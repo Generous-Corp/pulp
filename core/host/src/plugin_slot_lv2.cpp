@@ -330,8 +330,8 @@ public:
 
     // Typed plugin introspection surfaces the LV2 instance handle and URI so
     // callers can reach into LV2 vendor extensions.
-    void accept(ExtensionsVisitor& visitor) const override {
-        Lv2Extension ext;
+    void accept(NativeHandleVisitor& visitor) const override {
+        Lv2NativeHandle ext;
         ext.instance = reinterpret_cast<void*>(instance_);
         ext.uri = info_.unique_id;
         visitor.visit_lv2(*this, ext);

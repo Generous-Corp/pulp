@@ -650,7 +650,7 @@ TEST_CASE("window.parent is a self-reference and supports postMessage",
 
 // ── URLSearchParams ────────────────────────────────────────────────────
 
-TEST_CASE("URLSearchParams parses, mutates, and serialises round-trip",
+TEST_CASE("URLSearchParams parses, mutates, and serializes round-trip",
           "[view][web-compat][issue-468]") {
     auto result = run_in_bridge(R"(
         var p = new URLSearchParams('a=1&b=2&a=3');

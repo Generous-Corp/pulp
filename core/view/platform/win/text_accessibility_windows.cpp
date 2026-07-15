@@ -236,7 +236,7 @@ public:
     // Replace the backing node in-place (same id) so a re-register with
     // the same key doesn't churn the COM object identity. Assistive
     // tech caches provider pointers; preserving identity across updates
-    // keeps client-side state coherent. node_mu_ serialises this with
+    // keeps client-side state coherent. node_mu_ serializes this with
     // concurrent GetPropertyValue() / control_type() / node() calls
     // that may be running on UIA callback threads.
     void update_node(const TextAccessibilityNode& node) {
@@ -247,7 +247,7 @@ public:
 private:
     ~PulpTextAccessibilityProvider() = default;
 
-    // Guards every access to node_. The registry's own mutex serialises
+    // Guards every access to node_. The registry's own mutex serializes
     // register / unregister, but UIA may call GetPropertyValue on
     // separate threads (and the registry releases its mutex before
     // returning), so node_ needs its own lock for the read path.

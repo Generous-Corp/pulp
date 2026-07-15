@@ -7,11 +7,11 @@
 
 using pulp::canvas::path_to_sdf;
 
-TEST_CASE("path_to_sdf: centred square mask produces high centre, low corner",
+TEST_CASE("path_to_sdf: centerd square mask produces high center, low corner",
           "[canvas][sdf][path]") {
     constexpr int W = 32, H = 32;
     std::vector<std::uint8_t> mask(W * H, 0);
-    // Fill a 16x16 square in the centre.
+    // Fill a 16x16 square in the center.
     for (int y = 8; y < 24; ++y)
         for (int x = 8; x < 24; ++x)
             mask[y * W + x] = 255;
@@ -19,12 +19,12 @@ TEST_CASE("path_to_sdf: centred square mask produces high centre, low corner",
     auto sdf = path_to_sdf(mask.data(), W, H, 8);
     REQUIRE(sdf.size() == static_cast<std::size_t>(W * H));
 
-    // Debug dump around the centre before asserting.
+    // Debug dump around the center before asserting.
     INFO("sdf[16,16]=" << static_cast<int>(sdf[16 * W + 16])
          << " sdf[12,16]=" << static_cast<int>(sdf[16 * W + 12])
          << " sdf[20,16]=" << static_cast<int>(sdf[16 * W + 20])
          << " sdf[0]="     << static_cast<int>(sdf[0]));
-    // Centre of the square: deep inside, near 255.
+    // Center of the square: deep inside, near 255.
     REQUIRE(sdf[16 * W + 16] > 200);
     // Corner of the image: far outside, near 0.
     REQUIRE(sdf[0] < 40);

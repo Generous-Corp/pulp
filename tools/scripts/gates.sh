@@ -18,6 +18,8 @@
 #   - deps-audit (catches DEPENDENCIES.md / NOTICE.md drift)
 #   - codecov-config (codecov.yml flags/components mirror the live core/* tree
 #     with no double-counts, and its ignore list mirrors diff_cover_excludes)
+#   - framework-neutrality (Pulp's own source names no other framework, and
+#     adopts none of their class names into its API)
 #
 # Does NOT run:
 #   - local diff-coverage (slow — builds the cov target, hits ring crate
@@ -78,6 +80,8 @@ SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
 CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
+FRAMEWORK_NEUTRALITY="$ROOT/tools/scripts/framework_neutrality_check.py"
+US_ENGLISH="$ROOT/tools/scripts/us_english_check.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
     echo "gates.sh: gate scripts not found (expected at tools/scripts/)" >&2
@@ -317,6 +321,30 @@ if [ -f "$THREAD_ASSERT_GUARD" ]; then
     echo "" >&2
     echo "▸ thread-safe-assertions guard (no Catch2 assert in a worker thread)" >&2
     if ! "$PYTHON" "$THREAD_ASSERT_GUARD"; then
+        fail=1
+    fi
+fi
+
+# ── 14. framework-neutrality guard ─────────────────────────────────────────
+# Global invariant (not diff-scoped): Pulp's own source names no other
+# framework, and adopts none of their class names into its API. A comment that
+# says "mirrors the X class of the same name" is a written admission of
+# derivation in an MIT, public repo; an adopted type name is that same
+# admission shipped in a public header. Scans core/inspect/ship/packages/
+# experimental/test/apple; docs/, tools/, and .agents/ legitimately DISCUSS
+# interop and are out of scope.
+if [ -f "$FRAMEWORK_NEUTRALITY" ]; then
+    echo "" >&2
+    echo "▸ framework-neutrality guard (no foreign-framework vocabulary in Pulp source)" >&2
+    if ! "$PYTHON" "$FRAMEWORK_NEUTRALITY" --mode=report; then
+        fail=1
+    fi
+fi
+
+if [ -f "$US_ENGLISH" ]; then
+    echo "" >&2
+    echo "▸ us-english guard (American spelling — run us_english_check.py --fix to apply)" >&2
+    if ! "$PYTHON" "$US_ENGLISH"; then
         fail=1
     fi
 fi

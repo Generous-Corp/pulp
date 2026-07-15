@@ -9,7 +9,7 @@ Two responsibilities:
       - tools/check-docs-consistency.py  (cross-checks support-matrix.yaml
                                           against capabilities.md)
     Any failure aborts the build with a non-zero exit, mirroring the
-    existing `tools/check-docs.sh` behaviour.
+    existing `tools/check-docs.sh` behavior.
 
 2.  `on_files` — flatten the output URL of every page listed in
     `docs/status/docs-index.yaml` to `{slug}.html` at the site root, so

@@ -3,7 +3,7 @@
 // ──────────────────────────────────────────────────────────────────────────
 // #43a-rev — `font_family_assets` top-level envelope field.
 //
-// Plugin emits a deduplicated catalogue of (family, style, weight, italic)
+// Plugin emits a deduplicated catalog of (family, style, weight, italic)
 // tuples for every font referenced by text nodes. Runtime #43b consumes
 // via Skia's SkFontMgr system-font matcher with the
 // bundled OFL set as fallback.
@@ -43,7 +43,7 @@ TEST_CASE("parse_figma_plugin_json tolerates font_family_assets top-level field 
         }
     })JSON";
     // The whole point of the test: the parser must NOT throw on the new
-    // top-level field. Behaviour beyond that is #43b territory.
+    // top-level field. Behavior beyond that is #43b territory.
     auto ir = parse_figma_plugin_json(envelope);
     REQUIRE(ir.source == DesignSource::figma_plugin);
     REQUIRE(ir.root.name == "Typed");
@@ -208,7 +208,7 @@ std::optional<float> emitted_flex(const std::string& js, const std::string& id,
     return std::strtof(js.c_str() + pos, nullptr);
 }
 
-// Find the sanitized bridge id of the createImage call for a comment-labelled
+// Find the sanitized bridge id of the createImage call for a comment-labeled
 // node (codegen prints `// <name>` immediately before the create call).
 std::optional<std::string> image_id_after_comment(const std::string& js,
                                                    const std::string& name) {

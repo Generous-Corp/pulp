@@ -6,13 +6,15 @@
 /// device. This is the reusable, platform-agnostic CORE: an editor feeds it raw
 /// key up/down events (from whatever the host delivers) and it emits note on/off.
 ///
-/// Layout matches the canonical Tracktion/JUCE MidiKeyboardComponent row
-/// "awsedftgyhujkolp" (a piano keyboard laid over the home + top rows):
+/// The row is "awsedftgyhujkolp" — the layout DAWs and plugin hosts have
+/// converged on, so a player's muscle memory carries over. It lays a piano
+/// keyboard over the home + top rows: the home row is the white keys, the row
+/// above it the black keys, positioned where they sit on a real keyboard.
 ///   a=C  w=C# s=D  e=D# d=E  f=F  t=F# g=G  y=G# h=A  u=A# j=B
 ///   k=C(+12) o=C# l=D  p=D#
 /// `z` / `x` shift the base octave down / up.
 ///
-/// Design notes (JUCE/PlunderTube study):
+/// Behavioural contract:
 ///   - Rejects Cmd/Ctrl/Alt/Meta chords so host menu shortcuts (Cmd+S …) still
 ///     work — `handle_key` returns false for them and for unmapped keys, so the
 ///     caller falls through to the host.

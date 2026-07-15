@@ -561,7 +561,7 @@ if(PULP_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION "Unknown command")
 
     # `pulp loop --help` always renders the focus-mode help banner and
-    # exits 0. Behaviour-level tests for --status / --off / --platform
+    # exits 0. Behavior-level tests for --status / --off / --platform
     # live in test/test_cli_shellout.cpp under [issue-940].
     add_test(NAME cli-loop-help
         COMMAND pulp-cli loop --help

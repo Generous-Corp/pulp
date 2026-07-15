@@ -12,7 +12,9 @@
 
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/value_source.hpp>
+#include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp>
 
 using namespace pulp::view;
 
@@ -249,4 +251,72 @@ TEST_CASE("TripleBuffer<MeterFrame> never tears a frame under a 2-thread hammer"
     }
     writer.join();
     CHECK(torn.load() == 0);
+}
+
+// ── Idle gate ────────────────────────────────────────────────────────────────
+// A source-bound Meter is a FrameClock subscriber, so it runs every vsync for as
+// long as it is bound — including through silence, when the ballistics have
+// already settled and the next frame would be pixel-identical. Repainting anyway
+// costs a composite per meter per vsync forever, and on the plug-in-view-host
+// path each of those is a FULL-surface repaint of the whole editor. So a still
+// frame must request nothing at all.
+
+namespace {
+
+// A WindowHost that counts repaint requests. request_repaint(Rect) routes
+// through WindowHost::mark_dirty(rect) → repaint() when no RenderLoop is
+// attached, so this counts exactly the repaints a Meter asks for.
+class RepaintCountingHost : public WindowHost {
+public:
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override { return true; }
+    void repaint() override { ++repaints; }
+    void set_close_callback(std::function<void()>) override {}
+    void run_event_loop() override {}
+    int repaints = 0;
+};
+
+}  // namespace
+
+TEST_CASE("a silent source-bound Meter settles to zero repaints per second",
+          "[view][meter-source][idle-gate]") {
+    RepaintCountingHost host;
+    FrameClock clock;
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, 200, 100});
+    root->set_window_host(&host);
+
+    auto meter = std::make_unique<Meter>();
+    Meter* m = meter.get();
+    m->set_bounds({10, 10, 20, 80});
+    root->add_child(std::move(meter));
+
+    auto src = std::make_shared<MeterSource>();
+    m->set_source(src, 0);
+    root->set_frame_clock(&clock);
+    REQUIRE(clock.has_active_subscribers());
+
+    // Silence from the very first frame: the ballistics never leave zero, so no
+    // frame ever differs from the last and nothing is ever invalidated.
+    src->publish(stereo(0.0f, 0.0f));
+    for (int i = 0; i < 120; ++i) clock.tick(1.0f / 60.0f);  // 2 seconds @ 60 Hz
+    CHECK(host.repaints == 0);
+    CHECK(m->display_peak() == Catch::Approx(0.0f));
+
+    // A real level arrives: the very next frame invalidates.
+    src->publish(stereo(0.5f, 0.8f));
+    clock.tick(1.0f / 60.0f);
+    CHECK(host.repaints >= 1);
+    CHECK(m->display_peak() > 0.0f);
+
+    // Let the ballistics decay all the way back down, then confirm the meter
+    // goes quiet again rather than repainting forever.
+    src->publish(stereo(0.0f, 0.0f));
+    for (int i = 0; i < 600; ++i) clock.tick(1.0f / 60.0f);  // 10 s of silence
+    const int settled = host.repaints;
+    for (int i = 0; i < 120; ++i) clock.tick(1.0f / 60.0f);
+    CHECK(host.repaints == settled);   // 0 additional paints while silent
+
+    root->set_frame_clock(nullptr);    // drop the subscription before teardown
 }

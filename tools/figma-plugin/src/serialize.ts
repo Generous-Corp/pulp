@@ -18,7 +18,7 @@ export interface SerializeContext {
   libraryManifest?: LibraryManifestSnapshot;
   assets: AssetCache;
   tokens: ExtractedTokens;
-  /// Deduplicated font catalogue produced by extractScene.
+  /// Deduplicated font catalog produced by extractScene.
   /// Empty array → no text nodes in the selection (or no font names
   /// captured). Emitted at envelope root as `font_family_assets`.
   fontFamilyAssets?: FontFamilyAsset[];
@@ -27,7 +27,7 @@ export interface SerializeContext {
   /// matches a cache entry gets `asset_id` stamped, and the bytes flow
   /// through the asset_manifest into the `.pulp.zip`. Optional — empty
   /// or undefined cache is a no-op (the envelope still emits the
-  /// metadata-only catalogue).
+  /// metadata-only catalog).
   userFonts?: UserFontCache;
 }
 
@@ -45,7 +45,7 @@ export function serializeExport(
   // Orphan-font check: if the user dropped a TTF/OTF for
   // (family, style) tuples that don't appear in font_family_assets
   // (drop happened before scan, or selection changed before export),
-  // the bytes still ride in asset_manifest but no catalogue entry
+  // the bytes still ride in asset_manifest but no catalog entry
   // references them. The runtime can find them by hash, but the dead
   // weight + lack of pointer is worth surfacing so the user knows
   // they bundled bytes that won't auto-resolve.
@@ -129,7 +129,7 @@ export function serializeExport(
         })),
       ],
     },
-    // Top-level font catalogue. Each entry holds the family
+    // Top-level font catalog. Each entry holds the family
     // name + style + (optional) weight + (optional) italic flag for every
     // font referenced by text nodes. `asset_id` is populated only by the
     // drag-drop escape hatch for user-supplied TTF bundling — the
@@ -166,7 +166,7 @@ function extOfFontMime(mime: string): string {
 /// For every font_family_assets entry, if the user has
 /// supplied a matching (family, style) cache entry, stamp it with
 /// the cached asset_id. Pure function; the original list is preserved
-/// otherwise so the metadata-only catalogue is unchanged
+/// otherwise so the metadata-only catalog is unchanged
 /// when no user fonts are present.
 function stampUserFonts(
   fonts: FontFamilyAsset[],

@@ -8,7 +8,7 @@
 #include <pulp/view/text_overflow.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/canvas/text_shaper.hpp>
-#include <pulp/audio/audio_thumbnail.hpp>
+#include <pulp/audio/waveform_overview.hpp>
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
@@ -102,7 +102,7 @@ void ImageView::paint(canvas::Canvas& canvas) {
     // return false and we fall through to the filename-as-text placeholder
     // so authors can still see what URL is set.
     //
-    // Strip a `file://` prefix if present (set_image_path normalises file
+    // Strip a `file://` prefix if present (set_image_path normalizes file
     // paths to that form so the cache layer above can keep URI-keyed
     // entries; the canvas primitive expects a bare filesystem path).
     auto fs_path = path_;
@@ -111,7 +111,7 @@ void ImageView::paint(canvas::Canvas& canvas) {
         fs_path = fs_path.substr(kFileScheme.size());
     }
 
-    // Honour CSS `object-fit` + `object-position`. Probe intrinsic image
+    // Honor CSS `object-fit` + `object-position`. Probe intrinsic image
     // dimensions; if the backend can't measure (no decode primitive on this
     // platform) fall back to the stretch-to-bounds path (= object-fit: fill).
     float img_w = 0.0f, img_h = 0.0f;
@@ -134,7 +134,7 @@ void ImageView::paint(canvas::Canvas& canvas) {
         }
 
         // `none` — natural size, no scaling. Crop or letterbox both axes.
-        // Centre by default; object-position refines letterboxed placement
+        // Center by default; object-position refines letterboxed placement
         // below while the crop window stays centered.
         if (fit == "none") {
             float dw = std::min(b.width,  img_w);
@@ -191,10 +191,10 @@ void ImageView::paint(canvas::Canvas& canvas) {
 
         // Apply `object-position` as a percentage offset. CSS spec lets the
         // value be lengths or percentages; the JS
-        // shim normalises to a `<x>% <y>%` two-token string before
+        // shim normalizes to a `<x>% <y>%` two-token string before
         // routing through setObjectPosition. Anything we can't parse
         // collapses to "50% 50%" (the spec default), which keeps the
-        // centred-by-default `compute_fit` result.
+        // centerd-by-default `compute_fit` result.
         auto parse_object_position = [&](float& px, float& py) {
             px = 50.0f; py = 50.0f;
             const std::string& s = object_position();
@@ -340,7 +340,27 @@ void Meter::set_level(float rms, float peak) {
 }
 
 void Meter::update(float raw_peak, float raw_rms, float dt) {
+    const float prev_rms = ballistics_.display_rms;
+    const float prev_peak = ballistics_.display_peak;
+    const float prev_held = ballistics_.held_peak;
+
     ballistics_.update(raw_peak, raw_rms, dt);
+
+    // ── Idle gate ────────────────────────────────────────────────────────────
+    // A source-bound meter is a FrameClock subscriber, so update() runs every
+    // vsync for as long as it is bound — including through silence, when the
+    // ballistics have already decayed and the next frame would be pixel-for-pixel
+    // identical. Repainting anyway costs a composite per meter per vsync forever;
+    // on the plug-in-view-host path (a DAW) each of those is a FULL-surface
+    // repaint. Nothing moved, so ask for nothing: a silent plug-in settles to
+    // zero repaints per second instead of burning the editor's frame budget.
+    // Any real level change fails this compare on the very next frame, so the
+    // gate never swallows motion — only the still frames after it.
+    const bool unchanged = ballistics_.display_rms == prev_rms &&
+                           ballistics_.display_peak == prev_peak &&
+                           ballistics_.held_peak == prev_held;
+    if (unchanged) return;
+
     const auto b = local_bounds();
     request_repaint(Rect{b.x - kMeterPeakOverscan, b.y - kMeterPeakOverscan,
                          b.width + 2 * kMeterPeakOverscan,
@@ -623,7 +643,7 @@ void XYPad::paint(canvas::Canvas& canvas) {
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 4.0f);
 
-    // Grid lines — a 4×4 grid (matches the Figma XY pad), not just a centre cross.
+    // Grid lines — a 4×4 grid (matches the Figma XY pad), not just a center cross.
     auto grid = resolve_color("waveform.grid", canvas::Color::rgba8(60, 60, 75));
     canvas.set_stroke_color(grid);
     canvas.set_line_width(0.5f);
@@ -724,7 +744,7 @@ void WaveformView::set_data(std::vector<float> samples) {
 }
 
 void WaveformView::set_thumbnail(
-    std::shared_ptr<const pulp::audio::AudioThumbnail> thumb,
+    std::shared_ptr<const pulp::audio::WaveformOverview> thumb,
     uint32_t channel) {
     thumbnail_owner_ = std::move(thumb);
     thumbnail_ = thumbnail_owner_.get();
@@ -734,12 +754,12 @@ void WaveformView::set_thumbnail(
     samples_.clear();
 }
 
-void WaveformView::set_thumbnail(const pulp::audio::AudioThumbnail* thumb,
+void WaveformView::set_thumbnail(const pulp::audio::WaveformOverview* thumb,
                                  uint32_t channel) {
     set_thumbnail_borrowed(thumb, channel);
 }
 
-void WaveformView::set_thumbnail_borrowed(const pulp::audio::AudioThumbnail* thumb,
+void WaveformView::set_thumbnail_borrowed(const pulp::audio::WaveformOverview* thumb,
                                           uint32_t channel) {
     thumbnail_owner_.reset();
     thumbnail_ = thumb;
@@ -877,7 +897,7 @@ void WaveformView::paint(canvas::Canvas& canvas) {
     canvas.stroke_line(0, cy, b.width, cy);
 
     // Mirrored bar waveform — one vertical bar per column at the column's peak
-    // amplitude, mirrored about the centre line (the classic audio-editor
+    // amplitude, mirrored about the center line (the classic audio-editor
     // thumbnail). Drawn with fill_rect so it renders on the CPU raster path,
     // not only the GPU waveform shader.
     const int cols = std::max(1, std::min<int>(static_cast<int>(b.width), 512));

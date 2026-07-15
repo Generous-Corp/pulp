@@ -18,7 +18,7 @@
 // Pulp's FrameRate enum currently lists only the seven rates the spec
 // covers as engineering primitives (24/25/29.97/29.97-drop/30/30-drop/60).
 // Other rates (50, 59.94) map to FrameRate::unknown rather than the
-// nearest neighbour, because mislabelling 59.94 as fps_60 breaks SMPTE
+// nearest neighbor, because mislabelling 59.94 as fps_60 breaks SMPTE
 // math in downstream plug-ins.
 
 #include <pulp/format/processor.hpp>

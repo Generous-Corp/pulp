@@ -1736,7 +1736,7 @@ TEST_CASE("SignalGraph processes missing-plugin node as deterministic pass-throu
 
     dst.process(out_view, in_view, num_samples);
 
-    // Pass-through behaviour: output == input (the missing-plugin node
+    // Pass-through behavior: output == input (the missing-plugin node
     // forwarded audio verbatim, then AudioOutput accumulated it).
     for (int i = 0; i < num_samples; ++i) {
         REQUIRE(out_l[i] == 0.25f);

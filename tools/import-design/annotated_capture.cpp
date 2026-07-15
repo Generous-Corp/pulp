@@ -282,7 +282,7 @@ std::string generate_view_source(const AnnotatedCaptureManifest& m,
     if (m.has_param_bindings()) {
         o << "    // The manifest declares host-parameter bindings — self-wire user\n"
           << "    // gestures to the framework-agnostic HostParamSurface so this view\n"
-          << "    // runs unchanged embedded in JUCE / iPlug2 / native.\n"
+          << "    // runs unchanged in any host, whatever its parameter system.\n"
           << "    route_changes_to_host_params(true);\n";
     }
     o << "}\n\n"

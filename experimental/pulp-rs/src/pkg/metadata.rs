@@ -1,7 +1,7 @@
 //! Update `DEPENDENCIES.md` + `NOTICE.md` when packages are added /
 //! removed.
 //!
-//! # Behaviour parity with C++
+//! # Behavior parity with C++
 //!
 //! The C++ reference (`package_commands.cpp::update_dependencies_md`,
 //! `update_notice_md`) uses alphabetical insertion inside the existing
@@ -17,7 +17,7 @@
 //!   writer hard-codes "2026-04-07" in the row. We match that literal
 //!   string so parity tests stay stable.
 //! - The `NOTICE.md` removal path strips the leading blank line above
-//!   the section header, matching the C++ behaviour.
+//!   the section header, matching the C++ behavior.
 
 use std::fs;
 use std::path::Path;

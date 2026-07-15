@@ -179,7 +179,7 @@ TEST_CASE("group / image / none advertise no patterns",
 // The role is the ceiling; the View must actually have a value source. These
 // predicates ARE the Windows provider's logic (accessibility_win.cpp calls
 // nothing else), and that TU never compiles on the required macOS gate — so
-// this is where the behaviour is pinned.
+// this is where the behavior is pinned.
 
 TEST_CASE("a progress bar with no value interface exposes no RangeValue",
           "[a11y][uia]") {

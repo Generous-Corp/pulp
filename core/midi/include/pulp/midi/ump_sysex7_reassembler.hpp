@@ -186,7 +186,7 @@ public:
         default:
             // Reserved / unknown status nibble. Per the spec, type-0x3
             // status values 0x4..0xF are reserved; the only sane
-            // behaviour for forward compatibility is to drop the
+            // behavior for forward compatibility is to drop the
             // packet without disturbing accumulator state.
             return Status::dropped;
         }

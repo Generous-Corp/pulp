@@ -32,7 +32,7 @@ export function createMeter({ width = 12, height = 84 } = {}) {
     c.closePath();
   }
 
-  // Stepped fill colour (green / yellow / red at 0.7 and 0.9). meterColorStop
+  // Stepped fill color (green / yellow / red at 0.7 and 0.9). meterColorStop
   // returns the palette name; map it to the live meter token.
   function stepColor(v) {
     return tok(el, "--meter-" + meterColorStop(v));
@@ -46,7 +46,7 @@ export function createMeter({ width = 12, height = 84 } = {}) {
     // Housing (control.track), radius 2.
     c.fillStyle = tok(el, "--control-track");
     rrect(c, 0, 0, W, H, 2); c.fill();
-    // RMS fill, stepped colour, 1px side inset, flush bottom.
+    // RMS fill, stepped color, 1px side inset, flush bottom.
     const fill = Math.round(level * H);
     if (fill > 0) {
       c.fillStyle = stepColor(level);

@@ -553,7 +553,7 @@ int parse_body_tokens(const std::string& body, DesignMdParseResult& result) {
         if (t.size() >= 3 && t[0] == '#' && t[1] == '#' && t[2] != '#') {
             std::string h = choc::text::toLowerCase(choc::text::trim(t.substr(2)));
             mode.clear();
-            if (h == "colors" || h == "color" || h == "colours" || h == "color palette" || h == "palette")
+            if (h == "colors" || h == "color" || h == "colors" || h == "color palette" || h == "palette")
                 section = BodySection::colors;
             else if (h == "spacing" || h == "spacing scale" || h == "space")
                 section = BodySection::spacing;

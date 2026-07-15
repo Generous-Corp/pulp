@@ -15,7 +15,7 @@
 // The validators are intentionally *additive* to the existing
 // per-format flow in `cmd_validate.cpp`: they are only reached when
 // the user passes `--target`. Default `pulp validate` keeps its
-// current behaviour byte-for-byte.
+// current behavior byte-for-byte.
 
 #pragma once
 

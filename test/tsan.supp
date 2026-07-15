@@ -26,7 +26,9 @@
 #
 # The byte-stripe writes are expected to race with concurrent readers;
 # the seq-counter dance ensures readers detect torn reads and retry.
-# This pattern is canonical in audio code (RtAudio, JUCE AudioBuffer).
+# This pattern is canonical in real-time audio code: it is how any
+# lock-free reader gets a coherent multi-field snapshot without ever
+# blocking the audio thread.
 #
 # Why benign: seqlock byte writes ARE racy by design; the protocol
 # guarantees readers either see a fully-valid snapshot or detect the

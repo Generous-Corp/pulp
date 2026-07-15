@@ -114,7 +114,7 @@ Pack `envelope_json` as `scene.pulp.json` + each `assets[i].bytes` as
 
 Pass `--selection` to `run-headless.mjs` instead of a node id to fall
 back to whatever frame the user has selected in Figma (matches the UI
-plugin's behaviour). Selection mode is mostly useful for interactive
+plugin's behavior). Selection mode is mostly useful for interactive
 debugging.
 
 ---

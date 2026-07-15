@@ -10,7 +10,7 @@
 /// implement. It does not create GPU objects, perform file I/O, or wait on live
 /// audio threads.
 
-#include <pulp/audio/audio_thumbnail.hpp>
+#include <pulp/audio/waveform_overview.hpp>
 #include <pulp/view/waveform_gpu_render_controller.hpp>
 
 #include <cstddef>
@@ -68,7 +68,7 @@ public:
 
     bool prepare(WaveformHeadlessRenderConfig config);
     [[nodiscard]] WaveformHeadlessRenderFrame render(
-        const pulp::audio::AudioThumbnail& thumbnail,
+        const pulp::audio::WaveformOverview& thumbnail,
         const WaveformGpuLayerPlan& plan,
         const WaveformGpuRenderContext& context = {});
 

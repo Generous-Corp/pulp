@@ -48,7 +48,7 @@ function ctx(over: Partial<SerializeContext> = {}): SerializeContext {
   };
 }
 
-// A recognised Pulp knob, as the extractor would produce it for a published
+// A recognized Pulp knob, as the extractor would produce it for a published
 // "Pulp / Knob" instance (library kind stamped, structured audio props +
 // binding/units extracted from component properties).
 function knobNode(): ExtractedFigmaNode {
@@ -76,7 +76,7 @@ function rootOf(out: unknown): Record<string, any> {
   return env.root as Record<string, any>;
 }
 
-test("serializeExport: recognised knob emits root-level audio_widget + numeric fields", () => {
+test("serializeExport: recognized knob emits root-level audio_widget + numeric fields", () => {
   const out = serializeExport([knobNode()], [], ctx());
   const root = rootOf(out);
 
@@ -443,7 +443,7 @@ test("serializeExport emits userfont-orphan diagnostic for unmatched user fonts 
   orphanBytes[0] = 0x00; orphanBytes[1] = 0x01; orphanBytes[2] = 0x00; orphanBytes[3] = 0x00;
   await cache.add("Clash Grotesk", "Medium", orphanBytes, "ClashGrotesk-Medium.ttf");
 
-  // The font_family_assets catalogue is empty — the user dropped a TTF for a
+  // The font_family_assets catalog is empty — the user dropped a TTF for a
   // family that no text node in this selection references (drop happened
   // before scan, or selection changed before export).
   const diagnostics: any[] = [];
@@ -483,6 +483,6 @@ test("serializeExport does NOT emit userfont-orphan when every cached font is re
   assert.equal(
     env_diags.filter((d) => d.code === "userfont-orphan").length,
     0,
-    "no orphan diagnostic when every cached font matches a catalogue entry",
+    "no orphan diagnostic when every cached font matches a catalog entry",
   );
 });

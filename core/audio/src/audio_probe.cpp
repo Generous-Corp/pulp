@@ -20,7 +20,7 @@ void AudioProbe::prepare(int max_channels,
     capture_storage_.clear();
     capture_fifo_.reset();
     if (capture_frames_ > 0) {
-        // AbstractFifo reserves one sentinel slot, so allocate capacity+1 so
+        // SpscRingIndex reserves one sentinel slot, so allocate capacity+1 so
         // the worst-case queue depth is exactly `capture_frames_`.
         const int cap = capture_frames_ + 1;
         capture_storage_channels_ = std::max(1, max_channels_);
@@ -28,7 +28,7 @@ void AudioProbe::prepare(int max_channels,
         const auto storage_channels =
             static_cast<std::size_t>(capture_storage_channels_);
         capture_storage_.assign(storage_frames * storage_channels, 0.0f);
-        capture_fifo_ = std::make_unique<runtime::AbstractFifo>(cap);
+        capture_fifo_ = std::make_unique<runtime::SpscRingIndex>(cap);
     }
 
     sequence_number_ = 0;

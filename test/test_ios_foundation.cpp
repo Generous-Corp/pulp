@@ -201,7 +201,7 @@ TEST_CASE("ios-auv3 HostApp template matches the embedded descriptor exactly",
     REQUIRE(body.find("componentSubType == target.componentSubType") != std::string::npos);
     REQUIRE(body.find("componentManufacturer == target.componentManufacturer") != std::string::npos);
 
-    // The manufacturer-only path must remain available as a labelled
+    // The manufacturer-only path must remain available as a labeled
     // fallback so HostApps that intentionally strip the AudioComponents
     // key (debugging-only overrides) still surface a usable plug-in.
     REQUIRE(body.find("fallback manufacturer-only") != std::string::npos);

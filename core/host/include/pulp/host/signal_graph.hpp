@@ -425,7 +425,7 @@ public:
     // ports follow main inputs). The flag does NOT change topological
     // ordering — sidechain participates in cycle detection and PDC the
     // same as a normal audio edge — but it is tagged so UIs, serializers,
-    // and per-format adapters can recognise the role.
+    // and per-format adapters can recognize the role.
     //
     // Tagging is metadata: the actual routing still uses (source, source
     // port) → (dest, dest sidechain port). Calling this is equivalent to
@@ -1173,7 +1173,7 @@ private:
     // thread). DEFAULT ON: the routed executor is the primary inter-node backend
     // for every eligible graph and is bit-identical to the legacy walk for that
     // subset (proven by the routed-vs-walk parity suite) AND now reports the same
-    // per-node node_loads() telemetry, so the default-ON flip is behaviour-
+    // per-node node_loads() telemetry, so the default-ON flip is behavior-
     // preserving where it takes effect. Ineligible graphs (per-node automation
     // past the executor's fixed capacity, or a Plugin node with no live slot)
     // still fall back to the legacy walk, which remains the reference oracle the

@@ -119,7 +119,7 @@ TEST_CASE("WidgetBridge setSvgFillRule selects winding rule on SvgPathWidget",
     REQUIRE(w->fill_rule() == pulp::canvas::FillRule::nonzero);
 }
 
-// pulp #968 — canvasRect / canvasStrokeRect must honour the active fill /
+// canvasRect / canvasStrokeRect must honor the active fill /
 // stroke style when no color arg is passed. Validates the JS bridge path:
 //   1. five-arg canvasRect → fillStyle (color or gradient) wins
 //   2. six-arg canvasRect with explicit color → explicit color wins
@@ -200,9 +200,15 @@ TEST_CASE("WidgetBridge canvasRect with no color preserves active linear gradien
     StateStore store;
     WidgetBridge bridge(engine, root, store);
 
-    // Linear gradient red→blue along x. RecordingCanvas's default
-    // set_fill_gradient_linear records a set_fill_color of the first
-    // stop (red) — we use that as the proxy for "gradient is active".
+    // Linear gradient red→blue along x.
+    //
+    // This used to lean on a weakness: RecordingCanvas inherited the base-class
+    // fallback, which DEGRADES a gradient to a solid set_fill_color of the first
+    // stop — and the test used "the active fill is red" as a proxy for "the
+    // gradient is still active". RecordingCanvas records the gradient itself now,
+    // so the invariant can be asserted directly: at the fill_rect, the active fill
+    // STYLE must still be the gradient, with no set_fill_color emitted in between
+    // to clobber it. That is what issue-968 was actually about.
     bridge.load_script(R"(
         var c = document.createElement('canvas');
         c.id = 'grad-canvas';
@@ -221,30 +227,41 @@ TEST_CASE("WidgetBridge canvasRect with no color preserves active linear gradien
     canvas->paint(rec);
 
     using DrawType = pulp::canvas::DrawCommand::Type;
-    pulp::canvas::Color active_fill{};
+
+    // Whatever last SET the fill style — a solid color or a gradient.
+    DrawType active_style = DrawType::set_fill_color;
+    pulp::canvas::Color active_first_stop{};
     bool saw_rect = false;
-    pulp::canvas::Color rect_fill{};
+    DrawType style_at_rect = DrawType::set_fill_color;
+    pulp::canvas::Color first_stop_at_rect{};
+
     for (const auto& cmd : rec.commands()) {
-        if (cmd.type == DrawType::set_fill_color) {
-            active_fill = cmd.color;
+        if (cmd.type == DrawType::set_fill_color
+            || cmd.type == DrawType::set_fill_gradient_linear) {
+            active_style = cmd.type;
+            active_first_stop = cmd.color;
             continue;
         }
-        if (cmd.type == DrawType::fill_rect) {
-            const bool matches = (cmd.f[0] == 10.0f && cmd.f[1] == 10.0f &&
-                                  cmd.f[2] == 50.0f && cmd.f[3] == 50.0f);
-            if (matches) {
-                saw_rect = true;
-                rect_fill = active_fill;
-            }
+        if (cmd.type == DrawType::fill_rect
+            && cmd.f[0] == 10.0f && cmd.f[1] == 10.0f
+            && cmd.f[2] == 50.0f && cmd.f[3] == 50.0f) {
+            saw_rect = true;
+            style_at_rect = active_style;
+            first_stop_at_rect = active_first_stop;
         }
     }
+
     REQUIRE(saw_rect);
-    // The gradient's first stop (red) must still be the active fill —
-    // i.e. no white set_fill_color from a baked-in cmd.color was emitted
-    // between the gradient set and the fill_rect.
-    const bool is_red = (rect_fill.r8() == 255 && rect_fill.g8() == 0 &&
-                         rect_fill.b8() == 0 && rect_fill.a8() == 255);
-    REQUIRE(is_red);
+
+    // The gradient must STILL be the active fill style at the rect. A
+    // set_fill_color emitted between the gradient and the fill_rect — a baked-in
+    // default white, say — would have replaced it, and the rect would paint flat.
+    REQUIRE(style_at_rect == DrawType::set_fill_gradient_linear);
+
+    // ...and it is the gradient we asked for: red is its first stop.
+    REQUIRE(first_stop_at_rect.r8() == 255);
+    REQUIRE(first_stop_at_rect.g8() == 0);
+    REQUIRE(first_stop_at_rect.b8() == 0);
 }
 
 TEST_CASE("WidgetBridge canvasStrokeRect with no color uses active strokeStyle (issue-968)",

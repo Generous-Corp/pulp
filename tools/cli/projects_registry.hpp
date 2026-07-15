@@ -56,7 +56,7 @@ bool write_registry(const fs::path& registry_json,
 // against fs::current_path() if the input is relative. If a project
 // with the same canonical path is already present, its `name` and
 // `registered_at` are refreshed in place instead of duplicating.
-// Returns the resulting list (same behaviour as read + upsert + write).
+// Returns the resulting list (same behavior as read + upsert + write).
 //
 // The optional `out_wrote_ok` out-param reports whether the backing
 // `write_registry()` actually persisted the update; callers that

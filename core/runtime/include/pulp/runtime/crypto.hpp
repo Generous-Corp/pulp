@@ -164,7 +164,7 @@ std::optional<std::vector<uint8_t>> ed25519_sign(
 
 /// Verify a 64-byte detached signature against a message + 32-byte public key.
 /// Returns true iff the signature is authentic. Returns false on any input-
-/// size mismatch (defence in depth — callers should still range-check).
+/// size mismatch (defense in depth — callers should still range-check).
 bool ed25519_verify(
     const uint8_t* public_key_32, size_t public_key_size,
     const uint8_t* signature_64, size_t signature_size,

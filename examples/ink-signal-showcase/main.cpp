@@ -193,7 +193,7 @@ void advance_anims(View* v, float dt) {
     // ── Knob modulation (Saturn rings) ─────────────────────────────────
     section("Knob modulation");
     {
-        // Brand modulation-source colours (LFO blue, ENV amber, VEL pink,
+        // Brand modulation-source colors (LFO blue, ENV amber, VEL pink,
         // MACRO violet) — match the Figma "Knob Modulation" set.
         const Color LFO = Color::hex(0x5E78FF), ENV = Color::hex(0xF6B847),
                     VEL = Color::hex(0xFF7AA8), MAC = Color::hex(0x8B6CF5);
@@ -735,8 +735,8 @@ void advance_anims(View* v, float dt) {
         menu->set_anchor({0, 0});
         add(std::move(menu), kMargin + 110.0f, y, 180.0f, 104.0f);
 
-        // Labelled sidebar nav — the Figma "sidebar" (227:1830) reads as a
-        // labelled list with a teal-tinted selected row. Rendered with ListBox's
+        // Labeled sidebar nav — the Figma "sidebar" (227:1830) reads as a
+        // labeled list with a teal-tinted selected row. Rendered with ListBox's
         // opt-in accent selection + leading icons (the SidePanel above is the
         // chrome-less slide container; this is the list it would host).
         auto nav = std::make_unique<ListBox>();

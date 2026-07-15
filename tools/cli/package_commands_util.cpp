@@ -4,7 +4,7 @@
 // CLI surface.
 //
 // This TU holds the formerly file-local helpers that every package
-// sub-command cluster depends on: print/colour helpers, argument and
+// sub-command cluster depends on: print/color helpers, argument and
 // file/path utilities, CMake-block generation, and the
 // DEPENDENCIES.md / NOTICE.md metadata edits. The sub-command bodies
 // now live in package_commands_search.cpp / package_commands_add.cpp

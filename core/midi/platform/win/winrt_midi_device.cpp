@@ -87,7 +87,7 @@ static void ensure_winrt_init() {
         try {
             ::winrt::init_apartment(::winrt::apartment_type::multi_threaded);
         } catch (const ::winrt::hresult_error&) {
-            // Already initialised on this thread with a different model, or
+            // Already initialized on this thread with a different model, or
             // COM already up — both are fine for our consumer-only usage.
         }
     }

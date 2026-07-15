@@ -448,7 +448,7 @@ FixOutcome apply_fixes(std::vector<ValidatorReport>& reports, bool dry_run) {
 }
 
 namespace {
-// Tiny ANSI helpers — the production CLI has its own colour layer in
+// Tiny ANSI helpers — the production CLI has its own color layer in
 // cli_common.hpp, but pulling that in would defeat the unit-test
 // link isolation. Kept local + branchless for the off path.
 const char* ok_color(bool on)    { return on ? "\033[32m" : ""; }

@@ -216,8 +216,8 @@ int cmd_doctor(const std::vector<std::string>& args) {
     // macOS's `AudioComponentRegistrar` caches Audio Unit `Info.plist`
     // metadata aggressively. After a rebuild that changes a property
     // (description, manufacturer, type) the cache often returns the
-    // OLD value until you SIGKILL the registrar by hand. The JUCE
-    // dev-folk reach for `killall -9 AudioComponentRegistrar`; that's
+    // OLD value until you SIGKILL the registrar by hand. The usual
+    // remedy is `killall -9 AudioComponentRegistrar`; that's
     // exactly what we run here, with a friendly message before /
     // after and a clean exit code so scripts can chain it.
     //

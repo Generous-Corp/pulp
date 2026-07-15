@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <pulp/state/parameter.hpp>
 
 #include <cmath>
@@ -6,26 +7,26 @@
 
 using namespace pulp::state;
 
-TEST_CASE("NormalisableRange linear behaves like ParamRange", "[state][normalisable]") {
-    NormalisableRange<float> r{0.0f, 10.0f};
+TEST_CASE("SkewedRange linear behaves like ParamRange", "[state][skewed-range]") {
+    SkewedRange<float> r{0.0f, 10.0f};
     REQUIRE(r.normalize(0.0f) == 0.0f);
     REQUIRE(r.normalize(5.0f) == 0.5f);
     REQUIRE(r.normalize(10.0f) == 1.0f);
     REQUIRE(r.denormalize(0.5f) == 5.0f);
 }
 
-TEST_CASE("NormalisableRange clamps out-of-range inputs", "[state][normalisable]") {
-    NormalisableRange<float> r{-1.0f, 1.0f};
+TEST_CASE("SkewedRange clamps out-of-range inputs", "[state][skewed-range]") {
+    SkewedRange<float> r{-1.0f, 1.0f};
     REQUIRE(r.normalize(-5.0f) == 0.0f);
     REQUIRE(r.normalize(5.0f) == 1.0f);
     REQUIRE(r.denormalize(-1.0f) == -1.0f);
     REQUIRE(r.denormalize(2.0f) == 1.0f);
 }
 
-TEST_CASE("NormalisableRange skew weights low end", "[state][normalisable]") {
+TEST_CASE("SkewedRange skew weights low end", "[state][skewed-range]") {
     // skew < 1 should pull the curve toward `min` — so denormalize(0.5)
     // returns a value below the linear midpoint.
-    NormalisableRange<float> r{0.0f, 100.0f, /*step*/ 0.0f, /*skew*/ 0.3f};
+    SkewedRange<float> r{0.0f, 100.0f, /*step*/ 0.0f, /*skew*/ 0.3f};
     const float mid = r.denormalize(0.5f);
     REQUIRE(mid < 50.0f);
     REQUIRE(mid > 0.0f);
@@ -33,9 +34,9 @@ TEST_CASE("NormalisableRange skew weights low end", "[state][normalisable]") {
     REQUIRE(std::abs(r.normalize(mid) - 0.5f) < 1e-5f);
 }
 
-TEST_CASE("NormalisableRange with_centre places midpoint at 0.5", "[state][normalisable]") {
-    // Classic frequency knob: 20 Hz min, 20000 Hz max, 1000 Hz centre.
-    auto r = NormalisableRange<float>::with_centre(20.0f, 20000.0f, 1000.0f);
+TEST_CASE("SkewedRange with_center places midpoint at 0.5", "[state][skewed-range]") {
+    // Classic frequency knob: 20 Hz min, 20000 Hz max, 1000 Hz center.
+    auto r = SkewedRange<float>::with_center(20.0f, 20000.0f, 1000.0f);
     const float at_half = r.denormalize(0.5f);
     REQUIRE(std::abs(at_half - 1000.0f) < 0.5f);
     // Endpoints still snap.
@@ -43,8 +44,8 @@ TEST_CASE("NormalisableRange with_centre places midpoint at 0.5", "[state][norma
     REQUIRE(r.denormalize(1.0f) == 20000.0f);
 }
 
-TEST_CASE("NormalisableRange step quantization", "[state][normalisable]") {
-    NormalisableRange<float> r{0.0f, 10.0f, /*step*/ 0.5f};
+TEST_CASE("SkewedRange step quantization", "[state][skewed-range]") {
+    SkewedRange<float> r{0.0f, 10.0f, /*step*/ 0.5f};
     REQUIRE(r.denormalize(0.5f) == 5.0f);
     REQUIRE(r.denormalize(0.05f) == 0.5f);
     // 0.07 of 10 = 0.7, snaps to 0.5.
@@ -53,8 +54,8 @@ TEST_CASE("NormalisableRange step quantization", "[state][normalisable]") {
     REQUIRE(r.snap(0.2f) == 0.0f);
 }
 
-TEST_CASE("NormalisableRange symmetric skew is mirrored", "[state][normalisable]") {
-    NormalisableRange<float> r{-1.0f, 1.0f, /*step*/ 0.0f, /*skew*/ 0.5f, /*symmetric*/ true};
+TEST_CASE("SkewedRange symmetric skew is mirrored", "[state][skewed-range]") {
+    SkewedRange<float> r{-1.0f, 1.0f, /*step*/ 0.0f, /*skew*/ 0.5f, /*symmetric*/ true};
     // 0.0 in normalized space maps to -1, 1.0 maps to 1.
     REQUIRE(std::abs(r.denormalize(0.0f) - (-1.0f)) < 1e-5f);
     REQUIRE(std::abs(r.denormalize(1.0f) - 1.0f) < 1e-5f);
@@ -118,7 +119,7 @@ TEST_CASE("ParamRange linear is bit-identical to the legacy affine map",
 TEST_CASE("ParamRange skew round-trips monotonically with exact endpoints",
           "[state][range][shaped]") {
     // Frequency-style knob: low end gets more resolution (skew < 1).
-    auto range = ParamRange::with_centre(20.0f, 20000.0f, 1000.0f);
+    auto range = ParamRange::with_center(20.0f, 20000.0f, 1000.0f);
     REQUIRE_FALSE(range.is_linear());
 
     // Endpoints are exact regardless of the curve.
@@ -127,7 +128,7 @@ TEST_CASE("ParamRange skew round-trips monotonically with exact endpoints",
     REQUIRE(range.normalize(20.0f) == 0.0f);
     REQUIRE(range.normalize(20000.0f) == 1.0f);
 
-    // Known midpoint: 0.5 normalized lands at the chosen 1 kHz centre.
+    // Known midpoint: 0.5 normalized lands at the chosen 1 kHz center.
     REQUIRE(std::abs(range.denormalize(0.5f) - 1000.0f) < 0.5f);
 
     // Monotonic across the whole normalized domain, with a coarse round-trip
@@ -162,9 +163,9 @@ TEST_CASE("ParamRange symmetric skew is bipolar and mirrored",
 
     REQUIRE(std::abs(range.denormalize(0.0f) - (-1.0f)) < 1e-5f);
     REQUIRE(std::abs(range.denormalize(1.0f) - 1.0f) < 1e-5f);
-    REQUIRE(std::abs(range.denormalize(0.5f)) < 1e-5f); // centre at midpoint
+    REQUIRE(std::abs(range.denormalize(0.5f)) < 1e-5f); // center at midpoint
 
-    // Mirror symmetry about the centre.
+    // Mirror symmetry about the center.
     const float plus = range.denormalize(0.7f);
     const float minus = range.denormalize(0.3f);
     REQUIRE(std::abs(plus + minus) < 1e-5f);
@@ -176,14 +177,14 @@ TEST_CASE("ParamRange symmetric skew is bipolar and mirrored",
     }
 }
 
-TEST_CASE("ParamRange with_centre falls back to linear for degenerate centre",
+TEST_CASE("ParamRange with_center falls back to linear for degenerate center",
           "[state][range][shaped]") {
-    // Centre outside the open interval ⇒ no skew (stays linear, exact).
-    auto on_edge = ParamRange::with_centre(0.0f, 10.0f, 0.0f);
+    // Center outside the open interval ⇒ no skew (stays linear, exact).
+    auto on_edge = ParamRange::with_center(0.0f, 10.0f, 0.0f);
     REQUIRE(on_edge.is_linear());
     REQUIRE(on_edge.denormalize(0.5f) == 5.0f);
 
-    auto inverted = ParamRange::with_centre(10.0f, 0.0f, 5.0f);
+    auto inverted = ParamRange::with_center(10.0f, 0.0f, 5.0f);
     REQUIRE(inverted.is_linear());
 }
 
@@ -200,22 +201,40 @@ TEST_CASE("ParamRange skew honors step quantization on denormalize",
 }
 
 // ---------------------------------------------------------------------------
-// JUCE NormalisableRange reference cross-check (WS-4 / G5 "prove the skew").
+// Skew-curve reference cross-check — "prove the skew".
 //
-// Verifies Pulp's NormalisableRange<T> maps values with the same skew
-// convention a JUCE-based port expects, so migrated automation lanes keep the
-// identical curve. A reference computation of that skew math (skew via pow,
-// symmetric mirror about the middle, exp/log formulation for the inverse) runs
-// alongside Pulp's and is asserted equal across skew in [0.05, 20]. Uses double
-// so the only residual difference is exp/log-vs-pow rounding (a handful of ULP),
-// not the float32 precision wall the shaped tests above already document.
+// SkewedRange's curve is the standard power-law parameter mapping used
+// throughout plugin automation:
+//
+//     normalized  = p^skew                    (p = (v - min) / (max - min))
+//     denormalized = min + (max - min) * p^(1/skew)
+//
+// and, for `symmetric_skew`, the same power law applied to the signed distance
+// from the midpoint, d = 2p - 1:
+//
+//     normalized  = (1 + sign(d) * |d|^skew) / 2
+//
+// This block asserts SkewedRange against a SECOND, independently written
+// evaluation of those same formulas, so a typo in either implementation shows
+// up as a mismatch. The reference deliberately takes a different numerical
+// route through the inverse — exp(log(p) / skew) instead of pow(p, 1/skew) —
+// so agreement is evidence about the *math*, not a copy of the same
+// expression tree. Everything runs in double, which pushes the only residual
+// difference down to exp/log-vs-pow rounding (a handful of ULP) rather than
+// the float32 precision wall the shaped tests above already document.
+//
+// Why this matters beyond arithmetic hygiene: this power law is the curve an
+// automation lane authored in any other plugin ecosystem was recorded against.
+// Pinning it at 1e-9 across skew in [0.05, 20] is what lets a project migrated
+// into Pulp keep the *same knob feel* instead of silently re-shaping every
+// swept parameter.
 // ---------------------------------------------------------------------------
 
-namespace juce_ref {
+namespace skew_ref {
 
-// Independent transcription of JUCE's NormalisableRange<double> default
-// (no-custom-lambda) mapping. Kept structurally parallel to the JUCE source so
-// a reviewer can diff it against upstream.
+// Second evaluation of the power-law mapping written straight from the
+// formulas above. `skew == 1` short-circuits to the affine map (the power law
+// degenerates to identity there, and skipping pow() keeps it bit-exact).
 double convert_to_0to1(double start, double end, double skew, bool symmetric,
                        double v) {
     double proportion = (v - start) / (end - start);
@@ -240,10 +259,10 @@ double convert_from_0to1(double start, double end, double skew, bool symmetric,
     return start + (end - start) / 2.0 * (1.0 + dfm);
 }
 
-}  // namespace juce_ref
+}  // namespace skew_ref
 
-TEST_CASE("NormalisableRange matches JUCE reference values across skew [0.05,20]",
-          "[state][normalisable][juce-ref]") {
+TEST_CASE("SkewedRange matches the power-law reference across skew [0.05,20]",
+          "[state][skewed-range][skew-ref]") {
     struct Case { double lo, hi; bool symmetric; };
     const std::vector<Case> ranges = {
         {0.0, 100.0, false},       // gain-style
@@ -255,43 +274,44 @@ TEST_CASE("NormalisableRange matches JUCE reference values across skew [0.05,20]
 
     for (const auto& rc : ranges) {
         for (double skew : skews) {
-            NormalisableRange<double> r{rc.lo, rc.hi, /*step*/ 0.0, skew, rc.symmetric};
+            SkewedRange<double> r{rc.lo, rc.hi, /*step*/ 0.0, skew, rc.symmetric};
             const double span = rc.hi - rc.lo;
             for (int i = 0; i <= 100; ++i) {
                 const double n = static_cast<double>(i) / 100.0;
 
-                // denormalize == JUCE convertFrom0to1.
+                // denormalize == reference normalized -> real mapping.
                 const double plain = r.denormalize(n);
                 const double ref_plain =
-                    juce_ref::convert_from_0to1(rc.lo, rc.hi, skew, rc.symmetric, n);
+                    skew_ref::convert_from_0to1(rc.lo, rc.hi, skew, rc.symmetric, n);
                 REQUIRE(std::abs(plain - ref_plain) <= 1e-9 * span + 1e-12);
 
-                // normalize == JUCE convertTo0to1 (sample the real domain).
+                // normalize == reference real -> normalized mapping
+                // (sample across the real domain).
                 const double v = rc.lo + n * span;
                 const double norm = r.normalize(v);
                 const double ref_norm =
-                    juce_ref::convert_to_0to1(rc.lo, rc.hi, skew, rc.symmetric, v);
+                    skew_ref::convert_to_0to1(rc.lo, rc.hi, skew, rc.symmetric, v);
                 REQUIRE(std::abs(norm - ref_norm) <= 1e-9 + 1e-12);
             }
         }
     }
 }
 
-TEST_CASE("NormalisableRange plain->norm->plain round-trips tightly in double",
-          "[state][normalisable][juce-ref]") {
+TEST_CASE("SkewedRange plain->norm->plain round-trips tightly in double",
+          "[state][skewed-range][skew-ref]") {
     // Double precision removes the float32 wall, so the inverse round-trip is
     // tight across the WELL-CONDITIONED domain. Non-symmetric skew is stable to
     // the extreme (0.05..20); the symmetric branch composes pow(·,1/skew) then
     // pow(·,skew) about the midpoint and becomes ill-conditioned there for very
     // large skew (skew=20 maps a wide band to near the center, so the inverse
     // loses ~1e-4 absolute). That pathological corner — not a real bipolar
-    // parameter — is still proven FORWARD-exact against JUCE at 1e-9 by the
-    // reference-match test above; here we bound symmetric skew to a realistic
+    // parameter — is still proven FORWARD-exact against the reference at 1e-9
+    // by the match test above; here we bound symmetric skew to a realistic
     // range so the round-trip assertion stays tight and meaningful.
     const double span = 32.0;
     const double tol = 1e-7 * span + 1e-12;  // ~7 orders tighter than float32
     const auto round_trip_ok = [&](double skew, bool symmetric) {
-        NormalisableRange<double> r{-8.0, 24.0, /*step*/ 0.0, skew, symmetric};
+        SkewedRange<double> r{-8.0, 24.0, /*step*/ 0.0, skew, symmetric};
         for (int i = 0; i <= 200; ++i) {
             const double v = -8.0 + (span * i) / 200.0;
             const double rt = r.denormalize(r.normalize(v));
@@ -304,11 +324,13 @@ TEST_CASE("NormalisableRange plain->norm->plain round-trips tightly in double",
         round_trip_ok(skew, /*symmetric*/ true);
 }
 
-TEST_CASE("NormalisableRange step snapping matches JUCE snap-to-legal-value",
-          "[state][normalisable][juce-ref]") {
-    // JUCE snaps to the nearest legal interval on the way out of 0..1; Pulp's
-    // denormalize and snap() do the same. Prove it on a skewed, stepped range.
-    NormalisableRange<double> r{0.0, 120.0, /*interval*/ 12.0, /*skew*/ 0.3, false};
+TEST_CASE("SkewedRange step snapping lands every value on the interval grid",
+          "[state][skewed-range][skew-ref]") {
+    // A stepped range must only ever emit values that sit on the interval
+    // grid, no matter how the curve bends the way out of 0..1. denormalize()
+    // snaps on the way out; snap() is the same rounding exposed standalone.
+    // Prove both on a skewed, stepped range.
+    SkewedRange<double> r{0.0, 120.0, /*interval*/ 12.0, /*skew*/ 0.3, false};
     for (int i = 0; i <= 100; ++i) {
         const double v = r.denormalize(static_cast<double>(i) / 100.0);
         // Every emitted value sits exactly on a 12-unit grid line.
@@ -322,4 +344,88 @@ TEST_CASE("NormalisableRange step snapping matches JUCE snap-to-legal-value",
     REQUIRE(r.snap(19.0) == 24.0);
     REQUIRE(r.snap(-5.0) == 0.0);
     REQUIRE(r.snap(999.0) == 120.0);
+}
+
+// ── Derivation check: the curve is the standard exponential skew ─────────────
+//
+// These cases pin the mapping to its INDEPENDENT mathematical definition, not to
+// any particular implementation. A skewed parameter range is the textbook
+// exponential control curve:
+//
+//     normalize(v)   = ((v - min) / (max - min))^skew      (v in [min, max])
+//     denormalize(p) = min + (max - min) * p^(1/skew)      (p in [0, 1])
+//
+// (Pulp's convention: `skew` is the exponent applied in the value->proportion
+//  direction, so a `skew > 1` pushes more proportion range toward `min`. The
+//  two directions are exact inverses of each other.)
+//
+// and the symmetric variant applies that curve to |2p - 1| and mirrors the sign.
+// The expected values below are computed here from std::pow, so the test passes
+// only if the implementation realizes that exact equation — which is what makes
+// "it matches" mean "it is the standard curve", nothing more.
+
+namespace {
+double expected_denorm(double mn, double mx, double p, double skew) {
+    return mn + (mx - mn) * std::pow(p, 1.0 / skew);
+}
+double expected_norm(double mn, double mx, double v, double skew) {
+    return std::pow((v - mn) / (mx - mn), skew);
+}
+}  // namespace
+
+TEST_CASE("SkewedRange denormalize equals min + span * p^(1/skew)",
+          "[state][skewed-range][derivation]") {
+    const double mn = 20.0, mx = 20000.0;
+    for (double skew : {0.25, 0.5, 1.0, 2.0, 3.5}) {
+        SkewedRange<double> r{mn, mx, /*step*/ 0.0, skew};
+        for (int i = 0; i <= 20; ++i) {
+            const double p = i / 20.0;
+            REQUIRE(r.denormalize(p) ==
+                    Catch::Approx(expected_denorm(mn, mx, p, skew)).epsilon(1e-9));
+        }
+    }
+}
+
+TEST_CASE("SkewedRange normalize equals ((v-min)/span)^skew",
+          "[state][skewed-range][derivation]") {
+    const double mn = -24.0, mx = 12.0;
+    for (double skew : {0.4, 1.0, 2.2}) {
+        SkewedRange<double> r{mn, mx, /*step*/ 0.0, skew};
+        for (int i = 1; i < 20; ++i) {           // skip endpoints (0^neg / boundary)
+            const double v = mn + (mx - mn) * (i / 20.0);
+            REQUIRE(r.normalize(v) ==
+                    Catch::Approx(expected_norm(mn, mx, v, skew)).epsilon(1e-9));
+        }
+    }
+}
+
+TEST_CASE("SkewedRange with_center derives skew = log(0.5)/log(proportion)",
+          "[state][skewed-range][derivation]") {
+    // The ONLY skew that satisfies denormalize(0.5) == center is the one that
+    // solves 0.5^skew = (center - min)/(max - min). This is not a stylistic
+    // choice; it is the unique solution, computed here from the logs.
+    const double mn = 20.0, mx = 20000.0, center = 632.0;
+    const double proportion = (center - mn) / (mx - mn);
+    const double expected_skew = std::log(0.5) / std::log(proportion);
+
+    auto r = ParamRange::with_center(static_cast<float>(mn), static_cast<float>(mx),
+                                     static_cast<float>(center));
+    REQUIRE(static_cast<double>(r.skew) ==
+            Catch::Approx(expected_skew).epsilon(1e-6));
+    // ...and the defining property holds: half travel lands on the center.
+    REQUIRE(static_cast<double>(r.denormalize(0.5f)) ==
+            Catch::Approx(center).epsilon(1e-4));
+}
+
+TEST_CASE("SkewedRange round-trips to machine precision for every skew",
+          "[state][skewed-range][derivation]") {
+    // normalize(denormalize(p)) == p is forced by the curve being a bijection;
+    // if the two directions used different math this would drift.
+    for (double skew : {0.2, 0.7, 1.0, 1.9, 4.0}) {
+        SkewedRange<double> r{5.0, 5000.0, /*step*/ 0.0, skew};
+        for (int i = 0; i <= 40; ++i) {
+            const double p = i / 40.0;
+            REQUIRE(r.normalize(r.denormalize(p)) == Catch::Approx(p).margin(1e-9));
+        }
+    }
 }

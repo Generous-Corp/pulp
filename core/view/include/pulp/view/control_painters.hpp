@@ -6,10 +6,15 @@
 /// A faithful port often needs to draw a control directly from a paint() in panel
 /// coordinates — no View, no layout, no hit-testing — because the interaction is
 /// owned elsewhere (a DesignFrameView overlay, a custom widget) and only the LOOK
-/// is wanted, at an arbitrary rect, in an arbitrary skin. These are free functions
-/// that take a style struct, a Canvas&, a rect, and a value, and emit the geometry.
-/// They are the paint half of the JUCE LookAndFeel drawRotarySlider /
-/// drawLinearSlider / drawToggleButton surface, decoupled from any widget class.
+/// is wanted, at an arbitrary rect, in an arbitrary skin.
+///
+/// Each painter is a free function taking a style struct, a Canvas&, a rect, and a
+/// value, and emitting that control's visual. Rendering a knob / fader / toggle is
+/// therefore decoupled from any widget CLASS: the same painter serves a Pulp widget
+/// that owns its own state, an overlay element whose value lives in a design frame,
+/// and a preview/thumbnail that has no interaction at all. Restyle a control by
+/// passing a different style struct; re-host it by calling the painter from a
+/// different paint(); neither requires subclassing or replacing a widget.
 ///
 /// Every painter is pure w.r.t. the canvas (it only issues draw ops), so a
 /// RecordingCanvas can assert the emitted geometry is value-dependent (the arc

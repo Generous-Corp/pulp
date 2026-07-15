@@ -138,3 +138,6 @@ external/skia-build/.skia-asset-sha256
 external/AudioUnitSDK
 external/vst3sdk
 examples/web-demos/wclap-build/build
+
+# Stray Figma export that keeps reappearing at the repo root.
+ui-figma plugin export-render.png

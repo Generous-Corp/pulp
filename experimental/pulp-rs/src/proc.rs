@@ -28,7 +28,7 @@
 //! probe code that must inspect child output uses direct
 //! `Command::output` calls outside this trait.
 //!
-//! # Non-zero exit behaviour
+//! # Non-zero exit behavior
 //!
 //! Child exit codes pass through unchanged. A spawn failure (missing
 //! executable, permission denied) maps to [`CliError::Other`] with a
@@ -97,7 +97,7 @@ impl Invocation {
     }
 
     /// Chainable env-var add. Values can be empty (matches `setenv`'s
-    /// behaviour on most systems — exports the key with an empty
+    /// behavior on most systems — exports the key with an empty
     /// value rather than clearing it). Use multiple `env()` calls for
     /// multiple variables.
     #[must_use]
@@ -111,7 +111,7 @@ impl Invocation {
 /// without actually running anything.
 ///
 /// Implementors must be side-effect-free except for the documented
-/// "launch a child and wait" behaviour.
+/// "launch a child and wait" behavior.
 pub trait Spawner {
     /// Run the invocation to completion. Returns the child's exit
     /// code.

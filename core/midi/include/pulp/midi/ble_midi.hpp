@@ -121,7 +121,7 @@ public:
     /// Start scanning. The callback fires once per peripheral
     /// observation (the backend deduplicates by id and refreshes the
     /// last_seen timestamp). Calling start_scan() while already
-    /// scanning is a no-op. Backends MUST honour the OS-level scan
+    /// scanning is a no-op. Backends MUST honor the OS-level scan
     /// duty-cycle limits; consumers should still call stop_scan() when
     /// the UI is dismissed.
     virtual bool start_scan(BleMidiScanCallback callback) = 0;

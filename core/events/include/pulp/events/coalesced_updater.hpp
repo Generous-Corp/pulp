@@ -1,6 +1,6 @@
 #pragma once
 
-// AsyncUpdater — coalesce rapid updates to a single callback on the event thread.
+// CoalescedUpdater — coalesce rapid updates to a single callback on the event thread.
 // Thread-safe: can be triggered from any thread.
 
 #include <algorithm>
@@ -14,14 +14,14 @@ namespace pulp::events {
 
 /// Coalescing async update — trigger from any thread, callback runs on event thread.
 /// Multiple triggers between callbacks are coalesced into a single call.
-class AsyncUpdater {
+class CoalescedUpdater {
 public:
-    AsyncUpdater() = default;
-    virtual ~AsyncUpdater() = default;
+    CoalescedUpdater() = default;
+    virtual ~CoalescedUpdater() = default;
 
     /// Trigger an async update. Safe to call from any thread.
     /// If already triggered but not yet handled, the call is coalesced.
-    void trigger_async_update() {
+    void request_update() {
         if (!pending_.exchange(true, std::memory_order_acq_rel)) {
             // First trigger since last handle — post to event thread
             post_to_event_thread();
@@ -29,22 +29,22 @@ public:
     }
 
     /// Cancel a pending update.
-    void cancel_pending_update() {
+    void cancel_update() {
         pending_.store(false, std::memory_order_release);
     }
 
     /// Whether an update is pending.
-    bool is_update_pending() const {
+    bool update_pending() const {
         return pending_.load(std::memory_order_acquire);
     }
 
     /// Override this to handle the async update (runs on event thread).
-    virtual void handle_async_update() = 0;
+    virtual void on_update() = 0;
 
     /// Called by the event loop to process pending updates.
     void process_pending() {
         if (pending_.exchange(false, std::memory_order_acq_rel)) {
-            handle_async_update();
+            on_update();
         }
     }
 
@@ -56,12 +56,12 @@ private:
 };
 
 /// Lambda-based async updater (convenience)
-class LambdaAsyncUpdater : public AsyncUpdater {
+class LambdaCoalescedUpdater : public CoalescedUpdater {
 public:
-    explicit LambdaAsyncUpdater(std::function<void()> callback)
+    explicit LambdaCoalescedUpdater(std::function<void()> callback)
         : callback_(std::move(callback)) {}
 
-    void handle_async_update() override {
+    void on_update() override {
         if (callback_) callback_();
     }
 
@@ -154,5 +154,7 @@ public:
 private:
     bool active_ = false;
 };
+
+
 
 }  // namespace pulp::events

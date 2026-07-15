@@ -9,7 +9,7 @@
 //   * paint() emits begin_path → path commands → fill / stroke in the
 //     correct order, gated on has_fill_ / has_stroke_.
 //   * viewBox-to-bounds scale: a unit-square path inside a 10x10
-//     viewBox lands at the centre of a 20x20 widget when set_viewbox
+//     viewBox lands at the center of a 20x20 widget when set_viewbox
 //     and set_bounds disagree (xMidYMid meet).
 
 #include <catch2/catch_test_macros.hpp>
@@ -359,9 +359,11 @@ TEST_CASE("SvgPathWidget fill-rule defaults to nonzero and round-trips",
 
 TEST_CASE("SvgPathWidget paint threads fill-rule to fill_current_path",
           "[svg_path][issue-3656]") {
-    // A compound annular path (outer + inner subpath, the shape JUCE's
-    // SVGGraphicsContext emits for a stroked ellipse). Under nonzero the
-    // inner subpath fills solid; under even-odd it cuts the ring's hole.
+    // An annular (ring) path: ONE path, two closed subpaths — outer then
+    // inner. This is the shape a vector exporter emits for a stroked
+    // ellipse. Under nonzero the inner subpath adds to the winding count
+    // and the hole fills solid; under even-odd it cancels and cuts the
+    // ring's hole.
     // The widget itself just has to forward the rule — RecordingCanvas
     // captures it in fill_current_path's f[0] (0 = nonzero, 1 = evenodd).
     const char* annulus =
@@ -417,7 +419,7 @@ TEST_CASE("SvgPathWidget viewBox is mapped onto widget bounds with xMidYMid meet
           "[svg_path][issue-965]") {
     // Widget bounds 20x20, viewBox 10x10. Scale factor = 2. With a unit
     // square path at (0,0)-(1,1) in viewBox space, the scaled translate
-    // brings it into the widget. Aspect-preserved, centred.
+    // brings it into the widget. Aspect-preserved, centerd.
     SvgPathWidget w;
     w.set_bounds({0, 0, 20, 20});
     w.set_viewbox(10, 10);
@@ -474,7 +476,7 @@ TEST_CASE("SvgPathWidget setFill / clearFill toggles emission",
 // clear_fill_gradient was called by checking that the widget didn't
 // fall back to its solid fill_color on this paint pass.
 
-TEST_CASE("SvgPathWidget linear-gradient fill: first stop becomes the recorded fill color",
+TEST_CASE("SvgPathWidget fills with the gradient rather than the solid color",
           "[view][svg-path][issue-932][issue-1737]") {
     using namespace pulp::view;
     using namespace pulp::canvas;
@@ -491,22 +493,30 @@ TEST_CASE("SvgPathWidget linear-gradient fill: first stop becomes the recorded f
     RecordingCanvas canvas;
     w.paint(canvas);
 
-    // RecordingCanvas's default set_fill_gradient_linear impl records
-    // set_fill_color(colors[0]) — i.e. red (255,0,0). If the gradient
-    // path failed and we fell back to the solid fill_color, the
-    // recorded color would be green (0,255,0).
-    auto find_first_fill = [&]() -> std::optional<Color> {
-        for (const auto& cmd : canvas.commands()) {
-            if (cmd.type == DrawCommand::Type::set_fill_color) return cmd.color;
+    // This used to lean on a weakness: RecordingCanvas inherited the base-class
+    // fallback, which DEGRADES a gradient to set_fill_color(colors[0]), so the
+    // test looked for a red solid fill as a stand-in for "the gradient ran".
+    // RecordingCanvas records the gradient itself now, so the real thing is
+    // asserted: a gradient command, with red as its first stop.
+    std::optional<Color> gradient_first_stop;
+    bool fell_back_to_solid = false;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::set_fill_gradient_linear
+            && !gradient_first_stop.has_value()) {
+            gradient_first_stop = cmd.color;
         }
-        return std::nullopt;
-    };
-    auto first_fill = find_first_fill();
-    REQUIRE(first_fill.has_value());
-    const auto& c = *first_fill;
+        if (cmd.type == DrawCommand::Type::set_fill_color) fell_back_to_solid = true;
+    }
+
+    REQUIRE(gradient_first_stop.has_value());
+    const auto& c = *gradient_first_stop;
     REQUIRE(c.r > 0.9f);  // red == 1.0
-    REQUIRE(c.g < 0.1f);  // not green
-    REQUIRE(c.b < 0.1f);  // not blue (yet — that's the second stop)
+    REQUIRE(c.g < 0.1f);
+    REQUIRE(c.b < 0.1f);  // blue is the SECOND stop
+
+    // And it did not quietly fall through to the solid color, which was set to a
+    // loud green precisely so that a fall-through could not hide.
+    REQUIRE_FALSE(fell_back_to_solid);
 }
 
 TEST_CASE("SvgPathWidget unparseable gradient falls back to solid fill_color",

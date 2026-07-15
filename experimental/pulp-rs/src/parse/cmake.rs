@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn rejects_prerelease_suffix_in_match() {
-        // Matches the C++ behaviour: prerelease suffixes aren't captured
+        // Matches the C++ behavior: prerelease suffixes aren't captured
         // even if they appear after the triple. We only take the triple.
         let td = tempfile::tempdir().unwrap();
         write_file(

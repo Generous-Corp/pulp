@@ -24,7 +24,7 @@ using namespace pulp::canvas;
 
 #ifdef PULP_HAS_SKIA
 
-// `Default` / `PlatformDefault` resolve to `std::nullopt`, signalling
+// `Default` / `PlatformDefault` resolve to `std::nullopt`, signaling
 // "caller preserves the existing per-context heuristic". Explicit modes still
 // resolve to the fixed enum.
 

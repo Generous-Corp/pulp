@@ -68,7 +68,7 @@ impl Spawner for RecordingSpawner {
     }
 }
 
-/// Serialises `std::env::set_current_dir` calls across the parity
+/// Serializes `std::env::set_current_dir` calls across the parity
 /// harness so parallel `cargo test` threads don't fight for CWD.
 static CWD_LOCK: Mutex<()> = Mutex::new(());
 
@@ -88,7 +88,7 @@ fn copy_fixture(name: &str) -> tempfile::TempDir {
     copy_recursive(&src, dst.path());
     // `core/.keep` is copied above but the empty file isn't always
     // serialized by git; ensure it exists so `find_project_root`
-    // recognises the tempdir as a Pulp source tree.
+    // recognizes the tempdir as a Pulp source tree.
     let core = dst.path().join("core");
     if !core.is_dir() {
         fs::create_dir_all(&core).unwrap();

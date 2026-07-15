@@ -82,7 +82,7 @@ catch_discover_tests(pulp-test-cli-import-emit
 
 # CLI import IMPORTER_TERMS accept-gate + provenance check. Links the pure
 # acceptance-store logic directly, shells out to the built CLI for the
-# accept-to-run gate behaviour, and shells out to the Python provenance audit.
+# accept-to-run gate behavior, and shells out to the Python provenance audit.
 add_executable(pulp-test-cli-import-terms
     test_cli_import_terms.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/import_terms.cpp
@@ -102,7 +102,7 @@ catch_discover_tests(pulp-test-cli-import-terms
     PROPERTIES LABELS "parser-import")
 
 # `pulp run` flag parser unit tests. Pure parser, no I/O,
-# no project resolution. The shell-out CLI behaviour for the same
+# no project resolution. The shell-out CLI behavior for the same
 # flags lives in test_cli_shellout.cpp.
 add_executable(pulp-test-cli-run-options
     test_cli_run_options.cpp
@@ -121,7 +121,7 @@ add_executable(pulp-test-cli-run-fixture fixtures/cli_run_fixture.cpp)
 set_target_properties(pulp-test-cli-run-fixture PROPERTIES
     OUTPUT_NAME "pulp-cli-run-fixture")
 
-# CLI shell-out behaviour tests — launches the built `pulp` binary.
+# CLI shell-out behavior tests — launches the built `pulp` binary.
 function(pulp_bind_cli_shellout_target target)
     if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU)
         set(_pulp_cli_path "${CMAKE_BINARY_DIR}/tools/cli/pulp-cpp${CMAKE_EXECUTABLE_SUFFIX}")
@@ -280,7 +280,7 @@ if(NOT WIN32)
         PROPERTIES ENVIRONMENT "PULP_REPO_ROOT=${CMAKE_SOURCE_DIR}")
 endif()
 
-# CLI ship shell-out behaviour tests — launches the built `pulp` binary
+# CLI ship shell-out behavior tests — launches the built `pulp` binary
 # for the non-destructive ship subcommand branches.
 add_executable(pulp-test-cli-ship-shellout test_cli_ship_shellout.cpp)
 target_link_libraries(pulp-test-cli-ship-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)

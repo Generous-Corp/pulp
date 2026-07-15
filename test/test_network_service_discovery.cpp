@@ -18,7 +18,7 @@
 #include <utility>
 #include <vector>
 
-using pulp::events::LockingAsyncUpdater;
+using pulp::events::LockingCoalescedUpdater;
 using pulp::events::MountedVolumeListChangeDetector;
 using pulp::events::NetworkServiceDiscovery;
 using pulp::events::ServiceBrowser;
@@ -73,9 +73,9 @@ public:
     void unregister_service() override { log->unregistered++; }
 };
 
-class RecordingLockingUpdater : public LockingAsyncUpdater {
+class RecordingLockingUpdater : public LockingCoalescedUpdater {
 public:
-    void handle_async_update() override {
+    void on_update() override {
         handles.fetch_add(1);
     }
 
@@ -435,7 +435,7 @@ TEST_CASE("NSD discovery stores entries when callbacks are absent",
     REQUIRE(nsd.discovered().empty());
 }
 
-TEST_CASE("LockingAsyncUpdater trigger_and_wait handles every call synchronously",
+TEST_CASE("LockingCoalescedUpdater trigger_and_wait handles every call synchronously",
           "[events][service-discovery][locking-updater]") {
     RecordingLockingUpdater updater;
 
@@ -659,8 +659,8 @@ TEST_CASE("MountedVolumeListChangeDetector stop wakes a long poll promptly",
     REQUIRE(elapsed < 500ms);
 }
 
-TEST_CASE("LockingAsyncUpdater trigger_and_wait handles synchronously",
-          "[events][async_updater][locking]") {
+TEST_CASE("LockingCoalescedUpdater trigger_and_wait handles synchronously",
+          "[events][coalesced_updater][locking]") {
     RecordingLockingUpdater updater;
 
     updater.trigger_and_wait();

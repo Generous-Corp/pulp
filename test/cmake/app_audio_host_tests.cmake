@@ -9,6 +9,19 @@ catch_discover_tests(pulp-test-wam-adapter)
 # Parameter attachment tests
 pulp_add_test_suite(pulp-test-param-attachment LIBRARIES pulp::view)
 
+# The value engine the continuous controls share: range, interval, skew, drag
+# law, gesture bracketing, and the notify policy.
+pulp_add_test_suite(pulp-test-slider-core LIBRARIES pulp::view)
+
+# The paint delegate: subtree inheritance, partial override, and the units each
+# control shape reasons in.
+pulp_add_test_suite(pulp-test-widget-painter LIBRARIES pulp::view)
+
+# Bugs that shipped: a button face that never rendered, a wheel notch that moved
+# a quantized control by zero, a field that collapsed to no height in a flex
+# tree, and caret/selection colors no skin could reach.
+pulp_add_test_suite(pulp-test-widget-regressions LIBRARIES pulp::view)
+
 # App framework tests (KeyMapping, MenuBar, Toolbar, AppSettings)
 pulp_add_test_suite(pulp-test-app-framework LIBRARIES pulp::view)
 
@@ -286,11 +299,11 @@ target_sources(pulp-test-host-signal-graph PRIVATE
 target_link_libraries(pulp-test-host-signal-graph PRIVATE pulp::host Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-host-signal-graph)
 
-# ExtensionsVisitor pure-header pattern test. No plugin loading
+# NativeHandleVisitor pure-header pattern test. No plugin loading
 # required; uses lightweight mock slots to exercise dispatch.
-add_executable(pulp-test-extensions-visitor test_extensions_visitor.cpp)
-target_link_libraries(pulp-test-extensions-visitor PRIVATE pulp::host Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-extensions-visitor)
+add_executable(pulp-test-native-handle-visitor test_native_handle_visitor.cpp)
+target_link_libraries(pulp-test-native-handle-visitor PRIVATE pulp::host Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-native-handle-visitor)
 
 # Opt-in real-plugin integration runner. Builds only when
 # PULP_REAL_PLUGIN_TESTS=ON. Even when built, individual TEST_CASEs SKIP
@@ -465,3 +478,8 @@ pulp_add_test_suite(pulp-test-gap-widgets LIBRARIES pulp::view)
 
 # Widget gallery — themed board of every primitive; builds + renders
 pulp_add_test_suite(pulp-test-widget-gallery LIBRARIES pulp::view)
+
+# The sizing delegate, and the two widgets reworked to consult it: a menu that
+# can compute its whole geometry with no canvas and no paint, and a label whose
+# inline editor is a real child view.
+pulp_add_test_suite(pulp-test-widget-metrics LIBRARIES pulp::view)

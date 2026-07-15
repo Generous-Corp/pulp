@@ -26,7 +26,7 @@
 // with `flex-shrink: 1` (default), so the App flex item shrinks on its
 // main axis to fit the body's content box.
 //
-// This helper emulates that flex-shrink behaviour for runtime-import
+// This helper emulates that flex-shrink behavior for runtime-import
 // hosts. For any descendant of root_ with
 // `position:absolute|fixed` AND a `preferred_width|height` exceeding
 // the viewport AND no opposite-edge anchor (`right` for width,
@@ -72,7 +72,7 @@ inline void clamp_oversize_absolute_view(pulp::view::View& view,
     // though the source explicitly anchored it to the opposite edge.
     // The correct test: only clamp when the opposite edge is truly
     // unset (`auto`). Any explicit value — including 0 — is the
-    // source declaring edge-anchoring intent, which Yoga will honour
+    // source declaring edge-anchoring intent, which Yoga will honor
     // via the inset → size derivation; defer to that.
     const bool size_x_is_explicit = cw > 0 && !view.has_right();
     const bool size_y_is_explicit = ch > 0 && !view.has_bottom();

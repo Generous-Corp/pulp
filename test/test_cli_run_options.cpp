@@ -3,7 +3,7 @@
 // CLAUDE.md: every correctness fix or feature slice ships its tests in
 // the same PR. The shell-out coverage (which exercises the launched
 // binary against a real fixture) lives in test_cli_run_headless.cpp;
-// this file pins the pure parsing behaviour so future regressions on
+// this file pins the pure parsing behavior so future regressions on
 // flag composition / forwarding fail loudly.
 
 #include <catch2/catch_test_macros.hpp>
@@ -219,7 +219,7 @@ TEST_CASE("pulp run preserves unknown flags as pass-through",
     // as a pass-through token. (For unknown flags that take a separate
     // value argument, prefer `pulp run --headless -- --debug-port 9222`
     // since the parser otherwise treats the second token as a positional
-    // target — matching the legacy behaviour.)
+    // target — matching the legacy behavior.)
     REQUIRE(r.user_pass_through.size() == 1);
     REQUIRE(r.user_pass_through[0] == "--debug-port=9222");
 }

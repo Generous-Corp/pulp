@@ -29,6 +29,11 @@ CoreGraphicsCanvas::~CoreGraphicsCanvas() {
     release_path();
     release_conic_image();
     release_pattern_image();
+    // Retained compositing layers own CG resources that outlive a frame by
+    // design, so nothing else will free them — a cacheable layer's CGImageRef
+    // would leak for the life of the process without this.
+    for (auto& [id, layer] : layers_) release_layer(layer);
+    layers_.clear();
 }
 
 void CoreGraphicsCanvas::release_conic_image() {
@@ -193,7 +198,7 @@ void CoreGraphicsCanvas::clip_rect(float x, float y, float w, float h) {
 void CoreGraphicsCanvas::clip(FillRule rule) {
     if (!path_) return;
     CGContextAddPath(ctx_, path_);
-    // Honour the JS-supplied fillRule arg (`ctx.clip('evenodd')`). CG
+    // Honor the JS-supplied fillRule arg (`ctx.clip('evenodd')`). CG
     // distinguishes between CGContextClip (nonzero winding) and
     // CGContextEOClip (even-odd) at the API surface.
     if (rule == FillRule::evenodd) {
@@ -500,8 +505,10 @@ void CoreGraphicsCanvas::stroke_path(const Point2D* points, size_t count) {
     reset_line_dash_on_ctx();
 }
 
-void CoreGraphicsCanvas::fill_path(const Point2D* points, size_t count) {
+void CoreGraphicsCanvas::fill_path(const Point2D* points, size_t count,
+                                   FillRule rule) {
     if (points == nullptr || count < 3) return;
+    const bool eo = (rule == FillRule::evenodd);
     CGContextSetShouldAntialias(ctx_, true);
     CGContextBeginPath(ctx_);
     CGContextMoveToPoint(ctx_, points[0].x, points[0].y);
@@ -512,13 +519,22 @@ void CoreGraphicsCanvas::fill_path(const Point2D* points, size_t count) {
     // parallel of SkiaCanvas::fill_path.
     if (has_gradient_) {
         CGContextSaveGState(ctx_);
-        CGContextClip(ctx_);  // clip to the path we just built
+        // Clip to the path we just built, under the requested winding rule.
+        if (eo) {
+            CGContextEOClip(ctx_);
+        } else {
+            CGContextClip(ctx_);
+        }
         fill_with_active_paint();
         CGContextRestoreGState(ctx_);
         return;
     }
     apply_fill_color();
-    CGContextFillPath(ctx_);
+    if (eo) {
+        CGContextEOFillPath(ctx_);
+    } else {
+        CGContextFillPath(ctx_);
+    }
 }
 
 void CoreGraphicsCanvas::set_opacity(float alpha) {
@@ -662,7 +678,7 @@ void CoreGraphicsCanvas::stroke_text(const std::string& text, float x, float y,
                                       float max_width) {
     // True outlined-glyph rendering via CoreText. We swap the text drawing
     // mode to `kCGTextStroke` so each glyph outline is honoured with the
-    // active stroke colour + line width.
+    // active stroke color + line width.
     @autoreleasepool {
         if (text.empty()) return;
         NSString* ns_text = ns_string_never_nil(text);
@@ -748,7 +764,7 @@ void CoreGraphicsCanvas::stroke_text(const std::string& text, float x, float y,
             CGPathRelease(glyph_path);
             stroke_with_active_paint();
         } else {
-            // Stroke mode + active stroke colour. The line width was set by
+            // Stroke mode + active stroke color. The line width was set by
             // a prior set_line_width() call and is preserved by the GState
             // we just saved — no need to mirror it here.
             CGContextSetRGBStrokeColor(ctx_,
@@ -896,7 +912,7 @@ void CoreGraphicsCanvas::close_path() {
 
 void CoreGraphicsCanvas::fill_current_path(FillRule rule) {
     if (!path_) return;
-    // Honour the JS-supplied fillRule arg (`ctx.fill('evenodd')`). CG splits
+    // Honor the JS-supplied fillRule arg (`ctx.fill('evenodd')`). CG splits
     // nonzero (CGContextFillPath / CGContextClip) and even-odd
     // (CGContextEOFillPath / CGContextEOClip) at the API surface.
     const bool eo = (rule == FillRule::evenodd);
@@ -1193,7 +1209,7 @@ void CoreGraphicsCanvas::set_stroke_pattern(const std::string& image_src,
 // Canvas2D ctx.miterLimit.
 // CGContextSetMiterLimit attaches the value to the current GState, so
 // save()/restore() snapshots and pops it naturally. Spec: non-positive
-// or non-finite values are silently ignored (matches CG behaviour for
+// or non-finite values are silently ignored (matches CG behavior for
 // the "set" itself — CG would clamp to its internal minimum, but we
 // short-circuit to keep the recording-canvas test surface deterministic).
 void CoreGraphicsCanvas::set_miter_limit(float limit) {
@@ -1227,7 +1243,7 @@ void CoreGraphicsCanvas::set_image_smoothing(bool enabled,
     CGContextSetInterpolationQuality(ctx_, cg_q);
 }
 
-// Sample the active conic colour stops at angle `t` in [0, 1],
+// Sample the active conic color stops at angle `t` in [0, 1],
 // where t=0 corresponds to start_angle and t=1 wraps back to start_angle + 2π.
 // Returns four CGFloat RGBA components in straight (un-premultiplied) space.
 static void sample_conic_stops(const std::vector<pulp::canvas::Color>& colors,
@@ -1255,7 +1271,7 @@ static void sample_conic_stops(const std::vector<pulp::canvas::Color>& colors,
         return;
     }
     // Find the interval [positions[i], positions[i+1]] enclosing t and
-    // linearly interpolate the colour.
+    // linearly interpolate the color.
     for (size_t i = 0; i + 1 < n; ++i) {
         if (t >= positions[i] && t <= positions[i + 1]) {
             const double span = std::max<double>(positions[i + 1] - positions[i], 1e-9);
@@ -1268,7 +1284,7 @@ static void sample_conic_stops(const std::vector<pulp::canvas::Color>& colors,
             return;
         }
     }
-    // Defensive: last-stop colour.
+    // Defensive: last-stop color.
     out_rgba[0] = colors[n - 1].r;
     out_rgba[1] = colors[n - 1].g;
     out_rgba[2] = colors[n - 1].b;
@@ -1291,7 +1307,7 @@ static CGImageRef build_conic_gradient_image(
     std::vector<uint8_t> pixels(total, 0);
     constexpr double kTwoPi = 6.283185307179586;
     for (int py = 0; py < height; ++py) {
-        // Pixel centre in canvas space — bounds.origin is top-left of the
+        // Pixel center in canvas space — bounds.origin is top-left of the
         // image in canvas coords, so offset by (px+0.5, py+0.5).
         const double sample_y = bounds.origin.y + py + 0.5;
         for (int px = 0; px < width; ++px) {
@@ -1473,7 +1489,7 @@ void CoreGraphicsCanvas::fill_with_active_paint() {
             CGPointMake(grad_x1_, grad_y1_), grad_radius_,
             opts);
     } else if (gradient_kind_ == GradientKind::radial || gradient_is_radial_) {
-        // Single-circle form — inner circle collapses to centre, radius 0.
+        // Single-circle form — inner circle collapses to center, radius 0.
         CGContextDrawRadialGradient(ctx_,
             gradient,
             CGPointMake(grad_x0_, grad_y0_), 0.0,

@@ -1,14 +1,14 @@
 #pragma once
 
-// AbstractFifo — abstract index-pair FIFO management for single-producer
-// single-consumer (SPSC) ring buffers.
+// SpscRingIndex — index-pair cursor management for a single-producer
+// single-consumer (SPSC) ring buffer whose storage the CALLER owns.
 //
 // This class does NOT own a storage buffer. Instead it tracks the read and
 // write positions inside a caller-owned circular buffer (a contiguous array
 // the caller allocates separately — e.g. an `std::vector<float>` for an audio
 // sample ring, a `std::vector<uint8_t>` for a byte stream, etc.). The caller
 // uses the index ranges returned by `prepare_to_write()` / `prepare_to_read()`
-// to copy into / out of its own buffer; AbstractFifo only deals with the
+// to copy into / out of its own buffer; SpscRingIndex only deals with the
 // modular arithmetic of "where to read/write next, and how many items can
 // be touched without wrapping past the producer/consumer cursor."
 //
@@ -22,9 +22,16 @@
 // acquire/release ordering. Multi-producer / multi-consumer usage requires
 // external synchronization.
 //
-// Usage mirrors JUCE's `AbstractFifo`. This is the "abstract index-pair" sibling to
-// `SpscQueue<T,N>` (which IS a queue + owns storage via choc FIFO) and
-// `TripleBuffer<T>` (which publishes a single latest value).
+// Pick this over its two siblings when the payload is bulk samples/bytes you
+// want to memcpy in place rather than element-wise values you want to push and
+// pop:
+//
+//   * `SpscRingIndex`   — cursors only; you own the array and copy into the two
+//                         returned index ranges. Zero-copy bulk transfer.
+//   * `SpscQueue<T,N>`  — a real queue: owns its storage, moves elements in and
+//                         out one at a time.
+//   * `TripleBuffer<T>` — no queue at all: publishes a single latest value,
+//                         dropping anything the consumer did not pick up.
 
 #include <algorithm>
 #include <atomic>
@@ -32,14 +39,14 @@
 
 namespace pulp::runtime {
 
-class AbstractFifo {
+class SpscRingIndex {
 public:
-    /// Construct an AbstractFifo that manages indices in `[0, capacity)`.
+    /// Construct an SpscRingIndex that manages indices in `[0, capacity)`.
     /// `capacity` is the size of the caller-owned buffer in items. One slot
     /// is reserved internally as the empty/full sentinel, so the maximum
     /// number of items that can ever be queued is `capacity - 1`. Pick a
     /// capacity one larger than the worst-case queue depth you need.
-    explicit AbstractFifo(int capacity) noexcept
+    explicit SpscRingIndex(int capacity) noexcept
         : capacity_(capacity < 1 ? 1 : capacity) {}
 
     /// Total size of the managed buffer in items.
@@ -162,15 +169,16 @@ public:
         read_pos_.store(next, std::memory_order_release);
     }
 
-    AbstractFifo(const AbstractFifo&) = delete;
-    AbstractFifo& operator=(const AbstractFifo&) = delete;
-    AbstractFifo(AbstractFifo&&) = delete;
-    AbstractFifo& operator=(AbstractFifo&&) = delete;
+    SpscRingIndex(const SpscRingIndex&) = delete;
+    SpscRingIndex& operator=(const SpscRingIndex&) = delete;
+    SpscRingIndex(SpscRingIndex&&) = delete;
+    SpscRingIndex& operator=(SpscRingIndex&&) = delete;
 
 private:
     const int capacity_;
     std::atomic<int> read_pos_{0};
     std::atomic<int> write_pos_{0};
 };
+
 
 }  // namespace pulp::runtime

@@ -108,7 +108,7 @@ def test_every_exercisable_plugin_command_exits_nonsilent_on_unknown(
     for cmd in exercisable:
         result = sandbox.run([cmd, "--help"], timeout=10.0)
         # Known-good pattern: either --help succeeded (0), or --help
-        # is not recognised and stderr mentions usage / an error.
+        # is not recognized and stderr mentions usage / an error.
         if result.returncode == 0:
             continue
         if result.returncode != 0 and (result.stderr or "unknown" in result.stdout.lower()):

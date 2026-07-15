@@ -74,6 +74,6 @@ pulp_add_test_suite(pulp-test-denormal-null SOURCES test_denormal_null.cpp denor
         PULP_DENORMAL_NULL_REFGEN="$<TARGET_FILE:pulp-denormal-null-refgen>"
         PULP_DENORMAL_NULL_REF_BLOB="${CMAKE_CURRENT_BINARY_DIR}/denormal-null-reference.bin")
 add_dependencies(pulp-test-denormal-null pulp-denormal-null-refgen)
-pulp_add_test_suite(pulp-test-normalisable-range LIBRARIES pulp::state)
+pulp_add_test_suite(pulp-test-skewed-range LIBRARIES pulp::state)
 pulp_add_test_suite(pulp-test-adsr LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-high-resolution-timer LIBRARIES pulp::runtime)

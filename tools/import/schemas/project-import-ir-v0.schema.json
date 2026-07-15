@@ -78,7 +78,7 @@
         "tool": { "type": "string", "description": "Importer tool id (framework-agnostic at the SDK layer)." },
         "tool_version": { "type": "string" },
         "parser": { "type": "string", "description": "e.g. 'libclang'." },
-        "parser_version": { "type": "string", "description": "Exact parser identity; pinned + reported so behaviour drift is explainable." },
+        "parser_version": { "type": "string", "description": "Exact parser identity; pinned + reported so behavior drift is explainable." },
         "cpp_standard": { "type": "string" },
         "target": { "type": "string", "description": "Target triple or a documented placeholder." },
         "compile_db": {
@@ -163,7 +163,7 @@
     "support_status": {
       "type": "string",
       "enum": ["supported", "partial", "unsupported", "unknown"],
-      "description": "Importer confidence that a neutral migration surface can represent a source behaviour. `partial` must be paired with diagnostics explaining the manual work."
+      "description": "Importer confidence that a neutral migration surface can represent a source behavior. `partial` must be paired with diagnostics explaining the manual work."
     },
     "state_threading_model": {
       "type": "string",
@@ -227,7 +227,7 @@
         "base_effective_split": {
           "type": "string",
           "enum": ["native", "synthesized-zero-modulation", "destructive-source", "unknown"],
-          "description": "`native` means the source already preserves base + modulation separately. `synthesized-zero-modulation` means no source modulation was found, so effective == base. `destructive-source` means a source behaviour overwrites base where Pulp needs a modulation offset."
+          "description": "`native` means the source already preserves base + modulation separately. `synthesized-zero-modulation` means no source modulation was found, so effective == base. `destructive-source` means a source behavior overwrites base where Pulp needs a modulation offset."
         },
         "base_write_sources": { "type": "array", "items": { "$ref": "#/$defs/param_write_source" } },
         "modulation_write_sources": { "type": "array", "items": { "$ref": "#/$defs/param_write_source" } },
@@ -343,7 +343,7 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "classification": { "type": "string", "enum": ["portable-core", "framework-bound-mappable", "framework-bound-midi", "labelled-silence", "stub", "unknown"] },
+        "classification": { "type": "string", "enum": ["portable-core", "framework-bound-mappable", "framework-bound-midi", "labeled-silence", "stub", "unknown"] },
         "reachability_scope": {
           "type": "string",
           "enum": ["direct_body", "intra_tu", "compile_db_graph", "unknown"],
@@ -423,7 +423,7 @@
       "properties": {
         "id": { "type": "string", "description": "Package registry id, interpreted by the SDK/package registry." },
         "feature_key": { "type": "string", "description": "Stable importer-owned feature key such as 'session_tuning' or 'local_tuning_files'." },
-        "required": { "type": "boolean", "description": "True when omitting the package would remove source-project behaviour; false when it is a recommended enhancement." },
+        "required": { "type": "boolean", "description": "True when omitting the package would remove source-project behavior; false when it is a recommended enhancement." },
         "reason": { "type": "string" },
         "cmake_targets": {
           "type": "array",

@@ -110,10 +110,10 @@ TEST_CASE("css_to_root inverts the design-viewport transform", "[view][web][inpu
         CHECK_THAT(root.x, WithinAbs((css.x - tx) / sx, 1e-3));
         CHECK_THAT(root.y, WithinAbs((css.y - ty) / sy, 1e-3));
 
-        // ...and the design centre lands at the centre of the canvas box.
-        const Point centre = root_to_css(mapping, {c.design_w * 0.5f, c.design_h * 0.5f});
-        CHECK_THAT(centre.x, WithinAbs(c.css_w * 0.5, 1e-3));
-        CHECK_THAT(centre.y, WithinAbs(c.css_h * 0.5, 1e-3));
+        // ...and the design center lands at the center of the canvas box.
+        const Point center = root_to_css(mapping, {c.design_w * 0.5f, c.design_h * 0.5f});
+        CHECK_THAT(center.x, WithinAbs(c.css_w * 0.5, 1e-3));
+        CHECK_THAT(center.y, WithinAbs(c.css_h * 0.5, 1e-3));
 
         // Round-trip: root_to_css(css_to_root(p)) == p.
         for (const Point p : {Point{0, 0}, Point{c.css_w, c.css_h},
@@ -250,9 +250,9 @@ TEST_CASE("pointer events translate to MouseEvent", "[view][web][input]") {
         const auto boxed = make_mapping(800, 900, 800, 600);  // letterboxed
         BrowserPointerEvent e;
         e.css_x = 400;
-        e.css_y = 450;  // canvas centre
+        e.css_y = 450;  // canvas center
         const MouseEvent me = translate_pointer(e, boxed);
-        CHECK_THAT(me.position.x, WithinAbs(400.0, 1e-3));  // design centre
+        CHECK_THAT(me.position.x, WithinAbs(400.0, 1e-3));  // design center
         CHECK_THAT(me.position.y, WithinAbs(300.0, 1e-3));
         // window_position carries the same root point until the host resolves a
         // hit target and rewrites `position` into that view's local space.

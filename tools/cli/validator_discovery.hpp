@@ -178,7 +178,7 @@ FixOutcome apply_fixes(std::vector<ValidatorReport>& reports, bool dry_run);
 //   ✗ pluginval: /usr/local/bin/pluginval — broken signature (...). Auto-fixable.
 //   ⚠  clap-validator: not installed. Run `cargo install clap-validator`.
 //
-// `use_color` toggles ANSI colour escapes; tests pass false so string
+// `use_color` toggles ANSI color escapes; tests pass false so string
 // matching stays simple.
 std::string render_report(const std::vector<ValidatorReport>& reports,
                           bool use_color);

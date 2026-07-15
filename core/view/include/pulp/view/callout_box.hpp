@@ -1,15 +1,16 @@
 #pragma once
 
 /// @file callout_box.hpp
-/// Anchored popover with a pointer triangle (JUCE `CallOutBox` parity).
+/// Anchored popover with a pointer triangle.
+///
+/// AnchoredCallout is a floating content box tethered to a target rect (a knob, a
+/// button) by a little arrow. It auto-flips to the other side when it would clip
+/// the window, clamps itself inside the window edges, and keeps the arrow pointing
+/// at the anchor even after the body is clamped.
 ///
 /// Named AnchoredCallout to avoid colliding with Pulp's existing `CallOutBox` in
-/// ui_components.hpp, which is a modal message/confirm box with no anchor or
-/// arrow — a different primitive. AnchoredCallout is the JUCE-CallOutBox-shaped
-/// one: a floating content box tethered to a target rect (a knob, a button) by a
-/// little arrow, that auto-flips to the other side when it would clip the window,
-/// clamps itself inside the window edges, and keeps the arrow pointing at the
-/// anchor even after the body is clamped. Pulp already has ContextMenu (a
+/// ui_components.hpp, which is a modal message/confirm box with no anchor or arrow
+/// — a different primitive, despite the similar name. Pulp also has ContextMenu (a
 /// view-tree overlay) and TooltipWindow, but neither gives arbitrary child content
 /// an arrowed, edge-aware anchor — that is what AnchoredCallout adds.
 ///

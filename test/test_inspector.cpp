@@ -5209,7 +5209,7 @@ TEST_CASE("InspectorOverlay: body-press of selected element begins a MOVE, "
     const float left0 = tc->a->left();
     const float top0 = tc->a->top();
 
-    // PRESS on a's BODY (centre) with explicit press phase — must begin a
+    // PRESS on a's BODY (center) with explicit press phase — must begin a
     // move of a, NOT re-run selection hit-testing.
     MouseEvent press;
     press.position = {100, 80};          // inside a (40..160 / 40..120)
@@ -5348,7 +5348,7 @@ TEST_CASE("InspectorOverlay: edge-handle press resizes a single axis",
     overlay.set_tweak_store(&store);
     overlay.set_selected_view(child_ptr);
 
-    // Press on the EAST edge midpoint (right edge, vertical centre).
+    // Press on the EAST edge midpoint (right edge, vertical center).
     MouseEvent press;
     press.position = {180, 120};
     press.is_down = true;
@@ -5472,9 +5472,11 @@ TEST_CASE("InspectorOverlay: context-aware resize/move cursor per zone",
 TEST_CASE("InspectorOverlay: legacy is_down gesture convention still works "
           "(no explicit phase)",
           "[inspect][overlay][regression2]") {
-    // Guards the headless JUCE-style convention path: press=is_down,
-    // drag=!is_down, release=is_down, phase left automatic. This is the
-    // convention the pre-fix tests use, and it must remain intact.
+    // Guards the headless "is_down means the button state CHANGED" path:
+    // press=is_down, drag=!is_down, release=is_down, phase left automatic.
+    // (A platform host instead means "the button is currently HELD" and sets
+    // phase explicitly.) This is the convention the pre-fix tests use, and it
+    // must remain intact.
     View root;
     root.set_bounds({0, 0, 600, 400});
     auto child = std::make_unique<View>();

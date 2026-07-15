@@ -57,7 +57,7 @@ class RasterizeVectorFramesTest(unittest.TestCase):
                 },
                 {
                     "type": "frame",
-                    "name": "Labelled art",
+                    "name": "Labeled art",
                     "figma_node_id": "9:2",
                     "children": [{"type": "text", "name": "Value"}],
                 },

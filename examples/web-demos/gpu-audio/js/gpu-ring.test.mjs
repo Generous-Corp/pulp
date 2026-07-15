@@ -159,7 +159,7 @@ test("a dropped input costs ONE miss and does not shift the wet timeline", () =>
     const want = n - L;
     if (got) {
       // WHATEVER is delivered must be the wet of exactly block n-L. Never a
-      // neighbour's — that is the shift this test exists to catch.
+      // neighbor's — that is the shift this test exists to catch.
       assert.deepEqual([...out], [...wetOf(marker(want))],
         `block ${n} delivered the wet of block ${want}`);
     } else {

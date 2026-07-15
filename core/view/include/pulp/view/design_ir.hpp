@@ -410,7 +410,8 @@ struct IRInteractiveElement {
     /// bare layer name) — the control still renders and drags, but drives nothing
     /// until a key is supplied. Maps 1:1 to DesignFrameElement::param_key, which
     /// DesignFrameView resolves against the framework-agnostic HostParamSurface
-    /// (JUCE APVTS / iPlug2 / StateStore) when route_changes_to_host_params is on.
+    /// (an embedding plug-in framework's parameter tree, or Pulp's own
+    /// StateStore) when route_changes_to_host_params is on.
     /// This is the binding channel for geometry-detected interactive elements —
     /// the recognized-widget path lowers its binding through IRNode instead.
     std::string param_key;

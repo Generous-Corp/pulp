@@ -136,7 +136,7 @@ TEST_CASE("WASAPI mode coverage: shared low-latency open succeeds or honest-"
     // If IAudioClient3 is unavailable or the call fails, open() honestly
     // degrades to the standard shared Initialize. Either way the contract is the
     // same as every other open path: fully open (is_open + positive
-    // rate/buffer) or fully closed — never a half-initialised device.
+    // rate/buffer) or fully closed — never a half-initialized device.
     WasapiSystem sys;
     if (!has_default_render(sys)) {
         SUCCEED("no default render endpoint on this host; skipping");
@@ -167,7 +167,7 @@ TEST_CASE("WASAPI mode coverage: exclusive open succeeds or honest-fails "
     // "Allow applications to take exclusive control" setting + format support).
     // We can't guarantee it on an arbitrary CI host, so the contract we pin is:
     // open() either fully succeeds (is_open + positive rate/buffer) or fully
-    // fails (NOT is_open) — it never leaves a half-initialised device.
+    // fails (NOT is_open) — it never leaves a half-initialized device.
     WasapiSystem sys;
     if (!has_default_render(sys)) {
         SUCCEED("no default render endpoint on this host; skipping");
@@ -204,7 +204,7 @@ TEST_CASE("WASAPI mode coverage: AUDCLNT_SHAREMODE_EXCLUSIVE on the same "
 
     // Open the device in (the only path Pulp supports) shared mode, then
     // independently activate a SECOND IAudioClient on the same endpoint
-    // and try to initialise it in EXCLUSIVE mode.
+    // and try to initialize it in EXCLUSIVE mode.
     //
     // WASAPI semantics (per IAudioClient::Initialize MSDN):
     //   AUDCLNT_E_DEVICE_IN_USE is a VALID outcome of an exclusive-mode

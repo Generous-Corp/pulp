@@ -1,7 +1,7 @@
 // Freeze coverage for the parametric SequencerStateChannel: a second
 // (non-square) config, a custom cell type + reducer, the shared step_edit_reducer
 // (apply + overflow recovery), and a NEUTRAL non-Processor producer driving the
-// channel end to end. The reference-config behaviour is covered by
+// channel end to end. The reference-config behavior is covered by
 // test_sequencer_state_channel.cpp; this file proves generalization + the SDK
 // reducer contract.
 #include <catch2/catch_test_macros.hpp>

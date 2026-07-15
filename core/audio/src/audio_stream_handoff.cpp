@@ -80,7 +80,7 @@ void AudioStreamHandoff::allocate_scratch(std::uint64_t pending_capacity_frames)
     pending_write_ptrs_.assign(source_channels_, nullptr);
     pending_read_ptrs_.assign(source_channels_, nullptr);
     resampled_output_ptrs_.assign(source_channels_, nullptr);
-    pending_fifo_ = std::make_unique<runtime::AbstractFifo>(
+    pending_fifo_ = std::make_unique<runtime::SpscRingIndex>(
         static_cast<int>(pending_capacity_frames + 1u));
 }
 

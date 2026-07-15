@@ -17,7 +17,7 @@ pulp_add_test_suite(pulp-test-midi-monotonic-clock LIBRARIES pulp::midi)
 # BLE-MIDI 1.0 packet codec + cross-platform BleMidiCentral factory contract. The
 # CoreBluetooth backend's live discovery / pairing path is exercised
 # manually (requires a real adapter + a paired peripheral); these
-# tests pin the deterministic codec + the stub central behaviour.
+# tests pin the deterministic codec + the stub central behavior.
 # Keeping the codec tests host-independent lets every CI lane validate
 # timestamp/running-status handling without Bluetooth hardware.
 pulp_add_test_suite(pulp-test-ble-midi LIBRARIES pulp::midi)
@@ -390,5 +390,7 @@ catch_discover_tests(pulp-test-xcode-developer-path)
 
 # StepSequencer end-to-end proof: a StepGridView (UI) submits a cell edit through
 # a SequencerStateChannel, the Processor drains it and republishes state, and the
-# view reflects it — the synth-class non-param control path without APVTS.
+# view reflects it. This is the synth-class control path for state that is NOT a
+# host parameter — a step grid is too big and too structured to expose as one
+# automatable param per cell, so it travels its own channel instead.
 pulp_add_test_suite(pulp-test-step-sequencer-roundtrip LIBRARIES pulp::view pulp::state pulp::format pulp::midi pulp::audio)

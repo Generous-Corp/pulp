@@ -31,6 +31,61 @@ style.corner_radius = 8.0f;
 canvas.draw_sdf_shape(Canvas::SDFShape::squircle, x, y, w, h, style);
 ```
 
+## Retained Paths — `pulp::canvas::Path`
+
+`Path` is a geometry **value**. Before it, a shape could only exist *during* a
+paint, because it was built by calling the canvas directly — so it could not be
+measured before it was drawn, transformed, hit-tested, cached, or handed to
+anything else.
+
+```cpp
+#include <pulp/canvas/path.hpp>
+
+pulp::canvas::Path icon;
+icon.move_to(0, 0).line_to(10, 0).cubic_to(12, 4, 12, 8, 10, 10).close();
+
+icon.scale_to_fit(0, 0, 64, 64, /*preserve_proportions=*/true);
+
+if (icon.contains(mouse)) { … }              // hit-test, no canvas needed
+canvas.fill_path(icon, FillRule::nonzero);   // draw it
+```
+
+Copy is O(1) (copy-on-write) with real value semantics: assigning a `Path` is not
+sharing one.
+
+**Three details that are easy to get silently wrong, so the API makes them explicit:**
+
+- **`bounds()` is TIGHT** — computed from each curve's extrema, not its control
+  hull. The two differ for nearly every real curve, because a cubic's control
+  points usually fall *outside* the curve they steer. Use `control_bounds()` when
+  you want the cheap conservative hull instead (a repaint rect, where
+  over-estimating costs a few redrawn pixels and under-estimating is an artifact).
+- **`contains(p, rule)` takes a `FillRule`.** `nonzero` and `evenodd` genuinely
+  disagree about a region enclosed twice, and that disagreement is the entire
+  reason the rule is a parameter rather than a constant. `Canvas::fill_path` takes
+  one too.
+- **`scale_to_fit()` declines on a degenerate path.** Scaling a zero-width path
+  (a vertical line, a single point) to a non-zero width is a division by zero, and
+  the "result" is a path whose every coordinate is NaN — which renders as nothing
+  at all, from anywhere, forever. It returns identity instead, leaving the path
+  unchanged. With `preserve_proportions`, the slack on whichever axis did not bind
+  is **centred**, not dumped at one edge.
+
+Supporting types: `Point2D`, `AffineTransform` (`pulp/canvas/affine_transform.hpp`),
+`FillRule`, `StrokeStyle`.
+
+`pulp::view::Rect` gained **`encloses(other)`** for whole-rect containment. It is
+deliberately **not** an overload of `contains()`: `Rect` has default member
+initializers, so a braced `{50, 30}` is a valid two-field `Rect` as well as a valid
+`Point` — and a `contains(const Rect&)` overload therefore makes the idiomatic
+`r.contains({50, 30})` **ambiguous at every call site**. `contains(Point)` and
+`contains(x, y)` are unchanged.
+
+> `Point2D` is named that, and not `Point`, **on purpose**: Apple's `MacTypes.h`
+> declares a global Carbon `Point` (and `Rect`), and a `pulp::canvas::Point` becomes
+> ambiguous with it in every Objective-C++ translation unit in the view layer. Don't
+> rename it back.
+
 ## Compositing Layers
 
 Proper CSS opacity and filter:blur() via `save_layer()`:
@@ -43,6 +98,28 @@ canvas.restore();
 ```
 
 Works on both Skia (SkCanvas::saveLayer) and CoreGraphics (CGContextBeginTransparencyLayer).
+
+### Cacheable layers — `begin_layer()` / `end_layer()`
+
+`save_layer()` is a **scope**: the only way back into it is to re-run the drawing
+that filled it, which defeats the point of caching it. `begin_layer()` /
+`end_layer()` return a **`LayerHandle`** you can keep **across frames** and
+re-composite without redrawing its contents.
+
+```cpp
+if (!cached_) {
+    canvas.begin_layer(bounds, /*cacheable=*/true);
+    paint_expensive_subtree(canvas);
+    cached_ = canvas.end_layer();     // seals it; keep the handle
+}
+canvas.draw_layer(cached_);           // later frames: composite, don't redraw
+```
+
+`draw_layer(handle, alpha = 1.0f, mode = BlendMode::normal)` composites it;
+`draw_layer_fitted(handle, dest)` scales it into a destination rect.
+
+Use it for a subtree whose pixels are expensive and rarely change. `save_layer()`
+is unchanged and remains correct for the one-shot opacity/blur case.
 
 ## Effect, Mask, And Composite Vocabulary
 

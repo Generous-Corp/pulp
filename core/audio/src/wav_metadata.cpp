@@ -8,7 +8,7 @@
 //
 // Layout reminders:
 //   RIFF<u32 size>WAVE { <ckId u32><ckSize u32><payload [+1 pad byte if odd]> ...}
-//   RF64 variant is recognised on read (size==0xFFFFFFFF) but we always
+//   RF64 variant is recognized on read (size==0xFFFFFFFF) but we always
 //   emit RIFF on write — the metadata round-trip is for files small
 //   enough to round-trip in memory.
 

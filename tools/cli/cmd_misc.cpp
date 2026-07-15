@@ -364,7 +364,7 @@ int cmd_clean(const std::vector<std::string>& args) {
 // --Werror, exit 1 on any diff). `--check` is a CI-friendly alias that
 // doesn't rewrite.
 //
-// See docs/guides/coming-from-juce.md or `.clang-format` itself for
+// See the migration guides under docs/guides/ or `.clang-format` itself for
 // the full LLVM-derived formatting rules.
 
 int cmd_fmt(const std::vector<std::string>& args) {

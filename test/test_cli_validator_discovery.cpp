@@ -115,7 +115,7 @@ const vd::ValidatorReport& find_report(
 // mode that motivated #743. None of those map to Windows (no `auval`,
 // no Gatekeeper, fs::path stringification flips slashes so the StubEnv
 // hash lookups miss). The production code already neutralises Windows
-// behaviour (see `make_default_env()`'s _WIN32 branches), so gating
+// behavior (see `make_default_env()`'s _WIN32 branches), so gating
 // the tests off on Windows keeps coverage honest without disabling
 // anything load-bearing for that platform.
 #if !defined(_WIN32)

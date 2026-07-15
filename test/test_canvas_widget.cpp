@@ -410,7 +410,7 @@ TEST_CASE("CanvasWidget content paints over parent View bg via paint_all",
     REQUIRE(surface != nullptr);
     pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
 
-    // Parent View paints a dark-navy background — the colour Spectr's
+    // Parent View paints a dark-navy background — the color Spectr's
     // FilterBank container shows when the canvas widget's content fails
     // to render.
     View parent;
@@ -421,7 +421,7 @@ TEST_CASE("CanvasWidget content paints over parent View bg via paint_all",
     cw->set_bounds({0, 0, 64, 64});
 
     // Mimic the FilterBank render: clear, then fill_rect across the bounds.
-    // The fill_rect carries an opaque magenta colour so we can tell the
+    // The fill_rect carries an opaque magenta color so we can tell the
     // canvas widget's paint actually landed on top of the parent's navy.
     {
         CanvasDrawCmd c;
@@ -444,7 +444,7 @@ TEST_CASE("CanvasWidget content paints over parent View bg via paint_all",
     // navy. If the v0.57.0 regression is present, this samples (8,12,24)
     // (parent navy) or (0,0,0,0) (kClear leaked outside a layer).
     auto px = sample_pixel(surface.get(), 32, 32);
-    INFO("Centre pixel rgba=("
+    INFO("Center pixel rgba=("
          << int(px.r) << "," << int(px.g) << ","
          << int(px.b) << "," << int(px.a) << ")");
     REQUIRE(px.a == 255);
@@ -469,7 +469,7 @@ TEST_CASE("CanvasWidget draws on top of sibling-painted parent surface",
     parent.set_bounds({0, 0, 80, 60});
     parent.set_background_color(pulp::canvas::Color::rgba8(8, 12, 24, 255));  // dark navy
 
-    // CanvasWidget covers only the inner 60x40 region centred at (40, 30).
+    // CanvasWidget covers only the inner 60x40 region centerd at (40, 30).
     auto cw = std::make_unique<CanvasWidget>();
     cw->set_bounds({10, 10, 60, 40});
     {
@@ -545,7 +545,7 @@ TEST_CASE("FilterBank repro: empty canvas children don't paint opaque white",
     // Walk the command stream, tracking the most recent set_fill_color
     // (RecordingCanvas captures color separately from fill_rect). For
     // each fill_rect that covers the full wrap bounds, classify by the
-    // active fill colour: only green (parent's bg) is allowed. Any
+    // active fill color: only green (parent's bg) is allowed. Any
     // opaque-white or other full-bounds fill is the bug.
     pulp::canvas::Color last_fill{};
     int full_bounds_fills = 0;
@@ -600,13 +600,13 @@ TEST_CASE("Bare View with no setBackground emits no background fill",
     REQUIRE(fill_rect_count == 0);
 }
 
-// ── canvasRect must honour active fillStyle when no color arg ──────────────
+// ── canvasRect must honor active fillStyle when no color arg ──────────────
 //
 // The Canvas2D `ctx.fillRect(x,y,w,h)` API has no color argument — it paints
 // with whatever `ctx.fillStyle` (a CSS color OR a CanvasGradient) was set
 // most recently. The bridge's `canvasRect(id, x, y, w, h, color="#fff")`
 // previously baked in literal white when the caller omitted the color, which
-// makes a JS fillRect shim unable to honour the active fillStyle and breaks
+// makes a JS fillRect shim unable to honor the active fillStyle and breaks
 // gradient fills entirely (gradient is not a string color so the shim has
 // nothing to pass).
 //
@@ -614,7 +614,7 @@ TEST_CASE("Bare View with no setBackground emits no background fill",
 // must NOT call set_fill_color / set_stroke_color on the underlying canvas
 // before drawing — the previously-set fill/stroke state stays active.
 
-// Case 1 — fill_rect with use_active_style honours the active fill colour.
+// Case 1 — fill_rect with use_active_style honours the active fill color.
 TEST_CASE("CanvasWidget fill_rect with use_active_style preserves prior set_fill_color",
           "[canvas_widget][issue-968]") {
     RecordingCanvas rc;
@@ -627,7 +627,7 @@ TEST_CASE("CanvasWidget fill_rect with use_active_style preserves prior set_fill
     set_color.color = pulp::canvas::Color::rgba8(255, 0, 255, 255);
     cw.add_command(set_color);
 
-    // fillRect with no explicit colour (use_active_style = true). The
+    // fillRect with no explicit color (use_active_style = true). The
     // baked-in cmd.color stays at its default of opaque white — the test
     // asserts that white is NOT what the underlying canvas actually paints
     // with.
@@ -667,8 +667,8 @@ TEST_CASE("CanvasWidget fill_rect with use_active_style preserves prior set_fill
     REQUIRE(is_magenta);
 }
 
-// Case 2 — fill_rect with explicit colour (use_active_style = false) keeps
-// the legacy behaviour: cmd.color overrides whatever was set before.
+// Case 2 — fill_rect with explicit color (use_active_style = false) keeps
+// the legacy behavior: cmd.color overrides whatever was set before.
 TEST_CASE("CanvasWidget fill_rect with explicit color overrides active fill",
           "[canvas_widget][issue-968]") {
     RecordingCanvas rc;
@@ -681,7 +681,7 @@ TEST_CASE("CanvasWidget fill_rect with explicit color overrides active fill",
     set_color.color = pulp::canvas::Color::rgba8(255, 0, 255, 255);
     cw.add_command(set_color);
 
-    // fillRect with explicit cyan colour, use_active_style = false.
+    // fillRect with explicit cyan color, use_active_style = false.
     CanvasDrawCmd r;
     r.type = CanvasDrawCmd::Type::fill_rect;
     r.x = 10; r.y = 10; r.w = 50; r.h = 50;
@@ -724,9 +724,13 @@ TEST_CASE("CanvasWidget fill_rect with use_active_style preserves active gradien
     CanvasWidget cw;
     cw.set_bounds({0, 0, 100, 100});
 
-    // Active fill = linear gradient red→blue. RecordingCanvas's default
-    // overload of set_fill_gradient_linear records a set_fill_color of the
-    // first stop (red).
+    // Active fill = linear gradient red→blue.
+    //
+    // This used to lean on a weakness: RecordingCanvas inherited the base-class
+    // fallback, which DEGRADES a gradient to a solid set_fill_color of its first
+    // stop, so "the active fill is red" stood in for "the gradient is active".
+    // RecordingCanvas records the gradient itself now, so the invariant is
+    // asserted directly below.
     CanvasDrawCmd grad;
     grad.type = CanvasDrawCmd::Type::set_fill_gradient_linear;
     grad.x = 0; grad.y = 0; grad.x2 = 100; grad.y2 = 0;
@@ -735,7 +739,7 @@ TEST_CASE("CanvasWidget fill_rect with use_active_style preserves active gradien
     grad.gradient_positions = {0.0f, 1.0f};
     cw.add_command(grad);
 
-    // fillRect with no explicit colour — use_active_style = true.
+    // fillRect with no explicit color — use_active_style = true.
     CanvasDrawCmd r;
     r.type = CanvasDrawCmd::Type::fill_rect;
     r.x = 10; r.y = 10; r.w = 50; r.h = 50;
@@ -744,30 +748,36 @@ TEST_CASE("CanvasWidget fill_rect with use_active_style preserves active gradien
 
     cw.paint(rc);
 
-    // The active fill at draw time must still be the gradient's first stop
-    // (red) — NOT white, which is what would have been overwritten if the
-    // paint loop had called set_fill_color(cmd.color) before fill_rect.
-    pulp::canvas::Color active_fill{};
+    // The gradient must STILL be the active fill style at draw time. A
+    // set_fill_color(cmd.color) emitted by the paint loop before the fill_rect
+    // would have replaced it — that is the bug — and the rect would paint flat.
+    DrawCommand::Type active_style = DrawCommand::Type::set_fill_color;
+    pulp::canvas::Color active_first_stop{};
     bool saw_fill_rect = false;
-    pulp::canvas::Color fill_at_draw{};
+    DrawCommand::Type style_at_draw = DrawCommand::Type::set_fill_color;
+    pulp::canvas::Color first_stop_at_draw{};
+
     for (const auto& cmd : rc.commands()) {
-        if (cmd.type == DrawCommand::Type::set_fill_color) {
-            active_fill = cmd.color;
+        if (cmd.type == DrawCommand::Type::set_fill_color
+            || cmd.type == DrawCommand::Type::set_fill_gradient_linear) {
+            active_style = cmd.type;
+            active_first_stop = cmd.color;
             continue;
         }
-        if (cmd.type == DrawCommand::Type::fill_rect) {
-            const bool matches = (cmd.f[0] == 10.0f && cmd.f[1] == 10.0f &&
-                                  cmd.f[2] == 50.0f && cmd.f[3] == 50.0f);
-            if (matches) {
-                saw_fill_rect = true;
-                fill_at_draw = active_fill;
-            }
+        if (cmd.type == DrawCommand::Type::fill_rect
+            && cmd.f[0] == 10.0f && cmd.f[1] == 10.0f
+            && cmd.f[2] == 50.0f && cmd.f[3] == 50.0f) {
+            saw_fill_rect = true;
+            style_at_draw = active_style;
+            first_stop_at_draw = active_first_stop;
         }
     }
+
     REQUIRE(saw_fill_rect);
-    const bool is_red = (fill_at_draw.r8() == 255 && fill_at_draw.g8() == 0
-                      && fill_at_draw.b8() == 0 && fill_at_draw.a8() == 255);
-    REQUIRE(is_red);
+    REQUIRE(style_at_draw == DrawCommand::Type::set_fill_gradient_linear);
+    REQUIRE(first_stop_at_draw.r8() == 255);
+    REQUIRE(first_stop_at_draw.g8() == 0);
+    REQUIRE(first_stop_at_draw.b8() == 0);
 }
 
 // Case 4 — stroke_rect mirrors fill_rect: with use_active_style the prior
@@ -854,7 +864,7 @@ TEST_CASE("WidgetBridge: canvasFillRect bridges ctx.fillRect to a fill_rect comm
     REQUIRE(cw->command_count() == 1);
 
     // Replay onto a RecordingCanvas and verify a single fill_rect with the
-    // correct geometry and colour landed.
+    // correct geometry and color landed.
     RecordingCanvas rc;
     cw->paint(rc);
 
@@ -1339,7 +1349,7 @@ TEST_CASE("Sibling CanvasWidget destination-out does not punch holes in siblings
 // Single-canvas paints should not change output. The
 // per-canvas layer must be visually equivalent to direct-on-parent
 // painting for an isolated canvas; the layer's existence is a
-// correctness fix for the multi-canvas case, not a behaviour change
+// correctness fix for the multi-canvas case, not a behavior change
 // for single-canvas use.
 TEST_CASE("Single CanvasWidget paint is pixel-equivalent with the layer wrap",
           "[canvas_widget][skia][issue-1368]") {

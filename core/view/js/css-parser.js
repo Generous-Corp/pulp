@@ -556,7 +556,7 @@ function resolveLength(parsed, ctx) {
 //   { value: <number>, unit: "px" | "%" | "auto" | "em" | "rem" | ... }
 //   or null if the input is empty / unparseable / malformed.
 //
-// Per-input behaviour:
+// Per-input behavior:
 //   - calc-family with all-percent operands  →  { value, unit: "%" }
 //     so the bridge routes through the percent path.
 //   - calc-family otherwise                   →  { value: <px>, unit: "px" }
@@ -629,7 +629,7 @@ function _calcFamilyInner(s) {
 //   - `calc(50%)` → {value: 50, unit: '%'} so the bridge routes
 //     through the percent layout path.
 //   - `calc(10vh)` / `min(1em, 2em)` etc. preserve every unit
-//     parseCSSLength recognises: px, em, rem, %, vw, vh, vmin,
+//     parseCSSLength recognizes: px, em, rem, %, vw, vh, vmin,
 //     and vmax. Units outside that set (ch, pt, in, cm, etc.) fall
 //     through to px resolution rather than introducing helper-only
 //     support that would diverge from `parseCSSLength`.

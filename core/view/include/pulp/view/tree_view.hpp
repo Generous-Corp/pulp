@@ -57,11 +57,11 @@ struct TreeNode {
 class TreeView : public View {
 public:
     /// Selection treatment. `standard` (default) fills the selected row with
-    /// `tree_selected_bg` and keeps the normal text colour — the historic look,
+    /// `tree_selected_bg` and keeps the normal text color — the historic look,
     /// unchanged for every existing consumer. `accent` is the Ink & Signal
     /// navigation treatment (Figma 227:4196): the selected row is filled with a
     /// translucent accent tint (`nav.selected.bg`) and its label is drawn in the
-    /// accent colour (`nav.selected.text`). Opt-in via set_selection_style().
+    /// accent color (`nav.selected.text`). Opt-in via set_selection_style().
     enum class SelectionStyle { standard, accent };
 
     TreeView() { set_focusable(true); }

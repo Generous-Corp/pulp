@@ -93,7 +93,7 @@ inline LiveSwapResult apply_live_swap(const std::vector<SwapStage>& stages) {
 /// called; the transaction then applies the stages in order and unwinds on
 /// failure (see `apply_live_swap`).
 ///
-/// Implementations MUST honour the same atomicity + ordering contract as
+/// Implementations MUST honor the same atomicity + ordering contract as
 /// `SwapStage`: `apply` leaves no partial state on failure, and units are handed
 /// to the transaction easiest-to-roll-back first so the hardest-to-undo unit is
 /// last. `to_stage()` is expected to snapshot the pre-swap state now (e.g. the

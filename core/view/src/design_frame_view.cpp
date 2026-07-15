@@ -267,7 +267,7 @@ DesignFrameView::Frame DesignFrameView::build_frame(
         // consistent renderer of them. Otherwise the live labels paint over the
         // baked ones — two slightly different glyphs (the design font vs the
         // overlay font) → a faint "doubled" look — and the baked SELECTED digit
-        // keeps its glow + bright colour stuck in place when the live pill moves.
+        // keeps its glow + bright color stuck in place when the live pill moves.
         // Per slot, remove the baked glyph: the selected one is a glow filter
         // group, the rest are plain <path>s; try the group first, then the path.
         for (int slot = 0; slot < n; ++slot) {
@@ -462,6 +462,27 @@ DesignFrameElement::Kind DesignFrameView::element_kind(int i) const {
     return elements_[i].kind;
 }
 
+int DesignFrameView::element_option_count(int i) const {
+    if (i < 0 || i >= static_cast<int>(elements_.size())) return 0;
+    // A toggle is a 2-position control that carries no `options` list.
+    if (elements_[i].kind == DesignFrameElement::Kind::toggle) return 2;
+    if (!element_is_discrete(i)) return 0;  // continuous: no option denominator
+    return static_cast<int>(elements_[i].options.size());
+}
+
+bool DesignFrameView::element_is_discrete(int i) const {
+    if (i < 0 || i >= static_cast<int>(elements_.size())) return false;
+    switch (elements_[i].kind) {
+        case DesignFrameElement::Kind::toggle:     // 2 positions, no options list
+        case DesignFrameElement::Kind::dropdown:
+        case DesignFrameElement::Kind::tab_group:
+        case DesignFrameElement::Kind::stepper:
+            return true;
+        default:
+            return false;
+    }
+}
+
 float DesignFrameView::choice_to_norm(int i, int selected) const {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return 0.0f;
     const int n = static_cast<int>(elements_[i].options.size());
@@ -606,7 +627,10 @@ void DesignFrameView::set_element_param_key(int i, std::string key) {
     if (elements_[i].param_key == key) return;
     // Release the old key's gesture ONLY if one is actually open on this element
     // (i.e. it is the element currently being dragged). Ending an idle param's
-    // gesture sends an unbalanced end_gesture — JUCE APVTS asserts on that.
+    // gesture emits an end_gesture with no matching begin_gesture. Gesture
+    // brackets are a strict protocol on every host parameter surface — an
+    // unbalanced end may assert, drop the automation write, or leave the host's
+    // undo grouping open — so only close a gesture this view actually opened.
     if (drag_ == i) {
         if (HostParamSurface* hp = route_to_host_params_ ? host_params() : nullptr;
             hp && !elements_[i].param_key.empty() && hp->has_param(elements_[i].param_key)) {
@@ -817,7 +841,7 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
     // so the S/M/icon label shows through.
     for (const auto& e : elements_) {
         if (e.kind != DesignFrameElement::Kind::toggle || e.value < 0.5f) continue;
-        // Active tint: the design's own colour when it provides one (keeps
+        // Active tint: the design's own color when it provides one (keeps
         // faithful imports pixel-true), else the theme accent so a reskin
         // recolours unspecified toggles instead of a baked-in default.
         const auto accent = resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166));
@@ -827,8 +851,8 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
             g = std::strtoul(e.bg_color.substr(3, 2).c_str(), nullptr, 16);
             b = std::strtoul(e.bg_color.substr(5, 2).c_str(), nullptr, 16);
         }
-        // r/g/b come from the design colour or the theme accent above; 0x9c is
-        // the translucency over the baked chrome (not a hardcoded theme colour).
+        // r/g/b come from the design color or the theme accent above; 0x9c is
+        // the translucency over the baked chrome (not a hardcoded theme color).
         canvas.set_fill_color(canvas::Color::rgba8(static_cast<uint8_t>(r),  // token-lint:allow
                               static_cast<uint8_t>(g), static_cast<uint8_t>(b), 0x9c));
         canvas.fill_rounded_rect(t.ox + (e.x - panel_x_) * t.scale,
@@ -943,7 +967,7 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
         float tw = canvas.measure_text(e.text);
         // Auto-shrink-to-fit: a value wider than its rect (a 3-char reading like
         // "−20" or "C-2" in a box budgeted for a 1–2 char baked glyph) would draw
-        // OVER the neighbouring label or button. Scale the font down so it fits the
+        // OVER the neighboring label or button. Scale the font down so it fits the
         // rect width — the right edge stays put, so the reading never jumps
         // position, only the rare over-wide value renders a touch smaller.
         if (tw > rw && tw > 0.0f) {

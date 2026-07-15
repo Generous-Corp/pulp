@@ -1388,7 +1388,7 @@ TEST_CASE("generate_pulp_js reconstructs the value/range/unit/binding stack from
     REQUIRE(js.find("'20000'") != std::string::npos);
     REQUIRE(js.find("'Hz'") != std::string::npos);
     REQUIRE(js.find("'filter.cutoff_hz'") != std::string::npos);
-    // Sub-stack uses the small grey colour.
+    // Sub-stack uses the small grey color.
     REQUIRE(js.find("'#6c7086'") != std::string::npos);
 }
 
@@ -1794,7 +1794,7 @@ TEST_CASE("native codegen log-tapers a Hz-unit knob's initial value (issue-3192)
           "[view][import][issue-3192]") {
     // A frequency knob's value→angle map is logarithmic. The native silver knob
     // maps a 0..1 value linearly to its sweep, so the imported value must be the
-    // LOG-normalised position — 880 Hz in [20, 20000] lands near centre (~0.55),
+    // LOG-normalized position — 880 Hz in [20, 20000] lands near center (~0.55),
     // not at the far end (a raw 880 would clamp to 1.0) and not at the linear
     // position (~0.04, indicator pointing the wrong way).
     DesignIR ir;
@@ -1817,7 +1817,7 @@ TEST_CASE("native codegen log-tapers a Hz-unit knob's initial value (issue-3192)
     opts.mode = CodeGenMode::bridge_native_js;
     const auto js = generate_pulp_js(ir, opts);
 
-    // Compute the expected log-normalised value and assert the emitted setValue
+    // Compute the expected log-normalized value and assert the emitted setValue
     // matches it (and is nowhere near the raw 880 or the linear ~0.04).
     const float expected =
         (std::log(880.0f) - std::log(20.0f)) / (std::log(20000.0f) - std::log(20.0f));

@@ -7,7 +7,7 @@
 //   - the atlas builds at the expected size
 //   - every requested glyph is found
 //   - the SDF data is monotonic away from the edge
-//   - the value at the centre of an "inside" glyph is high (close to 255)
+//   - the value at the center of an "inside" glyph is high (close to 255)
 //   - the value at a far "outside" texel is low (close to 0)
 
 #include <pulp/canvas/sdf_atlas.hpp>
@@ -143,8 +143,8 @@ TEST_CASE("SdfAtlas SDF values: inside high, outside low", "[canvas][sdf][!mayfa
     const SdfGlyph* g = atlas.glyph(U'O');
     REQUIRE(g != nullptr);
 
-    // The placeholder rasterizer draws a circle centred in the tile,
-    // so the centre of the glyph tile should be inside (high SDF
+    // The placeholder rasterizer draws a circle centerd in the tile,
+    // so the center of the glyph tile should be inside (high SDF
     // value, > 200), and a corner texel near the tile edge should be
     // outside (low SDF value, < 60).
     int cx = g->atlas_x + g->width / 2;
@@ -159,7 +159,7 @@ TEST_CASE("SdfAtlas SDF values: inside high, outside low", "[canvas][sdf][!mayfa
     REQUIRE(corner < 60);
 }
 
-TEST_CASE("SdfAtlas SDF gradient is monotonic from centre outward",
+TEST_CASE("SdfAtlas SDF gradient is monotonic from center outward",
           "[canvas][sdf][!mayfail]") {
     SdfAtlas atlas;
     REQUIRE(atlas.build("stub", {U'M'}, 48, 6, 256));
@@ -173,7 +173,7 @@ TEST_CASE("SdfAtlas SDF gradient is monotonic from centre outward",
         return atlas.pixels()[y * atlas.width() + x];
     };
 
-    // Walk a horizontal ray from the centre toward the right edge of
+    // Walk a horizontal ray from the center toward the right edge of
     // the tile and verify the SDF value never increases (it should
     // decrease as we leave the inside of the circle and head outward).
     int prev = sample(cx, cy);

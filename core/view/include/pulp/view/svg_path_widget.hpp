@@ -88,12 +88,12 @@ public:
     /// pulp #3656 — fill winding rule, mirroring SVG's `fill-rule`
     /// (`nonzero` | `evenodd`). Default `nonzero` matches the SVG /
     /// Canvas2D default. `evenodd` is what compound annular paths need:
-    /// frameworks that lower a stroked ellipse to a two-subpath
-    /// `M…Z M…Z` fill (e.g. JUCE's `SVGGraphicsContext` for
-    /// `Graphics::drawEllipse`) only render the ring's hole correctly
-    /// under even-odd winding — under nonzero the inner subpath fills
-    /// solid and the widget paints a disc. Lets a captured editor ship
-    /// those paths verbatim instead of pre-collapsing them.
+    /// an exporter with no stroke primitive commonly lowers a stroked
+    /// ellipse to a two-subpath `M…Z M…Z` fill (outer contour + inner
+    /// contour, same winding direction). Such a ring only renders its
+    /// hole under even-odd winding — under nonzero the inner subpath
+    /// fills solid and the widget paints a disc. Lets a captured editor
+    /// ship those paths verbatim instead of pre-collapsing them.
     void set_fill_rule(canvas::FillRule rule);
 
     // Accessors used by tests.

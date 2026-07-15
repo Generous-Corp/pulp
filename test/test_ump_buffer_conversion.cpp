@@ -138,7 +138,7 @@ TEST_CASE("scale_16_to_7 inverts scale_7_to_16 for common values", "[midi][ump]"
     }
 }
 
-TEST_CASE("scale_14_to_32 / scale_32_to_14 preserve centre", "[midi][ump]") {
+TEST_CASE("scale_14_to_32 / scale_32_to_14 preserve center", "[midi][ump]") {
     REQUIRE(scale_14_to_32(0) == 0);
     REQUIRE(scale_14_to_32(0x2000) == 0x80000000u);
     REQUIRE(scale_14_to_32(0x3FFF) == 0xFFFFFFFFu);

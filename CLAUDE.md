@@ -253,7 +253,7 @@ Sync primitives (in `core/runtime/`):
 |-----------|------|---------|
 | platform | `core/platform/` | OS detection, types, Windows registry |
 | runtime | `core/runtime/` | Logging, SIMD (Highway), XML, ZIP, HTTP, sockets, pipes, base64, crypto (mbedTLS), i18n, analytics, licensing, BigInteger |
-| events | `core/events/` | EventLoop, Timer, AsyncUpdater, InterprocessConnection, ChildProcessManager, NetworkServiceDiscovery |
+| events | `core/events/` | EventLoop, Timer, CoalescedUpdater, InterprocessConnection, ChildProcessManager, NetworkServiceDiscovery |
 | audio | `core/audio/` | BufferView, FormatRegistry (WAV/FLAC/MP3/OGG/AIFF/AAC), ChannelSet, OfflineProcessor, SystemVolume |
 | midi | `core/midi/` | MidiEvent, MidiBuffer (via choc::midi), MIDI CI (discovery, profiles, properties) |
 | state | `core/state/` | ParamValue, ParamInfo, StateStore, Binding, StateTree, PropertiesFile, CachedProperty |
@@ -296,6 +296,26 @@ For the user-facing version of this rationale, see `docs/reference/layout-model.
 ## Repo Standards
 
 This repo will be open-sourced. Every commit, every file, every directory name should reflect that. No throwaway code on main. No "WIP" commits. No embarrassing history.
+
+### Language: American English, everywhere
+
+Pulp is written in **American English** — identifiers, comments, docs, and commit
+messages alike. This is a consistency rule, nothing more: a codebase with one
+spelling per word is greppable and guessable, while a mix of `color`/`colour` or
+`normalize`/`normalise` forces every reader to remember which spelling the author
+reached for. It is not aimed at any contributor or dialect; it is house style.
+
+- **Contributions in another dialect are rewritten**, not rejected. Run
+  `python3 tools/scripts/us_english_check.py --fix` to apply the house spelling,
+  then review the diff.
+- The gate (`us_english_check.py`) runs in the pre-push `gates.sh` and in CI
+  (`version-skill-check.yml`), and hard-fails on a non-US spelling in Pulp's own
+  source. Its dictionary is deliberately conservative — only words with a single
+  unambiguous American form (so `canceled`/`cancelled` and `gray`/`grey`, both
+  current in US usage, are NOT flagged).
+- A genuine external contract (a foreign API symbol, a value quoted verbatim from
+  a third-party licence) is exempted via `EXEMPT_SUBSTRINGS` in that script — use
+  it sparingly, and only when the spelling is not ours to change.
 
 `tools/scripts/docs_noise_lint.py` guards the repo against stale workflow breadcrumbs in long-lived docs and comments.
 Long-lived docs and source comments should explain current behavior, invariants, and upstream/vendor quirks — not workflow history.
@@ -1224,7 +1244,25 @@ fix is still on the issue tracker.
 
 ## Shared Agent Skills
 
-Skills live in `.agents/skills/` and are read by both Claude Code and Codex CLI. This is the single source of truth — do not duplicate skills into `.claude/skills/` or `.codex/skills/`.
+**`.agents/skills/` is read by BOTH Claude Code and Codex CLI.** It is the single
+source of truth — do not duplicate skills into `.claude/skills/` or
+`.codex/skills/`, and do not assume a skill is Claude-only. When you write a new
+skill, it lands here and every agent gets it.
+
+That cuts both ways, and it is worth being precise about which layer you need:
+
+| You want… | Put it in | Reaches |
+|---|---|---|
+| Guidance an agent should follow | `.agents/skills/<name>/SKILL.md` | Claude **and** Codex — but only when the agent *invokes* it |
+| A rule that must hold no matter who or what is driving | a script + `.githooks/pre-push` | **everyone** — every agent, every human, `gh`, `shipyard`, `pulp pr` |
+
+A skill cannot enforce anything: it is guidance, and it only fires if an agent
+chooses to read it. A human running `gh pr create`, or `shipyard pr` itself, will
+never consult one. If the behaviour genuinely must always happen, it belongs at
+the push — the one choke point every route to a PR passes through. Prefer a skill
+for judgment, and a hook for invariants. (Worked example: `pr-batching` is a
+skill for the *decision*, backed by `tools/scripts/pr_batch_advisor.py` in the
+pre-push hook so the question always gets asked.)
 
 ### Skill Versioning
 
@@ -1274,6 +1312,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `mpe` | Build MPE-aware synths: descriptor opt-in, `MpeBuffer` consumption, `MpeVoiceAllocator` routing |
 | `packages` | Third-party audio package search, suggest, add, browse |
 | `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially material/large PRs; pre-/post-merge, cross-repo (Pulp + Shipyard) |
+| `pr-batching` | Ship 2+ finished branches as ONE PR when they're related — cuts CI runs; heuristics for when NOT to |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`): focus marker + normal watch/rebuild, AOT analyzer guidance, deferred ar-swap / PR monitor |
 | `screenshot` | Faithful headless PNG capture: render_to_png Skia-vs-CoreGraphics backends, image-compositing trap, `--screenshot-backend`, capture_png |
 | `sdf-text` | SDF / MSDF / PSDF glyph atlases: building, sampling via SkSL, shared text-layout helpers |

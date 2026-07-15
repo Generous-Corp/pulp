@@ -61,7 +61,7 @@ void CoreGraphicsCanvas::set_fill_gradient_radial(float cx, float cy,
     has_gradient_ = true;
     gradient_kind_ = GradientKind::radial;
     gradient_is_radial_ = true;
-    // Single-circle form: inner circle collapses to the centre with radius 0,
+    // Single-circle form: inner circle collapses to the center with radius 0,
     // outer circle is (cx, cy, radius). Matches the legacy single-circle
     // contract where createRadialGradient routed only the outer circle.
     grad_x0_ = cx; grad_y0_ = cy; grad_x1_ = cx; grad_y1_ = cy;
@@ -72,9 +72,9 @@ void CoreGraphicsCanvas::set_fill_gradient_radial(float cx, float cy,
 }
 
 // True two-circle radial gradient. CGContextDrawRadialGradient accepts
-// (start_centre, start_radius, end_centre, end_radius), so we wire both circles
+// (start_center, start_radius, end_center, end_radius), so we wire both circles
 // through unmodified. The legacy single-circle bridge dropped (x0,y0,r0) and
-// used only the outer circle, which silently degraded centre-bloom-only fills
+// used only the outer circle, which silently degraded center-bloom-only fills
 // (Skia rendered the real two-point conical via MakeTwoPointConical; CG
 // produced a visibly different shape).
 void CoreGraphicsCanvas::set_fill_gradient_radial_two_circles(
@@ -99,7 +99,7 @@ void CoreGraphicsCanvas::set_fill_gradient_radial_two_circles(
 // Canvas2D ctx.createConicGradient on the CG backend. CoreGraphics has no
 // native conic / sweep shader, so we record the conic parameters here and
 // software-rasterise a CGImage at fill time (paint_conic_into_clip),
-// interpolating colour stops by atan2 angle from (cx, cy). The Skia backend
+// interpolating color stops by atan2 angle from (cx, cy). The Skia backend
 // uses SkShaders::SweepGradient — same visual result, real two-stop+ sweep
 // gradient.
 void CoreGraphicsCanvas::set_fill_gradient_conic(float cx, float cy,
@@ -114,7 +114,7 @@ void CoreGraphicsCanvas::set_fill_gradient_conic(float cx, float cy,
     has_gradient_ = true;
     gradient_kind_ = GradientKind::conic_image;
     gradient_is_radial_ = false;
-    // Repurpose linear x0/y0 as conic centre, x1 as start_angle (radians).
+    // Repurpose linear x0/y0 as conic center, x1 as start_angle (radians).
     grad_x0_ = cx; grad_y0_ = cy;
     grad_x1_ = start_angle; grad_y1_ = 0;
     grad_colors_.assign(colors, colors + count);

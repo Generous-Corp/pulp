@@ -26,7 +26,7 @@ namespace pulp::signal {
 
 /// The tunable subset of OfflineStretchOptions that defines a "character preset".
 /// Defaults mirror the engine defaults, so a freshly-constructed preset is the
-/// out-of-box behaviour.
+/// out-of-box behavior.
 struct StretchPreset {
     std::string name = "untitled";
     StretchCharacter character = StretchCharacter::clean;

@@ -1,7 +1,7 @@
 # AssertNoTracingSymbols.cmake — BEST-EFFORT guard: a default (PULP_TRACING=OFF)
 # build must contain ZERO Perfetto symbols.
 #
-# IMPORTANT: like AssertNoJsSymbols.cmake, this binary nm-scan is defence in
+# IMPORTANT: like AssertNoJsSymbols.cmake, this binary nm-scan is defense in
 # depth, NOT the authoritative guarantee. The authoritative guarantee is that
 # tools/cmake/PulpTracing.cmake adds no Perfetto link input when OFF (the
 # pulp::tracing INTERFACE target is empty), so nothing to strip can exist. This

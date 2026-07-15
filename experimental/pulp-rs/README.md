@@ -115,7 +115,7 @@ PULP_CLI_PATH=/path/to/pulp/build/tools/cli/pulp \
 
 Five doctor fixtures and four projects fixtures drive the parity
 tests. `expected_human.txt` was captured from the live C++ CLI and
-normalised (the registry path is replaced with `<REGISTRY>` so diffs
+normalized (the registry path is replaced with `<REGISTRY>` so diffs
 are portable across machines).
 
 ---
@@ -136,7 +136,7 @@ are portable across machines).
   other surface is testable without subprocess spawn.
 - **No FFI into the Pulp C++ library.** Criterion #4 of #686
   (zero production coupling) is a hard constraint: the prototype
-  either matches C++ behaviour using Rust-only code, or it isn't a
+  either matches C++ behavior using Rust-only code, or it isn't a
   fair evaluation.
 - **Inject overrides instead of mutating env in tests.** `diag::CollectOpts`
   and `projects::run_with_registry` exist so parallel-test runs don't
@@ -194,9 +194,9 @@ Raw Criterion HTML reports land in
 3. **Write the orchestrator** under `src/cmd/<command>.rs` with a
    `run(args, out: &mut impl Write)` signature. Take an explicit
    output sink so tests don't shell out.
-4. **Lock behaviour down with fixtures.** Capture the C++ output for
+4. **Lock behavior down with fixtures.** Capture the C++ output for
    each interesting state into `tests/fixtures/<command>/<case>/`,
-   normalise machine-specific bits, then add a test under
+   normalize machine-specific bits, then add a test under
    `tests/<command>_parity_test.rs` that diffs Rust output against
    the captured reference. Snapshot-test any Rust-introduced shape
    with `insta`.
@@ -226,7 +226,7 @@ on macOS / Ubuntu / Windows.
 
 | # | Criterion                  | Reading |
 |---|----------------------------|---------|
-| 1 | Parity                     | Doctor JSON: 5/5 fixtures byte-equal to C++. Projects human: 4/4 fixtures byte-equal after `<REGISTRY>` normalisation. |
+| 1 | Parity                     | Doctor JSON: 5/5 fixtures byte-equal to C++. Projects human: 4/4 fixtures byte-equal after `<REGISTRY>` normalization. |
 | 2 | Lower complexity           | ~1000 production LOC Rust vs ~1100 LOC C++ across `version_diag.cpp + projects_registry.cpp + cmd_projects.cpp + cmd_doctor.cpp` slices. Not shorter by much, but every non-trivial function has a test, and the error surface is typed. |
 | 3 | Test ergonomics            | 50+ tests run in <1s. Catch2 parity needs CMake test-binary wiring; Rust gets insta snapshots + proptest + `assert_cmd` out of the box. |
 | 4 | No production coupling     | Crate sits under `experimental/pulp-rs/`. No FFI, no CMake discovery, no Pulp dep. Cold-clone + `cargo test` works. |

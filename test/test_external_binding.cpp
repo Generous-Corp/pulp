@@ -8,8 +8,10 @@ using namespace pulp::state;
 
 namespace {
 
-// A stand-in for a host-owned value (e.g. a JUCE APVTS parameter) that is NOT a
-// Pulp StateStore param. ExternalBinding drives it through get/set lambdas.
+// A stand-in for a value owned by something OTHER than a Pulp StateStore — a
+// host's parameter object, another framework's parameter tree, a plain member
+// of the plugin. ExternalBinding drives it through get/set lambdas, so the
+// widget never learns where the value actually lives.
 struct HostValue {
     float v = 0.0f;
     int begins = 0;

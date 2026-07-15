@@ -159,7 +159,7 @@ TEST_CASE("JSON round-trip preserves rich plugin metadata",
 TEST_CASE("from_json on pre-metadata blob leaves new fields at defaults",
           "[scan_cache][metadata][backcompat]") {
     // Schema-v1 cache blobs from before the richer-metadata fields
-    // shipped must still deserialise cleanly with defaults — that's
+    // shipped must still deserialize cleanly with defaults — that's
     // the explicit scan_cache.hpp contract for older versions.
     std::string legacy = R"({
         "schema_version": 1,

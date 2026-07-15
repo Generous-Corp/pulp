@@ -116,7 +116,7 @@ TEST_CASE("check_param_round_trip handles linear, stepped, and skewed ranges",
     REQUIRE(check_param_round_trip(state::ParamRange{0.0f, 3.0f, 0.0f, 1.0f}, 1.7f));
 
     // Skewed (e.g. a frequency control). Endpoint anchors + stability hold.
-    auto freq = state::ParamRange::with_centre(20.0f, 20000.0f, 1000.0f);
+    auto freq = state::ParamRange::with_center(20.0f, 20000.0f, 1000.0f);
     REQUIRE(check_param_round_trip(freq, 1000.0f, 1.0f));
     REQUIRE(check_param_round_trip(freq, 50.0f, 1.0f));
 

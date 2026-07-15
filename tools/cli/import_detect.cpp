@@ -70,6 +70,48 @@ KnownFrameworks load_index(const fs::path& path) {
     return parse_index(text);
 }
 
+KnownFrameworks merge_installed_indices(const fs::path& tools_root) {
+    KnownFrameworks merged;
+
+    std::error_code ec;
+    if (!fs::is_directory(tools_root, ec)) return merged;   // nothing installed: nothing known
+
+    // Deterministic order, so two machines with the same tools installed rank
+    // candidates identically.
+    // An importer installs to ~/.pulp/tools/<tool_id>/ or, when versioned, to
+    // ~/.pulp/tools/<tool_id>/<version>/. Look for its index at both depths rather
+    // than assuming one, so a versioned install is not silently invisible.
+    std::vector<fs::path> indices;
+    auto note = [&](const fs::path& dir) {
+        auto candidate = dir / "known-frameworks.json";
+        if (fs::exists(candidate)) indices.push_back(candidate);
+    };
+    for (const auto& tool : fs::directory_iterator(tools_root, ec)) {
+        if (ec) break;
+        if (!tool.is_directory()) continue;
+        note(tool.path());
+        std::error_code inner;
+        for (const auto& ver : fs::directory_iterator(tool.path(), inner)) {
+            if (inner) break;
+            if (ver.is_directory()) note(ver.path());
+        }
+    }
+    std::sort(indices.begin(), indices.end());
+
+    for (const auto& idx : indices) {
+        auto one = load_index(idx);
+        if (!one.error.empty()) {
+            // A broken index from ONE tool must not blind detection to the others,
+            // but it must not pass silently either.
+            if (!merged.error.empty()) merged.error += "; ";
+            merged.error += idx.string() + ": " + one.error;
+            continue;
+        }
+        for (auto& fw : one.frameworks) merged.frameworks.push_back(std::move(fw));
+    }
+    return merged;
+}
+
 fs::path find_index(const fs::path& start_dir, const fs::path& exe_dir) {
     if (const char* env = std::getenv("PULP_KNOWN_FRAMEWORKS")) {
         if (env[0] != '\0') return fs::path(env);

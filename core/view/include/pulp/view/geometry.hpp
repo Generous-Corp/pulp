@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/canvas/affine_transform.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -8,6 +10,12 @@
 #include <vector>
 
 namespace pulp::view {
+
+/// The 2D affine transform value type. Defined in `pulp::canvas` — which is
+/// the layer BELOW this one (core/view links core/canvas, not the reverse) and
+/// where `Path` needs it — and re-exported here so view code can spell it
+/// `pulp::view::AffineTransform`. One type, two names; never two types.
+using AffineTransform = pulp::canvas::AffineTransform;
 
 struct Point {
     float x = 0, y = 0;
@@ -24,20 +32,55 @@ struct Size {
     bool is_empty() const { return width <= 0 || height <= 0; }
 };
 
+struct IntRect;  // below
+
+/// Axis-aligned rectangle in continuous (float) coordinates.
+///
+/// ── WHY THERE IS ALSO AN `IntRect` ──────────────────────────────────────
+/// A float rect's center is `x + width / 2.0f`. An INTEGER rect's center is
+/// `x + width / 2` — integer division, which TRUNCATES. For an even extent the
+/// two agree; for an odd one they differ by half a pixel. That half pixel is
+/// not academic: it is the difference between a 7px row's content landing on
+/// the pixel grid and landing between two pixels, where it renders as a blurry
+/// double-width line. Code that computes an integer layout with float maths and
+/// rounds at the end does NOT reproduce integer-rect behavior, because the
+/// truncation has to happen at each step, not once at the end.
+///
+/// So the two types deliberately do NOT share an implementation. Pick the one
+/// that matches the coordinate space you are actually in, and convert
+/// explicitly with `to_int()` / `to_float()`.
 struct Rect {
     float x = 0, y = 0, width = 0, height = 0;
 
-    float right() const { return x + width; }
-    float bottom() const { return y + height; }
+    constexpr float right() const { return x + width; }
+    constexpr float bottom() const { return y + height; }
     Point origin() const { return {x, y}; }
     Size size() const { return {width, height}; }
     Point center() const { return {x + width * 0.5f, y + height * 0.5f}; }
 
+    /// True center in continuous coordinates — exact halves, no truncation.
+    constexpr float center_x() const { return x + width * 0.5f; }
+    constexpr float center_y() const { return y + height * 0.5f; }
+
     bool contains(Point p) const {
         return p.x >= x && p.x < right() && p.y >= y && p.y < bottom();
     }
+    constexpr bool contains(float px, float py) const {
+        return px >= x && px < right() && py >= y && py < bottom();
+    }
+    /// Whole-rect containment: does this rect fully enclose `r`?
+    ///
+    /// NOT an overload of `contains`, on purpose. `Rect` has default member
+    /// initializers, so a braced `{50, 30}` is a valid two-field `Rect` as well
+    /// as a valid `Point` — which makes the natural, idiomatic
+    /// `r.contains({50, 30})` ambiguous at EVERY call site the moment a
+    /// `contains(const Rect&)` overload exists. A distinct name is the fix;
+    /// `encloses` also says what it does more plainly than a third `contains`.
+    constexpr bool encloses(const Rect& r) const {
+        return r.x >= x && r.y >= y && r.right() <= right() && r.bottom() <= bottom();
+    }
 
-    bool is_empty() const { return width <= 0 || height <= 0; }
+    constexpr bool is_empty() const { return width <= 0 || height <= 0; }
 
     Rect inset(float amount) const {
         return {x + amount, y + amount,
@@ -51,10 +94,255 @@ struct Rect {
                 std::max(0.0f, height - 2 * v)};
     }
 
+    // ── Non-mutating derivations ─────────────────────────────────────────
+    /// Shrink by `d` on every side (the common "padding" idiom).
+    Rect reduced(float d) const { return inset(d); }
+    Rect reduced(float dx, float dy) const { return inset(dx, dy); }
+    /// Grow by `d` on every side.
+    Rect expanded(float d) const { return inset(-d); }
+    Rect expanded(float dx, float dy) const { return inset(-dx, -dy); }
+
+    constexpr Rect translated(float dx, float dy) const {
+        return {x + dx, y + dy, width, height};
+    }
+
+    constexpr Rect with_x(float v) const      { return {v, y, width, height}; }
+    constexpr Rect with_y(float v) const      { return {x, v, width, height}; }
+    constexpr Rect with_width(float v) const  { return {x, y, v, height}; }
+    constexpr Rect with_height(float v) const { return {x, y, width, v}; }
+    constexpr Rect with_size(float w, float h) const { return {x, y, w, h}; }
+    constexpr Rect with_position(float nx, float ny) const {
+        return {nx, ny, width, height};
+    }
+
+    /// Resize about the center — the center stays put and the edges move.
+    constexpr Rect with_size_keeping_center(float w, float h) const {
+        return {x + (width - w) * 0.5f, y + (height - h) * 0.5f, w, h};
+    }
+
+    // ── The slicing idiom ────────────────────────────────────────────────
+    // `remove_from_*` MUTATES this rect and returns the slice taken off. It is
+    // the standard way to lay a row of controls out of a bounds rect:
+    //
+    //     auto header = bounds.remove_from_top(24);
+    //     auto footer = bounds.remove_from_bottom(24);
+    //     // `bounds` is now just the middle.
+    //
+    // Asking for more than exists takes everything and leaves an empty rect.
+    // Asking for a NEGATIVE amount takes nothing and changes nothing — a
+    // deliberate choice: the alternative (a negative-height slice, which is
+    // what naive arithmetic produces) is never what a caller wants and turns a
+    // simple sign bug into an invisible, badly-clipped widget.
+    Rect remove_from_top(float amount) {
+        if (amount <= 0) return {x, y, width, 0};
+        const float take = std::min(amount, height);
+        const Rect taken{x, y, width, take};
+        y += take;
+        height -= take;
+        return taken;
+    }
+    Rect remove_from_bottom(float amount) {
+        if (amount <= 0) return {x, bottom(), width, 0};
+        const float take = std::min(amount, height);
+        height -= take;
+        return {x, y + height, width, take};
+    }
+    Rect remove_from_left(float amount) {
+        if (amount <= 0) return {x, y, 0, height};
+        const float take = std::min(amount, width);
+        const Rect taken{x, y, take, height};
+        x += take;
+        width -= take;
+        return taken;
+    }
+    Rect remove_from_right(float amount) {
+        if (amount <= 0) return {right(), y, 0, height};
+        const float take = std::min(amount, width);
+        width -= take;
+        return {x + width, y, take, height};
+    }
+
+    // ── Set operations ───────────────────────────────────────────────────
+    constexpr bool intersects(const Rect& o) const {
+        if (is_empty() || o.is_empty()) return false;
+        return x < o.right() && right() > o.x && y < o.bottom() && bottom() > o.y;
+    }
+
+    /// The overlap, or an empty rect when they do not overlap.
+    Rect intersection(const Rect& o) const {
+        const float ix = std::max(x, o.x);
+        const float iy = std::max(y, o.y);
+        const float ir = std::min(right(), o.right());
+        const float ib = std::min(bottom(), o.bottom());
+        if (ir <= ix || ib <= iy) return {};
+        return {ix, iy, ir - ix, ib - iy};
+    }
+
+    /// Smallest rect enclosing both. An empty operand contributes nothing —
+    /// without that rule, a default-constructed accumulator at (0,0) would drag
+    /// every union back to the origin.
+    Rect union_with(const Rect& o) const {
+        if (is_empty()) return o;
+        if (o.is_empty()) return *this;
+        const float ux = std::min(x, o.x);
+        const float uy = std::min(y, o.y);
+        const float ur = std::max(right(), o.right());
+        const float ub = std::max(bottom(), o.bottom());
+        return {ux, uy, ur - ux, ub - uy};
+    }
+
+    // ── Conversion ───────────────────────────────────────────────────────
+    /// Round each edge to the nearest integer. Note this rounds the EDGES, so
+    /// the resulting width can differ from `round(width)` by one — which is the
+    /// correct behavior for a rect being snapped to the pixel grid.
+    IntRect to_nearest_int() const;
+
+    /// Smallest integer rect that fully CONTAINS this one.
+    IntRect to_enclosing_int() const;
+
     bool operator==(const Rect& r) const {
         return x == r.x && y == r.y && width == r.width && height == r.height;
     }
+    bool operator!=(const Rect& r) const { return !(*this == r); }
 };
+
+/// Axis-aligned rectangle in DISCRETE (integer) coordinates.
+///
+/// Every operation here uses integer arithmetic — most importantly, the center
+/// is an integer division and therefore truncates. See the note on `Rect`.
+struct IntRect {
+    int x = 0, y = 0, width = 0, height = 0;
+
+    constexpr int right() const { return x + width; }
+    constexpr int bottom() const { return y + height; }
+
+    /// Integer center. `IntRect{0,0,7,7}.center_x() == 3`, NOT 3.5 — the half
+    /// pixel is truncated away, and that is the whole point of this type.
+    constexpr int center_x() const { return x + width / 2; }
+    constexpr int center_y() const { return y + height / 2; }
+
+    constexpr bool is_empty() const { return width <= 0 || height <= 0; }
+
+    constexpr bool contains(int px, int py) const {
+        return px >= x && px < right() && py >= y && py < bottom();
+    }
+    constexpr bool contains(const IntRect& r) const {
+        return r.x >= x && r.y >= y && r.right() <= right() && r.bottom() <= bottom();
+    }
+
+    IntRect reduced(int d) const {
+        return {x + d, y + d, std::max(0, width - 2 * d), std::max(0, height - 2 * d)};
+    }
+    IntRect reduced(int dx, int dy) const {
+        return {x + dx, y + dy, std::max(0, width - 2 * dx), std::max(0, height - 2 * dy)};
+    }
+    IntRect expanded(int d) const { return reduced(-d); }
+    IntRect expanded(int dx, int dy) const { return reduced(-dx, -dy); }
+
+    constexpr IntRect translated(int dx, int dy) const {
+        return {x + dx, y + dy, width, height};
+    }
+
+    constexpr IntRect with_x(int v) const      { return {v, y, width, height}; }
+    constexpr IntRect with_y(int v) const      { return {x, v, width, height}; }
+    constexpr IntRect with_width(int v) const  { return {x, y, v, height}; }
+    constexpr IntRect with_height(int v) const { return {x, y, width, v}; }
+    constexpr IntRect with_size(int w, int h) const { return {x, y, w, h}; }
+    constexpr IntRect with_position(int nx, int ny) const {
+        return {nx, ny, width, height};
+    }
+
+    /// Resize about the center, in integer arithmetic. `(width - w) / 2`
+    /// truncates: IntRect{0,0,7,7}.with_size_keeping_center(4,4) is at x=1
+    /// (because 3/2 == 1), where the float rect would be at x=1.5.
+    constexpr IntRect with_size_keeping_center(int w, int h) const {
+        return {x + (width - w) / 2, y + (height - h) / 2, w, h};
+    }
+
+    // ── The slicing idiom (integer) ──────────────────────────────────────
+    // Same contract as the float version, including the negative-amount guard.
+    IntRect remove_from_top(int amount) {
+        if (amount <= 0) return {x, y, width, 0};
+        const int take = std::min(amount, height);
+        const IntRect taken{x, y, width, take};
+        y += take;
+        height -= take;
+        return taken;
+    }
+    IntRect remove_from_bottom(int amount) {
+        if (amount <= 0) return {x, bottom(), width, 0};
+        const int take = std::min(amount, height);
+        height -= take;
+        return {x, y + height, width, take};
+    }
+    IntRect remove_from_left(int amount) {
+        if (amount <= 0) return {x, y, 0, height};
+        const int take = std::min(amount, width);
+        const IntRect taken{x, y, take, height};
+        x += take;
+        width -= take;
+        return taken;
+    }
+    IntRect remove_from_right(int amount) {
+        if (amount <= 0) return {right(), y, 0, height};
+        const int take = std::min(amount, width);
+        width -= take;
+        return {x + width, y, take, height};
+    }
+
+    constexpr bool intersects(const IntRect& o) const {
+        if (is_empty() || o.is_empty()) return false;
+        return x < o.right() && right() > o.x && y < o.bottom() && bottom() > o.y;
+    }
+
+    IntRect intersection(const IntRect& o) const {
+        const int ix = std::max(x, o.x);
+        const int iy = std::max(y, o.y);
+        const int ir = std::min(right(), o.right());
+        const int ib = std::min(bottom(), o.bottom());
+        if (ir <= ix || ib <= iy) return {};
+        return {ix, iy, ir - ix, ib - iy};
+    }
+
+    IntRect union_with(const IntRect& o) const {
+        if (is_empty()) return o;
+        if (o.is_empty()) return *this;
+        const int ux = std::min(x, o.x);
+        const int uy = std::min(y, o.y);
+        const int ur = std::max(right(), o.right());
+        const int ub = std::max(bottom(), o.bottom());
+        return {ux, uy, ur - ux, ub - uy};
+    }
+
+    /// Widening conversion — always exact.
+    constexpr Rect to_float() const {
+        return {static_cast<float>(x), static_cast<float>(y),
+                static_cast<float>(width), static_cast<float>(height)};
+    }
+
+    constexpr bool operator==(const IntRect& r) const {
+        return x == r.x && y == r.y && width == r.width && height == r.height;
+    }
+    constexpr bool operator!=(const IntRect& r) const { return !(*this == r); }
+};
+
+inline IntRect Rect::to_nearest_int() const {
+    // Round the EDGES, then derive the extent — so a rect spanning [0.6, 2.4]
+    // becomes [1, 2] (width 1), not "width round(1.8) = 2" starting at 1.
+    const int l = static_cast<int>(std::lround(x));
+    const int t = static_cast<int>(std::lround(y));
+    const int r = static_cast<int>(std::lround(right()));
+    const int b = static_cast<int>(std::lround(bottom()));
+    return {l, t, r - l, b - t};
+}
+
+inline IntRect Rect::to_enclosing_int() const {
+    const int l = static_cast<int>(std::floor(x));
+    const int t = static_cast<int>(std::floor(y));
+    const int r = static_cast<int>(std::ceil(right()));
+    const int b = static_cast<int>(std::ceil(bottom()));
+    return {l, t, r - l, b - t};
+}
 
 // Layout mode
 enum class LayoutMode { flex, grid };

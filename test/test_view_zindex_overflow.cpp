@@ -3,7 +3,7 @@
 //   1. z-index paint order
 //      `sorted_children_by_z_index` returns insertion order at default
 //      z=0, sorts ascending so higher-z comes last, and is stable for
-//      equal z. `View::paint_all` and `View::hit_test` honour the
+//      equal z. `View::paint_all` and `View::hit_test` honor the
 //      sorted order so higher-z children paint on top and win
 //      pointer-hit at overlapping bounds, with insertion-order
 //      fallback at equal z.
@@ -95,7 +95,7 @@ TEST_CASE("View::paint_all paints higher-z child last so it lands on top",
     // Three siblings stacked at the same bounds with distinct backgrounds.
     // Popover sits in the MIDDLE of insertion order with z_index=10. The
     // last full-bounds fill in the recorded stream must be popover's
-    // colour; otherwise it would be content_b's (last by insertion).
+    // color; otherwise it would be content_b's (last by insertion).
     View parent;
     parent.set_bounds({0, 0, 100, 100});
 
@@ -278,7 +278,7 @@ TEST_CASE("View::hit_test returns the highest-z child for overlapping bounds",
 TEST_CASE("View::hit_test falls back to insertion-order topmost at equal z",
           "[view][z-index]") {
     // All siblings at same z=0 (default) — last inserted is visually topmost,
-    // matching legacy behaviour. This locks in the no-regression contract.
+    // matching legacy behavior. This locks in the no-regression contract.
     View parent;
     parent.set_bounds({0, 0, 100, 100});
 

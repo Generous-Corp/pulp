@@ -26,7 +26,7 @@ TEST_CASE("Core runtime RT safety contracts are well formed",
         CAPTURE(contract.component);
         CAPTURE(contract.operation);
 
-        // Every entry must be fully labelled.
+        // Every entry must be fully labeled.
         CHECK_FALSE(contract.component.empty());
         CHECK_FALSE(contract.operation.empty());
         CHECK_FALSE(contract.owner_boundary.empty());

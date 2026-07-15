@@ -314,7 +314,7 @@ int main(int argc, char* argv[]) {
 
     // Load the OKLCH library, then the design-tool concern modules — all into
     // one shared global scope. Order is load-bearing: oklch.js defines the
-    // colour engine the modules call at parse time, and the modules concatenate
+    // color engine the modules call at parse time, and the modules concatenate
     // in kDesignToolModules order to equal the historical single-file script.
     auto js_dir = js_path.parent_path();
     auto load_design_tool = [&](WidgetBridge& target) {

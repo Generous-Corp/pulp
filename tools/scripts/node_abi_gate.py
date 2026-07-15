@@ -237,6 +237,31 @@ def check_surface(root: Path, base: str, class_name: str, rel_path: str) -> str 
     return None
 
 
+def acknowledged_breaks(root: Path, base: str) -> set[str]:
+    """Class names authorized to change signature via a `Node-ABI-Break:` trailer.
+
+    A re-signature is normally forbidden, but an INTENTIONAL, acknowledged change
+    (e.g. a type rename the framework-neutrality gate requires) declares itself
+    per-PR with a trailer on any commit in the range — the same escape every other
+    hard gate here offers (Version-Bump, Hotspot-Grow, Compat-Update). Shape:
+
+        Node-ABI-Break: <ClassName> reason="..."
+    """
+    try:
+        out = subprocess.run(
+            ["git", "log", "--format=%B%x00", f"{base}..HEAD"],
+            cwd=root, capture_output=True, text=True, check=True,
+        ).stdout
+    except Exception:
+        return set()
+    allowed: set[str] = set()
+    for line in out.splitlines():
+        m = re.match(r"\s*Node-ABI-Break:\s*(\S+)", line)
+        if m:
+            allowed.add(m.group(1))
+    return allowed
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="origin/main")
@@ -248,10 +273,12 @@ def main(argv: list[str] | None = None) -> int:
         print("node_abi_gate: not in a git working tree", file=sys.stderr)
         return 0 if args.mode == "hint" else 2
 
+    allowed = acknowledged_breaks(root, args.base)
     findings = [
         finding
         for class_name, rel_path in SURFACES
-        if (finding := check_surface(root, args.base, class_name, rel_path))
+        if class_name not in allowed
+        and (finding := check_surface(root, args.base, class_name, rel_path))
     ]
 
     if not findings:

@@ -475,7 +475,7 @@ std::vector<std::size_t> line_break_opportunities(const std::string& text,
         return out;
     }
     // ASCII-space boundaries: emit the byte position immediately AFTER
-    // each space, matching ICU's UAX #14 behaviour for plain English
+    // each space, matching ICU's UAX #14 behavior for plain English
     // ("Hello world" breaks at offset 6, i.e. just after the space).
     for (std::size_t i = 0; i < text.size(); ++i) {
         if (text[i] == ' ' || text[i] == '\t') {

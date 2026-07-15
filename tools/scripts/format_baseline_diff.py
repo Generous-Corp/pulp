@@ -7,7 +7,7 @@ test/fixtures/format-baseline/. Fail if anything outside the
 normalized-noise allowlist has changed.
 
 Designed to run in CI as the gate for PRs that touch core/format/ or
-core/host/plugin_slot_*. Behaviour:
+core/host/plugin_slot_*. Behavior:
 
 1. Re-run format_baseline_capture.sh in a temp output directory.
 2. For each captured file, compare line-by-line to the committed

@@ -438,8 +438,8 @@ public:
     // Typed plugin introspection surfaces the IComponent and related VST3
     // interfaces so callers that link against the SDK can reach into vendor
     // extensions without round-tripping through `void*`.
-    void accept(ExtensionsVisitor& visitor) const override {
-        Vst3Extension ext;
+    void accept(NativeHandleVisitor& visitor) const override {
+        Vst3NativeHandle ext;
         ext.component = component_;
         ext.audio_processor = processor_;
         ext.edit_controller = controller_;

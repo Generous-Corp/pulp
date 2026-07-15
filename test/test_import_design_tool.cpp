@@ -1084,7 +1084,7 @@ TEST_CASE("pulp-import-design debug report names the default bridge-native mode"
 // NUL byte in the ZIP header — the user had to manually `unzip` before
 // running the import. This test pins the auto-unpack contract by
 // assembling a minimal .pulp.zip from C++ (one entry, scene.pulp.json,
-// holding a valid figma-plugin envelope with a recognised Pulp / Knob
+// holding a valid figma-plugin envelope with a recognized Pulp / Knob
 // instance) and asserting the CLI parses it without an intermediate
 // unzip step.
 
@@ -1208,7 +1208,7 @@ TEST_CASE("pulp-import-design auto-unpacks .pulp.zip Figma-plugin exports",
     const auto zip = tmp.path / "smoke.pulp.zip";
     const auto output = tmp.path / "ui.js";
 
-    // Minimal figma-plugin envelope with a Pulp / Knob recognised by the
+    // Minimal figma-plugin envelope with a Pulp / Knob recognized by the
     // audio_widget="knob" path. The full envelope shape is
     // documented in tools/figma-plugin/schema/figma-plugin-export-v1.json
     // and exercised end-to-end by test/test_design_import_codegen.cpp's
@@ -2072,7 +2072,7 @@ TEST_CASE("pulp-import-design refuses .pulp.zip with Windows drive-relative path
 // `/`, so a hand-crafted ZIP would be required to exercise that specific
 // path. The path-safety branch is already covered by the `..` test
 // (substring guard) and the Windows drive-relative test (explicit
-// drive-letter guard); the leading-slash fallback is defence-in-depth
+// drive-letter guard); the leading-slash fallback is defense-in-depth
 // for non-portable archives we'd never produce ourselves.
 
 TEST_CASE("pulp-import-design refuses .pulp.zip exceeding the file-count cap",

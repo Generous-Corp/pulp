@@ -241,7 +241,7 @@ class MainCliTests(unittest.TestCase):
     def test_windows_backslash_paths_normalise_to_forward_slash(self) -> None:
         """Windows Cobertura artifacts emit filenames with backslash
         separators (`core\\format\\src\\clap_adapter.cpp`). Linux and
-        macOS use forward slashes. Without normalisation the merge
+        macOS use forward slashes. Without normalization the merge
         treats them as TWO files; diff-cover then matches the backslash
         variant against the PR diff (which uses forward slashes from
         git), finds 0 hits, and silently reports 0% coverage on
@@ -271,7 +271,7 @@ class MainCliTests(unittest.TestCase):
         fetchcontent-src/ are not coverage-bearing. The Windows
         cobertura leg historically leaked `test\\*` because its
         backslash paths slipped past the OS-side regex; this script's
-        normalisation + filter catches them uniformly. Pin both ends
+        normalization + filter catches them uniformly. Pin both ends
         of the contract."""
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)

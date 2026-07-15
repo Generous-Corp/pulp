@@ -7,7 +7,7 @@
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/planar_audio_ring_buffer.hpp>
-#include <pulp/runtime/abstract_fifo.hpp>
+#include <pulp/runtime/spsc_ring_index.hpp>
 #include <pulp/signal/resampler.hpp>
 
 namespace pulp::audio {
@@ -104,7 +104,7 @@ private:
     std::vector<float*> pending_write_ptrs_;
     std::vector<const float*> pending_read_ptrs_;
     std::vector<float*> resampled_output_ptrs_;
-    std::unique_ptr<runtime::AbstractFifo> pending_fifo_;
+    std::unique_ptr<runtime::SpscRingIndex> pending_fifo_;
 
     std::uint32_t source_channels_ = 0;
     std::uint32_t host_channels_ = 0;

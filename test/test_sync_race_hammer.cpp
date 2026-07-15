@@ -161,7 +161,7 @@ TEST_CASE("SpscQueue hammer: producer + consumer for 500ms", "[concurrent][race]
     // loop (stop observed) and try to drain the queue while the producer
     // is still racing toward its own exit — pushing more items after the
     // consumer thinks it's done. SPSC assumes strict single-producer, so
-    // any overlap is undefined behaviour.
+    // any overlap is undefined behavior.
     std::atomic<bool> producer_done{false};
 
     std::thread consumer([&] {

@@ -267,6 +267,33 @@ SkSVGDOM **does** render Figma's effects-heavy SVG (67 filters, 61 masks)
 faithfully — the export and the SkSVGDOM render are both fine; only the
 native-materialize/codegen path is lossy.
 
+**Bitmap assets inside the faithful SVG (`<image>` + base64 data URI).** Figma
+exports raster fills as `<image href="data:image/png;base64,…">`. Two Skia traps
+made every one of those render **blank** (a hole where the art should be), and
+both are now fixed in `core/canvas/src/svg_dom_cache.cpp` — know them, because a
+blank image in a faithful render looks like an export bug and is not:
+
+* **SkSVGDOM needs a resource provider.** `SkSVGImage::LoadImage` returns early
+  on a null provider, and `SkSVGDOM::Builder` defaults it to null. `SvgDomCache`
+  installs `skresources::DataURIResourceProviderProxy` (+ registers the PNG /
+  JPEG / WebP / GIF codecs — Skia's codec registry starts EMPTY, so
+  `SkCodec::MakeFromData` fails until something calls `SkCodecs::Register`).
+  Gated on `PULP_HAS_SKRESOURCES`, a **try-link** probe in
+  `core/canvas/CMakeLists.txt`: the pinned native slices compile skresources
+  into `libsvg.a` (there is no `libskresources.a` at all), other slices ship a
+  standalone archive, and the wasm slice ships neither — only a try-link gets
+  all three right.
+* **Skia only parses `xlink:href`, never SVG-2 `href`.** The literal attribute
+  name its parser matches is `xlink:href`; Figma emits the bare `href` with no
+  xlink namespace, so Skia drops the attribute and the IRI is empty *no matter
+  how good the resource provider is*. `SvgDomCache` rewrites the attribute name
+  (tag-scoped, never inside a value or text) before parsing.
+
+If an `<image>` still comes out blank, check the configure line
+`Pulp: SVG <image> data-URI decoding enabled (skresources links)` — the opposite
+message means the active Skia bundle can't link skresources and `<image>` is
+genuinely unavailable in that build.
+
 **One-command path (USE THIS): `tools/import-design/make_catalog_component.py`.**
 It runs the whole lane — exports the Figma node, embeds the faithful SVG (chunked
 base64), and emits the `DesignFrameView` subclass + the catalog/CMake/showcase

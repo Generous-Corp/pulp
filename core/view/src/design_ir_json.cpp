@@ -1323,7 +1323,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     // boxes. Without a fix, our flex layout puts the line in the
     // first-item slot (compressed to its 106-ish px width on the left),
     // breaking the connection visual. Convert the line to absolute,
-    // span the full row width, and centre it vertically. Because it
+    // span the full row width, and center it vertically. Because it
     // stays first in z-order, subsequent children draw on top — the
     // visible segments emerge as gaps. Generalises a connector-rail
     // pattern (e.g. an FX-rack row: a hairline + chained dropdowns + "+")

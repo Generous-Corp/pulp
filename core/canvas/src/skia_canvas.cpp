@@ -150,7 +150,7 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family,
             // we keep walking the list to give later families a chance.
             SkString actual_name;
             resolved->getFamilyName(&actual_name);
-            // Case-insensitive comparison — Skia normalises but some
+            // Case-insensitive comparison — Skia normalizes but some
             // platforms canonicalise differently (e.g. "Helvetica" vs
             // "Helvetica Neue"). Accept if the actual name CONTAINS
             // the requested family or vice-versa.
@@ -206,7 +206,7 @@ static sk_sp<SkTypeface> get_cached_typeface_single(const std::string& family,
     return resolved.typeface;
 }
 
-// Legacy single-arg overload — preserves the old "Normal" behaviour for
+// Legacy single-arg overload — preserves the old "Normal" behavior for
 // callers that haven't migrated to the weight/slant-aware path.
 static sk_sp<SkTypeface> get_cached_typeface(const std::string& family) {
     return get_cached_typeface(family, SkFontStyle::kNormal_Weight, 0);
@@ -432,7 +432,7 @@ void SkiaCanvas::clip(FillRule rule) {
     if (!path_builder_) return;
     // Snapshot the path (don't detach — Canvas2D allows continued use of
     // the same path after clip()) and intersect with the current clip.
-    // Honour the JS-supplied fillRule arg (`ctx.clip('evenodd')`) by stamping
+    // Honor the JS-supplied fillRule arg (`ctx.clip('evenodd')`) by stamping
     // the path's fill type before SkCanvas::clipPath consumes it. Default
     // 'nonzero' maps to SkPathFillType::kWinding.
     SkPath p = path_builder_->snapshot();
@@ -604,7 +604,7 @@ void SkiaCanvas::apply_stroke_state(SkPaint& paint) const {
     paint.setStrokeJoin(sk_join);
     paint.setStrokeMiter(miter_limit_);
     // Canvas2D ctx.createPattern on strokeStyle wins over the solid stroke
-    // colour when present.
+    // color when present.
     if (stroke_shader_) {
         paint.setShader(stroke_shader_);
     }
@@ -734,7 +734,7 @@ void SkiaCanvas::stroke_line(float x0, float y0, float x1, float y1) {
 // dense curve then renders visibly beaded rather than as one antialiased
 // line. Building a single SkPath and stroking it once mirrors the CoreGraphics
 // backend and honors the active line width, cap, join, dash, shadow, and
-// stroke colour / shader. Degenerate input (null, or fewer than two points)
+// stroke color / shader. Degenerate input (null, or fewer than two points)
 // draws nothing, matching CgCanvas::stroke_path.
 void SkiaCanvas::stroke_path(const Point2D* points, size_t count) {
     GUARD_CANVAS;
@@ -751,17 +751,21 @@ void SkiaCanvas::stroke_path(const Point2D* points, size_t count) {
     canvas_->drawPath(builder.detach(), paint);
 }
 
-// Fill a closed polygon as ONE SkPath. The base-class default is a silent
-// no-op, so a filled polygon simply never appeared on the Skia backend.
-// Building a single closed SkPath and filling it via current_fill_paint()
-// mirrors the CoreGraphics backend and honors the active fill colour /
-// gradient, blend mode, shadow, and filter. Degenerate input (null, or fewer
+// Fill a closed polygon as ONE SkPath. Building a single closed SkPath and
+// filling it via current_fill_paint() mirrors the CoreGraphics backend and
+// honors the active fill color / gradient, blend mode, shadow, and filter.
+// `rule` maps onto the path's fill type, so a compound point array (outer
+// contour + inner contour, same winding) fills as a ring under
+// FillRule::evenodd and as a disc under FillRule::nonzero — the same split
+// fill_current_path() has always honored. Degenerate input (null, or fewer
 // than three points — no enclosed area) draws nothing, matching
 // CgCanvas::fill_path.
-void SkiaCanvas::fill_path(const Point2D* points, size_t count) {
+void SkiaCanvas::fill_path(const Point2D* points, size_t count, FillRule rule) {
     GUARD_CANVAS;
     if (!points || count < 3) return;
     SkPathBuilder builder;
+    builder.setFillType(rule == FillRule::evenodd ? SkPathFillType::kEvenOdd
+                                                  : SkPathFillType::kWinding);
     builder.moveTo(points[0].x, points[0].y);
     for (size_t i = 1; i < count; ++i)
         builder.lineTo(points[i].x, points[i].y);
@@ -842,7 +846,7 @@ bool SkiaCanvas::draw_image_from_data(const uint8_t* data, size_t size,
     if (!image) return false;
     image = ensure_gpu_image(std::move(image));
 
-    // Honour the sticky imageSmoothingEnabled / Quality state.
+    // Honor the sticky imageSmoothingEnabled / Quality state.
     canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
                            sampling_options_for_image_smoothing());
     return true;
@@ -859,7 +863,7 @@ bool SkiaCanvas::draw_image_from_file(const std::string& path,
     if (!image) return false;
     image = ensure_gpu_image(std::move(image));
 
-    // Honour the sticky imageSmoothingEnabled / Quality state.
+    // Honor the sticky imageSmoothingEnabled / Quality state.
     canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
                            sampling_options_for_image_smoothing());
     return true;
@@ -1163,7 +1167,7 @@ void SkiaCanvas::fill_current_path(FillRule rule) {
     // path must produce the outlined version of the filled shape.
     // Stamp the JS-supplied fillRule (`ctx.fill('evenodd')`) onto the
     // snapshot so Skia honours it when computing the filled area;
-    // default 'nonzero' keeps the SkPathFillType::kWinding behaviour.
+    // default 'nonzero' keeps the SkPathFillType::kWinding behavior.
     SkPath p = path_builder_->snapshot();
     p.setFillType(rule == FillRule::evenodd
                       ? SkPathFillType::kEvenOdd

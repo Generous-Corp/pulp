@@ -46,7 +46,7 @@ public:
         /// vocoder's accumulated synthesis-phase lead. Sustained re-firing drives
         /// the PV toward raw overlap-add at the synthesis hop, which both pitches
         /// every partial DOWN by the stretch factor and breaks phase coherence
-        /// (the "wobble"). 0 disables (legacy behaviour). At hop≈128 (offline
+        /// (the "wobble"). 0 disables (legacy behavior). At hop≈128 (offline
         /// drums) 3 frames ≈ 8 ms — below any real inter-onset gap.
         int refractory_frames = 3;
     };

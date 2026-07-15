@@ -152,7 +152,7 @@ TEST_CASE("Sampler RT safety contracts preserve required coverage",
         {"SampleAssetImporter", "import", RtSafetyClass::BackgroundThreadOnly, false},
         {"SampleAssetExporter", "export", RtSafetyClass::BackgroundThreadOnly, false},
         {"SampleSlotMaterializer", "publish_completed_recording", RtSafetyClass::BackgroundThreadOnly, false},
-        {"AudioThumbnail", "build_and_cache", RtSafetyClass::BackgroundThreadOnly, false},
+        {"WaveformOverview", "build_and_cache", RtSafetyClass::BackgroundThreadOnly, false},
     }};
 
     check_required_contracts(hot_paths);
@@ -215,7 +215,7 @@ TEST_CASE("Sampler RT safety contracts keep slow paths out of the callback",
     CHECK(recorder_release.safety_class == RtSafetyClass::OfflineOnly);
     CHECK_FALSE(recorder_release.audio_callback_allowed);
 
-    const auto& thumbnail = require_contract("AudioThumbnail", "build_and_cache");
+    const auto& thumbnail = require_contract("WaveformOverview", "build_and_cache");
     CHECK(thumbnail.safety_class == RtSafetyClass::BackgroundThreadOnly);
     CHECK_FALSE(thumbnail.audio_callback_allowed);
     CHECK(thumbnail.may_allocate);

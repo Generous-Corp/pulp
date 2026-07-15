@@ -515,7 +515,7 @@ pub fn find_run_binary(proj: &ActiveProject, target: Option<&str>) -> Option<Pat
 
     // Only the no-target auto-pick path falls through to the .app
     // bundle search on macOS — a named target never matches a bundle
-    // name (C++ behaviour).
+    // name (C++ behavior).
     #[cfg(target_os = "macos")]
     if target.is_none() {
         if let Some(p) = find_app_bundle(&proj.build_dir) {

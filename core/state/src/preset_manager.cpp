@@ -148,7 +148,7 @@ bool PresetManager::save(const std::string& name, const std::string& folder) {
     // Atomic write: stage to a sibling temp file, fully flush it, then rename it
     // onto the destination. A crash / power loss / full disk mid-write therefore
     // leaves any previously-saved preset intact instead of truncating it.
-    // Mirrors PropertiesFile::save_to and the skp_capture / audio_thumbnail_cache
+    // Mirrors PropertiesFile::save_to and the skp_capture / waveform_overview_cache
     // temp-then-rename convention.
     fs::path tmp = path;
     tmp += ".tmp";

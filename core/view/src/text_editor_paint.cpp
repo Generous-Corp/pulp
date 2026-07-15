@@ -25,6 +25,17 @@ bool row_owns_caret(int caret, int start, int end, bool has_next, int next_start
 void TextEditor::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
 
+    // Paint delegate (widget_painter.hpp): the fill and the frame are separate
+    // hooks, so a skin can flatten the fill and keep the stock frame, or the
+    // reverse. Both decline by default.
+    WidgetPainter* delegate = effective_painter();
+    TextFieldPaintState fps;
+    fps.bounds = b;
+    fps.enabled = enabled();
+    fps.focused = has_focus();
+    fps.read_only = read_only;
+    fps.empty = text_.empty();
+
     auto bg_color = has_background_color()
         ? background_color()
         : (has_focus()
@@ -45,7 +56,18 @@ void TextEditor::paint(canvas::Canvas& canvas) {
             : resolve_color("control.border",
                             resolve_color("border", canvas::Color::hex(0x3a3a5a))));
     float stroke_width = has_border() ? border_width() : (has_focus() ? 2.0f : 1.0f);
-    if (stroke_width > 0.0f) {
+
+    bool bg_skinned = false;
+    bool outline_skinned = false;
+    if (delegate != nullptr) {
+        bg_skinned = delegate->paint_text_field_background(canvas, fps, *this);
+        outline_skinned = delegate->paint_text_field_outline(canvas, fps, *this);
+    }
+    if (bg_skinned && outline_skinned) {
+        // Both surfaces are the skin's; skip the stock frame entirely.
+    } else if (bg_skinned) {
+        stroke_width = 0.0f;   // the skin owns the fill, the stock frame would overpaint it
+    } else if (stroke_width > 0.0f && !outline_skinned) {
         canvas.set_fill_color(stroke);
         canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, radius);
 
@@ -56,12 +78,12 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         float inner_radius = std::min(inner_max_radius, std::max(0.0f, radius - inset - 0.5f));
         canvas.set_fill_color(bg_color);
         canvas.fill_rounded_rect(b.x + inset, b.y + inset, inner_w, inner_h, inner_radius);
-    } else {
+    } else if (!bg_skinned) {
         canvas.set_fill_color(bg_color);
         canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, radius);
     }
 
-    canvas.set_font("Inter", font_size_);
+    canvas.set_font(font_family_.empty() ? std::string("Inter") : font_family_, font_size_);
     canvas.set_text_align(canvas::TextAlign::left);
 
     // Display text
@@ -71,7 +93,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     }
 
     if (multi_line) {
-        canvas.set_font("Inter", font_size_);
+        canvas.set_font(font_family_.empty() ? std::string("Inter") : font_family_, font_size_);
         canvas.set_text_align(canvas::TextAlign::left);
         const float inner_x = b.x + 6.0f;
         const float inner_y = b.y + 4.0f;
@@ -278,10 +300,18 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         return;
     }
 
-    const float text_pad_x = std::max(9.0f, border_width() + 7.0f);
-    const float left_pad = std::max(text_pad_x, content_inset_left_);
+    // Frame insets: an installed metrics delegate wins, then an explicit
+    // set_insets(), then the stock padding derived from the border width.
+    const float stock_pad = std::max(9.0f, border_width() + 7.0f);
+    EdgeInsets pad{stock_pad * 0.5f, stock_pad, stock_pad * 0.5f, stock_pad};
+    if (auto* m = effective_metrics(); m != nullptr) {
+        EdgeInsets from_delegate;
+        if (m->text_field_insets(from_delegate, *this)) pad = from_delegate;
+    }
+    if (has_own_insets_) pad = insets_;
+    const float left_pad = std::max(pad.left, content_inset_left_);
     const float text_inner_x = b.x + left_pad;
-    const float text_inner_w = std::max(0.0f, b.width - left_pad - text_pad_x);
+    const float text_inner_w = std::max(0.0f, b.width - left_pad - pad.right);
     const auto metrics = canvas.measure_text_full(display.empty() ? std::string("Ag") : display);
     const float text_y = b.y + std::max(0.0f, (b.height - metrics.line_height) * 0.5f) + metrics.ascent;
 
@@ -353,6 +383,14 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     }
 
     float text_x = text_inner_x - scroll_offset_;
+    // Horizontal alignment. Only meaningful when the run FITS: a run wider than
+    // the field is scrolled, and scrolling already owns the origin, so a center
+    // alignment there would fight the caret-follow. Slack is therefore clamped
+    // at zero and a long string keeps the left-aligned scrolled behavior.
+    if (text_align_ != canvas::TextAlign::left) {
+        const float slack = std::max(0.0f, text_inner_w - total_text_w);
+        text_x += (text_align_ == canvas::TextAlign::center) ? slack * 0.5f : slack;
+    }
     // After the scroll-offset update, re-write the snapshot's
     // `inner_x` so readers (caret_rect, hit-test, IME) match the
     // painted origin even on the first paint where scroll_offset_
@@ -362,12 +400,22 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     }
     auto text_primary = resolve_color("text.primary", canvas::Color::hex(0xe0e0e0));
     auto text_secondary = resolve_color("text.secondary", canvas::Color::hex(0x808090));
-    auto selection_fill = resolve_color("accent.primary", canvas::Color::rgba8(65, 105, 225, 255));
-    selection_fill.a = 168;
-    auto selected_text_color = resolve_color("bg.primary", bg_color);
+    // The selection band's color is a token in its own right, honoured exactly
+    // as authored — alpha included. Falling back to the accent color with a
+    // forced alpha (the old behavior) meant a skin could never choose the
+    // selection's transparency: whatever it set was overwritten.
+    auto accent = resolve_color("accent.primary", canvas::Color::rgba8(65, 105, 225, 255));
+    accent.a = 168;
+    auto selection_fill = resolve_color("text.selection", accent);
+    auto selected_text_color = resolve_color("text.selected", resolve_color("bg.primary", bg_color));
 
     canvas.save();
-    canvas.clip_rect(text_inner_x - 2.0f, b.y + 2.0f, text_inner_w + 4.0f, std::max(0.0f, b.height - 4.0f));
+    // Clip the text to the frame's content box. The inset is the field's own —
+    // a skin that asked for a 4px indent gets its text clipped at 4px, not at a
+    // widget constant that has nothing to do with the frame it drew.
+    canvas.clip_rect(b.x + pad.left - 2.0f, b.y + pad.top,
+                     std::max(0.0f, b.width - pad.horizontal() + 4.0f),
+                     std::max(0.0f, b.height - pad.vertical()));
 
     // Reuse the cached single-line snapshot for all per-glyph x lookups
     // (selection start/width, before/selected/after text origins). The
@@ -439,10 +487,26 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         // Zero at end of text: there is no glyph for the underline/block to cover.
         m.advance = next > caret_position_ ? (text_x + x_at(next)) - caret_x : 0.0f;
         m.nominal_advance = canvas.measure_text("0");
-        m.stroke = 1.5f;
-        paint_caret_over_text(canvas, caret_style_, m,
-                              resolve_color("text.primary", canvas::Color::hex(0xe0e0e0)),
-                              bg_color, display, text_x);
+        m.stroke = caret_width();
+
+        // A painter may own the caret outright (a hairline, a wedge, a block).
+        // It gets the caret's whole cell and the resolved stroke, so a painter
+        // and a metrics delegate that both restyle the caret cannot disagree
+        // about how wide it is.
+        bool caret_skinned = false;
+        if (delegate != nullptr) {
+            CaretPaintState cps;
+            cps.bounds = {m.x, m.cell_top, m.stroke, m.cell_height};
+            cps.enabled = enabled();
+            cps.focused = true;
+            cps.width = m.stroke;
+            caret_skinned = delegate->paint_caret(canvas, cps, *this);
+        }
+        if (!caret_skinned)
+            paint_caret_over_text(canvas, caret_style_, m,
+                                  resolve_color("text.caret", resolve_color("text.primary",
+                                                canvas::Color::hex(0xe0e0e0))),
+                                  bg_color, display, text_x);
     }
     canvas.restore();
 }

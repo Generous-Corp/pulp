@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <pulp/canvas/affine_transform.hpp>
+#include <pulp/canvas/path.hpp>
 #include <pulp/canvas/text_utf8.hpp>
 #include <string>
 #include <vector>
@@ -169,13 +171,14 @@ using Paint = std::variant<Color, LinearGradient, RadialGradient, ConicGradient>
 
 // ── Drawing commands ─────────────────────────────────────────────────────────
 
-enum class LineCap { butt, round, square };
-enum class LineJoin { miter, round, bevel };
-// Canvas2D fill rule for fill() / clip(). Mirrors the spec's
-// ('nonzero' | 'evenodd') string enum. Default 'nonzero' matches CSS
-// behaviour and the JS shim's fillRule==='evenodd'?1:0 mapping in
+// LineCap, LineJoin, and FillRule are defined in <pulp/canvas/path.hpp> — the
+// retained Path value type needs them and sits BELOW this header, so they live
+// there and are used unqualified here (same namespace, one definition).
+//
+// FillRule is the Canvas2D fill rule for fill() / clip(). It mirrors the
+// spec's ('nonzero' | 'evenodd') string enum; the default 'nonzero' matches
+// CSS behavior and the JS shim's fillRule==='evenodd'?1:0 mapping in
 // `core/view/js/web-compat-canvas.js`.
-enum class FillRule { nonzero, evenodd };
 // CSS / RN `text-align: justify`. SkiaCanvas dispatches `kJustify` via
 // SkParagraph when the backend supports it; CG / RecordingCanvas back-ends
 // approximate as `left` (no kerning-controlled space distribution) until full
@@ -325,7 +328,7 @@ public:
 
     /// Canvas2D `ctx.imageSmoothingEnabled` + `imageSmoothingQuality`.
     /// Sticky paint flag honored by subsequent `drawImage` calls. When
-    /// `enabled` is false the backend uses nearest-neighbour sampling;
+    /// `enabled` is false the backend uses nearest-neighbor sampling;
     /// when true the quality enum picks the resampler. Default no-op so
     /// backends without smoothing support compile; SkiaCanvas
     /// (`SkSamplingOptions`) and CoreGraphicsCanvas
@@ -381,7 +384,7 @@ public:
     // Mirror of the fill-gradient surface for `ctx.strokeStyle =
     // createLinearGradient(...) | createRadialGradient(...) |
     // createConicGradient(...)`. Defaults degrade to the first-stop
-    // colour via `set_stroke_color`; SkiaCanvas overrides with real
+    // color via `set_stroke_color`; SkiaCanvas overrides with real
     // `SkShaders` gradient shaders stored on `stroke_shader_` so subsequent
     // stroke paths
     // (stroke_rect / stroke_current_path / stroke_text) pick the
@@ -588,7 +591,12 @@ public:
     /// Stroke a continuous polyline through an array of points.
     /// Much smoother than individual stroke_line calls — produces proper
     /// anti-aliased curves with line joins between segments.
-    struct Point2D { float x, y; };
+    /// Alias, not a second type. The canonical point lives at namespace scope
+    /// in <pulp/canvas/affine_transform.hpp> so `Path` can use it; this name
+    /// keeps every existing `Canvas::Point2D` call site working. (It is spelled
+    /// `Point2D` rather than `Point` because Apple's MacTypes.h declares a
+    /// global `Point` — see the note on pulp::canvas::Point2D.)
+    using Point2D = pulp::canvas::Point2D;
 
     /// Stroke a continuous polyline — much smoother than individual stroke_line calls.
     virtual void stroke_path(const Point2D* points, size_t count) {
@@ -598,8 +606,36 @@ public:
             stroke_line(points[i-1].x, points[i-1].y, points[i].x, points[i].y);
     }
 
-    /// Fill a closed polygon defined by points. The fallback draws nothing.
-    virtual void fill_path(const Point2D*, size_t) {}
+    /// Fill a closed polygon defined by `points`, honoring `rule`.
+    ///
+    /// `rule` selects nonzero vs even-odd winding, exactly as
+    /// `fill_current_path(rule)` / Canvas2D `ctx.fill('evenodd')` do. Without
+    /// it a compound point array (an outer contour followed by an inner one)
+    /// could only ever fill as a solid disc — there was no way to punch the
+    /// hole that makes it a ring.
+    ///
+    /// The default is NOT a no-op. It synthesizes the polygon through the
+    /// path API — `begin_path` / `move_to` / `line_to` / `close_path` /
+    /// `fill_current_path(rule)` — which every backend already implements, so
+    /// a `Canvas` subclass that does not override `fill_path` still draws the
+    /// polygon instead of silently dropping it. Backends override only to skip
+    /// the state round-trip (SkiaCanvas builds one SkPath; CoreGraphicsCanvas
+    /// one CGPath).
+    ///
+    /// Note the default resets the current path (begin_path), matching the
+    /// Canvas2D convention that a shape-drawing call owns the path it builds.
+    /// Degenerate input (null array, or fewer than three points — no enclosed
+    /// area) draws nothing and never reads the array.
+    virtual void fill_path(const Point2D* points, size_t count,
+                           FillRule rule = FillRule::nonzero) {
+        if (points == nullptr || count < 3) return;
+        begin_path();
+        move_to(points[0].x, points[0].y);
+        for (size_t i = 1; i < count; ++i)
+            line_to(points[i].x, points[i].y);
+        close_path();
+        fill_current_path(rule);
+    }
 
     /// Draw an image identified by an opaque, platform-specific handle
     /// into the rectangle (x, y, w, h). The handle is the \c native_handle
@@ -615,9 +651,179 @@ public:
         (void)native_handle; (void)x; (void)y; (void)w; (void)h;
     }
 
+    // ── Retained paths ────────────────────────────────────────────────────
+    // These take a `pulp::canvas::Path` — a retained VALUE (build once, store
+    // it, draw it every frame) — rather than streaming verbs through the
+    // immediate-mode builder above. See <pulp/canvas/path.hpp>.
+    //
+    // Every default implementation below is a real fallback, not a no-op: it
+    // replays the path through the immediate-mode API that every backend
+    // already implements. A Canvas subclass that overrides nothing still draws
+    // the path correctly; backends override only to skip the state round-trip
+    // and hand a native path object straight to the rasterizer.
+
+    /// Fill `path` under `rule`. Resets the current path, matching the
+    /// Canvas2D convention that a shape-drawing call owns the path it builds.
+    virtual void fill_path(const Path& path, FillRule rule = FillRule::nonzero) {
+        if (path.is_empty()) return;
+        begin_path();
+        path.replay(*this);
+        fill_current_path(rule);
+    }
+
+    /// Stroke `path` with `style`. Unlike the `set_line_width` /
+    /// `set_line_cap` / `set_line_join` triplet, the whole stroke
+    /// configuration arrives as one value and cannot be half-applied.
+    ///
+    /// NOTE the default fallback mutates the canvas's stroke state (width /
+    /// cap / join / dash) and does not restore it, because the immediate-mode
+    /// API has no way to read the previous values back. Backends that override
+    /// this — Skia and CoreGraphics both do — keep the style local to the one
+    /// draw. Callers that care should save()/restore() around it.
+    virtual void stroke_path(const Path& path, const StrokeStyle& style) {
+        if (path.is_empty()) return;
+        set_line_width(style.width);
+        set_line_cap(style.cap);
+        set_line_join(style.join);
+        set_miter_limit(style.miter_limit);
+        if (style.dash.empty())
+            set_line_dash(nullptr, 0, 0.0f);
+        else
+            set_line_dash(style.dash.data(), static_cast<int>(style.dash.size()),
+                          style.dash_phase);
+        begin_path();
+        path.replay(*this);
+        stroke_current_path();
+    }
+
+    /// Intersect the current clip with `path`. Caller owns save()/restore().
+    virtual void clip_path(const Path& path, FillRule rule = FillRule::nonzero) {
+        if (path.is_empty()) return;
+        begin_path();
+        path.replay(*this);
+        clip(rule);
+    }
+
+    /// Draw ONLY the drop shadow cast by `path` — not the path itself.
+    ///
+    /// This is a shadow-*rendering* primitive, deliberately separate from
+    /// `save_layer_with_filters`'s `drop_shadow` filter Kind (which shadows a
+    /// whole painted subtree). The split exists because the common case —
+    /// "shadow behind this icon, then the icon on top, in a different color"
+    /// — needs the shadow WITHOUT the source, and a filter chain always
+    /// composites the source too.
+    ///
+    /// `spread` grows the shadow's silhouette before blurring, matching the
+    /// CSS `box-shadow` spread term. The default fallback approximates it by
+    /// scaling the path about its own center, which is exact for convex shapes
+    /// and an approximation for concave ones (a true spread is a Minkowski
+    /// sum / path outset, which is not something the immediate-mode API can
+    /// express).
+    virtual void draw_path_shadow(const Path& path, float dx, float dy,
+                                  float blur, float spread, Color color) {
+        if (path.is_empty()) return;
+        (void)blur;  // the fallback has no blur; backends override.
+        Path shadow = path;
+        if (spread != 0.0f) {
+            const Rect2D b = path.bounds();
+            if (b.width > 0.0f && b.height > 0.0f) {
+                const float sx = (b.width + 2.0f * spread) / b.width;
+                const float sy = (b.height + 2.0f * spread) / b.height;
+                shadow.apply_transform(AffineTransform::scaling(
+                    sx, sy, b.x + b.width * 0.5f, b.y + b.height * 0.5f));
+            }
+        }
+        shadow.apply_transform(AffineTransform::translation(dx, dy));
+        save();
+        set_fill_color(color);
+        fill_path(shadow, FillRule::nonzero);
+        restore();
+    }
+
     // ── Opacity & Layers ──────────────────────────────────────────────────
     /// Set global alpha for subsequent drawing operations (0.0-1.0).
     virtual void set_opacity(float alpha) { (void)alpha; }
+
+    /// An opaque reference to a compositing layer owned by the canvas.
+    ///
+    /// A HANDLE, not a scope. `save_layer(...)` / `restore()` is a statement
+    /// PAIR: the layer exists only between the two calls and is composited
+    /// exactly once, at the restore. That shape cannot express the thing a
+    /// retained compositor actually needs — rendering a subtree into a texture
+    /// ONCE and reusing that texture on later frames, or drawing it several
+    /// times at different transforms. A handle can:
+    ///
+    ///     // Frame N and every frame after:
+    ///     if (!canvas.layer_valid(cached_)) {          // survives across frames
+    ///         canvas.begin_layer(bounds, /*cacheable=*/true);
+    ///         draw_expensive_contents(canvas);
+    ///         cached_ = canvas.end_layer();            // seals it
+    ///     }
+    ///     canvas.draw_layer(cached_, alpha);           // cheap, every frame
+    ///     ...
+    ///     canvas.invalidate_layer(cached_);            // when contents change
+    ///
+    /// `id == 0` is the null handle, which every operation ignores.
+    struct LayerHandle {
+        uint64_t id = 0;
+        constexpr bool operator==(const LayerHandle& o) const { return id == o.id; }
+        constexpr bool operator!=(const LayerHandle& o) const { return id != o.id; }
+        constexpr explicit operator bool() const { return id != 0; }
+    };
+
+    /// Begin recording into an offscreen layer covering `bounds` (in current
+    /// user space). Drawing between this and `end_layer()` goes to the layer,
+    /// not the canvas.
+    ///
+    /// `cacheable` asks the backend to KEEP the layer's texture after
+    /// `end_layer()` so it can be redrawn on later frames without re-recording.
+    /// A non-cacheable layer may be discarded as soon as it has been drawn once.
+    ///
+    /// Backends without offscreen support return the null handle and draw
+    /// through to the canvas directly. That degrades to "re-record every
+    /// frame", which is correct — just not cached — because `layer_valid()`
+    /// keeps returning false and the caller's `if` above keeps re-recording.
+    virtual LayerHandle begin_layer(Rect2D bounds, bool cacheable = false) {
+        (void)cacheable;
+        save();
+        clip_rect(bounds.x, bounds.y, bounds.width, bounds.height);
+        return LayerHandle{};
+    }
+
+    /// Seal the layer opened by the last `begin_layer()` and return its handle.
+    /// After this, drawing goes back to the canvas (or the enclosing layer).
+    virtual LayerHandle end_layer() {
+        restore();
+        return LayerHandle{};
+    }
+
+    /// Composite a sealed layer at its recorded position.
+    virtual void draw_layer(LayerHandle layer, float alpha = 1.0f,
+                            BlendMode mode = BlendMode::normal) {
+        (void)layer; (void)alpha; (void)mode;
+    }
+
+    /// Composite a sealed layer scaled into `dest`.
+    virtual void draw_layer_fitted(LayerHandle layer, Rect2D dest) {
+        (void)layer; (void)dest;
+    }
+
+    /// Composite a sealed layer rotated about its own center.
+    virtual void draw_layer_rotated(LayerHandle layer, float angle_rad) {
+        (void)layer; (void)angle_rad;
+    }
+
+    /// Is `layer` still backed by a live texture that can be drawn WITHOUT
+    /// re-recording it? This is the question that has to survive across
+    /// frames, and the reason the layer API is a handle at all.
+    virtual bool layer_valid(LayerHandle layer) const {
+        (void)layer;
+        return false;
+    }
+
+    /// Drop `layer`'s texture. The next `layer_valid()` returns false, so the
+    /// caller re-records it. Call this when the layer's contents change.
+    virtual void invalidate_layer(LayerHandle layer) { (void)layer; }
 
     /// Save a compositing layer. All drawing until restore() is composited
     /// with the given opacity and optional blur. This is the correct way to
@@ -792,7 +998,7 @@ public:
     /// the backend MUST scale the text horizontally so the resulting run
     /// is exactly `max_width` px wide (vertical metrics unchanged). The
     /// default implementation falls through to `fill_text(text, x, y)`,
-    /// preserving legacy behaviour for backends that don't yet honour
+    /// preserving legacy behavior for backends that don't yet honor
     /// the constraint (RecordingCanvas, base mocks). Skia and CoreGraphics
     /// override this to apply an `SkMatrix::Scale(maxWidth/measured, 1)`
     /// (Skia) / `CGContextScaleCTM(scale, 1)` (CG) around the text origin.
@@ -809,7 +1015,7 @@ public:
     /// True outlined-glyph rendering: builds a stroked paint
     /// (`SkPaint::kStroke_Style` on Skia, CG text drawing mode
     /// kCTLineDrawingModeStroke on CoreGraphics) so the glyph outlines
-    /// honour the current `lineWidth` / `strokeStyle`. The default
+    /// honor the current `lineWidth` / `strokeStyle`. The default
     /// implementation degrades to `fill_text` with the stroke color
     /// pre-set by the caller — visually approximate but spec-incompatible.
     /// Backends override to render real glyph outlines. `max_width`
@@ -949,8 +1155,8 @@ public:
 
     /// Decoded-image intrinsic dimensions in pixels. Returned via out-params
     /// so backends without image decode just leave them at 0 and callers
-    /// short-circuit to "use destination bounds" (the previous behaviour).
-    /// Used by ImageView::paint to honour CSS object-fit / object-position
+    /// short-circuit to "use destination bounds" (the previous behavior).
+    /// Used by ImageView::paint to honor CSS object-fit / object-position
     /// and by canvas2d sprite sizing. Default returns false; Skia overrides
     /// to consult its decoder.
     virtual bool measure_image_from_file(const std::string& path,
@@ -1304,6 +1510,41 @@ struct DrawCommand {
         set_stroke_gradient_radial_two_circles,
         set_stroke_gradient_conic,
         clear_stroke_gradient,
+        // ── FILL gradients ──────────────────────────────────────────
+        // The stroke-side gradient commands above existed without these
+        // fill-side counterparts, so RecordingCanvas silently dropped every
+        // `set_fill_gradient_*` call: a headless test that set a fill
+        // gradient and asserted on the result was really asserting on the
+        // last solid `set_fill_color`, and would keep passing if the
+        // gradient plumbing broke entirely. Layout mirrors the stroke
+        // commands exactly — linear (x0,y0)→(x1,y1) in f[0..3]; radial
+        // (cx,cy,r) in f[0..2]; conic (cx,cy,startAngle) in f[0..2];
+        // two-circle (x0,y0,r0,x1,y1,r1) in f[0..5]; stops interleaved in
+        // `floats` as [pos, r, g, b, a, ...].
+        set_fill_gradient_linear,
+        set_fill_gradient_radial,
+        set_fill_gradient_radial_two_circles,
+        set_fill_gradient_conic,
+        clear_fill_gradient,
+        // ── Retained Path draws ─────────────────────────────────────
+        // The path's geometry is captured as an SVG `d` string in `text`
+        // (so a test can assert on the exact geometry without walking a
+        // command stream), and the fill rule / stroke style in `f`.
+        fill_path_object,     ///< path `d` in `text`; fill rule in f[0] (0=nonzero, 1=evenodd)
+        stroke_path_object,   ///< path `d` in `text`; width f[0], cap f[1], join f[2], miter f[3], dash phase f[4]; dash intervals in `floats`
+        clip_path_object,     ///< path `d` in `text`; fill rule in f[0]
+        draw_path_shadow,     ///< path `d` in `text`; dx/dy/blur/spread in f[0..3]; shadow color in `color`
+        // ── Retained compositing LAYERS (handle-based) ──────────────
+        // begin/end bracket the recording of a layer; draw_layer composites
+        // a sealed one. The handle id is captured in f[0] so a test can
+        // assert that the SAME layer was reused across frames rather than
+        // silently re-recorded.
+        begin_layer,          ///< bounds x/y/w/h in f[0..3]; cacheable in f[4]; id in f[5]
+        end_layer,            ///< sealed handle id in f[0]
+        draw_layer,           ///< id f[0], alpha f[1], blend mode f[2]
+        draw_layer_fitted,    ///< id f[0]; dest x/y/w/h in f[1..4]
+        draw_layer_rotated,   ///< id f[0]; angle (radians) in f[1]
+        invalidate_layer,     ///< id f[0]
         // ── save_backdrop_filter for frosted-glass overlays ─────────
         save_backdrop_filter, ///< x/y/w/h in f[0..3], blur_radius in f[4]
         // ── CSS clip-path: path("...") ──────────────────────────────
@@ -1441,6 +1682,49 @@ public:
                          float dx, float dy, float blur, float spread,
                          Color color, bool inset, float corner_radius) override;
 
+    // ── FILL gradients ───────────────────────────────────────────────────
+    // Previously unrecorded: the base-class no-ops swallowed these, so a
+    // headless fill-gradient test was really asserting on the last solid
+    // fill color. See the DrawCommand::Type comment.
+    void set_fill_gradient_linear(float x0, float y0, float x1, float y1,
+                                  const Color* colors, const float* positions,
+                                  int count) override;
+    void set_fill_gradient_radial(float cx, float cy, float radius,
+                                  const Color* colors, const float* positions,
+                                  int count) override;
+    void set_fill_gradient_radial_two_circles(
+        float x0, float y0, float r0, float x1, float y1, float r1,
+        const Color* colors, const float* positions, int count) override;
+    void set_fill_gradient_conic(float cx, float cy, float start_angle,
+                                 const Color* colors, const float* positions,
+                                 int count) override;
+    void clear_fill_gradient() override;
+
+    // ── Retained paths ───────────────────────────────────────────────────
+    // `using` re-exposes the base-class polygon overloads: declaring
+    // fill_path(const Path&) here would otherwise HIDE
+    // fill_path(const Point2D*, size_t) for anyone holding a RecordingCanvas&.
+    using Canvas::fill_path;
+    using Canvas::stroke_path;
+    void fill_path(const Path& path, FillRule rule = FillRule::nonzero) override;
+    void stroke_path(const Path& path, const StrokeStyle& style) override;
+    void clip_path(const Path& path, FillRule rule = FillRule::nonzero) override;
+    void draw_path_shadow(const Path& path, float dx, float dy,
+                          float blur, float spread, Color color) override;
+
+    // ── Retained layers ──────────────────────────────────────────────────
+    // The recording target models layer lifetime for real (it hands out ids,
+    // tracks which are sealed, and honours invalidate), so a test can assert
+    // that a cacheable layer SURVIVES ACROSS FRAMES without needing a GPU.
+    LayerHandle begin_layer(Rect2D bounds, bool cacheable = false) override;
+    LayerHandle end_layer() override;
+    void draw_layer(LayerHandle layer, float alpha = 1.0f,
+                    BlendMode mode = BlendMode::normal) override;
+    void draw_layer_fitted(LayerHandle layer, Rect2D dest) override;
+    void draw_layer_rotated(LayerHandle layer, float angle_rad) override;
+    bool layer_valid(LayerHandle layer) const override;
+    void invalidate_layer(LayerHandle layer) override;
+
     // Capture sticky Canvas2D shadow state setters
     // so tests can assert that JS `ctx.shadowColor = ...; ctx.shadowBlur =
     // ...; ctx.fillRect(...)` flushes the shadow state through to the
@@ -1539,6 +1823,24 @@ private:
     // CanvasRenderingContext2D order: [a, b, c, d, e, f].
     AffineTransform2x3 ctm_{};
     std::vector<AffineTransform2x3> ctm_stack_;
+
+    // ── Layer bookkeeping ────────────────────────────────────────────────
+    // Modeled faithfully (not stubbed) so that "does this layer survive to
+    // the next frame?" is testable headlessly. A cacheable layer stays valid
+    // until it is explicitly invalidated; a non-cacheable one is dropped as
+    // soon as it is drawn, which is exactly the contract the GPU backends
+    // implement with real textures.
+    struct LayerRecord {
+        Rect2D bounds;
+        bool cacheable = false;
+        bool sealed = false;
+    };
+    std::vector<std::pair<uint64_t, LayerRecord>> layers_;
+    std::vector<uint64_t> open_layers_;   ///< begin_layer stack
+    uint64_t next_layer_id_ = 1;
+
+    LayerRecord* find_layer(uint64_t id);
+    const LayerRecord* find_layer(uint64_t id) const;
 };
 
 } // namespace pulp::canvas

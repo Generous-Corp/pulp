@@ -77,7 +77,7 @@
     },
     "detect_candidate": {
       "type": "object",
-      "description": "A framework the importer recognises in the target dir, with confidence and evidence. Returned by `detect` even when the matching importer would be a different tool (so the SDK can print the install hint).",
+      "description": "A framework the importer recognizes in the target dir, with confidence and evidence. Returned by `detect` even when the matching importer would be a different tool (so the SDK can print the install hint).",
       "required": ["framework", "confidence"],
       "additionalProperties": true,
       "properties": {
@@ -177,7 +177,7 @@
         },
         "formats": { "type": "array", "items": { "type": "string" }, "description": "Formats the scaffold builds (self-contained)." },
         "deferred_formats": { "type": "array", "items": { "type": "string" }, "description": "Source formats not yet emitted, recorded so the info isn't lost." },
-        "unresolved": { "type": "array", "items": { "type": "string" }, "description": "Labelled-stub / unresolved-construct notes carried into the scaffold." },
+        "unresolved": { "type": "array", "items": { "type": "string" }, "description": "Labeled-stub / unresolved-construct notes carried into the scaffold." },
         "verdict": { "type": "string" }
       }
     },

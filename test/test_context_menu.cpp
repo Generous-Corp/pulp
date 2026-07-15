@@ -18,9 +18,19 @@ std::unique_ptr<View> make_root() {
 
 using Item = ContextMenu::Item;
 
-// Row 0 top is at anchor.y (10). Row i center y == 10 + i*24 + 12.
 constexpr float kAnchorX = 10.0f, kAnchorY = 10.0f;
-float row_center_y(int i) { return kAnchorY + static_cast<float>(i) * 24.0f + 12.0f; }
+
+// The center of row `i`, taken from the menu's own resolved geometry.
+//
+// This used to assume a uniform 24px grid (kAnchorY + i*24 + 12) — which is
+// exactly the "divide by a row constant" mistake the menu's rows are laid out to
+// prevent. It only ever worked because a separator was secretly sized as a full
+// label row; the moment a separator became the hairline it looks like, every
+// index past one landed in the wrong row. Ask the menu where its rows are.
+float row_center_y(const ContextMenu& menu, int i) {
+    const auto rows = menu.layout().rows;
+    return rows[static_cast<size_t>(i)].y + rows[static_cast<size_t>(i)].height * 0.5f;
+}
 constexpr float kInsideX = 50.0f;  // well within the >=120px-wide box at x=10
 
 MouseEvent down_at(float x, float y) {
@@ -63,7 +73,7 @@ TEST_CASE("ContextMenu click on a row selects and removes the menu",
         [&](std::optional<int> id) { fired = true; got = id; });
 
     // Click row 1 ("Copy", id=20).
-    menu->on_mouse_event(down_at(kInsideX, row_center_y(1)));
+    menu->on_mouse_event(down_at(kInsideX, row_center_y(*menu, 1)));
 
     REQUIRE(fired);
     REQUIRE(got.has_value());
@@ -164,12 +174,12 @@ TEST_CASE("ContextMenu click on a disabled row does not select",
         [&](std::optional<int> id) { fired = true; got = id; });
 
     // Click the disabled row (row 1) — must NOT fire, menu stays open.
-    menu->on_mouse_event(down_at(kInsideX, row_center_y(1)));
+    menu->on_mouse_event(down_at(kInsideX, row_center_y(*menu, 1)));
     REQUIRE_FALSE(fired);
     REQUIRE(root->child_count() == 1);  // still mounted
 
     // A subsequent click on an enabled row still works.
-    menu->on_mouse_event(down_at(kInsideX, row_center_y(2)));
+    menu->on_mouse_event(down_at(kInsideX, row_center_y(*menu, 2)));
     REQUIRE(fired);
     REQUIRE(got.has_value());
     REQUIRE(*got == 3);
@@ -186,7 +196,7 @@ TEST_CASE("ContextMenu click on a separator does not select",
         [&](std::optional<int>) { fired = true; });
 
     // Click the separator (row 1) — not selectable, menu stays open.
-    menu->on_mouse_event(down_at(kInsideX, row_center_y(1)));
+    menu->on_mouse_event(down_at(kInsideX, row_center_y(*menu, 1)));
     REQUIRE_FALSE(fired);
     REQUIRE(root->child_count() == 1);
 }
@@ -200,16 +210,16 @@ TEST_CASE("ContextMenu hover only highlights enabled non-separator rows",
         {});
 
     MouseEvent hover;  // move (not down) over the separator row
-    hover.position = {kInsideX, row_center_y(1)};
+    hover.position = {kInsideX, row_center_y(*menu, 1)};
     hover.is_down = false;
     menu->on_mouse_event(hover);
     REQUIRE(menu->hovered_index() == -1);
 
-    hover.position = {kInsideX, row_center_y(2)};  // disabled row
+    hover.position = {kInsideX, row_center_y(*menu, 2)};  // disabled row
     menu->on_mouse_event(hover);
     REQUIRE(menu->hovered_index() == -1);
 
-    hover.position = {kInsideX, row_center_y(0)};  // enabled row
+    hover.position = {kInsideX, row_center_y(*menu, 0)};  // enabled row
     menu->on_mouse_event(hover);
     REQUIRE(menu->hovered_index() == 0);
 }

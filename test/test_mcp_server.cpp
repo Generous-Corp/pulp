@@ -1764,7 +1764,7 @@ TEST_CASE("MCP wrapper tools route to the correct handler arm (project-root gate
     for (const char* tool : inspector_tools) {
         INFO("inspector tool: " << tool);
         auto response = handle_request(tool_call(std::to_string(id++), tool));
-        // Reject reason proves: (a) the tool name was recognised, and
+        // Reject reason proves: (a) the tool name was recognized, and
         // (b) execution reached find_project_root() instead of falling
         // through to the "Unknown tool" arm.
         require_contains(response, "Error: not in a Pulp project");
@@ -2449,7 +2449,7 @@ TEST_CASE("MCP tools/list response contains no embedded newlines (wire-safe)",
     REQUIRE(tools_list_wire.find("pulp_build") != std::string::npos);
 }
 
-// pulp #2153: every pulp_motion_* tool is recognised by the dispatcher
+// Every pulp_motion_* tool must be recognized by the dispatcher
 // (no "Unknown tool" fall-through) AND routes through the same
 // project-root gate that pulp_inspect_* uses. From a tempdir all 10
 // tools must short-circuit with "Error: not in a Pulp project" before
@@ -2473,7 +2473,7 @@ TEST_CASE("MCP pulp_motion_* tools route to the motion dispatch arm",
     for (const char* tool : no_param_tools) {
         INFO("motion tool (no params): " << tool);
         auto response = handle_request(tool_call(std::to_string(id++), tool));
-        // Reject reason proves the dispatcher recognised the tool and
+        // Reject reason proves the dispatcher recognized the tool and
         // reached find_project_root() before shelling out.
         require_contains(response, "Error: not in a Pulp project");
         // Guard against the silent-regression case where the dispatch
@@ -2620,7 +2620,7 @@ TEST_CASE("MCP pulp_trace_* tools route to the trace dispatch arm",
     for (const char* tool : no_param_tools) {
         INFO("trace tool (no params): " << tool);
         auto response = handle_request(tool_call(std::to_string(id++), tool));
-        // Reaching find_project_root() proves the dispatcher recognised the
+        // Reaching find_project_root() proves the dispatcher recognized the
         // tool; guards against a tools/list registration with no dispatch arm.
         require_contains(response, "Error: not in a Pulp project");
         REQUIRE(response.find("Unknown tool") == std::string::npos);

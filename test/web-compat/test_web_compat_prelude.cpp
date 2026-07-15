@@ -1114,8 +1114,8 @@ TEST_CASE("WebCompat: matrix() with zero scale (a=b=0) preserves the collapse",
 //
 // Scope deliberately narrow: smoke-level "does the existing
 // implementation actually do what the catalog claims". Edge-case
-// behaviour (multi-rule layering, focus/blur snapshot restore, var()
-// nested fallbacks, etc.) is covered by neighbouring tests
+// behavior (multi-rule layering, focus/blur snapshot restore, var()
+// nested fallbacks, etc.) is covered by neighboring tests
 // (test_css_hover_translation.cpp, test_selector_matching.cpp) — see
 // the `tests` field on each compat.json entry.
 
@@ -1711,7 +1711,7 @@ TEST_CASE("resolveCSSLength: signed percentages + whitespace operands preserve u
 }
 
 TEST_CASE("resolveCSSLength: mixed-unit calc fallthrough documented (resolves to px, not deferred)",
-          "[webcompat][css-parser][issue-1576][fallback-behaviour]") {
+          "[webcompat][css-parser][issue-1576][fallback-behavior]") {
     // Rather than silently mis-route mixed-unit calc-family
     // expressions, pin the documented fallback. Pulp has no
     // deferred-resolution layer (no separate layout pass for CSS calc),

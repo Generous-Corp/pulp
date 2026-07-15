@@ -40,9 +40,9 @@ struct CodeGenOptions {
     /// override via `@sprite` or `@silver` suffix on the Figma layer name.
     bool use_silver_knobs = true;
 
-    /// When true (default), recognised faders/meters are emitted with a
+    /// When true (default), recognized faders/meters are emitted with a
     /// value-driven skin derived from the captured asset (track / fill / thumb
-    /// colours for a fader; gradient stops for a meter) so they render like the
+    /// colors for a fader; gradient stops for a meter) so they render like the
     /// captured Figma art while the thumb/level still move with their bound
     /// value. When false (`--fader-style=default` / `--meter-style=default`)
     /// they fall back to the plain native look. The derived style attributes

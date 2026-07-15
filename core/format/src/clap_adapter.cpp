@@ -66,7 +66,7 @@ static T load_event(const clap_event_header_t* hdr) {
     // Guard against a short/malformed host event: copying sizeof(T) bytes when
     // hdr->size < sizeof(T) reads past the event (OOB / UB on the audio
     // thread). Copy only the bytes the host actually provided; the rest stay
-    // zero-initialised. memcpy-into-a-stack-local also fixes alignment.
+    // zero-initialized. memcpy-into-a-stack-local also fixes alignment.
     T out{};
     std::memcpy(&out, hdr, std::min(static_cast<std::size_t>(hdr->size), sizeof(T)));
     return out;
@@ -449,7 +449,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     //   * a multi-out Processor that writes only some aux channels still emits
     //     silence on the channels it skipped.
     // Host output buses beyond kMaxOutputBuses are zero-filled but not routed,
-    // preserving the prior safe behaviour for unusually wide bus layouts.
+    // preserving the prior safe behavior for unusually wide bus layouts.
     const uint32_t routed_output_buses =
         (std::min)(process->audio_outputs_count,
                    static_cast<uint32_t>(kMaxOutputBuses));
@@ -767,7 +767,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                         case CLAP_NOTE_EXPRESSION_TUNING: {
                             // ±120 semitones → 14-bit pitch bend clamped
                             // to ±2 semitones default MPE member range.
-                            // We normalise the raw value to the ±48st
+                            // We normalize the raw value to the ±48st
                             // member-bend default so the MpeVoiceTracker
                             // expands it back correctly.
                             const double norm = std::clamp(

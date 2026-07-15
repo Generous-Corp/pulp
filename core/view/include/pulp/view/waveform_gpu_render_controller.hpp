@@ -10,7 +10,7 @@
 /// code, not from live audio callbacks. It is not thread-safe; async GPU upload
 /// completions should marshal commits back to the owning render/control thread.
 
-#include <pulp/audio/audio_thumbnail.hpp>
+#include <pulp/audio/waveform_overview.hpp>
 #include <pulp/view/waveform_gpu_primitives.hpp>
 
 #include <cstddef>
@@ -71,7 +71,7 @@ public:
                  std::vector<WaveformGpuResourceRecord>* evicted_records = nullptr);
 
     [[nodiscard]] WaveformGpuRenderDecision plan_render(
-        const pulp::audio::AudioThumbnail& thumbnail,
+        const pulp::audio::WaveformOverview& thumbnail,
         const WaveformGpuLayerPlan& plan,
         const WaveformGpuRenderContext& context,
         std::span<WaveformPeakVertex> staging_vertices) noexcept;

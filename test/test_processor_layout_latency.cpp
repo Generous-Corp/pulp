@@ -760,7 +760,7 @@ TEST_CASE("flag_*_changed -> consume_*_changed_flag is data-race-free "
     // Hammer the flag from an "audio" thread and drain from a "main"
     // thread. The contract: every drain that observes `true` corresponds
     // to at least one preceding set, and we never observe undefined
-    // behaviour. This is the minimal smoke we need to gate the
+    // behavior. This is the minimal smoke we need to gate the
     // RT-safety claim; a TSan run extends it.
     StereoEffect p;
     std::atomic<bool> stop{false};

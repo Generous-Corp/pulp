@@ -1044,7 +1044,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                             midi::MidiEvent me;
                             if (decoded.controller == detail::kVst3CtrlPitchBend) {
                                 // Normalized 0..1 → 14-bit pitch bend
-                                // (0..16383, centre 8192).
+                                // (0..16383, center 8192).
                                 const auto bend14 = static_cast<uint16_t>(
                                     std::clamp<int>(
                                         static_cast<int>(norm * 16383.0 + 0.5),
@@ -1453,7 +1453,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             std::span(output64_buses.data(), routed_output_buses)),
     };
 
-    // VST3 `processBlockBypassed` behaviour. When the current bypass
+    // VST3 `processBlockBypassed` behavior. When the current bypass
     // value is >= 0.5, the adapter does the pass-through itself instead
     // of asking the Processor. Effects copy main input to main output;
     // instruments and generators zero-fill. MIDI output stays empty so a
@@ -1464,7 +1464,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         // for every output channel. If the host ever drives more channels than
         // setupProcessing() negotiated (channel count is pinned by
         // setBusArrangements in practice, so this is a corner), the whole block
-        // falls back to a zero-delay copy — degrading to pre-fix behaviour, not
+        // falls back to a zero-delay copy — degrading to pre-fix behavior, not
         // a mix of delayed and undelayed channels.
         const bool delayed = bypass_delay_samples_ > 0 &&
             static_cast<int>(bypass_dry_delay_.size()) >= out_channels;
@@ -1621,7 +1621,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                         midi::MidiEvent me{};
                         bool emitted = false;
                         if (ne.typeId == kTuningTypeID) {
-                            // VST3 tuning spans ±120 st; normalise to the MPE
+                            // VST3 tuning spans ±120 st; normalize to the MPE
                             // member-bend default so the tracker expands it
                             // back to the right per-note bend (mirrors CLAP).
                             const double semis =
@@ -1814,7 +1814,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // it hands us. A Processor may synthesize output from silence — a
     // generator, an oscillator, a DC/control-voltage source, a reverb tail — so
     // any bus we just rendered into must be reported as carrying signal.
-    // Leaving a stale flag set hands the host a full buffer labelled silent.
+    // Leaving a stale flag set hands the host a full buffer labeled silent.
     // The bypass path returns before this point and leaves the flags alone:
     // there the plugin is a wire, so upstream silence stays silence.
     for (int32 b = 0; b < data.numOutputs; ++b) {

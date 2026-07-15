@@ -8,7 +8,7 @@
 // notifications are decoded via BleMidiPacketDecoder and replayed
 // onto CoreMIDI virtual source/dest pairs so the rest of Pulp sees
 // the BLE link as a normal MIDI port (matching the system CoreMIDI
-// behaviour for OS-paired BLE peripherals).
+// behavior for OS-paired BLE peripherals).
 //
 // Current backend scope:
 //   • Scan-and-discover loop with deduplicated peripherals,
@@ -69,7 +69,7 @@ public:
     CoreBluetoothBleMidiCentral() {
         @autoreleasepool {
             delegate_ = [[PulpBleMidiDelegate alloc] initWithOwner:this];
-            // Initialise on the main dispatch queue per Apple's
+            // Initialize on the main dispatch queue per Apple's
             // recommendation; the delegate methods route work to our
             // mutex-protected state.
             manager_ = [[CBCentralManager alloc]

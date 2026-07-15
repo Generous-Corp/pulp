@@ -90,7 +90,8 @@ if(APPLE AND NOT PULP_IOS)
 endif()
 if(APPLE AND NOT PULP_IOS)
     # Foreign-framework coexistence (PAM WS-6 / G8): a raw non-Pulp NSWindow
-    # stands in for a JUCE editor sharing the process. Pins that the CPU
+    # stands in for any other framework's editor window sharing the process.
+    # Pins that the CPU
     # window host's idle pump keeps firing under a modal / event-tracking
     # run-loop mode (the NSRunLoopCommonModes fix in window_host_mac.mm) and
     # that Pulp's own-thread timer, audio-render thread, and UI hit-testing

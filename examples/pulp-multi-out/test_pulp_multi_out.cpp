@@ -151,7 +151,7 @@ TEST_CASE(
     proc.prepare(ctx);
 
     MultiOutHarness harness(256);
-    // Host leaves bus 0's aux neighbour (bus 1) disconnected: mark inactive with
+    // Host leaves bus 0's aux neighbor (bus 1) disconnected: mark inactive with
     // an empty buffer. The mapping stays index-aligned; voice 0 still lands on
     // bus 0, and the inactive bus is simply skipped.
     harness.out_views[1].info.active = false;

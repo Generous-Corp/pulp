@@ -111,7 +111,7 @@ export async function mountPulpUi(canvasEl, adapter, opts = {}) {
     // The canvas is styled `width:100%; aspect-ratio:8/5` and mounted in the same
     // tick it is appended. Chrome resolves that box on the first
     // getBoundingClientRect(); SAFARI DOES NOT — it hands back the element's
-    // INTRINSIC 300x150 default. Initialising the editor at 300px wide makes Yoga
+    // INTRINSIC 300x150 default. Initializing the editor at 300px wide makes Yoga
     // wrap the controls into a vertical column and the editor never reaches its
     // real size: a Safari user sees the knobs stacked and the editor "stuck
     // loading". Reported from a live page, 2026-07-12.

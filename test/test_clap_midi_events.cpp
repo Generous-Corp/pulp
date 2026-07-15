@@ -1,6 +1,6 @@
 // CLAP adapter inbound/outbound MIDI event coverage (issue-pending).
 //
-// This suite pins the behaviour added alongside
+// This suite pins the behavior added alongside
 // feature/clap-midi-cc-coverage:
 //
 //   Inbound:
@@ -3014,7 +3014,7 @@ TEST_CASE("Mixed CLAP_EVENT_MIDI2 + NOTE_ON: both reach UMP sidecar",
     // Both must appear in the UMP sidecar after process() returns. An
     // earlier shape of this test asserted the synthesis was skipped, but
     // assuming synthesis could be skipped silently dropped real-world note
-    // streams. This pins the corrected behaviour.
+    // streams. This pins the corrected behavior.
     g_pending_opts_mpe = false;
     g_pending_opts_ump = true;
     Harness h(make_capturing);
@@ -3046,7 +3046,7 @@ TEST_CASE("Mixed CLAP_EVENT_MIDI2 + NOTE_ON: both reach UMP sidecar",
     REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
     // UMP sidecar contains BOTH: the native MIDI2 packet (note 60) AND
     // a synthesised packet from the NOTE_ON (note 72). The earlier
-    // (buggy) behaviour produced size() == 1 here.
+    // (buggy) behavior produced size() == 1 here.
     REQUIRE(g_capturing->had_ump_input);
     REQUIRE(g_capturing->captured_ump.size() == 2);
     // Spec doesn't pin ordering between native and synthesised entries

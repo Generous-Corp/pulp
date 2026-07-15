@@ -1,4 +1,4 @@
-#include <pulp/audio/audio_thumbnail.hpp>
+#include <pulp/audio/waveform_overview.hpp>
 
 #include <cstring>
 #include <limits>
@@ -24,13 +24,13 @@ namespace pulp::audio {
 //           min_q7 : 1 byte  (int8)
 //           max_q7 : 1 byte  (int8)
 //
-// Bumping `kThumbnailDiskVersion` invalidates every existing on-disk
+// Bumping `kOverviewDiskVersion` invalidates every existing on-disk
 // cache entry; that is the contract.
 
 namespace {
 
-constexpr char     kThumbnailMagic[4] = {'P', 'T', 'H', 'M'};
-constexpr uint16_t kThumbnailDiskVersion = 1;
+constexpr char     kOverviewMagic[4] = {'P', 'W', 'O', 'V'};
+constexpr uint16_t kOverviewDiskVersion = 1;
 
 template <typename T>
 void append_le(std::vector<uint8_t>& out, T value) {
@@ -54,15 +54,15 @@ bool read_le(const uint8_t* data, std::size_t size, std::size_t& off, T& out) {
 
 }  // namespace
 
-std::vector<uint8_t> serialize_thumbnail(const AudioThumbnail& t) {
+std::vector<uint8_t> serialize_overview(const WaveformOverview& t) {
     const auto info = t.info();
     std::vector<uint8_t> out;
     // 4 (magic) + 2 (ver) + 4 + 8 + 4 + 4 + per-level overhead + peaks.
     out.reserve(26 + info.bytes_used + info.num_levels * 8);
     out.insert(out.end(),
-               reinterpret_cast<const uint8_t*>(kThumbnailMagic),
-               reinterpret_cast<const uint8_t*>(kThumbnailMagic) + 4);
-    append_le<uint16_t>(out, kThumbnailDiskVersion);
+               reinterpret_cast<const uint8_t*>(kOverviewMagic),
+               reinterpret_cast<const uint8_t*>(kOverviewMagic) + 4);
+    append_le<uint16_t>(out, kOverviewDiskVersion);
     append_le<uint32_t>(out, info.num_channels);
     append_le<uint64_t>(out, info.num_source_frames);
     append_le<uint32_t>(out, info.sample_rate);
@@ -81,14 +81,14 @@ std::vector<uint8_t> serialize_thumbnail(const AudioThumbnail& t) {
     return out;
 }
 
-std::optional<AudioThumbnail> deserialize_thumbnail(const uint8_t* data,
+std::optional<WaveformOverview> deserialize_overview(const uint8_t* data,
                                                     std::size_t size) {
     if (data == nullptr || size < 26) return std::nullopt;
-    if (std::memcmp(data, kThumbnailMagic, 4) != 0) return std::nullopt;
+    if (std::memcmp(data, kOverviewMagic, 4) != 0) return std::nullopt;
     std::size_t off = 4;
     uint16_t ver = 0;
     if (!read_le<uint16_t>(data, size, off, ver)) return std::nullopt;
-    if (ver != kThumbnailDiskVersion) return std::nullopt;
+    if (ver != kOverviewDiskVersion) return std::nullopt;
     uint32_t num_channels = 0;
     uint64_t num_frames = 0;
     uint32_t sample_rate = 0;
@@ -104,13 +104,13 @@ std::optional<AudioThumbnail> deserialize_thumbnail(const uint8_t* data,
     if (num_levels == 0 || num_levels > 32) return std::nullopt;
 
     // Header validation is complete; rebuild the exact serialized level
-    // hierarchy through AudioThumbnail's internal factory without re-decimating.
-    return AudioThumbnail::from_serialized_levels(
+    // hierarchy through WaveformOverview's internal factory without re-decimating.
+    return WaveformOverview::from_serialized_levels(
         num_channels, num_frames, sample_rate, num_levels,
         data, size, off);
 }
 
-std::optional<AudioThumbnail> AudioThumbnail::from_serialized_levels(
+std::optional<WaveformOverview> WaveformOverview::from_serialized_levels(
     uint32_t num_channels,
     uint64_t num_source_frames,
     uint32_t sample_rate,
@@ -118,7 +118,7 @@ std::optional<AudioThumbnail> AudioThumbnail::from_serialized_levels(
     const uint8_t* data,
     std::size_t size,
     std::size_t offset) {
-    AudioThumbnail t;
+    WaveformOverview t;
     t.num_channels_ = num_channels;
     t.num_source_frames_ = num_source_frames;
     t.sample_rate_ = sample_rate;
@@ -136,7 +136,7 @@ std::optional<AudioThumbnail> AudioThumbnail::from_serialized_levels(
                                * static_cast<std::size_t>(peaks_per_channel)
                                * 2u;
         if (off + need > size) return std::nullopt;
-        ThumbnailLevel lvl;
+        OverviewLevel lvl;
         lvl.samples_per_peak = samples_per_peak;
         lvl.peaks_per_channel = peaks_per_channel;
         lvl.peaks.resize(num_channels);

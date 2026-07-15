@@ -39,7 +39,7 @@
 ///
 /// All filtering happens in the time domain on coefficients that are
 /// sample-rate-invariant by construction: a half-band filter's
-/// transfer function depends only on the normalised frequency 0..Fs/2,
+/// transfer function depends only on the normalized frequency 0..Fs/2,
 /// so the same coefficients are correct at 44.1 kHz, 48 kHz, 96 kHz,
 /// or any other rate.
 ///

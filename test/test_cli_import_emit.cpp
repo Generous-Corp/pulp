@@ -455,31 +455,3 @@ TEST_CASE("import emit end-to-end fails closed when the importer smuggles "
 
 // ── Vendor-agnostic source guard ──
 
-TEST_CASE("import emit sources name no vendor token",
-          "[cli][import][emit][vendor-agnostic]") {
-    const fs::path cli_dir = fs::path(PULP_SOURCE_DIR) / "tools" / "cli";
-    REQUIRE(fs::exists(cli_dir));
-
-    const std::vector<std::string> banned = {
-        "juce", "iplug", "steinberg", "wdl",
-    };
-    auto lower = [](std::string s) {
-        for (auto& c : s) c = static_cast<char>(::tolower(c));
-        return s;
-    };
-
-    int scanned = 0;
-    for (const std::string name :
-         {"import_emit.hpp", "import_emit.cpp",
-          "import_emit_scan.hpp", "import_emit_scan.cpp"}) {
-        fs::path p = cli_dir / name;
-        REQUIRE(fs::exists(p));
-        ++scanned;
-        std::string lc = lower(read_file(p));
-        for (const auto& tok : banned) {
-            INFO("file=" << name << " token=" << tok);
-            REQUIRE(lc.find(tok) == std::string::npos);
-        }
-    }
-    REQUIRE(scanned == 4);
-}

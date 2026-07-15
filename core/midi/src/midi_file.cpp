@@ -254,7 +254,7 @@ std::optional<MidiFileData> read_midi_file(const std::string& path) {
                 continue;
             }
 
-            if (status == 0xF0 || status == 0xF7) {  // sysex: not modelled, but it
+            if (status == 0xF0 || status == 0xF7) {  // sysex: not modeled, but it
                 uint32_t len;                        // must be consumed EXACTLY or
                 if (!tc.varlen(len)) return std::nullopt;   // the parse desyncs
                 if (!tc.skip(len)) return std::nullopt;

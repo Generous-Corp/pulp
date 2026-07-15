@@ -316,7 +316,7 @@ TEST_CASE("WidgetBridge creates fader from JS", "[view][bridge]") {
     REQUIRE(dynamic_cast<Fader*>(w) != nullptr);
 }
 
-TEST_CASE("WidgetBridge setFaderSkin applies derived colours to the fader",
+TEST_CASE("WidgetBridge setFaderSkin applies derived colors to the fader",
           "[view][bridge][issue-3191]") {
     ScriptEngine engine;
     View root;

@@ -619,7 +619,7 @@ TEST_CASE("flipping Engine live, in both directions, is inaudible",
 // leaves a real convolver's overlap-save tail genuinely wrong for one IR length
 // (physics, not a bug), which would mask the alignment property under test. Every
 // delivered block must carry the marker of the block that is exactly L old — never
-// a neighbour's.
+// a neighbor's.
 TEST_CASE("a stalled worker that forces dropped inputs stays aligned",
           "[super-convolver][web-gpu]") {
     constexpr int kBlocks = 40;

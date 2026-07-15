@@ -1,7 +1,7 @@
 // macOS hover delivery for an embedded/hosted PluginViewHost.
 //
-// A hosted editor (a DAW, or a JUCE/iPlug2 embed) parents Pulp's child NSView
-// into a window it owns. The NSView installs a hover NSTrackingArea carrying
+// A hosted editor — a DAW, or any existing plugin embedding a Pulp view —
+// parents Pulp's child NSView into a window it owns. The NSView installs a hover NSTrackingArea carrying
 // NSTrackingMouseMoved, but AppKit only fans -mouseMoved: out to a tracking
 // area's owner when the window itself accepts mouse-moved events — and NSWindow
 // defaults that flag to NO. Nothing on the host side sets it, so -mouseMoved:
@@ -79,8 +79,8 @@ TEST_CASE("hosted plugin view opts its window into mouse-moved delivery",
         // events — this is the AppKit default the bug rode on.
         REQUIRE_FALSE(window.acceptsMouseMovedEvents);
 
-        // Parent Pulp's child NSView into the host window, the same operation a
-        // DAW / JUCE NSViewComponent performs.
+        // Parent Pulp's child NSView into the host window — the same
+        // addSubview: a DAW (or any embedding framework's NSView wrapper) does.
         host->attach_to_parent((__bridge void*) window.contentView);
         REQUIRE(host->is_attached());
 

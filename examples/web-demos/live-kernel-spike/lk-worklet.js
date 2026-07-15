@@ -94,7 +94,7 @@ class LkProcessor extends AudioWorkletProcessor {
     this.ready = false;
     // A QUEUE of pending edits (not a single slot): live playing sends bursts of
     // note pokes interleaved with patch edits, and each must land — dropping one
-    // (the old single-slot behaviour) would swallow a note or an edit. Drained in
+    // (the old single-slot behavior) would swallow a note or an edit. Drained in
     // order at the top of the next process() so each is timestamped at the exact
     // quantum it becomes audible (edit->sound latency on the audio clock).
     this.pendingEdits = [];

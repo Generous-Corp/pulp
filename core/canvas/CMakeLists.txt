@@ -9,6 +9,11 @@ target_include_directories(pulp-canvas
 
 target_sources(pulp-canvas PRIVATE
     src/color.cpp
+    # Path is the retained vector-path value type (build once, draw every
+    # frame) that the immediate-mode Canvas builder cannot express. It is
+    # Skia-free on purpose: it is a value, so it must exist in every build
+    # config, including the ones with no GPU backend at all.
+    src/path.cpp
     src/recording_canvas.cpp
     src/svg.cpp
     # Lottie playback. Always compiled; the body is a no-op unless PULP_LOTTIE
@@ -90,6 +95,9 @@ if(APPLE)
         platform/mac/cg_canvas.mm
         platform/mac/cg_canvas_gradients.mm
         platform/mac/cg_canvas_shadow.mm
+        # Retained Path draws + handle-based compositing layers (offscreen
+        # CGBitmapContexts sealed to CGImageRefs that outlive the frame).
+        platform/mac/cg_canvas_path.mm
     )
     target_link_libraries(pulp-canvas PRIVATE
         "-framework CoreGraphics"
@@ -112,6 +120,9 @@ if(PULP_HAS_SKIA)
         src/skia_canvas_mask.cpp
         src/skia_canvas_gradients.cpp
         src/skia_canvas_box_shadow.cpp
+        # Retained Path draws + handle-based compositing layers (offscreen
+        # SkSurfaces sealed to SkImages that outlive the frame).
+        src/skia_canvas_path.cpp
         src/box_shadow_cache.cpp
         src/svg_dom_cache.cpp
         src/skia_canvas_opacity.cpp
@@ -186,6 +197,42 @@ if(PULP_HAS_SKIA)
     endif()
     target_compile_definitions(pulp-canvas PUBLIC PULP_HAS_SKIA=1)
     target_include_directories(pulp-canvas PRIVATE ${SKIA_INCLUDE_DIRS})
+
+    # skresources — the module that owns skresources::ResourceProvider and its
+    # DataURIResourceProviderProxy. SkSVGDOM resolves <image href="..."> ONLY
+    # through a resource provider (SkSVGImage::LoadImage returns early on a null
+    # one), so without it every <image> element — including the base64 data URIs
+    # a design-tool SVG export uses for its bitmap assets — renders BLANK.
+    # src/svg_dom_cache.cpp installs the data-URI proxy when this is available.
+    #
+    # Detection is a real try-link, not a header or archive check: where the
+    # symbols live varies by slice. The pinned mac/linux/windows bundles compile
+    # the skresources objects INTO libsvg.a (there is no libskresources.a at
+    # all), while other slices ship a standalone libskresources.a — and the wasm
+    # slice ships neither (same missing-skjson/skresources gap that disables
+    # skottie there, see tools/cmake/FindSkia.cmake). A try-link is the only
+    # probe that gets all three right.
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_LIBRARIES skia::skia)
+    set(CMAKE_REQUIRED_INCLUDES ${SKIA_INCLUDE_DIRS})
+    check_cxx_source_compiles("
+        #include \"include/core/SkFontMgr.h\"
+        #include \"modules/skresources/include/SkResources.h\"
+        int main() {
+            auto rp = skresources::DataURIResourceProviderProxy::Make(
+                nullptr, skresources::ImageDecodeStrategy::kPreDecode);
+            return rp ? 0 : 1;
+        }
+    " PULP_SKRESOURCES_LINKS)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    unset(CMAKE_REQUIRED_INCLUDES)
+    if(PULP_SKRESOURCES_LINKS)
+        target_compile_definitions(pulp-canvas PUBLIC PULP_HAS_SKRESOURCES=1)
+        message(STATUS "Pulp: SVG <image> data-URI decoding enabled (skresources links)")
+    else()
+        message(STATUS "Pulp: this Skia bundle cannot link skresources — SVG "
+                       "<image> elements (incl. base64 data URIs) render blank")
+    endif()
 
     # Opt-in Lottie playback (PULP_LOTTIE). skottie/sksg ship inside the Skia
     # bundle and are already linked via skia::skia's glob, and the skottie

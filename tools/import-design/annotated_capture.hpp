@@ -5,17 +5,17 @@
 // The faithful-vector Figma lane (make_catalog_component.py + the Figma plugin's
 // scene export) works because the SOURCE carries semantics: typed nodes, node ids,
 // component names. A bare SVG capture — a screenshot vectorized, a hand-authored
-// asset, or a JUCE UI screenshot run through an extractor — has NONE of that: it
+// asset, or a UI capture run through an extractor — has NONE of that: it
 // is just paths and rects. This lane is the no-metadata analog: accept a bare
 // captured SVG plus a SIDECAR MANIFEST that supplies the missing semantics
 // (per-element selector/heuristic, kind, geometry, needle path, host-param key),
 // and generate the same artifacts the Figma path emits — a populated
 // DesignFrameElement table, a DesignFrameView subclass stub, and the wiring lines.
 //
-// The sidecar schema is intentionally aligned with pulp-import-juce's
-// ui_manifest.json so a JUCE UI extractor (component-type → kind, bounds →
-// geometry, parameterID → param_key) can emit a manifest this lane consumes
-// directly. Fields:
+// The sidecar schema is deliberately generic, so that ANY external UI extractor
+// — whatever it extracted FROM — can emit a manifest this lane consumes directly:
+// a widget kind, a bounding box, and a parameter key are all it needs to supply.
+// Fields:
 //
 //   {
 //     "name":  "Reverb Panel",           // catalog display name

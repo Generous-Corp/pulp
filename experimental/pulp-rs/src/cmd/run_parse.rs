@@ -30,8 +30,8 @@
 //! - `--` — everything after this is `user_pass_through` (verbatim
 //!   forwarding to the launched binary).
 //!
-//! Anything else that begins with `-` and isn't recognised becomes
-//! `user_pass_through` (legacy permissive behaviour matching the C++
+//! Anything else that begins with `-` and isn't recognized becomes
+//! `user_pass_through` (legacy permissive behavior matching the C++
 //! parser).
 
 /// Parsed result of a `pulp-rs run` invocation. Mirrors C++
@@ -73,7 +73,7 @@ pub struct RunOptions {
     pub audio_capture_frames: i32,
 
     /// Args explicitly forwarded by the user with `-- ...`, plus any
-    /// unknown flags (legacy permissive behaviour).
+    /// unknown flags (legacy permissive behavior).
     pub user_pass_through: Vec<String>,
 }
 

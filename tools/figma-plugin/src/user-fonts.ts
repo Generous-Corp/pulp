@@ -1,7 +1,7 @@
 // User-supplied font cache for the drag-drop escape hatch.
 //
 // The Figma plugin API intentionally does not expose font byte access (see
-// the runtime font-catalogue contract). Users with non-system fonts (custom
+// the runtime font-catalog contract). Users with non-system fonts (custom
 // foundry faces, restricted-license families like Clash Grotesk) supply the
 // `.ttf` / `.otf` file via a drag-drop zone in the plugin UI. The UI reads
 // bytes via FileReader and forwards them to the sandbox; this module is the
@@ -56,7 +56,7 @@ export class UserFontCache {
   /// Throws if the bytes don't look like a real font file. Two gates:
   ///   1. Bytes must contain at least one full SFNT/WOFF header
   ///      (4 magic + 8 table-count region = 12 bytes minimum). A 0-byte
-  ///      or under-12-byte drop is rejected here; the previous behaviour
+  ///      or under-12-byte drop is rejected here; the previous behavior
   ///      was to fall through to filename-based mime detection, which
   ///      silently propagated an empty / corrupt blob into the zip.
   ///   2. The bytes' SFNT magic OR a recognisable font-file extension

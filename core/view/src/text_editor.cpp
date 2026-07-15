@@ -1,4 +1,5 @@
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/widget_metrics.hpp>
 #include <pulp/view/context_menu.hpp>
 #include <pulp/view/frame_clock.hpp>  // caret-blink subscription
 #include "text_edit_model.hpp"
@@ -570,7 +571,43 @@ void TextEditor::advance_caret_blink(float dt) {
     caret_blink_.advance(dt);
 }
 
+float TextEditor::intrinsic_height() const {
+    EdgeInsets pad{};
+    const float stock_pad = std::max(9.0f, border_width() + 7.0f);
+    pad = EdgeInsets{stock_pad * 0.5f, stock_pad, stock_pad * 0.5f, stock_pad};
+    if (auto* m = effective_metrics(); m != nullptr) {
+        EdgeInsets from_delegate;
+        if (m->text_field_insets(from_delegate, const_cast<TextEditor&>(*this)))
+            pad = from_delegate;
+    }
+    if (has_own_insets_) pad = insets_;
+
+    float size = font_size_;
+    if (auto* m = effective_metrics(); m != nullptr) {
+        FontSpec f;
+        if (m->text_field_font(f, const_cast<TextEditor&>(*this)) && f.size > 0.0f)
+            size = f.size;
+    }
+    // A conservative single-line box: the em size plus the usual ascender +
+    // descender allowance, then the frame.
+    const float line = std::ceil(size * 1.35f);
+    return line + pad.vertical();
+}
+
+float TextEditor::caret_width() const {
+    // Precedence mirrors the insets: an explicit per-widget width wins, then an
+    // installed metrics delegate, then the stock stroke.
+    if (caret_width_ > 0.0f) return caret_width_;
+    if (auto* m = effective_metrics(); m != nullptr) {
+        float from_delegate = 0.0f;
+        if (m->caret_width(from_delegate, const_cast<TextEditor&>(*this)) && from_delegate > 0.0f)
+            return from_delegate;
+    }
+    return 1.5f;
+}
+
 bool TextEditor::should_paint_caret() const {
+    if (!caret_visible_) return false;
     if (!has_focus()) return false;
     // A selection already marks the insertion point, and a caret strobing at one
     // end of it reads as noise.
@@ -976,6 +1013,7 @@ void TextEditor::on_focus_changed(bool gained) {
         clear_caret_blink_subscription();
         caret_blink_.reset();
         request_repaint();  // clear the caret now that focus is lost
+        if (on_focus_lost) on_focus_lost(text_);
     }
 }
 

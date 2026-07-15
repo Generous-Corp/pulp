@@ -67,7 +67,7 @@ struct Manifest {
 };
 
 // Parse the EmissionManifest result JSON (the `result` object the SPI runner
-// re-serialised). Pure — no IO. On a structural problem, returns a Manifest
+// re-serialized). Pure — no IO. On a structural problem, returns a Manifest
 // with ok==false and parse_error set.
 Manifest parse_manifest(const std::string& result_json);
 

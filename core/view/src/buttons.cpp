@@ -1,4 +1,5 @@
 #include <pulp/view/buttons.hpp>
+#include <pulp/view/widget_painter.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/text_overflow.hpp>
 #include <pulp/view/theme_contrast.hpp>
@@ -11,6 +12,29 @@ namespace pulp::view {
 void TextButton::paint(canvas::Canvas& canvas) {
     float w = bounds().width, h = bounds().height;
     float r = 6.0f;
+
+    // A paint delegate (widget_painter.hpp) may replace the face, the label, or
+    // both — the two hooks are independent, so a skin can restyle the background
+    // and keep the stock text, or the reverse. Both decline by default.
+    WidgetPainter* delegate = effective_painter();
+    ButtonPaintState ps;
+    if (delegate != nullptr) {
+        ps.bounds = local_bounds();
+        ps.enabled = enabled_;
+        ps.hovered = hovered_;
+        ps.pressed = pressed_;
+        ps.focused = has_focus();
+        ps.text = label_;
+        ps.background = (style_ == Style::primary)
+            ? resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166))
+            : resolve_color("bg.elevated", canvas::Color::rgba8(60, 60, 70));
+    }
+    const bool skin_bg = delegate != nullptr && delegate->paint_button_background(canvas, ps, *this);
+    const bool skin_text = delegate != nullptr && delegate->paint_button_text(canvas, ps, *this);
+    if (skin_bg) {
+        if (!skin_text) paint_label(canvas);
+        return;
+    }
 
     // Background. NOTE: Color::rgba() takes 0–1 floats; these are 0–255 channel values and
     // must use rgba8() — rgba() clamps every channel to 1.0 and paints the button solid
@@ -42,7 +66,12 @@ void TextButton::paint(canvas::Canvas& canvas) {
         canvas.stroke_rounded_rect(0, 0, w, h, r);
     }
 
-    // Label colour per variant: primary uses on-accent (ink) text; ghost uses
+    if (!skin_text) paint_label(canvas);
+}
+
+void TextButton::paint_label(canvas::Canvas& canvas) {
+    const float w = bounds().width, h = bounds().height;
+    // Label color per variant: primary uses on-accent (ink) text; ghost uses
     // accent text; secondary uses the standard primary text.
     auto text_color =
         !enabled_ ? resolve_color("text.disabled", canvas::Color::rgba8(120, 120, 130))
@@ -60,11 +89,26 @@ void TextButton::paint(canvas::Canvas& canvas) {
 }
 
 void TextButton::on_mouse_down(Point) {
-    if (enabled_ && on_click) on_click();
+    if (!enabled_) return;
+    pressed_ = true;
+    request_repaint();
+    if (on_click) on_click();
+}
+
+// The pressed face was unreachable: `pressed_` was read by paint() but nothing
+// ever wrote it, so a button never rendered its down state. Latch it on press
+// and clear it on release or on leaving the button with the pointer still down.
+void TextButton::on_mouse_up(Point) {
+    if (!pressed_) return;
+    pressed_ = false;
+    request_repaint();
 }
 
 void TextButton::on_mouse_enter() { hovered_ = true; }
-void TextButton::on_mouse_leave() { hovered_ = false; }
+void TextButton::on_mouse_leave() {
+    hovered_ = false;
+    pressed_ = false;
+}
 
 // ── HyperlinkButton ─────────────────────────────────────────────────────
 

@@ -133,7 +133,7 @@ export type InteractiveElement = {
    */
   source_node_id?: string;
   /**
-   * Host-parameter binding key for a geometry-detected control (e.g. "filter.cutoff"). Maps to IRNode.interactive_elements[].param_key → DesignFrameElement::param_key; DesignFrameView routes gestures on it to the framework-agnostic HostParamSurface (JUCE APVTS / iPlug2 / StateStore). Absent for an unbound knob.
+   * Host-parameter binding key for a geometry-detected control (e.g. "filter.cutoff"). Maps to IRNode.interactive_elements[].param_key → DesignFrameElement::param_key; DesignFrameView routes gestures on it to the framework-agnostic HostParamSurface, so the view runs unchanged against whatever parameter system the host provides. Absent for an unbound knob.
    */
   param_key?: string;
 };
@@ -206,7 +206,7 @@ export interface PulpFigmaPluginExport {
    */
   diagnostics?: Diagnostic[];
   /**
-   * Deduplicated catalogue of every font (family + style + weight + italic) referenced by text nodes in the export. Drives Pulp's runtime font resolution: the consumer (Skia SkFontMgr) looks up each entry against system fonts, falls back to Pulp's bundled OFL set (Inter / Roboto / etc.), and emits a `recognition_unavailable` diagnostic when neither resolves. Note: the Figma plugin API intentionally does NOT expose font binaries, so `asset_id` stays unset for plain captures; it's populated only when the plugin's drag-drop escape hatch (issue follow-up) has carried a user-supplied TTF/OTF in `asset_manifest.assets`.
+   * Deduplicated catalog of every font (family + style + weight + italic) referenced by text nodes in the export. Drives Pulp's runtime font resolution: the consumer (Skia SkFontMgr) looks up each entry against system fonts, falls back to Pulp's bundled OFL set (Inter / Roboto / etc.), and emits a `recognition_unavailable` diagnostic when neither resolves. Note: the Figma plugin API intentionally does NOT expose font binaries, so `asset_id` stays unset for plain captures; it's populated only when the plugin's drag-drop escape hatch (issue follow-up) has carried a user-supplied TTF/OTF in `asset_manifest.assets`.
    */
   font_family_assets?: FontFamilyAsset[];
   root: Node;
@@ -263,7 +263,7 @@ export interface Diagnostic {
   property?: string;
 }
 /**
- * One row in the deduplicated font catalogue carried on `font_family_assets`. Populated by extractScene().collectFontFamilyAssets — every (family, style, weight, italic) tuple referenced by a text node appears exactly once, in first-encounter order.
+ * One row in the deduplicated font catalog carried on `font_family_assets`. Populated by extractScene().collectFontFamilyAssets — every (family, style, weight, italic) tuple referenced by a text node appears exactly once, in first-encounter order.
  */
 export interface FontFamilyAsset {
   /**
@@ -321,7 +321,7 @@ export interface Node {
    */
   content?: string;
   /**
-   * Recognised Pulp audio-widget kind. Emitted at the node root when serialize.ts sees node.library_widget_kind. The C++ parser maps this onto IRNode.audio_widget (enum). Equal to figma.library_widget_kind when present.
+   * Recognized Pulp audio-widget kind. Emitted at the node root when serialize.ts sees node.library_widget_kind. The C++ parser maps this onto IRNode.audio_widget (enum). Equal to figma.library_widget_kind when present.
    */
   audio_widget?: "knob" | "fader" | "meter" | "xy_pad" | "waveform" | "spectrum";
   /**
@@ -451,7 +451,7 @@ export interface Layout {
   height_mode?: "fixed" | "hug" | "fill";
 }
 /**
- * Figma-specific identity / provenance, packed into the node's `figma` sub-object by serialize.ts. The C++ parser reads figma.library_widget_kind / figma.component_key as needed. The six positional fields below are always present; the component/library fields are emitted only when the node is an instance / recognised library widget.
+ * Figma-specific identity / provenance, packed into the node's `figma` sub-object by serialize.ts. The C++ parser reads figma.library_widget_kind / figma.component_key as needed. The six positional fields below are always present; the component/library fields are emitted only when the node is an instance / recognized library widget.
  */
 export interface FigmaMetadata {
   parent_id: string | null;
@@ -468,7 +468,7 @@ export interface FigmaMetadata {
   main_component_id?: string;
   main_component_name?: string;
   /**
-   * Recognised Pulp widget kind, mirrors the node-root audio_widget field.
+   * Recognized Pulp widget kind, mirrors the node-root audio_widget field.
    */
   library_widget_kind?: "knob" | "fader" | "meter" | "xy_pad" | "waveform" | "spectrum";
   library_version?: string;

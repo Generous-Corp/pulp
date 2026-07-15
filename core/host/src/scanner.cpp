@@ -29,7 +29,7 @@ namespace {
 // We only support the common manifest.ttl shape:
 //   <URI> a lv2:Plugin ;  ...
 // This matches LV2's canonical manifest pattern. If we can't find a URI
-// stanza we fall back to the previous behaviour (directory stem) so the
+// stanza we fall back to the previous behavior (directory stem) so the
 // scanner stays best-effort.
 std::string parse_lv2_plugin_uri(const std::string& bundle_dir) {
     std::error_code ec;

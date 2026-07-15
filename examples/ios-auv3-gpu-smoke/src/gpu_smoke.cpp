@@ -55,7 +55,7 @@ public:
         canvas.set_fill_color(pulp::canvas::Color::rgba(0.04f, 0.06f, 0.12f));
         canvas.fill_rect(r.x, r.y, r.width, r.height);
 
-        // One rotating coloured quad in the centre. Cheap to draw, but
+        // One rotating colored quad in the center. Cheap to draw, but
         // animates every frame so a Metal frame capture from Xcode shows
         // real command buffers landing on the iPad GPU.
         const float cx = r.x + r.width * 0.5f;

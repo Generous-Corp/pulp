@@ -59,7 +59,7 @@ TEST_CASE("PluginScanner bundle detection", "[host][scanner]") {
     REQUIRE_FALSE(PluginScanner::is_plugin_bundle("MyPlugin.dll", PluginFormat::VST3));
 }
 
-TEST_CASE("AU / AUv3 post-scan narrowing keeps exact flavour",
+TEST_CASE("AU / AUv3 post-scan narrowing keeps exact flavor",
           "[host][scanner][issue-500]") {
     // Regression for issue #500: `pulp scan` advertised `--format au`
     // and `--format auv3` as mutually-exclusive filters, but both values

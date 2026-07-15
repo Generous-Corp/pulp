@@ -302,10 +302,10 @@ struct DBus::Impl {
         ctx.member_    = member ? member : "";
         ctx.sender_    = sender ? sender : "";
 
-        const bool recognised = it->second ? it->second(ctx) : false;
+        const bool recognized = it->second ? it->second(ctx) : false;
 
         int result = kHandlerHandled;
-        if (!recognised) {
+        if (!recognized) {
             // Decline → UnknownMethod error reply.
             void* err = self->msg_new_error(
                 msg, "org.freedesktop.DBus.Error.UnknownMethod",
@@ -320,7 +320,7 @@ struct DBus::Impl {
             self->msg_unref(ctx.reply_msg_);
             ctx.reply_msg_ = nullptr;
         } else {
-            // Recognised but produced no body → empty success reply.
+            // Recognized but produced no body → empty success reply.
             void* ret = self->msg_new_method_return(msg);
             if (ret) {
                 self->conn_send(self->conn, ret, nullptr);

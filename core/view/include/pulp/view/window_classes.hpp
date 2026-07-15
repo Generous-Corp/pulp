@@ -15,7 +15,7 @@
 //     buttons. Dispatches a `DialogResult` (`ok` / `cancel` / `closed`) to
 //     a user-supplied completion handler.
 //
-//   - `AlertWindow` — a simple titled message + N labelled buttons + an
+//   - `AlertWindow` — a simple titled message + N labeled buttons + an
 //     icon hint (info / warning / error / question). Convenience overloads
 //     for the three most common shapes: `info()`, `confirm()`, `error()`.
 //

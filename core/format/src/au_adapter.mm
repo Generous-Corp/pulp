@@ -154,7 +154,7 @@ struct AUBridge {
     // the audio thread. Reset with clear()+clear_sysex() each block (clear()
     // empties only the event list; clear_sysex() recycles the pooled sysex
     // payloads). Matches the VST3/CLAP adapters. Capacities below are shared
-    // with VST3 (vst3_adapter.cpp) so behaviour matches across formats.
+    // with VST3 (vst3_adapter.cpp) so behavior matches across formats.
     static constexpr std::size_t kMaxEventsPerBlock = 2048;
     static constexpr std::size_t kMaxSysexPerBlock = 64;
     static constexpr std::size_t kMaxSysexPayloadBytes = 512;

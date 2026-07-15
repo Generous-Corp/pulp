@@ -70,7 +70,7 @@ enum {
 };
 
 /* ───────────────────────── Capability flags ──────────────────────────
- * Decision 5/11: optional behaviour is negotiated by additive bits, never by
+ * Decision 5/11: optional behavior is negotiated by additive bits, never by
  * widening a required struct. A host ANDs what it needs against what the core
  * reports in the descriptor. */
 typedef uint32_t pulp_native_caps;
@@ -323,7 +323,7 @@ typedef struct pulp_native_descriptor_v1 {
 } pulp_native_descriptor_v1;
 
 /* ───────────────────────── Host services (decision 12) ────────────────
- * Callbacks the host provides to the core. Each is explicitly labelled
+ * Callbacks the host provides to the core. Each is explicitly labeled
  * RT-callable or NON-RT-ONLY. Calling a NON-RT-ONLY callback from process() is
  * a contract violation the RT-safety hook traps. `alloc`/`free` here are the
  * HOST allocator — the core must NOT pass host-allocated pointers to its own

@@ -34,7 +34,7 @@ bool write_text(const fs::path& path, const std::string& body) {
     // Atomic write: stage to a sibling temp file, fully flush it, then rename it
     // onto the destination so a crash / power loss / full disk mid-write never
     // truncates an existing file (e.g. the content index). Mirrors
-    // PropertiesFile::save_to and the skp_capture / audio_thumbnail_cache
+    // PropertiesFile::save_to and the skp_capture / waveform_overview_cache
     // temp-then-rename convention.
     fs::path tmp = path;
     tmp += ".tmp";

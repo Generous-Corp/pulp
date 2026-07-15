@@ -30,7 +30,7 @@ import metrics as M  # noqa: E402
 RATIOS = [0.75, 0.85, 1.15, 1.5]
 FILES = [
     "clickloop_120bpm.wav",  # transients (onset timing / pre-echo)
-    "sine_440_mono.wav",     # tonal (length / null behaviour)
+    "sine_440_mono.wav",     # tonal (length / null behavior)
     "logsweep_20_20k.wav",   # broadband
 ]
 

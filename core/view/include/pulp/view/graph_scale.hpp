@@ -45,7 +45,7 @@ struct LogFrequencyScale {
     std::vector<float> ticks() const;
 
     /// True for decade boundaries (100, 1k, 10k) — the lines conventionally
-    /// drawn heavier and labelled.
+    /// drawn heavier and labeled.
     static bool is_major_tick(float hz);
 };
 

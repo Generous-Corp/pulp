@@ -320,7 +320,7 @@ private:
         }
     }
     // Scroll wheel / two-finger: vertical -> zoom around the cursor, horizontal
-    // -> pan. Cursor-centred zoom keeps the sample under the pointer fixed.
+    // -> pan. Cursor-centered zoom keeps the sample under the pointer fixed.
     void handle_wheel(const view::MouseEvent& e) {
         auto b = local_bounds();
         if (b.width <= 0 || total_samples_ <= 0) return;
@@ -1097,7 +1097,7 @@ public:
         // to correct a doubled/halved detection. We force a WHOLE-BAR count — a
         // tempo sampler loops on the bar, so a non-integer-bar loop (e.g. 2.5 bars)
         // could never tile a DAW's bar grid. The host/reference tempo only resolves
-        // which octave/neighbour is closest; it never overrides the content's bar
+        // which octave/neighbor is closest; it never overrides the content's bar
         // count with a far-off one (a real 3-bar loop stays 3 bars).
         const double est_bars = dur * analyzer_bpm / 60.0 / kBeatsPerBar;
         if (est_bars <= 0.0) return analyzer_bpm;
@@ -1105,7 +1105,7 @@ public:
         // Whole-bar candidates around the analyzer's estimate, plus octave
         // neighbours (x2 / /2) to correct a doubled/halved detection. The eps pad
         // keeps a genuine integer estimate (e.g. 2.999 bars) from spuriously also
-        // offering its neighbour, while a truly ambiguous estimate (e.g. 2.5 bars)
+        // offering its neighbor, while a truly ambiguous estimate (e.g. 2.5 bars)
         // DOES offer both 2 and 3 so the host/reference tempo can pick the nearer.
         constexpr double kEps = 0.06;
         const long lo = std::max<long>(1, static_cast<long>(std::floor(est_bars + kEps)));
@@ -1532,8 +1532,8 @@ public:
             // edit affordance. A small theme override recolors the editor's text and
             // keeps selected glyphs legible (selected text is drawn in bg.primary).
             view::Theme th;
-            th.colors["text.primary"]   = teal;     // idle + caret colour
-            th.colors["bg.primary"]     = bg900;    // selected-glyph colour (on the highlight)
+            th.colors["text.primary"]   = teal;     // idle + caret color
+            th.colors["bg.primary"]     = bg900;    // selected-glyph color (on the highlight)
             th.colors["accent.primary"] = tealSoft; // selection highlight (soft teal)
             edit->set_theme(th);
             edit->set_background_color(bg900);

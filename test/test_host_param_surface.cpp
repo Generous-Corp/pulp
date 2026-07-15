@@ -5,7 +5,9 @@
 //     and action routing to HostActionSurface.
 //   - A framework-agnostic FakeHostParamSurface proves a view binds against the
 //     interface, not the StateStore concretely (the "port once, three hosts"
-//     ratchet, exercised here with a fake stand-in for the JUCE/iPlug backings).
+//     ratchet). The fake stands in for any non-Pulp parameter store a host or
+//     an existing plugin codebase brings with it: if the view only ever touches
+//     HostParamSurface, that store can be swapped without touching the view.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
@@ -244,11 +246,11 @@ TEST_CASE("DesignFrameView routes user gestures to the surface when enabled",
 }
 
 namespace {
-// A foreign-host adapter (a JUCE/iPlug2 fork or a headless QA harness) subclasses
-// DesignFrameView to drive the editor from its own automation layer, calling the
-// protected emit_* funnel so synthetic input travels the SAME path a pointer
-// gesture does. Making emit_* protected upstream removes the need to patch the
-// header downstream.
+// A foreign-host adapter — an existing plugin codebase embedding a Pulp editor,
+// or a headless QA harness — subclasses DesignFrameView to drive the editor from
+// its own automation layer, calling the protected emit_* funnel so synthetic
+// input travels the SAME path a pointer gesture does. emit_* is protected (not
+// private) precisely so that adapter never has to patch the header to get in.
 class ForeignHostDrivenFrameView : public DesignFrameView {
 public:
     using DesignFrameView::DesignFrameView;
@@ -543,4 +545,92 @@ TEST_CASE("DesignFrameView forwards action clicks to the host action channel",
         REQUIRE(actions.actions[0].first == "load_preset");
         REQUIRE(actions.actions[0].second == "{}");
     }
+}
+
+// ── Element metadata a binder needs to map a control onto a host parameter ────
+// A choice control's normalized value is selected_index / (option_count - 1). A
+// binder that cannot read the option count cannot map that value onto a host
+// parameter's own step count — a 3-option control reports 0, 0.5, 1.0 and a
+// binder guessing "2 options" would emit 0, 1, 1. option_count is the missing
+// denominator; is_discrete is the flag that says a denominator exists at all.
+TEST_CASE("element_option_count exposes a choice control's denominator",
+          "[view][host-param][design-import][frame]") {
+    const std::string svg =
+        R"(<svg width="200" height="100"><rect x="0" y="0" width="200" height="100"/></svg>)";
+
+    DesignFrameElement knob;   // continuous
+    knob.kind = DesignFrameElement::Kind::knob;
+    knob.x = 0; knob.y = 0; knob.w = 20; knob.h = 20;
+    knob.cx = 10; knob.cy = 10; knob.hit_radius = 10.0f;
+    knob.param_key = "cutoff";
+
+    DesignFrameElement tabs;   // 3-position choice control
+    tabs.kind = DesignFrameElement::Kind::tab_group;
+    tabs.x = 30; tabs.y = 0; tabs.w = 90; tabs.h = 20;
+    tabs.options = {"LP", "BP", "HP"};
+    tabs.param_key = "mode";
+
+    DesignFrameElement sw;     // toggle: 2 positions, no options list
+    sw.kind = DesignFrameElement::Kind::toggle;
+    sw.x = 130; sw.y = 0; sw.w = 30; sw.h = 20;
+    sw.param_key = "bypass";
+
+    DesignFrameView dfv(svg, {knob, tabs, sw}, 0, 0, 200, 100);
+
+    CHECK_FALSE(dfv.element_is_discrete(0));
+    CHECK(dfv.element_option_count(0) == 0);      // continuous: no denominator
+
+    CHECK(dfv.element_is_discrete(1));
+    CHECK(dfv.element_option_count(1) == 3);      // <-- the wire
+
+    CHECK(dfv.element_is_discrete(2));
+    CHECK(dfv.element_option_count(2) == 2);      // a toggle is off/on
+
+    // Out of range is inert.
+    CHECK(dfv.element_option_count(99) == 0);
+    CHECK_FALSE(dfv.element_is_discrete(-1));
+
+    // And the count really IS the denominator the element normalizes against:
+    // option i of 3 maps to i/2, not i/(some guess).
+    dfv.set_element_value(1, 1.0f);
+    CHECK(dfv.element_value(1) == Catch::Approx(1.0f));
+    dfv.set_element_value(1, 0.5f);
+    CHECK(dfv.element_value(1) == Catch::Approx(0.5f));   // middle of 3 == index 1
+}
+
+TEST_CASE("routing on TOP of a writing binder double-writes — the documented hazard",
+          "[view][host-param][issue-5230]") {
+    // This test does not assert a bug; it pins the contract that makes the
+    // OFF-by-default matter.
+    //
+    // on_element_changed keeps firing when routing is on. For a consumer that
+    // merely OBSERVES, that is free. For the existing binder path — which
+    // forwards on_element_changed into the host's parameter store itself — it is
+    // a double write: the surface sends the value, and then the binder sends it
+    // again. The host sees a doubled automation write and a duplicated gesture
+    // bracket.
+    //
+    // A view picks ONE path. If this test ever starts reporting a single write
+    // with both wired, the funnel has grown a dedupe and the header comment
+    // telling people to choose is now wrong.
+    ForeignHostDrivenFrameView dfv = make_driven_single_knob("gain");
+    dfv.set_bounds({0, 0, 100, 100});
+
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.0;
+    dfv.set_host_params(&params);
+    dfv.route_changes_to_host_params(true);          // path A: the surface
+
+    // path B: a legacy binder that ALSO writes to the same host.
+    int binder_writes = 0;
+    dfv.on_element_changed = [&](int, float) { ++binder_writes; };
+
+    dfv.drive_gesture_begin(0);
+    dfv.drive_value(0, 0.75f);
+    dfv.drive_gesture_end(0);
+
+    // Both paths carried the same gesture. Two writes reach the host for one
+    // user movement — which is exactly why you must not wire both.
+    CHECK(params.set_calls == 1);      // the surface wrote once...
+    CHECK(binder_writes == 1);         // ...and the binder wrote once MORE
 }

@@ -14,8 +14,8 @@
 namespace pulp::state {
 
 /// Configuration for an ExternalBinding: the getter/setter that back a UI
-/// control whose value is NOT a StateStore parameter — e.g. a host-side APVTS
-/// parameter in an embedding JUCE app, or a computed/derived value.
+/// control whose value is NOT a StateStore parameter — e.g. a parameter owned
+/// by an embedding host's own parameter tree, or a computed/derived value.
 ///
 /// All callbacks are invoked on the UI thread only — never the audio thread.
 struct ExternalBindingConfig {

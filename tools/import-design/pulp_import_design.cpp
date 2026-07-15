@@ -59,7 +59,7 @@ namespace {
 // build). For the fader/meter skin sampler we need actual pixels, so decode
 // here using miniz (already linked) for the common 8-bit, non-interlaced case.
 // Returns RGBA8 row-major; empty on any unsupported/failed path (caller then
-// skips skin derivation). Supports colour types 2 (RGB), 6 (RGBA), and 0/4
+// skips skin derivation). Supports color types 2 (RGB), 6 (RGBA), and 0/4
 // (grey / grey+alpha) — covers design-tool PNG exports.
 struct DecodedPng {
     std::vector<uint8_t> rgba;
@@ -2142,7 +2142,7 @@ int main(int argc, char* argv[]) {
 
         if (result.confidence_pct < 80) {
             std::cout << "warning: confidence below 80% — this export may be a newer\n"
-                      << "         format-version than Pulp recognises. Pulp will use\n"
+                      << "         format-version than Pulp recognizes. Pulp will use\n"
                       << "         the most-recent matching parser; gaps surface in\n"
                       << "         import-report.json. To file a new format detector:\n"
                       << "  pulp import-design --file " << scan_path
@@ -2963,9 +2963,9 @@ int main(int argc, char* argv[]) {
                             }
                         }
 
-                        // Derive a value-driven skin for recognised
+                        // Derive a value-driven skin for recognized
                         // faders/meters by SAMPLING the captured PNG (not baking
-                        // it). The widget then redraws the recovered colours /
+                        // it). The widget then redraws the recovered colors /
                         // gradient procedurally so the thumb/level still move
                         // with their bound value. Generalizable importer rule:
                         // reads the exported pixels, hardcodes nothing.
@@ -3052,7 +3052,7 @@ int main(int argc, char* argv[]) {
                                         }
                                         // Bar width → the meter's widget width
                                         // (logical px); the column min_width keeps
-                                        // the box spacing so the narrow bar centres.
+                                        // the box spacing so the narrow bar centers.
                                         if (ms.has_bar_width)
                                             n.attributes["shape_width"] = fmt_px(ms.bar_width_px / asset_scale);
                                         // Control housing height (logical px) —
@@ -3063,7 +3063,7 @@ int main(int argc, char* argv[]) {
                                             n.attributes["shape_height"] = fmt_px(ms.housing_height_px / asset_scale);
                                         // Colored-bar / housing width ratio →
                                         // the meter insets its gradient bar so a
-                                        // narrow coloured fill reads recessed in
+                                        // narrow colored fill reads recessed in
                                         // the wider dark housing (the capture's
                                         // structure). Scale-invariant ratio.
                                         if (ms.has_bar_fill_ratio)

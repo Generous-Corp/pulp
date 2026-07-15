@@ -22,7 +22,7 @@ inline constexpr float kSamplerWidth = 720.0f;
 inline constexpr float kSamplerHeight = 440.0f;
 
 // Build the sampler starter panel with `theme` applied to the root (descendants
-// resolve colours up the parent chain). Pass ink_signal_theme(dark) for the
+// resolve colors up the parent chain). Pass ink_signal_theme(dark) for the
 // flagship look, or any other Theme to preview a reskin.
 std::unique_ptr<pulp::view::View> build_sampler_starter(const pulp::view::Theme& theme);
 

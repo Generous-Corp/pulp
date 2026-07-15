@@ -18,6 +18,7 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/sdf_atlas.hpp>
 #include <array>
+#include <cmath>
 #include <functional>
 #include <vector>
 
@@ -191,7 +192,7 @@ TEST_CASE("CoreGraphicsCanvas Canvas2D path API fills (issue 1322)",
         CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
                                   static_cast<float>(H));
         canvas.set_fill_color(Color::rgba(1.0f, 0.0f, 0.0f, 1.0f));
-        // Diamond covering the centre of the bitmap (16,8)→(24,16)→(16,24)→(8,16).
+        // Diamond covering the center of the bitmap (16,8)→(24,16)→(16,24)→(8,16).
         canvas.begin_path();
         canvas.move_to(16.0f, 8.0f);
         canvas.line_to(24.0f, 16.0f);
@@ -295,7 +296,7 @@ TEST_CASE("CoreGraphicsCanvas Canvas2D path stroke draws (issue 1322)",
 
 // set_fill_gradient_linear must paint a real gradient on CG; the base Canvas
 // fallback collapses to "set fill color = colors[0]" which produces a single
-// colour fill (Spectr's spectrum bg is gradient-driven). Verify that two
+// color fill (Spectr's spectrum bg is gradient-driven). Verify that two
 // different colors actually appear in the output bitmap.
 TEST_CASE("CoreGraphicsCanvas linear gradient paints multiple colors (issue 1322)",
           "[canvas][cg][issue-1322]") {
@@ -392,7 +393,7 @@ TEST_CASE("CoreGraphicsCanvas::fill_rect honors active linear gradient",
 
 // Same test for fill_path. Build a triangle path and verify at least two pixels
 // inside the rendered triangle differ in color, proving the gradient was
-// actually painted (not a single solid colour).
+// actually painted (not a single solid color).
 // A null point array with a plausible count must draw nothing, not walk it. The
 // count guard alone does not stop that: the caller's count is what it is.
 TEST_CASE("CoreGraphicsCanvas path calls survive degenerate input",
@@ -427,6 +428,68 @@ TEST_CASE("CoreGraphicsCanvas path calls survive degenerate input",
 
     // Nothing was drawn: the bitmap is still the cleared background.
     for (uint8_t px : pixels) REQUIRE(px == 0u);
+}
+
+// fill_path had NO FillRule parameter, so a two-contour ring point array
+// always rendered as a filled disc (CGContextFillPath, nonzero) — there was no
+// way to ask for the hole. CG splits the rules at the API surface
+// (CGContextEOFillPath), the same way fill_current_path already did.
+TEST_CASE("CoreGraphicsCanvas::fill_path honors FillRule -- evenodd rings",
+          "[canvas][cg][fill-rule]") {
+    constexpr int W = 48;
+    constexpr int H = 48;
+
+    // Outer + inner circle in ONE point array, both wound the same direction
+    // and both starting at angle 0 so their bridge segments are collinear.
+    std::vector<Canvas::Point2D> pts;
+    for (float r : {20.0f, 10.0f}) {
+        for (int i = 0; i < 64; ++i) {
+            const float t = 2.0f * 3.14159265358979f * (static_cast<float>(i) / 64.0f);
+            pts.push_back({24.0f + r * std::cos(t), 24.0f + r * std::sin(t)});
+        }
+    }
+
+    auto render = [&](FillRule rule) {
+        std::vector<uint8_t> pixels(static_cast<size_t>(W) * H * 4u, 0u);
+        auto cs = CGColorSpaceCreateDeviceRGB();
+        REQUIRE(cs != nullptr);
+        const uint32_t bitmap_info =
+            static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+            static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+        CGContextRef ctx = CGBitmapContextCreate(
+            pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+        CGColorSpaceRelease(cs);
+        REQUIRE(ctx != nullptr);
+        {
+            CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                      static_cast<float>(H));
+            canvas.set_fill_color(Color::rgba(0.0f, 1.0f, 0.0f, 1.0f));  // green
+            canvas.fill_path(pts.data(), pts.size(), rule);
+        }
+        CGContextRelease(ctx);
+        return pixels;
+    };
+    auto alpha_at = [&](const std::vector<uint8_t>& px, int x, int y) {
+        return px[(static_cast<size_t>(y) * W + x) * 4u + 3u];
+    };
+
+    const auto eo = render(FillRule::evenodd);
+    const auto nz = render(FillRule::nonzero);
+
+    // Center of the hole: transparent under even-odd, painted under nonzero.
+    INFO("evenodd center a=" << int(alpha_at(eo, 24, 24))
+         << " nonzero center a=" << int(alpha_at(nz, 24, 24)));
+    REQUIRE(alpha_at(eo, 24, 24) < 20u);
+    REQUIRE(alpha_at(nz, 24, 24) > 200u);
+
+    // The ring band (r = 15 above the center) is painted under BOTH rules —
+    // even-odd punches the hole, it does not blank the shape.
+    REQUIRE(alpha_at(eo, 24, 9) > 200u);
+    REQUIRE(alpha_at(nz, 24, 9) > 200u);
+
+    // Outside the outer circle stays background under both.
+    REQUIRE(alpha_at(eo, 1, 1) < 20u);
+    REQUIRE(alpha_at(nz, 1, 1) < 20u);
 }
 
 TEST_CASE("CoreGraphicsCanvas::fill_path honors active linear gradient",
@@ -468,7 +531,7 @@ TEST_CASE("CoreGraphicsCanvas::fill_path honors active linear gradient",
 
     // Walk the bitmap and count pixels that look red-dominant vs
     // green-dominant. If fill_path dropped the gradient and fell back to
-    // apply_fill_color(), every painted pixel would be a single colour and
+    // apply_fill_color(), every painted pixel would be a single color and
     // exactly one of these counts would be non-zero.
     int red_dominant = 0;
     int green_dominant = 0;
@@ -717,10 +780,10 @@ TEST_CASE("CoreGraphicsCanvas::set_blend_mode honors all BlendMode values",
 // level depends on Apple's internal LUTs and would be brittle). The
 // invariant we assert instead: applying the blend mode and painting must
 // not crash the CG context, and the result must be reproducible (no
-// undefined behaviour). For most modes the result is non-empty; for
+// undefined behavior). For most modes the result is non-empty; for
 // `source_out` / `destination_out` (where the result IS empty when
 // source and destination cover the same area) we whitelist that as the
-// CSS-spec behaviour. Coverage hits every case branch in the switch.
+// CSS-spec behavior. Coverage hits every case branch in the switch.
 TEST_CASE("CoreGraphicsCanvas::set_blend_mode every enum value round-trips through to_cg_blend",
           "[canvas][cg][blend][issue-1371]") {
     constexpr int W = 4;
@@ -770,7 +833,7 @@ TEST_CASE("CoreGraphicsCanvas::set_blend_mode every enum value round-trips throu
             canvas.fill_rect(0, 0, W, H);
         }
         CGContextRelease(ctx);
-        // Sample the centre pixel — this is post-blend output.
+        // Sample the center pixel — this is post-blend output.
         const size_t idx = (static_cast<size_t>(H / 2) * W + (W / 2)) * 4u;
         const int r = pixels[idx + 0];
         const int g = pixels[idx + 1];

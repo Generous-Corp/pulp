@@ -784,7 +784,7 @@ TEST_CASE("StateTree structured PropertyValue equality is structural",
     REQUIRE(left != different);
 }
 
-TEST_CASE("StateTree import-shaped JUCE var-style array/object maps to PropertyValue leaves",
+TEST_CASE("StateTree import-shaped dynamic array/object maps to PropertyValue leaves",
           "[state][tree][json][import]") {
     auto imported = StateTree::from_json(R"JSON({
         "type": "plugin-state",
@@ -812,9 +812,9 @@ TEST_CASE("StateTree import-shaped JUCE var-style array/object maps to PropertyV
     REQUIRE_THAT(std::get<double>(macro.values.at("value")), WithinAbs(0.75, 1e-9));
 }
 
-TEST_CASE("StateTree import-shaped ValueTree records use children for owned nodes",
+TEST_CASE("StateTree import-shaped records use children for owned nodes",
           "[state][tree][json][import]") {
-    auto root = StateTree::create("ValueTreeLikePluginState");
+    auto root = StateTree::create("ImportedPluginState");
     root->set("leafData", make_property_object({
         {"ui", make_property_object({{"theme", std::string("dark")}, {"zoom", 1.25}})},
     }));
@@ -1888,26 +1888,26 @@ TEST_CASE("StateTreeSynchroniser detach after a removed subtree is destroyed is 
 
 // ── Thread-safety contract ───────────────────────────────────────────────
 //
-// StateTree is documented as "NOT thread-safe — caller must serialise".
+// StateTree is documented as "NOT thread-safe — caller must serialize".
 // These fixtures pin the contract two ways:
 //
 //   1. Concurrent access works correctly when the caller wraps every
 //      operation in an external mutex (the supported usage model).
-//   2. The class does NOT secretly serialise itself — i.e. there is no
+//   2. The class does NOT secretly serialize itself — i.e. there is no
 //      internal lock the caller can rely on. We verify this by reading the
-//      documented behavior: a hammered, serialised workload produces an
+//      documented behavior: a hammered, serialized workload produces an
 //      observation count that matches the writer count exactly.
 //
 // The second clause is what TSan will catch if a future change accidentally
 // drops the documented contract and starts mutating without external
-// synchronisation: run the same fixture under -fsanitize=thread with the
+// synchronization: run the same fixture under -fsanitize=thread with the
 // `std::scoped_lock` removed and TSan will report a data race on
 // `properties_` / `children_` / the listener vectors.
 
 #include <mutex>
 #include <thread>
 
-TEST_CASE("StateTree: external mutex serialises concurrent writers + readers",
+TEST_CASE("StateTree: external mutex serializes concurrent writers + readers",
           "[state][tree][thread-safety][gap-doc]") {
     auto tree = StateTree::create("hammer");
     std::mutex tree_mtx;
@@ -1957,7 +1957,7 @@ TEST_CASE("StateTree: external mutex serialises concurrent writers + readers",
     }
 }
 
-TEST_CASE("StateTree: external mutex serialises concurrent child mutations",
+TEST_CASE("StateTree: external mutex serializes concurrent child mutations",
           "[state][tree][thread-safety][gap-doc]") {
     auto root = StateTree::create("root");
     std::mutex root_mtx;
@@ -1988,7 +1988,7 @@ TEST_CASE("StateTree: external mutex serialises concurrent child mutations",
     }
 }
 
-TEST_CASE("ObservableValue: external mutex serialises concurrent set/get",
+TEST_CASE("ObservableValue: external mutex serializes concurrent set/get",
           "[state][tree][thread-safety][gap-doc]") {
     ObservableValue<int> obs(0);
     std::mutex mtx;

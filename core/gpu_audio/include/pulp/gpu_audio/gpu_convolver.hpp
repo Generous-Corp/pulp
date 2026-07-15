@@ -27,7 +27,7 @@ namespace pulp::gpu_audio {
 /// `signal::PartitionedConvolver` per channel that the transport keeps
 /// CONTINUOUSLY fed via prime_fallback() — one cheap partitioned block per audio
 /// block, every block, not only on misses. Feeding it only on misses (the old
-/// behaviour) left its overlap-add history full of gaps, so a substituted block
+/// behavior) left its overlap-add history full of gaps, so a substituted block
 /// was NOT a correct continuation of the convolution (its IR tail energy from the
 /// preceding audio was missing) — an audible discontinuity, not merely lower
 /// precision. Because the priming path is zero-latency but the transport reports

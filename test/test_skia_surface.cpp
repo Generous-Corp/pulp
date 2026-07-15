@@ -7,10 +7,12 @@
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/canvas/canvas.hpp>  // FillRule + Canvas path API (pulp #3656)
 
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <vector>
 
 #include "include/core/SkBitmap.h"
 #include "include/core/SkCanvas.h"
@@ -619,7 +621,7 @@ TEST_CASE("SkiaCanvas fill-rule punches an even-odd hole in compound paths",
 // no-op (a filled polygon never appeared).
 #ifdef PULP_HAS_SKIA
 namespace {
-// Render `draw` into a WxH capture, serialize, and sample one pixel colour.
+// Render `draw` into a WxH capture, serialize, and sample one pixel color.
 template <typename DrawFn>
 SkColor4f render_and_sample(int w, int h, DrawFn draw, int x, int y) {
     pulp::render::SkpFrameCapture capture(w, h);
@@ -640,7 +642,7 @@ SkColor4f render_and_sample(int w, int h, DrawFn draw, int x, int y) {
 TEST_CASE("SkiaCanvas fill_path fills a closed polygon", "[render][skia]") {
 #ifdef PULP_HAS_SKIA
     constexpr int W = 48, H = 48;
-    // A large triangle: apex top-centre, base along the bottom. Its centroid
+    // A large triangle: apex top-center, base along the bottom. Its centroid
     // is comfortably interior; the top corners of the frame are exterior.
     const pulp::canvas::Canvas::Point2D tri[] = {
         {24.0f, 6.0f}, {42.0f, 42.0f}, {6.0f, 42.0f}};
@@ -661,6 +663,70 @@ TEST_CASE("SkiaCanvas fill_path fills a closed polygon", "[render][skia]") {
     // A pixel outside the triangle (top-left corner) stays background.
     const SkColor4f outside = render_and_sample(W, H, draw, 3, 3);
     REQUIRE(outside.fG < 0.25f);
+#else
+    SKIP("Skia not compiled in (PULP_HAS_SKIA undefined) — no raster backend");
+#endif
+}
+
+#ifdef PULP_HAS_SKIA
+namespace {
+// A ring as ONE point array: an outer circle followed by an inner circle,
+// BOTH wound the same direction, starting at angle 0 (so the two bridge
+// segments are collinear along +x and cancel). Under even-odd the center is
+// inside two contours → even → HOLE (a ring). Under nonzero the windings add
+// → the center is FILLED (a disc). The point array is the only thing
+// fill_path() takes, so the winding rule is the ONLY way to ask for the ring.
+std::vector<pulp::canvas::Canvas::Point2D> ring_points(float cx, float cy,
+                                                       float r_outer,
+                                                       float r_inner,
+                                                       int segments = 64) {
+    std::vector<pulp::canvas::Canvas::Point2D> pts;
+    pts.reserve(static_cast<size_t>(segments) * 2);
+    for (float r : {r_outer, r_inner}) {
+        for (int i = 0; i < segments; ++i) {
+            const float t = 2.0f * 3.14159265358979f *
+                            (static_cast<float>(i) / static_cast<float>(segments));
+            pts.push_back({cx + r * std::cos(t), cy + r * std::sin(t)});
+        }
+    }
+    return pts;
+}
+}  // namespace
+#endif
+
+// fill_path had NO FillRule parameter, so a two-contour ring point array
+// always rendered as a filled disc — there was no way to ask for the hole.
+TEST_CASE("SkiaCanvas fill_path honors FillRule -- evenodd rings, nonzero discs",
+          "[render][skia][canvas]") {
+#ifdef PULP_HAS_SKIA
+    constexpr int W = 48, H = 48;
+    const auto pts = ring_points(24.0f, 24.0f, 20.0f, 10.0f);
+
+    auto draw = [&](pulp::canvas::FillRule rule) {
+        return [&, rule](pulp::canvas::Canvas& c) {
+            c.set_fill_color(pulp::canvas::Color{0.0f, 1.0f, 0.0f, 1.0f});  // green
+            c.fill_path(pts.data(), pts.size(), rule);
+        };
+    };
+
+    // Center of the hole (24,24). evenodd → transparent (background stays
+    // black); nonzero → filled green.
+    const SkColor4f center_eo = render_and_sample(W, H, draw(pulp::canvas::FillRule::evenodd), 24, 24);
+    INFO("evenodd center g=" << center_eo.fG);
+    REQUIRE(center_eo.fG < 0.25f);
+
+    const SkColor4f center_nz = render_and_sample(W, H, draw(pulp::canvas::FillRule::nonzero), 24, 24);
+    INFO("nonzero center g=" << center_nz.fG);
+    REQUIRE(center_nz.fG > 0.5f);
+
+    // The ring band itself (r = 15 above the center) is filled under BOTH
+    // rules — even-odd punches the hole, it does not blank the shape.
+    REQUIRE(render_and_sample(W, H, draw(pulp::canvas::FillRule::evenodd), 24, 9).fG > 0.5f);
+    REQUIRE(render_and_sample(W, H, draw(pulp::canvas::FillRule::nonzero), 24, 9).fG > 0.5f);
+
+    // Outside the outer circle stays background under both.
+    REQUIRE(render_and_sample(W, H, draw(pulp::canvas::FillRule::evenodd), 2, 2).fG < 0.25f);
+    REQUIRE(render_and_sample(W, H, draw(pulp::canvas::FillRule::nonzero), 2, 2).fG < 0.25f);
 #else
     SKIP("Skia not compiled in (PULP_HAS_SKIA undefined) — no raster backend");
 #endif

@@ -798,7 +798,7 @@ TEST_CASE("AU v2 MIDI out: callback pair publishes atomically (no torn pair)",
 // into it before ProcessBufferLists ever runs. The stock
 // AUEffectBase::ProcessBufferLists is the code that clears the bit again once a
 // kernel produces output — and PulpAUEffect overrides ProcessBufferLists, so
-// that clear never happened. The result was a full output buffer labelled
+// that clear never happened. The result was a full output buffer labeled
 // silent: a host that honours the label substitutes digital silence, which
 // silently deletes the output of every generator, oscillator, reverb tail, and
 // DC/control-voltage source.

@@ -9,7 +9,23 @@
 
 namespace pulp::canvas {
 
-struct Rect {
+/// Axis-aligned rectangle in canvas coordinates.
+///
+/// NAMED `Rect2D`, NOT `Rect`, ON PURPOSE — do not "simplify" this back.
+/// Apple's `MacTypes.h` declares a GLOBAL `struct Rect` (and a global `Point`)
+/// for Carbon compatibility. Any translation unit that says
+/// `using namespace pulp::canvas;` AND transitively includes an Apple header
+/// then hits an unfixable ambiguity inside Apple's own headers:
+///
+///     MacTypes.h:556:16: error: reference to 'Rect' is ambiguous
+///       note: candidate found by name lookup is 'pulp::canvas::Rect'
+///
+/// 65 TUs in this repo use that using-directive. The name stayed survivable
+/// only while this header was rarely included; once `Path` (and therefore
+/// `canvas.hpp`) needed a rect type, it became visible nearly repo-wide and the
+/// collision became unavoidable. `Point2D` in affine_transform.hpp is named for
+/// exactly the same reason.
+struct Rect2D {
     float x = 0, y = 0, width = 0, height = 0;
 
     float right() const { return x + width; }
@@ -20,13 +36,13 @@ struct Rect {
         return px >= x && px < right() && py >= y && py < bottom();
     }
 
-    bool intersects(const Rect& other) const {
+    bool intersects(const Rect2D& other) const {
         if (empty() || other.empty()) return false;
         return x < other.right() && right() > other.x &&
                y < other.bottom() && bottom() > other.y;
     }
 
-    Rect intersection(const Rect& other) const {
+    Rect2D intersection(const Rect2D& other) const {
         float ix = std::max(x, other.x);
         float iy = std::max(y, other.y);
         float ir = std::min(right(), other.right());
@@ -35,7 +51,7 @@ struct Rect {
         return {ix, iy, ir - ix, ib - iy};
     }
 
-    Rect enclosing_union(const Rect& other) const {
+    Rect2D enclosing_union(const Rect2D& other) const {
         if (empty()) return other;
         if (other.empty()) return *this;
         float ux = std::min(x, other.x);
@@ -45,7 +61,7 @@ struct Rect {
         return {ux, uy, ur - ux, ub - uy};
     }
 
-    bool operator==(const Rect& o) const {
+    bool operator==(const Rect2D& o) const {
         return x == o.x && y == o.y && width == o.width && height == o.height;
     }
 };
@@ -56,7 +72,7 @@ public:
     RectangleList() = default;
 
     /// Add a rectangle to the list (may overlap existing)
-    void add(const Rect& rect) {
+    void add(const Rect2D& rect) {
         if (!rect.empty())
             rects_.push_back(rect);
     }
@@ -71,7 +87,7 @@ public:
     int size() const { return static_cast<int>(rects_.size()); }
 
     /// Get a rectangle by index
-    const Rect& operator[](int i) const { return rects_[static_cast<size_t>(i)]; }
+    const Rect2D& operator[](int i) const { return rects_[static_cast<size_t>(i)]; }
 
     /// Whether a point is contained in any rectangle
     bool contains(float px, float py) const {
@@ -81,16 +97,16 @@ public:
     }
 
     /// Whether any rectangle intersects the given rect
-    bool intersects(const Rect& rect) const {
+    bool intersects(const Rect2D& rect) const {
         for (auto& r : rects_)
             if (r.intersects(rect)) return true;
         return false;
     }
 
     /// Compute the bounding box of all rectangles
-    Rect bounding_box() const {
+    Rect2D bounding_box() const {
         if (rects_.empty()) return {};
-        Rect result = rects_[0];
+        Rect2D result = rects_[0];
         for (size_t i = 1; i < rects_.size(); ++i)
             result = result.enclosing_union(rects_[i]);
         return result;
@@ -105,7 +121,7 @@ public:
     }
 
     /// Clip this list against a rectangle (keep only the intersection)
-    RectangleList clipped(const Rect& clip) const {
+    RectangleList clipped(const Rect2D& clip) const {
         RectangleList result;
         for (auto& r : rects_) {
             auto i = r.intersection(clip);
@@ -116,8 +132,8 @@ public:
     }
 
     /// Subtract a rectangle from all rectangles in the list
-    void subtract(const Rect& sub) {
-        std::vector<Rect> result;
+    void subtract(const Rect2D& sub) {
+        std::vector<Rect2D> result;
         for (auto& r : rects_) {
             if (!r.intersects(sub)) {
                 result.push_back(r);
@@ -167,7 +183,7 @@ public:
     /// to `add()` followed by a coalesce pass.
     ///
     /// NOT RT-safe — `std::vector::push_back` may reallocate.
-    void union_aa(const Rect& rect, float aa_tolerance = 1.0f / 256.0f) {
+    void union_aa(const Rect2D& rect, float aa_tolerance = 1.0f / 256.0f) {
         if (rect.empty()) return;
         rects_.push_back(rect);
         coalesce_aa(aa_tolerance);
@@ -177,9 +193,9 @@ public:
     /// non-overlapping pieces. Edges within `aa_tolerance` of `sub`'s
     /// edges are treated as coincident so a 1.001px wide sliver
     /// doesn't survive as a stray rectangle.
-    void subtract_aa(const Rect& sub, float aa_tolerance = 1.0f / 256.0f) {
+    void subtract_aa(const Rect2D& sub, float aa_tolerance = 1.0f / 256.0f) {
         if (sub.empty()) return;
-        std::vector<Rect> out;
+        std::vector<Rect2D> out;
         out.reserve(rects_.size());
         for (auto& r : rects_) {
             if (!r.intersects(sub)) {
@@ -214,8 +230,8 @@ public:
     /// Antialiased intersect — keep only the intersection with `clip`,
     /// in-place. Edges within `aa_tolerance` of `clip`'s edges are
     /// treated as coincident.
-    void intersect_aa(const Rect& clip, float aa_tolerance = 1.0f / 256.0f) {
-        std::vector<Rect> out;
+    void intersect_aa(const Rect2D& clip, float aa_tolerance = 1.0f / 256.0f) {
+        std::vector<Rect2D> out;
         out.reserve(rects_.size());
         for (auto& r : rects_) {
             auto i = r.intersection(clip);
@@ -296,7 +312,7 @@ public:
     }
 
 private:
-    std::vector<Rect> rects_;
+    std::vector<Rect2D> rects_;
 };
 
 }  // namespace pulp::canvas

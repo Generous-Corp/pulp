@@ -160,7 +160,7 @@ int cmd_scan(const std::vector<std::string>& args) {
         std::vector<PluginInfo> results;
         if (no_load) {
             // #812 escape hatch — pure filesystem walk, no dlopen.
-            // Mirrors the Rust port's default scan behaviour. Users
+            // Mirrors the Rust port's default scan behavior. Users
             // hitting plugin static-init crashes on the rich path can
             // fall back here and still discover their installed
             // bundles (without vendor/version/uid metadata).
@@ -181,7 +181,7 @@ int cmd_scan(const std::vector<std::string>& args) {
             opts.scan_lv2  = (f == PluginFormat::LV2);
             results = scanner.scan(opts);
         }
-        // Narrow AU / AUv3 results to the exact requested flavour. When
+        // Narrow AU / AUv3 results to the exact requested flavor. When
         // `all_formats` is in play each iteration's `f` is authoritative
         // for the bucket, so we still trim mixed entries out of the
         // wrong bucket and print each plugin in its own [au]/[auv3]
@@ -228,7 +228,7 @@ int cmd_scan(const std::vector<std::string>& args) {
         // LCOV_EXCL_START
         // _Exit terminates the process — anything past this line in a
         // unit test would never run, so it's intentionally excluded
-        // from coverage. The outer behaviour (clean rc=0 on a host
+        // from coverage. The outer behavior (clean rc=0 on a host
         // with throw-prone CLAP plugins) is exercised end-to-end by
         // the `pulp scan` shellout test in test_cli_shellout.cpp.
         finish_rich_scan_process();

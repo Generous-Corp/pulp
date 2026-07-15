@@ -1,10 +1,10 @@
-// AudioThumbnail + AudioThumbnailCache tests.
-// Pulp item 6.12 — wire AudioThumbnail into existing WaveformView.
+// WaveformOverview + WaveformOverviewCache tests.
+// Pulp item 6.12 — wire WaveformOverview into existing WaveformView.
 //
 // Coverage:
 //   * peak-table generation against a known sine wave (min/max bounds,
 //     decimation hierarchy, edge cases).
-//   * AudioThumbnailCache hit/miss/eviction LRU semantics.
+//   * WaveformOverviewCache hit/miss/eviction LRU semantics.
 //   * Round-trip through `build_from_path` using a temp WAV file.
 //   * WaveformView integration smoke: setting a thumbnail clears any
 //     prior raw sample buffer; calling set_data clears any prior
@@ -14,7 +14,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <pulp/audio/audio_file.hpp>
-#include <pulp/audio/audio_thumbnail.hpp>
+#include <pulp/audio/waveform_overview.hpp>
 #include <pulp/view/widgets.hpp>
 
 #include <chrono>
@@ -67,29 +67,29 @@ std::filesystem::path unique_wav_path() {
 
 }  // namespace
 
-TEST_CASE("AudioThumbnail empty buffer returns empty thumbnail", "[audio][thumbnail]") {
+TEST_CASE("WaveformOverview empty buffer returns empty thumbnail", "[audio][thumbnail]") {
     AudioFileData empty;
-    auto t = AudioThumbnail::build_from_buffer(empty);
+    auto t = WaveformOverview::build_from_buffer(empty);
     REQUIRE(t.empty());
     REQUIRE(t.num_levels() == 0);
 }
 
-TEST_CASE("AudioThumbnail clamps ragged channel buffers to the shortest channel",
+TEST_CASE("WaveformOverview clamps ragged channel buffers to the shortest channel",
           "[audio][thumbnail][edge]") {
     auto data = make_sine(48000, 8, 2, 100.0);
     data.channels[1].resize(5);
 
-    auto t = AudioThumbnail::build_from_buffer(data, 2);
+    auto t = WaveformOverview::build_from_buffer(data, 2);
     REQUIRE_FALSE(t.empty());
     REQUIRE(t.info().num_channels == 2);
     REQUIRE(t.info().num_source_frames == 5);
     REQUIRE(t.level(0).peaks_per_channel == 3);
 }
 
-TEST_CASE("AudioThumbnail peak-table covers the source amplitude", "[audio][thumbnail]") {
+TEST_CASE("WaveformOverview peak-table covers the source amplitude", "[audio][thumbnail]") {
     // 1 s sine at 100 Hz, 44.1 kHz, mono, amplitude 0.5.
     const auto data = make_sine(44100, 44100, 1, 100.0, 0.5f);
-    auto t = AudioThumbnail::build_from_buffer(data, /*samples_per_peak*/ 441);
+    auto t = WaveformOverview::build_from_buffer(data, /*samples_per_peak*/ 441);
     REQUIRE_FALSE(t.empty());
 
     const auto info = t.info();
@@ -118,9 +118,9 @@ TEST_CASE("AudioThumbnail peak-table covers the source amplitude", "[audio][thum
     REQUIRE(saturated >= 80);
 }
 
-TEST_CASE("AudioThumbnail decimation halves peak count per level", "[audio][thumbnail]") {
+TEST_CASE("WaveformOverview decimation halves peak count per level", "[audio][thumbnail]") {
     const auto data = make_sine(44100, 44100, 2, 200.0);
-    auto t = AudioThumbnail::build_from_buffer(data, 256);
+    auto t = WaveformOverview::build_from_buffer(data, 256);
     REQUIRE(t.num_levels() >= 2);
 
     for (std::size_t i = 1; i < t.num_levels(); ++i) {
@@ -133,14 +133,14 @@ TEST_CASE("AudioThumbnail decimation halves peak count per level", "[audio][thum
     REQUIRE(finest.peaks_per_channel <= 16u);
 }
 
-TEST_CASE("AudioThumbnail::render_min_max produces bounded peak pairs", "[audio][thumbnail]") {
+TEST_CASE("WaveformOverview::render_min_max produces bounded peak pairs", "[audio][thumbnail]") {
     const auto data = make_sine(48000, 48000, 2, 250.0, 0.8f);
-    auto t = AudioThumbnail::build_from_buffer(data, 128);
+    auto t = WaveformOverview::build_from_buffer(data, 128);
 
     constexpr uint32_t kTargetPeaks = 200;
     std::vector<float> out(kTargetPeaks * 2);
     const std::size_t produced =
-        t.render_min_max(AudioThumbnail::kAllChannels, kTargetPeaks, out.data());
+        t.render_min_max(WaveformOverview::kAllChannels, kTargetPeaks, out.data());
     REQUIRE(produced == kTargetPeaks);
 
     for (std::size_t i = 0; i < kTargetPeaks; ++i) {
@@ -158,9 +158,9 @@ TEST_CASE("AudioThumbnail::render_min_max produces bounded peak pairs", "[audio]
     REQUIRE(t.render_min_max(1, kTargetPeaks, ch1.data()) == kTargetPeaks);
 }
 
-TEST_CASE("AudioThumbnail::best_level_for picks the coarsest sufficient level", "[audio][thumbnail]") {
+TEST_CASE("WaveformOverview::best_level_for picks the coarsest sufficient level", "[audio][thumbnail]") {
     const auto data = make_sine(44100, 44100, 1, 100.0);
-    auto t = AudioThumbnail::build_from_buffer(data, 256);
+    auto t = WaveformOverview::build_from_buffer(data, 256);
     REQUIRE(t.num_levels() >= 2);
 
     // Asking for more peaks than the base level should pin level 0.
@@ -171,12 +171,12 @@ TEST_CASE("AudioThumbnail::best_level_for picks the coarsest sufficient level", 
     REQUIRE(t.best_level_for(1) == t.num_levels() - 1);
 }
 
-TEST_CASE("AudioThumbnail::build_from_path round-trips through a WAV", "[audio][thumbnail]") {
+TEST_CASE("WaveformOverview::build_from_path round-trips through a WAV", "[audio][thumbnail]") {
     const auto path = unique_wav_path();
     const auto data = make_sine(44100, 22050, 1, 440.0, 0.7f);
     REQUIRE(write_wav_file(path.string(), data));
 
-    auto t = AudioThumbnail::build_from_path(path.string(), 128);
+    auto t = WaveformOverview::build_from_path(path.string(), 128);
     REQUIRE(t.has_value());
     REQUIRE_FALSE(t->empty());
     REQUIRE(t->info().num_source_frames == 22050);
@@ -185,17 +185,17 @@ TEST_CASE("AudioThumbnail::build_from_path round-trips through a WAV", "[audio][
     std::filesystem::remove(path);
 }
 
-TEST_CASE("AudioThumbnail::build_from_path returns nullopt for missing file", "[audio][thumbnail]") {
-    auto t = AudioThumbnail::build_from_path("/definitely/does/not/exist.wav");
+TEST_CASE("WaveformOverview::build_from_path returns nullopt for missing file", "[audio][thumbnail]") {
+    auto t = WaveformOverview::build_from_path("/definitely/does/not/exist.wav");
     REQUIRE_FALSE(t.has_value());
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// AudioThumbnailCache
+// WaveformOverviewCache
 // ─────────────────────────────────────────────────────────────────────────
 
-TEST_CASE("AudioThumbnailCache records hit / miss statistics", "[audio][thumbnail][cache]") {
-    AudioThumbnailCache cache(4);
+TEST_CASE("WaveformOverviewCache records hit / miss statistics", "[audio][thumbnail][cache]") {
+    WaveformOverviewCache cache(4);
     REQUIRE(cache.size() == 0);
 
     REQUIRE(cache.get("absent") == nullptr);
@@ -203,8 +203,8 @@ TEST_CASE("AudioThumbnailCache records hit / miss statistics", "[audio][thumbnai
     REQUIRE(stats.misses == 1);
     REQUIRE(stats.hits == 0);
 
-    auto t = std::make_shared<AudioThumbnail>(
-        AudioThumbnail::build_from_buffer(make_sine(44100, 4410, 1, 200.0), 256));
+    auto t = std::make_shared<WaveformOverview>(
+        WaveformOverview::build_from_buffer(make_sine(44100, 4410, 1, 200.0), 256));
     cache.put("/tmp/a.wav", t);
 
     auto fetched = cache.get("/tmp/a.wav");
@@ -215,26 +215,26 @@ TEST_CASE("AudioThumbnailCache records hit / miss statistics", "[audio][thumbnai
     REQUIRE(stats.entries == 1);
 }
 
-TEST_CASE("AudioThumbnailCache::put infers samples-per-peak from thumbnail",
+TEST_CASE("WaveformOverviewCache::put infers samples-per-peak from thumbnail",
           "[audio][thumbnail][cache]") {
-    AudioThumbnailCache cache(4);
-    auto t = std::make_shared<AudioThumbnail>(
-        AudioThumbnail::build_from_buffer(make_sine(44100, 4410, 1, 100.0), 128));
+    WaveformOverviewCache cache(4);
+    auto t = std::make_shared<WaveformOverview>(
+        WaveformOverview::build_from_buffer(make_sine(44100, 4410, 1, 100.0), 128));
 
     cache.put("buffered", t);
     REQUIRE(cache.get("buffered", 128).get() == t.get());
     REQUIRE(cache.get("buffered", 256) == nullptr);
 }
 
-TEST_CASE("AudioThumbnailCache LRU evicts the oldest entry", "[audio][thumbnail][cache]") {
-    AudioThumbnailCache cache(2);
+TEST_CASE("WaveformOverviewCache LRU evicts the oldest entry", "[audio][thumbnail][cache]") {
+    WaveformOverviewCache cache(2);
 
-    auto a = std::make_shared<AudioThumbnail>(
-        AudioThumbnail::build_from_buffer(make_sine(44100, 4410, 1, 100.0), 256));
-    auto b = std::make_shared<AudioThumbnail>(
-        AudioThumbnail::build_from_buffer(make_sine(44100, 4410, 1, 200.0), 256));
-    auto c = std::make_shared<AudioThumbnail>(
-        AudioThumbnail::build_from_buffer(make_sine(44100, 4410, 1, 400.0), 256));
+    auto a = std::make_shared<WaveformOverview>(
+        WaveformOverview::build_from_buffer(make_sine(44100, 4410, 1, 100.0), 256));
+    auto b = std::make_shared<WaveformOverview>(
+        WaveformOverview::build_from_buffer(make_sine(44100, 4410, 1, 200.0), 256));
+    auto c = std::make_shared<WaveformOverview>(
+        WaveformOverview::build_from_buffer(make_sine(44100, 4410, 1, 400.0), 256));
 
     cache.put("a", a);
     cache.put("b", b);
@@ -257,10 +257,10 @@ TEST_CASE("AudioThumbnailCache LRU evicts the oldest entry", "[audio][thumbnail]
     REQUIRE(s.capacity == 2);
 }
 
-TEST_CASE("AudioThumbnailCache::set_capacity shrinks the cache", "[audio][thumbnail][cache]") {
-    AudioThumbnailCache cache(4);
-    auto t = std::make_shared<AudioThumbnail>(
-        AudioThumbnail::build_from_buffer(make_sine(44100, 4410, 1, 100.0), 256));
+TEST_CASE("WaveformOverviewCache::set_capacity shrinks the cache", "[audio][thumbnail][cache]") {
+    WaveformOverviewCache cache(4);
+    auto t = std::make_shared<WaveformOverview>(
+        WaveformOverview::build_from_buffer(make_sine(44100, 4410, 1, 100.0), 256));
     cache.put("a", t);
     cache.put("b", t);
     cache.put("c", t);
@@ -272,10 +272,10 @@ TEST_CASE("AudioThumbnailCache::set_capacity shrinks the cache", "[audio][thumbn
     REQUIRE(cache.stats().evictions == 2);
 }
 
-TEST_CASE("AudioThumbnailCache::erase + clear", "[audio][thumbnail][cache]") {
-    AudioThumbnailCache cache(4);
-    auto t = std::make_shared<AudioThumbnail>(
-        AudioThumbnail::build_from_buffer(make_sine(44100, 4410, 1, 100.0), 256));
+TEST_CASE("WaveformOverviewCache::erase + clear", "[audio][thumbnail][cache]") {
+    WaveformOverviewCache cache(4);
+    auto t = std::make_shared<WaveformOverview>(
+        WaveformOverview::build_from_buffer(make_sine(44100, 4410, 1, 100.0), 256));
     cache.put("a", t);
     cache.put("b", t);
     REQUIRE(cache.erase("a"));
@@ -285,13 +285,13 @@ TEST_CASE("AudioThumbnailCache::erase + clear", "[audio][thumbnail][cache]") {
     REQUIRE(cache.size() == 0);
 }
 
-TEST_CASE("AudioThumbnailCache::get_or_build hits the cache on second call",
+TEST_CASE("WaveformOverviewCache::get_or_build hits the cache on second call",
           "[audio][thumbnail][cache]") {
     const auto path = unique_wav_path();
     const auto data = make_sine(44100, 22050, 1, 440.0, 0.7f);
     REQUIRE(write_wav_file(path.string(), data));
 
-    AudioThumbnailCache cache(4);
+    WaveformOverviewCache cache(4);
     auto first = cache.get_or_build(path.string(), 256);
     REQUIRE(first != nullptr);
     auto second = cache.get_or_build(path.string(), 256);
@@ -301,13 +301,13 @@ TEST_CASE("AudioThumbnailCache::get_or_build hits the cache on second call",
     std::filesystem::remove(path);
 }
 
-TEST_CASE("AudioThumbnailCache keeps distinct samples-per-peak entries",
+TEST_CASE("WaveformOverviewCache keeps distinct samples-per-peak entries",
           "[audio][thumbnail][cache]") {
     const auto path = unique_wav_path();
     const auto data = make_sine(44100, 22050, 1, 440.0, 0.7f);
     REQUIRE(write_wav_file(path.string(), data));
 
-    AudioThumbnailCache cache(4);
+    WaveformOverviewCache cache(4);
     auto coarse = cache.get_or_build(path.string(), 512);
     REQUIRE(coarse != nullptr);
     REQUIRE(coarse->level(0).samples_per_peak == 512);
@@ -350,20 +350,20 @@ void write_le(std::vector<uint8_t>& blob, std::size_t offset, T value) {
 
 }  // namespace
 
-TEST_CASE("serialize_thumbnail round-trips through deserialize_thumbnail",
+TEST_CASE("serialize_overview round-trips through deserialize_overview",
           "[audio][thumbnail][persist]") {
     const auto data = make_sine(44100, 8820, 2, 220.0, 0.6f);
-    AudioThumbnail original = AudioThumbnail::build_from_buffer(data, 256);
+    WaveformOverview original = WaveformOverview::build_from_buffer(data, 256);
     REQUIRE_FALSE(original.empty());
 
-    const auto blob = serialize_thumbnail(original);
+    const auto blob = serialize_overview(original);
     REQUIRE(blob.size() > 26);  // header + payload
     REQUIRE(blob[0] == 'P');
-    REQUIRE(blob[1] == 'T');
-    REQUIRE(blob[2] == 'H');
-    REQUIRE(blob[3] == 'M');
+    REQUIRE(blob[1] == 'W');
+    REQUIRE(blob[2] == 'O');
+    REQUIRE(blob[3] == 'V');
 
-    auto restored = deserialize_thumbnail(blob.data(), blob.size());
+    auto restored = deserialize_overview(blob.data(), blob.size());
     REQUIRE(restored.has_value());
     REQUIRE_FALSE(restored->empty());
 
@@ -392,46 +392,47 @@ TEST_CASE("serialize_thumbnail round-trips through deserialize_thumbnail",
     }
 }
 
-TEST_CASE("deserialize_thumbnail rejects structurally empty cache blobs",
+TEST_CASE("deserialize_overview rejects structurally empty cache blobs",
           "[audio][thumbnail][persist]") {
     const auto data = make_sine(44100, 8820, 2, 220.0, 0.6f);
-    const auto original = AudioThumbnail::build_from_buffer(data, 256);
-    const auto blob = serialize_thumbnail(original);
+    const auto original = WaveformOverview::build_from_buffer(data, 256);
+    const auto blob = serialize_overview(original);
 
     auto zero_channels = blob;
     write_le<uint32_t>(zero_channels, 6, 0);
-    REQUIRE_FALSE(deserialize_thumbnail(zero_channels.data(), zero_channels.size()).has_value());
+    REQUIRE_FALSE(deserialize_overview(zero_channels.data(), zero_channels.size()).has_value());
 
     auto zero_frames = blob;
     write_le<uint64_t>(zero_frames, 10, 0);
-    REQUIRE_FALSE(deserialize_thumbnail(zero_frames.data(), zero_frames.size()).has_value());
+    REQUIRE_FALSE(deserialize_overview(zero_frames.data(), zero_frames.size()).has_value());
 
     auto zero_sample_rate = blob;
     write_le<uint32_t>(zero_sample_rate, 18, 0);
-    REQUIRE_FALSE(deserialize_thumbnail(zero_sample_rate.data(),
+    REQUIRE_FALSE(deserialize_overview(zero_sample_rate.data(),
                                         zero_sample_rate.size()).has_value());
 
     auto zero_levels = blob;
     write_le<uint32_t>(zero_levels, 22, 0);
-    REQUIRE_FALSE(deserialize_thumbnail(zero_levels.data(), zero_levels.size()).has_value());
+    REQUIRE_FALSE(deserialize_overview(zero_levels.data(), zero_levels.size()).has_value());
 
     auto zero_samples_per_peak = blob;
     write_le<uint32_t>(zero_samples_per_peak, 26, 0);
-    REQUIRE_FALSE(deserialize_thumbnail(zero_samples_per_peak.data(),
+    REQUIRE_FALSE(deserialize_overview(zero_samples_per_peak.data(),
                                         zero_samples_per_peak.size()).has_value());
 }
 
-TEST_CASE("deserialize_thumbnail rejects bad magic / truncated blobs",
+TEST_CASE("deserialize_overview rejects bad magic / truncated blobs",
           "[audio][thumbnail][persist]") {
     std::vector<uint8_t> garbage{0xDE, 0xAD, 0xBE, 0xEF,
                                   0x01, 0x00, 0x00, 0x00};
-    REQUIRE_FALSE(deserialize_thumbnail(garbage.data(), garbage.size()).has_value());
-    REQUIRE_FALSE(deserialize_thumbnail(nullptr, 0).has_value());
+    REQUIRE_FALSE(deserialize_overview(garbage.data(), garbage.size()).has_value());
+    REQUIRE_FALSE(deserialize_overview(nullptr, 0).has_value());
 
-    // Correct magic + bumped version → still rejected.
-    std::vector<uint8_t> wrong_version{'P', 'T', 'H', 'M',
+    // Correct magic + bumped version -> still rejected. Uses the REAL magic so
+    // this genuinely exercises the version check, not the magic check.
+    std::vector<uint8_t> wrong_version{'P', 'W', 'O', 'V',
                                        0xFF, 0xFF};
-    REQUIRE_FALSE(deserialize_thumbnail(wrong_version.data(),
+    REQUIRE_FALSE(deserialize_overview(wrong_version.data(),
                                         wrong_version.size()).has_value());
 }
 
@@ -449,10 +450,10 @@ TEST_CASE("AudioPeak clamps serialized display ranges", "[audio][thumbnail]") {
     REQUIRE(inside.max() > 0.0f);
 }
 
-TEST_CASE("AudioThumbnail sanitizes empty resolution and non-finite sample windows",
+TEST_CASE("WaveformOverview sanitizes empty resolution and non-finite sample windows",
           "[audio][thumbnail]") {
     auto data = make_sine(48000, 8, 1, 100.0);
-    REQUIRE(AudioThumbnail::build_from_buffer(data, 0).empty());
+    REQUIRE(WaveformOverview::build_from_buffer(data, 0).empty());
 
     data.channels[0] = {
         std::numeric_limits<float>::quiet_NaN(),
@@ -460,7 +461,7 @@ TEST_CASE("AudioThumbnail sanitizes empty resolution and non-finite sample windo
         -std::numeric_limits<float>::infinity(),
         0.5f,
     };
-    auto t = AudioThumbnail::build_from_buffer(data, 4);
+    auto t = WaveformOverview::build_from_buffer(data, 4);
     REQUIRE_FALSE(t.empty());
     REQUIRE(t.num_levels() == 1);
     REQUIRE(t.level(0).peaks_per_channel == 1);
@@ -468,15 +469,15 @@ TEST_CASE("AudioThumbnail sanitizes empty resolution and non-finite sample windo
     REQUIRE(t.level(0).peaks[0][0].max_q7 == 0);
 }
 
-TEST_CASE("AudioThumbnail::render_min_max guards empty and folded requests",
+TEST_CASE("WaveformOverview::render_min_max guards empty and folded requests",
           "[audio][thumbnail]") {
-    AudioThumbnail empty;
+    WaveformOverview empty;
     float scratch[4] = {};
     REQUIRE(empty.best_level_for(128) == 0);
-    REQUIRE(empty.render_min_max(AudioThumbnail::kAllChannels, 2, scratch) == 0);
+    REQUIRE(empty.render_min_max(WaveformOverview::kAllChannels, 2, scratch) == 0);
 
     const auto data = make_sine(44100, 64, 2, 440.0, 0.5f);
-    auto t = AudioThumbnail::build_from_buffer(data, 8);
+    auto t = WaveformOverview::build_from_buffer(data, 8);
     REQUIRE_FALSE(t.empty());
     REQUIRE(t.render_min_max(0, 0, scratch) == 0);
     REQUIRE(t.render_min_max(0, 2, nullptr) == 0);
@@ -495,47 +496,47 @@ TEST_CASE("AudioThumbnail::render_min_max guards empty and folded requests",
     REQUIRE(oversampled[38] <= oversampled[39]);
 }
 
-TEST_CASE("deserialize_thumbnail rejects malformed structural headers",
+TEST_CASE("deserialize_overview rejects malformed structural headers",
           "[audio][thumbnail][persist]") {
     const auto data = make_sine(44100, 1024, 1, 110.0);
-    auto thumbnail = AudioThumbnail::build_from_buffer(data, 64);
-    const auto valid = serialize_thumbnail(thumbnail);
-    REQUIRE(deserialize_thumbnail(valid.data(), valid.size()).has_value());
+    auto thumbnail = WaveformOverview::build_from_buffer(data, 64);
+    const auto valid = serialize_overview(thumbnail);
+    REQUIRE(deserialize_overview(valid.data(), valid.size()).has_value());
 
     auto too_many_channels = valid;
     write_le<uint32_t>(too_many_channels, 6, 65);
-    REQUIRE_FALSE(deserialize_thumbnail(too_many_channels.data(),
+    REQUIRE_FALSE(deserialize_overview(too_many_channels.data(),
                                         too_many_channels.size()).has_value());
 
     auto too_many_levels = valid;
     write_le<uint32_t>(too_many_levels, 22, 33);
-    REQUIRE_FALSE(deserialize_thumbnail(too_many_levels.data(),
+    REQUIRE_FALSE(deserialize_overview(too_many_levels.data(),
                                         too_many_levels.size()).has_value());
 
     auto truncated_payload = valid;
     truncated_payload.pop_back();
-    REQUIRE_FALSE(deserialize_thumbnail(truncated_payload.data(),
+    REQUIRE_FALSE(deserialize_overview(truncated_payload.data(),
                                         truncated_payload.size()).has_value());
 
     auto missing_level_header = valid;
     missing_level_header.resize(29);
-    REQUIRE_FALSE(deserialize_thumbnail(missing_level_header.data(),
+    REQUIRE_FALSE(deserialize_overview(missing_level_header.data(),
                                         missing_level_header.size()).has_value());
 }
 
-TEST_CASE("AudioThumbnailCache handles zero capacity, null inserts, and replacement",
+TEST_CASE("WaveformOverviewCache handles zero capacity, null inserts, and replacement",
           "[audio][thumbnail][cache]") {
-    AudioThumbnailCache cache(0);
+    WaveformOverviewCache cache(0);
     REQUIRE(cache.capacity() == 1);
     REQUIRE(cache.size() == 0);
     cache.put("null", nullptr);
     REQUIRE(cache.size() == 0);
     REQUIRE(cache.stats().entries == 0);
 
-    auto first = std::make_shared<AudioThumbnail>(
-        AudioThumbnail::build_from_buffer(make_sine(44100, 4410, 1, 100.0), 256));
-    auto second = std::make_shared<AudioThumbnail>(
-        AudioThumbnail::build_from_buffer(make_sine(44100, 8820, 1, 200.0), 128));
+    auto first = std::make_shared<WaveformOverview>(
+        WaveformOverview::build_from_buffer(make_sine(44100, 4410, 1, 100.0), 256));
+    auto second = std::make_shared<WaveformOverview>(
+        WaveformOverview::build_from_buffer(make_sine(44100, 8820, 1, 200.0), 128));
     cache.put("same", first);
     REQUIRE(cache.size() == 1);
     cache.put("same", second);
@@ -544,7 +545,7 @@ TEST_CASE("AudioThumbnailCache handles zero capacity, null inserts, and replacem
     REQUIRE(cache.stats().hits == 1);
 }
 
-TEST_CASE("AudioThumbnailCache writes and loads from disk across instances",
+TEST_CASE("WaveformOverviewCache writes and loads from disk across instances",
           "[audio][thumbnail][cache][persist]") {
     const auto cache_dir = unique_cache_dir();
     const auto wav_path = unique_wav_path();
@@ -553,7 +554,7 @@ TEST_CASE("AudioThumbnailCache writes and loads from disk across instances",
 
     // Pass 1 — build, expect a disk write.
     {
-        AudioThumbnailCache cache(4);
+        WaveformOverviewCache cache(4);
         cache.set_disk_cache_dir(cache_dir.string());
         auto t = cache.get_or_build(wav_path.string(), 256);
         REQUIRE(t != nullptr);
@@ -564,7 +565,7 @@ TEST_CASE("AudioThumbnailCache writes and loads from disk across instances",
 
     // Pass 2 — fresh cache, expect a disk hit and no extra decode.
     {
-        AudioThumbnailCache cache(4);
+        WaveformOverviewCache cache(4);
         cache.set_disk_cache_dir(cache_dir.string());
         auto t = cache.get_or_build(wav_path.string(), 256);
         REQUIRE(t != nullptr);
@@ -580,7 +581,7 @@ TEST_CASE("AudioThumbnailCache writes and loads from disk across instances",
     std::filesystem::remove_all(cache_dir, ec);
 }
 
-TEST_CASE("AudioThumbnailCache disk keys include samples-per-peak",
+TEST_CASE("WaveformOverviewCache disk keys include samples-per-peak",
           "[audio][thumbnail][cache][persist]") {
     const auto cache_dir = unique_cache_dir();
     const auto wav_path = unique_wav_path();
@@ -588,7 +589,7 @@ TEST_CASE("AudioThumbnailCache disk keys include samples-per-peak",
     REQUIRE(write_wav_file(wav_path.string(), data));
 
     {
-        AudioThumbnailCache cache(4);
+        WaveformOverviewCache cache(4);
         cache.set_disk_cache_dir(cache_dir.string());
         auto coarse = cache.get_or_build(wav_path.string(), 512);
         REQUIRE(coarse != nullptr);
@@ -597,7 +598,7 @@ TEST_CASE("AudioThumbnailCache disk keys include samples-per-peak",
     }
 
     {
-        AudioThumbnailCache cache(4);
+        WaveformOverviewCache cache(4);
         cache.set_disk_cache_dir(cache_dir.string());
         auto fine = cache.get_or_build(wav_path.string(), 128);
         REQUIRE(fine != nullptr);
@@ -607,7 +608,7 @@ TEST_CASE("AudioThumbnailCache disk keys include samples-per-peak",
     }
 
     {
-        AudioThumbnailCache cache(4);
+        WaveformOverviewCache cache(4);
         cache.set_disk_cache_dir(cache_dir.string());
         auto coarse = cache.get_or_build(wav_path.string(), 512);
         REQUIRE(coarse != nullptr);
@@ -620,25 +621,25 @@ TEST_CASE("AudioThumbnailCache disk keys include samples-per-peak",
     std::filesystem::remove_all(cache_dir, ec);
 }
 
-TEST_CASE("AudioThumbnailCache::set_disk_cache_dir is a no-op when empty",
+TEST_CASE("WaveformOverviewCache::set_disk_cache_dir is a no-op when empty",
           "[audio][thumbnail][cache][persist]") {
-    AudioThumbnailCache cache(2);
+    WaveformOverviewCache cache(2);
     cache.set_disk_cache_dir("");
     REQUIRE(cache.disk_cache_dir().empty());
-    auto t = std::make_shared<AudioThumbnail>(
-        AudioThumbnail::build_from_buffer(make_sine(44100, 4410, 1, 200.0), 256));
+    auto t = std::make_shared<WaveformOverview>(
+        WaveformOverview::build_from_buffer(make_sine(44100, 4410, 1, 200.0), 256));
     cache.put("no-disk", t);
     REQUIRE(cache.stats().disk_writes == 0);
 }
 
-TEST_CASE("AudioThumbnailCache::clear_disk_cache removes .thumb files",
+TEST_CASE("WaveformOverviewCache::clear_disk_cache removes .thumb files",
           "[audio][thumbnail][cache][persist]") {
     const auto cache_dir = unique_cache_dir();
     const auto wav_path = unique_wav_path();
     REQUIRE(write_wav_file(wav_path.string(),
                            make_sine(44100, 4410, 1, 100.0)));
 
-    AudioThumbnailCache cache(4);
+    WaveformOverviewCache cache(4);
     cache.set_disk_cache_dir(cache_dir.string());
     REQUIRE(cache.get_or_build(wav_path.string(), 256) != nullptr);
     REQUIRE(cache.stats().disk_writes == 1);
@@ -668,9 +669,9 @@ TEST_CASE("AudioThumbnailCache::clear_disk_cache removes .thumb files",
 // could escape as filesystem_error. We pin REQUIRE_NOTHROW for the
 // happy path (empty dir, missing dir, nonexistent dir) and for an
 // extra-file-mid-iteration case.
-TEST_CASE("AudioThumbnailCache::clear_disk_cache is non-throwing",
+TEST_CASE("WaveformOverviewCache::clear_disk_cache is non-throwing",
           "[audio][thumbnail][cache][persist][issue-2966]") {
-    AudioThumbnailCache cache(2);
+    WaveformOverviewCache cache(2);
 
     // Case 1: no disk dir set — early return, no throw.
     REQUIRE_NOTHROW(cache.clear_disk_cache());
@@ -708,7 +709,7 @@ TEST_CASE("AudioThumbnailCache::clear_disk_cache is non-throwing",
 // treated as a cache miss. We pin the contract: an oversize blob in the
 // cache directory must NOT crash get_or_build() and the call must fall
 // back to rebuilding from source.
-TEST_CASE("AudioThumbnailCache load_from_disk treats oversize blob as cache miss",
+TEST_CASE("WaveformOverviewCache load_from_disk treats oversize blob as cache miss",
           "[audio][thumbnail][cache][persist][issue-2966]") {
     const auto cache_dir = unique_cache_dir();
     const auto wav_path = unique_wav_path();
@@ -718,7 +719,7 @@ TEST_CASE("AudioThumbnailCache load_from_disk treats oversize blob as cache miss
     // Pass 1 — build a legitimate cache entry so we know the .thumb path.
     std::filesystem::path thumb_file;
     {
-        AudioThumbnailCache cache(4);
+        WaveformOverviewCache cache(4);
         cache.set_disk_cache_dir(cache_dir.string());
         REQUIRE(cache.get_or_build(wav_path.string(), 256) != nullptr);
         REQUIRE(cache.stats().disk_writes == 1);
@@ -751,9 +752,9 @@ TEST_CASE("AudioThumbnailCache load_from_disk treats oversize blob as cache miss
 
     // Pass 2 — fresh cache, must not crash or throw.
     {
-        AudioThumbnailCache cache(4);
+        WaveformOverviewCache cache(4);
         cache.set_disk_cache_dir(cache_dir.string());
-        std::shared_ptr<const AudioThumbnail> t;
+        std::shared_ptr<const WaveformOverview> t;
         REQUIRE_NOTHROW(t = cache.get_or_build(wav_path.string(), 256));
         // Either the entry is silently treated as a miss and rebuilt from
         // source (preferred) or skipped entirely — both are acceptable;
@@ -768,13 +769,13 @@ TEST_CASE("AudioThumbnailCache load_from_disk treats oversize blob as cache miss
     std::filesystem::remove_all(cache_dir, ec);
 }
 
-TEST_CASE("WaveformView accepts an AudioThumbnail source", "[view][waveform][thumbnail]") {
+TEST_CASE("WaveformView accepts an WaveformOverview source", "[view][waveform][thumbnail]") {
     pulp::view::WaveformView view;
     REQUIRE_FALSE(view.has_thumbnail());
 
     auto data = make_sine(44100, 4410, 1, 200.0);
-    auto thumb = std::make_shared<AudioThumbnail>(
-        AudioThumbnail::build_from_buffer(data, 256));
+    auto thumb = std::make_shared<WaveformOverview>(
+        WaveformOverview::build_from_buffer(data, 256));
     REQUIRE_FALSE(thumb->empty());
 
     view.set_thumbnail(thumb);
@@ -793,7 +794,7 @@ TEST_CASE("WaveformView accepts an AudioThumbnail source", "[view][waveform][thu
     view.clear_thumbnail();
     REQUIRE_FALSE(view.has_thumbnail());
 
-    AudioThumbnail borrowed = AudioThumbnail::build_from_buffer(data, 256);
+    WaveformOverview borrowed = WaveformOverview::build_from_buffer(data, 256);
     view.set_thumbnail_borrowed(&borrowed);
     REQUIRE(view.has_thumbnail());
     REQUIRE(view.thumbnail() == &borrowed);

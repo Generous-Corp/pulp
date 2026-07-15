@@ -29,7 +29,7 @@
 //   * Undefined → a single-run pass-through that infers level from
 //     `base_direction` only (no codepoint analysis). Lets callers
 //     compile without the dependency and ship a correct LTR-only
-//     behaviour while still exercising the API shape.
+//     behavior while still exercising the API shape.
 
 #include <cstdint>
 #include <string>
@@ -67,7 +67,7 @@ struct BidiParagraph {
 
 class BidiAnalyzer {
 public:
-    /// Analyse one paragraph of UTF-8 text. `base_direction` selects
+    /// Analyze one paragraph of UTF-8 text. `base_direction` selects
     /// the paragraph level (Auto = UBA rule P2). Always returns a
     /// non-empty `runs` vector when `text` is non-empty.
     static BidiParagraph analyze(std::string_view text,

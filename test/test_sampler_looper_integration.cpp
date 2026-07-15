@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/audio/audio_stream_handoff.hpp>
-#include <pulp/audio/audio_thumbnail.hpp>
+#include <pulp/audio/waveform_overview.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/loop_point_analyzer.hpp>
 #include <pulp/audio/loop_renderer.hpp>
@@ -106,14 +106,14 @@ TEST_CASE("Sampler looper primitives integrate without provider dependencies",
                                             published.num_channels,
                                             static_cast<std::size_t>(published.num_frames));
 
-    const auto thumbnail = pulp::audio::AudioThumbnail::build_from_buffer_view(
+    const auto thumbnail = pulp::audio::WaveformOverview::build_from_buffer_view(
         published_audio, static_cast<std::uint32_t>(published.sample_rate), 16);
     REQUIRE_FALSE(thumbnail.empty());
     const auto thumbnail_info = thumbnail.info();
     REQUIRE(thumbnail_info.num_source_frames == published.num_frames);
     REQUIRE(thumbnail_info.num_channels == published.num_channels);
     std::vector<float> peak_pairs(32);
-    REQUIRE(thumbnail.render_min_max(pulp::audio::AudioThumbnail::kAllChannels,
+    REQUIRE(thumbnail.render_min_max(pulp::audio::WaveformOverview::kAllChannels,
                                      16,
                                      peak_pairs.data()) == 16);
 

@@ -1,7 +1,7 @@
 // Deterministic non-browser validation for an in-worklet WAM RACK.
 //
 // Drives a built rack .wasm (pulp-pluck → pulp-gain) through the shared bridge
-// and asserts the behaviours only the chain path exercises: the descriptor
+// and asserts the behaviors only the chain path exercises: the descriptor
 // exposes stage-qualified parameters, a "<stage>:<id>" write reaches the right
 // stage, a MIDI note-on routed to stage 0 produces sound the later stage passes
 // through, and the multi-stage "PWR1" state container round-trips.

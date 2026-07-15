@@ -181,7 +181,7 @@ class ValidateTestRefTests(unittest.TestCase):
         self.assertIn("does not exist", reason)
 
     def test_semantic_prefix_fixture_id_accepted(self) -> None:
-        # Body looks like a fixture id (no recognised extension) → accepted.
+        # Body looks like a fixture id (no recognized extension) → accepted.
         ok, _ = _validate_test_ref(self.repo, "semantic:yoga/foo")
         self.assertTrue(ok)
 

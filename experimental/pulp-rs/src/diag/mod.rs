@@ -193,7 +193,7 @@ pub fn collect_with(cwd: &Path, opts: &CollectOpts) -> Result<VersionDiag> {
     Ok(d)
 }
 
-/// Path equivalence without canonicalisation — just normalise
+/// Path equivalence without canonicalisation — just normalize
 /// separators so Windows registries written with forward slashes
 /// compare equal on a back-slash cwd.
 fn paths_equivalent(a: &str, b: &str) -> bool {

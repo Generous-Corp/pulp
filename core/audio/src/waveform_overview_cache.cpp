@@ -1,4 +1,4 @@
-#include <pulp/audio/audio_thumbnail.hpp>
+#include <pulp/audio/waveform_overview.hpp>
 
 #include <pulp/runtime/crypto.hpp>
 
@@ -23,7 +23,7 @@ std::string memory_cache_key(const std::string& source_path,
     return source_path + "|spp=" + std::to_string(samples_per_peak);
 }
 
-uint32_t thumbnail_base_samples_per_peak(const AudioThumbnail& thumbnail,
+uint32_t thumbnail_base_samples_per_peak(const WaveformOverview& thumbnail,
                                          uint32_t fallback) {
     if (!thumbnail.empty() && thumbnail.num_levels() > 0) {
         const auto samples_per_peak = thumbnail.level(0).samples_per_peak;
@@ -34,14 +34,14 @@ uint32_t thumbnail_base_samples_per_peak(const AudioThumbnail& thumbnail,
 
 }  // namespace
 
-AudioThumbnailCache::AudioThumbnailCache(std::size_t max_entries)
+WaveformOverviewCache::WaveformOverviewCache(std::size_t max_entries)
     : capacity_(max_entries == 0 ? 1u : max_entries) {}
 
-void AudioThumbnailCache::touch_locked(Map::iterator it) {
+void WaveformOverviewCache::touch_locked(Map::iterator it) {
     list_.splice(list_.begin(), list_, it->second);
 }
 
-void AudioThumbnailCache::evict_to_capacity_locked() {
+void WaveformOverviewCache::evict_to_capacity_locked() {
     while (list_.size() > capacity_) {
         const auto& victim = list_.back();
         index_.erase(victim.key);
@@ -50,7 +50,7 @@ void AudioThumbnailCache::evict_to_capacity_locked() {
     }
 }
 
-std::shared_ptr<const AudioThumbnail> AudioThumbnailCache::get(
+std::shared_ptr<const WaveformOverview> WaveformOverviewCache::get(
     const std::string& path,
     uint32_t samples_per_peak) {
     const auto key = memory_cache_key(path, samples_per_peak);
@@ -65,8 +65,8 @@ std::shared_ptr<const AudioThumbnail> AudioThumbnailCache::get(
     return it->second->value;
 }
 
-void AudioThumbnailCache::put(const std::string& path,
-                              std::shared_ptr<const AudioThumbnail> thumbnail,
+void WaveformOverviewCache::put(const std::string& path,
+                              std::shared_ptr<const WaveformOverview> thumbnail,
                               uint32_t fallback_samples_per_peak) {
     if (!thumbnail) return;
     const auto resolved_samples_per_peak =
@@ -94,7 +94,7 @@ void AudioThumbnailCache::put(const std::string& path,
     }
 }
 
-std::shared_ptr<const AudioThumbnail> AudioThumbnailCache::get_or_build(
+std::shared_ptr<const WaveformOverview> WaveformOverviewCache::get_or_build(
     const std::string& path,
     uint32_t samples_per_peak) {
     if (auto cached = get(path, samples_per_peak)) return cached;
@@ -118,20 +118,20 @@ std::shared_ptr<const AudioThumbnail> AudioThumbnailCache::get_or_build(
         }
         return from_disk;
     }
-    auto built = AudioThumbnail::build_from_path(path, samples_per_peak);
+    auto built = WaveformOverview::build_from_path(path, samples_per_peak);
     if (!built) return nullptr;
-    auto shared = std::make_shared<const AudioThumbnail>(std::move(*built));
+    auto shared = std::make_shared<const WaveformOverview>(std::move(*built));
     put(path, shared, samples_per_peak);
     return shared;
 }
 
-void AudioThumbnailCache::clear() {
+void WaveformOverviewCache::clear() {
     std::lock_guard<std::mutex> lock(mtx_);
     list_.clear();
     index_.clear();
 }
 
-bool AudioThumbnailCache::erase(const std::string& path) {
+bool WaveformOverviewCache::erase(const std::string& path) {
     std::lock_guard<std::mutex> lock(mtx_);
     const auto prefix = path + "|spp=";
     bool erased = false;
@@ -147,8 +147,8 @@ bool AudioThumbnailCache::erase(const std::string& path) {
     return erased;
 }
 
-AudioThumbnailCacheStats AudioThumbnailCache::stats() const {
-    AudioThumbnailCacheStats s;
+WaveformOverviewCacheStats WaveformOverviewCache::stats() const {
+    WaveformOverviewCacheStats s;
     s.hits = hits_.load(std::memory_order_relaxed);
     s.misses = misses_.load(std::memory_order_relaxed);
     s.evictions = evictions_.load(std::memory_order_relaxed);
@@ -162,23 +162,23 @@ AudioThumbnailCacheStats AudioThumbnailCache::stats() const {
     return s;
 }
 
-std::size_t AudioThumbnailCache::size() const {
+std::size_t WaveformOverviewCache::size() const {
     std::lock_guard<std::mutex> lock(mtx_);
     return list_.size();
 }
 
-std::size_t AudioThumbnailCache::capacity() const {
+std::size_t WaveformOverviewCache::capacity() const {
     std::lock_guard<std::mutex> lock(mtx_);
     return capacity_;
 }
 
-void AudioThumbnailCache::set_capacity(std::size_t max_entries) {
+void WaveformOverviewCache::set_capacity(std::size_t max_entries) {
     std::lock_guard<std::mutex> lock(mtx_);
     capacity_ = max_entries == 0 ? 1u : max_entries;
     evict_to_capacity_locked();
 }
 
-void AudioThumbnailCache::set_disk_cache_dir(const std::string& dir) {
+void WaveformOverviewCache::set_disk_cache_dir(const std::string& dir) {
     std::lock_guard<std::mutex> lock(mtx_);
     disk_dir_ = dir;
     if (disk_dir_.empty()) return;
@@ -188,12 +188,12 @@ void AudioThumbnailCache::set_disk_cache_dir(const std::string& dir) {
     // through their own error paths.
 }
 
-std::string AudioThumbnailCache::disk_cache_dir() const {
+std::string WaveformOverviewCache::disk_cache_dir() const {
     std::lock_guard<std::mutex> lock(mtx_);
     return disk_dir_;
 }
 
-void AudioThumbnailCache::clear_disk_cache() {
+void WaveformOverviewCache::clear_disk_cache() {
     std::string dir;
     {
         std::lock_guard<std::mutex> lock(mtx_);
@@ -217,7 +217,7 @@ void AudioThumbnailCache::clear_disk_cache() {
     }
 }
 
-std::string AudioThumbnailCache::disk_path_for(const std::string& source_path,
+std::string WaveformOverviewCache::disk_path_for(const std::string& source_path,
                                                uint32_t samples_per_peak) const {
     // Key combines path + mtime so editing the underlying audio invalidates
     // cached peaks. mtime failure falls back to path-only keying.
@@ -245,7 +245,7 @@ std::string AudioThumbnailCache::disk_path_for(const std::string& source_path,
     return p.string();
 }
 
-std::shared_ptr<const AudioThumbnail> AudioThumbnailCache::load_from_disk(
+std::shared_ptr<const WaveformOverview> WaveformOverviewCache::load_from_disk(
     const std::string& path,
     uint32_t samples_per_peak) const {
     std::string dir;
@@ -266,19 +266,19 @@ std::shared_ptr<const AudioThumbnail> AudioThumbnailCache::load_from_disk(
     std::vector<uint8_t> buf(static_cast<std::size_t>(size));
     in.read(reinterpret_cast<char*>(buf.data()), size);
     if (!in) return nullptr;
-    auto thumb = deserialize_thumbnail(buf.data(), buf.size());
+    auto thumb = deserialize_overview(buf.data(), buf.size());
     if (!thumb) return nullptr;
     if (thumb->empty()) return nullptr;
     if (thumb->level(0).samples_per_peak != samples_per_peak) return nullptr;
-    return std::make_shared<const AudioThumbnail>(std::move(*thumb));
+    return std::make_shared<const WaveformOverview>(std::move(*thumb));
 }
 
-bool AudioThumbnailCache::write_to_disk(const std::string& path,
+bool WaveformOverviewCache::write_to_disk(const std::string& path,
                                         uint32_t samples_per_peak,
-                                        const AudioThumbnail& thumbnail) const {
+                                        const WaveformOverview& thumbnail) const {
     const std::string disk_path = disk_path_for(path, samples_per_peak);
     if (disk_path.empty()) return false;
-    const auto blob = serialize_thumbnail(thumbnail);
+    const auto blob = serialize_overview(thumbnail);
     // Write to a sibling tmp file and rename so a crash mid-write doesn't
     // leave a half-formed cache entry behind.
     const std::string tmp_path = disk_path + ".tmp";

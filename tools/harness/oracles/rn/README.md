@@ -57,7 +57,7 @@ Schema:
   aren't in the cross-platform pulp surface)
 * `pulpExtension` (oracle) — the entry is unique to pulp, treated as
   a normal entry (typically PASS when prop-applier wires it).
-* `mapsTo` markers signalling no-implementation (`no branch`,
+* `mapsTo` markers signaling no-implementation (`no branch`,
   `no @pulp/react prop`, `not surfaced`, `intentionally NOT
   dispatched`, `no bridge support`, `no prop-applier case`) →
   **NOT_IMPL**.

@@ -6,7 +6,7 @@
 //   (b) name-prefix       → AudioWidgetKind  (fallback for unpublished libraries)
 //
 // The manifest is the single source of truth for which Pulp library widgets
-// the importer recognises and which Figma component-set keys / name prefixes
+// the importer recognizes and which Figma component-set keys / name prefixes
 // they map to. Adding a new widget = adding one entry to the JSON.
 
 import manifest from "../library-manifest.json";

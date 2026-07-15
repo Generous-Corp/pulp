@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Unit test for tools/import-design/figma_rest_export.py — the headless REST
-exporter's font-capture + content-hash behaviour (the two conformance gaps vs
+exporter's font-capture + content-hash behavior (the two conformance gaps vs
 the plugin). Pure (no network)."""
 from __future__ import annotations
 import hashlib, importlib.util, pathlib, unittest

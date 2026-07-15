@@ -63,7 +63,7 @@ TEST_CASE("parse_mode recognizes the four documented values",
 TEST_CASE("parse_mode defaults to Prompt on unknown / empty input",
           "[cli][update-mode][issue-550]") {
     // Tolerant-on-typo is a hard requirement — a malformed config
-    // should degrade to the safest behaviour, not fail the invocation.
+    // should degrade to the safest behavior, not fail the invocation.
     REQUIRE(um::parse_mode("")        == um::Mode::Prompt);
     REQUIRE(um::parse_mode("AUTO")    == um::Mode::Prompt);   // case-sensitive
     REQUIRE(um::parse_mode("default") == um::Mode::Prompt);

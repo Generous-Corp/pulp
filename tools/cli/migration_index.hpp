@@ -1,6 +1,6 @@
-// migration_index.hpp — embedded migration-note catalogue.
+// migration_index.hpp — embedded migration-note catalog.
 //
-// Embedded catalogue of per-release migration notes. The generated
+// Embedded catalog of per-release migration notes. The generated
 // translation unit `migration_index.cpp` is produced at CMake configure
 // time by `tools/scripts/build_migration_index.py`, which scans
 // `docs/migrations/*.md`, parses TOML frontmatter, and emits a table

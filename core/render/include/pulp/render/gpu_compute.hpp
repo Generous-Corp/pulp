@@ -426,7 +426,7 @@ public:
     /// device-resident buffers + dilation history but share the device, queue, and
     /// compiled pipelines — so a stereo plugin needs one device, not one per
     /// channel. Instances are identified by `(block_size, instance)`; the default 0
-    /// preserves the single-stream behaviour.
+    /// preserves the single-stream behavior.
     virtual bool prepare_wavenet(const WavenetLayerArraySpec* arrays, uint32_t num_arrays,
                                  const float* weights, uint32_t weights_len,
                                  uint32_t block_size, float head_scale,

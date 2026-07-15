@@ -102,7 +102,7 @@ struct ProjectEntry {
 
 // Inputs to the skew analyzer. All fields optional — the analyzer
 // skips checks silently when data is missing (forward-compatible
-// behaviour: never hard-fail on missing or untagged versions).
+// behavior: never hard-fail on missing or untagged versions).
 struct VersionReport {
     Semver cli;                  // PULP_SDK_VERSION of the running binary
     Semver plugin;               // .claude-plugin/plugin.json "version"
@@ -116,7 +116,7 @@ struct VersionReport {
     // ancestor projects surfaced by `--scan-parents`.
     std::vector<ProjectEntry> projects;
 
-    // Analyse and return user-visible findings. Rules:
+    // Analyze and return user-visible findings. Rules:
     //   - project_cli_min set AND project_cli_min > cli  -> Warn "upgrade CLI"
     //   - project_sdk set AND project_sdk > cli          -> Warn "CLI behind project SDK"
     //   - plugin_min_cli set AND plugin_min_cli > cli    -> Warn "upgrade CLI for plugin"

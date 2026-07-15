@@ -1,4 +1,4 @@
-// Shell-out CLI behaviour tests for `pulp ship`.
+// Shell-out CLI behavior tests for `pulp ship`.
 //
 // The silent-empty-signature regression came from the CLI ship path not
 // being exercised end-to-end. This file shells to the built binary for

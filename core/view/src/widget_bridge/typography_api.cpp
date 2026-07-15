@@ -28,7 +28,7 @@ void WidgetBridge::register_widget_typography_api() {
         // Storage layer accepts the raw comma-list; the resolver
         // splits it at paint time. Single-family inputs (no comma)
         // still hit the get_cached_typeface_single fast path with
-        // identical single-family behaviour.
+        // identical single-family behavior.
         if (auto* l = dynamic_cast<Label*>(v)) {
             l->set_font_family(family);
         } else {

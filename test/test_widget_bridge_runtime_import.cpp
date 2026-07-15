@@ -21,7 +21,7 @@ using namespace pulp::state;
 // also defines. The original is `static` (file-local) and not exported
 // from any header, so a future shared `test/test_widget_bridge_helpers.hpp`
 // could centralise it — until then this small copy keeps the split
-// behaviour-neutral.
+// behavior-neutral.
 static std::string js_single_quoted(std::string value) {
     std::string out;
     out.reserve(value.size() + 8);

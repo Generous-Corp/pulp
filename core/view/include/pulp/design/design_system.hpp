@@ -15,7 +15,7 @@
 //      restyles through. The catalog is what lets tooling (design-import,
 //      JS/React bindings, docs) reason about the system without hardcoding it.
 //
-// The reskin contract still holds: every catalogued widget paints through
+// The reskin contract still holds: every cataloged widget paints through
 // View::resolve_color, so applying a different theme restyles all of them with
 // no code change (see docs/guides/design-tokens.md).
 
@@ -61,7 +61,7 @@ namespace pulp::design {
 pulp::view::Theme ink_signal_theme(bool dark = true);
 
 /// Apply the Ink & Signal theme to a view tree root. Descendants resolve their
-/// colours up the parent chain, so one call restyles the whole subtree.
+/// colors up the parent chain, so one call restyles the whole subtree.
 void apply_ink_signal(pulp::view::View& root, bool dark = true);
 
 // ── Component catalog ─────────────────────────────────────────────────────────
@@ -85,7 +85,7 @@ enum class Category {
 
 std::string_view category_name(Category c);
 
-/// One catalogued component: the bridge between a Figma component and its native
+/// One cataloged component: the bridge between a Figma component and its native
 /// C++ widget, plus enough metadata for tooling and docs to use it well.
 struct ComponentInfo {
     std::string name;             // Display + catalog key, matches Figma set name ("Knob")
@@ -97,7 +97,7 @@ struct ComponentInfo {
     std::vector<std::string> reskin_tokens;  // Theme tokens it paints through
 };
 
-/// All catalogued components, in a stable display order.
+/// All cataloged components, in a stable display order.
 const std::vector<ComponentInfo>& catalog();
 
 /// Look up a component by its catalog name (case-sensitive, e.g. "Knob").

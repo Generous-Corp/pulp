@@ -455,7 +455,7 @@ TEST_CASE("generate_pulp_swift emits the full B2 visual style set",
     REQUIRE(contains(view, ".scaleEffect(1.1)"));
 }
 
-TEST_CASE("generate_pulp_swift parses rgb()/rgba() colour tokens",
+TEST_CASE("generate_pulp_swift parses rgb()/rgba() color tokens",
           "[view][import][swiftui]") {
     DesignIR ir;
     ir.source = DesignSource::figma;
@@ -470,7 +470,7 @@ TEST_CASE("generate_pulp_swift parses rgb()/rgba() colour tokens",
 TEST_CASE("generate_pulp_swift parses gradients with rgba stops (internal spaces)",
           "[view][import][swiftui]") {
     // rgba() stops carry commas AND spaces inside their own parens; the stop
-    // splitter must not truncate the colour at the first internal space.
+    // splitter must not truncate the color at the first internal space.
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.root = frame_node("r", "R", 50.0f, 50.0f, LayoutDirection::column);
@@ -526,9 +526,9 @@ TEST_CASE("generate_pulp_swift flags per-side borders and multi/inset shadows",
     REQUIRE(count_strict_fidelity_failures(out.issues) >= 2);
 }
 
-TEST_CASE("generate_pulp_swift flags a per-side border that differs only in colour",
+TEST_CASE("generate_pulp_swift flags a per-side border that differs only in color",
           "[view][import][swiftui]") {
-    // Uniform widths but a distinct per-side colour still loses a side; the
+    // Uniform widths but a distinct per-side color still loses a side; the
     // width-only check would have missed it.
     DesignIR ir;
     ir.source = DesignSource::figma;

@@ -35,8 +35,8 @@
 
 namespace pulp::signal {
 
-/// Formant behaviour for the spectral modes. signal::FormantMode on main is
-/// only {follow, preserve} and cannot express the three-way behaviour we need,
+/// Formant behavior for the spectral modes. signal::FormantMode on main is
+/// only {follow, preserve} and cannot express the three-way behavior we need,
 /// so this is an offline-specific enum. Each value maps to a concrete
 /// SpectralEnvelopeShifter `warp` at wiring time (the shifter exposes a single
 /// warp knob, not a mode enum):
@@ -480,7 +480,7 @@ private:
 
     // Varispeed (tape) render: pitch+time LINKED. Output sample i reads input
     // position i/ratio at a constant rate (a pure mastering-grade resample — no
-    // phase-vocoder artifacts), then a speed-scaled head EQ colours it like a tape
+    // phase-vocoder artifacts), then a speed-scaled head EQ colors it like a tape
     // machine at that speed. Slowing down (ratio>1) loses highs and gains low-mid
     // warmth; speeding up (ratio<1) brightens and thins. Exact identity at ratio 1.
     bool varispeed_render(const SampleType* const* in, long in_frames,
@@ -510,7 +510,7 @@ private:
     }
 
     // Speed-scaled tape head EQ: a low-mid head bump (warmth) + a head-gap HF
-    // shelf (dulling), both scaled by log2(ratio) so the colour tracks the speed.
+    // shelf (dulling), both scaled by log2(ratio) so the color tracks the speed.
     // At ratio 1 every gain is 0 dB → exact bypass (varispeed stays a clean
     // identity at unity). Two cascaded RBJ biquads per channel, double state.
     void apply_head_eq(SampleType* const* out, long n, double ratio) {
@@ -868,7 +868,7 @@ private:
         }
         // Search +/- a fraction of the STRETCHED onset spacing for the output
         // transient peak: wide enough to cover the PV's ratio-dependent latency
-        // offset, but never so wide it locks onto a neighbouring transient (which
+        // offset, but never so wide it locks onto a neighboring transient (which
         // would happen with a fixed window at high compression, ratio << 1).
         const long search = std::clamp<long>(
             std::llround(static_cast<double>(kOnsetMinGap) * ratio * 0.4), 128L, kReloSearch);

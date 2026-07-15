@@ -112,7 +112,7 @@ void MidiKeyboard::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
     // Piano keys are physically white / black in any theme (like sheet music),
     // so they don't follow the surface tokens — that made the naturals render
-    // dark in the dark theme. Fixed material colours; the active key uses accent.
+    // dark in the dark theme. Fixed material colors; the active key uses accent.
     auto white_color = Color::rgba8(236, 239, 243);  // token-lint:allow (natural keys are white)
     auto black_color = Color::rgba8(22, 26, 33);     // token-lint:allow (sharp keys are black)
     auto active_color = highlight_color_.a > 0

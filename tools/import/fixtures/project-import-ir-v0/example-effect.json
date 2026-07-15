@@ -214,7 +214,7 @@
         "path": "assets/example-scale.scl",
         "kind": "tuning_scale",
         "copy_policy": "copy_to_scaffold",
-        "reason": "Scale file is required to preserve local tuning behaviour.",
+        "reason": "Scale file is required to preserve local tuning behavior.",
         "source_ref": { "file": "PluginProcessor.cpp", "line": 96 }
       }
     ],

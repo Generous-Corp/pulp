@@ -147,7 +147,7 @@ TEST_CASE("Panner Sin3dB / EqualPower constant-power", "[signal][pan-law]") {
         const float power = l * l + r * r;
         REQUIRE(std::abs(power - 1.0f) < 1e-5f);
     }
-    // -3 dB at centre.
+    // -3 dB at center.
     p.set_pan(0.0f);
     float l, r;
     p.compute_gains(l, r);
@@ -191,7 +191,7 @@ TEST_CASE("Panner endpoints reach hard-left / hard-right for every law",
     }
 }
 
-TEST_CASE("Panner Sin6dB has -6dB notch at centre", "[signal][pan-law]") {
+TEST_CASE("Panner Sin6dB has -6dB notch at center", "[signal][pan-law]") {
     Panner p;
     p.set_law(PanLaw::Sin6dB);
     p.set_pan(0.0f);
@@ -201,7 +201,7 @@ TEST_CASE("Panner Sin6dB has -6dB notch at centre", "[signal][pan-law]") {
     REQUIRE(std::abs(r - 0.5f) < 1e-4f);
 }
 
-TEST_CASE("Panner Sqrt4_5dB has -4.5dB notch at centre (#2834 regression)",
+TEST_CASE("Panner Sqrt4_5dB has -4.5dB notch at center (#2834 regression)",
           "[signal][pan-law][regression]") {
     Panner p;
     p.set_law(PanLaw::Sqrt4_5dB);

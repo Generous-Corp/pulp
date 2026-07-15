@@ -447,7 +447,7 @@ void WasapiDevice::render_thread_func() {
 // so the user's output buffer is empty.
 //
 // Discontinuity / silent packets are reported via the AUDCLNT_BUFFERFLAGS
-// returned by GetBuffer; we honour AUDCLNT_BUFFERFLAGS_SILENT by
+// returned by GetBuffer; we honor AUDCLNT_BUFFERFLAGS_SILENT by
 // memset-ing the input to zero rather than copying garbage.
 void WasapiDevice::capture_thread_func() {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
@@ -787,7 +787,7 @@ std::unique_ptr<AudioDevice> WasapiSystem::create_device(const std::string& devi
 
     // Query the endpoint's data flow so the WasapiDevice knows whether
     // to take the render or capture path. Default to render if the
-    // query fails (matches the prior behaviour and the empty-id branch
+    // query fails (matches the prior behavior and the empty-id branch
     // above).
     EDataFlow flow = eRender;
     IMMEndpoint* endpoint = nullptr;

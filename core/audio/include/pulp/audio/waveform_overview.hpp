@@ -1,6 +1,6 @@
 #pragma once
 
-// AudioThumbnail + AudioThumbnailCache
+// WaveformOverview + WaveformOverviewCache
 // ─────────────────────────────────────────────────────────────────────────────
 // Pre-decoded min/max peak summaries over an audio file at multiple zoom
 // levels. The peaks live in memory (and optionally on disk) so that a
@@ -8,15 +8,15 @@
 // audio.
 //
 // Design:
-//   * One AudioThumbnail per source. Peaks are stored per channel as
-//     interleaved (min, max) int8 samples normalised to [-1, 1]. A single
+//   * One WaveformOverview per source. Peaks are stored per channel as
+//     interleaved (min, max) int8 samples normalized to [-1, 1]. A single
 //     int8-pair costs 2 bytes per channel per peak — tens of thousands of
 //     peaks fit in a few KB.
 //   * Higher zoom levels are decimations of the level below. We build the
 //     base "samples_per_peak" level by walking the audio source once, then
 //     decimate by 2x for each subsequent level until we are down to a
 //     handful of peaks.
-//   * AudioThumbnailCache is a tiny LRU keyed by source path and requested
+//   * WaveformOverviewCache is a tiny LRU keyed by source path and requested
 //     base resolution. Eviction is by configurable maximum entry count.
 //   * Optional on-disk persistence — call `set_disk_cache_dir(path)` to
 //     point the cache at a directory. After that, `get_or_build()` first
@@ -28,7 +28,7 @@
 //     ignored.
 //
 // Wired into core/view::WaveformView so that callers may pass either a raw
-// sample buffer (existing behaviour) or an AudioThumbnail* (new behaviour
+// sample buffer (existing behavior) or an WaveformOverview* (new behavior
 // — peaks render straight from the cached table).
 
 #include <atomic>
@@ -48,7 +48,7 @@
 namespace pulp::audio {
 
 // A single (min, max) pair at one peak slot for one channel.
-// Stored normalised to [-1, 1]. int8 is plenty for waveform display
+// Stored normalized to [-1, 1]. int8 is plenty for waveform display
 // (256 levels per axis) and keeps peak tables small.
 struct AudioPeak {
     int8_t min_q7 = 0;
@@ -71,14 +71,14 @@ struct AudioPeak {
 
 // One zoom level: a peak table for every channel.
 // peaks[channel] has `peaks_per_channel` entries.
-struct ThumbnailLevel {
+struct OverviewLevel {
     uint32_t samples_per_peak = 0;
     uint32_t peaks_per_channel = 0;
     std::vector<std::vector<AudioPeak>> peaks;  // [channel][peak_index]
 };
 
 // Lightweight summary of an in-memory thumbnail.
-struct AudioThumbnailInfo {
+struct WaveformOverviewInfo {
     uint32_t num_channels = 0;
     uint64_t num_source_frames = 0;
     uint32_t sample_rate = 0;
@@ -86,7 +86,7 @@ struct AudioThumbnailInfo {
     std::size_t bytes_used = 0;
 };
 
-class AudioThumbnail {
+class WaveformOverview {
 public:
     // Build from an audio-file path. Returns nullopt if the source file
     // cannot be opened or has zero frames.
@@ -97,26 +97,26 @@ public:
     //
     // This call is synchronous — the caller decides whether to run it on a
     // background thread.
-    static std::optional<AudioThumbnail> build_from_path(
+    static std::optional<WaveformOverview> build_from_path(
         const std::string& path,
         uint32_t samples_per_peak = 256);
 
     // Build from an in-memory decoded buffer. Useful for tests and for
     // sources that are already loaded.
-    static AudioThumbnail build_from_buffer(
+    static WaveformOverview build_from_buffer(
         const AudioFileData& data,
         uint32_t samples_per_peak = 256);
     // Build from an immutable planar buffer view. This is the sampler/editor
     // bridge for published sample slots and materialized rolling captures.
     // The thumbnail owns its peak tables; it does not retain the source view.
-    static AudioThumbnail build_from_buffer_view(
+    static WaveformOverview build_from_buffer_view(
         BufferView<const float> source,
         uint32_t sample_rate,
         uint32_t samples_per_peak = 256);
 
-    AudioThumbnailInfo info() const noexcept;
+    WaveformOverviewInfo info() const noexcept;
 
-    const ThumbnailLevel& level(std::size_t i) const { return levels_.at(i); }
+    const OverviewLevel& level(std::size_t i) const { return levels_.at(i); }
     std::size_t num_levels() const noexcept { return levels_.size(); }
 
     // Pick the level whose peaks-per-channel is closest to (and at least
@@ -138,11 +138,11 @@ public:
     bool empty() const noexcept { return levels_.empty(); }
 
     // Internal: rebuild a thumbnail from a serialized blob. Public so the
-    // free-function `deserialize_thumbnail()` (defined in the .cpp) can
+    // free-function `deserialize_overview()` (defined in the .cpp) can
     // construct one without becoming a friend. Returns nullopt on malformed
     // input. Not part of the supported API surface — call
-    // `deserialize_thumbnail()` instead.
-    static std::optional<AudioThumbnail> from_serialized_levels(
+    // `deserialize_overview()` instead.
+    static std::optional<WaveformOverview> from_serialized_levels(
         uint32_t num_channels,
         uint64_t num_source_frames,
         uint32_t sample_rate,
@@ -152,7 +152,7 @@ public:
         std::size_t offset);
 
 private:
-    std::vector<ThumbnailLevel> levels_;
+    std::vector<OverviewLevel> levels_;
     uint32_t num_channels_ = 0;
     uint64_t num_source_frames_ = 0;
     uint32_t sample_rate_ = 0;
@@ -163,21 +163,21 @@ private:
 // num_source_frames(8) sample_rate(4) num_levels(4) [per-level:
 // samples_per_peak(4) peaks_per_channel(4) channels * peaks * AudioPeak]`
 // — little-endian. The version field is bumped only when the layout
-// changes; `deserialize_thumbnail()` rejects mismatched versions and
+// changes; `deserialize_overview()` rejects mismatched versions and
 // returns nullopt.
-std::vector<uint8_t> serialize_thumbnail(const AudioThumbnail& t);
-std::optional<AudioThumbnail> deserialize_thumbnail(const uint8_t* data,
+std::vector<uint8_t> serialize_overview(const WaveformOverview& t);
+std::optional<WaveformOverview> deserialize_overview(const uint8_t* data,
                                                     std::size_t size);
 
 // ─────────────────────────────────────────────────────────────────────────
-// AudioThumbnailCache — in-memory LRU of thumbnails keyed by source path,
+// WaveformOverviewCache — in-memory LRU of thumbnails keyed by source path,
 // with optional on-disk persistence layer.
 //
 // Thread-safe. Used by widgets that may rebuild the same waveform many
 // times (e.g. WaveformView opened repeatedly with the same sample).
 // ─────────────────────────────────────────────────────────────────────────
 
-struct AudioThumbnailCacheStats {
+struct WaveformOverviewCacheStats {
     std::size_t hits = 0;
     std::size_t misses = 0;
     std::size_t evictions = 0;
@@ -187,21 +187,21 @@ struct AudioThumbnailCacheStats {
     std::size_t disk_writes = 0;  ///< put → wrote to disk
 };
 
-class AudioThumbnailCache {
+class WaveformOverviewCache {
 public:
     static constexpr uint32_t kInferSamplesPerPeak = 0;
 
-    explicit AudioThumbnailCache(std::size_t max_entries = 32);
+    explicit WaveformOverviewCache(std::size_t max_entries = 32);
 
     // Returns a shared_ptr to the thumbnail for `path`, building it on
     // demand. Returns nullptr if the source cannot be opened.
-    std::shared_ptr<const AudioThumbnail> get_or_build(
+    std::shared_ptr<const WaveformOverview> get_or_build(
         const std::string& path,
         uint32_t samples_per_peak = 256);
 
     // Returns the cached thumbnail if present, otherwise nullptr. Does
     // NOT build. Records a hit or miss in stats.
-    std::shared_ptr<const AudioThumbnail> get(
+    std::shared_ptr<const WaveformOverview> get(
         const std::string& path,
         uint32_t samples_per_peak = 256);
 
@@ -211,7 +211,7 @@ public:
     // argument is only a fallback for thumbnails that do not expose a base
     // resolution. kInferSamplesPerPeak falls back to the normal 256 default.
     void put(const std::string& path,
-             std::shared_ptr<const AudioThumbnail> thumbnail,
+             std::shared_ptr<const WaveformOverview> thumbnail,
              uint32_t fallback_samples_per_peak = kInferSamplesPerPeak);
 
     // Drop everything.
@@ -221,7 +221,7 @@ public:
     bool erase(const std::string& path);
 
     // Atomic snapshot of cache stats. Cheap.
-    AudioThumbnailCacheStats stats() const;
+    WaveformOverviewCacheStats stats() const;
 
     std::size_t size() const;
     std::size_t capacity() const;
@@ -243,7 +243,7 @@ public:
 private:
     struct Entry {
         std::string key;
-        std::shared_ptr<const AudioThumbnail> value;
+        std::shared_ptr<const WaveformOverview> value;
     };
 
     // LRU: front == most recently used.
@@ -255,11 +255,11 @@ private:
 
     // Disk-cache helpers — return nullptr / false on any I/O failure.
     // Both are safe to call with disk_dir_ empty; they no-op silently.
-    std::shared_ptr<const AudioThumbnail> load_from_disk(const std::string& path,
+    std::shared_ptr<const WaveformOverview> load_from_disk(const std::string& path,
                                                         uint32_t samples_per_peak) const;
     bool write_to_disk(const std::string& path,
                        uint32_t samples_per_peak,
-                       const AudioThumbnail& thumbnail) const;
+                       const WaveformOverview& thumbnail) const;
     std::string disk_path_for(const std::string& source_path,
                               uint32_t samples_per_peak) const;
 
@@ -276,5 +276,7 @@ private:
     std::atomic<std::size_t> disk_hits_{0};
     std::atomic<std::size_t> disk_writes_{0};
 };
+
+
 
 }  // namespace pulp::audio

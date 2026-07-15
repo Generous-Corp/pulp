@@ -43,7 +43,7 @@ std::vector<float> LogFrequencyScale::ticks() const {
     if (!usable(*this)) return out;
 
     // 1-2-5 per decade: 20, 30, 50, 100, 200, 300, 500, 1k … The mantissas
-    // below are the ones an audio engineer expects to see labelled; a plain
+    // below are the ones an audio engineer expects to see labeled; a plain
     // every-integer-multiple sweep crowds the top of each decade.
     static constexpr float mantissas[] = {1, 2, 3, 5, 7};
     const int first_decade = static_cast<int>(std::floor(std::log10(min_hz)));

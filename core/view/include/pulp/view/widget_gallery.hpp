@@ -21,7 +21,7 @@ namespace pulp::view {
 constexpr float GALLERY_WIDTH = 940.0f;
 
 // Build the gallery board with `theme` applied to the root (descendants resolve
-// their colours up the parent chain). The root's bounds height is set to fit.
+// their colors up the parent chain). The root's bounds height is set to fit.
 std::unique_ptr<View> build_widget_gallery(const Theme& theme);
 
 // Wrap build_widget_gallery in a ScrollView sized to a `viewport_w × viewport_h`

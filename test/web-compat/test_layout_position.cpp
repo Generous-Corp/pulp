@@ -339,7 +339,7 @@ TEST_CASE("Yoga: layered absolute canvases (filterbank+overlay) both fill parent
 // overflows by 40 horizontally and 60 vertically, clipping the bottom
 // action rail (App-y=804..860 → viewport-y=804..860 → off-screen).
 //
-// This test pins the current Yoga behaviour so a future fix that
+// This test pins the current Yoga behavior so a future fix that
 // changes viewport-vs-content reconciliation (e.g. flex-centering body-
 // equivalent, or auto-clamping oversize absolute children to viewport)
 // has a regression anchor. Today the App is placed at (0,0,1320,860)
@@ -562,7 +562,7 @@ TEST_CASE("Viewport reconcile: explicit right:0 / bottom:0 is edge-anchored, not
     // pulp #1906 — distinguish `right:auto` from explicit `right:0`.
     // A child with explicit `right:0` / `bottom:0` is anchored to the
     // opposite edge: the source explicitly declared edge-anchoring intent
-    // and Yoga will honour it via the inset → size derivation. The
+    // and Yoga will honor it via the inset → size derivation. The
     // reconciler must NOT clamp the explicit preferred_* in that case;
     // doing so would override source positioning intent.
     View root;

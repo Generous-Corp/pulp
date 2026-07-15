@@ -94,7 +94,7 @@ function pack(records) {
      `readParamValues=${typeof bridge.readParamValues} paramEpoch=${typeof bridge.paramEpoch}`);
 }
 
-// ── SF-3: the removed interleave round-trip was behaviour-preserving ────────
+// ── SF-3: the removed interleave round-trip was behavior-preserving ────────
 // The WAM path used to transpose planar→interleaved (JS) →planar (C++) →DSP→
 // planar→interleaved (C++) →planar (JS): four O(frames×channels) transposes.
 // The two on each side are exact inverses, so the planar buffer the DSP sees —

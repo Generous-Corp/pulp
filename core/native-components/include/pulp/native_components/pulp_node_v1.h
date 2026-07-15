@@ -12,7 +12,7 @@
  * versioned state, and an optional host-services handle.
  *
  * COMPATIBILITY: same-major promise. Within ABI major 1, the contract is
- * append-only — fields are added by growing a struct's leading `size`, behaviour
+ * append-only — fields are added by growing a struct's leading `size`, behavior
  * by capability flags; existing fields, callback order, and semantics never
  * change. A host accepts any node whose `abi_major` matches and whose entry
  * `size` is at least the host's minimum. Loaders that find a higher minor simply
@@ -69,7 +69,7 @@ enum {
 };
 
 /* ───────────────────────── Capability flags ──────────────────────────
- * Additive negotiation: optional behaviour is a bit, never a required field. */
+ * Additive negotiation: optional behavior is a bit, never a required field. */
 typedef uint32_t pulp_node_caps_v1;
 enum {
     PULP_NODE_CAP_STATE_V1 = 1u << 0,   /* implements save_state / load_state  */
@@ -84,7 +84,7 @@ typedef struct pulp_node_instance_v1 pulp_node_instance_v1; /* node-owned */
 typedef struct pulp_node_host_v1 pulp_node_host_v1;         /* host-owned */
 
 /* ───────────────────────── Host services (decision: explicit RT labels) ──
- * The host hands this to the node at create(). Each callback is labelled
+ * The host hands this to the node at create(). Each callback is labeled
  * RT-callable or NON-RT-ONLY; calling a NON-RT-ONLY callback from process() is a
  * contract violation. `host_context` is opaque and passed back to each. */
 typedef struct pulp_node_host_services_v1 {

@@ -12,7 +12,7 @@
 // reproduces that setup with the real RtAllocationProbe interposer and proves
 // (a) add()/add_sysex_copy() into the reserved+limited buffers allocate nothing
 // on the render-thread append, and (b) the probe genuinely catches the pre-fix
-// behaviour (an unreserved buffer DOES allocate), so the passing assertion in
+// behavior (an unreserved buffer DOES allocate), so the passing assertion in
 // (a) is meaningful.
 //
 // The probe is armed only around the render-thread append region — never around

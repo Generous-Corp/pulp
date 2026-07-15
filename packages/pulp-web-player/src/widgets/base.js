@@ -1,6 +1,6 @@
 // widgets/base.js — shared helpers for the canvas-drawn Pulp widgets.
 //
-// Everything here is token-driven: colours are read live from the CSS custom
+// Everything here is token-driven: colors are read live from the CSS custom
 // properties in tokens.css (getComputedStyle), never hardcoded, so the widgets
 // track the active theme (our demos force data-theme="dark"). Geometry follows
 // the native paint code as documented in tokens/WIDGETS.md.
@@ -12,7 +12,7 @@ export function tok(el, name) {
   return getComputedStyle(el).getPropertyValue(name).trim();
 }
 
-// sRGB linear interpolation of two hex colours — matches Color::interpolate
+// sRGB linear interpolation of two hex colors — matches Color::interpolate
 // (per-channel lerp of gamma-encoded sRGB, canvas.hpp:63-68). t in [0,1].
 export function lerpHex(a, b, t) {
   const pa = hexToRgb(a), pb = hexToRgb(b);
@@ -74,7 +74,7 @@ export const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 // Repaint a canvas widget once it is actually in the document — CSS custom
 // properties (our design tokens) only resolve via getComputedStyle on an
 // ATTACHED element, and the native Inter face may still be loading. Without
-// this the first construction-time draw() paints token colours as "" (ignored →
+// this the first construction-time draw() paints token colors as "" (ignored →
 // black) and text in a fallback face. A ResizeObserver fires when the element
 // gains a box (i.e. is laid out in the DOM); document.fonts.ready covers the
 // font. draw() itself bails while detached so no black flash is committed.
@@ -115,7 +115,7 @@ export function snap(p, v) {
   return clamp(v, p.minValue, p.maxValue);
 }
 
-// Normalised position 0..1 for a value.
+// Normalized position 0..1 for a value.
 export const toNorm = (p, v) =>
   p.maxValue === p.minValue ? 0 : (v - p.minValue) / (p.maxValue - p.minValue);
 export const fromNorm = (p, n) => p.minValue + n * (p.maxValue - p.minValue);
@@ -200,7 +200,7 @@ export function initModality() {
   }, true);
 }
 
-// Attach drag / wheel / keyboard / double-click behaviour to a value widget.
+// Attach drag / wheel / keyboard / double-click behavior to a value widget.
 // opts: { el, param, get, set, pixels, orientation }
 //   get()          -> current value
 //   set(v, opts?)  -> commit a value (caller snaps/clamps/redraws/announces)

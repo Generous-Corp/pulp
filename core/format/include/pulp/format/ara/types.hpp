@@ -81,12 +81,12 @@ struct AraRegionSequence {
     RegionSequenceId id = 0;
     MusicalContextId musical_context_id = 0;
     std::string name;
-    int colour_argb = 0;          ///< Track colour, AARRGGBB; 0 if unset
+    int colour_argb = 0;          ///< Track color, AARRGGBB; 0 if unset
 };
 
 /// A playback region maps a span of an audio modification onto the
 /// host's timeline. All four time fields are in seconds, matching ARA's
-/// ARAPlaybackRegionProperties contract. Earlier drafts modelled the
+/// ARAPlaybackRegionProperties contract. Earlier drafts modeled the
 /// modification-time pair as int64 samples, which would have forced
 /// sample-rate-dependent conversion in every adapter and dropped
 /// fractional-time precision.

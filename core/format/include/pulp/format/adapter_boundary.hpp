@@ -37,7 +37,7 @@
 /// adapter calls at activate/setup time off the audio thread. The functions are
 /// pure and header-only so the parity-matrix test (`test_adapter_boundary_
 /// parity.cpp`) can drive one processor through every format's boundary profile
-/// and assert identical observable behaviour without standing up a host SDK.
+/// and assert identical observable behavior without standing up a host SDK.
 
 #include <pulp/format/processor.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
@@ -95,7 +95,7 @@ inline void zero_f64(double* dst, std::uint32_t count) noexcept {
 /// canonical units (quarter-note beats, samples, real BPM). Each `has_*` flag
 /// says whether the host actually supplied that field this block; an unset
 /// field leaves the corresponding `ProcessContext` value at its default so an
-/// adapter that never populates it keeps the pre-extension behaviour exactly.
+/// adapter that never populates it keeps the pre-extension behavior exactly.
 ///
 /// `valid == false` means "the host provided no transport at all" (e.g. CLAP's
 /// `process->transport == nullptr`): the mapper leaves every transport field at

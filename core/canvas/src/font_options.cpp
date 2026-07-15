@@ -26,7 +26,7 @@ inline std::size_t hash_float(float f) noexcept {
     // BEFORE memcpy by working on the bit pattern directly; `if (f == 0.0f)
     // f = 0.0f;` is unsafe because the compiler can optimize it away.
     //
-    // NaN hashes are intentionally not normalised — two NaN-bearing
+    // NaN hashes are intentionally not normalized — two NaN-bearing
     // FontOptions values that hash differently is benign (and `operator==`
     // also reports them as non-equal under IEEE-754).
     std::uint32_t bits;

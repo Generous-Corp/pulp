@@ -552,9 +552,12 @@ function __replaySvgPathAttributes__(el) {
         setSvgFill(el._id, fillVal);
     }
     // fill-rule / fillRule — winding rule ("nonzero" | "evenodd").
-    // Compound annular paths (a stroked ellipse lowered to `M…Z M…Z` by
-    // JUCE's SVGGraphicsContext) only render the hole under
-    // even-odd. Accept either the HTML hyphen spelling or the JSX
+    // Load-bearing for annular (ring) shapes. A ring arrives as ONE path
+    // with two closed subpaths — `M…Z M…Z`, outer then inner — which is
+    // how vector exporters emit a stroked ellipse. Under "nonzero" the
+    // inner subpath adds to the winding count and the hole fills in, so
+    // the ring paints as a solid disc; only "evenodd" cancels it and
+    // leaves the hole. Accept either the HTML hyphen spelling or the JSX
     // camelCase spelling, mirroring stroke-width / strokeWidth above.
     var fr = a["fill-rule"];
     if (fr === undefined) fr = a.fillRule;

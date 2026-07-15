@@ -148,7 +148,7 @@ TEST_CASE("Wavetable::make_square contains only odd harmonics — even-indexed l
     // A square synthesised from odd-harmonic sines has half-wave
     // anti-symmetry: sample at phase 0 = 0 (sum of sines starting at 0),
     // and the table integrates to a value mirrored across phase 0.5.
-    // We sanity-check that the table peak is normalised to ~1.0.
+    // We sanity-check that the table peak is normalized to ~1.0.
     auto wt = Wavetable::make_square(/*bands=*/8);
     wt.set_sample_rate(48000.0f);
     wt.set_frequency(110.0f);
@@ -208,7 +208,7 @@ TEST_CASE("WavetableBank morphs between two tables at position 0 and 1",
     for (int i = 0; i < 4096; ++i) sine_peak = std::max(sine_peak, std::fabs(bank.next()));
     REQUIRE_THAT(sine_peak, WithinAbs(1.0f, 1e-2f));
 
-    // Position 1 = pure saw → also normalised to ~1.
+    // Position 1 = pure saw → also normalized to ~1.
     bank.set_position(1.0f);
     bank.reset();
     float saw_peak = 0.0f;

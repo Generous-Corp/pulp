@@ -95,7 +95,7 @@ struct UmpSession::Impl {
     // target.
     std::unordered_map<std::string, std::vector<std::string>> wires;
 
-    // True iff the OS backend (e.g. CoreMIDI 2.0) initialised successfully.
+    // True iff the OS backend (e.g. CoreMIDI 2.0) initialized successfully.
     // Set from `vtable().init()` in the constructor.
     bool os_active = false;
 

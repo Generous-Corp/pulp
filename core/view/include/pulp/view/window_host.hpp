@@ -37,8 +37,8 @@ struct WindowOptions {
     /// skips the Dock-icon and focus-stealing activation steps. Intended
     /// for headless smoke tests (live-host-pump-smoke.sh) and any
     /// validation flow that wants the full live-host code path without a
-    /// GUI window flashing on screen. Backends that don't honour the
-    /// flag fall back to normal behaviour.
+    /// GUI window flashing on screen. Backends that don't honor the
+    /// flag fall back to normal behavior.
     bool initially_hidden = false;
 
     /// Explicit window role for the close policy. A PRIMARY

@@ -85,7 +85,7 @@ public:
     uint32_t collect(const Sink& sink);
 
     bool prepared() const { return prepared_; }
-    /// Device loss is normal browser behaviour, not an init failure: the owner is
+    /// Device loss is normal browser behavior, not an init failure: the owner is
     /// expected to re-acquire a device and prepare() again.
     bool device_lost() const { return gpu_ != nullptr && gpu_->device_lost(); }
     uint32_t fft_size() const { return fft_size_; }

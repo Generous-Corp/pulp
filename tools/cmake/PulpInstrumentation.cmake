@@ -53,7 +53,7 @@ endif()
 
 # Disallow combining with sanitizers — shared link-time flags collide
 # on some libc++/libstdc++ versions and we want separate artifacts for
-# separate analyses.
+# separate analyzes.
 if(PULP_SANITIZER)
     message(FATAL_ERROR
         "PULP_ENABLE_COVERAGE is mutually exclusive with PULP_SANITIZER. "

@@ -34,7 +34,7 @@ output. This matters because CMake's ``configure_file`` downstream build
 caches are keyed off the file contents.
 
 The parser is deliberately minimal — only the fields we actually use
-are recognised. Anything else in the frontmatter is preserved verbatim
+are recognized. Anything else in the frontmatter is preserved verbatim
 in the generated file as a comment so reviewers can see what was
 dropped.
 """

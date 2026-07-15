@@ -83,7 +83,7 @@ std::vector<Token> tokenize_json_line(std::string_view line);
 std::vector<Token> tokenize_lua_line(std::string_view line);
 std::vector<Token> tokenize_markdown_line(std::string_view line);
 
-/// True when `name` is one of the keywords the tokenizer recognises
+/// True when `name` is one of the keywords the tokenizer recognizes
 /// for `language`. Useful for editor callers that want to do their own
 /// scanning but reuse the keyword set.
 bool is_keyword(std::string_view name, CodeLanguage language);

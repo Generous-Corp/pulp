@@ -645,7 +645,7 @@ TEST_CASE("SignalGraph leaves a plugin that does not opt in byte-for-byte unchan
           "[host][signal-graph][transport]") {
     // A plugin that does NOT override wants_transport() (ScaleSlot) is bit-
     // identical between the transport and no-transport overloads — the no-bit
-    // oracle: opting in is the ONLY thing that changes a slot's behaviour.
+    // oracle: opting in is the ONLY thing that changes a slot's behavior.
     SignalGraph plain;
     SignalGraph withT;
     plain.set_canonical_executor_routing_enabled(true);

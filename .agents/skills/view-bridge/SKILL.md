@@ -1442,3 +1442,39 @@ resizable+aspect>0 is unchanged (viewport+lock+snap); free ⇒ no viewport/lock,
 min/max only, no aspect snap. Tests live in `test/test_vst3_plugin_state.cpp` and
 `test/test_clap_entry.cpp` (`[resize]`), plus fake-host viewport-transform cases in
 `test/test_native_view_host.cpp` (`[viewport]`).
+
+## Two ways to reach the host's parameters — wiring both DOUBLE-WRITES
+
+A `DesignFrameView` can carry a user gesture to the host's parameter store by two
+different routes, and they are **not** alternatives you can safely have both of:
+
+- **The binder** (the original route): you wire `on_element_changed` and forward
+  it into the parameter store yourself. This is what the existing embed path does.
+- **The host-param surface** (`View::host_params()`): call `set_host_params(&s)`
+  and `route_changes_to_host_params(true)`, and the view drives
+  `begin_gesture` / `set_param` / `end_gesture` on the surface itself. The surface
+  hides *which* parameter system is underneath, so one view runs unchanged against
+  an embedding framework's parameter tree or Pulp's own StateStore.
+
+**`on_element_changed` keeps firing when routing is on.** That is free for a
+consumer that merely *observes* it — and a **double write** for one that *writes*
+from it, which the binder does. Turn routing on without deleting the write side of
+your handler and the host receives every value **and every gesture bracket**
+twice: a doubled automation write and an unbalanced begin/end pair.
+
+Routing is **OFF by default**, and that default is load-bearing — it is what keeps
+every existing embed correct. Pick exactly one route per view:
+
+- staying on the binder → leave routing off, change nothing;
+- moving to the surface → turn routing on **and** drop the write side of
+  `on_element_changed`, keeping it only for observation.
+
+`test_host_param_surface.cpp` pins this deliberately: with both wired, one user
+movement produces one surface write *and* one binder write. If that test ever
+starts reporting a single write, the funnel has grown a dedupe and this advice is
+stale.
+
+Related: an element re-keyed at runtime with `set_element_param_key()` now
+re-binds. It previously kept driving the parameter it was first bound to, so a
+view that re-keyed on a preset change was quietly writing to the **wrong
+parameter**.

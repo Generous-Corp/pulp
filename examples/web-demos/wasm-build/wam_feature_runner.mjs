@@ -1,6 +1,6 @@
 // Deterministic non-browser validation for instrument + effect WAM plugins
 // (Phase 2). Drives a built .wasm through the shared bridge and asserts the
-// behaviours the plan requires: an instrument makes sound on a MIDI note-on and
+// behaviors the plan requires: an instrument makes sound on a MIDI note-on and
 // decays after note-off; an effect transforms a non-silent input; both stay
 // finite and round-trip parameters + state.
 //

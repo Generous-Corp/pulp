@@ -748,16 +748,16 @@ TEST_CASE("DesignFrameView paints a fader thumb that translates with value",
 TEST_CASE("DesignFrameView tints a toggle when it is on",
           "[view][design-import][frame][svg]") {
     // Toggle paint tints the rect translucently when value>=0.5. Two toggles
-    // exercise both tint sources: the design's own colour and the theme-accent
+    // exercise both tint sources: the design's own color and the theme-accent
     // default (used when the design supplies none).
     const std::string svg =
         R"SVG(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">)SVG"
         R"SVG(<rect x="10" y="10" width="80" height="80" fill="#222222"/></svg>)SVG";
-    DesignFrameElement branded;       // design supplies the active colour
+    DesignFrameElement branded;       // design supplies the active color
     branded.kind = DesignFrameElement::Kind::toggle;
     branded.x = 14; branded.y = 14; branded.w = 36; branded.h = 72;
     branded.bg_color = "#33aa88";
-    DesignFrameElement themed;        // no colour → theme-accent default tint
+    DesignFrameElement themed;        // no color → theme-accent default tint
     themed.kind = DesignFrameElement::Kind::toggle;
     themed.x = 50; themed.y = 14; themed.w = 36; themed.h = 72;
     DesignFrameView off(svg, {branded, themed}, 0, 0, 100, 100);

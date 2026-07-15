@@ -139,7 +139,7 @@ std::future<FontState> register_font_url(const std::string& url,
 /// cleanly and validates the decompressed sfnt bytes before handing them to
 /// Skia.
 ///
-/// Behaviour today (security-gated, detection-only):
+/// Behavior today (security-gated, detection-only):
 ///   * Null / empty input → false.
 ///   * Bytes whose first 4 bytes are not the WOFF2 magic (`wOF2`,
 ///     0x774F4632 big-endian) → false. This is the structural reject

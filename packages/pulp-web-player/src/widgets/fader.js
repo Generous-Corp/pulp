@@ -36,9 +36,9 @@ export function createFader({ param, value, onChange, width = 40, height = 84 })
   // single largest geometry deviation from the native baseline.
   const THUMB_H = 9;                   // widgets.cpp:1004, unskinned vertical
   const HOVER_SCALE = 1.3;             // widgets.cpp:324, must match the ease below
-  const cxc = w / 2;                   // cross-axis centre (the track)
+  const cxc = w / 2;                   // cross-axis center (the track)
 
-  // Travel of the thumb CENTRE at rest. Native recomputes this from the *scaled*
+  // Travel of the thumb CENTER at rest. Native recomputes this from the *scaled*
   // half-height each frame (widgets.cpp:1006-1008), so a hovered thumb shrinks
   // its own travel and can never overrun the ends. Interaction mapping uses the
   // unscaled value so drag sensitivity doesn't change on hover.

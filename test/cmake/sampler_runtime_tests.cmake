@@ -23,7 +23,7 @@ pulp_add_test_suite(pulp-test-host-runtime-matrix LIBRARIES pulp::format)
 # Offline bounce-to-sample policy and sample-slot publication.
 pulp_add_test_suite(pulp-test-offline-sample-bounce LIBRARIES pulp::format)
 
-# Backend-neutral waveform GPU/static-layer planning over AudioThumbnail data.
+# Backend-neutral waveform GPU/static-layer planning over WaveformOverview data.
 pulp_add_test_suite(pulp-test-waveform-gpu-primitives LIBRARIES pulp::view)
 
 # Backend-neutral waveform GPU render/upload/cache lifecycle orchestration.

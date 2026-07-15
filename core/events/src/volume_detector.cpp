@@ -174,14 +174,14 @@ void NetworkServiceDiscovery::notify_service_lost(const Service& svc) {
     if (on_service_lost) on_service_lost(svc);
 }
 
-// ── LockingAsyncUpdater ─────────────────────────────────────────────────
+// ── LockingCoalescedUpdater ─────────────────────────────────────────────────
 
-void LockingAsyncUpdater::trigger_and_wait() {
+void LockingCoalescedUpdater::trigger_and_wait() {
     std::unique_lock<std::mutex> lock(mutex_);
     pending_.store(true);
 
     // Process immediately (since we don't have an event loop reference)
-    handle_async_update();
+    on_update();
     pending_.store(false);
     cv_.notify_all();
 }

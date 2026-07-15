@@ -159,7 +159,7 @@ inline float finite_or_zero(float v) noexcept {
 }
 
 // Scale factor for int → float normalization. We use 2^(N-1) (not
-// 2^(N-1) - 1) for the divide so the centre maps cleanly to 0 and
+// 2^(N-1) - 1) for the divide so the center maps cleanly to 0 and
 // the full negative range produces -1.0 exactly. The maximum
 // positive int produces (2^(N-1) - 1) / 2^(N-1) ≈ 0.99999 (within
 // 1 LSB of +1), matching the asymmetric int range.

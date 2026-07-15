@@ -379,7 +379,7 @@ std::unique_ptr<AudioDevice> AlsaSystem::create_device(const std::string& device
     // Pick the stream direction by probing what the device actually
     // supports. If the requested device has only an input endpoint we
     // open it as CAPTURE; otherwise default to PLAYBACK (preserves
-    // the old behaviour for output-only callers and explicit hw:N ids
+    // the old behavior for output-only callers and explicit hw:N ids
     // that have both).
     std::string name = device_id.empty() ? "default" : device_id;
     snd_pcm_stream_t stream = SND_PCM_STREAM_PLAYBACK;

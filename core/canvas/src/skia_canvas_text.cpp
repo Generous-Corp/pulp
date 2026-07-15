@@ -465,7 +465,7 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     // Route gradient and pattern fillStyle through current_fill_paint() so
     // any active gradient_shader_ flows onto the glyph paint. Without this,
     // ctx.fillStyle = createLinearGradient(...); ctx.fillText('Hi', x, y)
-    // silently degrades to the first stop colour. The shader's geometry maps
+    // silently degrades to the first stop color. The shader's geometry maps
     // in device space, so the gradient stretches across the rendered glyphs
     // like Blink / WebKit. current_fill_paint() also folds in the sticky
     // Canvas2D shadow* state and the CSS filter chain so text honors
@@ -704,7 +704,7 @@ void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
                               float max_width) {
     // True stroked-glyph rendering. Build a paint with SkPaint::kStroke_Style
     // so each glyph outline is honoured at the active line width / stroke
-    // colour. HarfBuzz / SkShaper still handles cluster shaping; we only swap
+    // color. HarfBuzz / SkShaper still handles cluster shaping; we only swap
     // the paint's style flag.
     GUARD_CANVAS;
     if (text.empty()) return;
@@ -869,7 +869,7 @@ void SkiaCanvas::fill_text_sdf(const std::string& text, float x, float y,
     // Route SDF-drawn gradient/pattern fillStyle through current_fill_paint()
     // so an active gradient_shader_ tints the glyph quad consistently with
     // the shape-fill paths. The SDF channel is sampled out of the alpha-only
-    // atlas image; the paint shader supplies the colour, so gradients
+    // atlas image; the paint shader supplies the color, so gradients
     // composite identically to the Skia-shaped text path.
     auto paint = current_fill_paint();
     for (auto& [g, x_off] : draws) {

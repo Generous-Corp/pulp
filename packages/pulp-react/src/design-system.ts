@@ -47,7 +47,7 @@ export const inkSignalCatalog: readonly DesignComponent[] = [
     { name: 'Fader', category: 'controls', jsxTag: 'Fader', nativeClass: 'pulp::view::Fader', usage: 'Vertical level control', reskinTokens: ['slider.track', 'slider.fill', 'slider.thumb'] },
     { name: 'Slider', category: 'controls', jsxTag: null, nativeClass: 'pulp::view::RangeSlider', usage: 'Linear / range value control', reskinTokens: ['slider.track', 'slider.fill', 'slider.thumb', 'focus.ring'] },
     { name: 'Stepper', category: 'controls', jsxTag: 'Stepper', nativeClass: 'pulp::view::Stepper', usage: '[-] value [+] numeric nudge', reskinTokens: ['bg.surface', 'control.border', 'text.primary', 'accent.primary'] },
-    { name: 'Pan', category: 'controls', jsxTag: 'Pan', nativeClass: 'pulp::view::PanControl', usage: 'Bipolar L/R pan with centre detent', reskinTokens: ['slider.track', 'slider.fill', 'slider.thumb'] },
+    { name: 'Pan', category: 'controls', jsxTag: 'Pan', nativeClass: 'pulp::view::PanControl', usage: 'Bipolar L/R pan with center detent', reskinTokens: ['slider.track', 'slider.fill', 'slider.thumb'] },
     // inputs
     { name: 'Button', category: 'inputs', jsxTag: 'Button', nativeClass: 'pulp::view::TextButton', usage: 'Primary / secondary / ghost text button', reskinTokens: ['accent.primary', 'text.primary', 'bg.surface', 'control.border'] },
     { name: 'Toggle', category: 'inputs', jsxTag: 'Toggle', nativeClass: 'pulp::view::Toggle', usage: 'On/off switch', reskinTokens: ['control.track', 'accent.primary', 'control.thumb'] },

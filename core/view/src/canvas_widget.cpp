@@ -226,7 +226,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         case CanvasDrawCmd::Type::fill_rect:
             // When use_active_style is set the bridge's caller
             // omitted the color arg (Canvas2D `ctx.fillRect(x,y,w,h)` shim),
-            // so honour the active fillStyle (color OR gradient set most
+            // so honor the active fillStyle (color OR gradient set most
             // recently on the canvas) instead of overwriting with cmd.color.
             if (!cmd.use_active_style) {
                 canvas.set_fill_color(cmd.color);
@@ -300,12 +300,12 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             // True outlined-glyph rendering. The JS shim's
             // strokeText path emits this distinct cmd so the bridge can
             // route through `Canvas::stroke_text` (Skia/CG override to
-            // build a stroke paint and honour `lineWidth`). The base
+            // build a stroke paint and honor `lineWidth`). The base
             // class default still falls through to fill_text — preserving
             // the older visual approximation on backends that haven't
             // adopted the new override yet (RecordingCanvas in tests).
             //
-            // Stroke colour comes from the `set_stroke_color` cmd that
+            // Stroke color comes from the `set_stroke_color` cmd that
             // ran ahead of this one via the JS shim's _syncStrokeColor
             // path; line width comes from the prior `set_line_width`
             // cmd. We do NOT re-set them here (mirrors fill_text's
@@ -539,7 +539,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         // the fill counterparts, targeting the new
         // `Canvas::set_stroke_gradient_*` virtuals. SkiaCanvas overrides
         // populate `stroke_shader_`; the base default degrades to the
-        // first-stop colour via `set_stroke_color`.
+        // first-stop color via `set_stroke_color`.
         case CanvasDrawCmd::Type::set_stroke_gradient_linear:
             if (!cmd.gradient_colors.empty())
                 canvas.set_stroke_gradient_linear(cmd.x, cmd.y, cmd.x2, cmd.y2,
@@ -654,7 +654,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             break;
         // Canvas2D ctx.miterLimit and
         // ctx.imageSmoothingEnabled / Quality. Sticky stroke / image state
-        // pushed by the JS shim. SkiaCanvas / CoreGraphicsCanvas honour
+        // pushed by the JS shim. SkiaCanvas / CoreGraphicsCanvas honor
         // them on the next stroke / drawImage; RecordingCanvas captures
         // a single setter cmd per change so tests can assert flush order.
         case CanvasDrawCmd::Type::set_miter_limit:

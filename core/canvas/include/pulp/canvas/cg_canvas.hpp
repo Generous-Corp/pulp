@@ -100,7 +100,7 @@ public:
 
     // Canvas2D ctx.createPattern. CG fill patterns use a CGPatternRef +
     // tiling callback; stroke patterns remain a graceful fallback to the
-    // active stroke colour.
+    // active stroke color.
     void set_fill_pattern(const std::string& image_src,
                           PatternTileMode tile_x,
                           PatternTileMode tile_y) override;
@@ -119,7 +119,35 @@ public:
                    float start_angle, float end_angle) override;
     void stroke_line(float x0, float y0, float x1, float y1) override;
     void stroke_path(const Point2D* points, size_t count) override;
-    void fill_path(const Point2D* points, size_t count) override;
+    // `rule` splits nonzero (CGContextFillPath / CGContextClip) from even-odd
+    // (CGContextEOFillPath / CGContextEOClip), the same split
+    // fill_current_path() honors.
+    void fill_path(const Point2D* points, size_t count,
+                   FillRule rule = FillRule::nonzero) override;
+
+    // ── Retained paths (pulp::canvas::Path) ──────────────────────────────
+    // Implemented in cg_canvas_path.mm. Each builds one CGPath and issues a
+    // single draw. The `using` declarations keep the polygon overloads above
+    // visible — a same-named override would otherwise hide them.
+    using Canvas::fill_path;
+    using Canvas::stroke_path;
+    void fill_path(const Path& path, FillRule rule = FillRule::nonzero) override;
+    void stroke_path(const Path& path, const StrokeStyle& style) override;
+    void clip_path(const Path& path, FillRule rule = FillRule::nonzero) override;
+    void draw_path_shadow(const Path& path, float dx, float dy,
+                          float blur, float spread, Color color) override;
+
+    // ── Retained compositing layers ──────────────────────────────────────
+    // Offscreen CGBitmapContexts sealed to CGImageRefs that OUTLIVE the frame
+    // when `cacheable`.
+    LayerHandle begin_layer(Rect2D bounds, bool cacheable = false) override;
+    LayerHandle end_layer() override;
+    void draw_layer(LayerHandle layer, float alpha = 1.0f,
+                    BlendMode mode = BlendMode::normal) override;
+    void draw_layer_fitted(LayerHandle layer, Rect2D dest) override;
+    void draw_layer_rotated(LayerHandle layer, float angle_rad) override;
+    bool layer_valid(LayerHandle layer) const override;
+    void invalidate_layer(LayerHandle layer) override;
 
     // Canvas2D-style path building.
     void begin_path() override;
@@ -205,7 +233,7 @@ private:
     //
     // gradient_kind_ identifies which Draw* call to issue from
     // fill_with_active_paint(). `radial_two_circles` is the spec-correct
-    // two-circle form (inner + outer centres, inner_r in grad_radius_inner_,
+    // two-circle form (inner + outer centers, inner_r in grad_radius_inner_,
     // outer_r in grad_radius_); `conic_image` is a software-rasterised CGImage
     // that we paint via CGContextDrawImage inside the active clip.
     enum class GradientKind { none, linear, radial, radial_two_circles, conic_image };
@@ -230,7 +258,7 @@ private:
 
     // Software-rasterised conic gradient. CG has no native conic shader, so
     // set_fill_gradient_conic walks every pixel of a bounding-box bitmap,
-    // computes the angle from the centre, interpolates the colour stops, and
+    // computes the angle from the center, interpolates the color stops, and
     // stores the resulting CGImage here. fill_with_active_paint paints it via
     // CGContextDrawImage inside the active clip. The image is released in
     // clear_fill_gradient / dtor / on next gradient set.
@@ -299,6 +327,35 @@ private:
     // clipped to the stroked-path outline (via CGContextReplacePathWithStrokedPath).
     void stroke_with_active_paint();
     void release_path();
+
+    // ── Retained layer state (cg_canvas_path.mm) ─────────────────────────
+    // `image` is the sealed CGImageRef (owned; released on invalidate); `ctx`
+    // is the offscreen CGBitmapContext, live only while recording. A cacheable
+    // layer's image survives until it is explicitly invalidated — across
+    // frames, which is exactly what the scoped save_layer could never do.
+    struct CgLayer {
+        CGImageRef image = nullptr;
+        CGContextRef ctx = nullptr;
+        Rect2D bounds;
+        float scale_x = 1.0f;
+        float scale_y = 1.0f;
+        bool cacheable = false;
+    };
+    std::vector<std::pair<uint64_t, CgLayer>> layers_;
+
+    struct CgOpenLayer {
+        uint64_t id = 0;
+        CGContextRef previous_ctx = nullptr;
+    };
+    std::vector<CgOpenLayer> open_layers_;
+    uint64_t next_layer_id_ = 1;
+
+    CgLayer* find_layer(uint64_t id);
+    const CgLayer* find_layer(uint64_t id) const;
+    /// Release a layer's CG resources. Safe to call twice.
+    void release_layer(CgLayer& layer);
+    /// Build a CGPath for `path`; caller owns the result (CGPathRelease).
+    CGMutablePathRef make_cg_path(const Path& path) const;
 };
 
 } // namespace pulp::canvas

@@ -4,13 +4,13 @@
 //! need across modules is a shared mutex so tests that touch
 //! process-wide environment variables (`PULP_HOME`,
 //! `PULP_RS_CLI_VERSION`, `PULP_UPDATE_CHECK_DISABLED`) can
-//! serialise without colliding with each other under `cargo test`'s
+//! serialize without colliding with each other under `cargo test`'s
 //! parallel scheduler.
 
 use std::ffi::OsString;
 use std::sync::{Mutex, MutexGuard};
 
-/// Single serialising mutex used by every test that needs exclusive
+/// Single serializing mutex used by every test that needs exclusive
 /// read + write access to environment variables. Prefer this over
 /// ad-hoc per-module locks — cross-module parallelism would defeat
 /// them.
@@ -29,7 +29,7 @@ pub static ENV_LOCK: Mutex<()> = Mutex::new(());
 /// RAII guard for tests that temporarily set an environment variable.
 ///
 /// The guard holds [`ENV_LOCK`] for its lifetime, so callers get both
-/// restoration and cross-module serialisation of process-wide env changes.
+/// restoration and cross-module serialization of process-wide env changes.
 ///
 /// Do not create a second `EnvVarGuard` while one is still live on the same
 /// thread; `ENV_LOCK` is not reentrant. Use [`EnvVarGuard::set_many`] when a

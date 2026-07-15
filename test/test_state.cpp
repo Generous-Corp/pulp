@@ -100,7 +100,7 @@ TEST_CASE("StateStore normalized seam honors a shaped (skewed) range",
 
     ParamInfo freq = make_param_info(
         1, "Freq", "Hz",
-        ParamRange::with_centre(20.0f, 20000.0f, 1000.0f));
+        ParamRange::with_center(20.0f, 20000.0f, 1000.0f));
     ParamInfo gain = make_param_info(2, "Gain", "dB", {-60.0f, 12.0f, 0.0f});
     store.add_parameter(freq);
     store.add_parameter(gain);
@@ -108,7 +108,7 @@ TEST_CASE("StateStore normalized seam honors a shaped (skewed) range",
     REQUIRE_FALSE(store.info(1)->range.is_linear());
     REQUIRE(store.info(2)->range.is_linear());
 
-    // Skewed param: 0.5 normalized maps to the 1 kHz centre, and the value
+    // Skewed param: 0.5 normalized maps to the 1 kHz center, and the value
     // read back as normalized matches what we wrote.
     store.set_normalized(1, 0.5f);
     REQUIRE_THAT(store.get_value(1), WithinAbs(1000.0, 1.0));

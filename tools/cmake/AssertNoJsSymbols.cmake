@@ -5,7 +5,7 @@
 # — these markers can be absent from the final binary even when the archive WAS
 # linked, so the scan cannot reliably catch a stray link. The reliable guard is
 # the configure-time LINK_LIBRARIES assertion in core/view/CMakeLists.txt
-# (PULP_ENABLE_JS=OFF branch). This check is kept only as defence-in-depth: it
+# (PULP_ENABLE_JS=OFF branch). This check is kept only as defense-in-depth: it
 # still catches a JS-layer symbol force-referenced / whole-archived into a binary.
 # Mirrors the MacGpuWindowHost nm-check convention used elsewhere in the tree.
 #

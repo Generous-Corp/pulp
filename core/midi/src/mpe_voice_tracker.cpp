@@ -391,7 +391,7 @@ void MpeVoiceTracker::apply_per_note_management(uint8_t ch, uint8_t note, uint8_
 }
 
 float MpeVoiceTracker::ump_bend_normalised(uint32_t v32) {
-    // 0..0xFFFFFFFF with centre 0x80000000 → -1..+1.
+    // 0..0xFFFFFFFF with center 0x80000000 → -1..+1.
     // Explicit narrowing cast silences MSVC C4244 — the math runs in
     // double for precision, then we narrow to float to match the
     // declared return type. Was implicit when this body lived in the

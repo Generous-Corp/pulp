@@ -60,7 +60,7 @@ std::vector<ComponentInfo> build_catalog() {
          "[-] value [+] numeric nudge",
          {"bg.surface", "control.border", "text.primary", "accent.primary"}},
         {"Pan", C::controls, "pulp::view::PanControl", "pulp/view/gap_widgets.hpp", "Pan",
-         "Bipolar L/R pan with centre detent",
+         "Bipolar L/R pan with center detent",
          {"slider.track", "slider.fill", "slider.thumb"}},
 
         // ── Inputs ─────────────────────────────────────────────────────────

@@ -52,11 +52,11 @@ const noteName = (n) => NOTE_NAMES[((n % 12) + 12) % 12] + (Math.floor(n / 12) -
 // play.svg from the shipped Ink & Signal icon set (Lucide-derived, ISC — see
 // NOTICE.md / DEPENDENCIES.md). Original hardcodes fill="#16DAC2"; swapped to
 // currentColor so the glyph follows --accent-primary like everything else.
-// The source path's bbox spans x 8..18.83 (centre 13.42), so centring the <svg>
-// leaves the triangle ~1.4u right of centre. We translate the path by
-// (12 − 13.42) = −1.42 so the geometry itself is centred (no CSS margin nudge).
-// Right-pointing triangles can read a hair left once bbox-centred, but measured
-// centres agree to <0.5px here, so we keep the exact −1.42.
+// The source path's bbox spans x 8..18.83 (center 13.42), so centring the <svg>
+// leaves the triangle ~1.4u right of center. We translate the path by
+// (12 − 13.42) = −1.42 so the geometry itself is centered (no CSS margin nudge).
+// Right-pointing triangles can read a hair left once bbox-centered, but measured
+// centers agree to <0.5px here, so we keep the exact −1.42.
 const PLAY_SVG = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false"><g transform="translate(-1.42 0)"><path d="M8 6.1v11.8a1 1 0 0 0 1.53.85l9.3-5.9a1 1 0 0 0 0-1.7L9.53 5.25A1 1 0 0 0 8 6.1Z" fill="currentColor"/></g></svg>`;
 
 // ————————————————————————————————————————————————————————————— shared styles
@@ -81,7 +81,7 @@ function injectStyles(skin = {}) {
   }
 
   // Theme: "dark" | "light" force the matching appearance (data-theme, which the
-  // tokens' forced-theme mirrors honour); "auto" / undefined leave it unset so
+  // tokens' forced-theme mirrors honor); "auto" / undefined leave it unset so
   // the tokens' @media (prefers-color-scheme) block decides. NOT hardcoded dark.
   const theme = skin.theme;
   if (theme === "dark" || theme === "light") {
@@ -105,7 +105,7 @@ function injectStyles(skin = {}) {
     document.head.appendChild(link);
   }
 
-  // MidiKeyboard key colours come from the design tokens (--key-white /
+  // MidiKeyboard key colors come from the design tokens (--key-white /
   // --key-black) so a consumer skins them like everything else. The native paint
   // code hardcodes near-equivalents; a supplied skin overrides both.
   const css = `
@@ -172,9 +172,9 @@ function injectStyles(skin = {}) {
   .wk{flex:1;background:var(--key-white);border:1px solid var(--control-border);border-top:none;
       border-radius:0 0 2px 2px;position:relative;color:#98a0ab}
   .wk.on{background:var(--accent-primary);color:var(--accent-text);border-color:var(--bg-primary)}
-  /* Black keys: a persistent 1px ring in --bg-primary (#161A21 — the colour the
+  /* Black keys: a persistent 1px ring in --bg-primary (#161A21 — the color the
      native MidiKeyboard hardcodes for black keys) keeps a pressed black key from
-     merging into a pressed white neighbour. The ring stays on .on. */
+     merging into a pressed white neighbor. The ring stays on .on. */
   .bk{position:absolute;width:26px;height:66px;background:var(--key-black);border:none;
       border-radius:0 0 2px 2px;z-index:2;top:0;color:#8a9099;padding-bottom:4px;
       box-shadow:0 0 0 1px var(--bg-primary)}
@@ -393,7 +393,7 @@ function synthLoop(ctx) {
       voice(t0 + e * eighth, eighth * 1.7, pool[deg % pool.length] + 12, 0.15,
             { decay: 5.5, pan: (e % 2 ? 0.25 : -0.25) });
     }
-    // Melody: two half notes per bar, gentle vibrato, just right of centre.
+    // Melody: two half notes per bar, gentle vibrato, just right of center.
     for (let m = 0; m < 2; m++) {
       voice(t0 + m * 2 * beat, beat * 2.0, penta[melody[bar * 2 + m]], 0.2,
             { decay: 2.4, atk: 0.012, vib: 1, pan: 0.15, partials: [[1, 1], [2, 0.22], [3, 0.08]] });
@@ -403,7 +403,7 @@ function synthLoop(ctx) {
     kick(t0 + 2 * beat, 0.34);
     for (let e = 1; e < 8; e += 2) shaker(t0 + e * eighth, 0.06, 0.05);
   }
-  // Normalise to 0.7 (headroom: effects add gain — delay feedback, filter
+  // Normalize to 0.7 (headroom: effects add gain — delay feedback, filter
   // resonance, compressor makeup — so the source must leave room).
   let peak = 0;
   for (let i = 0; i < len; i++) peak = Math.max(peak, Math.abs(L[i]), Math.abs(R[i]));
@@ -601,7 +601,7 @@ export async function mountDemo(opts) {
       cell.className = "pw-cell" + (kind === "combo" ? " span2" : "");
 
       // Faders carry no built-in numeric readout — add one; knobs/combos/toggles
-      // display their own value (centre readout / field text / thumb position).
+      // display their own value (center readout / field text / thumb position).
       const entry = { kind, el: null, param: p, valEl: null, lastUser: 0 };
       const onChange = (v) => {
         entry.lastUser = performance.now();               // suppress the sync poll briefly
@@ -886,7 +886,7 @@ export async function mountDemo(opts) {
 
   function meter() {
     const token = ++S.meterToken;
-    // Scope stroke colour from the design tokens, never a hardcoded brand hex:
+    // Scope stroke color from the design tokens, never a hardcoded brand hex:
     // prefer --waveform-line, fall back to --accent-primary, then currentColor
     // (which resolves against --text-primary), so an unskinned page still draws.
     const rootStyle = getComputedStyle(document.documentElement);

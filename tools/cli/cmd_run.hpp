@@ -38,7 +38,7 @@ struct ParseRunResult {
     bool audio_capture_rolling_int24 = false; ///< --audio-capture-rolling-format int24 (default float)
 
     /// Args explicitly forwarded by the user with `-- ...`, plus any
-    /// unknown flags (legacy permissive behaviour).
+    /// unknown flags (legacy permissive behavior).
     std::vector<std::string> user_pass_through;
 };
 

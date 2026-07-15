@@ -136,7 +136,7 @@ def at_or_above_floor(tag: str, floor: tuple | None) -> bool:
     Releases from before the contract legitimately lack assets that did not exist
     yet — the Intel `darwin-x64` pair, `SHA256SUMS`. Holding them to today's
     contract would flag a pile of perfectly good historical releases, which is the
-    false-alarm behaviour this reconciler replaced.
+    false-alarm behavior this reconciler replaced.
     """
     v = version_of(tag)
     return bool(v and floor and v >= floor)
@@ -389,8 +389,8 @@ def sync_incident(repo: str, report: list[tuple[str, str]], dry_run: bool) -> No
 
       - The title is CONSTANT — no counts, no tag names. release-health embedded an
         escalating count, so its issues were not even title-identical to each other.
-      - The label EXISTS. release-health labelled with `release-health`, which is
-        not a label in this repo; the labelled create failed, an unlabelled create
+      - The label EXISTS. release-health labeled with `release-health`, which is
+        not a label in this repo; the labeled create failed, an unlabelled create
         fell through, and its own dedupe (filtered by that label) could never find
         what it had filed.
       - The lookup searches `--state all` and REOPENS. Searching only open issues

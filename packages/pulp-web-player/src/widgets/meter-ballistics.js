@@ -18,7 +18,7 @@ export const ATTACK = 0.001;   // near-instant attack (s) — native default
 export const DECAY = 0.30;     // motion.duration.meter_decay — release τ (s)
 export const PEAK_HOLD = 1.50; // motion.duration.peak_hold (s)
 
-// Stepped fill-colour selector (NOT a gradient). Matches visualizers.cpp:533-536:
+// Stepped fill-color selector (NOT a gradient). Matches visualizers.cpp:533-536:
 //   level > 0.9  → red;  level > 0.7 → yellow;  else green.
 // The comparisons are strict, exactly as native — so 0.7 is still green and
 // 0.9 is still yellow; the switch happens the instant the level exceeds each.

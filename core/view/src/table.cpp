@@ -49,7 +49,7 @@ void TableListBox::paint(canvas::Canvas& canvas) {
         // Sort indicator — anchored on the header's vertical midline via
         // GlyphCenter so the arrow lines up with the header label instead of
         // sitting high (the old baseline+4 offset placed the glyph above
-        // centre).
+        // center).
         if (c == sort_column_ && columns_[c].sortable) {
             float arrow_x = col_x + col_w - 14.0f;
             canvas.set_fill_color(c_accent);

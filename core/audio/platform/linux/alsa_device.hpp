@@ -20,7 +20,7 @@ namespace pulp::audio::linux_platform {
 // ALSA audio device. Single instance wraps EITHER a PLAYBACK
 // (output) endpoint OR a CAPTURE (input) endpoint, selected via the
 // stream parameter at construction. Duplex callers open two devices
-// and synchronise externally — same model as WASAPI on Windows and
+// and synchronize externally — same model as WASAPI on Windows and
 // CoreAudio on macOS.
 class AlsaDevice : public AudioDevice {
 public:

@@ -22,7 +22,11 @@ class HostParamSurface;   // pulp/view/host_param_surface.hpp — runtime param 
 class HostActionSurface;  // pulp/view/host_param_surface.hpp — host command channel
 class GestureArbiter; class GestureRecognizer;
 class FrameClock;
+class WidgetPainter;     // pulp/view/widget_painter.hpp — pluggable paint delegate
+class WidgetMetrics;     // pulp/view/widget_metrics.hpp — pluggable sizing delegate
 struct FileDragRequest;  // pulp/view/drag_drop.hpp
+struct ActiveDrag;       // pulp/view/drag_drop.hpp
+struct DropData;         // pulp/view/drag_drop.hpp
 
 // Base class for all UI elements
 // Views form a tree: each view has zero or more children and one optional parent
@@ -112,6 +116,45 @@ public:
 
     // Resolve a color: check own theme first, then walk up to parent
     Color resolve_color(const std::string& name, Color fallback = {}) const;
+
+    /// Override ONE named color token on this view without replacing the rest of
+    /// its theme. Tokens this view does not carry keep resolving up the parent
+    /// chain, so a per-view override is genuinely partial. This is the write side
+    /// of `resolve_color`.
+    void set_color(std::string name, Color c) {
+        theme_.colors[std::move(name)] = c;
+        request_repaint();
+    }
+
+    // ── Paint delegate ───────────────────────────────────────────────────
+    //
+    // A WidgetPainter installed here supplies the pixels for the stock controls
+    // in this view AND its whole subtree, unless a descendant installs its own.
+    // See widget_painter.hpp. Each hook defaults to declining, so a delegate
+    // restyles only the controls it implements and the rest keep Pulp's look.
+
+    void set_painter(std::shared_ptr<WidgetPainter> p);
+    const std::shared_ptr<WidgetPainter>& painter() const { return painter_; }
+
+    /// The painter that governs THIS view: its own if it has one, else the
+    /// nearest ancestor's, else null (meaning "draw the stock look").
+    WidgetPainter* effective_painter() const;
+
+    // ── Metrics delegate ─────────────────────────────────────────────────
+    //
+    // The sizing sibling of the painter: same install, same subtree cascade,
+    // same decline-by-default hooks. Consulted during LAYOUT, where there is no
+    // canvas — which is why it is a separate object from the painter. Widgets
+    // reach it from `intrinsic_width()`/`intrinsic_height()` (the function the
+    // layout engine already calls to measure a leaf), or directly when they
+    // position themselves. See widget_metrics.hpp.
+
+    void set_metrics(std::shared_ptr<WidgetMetrics> m);
+    const std::shared_ptr<WidgetMetrics>& metrics() const { return metrics_; }
+
+    /// The metrics delegate that governs THIS view: its own if it has one,
+    /// else the nearest ancestor's, else null (meaning "use the stock size").
+    WidgetMetrics* effective_metrics() const;
 
     // ── CSS-style typography inheritance ─────────────────────────────────
     //
@@ -455,6 +498,26 @@ public:
     /// native view to the platform backend; call from a pointer handler. False
     /// if no host, no files, or unsupported. See `pulp/view/drag_drop.hpp`.
     bool start_file_drag(const FileDragRequest& request);
+
+    // ── In-tree drag source (drag_drop.hpp) ──────────────────────────────
+    //
+    // Begin a drag whose payload stays in this process and in this view tree.
+    // The source view owns the gesture: start_drag() on press-and-move,
+    // drag_to() on each motion tick, drop_here() on release.
+    //
+    //     void on_mouse_drag(Point p) override {
+    //         if (!drag_active()) { DropData d; d.text = id_; start_drag(d); }
+    //         drag_to(local_to_root(p));
+    //     }
+    //     void on_mouse_up(Point p) override { drop_here(local_to_root(p)); }
+    //
+    // All three take ROOT coordinates, the space the drop dispatch works in.
+
+    bool start_drag(DropData data);
+    void drag_to(Point root_pos);
+    bool drop_here(Point root_pos);
+    void cancel_drag();
+    bool drag_active() const;
     bool has_focus() const { return has_focus_; }
     void set_focus(bool f) { has_focus_ = f; }
 
@@ -1601,6 +1664,11 @@ private:
     GridStyle grid_{};
     LayoutMode layout_mode_ = LayoutMode::flex;
     Theme theme_;
+    std::shared_ptr<WidgetPainter> painter_;
+    std::shared_ptr<WidgetMetrics> metrics_;
+    /// Only the ROOT's copy is ever populated (start_drag walks up to find it),
+    /// so concurrent trees cannot see each other's drag.
+    std::unique_ptr<ActiveDrag> active_drag_;
     View* parent_ = nullptr;
     std::vector<std::unique_ptr<View>> children_;
     std::string id_;

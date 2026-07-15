@@ -308,8 +308,8 @@ pulp_add_test_suite(pulp-test-runtime
     SOURCES test_runtime.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::runtime)
 
-# AbstractFifo (index-pair SPSC FIFO management)
-pulp_add_test_suite(pulp-test-abstract-fifo LIBRARIES pulp::runtime)
+# SpscRingIndex (index-pair SPSC ring-buffer cursor management)
+pulp_add_test_suite(pulp-test-spsc-ring-index LIBRARIES pulp::runtime)
 
 # FileSearchPath (ordered directory search list)
 pulp_add_test_suite(pulp-test-file-search-path LIBRARIES pulp::runtime)
@@ -359,9 +359,9 @@ pulp_add_test_suite(pulp-test-sample-resource
     SOURCES test_sample_resource.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio pulp::runtime)
 
-# AudioThumbnail + AudioThumbnailCache (item 6.12).
+# WaveformOverview + WaveformOverviewCache (item 6.12).
 # Links pulp::view so the WaveformView integration smoke compiles.
-pulp_add_test_suite(pulp-test-audio-thumbnail LIBRARIES pulp::audio pulp::view)
+pulp_add_test_suite(pulp-test-waveform-overview LIBRARIES pulp::audio pulp::view)
 
 # Memory-mapped reader: true ranged (seek-based) decode, no whole-file decode.
 pulp_add_test_suite(pulp-test-mmap-reader-ranged LIBRARIES pulp::audio)

@@ -80,7 +80,7 @@ fn env_for_fixture(name: &str) -> Vec<(String, String)> {
     vec![("PULP_HOME".to_string(), home.to_string_lossy().into_owned())]
 }
 
-fn normalise(mut v: Value, fixture: &str) -> Value {
+fn normalize(mut v: Value, fixture: &str) -> Value {
     // `project_root` is an absolute path. It differs between:
     //   - the machine where expected.json was captured (`/Users/.../pulp-rs-proto/.../fixtures/ok_plain`)
     //   - the CI runner where this test runs (`/home/runner/.../fixtures/ok_plain` on Linux,
@@ -145,8 +145,8 @@ fn fixtures_match_cpp_expected_json() {
         let expected_val: Value = serde_json::from_str(&expected_raw)
             .unwrap_or_else(|e| panic!("expected.json for {name} is not JSON: {e}"));
 
-        let rust_norm = normalise(rust_val, name);
-        let expected_norm = normalise(expected_val, name);
+        let rust_norm = normalize(rust_val, name);
+        let expected_norm = normalize(expected_val, name);
 
         if rust_norm != expected_norm {
             failures.push((
@@ -199,8 +199,8 @@ fn fixtures_match_live_cpp_when_available() {
         let cpp_val: Value = serde_json::from_slice(&cpp_out.stdout).unwrap();
 
         assert_eq!(
-            normalise(rust_val, name),
-            normalise(cpp_val, name),
+            normalize(rust_val, name),
+            normalize(cpp_val, name),
             "fixture `{name}` diverged from live C++ output",
         );
     }

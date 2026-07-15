@@ -134,7 +134,7 @@ TEST_CASE("MsdfAtlas pixel buffer is RGB8 (3 bytes per texel)",
     const int w = atlas.width();
     const int h = atlas.height();
     // The placeholder writes equal R=G=B, so median(r,g,b) == r. A texel
-    // near the centre of the glyph tile must be 'inside' (R > 200) and a
+    // near the center of the glyph tile must be 'inside' (R > 200) and a
     // texel just outside the tile must be 'outside' (R < 60).
     const MsdfGlyph* g = atlas.glyph(U'O');
     REQUIRE(g != nullptr);

@@ -815,14 +815,14 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setFlex('" << id << "', 'height', " << shape_h << ");\n";
             // Clear built-in label — use separate Yoga-positioned labels for exact placement
             ss << ind << "setLabel('" << id << "', ' ');\n";
-            // Normalise the captured value to 0..1 — Knob::set_value clamps to
+            // Normalize the captured value to 0..1 — Knob::set_value clamps to
             // [0,1], so a raw audio value (e.g. 880 Hz) would clamp to 1 and
             // park the indicator at the far end. The native silver knob maps
-            // 0..1 linearly to its [-135°,+135°] sweep, so the NORMALISED value
+            // 0..1 linearly to its [-135°,+135°] sweep, so the NORMALIZED value
             // must already encode the parameter taper. For a frequency-unit
             // knob (Hz / kHz) use a LOG taper — that's how audio cutoff/freq
             // controls are laid out (and how Figma's library knob is drawn), so
-            // 880 Hz in [20, 20000] lands near the centre (≈0.55), indicator
+            // 880 Hz in [20, 20000] lands near the center (≈0.55), indicator
             // ~straight up, matching the design. Linear units fall back to the
             // plain (value-min)/(max-min) map. Generalizable rule keyed on the
             // IR's own units attribute — no per-instance angle hardcoding.
@@ -993,7 +993,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setFlex('" << id << "', 'height', " << shape_h << ");\n";
             // Fader label overlaps track when rendered inside bounds — use separate label
             ss << ind << "setLabel('" << id << "', ' ');\n";  // Clear built-in label
-            // Normalise the captured value (audio_default, in [audio_min,
+            // Normalize the captured value (audio_default, in [audio_min,
             // audio_max]) to 0..1 so the imported fader's thumb sits where the
             // capture shows it. setValue clamps to [0,1]; a raw value like a dB
             // figure would clamp and mis-position the thumb.
@@ -1011,7 +1011,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 fader_norm = std::clamp(std::stof(pit->second), 0.0f, 1.0f);
             ss << ind << "setValue('" << id << "', " << fader_norm << ");\n";
             // Value-driven skin derived from the captured asset. The importer
-            // sampled the PNG's track/fill/thumb colours; emit setFaderSkin so
+            // sampled the PNG's track/fill/thumb colors; emit setFaderSkin so
             // the native fader renders the captured look while the thumb still
             // moves with setValue(). No per-instance hardcoding: every value
             // comes from node.attributes stamped by the sampler.
@@ -1035,7 +1035,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                     ss << ind << "setFaderTrackWidth('" << id << "', "
                        << node.attributes.at("skin_track_width") << ");\n";
                 }
-                // Derived empty-track outline colour. Strokes the track rect
+                // Derived empty-track outline color. Strokes the track rect
                 // so the empty channel above the thumb shows the captured edge
                 // instead of a flat dark slab.
                 std::string tbo = attr("skin_track_border_color");
@@ -1071,7 +1071,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "createMeter('" << id << "', 'vertical', '" << col_id << "');\n";
             ss << ind << "setFlex('" << id << "', 'width', " << widget_w << ");\n";
             ss << ind << "setFlex('" << id << "', 'height', " << shape_h << ");\n";
-            // Initial level: normalise the captured value (audio_default, in
+            // Initial level: normalize the captured value (audio_default, in
             // [audio_min, audio_max]) to 0..1 so the imported meter shows the
             // captured fill. setMeterLevel clamps to [0,1]; a raw dB value
             // (e.g. -6) would clamp to 0 and read empty.
@@ -1352,7 +1352,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         emit_position_if_absolute(id);
         emit_node_visual_overrides(id);
 
-        // Honour the IR-declared height when present; absolute-positioned labels
+        // Honor the IR-declared height when present; absolute-positioned labels
         // that are centered in a slot rely on the emitted height matching that
         // slot rather than being recomputed from font size alone.
         float font_h = node.style.font_size.value_or(14.0f);
@@ -1364,7 +1364,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         // When the IR carries an explicit height that's meaningfully taller
         // than the font (Figma's Auto-Layout / text-frame conventions use
         // a height-greater-than-font-size to RESERVE a vertical slot the
-        // text is supposed to be CENTRED within), emit setVerticalAlign:
+        // text is supposed to be CENTERED within), emit setVerticalAlign:
         // center so Pulp's Label draws its glyphs at the slot's optical
         // middle. Without this Label defaults to top-aligned, and the
         // SEARCH input's "Search" text rides above the magnifying-glass
@@ -1652,16 +1652,16 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         }
         // Cap-height nudge for [small icon, UPPERCASE label] header rows.
         // Figma vertically centers icons on the label's cap-height optical
-        // centre. CSS / Yoga `align-items: center` uses the line-box math
-        // centre, which sits ~font_size * 0.15 BELOW the cap-glyph optical
-        // centre because the line box reserves descender slack the
+        // center. CSS / Yoga `align-items: center` uses the line-box math
+        // center, which sits ~font_size * 0.15 BELOW the cap-glyph optical
+        // center because the line box reserves descender slack the
         // uppercase glyphs don't occupy. Pulp's Label::resolved_state()
-        // produces the same math-centre baseline, so the dot ends up
+        // produces the same math-center baseline, so the dot ends up
         // visually below the label glyphs. Generalisable rule: when a row
         // has align_items: center, at least one uppercase text child, and
         // any image child whose min-dim ≤ that label's font_size, emit a
-        // negative margin_top on the icon so its centre lifts to the
-        // cap-glyph centre. No hardcoded constants — the nudge is derived
+        // negative margin_top on the icon so its center lifts to the
+        // cap-glyph center. No hardcoded constants — the nudge is derived
         // from the label's own font_size.
         float upper_font_size = 0.0f;
         if (is_row && node.layout.align == LayoutAlign::center && !baseline_override) {
@@ -1676,8 +1676,8 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         }
         // In flex with align-items: center, a margin_top of -M shifts the
         // child's position UP by M/2 (Yoga centers around the margin-
-        // adjusted box). So to lift the icon's centre by font_size * 0.15
-        // (the cap-vs-math centre delta for an uppercase line-box) we
+        // adjusted box). So to lift the icon's center by font_size * 0.15
+        // (the cap-vs-math center delta for an uppercase line-box) we
         // need a -2 × that margin.
         float cap_nudge = (upper_font_size > 0.0f)
                               ? std::round(upper_font_size * 0.30f)

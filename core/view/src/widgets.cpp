@@ -213,11 +213,8 @@ void Knob::on_mouse_leave() {
 
 void Knob::on_mouse_event(const MouseEvent& event) {
     if (!event.is_down) return;
-    // Double-click: reset to default (0.5)
-    if (event.click_count >= 2) {
-        value_ = default_value_;
-        if (on_change) on_change(value_);
-    }
+    // Double-click returns the knob to its default position.
+    if (event.click_count >= 2) store_normalized(default_value_, Notify::sync);
 }
 
 void Knob::on_mouse_down(Point pos) {
@@ -251,7 +248,8 @@ void Knob::on_mouse_down(Point pos) {
         }
     }
     drag_start_y_ = pos.y;
-    drag_start_value_ = value_;
+    drag_last_y_ = pos.y;
+    drag_start_proportion_ = position_for_value();
     if (!gesture_active_) {
         gesture_active_ = true;
         if (on_gesture_begin) on_gesture_begin();
@@ -300,17 +298,23 @@ void Knob::on_mouse_drag(Point pos) {
         }
         return;
     }
-    // Drag up to increase, down to decrease. 150px = full track. The delta is
-    // applied in POSITION space and mapped back through the skew curve, so a
-    // skewed knob drags perceptually-linearly (identical when skew is 1).
-    float delta = (drag_start_y_ - pos.y) / 150.0f;
-    float start_pos = skew_ == 1.0f ? drag_start_value_
-                                    : std::pow(drag_start_value_, skew_);
-    float new_val = value_for_position(std::clamp(start_pos + delta, 0.0f, 1.0f));
-    if (new_val != value_) {
-        value_ = new_val;
-        if (on_change) on_change(value_);
-    }
+    // Drag up to increase, down to decrease. The travel is applied in the core's
+    // PROPORTION space (post-curve), so a skewed knob drags perceptually
+    // linearly; the core maps it back to a real value, then clamps and snaps it.
+    // Sensitivity, the fine-drag divisor and the velocity law all live in the
+    // core — the widget only supplies the pixels.
+    const double delta_total = static_cast<double>(drag_start_y_ - pos.y);
+    const double delta_tick = static_cast<double>(drag_last_y_ - pos.y);
+    drag_last_y_ = pos.y;
+    const bool moved = core_.velocity_mode()
+        ? core_.drag_step(delta_tick, /*fine*/ false, Notify::none)
+        : core_.drag_to(delta_total, drag_start_proportion_, /*fine*/ false, Notify::none);
+    if (!moved) return;
+    const float snapped = static_cast<float>(core_.normalized());
+    if (snapped == value_) return;
+    value_ = snapped;
+    request_repaint();
+    if (on_change) on_change(value_);
 }
 
 void Knob::advance_animations(float dt) {
@@ -515,6 +519,25 @@ float Knob::modulated_value(size_t ring) const {
 }
 
 void Knob::paint(canvas::Canvas& canvas) {
+    // A paint delegate installed on this knob or on any ancestor gets first
+    // refusal (widget_painter.hpp). It declines by default, in which case the
+    // stock rendering below runs unchanged.
+    if (auto* p = effective_painter()) {
+        RotaryPaintState s;
+        s.bounds = local_bounds();
+        s.enabled = enabled();
+        s.hovered = is_hovered();
+        s.pressed = gesture_active_;
+        s.focused = has_focus();
+        s.position = position_for_value();
+        s.start_angle = Knob::start_angle;
+        s.end_angle = Knob::end_angle;
+        s.value = core_.value();
+        s.value_min = core_.minimum();
+        s.value_max = core_.maximum();
+        if (p->paint_rotary(canvas, s, *this)) return;
+    }
+
     auto b = local_bounds();
     float cx = b.width * 0.5f;
     float cy = b.height * 0.5f;
@@ -813,7 +836,7 @@ void Knob::paint(canvas::Canvas& canvas) {
                 float hi_a = knob_value_to_angle(hi);
 
                 // Faint full track + the colored range arc.
-                canvas.set_stroke_color(canvas::Color::rgba(m.color.r, m.color.g, m.color.b, 0.22f));  // token-lint:allow (per-source mod colour)
+                canvas.set_stroke_color(canvas::Color::rgba(m.color.r, m.color.g, m.color.b, 0.22f));  // token-lint:allow (per-source mod color)
                 canvas.set_line_width(g.mod_w);
                 canvas.stroke_arc(g.cx, g.cy, mod_r, start_angle, end_angle);
                 canvas.set_stroke_color(m.color);
@@ -823,7 +846,7 @@ void Knob::paint(canvas::Canvas& canvas) {
                 // indicator dot below is drawn, riding between the two ends.
 
                 // Live modulated-value indicator: bright dot ringed in the
-                // source colour, riding the arc at base + depth·phase.
+                // source color, riding the arc at base + depth·phase.
                 float la = knob_value_to_angle(modulated_value(i));
                 float lx = g.cx + mod_r * std::cos(la), ly = g.cy + mod_r * std::sin(la);
                 auto ind = resolve_color("knob.thumb", canvas::Color::rgba8(235, 235, 235));
@@ -916,8 +939,8 @@ void Fader::paint(canvas::Canvas& canvas) {
         const float pos = position_for_value();
 
         // ── Per-widget skin overrides (figma-plugin import) ────────────────
-        // When the importer derived track / fill / thumb colours from the
-        // captured design, honour them here and force a rounded-rect thumb so
+        // When the importer derived track / fill / thumb colors from the
+        // captured design, honor them here and force a rounded-rect thumb so
         // the look matches the captured art — but keep the position
         // value-driven (the thumb still moves with value_), unlike a baked
         // full-image sprite. Falls back to theme tokens when unset.
@@ -931,7 +954,7 @@ void Fader::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color({track_color.r, track_color.g, track_color.b, track_color.a});
 
         // Track thickness. When the importer derived the captured track width,
-        // honour it exactly (clamped to the widget box) so the track is the
+        // honor it exactly (clamped to the widget box) so the track is the
         // narrow line the art shows — not a fraction of the box, which
         // over-wide widget bounds would balloon. Otherwise fall back to the
         // default heuristic (skinned: ~18% of box; default: 4px line).
@@ -951,7 +974,7 @@ void Fader::paint(canvas::Canvas& canvas) {
         canvas.fill_rounded_rect(track_x, track_y, track_w, track_h, track_radius);
 
         // Track outline. The captured empty track has a visible lighter edge
-        // around the dark channel. When the importer derived that edge colour
+        // around the dark channel. When the importer derived that edge color
         // from the art, stroke the track rect so the empty portion above the
         // thumb doesn't read as a flat dark slab. Drawn before the fill/thumb
         // so they sit on top, matching the captured layering.
@@ -1178,7 +1201,7 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
                                  horiz ? std::max(b.height, 1.0f)
                                        : std::max(b.width,  1.0f));
 
-    // Normalised position along the track, taking the (possibly-collapsed)
+    // Normalized position along the track, taking the (possibly-collapsed)
     // [min,max] range and the skew curve into account.
     float lo = min_;
     float hi = std::max(min_, max_);

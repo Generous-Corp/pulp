@@ -2,7 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/audio/audio_file.hpp>
-#include <pulp/audio/audio_thumbnail.hpp>
+#include <pulp/audio/waveform_overview.hpp>
 #include <pulp/view/waveform_gpu_primitives.hpp>
 
 #include <cmath>
@@ -11,7 +11,7 @@
 #include <vector>
 
 using pulp::audio::AudioFileData;
-using pulp::audio::AudioThumbnail;
+using pulp::audio::WaveformOverview;
 using namespace pulp::view;
 
 namespace {
@@ -60,12 +60,12 @@ WaveformGpuLayerConfig make_config(std::uint64_t source_generation = 1) {
 
 TEST_CASE("Waveform GPU static layer plan keys thumbnail LOD ranges",
           "[view][waveform][gpu]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 2, 440.0),
         10);
     WaveformGpuLayerConfig config;
     config.source_generation = 7;
-    config.channel = AudioThumbnail::kAllChannels;
+    config.channel = WaveformOverview::kAllChannels;
 
     const auto plan = build_waveform_gpu_static_layer_plan(thumbnail, make_viewport(), config);
 
@@ -74,7 +74,7 @@ TEST_CASE("Waveform GPU static layer plan keys thumbnail LOD ranges",
     REQUIRE(plan.cpu_fallback_available);
     REQUIRE(plan.upload_key.valid());
     REQUIRE(plan.upload_key.source_generation == 7);
-    REQUIRE(plan.upload_key.channel == AudioThumbnail::kAllChannels);
+    REQUIRE(plan.upload_key.channel == WaveformOverview::kAllChannels);
     REQUIRE(plan.upload_key.samples_per_peak == 10);
     REQUIRE(plan.upload_key.first_peak == 10);
     REQUIRE(plan.upload_key.peak_count == 20);
@@ -92,7 +92,7 @@ TEST_CASE("Waveform GPU static layer plan keys thumbnail LOD ranges",
 
 TEST_CASE("Waveform GPU upload keys include baked viewport geometry",
           "[view][waveform][gpu]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 1, 220.0),
         10);
     auto base_viewport = make_viewport();
@@ -120,7 +120,7 @@ TEST_CASE("Waveform GPU upload keys include baked viewport geometry",
 
 TEST_CASE("Waveform GPU layer plan supports playhead-only redraw",
           "[view][waveform][gpu]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 1, 220.0),
         10);
     WaveformGpuLayerConfig config;
@@ -157,7 +157,7 @@ TEST_CASE("Waveform GPU layer plan supports playhead-only redraw",
 
 TEST_CASE("Waveform GPU vertex fill provides CPU fallback upload data",
           "[view][waveform][gpu]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 2, 110.0),
         10);
     const auto plan = build_waveform_gpu_static_layer_plan(
@@ -189,11 +189,11 @@ TEST_CASE("Waveform GPU vertex fill provides CPU fallback upload data",
 
 TEST_CASE("Waveform GPU primitive rejects invalid source or viewport state",
           "[view][waveform][gpu]") {
-    AudioThumbnail empty;
+    WaveformOverview empty;
     const auto invalid_thumbnail = build_waveform_gpu_static_layer_plan(empty, make_viewport());
     REQUIRE_FALSE(invalid_thumbnail.valid);
 
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 1, 330.0),
         10);
     auto empty_view = make_viewport();
@@ -219,7 +219,7 @@ TEST_CASE("Waveform GPU primitive rejects invalid source or viewport state",
 
 TEST_CASE("Waveform GPU resource cache tracks opaque backend handles with LRU eviction",
           "[view][waveform][gpu]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 1, 440.0),
         10);
     const auto base_plan = build_waveform_gpu_static_layer_plan(
@@ -266,7 +266,7 @@ TEST_CASE("Waveform GPU resource cache rejects invalid records and can shrink",
     WaveformGpuUploadKey invalid;
     REQUIRE_FALSE(cache.put(invalid, 1, 16).ok);
 
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 1, 440.0),
         10);
     const auto plan = build_waveform_gpu_static_layer_plan(
@@ -303,7 +303,7 @@ TEST_CASE("Waveform GPU resource cache rejects invalid records and can shrink",
 
 TEST_CASE("Waveform GPU upload plans require explicit source generation",
           "[view][waveform][gpu]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 1, 440.0),
         10);
 
@@ -322,7 +322,7 @@ TEST_CASE("Waveform GPU upload plans require explicit source generation",
 
 TEST_CASE("Waveform GPU resource cache returns records for release-safe clearing",
           "[view][waveform][gpu]") {
-    const auto thumbnail = AudioThumbnail::build_from_buffer(
+    const auto thumbnail = WaveformOverview::build_from_buffer(
         make_sine(48000, 1000, 1, 440.0),
         10);
     const auto plan = build_waveform_gpu_static_layer_plan(

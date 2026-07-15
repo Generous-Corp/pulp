@@ -120,14 +120,14 @@ TEST_CASE("Bundled fonts resolve via SkFontMgr::makeFromData (#932)",
     REQUIRE(std::string(jb_family.c_str()) == "JetBrains Mono");
 
     // A name we DON'T bundle must miss — match_bundled_typeface only
-    // covers the bundle, not the system-wide font catalogue.
+    // covers the bundle, not the system-wide font catalog.
     auto miss = pulp::canvas::match_bundled_typeface(mgr.get(),
                                                      "ThisFamilyDoesNotExist",
                                                      upright_normal);
     REQUIRE(miss == nullptr);
 
     // Style-aware miss: the bundle currently ships only Regular/Upright
-    // Inter, but the system font catalogue does have
+    // Inter, but the system font catalog does have
     // a real Inter Bold and Italic. If a caller asks for Inter at
     // weight=Bold, returning the bundled Regular face would mask the
     // system Bold and silently regress #927's weight/slant honouring.
@@ -174,7 +174,7 @@ TEST_CASE("match_bundled_typeface is null-safe when no font mgr is available "
 //
 // We measure text via measure_text_with_font (same lookup path
 // canvas.set_font() uses). The fallback to JetBrains Mono produces
-// a positive width for "iiii"; if the first-family-only behaviour
+// a positive width for "iiii"; if the first-family-only behavior
 // regressed (and SkFontMgr returned a default that doesn't include
 // the test glyphs), the fallback would silently give a different
 // width. Compare against the JetBrains-Mono-direct measurement.
@@ -645,7 +645,7 @@ void set_serial_shaping(bool on) {
 // without pthreads cannot create threads — std::async THROWS there — so the
 // planner takes a serial arm instead. PULP_TEXT_SHAPE_SERIAL forces that same
 // arm on native builds; this test drives both and asserts the artifacts are
-// identical, so the single-threaded arm is behaviour-preserving and not merely
+// identical, so the single-threaded arm is behavior-preserving and not merely
 // compilable.
 TEST_CASE("shape_batch serial arm matches the parallel arm",
           "[canvas][skia][fonts][text]") {
@@ -722,10 +722,10 @@ TEST_CASE("SkiaCanvas draws images with no GPU upload context attached",
     SkBitmap read;
     REQUIRE(read.tryAllocPixels(info));
     REQUIRE(surface->readPixels(read, 0, 0));
-    const SkColor centre = read.getColor(4, 4);
-    REQUIRE(SkColorGetR(centre) > 200);
-    REQUIRE(SkColorGetG(centre) < 50);
-    REQUIRE(SkColorGetB(centre) < 50);
+    const SkColor center = read.getColor(4, 4);
+    REQUIRE(SkColorGetR(center) > 200);
+    REQUIRE(SkColorGetG(center) < 50);
+    REQUIRE(SkColorGetB(center) < 50);
 }
 
 #endif  // PULP_HAS_SKIA

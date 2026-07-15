@@ -70,7 +70,7 @@ std::string current_auv3_wrapper_identifier() {
         NSString* process_name = info ? [info processName] : nil;
         std::string process_name_str = nsstring_to_std(process_name);
 
-        // (3) Recognise Apple's AUHostingService wrapper name. The
+        // (3) Recognize Apple's AUHostingService wrapper name. The
         // suffix is informative on macOS Logic 10.5+ (e.g.
         // `AUHostingServiceXPC_arrow` → Logic). Bare `AUHostingService`
         // is the generic wrapper used by many hosts — the classifier in

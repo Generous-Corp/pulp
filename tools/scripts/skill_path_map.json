@@ -1,7 +1,7 @@
 {
   "$schema": "./skill_path_map.schema.json",
   "schema_version": 1,
-  "_comment": "Skill name -> glob patterns. When a diff touches any pattern, the corresponding SKILL.md must be updated in the same diff or a Skill-Update: skip trailer must appear on the tip commit. Paired with tools/scripts/versioning.json. Every subdir under .agents/skills/ MUST have an entry here; skill_sync_check.py fails if one is missing. Dual/triple ownership is permitted \u2014 and expected \u2014 for files that span multiple domains: e.g. core/format/src/au_adapter.mm is owned by both `auv3` (the adapter) and `view-bridge` (editor attach lifecycle), because a change to that file reasonably requires guidance updates on both sides. Dual ownership is not a mistake to collapse; use it when a single file legitimately teaches two skills.",
+  "_comment": "Skill name -> glob patterns. When a diff touches any pattern, the corresponding SKILL.md must be updated in the same diff or a Skill-Update: skip trailer must appear on the tip commit. Paired with tools/scripts/versioning.json. Every subdir under .agents/skills/ MUST have an entry here; skill_sync_check.py fails if one is missing. Dual/triple ownership is permitted — and expected — for files that span multiple domains: e.g. core/format/src/au_adapter.mm is owned by both `auv3` (the adapter) and `view-bridge` (editor attach lifecycle), because a change to that file reasonably requires guidance updates on both sides. Dual ownership is not a mistake to collapse; use it when a single file legitimately teaches two skills.",
   "skills": {
     "aax": {
       "paths": [
@@ -11,43 +11,8 @@
         "tools/cmake/PulpAAX.cmake"
       ],
       "_doc": {
-        "empty-ok": "external/AAX-SDK/** intentionally empty \u2014 AAX SDK is developer-supplied per docs/guides/ship.md and the aax skill"
+        "empty-ok": "external/AAX-SDK/** intentionally empty — AAX SDK is developer-supplied per docs/guides/ship.md and the aax skill"
       }
-    },
-    "ara": {
-      "paths": [
-        "core/format/src/ara*",
-        "core/format/include/pulp/format/ara*",
-        "core/format/include/pulp/format/ara/**",
-        "external/ara-sdk/**"
-      ],
-      "_doc": {
-        "empty-ok": "external/ara-sdk/** intentionally empty \u2014 ARA SDK is developer-supplied per the ara skill"
-      }
-    },
-    "audio-harness": {
-      "paths": [
-        "test/support/audio_signal_generators.*",
-        "test/support/audio_test_signals.*",
-        "test/support/render_scenario.*",
-        "test/support/audio_contracts.*",
-        "test/support/audio_doctor.*",
-        "test/support/README.md",
-        "tools/audio/analysis/**",
-        "tools/audio/quality-lab/**"
-      ]
-    },
-    "auv3": {
-      "paths": [
-        "core/format/src/au_adapter.mm",
-        "core/format/src/au_entry.mm",
-        "core/format/src/au_audio_unit.h",
-        "core/format/src/au_view_controller_ios.mm",
-        "core/format/src/ios_audio_session.cpp",
-        "core/format/include/pulp/format/ios_audio_session.h",
-        "core/format/include/pulp/format/ios_audio_session.hpp",
-        "tools/cmake/PulpInfoPlist.au.in"
-      ]
     },
     "android": {
       "paths": [
@@ -62,6 +27,36 @@
         "docs/guides/platforms/android.md"
       ]
     },
+    "ara": {
+      "paths": [
+        "core/format/src/ara*",
+        "core/format/include/pulp/format/ara*",
+        "core/format/include/pulp/format/ara/**",
+        "external/ara-sdk/**"
+      ],
+      "_doc": {
+        "empty-ok": "external/ara-sdk/** intentionally empty — ARA SDK is developer-supplied per the ara skill"
+      }
+    },
+    "audio-harness": {
+      "paths": [
+        "test/support/audio_signal_generators.*",
+        "test/support/audio_test_signals.*",
+        "test/support/render_scenario.*",
+        "test/support/audio_contracts.*",
+        "test/support/audio_doctor.*",
+        "test/support/README.md",
+        "tools/audio/analysis/**",
+        "tools/audio/quality-lab/**"
+      ]
+    },
+    "audio-headless-debug": {
+      "paths": [
+        "tools/audio/analysis/**",
+        "core/format/include/pulp/format/headless.hpp",
+        ".agents/skills/audio-headless-debug/**"
+      ]
+    },
     "auv2": {
       "paths": [
         "core/format/src/au_v2_adapter.cpp",
@@ -74,6 +69,18 @@
         "tools/cmake/PulpInfoPlist.au.in",
         "test/test_au_v2_*",
         "test/cmake/test_au_v2_*"
+      ]
+    },
+    "auv3": {
+      "paths": [
+        "core/format/src/au_adapter.mm",
+        "core/format/src/au_entry.mm",
+        "core/format/src/au_audio_unit.h",
+        "core/format/src/au_view_controller_ios.mm",
+        "core/format/src/ios_audio_session.cpp",
+        "core/format/include/pulp/format/ios_audio_session.h",
+        "core/format/include/pulp/format/ios_audio_session.hpp",
+        "tools/cmake/PulpInfoPlist.au.in"
       ]
     },
     "ci": {
@@ -125,21 +132,18 @@
         ".claude/commands/**"
       ]
     },
+    "cmajor-external": {
+      "paths": [
+        "tools/scripts/cmajor_external.py",
+        "tools/scripts/test_cmajor_external.py",
+        "examples/cmajor-*/**"
+      ]
+    },
     "code-comments": {
       "paths": [],
       "_doc": {
         "empty-ok": "Process/guidance skill (how to write durable source comments + test names/tags) — applies when writing any code, not tied to a source path, so it is never triggered by a source diff. The entry exists to satisfy the self-check that every .agents/skills/ subdir is mapped."
       }
-    },
-    "kits": {
-      "paths": [
-        "tools/kits/**",
-        "fixtures/packages/**",
-        "tools/cli/kit_commands.*",
-        "planning/2026-06-11-pulp-package-format-proposal.md",
-        "docs/reference/cli.md",
-        "docs/status/cli-commands.yaml"
-      ]
     },
     "content": {
       "paths": [
@@ -151,11 +155,11 @@
         "docs/status/cli-commands.yaml"
       ]
     },
-    "cmajor-external": {
+    "daw-smoke": {
       "paths": [
-        "tools/scripts/cmajor_external.py",
-        "tools/scripts/test_cmajor_external.py",
-        "examples/cmajor-*/**"
+        ".agents/skills/daw-smoke/**",
+        "tools/testing/daw-smoke/**",
+        "docs/guides/daw-smoke.md"
       ]
     },
     "engine": {
@@ -168,7 +172,7 @@
         "external/quickjs*/**"
       ],
       "_doc": {
-        "empty-ok": "external/quickjs*/** intentionally empty \u2014 QuickJS is fetched at configure time, not vendored"
+        "empty-ok": "external/quickjs*/** intentionally empty — QuickJS is fetched at configure time, not vendored"
       }
     },
     "faust": {
@@ -183,17 +187,6 @@
         "core/host/**",
         "examples/plugin-host-demo/**",
         "tools/cli/cmd_host.cpp"
-      ]
-    },
-    "ios": {
-      "paths": [
-        "core/view/platform/ios/**",
-        "core/format/src/au_view_controller_ios.mm",
-        "tools/cmake/ios.toolchain.cmake",
-        "tools/cmake/PulpIosHostApp.cmake",
-        "templates/ios-auv3/**",
-        "examples/ios-auv3-*/**",
-        "docs/getting-started/ios-deployment.md"
       ]
     },
     "import-design": {
@@ -229,11 +222,37 @@
         ".github/workflows/nightly-intel.yml"
       ]
     },
+    "ios": {
+      "paths": [
+        "core/view/platform/ios/**",
+        "core/format/src/au_view_controller_ios.mm",
+        "tools/cmake/ios.toolchain.cmake",
+        "tools/cmake/PulpIosHostApp.cmake",
+        "templates/ios-auv3/**",
+        "examples/ios-auv3-*/**",
+        "docs/getting-started/ios-deployment.md"
+      ]
+    },
     "jsfx-subset": {
       "paths": [
         "tools/scripts/jsfx_subset.py",
         "tools/scripts/test_jsfx_subset.py",
         "examples/jsfx-*/**"
+      ]
+    },
+    "kits": {
+      "paths": [
+        "tools/kits/**",
+        "fixtures/packages/**",
+        "tools/cli/kit_commands.*",
+        "planning/2026-06-11-pulp-package-format-proposal.md",
+        "docs/reference/cli.md",
+        "docs/status/cli-commands.yaml"
+      ]
+    },
+    "moonbase": {
+      "paths": [
+        "examples/moonbase-activation/**"
       ]
     },
     "motion": {
@@ -272,11 +291,6 @@
         "examples/mpe-*/**"
       ]
     },
-    "moonbase": {
-      "paths": [
-        "examples/moonbase-activation/**"
-      ]
-    },
     "packages": {
       "paths": [
         "tools/packages/**",
@@ -285,15 +299,16 @@
         "tools/deps/manifest.json"
       ]
     },
-    "pulp-web-demo": {
-      "paths": [
-        ".agents/skills/pulp-web-demo/**"
-      ]
+    "pr-batching": {
+      "paths": [],
+      "_doc": {
+        "empty-ok": "pr-batching is process guidance for the ship step (combine vs split finished branches to cut CI runs). It is not owned by any source path — no file edit should force a SKILL.md update. It is invoked by the shipping workflow, alongside the ci skill."
+      }
     },
     "pr-review-sweep": {
       "paths": [],
       "_doc": {
-        "empty-ok": "Process skill (sweep a PR's review comments and act on them) \u2014 not tied to any source path, so it is never triggered by a source diff. The entry exists to satisfy the self-check that every .agents/skills/ subdir is mapped."
+        "empty-ok": "Process skill (sweep a PR's review comments and act on them) — not tied to any source path, so it is never triggered by a source diff. The entry exists to satisfy the self-check that every .agents/skills/ subdir is mapped."
       }
     },
     "prototype-loop": {
@@ -303,14 +318,9 @@
         ".claude/commands/prototype-loop.md"
       ]
     },
-    "sdf-text": {
+    "pulp-web-demo": {
       "paths": [
-        "core/canvas/src/*sdf*",
-        "core/canvas/src/*msdf*",
-        "core/canvas/include/**/*sdf*",
-        "core/canvas/include/**/*msdf*",
-        "core/canvas/include/**/*psdf*",
-        "examples/sdf-*/**"
+        ".agents/skills/pulp-web-demo/**"
       ]
     },
     "screenshot": {
@@ -329,15 +339,14 @@
         "examples/web-demos/wclap-build/cloudflare/gen-og-images.mjs"
       ]
     },
-    "skia-gpu-build": {
+    "sdf-text": {
       "paths": [
-        "tools/cmake/FindSkia.cmake",
-        "tools/build-skia.sh",
-        "tools/build-skia-android.sh",
-        "tools/cmake/PulpBundleRelocatable.cmake",
-        "tools/cmake/PulpWgpuUniversal.cmake",
-        "tools/cmake/scripts/check_bundle_relocatable.py",
-        "tools/scripts/check_bundle_architectures.py"
+        "core/canvas/src/*sdf*",
+        "core/canvas/src/*msdf*",
+        "core/canvas/include/**/*sdf*",
+        "core/canvas/include/**/*msdf*",
+        "core/canvas/include/**/*psdf*",
+        "examples/sdf-*/**"
       ]
     },
     "ship": {
@@ -348,6 +357,17 @@
         ".github/workflows/sign-and-release.yml",
         ".github/workflows/release-cli.yml",
         "tools/scripts/build_combined_installer.sh"
+      ]
+    },
+    "skia-gpu-build": {
+      "paths": [
+        "tools/cmake/FindSkia.cmake",
+        "tools/build-skia.sh",
+        "tools/build-skia-android.sh",
+        "tools/cmake/PulpBundleRelocatable.cmake",
+        "tools/cmake/PulpWgpuUniversal.cmake",
+        "tools/cmake/scripts/check_bundle_relocatable.py",
+        "tools/scripts/check_bundle_architectures.py"
       ]
     },
     "streams": {
@@ -384,6 +404,24 @@
         "examples/threejs-*/**"
       ]
     },
+    "trace-analysis": {
+      "paths": [
+        ".agents/skills/trace-analysis/**",
+        "core/runtime/**/*trace*",
+        "tools/cmake/PulpTracing.cmake",
+        "experimental/pulp-rs/src/cmd/trace.rs",
+        "docs/guides/tracing.md"
+      ]
+    },
+    "trace-sql": {
+      "paths": [
+        ".agents/skills/trace-sql/**",
+        "core/runtime/**/*trace*",
+        "tools/cmake/PulpTracing.cmake",
+        "experimental/pulp-rs/src/cmd/trace.rs",
+        "docs/guides/tracing.md"
+      ]
+    },
     "update-demos": {
       "paths": [
         "tools/scripts/sdk_consumer_sweep.py",
@@ -403,6 +441,34 @@
         "tools/scripts/cli_version_check.sh",
         "docs/migrations/**",
         ".claude/commands/upgrade.md"
+      ]
+    },
+    "video-proof": {
+      "paths": [
+        ".agents/skills/video-proof/**",
+        "docs/reference/desktop-video-proofs.md",
+        "tools/local-ci/video_artifacts.py",
+        "tools/local-ci/mobile_video_composition.py",
+        "tools/local-ci/reaper_video_recipe.py",
+        "tools/local-ci/simulator_video_commands_cli.py",
+        "tools/local-ci/android_video_commands_cli.py",
+        "tools/local-ci/pack_video_proof_tool.py",
+        "tools/local-ci/macos_terminal_runner.py",
+        "tools/local-ci/macos_terminal_proof.py",
+        "tools/local-ci/macos_window_video_select.py",
+        "tools/local-ci/macos_desktop_video.py",
+        "tools/local-ci/macos_desktop_action_video.py",
+        "tools/local-ci/macos_video_bindings.py",
+        "tools/local-ci/macos_desktop_smoke_video_dependency_bindings.py",
+        "tools/local-ci/reporting_video.py",
+        "tools/local-ci/reporting_review.py",
+        "tools/local-ci/io_utils_design_parity.py",
+        "tools/local-ci/cli_parser_video.py",
+        "tools/local-ci/desktop_review_commands_cli.py",
+        "tools/local-ci/desktop_review_command_bindings.py",
+        "tools/local-ci/remotion-proof/**",
+        "tools/local-ci/scripts/compose-video-proof.mjs",
+        "tools/local-ci/scripts/smoke-video-proof.mjs"
       ]
     },
     "view-bridge": {
@@ -447,66 +513,6 @@
     "webview-ui": {
       "paths": [
         "examples/webview-*/**"
-      ]
-    },
-    "audio-headless-debug": {
-      "paths": [
-        "tools/audio/analysis/**",
-        "core/format/include/pulp/format/headless.hpp",
-        ".agents/skills/audio-headless-debug/**"
-      ]
-    },
-    "video-proof": {
-      "paths": [
-        ".agents/skills/video-proof/**",
-        "docs/reference/desktop-video-proofs.md",
-        "tools/local-ci/video_artifacts.py",
-        "tools/local-ci/mobile_video_composition.py",
-        "tools/local-ci/reaper_video_recipe.py",
-        "tools/local-ci/simulator_video_commands_cli.py",
-        "tools/local-ci/android_video_commands_cli.py",
-        "tools/local-ci/pack_video_proof_tool.py",
-        "tools/local-ci/macos_terminal_runner.py",
-        "tools/local-ci/macos_terminal_proof.py",
-        "tools/local-ci/macos_window_video_select.py",
-        "tools/local-ci/macos_desktop_video.py",
-        "tools/local-ci/macos_desktop_action_video.py",
-        "tools/local-ci/macos_video_bindings.py",
-        "tools/local-ci/macos_desktop_smoke_video_dependency_bindings.py",
-        "tools/local-ci/reporting_video.py",
-        "tools/local-ci/reporting_review.py",
-        "tools/local-ci/io_utils_design_parity.py",
-        "tools/local-ci/cli_parser_video.py",
-        "tools/local-ci/desktop_review_commands_cli.py",
-        "tools/local-ci/desktop_review_command_bindings.py",
-        "tools/local-ci/remotion-proof/**",
-        "tools/local-ci/scripts/compose-video-proof.mjs",
-        "tools/local-ci/scripts/smoke-video-proof.mjs"
-      ]
-    },
-    "daw-smoke": {
-      "paths": [
-        ".agents/skills/daw-smoke/**",
-        "tools/testing/daw-smoke/**",
-        "docs/guides/daw-smoke.md"
-      ]
-    },
-    "trace-analysis": {
-      "paths": [
-        ".agents/skills/trace-analysis/**",
-        "core/runtime/**/*trace*",
-        "tools/cmake/PulpTracing.cmake",
-        "experimental/pulp-rs/src/cmd/trace.rs",
-        "docs/guides/tracing.md"
-      ]
-    },
-    "trace-sql": {
-      "paths": [
-        ".agents/skills/trace-sql/**",
-        "core/runtime/**/*trace*",
-        "tools/cmake/PulpTracing.cmake",
-        "experimental/pulp-rs/src/cmd/trace.rs",
-        "docs/guides/tracing.md"
       ]
     }
   }

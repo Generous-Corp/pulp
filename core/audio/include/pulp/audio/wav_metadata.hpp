@@ -95,7 +95,7 @@ struct WavMetadata {
 // ── Public API ──────────────────────────────────────────────────────────────
 //
 // `read_wav_metadata` returns nullopt only on I/O error or a malformed
-// RIFF header. A successful read with zero recognised chunks returns an
+// RIFF header. A successful read with zero recognized chunks returns an
 // empty WavMetadata struct, not nullopt.
 std::optional<WavMetadata> read_wav_metadata(const std::string& path);
 

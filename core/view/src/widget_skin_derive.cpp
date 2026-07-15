@@ -29,7 +29,7 @@ inline canvas::Color to_color(const RGB& c) {
 }
 
 // Locate the widget art region as the tallest contiguous run of opaque pixels
-// in the centre column. Design-tool exports bake the live control at the top
+// in the center column. Design-tool exports bake the live control at the top
 // of the PNG and flatten label / value / metadata text below it as smaller,
 // gapped glyph runs — so the tallest opaque run is the control art.
 bool find_art_region(const SkinImage& img, int cx, int& top, int& bottom) {
@@ -77,7 +77,7 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
     int top = 0, bottom = 0;
     if (!find_art_region(img, cx, top, bottom)) return out;
 
-    // Collect opaque centre-column rows of the art region.
+    // Collect opaque center-column rows of the art region.
     std::vector<std::pair<int, RGB>> rows;
     for (int y = top; y < bottom; ++y) {
         RGB c = pixel(img, cx, y);
@@ -88,7 +88,7 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
     // Track: among low-saturation rows, take a near-darkest representative
     // (robust to anti-aliasing at the very top). Sorting by luminance and
     // sampling ~1/6 in avoids the single darkest AA pixel while staying on the
-    // real track colour.
+    // real track color.
     std::vector<std::pair<int, RGB>> low_sat;
     for (auto& r : rows) if (sat(r.second) < 25) low_sat.push_back(r);
     if (!low_sat.empty()) {
@@ -101,19 +101,19 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
         // design draws with a slightly lighter edge so it
         // doesn't read as a flat slab. We first try to RECOVER that edge by
         // scanning across a representative dark track row for the brightest
-        // low-saturation pixel and comparing it to the fill at the row centre —
+        // low-saturation pixel and comparing it to the fill at the row center —
         // a real outline shows a clear luminance delta. When the captured edge
         // is a sub-pixel anti-aliased rim that the flat-PNG sample can't
         // resolve (it reads as uniform fill), we SYNTHESISE the rim by
-        // lightening the sampled track colour — but only for a DARK track,
+        // lightening the sampled track color — but only for a DARK track,
         // where an outline is the design convention. Both paths are derived
-        // from the captured pixels (the actual track colour / edge); no
-        // per-instance colour is hardcoded. A light/flat track gets no rim.
+        // from the captured pixels (the actual track color / edge); no
+        // per-instance color is hardcoded. A light/flat track gets no rim.
         {
             const RGB track_rgb = low_sat[low_sat.size() / 6].second;
             const int track_lum = lum(track_rgb);
             int track_row = low_sat[low_sat.size() / 2].first;  // a mid dark row
-            int centre_lum = lum(pixel(img, cx, track_row));      // the fill here
+            int center_lum = lum(pixel(img, cx, track_row));      // the fill here
             int l = 0, r = 0;
             bool recovered = false;
             if (row_art_bounds(img, track_row, cx, l, r)) {
@@ -124,14 +124,14 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
                     if (c.a <= 200 || sat(c) >= 25) continue;
                     if (lum(c) > best_lum) { best_lum = lum(c); brightest = c; }
                 }
-                if (best_lum - centre_lum > 12) {
+                if (best_lum - center_lum > 12) {
                     out.track_border_color = to_color(brightest);
                     out.has_track_border = true;
                     recovered = true;
                 }
             }
             // Synthesised rim for a dark track when none could be resolved.
-            // Lighten the sampled track colour by a fixed step (kept modest so
+            // Lighten the sampled track color by a fixed step (kept modest so
             // the stroke reads as a subtle edge, not a second fill).
             if (!recovered && track_lum < 90) {
                 auto lift = [](int v) { return std::min(255, v + 30); };
@@ -161,7 +161,7 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
         }
 
         // Thumb border / bevel: nearest-to-mid-grey low-sat row within a small
-        // window around the thumb centre (the darker edge of the slab).
+        // window around the thumb center (the darker edge of the slab).
         RGB border{};
         bool found_border = false;
         int best_dist = 1 << 30;
@@ -182,12 +182,12 @@ FaderSkin derive_fader_skin(const SkinImage& img) {
         }
     }
 
-    // Fill: a REPRESENTATIVE coloured row, not the single most-saturated one.
+    // Fill: a REPRESENTATIVE colored row, not the single most-saturated one.
     // The captured fill is a vertical gradient (lighter near the thumb, darker
     // toward the bottom); the single max-saturation pixel is the darkest /
-    // deepest stop and over-saturates the derived colour vs the fill's dominant
+    // deepest stop and over-saturates the derived color vs the fill's dominant
     // mid tone. Collect the saturated rows (sat > 40) and take the MEDIAN by
-    // saturation so the derived colour is the dominant mid blue — matching the
+    // saturation so the derived color is the dominant mid blue — matching the
     // reference palette the harness compares against.
     {
         std::vector<RGB> colored;
@@ -263,11 +263,11 @@ MeterSkin derive_meter_skin(const SkinImage& img, int stop_count) {
         }
     }
 
-    // Walk the contiguous coloured fill from the bottom up. Stop at the dark
+    // Walk the contiguous colored fill from the bottom up. Stop at the dark
     // empty channel or the low-saturation white peak line — that bounds the
     // captured gradient's TOP (the warm/red stop sits just under the peak
     // line / dark channel). This `fill_top` is the top of the bar's full
-    // COLOURED extent, which is what the gradient must span so its top stop is
+    // COLORED extent, which is what the gradient must span so its top stop is
     // the warm/red the capture shows — not only the lower green→yellow band.
     int fill_bottom = bottom - 2;
     if (fill_bottom <= top) return out;
@@ -290,7 +290,7 @@ MeterSkin derive_meter_skin(const SkinImage& img, int stop_count) {
         out.has_fill_level = true;
     }
 
-    // Sample stop_count stops across the bar's full COLOURED extent, low/green
+    // Sample stop_count stops across the bar's full COLORED extent, low/green
     // (fill_bottom) → high/warm (fill_top). The renderer maps these stops across
     // the displayed fill region, so the top stop (warm/red) lands at the top of
     // the rendered fill, matching the capture.
@@ -303,15 +303,15 @@ MeterSkin derive_meter_skin(const SkinImage& img, int stop_count) {
 
     // ── Bar / housing widths ─────────────────────────────────────────────────
     // The captured art has TWO widths: the dark HOUSING slot (the full opaque
-    // run in [top, bottom)) and the narrower COLOURED bar recessed inside it
+    // run in [top, bottom)) and the narrower COLORED bar recessed inside it
     // (the saturated fill in [fill_top, fill_bottom]). The widget box should be
-    // the housing width; the coloured bar insets within it by bar_fill_ratio so
+    // the housing width; the colored bar insets within it by bar_fill_ratio so
     // the rendered meter reads as a recessed bar, not edge-to-edge paint.
     // Housing width = the full opaque extent (outward from cx) — the dark slot.
-    // Coloured-bar width = the run of SATURATED pixels around cx — the recessed
-    // coloured fill, which can be narrower than the opaque housing it sits in.
+    // Colored-bar width = the run of SATURATED pixels around cx — the recessed
+    // colored fill, which can be narrower than the opaque housing it sits in.
     // Measuring the opaque extent for the bar would just re-measure the housing
-    // (the dark slot stays opaque around the colour), so the bar must be the
+    // (the dark slot stays opaque around the color), so the bar must be the
     // saturated run, not the opaque run.
     auto median_opaque_width = [&](int y0, int y1) -> float {
         std::vector<int> widths;
@@ -348,7 +348,7 @@ MeterSkin derive_meter_skin(const SkinImage& img, int stop_count) {
             out.has_bar_fill_ratio = true;
         }
     }
-    // Housing height = the control art region (dark channel + coloured fill),
+    // Housing height = the control art region (dark channel + colored fill),
     // excluding the value-stack text the design tool bakes below it.
     if (bottom > top) {
         out.housing_height_px = static_cast<float>(bottom - top);

@@ -99,7 +99,7 @@ std::optional<LicenseFormatVersion> detect_license_format(std::string_view key) 
     // v1 layout is `<base64-payload>.<base64-signature>` — any string with
     // at least one '.' separator counts as v1. Empty payload / empty
     // signature halves are detected and rejected later by validate_v1 as
-    // InvalidSignature, matching the pre-v2 behaviour.
+    // InvalidSignature, matching the pre-v2 behavior.
     if (key.find('.') != std::string_view::npos)
         return LicenseFormatVersion::V1;
     return std::nullopt;

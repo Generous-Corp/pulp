@@ -48,7 +48,7 @@ bool PlanarAudioRingBuffer::prepare(std::uint32_t num_channels,
         storage_.assign(static_cast<std::size_t>(num_channels) *
                             static_cast<std::size_t>(internal_capacity),
                         0.0f);
-        fifo_ = std::make_unique<runtime::AbstractFifo>(static_cast<int>(internal_capacity));
+        fifo_ = std::make_unique<runtime::SpscRingIndex>(static_cast<int>(internal_capacity));
     } catch (...) {
         clear_unprepared();
         return false;

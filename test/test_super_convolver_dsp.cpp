@@ -1558,7 +1558,7 @@ TEST_CASE("SuperConvolver: toggling Bypass ramps instead of stepping", "[super-c
 //
 // This asserts the thing the ear objects to: the ENVELOPE must not collapse across the swap.
 // A steady tone in means steady energy out; a dip shows up as a block whose RMS falls far
-// below its neighbours. Deliberately measured per-block, not per-sample: the artefact here is
+// below its neighbours. Deliberately measured per-block, not per-sample: the artifact here is
 // an envelope hole, not a single-sample step (that is the Bypass test).
 TEST_CASE("SuperConvolver: a live Size change does not punch a hole in the output",
           "[super-convolver][size-drag]") {
@@ -1574,7 +1574,7 @@ TEST_CASE("SuperConvolver: a live Size change does not punch a hole in the outpu
     const auto tone = [](std::size_t i) {
         return 0.5f * std::sin(2.f * 3.14159265f * 220.f * static_cast<float>(i) / 48000.f);
     };
-    // 64-sample envelope windows, not per-block. The artefact is a short HOLE in the
+    // 64-sample envelope windows, not per-block. The artifact is a short HOLE in the
     // envelope; a 512-sample RMS averages an 11 ms dip away and the test passes on broken
     // code (it did — that is why the window is this size).
     const auto win_rms = [](const std::vector<float>& v, std::size_t w0, std::size_t w) {

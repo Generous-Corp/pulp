@@ -410,7 +410,7 @@ TEST_CASE("Wave 3 canvas2d — strokeStyle = createLinearGradient routes through
     REQUIRE(rec_stop_count == 2);
 }
 
-TEST_CASE("Wave 3 canvas2d — assigning a solid colour to strokeStyle after a gradient clears the stroke shader",
+TEST_CASE("Wave 3 canvas2d — assigning a solid color to strokeStyle after a gradient clears the stroke shader",
           "[view][bridge][canvas][wave3-canvas2d]") {
     ScriptEngine engine;
     View root;
@@ -430,9 +430,9 @@ TEST_CASE("Wave 3 canvas2d — assigning a solid colour to strokeStyle after a g
         g.addColorStop(1, '#0000ff');
         ctx.strokeStyle = g;
         ctx.strokeRect(10, 10, 50, 30);
-        // Reassign to a solid colour: the JS shim must flush
+        // Reassign to a solid color: the JS shim must flush
         // canvasClearStrokeGradient so the next stroke uses the solid
-        // colour without a stale shader.
+        // color without a stale shader.
         ctx.strokeStyle = '#00ff00';
         ctx.strokeRect(70, 10, 50, 30);
     )");

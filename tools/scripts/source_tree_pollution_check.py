@@ -127,7 +127,7 @@ ALLOWED_ROOT_PATHS = frozenset({
 class _DiffFailure(Exception):
     """Raised when `git diff` cannot resolve the requested ref range.
 
-    The previous behaviour was to return an empty list, which made the
+    The previous behavior was to return an empty list, which made the
     pollution gate silently bypass itself whenever `--base origin/main`
     was missing (fresh clones, detached worktrees). The hard-block
     contract is meaningless if the gate can return success without
@@ -326,7 +326,7 @@ def main(argv: list[str]) -> int:
             return 2
     except _DiffFailure as e:
         # Regression guard for #1761: fail closed when git diff cannot
-        # resolve. The previous behaviour silently bypassed the gate
+        # resolve. The previous behavior silently bypassed the gate
         # whenever `--base origin/main` was missing (fresh clones,
         # detached worktrees), defeating the hard-block contract.
         sys.stderr.write(

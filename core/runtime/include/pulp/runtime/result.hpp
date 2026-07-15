@@ -80,8 +80,8 @@ public:
     using value_type = T;
     using error_type = E;
 
-    // Default-constructed Result is a value-initialised T (matches
-    // std::expected's default behaviour when T is default-constructible).
+    // Default-constructed Result is a value-initialized T (matches
+    // std::expected's default behavior when T is default-constructible).
     Result()
         requires std::is_default_constructible_v<T>
         : has_value_(true) {

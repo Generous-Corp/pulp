@@ -4,7 +4,7 @@
 //
 // Thin View that visualises a ModulationMatrix: draws source nodes on
 // the left, destinations on the right, and one line per route with a
-// thickness/colour proportional to depth. Clicking a source then a
+// thickness/color proportional to depth. Clicking a source then a
 // destination adds a route. Clicking an existing route's line removes
 // it.
 //

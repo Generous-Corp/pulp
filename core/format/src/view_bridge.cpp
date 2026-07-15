@@ -2,6 +2,7 @@
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/remote_view_session.hpp>
 #include <pulp/runtime/exceptions.hpp>
+#include <pulp/view/host_param_surface.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/view.hpp>
 
@@ -72,6 +73,16 @@ bool ViewBridge::open(std::string* error) {
         uses_script_ui_ = instance.uses_script_ui;
     }
     view_raw_ = view_.get();
+
+    // Install the runtime host surfaces on the fresh tree. Without this,
+    // View::host_params() is null for every view Pulp itself builds, and an
+    // imported design that opted into route_changes_to_host_params(true) turns
+    // its knobs against nothing. The surface resolves a design param_key to the
+    // store parameter whose ParamInfo::name matches it.
+    host_param_surface_ =
+        std::make_unique<view::StateStoreHostParamSurface>(store_);
+    view_raw_->set_host_params(host_param_surface_.get());
+    view_raw_->set_host_actions(host_actions_);
 
     size_hints_ = safe_view_size(processor_);
     // A NATIVE create_view() already computed its own layout bounds; make the
@@ -185,8 +196,17 @@ void ViewBridge::close() {
         PULP_CATCH_ALL {}
         attached_ = false;
     }
+    // Detach the surfaces from the tree BEFORE dropping either. A released view
+    // (release_view()) outlives this bridge's surface, so leaving the pointer in
+    // place would dangle.
+    view_raw_->set_host_params(nullptr);
+    view_raw_->set_host_actions(nullptr);
+    for (auto& s : secondaries_)
+        if (s.view) { s.view->set_host_params(nullptr); s.view->set_host_actions(nullptr); }
+
     scripted_ui_.reset();
     view_.reset();          // no-op if already released
+    host_param_surface_.reset();
     view_raw_ = nullptr;
     uses_script_ui_ = false;
     released_ = false;
@@ -205,8 +225,21 @@ void ViewBridge::resize(uint32_t width, uint32_t height) {
 view::View* ViewBridge::attach_secondary_view(std::unique_ptr<view::View> v, ViewRole role) {
     if (!v) return nullptr;
     auto* raw = v.get();
+    // A secondary view (inspector, remote preview) binds against the same
+    // parameter store as the primary editor, so it gets the same surfaces.
+    raw->set_host_params(host_param_surface_.get());
+    raw->set_host_actions(host_actions_);
     secondaries_.push_back({std::move(v), role});
     return raw;
+}
+
+view::HostParamSurface* ViewBridge::host_params() { return host_param_surface_.get(); }
+
+void ViewBridge::set_host_actions(view::HostActionSurface* actions) {
+    host_actions_ = actions;
+    if (view_raw_) view_raw_->set_host_actions(actions);
+    for (auto& s : secondaries_)
+        if (s.view) s.view->set_host_actions(actions);
 }
 
 bool ViewBridge::detach_secondary_view(view::View* target) {

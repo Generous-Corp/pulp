@@ -114,7 +114,7 @@ def parse_licensing_md() -> set[str]:
 # package name, CMake FetchContent target, etc.) alongside the source file
 # + optional path context so the audit can render a useful diagnostic.
 #
-# The audit normalises both the declared name and each manifest entry
+# The audit normalizes both the declared name and each manifest entry
 # (canonical name + ``external_names`` aliases) before comparing, so that
 # casing / punctuation differences like ``webgpu`` vs ``WebGPU-distribution``
 # or ``mbedtls`` vs ``Mbed TLS`` match.
@@ -184,7 +184,7 @@ DEFAULT_ALIASES: dict[str, tuple[str, ...]] = {
 
 
 def manifest_alias_set(dep: dict) -> set[str]:
-    """Return the set of normalised aliases that match this manifest entry."""
+    """Return the set of normalized aliases that match this manifest entry."""
     keys = {_normalise(dep["name"])}
     for alias in dep.get("external_names", ()):  # explicit entries first
         keys.add(_normalise(alias))
@@ -225,7 +225,7 @@ def parse_mkdocs_yml() -> list[DeclaredDep]:
     * ``markdown_extensions:`` entries beginning with ``pymdownx.`` —
       captured as ``pymdown-extensions`` (only once)
 
-    Name normalisation later maps ``material`` to ``mkdocs-material``,
+    Name normalization later maps ``material`` to ``mkdocs-material``,
     ``awesome-pages`` to ``mkdocs-awesome-pages-plugin``, etc., via the
     ``DEFAULT_ALIASES`` table + optional per-entry ``external_names``.
     """

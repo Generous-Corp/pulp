@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <pulp/events/async_updater.hpp>
+#include <pulp/events/coalesced_updater.hpp>
 
 #include <string>
 #include <string_view>
@@ -9,21 +9,21 @@ using namespace pulp::events;
 
 namespace {
 
-class ReentrantUpdater : public AsyncUpdater {
+class ReentrantUpdater : public CoalescedUpdater {
 public:
-    void handle_async_update() override {
+    void on_update() override {
         ++handles;
         if (handles == 1) {
-            trigger_async_update();
+            request_update();
         }
     }
 
     int handles = 0;
 };
 
-class CountingUpdater : public AsyncUpdater {
+class CountingUpdater : public CoalescedUpdater {
 public:
-    void handle_async_update() override {
+    void on_update() override {
         ++handles;
     }
 
@@ -41,82 +41,82 @@ public:
 
 }  // namespace
 
-TEST_CASE("AsyncUpdater keeps a reentrant trigger pending",
-          "[events][async_updater][issue-642]") {
+TEST_CASE("CoalescedUpdater keeps a reentrant trigger pending",
+          "[events][coalesced_updater][issue-642]") {
     ReentrantUpdater updater;
 
-    updater.trigger_async_update();
-    REQUIRE(updater.is_update_pending());
+    updater.request_update();
+    REQUIRE(updater.update_pending());
 
     updater.process_pending();
     REQUIRE(updater.handles == 1);
-    REQUIRE(updater.is_update_pending());
+    REQUIRE(updater.update_pending());
 
     updater.process_pending();
     REQUIRE(updater.handles == 2);
-    REQUIRE_FALSE(updater.is_update_pending());
+    REQUIRE_FALSE(updater.update_pending());
 }
 
-TEST_CASE("LambdaAsyncUpdater clears pending state without a callback",
-          "[events][async_updater][issue-642]") {
-    LambdaAsyncUpdater updater({});
+TEST_CASE("LambdaCoalescedUpdater clears pending state without a callback",
+          "[events][coalesced_updater][issue-642]") {
+    LambdaCoalescedUpdater updater({});
 
-    updater.trigger_async_update();
-    REQUIRE(updater.is_update_pending());
+    updater.request_update();
+    REQUIRE(updater.update_pending());
 
     updater.process_pending();
-    REQUIRE_FALSE(updater.is_update_pending());
+    REQUIRE_FALSE(updater.update_pending());
 }
 
-TEST_CASE("AsyncUpdater cancel and coalesce paths are deterministic",
-          "[events][async_updater][issue-642]") {
+TEST_CASE("CoalescedUpdater cancel and coalesce paths are deterministic",
+          "[events][coalesced_updater][issue-642]") {
     CountingUpdater updater;
 
     updater.process_pending();
     REQUIRE(updater.handles == 0);
-    REQUIRE_FALSE(updater.is_update_pending());
+    REQUIRE_FALSE(updater.update_pending());
 
-    updater.trigger_async_update();
-    updater.trigger_async_update();
-    REQUIRE(updater.is_update_pending());
+    updater.request_update();
+    updater.request_update();
+    REQUIRE(updater.update_pending());
 
     updater.process_pending();
     REQUIRE(updater.handles == 1);
-    REQUIRE_FALSE(updater.is_update_pending());
+    REQUIRE_FALSE(updater.update_pending());
 
-    updater.trigger_async_update();
-    REQUIRE(updater.is_update_pending());
-    updater.cancel_pending_update();
-    REQUIRE_FALSE(updater.is_update_pending());
+    updater.request_update();
+    REQUIRE(updater.update_pending());
+    updater.cancel_update();
+    REQUIRE_FALSE(updater.update_pending());
     updater.process_pending();
     REQUIRE(updater.handles == 1);
 
-    updater.trigger_async_update();
+    updater.request_update();
     updater.process_pending();
     REQUIRE(updater.handles == 2);
 }
 
-TEST_CASE("LambdaAsyncUpdater invokes callbacks only for pending work",
-          "[events][async_updater][issue-642]") {
+TEST_CASE("LambdaCoalescedUpdater invokes callbacks only for pending work",
+          "[events][coalesced_updater][issue-642]") {
     int calls = 0;
-    LambdaAsyncUpdater updater([&] { ++calls; });
+    LambdaCoalescedUpdater updater([&] { ++calls; });
 
     updater.process_pending();
     REQUIRE(calls == 0);
 
-    updater.trigger_async_update();
-    updater.cancel_pending_update();
+    updater.request_update();
+    updater.cancel_update();
     updater.process_pending();
     REQUIRE(calls == 0);
 
-    updater.trigger_async_update();
+    updater.request_update();
     updater.process_pending();
     REQUIRE(calls == 1);
-    REQUIRE_FALSE(updater.is_update_pending());
+    REQUIRE_FALSE(updater.update_pending());
 }
 
 TEST_CASE("ActionBroadcaster ignores missing listener removals",
-          "[events][async_updater][action_broadcaster][issue-642]") {
+          "[events][coalesced_updater][action_broadcaster][issue-642]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
 
@@ -141,7 +141,7 @@ TEST_CASE("ActionBroadcaster ignores missing listener removals",
 }
 
 TEST_CASE("ActionBroadcaster handles empty actions and no-listener sends",
-          "[events][async_updater][action_broadcaster][issue-642]") {
+          "[events][coalesced_updater][action_broadcaster][issue-642]") {
     ActionBroadcaster broadcaster;
 
     broadcaster.send_action("");
@@ -161,7 +161,7 @@ TEST_CASE("ActionBroadcaster handles empty actions and no-listener sends",
 }
 
 TEST_CASE("ActionBroadcaster skips empty listener callbacks",
-          "[events][async_updater][action_broadcaster]") {
+          "[events][coalesced_updater][action_broadcaster]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
 
@@ -179,7 +179,7 @@ TEST_CASE("ActionBroadcaster skips empty listener callbacks",
 }
 
 TEST_CASE("ActionBroadcaster tolerates listener mutation during dispatch",
-          "[events][async_updater][action_broadcaster]") {
+          "[events][coalesced_updater][action_broadcaster]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
     int second = -1;
@@ -209,7 +209,7 @@ TEST_CASE("ActionBroadcaster tolerates listener mutation during dispatch",
 }
 
 TEST_CASE("ActionBroadcaster snapshots listeners during dispatch",
-          "[events][async_updater][action_broadcaster]") {
+          "[events][coalesced_updater][action_broadcaster]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
     int first_id = -1;
@@ -235,7 +235,7 @@ TEST_CASE("ActionBroadcaster snapshots listeners during dispatch",
 }
 
 TEST_CASE("ActionBroadcaster delays listeners added during dispatch",
-          "[events][async_updater][action_broadcaster]") {
+          "[events][coalesced_updater][action_broadcaster]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
     int late_id = -1;
@@ -264,7 +264,7 @@ TEST_CASE("ActionBroadcaster delays listeners added during dispatch",
 }
 
 TEST_CASE("ActionBroadcaster tolerates null listeners",
-          "[events][async_updater][action_broadcaster]") {
+          "[events][coalesced_updater][action_broadcaster]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
 
@@ -282,7 +282,7 @@ TEST_CASE("ActionBroadcaster tolerates null listeners",
 }
 
 TEST_CASE("MultiTimer stop all permits selective restart",
-          "[events][async_updater][multi_timer][issue-642]") {
+          "[events][coalesced_updater][multi_timer][issue-642]") {
     RecordingMultiTimer timers;
 
     timers.start_timer(1, 20);
@@ -305,7 +305,7 @@ TEST_CASE("MultiTimer stop all permits selective restart",
 }
 
 TEST_CASE("MultiTimer restart keeps one running entry per id",
-          "[events][async_updater][multi_timer][issue-642]") {
+          "[events][coalesced_updater][multi_timer][issue-642]") {
     RecordingMultiTimer timers;
 
     timers.start_timer(7, 20);
@@ -325,7 +325,7 @@ TEST_CASE("MultiTimer restart keeps one running entry per id",
 }
 
 TEST_CASE("MultiTimer supports zero and negative timer ids",
-          "[events][async_updater][multi_timer]") {
+          "[events][coalesced_updater][multi_timer]") {
     RecordingMultiTimer timers;
 
     timers.start_timer(0, 1);
@@ -340,7 +340,7 @@ TEST_CASE("MultiTimer supports zero and negative timer ids",
 }
 
 TEST_CASE("MultiTimer restart after stop_all works for existing entries",
-          "[events][async_updater][multi_timer]") {
+          "[events][coalesced_updater][multi_timer]") {
     RecordingMultiTimer timers;
 
     timers.start_timer(3, 10);
@@ -357,7 +357,7 @@ TEST_CASE("MultiTimer restart after stop_all works for existing entries",
 }
 
 TEST_CASE("ScopedLowPowerModeDisabler has no observable test-lane side effects",
-          "[events][async_updater][power][issue-642]") {
+          "[events][coalesced_updater][power][issue-642]") {
     ScopedLowPowerModeDisabler first;
     {
         ScopedLowPowerModeDisabler nested;

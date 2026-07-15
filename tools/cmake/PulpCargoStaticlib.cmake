@@ -3,7 +3,7 @@
 #
 # This is the opt-in native-component lane's build glue. It is NEVER included by
 # a default build: only the Rust-test option (PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS)
-# pulls it in, so default builds need no cargo/rustc. Modelled on
+# pulls it in, so default builds need no cargo/rustc. Modeled on
 # experimental/pulp-rs/CMakeLists.txt's cargo/rustc discovery, but for an FFI
 # staticlib (pulp-rs is a CLI crate and forbids FFI — it is NOT the precedent).
 #

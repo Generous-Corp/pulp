@@ -139,7 +139,7 @@ SpiResponse parse_response(const std::string& line) {
     if (auto v = root.get("id")) r.id = v->as_string();
 
     if (auto result = root.get("result"); result && result->type == JsonValue::Object) {
-        // Re-serialise the result object back to text so callers can reparse
+        // Re-serialize the result object back to text so callers can reparse
         // the verb-specific shape with their own reader.
         r.result_json = serialize(*result);
     }

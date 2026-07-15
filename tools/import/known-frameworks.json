@@ -1,44 +1,5 @@
 {
   "schema": "pulp.import.known_frameworks.v0",
-  "description": "Discovery index for framework importers. This is the ONE place real source-framework markers and vendor names appear in the Pulp SDK, and they appear strictly as DATA, never as code. `pulp import detect` ranks a target directory against these markers without any importer installed; the matching importer is a vendor-specific add-on tool resolved by `importer_tool_id` against the tool registry. Detection markers: type=file_glob matches a path under the project dir (shell-style glob, '**' = any depth); type=content_match matches a literal substring within any file matched by `in_glob` (defaults to all regular files). `weight` accumulates into a confidence score normalised to [0,1]. `spi_min`/`spi_max` bound the SPI versions the importer is expected to speak.",
-  "frameworks": [
-    {
-      "framework_id": "framework-a",
-      "display_name": "Framework A",
-      "importer_tool_id": "import-framework-a",
-      "spi_min": 0,
-      "spi_max": 0,
-      "detection": [
-        { "type": "file_glob", "pattern": "**/*.jucer", "weight": 0.6 },
-        { "type": "content_match", "pattern": "juce_add_plugin", "in_glob": "**/CMakeLists.txt", "weight": 0.5 },
-        { "type": "content_match", "pattern": "#include <JuceHeader.h>", "weight": 0.3 },
-        { "type": "content_match", "pattern": "JUCE_DECLARE_NON_COPYABLE", "weight": 0.2 }
-      ]
-    },
-    {
-      "framework_id": "framework-b",
-      "display_name": "Framework B",
-      "importer_tool_id": "import-framework-b",
-      "spi_min": 0,
-      "spi_max": 0,
-      "detection": [
-        { "type": "content_match", "pattern": "PLUG_NAME", "in_glob": "**/config.h", "weight": 0.5 },
-        { "type": "content_match", "pattern": "PLUG_MFR", "in_glob": "**/config.h", "weight": 0.3 },
-        { "type": "content_match", "pattern": "IPlug2", "weight": 0.4 },
-        { "type": "file_glob", "pattern": "**/*-iOS.xcodeproj/**", "weight": 0.2 }
-      ]
-    },
-    {
-      "framework_id": "framework-c",
-      "display_name": "Framework C",
-      "importer_tool_id": "import-framework-c",
-      "spi_min": 0,
-      "spi_max": 0,
-      "detection": [
-        { "type": "content_match", "pattern": "Steinberg::Vst::", "weight": 0.4 },
-        { "type": "content_match", "pattern": "DEF_CLASS2", "weight": 0.3 },
-        { "type": "file_glob", "pattern": "**/*.vstxml", "weight": 0.3 }
-      ]
-    }
-  ]
+  "description": "Discovery index SHAPE for framework importers. The Pulp SDK ships this file with an EMPTY frameworks list, ON PURPOSE, and it must stay empty. Detection markers are the property of an add-on importer, not of the SDK: an importer is installed by URL and drops its own known-frameworks.json into ~/.pulp/tools/<tool_id>/, which `pulp import detect` merges at runtime. The SDK therefore knows the SHAPE of a detection marker and nothing about any particular source framework. With no importer installed, `pulp import detect` matches nothing and says nothing — and behaves identically whether or not any given importer exists, is public, or is private. Do not add entries here. Detection markers: type=file_glob matches a path under the project dir (shell-style glob, '**' = any depth); type=content_match matches a literal substring within any file matched by `in_glob` (defaults to all regular files). `weight` accumulates into a confidence score normalized to [0,1]. `spi_min`/`spi_max` bound the SPI versions the importer is expected to speak.",
+  "frameworks": []
 }

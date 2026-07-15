@@ -169,7 +169,7 @@ void SkiaCanvas::clear_stroke_gradient() {
 //
 // Falling back: if the image fails to decode (missing file, malformed
 // data URI), we clear the active fill so the canvas degrades to the
-// previous solid colour rather than rendering garbage.
+// previous solid color rather than rendering garbage.
 
 namespace {
 

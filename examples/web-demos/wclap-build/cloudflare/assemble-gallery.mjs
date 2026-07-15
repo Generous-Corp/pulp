@@ -796,7 +796,7 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
       blockSize: INTERNAL_BLOCK,
       latencyBlocks: GPU_LATENCY_BLOCKS,
       onDeviceLost: (info) => {
-        // Normal behaviour, not a fatal error: the worklet misses from here on
+        // Normal behavior, not a fatal error: the worklet misses from here on
         // and the plugin's CPU convolver covers every block.
         console.warn("WebGPU device lost:", info && info.reason);
       },

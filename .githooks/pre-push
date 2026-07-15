@@ -44,6 +44,24 @@ if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then
     exit 0
 fi
 
+# ── PR-batching advice (advisory, never blocks) ────────────────────────────
+# A PR here costs ~an hour before it can merge (a ~25-minute local coverage
+# build, then a Shipyard validation that must run SERIALLY with any other), so
+# shipping three related branches separately costs three sequential hours.
+#
+# This runs FIRST, on purpose. Every other gate below is slow; advice that
+# arrives after you have already paid for a 25-minute coverage build is advice
+# you cannot act on.
+#
+# The pre-push hook is the only choke point EVERY route to a PR passes through —
+# `shipyard pr`, `pulp pr`, `gh pr create`, the legacy local-ci flow, a human,
+# Claude, or Codex. The `pr-batching` skill states the heuristics, but a skill
+# only reaches an agent that chooses to read it; a push reaches everyone.
+PR_BATCH_ADVISOR="$ROOT/tools/scripts/pr_batch_advisor.py"
+if [ -f "$PR_BATCH_ADVISOR" ] && [ "${PULP_SKIP_PR_BATCH_ADVICE:-0}" != "1" ]; then
+    python3 "$PR_BATCH_ADVISOR" || true   # advisory: its failure must never block a push
+fi
+
 # ── Shipyard-drift detection (pulp #1406) ──────────────────────────────────
 # Log whether this push originated from `shipyard pr` (which runs the full
 # local validation matrix BEFORE pushing) or from a direct `git push`

@@ -201,7 +201,7 @@ public:
             // Same seed across channels → coherent (mono-safe) noise phase:
             // identical input yields identical output and the noise sums
             // correctly to mono. The per-channel magnitude envelopes still
-            // give each channel its own colour.
+            // give each channel its own color.
             for (int ch = 0; ch < config.channels; ++ch)
                 noise_morphers_[static_cast<size_t>(ch)].prepare(spectral_bins);
             mag_scratch_.assign(static_cast<size_t>(spectral_bins), SampleType{0});
@@ -452,7 +452,7 @@ private:
         // frame: each channel regenerates its noise from the captured
         // envelope with fresh random phase, so successive synthesis frames
         // are decorrelated and overlap-add to natural noise of the right
-        // colour at any stretch ratio.
+        // color at any stretch ratio.
         if (morph) {
             // Random-phase noise frames overlap-add INCOHERENTLY while the WOLA
             // normalizes for COHERENT summation, so morphed noise renders ~4-5 dB

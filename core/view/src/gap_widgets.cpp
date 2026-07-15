@@ -10,9 +10,9 @@ namespace pulp::view {
 namespace {
 using canvas::Color;
 
-// Tone → semantic colour token (derive_theme family), with a sane literal
+// Tone → semantic color token (derive_theme family), with a sane literal
 // fallback for the no-theme case. accent.text resolves the "on bright fill"
-// colour (ink-signal provides it; others fall back to a dark ink).
+// color (ink-signal provides it; others fall back to a dark ink).
 const char* tone_token(Tone t) {
     switch (t) {
         case Tone::info:    return "accent.info";
@@ -191,7 +191,7 @@ void Stepper::paint(canvas::Canvas& canvas) {
     canvas.stroke_line(btn, 4.0f, btn, h - 4.0f);
     canvas.stroke_line(w - btn, 4.0f, w - btn, h - 4.0f);
     // −/+ glyphs, vertically centered in their h×h zones (GlyphCenter anchors
-    // on the glyph's optical centre, not the baseline).
+    // on the glyph's optical center, not the baseline).
     canvas.set_font("system", 18.0f);
     canvas.set_fill_color(resolve_color("text.secondary", Color::rgba8(150, 150, 160)));
     canvas.set_text_align(canvas::TextAlign::center);
@@ -225,7 +225,7 @@ int Stepper::zone_at_(float x) const {
     const float w = bounds().width, btn = bounds().height;
     if (x < btn) return 0;          // minus
     if (x > w - btn) return 1;      // plus
-    return -1;                      // centre value cell
+    return -1;                      // center value cell
 }
 void Stepper::on_mouse_down(Point pos) {
     press_y_ = pos.y;
@@ -245,7 +245,7 @@ void Stepper::on_mouse_down(Point pos) {
 }
 void Stepper::on_mouse_drag(Point pos) {
     // A vertical drag scrubs the value (up = increase). Below the threshold a
-    // centre press stays a click-to-type; once it becomes a drag we cancel any
+    // center press stays a click-to-type; once it becomes a drag we cancel any
     // just-started edit and scrub instead.
     if (!scrubbing_ && std::abs(press_y_ - pos.y) < kScrubThreshold) return;
     scrubbing_ = true;
@@ -333,7 +333,7 @@ void PanControl::paint(canvas::Canvas& canvas) {
         canvas.fill_rect(x0, cy - th / 2, fw, th);
     }
     canvas.set_fill_color(resolve_color("control.border", Color::rgba8(120, 130, 140)));
-    canvas.fill_rect(cx - 1.0f, cy - th / 2 - 2.0f, 2.0f, th + 4.0f);   // centre detent
+    canvas.fill_rect(cx - 1.0f, cy - th / 2 - 2.0f, 2.0f, th + 4.0f);   // center detent
     canvas.set_fill_color(resolve_color("slider.thumb", Color::rgba8(220, 220, 220)));
     canvas.fill_circle(tx, cy, (h / 2.0f) * hover_scale_.value());
 }
@@ -528,7 +528,7 @@ void NumberBox::paint(canvas::Canvas& canvas) {
     canvas.set_text_align(canvas::TextAlign::center);
     canvas.fill_text_anchored("\xe2\x80\xb9", r, h * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);        // ‹
     canvas.fill_text_anchored("\xe2\x80\xba", w - r, h * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);    // ›
-    // Centre: the edit buffer + blinking caret while typing, else the value.
+    // Center: the edit buffer + blinking caret while typing, else the value.
     std::string s;
     if (editing_) {
         canvas.set_stroke_color(resolve_color("focus.ring", Color::rgba8(22, 218, 194)));
@@ -555,7 +555,7 @@ int NumberBox::zone_at_(float x) const {
     const float w = bounds().width, edge = bounds().height;  // square-ish end zones
     if (x < edge) return 0;          // ‹ decrement
     if (x > w - edge) return 1;      // › increment
-    return -1;                       // centre value cell
+    return -1;                       // center value cell
 }
 void NumberBox::on_mouse_down(Point pos) {
     press_y_ = pos.y;
@@ -565,7 +565,7 @@ void NumberBox::on_mouse_down(Point pos) {
     else if (z == 1) { commit_edit_(); set_value(value_ + step_); pressed_zone_ = 1; }  // ›
     else {
         pressed_zone_ = -1;
-        // Centre cell: start typing a value (the host focuses us on click).
+        // Center cell: start typing a value (the host focuses us on click).
         editing_ = true;
         char buf[32]; std::snprintf(buf, sizeof(buf), "%g", value_);
         edit_buffer_ = buf;
@@ -574,7 +574,7 @@ void NumberBox::on_mouse_down(Point pos) {
     request_repaint();
 }
 void NumberBox::on_mouse_drag(Point pos) {
-    // Vertical drag scrubs (up = increase); a sub-threshold centre press stays
+    // Vertical drag scrubs (up = increase); a sub-threshold center press stays
     // a click-to-type. Once it becomes a drag, cancel any edit and scrub.
     if (!scrubbing_ && std::abs(press_y_ - pos.y) < kScrubThreshold) return;
     scrubbing_ = true;

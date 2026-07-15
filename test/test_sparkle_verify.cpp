@@ -14,7 +14,7 @@
 //   6. verify_appcast_signatures walks every signed enclosure in a
 //      Sparkle-style XML feed and validates each, returning true only
 //      when every signed item passes.
-//   7. The CLI's previous silent-empty-signature behaviour (#295) is
+//   7. The CLI must not silently write an empty signature; it must fail loudly.
 //      gone: sign_file_ed25519 returns nullopt (not empty string) on
 //      every error path.
 

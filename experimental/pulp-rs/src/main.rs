@@ -335,7 +335,7 @@ fn main() -> ExitCode {
     }
 }
 
-/// Honour `$PULP_USE_CPP=1` by exec'ing `pulp-cpp` with the user's
+/// Honor `$PULP_USE_CPP=1` by exec'ing `pulp-cpp` with the user's
 /// full argv (`std::env::args().skip(1)`). Returns a tool-use exit
 /// code if the legacy binary isn't resolvable — the user needs a
 /// clear "installation issue" message, not a silent no-op.
@@ -402,7 +402,7 @@ fn real_main() -> Result<(), ExitCode> {
         }
         Command::Projects(args) => {
             // With `trailing_var_arg`, clap's own `--json` flag is
-            // only recognised BEFORE the first positional. Sweep it
+            // only recognized BEFORE the first positional. Sweep it
             // out of the tail so users can type it in either spot.
             let mut json = args.json;
             let tail: Vec<String> = args
