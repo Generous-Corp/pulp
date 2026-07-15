@@ -35,6 +35,7 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <mutex>
@@ -521,7 +522,13 @@ int main(int argc, char** argv) {
     pulp::midi::MidiBuffer mi, mo;
 
     pulp::host::ParameterEventQueue pe;
-    const int blocks_to_process = slot->info().is_instrument ? 32 : 1;
+    const auto latency_blocks = std::clamp<std::int64_t>(
+        (std::max<std::int64_t>(0, slot->latency_samples()) + kBlockSize - 1)
+            / kBlockSize + 1,
+        1, 32);
+    const int blocks_to_process = slot->info().is_instrument
+        ? 32
+        : static_cast<int>(latency_blocks);
     float peak = 0.f;
     for (int block = 0; block < blocks_to_process; ++block) {
         std::fill(out_l.begin(), out_l.end(), 0.f);
