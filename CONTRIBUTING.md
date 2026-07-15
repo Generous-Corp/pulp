@@ -2,6 +2,11 @@
 
 We welcome contributions. Here's how to get started.
 
+> **Contributing with an AI agent?** See [Working with Pulp's review
+> process](docs/policies/working-with-pulp-review.md) — a short contract on how
+> review works here and how to make an agent-authored PR land with the fewest
+> round-trips.
+
 ## Help wanted (no Pulp internals required)
 
 Two high-impact ways to contribute that don't require digging into the framework:
