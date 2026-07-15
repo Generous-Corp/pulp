@@ -399,3 +399,28 @@ equal indices; on SuperConvolver, Engine's id is 5, so `values[e.id]` silently r
 parameter. Find the INDEX (`infos.findIndex(...)`) and read `values[index]`. This bug hid for a
 long time because the page's `<select>` handler also set the same state directly — the broken
 path only ran for preset/host writes.
+
+## Landmine: the wasm UI build hand-lists its sources — a core refactor silently breaks it
+
+`tools/cmake/PulpWebUi.cmake` builds Pulp's own view+canvas render stack to wasm by
+**explicitly listing every TU** (it can't glob core/ the way the native build's CMakeLists do —
+it deliberately excludes Dawn/Graphite/scripting/design-import TUs). So when a core refactor
+**splits a file** — `skia_canvas.cpp` → `skia_canvas.cpp` + `skia_canvas_path.cpp`, or the text
+editor into `text_edit_model` / `text_editor` / `_clipboard` / `_ime` / `_paint` — the native
+build (which lists or globs them) keeps working, and this hand-list silently goes stale. The
+failure is a wall of `undefined symbol:` at wasm-ld link time, and it lands far from the PR that
+caused it.
+
+It merges green because the web-build lanes (`web-plugins.yml`, `wclap-cloudflare.yml`) are
+**path-filtered and advisory** — a PR touching only `core/canvas/**` or `core/view/**` never
+triggers them. So a core-only refactor breaks the wasm UI build with nothing red. (Making the
+WebCLAP lane a required check is the durable fix; until then, assume this can be broken on main.)
+
+When you hit it: don't chase symbols one build at a time. Read the symbol's namespace, find the
+defining TU (`git grep -l 'Thing::method' -- core/.../src`), and **mirror what the native build
+compiles** (`core/view/CMakeLists.txt`, `core/canvas/…`) rather than adding files piecemeal —
+one added TU pulls in its own new references (a Label opening a TextEditor cascades into the
+editor's model + clipboard + context-menu TUs, and finally into `pulp::platform::Clipboard`,
+which had no web impl at all). Build locally against `origin/main` before trusting it — the
+cascade is real, and your local linker matches CI (verify the first layer agrees before chasing
+the next).

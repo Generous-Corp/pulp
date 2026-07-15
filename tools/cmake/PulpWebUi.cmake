@@ -166,7 +166,9 @@ set(_PULP_WEBUI_CANVAS_SOURCES
     ${_PULP_WEBUI_ROOT}/core/canvas/src/path_to_sdf.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/image_codecs_gif.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/image_codecs_tiff.cpp
+    ${_PULP_WEBUI_ROOT}/core/canvas/src/path.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas.cpp
+    ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_path.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_fonts.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_text.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_filter.cpp
@@ -184,6 +186,17 @@ set(_PULP_WEBUI_CANVAS_SOURCES
 # authoring, NO window hosts other than the browser one below.
 set(_PULP_WEBUI_VIEW_SOURCES
     ${_PULP_WEBUI_ROOT}/core/view/src/view.cpp
+    # The text editor was split into several TUs; the wasm build needs the same set the
+    # native build compiles (core/view/CMakeLists.txt), because a Label can open the editor's
+    # default context menu (label.cpp → TextEditor::show_default_context_menu) and that pulls
+    # in the editor's model, clipboard, IME, and paint TUs plus its vtable.
+    ${_PULP_WEBUI_ROOT}/core/view/src/text_edit_model.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/text_editor.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/text_editor_clipboard.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/text_editor_ime.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/text_editor_paint.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/slider_core.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/context_menu.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/yoga_layout.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/layout_snapshot.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/pointer_dispatch.cpp
@@ -247,6 +260,13 @@ set(_PULP_WEBUI_EVENTS_SOURCES
 # The browser WindowHost (canvas input events -> View tree, GL surface -> paint).
 file(GLOB _PULP_WEBUI_PLATFORM_SOURCES
     "${_PULP_WEBUI_ROOT}/core/view/platform/web/*.cpp")
+
+# The browser clipboard (navigator.clipboard write + paste-event capture). It backs the text
+# editor a selectable/editable Label opens; without it the wasm link fails on
+# pulp::platform::Clipboard::{set_text,get_text,has_text}. Emscripten-guarded, so it is inert
+# in any non-wasm compile.
+list(APPEND _PULP_WEBUI_PLATFORM_SOURCES
+    "${_PULP_WEBUI_ROOT}/core/platform/platform/web/clipboard_web.cpp")
 
 set(_PULP_WEBUI_ALL_SOURCES
     ${_PULP_WEBUI_RUNTIME_SOURCES}
