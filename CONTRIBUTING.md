@@ -30,12 +30,32 @@ If you're interested in the rationale behind these rules, see [Astral's open-sou
 ## How to submit a PR
 
 1. Fork the repo (or create a feature branch if you have write access).
-2. Make your changes on a branch named `feature/short-description` or `fix/short-description`.
-3. **Pre-PR validation** (optional but recommended): install the pinned source-checkout Shipyard tool with `./tools/install-shipyard.sh` (after the first install, `shipyard update` is the preferred in-tool upgrade path), then run `shipyard run` to validate on macOS + Linux + Windows without creating a PR.
-4. Open and ship the PR with `shipyard pr`. This is the canonical path because it runs Pulp's skill-sync and version-bump gates, pushes the branch, creates the PR, records Shipyard tracking state, validates, and merges on green.
-5. Avoid `gh pr create` for normal work. Use it only when the maintainer explicitly chooses an emergency/manual bypass; in that case, call out that the PR may not appear in Shipyard-managed state until it is reconciled or re-shipped through Shipyard. Contributors who do not want Shipyard in their local checkout can make that explicit with `pulp config set pr.workflow github` or `pulp config set pr.workflow manual`; `pulp status` reports the active choice.
-6. CI will run automatically on macOS, Linux, and Windows.
-7. The maintainer will merge the PR after CI passes. If anything is unclear, leave a comment.
+2. **Sync your fork before you branch.** Several of Pulp's pre-push gates
+   compare your branch against `origin/main`, so a stale fork makes them
+   compare against the wrong thing — and they report the difference as if
+   *you* caused it. A fork a few hundred commits behind will fail with
+   node-ABI "removals" and hotspot-size growth in files you never opened,
+   because from the gate's point of view your branch deleted everything
+   `main` has added since you forked. The failure names your branch, so it
+   reads like your bug. It isn't; it's the diff base.
+
+   ```bash
+   git remote add upstream https://github.com/danielraffel/pulp.git   # once
+   git fetch upstream
+   git checkout main && git merge --ff-only upstream/main
+   git push origin main                    # move your fork's main forward too
+   git checkout -b feature/my-change       # NOW branch
+   ```
+
+   If a gate blames your branch for something you did not touch, check how
+   far behind you are (`git rev-list --count HEAD..upstream/main`) before
+   debugging anything else.
+3. Make your changes on a branch named `feature/short-description` or `fix/short-description`.
+4. **Pre-PR validation** (optional but recommended): install the pinned source-checkout Shipyard tool with `./tools/install-shipyard.sh` (after the first install, `shipyard update` is the preferred in-tool upgrade path), then run `shipyard run` to validate on macOS + Linux + Windows without creating a PR.
+5. Open and ship the PR with `shipyard pr`. This is the canonical path because it runs Pulp's skill-sync and version-bump gates, pushes the branch, creates the PR, records Shipyard tracking state, validates, and merges on green.
+6. Avoid `gh pr create` for normal work. Use it only when the maintainer explicitly chooses an emergency/manual bypass; in that case, call out that the PR may not appear in Shipyard-managed state until it is reconciled or re-shipped through Shipyard. Contributors who do not want Shipyard in their local checkout can make that explicit with `pulp config set pr.workflow github` or `pulp config set pr.workflow manual`; `pulp status` reports the active choice.
+7. CI will run automatically on macOS, Linux, and Windows.
+8. The maintainer will merge the PR after CI passes. If anything is unclear, leave a comment.
 
 ## Developer Certificate of Origin
 
