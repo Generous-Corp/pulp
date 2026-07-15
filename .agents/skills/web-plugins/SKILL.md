@@ -472,3 +472,81 @@ tips (a gradient FP, a texture upload), so the symbolized top frames point AWAY 
 Count the repeating frame — it was 662× `View::paint_all` — to find the real cycle. The static
 generated grid never animates, so this stays hidden until a real animating editor mounts. **A
 new custom editor must be exercised by the browser fixture (it mounts and must not overflow).**
+
+## The full-canvas editor pattern (a plugin's REAL Skia UI on the web)
+
+Most web demos render the default parameter grid. A **full-canvas editor** instead paints
+the plugin's whole bespoke UI onto ONE Skia canvas that fills the panel edge to edge —
+the same native editor the DAW shows, running in the browser. `super-convolver-gpu` is
+the reference implementation; **copy it, do not reinvent it.** Where to look:
+
+- `examples/super-convolver/super_convolver_ui.hpp` — the editor itself (a `vw::View`
+  drawn with the canvas API). This compiles into BOTH the native plugin and the wasm UI
+  module — **one source, two builds.**
+- `examples/web-demos/super-convolver-ui/` — the web mount: `ui_entry.cpp` (the
+  `EMSCRIPTEN_KEEPALIVE` seam), `super_convolver_web_host.hpp` (a browser shim
+  implementing the editor's host interface), `pulp-ui.js` (`mountPulpUi`), `CMakeLists.txt`.
+- `tools/cmake/PulpWebUi.cmake` — builds the editor + Pulp's view/canvas/Skia stack to wasm.
+- The GPU page in `examples/web-demos/wclap-build/cloudflare/assemble-gallery.mjs`
+  (`customUi` + the CSS that widens `#panel.pulp` and pins the canvas height).
+- Docs: `docs/guides/web-plugins.md` ("Native Editors on the Web"), and the size/tier
+  design in `planning/2026-07-15-web-editor-architecture-and-size.md`.
+
+**The decoupling contract (what lets one editor serve native + web).** The editor talks
+ONLY to a small host interface (`SuperConvolverUiHost`: gpu_status / ir_path /
+load_ir_path / impulse_response_snapshot) + `StateStore` + a data bus — NEVER the DSP
+header. Native host = the processor; web host = the browser shim. A new plugin defines
+its own `<Plugin>UiHost` interface and two implementors.
+
+**Params cross the DSP, not the editor.** The editor reads its parameter list from the
+DSP descriptor (adapter → `pulp-ui.js` → `g_store`). So a param the editor draws must be
+DECLARED BY THE DSP — declare the SAME set the native build declares (the web build once
+dropped `Rooms` and the editor showed four sliders where native shows five). Rebuild BOTH
+the UI module (`build-webui`) AND the DSP wasm when params change; the UI module alone is
+not enough.
+
+**Full-width layout.** Strip the page chrome the editor already draws (engine dropdown,
+CPU/GPU blurbs, a separate load-file area) — it duplicates what the canvas paints. Widen
+`#panel.pulp` (`max-width: min(1200px,94vw)`) and give the canvas a FIXED height
+(`clamp(420px,60vh,680px)`), not an aspect ratio (aspect makes the box a function of width
+and collapses on a phone).
+
+### Responsive + iOS is NOT optional — the layout is DRAWN, so CSS won't save you
+
+A full-canvas editor lays itself out in code, so a phone-width bug (overlapping header,
+sheared slider labels) never surfaces in a unit test — only in a browser, at that width.
+Every full-canvas editor MUST handle these, all learned the hard way on SuperConvolver:
+
+- **Narrow breakpoint.** The UI `scale()` keys off HEIGHT, so a tall skinny phone canvas
+  has a LARGE scale and a SMALL width — a centered header (mode tabs) then collides with
+  the wordmark on the left and the status chip on the right, and a quarter-width slider
+  cell cannot fit "MIX" and "35 %" on one line. Add a `narrow_` mode (`W < ~680*scale`):
+  drop the tabs to their own row, give secondary chrome its own row, and STACK each slider
+  as label-over-value-over-track. Keep desktop untouched.
+- **The info/help overlay must reflow too** — a fixed two-column card overflows a phone;
+  give it a full-width, stacked, clipped variant.
+- **iOS file picker:** the page's `<input type=file>` must NOT be `display:none`/`hidden`
+  (iOS Safari drops `.click()` on it) — hide it visually instead. See its own landmine above.
+- **Page scroll over the canvas:** opt into `touch-action: pan-y` after mount so a vertical
+  drag scrolls the page while a horizontal drag/tap still works the controls. See its landmine.
+- **Live readouts:** reserve their height (two lines if they can wrap) and WRAP rather than
+  truncate, so flipping state never bumps the page; debounce fast-toggling values (~0.8s
+  hysteresis) so a single dropped poll doesn't strobe the text.
+
+### Verifying it: a browser pass at three sizes is PART OF THE JOB, not a favor to ask for
+
+Do NOT ship a full-canvas editor and let the user discover overlapping text. Before calling
+it done, run the bundled audit and LOOK at every size — this is the workflow, not an extra:
+
+```sh
+node examples/web-demos/tools/responsive-audit.mjs \
+  --url https://<preview>/<plugin>/ --out /tmp/audit
+# then READ /tmp/audit/{desktop,tablet,phone}-editor.png with your own eyes
+```
+
+It screenshots the page + editor at desktop (1440w), tablet (834w), and phone (390w),
+prints the editor's CSS size and computed `touch-action`, and lists what to check
+(header collisions, slider label/value overlap, the info card, even fill, and — on phone —
+the two-line readout, the file picker, and scroll). Drive real interactions with CDP
+`Input.dispatchTouchEvent` (a REAL touch), not synthetic `new TouchEvent` (which does not
+drive scrolling and gives a false negative). Fix what the screenshots show, redeploy, re-run.
