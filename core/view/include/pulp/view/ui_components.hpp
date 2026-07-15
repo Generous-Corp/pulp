@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/appearance_tracker.hpp>
+#include <pulp/view/slider_core.hpp>  // Notify, queue_async_notification
 #include <pulp/canvas/canvas.hpp>
 #include <functional>
 #include <string>
@@ -72,6 +73,12 @@ public:
 
     int selected() const { return selected_; }
     void set_selected(int index);
+    /// Notifying overload. `Notify::sync` matches `set_selected(index)` (fires
+    /// `on_change`); `Notify::none` matches `set_selected_silent(index)` (writes
+    /// silently — the right choice when syncing FROM the bound parameter);
+    /// `Notify::async` defers the callback to the next flush. Fires only on a
+    /// real change.
+    void set_selected(int index, Notify notify);
     void set_selected_silent(int index);
 
     const std::string& selected_text() const;
@@ -111,7 +118,7 @@ public:
     static void notify_global_click(View* target);
 
 private:
-    void set_selected_impl(int index, bool notify);
+    void set_selected_impl(int index, Notify notify);
     void open_dropdown();
     void close_dropdown();
     // Top of the dropdown menu in this combo's LOCAL coords. Below the field normally;
@@ -340,12 +347,16 @@ public:
     }
 
     void add_tab(std::string title, std::unique_ptr<View> content);
-    void set_active_tab(int index);
+    /// `notify` controls whether the switch reaches `on_tab_change`:
+    /// `Notify::sync` (default) fires it, `Notify::none` writes silently
+    /// (syncing FROM the bound state), `Notify::async` defers it to the next
+    /// flush. Fires only on a real change.
+    void set_active_tab(int index, Notify notify = Notify::sync);
     int active_tab() const { return active_; }
     int tab_count() const { return static_cast<int>(tabs_.size()); }
     std::string_view tab_title(int index) const;
     int find_tab(std::string_view title) const;
-    bool set_active_tab(std::string_view title);
+    bool set_active_tab(std::string_view title, Notify notify = Notify::sync);
 
     /// Hide the tab bar and use the panel purely as a navigable card stack (the active
     /// tab is shown; switch with set_active_tab()). Useful when an outer container should
@@ -411,6 +422,11 @@ public:
 
     int selected() const { return selected_; }
     void set_selected(int index);          ///< clamps + notifies on_change
+    /// Notifying overload. `Notify::sync` matches `set_selected(index)`;
+    /// `Notify::none` writes silently (syncing FROM the bound parameter);
+    /// `Notify::async` defers the callback to the next flush. Fires only on a
+    /// real change.
+    void set_selected(int index, Notify notify);
     void set_selected_silent(int index);   ///< clamps, no callback
 
     /// Called when the selected segment changes (user click or set_selected).
@@ -565,7 +581,11 @@ public:
     SelectionStyle selection_style() const { return selection_style_; }
 
     int selected() const { return selected_; }
-    void set_selected(int index);
+    /// `notify` controls whether the selection change reaches `on_select`:
+    /// `Notify::sync` (default) fires it, `Notify::none` writes silently
+    /// (syncing FROM the bound selection), `Notify::async` defers it to the next
+    /// flush. Fires only on a real change.
+    void set_selected(int index, Notify notify = Notify::sync);
 
     float row_height() const { return row_height_; }
     void set_row_height(float h) { row_height_ = h; }
