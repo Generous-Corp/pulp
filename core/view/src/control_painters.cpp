@@ -11,32 +11,54 @@ constexpr float kDegToRad = 3.14159265358979323846f / 180.0f;
 float clamp01(float v) { return std::clamp(v, 0.0f, 1.0f); }
 }  // namespace
 
+// An arc-gauge knob, derived from what an arc gauge IS rather than from any
+// framework's routine. The visual spec, in full:
+//
+//   * The dial is an arc of `sweep_deg` degrees on a circle of the given radius,
+//     opening from `start_angle_deg`. That arc is the TRACK — it shows the whole
+//     range the control can take, whether or not the value is near it.
+//   * The value is shown by FILLING the track from its start up to the point that
+//     corresponds to the normalized value. Position `p` in [0, 1] sits at the
+//     fraction `p` of the sweep, so `angle(p) = start + sweep * p`. The fill is
+//     the same arc, redrawn from the start to `angle(value)` in the fill color.
+//   * The exact value is marked by an INDICATOR from the center out to the rim at
+//     `angle(value)` — the one radius the eye can read an angle off directly.
+//
+// Everything below is a direct transcription of those three sentences. There is
+// no arbitrary step: the angle parameterization is the only linear one, the fill
+// is the track redrawn shorter, and the indicator points where the value is.
 void paint_mod_ring_knob(canvas::Canvas& canvas, const Rect& rect, float value,
                          const KnobStyle& style) {
     value = clamp01(value);
-    const Point c = rect.center();
+    const Point center = rect.center();
     const float radius = std::min(rect.width, rect.height) * style.radius_scale;
     if (radius <= 0.0f) return;
 
-    const float start = style.start_angle_deg * kDegToRad;
-    const float full_end = (style.start_angle_deg + style.sweep_deg) * kDegToRad;
-    const float active_end = (style.start_angle_deg + style.sweep_deg * value) * kDegToRad;
+    // angle(p): the point at fraction p of the sweep, in radians.
+    const auto angle_at = [&](float p) {
+        return (style.start_angle_deg + style.sweep_deg * p) * kDegToRad;
+    };
+    const float track_start = angle_at(0.0f);
+    const float track_end = angle_at(1.0f);
+    const float value_end = angle_at(value);
 
     canvas.set_line_width(style.ring_width);
-    // Full inactive track arc.
-    canvas.set_stroke_color(style.track);
-    canvas.stroke_arc(c.x, c.y, radius, start, full_end);
-    // Active value arc — emitted LAST so its sweep (active_end - start) is the
-    // value-dependent geometry a test reads off the final stroke_arc.
-    canvas.set_stroke_color(style.ring);
-    canvas.stroke_arc(c.x, c.y, radius, start, active_end);
 
-    // Pointer line from center out to the value angle.
-    const float ix = c.x + radius * std::cos(active_end);
-    const float iy = c.y + radius * std::sin(active_end);
+    // Track: the whole range.
+    canvas.set_stroke_color(style.track);
+    canvas.stroke_arc(center.x, center.y, radius, track_start, track_end);
+
+    // Fill: the track redrawn from its start up to the value. Emitted after the
+    // track so the value-dependent sweep is the last arc on the stream.
+    canvas.set_stroke_color(style.ring);
+    canvas.stroke_arc(center.x, center.y, radius, track_start, value_end);
+
+    // Indicator: a radius pointing at the value.
     canvas.set_stroke_color(style.indicator);
     canvas.set_line_width(style.indicator_width);
-    canvas.stroke_line(c.x, c.y, ix, iy);
+    canvas.stroke_line(center.x, center.y,
+                       center.x + radius * std::cos(value_end),
+                       center.y + radius * std::sin(value_end));
 }
 
 void paint_level_fader(canvas::Canvas& canvas, const Rect& rect, float value,
