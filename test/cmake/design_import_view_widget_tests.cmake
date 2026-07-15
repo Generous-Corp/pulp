@@ -101,6 +101,14 @@ pulp_add_test_suite(pulp-test-graph-editor-view LIBRARIES pulp::view)
 # Modal overlay + ContextMenu (view-drawn popup menu) tests
 pulp_add_test_suite(pulp-test-modal LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-context-menu LIBRARIES pulp::view)
+
+# Black-box characterization harness — recovers a stock widget's implicit
+# sizing law by headless measurement + a least-squares fit, and pins each
+# widget's current law (ContextMenu panel width, Label intrinsic width,
+# TextButton fixed height) as a regression guard.
+pulp_add_test_suite(pulp-test-widget-characterization
+    SOURCES test_widget_characterization.cpp support/widget_characterization.cpp
+    LIBRARIES pulp::view)
 # Design export tests
 add_executable(pulp-test-design-export test_design_export.cpp)
 target_link_libraries(pulp-test-design-export PRIVATE pulp::view Catch2::Catch2WithMain)
