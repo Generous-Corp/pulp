@@ -475,10 +475,25 @@ new custom editor must be exercised by the browser fixture (it mounts and must n
 
 ## The full-canvas editor pattern (a plugin's REAL Skia UI on the web)
 
-Most web demos render the default parameter grid. A **full-canvas editor** instead paints
-the plugin's whole bespoke UI onto ONE Skia canvas that fills the panel edge to edge —
-the same native editor the DAW shows, running in the browser. `super-convolver-gpu` is
-the reference implementation; **copy it, do not reinvent it.** Where to look:
+**Two modes, a per-plugin choice — full-canvas is ADDITIVE, not a replacement.** A demo
+page runs in one of two modes, selected by the `customUi` seam:
+
+- **Default (grid) mode** — the shared player renders the plugin's parameters as a knob
+  grid, generated declaratively. Zero bespoke UI code. This is the norm and the right
+  choice for a simple utility (a gain, a basic filter).
+- **Full-canvas mode** — the page supplies a `customUi` (a compiled Skia UI module) that
+  paints the plugin's whole bespoke editor onto ONE canvas filling the panel. Opt-in, more
+  work, native-quality. Pick it when the plugin's identity is a custom visual (an EQ's
+  frequency-response curve + draggable bands, a convolver's IR/field, a synth's scope).
+
+No `customUi` → grid; `customUi` present → full-canvas — **and the full-canvas mode FALLS
+BACK to the grid if the module fails to mount**, so adding it never risks the baseline.
+Everything below is the full-canvas path.
+
+A **full-canvas editor** paints the plugin's whole bespoke UI onto ONE Skia canvas that
+fills the panel edge to edge — the same native editor the DAW shows, running in the
+browser. `super-convolver-gpu` is the reference implementation; **copy it, do not reinvent
+it.** Where to look:
 
 - `examples/super-convolver/super_convolver_ui.hpp` — the editor itself (a `vw::View`
   drawn with the canvas API). This compiles into BOTH the native plugin and the wasm UI
