@@ -350,20 +350,20 @@ void write_le(std::vector<uint8_t>& blob, std::size_t offset, T value) {
 
 }  // namespace
 
-TEST_CASE("serialize_thumbnail round-trips through deserialize_thumbnail",
+TEST_CASE("serialize_overview round-trips through deserialize_overview",
           "[audio][thumbnail][persist]") {
     const auto data = make_sine(44100, 8820, 2, 220.0, 0.6f);
     WaveformOverview original = WaveformOverview::build_from_buffer(data, 256);
     REQUIRE_FALSE(original.empty());
 
-    const auto blob = serialize_thumbnail(original);
+    const auto blob = serialize_overview(original);
     REQUIRE(blob.size() > 26);  // header + payload
     REQUIRE(blob[0] == 'P');
-    REQUIRE(blob[1] == 'T');
-    REQUIRE(blob[2] == 'H');
-    REQUIRE(blob[3] == 'M');
+    REQUIRE(blob[1] == 'W');
+    REQUIRE(blob[2] == 'O');
+    REQUIRE(blob[3] == 'V');
 
-    auto restored = deserialize_thumbnail(blob.data(), blob.size());
+    auto restored = deserialize_overview(blob.data(), blob.size());
     REQUIRE(restored.has_value());
     REQUIRE_FALSE(restored->empty());
 
@@ -392,46 +392,46 @@ TEST_CASE("serialize_thumbnail round-trips through deserialize_thumbnail",
     }
 }
 
-TEST_CASE("deserialize_thumbnail rejects structurally empty cache blobs",
+TEST_CASE("deserialize_overview rejects structurally empty cache blobs",
           "[audio][thumbnail][persist]") {
     const auto data = make_sine(44100, 8820, 2, 220.0, 0.6f);
     const auto original = WaveformOverview::build_from_buffer(data, 256);
-    const auto blob = serialize_thumbnail(original);
+    const auto blob = serialize_overview(original);
 
     auto zero_channels = blob;
     write_le<uint32_t>(zero_channels, 6, 0);
-    REQUIRE_FALSE(deserialize_thumbnail(zero_channels.data(), zero_channels.size()).has_value());
+    REQUIRE_FALSE(deserialize_overview(zero_channels.data(), zero_channels.size()).has_value());
 
     auto zero_frames = blob;
     write_le<uint64_t>(zero_frames, 10, 0);
-    REQUIRE_FALSE(deserialize_thumbnail(zero_frames.data(), zero_frames.size()).has_value());
+    REQUIRE_FALSE(deserialize_overview(zero_frames.data(), zero_frames.size()).has_value());
 
     auto zero_sample_rate = blob;
     write_le<uint32_t>(zero_sample_rate, 18, 0);
-    REQUIRE_FALSE(deserialize_thumbnail(zero_sample_rate.data(),
+    REQUIRE_FALSE(deserialize_overview(zero_sample_rate.data(),
                                         zero_sample_rate.size()).has_value());
 
     auto zero_levels = blob;
     write_le<uint32_t>(zero_levels, 22, 0);
-    REQUIRE_FALSE(deserialize_thumbnail(zero_levels.data(), zero_levels.size()).has_value());
+    REQUIRE_FALSE(deserialize_overview(zero_levels.data(), zero_levels.size()).has_value());
 
     auto zero_samples_per_peak = blob;
     write_le<uint32_t>(zero_samples_per_peak, 26, 0);
-    REQUIRE_FALSE(deserialize_thumbnail(zero_samples_per_peak.data(),
+    REQUIRE_FALSE(deserialize_overview(zero_samples_per_peak.data(),
                                         zero_samples_per_peak.size()).has_value());
 }
 
-TEST_CASE("deserialize_thumbnail rejects bad magic / truncated blobs",
+TEST_CASE("deserialize_overview rejects bad magic / truncated blobs",
           "[audio][thumbnail][persist]") {
     std::vector<uint8_t> garbage{0xDE, 0xAD, 0xBE, 0xEF,
                                   0x01, 0x00, 0x00, 0x00};
-    REQUIRE_FALSE(deserialize_thumbnail(garbage.data(), garbage.size()).has_value());
-    REQUIRE_FALSE(deserialize_thumbnail(nullptr, 0).has_value());
+    REQUIRE_FALSE(deserialize_overview(garbage.data(), garbage.size()).has_value());
+    REQUIRE_FALSE(deserialize_overview(nullptr, 0).has_value());
 
     // Correct magic + bumped version → still rejected.
     std::vector<uint8_t> wrong_version{'P', 'T', 'H', 'M',
                                        0xFF, 0xFF};
-    REQUIRE_FALSE(deserialize_thumbnail(wrong_version.data(),
+    REQUIRE_FALSE(deserialize_overview(wrong_version.data(),
                                         wrong_version.size()).has_value());
 }
 
@@ -495,31 +495,31 @@ TEST_CASE("WaveformOverview::render_min_max guards empty and folded requests",
     REQUIRE(oversampled[38] <= oversampled[39]);
 }
 
-TEST_CASE("deserialize_thumbnail rejects malformed structural headers",
+TEST_CASE("deserialize_overview rejects malformed structural headers",
           "[audio][thumbnail][persist]") {
     const auto data = make_sine(44100, 1024, 1, 110.0);
     auto thumbnail = WaveformOverview::build_from_buffer(data, 64);
-    const auto valid = serialize_thumbnail(thumbnail);
-    REQUIRE(deserialize_thumbnail(valid.data(), valid.size()).has_value());
+    const auto valid = serialize_overview(thumbnail);
+    REQUIRE(deserialize_overview(valid.data(), valid.size()).has_value());
 
     auto too_many_channels = valid;
     write_le<uint32_t>(too_many_channels, 6, 65);
-    REQUIRE_FALSE(deserialize_thumbnail(too_many_channels.data(),
+    REQUIRE_FALSE(deserialize_overview(too_many_channels.data(),
                                         too_many_channels.size()).has_value());
 
     auto too_many_levels = valid;
     write_le<uint32_t>(too_many_levels, 22, 33);
-    REQUIRE_FALSE(deserialize_thumbnail(too_many_levels.data(),
+    REQUIRE_FALSE(deserialize_overview(too_many_levels.data(),
                                         too_many_levels.size()).has_value());
 
     auto truncated_payload = valid;
     truncated_payload.pop_back();
-    REQUIRE_FALSE(deserialize_thumbnail(truncated_payload.data(),
+    REQUIRE_FALSE(deserialize_overview(truncated_payload.data(),
                                         truncated_payload.size()).has_value());
 
     auto missing_level_header = valid;
     missing_level_header.resize(29);
-    REQUIRE_FALSE(deserialize_thumbnail(missing_level_header.data(),
+    REQUIRE_FALSE(deserialize_overview(missing_level_header.data(),
                                         missing_level_header.size()).has_value());
 }
 

@@ -54,7 +54,7 @@ bool read_le(const uint8_t* data, std::size_t size, std::size_t& off, T& out) {
 
 }  // namespace
 
-std::vector<uint8_t> serialize_thumbnail(const WaveformOverview& t) {
+std::vector<uint8_t> serialize_overview(const WaveformOverview& t) {
     const auto info = t.info();
     std::vector<uint8_t> out;
     // 4 (magic) + 2 (ver) + 4 + 8 + 4 + 4 + per-level overhead + peaks.
@@ -81,7 +81,7 @@ std::vector<uint8_t> serialize_thumbnail(const WaveformOverview& t) {
     return out;
 }
 
-std::optional<WaveformOverview> deserialize_thumbnail(const uint8_t* data,
+std::optional<WaveformOverview> deserialize_overview(const uint8_t* data,
                                                     std::size_t size) {
     if (data == nullptr || size < 26) return std::nullopt;
     if (std::memcmp(data, kOverviewMagic, 4) != 0) return std::nullopt;

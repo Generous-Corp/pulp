@@ -266,7 +266,7 @@ std::shared_ptr<const WaveformOverview> WaveformOverviewCache::load_from_disk(
     std::vector<uint8_t> buf(static_cast<std::size_t>(size));
     in.read(reinterpret_cast<char*>(buf.data()), size);
     if (!in) return nullptr;
-    auto thumb = deserialize_thumbnail(buf.data(), buf.size());
+    auto thumb = deserialize_overview(buf.data(), buf.size());
     if (!thumb) return nullptr;
     if (thumb->empty()) return nullptr;
     if (thumb->level(0).samples_per_peak != samples_per_peak) return nullptr;
@@ -278,7 +278,7 @@ bool WaveformOverviewCache::write_to_disk(const std::string& path,
                                         const WaveformOverview& thumbnail) const {
     const std::string disk_path = disk_path_for(path, samples_per_peak);
     if (disk_path.empty()) return false;
-    const auto blob = serialize_thumbnail(thumbnail);
+    const auto blob = serialize_overview(thumbnail);
     // Write to a sibling tmp file and rename so a crash mid-write doesn't
     // leave a half-formed cache entry behind.
     const std::string tmp_path = disk_path + ".tmp";

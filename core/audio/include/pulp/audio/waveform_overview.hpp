@@ -138,10 +138,10 @@ public:
     bool empty() const noexcept { return levels_.empty(); }
 
     // Internal: rebuild a thumbnail from a serialized blob. Public so the
-    // free-function `deserialize_thumbnail()` (defined in the .cpp) can
+    // free-function `deserialize_overview()` (defined in the .cpp) can
     // construct one without becoming a friend. Returns nullopt on malformed
     // input. Not part of the supported API surface — call
-    // `deserialize_thumbnail()` instead.
+    // `deserialize_overview()` instead.
     static std::optional<WaveformOverview> from_serialized_levels(
         uint32_t num_channels,
         uint64_t num_source_frames,
@@ -163,10 +163,10 @@ private:
 // num_source_frames(8) sample_rate(4) num_levels(4) [per-level:
 // samples_per_peak(4) peaks_per_channel(4) channels * peaks * AudioPeak]`
 // — little-endian. The version field is bumped only when the layout
-// changes; `deserialize_thumbnail()` rejects mismatched versions and
+// changes; `deserialize_overview()` rejects mismatched versions and
 // returns nullopt.
-std::vector<uint8_t> serialize_thumbnail(const WaveformOverview& t);
-std::optional<WaveformOverview> deserialize_thumbnail(const uint8_t* data,
+std::vector<uint8_t> serialize_overview(const WaveformOverview& t);
+std::optional<WaveformOverview> deserialize_overview(const uint8_t* data,
                                                     std::size_t size);
 
 // ─────────────────────────────────────────────────────────────────────────
