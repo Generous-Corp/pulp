@@ -164,24 +164,14 @@ extern "C" int pulp_gpu_xfer(const float* in_planar, float* out_planar, int fram
 
 namespace pulp::view { class View; }
 
+// The parameter ids, the spectrum bus and GpuStatus, plus the editor's host interface, now
+// live in super_convolver_ui_host.hpp — so the EDITOR can be built without this header (its
+// DSP), which is what lets the same editor run natively and on the web. This processor both
+// owns the DSP and IS a SuperConvolverUiHost (its four host calls are exactly these members),
+// so implementing the interface costs nothing and keeps one editor for both worlds.
+#include "super_convolver_ui_host.hpp"
+
 namespace pulp::examples {
-
-enum SuperConvolverParams : state::ParamID {
-    kMix     = 1,  // dry/wet, %
-    kSize    = 2,  // IR length, seconds
-    kGain    = 3,  // output gain, dB
-    kBypass  = 4,
-    kEngine  = 5,  // 0 = CPU (default), 1 = GPU
-    kRooms   = 6,  // GPU multi-room reverb: # of distinct IRs in one GPU batch
-    kFlow    = 7,  // 0 = static field; >0 = per-block moving pans (living field)
-    kGpuOnly = 8,  // web GPU engine: 0 = CPU safety net (default), 1 = no net
-};
-
-// Live wet-output magnitude spectrum (dB), published lock-free from the audio
-// thread to the GPU UI's frequency display. 256 log-ready bins.
-inline constexpr int kSpectrumBins = 256;
-using SpectrumFrame = std::array<float, kSpectrumBins>;
-using SpectrumBus = pulp::runtime::TripleBuffer<SpectrumFrame>;
 
 /// Normalize `ir` so its maximum magnitude frequency response (max_f |H(f)|) is
 /// `target` — i.e. 0 dB of steady-state gain at `target == 1`. This BOUNDS the
@@ -328,7 +318,7 @@ inline std::vector<float> window_ir_to_length(const std::vector<float>& ir,
     return out;
 }
 
-class SuperConvolverProcessor : public format::Processor {
+class SuperConvolverProcessor : public format::Processor, public SuperConvolverUiHost {
 public:
     // Fixed convolver block. Independent of the host's block size; the
     // re-blocking FIFO chunks the host stream into this. Power of two for the
@@ -561,18 +551,9 @@ public:
     /// measured average cost as a percentage of that budget — so 100 − rt_percent
     /// is the headroom left (roughly how much more work, e.g. more rooms, the GPU
     /// could still take in real time). UI/main-thread only.
-    struct GpuStatus {
-        bool active = false;
-        std::string backend;
-        int rooms = 0;
-        bool multi = false;
-        std::uint64_t blocks = 0;
-        std::uint64_t misses = 0;
-        double avg_us = 0.0;      // EWMA wall-clock per block (round-trip included)
-        double budget_us = 0.0;   // real-time budget for one GPU block here
-        double rt_percent = 0.0;  // avg_us / budget_us * 100 (lower = more headroom)
-    };
-    GpuStatus gpu_status() const {
+    // GpuStatus is declared in super_convolver_ui_host.hpp (same namespace) so the editor's
+    // host interface can name it without pulling in the DSP.
+    GpuStatus gpu_status() const override {
         std::lock_guard<std::mutex> lock(stack_mutex_);
         GpuStatus g;
         g.active = gpu_engine_active();
@@ -613,6 +594,14 @@ public:
 
     bool gpu_engine_active() const { return false; }
 
+#endif
+
+#if defined(PULP_WASM)
+    // gpu_status() satisfies SuperConvolverUiHost in the wasm build. The browser GPU engine's
+    // live counters live in the DedicatedWorker and the SharedArrayBuffer, NOT in this
+    // processor — so it answers honestly with an inactive status rather than inventing
+    // numbers. The PAGE reads the real GPU status out of the SAB and drives the editor.
+    GpuStatus gpu_status() const override { return {}; }
 #endif
 
     /// Disable the background rebuild worker. A host with no thread facility (a
@@ -935,7 +924,7 @@ public:
 
     /// A snapshot of the current impulse response for the GPU UI waveform /
     /// spectrogram. UI-thread only — never call from the audio thread.
-    std::vector<float> impulse_response_snapshot() const {
+    std::vector<float> impulse_response_snapshot() const override {
         std::lock_guard<std::mutex> lock(ir_display_mutex_);
         return ir_display_;
     }
@@ -971,7 +960,7 @@ public:
     /// or was missing and has since appeared). Always bumps the generation so
     /// the IR rebuilds. Main/UI thread only. Use this for explicit user
     /// "Load IR" actions; set_ir_path() (dedup) is for state restore.
-    void load_ir_path(std::string path) {
+    void load_ir_path(std::string path) override {
         {
             std::lock_guard<std::mutex> lock(ir_path_mutex_);
             active_ir_path_ = std::move(path);
@@ -1070,7 +1059,7 @@ public:
 
     /// The current IR source path ("" when using PCM or a built-in IR).
     /// UI/main-thread only (takes a mutex).
-    std::string ir_path() const {
+    std::string ir_path() const override {
         std::lock_guard<std::mutex> lock(ir_path_mutex_);
         return active_ir_path_;
     }
