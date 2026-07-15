@@ -8,6 +8,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06740"></a>
+## [0.674.0] - 2026-07-15
+
+- feat(audio): add isolated third-party plugin interrogation ([#6138](https://github.com/danielraffel/pulp/pull/6138))
+- ci: restore docs and Codecov gates ([#6143](https://github.com/danielraffel/pulp/pull/6143))
+- ci: take example format-validators off the required gate; add example-validation lane + test-lanes guide ([#6135](https://github.com/danielraffel/pulp/pull/6135))
+- test(coreaudio): gate input-only device opens behind an opt-in env ([#6124](https://github.com/danielraffel/pulp/pull/6124))
+- test(canvas): cover Path, AffineTransform, and view Rect geometry ([#6141](https://github.com/danielraffel/pulp/pull/6141))
+
 <a id="v06730"></a>
 ## [0.673.0] - 2026-07-15
 
@@ -6426,6 +6435,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.674.0]: https://github.com/danielraffel/pulp/releases/tag/v0.674.0
 [0.673.0]: https://github.com/danielraffel/pulp/releases/tag/v0.673.0
 [0.672.0]: https://github.com/danielraffel/pulp/releases/tag/v0.672.0
 [0.671.0]: https://github.com/danielraffel/pulp/releases/tag/v0.671.0
