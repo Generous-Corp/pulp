@@ -165,6 +165,7 @@ lowercase names for serialization and the JS bridge.
 |--------|---------|------------------|--------|
 | `MidiKeyboard` | Piano keyboard | range, note on/off, orientation, names, highlight, note callbacks | `midi_keyboard.hpp` |
 | `WaveformView` | Waveform display | sample data or `WaveformOverview`, trigger mode, oscillator preview shape, multi-channel | `widgets.hpp` |
+| `WaveformOverviewView` | Headless waveform overview | min/max peak columns, source-frame viewport for scrub/zoom, configurable line and background colors | `waveform_overview_view.hpp` |
 | `WaveformEditor` | Interactive waveform | selection, zoom/scroll, playhead, named regions, selection callback | `waveform_editor.hpp` |
 | `SpectrumView` | FFT magnitude spectrum | dB magnitudes, bars/line/filled, dB range | `widgets.hpp` |
 | `SpectrogramView` | Scrolling STFT spectrogram | push frames, history/freq config, colormap, dB range | `widgets.hpp` |
