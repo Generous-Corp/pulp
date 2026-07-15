@@ -427,6 +427,7 @@ component_management:
         - "!core/platform/platform/mac/**"
         - "!core/platform/platform/linux/**"
         - "!core/platform/platform/win/**"
+        - "!core/platform/platform/web/**"
         - "!core/platform/src/android/**"
         - "!core/platform/include/pulp/platform/android/**"
         - "!core/platform/include/pulp/platform/win/**"
