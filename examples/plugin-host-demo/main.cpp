@@ -521,14 +521,26 @@ int main(int argc, char** argv) {
     pulp::midi::MidiBuffer mi, mo;
 
     pulp::host::ParameterEventQueue pe;
-    slot->process(out, in, mi, mo, pe, kBlockSize);
-
+    const int blocks_to_process = slot->info().is_instrument ? 32 : 1;
     float peak = 0.f;
-    for (int i = 0; i < kBlockSize; ++i) {
-        peak = std::max(peak, std::max(std::abs(out_l[i]), std::abs(out_r[i])));
+    for (int block = 0; block < blocks_to_process; ++block) {
+        std::fill(out_l.begin(), out_l.end(), 0.f);
+        std::fill(out_r.begin(), out_r.end(), 0.f);
+        mi.clear();
+        mo.clear();
+        if (slot->info().is_instrument && block == 0) {
+            mi.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
+        }
+
+        slot->process(out, in, mi, mo, pe, kBlockSize);
+        for (int i = 0; i < kBlockSize; ++i) {
+            peak = std::max(peak,
+                std::max(std::abs(out_l[i]), std::abs(out_r[i])));
+        }
     }
-    std::printf("Processed %d samples @ %.0f Hz. Output peak: %.4f\n",
-                kBlockSize, kSampleRate, peak);
+    std::printf("Processed %d samples @ %.0f Hz%s. Output peak: %.4f\n",
+                blocks_to_process * kBlockSize, kSampleRate,
+                slot->info().is_instrument ? " with MIDI note C4" : "", peak);
 
     slot->release();
     return 0;
