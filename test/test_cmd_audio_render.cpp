@@ -6,6 +6,7 @@
 
 #include "../tools/cli/cmd_audio_render.hpp"
 #include "../tools/cli/cmd_audio_render_step.hpp"
+#include "../tools/cli/cmd_audio_plugin_inspect.hpp"
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
@@ -284,6 +285,14 @@ TEST_CASE("audio render parser rejects frame-count overflow",
          "--tail-ms", "18446744073709551615"});
     REQUIRE_FALSE(result.ok);
     REQUIRE(result.error.find("too long") != std::string::npos);
+}
+
+TEST_CASE("plugin inspect timeout scales with warm-up unless explicitly pinned",
+          "[audio-render][plugin-lab]") {
+    REQUIRE(plugin_inspect_timeout_ms(std::nullopt, 0) == 30'000);
+    REQUIRE(plugin_inspect_timeout_ms(std::nullopt, 1'000) == 30'000);
+    REQUIRE(plugin_inspect_timeout_ms(std::nullopt, 30'000) == 310'000);
+    REQUIRE(plugin_inspect_timeout_ms(2'500, 30'000) == 2'500);
 }
 
 TEST_CASE("audio render parser: required + mutually-exclusive flags", "[audio-render]") {

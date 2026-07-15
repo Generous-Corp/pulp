@@ -20,6 +20,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <locale>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -51,7 +52,8 @@ void usage() {
         << "  --block <frames>                  Prepare block size (default: 512)\n"
         << "  --warmup-ms <n>                   Initialization/event pre-roll\n"
         << "                                      (default: 1000 for AU, 0 otherwise)\n"
-        << "  --timeout-ms <n>                  Worker timeout (default: 30000)\n\n"
+        << "  --timeout-ms <n>                  Worker timeout (default: at least 30000;\n"
+        << "                                      scales with warm-up)\n\n"
         << "Output is always pulp.audio.plugin-inspect.v1 JSON.\n";
 }
 
@@ -160,6 +162,7 @@ std::string build_result_json(const pulp::host::PluginSlot& slot) {
     const auto& info = slot.info();
     const auto params = slot.parameters();
     std::ostringstream out;
+    out.imbue(std::locale::classic());
     const auto latency = slot.latency_query();
     out << std::setprecision(9)
         << "{\"schema\":\"pulp.audio.plugin-inspect.v1\",\"plugin\":{"
@@ -247,7 +250,7 @@ int worker_main(const Request& request, PluginFormat format) {
     return 0;
 }
 
-int coordinator_main(const Request& request) {
+int coordinator_main(const Request& request, PluginFormat format) {
     auto temp = pulp::cli::plugin_lab::PrivateTempDirectory::create("pulp-plugin-inspect");
     if (!temp) { std::fprintf(stderr, "plugin-inspect: cannot create temporary directory\n"); return 1; }
     const auto result_path = temp->path() / "result.json";
@@ -260,8 +263,13 @@ int coordinator_main(const Request& request) {
     if (request.warmup_ms) {
         child.push_back("--warmup-ms"); child.push_back(std::to_string(*request.warmup_ms));
     }
+    const auto warmup_ms = request.warmup_ms.value_or(
+        pulp::cli::plugin_lab::default_warmup_ms(format));
     const auto timeout_ms = static_cast<int>(std::min<std::uint32_t>(
-        request.timeout_ms == 0 ? 30000u : request.timeout_ms,
+        plugin_inspect_timeout_ms(
+            request.timeout_ms == 0 ? std::nullopt
+                                    : std::optional<std::uint32_t>{request.timeout_ms},
+            warmup_ms),
         static_cast<std::uint32_t>(std::numeric_limits<int>::max())));
     const auto result = pulp::cli::plugin_lab::run_disposable_worker(child, timeout_ms);
     if (!result.stderr_output.empty()) std::cerr << result.stderr_output;
@@ -295,7 +303,7 @@ int run_plugin_inspect(const std::vector<std::string>& args, bool worker) {
                      request.format.c_str());
         return 2;
     }
-    return worker ? worker_main(request, *format) : coordinator_main(request);
+    return worker ? worker_main(request, *format) : coordinator_main(request, *format);
 }
 
 int cmd_audio_plugin_inspect(const std::vector<std::string>& args) {

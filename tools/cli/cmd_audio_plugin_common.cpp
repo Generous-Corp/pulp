@@ -104,7 +104,12 @@ platform::ProcessResult run_disposable_worker(const std::vector<std::string>& ar
     options.timeout_ms = timeout_ms;
     options.max_output_bytes = 4u << 20;
     const auto self = current_executable_path();
-    if (self.empty()) return {};
+    if (self.empty()) {
+        platform::ProcessResult failed;
+        failed.exit_code = -1;
+        failed.stderr_output = "cannot resolve the current executable\n";
+        return failed;
+    }
     return platform::ChildProcess::run(self.string(), args, options);
 }
 

@@ -320,11 +320,14 @@ static int cmd_audio_render_impl(const std::vector<std::string>& args, bool work
                                           req.out_channels, req.block);
 
     const auto parameter_info = slot->parameters();
-    for (const auto& requested : req.initial_params) {
+    const auto valid_writable_parameter = [&](std::uint32_t id, float value) {
         const auto it = std::find_if(parameter_info.begin(), parameter_info.end(),
-            [&](const host::HostParamInfo& p) { return p.id == requested.id; });
-        if (it == parameter_info.end() || it->flags.read_only ||
-            requested.value < it->min_value || requested.value > it->max_value) {
+            [&](const host::HostParamInfo& p) { return p.id == id; });
+        return it != parameter_info.end() && !it->flags.read_only &&
+               value >= it->min_value && value <= it->max_value;
+    };
+    for (const auto& requested : req.initial_params) {
+        if (!valid_writable_parameter(requested.id, requested.value)) {
             std::fprintf(stderr,
                          "pulp audio render: invalid --initial-param %u=%g (unknown, "
                          "read-only, or outside the plain range)\n",
@@ -352,6 +355,14 @@ static int cmd_audio_render_impl(const std::vector<std::string>& args, bool work
     std::vector<audio_render::TimedParam> params;
     params.reserve(req.params.size());
     for (const auto& p : req.params) {
+        if (!valid_writable_parameter(p.id, p.value)) {
+            std::fprintf(stderr,
+                         "pulp audio render: invalid --param %u=%g (unknown, read-only, "
+                         "or outside the plain range)\n",
+                         p.id, p.value);
+            slot->release();
+            return 2;
+        }
         state::ParameterEvent e;
         e.param_id = p.id;
         e.value = p.value;  // PLAIN domain
