@@ -138,6 +138,9 @@ pulp_add_test_suite(pulp-test-vector-scene LIBRARIES pulp::canvas)
 # Effects tests
 pulp_add_test_suite(pulp-test-effects LIBRARIES pulp::canvas)
 
+# Canvas image placement: affine transform, preserve-aspect fit, tiled fill.
+pulp_add_test_suite(pulp-test-canvas-image-fit LIBRARIES pulp::canvas)
+
 # Signal/DSP tests
 pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-oversampling-quality LIBRARIES pulp::signal)
@@ -362,6 +365,10 @@ pulp_add_test_suite(pulp-test-sample-resource
 # WaveformOverview + WaveformOverviewCache (item 6.12).
 # Links pulp::view so the WaveformView integration smoke compiles.
 pulp_add_test_suite(pulp-test-waveform-overview LIBRARIES pulp::audio pulp::view)
+
+# WaveformOverviewView: Canvas (non-GPU) min/max-column rendering over a
+# caller-set viewport, asserted headlessly through RecordingCanvas.
+pulp_add_test_suite(pulp-test-waveform-overview-view LIBRARIES pulp::audio pulp::view)
 
 # Memory-mapped reader: true ranged (seek-based) decode, no whole-file decode.
 pulp_add_test_suite(pulp-test-mmap-reader-ranged LIBRARIES pulp::audio)

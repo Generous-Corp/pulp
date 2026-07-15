@@ -1432,6 +1432,138 @@ public:
         return false; // shader not rendered
     }
 
+    // ── Image transforms, fitting, and tiling ───────────────────────────
+    //
+    // These extend the opaque-handle image-draw path (`draw_image`) with the
+    // rest of the general 2D image-placement vocabulary: an arbitrary affine
+    // placement, preserve-aspect fitting into a destination box, and tiled
+    // fill of a region. Every method here has a neutral default expressed in
+    // primitives every backend already implements (save / restore / clip_rect
+    // / concat_transform / draw_image), so a backend that overrides none of
+    // them still paints correctly. Pixel backends may override any of them
+    // with a single native call (e.g. a shader-backed tile) for efficiency.
+
+    /// Preserve-aspect fit modes for `fit_image_rect` / `draw_image_fitted`:
+    ///   fill       — stretch to the destination box, ignoring aspect ratio.
+    ///   contain    — scale (preserving aspect) to the largest size that fits
+    ///                fully inside the box; may leave margins.
+    ///   cover      — scale (preserving aspect) to the smallest size that fully
+    ///                covers the box; may crop (clipped to the box).
+    ///   none       — natural pixel size, no scaling; positioned by alignment.
+    ///   scale_down — like `none` when the image already fits, otherwise like
+    ///                `contain` (never scales up).
+    enum class ImageFit { fill, contain, cover, none, scale_down };
+
+    /// Placement rectangle produced by `fit_image_rect`.
+    struct FitResult { float x = 0, y = 0, w = 0, h = 0; };
+
+    /// Pure geometry: place a source image of intrinsic size (`iw` x `ih`) into
+    /// the destination box (`dx`, `dy`, `dw`, `dh`) per `fit`. Alignment
+    /// `align_x` / `align_y` are fractions in [0, 1]: 0 = left / top,
+    /// 0.5 = center, 1 = right / bottom, positioning the scaled image inside
+    /// (or, for `cover`, over) the box. Side-effect free, so it is unit-testable
+    /// on its own without a backend.
+    static FitResult fit_image_rect(float iw, float ih,
+                                    float dx, float dy, float dw, float dh,
+                                    ImageFit fit,
+                                    float align_x = 0.5f,
+                                    float align_y = 0.5f) {
+        FitResult r{dx, dy, dw, dh};
+        if (iw <= 0.0f || ih <= 0.0f || dw <= 0.0f || dh <= 0.0f) return r;
+        float scale = 1.0f;
+        switch (fit) {
+            case ImageFit::fill:       return {dx, dy, dw, dh};
+            case ImageFit::contain:    scale = std::min(dw / iw, dh / ih); break;
+            case ImageFit::cover:      scale = std::max(dw / iw, dh / ih); break;
+            case ImageFit::none:       scale = 1.0f; break;
+            case ImageFit::scale_down: scale = std::min(1.0f, std::min(dw / iw, dh / ih)); break;
+        }
+        const float w = iw * scale;
+        const float h = ih * scale;
+        return {dx + (dw - w) * align_x, dy + (dh - h) * align_y, w, h};
+    }
+
+    /// Draw an opaque image handle (see `draw_image`) under an arbitrary affine
+    /// transform. The image's natural box `[0, 0, w, h]` is painted through
+    /// `t`, composed onto the current transform. Default composes
+    /// `concat_transform` + `draw_image` inside a save / restore pair so the
+    /// caller's transform state is preserved.
+    virtual void draw_image_transformed(void* native_handle, float w, float h,
+                                        const AffineTransform& t) {
+        save();
+        concat_transform(t.a, t.b, t.c, t.d, t.e, t.f);
+        draw_image(native_handle, 0.0f, 0.0f, w, h);
+        restore();
+    }
+
+    /// Draw an opaque image handle fitted into a destination box with a
+    /// preserve-aspect `fit` mode and alignment. `iw` / `ih` are the image's
+    /// intrinsic pixel dimensions (the handle is opaque, so the caller supplies
+    /// them). The default clips to the destination box — so `cover` cannot
+    /// paint outside it — and draws the fitted rectangle via `draw_image`.
+    virtual void draw_image_fitted(void* native_handle, float iw, float ih,
+                                   float dx, float dy, float dw, float dh,
+                                   ImageFit fit,
+                                   float align_x = 0.5f,
+                                   float align_y = 0.5f) {
+        const FitResult r = fit_image_rect(iw, ih, dx, dy, dw, dh, fit, align_x, align_y);
+        save();
+        clip_rect(dx, dy, dw, dh);
+        draw_image(native_handle, r.x, r.y, r.w, r.h);
+        restore();
+    }
+
+    /// Draw a file-path image fitted into a destination box. Consults
+    /// `measure_image_from_file` for the intrinsic size; if the backend cannot
+    /// measure it, falls back to stretching the image to the box (the plain
+    /// `draw_image_from_file` behavior). Returns whatever the underlying draw
+    /// returns (false when the backend cannot draw the image).
+    virtual bool draw_image_file_fitted(const std::string& path,
+                                        float dx, float dy, float dw, float dh,
+                                        ImageFit fit,
+                                        float align_x = 0.5f,
+                                        float align_y = 0.5f) {
+        float iw = 0.0f, ih = 0.0f;
+        if (!measure_image_from_file(path, iw, ih) || iw <= 0.0f || ih <= 0.0f) {
+            return draw_image_from_file(path, dx, dy, dw, dh);
+        }
+        const FitResult r = fit_image_rect(iw, ih, dx, dy, dw, dh, fit, align_x, align_y);
+        save();
+        clip_rect(dx, dy, dw, dh);
+        const bool ok = draw_image_from_file(path, r.x, r.y, r.w, r.h);
+        restore();
+        return ok;
+    }
+
+    /// Fill the destination box (`dx`, `dy`, `dw`, `dh`) by tiling an opaque
+    /// image handle at cells of size (`tile_w` x `tile_h`). `offset_x` /
+    /// `offset_y` shift the tile origin (for scrolling patterns). The default
+    /// clips to the box and lays whole tiles via repeated `draw_image`; the
+    /// trailing row / column overshoot the box but are clipped away. Pixel
+    /// backends may override with a single tiled-shader fill; `set_fill_pattern`
+    /// is the sticky shader-based alternative when a fill PATH (rather than a
+    /// direct box) is what needs the tiling.
+    virtual void draw_image_tiled(void* native_handle,
+                                  float tile_w, float tile_h,
+                                  float dx, float dy, float dw, float dh,
+                                  float offset_x = 0.0f, float offset_y = 0.0f) {
+        if (tile_w <= 0.0f || tile_h <= 0.0f || dw <= 0.0f || dh <= 0.0f) return;
+        save();
+        clip_rect(dx, dy, dw, dh);
+        // Start at or just before the box's leading edge so the offset never
+        // leaves an uncovered gap along the top / left.
+        float start_x = dx - std::fmod(offset_x, tile_w);
+        if (start_x > dx) start_x -= tile_w;
+        float start_y = dy - std::fmod(offset_y, tile_h);
+        if (start_y > dy) start_y -= tile_h;
+        for (float ty = start_y; ty < dy + dh; ty += tile_h) {
+            for (float tx = start_x; tx < dx + dw; tx += tile_w) {
+                draw_image(native_handle, tx, ty, tile_w, tile_h);
+            }
+        }
+        restore();
+    }
+
 protected:
     float font_size_ = 14.0f;  ///< Current font size (set by set_font)
 };
@@ -1656,6 +1788,12 @@ public:
     // on them via DrawCommand::Type::set_line_dash / draw_image /
     // write_pixels. Source path is stored in DrawCommand::text.
     void set_line_dash(const float* intervals, int count, float phase) override;
+    // Capture the opaque-handle image draw so the image transform / fit / tile
+    // helpers are assertable headlessly. Records a `draw_image` command with
+    // the destination rect in f[0..3] and an EMPTY `text` (file / data draws
+    // put the source in `text`, so empty text distinguishes a handle draw).
+    void draw_image(void* native_handle,
+                    float x, float y, float w, float h) override;
     bool draw_image_from_data(const uint8_t* data, size_t size,
                               float x, float y, float w, float h) override;
     bool draw_image_from_file(const std::string& path,
