@@ -115,7 +115,12 @@ if(TARGET pulp::gpu-audio AND TARGET pulp::render)
                 COMMAND ${PLUGINVAL} --validate ${CMAKE_BINARY_DIR}/VST3/SuperConvolver.vst3 --strictness-level 5 --timeout-ms 10000)
             set_tests_properties(pluginval-SuperConvolver-VST3 PROPERTIES
                 LABELS "validation;vst3"
-                TIMEOUT 30
+                # Full strictness-5 pluginval of this convolution plugin legitimately
+                # takes ~25-30s, so a 30s CTest wall-clock left no margin and made the
+                # test flake at the ceiling under any load. pluginval's own
+                # --timeout-ms bounds per-operation responsiveness (a real hang is
+                # still caught); this ceiling only guards total wall-clock.
+                TIMEOUT 120
                 ENVIRONMENT "PULP_DISABLE_PLUGIN_EDITOR=1;PULP_HEADLESS=1;PULP_TEST_MODE=1")
         endif()
     endif()
