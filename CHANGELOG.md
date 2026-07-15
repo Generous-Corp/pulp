@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06710"></a>
+## [0.671.0] - 2026-07-15
+
+- feat(import): add `pulp import install <url>` / `uninstall <id>` ([#6129](https://github.com/danielraffel/pulp/pull/6129))
+- fix/fastmath tanh provenance ([#6136](https://github.com/danielraffel/pulp/pull/6136))
+- fix/main test baseline ([#6137](https://github.com/danielraffel/pulp/pull/6137))
+
 <a id="v06701"></a>
 ## [0.670.1] - 2026-07-15
 
@@ -6409,6 +6416,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.671.0]: https://github.com/danielraffel/pulp/releases/tag/v0.671.0
 [0.670.1]: https://github.com/danielraffel/pulp/releases/tag/v0.670.1
 [0.670.0]: https://github.com/danielraffel/pulp/releases/tag/v0.670.0
 [0.669.1]: https://github.com/danielraffel/pulp/releases/tag/v0.669.1
