@@ -40,7 +40,7 @@ const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
 //
 // So decode the pixels and measure the band where the controls live. A card of a running
 // plugin is BUSY there — knobs, values, a scope. A card of an empty or still-loading panel is
-// the background colour and almost nothing else.
+// the background color and almost nothing else.
 //
 // MEASURED, which is why the threshold is where it is: the live loading-screen card scored
 // 0.60% bright pixels; every real plugin card scored 4.2–7.0%. 2% sits in the gap with room on
