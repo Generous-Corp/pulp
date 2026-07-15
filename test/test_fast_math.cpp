@@ -7,6 +7,19 @@ using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
 
+namespace {
+
+float lambert_tanh_through_13(float x) {
+    constexpr float odd_denominators[] = {11.0f, 9.0f, 7.0f, 5.0f, 3.0f};
+    const float x2 = x * x;
+    float fraction = 13.0f;
+    for (float denominator : odd_denominators)
+        fraction = denominator + x2 / fraction;
+    return x / (1.0f + x2 / fraction);
+}
+
+} // namespace
+
 TEST_CASE("FastMath tanh approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::tanh(0.0f), WithinAbs(0.0, 0.001));
     REQUIRE_THAT(FastMath::tanh(1.0f), WithinAbs(std::tanh(1.0f), 0.001));
@@ -16,6 +29,13 @@ TEST_CASE("FastMath tanh approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::tanh(4.0f), WithinAbs(std::tanh(4.0f), 0.001));
     REQUIRE_THAT(FastMath::tanh(-5.0f), WithinAbs(-1.0, 0.001));
     REQUIRE_THAT(FastMath::tanh(5.0f), WithinAbs(1.0, 0.001));
+}
+
+TEST_CASE("FastMath tanh matches the reduced Lambert continued fraction", "[signal][fast_math]") {
+    constexpr float values[] = {-4.0f, -3.0f, -1.0f, -0.25f, 0.0f, 0.25f, 1.0f, 3.0f, 4.0f};
+    for (float value : values) {
+        REQUIRE_THAT(FastMath::tanh(value), WithinAbs(lambert_tanh_through_13(value), 1e-6f));
+    }
 }
 
 TEST_CASE("FastMath tanh clamps exactly beyond approximation range",
