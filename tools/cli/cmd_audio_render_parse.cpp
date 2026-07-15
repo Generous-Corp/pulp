@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -72,6 +73,15 @@ bool parse_param(std::string_view spec, ParseAudioRenderResult& out) {
     const auto value = parse_double(rhs);
     if (!value) return false;
     out.params.push_back({*id, static_cast<float>(*value), frame});
+    return true;
+}
+
+bool parse_initial_param(std::string_view spec, ParseAudioRenderResult& out) {
+    ParseAudioRenderResult parsed;
+    if (!parse_param(spec, parsed) || parsed.params.size() != 1 ||
+        parsed.params.front().frame != 0 || spec.find('@') != std::string_view::npos)
+        return false;
+    out.initial_params.push_back(parsed.params.front());
     return true;
 }
 
@@ -163,7 +173,7 @@ ParseAudioRenderResult parse_audio_render_args(const std::vector<std::string>& a
     ParseAudioRenderResult r;
 
     bool has_ms = false, has_frames = false, input_signal_seen = false;
-    std::uint64_t duration_ms = 0, duration_frames = 0;
+    std::uint64_t duration_ms = 0, duration_frames = 0, tail_ms = 0;
 
     // Each flag that takes a value accepts both `--flag value` and `--flag=value`.
     auto split = [](const std::string& tok) -> std::pair<std::string, std::optional<std::string>> {
@@ -239,6 +249,26 @@ ParseAudioRenderResult parse_audio_render_args(const std::vector<std::string>& a
             if (!v || *v == 0) return usage_error("--duration-frames must be a positive integer");
             duration_frames = *v;
             has_frames = true;
+        } else if (key == "--tail-ms") {
+            if (!take_value(value)) return usage_error(key + " requires a value");
+            const auto v = parse_u64(*value);
+            if (!v) return usage_error("--tail-ms must be a non-negative integer");
+            tail_ms = *v;
+        } else if (key == "--warmup-ms") {
+            if (!take_value(value)) return usage_error(key + " requires a value");
+            const auto v = parse_u32(*value);
+            if (!v) return usage_error("--warmup-ms must be a non-negative integer");
+            r.warmup_ms = *v;
+        } else if (key == "--settle-ms") {
+            if (!take_value(value)) return usage_error(key + " requires a value");
+            const auto v = parse_u32(*value);
+            if (!v) return usage_error("--settle-ms must be a non-negative integer");
+            r.settle_ms = *v;
+        } else if (key == "--timeout-ms") {
+            if (!take_value(value)) return usage_error(key + " requires a value");
+            const auto v = parse_u32(*value);
+            if (!v || *v == 0) return usage_error("--timeout-ms must be a positive integer");
+            r.timeout_ms = *v;
         } else if (key == "--input") {
             if (!take_value(value)) return usage_error(key + " requires a value");
             r.input_kind = AudioRenderInputKind::Wav;
@@ -279,6 +309,10 @@ ParseAudioRenderResult parse_audio_render_args(const std::vector<std::string>& a
             if (!take_value(value)) return usage_error(key + " requires a value");
             if (!parse_param(*value, r))
                 return usage_error("--param must be '<id>=<value>[@frame]' (value is plain domain)");
+        } else if (key == "--initial-param") {
+            if (!take_value(value)) return usage_error(key + " requires a value");
+            if (!parse_initial_param(*value, r))
+                return usage_error("--initial-param must be '<id>=<value>' (value is plain domain)");
         } else if (key == "--midi") {
             if (!take_value(value)) return usage_error(key + " requires a value");
             if (!parse_midi(*value, r))
@@ -289,6 +323,12 @@ ParseAudioRenderResult parse_audio_render_args(const std::vector<std::string>& a
         } else if (key == "--manifest") {
             if (!take_value(value)) return usage_error(key + " requires a value");
             r.manifest_path = *value;
+        } else if (key == "--wav-format") {
+            if (!take_value(value)) return usage_error(key + " requires a value");
+            if (*value == "int16") r.wav_format = AudioRenderWavFormat::Int16;
+            else if (*value == "int24") r.wav_format = AudioRenderWavFormat::Int24;
+            else if (*value == "float32") r.wav_format = AudioRenderWavFormat::Float32;
+            else return usage_error("--wav-format must be int16, int24, or float32");
         } else {
             return usage_error("unknown flag: " + key);
         }
@@ -346,12 +386,29 @@ ParseAudioRenderResult parse_audio_render_args(const std::vector<std::string>& a
     if (!has_ms && !has_frames)
         return usage_error("one of --duration-ms / --duration-frames is required");
 
-    r.duration_frames = has_frames
-        ? duration_frames
-        : static_cast<std::uint64_t>(std::llround(
-              static_cast<double>(duration_ms) / 1000.0 * r.sample_rate));
+    auto milliseconds_to_frames = [&](std::uint64_t milliseconds)
+        -> std::optional<std::uint64_t> {
+        const long double frames = static_cast<long double>(milliseconds) /
+                                   1000.0L * static_cast<long double>(r.sample_rate);
+        if (!std::isfinite(frames) || frames < 0.0L ||
+            frames > static_cast<long double>(std::numeric_limits<std::uint64_t>::max()))
+            return std::nullopt;
+        return static_cast<std::uint64_t>(std::round(frames));
+    };
+    const auto resolved_duration = has_frames
+        ? std::optional<std::uint64_t>(duration_frames)
+        : milliseconds_to_frames(duration_ms);
+    if (!resolved_duration)
+        return usage_error("resolved duration is too large");
+    r.duration_frames = *resolved_duration;
     if (r.duration_frames == 0)
         return usage_error("resolved duration is zero frames");
+    const auto resolved_tail = milliseconds_to_frames(tail_ms);
+    if (!resolved_tail)
+        return usage_error("--tail-ms makes the render too long");
+    r.tail_frames = *resolved_tail;
+    if (r.tail_frames > std::numeric_limits<std::uint64_t>::max() - r.duration_frames)
+        return usage_error("--tail-ms makes the render too long");
     if (r.block > r.duration_frames)
         r.block = static_cast<std::uint32_t>(r.duration_frames);
 

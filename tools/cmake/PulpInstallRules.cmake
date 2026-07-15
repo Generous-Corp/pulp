@@ -177,8 +177,17 @@ if(TARGET SDL3_Headers)
     install(TARGETS SDL3_Headers EXPORT PulpTargets)
 endif()
 
-# Public headers for each SDK subsystem
-foreach(subsystem platform runtime events state audio midi signal graph format osc canvas render view gpu_audio native-components)
+# Public headers for each SDK subsystem. Keep platform-conditional surfaces
+# aligned with the targets exported above: iOS deliberately has no pulp-host,
+# so it must not receive orphaned desktop-host headers either.
+set(_pulp_sdk_header_subsystems
+    platform runtime events state audio midi signal graph format osc canvas
+    render view gpu_audio native-components dsl
+)
+if(TARGET pulp-host)
+    list(APPEND _pulp_sdk_header_subsystems host)
+endif()
+foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
     set(_inc_dir "${CMAKE_CURRENT_SOURCE_DIR}/core/${subsystem}/include")
     if(EXISTS "${_inc_dir}")
         install(DIRECTORY "${_inc_dir}/pulp/"
@@ -187,6 +196,7 @@ foreach(subsystem platform runtime events state audio midi signal graph format o
         )
     endif()
 endforeach()
+unset(_pulp_sdk_header_subsystems)
 
 # SDK version file
 file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${PROJECT_VERSION}\n")

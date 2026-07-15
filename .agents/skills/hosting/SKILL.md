@@ -101,6 +101,21 @@ already cache via a local. When adding a new format backend that calls
 
 ## Testing against a real plug-in
 
+For unattended, scriptable interrogation prefer the isolated CLI/MCP surfaces:
+
+```bash
+pulp audio plugin-inspect --plugin /path/to/plugin.component --format au
+pulp audio render --plugin /path/to/plugin.component --format au \
+  --input-signal noise:7 --duration-ms 1000 --warmup-ms 1000 \
+  --initial-param 12=0.5 --settle-ms 250 --wav-format float32 --out /tmp/out.wav
+```
+
+`plugin-inspect` reports the complete host-visible parameter API. Both commands
+instantiate vendor code in disposable child processes with timeouts. That is
+crash/hang containment, not a security sandbox. The rich `pulp audio compare`
+step is an optional Audio Quality Lab add-on; inspection, rendering, metrics, and
+`pulp audio validate compare` are stock Pulp.
+
 Integration tests gate on a compile-time path macro:
 
 ```cmake
@@ -139,6 +154,21 @@ path: shell tab-completion appends a trailing `/` to a bundle *directory*, which
 empties `std::filesystem::path::extension()` (step up via `parent_path()` when
 `filename()` is empty), and a plain `dlopen` of a relative bundle path triggers
 the `@rpath` search dance — pass an absolute path.
+
+## Headless Audio Unit event-loop servicing
+
+Licensed Audio Units may complete initialization asynchronously via XPC,
+timers, or dispatch-main callbacks. GUI hosts service these naturally; an
+offline analyzer may otherwise produce plausible but incorrect audio or ignore
+early parameter writes without reporting an error.
+
+Use `pulp::events::MessageLoopIntegration::pump_main_loop_for()` from the
+process main/control thread to service bounded slices before parameter access
+and between offline render blocks. Never call it from the audio callback. The
+result reports event-loop progress only, not license or plug-in readiness, so a
+tool must own a configurable warm-up and post-write/render-settle policy. Put
+the entire instantiate/process probe in a child process; isolated scanning alone
+does not contain crashes in deeper plug-in code.
 
 ## Signal graph gotchas
 

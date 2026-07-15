@@ -26,12 +26,11 @@
 //   - Documents the per-OS contract (callback thread, re-entrancy, etc.)
 //     for the four loops Pulp targets.
 //
-// What this header does NOT do:
-//   - Wrap CFRunLoop / HWND / GMainLoop primitives — adapters that need
-//     those should still include the platform-specific header from
-//     `core/events/src/<platform>/`. This header is the *cross-platform
-//     introspection* surface, not a re-implementation of every native
-//     loop API.
+// What this header additionally does for headless native hosts:
+//   - Offers one bounded main-loop service slice on Apple platforms. This
+//     lets offline tools advance plug-ins whose initialization depends on
+//     XPC, timers, or main-queue callbacks without taking ownership of the
+//     application's event loop.
 //
 // Platform coverage:
 //   - macOS / iOS  — Cocoa NSRunLoop backend via the plugin-mode helper
@@ -44,6 +43,7 @@
 
 #include <pulp/events/main_thread_dispatcher.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <string_view>
 
@@ -65,11 +65,22 @@ enum class MainLoopKind : std::uint8_t {
     Custom      = 255,  ///< Caller-registered loop (SDL, custom dispatcher).
 };
 
+/// Outcome of a bounded native-main-loop service slice.
+enum class MainLoopPumpResult : std::uint8_t {
+    HandledSource = 0, ///< At least one native source was handled.
+    TimedOut      = 1, ///< The bounded interval elapsed without a source.
+    Stopped       = 2, ///< The native loop was explicitly stopped.
+    Finished      = 3, ///< The native loop has no sources or timers.
+    Unsupported   = 4, ///< This platform has no bounded pump implementation.
+    WrongThread   = 5, ///< The call was not made on the process main thread.
+};
+
 /// Cross-platform introspection of the active main loop.
 ///
-/// All methods are thread-safe. Backends register themselves with the
-/// process-wide `MainThreadDispatcher` and the returned `MainLoopKind`
-/// follows whatever the most-recent active registration is.
+/// The introspection and dispatch methods are thread-safe. Backends register
+/// themselves with the process-wide `MainThreadDispatcher` and the returned
+/// `MainLoopKind` follows whatever the most-recent active registration is.
+/// `pump_main_loop_for()` is deliberately main-thread-only.
 class MessageLoopIntegration {
 public:
     /// Returns the kind of native loop currently active, or `None`.
@@ -96,6 +107,20 @@ public:
     /// Forwards to `MainThreadDispatcher::call_sync()`.
     /// Returns false if no backend is registered.
     static bool call_sync(Task task);
+
+    /// Service the native process main loop for at most `max_duration`.
+    ///
+    /// Apple hosts use this to advance dispatch-main, CFRunLoop, Cocoa, XPC,
+    /// and timer work while rendering headlessly. It must be called from the
+    /// process main/control thread, never from an audio callback. A zero or
+    /// negative duration performs a non-blocking poll. Other platforms return
+    /// `Unsupported` until they grow an equivalent bounded implementation.
+    ///
+    /// This reports event-loop progress only. It is not a plug-in readiness or
+    /// licensing signal; callers remain responsible for their own warm-up and
+    /// settle policy.
+    static MainLoopPumpResult
+    pump_main_loop_for(std::chrono::milliseconds max_duration);
 
     /// Register the *kind* tag for a custom backend. Call this AFTER
     /// `MainThreadDispatcher::register_backend()` returns a token, so

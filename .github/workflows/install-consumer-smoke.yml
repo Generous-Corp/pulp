@@ -18,6 +18,7 @@ on:
     paths:
       - 'core/**'
       - 'tools/cmake/**'
+      - 'tools/validation/sdk-smoke/**'
       - 'CMakeLists.txt'
       - '.github/workflows/install-consumer-smoke.yml'
   push:
@@ -25,6 +26,7 @@ on:
     paths:
       - 'core/**'
       - 'tools/cmake/**'
+      - 'tools/validation/sdk-smoke/**'
       - 'CMakeLists.txt'
       - '.github/workflows/install-consumer-smoke.yml'
 
@@ -101,7 +103,7 @@ jobs:
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF
-          cmake --build build --config Release
+          cmake --build build --config Release --parallel 2
         shell: bash
 
       - name: Install Pulp to a temp prefix
@@ -115,6 +117,13 @@ jobs:
           # source tree.
           test -f "$PREFIX/lib/cmake/Pulp/PulpLinkFontconfig.cmake"
           test -f "$PREFIX/lib/cmake/Pulp/PulpUtils.cmake"
+          # Representative public headers from every previously missed
+          # installed-SDK surface. `state` is included because released
+          # snapshots have regressed even though today's source manifest
+          # names it; host + dsl pin the omissions fixed here.
+          test -f "$PREFIX/include/pulp/host/plugin_slot.hpp"
+          test -f "$PREFIX/include/pulp/state/preset_manager.hpp"
+          test -f "$PREFIX/include/pulp/dsl/dsl_processor.hpp"
         shell: bash
 
       - name: Configure a downstream consumer against the installed SDK
@@ -145,6 +154,22 @@ jobs:
           // smoke verifies configure-time helper paths, not runtime
           // plugin behavior.
           EOF
+          cat > "$CONSUMER/src/host_probe.cpp" <<'EOF'
+          #include <pulp/dsl/dsl_processor.hpp>
+          #include <pulp/events/message_loop_integration.hpp>
+          #include <pulp/host/plugin_slot.hpp>
+          #include <pulp/state/preset_manager.hpp>
+
+          int main() {
+              const auto pump =
+                  pulp::events::MessageLoopIntegration::pump_main_loop_for(
+                      std::chrono::milliseconds(0));
+              pulp::host::PluginInfo info;
+              auto slot = pulp::host::PluginSlot::load(info);
+              return slot || pump == pulp::events::MainLoopPumpResult::WrongThread
+                  ? 1 : 0;
+          }
+          EOF
           cat > "$CONSUMER/CMakeLists.txt" <<'EOF'
           cmake_minimum_required(VERSION 3.24)
           project(PulpConsumerSmoke VERSION 0.1.0 LANGUAGES CXX)
@@ -154,6 +179,13 @@ jobs:
           if(NOT TARGET Pulp::view)
               message(FATAL_ERROR "find_package(Pulp) did not expose Pulp::view")
           endif()
+          if(NOT TARGET Pulp::events OR NOT TARGET Pulp::host
+             OR NOT TARGET Pulp::state OR NOT TARGET Pulp::dsl)
+              message(FATAL_ERROR "find_package(Pulp) did not expose events/host/state/dsl SDK targets")
+          endif()
+          add_executable(PulpHostHeaderProbe src/host_probe.cpp)
+          target_link_libraries(PulpHostHeaderProbe PRIVATE
+              Pulp::dsl Pulp::events Pulp::host Pulp::state)
           # ACTUALLY invoke pulp_add_plugin so _pulp_add_standalone runs.
           # This is the configure-time path where the
           # PulpLinkFontconfig.cmake include runs; a pure target-check
@@ -174,6 +206,8 @@ jobs:
             -DCMAKE_PREFIX_PATH="$PREFIX" \
             -DPulp_DIR="$PREFIX/lib/cmake/Pulp" \
             -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$CONSUMER/build" --config Release \
+            --target PulpHostHeaderProbe --parallel 2
         shell: bash
 
       - name: Verify CMake config files don't reach into Pulp's source tree

@@ -22,6 +22,7 @@ namespace pulp::cli {
 // ambiguous (delays one period apart look identical). Broadband, aperiodic
 // stimuli are what the probe policies need.
 enum class AudioRenderInputKind { Silence, Sine, Wav, Noise, Impulse };
+enum class AudioRenderWavFormat { Int16, Int24, Float32 };
 
 /// How `--latency-report` turns the render into a delay measurement.
 enum class AudioRenderLatencyPolicy {
@@ -71,6 +72,7 @@ struct ParseAudioRenderResult {
     std::uint32_t in_channels = 2;
     std::uint32_t out_channels = 2;
     std::uint64_t duration_frames = 0;  ///< Resolved from --duration-ms / --duration-frames.
+    std::uint64_t tail_frames = 0;      ///< Additional silent-input capture after duration.
 
     AudioRenderInputKind input_kind = AudioRenderInputKind::Silence;
     std::string input_wav;
@@ -94,8 +96,16 @@ struct ParseAudioRenderResult {
     std::optional<int> latency_expect;
 
     std::vector<AudioRenderParam> params;
+    std::vector<AudioRenderParam> initial_params;
     std::vector<AudioRenderMidi> midi;
 
+    /// Wall-clock/audio pre-roll before measured events. When omitted, the
+    /// driver chooses a licensed-AU-safe default and zero for other formats.
+    std::optional<std::uint32_t> warmup_ms;
+    /// Discarded processing after --initial-param writes.
+    std::optional<std::uint32_t> settle_ms;
+    std::uint32_t timeout_ms = 0;  ///< 0 derives a bounded coordinator timeout.
+    AudioRenderWavFormat wav_format = AudioRenderWavFormat::Int16;
     std::string out_wav;
     std::string manifest_path;
     bool json = false;
@@ -111,3 +121,4 @@ ParseAudioRenderResult parse_audio_render_args(const std::vector<std::string>& a
 
 // Entry point wired into `cmd_audio` dispatch.
 int cmd_audio_render(const std::vector<std::string>& args);
+int cmd_audio_render_worker(const std::vector<std::string>& args);

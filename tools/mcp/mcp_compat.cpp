@@ -193,6 +193,9 @@ static const ToolMinSdk TOOL_MIN_SDK_TABLE[] = {
     // appeared in 0.500.0, but the MCP schema promises sample-accurate
     // `param @frame` behavior, which landed in 0.513.0.
     {"pulp_audio_render", "0.513.0"},
+    // Unlike compare, inspect cannot degrade through an older CLI: the delegated
+    // subcommand itself is the contract and first ships with 0.671.0.
+    {"pulp_audio_plugin_inspect", "0.671.0"},
     // No floor for `pulp_audio_compare`: this table documents *behavioral* API
     // floors that landed in a past release (render's frame-accurate `param @frame`),
     // not "the tool exists since" markers. `pulp_audio_compare` shells out to the
