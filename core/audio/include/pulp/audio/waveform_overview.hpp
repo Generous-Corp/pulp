@@ -71,7 +71,7 @@ struct AudioPeak {
 
 // One zoom level: a peak table for every channel.
 // peaks[channel] has `peaks_per_channel` entries.
-struct ThumbnailLevel {
+struct OverviewLevel {
     uint32_t samples_per_peak = 0;
     uint32_t peaks_per_channel = 0;
     std::vector<std::vector<AudioPeak>> peaks;  // [channel][peak_index]
@@ -116,7 +116,7 @@ public:
 
     WaveformOverviewInfo info() const noexcept;
 
-    const ThumbnailLevel& level(std::size_t i) const { return levels_.at(i); }
+    const OverviewLevel& level(std::size_t i) const { return levels_.at(i); }
     std::size_t num_levels() const noexcept { return levels_.size(); }
 
     // Pick the level whose peaks-per-channel is closest to (and at least
@@ -152,7 +152,7 @@ public:
         std::size_t offset);
 
 private:
-    std::vector<ThumbnailLevel> levels_;
+    std::vector<OverviewLevel> levels_;
     uint32_t num_channels_ = 0;
     uint64_t num_source_frames_ = 0;
     uint32_t sample_rate_ = 0;

@@ -29,7 +29,7 @@ std::int32_t quantize_milli_px(float value) noexcept {
     return static_cast<std::int32_t>(scaled);
 }
 
-WaveformViewport normalized_viewport_for_thumbnail(const pulp::audio::WaveformOverview& thumbnail,
+WaveformViewport normalized_viewport_for_overview(const pulp::audio::WaveformOverview& thumbnail,
                                                    const WaveformViewport& viewport) {
     auto normalized = viewport;
     const auto info = thumbnail.info();
@@ -61,7 +61,7 @@ bool peak_sample_to_int64(std::uint32_t peak_index,
     return true;
 }
 
-bool read_peak(const pulp::audio::ThumbnailLevel& level,
+bool read_peak(const pulp::audio::OverviewLevel& level,
                std::uint32_t channel,
                std::uint32_t peak_index,
                float& min_value,
@@ -104,7 +104,7 @@ bool operator==(const WaveformGpuUploadKey& a,
                 const WaveformGpuUploadKey& b) noexcept {
     return a.source_generation == b.source_generation &&
            a.channel == b.channel &&
-           a.thumbnail_level_index == b.thumbnail_level_index &&
+           a.overview_level_index == b.overview_level_index &&
            a.samples_per_peak == b.samples_per_peak &&
            a.first_peak == b.first_peak &&
            a.peak_count == b.peak_count &&
@@ -142,7 +142,7 @@ WaveformGpuStaticLayerPlan build_waveform_gpu_static_layer_plan(
         return plan;
     }
 
-    auto normalized = normalized_viewport_for_thumbnail(thumbnail, viewport);
+    auto normalized = normalized_viewport_for_overview(thumbnail, viewport);
     if (normalized.empty()) return plan;
 
     const auto target_width_px = positive_ceil_px(normalized.bounds.width);
@@ -176,7 +176,7 @@ WaveformGpuStaticLayerPlan build_waveform_gpu_static_layer_plan(
     plan.viewport = normalized;
     plan.upload_key.source_generation = config.source_generation;
     plan.upload_key.channel = config.channel;
-    plan.upload_key.thumbnail_level_index = clamped_u32(level_index);
+    plan.upload_key.overview_level_index = clamped_u32(level_index);
     plan.upload_key.samples_per_peak = level.samples_per_peak;
     plan.upload_key.first_peak = clamped_u32(first_peak);
     plan.upload_key.peak_count = clamped_u32(peak_count);
@@ -216,9 +216,9 @@ std::size_t fill_waveform_peak_vertices(
     const WaveformGpuStaticLayerPlan& plan,
     std::span<WaveformPeakVertex> dst) noexcept {
     if (!plan.valid || !plan.upload_key.valid() || dst.empty()) return 0;
-    if (plan.upload_key.thumbnail_level_index >= thumbnail.num_levels()) return 0;
+    if (plan.upload_key.overview_level_index >= thumbnail.num_levels()) return 0;
 
-    const auto& level = thumbnail.level(plan.upload_key.thumbnail_level_index);
+    const auto& level = thumbnail.level(plan.upload_key.overview_level_index);
     if (level.samples_per_peak != plan.upload_key.samples_per_peak ||
         level.peaks_per_channel == 0) {
         return 0;

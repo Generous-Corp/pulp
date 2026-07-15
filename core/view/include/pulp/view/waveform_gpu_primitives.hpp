@@ -29,7 +29,7 @@ struct WaveformPeakVertex {
 struct WaveformGpuUploadKey {
     std::uint64_t source_generation = 0;
     std::uint32_t channel = pulp::audio::WaveformOverview::kAllChannels;
-    std::uint32_t thumbnail_level_index = 0;
+    std::uint32_t overview_level_index = 0;
     std::uint32_t samples_per_peak = 0;
     std::uint32_t first_peak = 0;
     std::uint32_t peak_count = 0;

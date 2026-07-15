@@ -10,8 +10,8 @@ namespace pulp::audio {
 
 namespace {
 
-ThumbnailLevel decimate_level(const ThumbnailLevel& src) {
-    ThumbnailLevel out;
+OverviewLevel decimate_level(const OverviewLevel& src) {
+    OverviewLevel out;
     out.samples_per_peak = src.samples_per_peak * 2u;
     const std::size_t in_peaks = src.peaks_per_channel;
     const std::size_t out_peaks = (in_peaks + 1u) / 2u;
@@ -52,7 +52,7 @@ WaveformOverview WaveformOverview::build_from_buffer_view(
     t.sample_rate_ = sample_rate;
 
     // Base level.
-    ThumbnailLevel base;
+    OverviewLevel base;
     base.samples_per_peak = samples_per_peak;
     const uint64_t frames = static_cast<uint64_t>(source.num_samples());
     const uint32_t peaks =
@@ -160,7 +160,7 @@ std::size_t WaveformOverview::render_min_max(uint32_t channel,
     }
 
     const std::size_t lvl_idx = best_level_for(target_peaks);
-    const ThumbnailLevel& lvl = levels_[lvl_idx];
+    const OverviewLevel& lvl = levels_[lvl_idx];
     if (lvl.peaks_per_channel == 0) return 0;
 
     const std::size_t channels = lvl.peaks.size();
