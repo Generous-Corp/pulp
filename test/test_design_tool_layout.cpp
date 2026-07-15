@@ -1363,8 +1363,13 @@ TEST_CASE("Design tool: palette rows keep mini ramps when collapsed and gamut ed
     REQUIRE(expanded_editor->visible());
     REQUIRE(expanded_editor->bounds().height > 250.0f);
     REQUIRE_THAT(gamut->bounds().height, Catch::Matchers::WithinAbs(130.0f, 2.0f));
+#ifdef PULP_HAS_SKIA
     REQUIRE_FALSE(rebuilt_hue_fader->custom_shader().empty());
     REQUIRE_FALSE(rebuilt_chroma_fader->custom_shader().empty());
+#else
+    REQUIRE(rebuilt_hue_fader->custom_shader().empty());
+    REQUIRE(rebuilt_chroma_fader->custom_shader().empty());
+#endif
 }
 
 TEST_CASE("Design tool: expanded palette exposes color format values and compact shade chips", "[design-tool]") {
