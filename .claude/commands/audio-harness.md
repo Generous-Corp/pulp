@@ -34,15 +34,19 @@ What you get:
   - `pulp audio validate doctor out.wav --thd [--fundamental <hz>]` / `--response f1,f2,...`
   - `pulp audio validate compare a.wav b.wav [--mode null|spectral] [--tolerance <dbfs>]`
   - `pulp audio validate assert audio-run/assertions.json` — re-check stored assertions, nonzero on failure
-- **`pulp audio render` CLI** — offline scenario render of an explicit plugin
-  bundle through `PluginSlot`, no DAW or audio device:
+- **Third-party plugin interrogation** — discover the host API, then render an
+  explicit plugin through `PluginSlot`, no DAW or audio device:
+  - `pulp audio plugin-inspect --plugin <bundle> --format <format> --json`
   - `pulp audio render --plugin <bundle> --out out.wav --duration-ms 1000`
-  - drive it with `--input-signal`, `--input`, repeatable `--param`, and repeatable `--midi`
+  - both commands isolate vendor code behind a child-process timeout
+  - drive renders with `--input-signal`, `--input`, repeatable `--param`, and repeatable `--midi`
+  - use `--warmup-ms`, `--initial-param`, and `--settle-ms` before capture;
+    use `--tail-ms` and `--wav-format float32` for analysis-quality captures
   - `--param <id>=<value>[@frame]` values are the PLAIN native parameter domain,
     not normalized; `@frame` is **sample-accurate** (block-rate on LV2 by its
     control-port nature, and on any plugin that reads its params once per block)
-  - also exposed as the `pulp_audio_render` MCP tool (returns the metrics JSON;
-    takes a single `param`/`midi` token — use the CLI for multiple)
+  - exposed as `pulp_audio_plugin_inspect` and `pulp_audio_render` MCP tools
+    (render takes single initial/automation/MIDI tokens; use the CLI for multiple)
 - **Latency proof (`--latency-report`)** — prove a plugin's `latency_samples()`
   against the delay actually in its rendered audio. The host slides the whole
   track by that number and nothing else checks it, so a wrong one comb-filters

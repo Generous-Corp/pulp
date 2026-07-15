@@ -101,6 +101,21 @@ already cache via a local. When adding a new format backend that calls
 
 ## Testing against a real plug-in
 
+For unattended, scriptable interrogation prefer the isolated CLI/MCP surfaces:
+
+```bash
+pulp audio plugin-inspect --plugin /path/to/plugin.component --format au --json
+pulp audio render --plugin /path/to/plugin.component --format au \
+  --input-signal noise:7 --duration-ms 1000 --warmup-ms 1000 \
+  --initial-param 12=0.5 --settle-ms 250 --wav-format float32 --out /tmp/out.wav
+```
+
+`plugin-inspect` reports the complete host-visible parameter API. Both commands
+instantiate vendor code in disposable child processes with timeouts. That is
+crash/hang containment, not a security sandbox. The rich `pulp audio compare`
+step is an optional Audio Quality Lab add-on; inspection, rendering, metrics, and
+`pulp audio validate compare` are stock Pulp.
+
 Integration tests gate on a compile-time path macro:
 
 ```cmake

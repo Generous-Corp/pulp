@@ -656,6 +656,7 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(tools, R"JSON("name":"pulp_audio_excerpt_find")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_probe_json")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_scope")JSON");
+    require_contains(tools, R"JSON("name":"pulp_audio_plugin_inspect")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_render")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_compare")JSON");
     require_contains(tools, R"JSON("name":"pulp_docs_search")JSON");
@@ -704,6 +705,7 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_audio_model_activate",
         "pulp_audio_model_list",
         "pulp_audio_model_status",
+        "pulp_audio_plugin_inspect",
         "pulp_audio_probe_json",
         "pulp_audio_read_bundle",
         "pulp_audio_render",
@@ -783,6 +785,7 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
         std::pair{"pulp_audio_model_activate", "Error: model_id is required"},
         std::pair{"pulp_audio_excerpt_find", "Error: text and input_path are required"},
         std::pair{"pulp_audio_read_bundle", "Error: bundle_path is required"},
+        std::pair{"pulp_audio_plugin_inspect", "Error: plugin is required"},
         std::pair{"pulp_audio_render", "Error: plugin is required"},
         std::pair{"pulp_audio_compare", "Error: reference and candidate are required"},
         std::pair{"pulp_create", "Error: name is required"},
@@ -2274,6 +2277,7 @@ TEST_CASE("min_sdk_for_tool defaults to 0.0.0 for unlisted tools",
 TEST_CASE("min_sdk_for_tool reports explicit floors for listed tools",
           "[mcp][compat]") {
     REQUIRE(min_sdk_for_tool("pulp_audio_render") == "0.513.0");
+    REQUIRE(min_sdk_for_tool("pulp_audio_plugin_inspect") == "0.671.0");
 }
 
 TEST_CASE("pulp_compat reports versions and tool min_sdk map",
@@ -2297,6 +2301,7 @@ TEST_CASE("pulp_compat reports versions and tool min_sdk map",
     // null check.
     require_contains(response, R"JSON("tool_min_sdk":)JSON");
     require_contains(response, R"JSON("pulp_audio_render":"0.513.0")JSON");
+    require_contains(response, R"JSON("pulp_audio_plugin_inspect":"0.671.0")JSON");
 }
 
 TEST_CASE("pulp_audio_render is gated for older pinned project SDKs",

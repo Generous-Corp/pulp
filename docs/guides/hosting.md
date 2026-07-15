@@ -14,6 +14,10 @@ compensation are implemented over the same `PluginSlot` interface.
 The VST3 and AU loaders are not stubs: both instantiate and process third-party
 plug-ins in supported desktop builds.
 
+For a ready-to-use, isolated CLI/MCP workflow that discovers parameters and
+renders controlled A/B experiments, see [Interrogating and Comparing
+Third-Party Plugins](plugin-interrogation.md).
+
 ## Quick start
 
 ```cpp

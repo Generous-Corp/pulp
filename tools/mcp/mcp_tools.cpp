@@ -983,6 +983,63 @@ std::string handle_audio_scope(const std::string& params_json) {
     return json_tool_payload(normalized_json);
 }
 
+std::string handle_audio_plugin_inspect(const std::string& params_json) {
+    auto root = find_project_root();
+    if (root.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+    }
+    auto arg_error = [](const std::string& msg) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(msg) + "}]}";
+    };
+    const auto plugin = extract_string(params_json, "plugin");
+    if (plugin.empty() || plugin.front() == '-')
+        return arg_error("Error: plugin is required and must be a bundle path");
+
+    std::string cmd = shell_quote(source_build_cli_path(root).string()) +
+                      " audio plugin-inspect --json --plugin " + shell_quote(plugin);
+    auto add_str = [&](const char* key, const char* flag) {
+        const auto value = extract_string(params_json, key);
+        if (!value.empty()) cmd += std::string(" ") + flag + " " + shell_quote(value);
+    };
+    add_str("format", "--format");
+    add_str("id", "--id");
+
+    auto has = [&](const char* key) {
+        const auto raw = extract_raw(params_json, key);
+        return !raw.empty() && raw != "null";
+    };
+    auto add_int = [&](const char* key, const char* flag, int minimum) -> std::string {
+        if (!has(key)) return {};
+        const int value = extract_int(params_json, key, minimum - 1);
+        if (value < minimum)
+            return std::string("Error: ") + key + " must be an integer >= " +
+                   std::to_string(minimum);
+        cmd += std::string(" ") + flag + " " + std::to_string(value);
+        return {};
+    };
+    for (auto error : {add_int("block", "--block", 1),
+                       add_int("warmup_ms", "--warmup-ms", 0),
+                       add_int("timeout_ms", "--timeout-ms", 1)}) {
+        if (!error.empty()) return arg_error(error);
+    }
+    if (has("sample_rate")) {
+        const double rate = extract_double(params_json, "sample_rate", -1.0);
+        if (!(std::isfinite(rate) && rate > 0.0))
+            return arg_error("Error: sample_rate must be positive");
+        cmd += " --sample-rate " + std::to_string(rate);
+    }
+    cmd += " 2>&1";
+
+    const auto run = exec_with_status(cmd);
+    if (run.failed())
+        return arg_error("Error: isolated plugin inspection failed.\n" + run.output);
+    std::string normalized;
+    std::string parse_error;
+    if (!normalize_structured_json(run.output, normalized, parse_error))
+        return arg_error("Error: " + parse_error + "\n" + run.output);
+    return json_tool_payload(normalized);
+}
+
 std::string handle_audio_render(const std::string& params_json) {
     auto root = find_project_root();
     if (root.empty()) {
@@ -1038,6 +1095,8 @@ std::string handle_audio_render(const std::string& params_json) {
     add_str("id", "--id");
     add_str("input", "--input");
     add_str("input_signal", "--input-signal");
+    add_str("initial_param", "--initial-param");
+    add_str("wav_format", "--wav-format");
     add_str("param", "--param");   // a single id=value[@frame]; multiple → use the CLI
     add_str("midi", "--midi");     // a single note:n,vel,on[,off]; multiple → use the CLI
 
@@ -1052,7 +1111,11 @@ std::string handle_audio_render(const std::string& params_json) {
     };
     for (auto err : {add_int("block", "--block", 1),
                      add_int("in_channels", "--in-channels", 0),
-                     add_int("out_channels", "--out-channels", 1)}) {
+                     add_int("out_channels", "--out-channels", 1),
+                     add_int("warmup_ms", "--warmup-ms", 0),
+                     add_int("settle_ms", "--settle-ms", 0),
+                     add_int("timeout_ms", "--timeout-ms", 1),
+                     add_int("tail_ms", "--tail-ms", 0)}) {
         if (!err.empty()) return arg_error(err);
     }
     if (has("sample_rate")) {

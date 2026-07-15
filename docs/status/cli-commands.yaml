@@ -2047,8 +2047,28 @@ commands:
             kind: option
           - name: --json
             kind: option
+      - name: plugin-inspect
+        summary: "Load a third-party plugin in a disposable worker and emit its host-visible metadata, buses, latency, tail, and complete parameter API as pulp.audio.plugin-inspect.v1 JSON."
+        args:
+          - name: --plugin
+            kind: option
+            required: true
+          - name: --format
+            kind: option
+          - name: --id
+            kind: option
+          - name: --sample-rate
+            kind: option
+          - name: --block
+            kind: option
+          - name: --warmup-ms
+            kind: option
+          - name: --timeout-ms
+            kind: option
+          - name: --json
+            kind: flag
       - name: render
-        summary: "Offline scenario render of a plugin bundle through the host slot (no DAW, no audio device): load --plugin, drive it from declarative flags, write a WAV, and emit metrics JSON matching validate summarize --json. --param values are in the PLAIN domain (native min..max), not normalized."
+        summary: "Isolated offline scenario render of a plugin bundle (no DAW, no audio device): warm up, apply initial state, settle, drive it from declarative flags, append an optional tail, write an int16/int24/float32 WAV, and emit metrics JSON matching validate summarize --json. --param values are in the PLAIN domain (native min..max), not normalized."
         args:
           - name: --plugin
             kind: option
@@ -2086,10 +2106,28 @@ commands:
           - name: --input-signal
             kind: option
             required: false
+          - name: --warmup-ms
+            kind: option
+            required: false
+          - name: --initial-param
+            kind: option
+            required: false
+          - name: --settle-ms
+            kind: option
+            required: false
+          - name: --timeout-ms
+            kind: option
+            required: false
           - name: --param
             kind: option
             required: false
           - name: --midi
+            kind: option
+            required: false
+          - name: --tail-ms
+            kind: option
+            required: false
+          - name: --wav-format
             kind: option
             required: false
           - name: --manifest
