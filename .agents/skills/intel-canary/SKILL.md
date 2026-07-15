@@ -116,3 +116,46 @@ When you change the lint, the allowlist, or an Intel workflow:
 5. `tools/scripts/skill_path_map.json` maps the lint + allowlist + self-test to
    this skill — a diff touching them without updating this SKILL.md is rejected
    by `skill_sync_check.py`.
+
+### Never let a flaky advisory leg decide a run's conclusion
+
+`nightly-intel` concluded **`cancelled` on every scheduled run** for a long time,
+which reads as "this workflow produces no Intel coverage". That reading is wrong, and
+the trap is worth internalising:
+
+```
+Universal + lipo + dual-arch auval (macos-15) : SUCCESS    <- every night
+Native Intel build + test (macos-15-intel)    : cancelled  <- its 120m job TIMEOUT
+Intel nightly watchdog                        : SUCCESS
+```
+
+`universal-crosscheck` — the arm64+Rosetta lipo + dual-arch auval signal that
+`release-cli.yml` relies on after the per-tag universal gate was removed — **succeeds
+every night**. The Intel signal was there the whole time, buried under a run-level
+conclusion poisoned by a *different* leg.
+
+`native-intel` on `macos-15-intel` had **never once completed**: that image CPU-pegs,
+so the job hit its 120-minute limit every run. **GitHub reports a job timeout as
+`cancelled`, and a cancelled job cancels the whole RUN.** So a leg producing zero
+signal was deciding the conclusion of the leg producing the real one — while burning
+two hours of a scarce Intel runner nightly.
+
+**Fix pattern: bound the work in the STEP, not with the job timeout.**
+
+```bash
+if timeout 75m cmake --build "$BUILD_DIR" -- -k 0 2>&1 | tee build.log; then
+  echo "status=pass" >> "$GITHUB_OUTPUT"
+elif [ "${PIPESTATUS[0]}" = "124" ]; then     # WE killed it, not GitHub
+  echo "::warning::runner pegged — INFRA, not a product failure"
+  echo "status=infra-timeout" >> "$GITHUB_OUTPUT"
+fi
+```
+
+The job then finishes **normally** with a loud, explicit infra-skip, and the run can
+reach a conclusive success/failure. Do **not** reach for job-level `continue-on-error`
+here: GitHub documents it for a job that *fails*, and a timeout is reported as
+*cancelled* — whether it covers that is a semantics gamble. Bounding the step is
+correct by construction.
+
+> A silent cancel is indistinguishable from "this workflow does nothing" — which is
+> exactly how working coverage got written off as absent.
