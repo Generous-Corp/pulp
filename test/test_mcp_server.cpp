@@ -2449,7 +2449,7 @@ TEST_CASE("MCP tools/list response contains no embedded newlines (wire-safe)",
     REQUIRE(tools_list_wire.find("pulp_build") != std::string::npos);
 }
 
-// pulp #2153: every pulp_motion_* tool is recognized by the dispatcher
+// Every pulp_motion_* tool must be recognized by the dispatcher
 // (no "Unknown tool" fall-through) AND routes through the same
 // project-root gate that pulp_inspect_* uses. From a tempdir all 10
 // tools must short-circuit with "Error: not in a Pulp project" before

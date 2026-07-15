@@ -119,7 +119,7 @@ TEST_CASE("WidgetBridge setSvgFillRule selects winding rule on SvgPathWidget",
     REQUIRE(w->fill_rule() == pulp::canvas::FillRule::nonzero);
 }
 
-// pulp #968 — canvasRect / canvasStrokeRect must honor the active fill /
+// canvasRect / canvasStrokeRect must honor the active fill /
 // stroke style when no color arg is passed. Validates the JS bridge path:
 //   1. five-arg canvasRect → fillStyle (color or gradient) wins
 //   2. six-arg canvasRect with explicit color → explicit color wins
