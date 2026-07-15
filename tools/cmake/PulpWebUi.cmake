@@ -255,6 +255,18 @@ set(_PULP_WEBUI_RENDER_SOURCES
 # with. No EventLoop, no Timer, no threads.
 set(_PULP_WEBUI_EVENTS_SOURCES
     ${_PULP_WEBUI_ROOT}/core/events/src/main_thread_dispatcher.cpp
+    # StateStore::set_main_loop makes store.cpp emit a call to EventLoop::dispatch, so the
+    # store needs the event loop compiled in.
+    ${_PULP_WEBUI_ROOT}/core/events/src/event_loop.cpp
+)
+
+# The parameter StateStore. The REAL plugin editor (not the generated grid) reads its params
+# from a live StateStore the web host owns and the JS side syncs — so this build needs the
+# store itself, NOT the DSP that usually owns it. store.cpp pulls state_migration.cpp in for
+# the schema-version table it holds by value.
+set(_PULP_WEBUI_STATE_SOURCES
+    ${_PULP_WEBUI_ROOT}/core/state/src/store.cpp
+    ${_PULP_WEBUI_ROOT}/core/state/src/state_migration.cpp
 )
 
 # The browser WindowHost (canvas input events -> View tree, GL surface -> paint).
@@ -271,6 +283,7 @@ list(APPEND _PULP_WEBUI_PLATFORM_SOURCES
 set(_PULP_WEBUI_ALL_SOURCES
     ${_PULP_WEBUI_RUNTIME_SOURCES}
     ${_PULP_WEBUI_EVENTS_SOURCES}
+    ${_PULP_WEBUI_STATE_SOURCES}
     ${_PULP_WEBUI_CANVAS_SOURCES}
     ${_PULP_WEBUI_VIEW_SOURCES}
     ${_PULP_WEBUI_RENDER_SOURCES}

@@ -19,12 +19,18 @@
 // handle tracks the in-flight edit value so it follows the cursor regardless of
 // the audio thread's per-block parameter echo.
 
-#include "super_convolver.hpp"
+#include "super_convolver_ui_host.hpp"
 #include "field_renderer.hpp"
+#include "source_display.hpp"     // clean_source_name — the Source chip's label
 #include <pulp/state/parameter_edit.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/view.hpp>
+#if !defined(__EMSCRIPTEN__)
+// The native picker. A browser tab has no filesystem and no modal file dialog a
+// wasm module can call — there the request goes out to the page instead (see
+// open_ir_chooser), so the header must not even be reachable in that build.
 #include <pulp/view/file_chooser.hpp>
+#endif
 #include <pulp/view/theme.hpp>
 #include <pulp/view/theme_presets.hpp>
 #include <pulp/canvas/canvas.hpp>
@@ -83,8 +89,9 @@ class SuperConvolverUi : public vw::View {
 public:
     SuperConvolverUi(pulp::state::StateStore& store,
                      pulp::examples::SpectrumBus& spectrum,
-                     pulp::examples::SuperConvolverProcessor& proc)
+                     pulp::examples::SuperConvolverUiHost& proc)
         : store_(store), spectrum_(spectrum), proc_(proc), edit_(store) {
+        build_sliders();
         // Live content (IR snapshot, spectrum curve, automation echo) → repaint
         // every frame. Prefer the GPU editor host for smooth rendering; the SDK
         // falls back to the CPU host if GPU init isn't available in the DAW.
@@ -93,6 +100,37 @@ public:
     }
 
     void on_resized() override { layout(); }
+
+    // ── Parameters the plugin might not HAVE ────────────────────────────────────────
+    //
+    // Rooms, Flow and Engine belong to the GPU multi-room stack, and that whole stack is
+    // `#if !defined(PULP_WASM)`. So a WAM/WebCLAP build of this plugin declares Mix, Size,
+    // Gain and Bypass and NOTHING ELSE — the editor's remaining controls address
+    // parameters that do not exist in that store.
+    //
+    // Reading one is not a soft failure. StateStore::get_value() on an unregistered id is
+    // undefined, and in wasm it is a hard "memory access out of bounds" on the first
+    // paint: the editor mounted, faulted, and the page fell back to the generated grid.
+    //
+    // So the editor asks. `has()` is the plugin's own answer — it built the store — and
+    // the control strip, the engine chip and the field all defer to it. Natively every
+    // parameter is present and nothing below changes.
+    bool has(pulp::state::ParamID id) const { return store_.info(id) != nullptr; }
+
+    /// The control strip shows exactly the sliders whose parameter the plugin declared.
+    /// Natively that is all five. On the web it is Mix / Size / Gain, because Rooms and
+    /// Flow do not exist there — and a slider that drives nothing is worse than no slider:
+    /// the user drags it, hears no change, and concludes the plugin is broken.
+    void build_sliders() {
+        sliders_.clear();
+        for (const Slider& sl : all_sliders())
+            if (has(sl.id)) sliders_.push_back(sl);
+    }
+
+    /// The parameter's value, or `fallback` when the plugin does not expose it.
+    float value_or(pulp::state::ParamID id, float fallback) const {
+        return has(id) ? store_.get_value(id) : fallback;
+    }
 
     /// Show the info card (same overlay the header "i" glyph toggles). For
     /// headless capture / tests; a click anywhere dismisses it at runtime.
@@ -116,9 +154,9 @@ public:
         read_spectrum();
         field_time_ += 1.0 / 60.0;
         const float field_flow = std::clamp(
-            static_cast<float>(store_.get_value(kFlow)) * 0.01f, 0.0f, 1.0f);
+            static_cast<float>(value_or(kFlow, 0.0f)) * 0.01f, 0.0f, 1.0f);
         const int field_density = std::min(96,
-            std::max(1, static_cast<int>(std::lround(store_.get_value(kRooms)))));
+            std::max(1, static_cast<int>(std::lround(value_or(kRooms, 1.0f)))));
         pulp::superconvolver::draw_acoustic_field(
             canvas, 0, 0, W, H, field_time_, field_flow, field_density, overall_energy(),
             viz_mode_);
@@ -326,6 +364,28 @@ public:
     void on_mouse_drag(vw::Point p) override { pointer_move(p); }
     void on_mouse_up(vw::Point) override { pointer_release(); }
 
+    // Widget geometry by PARAMETER, for hosts that drive this editor from outside
+    // the view tree (the browser fixture synthesises pointer events at these rects
+    // and measures ink inside them). Keyed by ParamID rather than by slider index
+    // because a host knows the parameter it wants, not this editor's column order.
+    bool slider_track_for_param(pulp::state::ParamID id, vw::Rect* out) {
+        if (layout_dirty_) layout();
+        for (const Slider& sl : sliders_)
+            if (sl.id == id) { if (out) *out = sl.track; return true; }
+        return false;
+    }
+    /// The band above a slider's track, where paint_controls draws its name and
+    /// value. Text lives here and nowhere else in the column.
+    bool slider_label_for_param(pulp::state::ParamID id, vw::Rect* out) {
+        vw::Rect t;
+        if (!slider_track_for_param(id, &t)) return false;
+        const float s = scale();
+        if (out) *out = {t.x, t.y - 26 * s, t.width, 26 * s};
+        return true;
+    }
+    /// The header engine chip (CPU/GPU + emitter count) — the editor's live readout.
+    vw::Rect engine_rect() { if (layout_dirty_) layout(); return engine_; }
+
     // Test accessors (headless interaction verification).
     void layout_for_test() { layout(); }
     vw::Rect ir_rect_for_test() { if (layout_dirty_) layout(); return ir_; }
@@ -360,7 +420,7 @@ private:
     }
     float scale() const { return std::max(0.5f, local_bounds().height / 560.0f); }
 
-    std::array<Slider, 5>& sliders() { return sliders_; }
+    std::vector<Slider>& sliders() { return sliders_; }
 
     void layout() {
         const float W = local_bounds().width, H = local_bounds().height;
@@ -381,11 +441,14 @@ private:
         spectrum_rect_ = {m, ir_.bottom() + 12 * s, W - 2 * m, spec_h};
         controls_ = {m, spectrum_rect_.bottom() + 12 * s, W - 2 * m, ctl_h};
 
-        // Five equal columns: four sliders (Mix/Size/Gain/Rooms) + a toggle
-        // column holding the Engine (CPU/GPU) toggle stacked over Bypass.
-        const float cw = controls_.width / 5.0f;  // five sliders fill the row
+        // Equal columns: one per slider the plugin actually declared, plus one for the
+        // toggle column (Engine over Bypass). Natively that is the familiar five. On the
+        // web it is four — Rooms and Flow do not exist there (see build_sliders()) — and
+        // dividing by a hardcoded 5 would both leave a dead gap and, worse, index past the
+        // end of the list. It did: it faulted paint() out of bounds on the first frame.
+        const float cw = controls_.width / static_cast<float>(sliders_.size() + 1);
         const float label_h = 20 * s, value_h = 22 * s, pad = 10 * s;
-        for (int i = 0; i < 5; ++i) {
+        for (int i = 0; i < static_cast<int>(sliders_.size()); ++i) {
             Slider& sl = sliders_[static_cast<size_t>(i)];
             sl.cell = {controls_.x + i * cw, controls_.y, cw, controls_.height};
             (void)label_h; (void)value_h; (void)pad;
@@ -397,7 +460,10 @@ private:
         }
         // Engine is the top-right chip (tap to toggle CPU/GPU); Bypass lives in
         // the host chrome. Mode tabs are three equal cells centered at the top.
-        engine_ = {W - 200 * s, 12 * s, 176 * s, 44 * s};
+        // No Engine parameter (a WAM/WebCLAP build) → no chip. An empty rect draws
+        // nothing and hit-tests to nothing, so the affordance simply is not offered
+        // rather than being offered and doing nothing.
+        engine_ = has(kEngine) ? vw::Rect{W - 200 * s, 12 * s, 176 * s, 44 * s} : vw::Rect{};
         bypass_ = {};
         const float tab_w = 92 * s, tab_h = 26 * s, tab_y = 16 * s;
         for (int i = 0; i < 3; ++i)
@@ -459,7 +525,17 @@ private:
     // Open the native file picker and set the chosen file as the IR source. The
     // dialog is synchronous on macOS (modal on the UI thread), so capturing the
     // processor by reference in the callback is safe.
+    //
+    // In a browser the editor cannot pick the file itself: there is no filesystem
+    // behind the wasm module and no synchronous dialog it may open. The whole
+    // request is therefore the empty load_ir_path — the host's job is to obtain
+    // the audio some other way (the page's own picker) and hand the plugin the
+    // decoded PCM. An empty path is the ASK, never a path to load; the web host
+    // reads it that way and no other implementation ever sees it.
     void open_ir_chooser() {
+#if defined(__EMSCRIPTEN__)
+        proc_.load_ir_path({});
+#else
         vw::FileChooser chooser;
         chooser.set_title("Load impulse response")
                .add_extension_filter("Impulse response (WAV/AIFF/FLAC)",
@@ -471,6 +547,7 @@ private:
             // missing path has since appeared.
             if (!paths.empty()) proc.load_ir_path(paths.front());
         });
+#endif
     }
 
     // ── IR waveform (hero) ──
@@ -656,7 +733,7 @@ private:
             canvas.set_fill_color(cv::Color::rgba8(0, 0, 0, 0));  // clears the gradient
         }
 
-        for (int i = 0; i < 5; ++i) {
+        for (int i = 0; i < static_cast<int>(sliders_.size()); ++i) {
             const Slider& sl = sliders_[static_cast<size_t>(i)];
             const auto& t = sl.track;
             const bool active = (active_slider_ == i);
@@ -723,9 +800,9 @@ private:
         for (int i = 0; i < 3; ++i) {
             if (in_rect(p, tabs_[static_cast<size_t>(i)])) { viz_mode_ = i; return; }
         }
-        if (in_rect(p, engine_)) {   // top-right chip toggles CPU/GPU
-            const bool gpu = store_.get_value(kEngine) >= 0.5f;
-            const int rooms = static_cast<int>(std::lround(store_.get_value(kRooms)));
+        if (has(kEngine) && in_rect(p, engine_)) {   // top-right chip toggles CPU/GPU
+            const bool gpu = value_or(kEngine, 0.0f) >= 0.5f;
+            const int rooms = static_cast<int>(std::lround(value_or(kRooms, 1.0f)));
             // CPU can't sustain more than kCpuRoomCap rooms. GPU->CPU while Rooms
             // is above that would silently ignore the extra rooms, so refuse and
             // say why; CPU->GPU is always fine. (Dragging Rooms past the cap on
@@ -737,7 +814,7 @@ private:
             }
             return;
         }
-        for (int i = 0; i < 5; ++i) {
+        for (int i = 0; i < static_cast<int>(sliders_.size()); ++i) {
             if (in_rect(p, sliders_[static_cast<size_t>(i)].cell)) {
                 active_slider_ = i;
                 edit_.begin(sliders_[static_cast<size_t>(i)].id);
@@ -768,7 +845,7 @@ private:
         // sustains in real time (kCpuRoomCap), auto-switch to GPU so the extra
         // rooms are actually heard instead of silently ignored. Fires once on the
         // crossing (the guard sees Engine already GPU on the next drag tick).
-        if (sl.id == kRooms && v > kCpuRoomCap && store_.get_value(kEngine) < 0.5f)
+        if (sl.id == kRooms && v > kCpuRoomCap && value_or(kEngine, 0.0f) < 0.5f)
             toggle_param(kEngine);
     }
 
@@ -800,18 +877,25 @@ private:
 
     pulp::state::StateStore& store_;
     pulp::examples::SpectrumBus& spectrum_;
-    pulp::examples::SuperConvolverProcessor& proc_;
+    pulp::examples::SuperConvolverUiHost& proc_;
     pulp::state::ParameterEdit edit_;
     ScPalette pal_ = make_ink_signal_palette();   // resolved from the Ink & Signal preset
 
     vw::Rect ir_{}, spectrum_rect_{}, controls_{}, bypass_{}, engine_{}, load_ir_btn_{};
-    std::array<Slider, 5> sliders_{{
-        {kMix,   "Mix",    0.0f, 100.0f, 0, "%"},
-        {kSize,  "Size",   0.05f, 4.0f,  2, "s"},
-        {kGain,  "Gain",  -24.0f, 24.0f, 1, "dB"},
-        {kRooms, "Rooms",  1.0f, 128.0f, 0, "", true},
-        {kFlow,  "Flow",   0.0f, 100.0f, 0, "%"},
-    }};
+    // Every slider the editor CAN show. Which of them it DOES show is decided in the
+    // constructor from the store — see build_sliders(). A function rather than a static
+    // constexpr member: Slider has default member initializers, which are not complete
+    // inside the enclosing class definition.
+    static std::array<Slider, 5> all_sliders() {
+        return {{
+            {kMix,   "Mix",    0.0f, 100.0f, 0, "%"},
+            {kSize,  "Size",   0.05f, 4.0f,  2, "s"},
+            {kGain,  "Gain",  -24.0f, 24.0f, 1, "dB"},
+            {kRooms, "Rooms",  1.0f, 128.0f, 0, "", true},
+            {kFlow,  "Flow",   0.0f, 100.0f, 0, "%"},
+        }};
+    }
+    std::vector<Slider> sliders_;
     std::array<float, kSpectrumBins> spec_display_{};
     int active_slider_ = -1;
     bool pointer_down_ = false;
