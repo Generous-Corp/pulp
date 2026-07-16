@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/audio/loop_playback_cursor.hpp>
 #include <pulp/audio/loop_reader.hpp>
 #include <pulp/audio/loop_renderer.hpp>
 #include <pulp/audio/loop_types.hpp>
@@ -8,11 +9,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <type_traits>
 #include <vector>
 
 using pulp::audio::Buffer;
 using pulp::audio::BufferView;
 using pulp::audio::LoopInterpolationMode;
+using pulp::audio::LoopPlaybackCursor;
 using pulp::audio::LoopPlaybackMode;
 using pulp::audio::LoopReader;
 using pulp::audio::LoopRenderResult;
@@ -20,6 +24,8 @@ using pulp::audio::LoopRegion;
 using pulp::audio::LoopRenderer;
 
 namespace {
+
+static_assert(std::is_trivially_copyable_v<LoopPlaybackCursor>);
 
 BufferView<const float> const_view(const Buffer<float>& buffer,
                                    std::vector<const float*>& ptrs) {
@@ -463,4 +469,239 @@ TEST_CASE("LoopRenderer hot path runs under no-allocation guard",
         result = renderer.render(input, output.view(), output.num_samples());
     }
     REQUIRE(result.rendered_frames == output.num_samples());
+}
+
+TEST_CASE("LoopPlaybackCursor matches LoopRenderer traversal coordinates",
+          "[audio][loop][cursor]") {
+    Buffer<float> source(1, 8);
+    for (std::size_t i = 0; i < source.num_samples(); ++i) {
+        source.channel(0)[i] = static_cast<float>(i + 1);
+    }
+    std::vector<const float*> ptrs;
+    const auto input = const_view(source, ptrs);
+    Buffer<float> output(1, 1);
+
+    struct Scenario {
+        LoopPlaybackMode mode;
+        bool reverse_entry;
+        double rate;
+    };
+    const Scenario scenarios[] = {
+        {LoopPlaybackMode::OneShot, false, 1.0},
+        {LoopPlaybackMode::ReverseOnce, false, 1.0},
+        {LoopPlaybackMode::Forward, false, 2.5},
+        {LoopPlaybackMode::Forward, true, 1.0},
+        {LoopPlaybackMode::Reverse, false, 1.0},
+        {LoopPlaybackMode::Reverse, true, 2.5},
+        {LoopPlaybackMode::PingPong, false, 2.5},
+        {LoopPlaybackMode::PingPong, true, 1.0},
+    };
+
+    for (const auto& scenario : scenarios) {
+        auto loop = region(1, 7);
+        loop.playback_mode = scenario.mode;
+        loop.reverse_entry = scenario.reverse_entry;
+
+        LoopPlaybackCursor cursor;
+        LoopRenderer renderer;
+        REQUIRE(cursor.set_region(loop, source.num_samples()));
+        REQUIRE(renderer.set_region(loop, source.num_samples()));
+        cursor.set_playback_rate(scenario.rate);
+        renderer.set_playback_rate(scenario.rate);
+        cursor.start();
+        renderer.start();
+
+        for (std::uint32_t frame = 0; frame < 12; ++frame) {
+            REQUIRE(renderer.position() == cursor.position());
+            REQUIRE(renderer.active() == cursor.active());
+
+            const auto plan = cursor.frame_read_plan();
+            const auto expected = cursor.active()
+                ? LoopReader::read_validated(input, loop, 0, plan.read_position)
+                : 0.0f;
+            const auto advanced = cursor.active()
+                ? cursor.advance()
+                : pulp::audio::LoopPlaybackAdvanceResult{};
+            const auto rendered = renderer.render(input, output.view(), 1);
+
+            REQUIRE(output.channel(0)[0] == expected);
+            REQUIRE(rendered.wrapped == (plan.wrapped || advanced.wrapped));
+            REQUIRE(renderer.position() == cursor.position());
+            REQUIRE(renderer.active() == cursor.active());
+        }
+    }
+}
+
+TEST_CASE("LoopPlaybackCursor exposes wrap crossfade read coordinates",
+          "[audio][loop][cursor]") {
+    auto forward = region(10, 20);
+    forward.crossfade_frames = 4;
+
+    LoopPlaybackCursor cursor;
+    REQUIRE(cursor.set_region(forward, 32));
+    cursor.set_playback_rate(4.0);
+    cursor.start();
+    for (int i = 0; i < 4; ++i) cursor.advance();
+
+    const auto forward_plan = cursor.frame_read_plan();
+    REQUIRE(forward_plan.blend);
+    REQUIRE(forward_plan.wrapped);
+    REQUIRE(forward_plan.read_position == 16.0);
+    REQUIRE(forward_plan.blend_position == 10.0);
+    REQUIRE(forward_plan.primary_gain == 1.0);
+    REQUIRE(forward_plan.blend_gain == 0.0);
+
+    auto reverse = forward;
+    reverse.playback_mode = LoopPlaybackMode::Reverse;
+    reverse.reverse_entry = true;
+    REQUIRE(cursor.set_region(reverse, 32));
+    cursor.set_playback_rate(4.0);
+    cursor.start();
+    cursor.advance();
+
+    const auto reverse_plan = cursor.frame_read_plan();
+    REQUIRE(reverse_plan.blend);
+    REQUIRE(reverse_plan.wrapped);
+    REQUIRE(reverse_plan.read_position == 15.0);
+    REQUIRE(reverse_plan.blend_position == 17.0);
+    REQUIRE(reverse_plan.primary_gain == 0.25);
+    REQUIRE(reverse_plan.blend_gain == 0.75);
+}
+
+TEST_CASE("LoopPlaybackCursor folds very large ping-pong steps",
+          "[audio][loop][cursor]") {
+    auto loop = region(0, 4);
+    loop.playback_mode = LoopPlaybackMode::PingPong;
+
+    LoopPlaybackCursor forward;
+    REQUIRE(forward.set_region(loop, 4));
+    forward.set_playback_rate(10.0);
+    forward.start();
+    const double forward_positions[] = {0.0, 2.0, 2.0, 0.0, 2.0, 2.0};
+    for (const auto expected : forward_positions) {
+        REQUIRE(forward.position() == expected);
+        REQUIRE(forward.advance().wrapped);
+    }
+
+    loop.reverse_entry = true;
+    LoopPlaybackCursor reverse;
+    REQUIRE(reverse.set_region(loop, 4));
+    reverse.set_playback_rate(10.0);
+    reverse.start();
+    const double reverse_positions[] = {3.0, 1.0, 1.0, 3.0, 1.0, 1.0};
+    for (const auto expected : reverse_positions) {
+        REQUIRE(reverse.position() == expected);
+        REQUIRE(reverse.advance().wrapped);
+    }
+}
+
+TEST_CASE("LoopPlaybackCursor preserves direction at folded ping-pong endpoints",
+          "[audio][loop][cursor]") {
+    auto loop = region(0, 4);
+    loop.playback_mode = LoopPlaybackMode::PingPong;
+
+    LoopPlaybackCursor cursor;
+    REQUIRE(cursor.set_region(loop, 4));
+    cursor.set_playback_rate(6.0);
+    cursor.start();
+    REQUIRE(cursor.advance().wrapped);
+    REQUIRE(cursor.position() == 0.0);
+    REQUIRE(cursor.step() == 6.0);
+
+    REQUIRE(cursor.set_region(loop, 4));
+    cursor.set_playback_rate(9.0);
+    cursor.start();
+    REQUIRE(cursor.advance().wrapped);
+    REQUIRE(cursor.position() == 3.0);
+    REQUIRE(cursor.step() == 9.0);
+
+    REQUIRE(cursor.set_region(loop, 4));
+    cursor.set_playback_rate(3.0);
+    cursor.start();
+    REQUIRE_FALSE(cursor.advance().wrapped);
+    REQUIRE(cursor.position() == 3.0);
+    REQUIRE(cursor.step() == 3.0);
+}
+
+TEST_CASE("LoopPlaybackCursor carries residual distance after entry turns",
+          "[audio][loop][cursor]") {
+    auto reverse_loop = region(0, 4);
+    reverse_loop.playback_mode = LoopPlaybackMode::Reverse;
+
+    LoopPlaybackCursor cursor;
+    REQUIRE(cursor.set_region(reverse_loop, 4));
+    cursor.set_playback_rate(10.0);
+    cursor.start();
+    const double reverse_positions[] = {0.0, 0.0, 2.0, 0.0, 2.0};
+    for (const auto expected : reverse_positions) {
+        REQUIRE(cursor.position() == expected);
+        REQUIRE(cursor.advance().wrapped);
+    }
+
+    auto forward_loop = region(0, 4);
+    forward_loop.playback_mode = LoopPlaybackMode::Forward;
+    forward_loop.reverse_entry = true;
+    REQUIRE(cursor.set_region(forward_loop, 4));
+    cursor.set_playback_rate(10.0);
+    cursor.start();
+    const double forward_positions[] = {3.0, 3.0, 1.0, 3.0, 1.0};
+    for (const auto expected : forward_positions) {
+        REQUIRE(cursor.position() == expected);
+        REQUIRE(cursor.advance().wrapped);
+    }
+}
+
+TEST_CASE("LoopPlaybackCursor normalizes very large steady loop steps",
+          "[audio][loop][cursor]") {
+    auto loop = region(0, 4);
+    loop.crossfade_frames = 2;
+
+    LoopPlaybackCursor cursor;
+    REQUIRE(cursor.set_region(loop, 4));
+    cursor.set_playback_rate(1001.0);
+    cursor.start();
+    const double positions[] = {0.0, 1.0, 2.0, 3.0, 0.0};
+    for (const auto expected : positions) {
+        REQUIRE(cursor.position() == expected);
+        REQUIRE(cursor.frame_read_plan().blend);
+        REQUIRE(cursor.advance().wrapped);
+    }
+}
+
+TEST_CASE("LoopPlaybackCursor preserves signed rates and rejects invalid updates",
+          "[audio][loop][cursor]") {
+    LoopPlaybackCursor cursor;
+    REQUIRE(cursor.set_region(region(0, 4), 4));
+    cursor.set_playback_rate(2.5);
+    cursor.start();
+    REQUIRE(cursor.step() == 2.5);
+
+    cursor.set_playback_rate(0.0);
+    REQUIRE(cursor.step() == 2.5);
+    cursor.set_playback_rate(-3.0);
+    REQUIRE(cursor.step() == -3.0);
+    cursor.set_playback_rate(std::numeric_limits<double>::infinity());
+    REQUIRE(cursor.step() == -3.0);
+    cursor.set_playback_rate(std::numeric_limits<double>::quiet_NaN());
+    REQUIRE(cursor.step() == -3.0);
+}
+
+TEST_CASE("LoopPlaybackCursor traversal is allocation-free",
+          "[audio][loop][cursor][rt]") {
+    auto loop = region(0, 8);
+    loop.crossfade_frames = 2;
+    loop.playback_mode = LoopPlaybackMode::PingPong;
+
+    LoopPlaybackCursor cursor;
+    REQUIRE(cursor.set_region(loop, 8));
+    cursor.set_playback_rate(2.5);
+    cursor.start();
+    {
+        pulp::runtime::ScopedNoAlloc guard;
+        for (int frame = 0; frame < 64; ++frame) {
+            (void) cursor.frame_read_plan();
+            (void) cursor.advance();
+        }
+    }
+    REQUIRE(cursor.active());
 }

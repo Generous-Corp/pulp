@@ -37,6 +37,7 @@ target_sources(pulp-audio PRIVATE
     src/live_dsp_telemetry.cpp
     src/live_dsp_telemetry_json.cpp
     src/loop_point_analyzer.cpp
+    src/loop_playback_cursor.cpp
     src/loop_reader.cpp
     src/loop_renderer.cpp
     src/loop_types.cpp

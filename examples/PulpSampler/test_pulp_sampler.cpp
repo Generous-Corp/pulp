@@ -25,6 +25,62 @@ struct PulpSamplerTestAccess {
             paused, std::memory_order_release);
         processor.streaming_.service_wake_.notify_all();
     }
+
+    static void set_reverse_prewarm_timeout(
+        PulpSamplerProcessor& processor,
+        std::chrono::milliseconds timeout) {
+        processor.streaming_.reverse_prewarm_timeout_ = timeout;
+    }
+
+    static bool streamed_tail_page_ready(
+        const PulpSamplerProcessor& processor) {
+        const auto published = processor.streaming_.published_source();
+        if (published.kind != SamplerPublishedSourceKind::Streamed ||
+            !published.streamed.valid() || published.streamed.total_frames == 0) {
+            return false;
+        }
+        const auto& stream = published.streamed.stream_source;
+        return stream.window->ready_page_for_frame(
+            published.streamed.source.source_generation,
+            published.streamed.total_frames - 1).valid;
+    }
+
+    static SamplerPublishedSourceKind published_source_kind(
+        const PulpSamplerProcessor& processor) {
+        return processor.streaming_.published_source().kind;
+    }
+
+    static bool reverse_prewarm_pending(
+        const PulpSamplerProcessor& processor) {
+        return processor.streaming_.reverse_prewarm_pending_for_test_.load(
+            std::memory_order_acquire);
+    }
+
+    static void block_next_reverse_decode(PulpSamplerProcessor& processor) {
+        processor.streaming_.reverse_decode_entered_for_test_.store(
+            false, std::memory_order_relaxed);
+        processor.streaming_.release_reverse_decode_for_test_.store(
+            false, std::memory_order_release);
+        processor.streaming_.block_next_reverse_decode_for_test_.store(
+            true, std::memory_order_release);
+    }
+
+    static bool reverse_decode_entered(
+        const PulpSamplerProcessor& processor) {
+        return processor.streaming_.reverse_decode_entered_for_test_.load(
+            std::memory_order_acquire);
+    }
+
+    static void release_reverse_decode(PulpSamplerProcessor& processor) {
+        processor.streaming_.release_reverse_decode_for_test_.store(
+            true, std::memory_order_release);
+    }
+
+    static std::uint32_t unpublished_rollback_count(
+        const PulpSamplerProcessor& processor) {
+        return processor.streaming_.unpublished_rollback_count_for_test_.load(
+            std::memory_order_acquire);
+    }
 };
 
 }  // namespace pulp::examples
@@ -910,10 +966,12 @@ TEST_CASE("PulpSampler streams continuously across the preload boundary",
     REQUIRE(preload < 24000);
 
     SamplerProcessBlock block;
+    const auto pages_before_note =
+        fixture.proc->stream_stats().pages_published;
     block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
     block.run(*fixture.proc);
     REQUIRE(wait_for_condition([&] {
-        return fixture.proc->stream_stats().pages_published > 0;
+        return fixture.proc->stream_stats().pages_published > pages_before_note;
     }));
 
     std::vector<float> rendered = block.left;
@@ -927,6 +985,113 @@ TEST_CASE("PulpSampler streams continuously across the preload boundary",
     for (std::uint64_t frame = preload - 8; frame < preload + 8; ++frame) {
         REQUIRE_THAT(rendered[static_cast<std::size_t>(frame)], WithinAbs(0.5f, 1e-6));
     }
+}
+
+TEST_CASE("PulpSampler prewarms reverse entry before publishing a stream",
+          "[sampler][stream]") {
+    TempSamplerWav wav("reverse_entry", 24000, 0.5f);
+    SamplerFixture fixture;
+
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+    REQUIRE(fixture.proc->stream_stats().preload_frames < 24000);
+    REQUIRE(PulpSamplerTestAccess::streamed_tail_page_ready(*fixture.proc));
+}
+
+TEST_CASE("PulpSampler does not publish a stream when reverse prewarm fails",
+          "[sampler][stream]") {
+    TempSamplerWav wav("reverse_entry_failure", 24000, 0.5f);
+    SamplerFixture fixture;
+    PulpSamplerTestAccess::set_reverse_prewarm_timeout(
+        *fixture.proc, std::chrono::milliseconds(5));
+    PulpSamplerTestAccess::pause_stream_dispatch(*fixture.proc, true);
+
+    REQUIRE_FALSE(fixture.proc->load_sample_file(wav.path));
+    REQUIRE(PulpSamplerTestAccess::published_source_kind(*fixture.proc) ==
+            SamplerPublishedSourceKind::Resident);
+    REQUIRE(fixture.proc->stream_stats().active_sources == 0);
+    PulpSamplerTestAccess::pause_stream_dispatch(*fixture.proc, false);
+}
+
+TEST_CASE("PulpSampler keeps the resident source published while prewarm waits",
+          "[sampler][stream]") {
+    TempSamplerWav wav("reverse_entry_ordering", 24000, 0.5f);
+    SamplerFixture fixture;
+    PulpSamplerTestAccess::set_reverse_prewarm_timeout(
+        *fixture.proc, std::chrono::seconds(2));
+    PulpSamplerTestAccess::pause_stream_dispatch(*fixture.proc, true);
+
+    std::atomic<bool> loaded{false};
+    std::thread loader([&] {
+        loaded.store(fixture.proc->load_sample_file(wav.path),
+                     std::memory_order_release);
+    });
+    const bool reached_prewarm = wait_for_condition([&] {
+        return PulpSamplerTestAccess::reverse_prewarm_pending(*fixture.proc);
+    });
+    const auto kind_while_pending =
+        PulpSamplerTestAccess::published_source_kind(*fixture.proc);
+    PulpSamplerTestAccess::pause_stream_dispatch(*fixture.proc, false);
+    loader.join();
+
+    REQUIRE(reached_prewarm);
+    REQUIRE(kind_while_pending == SamplerPublishedSourceKind::Resident);
+    REQUIRE(loaded.load(std::memory_order_acquire));
+    REQUIRE(PulpSamplerTestAccess::streamed_tail_page_ready(*fixture.proc));
+}
+
+TEST_CASE("PulpSampler reclaims an in-flight failed prewarm registration",
+          "[sampler][stream]") {
+    TempSamplerWav failed("reverse_entry_in_flight", 24000, 0.5f);
+    TempSamplerWav first("reverse_entry_reuse_a", 24000, 0.25f);
+    TempSamplerWav second("reverse_entry_reuse_b", 24000, 0.75f);
+    SamplerFixture fixture;
+    PulpSamplerTestAccess::set_reverse_prewarm_timeout(
+        *fixture.proc, std::chrono::milliseconds(20));
+    PulpSamplerTestAccess::block_next_reverse_decode(*fixture.proc);
+
+    const bool failed_load = fixture.proc->load_sample_file(failed.path);
+    const bool decode_entered =
+        PulpSamplerTestAccess::reverse_decode_entered(*fixture.proc);
+    const auto rollback_count =
+        PulpSamplerTestAccess::unpublished_rollback_count(*fixture.proc);
+    PulpSamplerTestAccess::release_reverse_decode(*fixture.proc);
+    const bool rollback_completed = wait_for_condition([&] {
+        return PulpSamplerTestAccess::unpublished_rollback_count(*fixture.proc) == 0;
+    });
+    PulpSamplerTestAccess::set_reverse_prewarm_timeout(
+        *fixture.proc, std::chrono::milliseconds(250));
+
+    REQUIRE_FALSE(failed_load);
+    REQUIRE(decode_entered);
+    REQUIRE(rollback_count == 1);
+    REQUIRE(rollback_completed);
+    REQUIRE(fixture.proc->load_sample_file(first.path));
+    REQUIRE(fixture.proc->load_sample_file(second.path));
+}
+
+TEST_CASE("PulpSampler shutdown rejects an in-flight prewarm admission",
+          "[sampler][stream]") {
+    TempSamplerWav wav("reverse_entry_shutdown", 24000, 0.5f);
+    SamplerFixture fixture;
+    PulpSamplerTestAccess::set_reverse_prewarm_timeout(
+        *fixture.proc, std::chrono::seconds(2));
+    PulpSamplerTestAccess::block_next_reverse_decode(*fixture.proc);
+
+    std::atomic<bool> load_result{true};
+    std::thread loader([&] {
+        load_result.store(fixture.proc->load_sample_file(wav.path),
+                          std::memory_order_release);
+    });
+    const bool decode_entered = wait_for_condition([&] {
+        return PulpSamplerTestAccess::reverse_decode_entered(*fixture.proc);
+    });
+    fixture.proc->release();
+    loader.join();
+
+    REQUIRE(decode_entered);
+    REQUIRE_FALSE(load_result.load(std::memory_order_acquire));
+    REQUIRE(PulpSamplerTestAccess::published_source_kind(*fixture.proc) ==
+            SamplerPublishedSourceKind::None);
 }
 
 TEST_CASE("PulpSampler reports deterministic streamed starvation",

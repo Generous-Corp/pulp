@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/audio/loop_playback_cursor.hpp>
 #include <pulp/audio/loop_reader.hpp>
 #include <pulp/audio/loop_types.hpp>
 
@@ -28,13 +29,13 @@ public:
     // Change the loop playback mode in place, preserving the current position — so a
     // sustaining voice can switch Forward<->OneShot without restarting (e.g. a LOOP
     // toggle acting on already-held notes). Does not re-arm fades or reset position.
-    void set_playback_mode(LoopPlaybackMode mode) noexcept { region_.playback_mode = mode; }
-    LoopPlaybackMode playback_mode() const noexcept { return region_.playback_mode; }
+    void set_playback_mode(LoopPlaybackMode mode) noexcept { cursor_.set_playback_mode(mode); }
+    LoopPlaybackMode playback_mode() const noexcept { return cursor_.region().playback_mode; }
     void set_start_fade_frames(std::uint64_t frames) noexcept { start_fade_frames_ = frames; }
     void set_stop_fade_frames(std::uint64_t frames) noexcept { stop_fade_frames_ = frames; }
 
-    bool active() const noexcept { return active_; }
-    double position() const noexcept { return position_; }
+    bool active() const noexcept { return cursor_.active(); }
+    double position() const noexcept { return cursor_.position(); }
 
     // Overwrite renderer for RT voice scratch buffers. Writes every frame up
     // to min(frames, destination.num_samples()) for every destination channel;
@@ -46,43 +47,17 @@ public:
                             std::uint64_t frames) noexcept;
 
 private:
-    // Per-frame wrap-crossfade descriptor. The branch decision, the read
-    // positions, and the blend gains depend only on (position, step) — not on
-    // the channel — so render() computes this ONCE per frame and every channel
-    // reuses it, instead of recomputing the equal-power cos/sin per channel.
-    struct CrossfadePlan {
-        double read_pos = 0.0;       // primary read position
-        double blend_pos = 0.0;      // wrap-target read position (blend only)
-        double primary_gain = 1.0;   // dry gain applied to read_pos
-        double blend_gain = 0.0;     // wet gain applied to blend_pos
-        bool blend = false;          // true => mix the two reads
-        bool wrapped = false;        // whether this frame crosses the loop wrap
-    };
-    CrossfadePlan compute_crossfade_plan(double position, double step) const noexcept;
     float apply_crossfade_plan(BufferView<const float> source,
                                std::uint32_t output_channel,
-                               const CrossfadePlan& plan) const noexcept;
-    double advance_position(double position, double step, bool& wrapped) noexcept;
-    void init_entry() noexcept;  // seed position + step_dir_ from the entry direction
+                               const LoopFrameReadPlan& plan) const noexcept;
     float fade_gain() noexcept;
-    double effective_step() const noexcept;
 
-    LoopRegion region_;
-    double position_ = 0.0;
-    double playback_rate_ = 1.0;
-    std::uint64_t source_frames_ = 0;
+    LoopPlaybackCursor cursor_;
     std::uint64_t start_fade_frames_ = 0;
     std::uint64_t stop_fade_frames_ = 0;
     std::uint64_t start_fade_position_ = 0;
     std::uint64_t stop_fade_position_ = 0;
-    bool active_ = false;
     bool stopping_ = false;
-    int pingpong_dir_ = 1;  // PingPong only: +1 forward, -1 backward; flips at boundaries
-    // Current travel direction for OneShot / ReverseOnce / Forward / Reverse:
-    // starts from the entry direction (reverse_entry) and, for Forward/Reverse
-    // loops, switches to the loop's steady direction once the first pass reaches
-    // the far edge (two-phase). +1 forward, -1 backward.
-    int step_dir_ = 1;
 };
 
 }  // namespace pulp::audio
