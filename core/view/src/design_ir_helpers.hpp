@@ -113,7 +113,7 @@ inline int hex_digit(char c) {
 // Parse "#rgb", "#rgba", "#rrggbb", "#rrggbbaa" → [r, g, b, a] in 0..255. The
 // short forms expand each nibble to a byte (#abc → #aabbcc); an omitted alpha
 // is opaque. Any other shape — including a CSS rgb()/rgba() token or a named
-// colour — returns nullopt for the caller to handle or skip.
+// color — returns nullopt for the caller to handle or skip.
 inline std::optional<std::array<unsigned, 4>> parse_hex_color_rgba(std::string_view value) {
     if (value.empty() || value.front() != '#') return std::nullopt;
     auto nibble = [](int v) -> unsigned { return static_cast<unsigned>((v << 4) | v); };
