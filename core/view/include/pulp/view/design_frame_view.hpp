@@ -560,7 +560,9 @@ public:
     // control in a different frame, whereas param_key is the element's stable
     // host-binding identity. A binding therefore survives a frame swap and
     // re-points at whichever element carries that key in the new frame; a key no
-    // frame declares simply reads 0. An empty key never matches.
+    // frame declares reads 0 and stays parked — it never subscribes, so a typo'd
+    // key cannot quietly pin the editor at full frame rate. An empty key never
+    // matches.
     void set_element_scalar_source(const std::string& param_key,
                                    std::shared_ptr<ScalarSource> source);
 
@@ -951,16 +953,13 @@ private:
 
     // Whether a live surface carries `key` — ParamScaleMismatch::host_has_param.
     bool host_has_param_for(const std::string& key) const;
-    // Keep every element scalar binding pointed at the reachable clock. The View
-    // base syncs its OWN two bindings non-virtually, so those survive any
-    // override; the per-element bindings live here and ride this hook, so a
-    // subclass that overrides it must chain to DesignFrameView's version or its
-    // rings quietly stop updating.
-    void on_frame_clock_changed() override;
 
     // Re-point the active frame's slot table at the bindings whose param_key the
-    // new element set declares. Called after every elements_ swap, so a binding
-    // outlives a frame change and paint stays a plain index.
+    // new element set declares, and park the rest. Called after every elements_
+    // swap, so a binding outlives a frame change and paint stays a plain index.
+    // Keeping each binding pointed at the reachable clock needs no hook here:
+    // bindings enrol with the View base, which re-points them all from its
+    // non-virtual funnel (see value_source_binding.hpp).
     void rebuild_element_scalar_slots();
 
     // Map a choice element's selected index to a normalized [0,1] value and back,

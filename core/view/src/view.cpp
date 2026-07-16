@@ -1698,9 +1698,21 @@ void View::notify_frame_clock_changed() {
 // ── Live host→view value sources ────────────────────────────────────────────
 
 void View::sync_value_bindings() {
-    if (!value_bindings_) return;
-    value_bindings_->meter.refresh();
-    value_bindings_->scalar.refresh();
+    for (FrameClockBinding* b = value_binding_head_; b; b = b->next_) b->refresh();
+}
+
+void View::register_value_binding(FrameClockBinding* b) {
+    b->next_ = value_binding_head_;
+    value_binding_head_ = b;
+}
+
+void View::unregister_value_binding(FrameClockBinding* b) {
+    for (FrameClockBinding** slot = &value_binding_head_; *slot; slot = &(*slot)->next_) {
+        if (*slot != b) continue;
+        *slot = b->next_;
+        b->next_ = nullptr;
+        return;
+    }
 }
 
 void View::set_meter_source(std::shared_ptr<MeterSource> source, int channel) {
