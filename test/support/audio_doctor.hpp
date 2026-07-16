@@ -64,6 +64,12 @@ ResponseCurve response_relative_to_input(const RenderScenario& scenario,
 /// Group delay is reported in samples at the scenario's sample rate, positive
 /// for a causal delay. Bins in a stopband are reported undefined rather than
 /// given a number read out of the noise floor — read `defined_at(hz)` first.
+/// Phase has a second, stricter gate: read `phase_defined_at(hz)` before
+/// `phase_radians_at(hz)`, because the unwrap cannot carry a branch across a
+/// stopband and so bins above one keep their group delay but lose their phase.
+/// This overload's reference is always a frame-0 impulse, whose spectrum is
+/// flat, so the gates can only ever diverge above a null the PROCESSOR
+/// produces — never because the reference had a gap.
 ///
 /// Delegates the spectral math to the buffer-level
 /// `measure_group_delay(input, output, ...)` in audio_spectrum.hpp, which

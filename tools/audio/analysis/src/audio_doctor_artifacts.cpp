@@ -131,8 +131,13 @@ std::string phase_curve_to_json(const PhaseCurve& curve,
         // both artifacts cannot conflate them.
         pt.setMember("magnitude_db_rel_peak", p.magnitude_db_rel_peak);
         pt.setMember("defined", p.defined);
-        if (p.defined) {
+        // Two gates, two flags: `phase_rad` needs an intact unwrap chain, which
+        // `defined` does not promise, so keying it off `defined` would ship a
+        // wrong-branch number under a "defined" label.
+        pt.setMember("phase_defined", p.phase_defined);
+        if (p.phase_defined)
             pt.setMember("phase_rad", p.phase_rad);
+        if (p.defined) {
             pt.setMember("group_delay_samples", p.group_delay_samples);
             if (sample_rate > 0.0)
                 pt.setMember("group_delay_seconds",

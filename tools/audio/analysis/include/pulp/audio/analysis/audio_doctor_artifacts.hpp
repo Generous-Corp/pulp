@@ -38,11 +38,15 @@ std::string thd_to_json(const ThdResult& thd, std::string_view scenario);
 
 /// Serialize a phase/group-delay curve to a JSON string.
 ///
-/// Undefined points (stopband — see `PhaseCurve`) carry `"defined": false` and
-/// **omit** `phase_rad` / `group_delay_samples` / `group_delay_seconds`
-/// entirely: their in-memory value is NaN, which JSON cannot represent, and
-/// writing a placeholder would hand a reader a number the analyzer never
-/// measured. Read `defined` before reaching for the delay fields.
+/// A point carries the two gates `PhaseCurve` defines — `"defined"` and the
+/// stricter `"phase_defined"` — and **omits** the field each one gates when it
+/// is false: `group_delay_samples` / `group_delay_seconds` under `defined`,
+/// `phase_rad` under `phase_defined`. Their in-memory value is NaN, which JSON
+/// cannot represent, and writing a placeholder would hand a reader a number the
+/// analyzer never measured. A stopband point omits all three; a `defined` point
+/// above a gap in the reference spectrum carries the delay pair and omits
+/// `phase_rad`. Read the matching gate before reaching for a field — or just
+/// test presence, which says the same thing.
 ///
 /// The magnitude key is `magnitude_db_rel_peak`, not the `.response.json`
 /// artifact's `magnitude_db`, because the two are different quantities: this

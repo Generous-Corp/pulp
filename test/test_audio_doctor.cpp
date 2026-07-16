@@ -294,6 +294,37 @@ DelaySpread delay_spread(const PhaseCurve& curve, double expected, double lo_hz,
     return s;
 }
 
+// Reference and output for a pure z^-delay transfer, built directly as buffers
+// so the transfer is exact by construction rather than rendered. The reference
+// is an impulse train of the given `period`, whose spectrum is nonzero only
+// every fft_length/period bins: `period == fft_length` is the single impulse
+// at frame 0 that excites EVERY bin, and any shorter period leaves the analyzer
+// a GAPPED reference to unwrap across. The shift is circular, so H is exactly
+// e^(-j2πk·delay/fft_length) at every excited bin — no truncation, no
+// windowing, no approximation.
+std::pair<pulp::audio::Buffer<float>, pulp::audio::Buffer<float>>
+make_delayed_train(int fft_length, int period, int delay) {
+    pulp::audio::Buffer<float> reference(1, fft_length);
+    pulp::audio::Buffer<float> output(1, fft_length);
+    reference.clear();
+    output.clear();
+    auto* r = reference.channel(0).data();
+    auto* o = output.channel(0).data();
+    for (int n = 0; n < fft_length; n += period) {
+        r[n] = 1.0f;
+        o[(n + delay) % fft_length] = 1.0f;
+    }
+    return {std::move(reference), std::move(output)};
+}
+
+// True unwrapped phase of a pure delay of `delay` samples at `bin`: the
+// transfer is e^(-j2πk·delay/N), so φ(k) = -2πk·delay/N — monotonic and
+// unbounded, which is exactly what an unwrap must reconstruct from wrapped
+// atan2 output.
+double pure_delay_phase(int bin, int delay, int fft_length) {
+    return -2.0 * std::numbers::pi * delay * bin / fft_length;
+}
+
 RenderScenario lowpass_scenario(const char* name, float cutoff_hz) {
     // Input/duration are overridden by the analyzer (it drives the impulse).
     return RenderScenario(create_pulp_effect)
@@ -912,6 +943,180 @@ TEST_CASE("Doctor: group delay reports a near-silent output as undefined",
     CHECK_FALSE(curve.defined_at(1000.0));
     CHECK(std::isnan(curve.group_delay_samples_at(1000.0)));
     CHECK(std::isnan(curve.phase_radians_at(1000.0)));
+}
+
+TEST_CASE("Doctor: group delay reports true unwrapped phase",
+          "[audio][doctor][group-delay]") {
+    // The positive half of the phase contract: when `phase_defined` says the
+    // unwrap is trustworthy, the number must actually BE the phase. A gate that
+    // only ever rejects is satisfied by an analyzer that reports nothing; this
+    // is what stops `phase_defined` from being vacuous.
+    //
+    // Ground truth: a pure delay of kDelay samples. |H| = 1 at every bin, so
+    // nothing is gated and the unwrap walks the whole band unbroken; the true
+    // phase is -2πk·kDelay/N, which sweeps well past ±π and so is a real
+    // unwrap, not a wrap-free special case. Determinism contract: buffers built
+    // directly (no render), rectangular window, offset 0. Tolerance class:
+    // numeric — the assertion below is 1e-12, against ~1.8e-15 observed.
+    constexpr int kFft = 1024;
+    constexpr int kDelay = 3;
+    // period == kFft: one impulse at frame 0, so every bin is excited.
+    auto [reference, output] = make_delayed_train(kFft, /*period=*/kFft, kDelay);
+
+    GroupDelayOptions opts;
+    opts.fft_length = kFft;
+    const double checkpoints[] = {1000.0};
+    const auto curve = measure_group_delay(
+        std::as_const(reference).view(), std::as_const(output).view(),
+        kSampleRate, checkpoints, opts);
+
+    // An all-pass transfer gates nothing, so both flags hold everywhere. If
+    // this fails the gate is over-rejecting and the phase assertions below are
+    // passing vacuously.
+    int defined_bins = 0;
+    int phase_defined_bins = 0;
+    for (const auto& p : curve.full) {
+        if (p.defined)
+            ++defined_bins;
+        if (p.phase_defined)
+            ++phase_defined_bins;
+    }
+    INFO("defined " << defined_bins << ", phase_defined " << phase_defined_bins
+                    << " of " << curve.full.size());
+    CHECK(defined_bins == static_cast<int>(curve.full.size()));
+    CHECK(phase_defined_bins == static_cast<int>(curve.full.size()));
+
+    // Every bin's unwrapped phase equals the closed form — including the bins
+    // many 2π branches down, which is what the accumulated offset exists for.
+    double worst_error = 0.0;
+    int worst_bin = 0;
+    for (std::size_t k = 0; k < curve.full.size(); ++k) {
+        const double error =
+            std::abs(curve.full[k].phase_rad -
+                     pure_delay_phase(static_cast<int>(k), kDelay, kFft));
+        if (error > worst_error) {
+            worst_error = error;
+            worst_bin = static_cast<int>(k);
+        }
+    }
+    INFO("worst phase error " << worst_error << " rad at bin " << worst_bin
+                              << " (true phase there "
+                              << pure_delay_phase(worst_bin, kDelay, kFft)
+                              << " rad)");
+    CHECK(worst_error < 1e-12);
+
+    // The accessor agrees with the curve, and the phase it returns is the
+    // unwrapped branch rather than the wrapped one atan2 would hand back.
+    const int bin_1k = static_cast<int>(std::lround(1000.0 / curve.bin_hz));
+    REQUIRE(curve.phase_defined_at(1000.0));
+    CHECK_THAT(curve.phase_radians_at(1000.0),
+               Catch::Matchers::WithinAbs(pure_delay_phase(bin_1k, kDelay, kFft),
+                                          1e-12));
+    // Nyquist is the deepest branch in the curve: -π·kDelay, i.e. kDelay/2 full
+    // turns from DC. A wrapped reading could not tell it from -π·(kDelay mod 2).
+    CHECK_THAT(curve.full.back().phase_rad,
+               Catch::Matchers::WithinAbs(-std::numbers::pi * kDelay, 1e-12));
+}
+
+TEST_CASE("Doctor: group delay refuses phase the unwrap could not reach",
+          "[audio][doctor][group-delay]") {
+    // The two gates are not the same gate, and this is the case that separates
+    // them. Group delay is a per-bin estimate — a bin with energy has one.
+    // Unwrapped phase is accumulated by walking from DC, so it is only as good
+    // as the bins BELOW it, and no per-bin test can see that.
+    //
+    // Stimulus: an impulse train of period 16 as the reference, so the
+    // reference spectrum is nonzero only every kFft/16 = 64 bins and the
+    // analyzer must unwrap across 63-bin gaps of pure absence. The output is
+    // the same train circularly delayed by kDelay, so the transfer is exactly
+    // z^-kDelay: every excited bin has full magnitude and a group delay of
+    // exactly kDelay, and the ONLY thing wrong with those bins is that the
+    // unwrap could not carry a branch to them.
+    //
+    // Without the chain gate this curve reports `defined = true` with phase off
+    // by a whole 2π at bin 192 and 4π at bin 512 — a fabricated `arg({0,0}) =
+    // 0` at each absent bin resets the accumulated offset. Tolerance class:
+    // exact for the gates (boolean) and for group delay's independence of them.
+    constexpr int kFft = 1024;
+    constexpr int kDelay = 3;
+    constexpr int kPeriod = 16;
+    constexpr int kSpacing = kFft / kPeriod; // 64: bins the reference excites
+    auto [reference, output] = make_delayed_train(kFft, kPeriod, kDelay);
+
+    GroupDelayOptions opts;
+    opts.fft_length = kFft;
+    // 9 kHz is bin 192 at this rate and length — an EXCITED bin two gaps up,
+    // so the accessors below exercise defined-but-unreachable, not a plain
+    // stopband. Checked, not assumed, right below.
+    constexpr double kExcitedHz = 9000.0;
+    const double checkpoints[] = {kExcitedHz};
+    const auto curve = measure_group_delay(
+        std::as_const(reference).view(), std::as_const(output).view(),
+        kSampleRate, checkpoints, opts);
+
+    // Group delay survives the gaps intact — it never consults the unwrap, so
+    // a gapped reference costs it nothing. This is the half that must NOT be
+    // thrown away by gating phase.
+    int measured_bins = 0;
+    for (int bin = kSpacing; bin < static_cast<int>(curve.full.size());
+         bin += kSpacing) {
+        const auto& p = curve.full[static_cast<std::size_t>(bin)];
+        INFO("bin " << bin << ": defined=" << p.defined << " group_delay="
+                    << p.group_delay_samples << " phase_defined="
+                    << p.phase_defined);
+        REQUIRE(p.defined);
+        CHECK_THAT(p.group_delay_samples,
+                   Catch::Matchers::WithinAbs(kDelay, 1e-9));
+        ++measured_bins;
+    }
+    CHECK(measured_bins > 1); // the walk really did cross gaps
+
+    // Phase does not. Every excited bin above the first gap is `defined` — it
+    // has a real measurement — yet its phase is unreachable, so it must be
+    // NaN and flagged, not a plausible wrong branch under a truthful-looking
+    // `defined`.
+    for (int bin = 2 * kSpacing; bin < static_cast<int>(curve.full.size());
+         bin += kSpacing) {
+        const auto& p = curve.full[static_cast<std::size_t>(bin)];
+        INFO("bin " << bin << " (defined=" << p.defined << ")");
+        CHECK_FALSE(p.phase_defined);
+        CHECK(std::isnan(p.phase_rad));
+    }
+
+    // The two flags disagree here, which is the whole point: `defined` is not a
+    // license to read `phase_rad`. Were they interchangeable this lane would
+    // not need both.
+    constexpr int kGappedBin = 3 * kSpacing; // 192
+    REQUIRE(std::lround(kExcitedHz / curve.bin_hz) == kGappedBin);
+    const auto& gapped = curve.full[kGappedBin];
+    REQUIRE(gapped.defined);
+    CHECK_FALSE(gapped.phase_defined);
+
+    // `phase_defined` implies `defined` — never the converse — everywhere.
+    for (const auto& p : curve.full) {
+        if (p.phase_defined)
+            CHECK(p.defined);
+        if (!p.phase_defined)
+            CHECK(std::isnan(p.phase_rad));
+    }
+
+    // The accessors carry the same split, so a caller who only ever touches
+    // the curve through them cannot read a branch the analyzer never resolved.
+    CHECK(curve.defined_at(kExcitedHz));
+    CHECK_FALSE(curve.phase_defined_at(kExcitedHz));
+    CHECK(std::isnan(curve.phase_radians_at(kExcitedHz)));
+    CHECK(std::isfinite(curve.group_delay_samples_at(kExcitedHz)));
+
+    // The artifact must not serialize the branch it refused in memory, while
+    // still publishing the group delay it did measure.
+    const auto parsed = choc::json::parse(
+        phase_curve_to_json(curve, "doctor.group-delay-gapped-reference"));
+    REQUIRE(parsed["curve"].isArray());
+    const auto point = parsed["curve"][kGappedBin];
+    CHECK(point["defined"].getWithDefault<bool>(false));
+    CHECK_FALSE(point["phase_defined"].getWithDefault<bool>(true));
+    CHECK_FALSE(point.hasObjectMember("phase_rad"));
+    CHECK(point.hasObjectMember("group_delay_samples"));
 }
 
 TEST_CASE("Doctor: group-delay artifact round-trips",

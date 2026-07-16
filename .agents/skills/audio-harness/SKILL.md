@@ -63,7 +63,7 @@ signal generators → scenarios → contracts → doctor
 | Generators | `"support/audio_test_signals.hpp"`, `"support/audio_signal_generators.hpp"` | test | Deterministic stimulus: sine/square/saw, impulse(+train), step, DC, multi-sine, swept sine, seeded white/pink/brown noise, stepped automation + MIDI note scripts. No clocks, no `random_device`. |
 | Scenarios | `"support/render_scenario.hpp"` | test | `RenderScenario` builder over HeadlessHost (factory, sample rate, block size, channels, duration, input/MIDI/param scripts); `render()` → `ScenarioResult`. `run_matrix()` (SR × block sweeps) + `assert_block_partition_invariant()`. |
 | Contracts | `"support/audio_contracts.hpp"` | test | `AudioContract` — a named claim + scenario + accumulated `CheckResult`s; failures read `contract '<name>': ...`. Family helpers `expect_{passthrough,silence_preserved,tone,finite_and_unclipped}`. |
-| Doctor (offline) | `"support/audio_doctor.hpp"` | test | The **scenario-driven** entry points: `response_relative_to_input(scenario, …)`, `measure_thd(scenario, …)`, and `measure_group_delay(scenario, …)` synthesize the stimulus, drive the `Processor`, and delegate the math to `audio_spectrum.hpp`. It re-exports that header's result types, so a test that includes it needs nothing else. |
+| Doctor (offline) | `"support/audio_doctor.hpp"` | test | The **scenario-driven** entry points: `response_relative_to_input(scenario, …)`, `measure_thd(scenario, …)`, and `measure_group_delay(scenario, …)` (its results gated by `defined_at(hz)` for group delay and the stricter `phase_defined_at(hz)` for phase) synthesize the stimulus, drive the `Processor`, and delegate the math to `audio_spectrum.hpp`. It re-exports that header's result types, so a test that includes it needs nothing else. |
 
 Two traps this table exists to prevent:
 
@@ -133,13 +133,16 @@ REQUIRE(curve.attenuation_db_at(8000.0) >= 20.0);   // "drops ≥20 dB at 8 kHz"
 auto thd = measure_thd(sc, /*fundamental_hz=*/999.0); // steady bin-coherent sine
 // thd.thd_percent(), thd.thd_plus_n, thd.harmonics[...]
 
-// Phase / group delay. ALWAYS gate on defined_at() first: a stopband has no
-// phase to measure, so the analyzer reports it undefined and the accessors
-// return NaN rather than a number read out of the noise floor.
+// Phase / group delay. ALWAYS gate first: a stopband has no phase to measure,
+// so the analyzer reports it undefined and the accessors return NaN rather than
+// a number read out of the noise floor. TWO gates, and they are not the same —
+// defined_at() qualifies group delay, phase_defined_at() qualifies phase.
 auto gd = measure_group_delay(sc, {100.0, 8000.0});
 if (gd.defined_at(100.0))
     REQUIRE(gd.group_delay_samples_at(100.0) < 8.0); // "≤ 8 samples latency"
-// gd.group_delay_seconds_at(hz), gd.phase_radians_at(hz)
+if (gd.phase_defined_at(100.0))                      // STRICTER — see below
+    REQUIRE(gd.phase_radians_at(100.0) < 0.0);
+// gd.group_delay_seconds_at(hz)
 // gd.magnitude_db_rel_peak_at(hz) — peak-relative, NOT the absolute out/in
 // ratio that ResponseCurve::magnitude_db_at returns. The two curves use
 // different names for this reason; a +12 dB passband reads +12 there and 0 here.
@@ -191,9 +194,22 @@ FFT(n·x[n])`) rather than differencing an unwrapped phase curve: it needs no
 unwrapping, has no frequency step to tune, and is exact for any impulse response
 that fits inside the rectangular analysis window. Budget `fft_length` so the IR
 has decayed within it — a truncated IR is the one real error source, and the
-analyzer will faithfully report the delay of the *truncated* signal. Reported
-`phase_rad` IS unwrapped, and unlike the group delay it carries an unresolved
-2πk ambiguity above a deep stopband null.
+analyzer will faithfully report the delay of the *truncated* signal.
+
+**`phase_defined` is stricter than `defined`, and you want the strict one for
+phase.** Reported `phase_rad` IS unwrapped, and unwrapping is a walk from DC
+upward — so a bin's phase is only as trustworthy as every bin *below* it, and
+past a stopband null or a gap in the reference spectrum the accumulated offset
+lands on an unresolved 2πk branch. `defined` cannot see that: it asks only
+whether *this* bin has energy, which is the whole precondition for group delay
+(estimated per bin, never consulting the unwrap) and not nearly enough for
+phase. So a bin can be `defined` — carrying a real, correct group delay — while
+its phase is unreachable. `phase_defined` is the gate that says so, and
+`phase_radians_at()` is NaN wherever it is false. Expect exactly this on a
+band-limited or gapped reference: full group delay across the band, phase only
+up to the first gap. (The separate aliasing bound — phase unwraps correctly only
+while `group_delay < fft_length / 2` — is *not* gated: per bin the analyzer
+cannot tell an aliased phase from a true one, so it is your budgeting duty.)
 
 **`defined` is not only a stopband test — it also rejects a near-silent
 output.** The estimator divides by `|X|²`, so it has an energy floor of its own
