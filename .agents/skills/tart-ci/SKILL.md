@@ -67,6 +67,13 @@ Pulp's `darwin-x64` release leg is native on GitHub's `macos-15-intel` (slow, ni
 - **Immutable, expensive-to-build deps → baked into the golden (CoW-shared, ~free per clone).** Skia + Dawn are prebuilt static libs (`libskia.a`, `libdawn_combined.a`, ~385 MB) baked at `~/pulp-skia-build`; `SKIA_DIR` points there. They are *never* recompiled.
 - **Mutable, growing caches → host-mounted via virtio-fs.** ccache (warm across clones — measured cold→warm 0.6%→88%) and FetchContent sources. Keep `CCACHE_TEMPDIR` **in-guest** (cross-fs rename onto virtio-fs breaks ccache); `CCACHE_BASEDIR` normalizes paths; guest `admin` is uid 501 == host primary user so the shared ccache is writable both ways.
 
+### ccache correctness on a shared, many-worktree cache — the #3504 combo
+A host that runs 100+ worktrees off one `.git` against one shared ccache is **cold by construction** unless paths are normalized AND depend mode is off. Two failure modes to keep straight:
+- **Cold cache, a perf loss:** no `base_dir` + `hash_dir=true` → every worktree keys on its own absolute path, so nothing hits. Fix: `base_dir=<common worktree parent>` + `hash_dir=false` so a hit compiled in one workspace serves another.
+- **Corruption, a correctness scar — this is #3504:** depend mode via `CCACHE_DEPEND`/`depend_mode=true` with the default mtime compiler keying on a *shared* cache serves a stale/false-hit object that corrupts unrelated TUs — a pure function returns `""` and change-unrelated tests fail while clean local Debug+Release pass. Fix: **depend mode OFF** plus `compiler_check=content`. Direct mode stays on: fast and correct once depend is off.
+
+These live in the versioned scripts so hosts converge, not just in one host's live config: `tools/ci/bootstrap-macos-host.sh` `tune_ccache()` writes them into the shared `$CCACHE_DIR/ccache.conf` (base_dir derived from the CI work root, never a hardcoded home), and `tools/ci/pulp-worktree.sh` `cache_env()` emits `CCACHE_NODEPEND=true` + `CCACHE_COMPILERCHECK=content` for the shipyard/worktree lane. `.github/workflows/build.yml` forces the same combo via job env for the GH-runner lane. Never turn depend mode back on for speed.
+
 ## GPU works in the guest (no hybrid lane needed)
 Apple Virtualization provides Metal in the guest **even with `--no-graphics`**. Verified: `pulp-screenshot --backend skia` renders a real Skia/Metal PNG, `nm pulp-ui-preview | grep MacGpuWindowHost` = present. So the full mac lane (build + GPU + tests) runs in-VM.
 
