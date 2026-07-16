@@ -1,0 +1,317 @@
+{
+  "$schema_version": 1,
+  "$comment": "Cross-language conformance vectors for stable_anchor_id. ONE source of truth consumed by BOTH core/view/src/anchor_strategy.cpp (via test/test_design_import_anchors.cpp) and packages/pulp-import-ir/src/anchors.ts (via packages/pulp-import-ir/test/anchors.test.ts). Both headers claim the two implementations mirror each other exactly. For ASCII they do. For non-ASCII text they DO NOT, and this file is the evidence: `cpp_anchor` and `ts_anchor` are both recorded, and every vector where they differ carries `known_divergence`. A pulp-tweaks.json keyed by one pipeline silently fails to match in the other for those vectors — the TS applyTweaks records orphaned_tweaks, the C++ side just does not apply the edit, and the user sees their edit stop sticking with no error.",
+  "$divergence_axes": {
+    "utf8-vs-utf16": "The FNV-1a fold consumes different units. C++ fnv1a_base36() iterates `char` and folds each UTF-8 BYTE; the TS hashCodeAsString() uses str.charCodeAt(i) and folds each UTF-16 CODE UNIT. 'o with diaeresis' is one 0x00F6 code unit in TS but two bytes (0xC3 0xB6) in C++, so the two hashes diverge for any text outside ASCII. Proven in isolation by nonascii-umlaut-lowercase, which involves no case mapping and no whitespace.",
+    "ascii-only-case-folding": "TS normalizes with String.prototype.toLowerCase(), which is full-Unicode. C++ normalize_text() lowercases only A-Z by construction. Proven by the pair nonascii-umlaut-{lower,upper}case: TS produces the SAME anchor for both (it folds the capital), C++ produces two DIFFERENT anchors.",
+    "ascii-only-whitespace-class": "TS normalizes with /\\s+/, whose class includes U+00A0 NBSP, U+000B, U+000C, U+2028/9 and the Unicode space separators. C++ normalize_text() recognizes only space, tab, CR and LF. Proven by the pair ascii-plain-space-control / nonascii-nbsp-whitespace: TS collapses the NBSP and lands on the plain-space anchor, C++ keeps the raw NBSP bytes and lands elsewhere."
+  },
+  "$expected_values_generated_from": "core/view/src/anchor_strategy.cpp — the C++ implementation is the RECORDED REFERENCE here purely because it is the pipeline the shipped native importer runs. That is a description of today's behavior, NOT a ruling that UTF-8 bytes are the canonical encoding. Choosing the canonical side is a human decision: either choice re-keys every existing pulp-tweaks.json that contains non-ASCII text, so the fix is a deliberate, migration-bearing change and is intentionally out of scope for this harness. This file exists to make the drift provable and impossible to merge over silently.",
+  "$regenerate": "These vectors are asserted, not derived — regenerate only when you INTEND to change anchor output. Recompute cpp_anchor by calling pulp::view::compute_anchor_id() over each `input`, and ts_anchor by calling generateAnchorId() from @pulp/import-ir, then re-run both suites.",
+  "vectors": [
+    {
+      "name": "ascii-button-ok",
+      "strategy": "content-hash",
+      "note": "ASCII control — plain label.",
+      "input": {
+        "tag": "button",
+        "role": "",
+        "text": "OK",
+        "depth": 0,
+        "sig_index": 0
+      },
+      "cpp_anchor": "1h4elo4",
+      "ts_anchor": "1h4elo4",
+      "known_divergence": null
+    },
+    {
+      "name": "ascii-uppercase-folds",
+      "strategy": "content-hash",
+      "note": "ASCII control — both sides lowercase A-Z identically.",
+      "input": {
+        "tag": "text",
+        "role": "",
+        "text": "HELLO",
+        "depth": 1,
+        "sig_index": 0
+      },
+      "cpp_anchor": "1t8o4t2",
+      "ts_anchor": "1t8o4t2",
+      "known_divergence": null
+    },
+    {
+      "name": "ascii-whitespace-collapses",
+      "strategy": "content-hash",
+      "note": "ASCII control — runs of space/tab/newline collapse to one space, then trim.",
+      "input": {
+        "tag": "text",
+        "role": "",
+        "text": "  Hello   World \n ",
+        "depth": 2,
+        "sig_index": 0
+      },
+      "cpp_anchor": "4w3krr",
+      "ts_anchor": "4w3krr",
+      "known_divergence": null
+    },
+    {
+      "name": "ascii-empty-text",
+      "strategy": "content-hash",
+      "note": "ASCII control — empty text.",
+      "input": {
+        "tag": "frame",
+        "role": "",
+        "text": "",
+        "depth": 0,
+        "sig_index": 0
+      },
+      "cpp_anchor": "beawxf",
+      "ts_anchor": "beawxf",
+      "known_divergence": null
+    },
+    {
+      "name": "ascii-with-role-and-sig-index",
+      "strategy": "content-hash",
+      "note": "ASCII control — exercises role + depth + duplicate-sibling discriminator.",
+      "input": {
+        "tag": "div",
+        "role": "slider",
+        "text": "Volume",
+        "depth": 3,
+        "sig_index": 2
+      },
+      "cpp_anchor": "1oiprxj",
+      "ts_anchor": "1oiprxj",
+      "known_divergence": null
+    },
+    {
+      "name": "nonascii-umlaut-lowercase",
+      "strategy": "content-hash",
+      "note": "Already-lowercase o-umlaut. Isolates the FNV input-encoding axis from the case-folding axis: no case mapping is involved, so any divergence here is purely UTF-8 bytes vs UTF-16 code units.",
+      "input": {
+        "tag": "text",
+        "role": "",
+        "text": "öl",
+        "depth": 0,
+        "sig_index": 0
+      },
+      "cpp_anchor": "ly2do6",
+      "ts_anchor": "19mhlsj",
+      "known_divergence": "utf8-vs-utf16",
+      "divergence_axes": [
+        "utf8-vs-utf16"
+      ]
+    },
+    {
+      "name": "nonascii-umlaut-uppercase",
+      "strategy": "content-hash",
+      "note": "Uppercase O-umlaut. Compounds two axes: TS toLowerCase() folds it to o-umlaut, C++ ASCII-only fold leaves it uppercase, and then the two hash different encodings.",
+      "input": {
+        "tag": "text",
+        "role": "",
+        "text": "Öl",
+        "depth": 0,
+        "sig_index": 0
+      },
+      "cpp_anchor": "1eu0lli",
+      "ts_anchor": "19mhlsj",
+      "known_divergence": "utf8-vs-utf16",
+      "divergence_axes": [
+        "utf8-vs-utf16",
+        "ascii-only-case-folding"
+      ]
+    },
+    {
+      "name": "nonascii-degree-sign",
+      "strategy": "content-hash",
+      "note": "Degree sign — extremely common in audio-plugin knob labels.",
+      "input": {
+        "tag": "text",
+        "role": "",
+        "text": "90°",
+        "depth": 1,
+        "sig_index": 0
+      },
+      "cpp_anchor": "1plhw7r",
+      "ts_anchor": "1j28fi9",
+      "known_divergence": "utf8-vs-utf16",
+      "divergence_axes": [
+        "utf8-vs-utf16"
+      ]
+    },
+    {
+      "name": "nonascii-trademark",
+      "strategy": "content-hash",
+      "note": "Trademark sign — 3 UTF-8 bytes, 1 UTF-16 code unit.",
+      "input": {
+        "tag": "text",
+        "role": "",
+        "text": "Pulp™",
+        "depth": 1,
+        "sig_index": 0
+      },
+      "cpp_anchor": "18bza23",
+      "ts_anchor": "1gebl1",
+      "known_divergence": "utf8-vs-utf16",
+      "divergence_axes": [
+        "utf8-vs-utf16"
+      ]
+    },
+    {
+      "name": "nonascii-cjk",
+      "strategy": "content-hash",
+      "note": "CJK (Japanese 'volume') — 3 UTF-8 bytes per char, 1 UTF-16 code unit per char.",
+      "input": {
+        "tag": "text",
+        "role": "",
+        "text": "音量",
+        "depth": 2,
+        "sig_index": 0
+      },
+      "cpp_anchor": "fcc0j1",
+      "ts_anchor": "tkq93h",
+      "known_divergence": "utf8-vs-utf16",
+      "divergence_axes": [
+        "utf8-vs-utf16"
+      ]
+    },
+    {
+      "name": "nonascii-emoji-surrogate-pair",
+      "strategy": "content-hash",
+      "note": "Control-knob emoji U+1F39B — 4 UTF-8 bytes, and a UTF-16 SURROGATE PAIR (2 code units). Worst case for the encoding split.",
+      "input": {
+        "tag": "text",
+        "role": "",
+        "text": "🎛",
+        "depth": 2,
+        "sig_index": 0
+      },
+      "cpp_anchor": "10wp7yd",
+      "ts_anchor": "1ro2f6y",
+      "known_divergence": "utf8-vs-utf16",
+      "divergence_axes": [
+        "utf8-vs-utf16"
+      ]
+    },
+    {
+      "name": "ascii-plain-space-control",
+      "strategy": "content-hash",
+      "note": "Regular ASCII space between two letters. Paired with nonascii-nbsp-whitespace to prove the whitespace-class axis: TS collapses NBSP to a plain space (so its NBSP anchor equals THIS anchor), while C++ keeps the raw NBSP bytes (so its NBSP anchor does not).",
+      "input": {
+        "tag": "text",
+        "role": "",
+        "text": "A B",
+        "depth": 0,
+        "sig_index": 0
+      },
+      "cpp_anchor": "1ecsnc",
+      "ts_anchor": "1ecsnc",
+      "known_divergence": null
+    },
+    {
+      "name": "nonascii-nbsp-whitespace",
+      "strategy": "content-hash",
+      "note": "Non-breaking space between two ASCII letters. Third divergence axis: the TS /\\s+/ regex treats NBSP as whitespace and collapses it to a plain space; the C++ normalizer only recognizes space/tab/CR/LF and passes NBSP through as two literal bytes.",
+      "input": {
+        "tag": "text",
+        "role": "",
+        "text": "A B",
+        "depth": 0,
+        "sig_index": 0
+      },
+      "cpp_anchor": "1pqbb00",
+      "ts_anchor": "1ecsnc",
+      "known_divergence": "utf8-vs-utf16",
+      "divergence_axes": [
+        "utf8-vs-utf16",
+        "ascii-only-whitespace-class"
+      ]
+    },
+    {
+      "name": "nonascii-tag-name",
+      "strategy": "content-hash",
+      "note": "Non-ASCII in the TAG rather than the text — tags are never normalized, so this isolates the encoding axis in a second field.",
+      "input": {
+        "tag": "boïte",
+        "role": "",
+        "text": "ok",
+        "depth": 0,
+        "sig_index": 0
+      },
+      "cpp_anchor": "4wrqay",
+      "ts_anchor": "ldhw1v",
+      "known_divergence": "utf8-vs-utf16",
+      "divergence_axes": [
+        "utf8-vs-utf16"
+      ]
+    },
+    {
+      "name": "path-nested",
+      "strategy": "path",
+      "note": "Path strategy is pure string concatenation — no hashing, so encoding cannot matter. Serves as a cross-language control proving the harness is not simply reporting 'everything diverges'.",
+      "input": {
+        "tag": "button",
+        "role": "",
+        "text": "",
+        "depth": 2,
+        "sig_index": 0,
+        "parent_anchor": "frame[0]/row[1]",
+        "sibling_tag_index": 3
+      },
+      "cpp_anchor": "frame[0]/row[1]/button[3]",
+      "ts_anchor": "frame[0]/row[1]/button[3]",
+      "known_divergence": null
+    },
+    {
+      "name": "path-nonascii-tag",
+      "strategy": "path",
+      "note": "Non-ASCII tag under the path strategy — MUST agree across languages precisely because no hash is involved.",
+      "input": {
+        "tag": "boïte",
+        "role": "",
+        "text": "",
+        "depth": 1,
+        "sig_index": 0,
+        "parent_anchor": "frame[0]",
+        "sibling_tag_index": 0
+      },
+      "cpp_anchor": "frame[0]/boïte[0]",
+      "ts_anchor": "frame[0]/boïte[0]",
+      "known_divergence": null
+    },
+    {
+      "name": "adapter-figma",
+      "strategy": "adapter",
+      "note": "Adapter strategy — pure concatenation control.",
+      "input": {
+        "tag": "frame",
+        "role": "",
+        "text": "",
+        "depth": 0,
+        "sig_index": 0,
+        "adapter": "figma",
+        "source_node_id": "0:42"
+      },
+      "cpp_anchor": "figma:0:42",
+      "ts_anchor": "figma:0:42",
+      "known_divergence": null
+    },
+    {
+      "name": "adapter-nonascii-source-id",
+      "strategy": "adapter",
+      "note": "Non-ASCII native id under the adapter strategy — control; must agree.",
+      "input": {
+        "tag": "frame",
+        "role": "",
+        "text": "",
+        "depth": 0,
+        "sig_index": 0,
+        "adapter": "figma",
+        "source_node_id": "nœud:7"
+      },
+      "cpp_anchor": "figma:nœud:7",
+      "ts_anchor": "figma:nœud:7",
+      "known_divergence": null
+    }
+  ]
+}

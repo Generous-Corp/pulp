@@ -113,9 +113,12 @@ target_compile_definitions(pulp-test-design-import-react-runtime PRIVATE PULP_RE
 catch_discover_tests(pulp-test-design-import-react-runtime
     PROPERTIES LABELS "parser-import")
 
-# stable_anchor_id assignment for imported design nodes.
+# stable_anchor_id assignment for imported design nodes. PULP_REPO_ROOT lets
+# the cross-language conformance cases read test/fixtures/anchor_vectors.json,
+# the shared vector table the @pulp/import-ir vitest suite reads too.
 add_executable(pulp-test-design-import-anchors test_design_import_anchors.cpp)
 target_link_libraries(pulp-test-design-import-anchors PRIVATE pulp::view Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-design-import-anchors PRIVATE PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-design-import-anchors
     PROPERTIES LABELS "parser-import")
 
