@@ -100,4 +100,15 @@ std::string StateStoreHostParamSurface::do_param_display_text(std::string_view k
     return std::string(buf);
 }
 
+int StateStoreHostParamSurface::do_param_step_count(std::string_view key) {
+    auto id = resolver_(key);
+    if (!id) return 0;  // unknown key: no index domain
+    const state::ParamInfo* info = store_.info(*id);
+    if (!info) return 0;
+    // param_value_count is the single source of truth for discrete cardinality
+    // and already yields 0 for a continuous parameter, which is exactly this
+    // accessor's "no index domain" signal.
+    return static_cast<int>(state::param_value_count(*info));
+}
+
 } // namespace pulp::view

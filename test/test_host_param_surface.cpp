@@ -149,6 +149,226 @@ TEST_CASE("StateStoreHostParamSurface round-trips through the store", "[view][ho
     }
 }
 
+TEST_CASE("param_step_count reports the parameter's own value cardinality",
+          "[view][host-param][state]") {
+    state::StateStore store;
+
+    state::ParamInfo cutoff;              // continuous
+    cutoff.id = 1;
+    cutoff.name = "cutoff";
+    cutoff.range = state::ParamRange::linear(20.0f, 20000.0f, 440.0f);
+    store.add_parameter(cutoff);
+
+    state::ParamInfo waveform;            // 6-way enum, labeled
+    waveform.id = 2;
+    waveform.name = "lfo_waveform";
+    waveform.kind = state::ParamKind::Enum;
+    waveform.range = state::ParamRange::linear(0.0f, 5.0f, 0.0f, 1.0f);
+    waveform.value_labels = {"Sine", "Triangle", "Saw", "Ramp", "Square", "Random"};
+    store.add_parameter(waveform);
+
+    state::ParamInfo bypass;              // toggle: off/on
+    bypass.id = 3;
+    bypass.name = "bypass";
+    bypass.kind = state::ParamKind::Toggle;
+    bypass.range = state::ParamRange::linear(0.0f, 1.0f, 0.0f, 1.0f);
+    store.add_parameter(bypass);
+
+    state::ParamInfo quantized;           // continuous, but range.step quantizes
+    quantized.id = 4;
+    quantized.name = "quantized";
+    quantized.range = state::ParamRange::linear(0.0f, 10.0f, 0.0f, 0.5f);
+    store.add_parameter(quantized);
+
+    state::ParamInfo octave;              // integer range, no labels
+    octave.id = 5;
+    octave.name = "octave";
+    octave.kind = state::ParamKind::Integer;
+    octave.range = state::ParamRange::linear(-2.0f, 2.0f, 0.0f, 1.0f);
+    store.add_parameter(octave);
+
+    StateStoreHostParamSurface surface(store);
+
+    SECTION("a continuous param has no index domain") {
+        REQUIRE(surface.param_step_count("cutoff") == 0);
+    }
+
+    SECTION("an unknown key reports 0, the same no-index-domain signal") {
+        REQUIRE(surface.param_step_count("nonexistent") == 0);
+        REQUIRE_FALSE(surface.has_param("nonexistent"));
+    }
+
+    SECTION("a discrete param reports its declared value count") {
+        REQUIRE(surface.param_step_count("lfo_waveform") == 6);
+        REQUIRE(surface.param_step_count("bypass") == 2);
+        // Integer range with no labels: cardinality is derived from range/step.
+        REQUIRE(surface.param_step_count("octave") == 5);
+    }
+
+    SECTION("range.step alone does not make a param discrete") {
+        // Quantization is not semantics: the author declared Continuous, so
+        // there is no index domain to divide by even though values snap.
+        REQUIRE(surface.param_step_count("quantized") == 0);
+    }
+
+    SECTION("a default host surface reports 0 rather than guessing") {
+        // An out-of-repo subclass that predates this accessor must degrade to
+        // "continuous/unknown", never to a wrong cardinality.
+        FakeHostParamSurface fake;
+        fake.values["gain"] = 0.5;
+        REQUIRE(fake.has_param("gain"));
+        REQUIRE(fake.param_step_count("gain") == 0);
+    }
+}
+
+TEST_CASE("the step count comes from the parameter, not from a view's option list",
+          "[view][host-param][state]") {
+    // The porting hazard this accessor exists to kill: a control that renders
+    // 3 visible positions bound to a 6-value parameter. Scaling by the number
+    // of things drawn silently emits wrong normalized values; the parameter is
+    // the only authority on its own divisor.
+    state::StateStore store;
+    state::ParamInfo waveform;
+    waveform.id = 1;
+    waveform.name = "lfo_waveform";
+    waveform.kind = state::ParamKind::Enum;
+    waveform.range = state::ParamRange::linear(0.0f, 5.0f, 0.0f, 1.0f);
+    waveform.value_labels = {"Sine", "Triangle", "Saw", "Ramp", "Square", "Random"};
+    store.add_parameter(waveform);
+
+    StateStoreHostParamSurface surface(store);
+
+    const int visible_options = 3;             // what a radio happens to draw
+    const int steps = surface.param_step_count("lfo_waveform");
+    REQUIRE(steps == 6);                       // unchanged by the UI's opinion
+    REQUIRE(steps != visible_options);
+
+    // Selecting index 2 must scale against 6 values (2/5), never against the
+    // 3 drawn options (2/2 == 1.0, which would jump the host to the last value).
+    const double correct = pulp::view::param_index_to_normalized(2, steps);
+    REQUIRE(correct == Catch::Approx(2.0 / 5.0));
+
+    const double from_ui_option_count =
+        pulp::view::param_index_to_normalized(2, visible_options);
+    REQUIRE(from_ui_option_count == Catch::Approx(1.0));
+    REQUIRE(correct != Catch::Approx(from_ui_option_count));
+
+    // The correct divisor round-trips through the real store; the UI-derived
+    // one lands on a different value entirely.
+    surface.set_param("lfo_waveform", correct);
+    REQUIRE(surface.param_display_text("lfo_waveform", surface.get_param("lfo_waveform")) == "2");
+    surface.set_param("lfo_waveform", from_ui_option_count);
+    REQUIRE(surface.param_display_text("lfo_waveform", surface.get_param("lfo_waveform")) == "5");
+}
+
+TEST_CASE("param_index_to_normalized spans the full automation range",
+          "[view][host-param]") {
+    SECTION("index 0 and the last index reach the range ends") {
+        REQUIRE(pulp::view::param_index_to_normalized(0, 6) == Catch::Approx(0.0));
+        REQUIRE(pulp::view::param_index_to_normalized(5, 6) == Catch::Approx(1.0));
+        REQUIRE(pulp::view::param_index_to_normalized(1, 6) == Catch::Approx(0.2));
+    }
+
+    SECTION("a toggle spans off/on") {
+        REQUIRE(pulp::view::param_index_to_normalized(0, 2) == Catch::Approx(0.0));
+        REQUIRE(pulp::view::param_index_to_normalized(1, 2) == Catch::Approx(1.0));
+    }
+
+    SECTION("a 0 step count never divides by zero") {
+        // 0 is the continuous/unknown signal; 1 has a single value. Neither
+        // carries an index domain, so both collapse to 0.0 instead of trapping.
+        REQUIRE(pulp::view::param_index_to_normalized(3, 0) == Catch::Approx(0.0));
+        REQUIRE(pulp::view::param_index_to_normalized(3, 1) == Catch::Approx(0.0));
+        REQUIRE(pulp::view::param_normalized_to_index(0.7, 0) == 0);
+        REQUIRE(pulp::view::param_normalized_to_index(0.7, 1) == 0);
+    }
+
+    SECTION("out-of-domain indices and values clamp") {
+        REQUIRE(pulp::view::param_index_to_normalized(-1, 6) == Catch::Approx(0.0));
+        REQUIRE(pulp::view::param_index_to_normalized(99, 6) == Catch::Approx(1.0));
+        REQUIRE(pulp::view::param_normalized_to_index(-0.5, 6) == 0);
+        REQUIRE(pulp::view::param_normalized_to_index(1.5, 6) == 5);
+    }
+
+    SECTION("normalized_to_index snaps to the nearest index") {
+        REQUIRE(pulp::view::param_normalized_to_index(0.19, 6) == 1);
+        REQUIRE(pulp::view::param_normalized_to_index(0.21, 6) == 1);
+        REQUIRE(pulp::view::param_normalized_to_index(0.5, 6) == 3);  // 2.5 rounds up
+    }
+
+    SECTION("index -> normalized -> index round-trips every value") {
+        for (int steps : {2, 3, 6, 17}) {
+            for (int i = 0; i < steps; ++i) {
+                const double n = pulp::view::param_index_to_normalized(i, steps);
+                REQUIRE(pulp::view::param_normalized_to_index(n, steps) == i);
+            }
+        }
+    }
+}
+
+TEST_CASE("a discrete param's normalized index agrees with its ParamRange",
+          "[view][host-param][state]") {
+    // param_index_to_normalized works off a bare step count because a host
+    // surface may have no ParamRange behind it. For a StateStore-backed
+    // discrete param the two must not disagree, or the embed and native lanes
+    // would scale the same control differently.
+    state::StateStore store;
+    state::ParamInfo waveform;
+    waveform.id = 1;
+    waveform.name = "lfo_waveform";
+    waveform.kind = state::ParamKind::Enum;
+    waveform.range = state::ParamRange::linear(0.0f, 5.0f, 0.0f, 1.0f);
+    waveform.value_labels = {"Sine", "Triangle", "Saw", "Ramp", "Square", "Random"};
+    store.add_parameter(waveform);
+
+    StateStoreHostParamSurface surface(store);
+    const int steps = surface.param_step_count("lfo_waveform");
+
+    REQUIRE(waveform.range.is_linear());   // the helper's stated assumption
+
+    for (int i = 0; i < steps; ++i) {
+        const double n = pulp::view::param_index_to_normalized(i, steps);
+        REQUIRE(n == Catch::Approx(waveform.range.normalize(static_cast<float>(i))));
+
+        // And it survives a real write/read through the store.
+        surface.set_param("lfo_waveform", n);
+        REQUIRE(pulp::view::param_normalized_to_index(surface.get_param("lfo_waveform"),
+                                                      steps) == i);
+    }
+}
+
+TEST_CASE("a skewed discrete range is outside the index helper's contract",
+          "[view][host-param][state]") {
+    // param_index_to_normalized takes a bare count because a host surface may
+    // have no ParamRange behind it, so it can only assume even spacing. A
+    // discrete param that declares a skew defines its own curve and the two
+    // genuinely disagree. This pins that boundary as a known limit rather than
+    // leaving it a silent mis-scale: authors declare discrete params linear.
+    state::StateStore store;
+    state::ParamInfo shaped;
+    shaped.id = 1;
+    shaped.name = "shaped";
+    shaped.kind = state::ParamKind::Enum;
+    shaped.range = state::ParamRange{0.0f, 5.0f, 0.0f, 1.0f, 0.5f, false};
+    shaped.value_labels = {"a", "b", "c", "d", "e", "f"};
+    store.add_parameter(shaped);
+
+    StateStoreHostParamSurface surface(store);
+    const int steps = surface.param_step_count("shaped");
+    REQUIRE(steps == 6);                       // cardinality is still correct
+    REQUIRE_FALSE(shaped.range.is_linear());
+
+    // The ends still agree — a skew fixes both endpoints.
+    REQUIRE(pulp::view::param_index_to_normalized(0, steps) ==
+            Catch::Approx(shaped.range.normalize(0.0f)));
+    REQUIRE(pulp::view::param_index_to_normalized(5, steps) ==
+            Catch::Approx(shaped.range.normalize(5.0f)));
+
+    // The interior does NOT. The range's curve is the authority here.
+    REQUIRE(pulp::view::param_index_to_normalized(1, steps) != Catch::Approx(
+                shaped.range.normalize(1.0f)));
+}
+
 TEST_CASE("StateStoreHostParamSurface honors a custom key resolver", "[view][host-param][issue-5230]") {
     state::StateStore store;
     state::ParamInfo p;
