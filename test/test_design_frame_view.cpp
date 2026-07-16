@@ -246,6 +246,48 @@ TEST_CASE("DesignFrameView renders + the needle rotates at a non-panel aspect",
     CHECK(cmp.similarity < 0.999f);
 }
 
+TEST_CASE("DesignFrameView hover highlight tracks the knob's live rotation, not its rest pose",
+          "[view][design-import][frame][hover]") {
+    // make_knob()'s needle is baked pointing straight UP (path "M50 38L50 30",
+    // center (50,50)). At value 1.0 the live render rotates it +135 degrees off
+    // that rest pose (kSweepDeg = 270, angle = (value-0.5)*270), i.e. down-and-
+    // right of center. The per-element hover overlay is a second, translucent
+    // redraw of the SAME needle fragment — it should track that same live
+    // rotation, so hovering must only ADD a highlight down-and-right of center,
+    // never up-and-level with it.
+    DesignFrameView baseline(make_design_svg(), {make_knob()});
+    DesignFrameView hovered(make_design_svg(), {make_knob()});
+    baseline.set_bounds({0, 0, 80, 80});
+    hovered.set_bounds({0, 0, 80, 80});
+    baseline.set_element_value(0, 1.0f);
+    hovered.set_element_value(0, 1.0f);
+
+    hovered.simulate_hover({40, 40});  // -> SVG (50,50): over the knob dome
+
+    auto base_png = render_to_png(baseline, 80, 80, 2.0f, ScreenshotBackend::skia);
+    if (base_png.empty()) SKIP("Skia raster screenshot backend unavailable");
+    auto hover_png = render_to_png(hovered, 80, 80, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(hover_png.empty());
+
+    // Isolate exactly what the hover highlight painted: the two renders are
+    // otherwise identical (same value, same everything else), so every
+    // differing pixel comes from the highlight redraw alone.
+    const auto bounds = diff_bounds(base_png, hover_png, /*tolerance=*/4);
+    REQUIRE(bounds.valid);
+
+    // The knob center (SVG 50,50; panel origin 10,10) lands at pixel (80,80) in
+    // this 2x-scaled render.
+    const float ghost_cx = bounds.x + bounds.width * 0.5f;
+    const float ghost_cy = bounds.y + bounds.height * 0.5f;
+
+    // BUG: fails today. The highlight's center comes out at/above (80,80) —
+    // the needle's BAKED rest position (straight up) — because the hover
+    // overlay is drawn with an identity transform regardless of value, instead
+    // of the value's live rotation.
+    CHECK(ghost_cx > 80.0f);
+    CHECK(ghost_cy > 80.0f);
+}
+
 namespace {
 // A knob carrying a host-parameter binding key — the surface a foreign-host
 // (the embed shim) binder reads to wire a hand-built native view to host params.
