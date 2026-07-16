@@ -3,6 +3,9 @@
 #include <pulp/host/scanner.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
+// The CLAP fixture is a Pulp-built plugin, so its editor obeys Pulp's own
+// editor-environment gate; the host-side expectation has to read the same flag.
+#include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
 #include "harness/rt_allocation_probe.hpp"
@@ -862,8 +865,21 @@ TEST_CASE("ClapSlot exposes PulpGain parameter metadata and host defaults",
     REQUIRE_FALSE(slot->is_bypassed());
     REQUIRE(slot->latency_samples() == 0);
     REQUIRE(slot->tail_samples() == 0);
-    REQUIRE_FALSE(slot->has_editor());
+
+    // PulpGain's CLAP adapter serves clap.gui, but suppresses the whole
+    // extension when the environment disables editors (CI / headless /
+    // PULP_TEST_MODE). So the honest expectation tracks the environment rather
+    // than being a constant — pinning either answer outright would pass in one
+    // environment and fail in the other.
+    const bool editor_expected = !pulp::format::detail::editor_launch_blocked_by_environment();
+    REQUIRE(slot->has_editor() == editor_expected);
+    // Whichever way it lands, the scanned descriptor must agree with the slot.
+    REQUIRE(slot->info().has_editor == slot->has_editor());
+
+    // The legacy void* path is not implemented for CLAP: the extension consumes
+    // a parent window and has nowhere to receive one here.
     REQUIRE(slot->create_editor_view() == nullptr);
+    // A null parent is refused regardless of whether an editor exists.
     REQUIRE(slot->create_hosted_editor(nullptr) == nullptr);
 }
 

@@ -176,6 +176,17 @@ endif()
 pulp_add_test_suite(pulp-test-hosted-editor LIBRARIES pulp::host)
 # HostedEditor → WindowHost attachment migration
 pulp_add_test_suite(pulp-test-hosted-editor-migration LIBRARIES pulp::view pulp::host)
+# CLAP gui-extension negotiation against a fake plugin. Reaches into
+# core/host/src for the slot factory that skips dlopen. ObjC++ + Apple-only:
+# the negotiation hands the plugin a real NSView parent, and no other platform
+# has a WindowHost implementing the native-child seam to parent an editor into.
+if(APPLE)
+    add_executable(pulp-test-clap-hosted-editor test_clap_hosted_editor.mm)
+    target_link_libraries(pulp-test-clap-hosted-editor
+        PRIVATE pulp::host clap Catch2::Catch2WithMain "-framework AppKit")
+    target_include_directories(pulp-test-clap-hosted-editor PRIVATE ${PULP_ROOT_DIR}/core/host/src)
+    catch_discover_tests(pulp-test-clap-hosted-editor)
+endif()
 # CFRunLoop cooperation — plugin-mode MainThreadDispatcher
 pulp_add_test_suite(pulp-test-cfrunloop-cooperation LIBRARIES pulp::events)
 if(APPLE)
