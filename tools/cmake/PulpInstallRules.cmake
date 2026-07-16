@@ -198,6 +198,25 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
 endforeach()
 unset(_pulp_sdk_header_subsystems)
 
+# SDK license + third-party attribution.
+#
+# The rules above install third-party headers and archives into the SDK tree —
+# VST3, CLAP, AudioUnitSDK, LV2, Yoga, Highway, mbedTLS, SDL3, SheenBidi. That
+# is redistribution, and MIT conditions it on shipping the copyright and
+# permission notice with "all copies or substantial portions of the Software"
+# (Apache-2.0 §4 likewise requires the license text and any NOTICE). Without
+# these two files the installed SDK carried none: a `cmake --install` tree held
+# 218 files of third-party code and zero attribution, and every plugin that
+# vendors the SDK inherited that.
+#
+# Installed at the SDK root, next to version.txt, so they are visible the
+# moment the tree is unpacked rather than buried in share/doc.
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/NOTICE.md"
+    DESTINATION "."
+)
+
 # SDK version file
 file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${PROJECT_VERSION}\n")
 install(FILES "${CMAKE_BINARY_DIR}/version.txt" DESTINATION ".")
