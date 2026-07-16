@@ -27,7 +27,9 @@ PULP_SKIP_DIFF_COVER=1 tools/scripts/local_diff_cover.sh
 
 If the script fails:
 
-- Read `/tmp/diff-cover.html` (printed at the end) for the per-file uncovered-line breakdown.
+- Read the HTML report for the per-file uncovered-line breakdown. The script
+  prints its path at the end — it is written under this worktree's `build-cov/`,
+  so read the path it printed rather than assuming a shared location.
 - Add a test that exercises the new lines, or refactor to remove the dead branch.
 - The pre-push hook enforces this check by default when relevant code changed; `PULP_DISABLE_PREPUSH_DIFF_COVER=1` demotes only diff-cover to advisory.
 

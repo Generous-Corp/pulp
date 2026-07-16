@@ -116,6 +116,17 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME skills-doc-check-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_skills_doc_check.py")
 
+    # local_diff_cover.sh contracts: config-key consumption, the per-worktree
+    # report path, and build-cov mutual exclusion. Fixture-only — it never runs
+    # a coverage build. The lock cases spawn real concurrent shells and wait on
+    # each other, so this is seconds rather than milliseconds.
+    if(UNIX)
+        add_test(NAME local-diff-cover-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_local_diff_cover
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(local-diff-cover-selftest PROPERTIES TIMEOUT 300)
+    endif()
+
     # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).
     add_test(NAME gallery-diff-selftest

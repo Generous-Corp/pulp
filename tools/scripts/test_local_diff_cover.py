@@ -25,6 +25,8 @@ import os
 import pathlib
 import re
 import subprocess
+import tempfile
+import time
 import unittest
 
 
@@ -639,6 +641,194 @@ class DiffCoverExcludeContractTests(unittest.TestCase):
                 f"Use a basename like 'cmd_loop.cpp' or a glob like "
                 f"'**/cmd_loop.cpp' instead.",
             )
+
+
+def _fake_worktree(tmp: pathlib.Path, name: str) -> pathlib.Path:
+    """Stage a <root>/tools/scripts/local_diff_cover.sh copy and return <root>.
+
+    The script derives every path it owns from its own location, so a copy in a
+    throwaway tree behaves like a real worktree without a checkout or a build.
+    """
+    root = tmp / name
+    (root / "tools" / "scripts").mkdir(parents=True)
+    dest = root / "tools" / "scripts" / "local_diff_cover.sh"
+    dest.write_text(SCRIPT.read_text())
+    return root
+
+
+def _lib_eval(root: pathlib.Path, snippet: str, timeout: float = 30,
+              env_extra: dict | None = None) -> subprocess.CompletedProcess:
+    """Source the script in lib-only mode and run `snippet` against its helpers."""
+    env = os.environ.copy()
+    env["PULP_DIFF_COVER_LIB_ONLY"] = "1"
+    env.pop("PULP_DIFF_COVER_HTML_REPORT", None)
+    if env_extra:
+        env.update(env_extra)
+    script = root / "tools" / "scripts" / "local_diff_cover.sh"
+    return subprocess.run(
+        ["bash", "-c", f'source "{script}"\n{snippet}'],
+        env=env, capture_output=True, text=True, timeout=timeout,
+    )
+
+
+class ReportPathTests(unittest.TestCase):
+    """The HTML report path is per-worktree, not a shared $TMPDIR mailbox."""
+
+    def test_report_path_is_not_a_shared_tmpdir_file(self) -> None:
+        # A fixed name under $TMPDIR (which is per-USER) is the collision:
+        # concurrent runs in other worktrees clobber it, and the loser reads
+        # someone else's coverage as evidence for their own change.
+        out = _lib_eval(REPO_ROOT, 'echo "$HTML_REPORT"').stdout.strip()
+        tmpdir = os.environ.get("TMPDIR", "/tmp")
+        # normpath collapses the `//` a trailing-slash $TMPDIR produces —
+        # without it this compare silently passes against the very path it
+        # is meant to reject.
+        self.assertNotEqual(
+            os.path.normpath(out),
+            os.path.normpath(os.path.join(tmpdir, "diff-cover.html")),
+            "report path is a fixed per-user $TMPDIR file — concurrent runs "
+            "in other worktrees overwrite it",
+        )
+
+    def test_report_path_differs_between_worktrees(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = pathlib.Path(td)
+            a = _lib_eval(_fake_worktree(tmp, "wt-a"), 'echo "$HTML_REPORT"')
+            b = _lib_eval(_fake_worktree(tmp, "wt-b"), 'echo "$HTML_REPORT"')
+        self.assertNotEqual(
+            a.stdout.strip(), b.stdout.strip(),
+            "two worktrees resolve the same report path — one run's report "
+            "would overwrite the other's",
+        )
+
+    def test_report_path_is_under_the_worktree_build_cov(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = _fake_worktree(pathlib.Path(td), "wt")
+            out = _lib_eval(root, 'echo "$HTML_REPORT"').stdout.strip()
+        # build-cov is per-worktree, single-writer under the lock, and already
+        # reclaimed by clean_build_cov.sh — so it leaves no tmp litter.
+        self.assertTrue(
+            out.startswith(str(root / "build-cov")),
+            f"expected report under the worktree's build-cov, got {out!r}",
+        )
+
+    def test_report_path_env_override_is_honored(self) -> None:
+        out = _lib_eval(
+            REPO_ROOT, 'echo "$HTML_REPORT"',
+            env_extra={"PULP_DIFF_COVER_HTML_REPORT": "/tmp/custom-report.html"},
+        ).stdout.strip()
+        self.assertEqual(out, "/tmp/custom-report.html")
+
+    def test_script_prints_the_report_path_on_both_outcomes(self) -> None:
+        # Whoever runs this needs to find the report it actually wrote — on a
+        # pass and on a failure.
+        text = SCRIPT.read_text()
+        self.assertEqual(
+            text.count('HTML report: ${HTML_REPORT}'), 2,
+            "the script must print the report path it wrote on both the "
+            "pass and the fail path",
+        )
+
+
+class BuildCovLockTests(unittest.TestCase):
+    """build-cov is single-writer: concurrent runs serialize, never interleave."""
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.root = _fake_worktree(pathlib.Path(self._td.name), "wt")
+        self.lock = self.root / "build-cov.lock"
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_release_is_armed_before_the_owner_pid_is_written(self) -> None:
+        # Writing the pid can fail on its own (a full disk — build-cov
+        # accumulates, and that is how it shows up here). Under `set -e` that
+        # exits the script, so the trap must already be armed or the run
+        # strands a pid-less lock no later run can prove is dead.
+        text = SCRIPT.read_text()
+        self.assertLess(
+            text.index("trap release_build_cov_lock EXIT"),
+            text.index('echo "$$" > "${BUILD_COV_LOCK}/pid"'),
+            "the EXIT trap must be armed before the pid write that can fail",
+        )
+
+    def test_acquire_creates_lock_and_records_owner_pid(self) -> None:
+        r = _lib_eval(self.root, 'acquire_build_cov_lock; cat "$BUILD_COV_LOCK/pid"')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertRegex(r.stdout.strip(), r"^\d+$")
+
+    def test_lock_is_released_on_normal_exit(self) -> None:
+        r = _lib_eval(self.root, 'acquire_build_cov_lock; exit 0')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(self.lock.exists(), "EXIT trap did not release the lock")
+
+    def test_lock_is_released_on_failing_exit(self) -> None:
+        # A run that fails (coverage below threshold, a build error) must not
+        # strand the lock and wedge the next run.
+        r = _lib_eval(self.root, 'acquire_build_cov_lock; exit 1')
+        self.assertEqual(r.returncode, 1)
+        self.assertFalse(self.lock.exists(), "EXIT trap did not fire on failure")
+
+    def test_second_run_waits_for_the_first(self) -> None:
+        script = self.root / "tools" / "scripts" / "local_diff_cover.sh"
+        env = os.environ.copy()
+        env["PULP_DIFF_COVER_LIB_ONLY"] = "1"
+        marker = self.root / "holder-done"
+
+        # Holder takes the lock, sleeps, then releases via its EXIT trap.
+        holder = subprocess.Popen(
+            ["bash", "-c",
+             f'source "{script}"\nacquire_build_cov_lock\nsleep 3\n'
+             f'touch "{marker}"'],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        try:
+            deadline = time.time() + 10
+            while not self.lock.exists() and time.time() < deadline:
+                time.sleep(0.05)
+            self.assertTrue(self.lock.exists(), "holder never took the lock")
+
+            waiter = subprocess.run(
+                ["bash", "-c",
+                 f'source "{script}"\nacquire_build_cov_lock\n'
+                 f'test -f "{marker}" && echo SERIALIZED || echo RACED'],
+                env=env, capture_output=True, text=True, timeout=30,
+            )
+        finally:
+            holder.communicate(timeout=15)
+
+        self.assertIn("waiting for another diff-coverage run", waiter.stderr)
+        self.assertIn(
+            "SERIALIZED", waiter.stdout,
+            "the second run proceeded while the first still held the lock — "
+            "both would have written the same build-cov",
+        )
+
+    def test_stale_lock_from_a_dead_owner_is_reclaimed(self) -> None:
+        # A run killed with SIGKILL never fires its EXIT trap. The lock it
+        # leaves must not wedge every later run forever.
+        dead = subprocess.Popen(["true"])
+        dead.wait()
+        self.lock.mkdir(parents=True)
+        (self.lock / "pid").write_text(str(dead.pid))
+
+        r = _lib_eval(self.root, 'acquire_build_cov_lock; echo ACQUIRED', timeout=30)
+        self.assertIn("ACQUIRED", r.stdout, r.stderr)
+        self.assertIn("reclaiming stale lock", r.stderr)
+
+    def test_live_lock_is_not_reclaimed(self) -> None:
+        # Reclaim must prove the owner is dead. This test process is alive, so
+        # a run seeing our pid must wait, not steal the lock.
+        self.lock.mkdir(parents=True)
+        (self.lock / "pid").write_text(str(os.getpid()))
+
+        with self.assertRaises(subprocess.TimeoutExpired):
+            _lib_eval(self.root, 'acquire_build_cov_lock; echo STOLE', timeout=6)
+        self.assertEqual(
+            (self.lock / "pid").read_text(), str(os.getpid()),
+            "a live owner's lock was reclaimed",
+        )
 
 
 if __name__ == "__main__":
