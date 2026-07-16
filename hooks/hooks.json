@@ -37,6 +37,11 @@
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/cli-plugin-sync.sh",
             "timeout": 3000
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/decisions-contract-hint.sh",
+            "timeout": 3000
           }
         ]
       }

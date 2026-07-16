@@ -297,6 +297,30 @@ For the user-facing version of this rationale, see `docs/reference/layout-model.
 
 This repo will be open-sourced. Every commit, every file, every directory name should reflect that. No throwaway code on main. No "WIP" commits. No embarrassing history.
 
+### Decisions contract — read before changing fleet/CI config
+
+Settled build-system / CI / release-automation decisions live in
+[`.agents/contract.toml`](.agents/contract.toml) — schema-versioned, layered
+(generic `default` layer + a `pulp` overlay), agent-neutral (the same file
+Codex reads; named directly in `AGENTS.md`). Each row was bought with an
+incident, and several — the merge queue, bump-at-merge, auto-rebase — were
+re-proposed by past agents and cost a planning cycle each. Before proposing or
+writing a change to CI/fleet config, read the relevant rows and honor them:
+
+```bash
+python3 tools/scripts/decisions_contract.py --mode list                          # all rows
+python3 tools/scripts/decisions_contract.py --mode surface --base origin/main    # rows your diff touches
+python3 tools/scripts/decisions_contract.py --mode validate                      # schema-check the file
+```
+
+Reversing a decision requires first proving its motivating incident class can no
+longer occur (Step Zero). The read surface plus the SessionStart/PostToolUse
+hooks (`hooks/scripts/decisions-contract-*.sh`) are advisory context only,
+scoped to fleet/CI config paths and a clean no-op for external contributors —
+the authoritative block is the CLI `validate` gate plus CI required checks, not
+a hook. Non-obvious "wrong-looking" rows are scar tissue; find the incident
+before proposing removal.
+
 ### Language: American English, everywhere
 
 Pulp is written in **American English** — identifiers, comments, docs, and commit

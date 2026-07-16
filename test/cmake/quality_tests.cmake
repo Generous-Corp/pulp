@@ -52,6 +52,16 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME pr-check-triage-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_pr_check_triage.py")
 
+    # Decisions contract: assert the shipped .agents/contract.toml is always
+    # schema-valid (a broken contract must fail the build, not CI).
+    add_test(NAME decisions-contract-validate COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/decisions_contract.py" --mode validate)
+    # Self-test: the read surface (surface/list/validate), the external-contributor
+    # no-op (non-fleet paths surface nothing), the agent-neutral hint hook, and
+    # the AGENTS.md + CLAUDE.md pointers.
+    add_test(NAME decisions-contract-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_decisions_contract.py")
+
     # Version-at-land (T1.1): single-writer version assignment from Version-Bump
     # intent trailers. Pure aggregate_intent / plan_assignments logic (the bot
     # is dry-run only at this stage).

@@ -63,6 +63,9 @@ ALLOWED_ROOT_PATHS = frozenset({
     ".claude",
     ".claude-plugin",
     ".clang-format",
+    # Codex-side agent hooks — the peer of .claude/, kept at the root for the
+    # same reason: Codex reads its hook config from the repo root only.
+    ".codex",
     ".gitattributes",
     ".githooks",
     ".github",
