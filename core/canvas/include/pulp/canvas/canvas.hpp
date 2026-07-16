@@ -550,15 +550,12 @@ public:
     /// Stroke the current path.
     virtual void stroke_current_path() {}
 
-    // A `set_bloom(intensity, threshold)` used to live here. It was declared
-    // virtual and documented as "implemented in SkiaCanvas", but no backend
-    // ever overrode it — the base no-op was the ONLY implementation, so every
-    // call silently did nothing. A real bloom needs a bright-pass + blur +
-    // additive composite against the layer's own content
-    // (`SkImageFilters::Blend(kPlus, source, Blur(ColorFilter(source)))`),
-    // which means it belongs on the layer paint in `save_layer_with_filters`,
-    // not in a standalone setter with no state to attach to. `GpuBloomEffect`
-    // approximates glow with a plain blur layer instead; see `view_effect.hpp`.
+    // A `set_bloom()` was removed from here: documented as "implemented in
+    // SkiaCanvas", it had no override in any backend — the base no-op was the
+    // only implementation, so every call silently did nothing. A real bloom
+    // (bright-pass + blur + additive composite) needs the layer's own content,
+    // so it belongs on the layer paint in `save_layer_with_filters`, not a
+    // standalone setter. `GpuBloomEffect` approximates glow with a blur layer.
 
     // ── Shapes ───────────────────────────────────────────────────────────
     virtual void fill_rect(float x, float y, float w, float h) = 0;

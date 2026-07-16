@@ -181,11 +181,10 @@ popover, add a soft glow to a meter), use `ViewEffect` from
 
 > **What `ViewEffect` is not.** These effects composite *layers* (blur,
 > opacity, transform). **You cannot currently run an SkSL pass over a
-> view's rendered content.** A `CustomShaderEffect` that appeared to do
-> so was removed in PR #6046 because it silently ignored its shader — it
-> needed a child-shader compositor Pulp does not yet wire up. Widget-body
-> shaders (`setWidgetShader`, `CustomShaderHost`) are real, but they paint
-> a *fresh* rect and cannot see rendered content. Read the per-effect doc
+> view's rendered content** — doing so needs a child-shader compositor
+> that Pulp does not wire up today. Widget-body shaders
+> (`setWidgetShader`, `CustomShaderHost`) are real, but they paint a
+> *fresh* rect and cannot see rendered content. Read the per-effect doc
 > comments before relying on one: `GpuBloomEffect` is a blur-based glow
 > approximation, not a true bloom.
 
