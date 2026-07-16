@@ -419,7 +419,21 @@ pulp import-design --from figma --file design.json \
     --validate --reference source.png --diff diff.png
 ```
 
-Similarity threshold: 70% (PASS) / below 70% (NEEDS REVIEW).
+Similarity threshold: 85% (PASS) / below 85% (NEEDS REVIEW).
+
+The printed verdict is **advisory** — `--validate` exits 0 at any similarity so
+existing callers keep working. To enforce a bar in CI, add `--fail-below <pct>`,
+which exits 5 when the similarity falls under it:
+
+```bash
+# Fails the build if the render drifts below 85% of the reference
+pulp import-design --from figma --file design.json \
+    --validate --reference source.png --fail-below 85
+```
+
+`<pct>` is a percentage from 0 to 100 (`85`, not `0.85`) — matching the
+`Similarity: NN%` line it gates on. A fraction is rejected rather than read as a
+sub-1% threshold that would never fire.
 
 ## Project Templates
 

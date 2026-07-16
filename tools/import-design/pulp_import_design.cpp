@@ -946,6 +946,10 @@ static void print_usage() {
     std::cout << "  --import-report <path>  Write the per-control resolution report (JSON) — rung,\n";
     std::cout << "                    confidence, conflicts, verification — for review or a CI gate\n";
     std::cout << "  --fail-on-unresolved    Exit nonzero (2) when a control is conflicted or inert\n";
+    std::cout << "  --fail-below <pct>      Exit nonzero (5) when --reference similarity is below\n";
+    std::cout << "                    <pct>, given as a percentage 0-100 (e.g. 85, not 0.85).\n";
+    std::cout << "                    Without this flag the similarity is advisory and the exit\n";
+    std::cout << "                    code is unchanged, at any similarity.\n";
     std::cout << "  --recognition-manifest <path>\n";
     std::cout << "                    User recognition manifest (flat library-manifest shape) mapping\n";
     std::cout << "                    your OWN Figma component-set keys / name prefixes to Pulp control\n";
@@ -1708,6 +1712,11 @@ int main(int argc, char* argv[]) {
     std::string diff_output;         // --diff: output path for visual diff image
     std::string import_report_path;  // --import-report: write the P7 resolution report JSON here
     bool fail_on_unresolved = false; // --fail-on-unresolved: nonzero exit if a control is conflicted/inert
+    // --fail-below <pct>: opt-in gate turning a low --reference similarity into
+    // a nonzero exit. Negative means "not requested" — absent the flag the
+    // similarity stays advisory and the exit code is unchanged, so existing
+    // callers that only read the printed number keep working.
+    float fail_below_pct = -1.0f;
     bool dry_run = false;
     bool include_tokens = true;
     bool include_comments = true;
@@ -1715,6 +1724,7 @@ int main(int argc, char* argv[]) {
     bool validate = false;           // --validate: render + compare after import
     bool strict_fidelity = false;    // --strict-fidelity: fail on a fidelity self-check finding
     bool fidelity_failed = false;    // set when strict_fidelity + at least one finding
+    bool similarity_failed = false;  // set when --fail-below + reference similarity under the bar
     std::string fidelity_report_path; // --fidelity-report <file>: write the JSON fidelity ledger
     bool use_web_compat = false;     // --web-compat: use DOM API instead of native
     bool preview_mode = false;       // --preview: minimal widget style for design comparison
@@ -1818,6 +1828,34 @@ int main(int argc, char* argv[]) {
             param_binding_manifest_path = argv[++i];
         } else if (std::strcmp(argv[i], "--fail-on-unresolved") == 0) {
             fail_on_unresolved = true;
+        } else if (std::strcmp(argv[i], "--fail-below") == 0 && i + 1 < argc) {
+            // Unit is PERCENT (0-100), matching the "Similarity: NN%" line this
+            // gates on. A fraction like 0.85 is rejected rather than silently
+            // read as 0.85% — a threshold that parses too low never fires, which
+            // is precisely the silent-pass failure this flag exists to end.
+            const std::string raw = argv[++i];
+            std::size_t consumed = 0;
+            float pct = 0.0f;
+            try {
+                pct = std::stof(raw, &consumed);
+            } catch (const std::exception&) {
+                consumed = 0;
+            }
+            if (consumed != raw.size()) {
+                std::cerr << "Error: --fail-below expects a number, got '" << raw << "'\n";
+                return 2;
+            }
+            if (pct > 0.0f && pct < 1.0f) {
+                std::cerr << "Error: --fail-below takes a percentage (0-100), not a fraction; "
+                          << "'" << raw << "' is ambiguous. Did you mean "
+                          << static_cast<int>(pct * 100.0f) << "?\n";
+                return 2;
+            }
+            if (pct < 0.0f || pct > 100.0f) {
+                std::cerr << "Error: --fail-below must be between 0 and 100, got '" << raw << "'\n";
+                return 2;
+            }
+            fail_below_pct = pct;
         } else if (std::strcmp(argv[i], "--render-size") == 0 && i + 1 < argc) {
             // Parse WxH
             std::string sz = argv[++i];
@@ -1970,6 +2008,14 @@ int main(int argc, char* argv[]) {
             print_usage();
             return 0;
         }
+    }
+
+    // --fail-below gates the --reference similarity, so without a reference it
+    // could never fire. Rejecting that up front keeps a CI gate from reading as
+    // enforced while silently passing everything.
+    if (fail_below_pct >= 0.0f && reference_image.empty()) {
+        std::cerr << "Error: --fail-below requires --reference <png> (nothing to compare against)\n";
+        return 2;
     }
 
     DefaultSelection default_selection;
@@ -3427,10 +3473,19 @@ int main(int argc, char* argv[]) {
                       << result.diff_pixels << "/" << result.total_pixels << " pixels differ, "
                       << "mean error: " << result.mean_error << ")\n";
 
-            if (result.passes(0.70f)) {
+            // The advisory label uses the shared default; --fail-below, when
+            // given, sets both the label's bar and the exit gate so one number
+            // drives what is printed and what is enforced.
+            const float gate = fail_below_pct >= 0.0f
+                ? fail_below_pct / 100.0f : pulp::view::kDefaultSimilarityThreshold;
+            if (result.passes(gate)) {
                 std::cout << "Validation: PASS\n";
             } else {
-                std::cout << "Validation: NEEDS REVIEW (similarity below 70%)\n";
+                std::cout << "Validation: NEEDS REVIEW (similarity below "
+                          << static_cast<int>(gate * 100.0f) << "%)\n";
+                // Only --fail-below turns this into a failure. Absent the flag
+                // the exit code stays whatever the rest of the run decided.
+                if (fail_below_pct >= 0.0f) similarity_failed = true;
             }
 
             // Always generate diff image when reference is provided
@@ -3534,5 +3589,9 @@ int main(int argc, char* argv[]) {
     // code so callers/harness can tell it apart from a parse/IO error).
     if (pulp_zip_keepalive) finalize_pulp_zip_sidecar(*pulp_zip_keepalive);
     if (fidelity_failed) return 4;
+    // --fail-below: the render missed the reference bar. Distinct from 4
+    // (import-time self-check) because this is a render-vs-reference verdict a
+    // caller may want to triage differently.
+    if (similarity_failed) return 5;
     return report_exit;  // 0, or 2 under --fail-on-unresolved with a conflicted/inert control
 }
