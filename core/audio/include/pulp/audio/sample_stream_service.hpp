@@ -150,11 +150,13 @@ public:
     bool matches(SampleStreamSourceToken token,
                  const SampleStreamWindow* window,
                  std::uint64_t total_frames,
-                 std::uint64_t page_frames) const noexcept {
+                 std::uint64_t page_frames,
+                 std::uint64_t registration_epoch) const noexcept {
         return window_ != nullptr && window_ == window &&
                source_id_ == token.source_id &&
                source_generation_ == token.source_generation &&
-               total_frames_ == total_frames && page_frames_ == page_frames;
+               total_frames_ == total_frames && page_frames_ == page_frames &&
+               registration_epoch_ == registration_epoch;
     }
 
 private:
@@ -163,18 +165,21 @@ private:
     SampleStreamSourceRegistrationProof(SampleStreamSourceToken token,
                                         const SampleStreamWindow* window,
                                         std::uint64_t total_frames,
-                                        std::uint64_t page_frames) noexcept
+                                        std::uint64_t page_frames,
+                                        std::uint64_t registration_epoch) noexcept
         : window_(window),
           source_id_(token.source_id),
           source_generation_(token.source_generation),
           total_frames_(total_frames),
-          page_frames_(page_frames) {}
+          page_frames_(page_frames),
+          registration_epoch_(registration_epoch) {}
 
     const SampleStreamWindow* window_ = nullptr;
     std::uint64_t source_id_ = 0;
     std::uint64_t source_generation_ = 0;
     std::uint64_t total_frames_ = 0;
     std::uint64_t page_frames_ = 0;
+    std::uint64_t registration_epoch_ = 0;
 };
 
 static_assert(std::is_trivially_copyable_v<SampleStreamSourceRegistrationProof>);
@@ -185,12 +190,17 @@ struct SampleStreamCacheSourceView {
     SampleStreamWindow* window = nullptr;
     std::uint64_t total_frames = 0;
     std::uint64_t page_frames = 0;
+    std::uint64_t registration_epoch = 0;
     SampleStreamSourceRegistrationProof registration{};
 
     bool valid() const noexcept {
         return token.source_id != 0 && token.source_generation != 0 &&
                window != nullptr && total_frames != 0 && page_frames != 0 &&
-               registration.matches(token, window, total_frames, page_frames);
+               registration.matches(token,
+                                    window,
+                                    total_frames,
+                                    page_frames,
+                                    registration_epoch);
     }
 };
 
@@ -229,6 +239,45 @@ enum class SampleStreamServiceStatus : std::uint8_t {
     StaleSource,
     NoPageAvailable,
     ReadFailed,
+    PublishFailed,
+};
+
+enum class SampleStreamAsyncReserveStatus : std::uint8_t {
+    Reserved,
+    Idle,
+    AlreadyReady,
+    PageRetired,
+    WaitingForAudioGeneration,
+    StaleSource,
+    SourceInFlight,
+    NoPageAvailable,
+    SerialExhausted,
+};
+
+struct SampleStreamAsyncReservation {
+    SampleStreamSourceToken source{};
+    SampleStreamSourceRegistrationProof registration{};
+    std::uint64_t registration_epoch = 0;
+    std::uint64_t reservation_serial = 0;
+    std::uint64_t start_frame = 0;
+    std::uint64_t frame_count = 0;
+    std::uint32_t page_index = 0;
+    bool final_page = false;
+    SampleStreamPageRequest request{};
+};
+
+struct SampleStreamAsyncReserveResult {
+    SampleStreamAsyncReserveStatus status = SampleStreamAsyncReserveStatus::Idle;
+    SampleStreamAsyncReservation reservation{};
+};
+
+enum class SampleStreamAsyncCompletionStatus : std::uint8_t {
+    Published,
+    Canceled,
+    StaleSource,
+    StaleRegistration,
+    StaleReservation,
+    CopyFailed,
     PublishFailed,
 };
 
@@ -326,6 +375,10 @@ public:
         try {
             auto source = std::make_unique<Source>();
             source->config = config;
+            if (next_registration_epoch_ == 0) {
+                return {SampleStreamSourceAddStatus::AllocationFailed, {}};
+            }
+            source->registration_epoch = next_registration_epoch_++;
             source->reader = std::move(reader);
             source->channel_ptrs.resize(config.channels);
             source->slots.resize(config.cache_page_count);
@@ -377,11 +430,27 @@ public:
         return SampleStreamSourceRetireStatus::Scheduled;
     }
 
+    bool retirement_watermark_reached(
+        SampleStreamSourceToken token) const noexcept {
+        const auto* source = find_source(token);
+        return source != nullptr && source->retire_after_audio_generation != 0 &&
+               completed_audio_generation_ >=
+                   source->retire_after_audio_generation;
+    }
+
+    bool contains_source(SampleStreamSourceToken token) const noexcept {
+        return find_source(token) != nullptr;
+    }
+
     std::size_t collect_retired_sources() noexcept {
         std::size_t collected = 0;
         for (auto source = sources_.begin(); source != sources_.end();) {
             const auto retire_after = (*source)->retire_after_audio_generation;
             if (retire_after == 0 || completed_audio_generation_ < retire_after) {
+                ++source;
+                continue;
+            }
+            if ((*source)->async_in_flight) {
                 ++source;
                 continue;
             }
@@ -460,6 +529,152 @@ public:
         return result;
     }
 
+    SampleStreamAsyncReserveResult reserve_async_page() noexcept {
+        const auto request = scheduler_.most_urgent_if(
+            [this](const SampleStreamPageRequest& candidate) noexcept {
+                const auto* source = find_source(
+                    {candidate.source_id, candidate.source_generation});
+                return source == nullptr || !source->async_in_flight;
+            });
+        if (!request) {
+            return {scheduler_.stats().pending == 0
+                        ? SampleStreamAsyncReserveStatus::Idle
+                        : SampleStreamAsyncReserveStatus::SourceInFlight,
+                    {}};
+        }
+
+        auto* source = find_source({request->source_id, request->source_generation});
+        if (source == nullptr) {
+            scheduler_.complete_page(*request);
+            ++stats_.stale_requests;
+            return {SampleStreamAsyncReserveStatus::StaleSource, {}};
+        }
+        if (source->async_in_flight)
+            return {SampleStreamAsyncReserveStatus::SourceInFlight, {}};
+        if (source->window.ready_page_for_frame(request->source_generation,
+                                                request->start_frame).valid) {
+            scheduler_.complete_page(*request);
+            ++stats_.already_ready;
+            return {SampleStreamAsyncReserveStatus::AlreadyReady, {}};
+        }
+
+        const auto serial = take_reservation_serial();
+        if (serial == 0)
+            return {SampleStreamAsyncReserveStatus::SerialExhausted, {}};
+        const auto page = reserve_page(*source, serial);
+        if (page.status != PageReservationStatus::Reserved) {
+            if (page.status == PageReservationStatus::RetiredVictim) {
+                ++stats_.pages_retired;
+                return {SampleStreamAsyncReserveStatus::PageRetired, {}};
+            }
+            if (page.status == PageReservationStatus::WaitingForGeneration) {
+                ++stats_.retire_waits;
+                return {SampleStreamAsyncReserveStatus::WaitingForAudioGeneration, {}};
+            }
+            ++stats_.no_page_available;
+            return {SampleStreamAsyncReserveStatus::NoPageAvailable, {}};
+        }
+        if (page.reused_retired) ++stats_.retired_pages_reused;
+
+        source->async_in_flight = true;
+        auto& slot = source->slots[page.page_index];
+        slot.fill_registration_epoch = source->registration_epoch;
+        slot.fill_start_frame = request->start_frame;
+        slot.fill_frame_count = request->frame_count;
+        const auto view = make_view(*source);
+        return {
+            SampleStreamAsyncReserveStatus::Reserved,
+            {
+                .source = source->config.token,
+                .registration = view.registration,
+                .registration_epoch = source->registration_epoch,
+                .reservation_serial = serial,
+                .start_frame = request->start_frame,
+                .frame_count = request->frame_count,
+                .page_index = page.page_index,
+                .final_page = request->frame_count ==
+                    source->config.total_frames - request->start_frame,
+                .request = *request,
+            },
+        };
+    }
+
+    bool commit_async_dispatch(
+        const SampleStreamAsyncReservation& reservation) noexcept {
+        auto* source = matching_async_source(reservation);
+        if (source == nullptr || !matching_filling_slot(*source, reservation))
+            return false;
+        scheduler_.complete_page(reservation.request);
+        ++stats_.decode_calls;
+        return true;
+    }
+
+    bool async_reservation_has_interest(
+        const SampleStreamAsyncReservation& reservation) const noexcept {
+        return scheduler_.has_page_interest(reservation.request);
+    }
+
+    SampleStreamAsyncCompletionStatus cancel_async_reservation(
+        const SampleStreamAsyncReservation& reservation) noexcept {
+        auto* source = find_source(reservation.source);
+        if (source == nullptr) return SampleStreamAsyncCompletionStatus::StaleSource;
+        if (!registration_matches(*source, reservation))
+            return SampleStreamAsyncCompletionStatus::StaleRegistration;
+        if (!matching_filling_slot(*source, reservation))
+            return SampleStreamAsyncCompletionStatus::StaleReservation;
+        if (!cancel_fill(*source,
+                         reservation.page_index,
+                         reservation.reservation_serial)) {
+            return SampleStreamAsyncCompletionStatus::StaleReservation;
+        }
+        source->async_in_flight = false;
+        return SampleStreamAsyncCompletionStatus::Canceled;
+    }
+
+    SampleStreamAsyncCompletionStatus publish_async_reservation(
+        const SampleStreamAsyncReservation& reservation,
+        BufferView<const float> decoded) noexcept {
+        auto* source = find_source(reservation.source);
+        if (source == nullptr) return SampleStreamAsyncCompletionStatus::StaleSource;
+        if (!registration_matches(*source, reservation))
+            return SampleStreamAsyncCompletionStatus::StaleRegistration;
+        if (!matching_filling_slot(*source, reservation))
+            return SampleStreamAsyncCompletionStatus::StaleReservation;
+        if (decoded.num_channels() != source->config.channels ||
+            decoded.num_samples() < reservation.frame_count ||
+            !source->window.copy_to_filling_page(reservation.page_index,
+                                                 decoded,
+                                                 reservation.frame_count)) {
+            cancel_fill(*source,
+                        reservation.page_index,
+                        reservation.reservation_serial);
+            source->async_in_flight = false;
+            ++stats_.read_failures;
+            return SampleStreamAsyncCompletionStatus::CopyFailed;
+        }
+        if (!source->window.publish_page(
+                reservation.page_index,
+                {
+                    .stream_generation = reservation.source.source_generation,
+                    .start_frame = reservation.start_frame,
+                    .valid_frames = reservation.frame_count,
+                    .final_page = reservation.final_page,
+                })) {
+            cancel_fill(*source,
+                        reservation.page_index,
+                        reservation.reservation_serial);
+            source->async_in_flight = false;
+            ++stats_.publish_failures;
+            return SampleStreamAsyncCompletionStatus::PublishFailed;
+        }
+        auto& slot = source->slots[reservation.page_index];
+        slot.fill_serial = 0;
+        slot.publish_sequence = source->next_publish_sequence++;
+        source->async_in_flight = false;
+        ++stats_.pages_published;
+        return SampleStreamAsyncCompletionStatus::Published;
+    }
+
     SampleStreamServiceStatus service_once() noexcept {
         const auto request = scheduler_.most_urgent();
         if (!request) return SampleStreamServiceStatus::Idle;
@@ -478,7 +693,9 @@ public:
             return SampleStreamServiceStatus::AlreadyReady;
         }
 
-        const auto reservation = reserve_page(*source);
+        const auto reservation_serial = take_reservation_serial();
+        if (reservation_serial == 0) return SampleStreamServiceStatus::NoPageAvailable;
+        const auto reservation = reserve_page(*source, reservation_serial);
         if (reservation.status != PageReservationStatus::Reserved) {
             if (reservation.status == PageReservationStatus::RetiredVictim) {
                 ++stats_.pages_retired;
@@ -500,7 +717,7 @@ public:
             source->channel_ptrs[channel] =
                 source->window.writable_channel_data(page_slot, channel);
             if (source->channel_ptrs[channel] == nullptr) {
-                source->window.cancel_fill_page(page_slot);
+                cancel_fill(*source, page_slot, reservation_serial);
                 ++stats_.read_failures;
                 return SampleStreamServiceStatus::ReadFailed;
             }
@@ -518,7 +735,7 @@ public:
         }
 
         if (decoded != request->frame_count) {
-            source->window.cancel_fill_page(page_slot);
+            cancel_fill(*source, page_slot, reservation_serial);
             ++stats_.read_failures;
             return SampleStreamServiceStatus::ReadFailed;
         }
@@ -532,12 +749,13 @@ public:
                                             .valid_frames = request->frame_count,
                                             .final_page = final_page,
                                         })) {
-            source->window.cancel_fill_page(page_slot);
+            cancel_fill(*source, page_slot, reservation_serial);
             ++stats_.publish_failures;
             return SampleStreamServiceStatus::PublishFailed;
         }
 
         source->slots[page_slot].publish_sequence = source->next_publish_sequence++;
+        source->slots[page_slot].fill_serial = 0;
         ++stats_.pages_published;
         return SampleStreamServiceStatus::Published;
     }
@@ -551,6 +769,10 @@ public:
 private:
     struct SlotRecord {
         std::uint64_t publish_sequence = 0;
+        std::uint64_t fill_serial = 0;
+        std::uint64_t fill_registration_epoch = 0;
+        std::uint64_t fill_start_frame = 0;
+        std::uint64_t fill_frame_count = 0;
     };
 
     struct SourceGenerationRecord {
@@ -566,6 +788,8 @@ private:
         std::vector<SlotRecord> slots;
         std::uint64_t next_publish_sequence = 1;
         std::uint64_t retire_after_audio_generation = 0;
+        std::uint64_t registration_epoch = 0;
+        bool async_in_flight = false;
     };
 
     enum class PageReservationStatus : std::uint8_t {
@@ -608,15 +832,25 @@ private:
             .window = &source.window,
             .total_frames = source.config.total_frames,
             .page_frames = source.config.page_frames,
+            .registration_epoch = source.registration_epoch,
             .registration = SampleStreamSourceRegistrationProof(
                 source.config.token,
                 &source.window,
                 source.config.total_frames,
-                source.config.page_frames),
+                source.config.page_frames,
+                source.registration_epoch),
         };
     }
 
     Source* find_source_id(std::uint64_t source_id) noexcept {
+        const auto found = std::find_if(sources_.begin(), sources_.end(),
+            [source_id](const auto& source) noexcept {
+                return source->config.token.source_id == source_id;
+            });
+        return found == sources_.end() ? nullptr : found->get();
+    }
+
+    const Source* find_source_id(std::uint64_t source_id) const noexcept {
         const auto found = std::find_if(sources_.begin(), sources_.end(),
             [source_id](const auto& source) noexcept {
                 return source->config.token.source_id == source_id;
@@ -630,6 +864,52 @@ private:
             source->config.token.source_generation != token.source_generation) {
             return nullptr;
         }
+        return source;
+    }
+
+    const Source* find_source(SampleStreamSourceToken token) const noexcept {
+        const auto* source = find_source_id(token.source_id);
+        if (source == nullptr ||
+            source->config.token.source_generation != token.source_generation) {
+            return nullptr;
+        }
+        return source;
+    }
+
+    static bool registration_matches(
+        const Source& source,
+        const SampleStreamAsyncReservation& reservation) noexcept {
+        return reservation.registration_epoch == source.registration_epoch &&
+               reservation.registration.matches(
+                   source.config.token,
+                   &source.window,
+                   source.config.total_frames,
+                   source.config.page_frames,
+                   source.registration_epoch);
+    }
+
+    static bool matching_filling_slot(
+        const Source& source,
+        const SampleStreamAsyncReservation& reservation) noexcept {
+        return reservation.page_index < source.slots.size() &&
+               source.async_in_flight &&
+               source.slots[reservation.page_index].fill_serial ==
+                   reservation.reservation_serial &&
+               source.slots[reservation.page_index].fill_registration_epoch ==
+                   reservation.registration_epoch &&
+               source.slots[reservation.page_index].fill_start_frame ==
+                   reservation.start_frame &&
+               source.slots[reservation.page_index].fill_frame_count ==
+                   reservation.frame_count &&
+               source.window.page_state(reservation.page_index) ==
+                   SampleStreamPageState::Filling;
+    }
+
+    Source* matching_async_source(
+        const SampleStreamAsyncReservation& reservation) noexcept {
+        auto* source = find_source(reservation.source);
+        if (source == nullptr || !registration_matches(*source, reservation))
+            return nullptr;
         return source;
     }
 
@@ -660,11 +940,13 @@ private:
         };
     }
 
-    PageReservation reserve_page(Source& source) noexcept {
+    PageReservation reserve_page(Source& source,
+                                 std::uint64_t reservation_serial) noexcept {
         for (std::uint32_t page = 0; page < source.window.page_count(); ++page) {
             if (source.window.page_state(page) == SampleStreamPageState::Empty &&
                 source.window.begin_fill_page(page)) {
                 source.slots[page] = {};
+                source.slots[page].fill_serial = reservation_serial;
                 return {PageReservationStatus::Reserved, page, false};
             }
         }
@@ -680,6 +962,7 @@ private:
             if (state == SampleStreamPageState::Retired &&
                 source.window.begin_fill_page(page, completed_audio_generation_)) {
                 source.slots[page] = {};
+                source.slots[page].fill_serial = reservation_serial;
                 return {PageReservationStatus::Reserved, page, true};
             }
         }
@@ -705,12 +988,32 @@ private:
         return {PageReservationStatus::RetiredVictim, *victim, false};
     }
 
+    std::uint64_t take_reservation_serial() noexcept {
+        if (next_reservation_serial_ == 0) return 0;
+        return next_reservation_serial_++;
+    }
+
+    static bool cancel_fill(Source& source,
+                            std::uint32_t page_index,
+                            std::uint64_t reservation_serial) noexcept {
+        if (page_index >= source.slots.size() ||
+            source.slots[page_index].fill_serial != reservation_serial ||
+            source.window.page_state(page_index) != SampleStreamPageState::Filling) {
+            return false;
+        }
+        if (!source.window.cancel_fill_page(page_index)) return false;
+        source.slots[page_index].fill_serial = 0;
+        return true;
+    }
+
     std::vector<std::unique_ptr<Source>> sources_;
     std::vector<SourceGenerationRecord> source_generations_;
     SampleStreamScheduler scheduler_;
     std::uint64_t memory_budget_bytes_ = 0;
     std::uint64_t active_audio_generation_ = 0;
     std::uint64_t completed_audio_generation_ = 0;
+    std::uint64_t next_registration_epoch_ = 1;
+    std::uint64_t next_reservation_serial_ = 1;
     bool prepared_ = false;
     SampleStreamCacheServiceStats stats_{};
 };
