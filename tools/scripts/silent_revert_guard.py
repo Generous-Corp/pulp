@@ -238,33 +238,50 @@ def recent_landings(
             merged_at = datetime.fromisoformat(when.replace("Z", "+00:00"))
         except Exception:
             continue
-        record = landing_record(repo, sha, merged_at)
+        record = landing_record(
+            repo, sha, merged_at, only_within=set(paths) if paths else None
+        )
         if record is not None:
             out.append(record)
     return out
 
 
 def landing_record(
-    repo: str, sha: str, merged_at: Optional[datetime] = None
+    repo: str,
+    sha: str,
+    merged_at: Optional[datetime] = None,
+    only_within: Optional[set[str]] = None,
 ) -> Optional[MergeRecord]:
-    """Build a MergeRecord for one landed commit: its pre/post blob per path."""
+    """Build a MergeRecord for one landed commit: its pre/post blob per path.
+
+    `only_within` skips a landing whose touched paths are not all present in that
+    set, returning None WITHOUT reading a single blob. This is a pure cost
+    optimization with no effect on the verdict: a wholesale revert must restore
+    EVERY path its landing touched, so `is_byte_exact_revert` already returns
+    False the moment one is missing from the proposed change.
+
+    It matters because the blob reads are the expensive part — two per file — and
+    the landings that share a path with a push are often large. Measured on a
+    5-file push here: 2 candidate landings touching 561 files between them, i.e.
+    ~1124 git invocations and ~18s, versus one name listing each and ~0.2s.
+    """
     if merged_at is None:
         try:
             when = _git(["log", "-1", "--format=%cI", sha], cwd=repo).strip()
             merged_at = datetime.fromisoformat(when.replace("Z", "+00:00"))
         except Exception:
             return None
-    changes: dict = {}
     try:
         names = _git(
             ["diff-tree", "--no-commit-id", "--name-only", "-r", sha], cwd=repo
         )
     except Exception:
         return None
-    for path in names.splitlines():
-        path = path.strip()
-        if not path:
-            continue
+    touched = [p.strip() for p in names.splitlines() if p.strip()]
+    if only_within is not None and not set(touched).issubset(only_within):
+        return None
+    changes: dict = {}
+    for path in touched:
         changes[path] = {
             "pre": _blob_sha(repo, f"{sha}^", path),
             "post": _blob_sha(repo, sha, path),
@@ -330,17 +347,23 @@ def check_push(
     base_ref: str = "origin/main",
     head_ref: str = "HEAD",
     since_hours: float = 72.0,
+    now: Optional[datetime] = None,
 ) -> GuardVerdict:
-    """End-to-end: classify what this branch would do to the base branch."""
+    """End-to-end: classify what this branch would do to the base branch.
+
+    `now` anchors the recency window; it exists so a historical incident can be
+    replayed at the moment it actually happened rather than against wall-clock
+    time, which would put it outside the window and pass for the wrong reason.
+    """
     if has_revert_intent(repo, base_ref, head_ref):
         return GuardVerdict(blocked=False, reason="explicit revert intent stated")
     proposed = proposed_from_git(repo, base_ref, head_ref)
     if not proposed:
         return GuardVerdict(blocked=False, reason="no changes proposed")
     landings = recent_landings(
-        repo, base_ref, since_hours, paths=sorted(proposed.keys())
+        repo, base_ref, since_hours, paths=sorted(proposed.keys()), now=now
     )
-    return GuardBackstop(since_hours).check(proposed, landings)
+    return GuardBackstop(since_hours).check(proposed, landings, now=now)
 
 
 def main(argv: Optional[list[str]] = None) -> int:

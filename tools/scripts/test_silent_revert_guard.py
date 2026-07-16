@@ -84,6 +84,23 @@ def test_predicate_blocks_wholesale_revert() -> None:
     check("names the landing", v.merge_id == "MERGE-1")
 
 
+def test_predicate_revert_disguised_by_real_work() -> None:
+    """The realistic form: the revert rides along with genuine changes.
+
+    This is what makes the shape hard to see in review — the diff has real work
+    in it. The extra paths must not excuse the revert, and the cost short-circuit
+    (which skips a landing whose paths are not all in the push) must not drop it.
+    """
+    print("\n[predicate] a revert bundled with unrelated work still blocks")
+    proposed = {f: f"pre_{i}" for i, f in enumerate(FILES)}
+    proposed["core/genuinely_new.cpp"] = "brand_new"
+    proposed["core/other.cpp"] = "also_edited"
+    v = G.GuardBackstop().check(proposed, [MERGE], now=NOW)
+    check("blocked despite the extra work", v.blocked is True, f"reason={v.reason}")
+    check("the landing's paths are a subset of the push (so it is examined)",
+          MERGE.touched_paths().issubset(set(proposed)))
+
+
 def test_predicate_clean_cases() -> None:
     print("\n[predicate] does not cry wolf on honest work")
     controls: list[tuple[str, dict]] = []
@@ -230,6 +247,38 @@ def test_real_6082_replay() -> None:
         cwd=REPO_ROOT, capture_output=True, text=True,
     ).stdout.split()
     check("a --first-parent walk does see it", LANDING in first_parent)
+
+
+def test_real_6082_end_to_end() -> None:
+    """The whole guard, via its public entry point, on the real incident.
+
+    Anchored to the moment the revert actually happened. Wall-clock time would
+    put a historical landing outside the recency window and pass for the wrong
+    reason — an outcome indistinguishable from the guard working.
+    """
+    print("\n[real] check_push blocks the real incident, at the real moment")
+    if not _have_history():
+        print("  SKIP  incident commits not present in this checkout")
+        return
+    when = subprocess.run(
+        ["git", "log", "-1", "--format=%cI", REVERTER],
+        cwd=REPO_ROOT, capture_output=True, text=True,
+    ).stdout.strip()
+    at = datetime.fromisoformat(when)
+
+    v = G.check_push(REPO_ROOT, base_ref=LANDING, head_ref=REVERTER,
+                     since_hours=72.0, now=at)
+    check("BLOCKED end-to-end", v.blocked is True, f"reason={v.reason}")
+    check("names the real landing", v.merge_id == LANDING, v.merge_id)
+    check("names all 5 real paths", len(v.reverted_paths) == 5,
+          f"got {v.reverted_paths}")
+
+    # Same commits, but with the window measured from now: the landing is long
+    # past, so this must pass — and NOT because the guard is broken.
+    old = G.check_push(REPO_ROOT, base_ref=LANDING, head_ref=REVERTER,
+                       since_hours=72.0)
+    check("an old landing is outside the window and passes",
+          old.blocked is False, f"reason={old.reason}")
 
 
 # ===========================================================================
@@ -394,6 +443,7 @@ def test_e2e_degrades_on_bad_repo() -> None:
 
 def main() -> int:
     test_predicate_blocks_wholesale_revert()
+    test_predicate_revert_disguised_by_real_work()
     test_predicate_clean_cases()
     test_predicate_window()
     test_predicate_added_file_tombstone()
@@ -401,6 +451,7 @@ def main() -> int:
     test_since_arg_is_absolute()
     test_recent_landings_path_filter()
     test_real_6082_replay()
+    test_real_6082_end_to_end()
     test_e2e_blocks_silent_revert()
     test_e2e_hint_mode_never_fails()
     test_e2e_behind_base_is_clean()
