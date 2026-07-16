@@ -545,8 +545,15 @@ PhaseCurve measure_group_delay(
         const auto idx = static_cast<std::size_t>(i);
         const double mag_db =
             20.0 * std::log10(std::max(std::abs(h[idx]), kLinearFloor) / peak);
-        const bool defined =
-            reference_present[idx] && mag_db >= options.magnitude_floor_db;
+        // Two independent gates. The relative one rejects a stopband; the
+        // ABSOLUTE one rejects a curve with no signal anywhere, which the
+        // relative gate cannot see — for a silent output the peak is itself
+        // the numerical floor, every bin sits at 0 dB relative to it, and the
+        // curve would otherwise claim a flat, fully-defined, zero-delay
+        // response for a processor that emitted nothing at all.
+        const bool defined = reference_present[idx] &&
+                             std::abs(h[idx]) > kLinearFloor &&
+                             mag_db >= options.magnitude_floor_db;
         curve.full.push_back(
             {i * curve.bin_hz, mag_db, defined ? phase[idx] : nan,
              defined ? out_tau[idx] - in_tau[idx] : nan, defined});
