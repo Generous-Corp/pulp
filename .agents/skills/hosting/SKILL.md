@@ -597,6 +597,32 @@ Gotchas:
 
 ## Common tripwires
 
+- **Instruments have no input bus — never address input element 0 blind.**
+  An AU instrument (`aumu`/`aumi`), a generator (`augn`), and often a MIDI
+  effect (`aumf`) expose **zero input elements**. Setting a per-element input
+  property on one — `kAudioUnitProperty_StreamFormat`,
+  `kAudioUnitProperty_SetRenderCallback` — returns
+  `kAudioUnitErr_InvalidElement` (**-10877**), *not* a format error. Treating
+  that as fatal rejects **every instrument on the system** while every effect
+  keeps working, so the failure is invisible to effect-only tests. Ask
+  `kAudioUnitProperty_ElementCount` on the scope first and skip the input-side
+  setup when it is 0 (`scope_element_count()` in
+  `core/host/src/plugin_slot_au.mm`). The general rule for any backend: derive
+  the bus layout from what the plug-in **reports**, never from the assumption
+  that an input side exists. The other slots already do this and are the pattern
+  to copy — VST3 loops `component_->getBusCount(kAudio, kInput)` and ignores
+  `setBusArrangements`' status ("missing buses degrade gracefully"); LV2 counts
+  `num_audio_inputs_` from the ports it discovers. AU was the outlier.
+- **Test hosts against a real *instrument*, not just a real effect.** The
+  effect-only integration test in `test/test_plugin_slot_au.mm` passed happily
+  through the bug above. Apple's bundled `DLSMusicDevice`
+  (`kAudioUnitType_MusicDevice` + `kAudioUnitManufacturer_Apple`) ships on every
+  Mac, so an instrument fixture costs nothing —
+  `first_apple_instrument_unique_id()` is there for this. Any host change that
+  touches bus/format negotiation needs both shapes, or half the plug-in universe
+  goes untested. (These tests WARN-and-return when no system AU is registered;
+  a headless VM may not surface Apple's AUs, so treat a green run in CI as
+  "not disproven" rather than "covered" — a **skip is never a pass**.)
 - Building `pulp-host` without adding a new `.cpp` to `target_sources` —
   the file sits on disk but isn't compiled; link errors fire only in the
   dispatcher's `case`. **Always** update `core/host/CMakeLists.txt`
