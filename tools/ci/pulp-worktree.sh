@@ -18,13 +18,13 @@
 #   pulp-worktree.sh gc [--max-total-gb N] [--max-age-days N] [--merged]
 #
 # Env overrides: PULP_WT_ROOT (default ../pulp-worktrees), PULP_CI_CACHE
-# (default ~/.cache/pulp-ci), PULP_CCACHE_MAX_SIZE (default 80G).
+# (default ~/.cache/pulp-ci), PULP_CCACHE_MAX_SIZE (default 200G).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WT_ROOT="${PULP_WT_ROOT:-$(cd "$REPO_ROOT/.." && pwd)/pulp-worktrees}"
 CACHE_ROOT="${PULP_CI_CACHE:-$HOME/.cache/pulp-ci}"
-CCACHE_MAX_SIZE="${PULP_CCACHE_MAX_SIZE:-80G}"
+CCACHE_MAX_SIZE="${PULP_CCACHE_MAX_SIZE:-200G}"
 
 # CCACHE_BASEDIR is the COMMON PARENT of the repo and every worktree so a hit
 # in /a/pulp-worktrees/X normalizes against /a/pulp-worktrees/Y and the primary
@@ -52,8 +52,18 @@ cache_env() {  # emit the env every worktree build should use
 export CCACHE_DIR="$CACHE_ROOT/ccache"
 export CCACHE_BASEDIR="$BASEDIR"
 export CCACHE_NOHASHDIR=true
-export CCACHE_DEPEND=true
-export CCACHE_SLOPPINESS=time_macros,pch_defines
+# Depend mode OFF + content compiler keying — the #3504 correctness combo, the
+# same one build.yml forces at job level. Depend mode with default mtime
+# compiler keying on a cache SHARED across worktrees serves a stale/false-hit
+# object that corrupts unrelated TUs (a pure function returns "" and
+# change-unrelated tests fail) — the exact scar this shipyard/worktree lane
+# would otherwise reproduce. ccache rejects CCACHE_DEPEND=false, so the negated
+# NO-form is the env spelling; direct mode stays on (fast + correct once depend
+# mode is off and the compiler is content-keyed). Depend mode stays OFF
+# fleet-wide.
+export CCACHE_NODEPEND=true
+export CCACHE_COMPILERCHECK=content
+export CCACHE_SLOPPINESS=time_macros
 export FETCHCONTENT_BASE_DIR="$CACHE_ROOT/fetchcontent-src"
 export SKIA_DIR="$CACHE_ROOT/skia-build/build/mac-gpu"
 # Make object paths relative so ccache hits survive different worktree paths
