@@ -12,8 +12,8 @@
   "hotspots": [
     {
       "path": "core/view/src/widget_bridge.cpp",
-      "max_loc": 1002,
-      "note": "WidgetBridge shell after callback wiring + subtree cleanup extraction; keep widget callbacks in widget_bridge/widget_callbacks.cpp, cleanup in widget_bridge/subtree_cleanup.cpp, JS event dispatch in widget_bridge/bridge_dispatch.cpp, and the CSS color parser in widget_bridge/css_color.cpp"
+      "max_loc": 930,
+      "note": "WidgetBridge shell after callback wiring + subtree cleanup extraction; keep widget callbacks in widget_bridge/widget_callbacks.cpp, cleanup in widget_bridge/subtree_cleanup.cpp, JS event dispatch in widget_bridge/bridge_dispatch.cpp, and the CSS color parser in widget_bridge/css_color.cpp; registrar table + shared value-widget access in widget_bridge/value_widget_access.hpp"
     },
     {
       "path": "core/view/src/widget_bridge/canvas2d_api.cpp",
@@ -77,8 +77,8 @@
     },
     {
       "path": "core/render/src/renderer3d.cpp",
-      "max_loc": 3410,
-      "note": "Renderer3D implementation hotspot after CPU value-type extraction; frame device-acquisition + readback/PNG tail shared via acquire_dawn_frame/finish_frame_readback"
+      "max_loc": 3394,
+      "note": "Renderer3D implementation hotspot after CPU value-type extraction; frame device-acquisition + readback/PNG tail shared via acquire_dawn_frame/finish_frame_readback; render_scene_data phase split + grouped flag structs"
     },
     {
       "path": "tools/import-design/pulp_import_design.cpp",
@@ -87,13 +87,13 @@
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",
-      "max_loc": 2770,
-      "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing). Raised 2752->2770 for the two set_native_child_view_clip overrides (CPU + GPU WindowHost) that forward to the shared mac_geometry clip helper (R1 NativeViewHost)."
+      "max_loc": 2690,
+      "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing). Raised 2752->2770 for the two set_native_child_view_clip overrides (CPU + GPU WindowHost) that forward to the shared mac_geometry clip helper (R1 NativeViewHost). Lowered after the three hand-rolled CVDisplayLink drivers collapsed onto the shared MacDisplayLinkDriver."
     },
     {
       "path": "core/view/src/design_import.cpp",
-      "max_loc": 2506,
-      "note": "design-import orchestration hotspot; lowered after comment-hygiene cleanup"
+      "max_loc": 2189,
+      "note": "design-import orchestration hotspot; lowered after comment-hygiene cleanup; PNG codec + pixel passes live in design_import_png.cpp"
     },
     {
       "path": "core/view/src/design_ir_json.cpp",
@@ -102,13 +102,13 @@
     },
     {
       "path": "core/view/src/design_cpp_codegen.cpp",
-      "max_loc": 2050,
-      "note": "DesignIR C++ codegen contract hotspot; +12 for interactive-element param_key emit + host-param routing enable (parity with make_faithful_svg_frame); hit-policy + image-sizing lowering now shared from design_import_native_common"
+      "max_loc": 1962,
+      "note": "DesignIR C++ codegen contract hotspot; +12 for interactive-element param_key emit + host-param routing enable (parity with make_faithful_svg_frame); hit-policy + image-sizing lowering now shared from design_import_native_common; shared IR helpers in design_ir_helpers.hpp"
     },
     {
       "path": "core/view/src/design_import_native_common.cpp",
-      "max_loc": 2070,
-      "note": "native materialization/import boundary hotspot; +12 for the interactive-element param_key mapping + host-param routing auto-enable; owns the shared hit-policy + image-sizing lowering for the runtime and baked-C++ lanes"
+      "max_loc": 1991,
+      "note": "native materialization/import boundary hotspot; +12 for the interactive-element param_key mapping + host-param routing auto-enable; owns the shared hit-policy + image-sizing lowering for the runtime and baked-C++ lanes; shared IR helpers in design_ir_helpers.hpp"
     },
     {
       "path": "core/view/src/design_codegen.cpp",
@@ -132,8 +132,8 @@
     },
     {
       "path": "tools/cli/kit_commands.cpp",
-      "max_loc": 3909,
-      "note": "kit/package trust-boundary monolith; split per tools/cli/KIT_COMMANDS_MODULE_MAP.md; JSON escaping shared from tools/cli/json_writer.hpp"
+      "max_loc": 3883,
+      "note": "kit/package trust-boundary monolith; split per tools/cli/KIT_COMMANDS_MODULE_MAP.md; JSON escaping shared from tools/cli/json_writer.hpp; archive-safety path checks shared from tools/cli/cli_fs_util.hpp"
     },
     {
       "path": "inspect/src/inspector_overlay.cpp",

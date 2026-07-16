@@ -31,7 +31,119 @@
 #include <cmath>
 #include <vector>
 
+namespace {
+
+// ── Cursor hide/unhide balance ───────────────────────────────────────────────
+// NSCursor hide/unhide calls are reference-counted by AppKit, so we must track
+// our own hidden state and always unhide before setting a different cursor.
+bool s_cursor_hidden = false;
+
+// ── Diagonal resize cursor ───────────────────────────────────────────────────
+// AppKit exposes no PUBLIC diagonal corner-resize cursor, but NSCursor carries
+// the private `_windowResizeNorthWestSouthEastCursor` (↖↘) and
+// `_windowResizeNorthEastSouthWestCursor` (↗↙) selectors that NSWindow itself
+// uses for corner resizing. We reach them via respondsToSelector so a future
+// SDK that renames/removes them degrades to a crosshair instead of crashing.
+// `nwse == YES` → the ↖↘ (TL/BR) variant; NO → the ↗↙ (TR/BL) variant.
+NSCursor* diagonal_resize_cursor(BOOL nwse) {
+    SEL sel = nwse
+        ? NSSelectorFromString(@"_windowResizeNorthWestSouthEastCursor")
+        : NSSelectorFromString(@"_windowResizeNorthEastSouthWestCursor");
+    if ([NSCursor respondsToSelector:sel]) {
+        id cur = [NSCursor performSelector:sel];
+        if ([cur isKindOfClass:[NSCursor class]]) return (NSCursor*)cur;
+    }
+    return [NSCursor crosshairCursor];
+}
+
+}  // namespace
+
 namespace pulp::view::mac_geometry {
+
+void set_ns_cursor_hidden(bool hidden) {
+    if (hidden) {
+        if (!s_cursor_hidden) {
+            [NSCursor hide];
+            s_cursor_hidden = true;
+        }
+    } else if (s_cursor_hidden) {
+        [NSCursor unhide];
+        s_cursor_hidden = false;
+    }
+}
+
+void set_ns_cursor_for_style(pulp::view::View::CursorStyle style) {
+    // Unhide cursor before switching to any non-invisible style
+    if (style != pulp::view::View::CursorStyle::invisible) set_ns_cursor_hidden(false);
+    switch (style) {
+        case pulp::view::View::CursorStyle::pointer:
+            [[NSCursor pointingHandCursor] set]; break;
+        case pulp::view::View::CursorStyle::crosshair:
+            [[NSCursor crosshairCursor] set]; break;
+        case pulp::view::View::CursorStyle::text:
+            [[NSCursor IBeamCursor] set]; break;
+        case pulp::view::View::CursorStyle::grab:
+            [[NSCursor openHandCursor] set]; break;
+        case pulp::view::View::CursorStyle::grabbing:
+            [[NSCursor closedHandCursor] set]; break;
+        case pulp::view::View::CursorStyle::not_allowed:
+            [[NSCursor operationNotAllowedCursor] set]; break;
+        case pulp::view::View::CursorStyle::invisible:
+            set_ns_cursor_hidden(true);
+            break;
+        case pulp::view::View::CursorStyle::horizontal_resize:
+            [[NSCursor resizeLeftRightCursor] set]; break;
+        case pulp::view::View::CursorStyle::vertical_resize:
+            [[NSCursor resizeUpDownCursor] set]; break;
+        case pulp::view::View::CursorStyle::top_left_resize:
+        case pulp::view::View::CursorStyle::bottom_right_resize:
+            // Proper diagonal ↖↘ resize cursor. AppKit ships no public diagonal
+            // resize cursor, but the private
+            // `_windowResizeNorthWestSouthEastCursor` selector
+            // is the standard NSWindow corner-resize arrow.
+            // Guard with respondsToSelector and fall back to
+            // crosshair if the (undocumented) symbol is gone.
+            [diagonal_resize_cursor(YES) set]; break;
+        case pulp::view::View::CursorStyle::top_right_resize:
+        case pulp::view::View::CursorStyle::bottom_left_resize:
+            // Proper diagonal ↗↙
+            // resize cursor (private
+            // `_windowResizeNorthEastSouthWestCursor`).
+            [diagonal_resize_cursor(NO) set]; break;
+        case pulp::view::View::CursorStyle::multi_directional_resize:
+            [[NSCursor openHandCursor] set]; break;
+        // CSS cursor keywords with native NSCursor backings.
+        //   alias → dragLinkCursor (macOS 10.6+).
+        //   copy → dragCopyCursor (macOS 10.6+).
+        //   zoom-in / zoom-out → zoomInCursor / zoomOutCursor
+        //     (macOS 10.15+; defensive respondsToSelector
+        //     check in case the symbol is weak-linked or
+        //     unavailable on the runtime OS).
+        //   context-menu → contextualMenuCursor (macOS 10.6+).
+        case pulp::view::View::CursorStyle::alias:
+            [[NSCursor dragLinkCursor] set]; break;
+        case pulp::view::View::CursorStyle::copy:
+            [[NSCursor dragCopyCursor] set]; break;
+        case pulp::view::View::CursorStyle::zoom_in:
+            if ([NSCursor respondsToSelector:@selector(zoomInCursor)]) {
+                [[NSCursor performSelector:@selector(zoomInCursor)] set];
+            } else {
+                [[NSCursor arrowCursor] set];
+            }
+            break;
+        case pulp::view::View::CursorStyle::zoom_out:
+            if ([NSCursor respondsToSelector:@selector(zoomOutCursor)]) {
+                [[NSCursor performSelector:@selector(zoomOutCursor)] set];
+            } else {
+                [[NSCursor arrowCursor] set];
+            }
+            break;
+        case pulp::view::View::CursorStyle::context_menu:
+            [[NSCursor contextualMenuCursor] set]; break;
+        default:
+            [[NSCursor arrowCursor] set]; break;
+    }
+}
 
 void request_app_close(NSWindow* window) {
     NSWindow* target = window != nil ? window : [NSApp keyWindow];

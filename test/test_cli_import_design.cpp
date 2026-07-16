@@ -18,6 +18,8 @@
 // Tests live under [issue-1035] so coverage harness can attribute
 // them to the slice that introduced them.
 
+#include "test_cli_shellout_util.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/platform/child_process.hpp>
@@ -93,7 +95,9 @@ fs::path pulp_binary() {
 
 bool binary_exists() { return fs::exists(pulp_binary()); }
 
-ProcessResult run_pulp(const std::vector<std::string>& args, int timeout_ms = 30000) {
+// Timeout defaults to the shared hang guard — see test_cli_shellout_util.hpp.
+ProcessResult run_pulp(const std::vector<std::string>& args,
+                       int timeout_ms = pulp_test_cli::shellout_timeout_ms()) {
     auto bin = pulp_binary();
     if (!fs::exists(bin)) {
         ProcessResult r;

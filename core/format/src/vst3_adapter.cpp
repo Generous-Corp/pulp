@@ -12,6 +12,7 @@
 #include <pulp/format/detail/vst3_midi_mapping.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/format/max_block_contract.hpp>
+#include <pulp/format/mpe_expression.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/parameter_text.hpp>
 #include <pulp/format/vst3_plug_view.hpp>
@@ -81,6 +82,117 @@ inline bool is_declared_note_expr_type(NoteExpressionTypeID id) {
         if (entry.type_id == id) return true;
     }
     return false;
+}
+
+// Decode the host's VST3 process context into Pulp's neutral ProcessContext and
+// raise this block's transport change flags.
+//
+// `playhead_prev` is the adapter's previous-block transport snapshot and is
+// advanced in place, so a first block after construction raises no spurious
+// change flags. A host that supplies no process context leaves every transport
+// field at its ProcessContext default; only the change-flag diff still runs.
+pulp::format::ProcessContext build_process_context(
+    const ProcessData& data,
+    const ProcessSetup& setup,
+    int32 num_samples,
+    pulp::format::detail::PlayheadSnapshot& playhead_prev) {
+    pulp::format::ProcessContext ctx;
+    ctx.sample_rate = setup.sampleRate;
+    ctx.num_samples = num_samples;
+    ctx.process_mode = setup.processMode == Steinberg::Vst::kOffline
+        ? pulp::format::ProcessMode::Offline
+        : pulp::format::ProcessMode::Realtime;
+    ctx.render_speed_hint = ctx.process_mode == pulp::format::ProcessMode::Offline
+        ? pulp::format::RenderSpeedHint::FasterThanRealtime
+        : pulp::format::RenderSpeedHint::Realtime;
+    if (data.processContext) {
+        const auto* pc = data.processContext;
+        const uint32_t state = pc->state;
+        ctx.is_playing = (state & Steinberg::Vst::ProcessContext::kPlaying) != 0;
+        ctx.is_recording = (state & Steinberg::Vst::ProcessContext::kRecording) != 0;
+        ctx.position_samples = pc->projectTimeSamples;
+        if (state & Steinberg::Vst::ProcessContext::kTempoValid) {
+            ctx.tempo_bpm = pc->tempo;
+        }
+        if (state & Steinberg::Vst::ProcessContext::kProjectTimeMusicValid) {
+            ctx.position_beats = pc->projectTimeMusic;
+        }
+        if (state & Steinberg::Vst::ProcessContext::kTimeSigValid) {
+            ctx.time_sig_numerator = pc->timeSigNumerator;
+            ctx.time_sig_denominator = pc->timeSigDenominator;
+        }
+
+        // kCycleValid covers cycleStartMusic + cycleEndMusic; kCycleActive
+        // indicates the host is currently looping. Both must be set for
+        // the loop range to be meaningful.
+        ctx.is_looping = (state & Steinberg::Vst::ProcessContext::kCycleActive) != 0;
+        if (state & Steinberg::Vst::ProcessContext::kCycleValid) {
+            ctx.loop_start_beats = pc->cycleStartMusic;
+            ctx.loop_end_beats = pc->cycleEndMusic;
+        }
+
+        // Host clock for video sync.
+        if (state & Steinberg::Vst::ProcessContext::kSystemTimeValid) {
+            ctx.host_time_ns = pc->systemTime;
+        }
+
+        // SMPTE frame rate enum. VST3 reports it as an integer
+        // framesPerSecond plus pulldown / drop flags. Map the documented
+        // combinations from the VST3 FrameRate docs onto Pulp's enum.
+        if (state & Steinberg::Vst::ProcessContext::kSmpteValid) {
+            const auto fps = pc->frameRate.framesPerSecond;
+            const auto fr_flags = pc->frameRate.flags;
+            const bool pulldown =
+                (fr_flags & Steinberg::Vst::FrameRate::kPullDownRate) != 0;
+            const bool drop =
+                (fr_flags & Steinberg::Vst::FrameRate::kDropRate) != 0;
+            // Mapping table is extracted to vst3_frame_rate.hpp so it is
+            // unit-testable without pulling the Steinberg VST3 SDK into
+            // the test binary. Critically, 59.94 (= 60 + pulldown) MUST
+            // NOT map to fps_60 — that bug broke SMPTE math in plugins
+            // that trust ctx.frame_rate.
+            ctx.frame_rate = pulp::format::detail::vst3_frame_rate(
+                static_cast<int>(fps), pulldown, drop);
+        }
+
+        // Derive bar index from position_beats + time-sig. VST3 also
+        // exposes `barPositionMusic` directly when kBarPositionValid is
+        // set, but that is the quarter-note position of the last bar
+        // start, not a bar index. Deriving matches `ProcessContext::bar`
+        // and stays consistent with the AU/CLAP paths.
+        pulp::format::detail::derive_bar_from_beats(ctx);
+    }
+
+    // Diff against the previous block to populate the transport change flags.
+    pulp::format::detail::compute_playhead_changes(ctx, playhead_prev);
+    return ctx;
+}
+
+// Bridge the processor's outbound MIDI back to the host's event list. Only note
+// on/off cross this boundary; other message types the processor emits have no
+// VST3 Event representation here and are not forwarded.
+void write_midi_output(const ProcessData& data, const midi::MidiBuffer& midi_out) {
+    if (!data.outputEvents || midi_out.empty()) return;
+    for (const auto& me : midi_out) {
+        Event evt{};
+        // Shared cross-format outbound-offset contract (offset N in -> N out;
+        // see detail/midi_out_offset.hpp + test_midi_out_offset_parity.cpp).
+        evt.sampleOffset =
+            pulp::format::detail::vst3_output_offset(me.sample_offset);
+        if (me.is_note_on()) {
+            evt.type = Event::kNoteOnEvent;
+            evt.noteOn.channel = me.channel();
+            evt.noteOn.pitch = me.note();
+            evt.noteOn.velocity = me.velocity() / 127.0f;
+            data.outputEvents->addEvent(evt);
+        } else if (me.is_note_off()) {
+            evt.type = Event::kNoteOffEvent;
+            evt.noteOff.channel = me.channel();
+            evt.noteOff.pitch = me.note();
+            evt.noteOff.velocity = me.velocity() / 127.0f;
+            data.outputEvents->addEvent(evt);
+        }
+    }
 }
 
 inline void resize_sample_scratch(std::vector<std::vector<float>>& scratch,
@@ -1600,42 +1712,21 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                         midi::MidiEvent me{};
                         bool emitted = false;
                         if (ne.typeId == kTuningTypeID) {
-                            // VST3 tuning spans ±120 st; normalize to the MPE
-                            // member-bend default so the tracker expands it
-                            // back to the right per-note bend (mirrors CLAP).
-                            const double semis =
-                                vst3_tuning_norm_to_semitones(norm);
-                            const double bend_norm = std::clamp(
-                                semis / static_cast<double>(
-                                    midi::MpeVoiceTracker::
-                                        kDefaultMemberBendSemitones),
-                                -1.0, 1.0);
-                            const int bend14 = static_cast<int>(
-                                std::lround(8192.0 + bend_norm * 8191.0));
-                            me = midi::MidiEvent::pitch_bend(
-                                channel,
-                                static_cast<uint16_t>(
-                                    std::clamp(bend14, 0, 16383)));
+                            // VST3 tuning is normalized over ±120 st; decode
+                            // it to semitones here, then let the shared mapping
+                            // normalize to the MPE member-bend default so the
+                            // tracker expands it back to the right per-note
+                            // bend (mirrors CLAP).
+                            me = mpe::pitch_bend_from_semitones(
+                                channel, vst3_tuning_norm_to_semitones(norm));
                             emitted = true;
                         } else if (ne.typeId == kVolumeTypeID) {
                             // Loudness axis -> channel pressure (status 0xD0).
-                            const auto v7 = static_cast<uint8_t>(
-                                std::clamp<int>(
-                                    static_cast<int>(norm * 127.0 + 0.5),
-                                    0, 127));
-                            me = midi::MidiEvent{
-                                choc::midi::ShortMessage(
-                                    static_cast<uint8_t>(0xD0 | (channel & 0x0F)),
-                                    v7, 0),
-                                0, 0.0};
+                            me = mpe::channel_pressure(channel, norm);
                             emitted = true;
                         } else if (ne.typeId == kBrightnessTypeID) {
                             // Timbre -> CC 74.
-                            const auto v7 = static_cast<uint8_t>(
-                                std::clamp<int>(
-                                    static_cast<int>(norm * 127.0 + 0.5),
-                                    0, 127));
-                            me = midi::MidiEvent::cc(channel, 74, v7);
+                            me = mpe::timbre_cc(channel, norm);
                             emitted = true;
                         }
                         // kPanTypeID (and any other declared/unknown type) has
@@ -1675,87 +1766,15 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // events vector does not allocate.
     midi_in_.sort();
 
-    // Build process context
-    pulp::format::ProcessContext ctx;
-    ctx.sample_rate = processSetup.sampleRate;
-    ctx.num_samples = num_samples;
-    ctx.process_mode = processSetup.processMode == Steinberg::Vst::kOffline
-        ? pulp::format::ProcessMode::Offline
-        : pulp::format::ProcessMode::Realtime;
-    ctx.render_speed_hint = ctx.process_mode == pulp::format::ProcessMode::Offline
-        ? pulp::format::RenderSpeedHint::FasterThanRealtime
-        : pulp::format::RenderSpeedHint::Realtime;
-    if (data.processContext) {
-        const auto* pc = data.processContext;
-        const uint32_t state = pc->state;
-        ctx.is_playing = (state & Steinberg::Vst::ProcessContext::kPlaying) != 0;
-        ctx.is_recording = (state & Steinberg::Vst::ProcessContext::kRecording) != 0;
-        ctx.position_samples = pc->projectTimeSamples;
-        if (state & Steinberg::Vst::ProcessContext::kTempoValid) {
-            ctx.tempo_bpm = pc->tempo;
-        }
-        if (state & Steinberg::Vst::ProcessContext::kProjectTimeMusicValid) {
-            ctx.position_beats = pc->projectTimeMusic;
-        }
-        if (state & Steinberg::Vst::ProcessContext::kTimeSigValid) {
-            ctx.time_sig_numerator = pc->timeSigNumerator;
-            ctx.time_sig_denominator = pc->timeSigDenominator;
-        }
-
-        // kCycleValid covers cycleStartMusic + cycleEndMusic; kCycleActive
-        // indicates the host is currently looping. Both must be set for
-        // the loop range to be meaningful.
-        ctx.is_looping = (state & Steinberg::Vst::ProcessContext::kCycleActive) != 0;
-        if (state & Steinberg::Vst::ProcessContext::kCycleValid) {
-            ctx.loop_start_beats = pc->cycleStartMusic;
-            ctx.loop_end_beats = pc->cycleEndMusic;
-        }
-
-        // Host clock for video sync.
-        if (state & Steinberg::Vst::ProcessContext::kSystemTimeValid) {
-            ctx.host_time_ns = pc->systemTime;
-        }
-
-        // SMPTE frame rate enum. VST3 reports it as an integer
-        // framesPerSecond plus pulldown / drop flags. Map the documented
-        // combinations from the VST3 FrameRate docs onto Pulp's enum.
-        if (state & Steinberg::Vst::ProcessContext::kSmpteValid) {
-            const auto fps = pc->frameRate.framesPerSecond;
-            const auto fr_flags = pc->frameRate.flags;
-            const bool pulldown =
-                (fr_flags & Steinberg::Vst::FrameRate::kPullDownRate) != 0;
-            const bool drop =
-                (fr_flags & Steinberg::Vst::FrameRate::kDropRate) != 0;
-            // Mapping table is extracted to vst3_frame_rate.hpp so it is
-            // unit-testable without pulling the Steinberg VST3 SDK into
-            // the test binary. Critically, 59.94 (= 60 + pulldown) MUST
-            // NOT map to fps_60 — that bug broke SMPTE math in plugins
-            // that trust ctx.frame_rate.
-            ctx.frame_rate = pulp::format::detail::vst3_frame_rate(
-                static_cast<int>(fps), pulldown, drop);
-        }
-
-        // Derive bar index from position_beats + time-sig. VST3 also
-        // exposes `barPositionMusic` directly when kBarPositionValid is
-        // set, but that is the quarter-note position of the last bar
-        // start, not a bar index. Deriving matches `ProcessContext::bar`
-        // and stays consistent with the AU/CLAP paths.
-        pulp::format::detail::derive_bar_from_beats(ctx);
-    }
-
-    // Diff against the previous block to populate the transport change
-    // flags. Stateful; updates `playhead_prev_` in place.
-    pulp::format::detail::compute_playhead_changes(ctx, playhead_prev_);
+    auto ctx = build_process_context(data, processSetup, num_samples,
+                                     playhead_prev_);
 
     // Snapshot parameter values before processing so we can detect
     // plugin-side changes and report them to the host for automation recording
     auto all_params = store_.all_params();
-    param_snapshot_.resize(all_params.size());
+    boundary::snapshot_param_values(store_, all_params, param_snapshot_);
     output_param_has_event_.assign(all_params.size(), 0);
     output_param_queue_cache_.assign(all_params.size(), nullptr);
-    for (std::size_t i = 0; i < all_params.size(); ++i) {
-        param_snapshot_[i] = store_.get_value(all_params[i].id);
-    }
     processor_->set_param_events(&param_events_);
     output_param_events_.clear();
     processor_->set_output_param_events(&output_param_events_);
@@ -1852,11 +1871,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         output_param_events_.sort();
         const int32 last_frame = data.numSamples > 0 ? data.numSamples - 1 : 0;
         for (const auto& ev : output_param_events_) {
-            std::size_t idx = all_params.size();
-            for (std::size_t i = 0; i < all_params.size(); ++i) {
-                if (all_params[i].id == ev.param_id) { idx = i; break; }
-            }
-            if (idx == all_params.size()) continue;  // unknown param — drop
+            const std::size_t idx =
+                boundary::find_param_index(all_params, ev.param_id);
+            if (idx == boundary::kParamIndexNotFound) continue;  // unknown — drop
             int32 offset = ev.sample_offset;
             if (offset < 0) offset = 0;
             if (offset > last_frame) offset = last_frame;  // clamp into the block
@@ -1883,7 +1900,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                 continue;
             }
             float current = store_.get_value(all_params[i].id);
-            if (std::memcmp(&current, &param_snapshot_[i], sizeof(float)) != 0) {
+            if (boundary::changed_since_snapshot(current, param_snapshot_[i])) {
                 int32 index = 0;
                 auto* queue = data.outputParameterChanges->addParameterData(
                     static_cast<ParamID>(all_params[i].id), index);
@@ -1923,29 +1940,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         restart_publisher_.note_pending(flags);
     }
 
-    // Write MIDI output
-    if (data.outputEvents && !midi_out_.empty()) {
-        for (const auto& me : midi_out_) {
-            Event evt{};
-            // Shared cross-format outbound-offset contract (offset N in -> N out;
-            // see detail/midi_out_offset.hpp + test_midi_out_offset_parity.cpp).
-            evt.sampleOffset =
-                pulp::format::detail::vst3_output_offset(me.sample_offset);
-            if (me.is_note_on()) {
-                evt.type = Event::kNoteOnEvent;
-                evt.noteOn.channel = me.channel();
-                evt.noteOn.pitch = me.note();
-                evt.noteOn.velocity = me.velocity() / 127.0f;
-                data.outputEvents->addEvent(evt);
-            } else if (me.is_note_off()) {
-                evt.type = Event::kNoteOffEvent;
-                evt.noteOff.channel = me.channel();
-                evt.noteOff.pitch = me.note();
-                evt.noteOff.velocity = me.velocity() / 127.0f;
-                data.outputEvents->addEvent(evt);
-            }
-        }
-    }
+    write_midi_output(data, midi_out_);
 
     return kResultOk;
 }

@@ -40,29 +40,6 @@
 #import <Metal/Metal.h>
 #endif
 
-// ── Cursor hide/unhide balance ───────────────────────────────────────────────
-// NSCursor hide/unhide calls are reference-counted by AppKit, so we must track
-// our own hidden state and always unhide before setting a different cursor.
-static bool s_cursor_hidden = false;
-
-// ── Diagonal resize cursor ───────────────────────────────────────────────────
-// AppKit exposes no PUBLIC diagonal corner-resize cursor, but NSCursor carries
-// the private `_windowResizeNorthWestSouthEastCursor` (↖↘) and
-// `_windowResizeNorthEastSouthWestCursor` (↗↙) selectors that NSWindow itself
-// uses for corner resizing. We reach them via respondsToSelector so a future
-// SDK that renames/removes them degrades to a crosshair instead of crashing.
-// `nwse == YES` → the ↖↘ (TL/BR) variant; NO → the ↗↙ (TR/BL) variant.
-static NSCursor* pulp_diagonal_resize_cursor(BOOL nwse) {
-    SEL sel = nwse
-        ? NSSelectorFromString(@"_windowResizeNorthWestSouthEastCursor")
-        : NSSelectorFromString(@"_windowResizeNorthEastSouthWestCursor");
-    if ([NSCursor respondsToSelector:sel]) {
-        id cur = [NSCursor performSelector:sel];
-        if ([cur isKindOfClass:[NSCursor class]]) return (NSCursor*)cur;
-    }
-    return [NSCursor crosshairCursor];
-}
-
 // ── App menu helper ──────────────────────────────────────────────────────────
 
 static std::mutex& cocoa_dispatcher_liveness_mutex() {
@@ -1185,82 +1162,7 @@ static void install_app_menu(NSString* appName) {
                 auto style = inspector_cursor >= 0
                     ? static_cast<pulp::view::View::CursorStyle>(inspector_cursor)
                     : target->cursor();
-                // Unhide cursor before switching to any non-invisible style
-                if (style != pulp::view::View::CursorStyle::invisible && s_cursor_hidden) {
-                    [NSCursor unhide];
-                    s_cursor_hidden = false;
-                }
-                switch (style) {
-                    case pulp::view::View::CursorStyle::pointer:
-                        [[NSCursor pointingHandCursor] set]; break;
-                    case pulp::view::View::CursorStyle::crosshair:
-                        [[NSCursor crosshairCursor] set]; break;
-                    case pulp::view::View::CursorStyle::text:
-                        [[NSCursor IBeamCursor] set]; break;
-                    case pulp::view::View::CursorStyle::grab:
-                        [[NSCursor openHandCursor] set]; break;
-                    case pulp::view::View::CursorStyle::grabbing:
-                        [[NSCursor closedHandCursor] set]; break;
-                    case pulp::view::View::CursorStyle::not_allowed:
-                        [[NSCursor operationNotAllowedCursor] set]; break;
-                    case pulp::view::View::CursorStyle::invisible:
-                        if (!s_cursor_hidden) {
-                            [NSCursor hide];
-                            s_cursor_hidden = true;
-                        }
-                        break;
-                    case pulp::view::View::CursorStyle::horizontal_resize:
-                        [[NSCursor resizeLeftRightCursor] set]; break;
-                    case pulp::view::View::CursorStyle::vertical_resize:
-                        [[NSCursor resizeUpDownCursor] set]; break;
-                    case pulp::view::View::CursorStyle::top_left_resize:
-                    case pulp::view::View::CursorStyle::bottom_right_resize:
-                        // Proper diagonal ↖↘ resize cursor. AppKit ships no public diagonal
-                        // resize cursor, but the private
-                        // `_windowResizeNorthWestSouthEastCursor` selector
-                        // is the standard NSWindow corner-resize arrow.
-                        // Guard with respondsToSelector and fall back to
-                        // crosshair if the (undocumented) symbol is gone.
-                        [pulp_diagonal_resize_cursor(YES) set]; break;
-                    case pulp::view::View::CursorStyle::top_right_resize:
-                    case pulp::view::View::CursorStyle::bottom_left_resize:
-                        // Proper diagonal ↗↙
-                        // resize cursor (private
-                        // `_windowResizeNorthEastSouthWestCursor`).
-                        [pulp_diagonal_resize_cursor(NO) set]; break;
-                    case pulp::view::View::CursorStyle::multi_directional_resize:
-                        [[NSCursor openHandCursor] set]; break;
-                    // CSS cursor keywords with native NSCursor backings.
-                    //   alias → dragLinkCursor (macOS 10.6+).
-                    //   copy → dragCopyCursor (macOS 10.6+).
-                    //   zoom-in / zoom-out → zoomInCursor / zoomOutCursor
-                    //     (macOS 10.15+; defensive respondsToSelector
-                    //     check in case the symbol is weak-linked or
-                    //     unavailable on the runtime OS).
-                    //   context-menu → contextualMenuCursor (macOS 10.6+).
-                    case pulp::view::View::CursorStyle::alias:
-                        [[NSCursor dragLinkCursor] set]; break;
-                    case pulp::view::View::CursorStyle::copy:
-                        [[NSCursor dragCopyCursor] set]; break;
-                    case pulp::view::View::CursorStyle::zoom_in:
-                        if ([NSCursor respondsToSelector:@selector(zoomInCursor)]) {
-                            [[NSCursor performSelector:@selector(zoomInCursor)] set];
-                        } else {
-                            [[NSCursor arrowCursor] set];
-                        }
-                        break;
-                    case pulp::view::View::CursorStyle::zoom_out:
-                        if ([NSCursor respondsToSelector:@selector(zoomOutCursor)]) {
-                            [[NSCursor performSelector:@selector(zoomOutCursor)] set];
-                        } else {
-                            [[NSCursor arrowCursor] set];
-                        }
-                        break;
-                    case pulp::view::View::CursorStyle::context_menu:
-                        [[NSCursor contextualMenuCursor] set]; break;
-                    default:
-                        [[NSCursor arrowCursor] set]; break;
-                }
+                pulp::view::mac_geometry::set_ns_cursor_for_style(style);
             }
 
             [self setNeedsDisplay:YES];
@@ -2032,7 +1934,7 @@ public:
         // window but never repaints the new frame. Start a per-window display
         // link here, guarded so the primary (which already started its link in
         // run_event_loop()) is untouched.
-        if (!display_link_) start_display_link();
+        if (!display_link_.is_open()) start_display_link();
         // Make the Metal view the first responder so the window receives key
         // events on its FIRST show. Only run_event_loop() (the PRIMARY window)
         // did this; a SECONDARY window (e.g. the MusicalTypingKeyboard popout)
@@ -2287,16 +2189,10 @@ public:
         [metal_view_ setRelativeMouseMode:enabled ? YES : NO];
         if (enabled) {
             CGAssociateMouseAndMouseCursorPosition(false);
-            if (!s_cursor_hidden) {
-                [NSCursor hide];
-                s_cursor_hidden = true;
-            }
+            pulp::view::mac_geometry::set_ns_cursor_hidden(true);
         } else {
             CGAssociateMouseAndMouseCursorPosition(true);
-            if (s_cursor_hidden) {
-                [NSCursor unhide];
-                s_cursor_hidden = false;
-            }
+            pulp::view::mac_geometry::set_ns_cursor_hidden(false);
         }
     }
 
@@ -2429,7 +2325,7 @@ private:
 
     std::unique_ptr<render::GpuSurface> gpu_surface_;
     std::unique_ptr<render::SkiaSurface> skia_surface_;
-    CVDisplayLinkRef display_link_ = nullptr;
+    pulp::view::mac_frame_timing::MacDisplayLinkDriver display_link_;
     std::atomic<bool> needs_repaint_{true};
     std::atomic<bool> continuous_frames_{false};
     std::atomic<bool> render_dispatch_queued_{false};
@@ -2747,21 +2643,18 @@ private:
     }
 
     void start_display_link() {
-        CVDisplayLinkCreateWithActiveCGDisplays(&display_link_);
-        CVDisplayLinkSetOutputCallback(display_link_, display_link_callback, this);
+        display_link_.open(display_link_callback, this);
 
         // Match the display the window is on
         CGDirectDisplayID display_id =
             (CGDirectDisplayID)[[window_.screen deviceDescription][@"NSScreenNumber"] unsignedIntValue];
-        CVDisplayLinkSetCurrentCGDisplay(display_link_, display_id);
-        CVDisplayLinkStart(display_link_);
+        display_link_.bind_to_display(display_id);
+        display_link_.resume();
 
         // Seed the pump's nominal interval from THIS display's refresh period, so
         // the first frame (and any wake-from-idle frame) advances by one real
         // frame of this display — 1/120 on ProMotion, not a hardcoded 1/60.
-        if (const float nominal =
-                pulp::view::mac_frame_timing::display_link_nominal_dt(display_link_);
-            nominal > 0.0f) {
+        if (const float nominal = display_link_.nominal_dt(); nominal > 0.0f) {
             frame_pump_.set_nominal_dt(nominal);
         }
         // Starting the link is a resume: whatever wall time passed while it was
@@ -2770,11 +2663,7 @@ private:
     }
 
     void stop_display_link() {
-        if (display_link_) {
-            CVDisplayLinkStop(display_link_);
-            CVDisplayLinkRelease(display_link_);
-            display_link_ = nullptr;
-        }
+        display_link_.stop();
         frame_pump_.suspend();
     }
 };

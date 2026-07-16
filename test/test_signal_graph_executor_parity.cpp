@@ -160,6 +160,71 @@ TEST_CASE("Translated routing matches SignalGraph: stereo two-gain chain",
     expect_equal(legacy, routed);
 }
 
+TEST_CASE("build_executor_snapshot: the positional forwarder binds what the struct binds",
+          "[host][graph][executor][routing][parity]") {
+    // The positional overload maps each argument onto an ExecutorSnapshotBinders
+    // field. A mis-mapped field there would silently swap two same-shaped
+    // resolvers, so pin that both spellings build a routing that renders the same
+    // block, on a topology whose output depends on the gain resolver.
+    SignalGraph g;
+    const auto in = g.add_input_node(2, "In");
+    const auto g1 = g.add_gain_node("G1");
+    const auto out = g.add_output_node(2, "Out");
+    REQUIRE(g.connect(in, 0, g1, 0));
+    REQUIRE(g.connect(in, 1, g1, 1));
+    REQUIRE(g.connect(g1, 0, out, 0));
+    REQUIRE(g.connect(g1, 1, out, 1));
+    REQUIRE(g.set_node_gain(g1, 0.5f));
+    REQUIRE(g.prepare(kSr, kFrames));
+
+    auto gain_for = [&g](pulp::host::NodeId id) { return g.live_gain_atomic(id); };
+    auto plugin_for = [&g](pulp::host::NodeId id) { return g.live_plugin_slot(id); };
+    auto custom_for = [&g](pulp::host::NodeId id) { return g.live_custom_processor(id); };
+    auto custom_transport_for = [&g](pulp::host::NodeId id) {
+        return g.live_custom_transport_processor(id);
+    };
+
+    SignalGraphExecutorRouting via_struct;
+    const pulp::host::ExecutorSnapshotBinders binders{
+        .gain_for = gain_for,
+        .plugin_for = plugin_for,
+        .custom_for = custom_for,
+        .custom_transport_for = custom_transport_for,
+    };
+    REQUIRE(pulp::host::build_executor_snapshot(
+        g.nodes(), g.connections(), binders, via_struct.plugin_ctx,
+        via_struct.plugin_scratch, via_struct.snapshot, /*parallel_safe=*/false,
+        &via_struct.custom_ctx));
+
+    SignalGraphExecutorRouting via_positional;
+    REQUIRE(pulp::host::build_executor_snapshot(
+        g.nodes(), g.connections(), gain_for, plugin_for,
+        via_positional.plugin_ctx, via_positional.plugin_scratch,
+        via_positional.snapshot, /*parallel_safe=*/false, /*load_for=*/{},
+        &via_positional.custom_ctx, custom_for, custom_transport_for));
+
+    REQUIRE(via_struct.snapshot.buffer_slot_count()
+            == via_positional.snapshot.buffer_slot_count());
+
+    for (auto* routing : {&via_struct, &via_positional}) {
+        REQUIRE(routing->pool.reset(
+            routing->snapshot.buffer_slot_count(),
+            static_cast<std::uint32_t>(kFrames),
+            routing->snapshot.buffer_assignment().connection_delay_samples));
+        routing->snapshot_keepalive = g.live_snapshot_handle();
+        routing->valid = true;
+    }
+
+    pulp::format::GraphRuntimeExecutor exec_struct;
+    pulp::format::GraphRuntimeExecutor exec_positional;
+    const std::vector<std::vector<float>> input{ramp(kFrames, 0.8f), ramp(kFrames, 0.6f)};
+    const auto from_struct = run_routed(exec_struct, via_struct, kFrames, input, 2);
+    expect_equal(from_struct, run_routed(exec_positional, via_positional, kFrames, input, 2));
+    // The gain resolver really is bound (a silently-unbound one would render the
+    // input unattenuated), so the equality above is not two identical no-ops.
+    expect_equal(from_struct, run_legacy(g, kFrames, input, 2));
+}
+
 TEST_CASE("Translated routing matches SignalGraph: mono diamond with fan-in",
           "[host][graph][executor][routing][parity]") {
     SignalGraph g;
