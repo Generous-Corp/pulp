@@ -11,6 +11,8 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
 
+#include <cmath>
+#include <limits>
 #include <map>
 #include <string>
 #include <utility>
@@ -36,14 +38,17 @@ struct GestureLog {
 };
 
 /// Definition with two parameters whose AAX IDs follow the adapter's
-/// `parameter_id_string` convention.
-PluginDefinition make_definition() {
+/// `parameter_id_string` convention. The range is what the adapter hands its
+/// taper delegate, so it has to be the same one the store is registered over.
+PluginDefinition make_definition(
+    state::ParamRange range = state::ParamRange::linear(0.0f, 1.0f, 0.0f)) {
     PluginDefinition definition;
     for (const state::ParamID id : {state::ParamID{1}, state::ParamID{7}}) {
         ParameterBinding binding;
         binding.id = id;
         binding.aax_id = parameter_id_string(id);
         binding.name = "p" + std::to_string(id);
+        binding.range = range;
         definition.parameters.push_back(std::move(binding));
     }
     return definition;
@@ -54,17 +59,24 @@ constexpr state::ParamID kMix = 7;
 constexpr state::ParamID kUnregistered = 99;
 
 /// The AAX parameter manager, reduced to the behavior the mirror contract turns
-/// on. Faithful to `AAX_CParameter<float>` on the two points that matter:
+/// on. Faithful to `AAX_CParameter<float>` on the three points that matter:
 ///
-///   - `SetValueWithFloat` does NOT store the value. It asks the host for it
-///     (`AAX_CParameter::SetValue` posts through the automation delegate), so
-///     `GetValueAsFloat` keeps returning the old value until the host answers.
+///   - `SetValueWithFloat` does NOT store the value. `AAX_CParameter::SetValue`
+///     posts `RealToNormalized(value)` through the automation delegate and
+///     stores nothing, so `GetValueAsFloat` keeps returning the old value until
+///     the host answers.
+///   - what travels to the host and back is therefore a *normalized* value, and
+///     the parameter stores `NormalizedToReal` of it. Both legs go through the
+///     taper, so the value AAX settles on is generally NOT the value the mirror
+///     asked for.
 ///   - the host answers via `AAX_CEffectParameters::UpdateParameterNormalizedValue`,
 ///     which stores the value FIRST and only then lets the model mirror it into
-///     the editor store.
+///     the editor store — with `set_normalized`, the way the adapter does, so
+///     the store applies its own constraint on top.
 ///
-/// Both are load-bearing: a mirror that assumed a synchronous write, or that
-/// mirrored before storing, would not settle.
+/// All three are load-bearing. A fake that echoed the real value back verbatim,
+/// or pushed it with `set_value`, would drop both lossy transforms and could
+/// only ever confirm whatever rule the mirror already implemented.
 class FakeParameterManager {
 public:
     FakeParameterManager(const PluginDefinition& definition, state::StateStore& store)
@@ -78,10 +90,12 @@ public:
         return true;
     }
 
-    /// `AAX_IParameter::SetValueWithFloat` — a request, not a store.
-    void write(const char* aax_id, float value) {
+    /// `AAX_IParameter::SetValueWithFloat` — a request, not a store. What gets
+    /// queued is the normalized token `SetValue` posts, not `value` itself.
+    bool write(const char* aax_id, float value) {
         ++writes;
-        pending_.emplace_back(aax_id, value);
+        pending_.emplace_back(aax_id, taper_real_to_normalized(range_for(aax_id), value));
+        return true;
     }
 
     void register_parameter(const std::string& aax_id, float value) { values_[aax_id] = value; }
@@ -90,20 +104,33 @@ public:
     /// `UpdateParameterNormalizedValue`. Returns false when nothing was pending.
     bool deliver_one() {
         if (pending_.empty()) return false;
-        const auto [aax_id, value] = pending_.front();
+        const auto [aax_id, normalized] = pending_.front();
         pending_.erase(pending_.begin());
-        update_from_host(aax_id, value);
+        update_from_host(aax_id, normalized);
         return true;
     }
 
     /// An automation move / fader / control surface: a host-originated change no
-    /// editor asked for.
-    void update_from_host(const std::string& aax_id, float value) {
-        values_[aax_id] = value;  // AAX stores before the model mirrors
+    /// editor asked for. AAX hands the model a normalized value.
+    void update_from_host(const std::string& aax_id, double normalized) {
+        // AAX stores NormalizedToReal(N) before the model mirrors anything.
+        values_[aax_id] = taper_normalized_to_real(range_for(aax_id), normalized);
         state::ParamID id = 0;
         if (param_id_for_aax_id(definition_, aax_id, id)) {
-            store_.set_value(id, value);
+            store_.set_normalized(id, static_cast<float>(normalized));
         }
+    }
+
+    /// Move a parameter to a real value the way a host would: normalize it first
+    /// and deliver that, so the taper round trip is not skipped.
+    void update_from_host_real(const std::string& aax_id, float value) {
+        update_from_host(aax_id, taper_real_to_normalized(range_for(aax_id), value));
+    }
+
+    /// The value AAX holds for `aax_id`, or NaN when it is not registered.
+    float held(const std::string& aax_id) const {
+        const auto it = values_.find(aax_id);
+        return it == values_.end() ? std::numeric_limits<float>::quiet_NaN() : it->second;
     }
 
     /// Run the loop to quiescence, bounded so a non-settling mirror fails the
@@ -121,10 +148,18 @@ public:
     int writes = 0;
 
 private:
+    const state::ParamRange& range_for(const std::string& aax_id) const {
+        for (const auto& binding : definition_.parameters) {
+            if (binding.aax_id == aax_id) return binding.range;
+        }
+        static const state::ParamRange fallback{};
+        return fallback;
+    }
+
     const PluginDefinition& definition_;
     state::StateStore& store_;
     std::map<std::string, float> values_;
-    std::vector<std::pair<std::string, float>> pending_;
+    std::vector<std::pair<std::string, double>> pending_;
 };
 
 /// Register `make_definition()`'s parameters over a plain [0, 1] range.
@@ -360,7 +395,7 @@ struct MirrorFixture {
     ParameterMirror mirror{
         definition,
         [this](const char* id, float& out) { return aax.read(id, out); },
-        [this](const char* id, float value) { aax.write(id, value); }};
+        [this](const char* id, float value) { return aax.write(id, value); }};
     state::ListenerToken token;
 
     MirrorFixture() {
@@ -409,7 +444,7 @@ TEST_CASE("AAX mirror does not bounce a host parameter change back at the host",
     // Automation / a fader / a control surface moves the parameter. The model
     // mirrors it into the store, whose listener runs the mirror. Writing back
     // here is what would fight the host for control of the value.
-    f.aax.update_from_host(parameter_id_string(kGain), 0.25f);
+    f.aax.update_from_host_real(parameter_id_string(kGain), 0.25f);
 
     CHECK(f.aax.writes == 0);
     CHECK_FALSE(f.aax.has_pending());
@@ -462,4 +497,259 @@ TEST_CASE("AAX mirror keeps parameters independent", "[aax][view-bridge]") {
     CHECK(gain == 0.75f);
     CHECK(mix == 0.25f);
     CHECK(f.aax.writes == 2);
+}
+
+// ── Convergence: the property the whole contract exists to provide ──────────
+//
+// The mirror sits between two lossy transforms — AAX's taper round trip and the
+// store's own constraint — so "the two values are equal" is not a question it
+// can ask. These drive the real round trip to quiescence and assert it stops.
+
+namespace {
+
+/// One parameter, wired end to end: real StateStore, real ParameterMirror, real
+/// taper math, and a host that echoes perfectly. Runs the loop until it settles
+/// or exceeds `max_writes`, and reports which.
+struct ConvergenceProbe {
+    long long writes = 0;
+    bool converged = false;
+    float aax_value = 0.0f;
+    float store_value = 0.0f;
+    std::uint64_t refused = 0;
+};
+
+ConvergenceProbe run_to_quiescence(state::ParamRange range,
+                                   state::ParamKind kind,
+                                   double start_normalized,
+                                   long long max_writes = 100) {
+    const auto definition = make_definition(range);
+    state::StateStore store;
+    state::ParamInfo info;
+    info.id = kGain;
+    info.name = "p";
+    info.range = range;
+    info.kind = kind;
+    store.add_parameter(info);
+
+    FakeParameterManager aax{definition, store};
+    for (const auto& binding : definition.parameters) {
+        aax.register_parameter(binding.aax_id, taper_normalized_to_real(range, 0.0));
+    }
+
+    ConvergenceProbe probe;
+    ParameterMirror mirror{
+        definition,
+        [&aax](const char* id, float& out) { return aax.read(id, out); },
+        [&aax, &probe, max_writes](const char* id, float value) {
+            if (++probe.writes > max_writes) return false;
+            return aax.write(id, value);
+        }};
+    const auto token = store.add_listener(
+        [&mirror](state::ParamID id, float value) { mirror.on_store_value_changed(id, value); },
+        state::ListenerThread::Main);
+
+    // The host moves the parameter, then answers every request it gets back.
+    aax.update_from_host(parameter_id_string(kGain), start_normalized);
+    while (aax.has_pending() && probe.writes <= max_writes) {
+        aax.deliver_one();
+    }
+
+    probe.converged = probe.writes <= max_writes && !aax.has_pending();
+    probe.aax_value = aax.held(parameter_id_string(kGain));
+    probe.store_value = store.get_value(kGain);
+    probe.refused = mirror.refused_count();
+    return probe;
+}
+
+struct NamedRange {
+    const char* name;
+    state::ParamRange range;
+};
+
+/// Ranges a real plugin plausibly declares: linear and skewed, stepped and not.
+/// The skewed ones matter most — `pow()` round trips are far less forgiving than
+/// linear ones, which survive on float accidents like `float(1/3) * 3 == 1.0f`.
+std::vector<NamedRange> convergence_ranges() {
+    return {
+        {"[0,1] lin step=0", {0.0f, 1.0f, 0.0f, 0.0f, 1.0f, false}},
+        {"[0,3] lin step=0", {0.0f, 3.0f, 0.0f, 0.0f, 1.0f, false}},
+        {"[0,10] lin step=0", {0.0f, 10.0f, 0.0f, 0.0f, 1.0f, false}},
+        {"[0,7] lin step=0", {0.0f, 7.0f, 0.0f, 0.0f, 1.0f, false}},
+        {"[1,128] lin step=0", {1.0f, 128.0f, 1.0f, 0.0f, 1.0f, false}},
+        {"[-24,24] lin step=0", {-24.0f, 24.0f, 0.0f, 0.0f, 1.0f, false}},
+        {"[0,5] lin step=0", {0.0f, 5.0f, 0.0f, 0.0f, 1.0f, false}},
+        {"[0,6] lin step=0", {0.0f, 6.0f, 0.0f, 0.0f, 1.0f, false}},
+        {"[0,9] lin step=0", {0.0f, 9.0f, 0.0f, 0.0f, 1.0f, false}},
+        {"[0,11] lin step=0", {0.0f, 11.0f, 0.0f, 0.0f, 1.0f, false}},
+        {"[0,100] lin step=0", {0.0f, 100.0f, 0.0f, 0.0f, 1.0f, false}},
+        {"[0,1] lin step=0.1", {0.0f, 1.0f, 0.0f, 0.1f, 1.0f, false}},
+        {"[0,1] lin step=0.3", {0.0f, 1.0f, 0.0f, 0.3f, 1.0f, false}},
+        {"[20,20k] skew=0.3 step=0", {20.0f, 20000.0f, 440.0f, 0.0f, 0.3f, false}},
+        {"[0,3] skew=0.5 step=0", {0.0f, 3.0f, 0.0f, 0.0f, 0.5f, false}},
+        {"[0,10] skew=2 step=0", {0.0f, 10.0f, 0.0f, 0.0f, 2.0f, false}},
+        {"[0,4] skew=0.25 step=0", {0.0f, 4.0f, 0.0f, 0.0f, 0.25f, false}},
+        {"[-1,1] symskew=2 step=0", {-1.0f, 1.0f, 0.0f, 0.0f, 2.0f, true}},
+        {"[0,5] skew=0.4 step=1", {0.0f, 5.0f, 0.0f, 1.0f, 0.4f, false}},
+        {"[0,8] skew=3 step=1", {0.0f, 8.0f, 0.0f, 1.0f, 3.0f, false}},
+        {"[0,12] skew=0.7 step=0", {0.0f, 12.0f, 0.0f, 0.0f, 0.7f, false}},
+    };
+}
+
+} // namespace
+
+TEST_CASE("AAX mirror converges for a discrete parameter that declares no step",
+          "[aax][view-bridge]") {
+    // A legal, plausible declaration: the author states the semantic kind and
+    // lets the framework infer the stepping, exactly as CLAP/VST3/AU allow.
+    // constrain_stored_value() then applies an implicit step of 1 that the AAX
+    // taper knows nothing about, so the two sides hold structurally different
+    // values and never compare equal as raw reals.
+    const state::ParamRange range{-24.0f, 24.0f, 0.0f, 0.0f, 1.0f, false};
+    const auto probe = run_to_quiescence(range, state::ParamKind::Integer, 0.325);
+
+    INFO("writes=" << probe.writes << " aax=" << probe.aax_value
+                   << " store=" << probe.store_value);
+    CHECK(probe.converged);
+    CHECK(probe.refused == 0);  // converged on the rule, not on the fuse
+    // The store quantizes to the integer; AAX holds the same value in its own
+    // coordinates, one taper round trip away. Both are -8 to the user.
+    CHECK(probe.store_value == -8.0f);
+    CHECK(taper_real_to_normalized(range, probe.aax_value) ==
+          taper_real_to_normalized(range, -8.0f));
+}
+
+TEST_CASE("AAX mirror converges across every declarable range and kind",
+          "[aax][view-bridge]") {
+    const state::ParamKind kinds[] = {state::ParamKind::Continuous,
+                                      state::ParamKind::Integer,
+                                      state::ParamKind::Toggle,
+                                      state::ParamKind::Enum};
+
+    int cases = 0;
+    int runaways = 0;
+    int fuse_carried = 0;
+    long long worst = 0;
+    for (const auto& named : convergence_ranges()) {
+        for (const auto kind : kinds) {
+            for (int i = 0; i <= 200; ++i) {
+                const auto probe =
+                    run_to_quiescence(named.range, kind, i / 200.0);
+                ++cases;
+                worst = std::max(worst, probe.writes);
+                if (!probe.converged) {
+                    ++runaways;
+                    UNSCOPED_INFO("runaway: " << named.name << " kind=" << static_cast<int>(kind)
+                                              << " n0=" << (i / 200.0)
+                                              << " aax=" << probe.aax_value
+                                              << " store=" << probe.store_value);
+                }
+                if (probe.refused > 0) {
+                    ++fuse_carried;
+                    UNSCOPED_INFO("fuse-carried: " << named.name
+                                                   << " kind=" << static_cast<int>(kind)
+                                                   << " n0=" << (i / 200.0));
+                }
+            }
+        }
+    }
+
+    INFO("cases=" << cases << " worst_corrective_writes=" << worst
+                  << " fuse_carried=" << fuse_carried);
+    CHECK(cases == 16884);
+    CHECK(runaways == 0);
+    // The rule has to do this on its own. The fuse bounds a runaway at
+    // kCorrectionFuseLimit writes, so it would hide a broken rule here as
+    // "converged" — a case that reaches the fuse is a case the rule got wrong.
+    CHECK(fuse_carried == 0);
+    // And a correct rule needs exactly one write to close the gap.
+    CHECK(worst <= 1);
+}
+
+TEST_CASE("AAX mirror fuse bounds a host that never converges",
+          "[aax][view-bridge]") {
+    // No real host should do this, and after the fix above no range does either.
+    // The fuse is what makes an unknown host quirk fail safe instead of wedging
+    // Pro Tools with an unbounded touch/post/release stream.
+    const auto definition = make_definition();
+    state::StateStore store;
+    add_definition_parameters(store);
+
+    int writes = 0;
+    ParameterMirror mirror{
+        definition,
+        // A host stuck one epsilon away from whatever it is told, forever.
+        [](const char*, float& out) { out = -1.0f; return true; },
+        [&writes](const char*, float) { ++writes; return true; }};
+
+    for (int i = 0; i < 100; ++i) {
+        mirror.on_store_value_changed(kGain, 0.5f);
+    }
+
+    CHECK(writes == static_cast<int>(ParameterMirror::kCorrectionFuseLimit));
+    CHECK(mirror.is_fused(kGain));
+    CHECK(mirror.refused_count() == 100 - ParameterMirror::kCorrectionFuseLimit);
+}
+
+TEST_CASE("AAX mirror fuse re-arms on the next distinct value",
+          "[aax][view-bridge]") {
+    // A blown fuse must not deafen the parameter for the rest of the session:
+    // the user's next knob move is a new value and deserves a write.
+    const auto definition = make_definition();
+    state::StateStore store;
+    add_definition_parameters(store);
+
+    int writes = 0;
+    ParameterMirror mirror{
+        definition,
+        [](const char*, float& out) { out = -1.0f; return true; },
+        [&writes](const char*, float) { ++writes; return true; }};
+
+    for (int i = 0; i < 100; ++i) {
+        mirror.on_store_value_changed(kGain, 0.5f);
+    }
+    REQUIRE(mirror.is_fused(kGain));
+
+    CHECK(mirror.on_store_value_changed(kGain, 0.25f));  // a new value writes
+    CHECK_FALSE(mirror.is_fused(kGain));
+    CHECK(writes == static_cast<int>(ParameterMirror::kCorrectionFuseLimit) + 1);
+}
+
+TEST_CASE("AAX mirror fuse never trips on a knob drag", "[aax][view-bridge]") {
+    // Every value in a drag is distinct, so the fuse must stay armed throughout
+    // however long the drag runs.
+    MirrorFixture f;
+    for (int i = 1; i <= 200; ++i) {
+        f.store.set_value(kGain, static_cast<float>(i) / 200.0f);
+        f.aax.settle();
+    }
+    CHECK(f.mirror.refused_count() == 0);
+    CHECK_FALSE(f.mirror.is_fused(kGain));
+    CHECK(f.store.get_value(kGain) == 1.0f);
+}
+
+TEST_CASE("AAX mirror reports a read it could not perform", "[aax][view-bridge]") {
+    // AAX_IParameter::GetValueAsFloat answers false without writing through the
+    // out-pointer for a non-float parameter. A reader that swallowed that would
+    // leave `out` at zero and the mirror would "correct" the host to zero.
+    const auto definition = make_definition();
+    int writes = 0;
+    ParameterMirror mirror{
+        definition,
+        [](const char*, float&) { return false; },  // value unreadable, out untouched
+        [&writes](const char*, float) { ++writes; return true; }};
+
+    CHECK_FALSE(mirror.on_store_value_changed(kGain, 0.75f));
+    CHECK(writes == 0);  // no write on a fabricated value
+    CHECK(mirror.suppressed_count() == 0);
+    CHECK(mirror.refused_count() == 0);
+}
+
+TEST_CASE("AAX mirror reports a write the manager refused", "[aax][view-bridge]") {
+    const auto definition = make_definition();
+    ParameterMirror mirror{
+        definition,
+        [](const char*, float& out) { out = 0.0f; return true; },
+        [](const char*, float) { return false; }};  // AAX_IParameter refused
+
+    CHECK_FALSE(mirror.on_store_value_changed(kGain, 0.75f));
 }

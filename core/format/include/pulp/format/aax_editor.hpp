@@ -2,6 +2,7 @@
 
 #include <pulp/format/aax_model.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/runtime/log.hpp>
 #include <pulp/state/parameter.hpp>
 #include <pulp/state/store.hpp>
 
@@ -42,6 +43,45 @@ inline bool param_id_for_aax_id(const PluginDefinition& definition,
         }
     }
     return false;
+}
+
+// ── The parameter taper, in one place ──────────────────────────────────────
+//
+// AAX reaches a parameter's real value through an `AAX_ITaperDelegate<T>`; the
+// adapter's delegate is these three functions over a `state::ParamRange`. They
+// live here, free of AAX types, because `ParameterMirror` below has to model
+// what AAX does with a write — and a second, drifting copy of this math is
+// exactly how the mirror's rule came apart from the taper it was reasoning
+// about. `FloatTaperDelegate` in the adapter calls straight through to these,
+// so the SDK shell, the mirror, and the tests cannot disagree about the map.
+
+/// `AAX_ITaperDelegate::ConstrainRealValue` — the nearest value the range can
+/// actually represent, found by a normalized round trip (which is also where
+/// `ParamRange::step` quantization applies).
+inline float taper_constrain_real(const state::ParamRange& range, float value) {
+    return range.denormalize(range.normalize(value));
+}
+
+/// `AAX_ITaperDelegate::NormalizedToReal`.
+inline float taper_normalized_to_real(const state::ParamRange& range, double normalized) {
+    return range.denormalize(static_cast<float>(normalized));
+}
+
+/// `AAX_ITaperDelegate::RealToNormalized`.
+///
+/// This is the value that actually travels: `AAX_CParameter<float>::SetValue`
+/// stores nothing and posts `RealToNormalized(value)` to the automation
+/// delegate, and the host's answer comes back normalized too.
+inline double taper_real_to_normalized(const state::ParamRange& range, float value) {
+    return range.normalize(taper_constrain_real(range, value));
+}
+
+/// The value an AAX parameter ends up holding once `SetValueWithFloat(value)`
+/// has been through the host and back: the host is handed
+/// `RealToNormalized(value)` and the parameter stores `NormalizedToReal` of the
+/// answer. Both legs are lossy, so this is generally not `value`.
+inline float aax_value_after_write(const state::ParamRange& range, float value) {
+    return taper_normalized_to_real(range, taper_real_to_normalized(range, value));
 }
 
 /// The editor-facing surface of the AAX data model.
@@ -168,71 +208,175 @@ private:
 ///     control surface produces. The editor's own edits therefore come back to
 ///     the model on exactly the host path an external change takes.
 ///   - that return leg: the parameter manager is updated *before* the model
-///     mirrors the value into the store, so by the time this rule runs the two
-///     agree and nothing is sent. The loop closes here.
+///     mirrors the value into the store, so by the time this rule runs AAX
+///     already holds the settled value and nothing more is sent. The loop
+///     closes here.
 ///
-/// Equality closes it rather than an "I am syncing" flag because the rule holds
-/// wherever and whenever the store listener lands — it is a statement about the
-/// two values, not about control flow. It is also load-bearing rather than a
-/// mere optimization: `StateStore::set_value()` notifies unconditionally, even
-/// when the value did not change, so the echo has no fixed point of its own and
-/// would ping-pong at the host's dispatch rate.
+/// The rule is a statement about the two values rather than an "I am syncing"
+/// flag, so it holds wherever and whenever the store listener lands. It is
+/// load-bearing rather than a mere optimization: `StateStore::set_value()`
+/// notifies unconditionally, even when the value did not change, so the echo
+/// has no fixed point of its own and would ping-pong at the host's dispatch
+/// rate.
 ///
-/// Exact float comparison is sound here because both sides derive the value
-/// from the same normalized input with the same function: the adapter's taper
-/// delegate maps normalized→real through `state::ParamRange::denormalize`,
-/// which is precisely what `StateStore::set_normalized()` applies. The mirror
-/// therefore lands bit-identical to the parameter, not merely close to it.
-/// Where the store additionally constrains a value the taper does not — a
-/// discrete parameter quantizing to its step — the two disagree for exactly one
-/// more round trip: this writes the constrained value, AAX takes it, and the
-/// next echo compares equal because the store's constraint is idempotent.
+/// **The two sides are not in the same coordinate system, so the rule cannot
+/// compare them directly.** Both legs are lossy, in different ways:
+///
+///   - AAX's value is `NormalizedToReal(...)` of whatever normalized value the
+///     host last sent. It snaps to `ParamRange::step` only when a step is set.
+///   - the store's value has additionally been through
+///     `constrain_stored_value`, which applies an implicit step of 1 to any
+///     non-`Continuous` `ParamKind` *even when the range declares no step*.
+///
+/// So for, say, an `Integer` parameter with no explicit step, the two are
+/// structurally different values and `aax_value == store_value` is never true.
+/// Nor does writing the store's value fix that: `SetValueWithFloat` does not
+/// store what it is given (see above), and `denormalize(normalize(k)) != k` in
+/// float for many `k`, so the correction lands somewhere else again and the
+/// next echo re-triggers it. That is an unbounded automation write stream, not
+/// a mirror.
+///
+/// The rule therefore never compares the two reals. It asks whether there is
+/// anything for a write to *do*, which is two separate questions — both needed,
+/// neither implying the other:
+///
+///   - **Do they already agree?** A write does not send a real value anywhere:
+///     `SetValue` posts `RealToNormalized(value)` and the host's answer comes
+///     back normalized. So if the normalized value this would post is the one
+///     the host already has, posting it cannot change anything, whatever the two
+///     reals look like. This is what makes an echo die, and what keeps a
+///     skewed range from chasing its own rounding: the store's extra constraint
+///     and the taper's float error both wash out of the normalized domain.
+///   - **Would the write move AAX at all?** For a range whose real grid and
+///     normalized grid do not line up — a discrete kind over a wide skewed
+///     range is the case that bites — the two sides can disagree in normalized
+///     space and yet a write lands AAX exactly back where it already is. Those
+///     values are a genuine standoff: the store will not yield its quantum and
+///     AAX cannot represent it. Writing forever is the one option that helps
+///     nobody, so the mirror recognizes the no-op and stops.
+///
+/// Exact float comparison is right here rather than an epsilon: the taper is a
+/// pure function of the range, so two values that normalize to the same float
+/// *are* the same parameter value as far as AAX is concerned. An epsilon would
+/// only invent a second, arbitrary notion of "close enough" on top of the one
+/// AAX already defines.
 ///
 /// Free of AAX types: the manager is reached through two sinks, so the whole
 /// contract is exercised by tests that never see the SDK.
 class ParameterMirror {
 public:
     /// Reads the value the AAX parameter manager currently holds. Returns false
-    /// when `aax_param_id` names no registered parameter.
+    /// — leaving `out_value` untouched — when the value could not be read.
     using ValueReader = std::function<bool(const char* aax_param_id, float& out_value)>;
 
     /// Requests `value` for `aax_param_id` — `AAX_IParameter::SetValueWithFloat`.
-    using ValueWriter = std::function<void(const char* aax_param_id, float value)>;
+    /// Returns false when the request was refused.
+    using ValueWriter = std::function<bool(const char* aax_param_id, float value)>;
+
+    /// Consecutive corrective writes of the *same* store value before the fuse
+    /// opens on a parameter.
+    ///
+    /// A converging correction takes exactly one; a knob drag carries a new
+    /// value each time and resets the count. Only a value that is written,
+    /// echoed, and written again unchanged accumulates — which is precisely the
+    /// shape of a mirror that is not converging.
+    static constexpr std::uint32_t kCorrectionFuseLimit = 8;
 
     ParameterMirror(const PluginDefinition& definition, ValueReader reader, ValueWriter writer)
-        : ids_(definition)
-        , reader_(std::move(reader))
+        : reader_(std::move(reader))
         , writer_(std::move(writer))
-    {}
+    {
+        params_.reserve(definition.parameters.size());
+        for (const auto& binding : definition.parameters) {
+            params_.emplace(binding.id, Entry{binding.aax_id, binding.range});
+        }
+    }
 
     /// Editor store → AAX parameter manager. Wire to a `StateStore` value
     /// listener. Returns true when a write was issued.
     bool on_store_value_changed(state::ParamID id, float store_value) {
-        const auto* aax_id = ids_.find(id);
-        if (!aax_id) {
+        const auto it = params_.find(id);
+        if (it == params_.end()) {
             return false;  // not an AAX-registered parameter
         }
+        Entry& entry = it->second;
+
         float aax_value = 0.0f;
-        if (!reader_ || !reader_(aax_id->c_str(), aax_value)) {
+        if (!reader_ || !reader_(entry.aax_id.c_str(), aax_value)) {
             return false;
         }
-        if (aax_value == store_value) {
+        const bool already_agrees =
+            taper_real_to_normalized(entry.range, store_value) ==
+            taper_real_to_normalized(entry.range, aax_value);
+        const bool write_is_a_no_op =
+            aax_value_after_write(entry.range, store_value) == aax_value;
+        if (already_agrees || write_is_a_no_op) {
             ++suppressed_count_;
-            return false;  // AAX already holds this value — this is an echo
+            entry.consecutive_corrections = 0;  // settled — re-arm the fuse
+            return false;
         }
-        if (writer_) writer_(aax_id->c_str(), store_value);
-        return true;
+
+        // A new value is a new correction, however the last one ended.
+        if (!entry.has_last_written || entry.last_written != store_value) {
+            entry.last_written = store_value;
+            entry.has_last_written = true;
+            entry.consecutive_corrections = 0;
+        }
+
+        // The backstop. The rule above is what makes the loop terminate; this is
+        // what keeps a host that breaks the rule anyway from wedging Pro Tools.
+        // Stopping leaves AAX holding a value at most one taper round trip from
+        // the store's — the host stays authoritative and correct to within that
+        // epsilon, which is strictly better than an unbounded touch/post/release
+        // stream at the host's dispatch rate. The next distinct value re-arms
+        // it, so a fused parameter is not deaf for the rest of the session.
+        if (entry.consecutive_corrections >= kCorrectionFuseLimit) {
+            ++refused_count_;
+            if (!entry.fuse_reported) {
+                entry.fuse_reported = true;  // report the parameter once, not the stream
+                runtime::log_error(
+                    "AAX mirror: parameter '{}' did not converge after {} corrective "
+                    "writes of {}; AAX holds {}. Leaving the host authoritative.",
+                    entry.aax_id, kCorrectionFuseLimit, store_value, aax_value);
+            }
+            return false;
+        }
+        ++entry.consecutive_corrections;
+
+        return writer_ && writer_(entry.aax_id.c_str(), store_value);
     }
 
     /// Echoes absorbed. Non-zero is the healthy case — it counts the write-backs
-    /// the equality rule swallowed rather than bouncing at the host.
+    /// the rule swallowed rather than bouncing at the host.
     std::uint64_t suppressed_count() const { return suppressed_count_; }
 
+    /// Corrective writes the fuse refused. Non-zero means some parameter's
+    /// round trip does not converge — a bug here or a host quirk, never routine.
+    std::uint64_t refused_count() const { return refused_count_; }
+
+    /// Whether `id`'s fuse is currently open, i.e. the next repeat of the same
+    /// value would be refused.
+    bool is_fused(state::ParamID id) const {
+        const auto it = params_.find(id);
+        return it != params_.end() &&
+               it->second.consecutive_corrections >= kCorrectionFuseLimit;
+    }
+
 private:
-    ParameterIdMap ids_;
+    struct Entry {
+        std::string aax_id;
+        state::ParamRange range;
+        float last_written = 0.0f;
+        bool has_last_written = false;
+        std::uint32_t consecutive_corrections = 0;
+        bool fuse_reported = false;
+    };
+
+    std::unordered_map<state::ParamID, Entry> params_;
     ValueReader reader_;
     ValueWriter writer_;
     std::uint64_t suppressed_count_ = 0;
+    std::uint64_t refused_count_ = 0;
 };
 
 /// Maps `StateStore` gesture callbacks onto AAX automation touch/release.

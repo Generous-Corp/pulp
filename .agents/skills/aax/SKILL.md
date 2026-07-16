@@ -52,28 +52,59 @@ Gotchas that are specific to AAX and cost time if you rediscover them:
   (`UpdateParameterNormalizedValue` in, `AAX_IParameter::SetValueWithFloat`
   out), via `ParameterMirror` in `aax_editor.hpp`.
 - **The mirror stops the echo by comparing values, not with a re-entrancy
-  flag.** `ParameterMirror` writes back only when the store's value differs from
-  what the parameter manager already holds. A transient "I am syncing" bool
-  around the inbound write looks equivalent and is not: it encodes *when* the
-  listener runs, and that is not guaranteed. `StateStore` runs a
-  `ListenerThread::Main` listener inline only while no `EventLoop` is installed
-  (`set_main_loop()` is never called on this store today) — install one and the
-  flag is long cleared before the deferred listener fires. The value comparison
-  is a statement about the two values, so it holds wherever the callback lands.
-  It is load-bearing, not an optimization: `StateStore::set_value()` notifies
-  unconditionally, even when nothing changed, so the echo has no fixed point of
-  its own and would re-enter the host at its dispatch rate forever. Covered by
-  `pulp-test-aax-editor` (SDK-free), which fails with a 16-deep loop if the
-  comparison is removed.
+  flag.** `ParameterMirror` writes back only when a write would actually change
+  something. A transient "I am syncing" bool around the inbound write looks
+  equivalent and is not: it encodes *when* the listener runs, and that is not
+  guaranteed. `StateStore` runs a `ListenerThread::Main` listener inline only
+  while no `EventLoop` is installed (`set_main_loop()` is never called on this
+  store today) — install one and the flag is long cleared before the deferred
+  listener fires. The rule is a statement about the two values, so it holds
+  wherever the callback lands. It is load-bearing, not an optimization:
+  `StateStore::set_value()` notifies unconditionally, even when nothing changed,
+  so the echo has no fixed point of its own and would re-enter the host at its
+  dispatch rate forever.
+- **Never compare the store's value against the parameter's raw real value.**
+  They are not in the same coordinate system, and `==` between them does not
+  terminate. Two lossy transforms sit on the two sides: AAX's value has been
+  through the taper (`NormalizedToReal` of whatever the host sent, snapping to
+  `ParamRange::step` only when a step is set), while the store's has been
+  through `constrain_stored_value`, which applies an **implicit step of 1 to any
+  non-`Continuous` `ParamKind` even when the range declares no step**. For a
+  discrete parameter with no explicit step the two are therefore *structurally
+  different values*, `==` is never true, and — because `SetValueWithFloat` does
+  not store what it is handed — the corrective write never reproduces them
+  either. That is an unbounded automation write stream reaching Pro Tools.
+  `ParameterMirror` instead asks two questions, both required:
+  *do the two sides normalize to the same value* (`taper_real_to_normalized` —
+  the normalized token is the only thing that actually travels to the host), and
+  *would the write land AAX where it already is* (`aax_value_after_write`, for
+  ranges whose real and normalized grids do not line up — a discrete kind over a
+  wide skewed range is the case that bites). A per-parameter fuse
+  (`kCorrectionFuseLimit`) bounds any remaining host quirk and logs it rather
+  than wedging the host. Covered by `pulp-test-aax-editor` (SDK-free), whose
+  sweep drives 21 ranges × 4 kinds × 201 start points through the real taper and
+  requires every case to settle in one write with the fuse never firing.
 - **`AAX_IParameter::SetValueWithFloat` does not store the value.** It posts a
-  request through the automation delegate (`AAX_CParameter::SetValue`), so
-  `GetValueAsFloat` keeps returning the old value until the host answers with
-  `UpdateParameterNormalizedValue` — the same path a fader or control surface
-  takes. Code that assumes a synchronous write will misread the parameter.
-  Exact float comparison against it is nonetheless sound: the adapter's taper
-  delegate maps normalized→real through `state::ParamRange::denormalize`, which
-  is exactly what `StateStore::set_normalized()` applies, so the mirror lands
-  bit-identical rather than merely close.
+  request through the automation delegate (`AAX_CParameter::SetValue` does
+  `Touch(); PostSetValueRequest(Identifier(), RealToNormalized(newValue));
+  Release();`), so `GetValueAsFloat` keeps returning the old value until the host
+  answers with `UpdateParameterNormalizedValue` — the same path a fader or
+  control surface takes. Code that assumes a synchronous write will misread the
+  parameter. What comes back is a *normalized* value, stored as
+  `NormalizedToReal` of it, so AAX ends up holding
+  `denormalize(normalize(constrained))` and **not** the value that was written.
+- **`AAX_IParameter::GetValueAsFloat` can fail without writing its out-param.**
+  It answers `false` and leaves the float untouched for any parameter whose value
+  type is not `float` (`SetValueWithFloat` refuses the same way). Pulp registers
+  only `AAX_CParameter<float>` today, so it always succeeds — but ignoring the
+  return means the day that changes, a caller reports success with a fabricated
+  zero. Propagate the bool.
+- **A test double for the parameter manager must round-trip the taper.** The
+  manager's asynchrony is the *easy* half to model; the value transform is the
+  half that hides bugs. A fake that echoes the real value back verbatim, or that
+  pushes it with `set_value` where the adapter uses `set_normalized`, drops both
+  lossy transforms and can only ever confirm whatever rule the mirror already
+  implements — it cannot fail on a mirror-convergence bug by construction.
 - **Update values only through `AAX_IParameter::SetValue*`.** Avid's own header
   is explicit that a GUI must never call `UpdateParameterNormalizedValue`
   directly; `SetValue*` manages the automation locks and posts coefficients.

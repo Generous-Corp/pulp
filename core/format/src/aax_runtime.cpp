@@ -265,14 +265,18 @@ struct FloatTaperDelegate final : AAX_ITaperDelegate<float> {
     AAX_ITaperDelegate<float>* Clone() const override { return new FloatTaperDelegate(*this); }
     float GetMaximumValue() const override { return range.max; }
     float GetMinimumValue() const override { return range.min; }
+
+    // The map itself lives in aax_editor.hpp. ParameterMirror has to model what
+    // this delegate does to a value in order to know when a write-back would be
+    // a no-op, and a private copy of the math here is how the two drift apart.
     float ConstrainRealValue(float value) const override {
-        return range.denormalize(range.normalize(value));
+        return taper_constrain_real(range, value);
     }
     float NormalizedToReal(double normalizedValue) const override {
-        return range.denormalize(static_cast<float>(normalizedValue));
+        return taper_normalized_to_real(range, normalizedValue);
     }
     double RealToNormalized(float realValue) const override {
-        return range.normalize(ConstrainRealValue(realValue));
+        return taper_real_to_normalized(range, realValue);
     }
 
     state::ParamRange range;
@@ -485,6 +489,12 @@ struct InstanceState {
     int prepared_output_channels = 0;
 };
 
+// Same reasoning as EditorModel's asserts below, and the same failure if it is
+// ever violated. Fail the build rather than the teardown.
+static_assert(offsetof(InstanceState, store) < offsetof(InstanceState, processor),
+              "InstanceState::store must be declared before ::processor so the "
+              "store outlives the Processor that points at it");
+
 void destroy_instance(PrivateDataBlock* block) {
     if (!block || !block->instance) {
         return;
@@ -684,6 +694,10 @@ private:
                   "EditorModel::gestures must be declared before ::processor: a "
                   "parameter write from ~Processor routes through the gesture "
                   "callbacks");
+    static_assert(offsetof(EditorModel, value_listener) > offsetof(EditorModel, processor),
+                  "EditorModel::value_listener must be declared last so it is "
+                  "destroyed first, unsubscribing from the store before the "
+                  "mirror and Processor the callback touches go away");
 
     void ensure_editor_model() {
         if (editor_ || editor_init_failed_ || !init_error_.empty() || !config_.factory) {
@@ -737,13 +751,18 @@ private:
             [this](const char* aax_id, float& out) {
                 auto* parameter = mParameterManager.GetParameterByID(aax_id);
                 if (!parameter) return false;
-                parameter->GetValueAsFloat(&out);
-                return true;
+                // AAX_IParameter::GetValueAsFloat answers false — without
+                // writing through the out-pointer — for a parameter whose value
+                // type is not float. Reporting success would hand the mirror an
+                // untouched `out` and invite it to "correct" AAX to that.
+                return parameter->GetValueAsFloat(&out);
             },
             [this](const char* aax_id, float value) {
-                if (auto* parameter = mParameterManager.GetParameterByID(aax_id)) {
-                    parameter->SetValueWithFloat(value);
-                }
+                auto* parameter = mParameterManager.GetParameterByID(aax_id);
+                if (!parameter) return false;
+                // Refuses the same way, rather than converting, for a non-float
+                // parameter: report the refusal instead of claiming the write.
+                return parameter->SetValueWithFloat(value);
             });
         model->value_listener = model->store.add_listener(
             [this](state::ParamID id, float value) {
