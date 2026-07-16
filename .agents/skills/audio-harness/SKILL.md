@@ -1,6 +1,6 @@
 ---
 name: audio-harness
-description: The measurement surface for ALL Pulp DSP and audio-pipeline work — read it BEFORE writing or gating DSP, not only when something already sounds wrong. Covers the C++ harness (signal generators, metrics, assertions, RenderScenario, contracts), the offline Audio Doctor (magnitude/frequency response, THD/THD+N), and their Python sibling the Audio Quality Lab (tools/audio/quality-lab — null residual + alignment, LTAS log-spectral distance, spectral flux/centroid, HNR, Theil-Sen drift slope, Kaiser-sinc resampling, license-guarded corpus, regression-net ratchet). TRIGGER on AUTHORING work — "build/design an oscillator/filter/synth/effect", "add a DSP module", "what should the acceptance gate be", "how do I measure aliasing / anti-aliasing / alias floor", "null against a reference", "is this DSP correct", "choose a tolerance", "golden/regression corpus for audio", "measure drift or jitter", "A/B two renders" — AND on DEBUGGING work — "is there sound / no audio / I hear nothing", "does this filter/compressor/synth/delay produce the right signal", "prove the DSP / prove the contract", "measure the frequency response", "what's the THD / is it distorting", "render a test tone and assert", "audio regression", "64-frame works but 128 is silent", "sample-rate change pitch-shifted it", "describe what's in this buffer", "audio doctor", "compare before/after a DSP refactor". Reach for this BEFORE hand-rolling any FFT, null test, alias measurement, pitch tracker, or golden-render script — most of it already exists in one of the two lanes. Test/tool layer over HeadlessHost — deterministic, no audio device, no speakers. Off the realtime thread entirely.
+description: The measurement surface for ALL Pulp DSP and audio-pipeline work — read it BEFORE writing or gating DSP, not only when something already sounds wrong. Covers the C++ harness (signal generators, metrics, assertions, RenderScenario, contracts), the offline Audio Doctor (magnitude/frequency response, THD/THD+N, phase/group delay), and their Python sibling the Audio Quality Lab (tools/audio/quality-lab — null residual + alignment, LTAS log-spectral distance, spectral flux/centroid, HNR, Theil-Sen drift slope, Kaiser-sinc resampling, license-guarded corpus, regression-net ratchet). TRIGGER on AUTHORING work — "build/design an oscillator/filter/synth/effect", "add a DSP module", "what should the acceptance gate be", "how do I measure aliasing / anti-aliasing / alias floor", "null against a reference", "is this DSP correct", "choose a tolerance", "golden/regression corpus for audio", "measure drift or jitter", "A/B two renders" — AND on DEBUGGING work — "is there sound / no audio / I hear nothing", "does this filter/compressor/synth/delay produce the right signal", "prove the DSP / prove the contract", "measure the frequency response", "what's the THD / is it distorting", "what's the group delay / phase response / measured latency", "magnitude response curve", "render a test tone and assert", "audio regression", "64-frame works but 128 is silent", "sample-rate change pitch-shifted it", "describe what's in this buffer", "audio doctor", "compare before/after a DSP refactor". Reach for this BEFORE hand-rolling any FFT, null test, alias measurement, pitch tracker, or golden-render script — most of it already exists in one of the two lanes. Test/tool layer over HeadlessHost — deterministic, no audio device, no speakers. Off the realtime thread entirely.
 ---
 
 # Audio harness (observability + validation)
@@ -40,6 +40,8 @@ target a symbol comes from — the include path does.
 - A DSP refactor — compare old vs new renders (exact / numeric / spectral).
 - "How distorted is this?" — THD / THD+N and a harmonic breakdown.
 - "What does this lowpass actually do at 8 kHz?" — a magnitude-response curve.
+- "What's the group delay / latency of this filter?" — a phase + group-delay
+  curve, in samples or seconds, per frequency.
 
 ## The layering (each layer builds only on the ones below — no back-edges)
 
@@ -55,13 +57,13 @@ signal generators → scenarios → contracts → doctor
 | Metrics | `<pulp/audio/analysis/audio_metrics.hpp>` | lib | `analyze()` → `BufferMetrics`: peak, RMS, DC, NaN/Inf, clip count, silence-run; `estimate_frequency()` (zero-crossing, documented limits); `to_dbfs`; `summarize()` (agent-readable signal description). |
 | Assertions | `<pulp/audio/analysis/audio_assertions.hpp>` | lib | `assert_no_nan_inf / not_clipped / silent / not_silent / peak_between / rms_between / frequency_near / null_near / channels_independent` — each returns `CheckResult{passed,message}` with dBFS/Hz/cents messages, never a bare float. |
 | Artifacts | `<pulp/audio/analysis/audio_artifacts.hpp>` | lib | `BufferMetrics` → JSON (`schema_version` + provenance) for failing CI/local runs. |
-| Spectrum | `<pulp/audio/analysis/audio_spectrum.hpp>` | lib | The FFT-bearing core of the Doctor, over **already-rendered buffers** (no `Processor`): `response_relative_to_input(input, output, …)`, `magnitude_spectrum_curve()`, `measure_thd(signal, …)`, plus the shared `ResponseCurve` / `ThdResult` / `Window` types. This is what the `pulp audio validate doctor` CLI runs over decoded WAVs — and what you call directly when your audio came from somewhere other than a scenario (e.g. rendered through a real format adapter). |
-| Doctor artifacts | `<pulp/audio/analysis/audio_doctor_artifacts.hpp>` | lib | `write_response_artifact()` / `write_thd_artifact()` + the JSON serializers; `kDoctorCurveSchemaVersion`. |
+| Spectrum | `<pulp/audio/analysis/audio_spectrum.hpp>` | lib | The FFT-bearing core of the Doctor, over **already-rendered buffers** (no `Processor`): `response_relative_to_input(input, output, …)`, `magnitude_spectrum_curve()`, `measure_thd(signal, …)`, `measure_group_delay(input, output, …)` (phase + group delay), plus the shared `ResponseCurve` / `ThdResult` / `PhaseCurve` / `Window` types. This is what the `pulp audio validate doctor` CLI runs over decoded WAVs — and what you call directly when your audio came from somewhere other than a scenario (e.g. rendered through a real format adapter). |
+| Doctor artifacts | `<pulp/audio/analysis/audio_doctor_artifacts.hpp>` | lib | `write_response_artifact()` / `write_thd_artifact()` / `write_phase_artifact()` + the JSON serializers (`phase_curve_to_json`); `kDoctorCurveSchemaVersion`. |
 | Latency evidence | `<pulp/audio/analysis/latency_evidence.hpp>` | lib | Delayed-null + impulse-marker latency policies as pure functions (see *Proving reported latency*). |
 | Generators | `"support/audio_test_signals.hpp"`, `"support/audio_signal_generators.hpp"` | test | Deterministic stimulus: sine/square/saw, impulse(+train), step, DC, multi-sine, swept sine, seeded white/pink/brown noise, stepped automation + MIDI note scripts. No clocks, no `random_device`. |
 | Scenarios | `"support/render_scenario.hpp"` | test | `RenderScenario` builder over HeadlessHost (factory, sample rate, block size, channels, duration, input/MIDI/param scripts); `render()` → `ScenarioResult`. `run_matrix()` (SR × block sweeps) + `assert_block_partition_invariant()`. |
 | Contracts | `"support/audio_contracts.hpp"` | test | `AudioContract` — a named claim + scenario + accumulated `CheckResult`s; failures read `contract '<name>': ...`. Family helpers `expect_{passthrough,silence_preserved,tone,finite_and_unclipped}`. |
-| Doctor (offline) | `"support/audio_doctor.hpp"` | test | The **scenario-driven** entry points: `response_relative_to_input(scenario, …)` and `measure_thd(scenario, …)` synthesize the stimulus, drive the `Processor`, and delegate the math to `audio_spectrum.hpp`. It re-exports that header's result types, so a test that includes it needs nothing else. |
+| Doctor (offline) | `"support/audio_doctor.hpp"` | test | The **scenario-driven** entry points: `response_relative_to_input(scenario, …)`, `measure_thd(scenario, …)`, and `measure_group_delay(scenario, …)` synthesize the stimulus, drive the `Processor`, and delegate the math to `audio_spectrum.hpp`. It re-exports that header's result types, so a test that includes it needs nothing else. |
 
 Two traps this table exists to prevent:
 
@@ -75,6 +77,7 @@ Two traps this table exists to prevent:
   runtime/plugin build.** That is enforced by a CMake target boundary, so a
   violation is a link error rather than a review comment. Do not add FFT code
   anywhere else.
+
 
 Read `test/support/README.md` for the authoritative layering contract.
 
@@ -129,6 +132,14 @@ auto curve = response_relative_to_input(sc, {50.0, 8000.0});
 REQUIRE(curve.attenuation_db_at(8000.0) >= 20.0);   // "drops ≥20 dB at 8 kHz"
 auto thd = measure_thd(sc, /*fundamental_hz=*/999.0); // steady bin-coherent sine
 // thd.thd_percent(), thd.thd_plus_n, thd.harmonics[...]
+
+// Phase / group delay. ALWAYS gate on defined_at() first: a stopband has no
+// phase to measure, so the analyzer reports it undefined and the accessors
+// return NaN rather than a number read out of the noise floor.
+auto gd = measure_group_delay(sc, {100.0, 8000.0});
+if (gd.defined_at(100.0))
+    REQUIRE(gd.group_delay_samples_at(100.0) < 8.0); // "≤ 8 samples latency"
+// gd.group_delay_seconds_at(hz), gd.phase_radians_at(hz), gd.magnitude_db_at(hz)
 ```
 
 Measure audio that did NOT come from a scenario — e.g. rendered through a real
@@ -170,6 +181,16 @@ and confirm your test goes red.
 - **Response and THD are both RATIOS, so they cannot see a broadband gain
   error.** A wrong-by-0.5 dB adapter path passes every Doctor check. Level is a
   null test's job.
+
+**Group delay is a derivative, so the estimator matters.** `measure_group_delay`
+uses the ramped-signal Fourier identity (`τ = Re{X_r·conj(X)}/|X|²`, `X_r =
+FFT(n·x[n])`) rather than differencing an unwrapped phase curve: it needs no
+unwrapping, has no frequency step to tune, and is exact for any impulse response
+that fits inside the rectangular analysis window. Budget `fft_length` so the IR
+has decayed within it — a truncated IR is the one real error source, and the
+analyzer will faithfully report the delay of the *truncated* signal. Reported
+`phase_rad` IS unwrapped, and unlike the group delay it carries an unresolved
+2πk ambiguity above a deep stopband null.
 
 ## Discipline that keeps it trustworthy
 
