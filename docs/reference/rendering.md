@@ -146,13 +146,20 @@ state and backend path.
 
 ```cpp
 view.set_effect(std::make_shared<GpuBlurEffect>());           // Gaussian blur
-view.set_effect(std::make_shared<GpuBloomEffect>());          // HDR bloom
+view.set_effect(std::make_shared<GpuBloomEffect>());          // Glow approximation
 view.set_effect(std::make_shared<EffectChain>());             // Compose multiple
 ```
 
 An effect pushes `layer_count()` compositing layers (one for a simple
 effect; `EffectChain` pushes one per child) and `View::paint_all` pops
 exactly that many.
+
+`GpuBloomEffect` is a glow *approximation*, not a true bloom: it blurs the
+subtree uniformly by `radius * intensity` and composites it back normally.
+There is no bright-pass and no additive composite, so nothing gets brighter
+and dark pixels smear as much as light ones. It is not HDR-aware either —
+every Pulp surface is 8-bit unorm + sRGB, so there is no headroom above 1.0
+to threshold against. Use it for soft glow on light-on-dark content.
 
 Arbitrary SkSL as a *view post-effect* is not supported — filtering a
 subtree's rendered pixels needs a child-shader compositor Pulp does not
