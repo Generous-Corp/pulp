@@ -147,6 +147,23 @@ struct DesignFrameElement {
     /// imported view may leave it empty and let the binder fall back to
     /// source_node_id. Empty = this element is not bound to a host parameter.
     std::string param_key;
+
+    /// Host-formatted readout for `param_key`, cached by sync_from_host_params()
+    /// once per tick so paint() can read it without re-entering the host. Empty
+    /// and `display_text_bound == false` when the element carries no param_key,
+    /// when no HostParamSurface resolves it, or before the first sync. Read it
+    /// via element_display_text() / element_has_display_text() rather than
+    /// directly — those bound the index and carry the contract.
+    ///
+    /// Distinct from `text`, which is the value_label's own painted readout and
+    /// is author-owned (set_element_text): an element may carry a caller-set
+    /// `text` AND a host-formatted `display_text` without either clobbering the
+    /// other.
+    std::string display_text;
+    /// Whether `display_text` came from a host parameter at the last sync, as
+    /// opposed to being empty because nothing resolved. Distinguishes "the host
+    /// formats this as an empty string" from "no host parameter here".
+    bool display_text_bound = false;
 };
 
 // ── Custom-control factory registry ──────────────────────────────────────────
@@ -411,6 +428,62 @@ public:
         static const std::string kEmpty;
         return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].text : kEmpty;
     }
+    // ── Paint-safe host readout ──────────────────────────────────────────────
+    // The host-formatted display text of element `i`'s bound parameter — e.g.
+    // "500 ms", "-6.0 dB", "Sine" — as of the last sync_from_host_params().
+    //
+    // This is the READ half of the host readout channel, and the ONLY one legal
+    // from paint(). HostParamSurface::param_display_text() calls the host's own
+    // formatter (arbitrary code, possibly holding locks shared with the audio
+    // thread) and returns a fresh std::string; both make it illegal mid-render,
+    // which is why the surface asserts on a call from a no-alloc scope. So the
+    // one host round-trip happens at tick — sync_from_host_params() caches every
+    // bound element's text — and paint reads the cache.
+    //
+    // Paint-safe: bounds `i` and returns a reference to the cached string. No
+    // host call, no lock, no allocation, no copy. The reference is valid until
+    // the next sync_from_host_params() or frame swap; a painter reads it and
+    // draws, it does not store it.
+    //
+    // The text is NOT truncated and carries no length cap: the cache holds the
+    // host's string verbatim, so a readout is never a partial lie. A fixed
+    // buffer would be needed only to cross a thread or a C ABI, and this channel
+    // does neither — sync_from_host_params() and paint() both run on the UI
+    // thread, so the cache is a plain member read rather than a published frame.
+    // (Contrast MeterSource/ScalarSource, whose producer IS the audio thread and
+    // which therefore ride a TripleBuffer of fixed-capacity frames.)
+    //
+    // Every host parameter has an element once build_bind_grid() has run, so
+    // `element_for_param_key(key)` + this is a complete keyed readout for a
+    // parameter the design draws no control for — the shape a rack/chain UI
+    // painting its own per-slot readouts needs.
+    //
+    // Returns empty when `i` is out of range, when the element carries no
+    // param_key, when no HostParamSurface resolves that key, or before the first
+    // sync. Empty is therefore ambiguous on its own — a host may legitimately
+    // format a value AS an empty string. Gate on element_has_display_text(i)
+    // when the difference matters.
+    const std::string& element_display_text(int i) const {
+        static const std::string kEmpty;
+        return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].display_text
+                                                                  : kEmpty;
+    }
+
+    // Whether element `i`'s display text came from a host parameter at the last
+    // sync — i.e. the element carries a param_key that a HostParamSurface
+    // resolved. False for an out-of-range index, an element with no param_key, a
+    // key no surface resolves, and any element before the first
+    // sync_from_host_params(). Paint-safe, same as element_display_text().
+    //
+    // A key the host stops resolving is CLEARED at the next sync rather than
+    // left at its last value: a readout that keeps painting the text of a
+    // parameter that no longer exists is a stale lie, and unbound must read as
+    // unbound.
+    bool element_has_display_text(int i) const {
+        return i >= 0 && i < static_cast<int>(elements_.size()) &&
+               elements_[i].display_text_bound;
+    }
+
     // Whether a Kind::value_label element `i` left-aligns its readout.
     bool element_left_align(int i) const {
         return (i >= 0 && i < static_cast<int>(elements_.size())) && elements_[i].value_left_align;
