@@ -66,8 +66,13 @@ reproduces the design; the others below do NOT and waste hours:
 ```bash
 # 1) Export the Figma NODE to a scene (faithful vectors + geometry + assets).
 #    Token resolves from --token, $FIGMA_TOKEN, then ~/.config/pulp/figma-token.
+#    ALWAYS pass --cache-dir: it memoizes the /nodes JSON + frame SVG, so a
+#    fix-loop iteration costs ZERO REST calls on a cache hit. Figma MCP allows
+#    only ~6 calls/MONTH on a View seat — re-fetching every iteration burns the
+#    quota for nothing.
 python3 tools/import-design/figma_rest_export.py \
   --file-key q9iDYZzg86YrOQKr6I3bY0 --node 187:2 \
+  --cache-dir .pulp-figma-cache \
   --out scene.pulp.json            # → "N nodes, faithful-vector SVG, interactive elements"
 
 # 2) Import the scene (the source-of-truth lane: audio-widget + library matching,
@@ -2585,27 +2590,41 @@ After generating Pulp code, ALWAYS validate by comparing with the source design:
    pulp-screenshot --script generated.js --output render.png --width W --height H --backend skia
    ```
 
-   > ⚠️ **`pulp-screenshot` is the ONLY render that decodes image assets.** Use it
-   > to *see* what an import looks like. The importer's `--validate` render is a
-   > **layout-only** check — it does NOT decode `setImageSource`/`createImage`
-   > files; `ImageView::paint` draws the filename as a placeholder (e.g.
-   > "3_228.png"). Native widgets (knob/fader/meter, CPU-canvas vectors) render in
-   > both, so a Pulp-library design looks fine under `--validate`, but any
-   > image-`asset_ref` design (generic-vector frames like ELYSIUM → captured PNGs)
-   > shows filename placeholders there. **Seeing placeholders means you used
-   > `--validate`/a non-Skia backend — NOT that image rendering regressed.**
-   > `pulp-screenshot` needs a `PULP_ENABLE_GPU=ON` (Skia-linked) build. This is
-   > exactly the path that produced the accurate ELYSIUM sprite-strip /
-   > native-silver-knob comparison renders in #3138.
+   > ⚠️ **Placeholders mean the wrong backend, not a broken import.** If a render
+   > shows an image's *filename* in a box (e.g. "3_228.png") instead of the
+   > picture, `ImageView::paint` drew a placeholder because the renderer could not
+   > composite file-backed images. That is a backend problem — do NOT go looking
+   > for an import bug.
+   >
+   > Only two things cause it:
+   > 1. **`--screenshot-backend coregraphics`** — an explicit escape hatch.
+   >    CoreGraphics does not composite file-backed images.
+   > 2. **A GPU-off (non-Skia-linked) build** — the real decode lives in the Skia
+   >    renderer, which isn't linked in a `PULP_ENABLE_GPU=OFF` importer build.
+   >
+   > **`--validate` defaults to the Skia backend and DOES composite file-backed
+   > images** (`--screenshot-backend {skia|coregraphics}`, default `skia`; see
+   > `pulp import-design --help`). So you do **not** need a separate
+   > `pulp-screenshot` pass just because a design has image assets — that costs an
+   > extra round-trip per iteration for nothing. Reach for `pulp-screenshot` when
+   > you want a live/host-surface capture or a size/scale the importer's render
+   > doesn't offer, not as a routine workaround.
+   >
+   > Both paths need a Skia-linked (`PULP_ENABLE_GPU=ON`) build to show images.
+   > Verify the backend before diagnosing anything visual.
 
-3. **Compare** reference vs render. For designs WITHOUT image assets (pure native widgets/text), the importer's built-in `--validate --reference` diff is fine:
+3. **Compare** reference vs render. The importer's built-in `--validate --reference` diff works for designs **with or without** image assets, because `--validate` renders on the Skia backend by default and composites file-backed images:
    ```bash
    pulp import-design --from X --file input --validate --reference source.png --diff diff.png
    ```
-   But for designs WITH image `asset_ref`s, do NOT diff through `--validate` — its render placeholders images (see the ⚠️ above), so the diff would flag every image as a mismatch. Instead diff the **`pulp-screenshot`** render (step 2) against the reference directly with `fidelity_diff.py` / `figma_import_diff.py`:
+   Use `fidelity_diff.py` when you want **per-widget region checks** rather than one global similarity number — it detects widget regions and checks aspect/gradient/text per widget, which a whole-board score cannot:
    ```bash
    python3 tools/import-design/fidelity_diff.py --render render.png --scene scene.pulp.json --frame-reference source.png
    ```
+   > **Do not treat `--validate`'s exit code as a gate.** It prints `PASS` or
+   > `NEEDS REVIEW` but **exits 0 either way**, at any similarity — a 0%-similar
+   > render still exits 0. Read the printed similarity (and the diff image); never
+   > infer success from `$?`.
 
 4. **Review the diff image** — red highlights show differences
 
