@@ -1392,6 +1392,56 @@ a `feat:`/`fix:` title) — expect to add those trailers too.
 
 ### Shipyard pin and behaviour notes
 
+#### `shipyard update` is an updater, not a converger — it will not go backwards
+
+`shipyard update --to vX.Y.Z` silently does **nothing** when `X.Y.Z` is older
+than the installed version: it reports `update_available: false` and exits 0.
+Verified against v0.70.0 — asked for `--to v0.60.0` with 0.70.0 installed it
+reports no update available, exactly as it does for an already-current
+machine. The two outcomes are indistinguishable from the exit code.
+
+Two consequences:
+
+- **A bare `shipyard update` tracks `latest`, not the pin.** Run it on a fleet
+  machine and that machine leaves the pin permanently — `latest` ran 7 minors
+  ahead of the pin on 2026-07-16 (pin v0.70.0, latest v0.77.1). It is then
+  running a Shipyard that was never validated against Pulp's CI matrix and
+  that disagrees with every workflow's `SHIPYARD_VERSION` (the exact drift
+  `check_shipyard_pin.py` exists to prevent). Always `--to` the pin.
+- **Coming back to the pin needs `tools/install-shipyard.sh`**, which installs
+  the pinned version unconditionally (via the upstream, checksum-verifying
+  `install.sh`). Routing a downgrade through `shipyard update` is a silent
+  no-op, so an ahead-of-pin machine would never converge.
+
+Never trust either path's exit code alone — re-read `shipyard --version` and
+compare it to the pin. `tools/scripts/shipyard_autoupdate.py` encodes all of
+this (direction dispatch + outcome verification); `--check --json` reports
+pin-vs-installed without touching anything.
+
+#### Optional: keep a fleet Mac on the pin automatically
+
+`tools/scripts/install_shipyard_autoupdate.sh` installs an hourly launchd agent
+that converges this machine onto the pin when it is idle. Opt-in per machine
+and irrelevant to public Pulp (which just runs `install-shipyard.sh` once).
+Kill switch, no uninstall needed:
+
+```bash
+echo off > ~/.config/pulp/shipyard-autoupdate   # stop; `on` resumes
+tools/scripts/install_shipyard_autoupdate.sh --status
+```
+
+Two gotchas worth knowing if you touch it:
+
+- **The pin it obeys is `origin/main`'s, not the working tree's.** A dev
+  checkout is routinely parked on a feature branch, and a branch may carry an
+  experimental pin; converging the machine onto that would be a bug. Override
+  with `PULP_SHIPYARD_AUTOUPDATE_PIN_REF=worktree`.
+- **The idle probe must parse the `shipyard` command line, not substring-match
+  it.** The persistent daemon runs as `shipyard --mode shipyard daemon run` —
+  a substring match on `run` reads it as a live ship and the machine then never
+  updates at all, while `--mode shipyard` puts the literal token `shipyard`
+  where a subcommand would be.
+
 Pin bumps must go through `shipyard pin bump --to vX.Y.Z`, not a hand edit.
 Shipyard v0.50.0+ is Rust-backed and macOS ships as an Apple-Silicon-only
 signed/notarized `.dmg`, so the version and asset metadata must move together.
