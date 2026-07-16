@@ -817,8 +817,14 @@ TEST_CASE("Doctor: group delay reports a stopband as undefined",
     // — it is the evidence for the verdict.
     CHECK(std::isfinite(curve.magnitude_db_rel_peak_at(20000.0)));
 
-    // Every undefined bin in the curve obeys the same contract, and the gate
-    // is driven by the stated floor rather than an ad-hoc rule.
+    // Every undefined bin in the curve obeys the same contract. `defined`
+    // implies "at or above the stated floor" for ANY curve — that is one
+    // conjunct of the gate. The converse holds only because this stimulus is a
+    // real lowpass with a genuine passband: `defined` also requires reference
+    // and output energy above the estimator's own floor, and on a curve whose
+    // output has collapsed those gates reject bins the dB floor would admit
+    // (see the near-silent-output case). Here they never fire, so the floor is
+    // the only gate in play and every undefined bin is a stopband bin.
     for (const auto& p : curve.full) {
         if (p.defined) {
             CHECK(p.magnitude_db_rel_peak >= curve.magnitude_floor_db);
