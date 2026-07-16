@@ -148,12 +148,29 @@ public:
     }
 
     std::optional<SampleStreamPageRequest> most_urgent() const noexcept {
+        return most_urgent_if([](const SampleStreamPageRequest&) noexcept {
+            return true;
+        });
+    }
+
+    template<typename Predicate>
+    std::optional<SampleStreamPageRequest> most_urgent_if(
+        Predicate&& predicate) const noexcept {
         if (pending_.empty()) return std::nullopt;
-        auto best = pending_.begin();
-        for (auto candidate = std::next(best); candidate != pending_.end(); ++candidate) {
-            if (more_urgent(*candidate, *best)) best = candidate;
+        auto best = pending_.end();
+        for (auto candidate = pending_.begin(); candidate != pending_.end(); ++candidate) {
+            if (!predicate(*candidate)) continue;
+            if (best == pending_.end() || more_urgent(*candidate, *best)) best = candidate;
         }
+        if (best == pending_.end()) return std::nullopt;
         return *best;
+    }
+
+    bool has_page_interest(const SampleStreamPageRequest& request) const noexcept {
+        return std::any_of(pending_.begin(), pending_.end(),
+            [&request](const SampleStreamPageRequest& candidate) noexcept {
+                return same_page(candidate, request);
+            });
     }
 
     std::size_t complete_page(const SampleStreamPageRequest& request) noexcept {

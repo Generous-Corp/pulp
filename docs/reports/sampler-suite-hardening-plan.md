@@ -33,9 +33,14 @@ Current branch evidence, without implying completion of later gates:
   current source timeline through explicit starvation. A fixed-count decode
   pool now provides bounded SPSC job/completion mailboxes, one in-flight decode
   per source, preallocated worker scratch, leased completion views, and
-  cooperative or join-only teardown. Service-side validation/publication of
-  those completions, active-page interest, loop/reverse voice policy, and
-  example integration remain open.
+  cooperative or join-only teardown. The cache and decode pool are now joined
+  by an owner-thread async service with exact registration/reservation tickets,
+  queue-full retry without cross-source head-of-line blocking, stale-completion
+  rejection, two-phase audio-watermark retirement, and decode-before-cache
+  teardown. Release and AddressSanitizer coverage exercise registration
+  rollback, reprepare identity, active-I/O retirement, slot recycling, and
+  completion lease release. Loop/reverse voice policy and example integration
+  remain open.
 - The existing Release audio harness baseline and all 375 Audio Quality Lab
   self-tests pass. Quality Lab remains supplementary to exact transport,
   telemetry, lifetime, and allocation gates.
