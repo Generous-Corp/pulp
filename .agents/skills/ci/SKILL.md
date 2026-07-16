@@ -245,6 +245,19 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    (`git tag --contains <sha>`) — i.e. consumers can actually reach the change.
    Closing on "a tag appeared" would mark a still-unreleased change as shipped.
 
+2b1b. **Byte-exact undo of a recent landing?** The `silent-revert` gate
+   (`tools/scripts/silent_revert_guard.py`) fails if the push restores the
+   pre-landing bytes of EVERY file a landing from the last 72h touched. That
+   shape reads as ordinary work in review — a plausible diff, not an undo — and
+   has landed on main and erased a real change; a stale worktree, a mis-resolved
+   merge, or `git add -A` over old content all produce it. It is local-only
+   (pre-push + `gates.sh`), pure blob-sha comparison against local git — no
+   build, no network — and degrades to a pass when git cannot answer. The usual
+   cause is a genuinely stale branch: rebase onto `origin/main` and re-check. A
+   deliberate revert passes by stating intent — a `Revert "..."` subject, a
+   `Revert-Of:` trailer, or `Silent-Revert: skip reason="..."`. Do not reach for
+   the skip trailer to get past a revert you did not intend: the gate is the only
+   thing that sees this class.
 2b2. **Hotspot growth?** The `hotspot-size` gate is now net-delta vs merge-base:
    it fails only if THIS PR grows a frozen hotspot past its reference size (main
    growing the same file is NOT your fault and passes). If you must grow one,
