@@ -12,8 +12,11 @@ on:
       - "core/format/include/pulp/format/web/**"
       # PulpWebUi.cmake hand-enumerates a curated subset of these trees, so a
       # change to any of them can break the wasm link without touching a single
-      # file matched above. They are cheap to watch: together they carry ~14
-      # merges a month, and the macOS job below runs ~2 minutes.
+      # file matched above. They are high-traffic — ~260 commits a month, an
+      # order of magnitude more than the paths around them — so they gate only
+      # the Linux job, which links the same wasm target and therefore catches
+      # the same break. `gpu-audio-macos` stays on the narrow set below: it
+      # holds a lease on the Mac Studios that serve the required `macos` check.
       - "core/view/**"
       - "core/canvas/**"
       - "core/render/**"
@@ -41,6 +44,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The workflow-level `paths` filter admits the high-traffic core/** trees so
+  # the Linux job can catch a wasm link break. `gpu-audio-macos` must not widen
+  # with them, so re-test the narrow surface here and gate that job on it.
+  changed-files:
+    runs-on: ubuntu-latest
+    # dorny/paths-filter@v3 in PR mode needs pull-requests:read; without it the
+    # action returns no matches, which would silently stop the GPU proof from
+    # ever running.
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      # 'true' when the GPU proof should run: every non-PR event (merge_group
+      # and workflow_dispatch bypass `paths` entirely), or a PR that touched the
+      # GPU/wasm surface itself.
+      gpu: ${{ github.event_name != 'pull_request' || steps.filter.outputs.gpu == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          lfs: false
+      - id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            gpu:
+              - 'core/format/src/wasm/**'
+              - 'core/format/include/pulp/format/web/**'
+              - 'core/gpu_audio/**'
+              - 'examples/web-demos/**'
+              - 'examples/pulp-gain/**'
+              - 'examples/super-convolver/**'
+              - 'packages/pulp-web-player/**'
+              - 'tools/cmake/PulpWam.cmake'
+              - 'tools/cmake/PulpWclap.cmake'
+              - 'tools/cmake/PulpWebUi.cmake'
+              - 'tools/cmake/PulpGpuWasm.cmake'
+              - 'tools/cmake/wasi-toolchain.cmake'
+              - '.github/workflows/web-plugins.yml'
+
   web-plugins:
     name: WAMv2 + WebCLAP (Linux, headless Chrome)
     runs-on: ubuntu-latest
@@ -355,7 +399,11 @@ jobs:
   # REAL gate on the machines it runs on, not a decoration.
   gpu-audio-macos:
     name: GPU audio proof (macOS, real WebGPU)
-    if: vars.PULP_LOCAL_MACOS_RUNS_ON_JSON != ''
+    needs: changed-files
+    # Runs on the Mac Studios that also serve the required `macos` check, so it
+    # stays on the GPU/wasm surface rather than following the workflow-level
+    # `paths` filter into the high-traffic core/** trees.
+    if: vars.PULP_LOCAL_MACOS_RUNS_ON_JSON != '' && needs.changed-files.outputs.gpu == 'true'
     runs-on: ${{ fromJSON(vars.PULP_LOCAL_MACOS_RUNS_ON_JSON) }}
     steps:
       - uses: actions/checkout@v4
