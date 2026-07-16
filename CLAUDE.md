@@ -101,7 +101,7 @@ gate). When adding a build command anywhere — CLI, script, `.shipyard/config.t
 CI workflow — give `--parallel`/`-j` an explicit count.
 
 **External SDKs** (not committed, cloned at configure time or manually):
-- VST3 SDK → `external/vst3sdk` (MIT, `git clone --depth 1 --branch v3.7.12_build_20`)
+- VST3 SDK → `external/vst3sdk` (MIT, `git clone --depth 1 --branch v3.8.0_build_66`)
 - AudioUnitSDK → `external/AudioUnitSDK` (Apache 2.0, `git clone --depth 1`)
 - CLAP → fetched automatically via CMake FetchContent
 - Skia → pre-built binaries in `external/skia-build/`

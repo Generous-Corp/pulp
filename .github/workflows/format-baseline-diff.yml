@@ -75,7 +75,7 @@ jobs:
             git clone --depth 1 https://github.com/apple/AudioUnitSDK.git external/AudioUnitSDK
           fi
           if [ ! -d external/vst3sdk ]; then
-            git clone --depth 1 --branch v3.7.12_build_20 \
+            git clone --depth 1 --branch v3.8.0_build_66 \
               --recurse-submodules https://github.com/steinbergmedia/vst3sdk.git \
               external/vst3sdk
           fi
