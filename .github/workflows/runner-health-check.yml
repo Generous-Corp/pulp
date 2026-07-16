@@ -1,0 +1,176 @@
+name: Runner health check
+
+# Off-fleet queue-age watchdog for the CI runner lanes.
+#
+# Runs on ubuntu-latest ON PURPOSE. A guard that lives on the fleet dies with
+# the fleet: routing this to the self-hosted macOS lanes would mean the exact
+# outage it exists to report is the outage that stops it reporting. GitHub-
+# hosted is the only vantage point that survives the failure it watches.
+#
+# Why queue age, and not a label-satisfiability check
+# ---------------------------------------------------
+# The macOS lanes are JIT/ephemeral: a runner registers with GitHub only while
+# it serves a job. "Zero runners carry label X" is therefore BOTH the healthy-
+# idle state AND the dead-lane state, and GitHub cannot tell them apart. A
+# label-satisfiability probe would page someone every idle night and be muted
+# within a week. Queue age is the observable that distinguishes alive from
+# dead, and it is cause-agnostic — it catches unknown-unknowns rather than the
+# specific failure that happened last time.
+#
+# Why the threshold is what it is
+# -------------------------------
+# Measured baseline on this repo under normal healthy load: median queue age
+# 5 min, oldest 31 min, 3 runs over 30 min. A naive "queued > 30 min" rule
+# fires on that healthy distribution. So an alarm requires TWO independent
+# conditions: age >= 45 min (~1.5x the observed healthy max) AND no sign of
+# life on the lane (nothing comparable in_progress, nothing comparable started
+# since the job queued). Saturation keeps its runners visibly busy, so a deep
+# queue on a live pool stays quiet at any age; a dead lane has neither. The
+# liveness condition carries the false-alarm load, which is what lets the age
+# stay tight enough to detect a dead lane in 45-75 min. Findings between 30 and
+# 45 min are reported in the run summary only — never on the issue.
+#
+# Analysis + thresholds live in tools/scripts/queue_age_watchdog.py, tested by
+# tools/scripts/test_queue_age_watchdog.py (which pins the measured baseline
+# above as a must-stay-quiet regression case).
+#
+# Issue lifecycle mirrors auto-release-watchdog.yml / release-cadence-check.yml:
+# one tracking issue, edited in place each sweep, closed automatically on
+# recovery. REST search rather than `gh issue list` (GraphQL) — the shared
+# GraphQL quota is regularly exhausted by agent PR polling, and a watchdog must
+# not fail when the thing it watches is fine.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      warn_minutes:
+        description: 'Queue age (min) to report in the run summary'
+        required: false
+        default: '30'
+      alarm_minutes:
+        description: 'Queue age (min) that, with no live runner, opens an issue'
+        required: false
+        default: '45'
+      dry_run:
+        description: 'Log findings but do not touch the tracking issue'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+concurrency:
+  group: runner-health-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+    runs-on: ubuntu-latest
+    name: Check queue age against lane liveness
+
+    env:
+      WARN_MINUTES: ${{ github.event.inputs.warn_minutes || '30' }}
+      ALARM_MINUTES: ${{ github.event.inputs.alarm_minutes || '45' }}
+      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      TRACKING_TITLE: 'CI queue stall: jobs waiting with no live runner'
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Scan queued jobs
+        id: scan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 tools/scripts/queue_age_watchdog.py \
+              --repo '${{ github.repository }}' \
+              --warn-minutes "${WARN_MINUTES}" \
+              --alarm-minutes "${ALARM_MINUTES}" \
+              --findings-out findings.json \
+              --snapshot-out snapshot.json \
+              --body-out body.md \
+              --summary-out "${GITHUB_STEP_SUMMARY}" \
+              | tee scan.log
+
+          count=$(python3 -c "import json; print(sum(1 for f in json.load(open('findings.json')) if f['level'] == 'alarm'))")
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          echo "Alarm count: ${count}"
+
+      - name: Maintain tracking issue
+        if: env.DRY_RUN != 'true'
+        shell: bash
+        env:
+          COUNT: ${{ steps.scan.outputs.count }}
+        run: |
+          set -euo pipefail
+
+          repo='${{ github.repository }}'
+          title="${TRACKING_TITLE}"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          # Look up in both OPEN and CLOSED state so a recovered sweep only
+          # closes an OPEN tracker and a recurrence reopens the same issue
+          # rather than spawning a new one every 30 minutes.
+          search_json=$(
+              gh api --method GET "/search/issues" \
+                  -f q="repo:${repo} is:issue in:title ${title}"
+          )
+          existing_json=$(printf '%s' "$search_json" | TRACKING_TITLE="$title" python3 -c 'import json, os, sys; title = os.environ["TRACKING_TITLE"]; data = json.load(sys.stdin); match = next((item for item in data.get("items", []) if item.get("title") == title), None); print(json.dumps({"number": match.get("number", ""), "state": str(match.get("state", "")).upper()}) if match else "{}")')
+          existing=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('number','') or '')")
+          existing_state=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
+
+          if [ "$COUNT" -eq 0 ]; then
+              if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
+                  echo "Queues drained — closing tracker #${existing}."
+                  gh api -X POST "/repos/${repo}/issues/${existing}/comments" \
+                      -f body="Sweep on $(date -u '+%Y-%m-%d %H:%M UTC') found no lane stalled: every queued job is either under the threshold or has a live runner. Closing. (${run_url})"
+                  gh api -X PATCH "/repos/${repo}/issues/${existing}" \
+                      -f state=closed \
+                      -f state_reason=completed
+              else
+                  echo "No stalled lanes and no open tracker — nothing to do."
+              fi
+              exit 0
+          fi
+
+          {
+            cat body.md
+            echo
+            echo "**Sweep:** ${run_url}"
+          } > issue-body.md
+
+          if [ -z "${existing:-}" ]; then
+              echo "Creating tracking issue."
+              gh api -X POST "/repos/${repo}/issues" \
+                  -f title="$title" -F body=@issue-body.md \
+                  -f 'labels[]=bug' -f 'labels[]=ci' 2>&1 || {
+                  # Label creation can fail on a fresh repo/fork where the
+                  # labels don't exist; the tracker matters more than its tags.
+                  gh api -X POST "/repos/${repo}/issues" \
+                      -f title="$title" -F body=@issue-body.md
+              }
+          else
+              echo "Updating tracking issue #${existing} in place."
+              gh api -X PATCH "/repos/${repo}/issues/${existing}" -F body=@issue-body.md
+              gh api -X PATCH "/repos/${repo}/issues/${existing}" -f state=open 2>/dev/null || true
+          fi
+
+      - name: Upload snapshot + findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-health-findings
+          path: |
+            findings.json
+            snapshot.json
+          retention-days: 14
+          if-no-files-found: ignore

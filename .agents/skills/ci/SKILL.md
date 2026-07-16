@@ -300,6 +300,38 @@ defaults to `ubuntu-latest` (no-op) until set. A tartci launchd detector watches
 for this triad; full design in
 `planning/2026-07-06-ci-queue-saturation-watchdog.md`.
 
+## A dead lane is only visible as queue age — never as a missing runner
+
+`.github/workflows/runner-health-check.yml` sweeps every 30 min from
+`ubuntu-latest` (off-fleet on purpose — a guard on the fleet dies with the
+fleet) and opens/updates one tracking issue when a lane stops serving work. Read
+its issue before hand-diagnosing a stuck PR: it names the labels the stalled
+jobs asked for, which is the "which lane is sick" answer step 3 above otherwise
+costs you a fleet probe to get.
+
+**Do not "improve" this into a runner-label check.** The macOS lanes are
+JIT/ephemeral: a runner registers with GitHub only while it serves a job.
+`gh api .../actions/runners` returning zero runners for label `pulp-studio-01`
+is therefore BOTH the healthy-idle state AND the dead-lane state — the two are
+indistinguishable from GitHub's side. This is a trap that has already been
+walked into: a label-satisfiability probe was recommended, built on, and used to
+declare a perfectly healthy lane dead. An empty runner list at 3am is not
+evidence of anything. Queue age is the only observable that separates alive from
+dead, and it is cause-agnostic, so it catches failure modes nobody enumerated.
+
+**The alarm needs two conditions, and the second one is the important one.** An
+alarm requires age >= 45 min AND no sign of life on the lane (nothing comparable
+`in_progress`, nothing comparable *started* since the job queued). Age alone is
+not enough: the measured healthy baseline is median 5 min / oldest 31 min / 3
+runs past 30 min, so a "queued > 30 min" rule fires every busy afternoon. It
+also mis-reads one runner grinding a 90-min job with a queue behind it as death.
+A busy runner is a live runner. If you retune the thresholds, do it in
+`tools/scripts/queue_age_watchdog.py` — `test_queue_age_watchdog.py` pins the
+measured baseline as a must-stay-quiet case and will fail a tuning that
+re-introduces afternoon false alarms. Rationale + operator surface:
+[docs/guides/local-ci.md](../../../docs/guides/local-ci.md) (the `config-doc`
+gate maps the workflow and the script to that guide).
+
 ## Host-vitals preflight — back off before a saturating CI host reboots
 
 The self-hosted Mac Studio that runs the required `macos` gate ALSO hosts the
