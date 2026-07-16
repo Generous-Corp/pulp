@@ -332,6 +332,57 @@ re-introduces afternoon false alarms. Rationale + operator surface:
 [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) (the `config-doc`
 gate maps the workflow and the script to that guide).
 
+### Gotcha: a lane pointed at a label NO runner carries is silent — and looks exactly like saturation
+
+The trap behind step 3. Before concluding "the pool is saturated", check that the
+lane can be served **at all**. GitHub does not validate `runs-on`: a job asking
+for a label no runner carries is **not rejected, it is queued — forever**. No
+error, no annotation, no failed check. The only symptom is jobs piling up while
+the pool looks busy, which is indistinguishable from a genuine burst. So "18 runs
+queued + every runner busy" is *not* evidence of saturation; it is equally
+consistent with a lane routed into a black hole.
+
+Found live 2026-07-16: `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` targeted
+`["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]`, and **zero
+runners carried `pulp-build-vm`** — the intended Tart-VM topology had drifted to
+bare-metal (`pulp-build-studio`) and the variable was never reconciled. The
+relief valve had been routing into nothing for an unknown period, so the queue it
+existed to drain simply grew behind it. A relief valve routed into a black hole
+is worse than none: it reports healthy and relieves nothing.
+
+Check it directly — a runner must carry **every** label in the array (subset
+containment, not "any label overlaps"):
+
+```bash
+# Authoritative: reconciles every lane against the live fleet.
+python3 tools/scripts/runner_topology_check.py --mode=report
+```
+
+Watch for three traps when reading this by hand:
+
+- **Zero runners ≠ broken.** Tart runners register JIT/ephemeral and exist only
+  while a job runs. An idle ephemeral lane has no registered runner and is
+  perfectly healthy — the release lanes look "dead" between releases. Judge those
+  on *service history* (did a job recently run with that exact label set?), not
+  on the registry.
+- **Offline ≠ absent.** A registered-but-offline runner may just be asleep (m1 is
+  intermittent). A label *nothing owns* is always a black hole. Different
+  failures; don't conflate them.
+- **The fleet mutates while you look.** Runner count changed between two API
+  calls during this investigation. Re-read before concluding.
+
+Related instance of the same class: `build.yml`'s busy probe needs
+`Administration: Read` to call `actions/runners`; the default `GITHUB_TOKEN`
+lacks it, so the probe 403s and falls back to `BUSY=0` — **silently disabling
+overflow**. Whenever routing "does nothing", suspect a silent read failure before
+suspecting load.
+
+The standing guard is `runner-topology-check.yml` (hourly, opens a tracking
+issue) plus the `runner-topology-selftest` ctest. Lane→label intent lives in
+`tools/scripts/runner_topology.json` — edit a routing variable and its lane
+together, or the drift check fails. Full rationale:
+`docs/guides/local-ci.md` → "Routing contract (checked)".
+
 ## Host-vitals preflight — back off before a saturating CI host reboots
 
 The self-hosted Mac Studio that runs the required `macos` gate ALSO hosts the
