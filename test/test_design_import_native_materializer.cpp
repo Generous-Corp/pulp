@@ -1466,6 +1466,62 @@ TEST_CASE("baked native materializer resolves an rgba() background color",
     CHECK(c.a == Catch::Approx(0.1f).margin(0.01f));
 }
 
+TEST_CASE("baked native materializer resolves rgb()/rgba() border and text colors",
+          "[view][import][native-materializer][color]") {
+    // background_color already fell back to the shared CSS parser, but every
+    // other color read stayed hex-only — so a Figma-authored rgba() border
+    // painted nothing and an rgb() text color silently kept the inherited one.
+    // Figma emits rgb()/rgba() routinely, so these are the common cases.
+    SECTION("rgba() border keeps its alpha") {
+        DesignIR ir;
+        ir.root.type = "frame";
+        ir.root.stable_anchor_id = "panel";
+        ir.root.style.width = 100.0f;
+        ir.root.style.height = 40.0f;
+        ir.root.style.border_width = 1.0f;
+        ir.root.style.border_color = "rgba(255, 255, 255, 0.2)";
+
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        REQUIRE(root->has_border());
+        const auto c = root->border_color();
+        CHECK(c.r == Catch::Approx(1.0f).margin(0.01f));
+        CHECK(c.g == Catch::Approx(1.0f).margin(0.01f));
+        CHECK(c.b == Catch::Approx(1.0f).margin(0.01f));
+        CHECK(c.a == Catch::Approx(0.2f).margin(0.01f));
+    }
+
+    SECTION("rgb() sets a label's text color") {
+        DesignIR ir;
+        ir.root = label("title", "MIX", 60.0f, 12.0f);
+        ir.root.style.color = "rgb(200, 60, 60)";
+
+        auto root = build_native_view_tree(ir, {}, {});
+        auto* lbl = dynamic_cast<Label*>(root.get());
+        REQUIRE(lbl != nullptr);
+        REQUIRE(lbl->has_own_text_color());
+        const auto c = lbl->text_color();
+        CHECK(c.r == Catch::Approx(200.0f / 255.0f).margin(0.01f));
+        CHECK(c.g == Catch::Approx(60.0f / 255.0f).margin(0.01f));
+        CHECK(c.b == Catch::Approx(60.0f / 255.0f).margin(0.01f));
+        CHECK(c.a == Catch::Approx(1.0f).margin(0.01f));
+    }
+
+    SECTION("an unrecognized token leaves the color unset, not white") {
+        // The shared CSS parser reports failure as opaque WHITE rather than an
+        // empty optional, so the rgb()/rgba() fallback is prefix-gated. A named
+        // color or var() must stay unset and inherit — never paint solid white.
+        DesignIR ir;
+        ir.root = label("title", "MIX", 60.0f, 12.0f);
+        ir.root.style.color = "var(--accent)";
+
+        auto root = build_native_view_tree(ir, {}, {});
+        auto* lbl = dynamic_cast<Label*>(root.get());
+        REQUIRE(lbl != nullptr);
+        CHECK_FALSE(lbl->has_own_text_color());
+    }
+}
+
 TEST_CASE("baked native materializer maps a Dropdown frame to an interactive ComboBox",
           "[view][import][native-materializer][combo-box]") {
     // ELYSIUM's FX RACK ships explicit "Dropdown" frames (a selected-value text

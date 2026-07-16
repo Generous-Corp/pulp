@@ -107,8 +107,8 @@
     },
     {
       "path": "core/view/src/design_import_native_common.cpp",
-      "max_loc": 2070,
-      "note": "native materialization/import boundary hotspot; +12 for the interactive-element param_key mapping + host-param routing auto-enable; owns the shared hit-policy + image-sizing lowering for the runtime and baked-C++ lanes"
+      "max_loc": 2080,
+      "note": "native materialization/import boundary hotspot; +12 for the interactive-element param_key mapping + host-param routing auto-enable; +9 for the shared parse_style_color helper (hex fast path + prefix-gated rgb()/rgba() fallback) now used by every authored-CSS color read; owns the shared hit-policy + image-sizing lowering for the runtime and baked-C++ lanes"
     },
     {
       "path": "core/view/src/design_codegen.cpp",

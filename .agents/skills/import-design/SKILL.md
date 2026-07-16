@@ -1111,6 +1111,37 @@ they share no code unless you make them.
   (so the codegen path is covered even when the planning-gated cpp-codegen target
   is skipped), plus the gated `pulp-test-design-import-cpp-codegen`.
 
+### Authored colors: read them with `parse_style_color`, never `parse_hex_color`
+
+Figma emits `rgb()` / `rgba()` routinely — most visibly because it demotes a
+hairline stroke to a 1px frame whose *fill* carries the stroke color
+(`rgba(171,171,171,0.1)`). The native materializer's `parse_hex_color`
+(`design_import_native_common.cpp`) only accepts `#rgb` / `#rrggbb` /
+`#rrggbbaa` and returns `nullopt` for everything else, so every `rgba()` color
+read through it was **silently dropped**: an `rgba()` `borderColor` painted no
+border at all, and an `rgb()` `color` fell back to the inherited text color.
+This bug class has now bitten twice (first `background_color`, then the border /
+label / SVG-paint reads), so:
+
+- **Read any authored CSS color through `parse_style_color`** — the shared
+  helper next to `parse_hex_color`. Hex fast path, then an
+  `rgb()`/`rgba()`/`transparent` fallback to `parse_css_color`
+  (`core/view/src/css_gradient.cpp`). It is a strict superset of
+  `parse_hex_color`: identical result on every input the latter accepted.
+- **Gotcha — `parse_css_color` has no failure value.** It returns
+  `canvas::Color`, not `std::optional`, and reports an unrecognized token as
+  **opaque white**. Do NOT swap `parse_hex_color` → `parse_css_color` directly:
+  a named color, a `var(--x)`, or an SVG `url(#grad)` would then paint solid
+  white instead of leaving the color unset to inherit. `parse_style_color`
+  prefix-gates the fallback precisely to keep unknown ⇒ "don't set".
+- **Not every color token is authored CSS.** `shape_fill_gradient` is
+  machine-emitted by the importer's PNG sampler as `#rrggbb,#rrggbb,…` and stays
+  hex-only — its naive comma split would shred an `rgba(r,g,b,a)` token into
+  four fragments. Assess each call site; don't blanket-replace.
+- Tests: `[view][import][native-materializer][color]` in
+  `test_design_import_native_materializer.cpp` — rgba border alpha, rgb label
+  color, and an unrecognized token that must stay unset rather than turn white.
+
 ### Per-range text styles → nested `<span>`s
 
 A text node used to take the FIRST-CHAR dominant style only (one run); mixed
