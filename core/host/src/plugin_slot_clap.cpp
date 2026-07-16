@@ -482,6 +482,7 @@ public:
             runtime::log_error("CLAP editor: gui->create failed for '{}'", info_.name);
             return nullptr;
         }
+        gui_created_ = true;
 
         // Only the physical-size APIs get a scale. clap/ext/gui.h explicitly
         // says not to call set_scale() on cocoa/uikit, which are logical-size.
@@ -494,7 +495,7 @@ public:
         uint32_t height = 0;
         if (!gui_ext_->get_size(plugin_, &width, &height) || width == 0 || height == 0) {
             runtime::log_error("CLAP editor: gui->get_size failed for '{}'", info_.name);
-            gui_ext_->destroy(plugin_);
+            close_editor();
             return nullptr;
         }
 
@@ -503,29 +504,27 @@ public:
         void* container = create_editor_container(parent_window, width, height);
         if (!container) {
             // No native-window seam on this platform, or a bad parent.
-            gui_ext_->destroy(plugin_);
+            close_editor();
             return nullptr;
         }
+        editor_container_ = container;
 
         clap_window_t window{};
         window.api = kWindowApi;
         set_window_handle(window, container);
         if (!gui_ext_->set_parent(plugin_, &window)) {
             runtime::log_error("CLAP editor: gui->set_parent failed for '{}'", info_.name);
-            destroy_editor_container(container);
-            gui_ext_->destroy(plugin_);
+            close_editor();
             return nullptr;
         }
 
         if (gui_ext_->show && !gui_ext_->show(plugin_)) {
             runtime::log_error("CLAP editor: gui->show failed for '{}'", info_.name);
-            destroy_editor_container(container);
-            gui_ext_->destroy(plugin_);
+            close_editor();
             return nullptr;
         }
 
         editor_open_ = true;
-        editor_container_ = container;
 
         auto ed = std::make_unique<HostedEditor>();
         ed->native_handle = container;
@@ -587,16 +586,27 @@ public:
     }
 
 private:
-    /// hide → destroy → release the container, in that order. Idempotent.
+    /// Tear the plugin's gui down: hide, then destroy. Leaves the container
+    /// alone — see close_editor(). Idempotent.
+    void destroy_gui() {
+        if (!gui_created_) return;
+        gui_created_ = false;
+        if (!plugin_ || !gui_ext_) return;
+        if (gui_ext_->hide) gui_ext_->hide(plugin_);
+        gui_ext_->destroy(plugin_);
+    }
+
+    /// Full teardown: plugin gui first, then the container it was parented
+    /// into. Idempotent, and tracks the gui and the container separately so a
+    /// gui that died on its own still leaves the container to be released
+    /// exactly once.
     void close_editor() {
-        if (!editor_open_) return;
-        editor_open_ = false;
-        if (plugin_ && gui_ext_) {
-            if (gui_ext_->hide) gui_ext_->hide(plugin_);
-            gui_ext_->destroy(plugin_);
+        destroy_gui();
+        if (editor_container_) {
+            destroy_editor_container(editor_container_);
+            editor_container_ = nullptr;
         }
-        destroy_editor_container(editor_container_);
-        editor_container_ = nullptr;
+        editor_open_ = false;
     }
 
     static ClapSlot* self_from(const clap_host_t* host) {
@@ -640,18 +650,19 @@ private:
     static void CLAP_ABI host_gui_closed(const clap_host_t* host, bool was_destroyed) {
         auto* self = self_from(host);
         if (!self) return;
-        // Only floating editors can be closed by the user, and Pulp never
-        // creates one. Reaching here means the plugin lost its gui connection.
+        // Pulp never creates floating editors, so this means the plugin lost
+        // its gui connection rather than a user closing a window.
         runtime::log_warn("CLAP editor: plugin '{}' reported gui closed (was_destroyed={})",
                           self->info_.name, was_destroyed);
-        if (was_destroyed) {
-            // The spec requires acknowledging with destroy(); the gui is
-            // already gone, so drop our side without calling hide() on it.
-            self->editor_open_ = false;
-            if (self->plugin_ && self->gui_ext_) self->gui_ext_->destroy(self->plugin_);
-            destroy_editor_container(self->editor_container_);
-            self->editor_container_ = nullptr;
-        }
+        if (!was_destroyed) return;
+
+        // The spec requires acknowledging a was_destroyed close with destroy().
+        // Do exactly that and no more: the caller still holds a HostedEditor
+        // whose native_handle is our container, and freeing it here would
+        // dangle that handle under EditorAttachment (which detaches by handle
+        // on release). The container is released when the caller tears the
+        // editor down, which close_editor() still does exactly once.
+        self->destroy_gui();
     }
 
     static const clap_host_gui_t s_host_gui;
@@ -732,6 +743,11 @@ private:
     // pointer is stable for the plugin's lifetime.
     const clap_plugin_gui_t* gui_ext_ = nullptr;
     bool gui_api_supported_ = false;
+    // The plugin's gui and our container have independent lifetimes: a plugin
+    // can report its gui destroyed (clap_host_gui::closed) while the caller
+    // still holds the HostedEditor handle to the container. Tracking them
+    // separately keeps each torn down exactly once.
+    bool gui_created_ = false;
     bool editor_open_ = false;
     bool editor_resizable_ = false;
     void* editor_container_ = nullptr;

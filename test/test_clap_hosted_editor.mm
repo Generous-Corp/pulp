@@ -19,6 +19,7 @@
 
 #import <AppKit/AppKit.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -523,6 +524,64 @@ TEST_CASE("CLAP host relays the handler's refusal to the plugin", "[clap][editor
     REQUIRE_FALSE(host_gui->request_resize(fake.host, 1024, 768));
 
     slot->destroy_hosted_editor(std::move(ed));
+}
+
+TEST_CASE("CLAP gui closed(was_destroyed) acknowledges without dangling the handle",
+          "[clap][editor]") {
+    FakeClapPlugin fake;
+    auto slot = make_slot(fake);
+    REQUIRE(slot != nullptr);
+
+    ParentView parent;
+    auto ed = slot->create_hosted_editor(parent.handle());
+    REQUIRE(ed != nullptr);
+    void* const handle = ed->native_handle;
+
+    auto* host_gui =
+        static_cast<const clap_host_gui_t*>(fake.host->get_extension(fake.host, CLAP_EXT_GUI));
+    REQUIRE(host_gui != nullptr);
+
+    // The plugin reports its gui gone. The spec requires the host to
+    // acknowledge with destroy() — but the caller still holds `ed`, whose
+    // native_handle is our container, so the container must NOT be freed here.
+    // Freeing it would dangle a handle that EditorAttachment detaches by
+    // pointer on release.
+    host_gui->closed(fake.host, /*was_destroyed=*/true);
+    REQUIRE(fake.logged("destroy"));
+    REQUIRE(ed->native_handle == handle);
+    REQUIRE(parent.subview_count() == 1);
+
+    // Teardown still releases the container exactly once, and must not
+    // re-destroy a gui that is already gone.
+    const int destroys_before = static_cast<int>(std::count(fake.calls.begin(), fake.calls.end(),
+                                                            std::string("destroy")));
+    slot->destroy_hosted_editor(std::move(ed));
+    const int destroys_after = static_cast<int>(std::count(fake.calls.begin(), fake.calls.end(),
+                                                           std::string("destroy")));
+    REQUIRE(destroys_after == destroys_before);
+    REQUIRE(parent.subview_count() == 0);
+}
+
+TEST_CASE("CLAP gui closed(was_destroyed=false) leaves an embedded editor alone",
+          "[clap][editor]") {
+    FakeClapPlugin fake;
+    auto slot = make_slot(fake);
+    REQUIRE(slot != nullptr);
+
+    ParentView parent;
+    auto ed = slot->create_hosted_editor(parent.handle());
+    REQUIRE(ed != nullptr);
+
+    auto* host_gui =
+        static_cast<const clap_host_gui_t*>(fake.host->get_extension(fake.host, CLAP_EXT_GUI));
+    // Without was_destroyed there is nothing to acknowledge, so the gui stays.
+    host_gui->closed(fake.host, /*was_destroyed=*/false);
+    REQUIRE_FALSE(fake.logged("destroy"));
+    REQUIRE(parent.subview_count() == 1);
+
+    slot->destroy_hosted_editor(std::move(ed));
+    REQUIRE(fake.logged("destroy"));
+    REQUIRE(parent.subview_count() == 0);
 }
 
 TEST_CASE("CLAP slot destroyed with an open editor still tears the gui down", "[clap][editor]") {
