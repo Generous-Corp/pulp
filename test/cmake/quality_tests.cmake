@@ -40,6 +40,18 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
 
+    # Governed-build wrapper: the bound on Shipyard's `local` mac backend, which
+    # runs the build string directly on the host and so never sees the pulp
+    # CLI's lease integration. Pins the lease-denial contract (back off to the
+    # store's reported capacity, floor when none) with a stub tartci — no
+    # compile, no lease store, no host-size dependency. UNIX-only: it drives a
+    # bash script, and the wrapper only runs on the macOS/Linux CI hosts.
+    if(UNIX)
+        add_test(NAME governed-build-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_governed_build.py")
+        set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
+    endif()
+
     # Planning-gitlink guard: reject an accidental `planning` submodule pointer
     # bump (a `git reset --hard` + `git add -A` re-staging the drifted gitlink);
     # a deliberate re-pin passes with a `Planning-Bump:` trailer.
