@@ -601,6 +601,120 @@ TEST_CASE("frontmatter-less DESIGN.md handles emphasis, slashes, rgb(), refs, an
     REQUIRE(result.ir.tokens.dimensions.find("spacing-weird") == result.ir.tokens.dimensions.end());
 }
 
+// ── Shadows: frontmatter group + additive body scan ──────────────────────
+// Three cases pinned together, because the bug they cover was the gap BETWEEN
+// them: a body `## Shadows` table was read only when the document had no
+// frontmatter, and the frontmatter schema had no shadow key at all. Adding
+// frontmatter to a prose DESIGN.md therefore deleted the only slot shadows
+// had, silently. (A) and (C) are the two ways to author a shadow; (B) is the
+// control that proves the body scanner itself works.
+
+// (A) frontmatter present + body `## Shadows` table → body fills the gap.
+TEST_CASE("DESIGN.md with frontmatter still recovers shadow tokens from a body section",
+          "[view][import][designmd][body][shadows]") {
+    const std::string md = R"md(---
+name: Gap Filler
+colors:
+  primary: "#6750A4"
+---
+
+# Gap Filler
+
+## Shadows
+
+| Token | Value |
+| --- | --- |
+| Card | 0 1px 3px rgba(0,0,0,0.2) |
+| Modal | 0 8px 24px rgba(0,0,0,0.4) |
+)md";
+    auto result = parse_designmd(md);
+    REQUIRE(result.had_frontmatter);
+    // Frontmatter parsed as usual.
+    REQUIRE(result.ir.tokens.colors.at("primary") == "#6750A4");
+    // ...and the body section is no longer dropped on the floor.
+    REQUIRE(result.ir.tokens.strings.at("shadow-card") == "0 1px 3px rgba(0,0,0,0.2)");
+    REQUIRE(result.ir.tokens.strings.at("shadow-modal") == "0 8px 24px rgba(0,0,0,0.4)");
+    // The recovery is reported rather than happening silently.
+    REQUIRE(has_diag_code(result.diagnostics, "body-tokens"));
+}
+
+// (A′) frontmatter wins on conflict; the body only fills what it never said.
+TEST_CASE("DESIGN.md frontmatter values win over body values for the same token",
+          "[view][import][designmd][body][shadows]") {
+    const std::string md = R"md(---
+name: Conflict
+colors:
+  primary: "#111111"
+spacing:
+  md: 8px
+---
+
+## Colors
+- Primary: #999999
+- Accent: #222222
+
+## Spacing
+- md: 999px
+- lg: 16px
+)md";
+    auto result = parse_designmd(md);
+    REQUIRE(result.had_frontmatter);
+    // Conflicts resolve to the frontmatter value.
+    REQUIRE(result.ir.tokens.colors.at("primary") == "#111111");
+    REQUIRE(result.ir.tokens.dimensions.at("spacing-md") == 8.0f);
+    // Gaps are filled from the body.
+    REQUIRE(result.ir.tokens.colors.at("accent") == "#222222");
+    REQUIRE(result.ir.tokens.dimensions.at("spacing-lg") == 16.0f);
+}
+
+// (C) a `shadows:` frontmatter group is a real slot, not an unknown key.
+TEST_CASE("DESIGN.md parses a shadows frontmatter group into shadow-* string tokens",
+          "[view][import][designmd][parse][shadows]") {
+    const std::string yaml =
+        "---\n"
+        "name: Shadow Group\n"
+        "shadows:\n"
+        "  sm: \"0 1px 2px rgba(0,0,0,0.1)\"\n"
+        "  lg: \"0 8px 24px rgba(0,0,0,0.4)\"\n"
+        "  card:\n"
+        "    rest: \"0 1px 3px rgba(0,0,0,0.2)\"\n"
+        "---\n";
+    auto result = parse_designmd(yaml);
+    REQUIRE(result.had_frontmatter);
+    // Same slot + prefix the body scanner uses, so the two forms agree.
+    REQUIRE(result.ir.tokens.strings.at("shadow-sm") == "0 1px 2px rgba(0,0,0,0.1)");
+    REQUIRE(result.ir.tokens.strings.at("shadow-lg") == "0 8px 24px rgba(0,0,0,0.4)");
+    // Nested levels dot-join, matching rounded/spacing.
+    REQUIRE(result.ir.tokens.strings.at("shadow-card.rest") == "0 1px 3px rgba(0,0,0,0.2)");
+    // `shadows` is schema, so it must NOT be flagged as an unknown top-level key.
+    for (const auto& d : result.diagnostics)
+        REQUIRE_FALSE(d.code == "unknown-key");
+}
+
+// Prose under a shadow heading is not a shadow token. This guards the additive
+// scan above: real DESIGN.md files put descriptive sentences under
+// `## Elevation & Depth`, and those sentences quote sizes ("Blur: 20px-40px"),
+// so a digit-anywhere test would import them as tokens.
+TEST_CASE("DESIGN.md does not mistake prose under an elevation heading for a shadow token",
+          "[view][import][designmd][body][shadows]") {
+    const std::string md = R"md(---
+name: Prose Body
+---
+
+## Elevation & Depth
+
+- **Shadows:** Shadows are highly diffused and soft (Blur: 20px-40px, Opacity: 4-8%).
+- **Interactions:** Elements lift on hover, increasing shadow spread for feedback.
+- card: 0 1px 3px rgba(0,0,0,0.2)
+)md";
+    auto result = parse_designmd(md);
+    // The sentences are skipped...
+    REQUIRE(result.ir.tokens.strings.find("shadow-shadows") == result.ir.tokens.strings.end());
+    REQUIRE(result.ir.tokens.strings.find("shadow-interactions") == result.ir.tokens.strings.end());
+    // ...while a real shadow value in the same section still imports.
+    REQUIRE(result.ir.tokens.strings.at("shadow-card") == "0 1px 3px rgba(0,0,0,0.2)");
+}
+
 // ── DESIGN.md 0.3.0 format coverage ─────────────────────────────────────
 // The format spec was bumped 0.1.1 → 0.3.0. The changes relevant to Pulp's
 // consumer (importer) side are: any-valid-CSS-color values, arbitrary-depth
