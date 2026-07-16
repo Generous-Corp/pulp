@@ -2179,6 +2179,19 @@ int main(int argc, char* argv[]) {
         }
     } fig_scratch_cleanup{fig_scratch_dir};
 
+    // Multi-state capture needs a source that can decode each frame on its own,
+    // which today is only the `.fig` lane. Every other source resolves a single
+    // frame per run, so honor only the first --frame there — and say so, rather
+    // than silently importing one state and dropping the rest.
+    if (frame_names.size() > 1 && source_str != "fig") {
+        std::cerr << "Error: --frame is repeatable only with --from fig (got "
+                  << frame_names.size() << " --frame values with --from "
+                  << source_str << ")\n";
+        std::cerr << "       Multi-state capture decodes each frame separately, which "
+                     "only the .fig lane supports.\n";
+        return 2;
+    }
+
     pulp::import_design::fig::LaneArgs fig_args{
         source_str, input_file, frame_names, page_name, outline_mode, outline_json};
     fig_args.created_tmp_dir = &fig_scratch_dir;
