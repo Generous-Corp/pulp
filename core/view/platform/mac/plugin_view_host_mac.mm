@@ -1214,14 +1214,9 @@ public:
             stop_render_link();
     }
     void start_render_link() {
-        if (render_link_) return;
-        CVDisplayLinkCreateWithActiveCGDisplays(&render_link_);
-        if (!render_link_) return;
-        CVDisplayLinkSetOutputCallback(render_link_, &render_link_callback, this);
-        CVDisplayLinkStart(render_link_);
-        if (const float nominal =
-                pulp::view::mac_frame_timing::display_link_nominal_dt(render_link_);
-            nominal > 0.0f) {
+        if (!render_link_.open(&render_link_callback, this)) return;
+        render_link_.resume();
+        if (const float nominal = render_link_.nominal_dt(); nominal > 0.0f) {
             frame_pump_.set_nominal_dt(nominal);
         }
         // The editor was not being pumped while the link was stopped; the next
@@ -1230,11 +1225,7 @@ public:
     }
     void stop_render_link() {
         frame_pump_.suspend();
-        if (render_link_) {
-            CVDisplayLinkStop(render_link_);   // synchronous: no callback after this
-            CVDisplayLinkRelease(render_link_);
-            render_link_ = nullptr;
-        }
+        render_link_.stop();   // Stop is synchronous: no callback after this
     }
 
     static CVReturn render_link_callback(CVDisplayLinkRef, const CVTimeStamp*,
@@ -1430,7 +1421,7 @@ private:
     std::function<void(uint32_t, uint32_t)> resize_cb_;
     // Continuous-frame driver for the CPU (non-GPU) editor path.
     std::function<void()> idle_cb_;
-    CVDisplayLinkRef render_link_ = nullptr;
+    pulp::view::mac_frame_timing::MacDisplayLinkDriver render_link_;
     // Shared liveness + per-vsync queue flag. Lives in a shared_ptr so the
     // CVDisplayLink callback's main-queue block can outlive the host without
     // touching freed memory.
@@ -1970,7 +1961,7 @@ private:
 
     std::unique_ptr<render::GpuSurface> gpu_surface_;
     std::unique_ptr<render::SkiaSurface> skia_surface_;
-    CVDisplayLinkRef display_link_ = nullptr;
+    pulp::view::mac_frame_timing::MacDisplayLinkDriver display_link_;
     FrameClock frame_clock_;
     // Measured-dt source fed by the CVDisplayLink's presentation timestamps.
     HostFramePump frame_pump_;
@@ -2302,15 +2293,14 @@ private:
     }
 
     void start_display_link() {
-        if (display_link_) {
+        if (display_link_.is_open()) {
             // Already running; just make sure it's bound to the current screen.
             bind_to_window_screen();
             return;
         }
-        CVDisplayLinkCreateWithActiveCGDisplays(&display_link_);
-        CVDisplayLinkSetOutputCallback(display_link_, display_link_callback, this);
+        display_link_.open(display_link_callback, this);
         bind_to_window_screen();
-        CVDisplayLinkStart(display_link_);
+        display_link_.resume();
         frame_pump_.suspend();  // the editor was not being pumped: next frame is a resume
     }
 
@@ -2321,28 +2311,21 @@ private:
     // Seeding lives here, not in start_display_link(), because the editor can be
     // dragged to a display with a different refresh rate while the link runs.
     void bind_to_window_screen() {
-        if (!display_link_) return;
+        if (!display_link_.is_open()) return;
         NSScreen* screen = metal_view_.window ? metal_view_.window.screen : nil;
         if (!screen) screen = [NSScreen mainScreen];
         NSNumber* num = screen.deviceDescription[@"NSScreenNumber"];
         if (num) {
-            CVDisplayLinkSetCurrentCGDisplay(
-                display_link_, (CGDirectDisplayID)num.unsignedIntValue);
+            display_link_.bind_to_display((CGDirectDisplayID)num.unsignedIntValue);
         }
-        if (const float nominal =
-                pulp::view::mac_frame_timing::display_link_nominal_dt(display_link_);
-            nominal > 0.0f) {
+        if (const float nominal = display_link_.nominal_dt(); nominal > 0.0f) {
             frame_pump_.set_nominal_dt(nominal);
         }
     }
 
     void stop_display_link() {
         frame_pump_.suspend();
-        if (display_link_) {
-            CVDisplayLinkStop(display_link_);
-            CVDisplayLinkRelease(display_link_);
-            display_link_ = nullptr;
-        }
+        display_link_.stop();
     }
 
     // The widget/CSS animation walk lives in shared code

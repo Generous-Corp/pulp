@@ -26,9 +26,36 @@
 
 using Catch::Matchers::WithinAbs;
 using pulp::view::mac_frame_timing::display_link_nominal_dt;
+using pulp::view::mac_frame_timing::MacDisplayLinkDriver;
 using pulp::view::mac_frame_timing::plugin_view_wants_render_link;
 
 namespace {
+
+/// Output callback for driver-lifecycle tests: a link opened by these tests is
+/// never resumed, so this only has to be a valid target for the driver to route.
+CVReturn counting_link_callback(CVDisplayLinkRef, const CVTimeStamp*,
+                                const CVTimeStamp*, CVOptionFlags, CVOptionFlags*,
+                                void*) {
+    return kCVReturnSuccess;
+}
+
+/// Does the main display report a definite nominal refresh period? Only there is
+/// a never-started link's nominal_dt() meaningful: display_link_nominal_dt falls
+/// back to the MEASURED period when nominal is indefinite, and that stays 0 until
+/// the link has run. Probes through its own link so it reads the same CoreVideo
+/// answer the driver would, without needing the driver's private handle.
+bool main_display_has_definite_nominal_period() {
+    CVDisplayLinkRef probe = nullptr;
+    if (CVDisplayLinkCreateWithCGDisplay(CGMainDisplayID(), &probe) != kCVReturnSuccess ||
+        probe == nullptr) {
+        return false;
+    }
+    const CVTime nominal = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(probe);
+    const bool definite = (nominal.flags & kCVTimeIsIndefinite) == 0 && nominal.timeScale != 0;
+    CVDisplayLinkRelease(probe);
+    return definite;
+}
+
 
 /// Run the main run loop for `seconds`, which is what drains the display link's
 /// dispatch_async(dispatch_get_main_queue()) blocks.
@@ -95,6 +122,59 @@ TEST_CASE("the pump's nominal dt is seeded from a link that has never run",
 TEST_CASE("a null link leaves the pump's default in place",
           "[view][mac][frame-pump][timing]") {
     REQUIRE(display_link_nominal_dt(nullptr) == 0.0f);
+}
+
+TEST_CASE("a closed display-link driver answers every verb without a handle",
+          "[view][mac][frame-pump][timing]") {
+    // The hosts call these verbs on a driver that may never have opened — a
+    // headless process has no display list, so open() fails and every later
+    // verb has to be a no-op rather than a null-handle CoreVideo call. This is
+    // the contract that lets a host write its start/stop sequence straight
+    // through without re-checking the handle at each step.
+    MacDisplayLinkDriver driver;
+    REQUIRE_FALSE(driver.is_open());
+    REQUIRE(driver.nominal_dt() == 0.0f);
+    driver.bind_to_display(CGMainDisplayID());
+    driver.resume();
+    driver.stop();
+    driver.stop();  // idempotent: every host stops explicitly, then again on destruction
+    REQUIRE_FALSE(driver.is_open());
+}
+
+TEST_CASE("an open display-link driver refuses to replace its own handle",
+          "[view][mac][frame-pump][timing]") {
+    // A second open() must leave the first link alone and report false. The
+    // hosts rely on it: the standalone GPU window host starts its link from
+    // run_event_loop() AND from show(), and a plugin editor re-attached to a
+    // window starts one per attach. Replacing the handle would leak the running
+    // link and leave its callback firing at a host that thinks it owns one link.
+    MacDisplayLinkDriver driver;
+    if (!driver.open(&counting_link_callback, nullptr)) {
+        SUCCEED("no display list in this process — no link to open");
+        return;
+    }
+    REQUIRE(driver.is_open());
+    REQUIRE_FALSE(driver.open(&counting_link_callback, nullptr));
+    REQUIRE(driver.is_open());
+
+    // Bound to a display, the link can seed a pump before it has ever ticked --
+    // but only where the display reports a definite nominal period. A
+    // variable-refresh-rate panel, or the virtual display a Mac attaches when
+    // driven headless over screen sharing, legitimately reports
+    // kCVTimeIsIndefinite; there the measured period is the only answer and it
+    // stays 0 until the link has actually run. Asserting unconditionally would
+    // fail on those hosts for a property this case is not about.
+    driver.bind_to_display(CGMainDisplayID());
+    if (main_display_has_definite_nominal_period()) {
+        REQUIRE(driver.nominal_dt() > 0.0f);
+    }
+
+    driver.stop();
+    REQUIRE_FALSE(driver.is_open());
+    REQUIRE(driver.nominal_dt() == 0.0f);
+    // Closing is not retiring: a re-attached editor opens the same driver again.
+    REQUIRE(driver.open(&counting_link_callback, nullptr));
+    REQUIRE(driver.is_open());
 }
 
 TEST_CASE("the CPU plugin-view host drives frames for a NATIVE editor too",

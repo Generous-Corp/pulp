@@ -45,6 +45,7 @@ add_executable(pulp-cli
     shell_redirect.cpp
     tartci_lease.cpp
     cli_sdk.cpp
+    cli_fs_util.cpp
     cli_doctor_helpers.cpp
     cmd_build.cpp
     cmd_config.cpp

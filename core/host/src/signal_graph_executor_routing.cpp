@@ -288,6 +288,36 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                              const std::function<int(NodeId)>& plugin_latency_for,
                              const std::function<const std::vector<HostParamInfo>*(NodeId)>&
                                  plugin_params_for) {
+    return build_executor_snapshot(nodes, connections,
+                                   ExecutorSnapshotBinders{
+                                       .gain_for = gain_for,
+                                       .plugin_for = plugin_for,
+                                       .load_for = load_for,
+                                       .custom_for = custom_for,
+                                       .custom_transport_for = custom_transport_for,
+                                       .plugin_latency_for = plugin_latency_for,
+                                       .plugin_params_for = plugin_params_for,
+                                   },
+                                   plugin_ctx, scratch, out, parallel_safe,
+                                   custom_ctx);
+}
+
+bool build_executor_snapshot(std::span<const GraphNode> nodes,
+                             std::span<const Connection> connections,
+                             const ExecutorSnapshotBinders& binders,
+                             std::vector<PluginBindingContext>& plugin_ctx,
+                             PluginRoutingScratch& scratch,
+                             fmt::GraphRuntimeSnapshot& out,
+                             bool parallel_safe,
+                             std::vector<CustomBindingContext>* custom_ctx) {
+    const auto& gain_for = binders.gain_for;
+    const auto& plugin_for = binders.plugin_for;
+    const auto& load_for = binders.load_for;
+    const auto& custom_for = binders.custom_for;
+    const auto& custom_transport_for = binders.custom_transport_for;
+    const auto& plugin_latency_for = binders.plugin_latency_for;
+    const auto& plugin_params_for = binders.plugin_params_for;
+
     out.clear();
     plugin_ctx.clear();
     if (custom_ctx != nullptr) custom_ctx->clear();
@@ -530,14 +560,16 @@ bool build_signal_graph_executor_routing(const SignalGraph& graph,
     out.snapshot_keepalive.reset();
     if (!graph.is_prepared()) return false;
 
-    if (!build_executor_snapshot(
-            graph.nodes(), graph.connections(),
-            [&graph](NodeId id) { return graph.live_gain_atomic(id); },
-            [&graph](NodeId id) { return graph.live_plugin_slot(id); },
-            out.plugin_ctx, out.plugin_scratch, out.snapshot, /*parallel_safe=*/false,
-            /*load_for=*/{}, &out.custom_ctx,
-            [&graph](NodeId id) { return graph.live_custom_processor(id); },
-            [&graph](NodeId id) { return graph.live_custom_transport_processor(id); })) {
+    const ExecutorSnapshotBinders binders{
+        .gain_for = [&graph](NodeId id) { return graph.live_gain_atomic(id); },
+        .plugin_for = [&graph](NodeId id) { return graph.live_plugin_slot(id); },
+        .custom_for = [&graph](NodeId id) { return graph.live_custom_processor(id); },
+        .custom_transport_for =
+            [&graph](NodeId id) { return graph.live_custom_transport_processor(id); },
+    };
+    if (!build_executor_snapshot(graph.nodes(), graph.connections(), binders,
+                                 out.plugin_ctx, out.plugin_scratch, out.snapshot,
+                                 /*parallel_safe=*/false, &out.custom_ctx)) {
         return false;
     }
 

@@ -583,6 +583,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
         src/anchor_strategy.cpp
         src/design_export.cpp
         src/design_import.cpp
+        src/design_import_png.cpp
         src/design_binding_metadata.cpp
         src/design_ir_json.cpp
         src/recognition_resolver.cpp

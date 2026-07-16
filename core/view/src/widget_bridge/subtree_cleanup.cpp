@@ -2,6 +2,7 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <algorithm>
 #include <exception>
 #include <iostream>
 #include <string>
@@ -60,18 +61,30 @@ void forget_js_widget_subtree(ScriptEngine& engine,
 
 } // namespace
 
-void WidgetBridge::forget_widget_registrations(const std::string& id) {
-    pointer_registered_.erase(id);
-    wheel_registered_.erase(id);
+bool WidgetBridge::claim_pointer_registration(const std::string& id) {
+    auto& record = registrations_[id];
+    if (record.pointer) return false;
+    record.pointer = true;
+    return true;
+}
 
-    const std::string prefix = id + ":";
-    for (auto it = gesture_recognizer_registered_.begin();
-         it != gesture_recognizer_registered_.end();) {
-        if (it->compare(0, prefix.size(), prefix) == 0)
-            it = gesture_recognizer_registered_.erase(it);
-        else
-            ++it;
-    }
+bool WidgetBridge::claim_wheel_registration(const std::string& id) {
+    auto& record = registrations_[id];
+    if (record.wheel) return false;
+    record.wheel = true;
+    return true;
+}
+
+bool WidgetBridge::claim_gesture_registration(const std::string& id,
+                                              const std::string& recognizer_key) {
+    auto& keys = registrations_[id].gesture_recognizers;
+    if (std::find(keys.begin(), keys.end(), recognizer_key) != keys.end()) return false;
+    keys.push_back(recognizer_key);
+    return true;
+}
+
+void WidgetBridge::forget_widget_registrations(const std::string& id) {
+    registrations_.erase(id);
 }
 
 void WidgetBridge::forget_widget_subtree(View* node, bool preserve_js_dom_state) {

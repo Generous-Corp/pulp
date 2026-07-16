@@ -33,6 +33,12 @@
 ///      to the RT-safe listener path, the pair every adapter must keep in sync.
 ///      Consumed by `clap_adapter.cpp` and `vst3_adapter.cpp`; AU applies host
 ///      params through its own store writes.
+///   5. **output-parameter publication** — the bookkeeping around reporting
+///      plugin-side parameter changes back to the host for automation
+///      recording: resolving a param id to its scratch-vector index, snapshotting
+///      values before `process()`, and the bitwise post-`process()` diff. The
+///      host-ABI emit stays in the adapter. Consumed by `clap_adapter.cpp` and
+///      `vst3_adapter.cpp`.
 ///
 /// **Real-time contract.** Everything here runs on the audio/render thread and
 /// is allocation-, lock-, and syscall-free after `prepare()`: the only place
@@ -52,6 +58,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <span>
+#include <vector>
 
 namespace pulp::format::boundary {
 
@@ -296,6 +304,69 @@ inline bool apply_param_value(state::ParameterEventQueue& queue,
     const bool queued = queue.push(state::ParameterEvent{id, sample_offset, value});
     store.set_value_rt(id, value);
     return queued;
+}
+
+// ---------------------------------------------------------------------------
+// 5. output-parameter publication
+//
+// The mirror of (4): values the *plugin* changed during process() have to reach
+// the host so it can record automation. The host-ABI emit differs per format
+// (VST3 `IParamValueQueue::addPoint`, CLAP `out_events->try_push`), but the
+// bookkeeping around it does not: snapshot every parameter before process(),
+// diff after, and skip any parameter that already reported sample-accurate
+// explicit events. These are the pieces of that bookkeeping which carry no
+// format currency. Consumed by `clap_adapter.cpp` and `vst3_adapter.cpp`.
+// ---------------------------------------------------------------------------
+
+/// Index returned by `find_param_index` when the id is not registered.
+inline constexpr std::size_t kParamIndexNotFound = static_cast<std::size_t>(-1);
+
+/// Position of @p id within @p all_params, or `kParamIndexNotFound`.
+///
+/// The position — not the id — is the key for every per-block scratch vector an
+/// adapter sizes off `all_params()` (the value snapshot, the skip-set, the
+/// per-parameter host queue cache), so a publication path holding an id has to
+/// resolve it back to an index.
+///
+/// First match wins. `StateStore` permits an id to be registered more than once
+/// and resolves reads/writes to the *latest* such slot (see the duplicate-
+/// ParamID contract in `StateStore::reset_triggers_rt`), so under a duplicate id
+/// this returns a slot the store itself no longer reads. Preserved as-is because
+/// it is what every adapter's publication path has always done. RT-safe.
+inline std::size_t find_param_index(std::span<const state::ParamInfo> all_params,
+                                    state::ParamID id) noexcept {
+    for (std::size_t i = 0; i < all_params.size(); ++i) {
+        if (all_params[i].id == id) return i;
+    }
+    return kParamIndexNotFound;
+}
+
+/// Capture every parameter's current value into @p snapshot, positionally
+/// aligned with @p all_params, so a post-process() diff can spot the values the
+/// processor changed.
+///
+/// @p snapshot is resized to match; the adapter must have reserved it to
+/// `all_params.size()` off the audio thread (at activate/setup) or the first
+/// block grow-and-allocates. RT-safe given that reservation.
+inline void snapshot_param_values(const state::StateStore& store,
+                                  std::span<const state::ParamInfo> all_params,
+                                  std::vector<float>& snapshot) {
+    snapshot.resize(all_params.size());
+    for (std::size_t i = 0; i < all_params.size(); ++i) {
+        snapshot[i] = store.get_value(all_params[i].id);
+    }
+}
+
+/// True when @p current differs from @p snapshotted, compared *bitwise*.
+///
+/// Deliberately not `current != snapshotted`. The question this answers is "did
+/// the stored bits move", not "are these numerically equal", and the two differ
+/// at the edges every parameter store hits eventually: a NaN parameter would
+/// compare unequal to itself under `!=` and be republished on every single block
+/// forever, while `+0.0`/`-0.0` compare equal under `!=` and would silently drop
+/// a real store write. RT-safe.
+inline bool changed_since_snapshot(float current, float snapshotted) noexcept {
+    return std::memcmp(&current, &snapshotted, sizeof(float)) != 0;
 }
 
 }  // namespace pulp::format::boundary

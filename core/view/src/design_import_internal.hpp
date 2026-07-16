@@ -13,8 +13,10 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <choc/text/choc_JSON.h>
@@ -22,6 +24,60 @@
 #include <pulp/view/design_import.hpp>
 
 namespace pulp::view {
+
+// ── PNG codec / pixel surgery boundary ───────────────────────────────────
+// Defined in design_import_png.cpp; called from the asset pipeline in
+// design_import.cpp. The two structs are the currency the codec and the
+// pixel passes exchange, so they live here rather than in either TU.
+
+// A decoded 8-bit RGBA image: tightly packed, four bytes per pixel, row-major.
+struct ImportDecodedPng {
+    std::vector<uint8_t> rgba;
+    int width = 0;
+    int height = 0;
+    bool valid() const { return !rgba.empty() && width > 0 && height > 0; }
+};
+
+// The bounding box of an image's opaque art within its PNG, plus the PNG's own
+// dimensions. A captured sprite's art rarely fills its file: the drop shadow /
+// glow bleeds past it, so the layout box is fitted to this core, not the file.
+struct ImportOpaqueCore {
+    int x = 0;
+    int y = 0;
+    int w = 0;
+    int h = 0;
+    int png_w = 0;
+    int png_h = 0;
+};
+
+// Reads width/height out of a PNG's IHDR. Returns {0, 0} for anything that is
+// not a PNG or that declares a non-positive extent.
+std::pair<int, int> png_dimensions_from_bytes(const std::vector<uint8_t>& bytes);
+
+// Decodes an 8-bit, non-interlaced PNG (gray / gray+alpha / RGB / RGBA) to
+// RGBA8. Returns nullopt for any other PNG shape or a malformed stream.
+std::optional<ImportDecodedPng> decode_png_rgba_for_import(const std::vector<uint8_t>& bytes);
+
+// Re-encodes a decoded RGBA buffer as an 8-bit RGBA PNG. Lossless against
+// decode_png_rgba_for_import, so a decode → edit-pixels → encode round-trip
+// leaves the untouched pixels byte-identical.
+std::optional<std::vector<uint8_t>> encode_rgba_png_for_import(const ImportDecodedPng& img);
+
+// The opaque-art bounding box of a PNG's pixels, at the given alpha cutoff.
+// Returns nullopt when the image does not decode or is fully transparent.
+std::optional<ImportOpaqueCore> compute_import_opaque_core(const std::vector<uint8_t>& bytes,
+                                                           float min_alpha = 0.5f);
+
+// Erases the indicator baked into a captured knob disc, in place. Wraps
+// clear_baked_knob_antenna with the decoded image's own dimensions.
+void clean_baked_knob_indicator(ImportDecodedPng& img, const ImportOpaqueCore& core);
+
+// Samples a shape illustration's own vertical colour gradient, bottom→top, as
+// up to `n` comma-joined "#rrggbb" stops. Returns "" when the art is too close
+// to grey to read as a gradient fill (a logo / icon rather than a fillable
+// shape).
+std::string sample_shape_fill_gradient(const ImportDecodedPng& img,
+                                       const ImportOpaqueCore& core, int n = 5);
 
 // Clears the baked indicator "antenna" that ELYSIUM-style captured knob discs
 // paint standing straight up ABOVE the disc body at 12 o'clock (we draw our own
@@ -31,7 +87,7 @@ namespace pulp::view {
 // wide (disc-body) row — so the ring outline, face, and bottom min/max ticks are
 // never touched (no notch/gap). The antenna is found by its actual opaque span
 // per row, NOT assumed centered (the min/max ticks skew the bbox center).
-// Pure + testable; defined in design_import.cpp. `[knob][antenna]`.
+// Pure + testable; defined in design_import_png.cpp. `[knob][antenna]`.
 void clear_baked_knob_antenna(std::vector<uint8_t>& rgba, int img_w, int img_h,
                               int core_x, int core_y, int core_w, int core_h);
 

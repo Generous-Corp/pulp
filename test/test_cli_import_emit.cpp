@@ -12,6 +12,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "test_cli_shellout_util.hpp"
+
 #include "tools/cli/import_detect.hpp"
 #include "tools/cli/import_emit.hpp"
 #include "tools/cli/import_emit_scan.hpp"
@@ -363,7 +365,7 @@ TEST_CASE("import emit end-to-end materialises a scaffold + provenance marker",
     fs::path out = td.path / "scaffold";
 
     pulp::platform::ProcessOptions opts;
-    opts.timeout_ms = 60000;
+    opts.timeout_ms = pulp_test_cli::shellout_timeout_ms();  // shared hang guard
     ::setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
     ::setenv("PULP_KNOWN_FRAMEWORKS", idx.string().c_str(), 1);
 
@@ -433,7 +435,7 @@ TEST_CASE("import emit end-to-end fails closed when the importer smuggles "
     fs::path out = td.path / "scaffold";
 
     pulp::platform::ProcessOptions opts;
-    opts.timeout_ms = 60000;
+    opts.timeout_ms = pulp_test_cli::shellout_timeout_ms();  // shared hang guard
     ::setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
     ::setenv("PULP_KNOWN_FRAMEWORKS", idx.string().c_str(), 1);
 

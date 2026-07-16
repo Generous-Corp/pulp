@@ -4371,3 +4371,213 @@ TEST_CASE("WidgetBridge reload snapshot leaves custom_state empty for built-ins 
     REQUIRE(snap.scalar_values.count("k") == 1);   // built-in still snapshotted by type
     REQUIRE(snap.custom_state.empty());            // built-in Knob opts out of custom state
 }
+
+// ── Canonical scalar-value access (widget_bridge/value_widget_access.hpp) ─────
+//
+// try_get_scalar_value / try_set_scalar_value are the single ladder that knows
+// which widgets carry a float and how to read/write it. Both snapshot_values
+// overloads and both restore_values overloads route through it, so the per-type
+// contract is pinned here through the public surface: whatever the snapshot
+// captures must restore to the same value, for every type in the ladder.
+TEST_CASE("WidgetBridge snapshot/restore round-trips every scalar value widget",
+          "[view][bridge][hot-reload][snapshot][parity]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+
+    auto knob = std::make_unique<Knob>();
+    knob->set_id("knob");
+    knob->set_value(0.25f);
+    auto* knob_ptr = knob.get();
+    root.add_child(std::move(knob));
+
+    auto fader = std::make_unique<Fader>();
+    fader->set_id("fader");
+    fader->set_value(0.75f);
+    auto* fader_ptr = fader.get();
+    root.add_child(std::move(fader));
+
+    auto range = std::make_unique<RangeSlider>();
+    range->set_id("range");
+    range->set_value(0.5f);
+    auto* range_ptr = range.get();
+    root.add_child(std::move(range));
+
+    auto toggle = std::make_unique<Toggle>();
+    toggle->set_id("toggle");
+    toggle->set_on(true);
+    auto* toggle_ptr = toggle.get();
+    root.add_child(std::move(toggle));
+
+    auto checkbox = std::make_unique<Checkbox>();
+    checkbox->set_id("checkbox");
+    checkbox->set_checked(true);
+    auto* checkbox_ptr = checkbox.get();
+    root.add_child(std::move(checkbox));
+
+    auto toggle_button = std::make_unique<ToggleButton>();
+    toggle_button->set_id("toggle-button");
+    toggle_button->set_on(true);
+    auto* toggle_button_ptr = toggle_button.get();
+    root.add_child(std::move(toggle_button));
+
+    WidgetBridge bridge(engine, root, store);
+    // widget() is the lookup that adopts a natively-created view into the id map
+    // that snapshot_values / restore_values iterate.
+    for (const char* id : {"knob", "fader", "range", "toggle", "checkbox", "toggle-button"})
+        REQUIRE(bridge.widget(id) != nullptr);
+
+    std::unordered_map<std::string, float> snap;
+    bridge.snapshot_values(snap);
+
+    // Every ladder type contributes; booleans report 1.0f / 0.0f.
+    REQUIRE(snap.at("knob") == Catch::Approx(0.25f));
+    REQUIRE(snap.at("fader") == Catch::Approx(0.75f));
+    REQUIRE(snap.at("range") == Catch::Approx(0.5f));
+    REQUIRE(snap.at("toggle") == Catch::Approx(1.0f));
+    REQUIRE(snap.at("checkbox") == Catch::Approx(1.0f));
+    REQUIRE(snap.at("toggle-button") == Catch::Approx(1.0f));
+
+    // Move every widget off its captured value, then restore.
+    knob_ptr->set_value(0.9f);
+    fader_ptr->set_value(0.1f);
+    range_ptr->set_value(0.2f);
+    toggle_ptr->set_on(false);
+    checkbox_ptr->set_checked(false);
+    toggle_button_ptr->set_on(false);
+
+    bridge.restore_values(snap);
+
+    REQUIRE(knob_ptr->value() == Catch::Approx(0.25f));
+    REQUIRE(fader_ptr->value() == Catch::Approx(0.75f));
+    REQUIRE(range_ptr->value() == Catch::Approx(0.5f));
+    REQUIRE(toggle_ptr->is_on());
+    REQUIRE(checkbox_ptr->is_checked());
+    REQUIRE(toggle_button_ptr->is_on());
+
+    // A restore value at/below the 0.5 threshold turns a boolean widget off —
+    // the set side of the ladder reads > 0.5 as on.
+    std::unordered_map<std::string, float> off;
+    off["toggle"] = 0.5f;
+    off["checkbox"] = 0.0f;
+    off["toggle-button"] = 0.5f;
+    bridge.restore_values(off);
+    REQUIRE_FALSE(toggle_ptr->is_on());
+    REQUIRE_FALSE(checkbox_ptr->is_checked());
+    REQUIRE_FALSE(toggle_button_ptr->is_on());
+}
+
+// The reload snapshot layers selection controls and XYPad ON TOP of the shared
+// scalar ladder: they are reached only when the scalar ladder declines the view.
+// Pin that precedence — a widget that carries a scalar must never be captured as
+// a selection index, and vice versa.
+TEST_CASE("WidgetBridge reload snapshot layers selection + XY on the scalar ladder",
+          "[view][bridge][hot-reload][snapshot][parity]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+
+    auto knob = std::make_unique<Knob>();
+    knob->set_id("knob");
+    knob->set_value(0.25f);
+    auto* knob_ptr = knob.get();
+    root.add_child(std::move(knob));
+
+    auto combo = std::make_unique<ComboBox>();
+    combo->set_id("combo");
+    combo->set_items({"a", "b", "c"});
+    combo->set_selected_silent(2);
+    auto* combo_ptr = combo.get();
+    root.add_child(std::move(combo));
+
+    auto xy = std::make_unique<XYPad>();
+    xy->set_id("xy");
+    xy->set_x(0.3f);
+    xy->set_y(0.7f);
+    auto* xy_ptr = xy.get();
+    root.add_child(std::move(xy));
+
+    WidgetBridge bridge(engine, root, store);
+    for (const char* id : {"knob", "combo", "xy"})
+        REQUIRE(bridge.widget(id) != nullptr);
+
+    WidgetReloadSnapshot snap;
+    bridge.snapshot_values(snap);
+
+    REQUIRE(snap.scalar_values.at("knob") == Catch::Approx(0.25f));
+    // The selection index rides in scalar_values as an index-as-float.
+    REQUIRE(snap.scalar_values.at("combo") == Catch::Approx(2.0f));
+    // XYPad carries no scalar, so it lands in the XY channel only.
+    REQUIRE(snap.scalar_values.count("xy") == 0);
+    REQUIRE(snap.xy_values.at("xy").x == Catch::Approx(0.3f));
+    REQUIRE(snap.xy_values.at("xy").y == Catch::Approx(0.7f));
+
+    knob_ptr->set_value(0.9f);
+    combo_ptr->set_selected_silent(0);
+    xy_ptr->set_x(0.0f);
+    xy_ptr->set_y(0.0f);
+
+    bridge.restore_values(snap);
+
+    REQUIRE(knob_ptr->value() == Catch::Approx(0.25f));
+    REQUIRE(combo_ptr->selected() == 2);
+    REQUIRE(xy_ptr->x_value() == Catch::Approx(0.3f));
+    REQUIRE(xy_ptr->y_value() == Catch::Approx(0.7f));
+}
+
+// ── Native-event registration guards (WidgetBridge::registrations_) ───────────
+//
+// Registration state is one record per widget id covering every native channel
+// (pointer / wheel / gesture), so tearing a subtree down forgets all of them in
+// a single erase. The guard exists to stop a re-rendering reconciler stacking N
+// lambdas on one widget (covered by the spectr idempotence tests); the contract
+// pinned here is the OTHER half — the guard must not outlive the widget, or a
+// recycled id silently wires nothing and the new widget is inert.
+TEST_CASE("WidgetBridge re-wires a recycled widget id after its subtree is forgotten",
+          "[view][bridge][registration]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Plain containers, not value widgets: View's base on_mouse_event is what
+    // dispatches on_pointer_event, so this exercises the registrar's wiring
+    // rather than a widget's own mouse handling.
+    bridge.load_script(R"(
+        globalThis.hits = 0;
+        createRow('box');
+        createRow('k', 'box');
+        on('k', 'pointerdown', function() { globalThis.hits++; });
+    )");
+
+    MouseEvent down{};
+    down.button = MouseButton::left;
+    down.is_down = true;
+
+    auto* first = bridge.widget("k");
+    REQUIRE(first != nullptr);
+    first->on_mouse_event(down);
+    REQUIRE(engine.evaluate("String(globalThis.hits)").toString() == "1");
+
+    // Tearing the subtree down must forget every registration channel for 'k',
+    // not just its entry in the widget id map.
+    bridge.load_script("removeWidget('box'); void 0;");
+    REQUIRE(bridge.widget("k") == nullptr);
+
+    // A fresh widget recycling the same id wires again. Were the pointer guard
+    // to survive the teardown, registerPointer would no-op here and this widget
+    // would never see a pointer event.
+    bridge.load_script(R"(
+        createRow('box2');
+        createRow('k', 'box2');
+        on('k', 'pointerdown', function() { globalThis.hits++; });
+    )");
+
+    auto* second = bridge.widget("k");
+    REQUIRE(second != nullptr);
+    second->on_mouse_event(down);
+    REQUIRE(engine.evaluate("String(globalThis.hits)").toString() == "2");
+}

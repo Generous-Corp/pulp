@@ -36,6 +36,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -802,4 +803,99 @@ TEST_CASE("boundary parity: the real CLAP adapter dual-writes params to the stor
             CLAP_PROCESS_CONTINUE);
     CHECK_THAT(inst.plugin.store.get_value(kGainParam), WithinAbs(0.5f, 1e-6f));
     CHECK_THAT(inst.captured.gain_seen, WithinAbs(0.5f, 1e-6f));
+}
+
+// ---------------------------------------------------------------------------
+// Output-parameter publication (adapter_boundary.hpp section 5)
+//
+// The mirror of the param-decode column above: values the PLUGIN changed during
+// process() travel back to the host for automation recording. VST3 and CLAP
+// emit through different host ABIs but share the bookkeeping — index resolution,
+// the pre-process() snapshot, and the post-process() diff — so these pin that
+// shared contract once.
+// ---------------------------------------------------------------------------
+
+namespace {
+constexpr state::ParamID kMixParam = 2;
+
+/// Gain at index 0, Mix at index 1 — `StateStore` is non-copyable, so callers
+/// own the store and this only registers into it.
+void add_two_params(state::StateStore& store) {
+    store.add_parameter(
+        {.id = kGainParam, .name = "Gain", .range = {0.0f, 1.0f, 0.25f, 0.0f}});
+    store.add_parameter(
+        {.id = kMixParam, .name = "Mix", .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+}
+}  // namespace
+
+TEST_CASE("boundary parity: param index resolves registration position",
+          "[format][sf1][parity][params]") {
+    state::StateStore store;
+    add_two_params(store);
+    const auto all = store.all_params();
+
+    CHECK(boundary::find_param_index(all, kGainParam) == 0);
+    CHECK(boundary::find_param_index(all, kMixParam) == 1);
+    // An id the plugin never registered must be reported as absent, not
+    // silently resolved onto some other parameter's scratch slot — every
+    // adapter drops such an output event rather than publishing it.
+    CHECK(boundary::find_param_index(all, 999) == boundary::kParamIndexNotFound);
+    // An empty store resolves nothing.
+    state::StateStore empty;
+    CHECK(boundary::find_param_index(empty.all_params(), kGainParam)
+          == boundary::kParamIndexNotFound);
+}
+
+TEST_CASE("boundary parity: the value snapshot aligns positionally with all_params",
+          "[format][sf1][parity][params]") {
+    state::StateStore store;
+    add_two_params(store);
+    std::vector<float> snapshot;
+    boundary::snapshot_param_values(store, store.all_params(), snapshot);
+
+    REQUIRE(snapshot.size() == store.all_params().size());
+    CHECK_THAT(snapshot[0], WithinAbs(0.25f, 1e-6f));
+    CHECK_THAT(snapshot[1], WithinAbs(0.5f, 1e-6f));
+
+    // Re-snapshotting after a plugin-side write observes the new value, and the
+    // previous snapshot is what the diff compares against. This is the whole
+    // mechanism by which an adapter reports plugin-side changes to the host.
+    store.set_value(kMixParam, 0.9f);
+    std::vector<float> after;
+    boundary::snapshot_param_values(store, store.all_params(), after);
+    CHECK(boundary::changed_since_snapshot(after[1], snapshot[1]));
+    CHECK_FALSE(boundary::changed_since_snapshot(after[0], snapshot[0]));
+}
+
+TEST_CASE("boundary parity: snapshot reuses its buffer across blocks",
+          "[format][sf1][parity][params][rt-safety]") {
+    // Adapters reserve this vector off the audio thread and re-snapshot into it
+    // every block; the per-block call must not reallocate.
+    state::StateStore store;
+    add_two_params(store);
+    std::vector<float> snapshot;
+    snapshot.reserve(store.all_params().size());
+    boundary::snapshot_param_values(store, store.all_params(), snapshot);
+    const auto* first_block_data = snapshot.data();
+    for (int block = 0; block < 8; ++block) {
+        boundary::snapshot_param_values(store, store.all_params(), snapshot);
+    }
+    CHECK(snapshot.data() == first_block_data);
+}
+
+TEST_CASE("boundary parity: the snapshot diff compares bits, not numeric equality",
+          "[format][sf1][parity][params]") {
+    // An unchanged value is never republished.
+    CHECK_FALSE(boundary::changed_since_snapshot(0.5f, 0.5f));
+    CHECK(boundary::changed_since_snapshot(0.5f, 0.5000001f));
+
+    // A NaN parameter must settle rather than republish on every block forever
+    // (which is what `current != snapshot` would do, since NaN != NaN).
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    CHECK_FALSE(boundary::changed_since_snapshot(nan, nan));
+    CHECK(boundary::changed_since_snapshot(nan, 0.5f));
+
+    // Signed zeros are distinct bit patterns, so a store write that flips the
+    // sign is a real change even though `-0.0f == 0.0f`.
+    CHECK(boundary::changed_since_snapshot(-0.0f, 0.0f));
 }

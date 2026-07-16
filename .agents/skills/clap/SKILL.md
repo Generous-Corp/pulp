@@ -844,6 +844,28 @@ explicit `push_output_param_event()` events. CLAP param values are **plain
 domain** (`double`), unlike VST3 which normalizes. `test_clap_midi_events.cpp`
 asserts the `param@0, midi@8, param@16` interleave stays non-decreasing in time.
 
+## `clap_process()` is phase-split — the phase ORDER is the contract
+
+`clap_process()` is a sequence of named phase helpers rather than one
+megafunction. The split is presentational: the phases must run in exactly the
+order they do, because the CLAP boundary is order-sensitive in ways the function
+names do not advertise — input events must be drained before the block is
+processed, and the `out_events` drain must stay last so the three-cursor merge
+above sees every event the block produced. Reordering two phases compiles
+cleanly and passes any test that only checks a single-block render.
+
+So when adding work, add it *inside* the phase that owns it; do not add a new
+phase between existing ones without re-reading the merge contract above. The
+guard is `test/test_adapter_audio_parity.cpp`, which renders through the real
+adapter and nulls it against the direct render — a phase-order regression shows
+up there as a block-boundary difference, not as a crash.
+
+`find_param_index()` in `adapter_boundary.hpp` is shared by the CLAP and VST3
+output-param publication paths so the two cannot drift. Note it is a **linear
+scan**, not an index — param counts are small and the scan is what both adapters
+already did. If it ever becomes hot, index it for both adapters at once; a
+one-sided optimization is how these two paths drifted before.
+
 ## The StateStore must outlive the Processor
 
 `Processor::state()` dereferences a pointer the host installs. A Processor may
