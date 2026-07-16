@@ -323,6 +323,37 @@ tools/scripts/host_vitals.sh --json     # machine-readable
 
 ## GitHub workflow gotchas
 
+- **A cache-save step gated on `github.event_name != 'pull_request' &&
+  github.ref == 'refs/heads/main'` is dead code unless the workflow has a
+  `push:` trigger.** GitHub's cloud cache scopes a PR-written entry to that
+  PR's own ref, so PR runs can never warm each other and only a default-branch
+  non-PR run publishes a shared entry. `build.yml` had that gate with no `push`
+  trigger, so both `Save …` steps were unreachable and their `Restore …`
+  partners were a permanent miss. Two traps when fixing this:
+
+  1. **The base must be event-aware, or the fix no-ops.** `classify` diffs
+     `<base>...HEAD`. On a push to main the checked-out HEAD *is* the new main
+     tip, so `origin/main` resolves to HEAD and the diff is always empty. The
+     classifier is fail-closed (empty ⇒ build), so this reads as "working"
+     while never once distinguishing a docs merge from a core merge. Use
+     `github.event.before` on push, `github.event.pull_request.base.sha` on PR
+     — `tools/scripts/resolve_classify_base.py` owns that mapping, including
+     the all-zero-sha fallback that `event.before` carries when a push creates
+     a ref.
+  2. **Never let the new trigger schedule work on the self-hosted Macs.** They
+     serve the one required check and keep ccache + FetchContent on local disk,
+     so a macOS leg on a push burns required-gate capacity to upload nothing.
+     `resolve-provider` omits the macOS leg for push events; the aliases and
+     `windows-*-gate` jobs skip too (the `macos` alias polls up to 60 min for a
+     leg that isn't there). Scope saves to
+     `runner.environment == 'github-hosted' && runner.os != 'macOS'` — the
+     restore side's `runner.os != 'macOS' || …` disjunction is wrong here, it
+     re-admits self-hosted non-macOS runners.
+
+  Push runs are also exempt from `cancel-in-progress` (they share the
+  `refs/heads/main` group; cancelling one discards the cache it exists to
+  publish). Covered by `tools/scripts/test_resolve_classify_base.py`.
+
 - **Every `on: schedule` workflow must carry the fork guard.** When someone forks
   the repo, GitHub copies all workflows and runs the scheduled ones on the fork's
   default branch — then emails the fork owner whenever one *fails*, which our

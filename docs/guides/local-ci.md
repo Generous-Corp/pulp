@@ -301,6 +301,48 @@ broad validation.
 
 To opt out for an individual run, pass `--pipeline default` explicitly.
 
+## Cache-warming runs on `main`
+
+`build.yml` triggers on `push: branches: [main]` in addition to
+`pull_request` / `merge_group` / `workflow_dispatch`. That run gates nothing —
+it exists solely to **publish the GitHub-hosted Linux/Windows ccache and
+FetchContent caches** that PR runs restore from.
+
+It is needed because of how GitHub's cloud cache is scoped: a cache entry
+written by a PR run is visible only to that PR's own ref, so PR runs can never
+warm each other. Only a non-PR run on the default branch writes an entry every
+subsequent PR can read. Without the `push` trigger the `Save …` steps are
+unreachable and the matching `Restore …` steps are a permanent miss.
+
+A push run is deliberately **narrower than a PR run**:
+
+| | PR / merge_group run | `push: main` cache run |
+|---|---|---|
+| Linux + Windows matrix legs | yes | yes (these publish the caches) |
+| macOS matrix leg | yes | **no** — omitted by `resolve-provider` |
+| `macos` / `linux` / `windows` alias jobs | yes | no |
+| `windows-{msvc-release,midi2,ble}-gate` | yes | no |
+| Writes to GitHub's cloud cache | no | Linux + Windows only |
+
+The macOS leg is dropped because macOS builds on the **self-hosted** Macs that
+serve the one required check in this repo, and those machines keep ccache and
+FetchContent on local disk between jobs. Scheduling a macOS leg on a push would
+put the required gate's runners under load to save a cache that is never
+uploaded — strictly a cost. For the same reason the two `Save …` steps are
+scoped `runner.environment == 'github-hosted' && runner.os != 'macOS'`, which
+is narrower than the restore side on purpose.
+
+Push runs are also exempt from `cancel-in-progress`: they share the
+`refs/heads/main` concurrency group, so cancelling a superseded one would kill
+its cache-save step exactly when main is busiest. PR runs still cancel.
+
+The `classify` job diffs an **event-dependent base**
+(`tools/scripts/resolve_classify_base.py`): a PR diffs
+`github.event.pull_request.base.sha`, a push diffs `github.event.before`. On a
+push, `origin/main` resolves to HEAD itself and the diff is always empty — so a
+docs-only merge is indistinguishable from a core merge, and the run never
+skips. A docs-only merge to main now correctly skips the whole matrix.
+
 ## macOS overflow routing (Plan B)
 
 > **Namespace is OFF (cost).** We build macOS on **local Macs + GitHub-hosted**
