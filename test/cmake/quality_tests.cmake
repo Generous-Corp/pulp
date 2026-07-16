@@ -97,6 +97,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME runner-topology-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_check.py")
 
+    # Silent-revert guard: reject a push whose diff byte-exactly restores the
+    # pre-landing bytes of every file a recent commit changed. Includes a replay
+    # of the real shape from this repo's own history; that half self-skips on a
+    # shallow clone where the commits are absent.
+    add_test(NAME silent-revert-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_silent_revert_guard.py")
+
     # PR-check triage: pure comparison logic that labels a red PR check as
     # pre-existing-on-main vs regressed-by-this-PR (the "also-red-on-main"
     # diagnostic). The CLI half is a thin gh-api wrapper (not unit-tested).
