@@ -186,6 +186,41 @@ class TestAlarmCases(unittest.TestCase):
         )
 
 
+class TestDegradedSweep(unittest.TestCase):
+    """Incomplete evidence must never alarm — an unobserved lane isn't a dead one."""
+
+    def test_collection_errors_suppress_an_otherwise_valid_alarm(self):
+        snap = {
+            "queued_jobs": [queued(90)],
+            "live_jobs": [],
+            "errors": [{"run_id": 7, "status": "in_progress", "error": "HTTP 502"}],
+        }
+        findings = qaw.analyze(snap, NOW)
+        self.assertEqual(levels(findings), ["warn"])
+        self.assertEqual(findings[0]["lane_evidence"], "evidence incomplete this sweep")
+
+    def test_the_same_snapshot_without_errors_does_alarm(self):
+        # Proves the suppression above is the errors key doing the work, not a
+        # coincidence of the fixture.
+        snap = {"queued_jobs": [queued(90)], "live_jobs": [], "errors": []}
+        self.assertEqual(levels(qaw.analyze(snap, NOW)), ["alarm"])
+
+    def test_summary_discloses_a_degraded_sweep(self):
+        summary = qaw.render_summary([], qaw.ALARM_MINUTES, [{"error": "boom"}])
+        self.assertIn("Degraded sweep", summary)
+        self.assertIn("alarms are suppressed", summary)
+
+    def test_summary_is_clean_when_nothing_failed(self):
+        self.assertNotIn("Degraded", qaw.render_summary([], qaw.ALARM_MINUTES, []))
+
+    def test_a_blind_sweep_never_reports_the_fleet_healthy(self):
+        # "I found nothing" is not "there is nothing". A degraded sweep with no
+        # findings must not read as a clean bill of health.
+        summary = qaw.render_summary([], qaw.ALARM_MINUTES, [{"error": "boom"}])
+        self.assertNotIn("healthy", summary)
+        self.assertIn("not a clean bill of health", summary)
+
+
 class TestGrouping(unittest.TestCase):
     def test_lanes_group_worst_first_with_counts(self):
         findings = qaw.analyze(

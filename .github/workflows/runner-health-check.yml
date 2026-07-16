@@ -150,13 +150,12 @@ jobs:
 
           if [ -z "${existing:-}" ]; then
               echo "Creating tracking issue."
-              gh api -X POST "/repos/${repo}/issues" \
-                  -f title="$title" -F body=@issue-body.md \
-                  -f 'labels[]=bug' -f 'labels[]=ci' 2>&1 || {
-                  # Label creation can fail on a fresh repo/fork where the
-                  # labels don't exist; the tracker matters more than its tags.
-                  gh api -X POST "/repos/${repo}/issues" \
-                      -f title="$title" -F body=@issue-body.md
+              TRACKING_TITLE="$title" python3 -c 'import json, os; body = open("issue-body.md", encoding="utf-8").read(); print(json.dumps({"title": os.environ["TRACKING_TITLE"], "body": body, "labels": ["bug", "ci"]}))' > issue.json
+              gh api -X POST "/repos/${repo}/issues" --input issue.json 2>&1 || {
+                  # Labels may not exist on a fresh repo; the tracker matters
+                  # more than its tags, so retry without them.
+                  TRACKING_TITLE="$title" python3 -c 'import json, os; body = open("issue-body.md", encoding="utf-8").read(); print(json.dumps({"title": os.environ["TRACKING_TITLE"], "body": body}))' > issue.json
+                  gh api -X POST "/repos/${repo}/issues" --input issue.json
               }
           else
               echo "Updating tracking issue #${existing} in place."

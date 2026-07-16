@@ -55,6 +55,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import subprocess
 import sys
 from typing import Any
@@ -108,7 +109,15 @@ def analyze(
     Each finding carries ``level`` ("warn" or "alarm"). Only "alarm" findings
     are issue-worthy; "warn" exists so a human reading the run summary can see
     the queue getting deep before it is judged sick.
+
+    A snapshot that failed to collect part of its evidence never alarms. The
+    alarm means "no runner is alive here", and an unobserved lane is not an
+    absent one -- claiming otherwise on partial data is how a monitor earns a
+    reputation for lying. We sweep every 30 min, so the cost of waiting for
+    complete evidence is one cycle.
     """
+    degraded = bool(snapshot.get("errors"))
+
     live = []
     for entry in snapshot.get("live_jobs", []):
         labels = set(entry.get("labels") or [])
@@ -147,7 +156,7 @@ def analyze(
                 served_by = "recent_start"
                 break
 
-        if served_by is None and age >= alarm_minutes:
+        if served_by is None and age >= alarm_minutes and not degraded:
             level = "alarm"
         else:
             level = "warn"
@@ -162,7 +171,10 @@ def analyze(
                 "job": job.get("job", ""),
                 "run_url": job.get("run_url", ""),
                 "queued_at": job["queued_at"],
-                "lane_evidence": served_by or "no live runner observed",
+                "lane_evidence": (
+                    served_by
+                    or ("evidence incomplete this sweep" if degraded else "no live runner observed")
+                ),
             }
         )
 
@@ -201,8 +213,12 @@ def group_by_lane(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _gh_api(path: str) -> dict[str, Any]:
+    # In Actions this is `gh` on GITHUB_TOKEN. Locally, PULP_GH_BIN=ghapp
+    # routes through the Shipyard GitHub App's own rate-limit bucket rather
+    # than burning the personal token shared with a human.
+    gh_bin = os.environ.get("PULP_GH_BIN") or "gh"
     proc = subprocess.run(
-        ["gh", "api", "-H", "Accept: application/vnd.github+json", path],
+        [gh_bin, "api", "-H", "Accept: application/vnd.github+json", path],
         capture_output=True,
         text=True,
         check=True,
@@ -218,6 +234,7 @@ def collect_snapshot(repo: str, now: dt.datetime) -> dict[str, Any]:
         "queued_jobs": [],
         "live_jobs": [],
         "truncated": [],
+        "errors": [],
     }
 
     def runs(status: str, limit: int) -> list[dict[str, Any]]:
@@ -235,15 +252,28 @@ def collect_snapshot(repo: str, now: dt.datetime) -> dict[str, Any]:
     # while some of its jobs are still queued, so the waiting job for a dead
     # lane is just as likely to sit under an in_progress run as a queued one.
     for status in ("queued", "in_progress", "completed"):
-        limit = 30 if status == "completed" else MAX_RUNS_PER_STATUS
-        for run in runs(status, limit):
+        # Uniform cap across statuses. Truncating the liveness evidence
+        # (in_progress/completed) makes a live lane look dead, which is the one
+        # direction of error a monitor cannot afford, so this window is not
+        # shallower than the queued one.
+        for run in runs(status, MAX_RUNS_PER_STATUS):
             if status == "completed":
                 updated = run.get("updated_at")
                 if updated and parse_ts(updated) < completed_cutoff:
                     continue
-            jobs = _gh_api(
-                f"/repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100"
-            ).get("jobs", [])
+            try:
+                jobs = _gh_api(
+                    f"/repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100"
+                ).get("jobs", [])
+            except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+                # One flaky call must not take the sweep down — a watchdog that
+                # reddens its own run gets ignored. But record it: a missed
+                # jobs fetch can hide the liveness evidence that keeps a live
+                # lane quiet, and analyze() must not alarm on partial data.
+                snapshot["errors"].append(
+                    {"run_id": run["id"], "status": status, "error": str(exc)[:200]}
+                )
+                continue
             for job in jobs:
                 labels = job.get("labels") or []
                 if job.get("status") == "queued":
@@ -342,12 +372,30 @@ def render_body(
     return "\n".join(lines)
 
 
-def render_summary(findings: list[dict[str, Any]], alarm_minutes: float) -> str:
+def render_summary(
+    findings: list[dict[str, Any]],
+    alarm_minutes: float,
+    errors: list[dict[str, Any]] | None = None,
+) -> str:
     alarms = [f for f in findings if f["level"] == "alarm"]
     warns = [f for f in findings if f["level"] == "warn"]
     lines = ["## Queue-age watchdog", ""]
+    if errors:
+        lines.append(
+            f"> **Degraded sweep** — {len(errors)} API call(s) failed, so the "
+            "lane-liveness evidence is incomplete and alarms are suppressed for "
+            "this cycle. An unobserved lane is not a dead one. Next sweep in 30 min."
+        )
+        lines.append("")
     if not findings:
-        lines.append("No job has been queued past the warn threshold. Fleet looks healthy.")
+        # Never report health off a sweep that could not see. "I found nothing"
+        # and "I looked and there is nothing" are different claims.
+        lines.append(
+            "No findings — but this sweep's evidence was incomplete, so this is "
+            "not a clean bill of health."
+            if errors
+            else "No job has been queued past the warn threshold. Fleet looks healthy."
+        )
         return "\n".join(lines)
     lines.append(f"- **{len(alarms)}** alarm (>= {alarm_minutes:g} min, no live runner)")
     lines.append(f"- **{len(warns)}** warn (deep queue, lane still serving — not alarmed)")
@@ -404,7 +452,7 @@ def main(argv: list[str] | None = None) -> int:
         with open(args.body_out, "w", encoding="utf-8") as fh:
             fh.write(render_body(findings, args.alarm_minutes, now))
 
-    summary = render_summary(findings, args.alarm_minutes)
+    summary = render_summary(findings, args.alarm_minutes, snapshot.get("errors"))
     print(summary)
     if args.summary_out:
         with open(args.summary_out, "a", encoding="utf-8") as fh:
@@ -414,6 +462,12 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "note: run listing truncated for status(es): "
             + ", ".join(snapshot["truncated"]),
+            file=sys.stderr,
+        )
+    if snapshot.get("errors"):
+        print(
+            f"note: {len(snapshot['errors'])} API call(s) failed; alarms "
+            "suppressed this sweep on incomplete evidence.",
             file=sys.stderr,
         )
 
