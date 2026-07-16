@@ -221,9 +221,11 @@ if [ -f "$DEPS_AUDIT" ]; then
 fi
 
 # ── 7a. deps-audit self-tests ──────────────────────────────────────────────
-# The audit's own tests were not run by any gate, ctest target, or workflow, so
-# they rotted: two assertions were failing on main (manifest ordering, a missing
-# source_files key) with nothing to report it. A gate nobody runs is decoration.
+# The audit's own tests rotted — two assertions were failing on main (manifest
+# ordering, a missing source_files key) — because nothing ENFORCED them. The
+# Python coverage lane does run them, but behind `continue-on-error: true` and
+# on a workflow that does not gate merge, so a failure there reddens nothing.
+# No ctest registers them. Run them where a red result stops a push.
 if [ -f "$ROOT/tools/deps/test_audit.py" ]; then
     echo "" >&2
     echo "▸ deps-audit self-tests" >&2
