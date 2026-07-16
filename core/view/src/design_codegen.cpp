@@ -1361,7 +1361,7 @@ static void emit_js_image_node(const NativeEmit& e) {
     ss << "\n";
 }
 
-// Text terminal: createLabel plus type, colour, run and wrap styling.
+// Text terminal: createLabel plus type, color, run and wrap styling.
 static void emit_js_text_node(const NativeEmit& e) {
     auto& ss = e.ss;
     const auto& node = e.node;

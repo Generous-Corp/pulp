@@ -72,7 +72,7 @@ std::optional<ImportOpaqueCore> compute_import_opaque_core(const std::vector<uin
 // clear_baked_knob_antenna with the decoded image's own dimensions.
 void clean_baked_knob_indicator(ImportDecodedPng& img, const ImportOpaqueCore& core);
 
-// Samples a shape illustration's own vertical colour gradient, bottom→top, as
+// Samples a shape illustration's own vertical color gradient, bottom→top, as
 // up to `n` comma-joined "#rrggbb" stops. Returns "" when the art is too close
 // to grey to read as a gradient fill (a logo / icon rather than a fillable
 // shape).
