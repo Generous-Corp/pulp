@@ -27,8 +27,8 @@
     },
     {
       "path": "core/view/src/widget_bridge/gpu_api.cpp",
-      "max_loc": 2271,
-      "note": "WidgetBridge GPU registrar split hotspot; lowered after comment-hygiene cleanup"
+      "max_loc": 2241,
+      "note": "WidgetBridge GPU registrar split hotspot; lowered after removing the write-only native-buffer stubs"
     },
     {
       "path": "tools/local-ci/local_ci.py",
