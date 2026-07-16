@@ -21,9 +21,12 @@ Current branch evidence, without implying completion of later gates:
   remains to be proved.
 - S2 partial: requester-aware scheduling, checked page-memory admission, shared
   page coalescing, explicit pressure, and generation-gated FIFO retirement/reuse
-  are implemented in a deterministic caller-driven service. The RT command
-  port, bounded worker/completion plane, active-page interest, dynamic source
-  retirement, and example integration remain open.
+  are implemented in a deterministic caller-driven service. A bounded ordered
+  RT command port carries demand and generation-qualified cancellation, and an
+  immutable asset owner publishes trivial audio views under a checked preload
+  contract. The bounded worker/completion plane, active-page interest, dynamic
+  source retirement, streamed voice reader, and example integration remain
+  open.
 - The existing Release audio harness baseline and all 375 Audio Quality Lab
   self-tests pass. Quality Lab remains supplementary to exact transport,
   telemetry, lifetime, and allocation gates.

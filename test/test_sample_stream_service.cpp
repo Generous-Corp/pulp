@@ -3,15 +3,22 @@
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/sample_stream_service.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
+
+#include "harness/rt_allocation_probe.hpp"
 
 #include <cstdint>
 #include <limits>
+#include <type_traits>
 
 using Catch::Matchers::WithinAbs;
 using pulp::audio::Buffer;
 using pulp::audio::SampleStreamCacheService;
 using pulp::audio::SampleStreamCacheServiceConfig;
 using pulp::audio::SampleStreamCacheSourceConfig;
+using pulp::audio::SampleStreamCommand;
+using pulp::audio::SampleStreamCommandInbox;
+using pulp::audio::SampleStreamCommandPushStatus;
 using pulp::audio::SampleStreamPageDemand;
 using pulp::audio::SampleStreamRequesterToken;
 using pulp::audio::SampleStreamScheduleStatus;
@@ -19,6 +26,8 @@ using pulp::audio::SampleStreamServiceStatus;
 using pulp::audio::SampleStreamSourceAddStatus;
 using pulp::audio::SampleStreamSourceToken;
 using pulp::audio::SampleStreamWindowReadRequest;
+
+static_assert(std::is_trivially_copyable_v<SampleStreamCommand>);
 
 namespace {
 
@@ -106,6 +115,130 @@ TEST_CASE("Cancelling one sample stream requester preserves shared demand",
     REQUIRE(service.scheduler_stats().pending == 1);
     REQUIRE(service.service_once() == SampleStreamServiceStatus::Published);
     REQUIRE(decode_calls == 1);
+}
+
+TEST_CASE("Sample stream RT commands drain in producer order",
+          "[audio][sampler][stream-service][commands]") {
+    SampleStreamCacheService service;
+    REQUIRE(service.prepare({.scheduler_capacity = 8, .page_memory_budget_bytes = 32}));
+    const auto added = service.add_source(source_config(),
+        [](std::uint64_t start, pulp::audio::BufferView<float> destination,
+           std::uint64_t frames) {
+            for (std::uint64_t frame = 0; frame < frames; ++frame) {
+                destination.channel_ptr(0)[frame] =
+                    static_cast<float>(start + frame + 1);
+            }
+            return frames;
+        });
+    REQUIRE(added.added());
+
+    SampleStreamCommandInbox<8> inbox;
+    REQUIRE(inbox.demand_page(demand(added.view.token, 70, 0)) ==
+            SampleStreamCommandPushStatus::Enqueued);
+    REQUIRE(inbox.cancel_requester({70, 1}) ==
+            SampleStreamCommandPushStatus::Enqueued);
+    REQUIRE(inbox.demand_page(demand(added.view.token, 70, 1)) ==
+            SampleStreamCommandPushStatus::Enqueued);
+    REQUIRE(inbox.demand_page(demand(added.view.token, 71, 2)) ==
+            SampleStreamCommandPushStatus::Enqueued);
+    REQUIRE(inbox.cancel_source_generation(added.view.token) ==
+            SampleStreamCommandPushStatus::Enqueued);
+    REQUIRE(inbox.demand_page(demand(added.view.token, 72, 3)) ==
+            SampleStreamCommandPushStatus::Enqueued);
+    REQUIRE(service.scheduler_stats().pending == 0);
+
+    const auto drained = service.drain_commands(inbox);
+    REQUIRE(drained.commands_drained == 6);
+    REQUIRE(drained.demand_commands == 4);
+    REQUIRE(drained.cancel_requester_commands == 1);
+    REQUIRE(drained.cancel_source_commands == 1);
+    REQUIRE(drained.demands_inserted == 4);
+    REQUIRE(drained.demands_refreshed == 0);
+    REQUIRE(drained.demands_rejected_full == 0);
+    REQUIRE(drained.demands_invalid == 0);
+    REQUIRE(drained.requests_cancelled == 3);
+    REQUIRE(inbox.telemetry().pending == 0);
+    REQUIRE(service.scheduler_stats().pending == 1);
+
+    REQUIRE(service.service_once() == SampleStreamServiceStatus::Published);
+    Buffer<float> rendered(1, 4);
+    const auto read = added.view.window->read_frames(
+        rendered.view(),
+        {
+            .stream_generation = added.view.token.source_generation,
+            .start_frame = 12,
+            .frames = 4,
+        });
+    REQUIRE(read.complete);
+    REQUIRE_THAT(rendered.channel(0)[0], WithinAbs(13.0f, 1.0e-6f));
+}
+
+TEST_CASE("Sample stream RT command inbox reports bounded overflow",
+          "[audio][sampler][stream-service][commands][rt]") {
+    SampleStreamCommandInbox<2> inbox;
+    SampleStreamCommandPushStatus demand_status = SampleStreamCommandPushStatus::Full;
+    SampleStreamCommandPushStatus cancel_status = SampleStreamCommandPushStatus::Full;
+    SampleStreamCommandPushStatus overflow_status = SampleStreamCommandPushStatus::Enqueued;
+    pulp::audio::SampleStreamCommandInboxTelemetry full;
+    {
+        pulp::runtime::ScopedNoAlloc no_alloc;
+        demand_status = inbox.demand_page(demand({1, 1}, 80, 0));
+        cancel_status = inbox.cancel_requester({80, 1});
+        overflow_status = inbox.cancel_source_generation({1, 1});
+        full = inbox.telemetry();
+    }
+
+    REQUIRE(demand_status == SampleStreamCommandPushStatus::Enqueued);
+    REQUIRE(cancel_status == SampleStreamCommandPushStatus::Enqueued);
+    REQUIRE(overflow_status == SampleStreamCommandPushStatus::Full);
+    REQUIRE(full.pending == 2);
+    REQUIRE(full.capacity == 2);
+    REQUIRE(full.overflow_count == 1);
+
+    SampleStreamCacheService service;
+    REQUIRE(service.prepare({.scheduler_capacity = 4, .page_memory_budget_bytes = 32}));
+    const auto added = service.add_source(source_config(),
+        [](std::uint64_t, pulp::audio::BufferView<float>, std::uint64_t frames) {
+            return frames;
+        });
+    REQUIRE(added.added());
+
+    const auto drained = service.drain_commands(inbox);
+    REQUIRE(drained.commands_drained == 2);
+    REQUIRE(drained.demands_inserted == 1);
+    REQUIRE(drained.requests_cancelled == 1);
+    REQUIRE(service.scheduler_stats().pending == 0);
+    const auto empty = inbox.telemetry();
+    REQUIRE(empty.pending == 0);
+    REQUIRE(empty.overflow_count == 1);
+}
+
+TEST_CASE("Prepared sample stream command submission and cancellation do not allocate",
+          "[audio][sampler][stream-service][commands][rt]") {
+    SampleStreamCacheService service;
+    REQUIRE(service.prepare({.scheduler_capacity = 2, .page_memory_budget_bytes = 32}));
+    const auto added = service.add_source(source_config(),
+        [](std::uint64_t, pulp::audio::BufferView<float>, std::uint64_t frames) {
+            return frames;
+        });
+    REQUIRE(added.added());
+    SampleStreamCommandInbox<2> inbox;
+
+    std::size_t allocations = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (std::uint64_t generation = 1; generation <= 10000; ++generation) {
+            auto page_demand = demand(added.view.token, 90, 0);
+            page_demand.requester.requester_generation = generation;
+            (void) inbox.demand_page(page_demand);
+            (void) inbox.cancel_requester(page_demand.requester);
+            (void) service.drain_commands(inbox);
+        }
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(allocations == 0);
+    REQUIRE(service.scheduler_stats().pending == 0);
+    REQUIRE(inbox.telemetry().overflow_count == 0);
 }
 
 TEST_CASE("Sample stream cache admits exact page budget and rejects overflow",
