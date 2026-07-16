@@ -32,6 +32,79 @@ struct SampleAssetConfig {
     std::optional<SampleStreamCacheSourceView> stream_source;
 };
 
+class SampleAsset;
+
+class SampleAssetRegistrationProof {
+public:
+    SampleAssetRegistrationProof() = default;
+
+    bool matches(SampleAssetToken asset,
+                 SampleStreamSourceToken source,
+                 const float* const* preload_channels,
+                 std::uint32_t channels,
+                 std::uint64_t total_frames,
+                 std::uint32_t sample_rate,
+                 std::uint64_t preload_frames,
+                 bool has_preload_contract,
+                 const SamplePreloadContract& preload_contract,
+                 bool has_stream_source) const noexcept {
+        return asset_.asset_id == asset.asset_id &&
+               asset_.asset_generation == asset.asset_generation &&
+               source_.source_id == source.source_id &&
+               source_.source_generation == source.source_generation &&
+               preload_channels_ == preload_channels && channels_ == channels &&
+               total_frames_ == total_frames && sample_rate_ == sample_rate &&
+               preload_frames_ == preload_frames &&
+               has_preload_contract_ == has_preload_contract &&
+               same_contract(preload_contract_, preload_contract) &&
+               has_stream_source_ == has_stream_source;
+    }
+
+private:
+    friend class SampleAsset;
+
+    SampleAssetRegistrationProof(const SampleAssetConfig& config,
+                                 const float* const* preload_channels) noexcept
+        : asset_(config.asset),
+          source_(config.source),
+          preload_channels_(preload_channels),
+          channels_(config.channels),
+          total_frames_(config.total_frames),
+          sample_rate_(config.sample_rate),
+          preload_frames_(config.preload_frames),
+          has_preload_contract_(config.preload_contract.has_value()),
+          preload_contract_(config.preload_contract.value_or(SamplePreloadContract{})),
+          has_stream_source_(config.stream_source.has_value()) {}
+
+    static bool same_contract(const SamplePreloadContract& left,
+                              const SamplePreloadContract& right) noexcept {
+        return left.source_sample_rate == right.source_sample_rate &&
+               left.host_sample_rate == right.host_sample_rate &&
+               left.maximum_playback_ratio == right.maximum_playback_ratio &&
+               left.certified_io_latency_seconds == right.certified_io_latency_seconds &&
+               left.scheduler_margin_seconds == right.scheduler_margin_seconds &&
+               left.decoder_latency_seconds == right.decoder_latency_seconds &&
+               left.maximum_host_block_frames == right.maximum_host_block_frames &&
+               left.interpolation_guard_frames == right.interpolation_guard_frames &&
+               left.loop_prefetch_guard_frames == right.loop_prefetch_guard_frames &&
+               left.configured_preload_frames == right.configured_preload_frames;
+    }
+
+    SampleAssetToken asset_{};
+    SampleStreamSourceToken source_{};
+    const float* const* preload_channels_ = nullptr;
+    std::uint32_t channels_ = 0;
+    std::uint64_t total_frames_ = 0;
+    std::uint32_t sample_rate_ = 0;
+    std::uint64_t preload_frames_ = 0;
+    bool has_preload_contract_ = false;
+    SamplePreloadContract preload_contract_{};
+    bool has_stream_source_ = false;
+};
+
+static_assert(std::is_trivially_copyable_v<SampleAssetRegistrationProof>);
+static_assert(std::is_standard_layout_v<SampleAssetRegistrationProof>);
+
 /// Immutable audio-thread snapshot borrowed from one SampleAsset owner.
 /// The owner and its stream source must outlive every copy of this view.
 struct SampleAssetView {
@@ -42,8 +115,11 @@ struct SampleAssetView {
     std::uint64_t total_frames = 0;
     std::uint32_t sample_rate = 0;
     std::uint64_t preload_frames = 0;
+    bool has_preload_contract = false;
+    SamplePreloadContract preload_contract{};
     bool has_stream_source = false;
     SampleStreamCacheSourceView stream_source{};
+    SampleAssetRegistrationProof registration{};
 
     bool valid() const noexcept {
         const bool base_valid = asset.asset_id != 0 && asset.asset_generation != 0 &&
@@ -52,7 +128,26 @@ struct SampleAssetView {
                                 total_frames != 0 && sample_rate != 0 &&
                                 preload_frames != 0 && preload_frames <= total_frames &&
                                 (preload_frames == total_frames || has_stream_source);
-        if (!base_valid || !has_stream_source) return base_valid;
+        if (!base_valid ||
+            !registration.matches(asset,
+                                  source,
+                                  preload_channels,
+                                  channels,
+                                  total_frames,
+                                  sample_rate,
+                                  preload_frames,
+                                  has_preload_contract,
+                                  preload_contract,
+                                  has_stream_source)) {
+            return false;
+        }
+        if (!has_stream_source) return true;
+        if (preload_frames < total_frames &&
+            (!has_preload_contract ||
+             preload_contract.source_sample_rate != static_cast<double>(sample_rate) ||
+             preload_contract.configured_preload_frames != preload_frames)) {
+            return false;
+        }
         return stream_source.valid() &&
                stream_source.token.source_id == source.source_id &&
                stream_source.token.source_generation == source.source_generation &&
@@ -116,8 +211,12 @@ public:
             .total_frames = config.total_frames,
             .sample_rate = config.sample_rate,
             .preload_frames = config.preload_frames,
+            .has_preload_contract = config.preload_contract.has_value(),
+            .preload_contract = config.preload_contract.value_or(SamplePreloadContract{}),
             .has_stream_source = config.stream_source.has_value(),
             .stream_source = config.stream_source.value_or(SampleStreamCacheSourceView{}),
+            .registration = SampleAssetRegistrationProof(
+                config, preload_channel_ptrs_.data()),
         };
         return true;
     }

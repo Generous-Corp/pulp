@@ -19,8 +19,9 @@ Current branch evidence, without implying completion of later gates:
   readers. Codec capability is explicit, ranged reads are bounded, and preload
   admission uses the checked latency/rate/guard formula. Synchronized release
   and destruction tests prove that entered reader work is joined before its
-  captured owner is destroyed; arbitrary reader I/O still requires its own
-  stoppable contract to make teardown promptly interruptible.
+  captured owner is destroyed. Ranged mapped bindings cooperatively observe a
+  stop token between bounded chunks, while arbitrary and decode-once callbacks
+  remain explicitly join-only rather than claiming prompt interruption.
 - S2 partial: requester-aware scheduling, checked page-memory admission, shared
   page coalescing, explicit pressure, and generation-gated FIFO retirement/reuse
   are implemented in a deterministic caller-driven service. A bounded ordered
@@ -29,8 +30,11 @@ Current branch evidence, without implying completion of later gates:
   contract and service-issued source-registration proof. Source collection is
   audio-watermark gated. An allocation-free linear forward voice reader plans
   coalesced page demand, crosses preload/page boundaries, and advances the
-  current source timeline through explicit starvation. The bounded
-  worker/completion plane, active-page interest, loop/reverse voice policy, and
+  current source timeline through explicit starvation. A fixed-count decode
+  pool now provides bounded SPSC job/completion mailboxes, one in-flight decode
+  per source, preallocated worker scratch, leased completion views, and
+  cooperative or join-only teardown. Service-side validation/publication of
+  those completions, active-page interest, loop/reverse voice policy, and
   example integration remain open.
 - The existing Release audio harness baseline and all 375 Audio Quality Lab
   self-tests pass. Quality Lab remains supplementary to exact transport,

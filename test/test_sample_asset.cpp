@@ -167,6 +167,10 @@ TEST_CASE("Partial sample asset requires a matching prepared stream source",
     forged.total_frames += 1;
     forged.stream_source.total_frames += 1;
     REQUIRE_FALSE(forged.valid());
+
+    forged = view;
+    forged.preload_contract.maximum_host_block_frames += 1;
+    REQUIRE_FALSE(forged.valid());
 }
 
 TEST_CASE("Sample asset rejects malformed identity metadata and preload bounds",

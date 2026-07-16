@@ -201,6 +201,7 @@ enum class SampleStreamSourceAddStatus : std::uint8_t {
     Added,
     InvalidConfig,
     DuplicateSource,
+    StaleGeneration,
     BudgetExceeded,
     AllocationFailed,
 };
@@ -268,6 +269,7 @@ public:
 
     void release() noexcept {
         sources_.clear();
+        source_generations_.clear();
         scheduler_.reset();
         memory_budget_bytes_ = 0;
         active_audio_generation_ = 0;
@@ -304,6 +306,16 @@ public:
         if (find_source_id(config.token.source_id) != nullptr) {
             return {SampleStreamSourceAddStatus::DuplicateSource, {}};
         }
+        const auto generation_record = std::find_if(
+            source_generations_.begin(),
+            source_generations_.end(),
+            [&config](const SourceGenerationRecord& record) noexcept {
+                return record.source_id == config.token.source_id;
+            });
+        if (generation_record != source_generations_.end() &&
+            config.token.source_generation <= generation_record->highest_generation) {
+            return {SampleStreamSourceAddStatus::StaleGeneration, {}};
+        }
 
         const auto bytes = page_storage_bytes(config);
         if (!bytes || stats_.reserved_page_bytes > memory_budget_bytes_ ||
@@ -327,6 +339,19 @@ public:
 
             const auto view = make_view(*source);
             sources_.push_back(std::move(source));
+            if (generation_record == source_generations_.end()) {
+                try {
+                    source_generations_.push_back({
+                        .source_id = config.token.source_id,
+                        .highest_generation = config.token.source_generation,
+                    });
+                } catch (...) {
+                    sources_.pop_back();
+                    return {SampleStreamSourceAddStatus::AllocationFailed, {}};
+                }
+            } else {
+                generation_record->highest_generation = config.token.source_generation;
+            }
             stats_.reserved_page_bytes += *bytes;
             stats_.source_count = sources_.size();
             return {SampleStreamSourceAddStatus::Added, view};
@@ -335,18 +360,19 @@ public:
         }
     }
 
-    SampleStreamSourceRetireStatus retire_source(
-        SampleStreamSourceToken token,
-        std::uint64_t retire_after_audio_generation) noexcept {
-        if (retire_after_audio_generation == 0 || active_audio_generation_ == 0 ||
-            retire_after_audio_generation < active_audio_generation_) {
+    /// Call only after the asset publisher has stopped issuing this source view.
+    /// The current audio generation becomes the last generation allowed to hold
+    /// a borrowed view; collection waits for that generation to complete.
+    SampleStreamSourceRetireStatus retire_source_after_asset_unpublish(
+        SampleStreamSourceToken token) noexcept {
+        if (active_audio_generation_ == 0) {
             return SampleStreamSourceRetireStatus::InvalidGeneration;
         }
         auto* source = find_source(token);
         if (source == nullptr) return SampleStreamSourceRetireStatus::StaleSource;
         if (source->retire_after_audio_generation != 0)
             return SampleStreamSourceRetireStatus::AlreadyScheduled;
-        source->retire_after_audio_generation = retire_after_audio_generation;
+        source->retire_after_audio_generation = active_audio_generation_;
         ++stats_.sources_retire_scheduled;
         return SampleStreamSourceRetireStatus::Scheduled;
     }
@@ -527,6 +553,11 @@ private:
         std::uint64_t publish_sequence = 0;
     };
 
+    struct SourceGenerationRecord {
+        std::uint64_t source_id = 0;
+        std::uint64_t highest_generation = 0;
+    };
+
     struct Source {
         SampleStreamCacheSourceConfig config{};
         SampleStreamWindow window;
@@ -675,6 +706,7 @@ private:
     }
 
     std::vector<std::unique_ptr<Source>> sources_;
+    std::vector<SourceGenerationRecord> source_generations_;
     SampleStreamScheduler scheduler_;
     std::uint64_t memory_budget_bytes_ = 0;
     std::uint64_t active_audio_generation_ = 0;
