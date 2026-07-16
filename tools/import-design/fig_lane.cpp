@@ -1,18 +1,14 @@
 #include "fig_lane.hpp"
 
+#include "envelope_merge.hpp"
+
 #include <pulp/platform/child_process.hpp>
 
-#include <choc/text/choc_JSON.h>
-
-#include <chrono>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <optional>
-#include <sstream>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 namespace pulp::import_design::fig {
@@ -94,150 +90,6 @@ DecodeResult run_decode(const std::vector<std::string>& args, std::string* stdou
     return {result.exit_code, truncated};
 }
 
-// A per-run, hard-to-predict scratch directory. The monotonic tick keeps two
-// concurrent imports of the same file from colliding and stops a local attacker
-// from pre-planting a symlink at a guessable path that node's write would follow.
-// Merge N per-frame envelopes into one whose root carries frames 1..N-1 as
-// `alternate_frames`. Frame 0's envelope supplies every top-level field
-// (provenance, tokens, library manifest); the rest contribute only their root
-// node plus their assets.
-//
-// Merging asset manifests is collision-safe by construction: the decoder keys
-// each asset by its content hash (asset_id == hash, local_path == assets/<hash>),
-// so an id that repeats across frames names byte-identical content and dedupes,
-// while distinct content can never share an id. That is what lets every frame's
-// assets flatten into one `assets/` directory next to the merged envelope
-// without rewriting a single local_path.
-std::optional<int> merge_frame_envelopes(const std::vector<fs::path>& envelopes,
-                                         const fs::path& scratch,
-                                         const fs::path& out_path) {
-    auto read_json = [](const fs::path& p, choc::value::Value& v) -> bool {
-        std::ifstream in(p, std::ios::binary);
-        if (!in) return false;
-        std::ostringstream buf;
-        buf << in.rdbuf();
-        try {
-            v = choc::json::parse(buf.str());
-        } catch (const std::exception&) {
-            return false;
-        }
-        return v.isObject();
-    };
-
-    choc::value::Value merged;
-    if (!read_json(envelopes.front(), merged)) {
-        std::cerr << "Error: could not read decoded envelope " << envelopes.front() << "\n";
-        return 3;
-    }
-
-    auto alternates = choc::value::createEmptyArray();
-    for (std::size_t i = 1; i < envelopes.size(); ++i) {
-        choc::value::Value env;
-        if (!read_json(envelopes[i], env)) {
-            std::cerr << "Error: could not read decoded envelope " << envelopes[i] << "\n";
-            return 3;
-        }
-        if (!env.hasObjectMember("root")) {
-            std::cerr << "Error: decoded envelope " << envelopes[i] << " has no root frame\n";
-            return 3;
-        }
-        alternates.addArrayElement(env["root"]);
-
-        // Union `src` into `dst`, skipping entries whose `id_key` is already
-        // present. An empty id_key keeps every entry (unkeyed observations).
-        // Returns an owning array — choc's operator[] hands back a non-owning
-        // ValueView, so the result has to be built up and set back by value.
-        auto union_by = [](const choc::value::ValueView& dst,
-                           const choc::value::ValueView& src,
-                           const char* id_key) {
-            auto out = choc::value::createEmptyArray();
-            std::unordered_set<std::string> seen;
-            auto take = [&](const choc::value::ValueView& arr) {
-                if (!arr.isArray()) return;
-                for (uint32_t j = 0; j < arr.size(); ++j) {
-                    const auto e = arr[static_cast<int>(j)];
-                    if (id_key && e.isObject() && e.hasObjectMember(id_key) &&
-                        !seen.insert(e[id_key].toString()).second)
-                        continue;   // same content hash → already merged
-                    out.addArrayElement(e);
-                }
-            };
-            take(dst);
-            take(src);
-            return out;
-        };
-
-        // asset_manifest is an object wrapping the assets array.
-        // A member that isn't there reads as an empty array, so a frame that
-        // carries a section the others lack still merges.
-        const auto empty = choc::value::createEmptyArray();
-        auto array_member = [&empty](const choc::value::ValueView& obj, const char* key) {
-            return (obj.isObject() && obj.hasObjectMember(key) && obj[key].isArray())
-                       ? obj[key] : empty.getView();
-        };
-
-        if (env.hasObjectMember("asset_manifest") && env["asset_manifest"].isObject() &&
-            merged.hasObjectMember("asset_manifest") && merged["asset_manifest"].isObject()) {
-            choc::value::Value manifest(merged["asset_manifest"]);
-            manifest.setMember("assets",
-                               union_by(array_member(manifest, "assets"),
-                                        array_member(env["asset_manifest"], "assets"),
-                                        "asset_id"));
-            merged.setMember("asset_manifest", manifest);
-        }
-        if (env.hasObjectMember("font_family_assets"))
-            merged.setMember("font_family_assets",
-                             union_by(array_member(merged, "font_family_assets"),
-                                      array_member(env, "font_family_assets"), "asset_id"));
-        // Diagnostics are observations, not keyed records — keep every one.
-        if (env.hasObjectMember("diagnostics"))
-            merged.setMember("diagnostics",
-                             union_by(array_member(merged, "diagnostics"),
-                                      array_member(env, "diagnostics"), nullptr));
-    }
-
-    choc::value::Value root(merged["root"]);
-    root.setMember("alternate_frames", alternates);
-    merged.setMember("root", root);
-
-    // Flatten every frame's assets next to the merged envelope so each entry's
-    // `assets/<hash>` local_path resolves from the merged file's directory.
-    std::error_code ec;
-    for (const auto& env_path : envelopes) {
-        const fs::path src_assets = env_path.parent_path() / "assets";
-        if (!fs::exists(src_assets, ec)) continue;
-        fs::create_directories(scratch / "assets", ec);
-        for (const auto& entry : fs::directory_iterator(src_assets, ec)) {
-            if (!entry.is_regular_file(ec)) continue;
-            fs::copy_file(entry.path(), scratch / "assets" / entry.path().filename(),
-                          fs::copy_options::skip_existing, ec);
-            if (ec) {
-                std::cerr << "Error: could not stage asset " << entry.path() << ": "
-                          << ec.message() << "\n";
-                return 3;
-            }
-        }
-    }
-
-    std::ofstream out(out_path, std::ios::binary);
-    if (!out) {
-        std::cerr << "Error: could not write merged envelope " << out_path << "\n";
-        return 3;
-    }
-    out << choc::json::toString(merged, true);
-    if (!out) {
-        std::cerr << "Error: could not write merged envelope " << out_path << "\n";
-        return 3;
-    }
-    return std::nullopt;
-}
-
-fs::path make_scratch_dir(const std::string& input_file) {
-    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-    return fs::temp_directory_path()
-           / ("pulp-fig-" + fs::path(input_file).stem().string() + "-" + std::to_string(tick));
-}
-
 }  // namespace
 
 std::optional<int> handle(const LaneArgs& args) {
@@ -274,7 +126,7 @@ std::optional<int> handle(const LaneArgs& args) {
         return 1;
     }
 
-    const fs::path scratch = make_scratch_dir(args.input_file);
+    const fs::path scratch = make_scratch_dir("fig", args.input_file);
     std::error_code ec;
     fs::create_directories(scratch, ec);
     if (ec) {

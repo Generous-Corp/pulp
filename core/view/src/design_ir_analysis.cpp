@@ -111,20 +111,31 @@ int apply_placement_verification(IRNode& root, float frame_w, float frame_h) {
 // frame-owning node: frame 0 is the node itself, alternate_frames[i] is frame
 // i+1.
 
-// Flag `node`'s own swap elements that do not address one of `frame_count` frames.
-static int check_swap_targets(IRNode& node, int frame_count) {
+// Flag `node`'s own swap elements that do not address one of `frame_count`
+// frames. `own_index` is the frame `node` itself renders as (0 for the
+// frame-owning node, i+1 for its alternate_frames[i]) — a swap that targets it
+// activates the frame already showing, so the button does nothing.
+static int check_swap_targets(IRNode& node, int frame_count, int own_index) {
     int flagged = 0;
     for (auto& e : node.interactive_elements) {
         if (e.kind != InteractiveElementKind::swap) continue;
         std::string issue;
-        if (e.target_frame < 0) {
+        if (e.target_frame == -1) {
             issue = "swap link has no target frame (name the layer \"swap <n>\" to "
                     "address a captured frame)";
+        } else if (e.target_frame < 0) {
+            // Distinct from unset: a target got parsed, but to a negative index.
+            issue = "swap link targets frame " + std::to_string(e.target_frame) +
+                    ", which is not a frame index (valid indices 0.." +
+                    std::to_string(frame_count - 1) + ")";
         } else if (e.target_frame >= frame_count) {
             issue = "swap link targets frame " + std::to_string(e.target_frame) +
                     " but only " + std::to_string(frame_count) + " frame" +
                     (frame_count == 1 ? "" : "s") + " captured (valid indices 0.." +
                     std::to_string(frame_count - 1) + ")";
+        } else if (e.target_frame == own_index) {
+            issue = "swap link targets frame " + std::to_string(e.target_frame) +
+                    ", the frame it already sits on — clicking it would do nothing";
         }
         if (!issue.empty()) {
             e.verification_pass = false;
@@ -137,12 +148,15 @@ static int check_swap_targets(IRNode& node, int frame_count) {
 
 static int verify_swap_visit(IRNode& node) {
     const int frame_count = 1 + static_cast<int>(node.alternate_frames.size());
-    int flagged = check_swap_targets(node, frame_count);
-    for (auto& f : node.alternate_frames) {
+    int flagged = check_swap_targets(node, frame_count, 0);
+    for (std::size_t i = 0; i < node.alternate_frames.size(); ++i) {
+        IRNode& f = node.alternate_frames[i];
         // An alternate's own swaps (the "back" toggle) address the OWNER's frame
         // set, so they are checked against the owner's count rather than treated
-        // as a fresh owner. Its children are ordinary nodes and recurse normally.
-        flagged += check_swap_targets(f, frame_count);
+        // as a fresh owner — and the alternate renders as frame i+1, which is the
+        // index a self-target would name. Its children are ordinary nodes and
+        // recurse normally.
+        flagged += check_swap_targets(f, frame_count, static_cast<int>(i) + 1);
         for (auto& c : f.children) flagged += verify_swap_visit(c);
     }
     for (auto& c : node.children) flagged += verify_swap_visit(c);
@@ -151,6 +165,37 @@ static int verify_swap_visit(IRNode& node) {
 
 int apply_swap_target_verification(IRNode& root) {
     return verify_swap_visit(root);
+}
+
+// A node's alternate frames reach a renderer only through make_faithful_svg_frame
+// / emit_faithful_frame, both of which bail before touching alternate_frames
+// unless the node is faithful_svg AND names an SVG asset. Mirror that exact
+// admission test here so the walk reports precisely the sets that get dropped.
+static void find_unrenderable_visit(const IRNode& node,
+                                    std::vector<UnrenderableFrameSet>& out) {
+    if (!node.alternate_frames.empty()) {
+        const char* reason = nullptr;
+        if (node.render_mode != NodeRenderMode::faithful_svg)
+            reason = "the node it captured them on renders as native widgets "
+                     "(render_mode is not faithful_svg), and only a faithful_svg "
+                     "node renders alternate frames";
+        else if (!node.svg_asset_id)
+            reason = "the node it captured them on is faithful_svg but names no "
+                     "svg_asset_id, so it has no frame 0 to add frames to";
+        if (reason)
+            out.push_back({node.name.empty() ? "<unnamed>" : node.name,
+                           node.alternate_frames.size(), reason});
+    }
+    // Alternates are a sibling axis to children: a nested frame-owning node can
+    // sit inside either, so both are walked.
+    for (const auto& f : node.alternate_frames) find_unrenderable_visit(f, out);
+    for (const auto& c : node.children) find_unrenderable_visit(c, out);
+}
+
+std::vector<UnrenderableFrameSet> find_unrenderable_alternate_frames(const IRNode& root) {
+    std::vector<UnrenderableFrameSet> out;
+    find_unrenderable_visit(root, out);
+    return out;
 }
 
 std::string import_report_to_json(const ImportReport& r) {

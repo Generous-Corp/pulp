@@ -11,6 +11,7 @@
 #include <pulp/state/store.hpp>
 #include "import_detect.hpp"
 #include "fig_lane.hpp"
+#include "envelope_merge.hpp"
 #include <miniz.h>
 // getpid() is POSIX-only via <unistd.h>; MSVC ships an equivalent
 // `_getpid` declaration in <process.h>. Wrap both to keep the
@@ -896,7 +897,11 @@ static void print_usage() {
     std::cout << "  jsx      Precompiled React JSX runtime bundle for live pass-through or baked snapshots\n\n";
     std::cout << "Options:\n";
     std::cout << "  --from <source>   Design source (required)\n";
-    std::cout << "  --file <path>     Input file path\n";
+    std::cout << "  --file <path>     Input file path. Repeatable with --from figma-plugin:\n";
+    std::cout << "                    one already-exported envelope per state captures a\n";
+    std::cout << "                    multi-state design into one view. Order sets the frame\n";
+    std::cout << "                    index a \"swap <n>\" button targets (the first --file is\n";
+    std::cout << "                    frame 0).\n";
     std::cout << "  --url <url>       Design URL (Figma file URL or v0 share link)\n";
     std::cout << "  --frame <name>    Frame/artboard to import (Figma; guid or name for --from fig).\n";
     std::cout << "                    Repeatable: give it once per state to capture a multi-state\n";
@@ -1003,7 +1008,7 @@ static void print_usage() {
     std::cout << "  pulp import-design --from claude --file design.html\n";
     std::cout << "  pulp import-design --from fig --file design.fig --outline\n";
     std::cout << "  pulp import-design --from fig --file design.fig --frame 'Main' --output ui.js\n";
-    std::cout << "  pulp import-design --from fig --file kbd.fig --frame Typing --frame Piano --output kbd.cpp\n";
+    std::cout << "  pulp import-design --from figma-plugin --file typing.pulp.json --file piano.pulp.json --emit cpp --output kbd.cpp\n";
     std::cout << "  pulp import-design --from figma --file design.json --format css-variables --tokens theme.css\n";
     std::cout << "  pulp import-design --export-tokens --format css-variables   # built-in dark theme → theme.css\n";
     std::cout << "  pulp import-design --from jsx --file bundle.js --mode live --emit js --output live-ui.js\n";
@@ -1699,6 +1704,12 @@ static bool write_file(const std::string& path, const std::string& content) {
 int main(int argc, char* argv[]) {
     std::string source_str;
     std::string input_file;
+    // --file: repeatable. Two or more paths capture a MULTI-STATE design from
+    // already-exported envelopes — one per state, in the order given — which is
+    // how a lane that exports a faithful frame at a time (the Figma REST
+    // faithful-vector export, the Figma plugin) reaches multi-state capture.
+    // input_file stays the first, so every single-file path is untouched.
+    std::vector<std::string> input_files;
     std::string input_url;           // --url: Figma file URL or v0 share link
     // --frame: Figma frame/artboard name. Repeatable — two or more capture a
     // multi-state design into one DesignFrameView, in the order given, so a
@@ -1775,7 +1786,7 @@ int main(int argc, char* argv[]) {
         if (std::strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
             source_str = argv[++i];
         } else if (std::strcmp(argv[i], "--file") == 0 && i + 1 < argc) {
-            input_file = argv[++i];
+            input_files.push_back(argv[++i]);
         } else if (std::strcmp(argv[i], "--url") == 0 && i + 1 < argc) {
             input_url = argv[++i];
         } else if (std::strcmp(argv[i], "--frame") == 0 && i + 1 < argc) {
@@ -2035,6 +2046,10 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Every path below reads the first --file; a second one only means
+    // multi-state capture, handled once the source is known.
+    if (!input_files.empty()) input_file = input_files.front();
+
     // Export-tokens mode: read a Pulp theme JSON and export in --format.
     if (export_tokens_mode) {
         // Tailwind formats need DESIGN.md section context that --export-tokens
@@ -2179,16 +2194,34 @@ int main(int argc, char* argv[]) {
         }
     } fig_scratch_cleanup{fig_scratch_dir};
 
-    // Multi-state capture needs a source that can decode each frame on its own,
-    // which today is only the `.fig` lane. Every other source resolves a single
-    // frame per run, so honor only the first --frame there — and say so, rather
-    // than silently importing one state and dropping the rest.
+    // Both multi-value flags are validated against the source the USER named,
+    // before the fig lane runs — it rewrites source_str to "figma-plugin" once it
+    // has decoded, at which point a `--from fig` run is no longer distinguishable
+    // from a real figma-plugin one.
+    //
+    // `--file` names the design to read, so repeating it is only meaningful for a
+    // source whose input IS one already-exported state (figma-plugin envelopes);
+    // `--from fig` takes one .fig and selects states from it with --frame.
+    if (input_files.size() > 1 && source_str != "figma-plugin") {
+        std::cerr << "Error: --file is repeatable only with --from figma-plugin (got "
+                  << input_files.size() << " --file values with --from " << source_str << ")\n";
+        std::cerr << "       Repeated --file merges one already-exported envelope per state "
+                     "into a\n"
+                     "       multi-state design; other sources parse a single file.\n";
+        return 2;
+    }
+
+    // `--frame` selects a frame from ONE design file, which only the .fig lane
+    // does per-frame; every other source resolves a single frame per run. Repeat
+    // it elsewhere and the extra states would be dropped without a word.
     if (frame_names.size() > 1 && source_str != "fig") {
         std::cerr << "Error: --frame is repeatable only with --from fig (got "
                   << frame_names.size() << " --frame values with --from "
                   << source_str << ")\n";
-        std::cerr << "       Multi-state capture decodes each frame separately, which "
-                     "only the .fig lane supports.\n";
+        std::cerr << "       To capture a multi-state design from another source, export "
+                     "each state to its\n"
+                     "       own envelope and pass a --file per state: --from figma-plugin "
+                     "--file a.pulp.json --file b.pulp.json\n";
         return 2;
     }
 
@@ -2204,6 +2237,39 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: unknown source '" << source_str << "'\n";
         std::cerr << "Valid sources: fig, figma, figma-plugin, stitch, v0, pencil, claude, designmd, jsx\n";
         return 1;
+    }
+
+    // Multi-state capture from pre-exported envelopes: one --file per state, in
+    // capture order, merged into a single envelope whose root carries the rest as
+    // alternate_frames. This is the multi-state surface for the lanes that export
+    // one faithful frame per run — the Figma REST faithful-vector export and the
+    // Figma plugin both write this envelope — and it is deliberately a merge of
+    // finished exports rather than a new decode path, so it inherits whatever
+    // render mode those exporters produced.
+    if (input_files.size() > 1) {
+        namespace id = pulp::import_design;
+        const fs::path scratch = id::make_scratch_dir("states", input_files.front());
+        std::error_code sec;
+        fs::create_directories(scratch, sec);
+        if (sec) {
+            std::cerr << "Error: could not create scratch dir " << scratch << ": "
+                      << sec.message() << "\n";
+            return 1;
+        }
+        fig_scratch_dir = scratch.string();   // removed when main returns
+
+        std::vector<fs::path> envelopes;
+        envelopes.reserve(input_files.size());
+        for (const auto& f : input_files) {
+            if (!fs::exists(f)) {
+                std::cerr << "Error: --file " << f << " does not exist\n";
+                return 1;
+            }
+            envelopes.emplace_back(f);
+        }
+        const fs::path merged = scratch / "scene.pulp.json";
+        if (auto err = id::merge_frame_envelopes(envelopes, scratch, merged)) return *err;
+        input_file = merged.string();
     }
 
     // Tailwind formats are gated to DESIGN.md (they re-parse it for section
@@ -2657,6 +2723,32 @@ int main(int argc, char* argv[]) {
     // here — before the report collects verification_pass — and let the same
     // --import-report / --fail-on-unresolved channel carry it.
     apply_swap_target_verification(ir.root);
+
+    // Captured states nobody can render are a hard error, not a diagnostic. Only
+    // a faithful_svg node lowers alternate_frames to DesignFrameView::add_frame,
+    // so on any other node the extra states are dropped and the import "succeeds"
+    // with a single frame — the user asked for N states and silently got one.
+    // Refusing here is what keeps that from shipping as a working command.
+    if (const auto dropped = find_unrenderable_alternate_frames(ir.root); !dropped.empty()) {
+        std::size_t total = 0;
+        for (const auto& d : dropped) total += d.alternates;
+        std::cerr << "Error: " << total << " captured state"
+                  << (total == 1 ? "" : "s") << " cannot be rendered and would be "
+                     "dropped:\n";
+        for (const auto& d : dropped)
+            std::cerr << "       - " << d.node_name << ": " << d.alternates
+                      << " alternate frame" << (d.alternates == 1 ? "" : "s")
+                      << " — " << d.reason << "\n";
+        std::cerr << "       Multi-state capture needs a faithful-vector export. The Figma "
+                     "REST lane produces one:\n"
+                     "         python3 tools/import-design/figma_rest_export.py --file-key "
+                     "<KEY> --node <A> --out a.pulp.json --faithful-vector\n"
+                     "         python3 tools/import-design/figma_rest_export.py --file-key "
+                     "<KEY> --node <B> --out b.pulp.json --faithful-vector\n"
+                     "         pulp import-design --from figma-plugin --file a.pulp.json "
+                     "--file b.pulp.json ...\n";
+        return 2;
+    }
     const auto import_report = collect_import_report(ir.root);
     if (!import_report.controls.empty())
         std::cerr << import_report_to_text(import_report);
