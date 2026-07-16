@@ -502,6 +502,21 @@ struct IRNode {
     /// Source-identified interactive overlays for a faithful_svg render.
     /// Empty for `normal` nodes.
     std::vector<IRInteractiveElement> interactive_elements;
+    /// Alternate states of a faithful_svg node (multi-state capture). Each entry
+    /// is itself a faithful_svg node carrying its own svg_asset_id and
+    /// interactive_elements, materialized via DesignFrameView::add_frame — one
+    /// DesignFrameView holding N frames, not N views.
+    ///
+    /// Frame indices are POSITIONAL and are what a `swap` element's target_frame
+    /// names: THIS node is frame 0, alternate_frames[i] is frame i+1. Order is
+    /// therefore load-bearing — it is the capture order the author chose (the
+    /// CLI's repeated --frame order), never sorted or deduplicated.
+    ///
+    /// Alternates are frames of the same view, not descendants: they are a
+    /// SIBLING axis to `children`, so a walk that must visit every node has to
+    /// descend both. Empty for a single-state import (the common path), which
+    /// keeps that path byte-identical to a capture that predates this field.
+    std::vector<IRNode> alternate_frames;
 };
 
 enum class ImportDiagnosticSeverity {

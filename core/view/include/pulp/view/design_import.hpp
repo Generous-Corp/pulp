@@ -89,6 +89,17 @@ std::string import_report_to_text(const ImportReport& report);
 // geometry-level check, not a pixel diff.
 int apply_placement_verification(IRNode& root, float frame_w = 0.0f, float frame_h = 0.0f);
 
+// Swap-target verification. Walks the IR and flags every `swap` element whose
+// target_frame does not name a frame that was actually captured on its own node
+// — an unset target (-1), a negative index, an index past the captured frame
+// count (1 + alternate_frames.size()), or a self-target that would make the
+// button a no-op. Such a swap would render as a button that silently does
+// nothing, so each one gets verification_pass=false plus a conflict signal,
+// which makes collect_import_report count it as `conflicted` and
+// --fail-on-unresolved exit nonzero. Mutates `root` in place; returns the number
+// of swaps newly flagged. A design with no swap elements is untouched.
+int apply_swap_target_verification(IRNode& root);
+
 struct NativeMaterializeOptions {
     bool apply_token_theme = true;
     bool preview_mode = false;
