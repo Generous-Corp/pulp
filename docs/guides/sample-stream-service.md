@@ -31,13 +31,12 @@ the request remains pending and `NoPageAvailable` is returned.
 ## Current limits
 
 This is the synchronous core needed to test identity, budgeting, scheduling,
-publication, and cancellation before adding concurrency. It does not yet own a
-worker pool, completion mailboxes, page eviction, retired-page reuse, dynamic
-source replacement, or an audio-thread command port. Only Empty page slots are
-filled. Production multi-voice integration must add those pieces and prove
-joinable teardown, generation-gated reuse, bounded queue behavior, and
-resident-versus-streamed render parity before advertising general long-sample
-streaming.
+publication, cancellation, and generation-gated FIFO page reuse before adding
+concurrency. It does not yet own a worker pool, completion mailboxes, dynamic
+source replacement, or an audio-thread command port. Production multi-voice
+integration must add those pieces and prove joinable teardown, bounded queue
+behavior, active-page interest, and resident-versus-streamed render parity
+before advertising general long-sample streaming.
 
 `StreamingSampleSource` remains the simpler preload-plus-ring utility for
 sequential one-shot playback. It is not instantiated once per sampler voice.

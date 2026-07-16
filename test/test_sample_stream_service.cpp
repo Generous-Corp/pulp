@@ -172,3 +172,100 @@ TEST_CASE("Sample stream cache retains demand while every page slot is busy",
     REQUIRE(service.service_once() == SampleStreamServiceStatus::NoPageAvailable);
     REQUIRE(service.scheduler_stats().pending == 1);
 }
+
+TEST_CASE("Sample stream cache reuses retired pages only after the audio generation completes",
+          "[audio][sampler][stream-service][generation][eviction]") {
+    SampleStreamCacheService service;
+    REQUIRE(service.prepare({.scheduler_capacity = 4, .page_memory_budget_bytes = 16}));
+    REQUIRE(service.update_audio_generations(7, 6));
+
+    auto config = source_config();
+    config.cache_page_count = 1;
+    const auto added = service.add_source(config,
+        [](std::uint64_t start, pulp::audio::BufferView<float> destination,
+           std::uint64_t frames) {
+            for (std::uint64_t frame = 0; frame < frames; ++frame)
+                destination.channel_ptr(0)[frame] = static_cast<float>(start + frame + 1);
+            return frames;
+        });
+    REQUIRE(added.added());
+
+    REQUIRE(service.request_page(demand(added.view.token, 50, 0)) ==
+            SampleStreamScheduleStatus::Inserted);
+    REQUIRE(service.service_once() == SampleStreamServiceStatus::Published);
+    const auto old_view = added.view.window->ready_page_for_frame(
+        added.view.token.source_generation, 0);
+    REQUIRE(old_view.valid);
+    REQUIRE_THAT(added.view.window->ready_channel_data(old_view, 0)[0],
+                 WithinAbs(1.0f, 1.0e-6f));
+
+    REQUIRE(service.request_page(demand(added.view.token, 50, 1)) ==
+            SampleStreamScheduleStatus::Inserted);
+    REQUIRE(service.service_once() == SampleStreamServiceStatus::PageRetired);
+    REQUIRE(added.view.window->page_state(0) ==
+            pulp::audio::SampleStreamPageState::Retired);
+    REQUIRE(service.scheduler_stats().pending == 1);
+    REQUIRE_FALSE(added.view.window->ready_page_for_frame(
+        added.view.token.source_generation, 0).valid);
+    REQUIRE_THAT(added.view.window->ready_channel_data(old_view, 0)[0],
+                 WithinAbs(1.0f, 1.0e-6f));
+
+    REQUIRE(service.service_once() ==
+            SampleStreamServiceStatus::WaitingForAudioGeneration);
+    REQUIRE(service.scheduler_stats().pending == 1);
+    REQUIRE_FALSE(service.update_audio_generations(7, 8));
+    REQUIRE(service.update_audio_generations(8, 7));
+    REQUIRE(service.service_once() == SampleStreamServiceStatus::Published);
+    REQUIRE(service.scheduler_stats().pending == 0);
+    REQUIRE(added.view.window->ready_channel_data(old_view, 0) == nullptr);
+
+    Buffer<float> rendered(1, 4);
+    const auto read = added.view.window->read_frames(
+        rendered.view(),
+        SampleStreamWindowReadRequest{
+            .stream_generation = added.view.token.source_generation,
+            .start_frame = 4,
+            .frames = 4,
+        });
+    REQUIRE(read.complete);
+    REQUIRE_THAT(rendered.channel(0)[0], WithinAbs(5.0f, 1.0e-6f));
+
+    const auto stats = service.stats();
+    REQUIRE(stats.pages_retired == 1);
+    REQUIRE(stats.retired_pages_reused == 1);
+    REQUIRE(stats.retire_waits == 1);
+    REQUIRE(stats.invalid_audio_generation_updates == 1);
+}
+
+TEST_CASE("Sample stream cache retires the oldest published page deterministically",
+          "[audio][sampler][stream-service][eviction]") {
+    SampleStreamCacheService service;
+    REQUIRE(service.prepare({.scheduler_capacity = 4, .page_memory_budget_bytes = 32}));
+    REQUIRE(service.update_audio_generations(10, 9));
+    const auto added = service.add_source(source_config(),
+        [](std::uint64_t, pulp::audio::BufferView<float>, std::uint64_t frames) {
+            return frames;
+        });
+    REQUIRE(added.added());
+
+    REQUIRE(service.request_page(demand(added.view.token, 60, 0)) ==
+            SampleStreamScheduleStatus::Inserted);
+    REQUIRE(service.service_once() == SampleStreamServiceStatus::Published);
+    REQUIRE(service.request_page(demand(added.view.token, 60, 1)) ==
+            SampleStreamScheduleStatus::Inserted);
+    REQUIRE(service.service_once() == SampleStreamServiceStatus::Published);
+    REQUIRE(service.request_page(demand(added.view.token, 60, 2)) ==
+            SampleStreamScheduleStatus::Inserted);
+
+    REQUIRE(service.service_once() == SampleStreamServiceStatus::PageRetired);
+    REQUIRE(added.view.window->page_state(0) ==
+            pulp::audio::SampleStreamPageState::Retired);
+    REQUIRE(added.view.window->page_state(1) ==
+            pulp::audio::SampleStreamPageState::Ready);
+    REQUIRE(service.scheduler_stats().pending == 1);
+    REQUIRE(service.service_once() ==
+            SampleStreamServiceStatus::WaitingForAudioGeneration);
+    REQUIRE(added.view.window->page_state(1) ==
+            pulp::audio::SampleStreamPageState::Ready);
+    REQUIRE(service.stats().pages_retired == 1);
+}
