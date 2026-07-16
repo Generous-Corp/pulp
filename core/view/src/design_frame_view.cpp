@@ -890,6 +890,32 @@ Rect DesignFrameView::element_rect(int i) const {
     return {e.x, e.y, e.w, e.h};
 }
 
+bool DesignFrameView::element_hit_point(int i, Point& out) const {
+    if (i < 0 || i >= static_cast<int>(elements_.size())) return false;
+    const auto t = panel_transform(local_bounds());
+    if (t.scale <= 0.0f) return false;  // not laid out: no point exists yet
+    const auto& e = elements_[i];
+    // The anchor hit_element() matches this kind by: a knob by distance to its
+    // pivot, every other kind by containment in its rect.
+    const bool by_pivot = e.kind == DesignFrameElement::Kind::knob;
+    const float sx = by_pivot ? e.cx : e.x + e.w * 0.5f;
+    const float sy = by_pivot ? e.cy : e.y + e.h * 0.5f;
+    // Forward the paint/hit fit: SVG coords -> view px (hit_element inverts this).
+    const Point p{t.ox + (sx - panel_x_) * t.scale, t.oy + (sy - panel_y_) * t.scale};
+    // Prove the anchor before promising it. An element with a native overlay is
+    // clicked through its child widget, which View::hit_test reaches before this
+    // parent, and layout_children() puts that widget on exactly this rect — so the
+    // rect center lands on it. Every other kind must round-trip through the real
+    // hit-tester, which is the only thing that knows the element is disabled, is a
+    // momentary key outside the active view group, has a degenerate hit radius or
+    // rect, or is occluded by a rect-tested element ahead of it. In each of those
+    // cases NO point hits `i`, and saying so beats handing back a coordinate that
+    // misses silently and reads as a dead control.
+    if (overlay_widget(i) == nullptr && hit_element(p) != i) return false;
+    out = p;
+    return true;
+}
+
 float DesignFrameView::element_value(int i) const {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return -1.0f;
     const auto& e = elements_[i];

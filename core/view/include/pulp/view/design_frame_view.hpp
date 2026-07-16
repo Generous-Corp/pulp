@@ -350,6 +350,31 @@ public:
     // position its own overlay relative to an element (e.g. the piano C-labels
     // drawn under the C keys, which shift as the window moves).
     Rect element_rect(int i) const;
+    // The point, in this view's LOCAL coordinates, at which a pointer event lands
+    // on element `i` — writes it to `out` and returns true, or returns false and
+    // leaves `out` untouched when no such point exists. Dispatching on_mouse_down()
+    // at a reported point hits element `i`.
+    //
+    // This is the INVERSE of hit_element(): it forward-maps the element's hit
+    // anchor through the same panel_transform() that hit_element() inverts, and
+    // picks that anchor the way hit_element() matches each kind — a knob by
+    // distance to its pivot (cx, cy), every other kind by containment in its rect.
+    // Both facts live behind this view's private state (the pivot, the panel crop
+    // origin, and the fit itself), so a caller outside the class cannot derive
+    // this point; re-deriving it against a copy of the fit would be a second
+    // source of truth that drifts from paint(). It exists so a foreign-host
+    // adapter or QA harness can drive a NAMED control through the REAL pointer
+    // path — hit-test included — instead of reaching past hit-testing to poke the
+    // element directly, which would pass even with the hit path broken.
+    //
+    // Returns false — rather than a nearby-looking coordinate — whenever the
+    // element is genuinely unclickable: `i` out of range, the panel not laid out
+    // yet, a disabled element, a momentary key outside the active view group, a
+    // degenerate hit radius or rect, an element occluded by a rect-tested one
+    // ahead of it, and the non-interactive kinds (a value_label readout, a custom
+    // control whose factory never registered). Check the return value: a false
+    // means "there is no such point", never "use (0,0)".
+    bool element_hit_point(int i, Point& out) const;
     // The `action` id of element `i` (for Kind::action command buttons and the
     // readout tag of Kind::value_label), or empty. Lets a consumer route by id.
     const std::string& element_action(int i) const {
