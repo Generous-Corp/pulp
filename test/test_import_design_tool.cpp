@@ -2748,6 +2748,25 @@ TEST_CASE("pulp-import-design --fail-below gates the --validate similarity",
         CHECK(r.stdout_output.find("NEEDS REVIEW") != std::string::npos);
     }
 
+    SECTION("a valueless --fail-below is a hard error, never a silent pass") {
+        // The trap this guards: gating the branch on `&& i + 1 < argc` drops a
+        // valueless --fail-below through the arg loop's silent fallthrough, so
+        // the gate disables itself while still READING as enforcement. A CI job
+        // running `--fail-below $THRESHOLD` with THRESHOLD unset would then pass
+        // every import at any similarity — the exact silent-pass this flag
+        // exists to end. Exit 2 (usage error), never 0.
+        auto r = run_import_design_in(tmp.path, {"--from", "stitch",
+                                                "--file", input.string(),
+                                                "--output", output.string(),
+                                                "--validate",
+                                                "--reference", wrong.string(),
+                                                "--fail-below"}, 60000);
+        REQUIRE_FALSE(r.timed_out);
+        CHECK(r.exit_code == 2);
+        CHECK(r.exit_code != 0);
+        CHECK(r.stderr_output.find("--fail-below requires a value") != std::string::npos);
+    }
+
     SECTION("the same mismatch without --fail-below still exits 0") {
         // The gate is opt-in: callers that only read the printed similarity
         // must keep seeing exit 0, at any similarity.
