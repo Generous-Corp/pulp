@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <pulp/format/gpu_host_select.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
@@ -752,4 +753,265 @@ TEST_CASE("a routed control degrades to local state when the key is unknown",
 
     proc.last_frame->simulate_drag({20, 20}, {20, 5});
     CHECK(proc.last_frame->element_value(0) > 0.0f);   // the control still moved
+}
+
+
+// ── Host -> UI: pulling host values into an imported design ──────────────────
+//
+// The mirror image of the routed-gesture tests above, and the half that was
+// missing: `route_changes_to_host_params(true)` drove the store, but nothing
+// ever pulled the store back into the view, so an imported design's controls
+// did not follow automation playback or a host-side edit. A `bind_parameter`
+// widget follows the host by registering a store listener that
+// `pump_listeners()` drains; a DesignFrameView binds through the abstract
+// HostParamSurface and registers no listener, so the editor pump must pull it.
+
+namespace {
+
+// A design whose bound frame is NESTED under a container root — the shape the
+// importer actually emits (a frame inside a layout), not a bare frame root.
+class NestedFrameProcessor : public format::Processor {
+public:
+    format::PluginDescriptor descriptor() const override {
+        return {"NestedFrame", "Acme", "com.acme.nested", "1.0.0",
+                format::PluginCategory::Effect};
+    }
+    void define_parameters(state::StateStore& s) override {
+        s.add_parameter({1, "gain", "", {0.0f, 1.0f, 0.0f}});
+    }
+    void prepare(const format::PrepareContext&) override {}
+    void process(audio::BufferView<float>&, const audio::BufferView<const float>&,
+                 midi::MidiBuffer&, midi::MidiBuffer&,
+                 const format::ProcessContext&) override {}
+
+    std::unique_ptr<view::View> create_view() override {
+        const std::string svg =
+            R"(<svg width="100" height="100"><rect x="0" y="0" width="100" height="100"/></svg>)";
+        view::DesignFrameElement knob;
+        knob.kind = view::DesignFrameElement::Kind::knob;
+        knob.x = 10; knob.y = 10; knob.w = 20; knob.h = 20;
+        knob.cx = 20; knob.cy = 20; knob.hit_radius = 20.0f;
+        knob.value = 0.0f;
+        knob.param_key = "gain";
+        auto frame = std::make_unique<view::DesignFrameView>(svg, std::vector{knob},
+                                                             0, 0, 100, 100);
+        frame->route_changes_to_host_params(true);
+        frame->set_bounds({0, 0, 100, 100});
+        last_frame = frame.get();
+
+        auto root = std::make_unique<view::View>();
+        root->set_bounds({0, 0, 100, 100});
+        auto mid = std::make_unique<view::View>();   // an extra level of nesting
+        mid->add_child(std::move(frame));
+        root->add_child(std::move(mid));
+        return root;
+    }
+
+    view::DesignFrameView* last_frame = nullptr;
+};
+
+}  // namespace
+
+TEST_CASE("host automation moves an imported design's control",
+          "[view-bridge][host-param]") {
+    RoutedFrameProcessor proc;
+    state::StateStore store;
+    proc.define_parameters(store);
+    format::ViewBridge bridge(proc, store);
+    REQUIRE(bridge.open());
+    REQUIRE(proc.last_frame != nullptr);
+    REQUIRE(proc.last_frame->element_value(0) == Catch::Approx(0.0f));
+
+    // The host automates "gain" — the adapter writes the store from the audio
+    // thread, exactly as an automation-playback block would.
+    store.set_normalized_rt(1, 0.75f);
+
+    // The production editor idle pump runs on the UI thread.
+    auto pump = format::make_scripted_idle_pump(bridge);
+    pump();
+
+    CHECK(proc.last_frame->element_value(0) == Catch::Approx(0.75f));
+}
+
+TEST_CASE("the host pull reaches a design frame nested below the root",
+          "[view-bridge][host-param]") {
+    // The importer emits the frame inside a container, so a root-only pull
+    // would reach nothing in a real imported design.
+    NestedFrameProcessor proc;
+    state::StateStore store;
+    proc.define_parameters(store);
+    format::ViewBridge bridge(proc, store);
+    REQUIRE(bridge.open());
+    REQUIRE(proc.last_frame != nullptr);
+
+    store.set_normalized_rt(1, 0.5f);
+    format::make_scripted_idle_pump(bridge)();
+
+    CHECK(proc.last_frame->element_value(0) == Catch::Approx(0.5f));
+    CHECK(bridge.sync_design_frames_from_host() == 1);   // found the nested frame
+}
+
+TEST_CASE("the host pull is silent: it never echoes back as a gesture",
+          "[view-bridge][host-param]") {
+    // The echo hazard: routing is auto-enabled for every bound imported design,
+    // so a pull that re-emitted would drive the surface from the host's own
+    // value and fight automation. The push must write the element directly.
+    RoutedFrameProcessor proc;
+    state::StateStore store;
+    proc.define_parameters(store);
+    format::ViewBridge bridge(proc, store);
+    REQUIRE(bridge.open());
+
+    int changed = 0, begins = 0, ends = 0;
+    proc.last_frame->on_element_changed = [&](int, float) { ++changed; };
+    proc.last_frame->on_gesture_begin = [&](int) { ++begins; };
+    proc.last_frame->on_gesture_end = [&](int) { ++ends; };
+
+    store.set_normalized_rt(1, 0.4f);
+    auto pump = format::make_scripted_idle_pump(bridge);
+    pump();
+
+    CHECK(proc.last_frame->element_value(0) == Catch::Approx(0.4f));
+    CHECK(changed == 0);   // a pull is not a user edit
+    CHECK(begins == 0);
+    CHECK(ends == 0);
+}
+
+TEST_CASE("repeated pulls converge and do not drift the host value",
+          "[view-bridge][host-param]") {
+    // Convergence on the continuous lane, demonstrated rather than argued: a
+    // pull that fed its own value back would drift the parameter every frame.
+    // The discrete (lossy) lane is swept separately below — a continuous knob
+    // cannot fail this by construction, so it is not the interesting case.
+    RoutedFrameProcessor proc;
+    state::StateStore store;
+    proc.define_parameters(store);
+    format::ViewBridge bridge(proc, store);
+    REQUIRE(bridge.open());
+
+    // A value that does NOT sit on a quantization boundary.
+    store.set_normalized_rt(1, 0.3f);
+    auto pump = format::make_scripted_idle_pump(bridge);
+    pump();
+
+    const float settled_view = proc.last_frame->element_value(0);
+    const float settled_host = store.get_normalized(1);
+
+    for (int i = 0; i < 200; ++i) pump();   // a few seconds of UI ticks
+
+    CHECK(proc.last_frame->element_value(0) == Catch::Approx(settled_view));
+    CHECK(store.get_normalized(1) == Catch::Approx(settled_host));
+    CHECK(store.get_normalized(1) == Catch::Approx(0.3f));   // host never moved
+}
+
+TEST_CASE("a user gesture still wins while the pull is live",
+          "[view-bridge][host-param]") {
+    // The pull must not fight the mouse: a gesture writes the store, so the
+    // next pull reads back the value the user just set, not a stale one.
+    RoutedFrameProcessor proc;
+    state::StateStore store;
+    proc.define_parameters(store);
+    format::ViewBridge bridge(proc, store);
+    REQUIRE(bridge.open());
+    auto pump = format::make_scripted_idle_pump(bridge);
+    pump();
+
+    proc.last_frame->simulate_drag({20, 20}, {20, 5});   // user turns the knob up
+    const float after_gesture = proc.last_frame->element_value(0);
+    REQUIRE(after_gesture > 0.0f);
+
+    pump();   // the pull must agree with the gesture, not undo it
+    CHECK(proc.last_frame->element_value(0) == Catch::Approx(after_gesture));
+}
+
+namespace {
+
+// A design whose bound control is a DISCRETE dropdown — the lossy lane. Three
+// quantizing transforms sit between a user's pick and the value pulled back:
+// choice_to_norm (index -> norm), the store's constrain_stored_value (which
+// applies an implicit step of 1 to any non-Continuous ParamKind, whether or not
+// the range declares a step), and norm_to_choice (norm -> index). A continuous
+// knob passes a convergence test by construction; only this lane can fail one.
+class DiscreteFrameProcessor : public format::Processor {
+public:
+    explicit DiscreteFrameProcessor(int options) : options_(options) {}
+    format::PluginDescriptor descriptor() const override {
+        return {"Discrete", "Acme", "com.acme.discrete", "1.0.0",
+                format::PluginCategory::Effect};
+    }
+    void define_parameters(state::StateStore& s) override {
+        state::ParamInfo p;
+        p.id = 1;
+        p.name = "mode";
+        p.range = {0.0f, static_cast<float>(options_ - 1), 0.0f};
+        p.kind = state::ParamKind::Enum;   // opts into integer quantization
+        s.add_parameter(p);
+    }
+    void prepare(const format::PrepareContext&) override {}
+    void process(audio::BufferView<float>&, const audio::BufferView<const float>&,
+                 midi::MidiBuffer&, midi::MidiBuffer&,
+                 const format::ProcessContext&) override {}
+
+    std::unique_ptr<view::View> create_view() override {
+        view::DesignFrameElement e;
+        e.kind = view::DesignFrameElement::Kind::dropdown;
+        e.x = 0; e.y = 0; e.w = 40; e.h = 10;
+        e.param_key = "mode";
+        for (int i = 0; i < options_; ++i) e.options.push_back("opt" + std::to_string(i));
+        auto frame = std::make_unique<view::DesignFrameView>(
+            R"(<svg width="40" height="10"><rect width="40" height="10"/></svg>)",
+            std::vector{e}, 0, 0, 40, 10);
+        frame->route_changes_to_host_params(true);
+        frame->set_bounds({0, 0, 40, 10});
+        last_frame = frame.get();
+        return frame;
+    }
+
+    int options_;
+    view::DesignFrameView* last_frame = nullptr;
+};
+
+}  // namespace
+
+TEST_CASE("a discrete pull settles on the host's own value, across the range",
+          "[view-bridge][host-param]") {
+    // The oracle, swept the way the parameter-mirror lane learned to sweep:
+    // option counts x 201 host start points, including values that land
+    // BETWEEN options. A continuous knob cannot fail a convergence check by
+    // construction; this lane can, because three quantizing hops sit between
+    // the host's value and the index the design shows.
+    //
+    // Two questions, because neither implies the other:
+    //   1. does the element settle (stop moving)?
+    //   2. does the host stay where it was (the pull writes nothing back)?
+    // A pull that echoed a quantized value would satisfy (1) while ratcheting
+    // the parameter across the range in (2).
+    for (int n : {2, 3, 4, 5, 8, 16}) {
+        DiscreteFrameProcessor proc(n);
+        state::StateStore store;
+        proc.define_parameters(store);
+        format::ViewBridge bridge(proc, store);
+        REQUIRE(bridge.open());
+        auto pump = format::make_scripted_idle_pump(bridge);
+
+        for (int step = 0; step <= 200; ++step) {
+            const float v = step / 200.0f;
+            INFO("options=" << n << " host_norm=" << v);
+            store.set_normalized_rt(1, v);
+            pump();
+
+            const float host_settled = store.get_normalized(1);
+            const float elem_settled = proc.last_frame->element_value(0);
+
+            // The element must show the option the HOST actually holds, not a
+            // neighbor: re-deriving the index from the host's own value is the
+            // only agreement that matters.
+            CHECK(elem_settled == Catch::Approx(host_settled).margin(
+                      0.5f / static_cast<float>(n - 1)));
+
+            for (int t = 0; t < 50; ++t) pump();   // hold it for many UI ticks
+            CHECK(store.get_normalized(1) == Catch::Approx(host_settled));  // host never moved
+            CHECK(proc.last_frame->element_value(0) == Catch::Approx(elem_settled));  // settled
+        }
+    }
 }

@@ -147,6 +147,23 @@ public:
     state::StateStore& store() { return store_; }
     bool uses_script_ui() const { return uses_script_ui_; }
 
+    /// Pull host parameter values into every `DesignFrameView` in the open tree
+    /// (`sync_from_host_params()` on each), and return how many were synced.
+    ///
+    /// This is the host->UI half of the routed design path. `bind_parameter`
+    /// widgets follow host automation by registering a store listener, which
+    /// `pump_listeners()` drains; a `DesignFrameView` resolves its `param_key`s
+    /// against the abstract `HostParamSurface` instead and registers no
+    /// listener, so it has no such channel and must be pulled. Without this an
+    /// imported design's controls drive the host but never follow it: a knob
+    /// stays put under automation playback or a host-side edit.
+    ///
+    /// UI thread only — it mutates view state and requests repaints. The editor
+    /// idle pump (`make_scripted_idle_pump`) calls it beside `pump_listeners()`.
+    /// The push is silent (`set_element_value` writes the element directly and
+    /// does not re-emit), so it cannot echo back into the surface.
+    std::size_t sync_design_frames_from_host();
+
     /// The runtime host-parameter surface installed on the open view tree.
     ///
     /// A view built by `create_view()` — in particular an imported

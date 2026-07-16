@@ -1503,6 +1503,42 @@ re-binds. It previously kept driving the parameter it was first bound to, so a
 view that re-keyed on a preset change was quietly writing to the **wrong
 parameter**.
 
+### A DesignFrameView must be PULLED — `pump_listeners()` cannot reach it
+
+The two host→UI channels are **not** the same mechanism, and the difference is
+easy to miss:
+
+- a `bind_parameter` widget **registers a store listener**, so
+  `StateStore::pump_listeners()` pushes host automation into it;
+- a `DesignFrameView` binds through the abstract `HostParamSurface` (so one view
+  runs against JUCE APVTS / iPlug2 / StateStore) and therefore registers **no
+  listener at all**. Nothing pushes to it. It has to be pulled with
+  `sync_from_host_params()`.
+
+The editor idle pump (`make_scripted_idle_pump`) calls both — `pump_listeners()`
+and `ViewBridge::sync_design_frames_from_host()` — so every plugin editor gets
+both channels. Embedding Pulp views in your own host? Wiring only the pump's
+listener drain gives you a design whose knobs drive the host but never follow it.
+
+The pull is **silent**: `set_element_value` writes the element directly and never
+re-emits `on_element_changed`, so it cannot echo back into the surface. That is
+what makes it safe to pull unconditionally on a tick even though routing is
+auto-enabled for every bound imported design — do not "optimize" it into a
+re-emit.
+
+**Testing that property: assert zero writes, not "it converges."** A
+settle/no-drift check over repeated pulls looks like the natural convergence
+proof and is nearly worthless here — a discrete parameter quantizes a small echo
+straight back onto the same option, so an echoing pull can touch the host every
+single frame while the value never moves and the check stays green. (Verified by
+injecting exactly that echo: the settle/drift sweep passed; only
+`FakeHostParamSurface::set_calls == 0` caught it, 180 == 0.) The pull is a read
+— assert it that way, across every element kind, since routing is on for all of
+them. Equally, do not add a naive `last_norm` guard: display text is not pure
+in `(key, norm)` (`ParamInfo::to_string` is a closure and `do_param_display_text`
+is virtual), so a tempo-synced delay reformats `"500 ms"` → `"1/4"` with its value
+unmoved, and a value-only guard would freeze that readout.
+
 ## Widget-bridge JS dispatch and CSS color parsing have one home each
 
 **Dispatch:** all `__dispatch__` event emission goes through
