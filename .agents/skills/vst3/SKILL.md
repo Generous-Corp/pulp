@@ -979,3 +979,44 @@ in `adapter_boundary.hpp`, not in the adapter. The header's prose states actual 
 adoption — trust it over an assumption that all adapters are migrated (AU/LV2 still carry
 local bypass, and AU/AAX/LV2 still pass the dry signal through UNDELAYED while bypassed,
 a real PDC-misalignment bug tracked as its own follow-up).
+
+## The adapter has an end-to-end null — extend it rather than trusting a diff
+
+`test/test_vst3_audio_parity.cpp` renders one deterministic Processor through
+`HeadlessHost` and through the real `PulpVst3Processor::process()` — `ProcessData` /
+`AudioBusBuffers` / `IEventList` / `IParameterChanges`, the plumbing a host builds — and
+requires the output to be **bit-identical** (memcmp, no tolerance) across a sample-rate ×
+block-size sweep including a ragged final block. `HeadlessHost` shares no adapter code, so
+the reference cannot drift with the thing it is checking. `test_adapter_boundary_parity.cpp`
+drives VST3 only as a neutral-struct matrix column and never enters `process()`; it is not
+a substitute.
+
+Things that fixture learned the hard way, if you extend it:
+
+- **The store carries one MORE param than you registered.** `initialize()` runs
+  `maybe_synthesize_bypass()`, and `synthesize_bypass_parameter` defaults **on**, so a
+  synthesized `Bypass` (`kSynthesizedBypassParamId`, `'pByp'`) is appended last. Every
+  index the publication path resolves is a position in *that* list — an off-by-one lands
+  on Bypass and silently normalizes against its `{0,1}` range without going out of bounds.
+  (Relatedly, `getParameterCount()` is 2085, not 5: it also counts the 16×130 hidden
+  MIDI-CC controllers registered for `IMidiMapping`. Assert on `getParameterInfo(i).id`,
+  never the count.)
+- **The host boundary is normalized, so a null needs values that survive it.** The harness
+  normalizes and the adapter denormalizes, while the direct path writes the plain value.
+  Only values that round-trip bitwise (dyadic rationals on a linear range) compare fairly.
+  The fixture asserts that round-trip rather than assuming it, so a drift there names the
+  range math instead of blaming the adapter.
+- **VST3 has no raw-short-message event.** Notes arrive as `kNoteOnEvent` with a float
+  velocity the adapter rebuilds as `uint8_t(velocity * 127.0f)` — lossy. The fixture uses
+  dyadic velocities (0.5 → 63) and feeds the direct path the byte decode produces, so the
+  stimulus stays identical and the null measures the adapter, not the note encoding.
+- **Publication faults are invisible in the waveform.** A plugin-side param change never
+  reaches the samples, so the audio null stays green through a wholly broken publication
+  path. That is why the param cases are separate assertions — verified by mutation: moving
+  the pre-process param snapshot after `process()` reddens only the publication cases and
+  leaves the null passing.
+- **`setParamNormalized` in the skip branch is load-bearing and easy to drop.** It keeps
+  the EditController synced for params that emitted explicit sample-accurate points.
+  Deleting it changes no sample, so it was covered by nothing until the null's
+  controller-read case; without that case a refactor that drops it ships green while the
+  host UI and host-side automation reads show a stale value.
