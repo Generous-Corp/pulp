@@ -774,6 +774,54 @@ rules:
 - **Thread rules doc.** `docs/reference/host-thread-rules.md` is the
   canonical reference.
 
+## Hosted plugin editors
+
+`EditorAttachment::create(slot, window)` embeds a hosted plugin's own GUI.
+Wired for **CLAP on macOS**; VST3 / AU / LV2 slots still report no editor. The
+non-obvious parts:
+
+- **The APIs are inverted from `HostedEditor`.** CLAP `set_parent` and VST3
+  `IPlugView::attached` CONSUME a parent view — the plugin inserts its own view
+  into what you hand it and never hands one back. `HostedEditor` is the other
+  way round (the slot returns a handle the host embeds). The slots reconcile
+  this with a host-owned container `NSView` (`hosted_editor_container.hpp`)
+  reported as `native_handle`. AU v2's CocoaUI does return a view, but wraps it
+  in the same container so teardown is uniform. Do not "simplify" this away.
+- **The container is inserted into the parent window at CREATION**, not at
+  attach. `EditorAttachment::create` calls `create_hosted_editor()` BEFORE
+  `attach_native_child_view()`, so a container that deferred insertion would
+  have the plugin run `set_parent`/`attached` against a windowless view —
+  editors that bring up Metal/OpenGL layers misbehave there. The later attach is
+  an `addSubview:` move within the same window.
+- **`core/host` is compiled WITHOUT ARC.** Container views are retained and
+  released by hand. Check `flags.make` before assuming ARC in any `core/host`
+  `.mm`.
+- **`clap_host_gui` must be served from `host_get_extension`.** It returned
+  nullptr for every extension before editors existed, so a plugin could not call
+  back at all. `request_show`/`request_hide` are denied — Pulp only creates
+  embedded editors. Deny rather than pretend.
+- **Do not call `set_scale()` on cocoa/uikit.** `clap/ext/gui.h` documents them
+  as logical-size APIs that must not receive it; win32/x11 are physical-size and
+  do want it.
+- **The gui and the container have independent lifetimes.** A plugin can report
+  its gui destroyed (`clap_host_gui::closed(was_destroyed=true)`) while the
+  caller still holds a `HostedEditor` pointing at the container. Freeing the
+  container there dangles that handle, because `EditorAttachment` detaches by
+  pointer on release. Acknowledge with `destroy()` only; let the caller's
+  teardown release the container.
+- **A native child ALWAYS composites above Pulp's GPU layer** — you cannot paint
+  Pulp chrome over an embedded editor. This is a fixed OS behavior, not a bug to
+  fix, and it constrains node-editor designs.
+- **Pulp's OWN plugins withdraw `clap.gui` under `CI=1` / `PULP_HEADLESS=1` /
+  `PULP_TEST_MODE=1`** (`format/detail/editor_environment.hpp`). A dogfood test
+  asserting a fixed `has_editor()` will pass locally and fail in CI; read the
+  same flag instead.
+- **Testing without a bundle:** `make_clap_slot(info, creator)` in
+  `core/host/src/plugin_slot_clap_internal.hpp` builds a slot around a
+  caller-created `clap_plugin_t`, skipping dlopen. The creator receives the
+  slot's real `clap_host_t`, so a fake can call back into `clap_host_gui`. See
+  `test/test_clap_hosted_editor.mm`.
+
 ## Per-format depth
 
 Each format loader has parameter / state / automation handling on top of the

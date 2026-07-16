@@ -405,6 +405,8 @@ carrying opaque state is refused (`StatefulCustomNotYetLoadable`).
 
 ## See also
 
+- [Choosing a Processing Model](processing-models.md) — whether you need a
+  `SignalGraph` at all, and what goes inside a node.
 - [Hosting guide](../guides/hosting.md) — end-to-end example.
 - [`pulp::host::PluginSlot`](../../core/host/include/pulp/host/plugin_slot.hpp)
 - [`pulp::host::SignalGraph`](../../core/host/include/pulp/host/signal_graph.hpp)

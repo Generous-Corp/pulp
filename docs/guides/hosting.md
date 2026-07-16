@@ -203,6 +203,51 @@ carries no signing or trust surface. See
 [Live plugin swap](../reference/signal-graph.md#live-plugin-swap) for the
 full workflow and the fail-closed checks that protect the stream.
 
+## Showing a hosted plugin's editor
+
+`EditorAttachment` embeds a hosted plugin's own GUI in a `WindowHost`, so you
+can show the vendor's interface instead of rebuilding it from the parameter
+list. It is RAII: the attachment owns the editor and detaches and destroys it in
+the right order.
+
+```cpp
+#include <pulp/view/hosted_editor_attachment.hpp>
+
+auto attachment = pulp::view::EditorAttachment::create(slot.get(), window);
+if (!attachment) {
+    // No editor for this format/platform, or the plugin refused. Fall back to
+    // your own parameter UI — this is a normal answer, not an error.
+}
+```
+
+Available for CLAP on macOS today; see Limits below.
+
+Two things to design around:
+
+- **A native child composites ABOVE Pulp's whole GPU layer.** The window server
+  draws it over the Skia surface, so you cannot paint Pulp chrome on top of an
+  embedded editor. Use `set_native_child_view_clip` (which `NativeViewHost` does
+  for you) to keep a child inside a scroll viewport.
+- **Editor calls are main-thread only.** Create, resize, and destroy on the main
+  thread; never from `process()`. Destroy the attachment before dropping the
+  slot — the CLAP slot logs an error and force-tears-down if you don't, but that
+  is a diagnostic for a contract violation, not a supported path.
+
+Resize negotiates in both directions. A plugin asking to resize itself reaches
+the handler you install; refusing is legal and the plugin must cope:
+
+```cpp
+slot->set_editor_resize_request_handler([&](uint32_t w, uint32_t h) {
+    return attachment->set_bounds(0.0f, 0.0f, float(w), float(h));
+});
+
+// Host-initiated: the plugin may snap to its own constraints, so read back.
+uint32_t w = 900, h = 700;
+if (slot->set_hosted_editor_size(w, h)) {
+    attachment->set_bounds(0.0f, 0.0f, float(w), float(h));  // w/h are the accepted size
+}
+```
+
 ## Delay compensation (PDC)
 
 `PluginSlot::latency_samples()` reports per-node latency. The graph sums
@@ -237,8 +282,10 @@ These exist to smoke-test the loaders outside a full DAW context.
   only short MIDI messages in the atom input sequence reach the processor.
 - Only one factory descriptor per `.clap` is selected (first one, or one
   matching `info.unique_id`).
-- Third-party hosted editor embedding is not wired in the current host
-  loaders; the typed hosted-editor API exists, but CLAP / VST3 / AU / LV2
-  slots still report no hosted editor. This does not prevent metadata,
-  parameter, state, MIDI, or audio analysis; it means Pulp cannot currently
-  create and display the vendor's native editor UI.
+- Hosted editor embedding is wired for CLAP on macOS. VST3, AU, and LV2 slots
+  still report no editor, and Windows and Linux have no desktop `WindowHost`
+  implementing the native-child seam, so nothing can be parented there yet.
+  Where an editor is unavailable, `has_editor()` is false and
+  `EditorAttachment::create` returns nullptr — branch on that rather than
+  assuming a view. A missing editor never blocks metadata, parameter, state,
+  MIDI, or audio work; it only means the vendor's own UI cannot be shown.
