@@ -234,3 +234,47 @@ current values and display text back at tick.
 > Routing is **off by default**, and that default is what keeps every existing embed
 > correct. Moving to the surface? Turn routing on **and** drop the write side of
 > `on_element_changed`, keeping it only for observation.
+
+### Discrete parameters — the divisor comes from the parameter
+
+`param_step_count(key)` reports how many distinct values the **host's** parameter
+exposes. It counts values, not intervals: a 6-way selector returns 6, a toggle
+returns 2, and a **continuous parameter or an unknown key returns 0**.
+
+`0` means "this parameter has no index domain". It is never a denominator — do not
+divide by it. Use the helpers, which encode that guard:
+
+```cpp
+const int steps = surface.param_step_count("lfo_waveform");   // 6
+const double n  = pulp::view::param_index_to_normalized(2, steps);   // 2/5
+const int idx   = pulp::view::param_normalized_to_index(n, steps);   // 2
+```
+
+The denominator is `steps - 1`, so index `0` maps to `0.0` and index `steps - 1`
+maps to `1.0` — the same mapping `ParamRange::normalize()` produces for a discrete
+range.
+
+> #### ⚠️ Scale by the parameter's count, never by what the UI draws
+>
+> A control that renders **3** visible positions may be bound to a **6**-value
+> parameter. Dividing by the number of things drawn — `idx / (options - 1)` —
+> silently emits a wrong normalized value: index 2 of a 3-way radio becomes `1.0`
+> and slams the host to the parameter's *last* value. `param_step_count()` is the
+> only authority on a parameter's divisor.
+>
+> If a control's option count disagrees with its parameter's step count, that is a
+> binding bug. Assert on the mismatch rather than scaling against the view.
+
+`param_step_count()` matches the cardinality Pulp's format adapters advertise
+(`state::param_value_count`) — what the AU and AAX adapters pass through directly.
+It is **not** VST3's `stepCount` field, which counts intervals and is therefore one
+less; the VST3 adapter applies that `-1` at its own boundary. "Step count" is
+overloaded across plug-in APIs — this accessor always means values.
+
+Only an author-declared `ParamKind` (`Integer` / `Toggle` / `Enum`) or a
+`value_labels` list makes a parameter discrete. A `ParamRange::step` that merely
+quantizes a `Continuous` parameter still reports `0` — quantization is not
+semantics, and adapters treat it the same way.
+
+A host surface that does not implement `do_param_step_count()` reports `0`, so an
+older surface degrades to "continuous" rather than to a wrong count.
