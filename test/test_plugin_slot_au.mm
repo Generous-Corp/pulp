@@ -119,18 +119,16 @@ TEST_CASE("AU host output AudioBufferList reuses pre-sized storage (A2 RT no-all
     REQUIRE(abl->mBuffers[1].mData == ch1.data());
 }
 
-TEST_CASE("AU host slot prepares an instrument, which has no input bus",
+TEST_CASE("AU host slot prepares and renders an instrument, which has no input bus",
           "[host][au][integration]") {
-    // An instrument (aumu) exposes zero input elements. prepare() used to set
-    // kAudioUnitProperty_StreamFormat on input element 0 unconditionally and
-    // treat the resulting kAudioUnitErr_InvalidElement (-10877) as fatal, so
-    // loading ANY instrument failed while every effect passed — which is why
-    // the effect-only integration test above never caught it. Instruments are
-    // the whole point of a host that wants to drive a synth offline.
+    // An instrument (aumu) exposes zero input elements, so setting
+    // kAudioUnitProperty_StreamFormat on input element 0 returns
+    // kAudioUnitErr_InvalidElement and treating that as fatal rejects every
+    // instrument. An effect-only test cannot cover this: effects expose both
+    // scopes and so never take the failing path.
     const std::string uid = first_apple_instrument_unique_id();
     if (uid.empty()) {
-        WARN("skipped: no Apple instrument AU registered in this environment");
-        return;
+        SKIP("no Apple instrument AU registered in this environment");
     }
 
     host::PluginInfo info;
@@ -144,33 +142,54 @@ TEST_CASE("AU host slot prepares an instrument, which has no input bus",
 
     auto slot = host::PluginSlot::load(info);
     if (!slot) {
-        WARN("skipped: system AU '" + uid + "' did not load in this environment");
-        return;
+        SKIP("system AU '" + uid + "' did not load in this environment");
     }
 
     // The regression: this returned false for every instrument.
     REQUIRE(slot->prepare(48000.0, 512));
 
-    // And it must actually render — proving we skipped the input-side setup
-    // rather than merely swallowing the error and leaving the AU uninitialized.
     constexpr int channels = 2;
     constexpr int frames = 512;
-    std::vector<float> out0(frames, 1.0f), out1(frames, 1.0f);
-    std::array<float*, channels> out_ptrs{out0.data(), out1.data()};
+    constexpr float kSentinel = 1.0f;
+    std::array<std::vector<float>, channels> chans{
+        std::vector<float>(frames, kSentinel), std::vector<float>(frames, kSentinel)};
+    std::array<float*, channels> out_ptrs{chans[0].data(), chans[1].data()};
+    // An instrument pulls no input; a 0-channel view is what a host with
+    // nothing to feed it passes.
     audio::BufferView<const float> input(nullptr, 0, frames);
     audio::BufferView<float> output(out_ptrs.data(), channels, frames);
     midi::MidiBuffer midi_in, midi_out;
     host::ParameterEventQueue params;
 
+    // Rendering must WRITE the buffer, not merely leave it finite: when
+    // AudioUnitRender fails, process() logs and returns with the caller's
+    // buffer untouched, so `isfinite` alone would pass over a dead render.
     slot->process(output, input, midi_in, midi_out, params, frames);
 
-    // Silent (no note on) but finite and written — a rendered buffer, not the
-    // untouched 1.0f fill and not NaN.
+    bool overwritten = false;
     for (int c = 0; c < channels; ++c) {
+        const float* p = output.channel_ptr(static_cast<std::size_t>(c));
         for (int i = 0; i < frames; ++i) {
-            REQUIRE(std::isfinite(output.channel_ptr(static_cast<std::size_t>(c))[i]));
+            if (p[i] != kSentinel) overwritten = true;
+            if (!std::isfinite(p[i])) FAIL("non-finite output at channel " << c
+                                           << " sample " << i);
         }
     }
+    CHECK(overwritten);
+
+    // Drive it the way a host actually uses an instrument: a note on must
+    // produce energy. This is the end-to-end claim the fix exists to support.
+    midi_in.add(midi::MidiEvent::note_on(0, 69, 100));
+    double energy = 0.0;
+    for (int block = 0; block < 8; ++block) {
+        slot->process(output, input, midi_in, midi_out, params, frames);
+        midi_in.clear();
+        for (int c = 0; c < channels; ++c) {
+            const float* p = output.channel_ptr(static_cast<std::size_t>(c));
+            for (int i = 0; i < frames; ++i) energy += double(p[i]) * double(p[i]);
+        }
+    }
+    CHECK(energy > 0.0);
 }
 
 TEST_CASE("AU host slot renders a real system AudioUnit (A2 integration)",

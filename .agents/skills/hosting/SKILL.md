@@ -598,21 +598,43 @@ Gotchas:
 ## Common tripwires
 
 - **Instruments have no input bus — never address input element 0 blind.**
-  An AU instrument (`aumu`/`aumi`), a generator (`augn`), and often a MIDI
-  effect (`aumf`) expose **zero input elements**. Setting a per-element input
-  property on one — `kAudioUnitProperty_StreamFormat`,
-  `kAudioUnitProperty_SetRenderCallback` — returns
-  `kAudioUnitErr_InvalidElement` (**-10877**), *not* a format error. Treating
-  that as fatal rejects **every instrument on the system** while every effect
-  keeps working, so the failure is invisible to effect-only tests. Ask
+  An AU instrument (`aumu`) and a generator (`augn`) expose **zero input
+  elements**; so does a MIDI processor (`aumi`, which despite the name is
+  `kAudioUnitType_MIDIProcessor`, not an instrument — and it may expose no
+  *output* element either). A MIDI effect (`aumf`) *does* have audio input and
+  is unaffected. Setting a per-element input property on an input-less AU —
+  `kAudioUnitProperty_StreamFormat`, `kAudioUnitProperty_SetRenderCallback` —
+  returns `kAudioUnitErr_InvalidElement` (**-10877**), *not* a format error.
+  Treating that as fatal rejects **every instrument on the system** while every
+  effect keeps working, so the failure is invisible to effect-only tests. Ask
   `kAudioUnitProperty_ElementCount` on the scope first and skip the input-side
   setup when it is 0 (`scope_element_count()` in
-  `core/host/src/plugin_slot_au.mm`). The general rule for any backend: derive
-  the bus layout from what the plug-in **reports**, never from the assumption
-  that an input side exists. The other slots already do this and are the pattern
-  to copy — VST3 loops `component_->getBusCount(kAudio, kInput)` and ignores
-  `setBusArrangements`' status ("missing buses degrade gracefully"); LV2 counts
-  `num_audio_inputs_` from the ports it discovers. AU was the outlier.
+  `core/host/src/plugin_slot_au.mm`). When the AU does not answer the query,
+  assume an input bus **exists**: a non-answering effect then behaves as it
+  always did, and a non-answering instrument fails loudly at the property set
+  with a named scope+status. Assuming *none* would skip input setup on that
+  effect and leave every `AudioUnitRender` failing while the caller's buffer
+  keeps stale contents — **silent wrong audio, the worst of the four outcomes.**
+  The general rule for any backend: derive the bus layout from what the plug-in
+  **reports**, never from the assumption that an input side exists. The other
+  slots already do this and are the pattern to copy — VST3 loops
+  `component_->getBusCount(kAudio, kInput)` and ignores `setBusArrangements`'
+  status ("missing buses degrade gracefully"); CLAP and VST3 both size
+  `ProcessData` from the caller's view. AU was the outlier.
+- **The LV2 slot cannot safely host an instrument — and it fails as UB, not
+  cleanly.** Port discovery keeps only `lv2:AudioPort`/`lv2:ControlPort` stanzas
+  (`plugin_slot_lv2.cpp`, `if (!is_audio && !is_control) continue;`), so atom /
+  event / CV ports are never seen and never `connect_port`'d — yet `run()` is
+  called anyway. The LV2 spec requires **every** port be connected before
+  `run()` unless it is `lv2:connectionOptional`; running with unconnected ports
+  is undefined behavior and commonly segfaults. Every LV2 instrument has an atom
+  MIDI input port, and many effects carry atom ports for transport. There is
+  also no MIDI delivery path for LV2 at all. Unlike the AU trap above this does
+  not fail loudly — so **do not claim "Pulp hosts instruments" unqualified**:
+  AU yes, VST3/CLAP plausibly, LV2 no. Fixing it means an atom-sequence input
+  buffer + MIDI mapping; the minimum stopgap is to detect non-audio/non-control
+  input ports at discovery and refuse `prepare()` loudly unless
+  `connectionOptional`.
 - **Test hosts against a real *instrument*, not just a real effect.** The
   effect-only integration test in `test/test_plugin_slot_au.mm` passed happily
   through the bug above. Apple's bundled `DLSMusicDevice`
