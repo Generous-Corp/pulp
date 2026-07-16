@@ -2,6 +2,7 @@
 
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
+#include "css_color.hpp"
 
 #include <pulp/canvas/attributed_string.hpp>
 
@@ -14,9 +15,8 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_text_runs_api(std::function<canvas::Color(const std::string&)> parse_color) {
+void WidgetBridge::register_widget_text_runs_api() {
     BridgeApiContext api{engine_};
-    auto parseHexColor = std::move(parse_color);
 
     // setTextRuns(id, [{start,end,fontWeight?,fontSize?,color?,fontStyle?,
     // letterSpacing?}, ...]) — per-range styled text. Builds a
@@ -24,7 +24,7 @@ void WidgetBridge::register_widget_text_runs_api(std::function<canvas::Color(con
     // offsets) so single-line mixed text renders each run with its own style
     // (the native equivalent of the web nested-<span> path). The dominant style
     // is read from the Label (codegen emits the single-style setters first).
-    register_bridge_function(api, "setTextRuns", [this, parseHexColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setTextRuns", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto* l = dynamic_cast<Label*>(widget(id));
         if (!l || args.numArgs < 2 || !args[1] || !args[1]->isArray())
@@ -54,7 +54,7 @@ void WidgetBridge::register_widget_text_runs_api(std::function<canvas::Color(con
             if (r.hasObjectMember("fontSize"))
                 span.font_size = static_cast<float>(r["fontSize"].getWithDefault<double>(span.font_size));
             if (r.hasObjectMember("color"))
-                span.color = parseHexColor(std::string(r["color"].toString()));
+                span.color = parse_bridge_css_color(std::string(r["color"].toString()));
             if (r.hasObjectMember("fontStyle"))
                 span.italic = (std::string(r["fontStyle"].toString()) == "italic");
             if (r.hasObjectMember("letterSpacing"))

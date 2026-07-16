@@ -962,3 +962,14 @@ overrides both (`vst3_adapter.cpp`):
 - `from_string` is author code: guard with `std::isfinite` and fall through to
   the base parser on a non-finite result rather than writing a garbage
   normalized value. Test: `test/test_vst3_param_display.cpp`.
+
+## The VST3 adapter consumes the shared adapter-boundary core
+
+`core/format/include/pulp/format/adapter_boundary.hpp` is the shared home for f64 param
+marshalling, latency-compensated bypass, and param dual-write. VST3 now consumes it
+(`boundary::LatencyCompensatedBypass`, `boundary::apply_param_value`, the f64 helpers,
+`kBoundaryMaxChannels`) instead of carrying local copies. Fix marshalling/bypass semantics
+in `adapter_boundary.hpp`, not in the adapter. The header's prose states actual per-adapter
+adoption — trust it over an assumption that all adapters are migrated (AU/LV2 still carry
+local bypass, and AU/AAX/LV2 still pass the dry signal through UNDELAYED while bypassed,
+a real PDC-misalignment bug tracked as its own follow-up).

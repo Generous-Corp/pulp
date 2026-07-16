@@ -5107,10 +5107,7 @@ TEST_CASE("InspectorOverlay: paint hook gates on the painting root",
     REQUIRE(null_canvas.command_count() > 0);
 
     // Clean up the global hooks so later tests aren't affected.
-    g_active_inspector = nullptr;
-    View::set_inspector_paint_hook({});
-    View::set_inspector_key_hook({});
-    View::set_inspector_mouse_hook({});
+    uninstall_inspector_hooks();
 }
 
 // Two-way selection fix. A tree-row click (default, non-read-only)
@@ -6504,12 +6501,59 @@ TEST_CASE("InspectorOverlay P5: install_inspector_hooks installs a root-gated "
     REQUIRE(View::call_inspector_cursor_hook(mv, &other_root) == -1);
 
     // Clean up the global hooks so later tests aren't affected.
-    g_active_inspector = nullptr;
-    View::set_inspector_paint_hook({});
-    View::set_inspector_key_hook({});
-    View::set_inspector_mouse_hook({});
-    View::set_inspector_text_hook({});
-    View::set_inspector_cursor_hook({});
+    uninstall_inspector_hooks();
+}
+
+// ── uninstall_inspector_hooks tears down every slot so a host outliving its
+// inspector cannot fire a hook bound to freed memory ─────────────────────────
+//
+// install_inspector_hooks captures nothing and routes through
+// g_active_inspector, so nulling the global (which uninstall does first) makes
+// the still-installed hooks inert; uninstall then also releases all five View
+// hook slots. Assert both properties: after uninstall the global is null and
+// each hook reports its no-op default even if a caller invokes it.
+TEST_CASE("InspectorOverlay: uninstall_inspector_hooks clears the global and "
+          "all View hook slots",
+          "[inspect][overlay][hooks][teardown]") {
+    View inspected_root;
+    inspected_root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<View>();
+    child->set_bounds({20, 20, 120, 30});
+    View* child_ptr = child.get();
+    inspected_root.add_child(std::move(child));
+
+    InspectorOverlay overlay(inspected_root);
+    overlay.set_active(true);
+    overlay.set_selected_view(child_ptr);
+    install_inspector_hooks(overlay);
+    REQUIRE(g_active_inspector == &overlay);
+
+    // Sanity: with hooks installed the overlay paints into the inspected root.
+    pulp::canvas::RecordingCanvas before_canvas;
+    View::paint_overlays(before_canvas, &inspected_root);
+    REQUIRE(before_canvas.command_count() > 0);
+
+    uninstall_inspector_hooks();
+
+    // Global is nulled and every slot reports its no-op default.
+    REQUIRE(g_active_inspector == nullptr);
+
+    pulp::canvas::RecordingCanvas after_canvas;
+    View::paint_overlays(after_canvas, &inspected_root);
+    REQUIRE(after_canvas.command_count() == 0);
+
+    KeyEvent ke;
+    REQUIRE_FALSE(View::call_inspector_key_hook(ke));
+
+    MouseEvent me;
+    me.position = {40, 40};
+    REQUIRE_FALSE(View::call_inspector_mouse_hook(me, &inspected_root));
+
+    TextInputEvent te;
+    te.text = "x";
+    REQUIRE_FALSE(View::call_inspector_text_hook(te, &inspected_root));
+
+    REQUIRE(View::call_inspector_cursor_hook(me, &inspected_root) == -1);
 }
 
 // ── WYSIWYG P5 regression — typing V/T mid-edit must NOT flip the tool ────────

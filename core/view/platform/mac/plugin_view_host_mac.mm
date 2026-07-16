@@ -969,7 +969,9 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     // Clear at host bounds so the letterbox bars (visible only when the
     // OS aspect-lock briefly diverges during user drag) share the design
     // background color — same approach as the standalone host.
-    canvas.set_fill_color(pulp::canvas::Color::rgba8(30, 30, 46));
+    canvas.set_fill_color(pulp::canvas::Color::rgba8(
+        pulp::view::mac_host::kHostClearR, pulp::view::mac_host::kHostClearG,
+        pulp::view::mac_host::kHostClearB));
     canvas.fill_rect(0, 0, bw, bh);
 
     if (!self.rootView) return;
@@ -1067,82 +1069,10 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 
 @end
 
-static NSRect child_view_frame_in_host(NSView* container,
-                                       float x,
-                                       float y,
-                                       float width,
-                                       float height) {
-    if (!container) {
-        return NSZeroRect;
-    }
-
-    const auto bounds = container.bounds;
-    const CGFloat clipped_width = std::max<CGFloat>(0.0, width);
-    const CGFloat clipped_height = std::max<CGFloat>(0.0, height);
-    const CGFloat cocoa_y = container.isFlipped
-        ? y
-        : NSHeight(bounds) - y - clipped_height;
-    return NSMakeRect(x, cocoa_y, clipped_width, clipped_height);
-}
-
-static bool attach_child_view_to_host(NSView* container,
-                                      void* child_view_handle,
-                                      float x,
-                                      float y,
-                                      float width,
-                                      float height) {
-    if (!container || !child_view_handle) {
-        return false;
-    }
-
-    NSView* child = (__bridge NSView*)child_view_handle;
-    if (!child) {
-        return false;
-    }
-
-    if (child.superview && child.superview != container) {
-        [child removeFromSuperview];
-    }
-
-    [child setFrame:child_view_frame_in_host(container, x, y, width, height)];
-
-    if (child.superview != container) {
-        [container addSubview:child];
-    }
-
-    [child setHidden:NO];
-    return true;
-}
-
-static bool set_child_view_bounds_in_host(NSView* container,
-                                          void* child_view_handle,
-                                          float x,
-                                          float y,
-                                          float width,
-                                          float height) {
-    if (!container || !child_view_handle) {
-        return false;
-    }
-
-    NSView* child = (__bridge NSView*)child_view_handle;
-    if (!child || child.superview != container) {
-        return false;
-    }
-
-    [child setFrame:child_view_frame_in_host(container, x, y, width, height)];
-    return true;
-}
-
-static void detach_child_view_from_host(NSView* container, void* child_view_handle) {
-    if (!container || !child_view_handle) {
-        return;
-    }
-
-    NSView* child = (__bridge NSView*)child_view_handle;
-    if (child && child.superview == container) {
-        [child removeFromSuperview];
-    }
-}
+// Child-view attach/detach/reposition reuse the shared mac_geometry helpers
+// (window_host_mac_geometry.mm) so the coordinate-flip math lives in exactly
+// one place — see window_host_mac_internal.hpp (included above). The plugin-host
+// overrides below forward to them directly.
 
 // Native-child clip masking reuses the shared mac_geometry helper
 // (clip_child_view_in_host, window_host_mac_geometry.mm) so the coordinate-flip
@@ -1406,7 +1336,8 @@ public:
                                   float y,
                                   float width,
                                   float height) override {
-        return attach_child_view_to_host(view_, child_view, x, y, width, height);
+        return mac_geometry::attach_child_view_to_host(view_, child_view, x, y,
+                                                       width, height);
     }
 
     bool set_native_child_view_bounds(NativeViewHandle child_view,
@@ -1414,11 +1345,12 @@ public:
                                       float y,
                                       float width,
                                       float height) override {
-        return set_child_view_bounds_in_host(view_, child_view, x, y, width, height);
+        return mac_geometry::set_child_view_bounds_in_host(view_, child_view, x, y,
+                                                           width, height);
     }
 
     void detach_native_child_view(NativeViewHandle child_view) override {
-        detach_child_view_from_host(view_, child_view);
+        mac_geometry::detach_child_view_from_host(view_, child_view);
     }
 
     bool set_native_child_view_clip(NativeViewHandle child_view,
@@ -1726,10 +1658,7 @@ private:
     // mirroring the standalone PulpMetalView, so there is no clear/undefined
     // composite while the foreign host reparents and relayers the view.
     layer.opaque = YES;
-    const CGFloat dark[4] = { 30.0 / 255.0, 30.0 / 255.0, 46.0 / 255.0, 1.0 };
-    CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-    layer.backgroundColor = CGColorCreate(cs, dark);
-    CGColorSpaceRelease(cs);
+    layer.backgroundColor = pulp::view::mac_host::cg_host_clear_color();
 
     _metalLayer = layer;
     return layer;
@@ -1947,7 +1876,8 @@ public:
                                   float y,
                                   float width,
                                   float height) override {
-        return attach_child_view_to_host(metal_view_, child_view, x, y, width, height);
+        return mac_geometry::attach_child_view_to_host(metal_view_, child_view, x, y,
+                                                       width, height);
     }
 
     bool set_native_child_view_bounds(NativeViewHandle child_view,
@@ -1955,11 +1885,12 @@ public:
                                       float y,
                                       float width,
                                       float height) override {
-        return set_child_view_bounds_in_host(metal_view_, child_view, x, y, width, height);
+        return mac_geometry::set_child_view_bounds_in_host(metal_view_, child_view,
+                                                           x, y, width, height);
     }
 
     void detach_native_child_view(NativeViewHandle child_view) override {
-        detach_child_view_from_host(metal_view_, child_view);
+        mac_geometry::detach_child_view_from_host(metal_view_, child_view);
     }
 
     bool set_native_child_view_clip(NativeViewHandle child_view,
@@ -2121,7 +2052,9 @@ private:
         // Letterbox bg first at host bounds so the bars (visible only when
         // the OS aspect-lock briefly diverges during user drag) share the
         // design background color. Matches the standalone host.
-        canvas.set_fill_color(pulp::canvas::Color::rgba8(30, 30, 46));
+        canvas.set_fill_color(pulp::canvas::Color::rgba8(
+        pulp::view::mac_host::kHostClearR, pulp::view::mac_host::kHostClearG,
+        pulp::view::mac_host::kHostClearB));
         canvas.fill_rect(0, 0, w, h);
 
         float sx, sy, tx, ty;

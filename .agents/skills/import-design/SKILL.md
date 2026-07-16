@@ -3516,3 +3516,15 @@ rasterized shapes). Each cost a visible fidelity bug.
     thin feature can still read as "high edge agreement". The
     `int16` cast fixes it. `golden_regression.py --selftest` (ctest
     `golden-regression-selftest`, skips 77 without numpy) pins this.
+
+## Runtime materializer and baked-C++ emitter share their lowering decisions
+
+`PromotedChildHitPolicy` + the hit-ownership functions and `ImportedImageSizing` +
+`imported_image_sizing_override` live ONCE in `design_import_native_common.{hpp,cpp}` and are
+consumed by both the runtime import path and `design_cpp_codegen.cpp`. They used to be
+copy-pasted per lane and had already drifted — the baked-C++ copy omitted `combo_box`, so a
+baked plugin's hit ownership silently diverged from what the runtime importer produced from
+the same IR. A Catch2 case now asserts the policy for every `NativeWidgetKind`, so the next
+drift fails a test instead of shipping. When you add a widget kind or change a lowering
+DECISION (as opposed to per-target emission syntax), it belongs in native_common — only the
+target-specific string emission stays per-lane.

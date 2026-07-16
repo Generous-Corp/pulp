@@ -1581,4 +1581,10 @@ inline InspectorOverlay* g_active_inspector = nullptr;
 /// so pulp-view doesn't need to link pulp-inspect.
 void install_inspector_hooks(InspectorOverlay& inspector);
 
+/// Tear down what install_inspector_hooks() set up: nulls g_active_inspector
+/// and releases all five View hook slots. Call this before destroying the
+/// InspectorOverlay so a host that outlives its inspector cannot fire a hook
+/// bound to freed memory. Safe to call when no hooks were installed.
+void uninstall_inspector_hooks();
+
 } // namespace pulp::inspect

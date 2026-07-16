@@ -1478,3 +1478,22 @@ Related: an element re-keyed at runtime with `set_element_param_key()` now
 re-binds. It previously kept driving the parameter it was first bound to, so a
 view that re-keyed on a preset change was quietly writing to the **wrong
 parameter**.
+
+## Widget-bridge JS dispatch and CSS color parsing have one home each
+
+**Dispatch:** all `__dispatch__` event emission goes through
+`core/view/src/widget_bridge/bridge_dispatch.{hpp,cpp}` — one `safe_dispatch_eval` (the
+alive-flag overload) plus `dispatch_event(alive, engine, id, event_name, payload_expr)`.
+It ALWAYS routes the target id through `js_string_literal`. Do not hand-build
+`"__dispatch__('" + id + "', ...)"` by string concatenation: that pattern was copy-pasted
+across ~40 call sites with *inconsistent* escaping, so an id containing a quote or
+backslash broke out of the JS string literal and the exception was silently swallowed by
+the surrounding catch. New events call `dispatch_event`.
+
+**CSS color:** the bridge's full CSS-Color-4 parser is
+`parse_bridge_css_color(std::string_view)` in `widget_bridge/css_color.hpp` — deliberately
+NOT named `parse_css_color`, because `css_gradient.hpp` already declares a *weaker*
+`pulp::view::parse_css_color(const std::string&)` (hex/rgb/rgba/transparent only — no named
+colors, no hsl). Naming them alike makes `std::string` call sites silently bind to the weaker
+overload and regress named/hsl handling. Keep the names distinct until the two parsers are
+deliberately converged.

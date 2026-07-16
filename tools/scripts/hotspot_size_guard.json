@@ -169,6 +169,16 @@
       "path": "core/canvas/src/skia_canvas.cpp",
       "max_loc": 1136,
       "note": "Skia canvas split stabilization candidate"
+    },
+    {
+      "path": "core/view/src/widgets.cpp",
+      "max_loc": 2096,
+      "note": "Core widget implementations hotspot; split further before growing"
+    },
+    {
+      "path": "core/view/src/ui_components.cpp",
+      "max_loc": 1500,
+      "note": "Composite UI component hotspot; split further before growing"
     }
   ]
 }

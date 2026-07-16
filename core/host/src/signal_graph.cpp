@@ -1828,6 +1828,56 @@ void SignalGraph::compile_snapshot_for_test(double sample_rate, int max_block_si
     (void)snapshot;
 }
 
+bool SignalGraph::build_routing_snapshot_locked_(
+    CompiledGraph& cg, bool parallel_safe,
+    std::vector<PluginBindingContext>& plugin_ctx,
+    std::vector<CustomBindingContext>& custom_ctx,
+    format::GraphRuntimeSnapshot& out) {
+    // Resolve each node's persistent CPU-load measurer so routed execution
+    // reports the same node_loads() telemetry as the legacy walk. The measurers
+    // are insert-only and persist across snapshots; node_load_ was populated
+    // earlier in compile_. Lock the map's structure mutex (compile_ does not hold
+    // it) — a concurrent UI-thread node_loads() poll iterates under the same lock.
+    auto load_for = [this](NodeId id) -> audio::AudioProcessLoadMeasurer* {
+        std::lock_guard<std::mutex> node_load_lock(node_load_mu_);
+        auto it = node_load_.find(id);
+        return it == node_load_.end() ? nullptr : it->second.get();
+    };
+    return build_executor_snapshot(
+        nodes_, connections_,
+        [&cg](NodeId id) -> std::atomic<float>* {
+            auto it = cg.runtime.find(id);
+            return it == cg.runtime.end() ? nullptr : it->second.gain.get();
+        },
+        [&cg](NodeId id) -> PluginSlot* {
+            auto it = cg.plugins.find(id);
+            return it == cg.plugins.end() ? nullptr : it->second.get();
+        },
+        plugin_ctx, cg.routing_plugin_scratch, out, parallel_safe, load_for,
+        &custom_ctx,
+        [&cg](NodeId id) -> const CustomNodeProcessFn* {
+            auto it = cg.custom_processors.find(id);
+            return it == cg.custom_processors.end() ? nullptr : &it->second;
+        },
+        [&cg](NodeId id) -> const CustomNodeTransportProcessFn* {
+            auto it = cg.custom_transport_processors.find(id);
+            return it == cg.custom_transport_processors.end() ? nullptr
+                                                              : &it->second;
+        },
+        // Feed cached plugin metadata so the routing build makes no live
+        // PluginSlot metadata call (safe for a swap-time recompile).
+        [this](NodeId id) -> int {
+            auto it = prepared_plugin_meta_.find(id);
+            return it == prepared_plugin_meta_.end() ? 0
+                                                     : it->second.latency_samples;
+        },
+        [this](NodeId id) -> const std::vector<HostParamInfo>* {
+            auto it = prepared_plugin_meta_.find(id);
+            return it == prepared_plugin_meta_.end() ? nullptr
+                                                     : &it->second.parameters;
+        });
+}
+
 std::shared_ptr<SignalGraph::CompiledGraph>
 SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) {
     auto cg = std::make_shared<CompiledGraph>();
@@ -2073,52 +2123,13 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
     // (valid for cg's whole lifetime), so the embedded snapshot needs no
     // keepalive. Ineligible graphs leave routing_valid false and use the walk.
     {
-        CompiledGraph& cgr = *cg;
-        // Resolve each node's persistent CPU-load measurer so routed execution
-        // reports the same node_loads() telemetry as the legacy walk. The
-        // measurers are insert-only and persist across snapshots; node_load_ was
-        // populated earlier in compile_. Lock the map's structure mutex (compile_
-        // does not hold it here) — a concurrent UI-thread node_loads() poll
-        // iterates under the same lock.
-        auto load_for = [this](NodeId id) -> audio::AudioProcessLoadMeasurer* {
-            std::lock_guard<std::mutex> node_load_lock(node_load_mu_);
-            auto it = node_load_.find(id);
-            return it == node_load_.end() ? nullptr : it->second.get();
-        };
-        cg->routing_valid = build_executor_snapshot(
-            nodes_, connections_,
-            [&cgr](NodeId id) -> std::atomic<float>* {
-                auto it = cgr.runtime.find(id);
-                return it == cgr.runtime.end() ? nullptr : it->second.gain.get();
-            },
-            [&cgr](NodeId id) -> PluginSlot* {
-                auto it = cgr.plugins.find(id);
-                return it == cgr.plugins.end() ? nullptr : it->second.get();
-            },
-            cg->routing_plugin_ctx, cg->routing_plugin_scratch,
-            cg->routing_snapshot, /*parallel_safe=*/false, load_for,
-            &cg->routing_custom_ctx,
-            [&cgr](NodeId id) -> const CustomNodeProcessFn* {
-                auto it = cgr.custom_processors.find(id);
-                return it == cgr.custom_processors.end() ? nullptr : &it->second;
-            },
-            [&cgr](NodeId id) -> const CustomNodeTransportProcessFn* {
-                auto it = cgr.custom_transport_processors.find(id);
-                return it == cgr.custom_transport_processors.end() ? nullptr
-                                                                   : &it->second;
-            },
-            // 2.2b (H2): feed cached plugin metadata so the routing build makes
-            // no live PluginSlot metadata call (safe for a swap-time recompile).
-            [this](NodeId id) -> int {
-                auto it = prepared_plugin_meta_.find(id);
-                return it == prepared_plugin_meta_.end()
-                           ? 0 : it->second.latency_samples;
-            },
-            [this](NodeId id) -> const std::vector<HostParamInfo>* {
-                auto it = prepared_plugin_meta_.find(id);
-                return it == prepared_plugin_meta_.end()
-                           ? nullptr : &it->second.parameters;
-            });
+        // Serial routed snapshot (compact buffer layout). The resolver set that
+        // reads THIS snapshot's own runtime/plugins and the cached plugin
+        // metadata lives in build_routing_snapshot_locked_, shared with the
+        // parallel path so the two never drift.
+        cg->routing_valid = build_routing_snapshot_locked_(
+            *cg, /*parallel_safe=*/false, cg->routing_plugin_ctx,
+            cg->routing_custom_ctx, cg->routing_snapshot);
         // Size THIS snapshot's own scratch pool (per-snapshot, retired with the
         // snapshot via RCU — never resized under an in-flight reader).
         if (cg->routing_valid && max_block_size > 0) {
@@ -2173,41 +2184,14 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         cg->routing_parallel_valid = false;
         if (cg->routing_valid && parallel_routing_enabled_.load(std::memory_order_relaxed) &&
             max_block_size > 0) {
-            CompiledGraph& cgr = *cg;
-            bool ok = build_executor_snapshot(
-                nodes_, connections_,
-                [&cgr](NodeId id) -> std::atomic<float>* {
-                    auto it = cgr.runtime.find(id);
-                    return it == cgr.runtime.end() ? nullptr : it->second.gain.get();
-                },
-                [&cgr](NodeId id) -> PluginSlot* {
-                    auto it = cgr.plugins.find(id);
-                    return it == cgr.plugins.end() ? nullptr : it->second.get();
-                },
-                cg->routing_plugin_ctx_parallel, cg->routing_plugin_scratch,
-                cg->routing_snapshot_parallel, /*parallel_safe=*/true, load_for,
-                &cg->routing_custom_ctx_parallel,
-                [&cgr](NodeId id) -> const CustomNodeProcessFn* {
-                    auto it = cgr.custom_processors.find(id);
-                    return it == cgr.custom_processors.end() ? nullptr : &it->second;
-                },
-                [&cgr](NodeId id) -> const CustomNodeTransportProcessFn* {
-                    auto it = cgr.custom_transport_processors.find(id);
-                    return it == cgr.custom_transport_processors.end() ? nullptr
-                                                                       : &it->second;
-                },
-                // 2.2b (H2): cached plugin metadata (anticipation is swap-excluded
-                // by H4, but keep the whole compile path off live PluginSlot calls).
-                [this](NodeId id) -> int {
-                    auto it = prepared_plugin_meta_.find(id);
-                    return it == prepared_plugin_meta_.end()
-                               ? 0 : it->second.latency_samples;
-                },
-                [this](NodeId id) -> const std::vector<HostParamInfo>* {
-                    auto it = prepared_plugin_meta_.find(id);
-                    return it == prepared_plugin_meta_.end()
-                               ? nullptr : &it->second.parameters;
-                });
+            // Parallel-safe routed snapshot: same resolver set as the serial
+            // path (via build_routing_snapshot_locked_) but a reuse-free buffer
+            // assignment so concurrent same-level nodes never alias a recycled
+            // slot. The MIDI/automation scratch and MidiInput/Output node lists
+            // are SHARED with the serial path (identical plan).
+            bool ok = build_routing_snapshot_locked_(
+                *cg, /*parallel_safe=*/true, cg->routing_plugin_ctx_parallel,
+                cg->routing_custom_ctx_parallel, cg->routing_snapshot_parallel);
             if (ok) {
                 cg->routing_levelization = graph::build_graph_runtime_levelization(
                     cg->routing_snapshot_parallel.plan());

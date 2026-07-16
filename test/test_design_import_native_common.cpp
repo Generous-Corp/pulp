@@ -317,3 +317,43 @@ TEST_CASE("native resolver recognizes the Ink & Signal design-system vocabulary"
     // None of these should be flagged as an unsupported node anymore.
     REQUIRE_FALSE(has_diag(resolved, "native-unsupported-node"));
 }
+
+TEST_CASE("native hit-ownership contract is exhaustive across widget kinds",
+          "[design-import][hit-policy]") {
+    // The runtime materializer and the baked-C++ codegen share one definition of
+    // these predicates, so this table is the single canonical contract. Every
+    // NativeWidgetKind is listed explicitly; a new kind or a flipped answer must
+    // be reconciled here, which is what keeps the two lowerers from drifting
+    // (combo_box, in particular, is interactive and owns its children's hits).
+    struct HitPolicyRow {
+        NativeWidgetKind kind;
+        bool interactive;
+        bool owns_child_hits;
+    };
+    const HitPolicyRow rows[] = {
+        {NativeWidgetKind::view,          false, false},
+        {NativeWidgetKind::label,         false, false},
+        {NativeWidgetKind::text_button,   true,  true},
+        {NativeWidgetKind::text_editor,   true,  true},
+        {NativeWidgetKind::checkbox,      true,  true},
+        {NativeWidgetKind::toggle_button, true,  true},
+        {NativeWidgetKind::combo_box,     true,  true},
+        {NativeWidgetKind::knob,          true,  true},
+        {NativeWidgetKind::fader,         true,  true},
+        {NativeWidgetKind::meter,         false, true},
+        {NativeWidgetKind::xy_pad,        true,  true},
+        {NativeWidgetKind::waveform,      false, true},
+        {NativeWidgetKind::spectrum,      false, true},
+        {NativeWidgetKind::image_view,    false, false},
+        {NativeWidgetKind::canvas,        false, false},
+        {NativeWidgetKind::svg_path,      false, false},
+        {NativeWidgetKind::svg_rect,      false, false},
+        {NativeWidgetKind::svg_line,      false, false},
+    };
+
+    for (const auto& row : rows) {
+        INFO("kind=" << native_widget_kind_name(row.kind));
+        CHECK(is_interactive_native_kind(row.kind) == row.interactive);
+        CHECK(native_kind_owns_imported_child_hits(row.kind) == row.owns_child_hits);
+    }
+}

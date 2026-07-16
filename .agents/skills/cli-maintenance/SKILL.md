@@ -2447,3 +2447,18 @@ artifact's *existence* is not the result. `handle_audio_render` does this for
 never as a payload the caller has to remember to inspect.
 
 Plain `exec()` is still correct for commands whose output *is* the whole result.
+
+## CLI shared primitives: one home each
+
+- **JSON escaping:** use `tools/cli/json_writer.hpp` (`json_escape` / `json_string`). It is
+  header-only so standalone test targets need no link change. There were 17 hand-rolled
+  copies, several of which did not escape control bytes; do not add an 18th.
+- **Shell quoting:** use `shell_quote()` from `cli_common.hpp`. `cmd_ship.cpp` previously
+  mixed three idioms including raw `'"' + path + '"'` concatenation on the signing-key and
+  `gh secret set` paths. Never concatenate quotes around a path you shell out with.
+- **Home directories are NOT one concept.** `pulp_home()` (cli_common) is the user-facing
+  root (`%USERPROFILE%\.pulp` on Windows; missing HOME is an error). `tools_install_home()`
+  (tool_registry) is the managed-tool install root (`%LOCALAPPDATA%\Pulp` on Windows; falls
+  back to a temp dir when HOME is unset). They were both once named `pulp_home` with
+  different contracts — a silent two-sources-of-truth for a filesystem-layout invariant.
+  Pick deliberately; do not "unify" them without deciding the Windows root + fallback.

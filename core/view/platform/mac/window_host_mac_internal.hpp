@@ -197,4 +197,38 @@ inline bool plugin_view_wants_render_link(bool has_view, bool in_window) {
 
 }  // namespace pulp::view::mac_frame_timing
 
+// ── Host clear / background color ─────────────────────────────────────
+//
+// Every macOS host (the standalone window host and both plugin-view hosts)
+// seeds an opaque dark background (RGB 30,30,46 = 0x1E1E2E) so no
+// clear/undefined composite flashes before the first Metal frame lands.
+// Defined once here so the NSColor, CGColor, and canvas rgba8 spellings can
+// never drift apart.
+namespace pulp::view::mac_host {
+
+inline constexpr uint8_t kHostClearR = 30;
+inline constexpr uint8_t kHostClearG = 30;
+inline constexpr uint8_t kHostClearB = 46;
+
+// AppKit spelling for NSWindow.backgroundColor.
+inline NSColor* ns_host_clear_color() {
+    return [NSColor colorWithCalibratedRed:kHostClearR / 255.0
+                                     green:kHostClearG / 255.0
+                                      blue:kHostClearB / 255.0
+                                     alpha:1.0];
+}
+
+// Core Graphics spelling for CALayer.backgroundColor. Returns a +1-owned
+// CGColorRef (CG "Create" rule) in sRGB; assign it to a retaining property.
+inline CGColorRef cg_host_clear_color() {
+    const CGFloat comps[4] = {kHostClearR / 255.0, kHostClearG / 255.0,
+                              kHostClearB / 255.0, 1.0};
+    CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGColorRef color = CGColorCreate(cs, comps);
+    CGColorSpaceRelease(cs);
+    return color;
+}
+
+}  // namespace pulp::view::mac_host
+
 #endif  // __OBJC__

@@ -107,6 +107,12 @@ BadgePlacement compute_badge_placement(float sel_x, float sel_y, float sel_h,
 void install_inspector_hooks(InspectorOverlay& inspector) {
     g_active_inspector = &inspector;
     // Install all hooks via function pointers — no circular dependency.
+    // Every hook dereferences g_active_inspector rather than capturing the
+    // InspectorOverlay by reference, so uninstall_inspector_hooks() (or a bare
+    // `g_active_inspector = nullptr` on an old teardown path) makes the still-
+    // installed hooks inert instead of firing on a destroyed inspector. A null
+    // global returns each hook's no-op default (skip paint / don't handle / -1).
+    //
     // Gate overlay paint on the inspected root. The overlay's
     // selection box / handles / drop indicators are positioned in the inspected
     // root's coordinate space, so they must paint ONLY when the root being
@@ -115,13 +121,16 @@ void install_inspector_hooks(InspectorOverlay& inspector) {
     // root coordinates — a stray box at a random spot inside the inspector
     // window. nullptr (root unknown, legacy caller) paints unconditionally.
     View::set_inspector_paint_hook(
-        [&inspector](Canvas& canvas, View* painting_root) {
-            if (painting_root && painting_root != &inspector.inspected_root())
+        [](Canvas& canvas, View* painting_root) {
+            InspectorOverlay* insp = g_active_inspector;
+            if (!insp) return;
+            if (painting_root && painting_root != &insp->inspected_root())
                 return;
-            inspector.paint(canvas);
+            insp->paint(canvas);
         });
-    View::set_inspector_key_hook([&inspector](const KeyEvent& e) -> bool {
-        return inspector.handle_key_event(e);
+    View::set_inspector_key_hook([](const KeyEvent& e) -> bool {
+        InspectorOverlay* insp = g_active_inspector;
+        return insp ? insp->handle_key_event(e) : false;
     });
     // Window-gate the mouse hook, mirroring the paint-hook gate above. A
     // secondary window (the floating InspectorWindow) routes its
@@ -130,10 +139,12 @@ void install_inspector_hooks(InspectorOverlay& inspector) {
     // the inspector window would highlight/affect the canvas. nullptr (root
     // unknown, legacy/headless caller) runs unconditionally.
     View::set_inspector_mouse_hook(
-        [&inspector](const MouseEvent& e, View* event_root) -> bool {
-            if (event_root && event_root != &inspector.inspected_root())
+        [](const MouseEvent& e, View* event_root) -> bool {
+            InspectorOverlay* insp = g_active_inspector;
+            if (!insp) return false;
+            if (event_root && event_root != &insp->inspected_root())
                 return false;
-            return inspector.handle_mouse_event(e);
+            return insp->handle_mouse_event(e);
         });
     // Install the inline-text-edit hook here so the standalone host (and any
     // other install_inspector_hooks() caller) can
@@ -143,21 +154,37 @@ void install_inspector_hooks(InspectorOverlay& inspector) {
     // canvas overlay's inline edit. nullptr (root unknown, legacy/headless
     // caller) runs unconditionally.
     View::set_inspector_text_hook(
-        [&inspector](const TextInputEvent& e, View* event_root) -> bool {
-            if (event_root && event_root != &inspector.inspected_root())
+        [](const TextInputEvent& e, View* event_root) -> bool {
+            InspectorOverlay* insp = g_active_inspector;
+            if (!insp) return false;
+            if (event_root && event_root != &insp->inspected_root())
                 return false;
-            return inspector.handle_text_input(e);
+            return insp->handle_text_input(e);
         });
     // Cursor-affordance hook for move/resize cursor feedback over a selected
     // element. Same root gate; returns -1 to defer to the
     // normal hit-view cursor() path when off the selection or in another
     // window.
     View::set_inspector_cursor_hook(
-        [&inspector](const MouseEvent& e, View* event_root) -> int {
-            if (event_root && event_root != &inspector.inspected_root())
+        [](const MouseEvent& e, View* event_root) -> int {
+            InspectorOverlay* insp = g_active_inspector;
+            if (!insp) return -1;
+            if (event_root && event_root != &insp->inspected_root())
                 return -1;
-            return inspector.cursor_style_for(e.position);
+            return insp->cursor_style_for(e.position);
         });
+}
+
+void uninstall_inspector_hooks() {
+    // Clear the global first so any hook that fires between the two steps sees
+    // a null inspector and no-ops, then release the five View hook slots so no
+    // stale std::function outlives the inspector it was installed for.
+    g_active_inspector = nullptr;
+    View::set_inspector_paint_hook({});
+    View::set_inspector_key_hook({});
+    View::set_inspector_mouse_hook({});
+    View::set_inspector_text_hook({});
+    View::set_inspector_cursor_hook({});
 }
 
 void InspectorOverlay::set_active(bool active) {
@@ -1862,7 +1889,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     // record the cursor position and let paint() do the readback.
     if (eyedropper_active_ && !point_in_panel(pos)) {
         eyedropper_cursor_ = pos;
-        if (event.is_down) {
+        if (is_press) {
             // Resolved-style sampling is synchronous + frame-
             // independent, so a click without a prior move still
             // picks a real color (covers headless / scripted use).
@@ -2401,7 +2428,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         // the cursor has left the view area.
         alt_hover_target_ = nullptr;
 
-        if (event.is_down) {
+        if (is_press) {
             // Clicks on the semantic-knob controls / send-to-agent field at the
             // top of the tweaks panel. Checked first so a knob or field click
             // never falls through to a tweak-row icon or tree selection. The hit
@@ -2538,7 +2565,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     // (matches the blur-to-commit convention of the spec). We do NOT
     // consume the click — the user is presumably selecting a different
     // view in the canvas, which should proceed normally.
-    if (event.is_down && !editing_field_.empty()) {
+    if (is_press && !editing_field_.empty()) {
         commit_field_edit();
     }
 
@@ -2561,8 +2588,13 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         // mid-edit hover were allowed to move selected_, the edit would commit
         // to the wrong node (or a no-longer-valid target). follows_focus mode
         // is already safe here because it never chases the pointer.
+        // A pure hover-move only: neither press, drag tick, nor release, so
+        // an explicit-phase drag begun on empty canvas never re-selects
+        // mid-drag. In the state-CHANGED convention this reduces to the old
+        // !event.is_down test for a fresh (no active gesture) event.
         if (selection_mode_ == SelectionMode::follows_mouse &&
-            !event.is_down && !event.isAltDown() && !is_editing()) {
+            !is_press && !is_drag_tick && !is_release && !event.isAltDown() &&
+            !is_editing()) {
             selected_ = hit;
         }
     }

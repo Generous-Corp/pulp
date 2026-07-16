@@ -541,7 +541,7 @@ public:
 
     // Animation accessors for testing
     float hover_glow() const { return hover_glow_.value(); }
-    void advance_animations(float dt);
+    void advance_animations(float dt) override;
 
     // Arc range in radians (default: 270-degree sweep)
     static constexpr float start_angle = 2.356f;  // 135 degrees (bottom-left)
@@ -833,7 +833,7 @@ public:
 
     // Animation accessors for testing
     float hover_scale() const { return hover_thumb_scale_.value(); }
-    void advance_animations(float dt);
+    void advance_animations(float dt) override;
 
     /// Skew / response curve (see RangeSlider::set_skew). 1 = linear (default);
     /// <1 gives finer control near the bottom of the fader. Value is normalized
@@ -1074,7 +1074,7 @@ public:
     void on_mouse_enter() override;
     void on_mouse_leave() override;
     bool wants_mouse_input() const override { return true; }
-    void advance_animations(float dt) { hover_scale_.advance(dt); }
+    void advance_animations(float dt) override { hover_scale_.advance(dt); }
     float hover_scale() const { return hover_scale_.value(); }
 
 private:
@@ -1157,7 +1157,7 @@ public:
     // Animation accessors for testing
     float thumb_position() const { return thumb_position_.value(); }
     float hover_opacity() const { return hover_opacity_.value(); }
-    void advance_animations(float dt);
+    void advance_animations(float dt) override;
 
     // Custom body shader comes from CustomShaderHost.
     void set_widget_schema(std::string json) { widget_schema_ = std::move(json); }

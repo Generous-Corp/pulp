@@ -1,34 +1,33 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/css_gradient.hpp>
 #include "api_registry.hpp"
+#include "css_color.hpp"
 
 #include <algorithm>
 #include <string>
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_style_background_color_api(
-    std::function<canvas::Color(const std::string&)> parse_color) {
+void WidgetBridge::register_widget_style_background_color_api() {
     BridgeApiContext api{engine_};
 
-    register_bridge_function(api, "setBackground", [this, parse_color](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBackground", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
         auto* v = id.empty() ? &root_ : widget(id);
-        if (v && !hex.empty()) v->set_background_color(parse_color(hex));
+        if (v && !hex.empty()) v->set_background_color(parse_bridge_css_color(hex));
         return choc::value::Value();
     });
 }
 
-void WidgetBridge::register_widget_style_shadow_api(
-    std::function<canvas::Color(const std::string&)> parse_color) {
+void WidgetBridge::register_widget_style_shadow_api() {
     BridgeApiContext api{engine_};
 
     // RN-shaped shadow primitive. RN's View style-prop names are
     // { shadowColor, shadowOffset: {x,y}, shadowOpacity, shadowRadius } and
     // do not carry spread or inset. Lower these onto the existing box-shadow
     // primitive while leaving setBoxShadow unchanged.
-    register_bridge_function(api, "setShadow", [this, parse_color](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setShadow", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "#000000ff");
         auto ox = static_cast<float>(args.get<double>(2, 0.0));
@@ -37,7 +36,7 @@ void WidgetBridge::register_widget_style_shadow_api(
         auto radius = static_cast<float>(args.get<double>(5, 0.0));
         auto* v = id.empty() ? &root_ : widget(id);
         if (!v) return choc::value::Value();
-        auto color = parse_color(hex);
+        auto color = parse_bridge_css_color(hex);
         opacity = std::clamp(opacity, 0.0f, 1.0f);
         color.a *= opacity;
         v->set_box_shadow(ox, oy, /*blur=*/radius, /*spread=*/0.0f,
@@ -73,26 +72,24 @@ void WidgetBridge::register_widget_style_overflow_api() {
     });
 }
 
-void WidgetBridge::register_widget_style_background_gradient_api(
-    std::function<canvas::Color(const std::string&)> parse_color) {
+void WidgetBridge::register_widget_style_background_gradient_api() {
     BridgeApiContext api{engine_};
 
-    register_bridge_function(api, "setBackgroundGradient", [this, parse_color](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBackgroundGradient", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto gradient = args.get<std::string>(1, "");
         auto* v = id.empty() ? &root_ : widget(id);
         if (!v || gradient.empty()) return choc::value::Value();
 
-        apply_css_background_gradient(*v, gradient, parse_color);
+        apply_css_background_gradient(*v, gradient, parse_bridge_css_color);
         return choc::value::Value();
     });
 }
 
-void WidgetBridge::register_widget_style_box_shadow_api(
-    std::function<canvas::Color(const std::string&)> parse_color) {
+void WidgetBridge::register_widget_style_box_shadow_api() {
     BridgeApiContext api{engine_};
 
-    register_bridge_function(api, "setBoxShadow", [this, parse_color](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBoxShadow", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto ox = static_cast<float>(args.get<double>(1, 0));
         auto oy = static_cast<float>(args.get<double>(2, 2));
@@ -111,7 +108,7 @@ void WidgetBridge::register_widget_style_box_shadow_api(
             }
         }
         auto* v = id.empty() ? &root_ : widget(id);
-        if (v) v->set_box_shadow(ox, oy, blur, spread, parse_color(hex), inset);
+        if (v) v->set_box_shadow(ox, oy, blur, spread, parse_bridge_css_color(hex), inset);
         return choc::value::Value();
     });
 

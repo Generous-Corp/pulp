@@ -1,5 +1,6 @@
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
+#include "bridge_dispatch.hpp"
 
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/native_view_host.hpp>
@@ -10,29 +11,12 @@
 #include <pulp/view/virtual_grid.hpp>
 
 #include <atomic>
-#include <iostream>
 #include <memory>
 #include <string>
 
 namespace pulp::view {
 
 namespace {
-
-void safe_dispatch_eval(const std::shared_ptr<std::atomic<bool>>& alive,
-                        ScriptEngine* engine,
-                        const std::string& js,
-                        const char* context) {
-    if (!alive || !alive->load(std::memory_order_acquire) || engine == nullptr) return;
-    try {
-        if (!static_cast<bool>(*engine)) return;
-        engine->evaluate(js);
-        engine->pump_message_loop();
-    } catch (const std::exception& e) {
-        std::cerr << "WidgetBridge " << context << " error: " << e.what() << "\n";
-    } catch (...) {
-        std::cerr << "WidgetBridge " << context << " error: unknown exception\n";
-    }
-}
 
 bool is_new_widget_factory_api(choc::javascript::ArgumentList& args) {
     if (args.numArgs <= 2) return true;
@@ -184,7 +168,7 @@ void WidgetBridge::register_widget_factory_form_api() {
         auto alive = callback_alive_;
         auto* engine = &engine_;
         cb->on_change = [alive, engine, id](bool v) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::string(v?"1":"0") + ")", "checkbox change");
+            dispatch_event(alive, engine, id, "change", v ? "1" : "0");
         };
         resolve_parent(pid)->add_child(std::move(cb));
         return choc::value::createString(id);
@@ -199,7 +183,7 @@ void WidgetBridge::register_widget_factory_form_api() {
         auto alive = callback_alive_;
         auto* engine = &engine_;
         tb->on_toggle = [alive, engine, id](bool v) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'toggle', " + std::string(v?"1":"0") + ")", "toggle button");
+            dispatch_event(alive, engine, id, "toggle", v ? "1" : "0");
         };
         resolve_parent(pid)->add_child(std::move(tb));
         return choc::value::createString(id);
@@ -270,7 +254,7 @@ void WidgetBridge::register_widget_factory_container_api() {
             if (modal) {
                 modal->set_visible(false);
             }
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'dismiss', 0)", "modal dismiss");
+            dispatch_event(alive, engine, id, "dismiss", "0");
         };
         widgets_[id] = v.get();
         resolve_parent(pid)->add_child(std::move(v));
@@ -327,7 +311,7 @@ void WidgetBridge::register_widget_factory_composite_api() {
         auto alive = callback_alive_;
         auto* engine = &engine_;
         c->on_change = [alive, engine, id](int idx) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'select', " + std::to_string(idx) + ")", "combo select");
+            dispatch_event(alive, engine, id, "select", std::to_string(idx));
         };
         resolve_parent(pid)->add_child(std::move(c));
         return choc::value::createString(id);
@@ -365,10 +349,10 @@ void WidgetBridge::register_widget_factory_composite_api() {
         auto alive = callback_alive_;
         auto* engine = &engine_;
         lb->on_select = [alive, engine, id](int idx) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'select', " + std::to_string(idx) + ")", "list select");
+            dispatch_event(alive, engine, id, "select", std::to_string(idx));
         };
         lb->on_activate = [alive, engine, id](int idx) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'activate', " + std::to_string(idx) + ")", "list activate");
+            dispatch_event(alive, engine, id, "activate", std::to_string(idx));
         };
         resolve_parent(pid)->add_child(std::move(lb));
         return choc::value::createString(id);
@@ -404,15 +388,15 @@ void WidgetBridge::register_widget_factory_text_editor_api() {
         auto alive = callback_alive_;
         auto* engine = &engine_;
         ed->on_escape = [alive, engine, id]() {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'escape', 0)", "text escape");
+            dispatch_event(alive, engine, id, "escape", "0");
         };
         ed->on_return = [alive, engine, id](const std::string& text) {
             std::string e; for (char c : text) { if (c=='\'') e+= "\\'"; else if (c=='\n') e+= "\\n"; else e+= c; }
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'return', '" + e + "')", "text return");
+            dispatch_event(alive, engine, id, "return", "'" + e + "'");
         };
         ed->on_change = [alive, engine, id](const std::string& text) {
             std::string e; for (char c : text) { if (c=='\'') e+= "\\'"; else if (c=='\n') e+= "\\n"; else e+= c; }
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', '" + e + "')", "text change");
+            dispatch_event(alive, engine, id, "change", "'" + e + "'");
         };
         resolve_parent(pid)->add_child(std::move(ed));
         return choc::value::createString(id);
@@ -453,7 +437,7 @@ void WidgetBridge::register_widget_factory_design_system_api() {
         auto alive = callback_alive_;
         auto* engine = &engine_;
         s->on_change = [alive, engine, id](double v) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::to_string(v) + ")", "stepper change");
+            dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
         resolve_parent(pid)->add_child(std::move(s));
         return choc::value::createString(id);
@@ -470,7 +454,7 @@ void WidgetBridge::register_widget_factory_design_system_api() {
         auto alive = callback_alive_;
         auto* engine = &engine_;
         p->on_change = [alive, engine, id](float v) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::to_string(v) + ")", "pan change");
+            dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
         resolve_parent(pid)->add_child(std::move(p));
         return choc::value::createString(id);
