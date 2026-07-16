@@ -3842,7 +3842,13 @@ int main(int argc, char* argv[]) {
             dbg << "    \"diff_pixels\": " << result.diff_pixels << ",\n";
             dbg << "    \"total_pixels\": " << result.total_pixels << ",\n";
             dbg << "    \"mean_error\": " << result.mean_error << ",\n";
-            dbg << "    \"pass\": " << (result.passes(0.70f) ? "true" : "false") << "\n";
+            // Same bar as the printed verdict: --fail-below when given, else the
+            // shared default. A hardcoded 0.70 here meant the debug JSON could
+            // report "pass": true for a render the very same run printed as
+            // NEEDS REVIEW — one tool, one run, two answers.
+            const float dbg_gate = fail_below_pct >= 0.0f
+                ? fail_below_pct / 100.0f : pulp::view::kDefaultSimilarityThreshold;
+            dbg << "    \"pass\": " << (result.passes(dbg_gate) ? "true" : "false") << "\n";
             dbg << "  },\n";
         }
 
