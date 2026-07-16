@@ -186,6 +186,17 @@ if(APPLE)
         PRIVATE pulp::host clap Catch2::Catch2WithMain "-framework AppKit")
     target_include_directories(pulp-test-clap-hosted-editor PRIVATE ${PULP_ROOT_DIR}/core/host/src)
     catch_discover_tests(pulp-test-clap-hosted-editor)
+
+    # Proves the editor lifecycle is inaudible: a tone-emitting fake plugin
+    # renders while the editor opens/resizes/closes, and the audio-analysis
+    # metrics catch any dropout, NaN, or clip the editor path introduces.
+    add_executable(pulp-test-clap-editor-audio-continuity
+        test_clap_editor_audio_continuity.mm harness/rt_allocation_probe.cpp)
+    target_link_libraries(pulp-test-clap-editor-audio-continuity
+        PRIVATE pulp::host pulp::audio-analysis clap Catch2::Catch2WithMain "-framework AppKit")
+    target_include_directories(pulp-test-clap-editor-audio-continuity
+        PRIVATE ${PULP_ROOT_DIR}/core/host/src)
+    catch_discover_tests(pulp-test-clap-editor-audio-continuity)
 endif()
 # CFRunLoop cooperation — plugin-mode MainThreadDispatcher
 pulp_add_test_suite(pulp-test-cfrunloop-cooperation LIBRARIES pulp::events)
