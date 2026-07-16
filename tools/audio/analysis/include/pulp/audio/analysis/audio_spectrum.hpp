@@ -278,11 +278,25 @@ ResponseCurve magnitude_spectrum_curve(
 
 /// One point on a phase/group-delay curve.
 ///
-/// `defined` is the honesty gate: phase carries no information where the
-/// transfer magnitude is at the noise floor (a stopband), so every field
-/// below except `hz` and `magnitude_db_rel_peak` is meaningless when it is
-/// false, and `phase_rad` / `group_delay_samples` are NaN there rather than a
-/// plausible number. Check `defined` before reading them.
+/// **Two gates, because the two measurements have different preconditions.**
+/// Both are honesty gates: neither field may carry a number the analyzer did
+/// not measure, and each is NaN rather than a plausible value when its gate is
+/// false.
+///
+///   * `defined` gates `group_delay_samples`. Group delay is estimated per bin
+///     from that bin's own energy and never consults a neighbor, so this bin
+///     having signal — in the reference, in the output, and in the transfer
+///     ratio relative to the curve's peak — is the whole precondition.
+///   * `phase_defined` gates `phase_rad`, and is STRICTER. Unwrapped phase is
+///     not a per-bin quantity: it is accumulated by walking every bin from DC
+///     upward, so it is trustworthy only when that entire walk crossed real
+///     data. `defined` cannot express that, and a bin can legitimately be
+///     `defined` while its `phase_rad` sits on the wrong 2π branch because the
+///     walk below it passed through bins that had none.
+///
+/// `hz` and `magnitude_db_rel_peak` are always readable — the magnitude IS the
+/// gate input, i.e. the evidence for the verdict. Check the matching gate
+/// before reading either measurement.
 ///
 /// **`magnitude_db_rel_peak` is NOT the same quantity as
 /// `ResponsePoint::magnitude_db`**, despite both curves coming from the same
@@ -299,9 +313,18 @@ struct PhasePoint {
     /// Transfer magnitude in dB relative to the curve's own peak transfer
     /// magnitude (peak bin = 0 dB, everything else negative) — the gate input.
     double magnitude_db_rel_peak = 0.0;
-    double phase_rad = 0.0;           ///< Unwrapped transfer phase; NaN if !defined.
-    double group_delay_samples = 0.0; ///< -dφ/dω in samples; NaN if !defined.
-    bool defined = false;             ///< False where magnitude is below the floor.
+    /// Unwrapped transfer phase; NaN unless `phase_defined`.
+    double phase_rad = 0.0;
+    /// -dφ/dω in samples; NaN unless `defined`.
+    double group_delay_samples = 0.0;
+    /// Gates `group_delay_samples`. False where the reference bin, the output
+    /// bin, or the transfer ratio carries too little energy to differentiate —
+    /// three gates, not one; see `measure_group_delay`.
+    bool defined = false;
+    /// Gates `phase_rad`. True only when this bin is `defined` AND every bin
+    /// from DC up to it is too, so the unwrap reached here without crossing a
+    /// bin that had no phase to read. Implies `defined`; never the converse.
+    bool phase_defined = false;
 };
 
 /// Phase / group-delay curve of a transfer function.
@@ -330,14 +353,22 @@ struct PhaseCurve {
     double sample_rate = 0.0;
     double bin_hz = 0.0;
     /// Magnitude gate, in dB **relative to the curve's peak transfer
-    /// magnitude**. Bins below it are reported `defined = false`.
+    /// magnitude**. Bins below it are reported `defined = false`. Necessary,
+    /// not sufficient: clearing it does not by itself make a bin `defined` —
+    /// the reference- and output-energy gates apply too (see
+    /// `measure_group_delay`).
     double magnitude_floor_db = 0.0;
     std::vector<PhasePoint> full;        ///< Bin 0..N/2, monotonic in hz.
     std::vector<PhasePoint> checkpoints; ///< Requested frequencies only.
 
-    /// True when the bin nearest `hz` carries enough magnitude for its phase
-    /// to mean anything. False for an empty curve.
+    /// True when the bin nearest `hz` carries enough energy for its group
+    /// delay to be a measurement. False for an empty curve. This does NOT
+    /// qualify `phase_radians_at` — see `phase_defined_at`.
     bool defined_at(double hz) const;
+    /// True when the bin nearest `hz` is `defined_at` AND the unwrap reached it
+    /// over an unbroken run of defined bins from DC, so its phase sits on the
+    /// right 2π branch. False for an empty curve.
+    bool phase_defined_at(double hz) const;
     /// Group delay in samples at the bin nearest `hz`. **NaN when
     /// `defined_at(hz)` is false** — the caller must not treat a stopband as a
     /// measurement. NaN propagates loudly through arithmetic and fails any
@@ -345,8 +376,10 @@ struct PhaseCurve {
     double group_delay_samples_at(double hz) const;
     /// Group delay in seconds at `hz` (samples / sample_rate). NaN when undefined.
     double group_delay_seconds_at(double hz) const;
-    /// Unwrapped transfer phase in radians at `hz`. NaN when undefined. See
-    /// `measure_group_delay` for the ambiguity a stopband null leaves behind.
+    /// Unwrapped transfer phase in radians at `hz`. **NaN when
+    /// `phase_defined_at(hz)` is false** — which includes bins that are
+    /// `defined_at` but sit above a gap the unwrap could not carry a branch
+    /// across. See `measure_group_delay`.
     double phase_radians_at(double hz) const;
     /// Transfer magnitude at `hz` in dB **relative to this curve's own peak
     /// transfer magnitude** — always defined (it IS the gate input). NOT the
@@ -423,19 +456,33 @@ struct GroupDelayOptions {
 /// bin). Beyond that the phase aliases and unwrapping silently tracks the
 /// wrong branch — budget `fft_length` accordingly.
 ///
-/// Unwrapping also cannot recover the branch across a magnitude null, where
-/// the true phase steps discontinuously: **`phase_rad` above a deep stopband
-/// null carries an unresolved 2πk ambiguity**, and the undefined bins it walks
-/// through contribute noise to the accumulated offset. `group_delay_samples`
-/// does not inherit this — it never consults the unwrapped phase.
+/// Unwrapping also cannot recover the branch across a magnitude null or a gap
+/// in the reference spectrum: there is no phase to read in between, so the
+/// accumulated offset carries an unresolved 2πk ambiguity past it. That is a
+/// precondition on the WALK, not on the destination bin, so `defined` — which
+/// asks only about a bin's own energy — cannot express it. **`phase_defined`
+/// is the gate that does**: it is true only for a bin the unwrap reached over
+/// an unbroken run of defined bins from DC, and `phase_rad` is NaN everywhere
+/// else, including at bins that are themselves perfectly well `defined`. So a
+/// band-limited or gapped reference yields real group delay at every bin it
+/// excites and phase only up to the first gap — which is the honest split.
+/// `group_delay_samples` does not inherit the ambiguity at all; it never
+/// consults the unwrapped phase.
+///
+/// The aliasing bound above (`group_delay < fft_length / 2`) is NOT gated: it
+/// is a budgeting duty on the caller, and per bin the analyzer cannot tell an
+/// aliased phase from a true one. It is stated, not enforced. The gap
+/// ambiguity is gated because it IS exactly testable.
 ///
 /// ── Stopband contract ──────────────────────────────────────────────────────
 /// Where the transfer magnitude is at the noise floor there is no signal whose
 /// phase could be measured, and `atan2` of numerical noise yields a plausible-
 /// looking number that means nothing. Every bin whose magnitude is more than
 /// `options.magnitude_floor_db` below the curve's peak is therefore reported
-/// `defined = false` with NaN phase and group delay. A bin whose reference
-/// (input) spectrum is itself negligible is undefined for the same reason.
+/// `defined = false` with NaN group delay, and NaN phase both there and at
+/// every bin above it that the unwrap could only reach through it. A bin whose
+/// reference (input) spectrum is itself negligible is undefined for the same
+/// reason.
 ///
 /// That relative gate is backstopped by an absolute one, because the two fail
 /// in different places: the relative gate is measured against the curve's own

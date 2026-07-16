@@ -168,9 +168,14 @@ using HalfBandAllpassSection64 = HalfBandAllpassSectionT<double>;
 ///     both paths at the input rate, costs their sum: ~ 3.46 samples.
 ///     Delay is frequency-dependent and rises toward the transition
 ///     band; these figures are the DC/passband end. The Audio Doctor's
-///     group-delay analyzer measures all three and agrees with the
-///     closed form to within 0.01 samples — which is what the suite
-///     actually asserts (test/test_audio_doctor.cpp).
+///     group-delay analyzer measures two of these independently — the
+///     filter's own ~3.96 at the 2x rate, and the ~3.46 round trip —
+///     and the suite asserts each against the closed form above to
+///     within 0.01 samples (test/test_audio_doctor.cpp). The ~1.98
+///     input-rate figure is the 2x measurement halved rather than a
+///     third measurement, so the suite prints it but does not assert
+///     it: at half the tolerance it cannot fail unless the 2x
+///     assertion already has.
 ///
 /// Lineage: derived from the published polyphase IIR half-band
 /// literature (Vaidyanathan, "Multirate Systems and Filter Banks"

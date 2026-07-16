@@ -441,6 +441,11 @@ bool PhaseCurve::defined_at(double hz) const {
     return p != nullptr && p->defined;
 }
 
+bool PhaseCurve::phase_defined_at(double hz) const {
+    const auto* p = nearest_phase_point(full, hz, bin_hz);
+    return p != nullptr && p->phase_defined;
+}
+
 double PhaseCurve::group_delay_samples_at(double hz) const {
     const auto* p = nearest_phase_point(full, hz, bin_hz);
     return p != nullptr ? p->group_delay_samples
@@ -546,6 +551,14 @@ PhaseCurve measure_group_delay(
 
     const double nan = std::numeric_limits<double>::quiet_NaN();
     curve.full.reserve(static_cast<std::size_t>(bins));
+    // The unwrap walks bins low to high accumulating an offset, so a bin's
+    // phase is only as trustworthy as every bin below it. Latches false at the
+    // first undefined bin and never recovers: past that point the offset has
+    // walked through a bin with no phase to read — where `h` is the {0,0}
+    // substituted above, whose `std::arg` is a fabricated 0 — and no later bin
+    // can recover which 2π branch the true phase took. `defined` cannot carry
+    // this; it is a per-bin question and this is a question about the walk.
+    bool chain_intact = true;
     for (int i = 0; i < bins; ++i) {
         const auto idx = static_cast<std::size_t>(i);
         const double mag_db_rel_peak =
@@ -572,9 +585,14 @@ PhaseCurve measure_group_delay(
                              std::norm(out_spec[idx]) > kLinearFloor &&
                              std::abs(h[idx]) > kLinearFloor &&
                              mag_db_rel_peak >= options.magnitude_floor_db;
-        curve.full.push_back(
-            {i * curve.bin_hz, mag_db_rel_peak, defined ? phase[idx] : nan,
-             defined ? out_tau[idx] - in_tau[idx] : nan, defined});
+        // Folding this bin in first makes `chain_intact` exactly the phase
+        // gate: true only when bins 0..i are every one of them defined.
+        chain_intact = chain_intact && defined;
+        const bool phase_defined = chain_intact;
+        curve.full.push_back({i * curve.bin_hz, mag_db_rel_peak,
+                              phase_defined ? phase[idx] : nan,
+                              defined ? out_tau[idx] - in_tau[idx] : nan,
+                              defined, phase_defined});
     }
 
     curve.checkpoints.reserve(checkpoints_hz.size());
