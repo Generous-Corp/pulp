@@ -30,6 +30,55 @@ For Rust-native commands, the source of truth is
 `experimental/pulp-rs/src/help.rs` too; the installed Rust binary's help banner
 is user-facing even when there is no C++ table entry.
 
+#### Where a new helper declaration goes
+
+`cli_common.hpp` is split along the implementation seam — each header carries
+the declarations for one sibling `.cpp`. Put a new helper's declaration in the
+header that matches the `.cpp` you implement it in:
+
+| Header | Implementation | Owns |
+|--------|----------------|------|
+| `cli_common.hpp` | `cli_common.cpp` | Command forward decls, repo/build-dir discovery, build + validator helpers, interactive prompts |
+| `cli_sdk.hpp` | `cli_sdk.cpp` | SDK resolution, `pulp.toml` / user-config reads and writes, PR-workflow selection, version banners |
+| `cli_doctor.hpp` | `cli_doctor_helpers.cpp` | `DoctorCheck` and the `run_doctor_*` probes |
+| `cli_fs_util.hpp` | `cli_fs_util.cpp` | Filesystem/archive-safety helpers, in `namespace pulp::cli::fsutil` |
+
+Two things about this that are easy to get wrong:
+
+- **The split is enforced by discipline only.** `cli_common.hpp` includes
+  `cli_doctor.hpp` and `cli_sdk.hpp`, so every command file that includes
+  `cli_common.hpp` still sees the whole API and nothing fails when you park a
+  new SDK or doctor decl back in `cli_common.hpp`. It compiles, and
+  `cli_common.hpp` quietly regrows into the grab-bag the split undid. Check
+  which `.cpp` your definition lives in and declare it in that `.cpp`'s header.
+- **`cli_fs_util.hpp` is deliberately NOT included by `cli_common.hpp`.** It is
+  namespaced and included directly (`kit_commands.cpp` includes it without
+  `cli_common.hpp` at all), which keeps archive handling off the `cli_common`
+  dep chain. Don't "simplify" by adding it to the `cli_common.hpp` include
+  block.
+
+#### `path_is_within` exists twice, with different semantics
+
+There are two same-signature `path_is_within` functions, and they do not agree:
+
+- `::path_is_within` (`cli_common.{hpp,cpp}`, used by `cmd_create.cpp`) calls
+  `fs::absolute()` on both arguments first, so a relative path is resolved
+  against the process CWD.
+- `pulp::cli::fsutil::path_is_within` (`cli_fs_util.{hpp,cpp}`, used by
+  `kit_commands.cpp`) is **purely lexical** — no `fs::absolute`. The caller owns
+  resolution and must pass both arguments in the same frame of reference; a
+  relative/absolute pair shares no prefix and always answers "not within".
+
+They look like an obvious duplicate to collapse. Collapsing them by pointing the
+`cli_common` callers at the `fsutil` one silently drops the absolute-ising step
+and changes the answer for any relative input — a containment check that quietly
+starts answering a different question. If they are ever merged, the
+`fs::absolute()` has to move out into the `cmd_create.cpp` call sites, not
+disappear. The `fsutil` contract (including the lexical-normalization caveat
+that a symlink inside the root still reads as "within") is pinned in the header
+comments and covered by the `[fs-safety]` cases in
+`test/test_cli_kit_commands.cpp` — update both sides when changing it.
+
 ### 2. Update the CLI commands manifest
 - [ ] Add entry to `docs/status/cli-commands.yaml` with:
   - `name`, `status` (use status vocabulary: stable/usable/experimental), `summary`
