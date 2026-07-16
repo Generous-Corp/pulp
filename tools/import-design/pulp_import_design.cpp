@@ -1929,11 +1929,21 @@ int main(int argc, char* argv[]) {
             param_binding_manifest_path = argv[++i];
         } else if (std::strcmp(argv[i], "--fail-on-unresolved") == 0) {
             fail_on_unresolved = true;
-        } else if (std::strcmp(argv[i], "--fail-below") == 0 && i + 1 < argc) {
+        } else if (std::strcmp(argv[i], "--fail-below") == 0) {
             // Unit is PERCENT (0-100), matching the "Similarity: NN%" line this
             // gates on. A fraction like 0.85 is rejected rather than silently
             // read as 0.85% — a threshold that parses too low never fires, which
             // is precisely the silent-pass failure this flag exists to end.
+            //
+            // The missing-value case is checked BEFORE consuming argv: gating on
+            // `&& i + 1 < argc` would drop a valueless `--fail-below` through to
+            // the arg loop's silent fallthrough, disabling the gate while still
+            // reading as enforcement. `--fail-below $UNSET_VAR` in CI must be a
+            // hard error, not a pass.
+            if (i + 1 >= argc) {
+                std::cerr << "Error: --fail-below requires a value (percent, 0-100)\n";
+                return 2;
+            }
             const std::string raw = argv[++i];
             std::size_t consumed = 0;
             float pct = 0.0f;
