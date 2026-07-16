@@ -15,7 +15,9 @@
 #   - node-ABI (Processor/PluginSlot virtual methods are append-only)
 #   - hotspot-size (known refactor hotspots must not exceed frozen LOC baselines)
 #   - planning-gitlink (no accidental `planning` submodule pointer bump)
-#   - deps-audit (catches DEPENDENCIES.md / NOTICE.md drift)
+#   - deps-audit (catches DEPENDENCIES.md / NOTICE.md drift, and checks the
+#     attribution text against the license files actually on disk)
+#   - deps-audit self-tests (tools/deps/test_audit.py — no other gate ran them)
 #   - codecov-config (codecov.yml flags/components mirror the live core/* tree
 #     with no double-counts, and its ignore list mirrors diff_cover_excludes)
 #   - framework-neutrality (Pulp's own source names no other framework, and
@@ -202,14 +204,34 @@ if [ -f "$PGL" ]; then
 fi
 
 # ── 7. deps-audit ──────────────────────────────────────────────────────────
+# --verify-licenses additionally checks the attribution text against the license
+# files on disk. Without it the audit only asks whether a dependency is *named*
+# in each file, which is how a truncated NOTICE and an MIT-labelled GPL-or-
+# proprietary VST3 pin both passed a green --strict run. Offline and sub-second:
+# it reads checked-out trees and never queries upstream (that is --check-upstream).
 if [ -f "$DEPS_AUDIT" ]; then
     echo "" >&2
-    echo "▸ deps-audit (attribution drift)" >&2
-    if ! "$PYTHON" "$DEPS_AUDIT" --strict >/dev/null 2>&1; then
-        echo "  deps-audit: attribution drift detected — run \`python3 tools/deps/audit.py --strict\` for details." >&2
+    echo "▸ deps-audit (attribution drift + license truthfulness)" >&2
+    if ! "$PYTHON" "$DEPS_AUDIT" --strict --verify-licenses >/dev/null 2>&1; then
+        echo "  deps-audit: attribution drift detected — run \`python3 tools/deps/audit.py --strict --verify-licenses\` for details." >&2
         fail=1
     else
         echo "  deps-audit: ok" >&2
+    fi
+fi
+
+# ── 7a. deps-audit self-tests ──────────────────────────────────────────────
+# The audit's own tests were not run by any gate, ctest target, or workflow, so
+# they rotted: two assertions were failing on main (manifest ordering, a missing
+# source_files key) with nothing to report it. A gate nobody runs is decoration.
+if [ -f "$ROOT/tools/deps/test_audit.py" ]; then
+    echo "" >&2
+    echo "▸ deps-audit self-tests" >&2
+    if ! "$PYTHON" "$ROOT/tools/deps/test_audit.py" >/dev/null 2>&1; then
+        echo "  deps-audit self-tests: failing — run \`python3 tools/deps/test_audit.py\` for details." >&2
+        fail=1
+    else
+        echo "  deps-audit self-tests: ok" >&2
     fi
 fi
 
