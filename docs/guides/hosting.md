@@ -12,7 +12,9 @@ Current scope: CLAP, VST3, AU, and LV2 have real `PluginSlot` loaders
 when the matching SDK or platform support is compiled in. Each loader can
 open a bundle, prepare it, and process audio through the common host
 interface. Feature depth still varies by format: parameter, MIDI, state,
-editor, and extension support are not identical across loaders.
+editor, and extension support are not identical across loaders. In
+particular, **instruments are hostable through AU, VST3, and CLAP but not
+LV2** — see [Limits](#limits).
 `SignalGraph` topology, block processing, automation routing, and delay
 compensation are implemented over the same `PluginSlot` interface.
 The VST3 and AU loaders are not stubs: both instantiate and process third-party
@@ -278,8 +280,13 @@ These exist to smoke-test the loaders outside a full DAW context.
 - Feature coverage is format-specific. CLAP, VST3, and AU route parameter
   automation through their native event paths; LV2 routes host parameter
   events through block-rate control ports, so the last event in a block wins.
-- LV2 atom sysex and other variable-length atom events are not routed yet;
-  only short MIDI messages in the atom input sequence reach the processor.
+- **LV2 cannot host instruments.** The LV2 loader discovers only
+  `lv2:AudioPort` and `lv2:ControlPort`, so atom, event, and CV ports are
+  never `connect_port`'d — and LV2 requires *every* port be connected before
+  `run()`. Every LV2 instrument has an atom MIDI input port, so running one
+  is undefined behavior rather than a clean failure. No MIDI reaches an LV2
+  plugin at all: `process()` accepts the host's `MidiBuffer` and discards it.
+  Host instruments through **AU, VST3, or CLAP**, which do route MIDI.
 - Only one factory descriptor per `.clap` is selected (first one, or one
   matching `info.unique_id`).
 - Hosted editor embedding is wired for CLAP on macOS. VST3, AU, and LV2 slots
