@@ -393,6 +393,24 @@ static std::vector<unsigned char> make_ssnd_chunk(const std::vector<unsigned cha
     return make_ssnd_chunk_with_offset({}, sample_bytes);
 }
 
+static void append_aiff_pcm(std::vector<unsigned char>& bytes,
+                            uint16_t bits_per_sample,
+                            int32_t aligned_sample) {
+    const auto raw = static_cast<uint32_t>(aligned_sample);
+    for (uint16_t bit = 0; bit < bits_per_sample; bit += 8) {
+        bytes.push_back(static_cast<unsigned char>((raw >> (24 - bit)) & 0xFF));
+    }
+}
+
+static float expected_aiff_pcm(uint16_t bits_per_sample, int32_t aligned_sample) {
+    const uint32_t mask = bits_per_sample == 32
+        ? std::numeric_limits<uint32_t>::max()
+        : std::numeric_limits<uint32_t>::max() << (32 - bits_per_sample);
+    const auto quantized = static_cast<int32_t>(
+        static_cast<uint32_t>(aligned_sample) & mask);
+    return static_cast<float>(quantized) / 2147483648.0f;
+}
+
 static void write_aiff_fixture(const std::filesystem::path& path,
                                std::string_view form_type,
                                const std::vector<std::pair<std::string_view, std::vector<unsigned char>>>& chunks) {
@@ -2106,6 +2124,114 @@ TEST_CASE("AIFF reader handles AIFC metadata and odd chunk padding", "[audio][fi
     REQUIRE_THAT(data->channels[0][1], WithinAbs(0.5f, 0.001f));
 
     std::filesystem::remove(tmp_path);
+}
+
+TEST_CASE("MemoryMappedAudioReader range-reads AIFF PCM without reopening the file",
+          "[audio][file][aiff][mmap][ranged]") {
+    constexpr int32_t samples[] = {
+        std::numeric_limits<int32_t>::min(),
+        -1073741824,
+        0,
+        1073741824,
+        std::numeric_limits<int32_t>::max(),
+    };
+
+    for (const uint16_t bits_per_sample : {8, 16, 24, 32}) {
+        CAPTURE(bits_per_sample);
+        const bool aifc = bits_per_sample == 24;
+        auto tmp_path = unique_temp_audio_path(aifc ? "_mmap_pcm.aifc" : "_mmap_pcm.aiff");
+        std::vector<unsigned char> pcm;
+        for (size_t frame = 0; frame < std::size(samples); ++frame) {
+            append_aiff_pcm(pcm, bits_per_sample, samples[frame]);
+            append_aiff_pcm(pcm, bits_per_sample,
+                            samples[std::size(samples) - frame - 1]);
+        }
+        write_aiff_fixture(
+            tmp_path,
+            aifc ? "AIFC" : "AIFF",
+            {
+                {"COMM", make_comm_chunk(2, std::size(samples), bits_per_sample, aifc)},
+                {"SSND", make_ssnd_chunk_with_offset({0xDE, 0xAD, 0xBE}, pcm)},
+            });
+
+        MemoryMappedAudioReader reader;
+        REQUIRE(reader.open(tmp_path.string()));
+        REQUIRE(reader.supports_ranged_read());
+        REQUIRE(reader.info().num_channels == 2);
+        REQUIRE(reader.info().num_frames == std::size(samples));
+
+#ifndef _WIN32
+        REQUIRE(std::filesystem::remove(tmp_path));
+#endif
+
+        std::vector<float> left(5, 9.0f);
+        std::vector<float> right(5, 9.0f);
+        float* destinations[] = {left.data(), right.data()};
+        REQUIRE(reader.read_frames(destinations, 2, 1, 5));
+        for (size_t frame = 0; frame < 4; ++frame) {
+            REQUIRE_THAT(left[frame],
+                         WithinAbs(expected_aiff_pcm(bits_per_sample, samples[frame + 1]),
+                                   1.0e-7f));
+            REQUIRE_THAT(right[frame],
+                         WithinAbs(expected_aiff_pcm(
+                                       bits_per_sample,
+                                       samples[std::size(samples) - frame - 2]),
+                                   1.0e-7f));
+        }
+        REQUIRE(left[4] == 0.0f);
+        REQUIRE(right[4] == 0.0f);
+
+        std::vector<float> mono(2, 9.0f);
+        float* mono_destination[] = {mono.data()};
+        REQUIRE(reader.read_frames(mono_destination, 1, 2, 2));
+        REQUIRE_THAT(mono[0], WithinAbs(0.0f, 1.0e-7f));
+        REQUIRE_THAT(mono[1], WithinAbs(0.5f, 1.0e-7f));
+
+        reader.close();
+#ifdef _WIN32
+        std::filesystem::remove(tmp_path);
+#endif
+    }
+}
+
+TEST_CASE("MemoryMappedAudioReader withholds ranged support from malformed AIFF data",
+          "[audio][file][aiff][mmap][ranged]") {
+    SECTION("declared frames exceed the SSND payload") {
+        auto tmp_path = unique_temp_audio_path("_mmap_truncated.aiff");
+        write_aiff_fixture(tmp_path,
+                           "AIFF",
+                           {
+                               {"COMM", make_comm_chunk(1, 2, 16)},
+                               {"SSND", make_ssnd_chunk({0x40, 0x00})},
+                           });
+
+        MemoryMappedAudioReader reader;
+        REQUIRE(reader.open(tmp_path.string()));
+        REQUIRE_FALSE(reader.supports_ranged_read());
+        float sample = 9.0f;
+        float* destination[] = {&sample};
+        REQUIRE_FALSE(reader.read_frames(destination, 1, 0, 1));
+        std::filesystem::remove(tmp_path);
+    }
+
+    SECTION("SSND offset exceeds its payload") {
+        auto tmp_path = unique_temp_audio_path("_mmap_bad_offset.aiff");
+        std::vector<unsigned char> sound;
+        append_be32(sound, 4);
+        append_be32(sound, 0);
+        sound.insert(sound.end(), {0x40, 0x00});
+        write_aiff_fixture(tmp_path,
+                           "AIFF",
+                           {
+                               {"COMM", make_comm_chunk(1, 1, 16)},
+                               {"SSND", sound},
+                           });
+
+        MemoryMappedAudioReader reader;
+        REQUIRE(reader.open(tmp_path.string()));
+        REQUIRE_FALSE(reader.supports_ranged_read());
+        std::filesystem::remove(tmp_path);
+    }
 }
 
 TEST_CASE("AIFF reader rejects unsupported AIFC compression types",

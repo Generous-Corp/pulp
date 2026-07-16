@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <pulp/audio/sample_stream_window.hpp>
+#include <pulp/audio/sample_stream_scheduler.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
 #include <algorithm>
@@ -10,7 +11,11 @@ using Catch::Matchers::WithinAbs;
 using pulp::audio::Buffer;
 using pulp::audio::BufferView;
 using pulp::audio::SampleStreamPageDescriptor;
+using pulp::audio::SampleStreamPageRequest;
 using pulp::audio::SampleStreamPageState;
+using pulp::audio::SampleStreamRequestInbox;
+using pulp::audio::SampleStreamScheduleStatus;
+using pulp::audio::SampleStreamScheduler;
 using pulp::audio::SampleStreamWindow;
 using pulp::audio::SampleStreamWindowConfig;
 using pulp::audio::SampleStreamWindowReadRequest;
@@ -416,4 +421,262 @@ TEST_CASE("SampleStreamWindow hot lookup read and stats do not allocate",
     REQUIRE(page.valid);
     REQUIRE(data != nullptr);
     REQUIRE_THAT(destination.channel(0)[7], WithinAbs(8.0f, 1.0e-6f));
+}
+
+TEST_CASE("Sample stream request inbox is bounded and allocation-free",
+          "[audio][sampler][stream-scheduler][rt]") {
+    SampleStreamRequestInbox<2> inbox;
+    const SampleStreamPageRequest first{
+        .source_id = 1,
+        .source_generation = 2,
+        .requester_id = 1,
+        .requester_generation = 1,
+        .start_frame = 0,
+        .frame_count = 256,
+        .resident_source_frames = 128,
+        .consumption_frames_per_second = 48000.0,
+    };
+    auto second = first;
+    second.start_frame = 256;
+
+    bool pushed_first = false;
+    bool pushed_second = false;
+    bool pushed_overflow = true;
+    std::optional<SampleStreamPageRequest> popped;
+    {
+        pulp::runtime::ScopedNoAlloc no_alloc;
+        pushed_first = inbox.try_push(first);
+        pushed_second = inbox.try_push(second);
+        pushed_overflow = inbox.try_push(first);
+        popped = inbox.try_pop();
+    }
+
+    REQUIRE(pushed_first);
+    REQUIRE(pushed_second);
+    REQUIRE_FALSE(pushed_overflow);
+    REQUIRE(popped.has_value());
+    REQUIRE(popped->start_frame == 0);
+    REQUIRE(inbox.telemetry().overflow_count == 1);
+}
+
+TEST_CASE("Sample stream scheduler orders by time to starvation deterministically",
+          "[audio][sampler][stream-scheduler]") {
+    SampleStreamScheduler scheduler;
+    REQUIRE(scheduler.prepare(4));
+
+    REQUIRE(scheduler.submit_or_refresh({
+        .source_id = 1,
+        .source_generation = 1,
+        .requester_id = 1,
+        .requester_generation = 1,
+        .start_frame = 0,
+        .frame_count = 256,
+        .resident_source_frames = 4800,
+        .consumption_frames_per_second = 48000.0,
+    }) == SampleStreamScheduleStatus::Inserted);
+    REQUIRE(scheduler.submit_or_refresh({
+        .source_id = 2,
+        .source_generation = 1,
+        .requester_id = 2,
+        .requester_generation = 1,
+        .start_frame = 0,
+        .frame_count = 256,
+        .resident_source_frames = 9600,
+        .consumption_frames_per_second = 192000.0,
+    }) == SampleStreamScheduleStatus::Inserted);
+    REQUIRE(scheduler.submit_or_refresh({
+        .source_id = 3,
+        .source_generation = 1,
+        .requester_id = 3,
+        .requester_generation = 1,
+        .start_frame = 0,
+        .frame_count = 256,
+        .resident_source_frames = 2400,
+        .consumption_frames_per_second = 48000.0,
+        .demand_class = pulp::audio::SampleStreamDemandClass::Attack,
+    }) == SampleStreamScheduleStatus::Inserted);
+    REQUIRE(scheduler.submit_or_refresh({
+        .source_id = 4,
+        .source_generation = 1,
+        .requester_id = 4,
+        .requester_generation = 1,
+        .start_frame = 0,
+        .frame_count = 256,
+        .resident_source_frames = 2400,
+        .consumption_frames_per_second = 48000.0,
+    }) == SampleStreamScheduleStatus::Inserted);
+
+    const auto attack = scheduler.pop_most_urgent();
+    const auto pitched = scheduler.pop_most_urgent();
+    const auto same_deadline_later = scheduler.pop_most_urgent();
+    const auto unpitched = scheduler.pop_most_urgent();
+    REQUIRE(attack->source_id == 3);
+    REQUIRE(pitched->source_id == 2);
+    REQUIRE(same_deadline_later->source_id == 4);
+    REQUIRE(unpitched->source_id == 1);
+}
+
+TEST_CASE("Prepared sample stream scheduler hot operations do not allocate",
+          "[audio][sampler][stream-scheduler][rt]") {
+    SampleStreamScheduler scheduler;
+    REQUIRE(scheduler.prepare(2));
+    SampleStreamScheduleStatus status = SampleStreamScheduleStatus::Invalid;
+    std::optional<SampleStreamPageRequest> selected;
+    {
+        pulp::runtime::ScopedNoAlloc no_alloc;
+        status = scheduler.submit_or_refresh({
+            .source_id = 11,
+            .source_generation = 2,
+            .requester_id = 1,
+            .requester_generation = 1,
+            .start_frame = 512,
+            .frame_count = 256,
+            .resident_source_frames = 64,
+            .consumption_frames_per_second = 96000.0,
+        });
+        selected = scheduler.pop_most_urgent();
+    }
+
+    REQUIRE(status == SampleStreamScheduleStatus::Inserted);
+    REQUIRE(selected.has_value());
+    REQUIRE(selected->source_id == 11);
+}
+
+TEST_CASE("Sample stream scheduler deduplicates shared pages at the highest urgency",
+          "[audio][sampler][stream-scheduler]") {
+    SampleStreamScheduler scheduler;
+    REQUIRE(scheduler.prepare(2));
+
+    SampleStreamPageRequest request{
+        .source_id = 9,
+        .source_generation = 4,
+        .requester_id = 1,
+        .requester_generation = 1,
+        .page_index = 2,
+        .start_frame = 1024,
+        .frame_count = 512,
+        .resident_source_frames = 4096,
+        .consumption_frames_per_second = 48000.0,
+        .demand_class = pulp::audio::SampleStreamDemandClass::Release,
+    };
+    REQUIRE(scheduler.submit_or_refresh(request) == SampleStreamScheduleStatus::Inserted);
+
+    request.resident_source_frames = 256;
+    request.consumption_frames_per_second = 96000.0;
+    request.demand_class = pulp::audio::SampleStreamDemandClass::Attack;
+    REQUIRE(scheduler.submit_or_refresh(request) == SampleStreamScheduleStatus::Refreshed);
+
+    auto less_urgent = request;
+    less_urgent.resident_source_frames = 10000;
+    less_urgent.demand_class = pulp::audio::SampleStreamDemandClass::Release;
+    REQUIRE(scheduler.submit_or_refresh(less_urgent) == SampleStreamScheduleStatus::Refreshed);
+
+    const auto selected = scheduler.pop_most_urgent();
+    REQUIRE(selected.has_value());
+    REQUIRE(selected->resident_source_frames == 256);
+    REQUIRE(selected->demand_class == pulp::audio::SampleStreamDemandClass::Attack);
+    REQUIRE(scheduler.stats().inserted == 1);
+    REQUIRE(scheduler.stats().refreshed == 2);
+}
+
+TEST_CASE("Sample stream scheduler drains, rejects overflow, and cancels generations",
+          "[audio][sampler][stream-scheduler]") {
+    SampleStreamRequestInbox<4> inbox;
+    for (std::uint64_t page = 0; page < 3; ++page) {
+        REQUIRE(inbox.try_push({
+            .source_id = page < 2 ? 7u : 8u,
+            .source_generation = 3,
+            .requester_id = page + 1,
+            .requester_generation = 1,
+            .page_index = page,
+            .start_frame = page * 256,
+            .frame_count = 256,
+            .resident_source_frames = page * 64,
+            .consumption_frames_per_second = 48000.0,
+        }));
+    }
+
+    SampleStreamScheduler scheduler;
+    REQUIRE(scheduler.prepare(2));
+    REQUIRE(scheduler.drain(inbox) == 3);
+    REQUIRE(scheduler.stats().pending == 2);
+    REQUIRE(scheduler.stats().rejected_full == 1);
+    REQUIRE(scheduler.cancel_source_generation(7, 3) == 2);
+    REQUIRE(scheduler.stats().pending == 0);
+    REQUIRE(scheduler.stats().cancelled == 2);
+
+    REQUIRE(scheduler.submit_or_refresh({}) == SampleStreamScheduleStatus::Invalid);
+    REQUIRE(scheduler.stats().rejected_invalid == 1);
+}
+
+TEST_CASE("Sample stream scheduler coalesces a canonical page without sharing voice lifetime",
+          "[audio][sampler][stream-scheduler]") {
+    SampleStreamScheduler scheduler;
+    REQUIRE(scheduler.prepare(4));
+
+    SampleStreamPageRequest first{
+        .source_id = 5,
+        .source_generation = 2,
+        .requester_id = 10,
+        .requester_generation = 3,
+        .page_index = 7,
+        .start_frame = 1792,
+        .frame_count = 256,
+        .resident_source_frames = 128,
+        .consumption_frames_per_second = 48000.0,
+    };
+    auto second = first;
+    second.requester_id = 11;
+    second.start_frame = 1700;
+    second.frame_count = 400;
+    second.resident_source_frames = 64;
+
+    REQUIRE(scheduler.submit_or_refresh(first) == SampleStreamScheduleStatus::Inserted);
+    REQUIRE(scheduler.submit_or_refresh(second) == SampleStreamScheduleStatus::Inserted);
+    REQUIRE(scheduler.cancel_requester(10, 3) == 1);
+    const auto surviving = scheduler.pop_most_urgent();
+    REQUIRE(surviving.has_value());
+    REQUIRE(surviving->requester_id == 11);
+
+    REQUIRE(scheduler.submit_or_refresh(first) == SampleStreamScheduleStatus::Inserted);
+    REQUIRE(scheduler.submit_or_refresh(second) == SampleStreamScheduleStatus::Inserted);
+    const auto shared = scheduler.pop_most_urgent();
+    REQUIRE(shared.has_value());
+    REQUIRE(shared->requester_id == 11);
+    REQUIRE(scheduler.stats().coalesced == 1);
+    REQUIRE(scheduler.stats().pending == 0);
+}
+
+TEST_CASE("Sample stream scheduler displaces only for a more urgent demand",
+          "[audio][sampler][stream-scheduler]") {
+    SampleStreamScheduler scheduler;
+    REQUIRE(scheduler.prepare(1));
+    SampleStreamPageRequest release{
+        .source_id = 1,
+        .source_generation = 1,
+        .requester_id = 1,
+        .requester_generation = 1,
+        .page_index = 1,
+        .start_frame = 256,
+        .frame_count = 256,
+        .resident_source_frames = 9600,
+        .consumption_frames_per_second = 48000.0,
+        .demand_class = pulp::audio::SampleStreamDemandClass::Release,
+    };
+    REQUIRE(scheduler.submit_or_refresh(release) == SampleStreamScheduleStatus::Inserted);
+
+    auto slower = release;
+    slower.requester_id = 2;
+    slower.page_index = 2;
+    slower.resident_source_frames = 19200;
+    REQUIRE(scheduler.submit_or_refresh(slower) == SampleStreamScheduleStatus::Full);
+
+    auto attack = release;
+    attack.requester_id = 3;
+    attack.page_index = 3;
+    attack.resident_source_frames = 64;
+    attack.demand_class = pulp::audio::SampleStreamDemandClass::Attack;
+    REQUIRE(scheduler.submit_or_refresh(attack) == SampleStreamScheduleStatus::Inserted);
+    REQUIRE(scheduler.stats().displaced_less_urgent == 1);
+    REQUIRE(scheduler.pop_most_urgent()->requester_id == 3);
 }
