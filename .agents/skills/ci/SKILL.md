@@ -68,13 +68,36 @@ Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
   gate on the **`example-validation`** lane
   (`.github/workflows/examples-validation.yml`), which blocks PRs touching
   `examples/**` and internally skips otherwise (required-safe: always reports).
-- Example **compile** is still gated (the required gate builds
-  `PULP_BUILD_EXAMPLES=ON`); only the runtime validators moved off.
+- **The required `macos` gate does NOT compile the examples.** `build.yml` (and
+  `cross-platform-check.yml`, the windows gates) configure with
+  `PULP_BUILD_EXAMPLES=OFF`. **Only `release-cli.yml` compiles the examples** — at
+  release time. Do not assume a green required gate means the examples build.
 
 So a red required gate should NOT be an example `pluginval`/`auval` timeout — if
 it is, the exclusion regressed. The `example-validation` lane is **not yet in
 `required_status_checks`**; promote it once it is green on a real `examples/**`
 run.
+
+### Gotcha: a broken example goes green on `main` and breaks the RELEASE build
+
+Because the required gate builds `PULP_BUILD_EXAMPLES=OFF` and only `release-cli`
+builds examples, an example that fails to compile can merge green and then fail
+every release build until it is fixed — silently making the SDK unpublishable.
+The nastiest form is a compiler *disagreement*: an out-of-declaration-order
+designated initializer (`.kind` before `.range`) is a **hard error under GCC**
+but only a **warning under Clang**. It compiled clean on every macOS/Clang check,
+then killed both Linux (GCC) legs of the release (`#6082`, the `.kind`/`.range`
+swap; it stranded ~10 tags).
+
+Guard (`build(examples)` PR): `examples/CMakeLists.txt` promotes
+`-Wreorder-init-list` to an error under Clang (GCC already errors by default), so
+the reorder now fails wherever examples compile — `release-cli` AND the
+`example-validation` lane — on every compiler. `examples-validation.yml` also
+triggers on `core/state/include/**` + `core/format/include/**`, because a field
+reorder in a header the examples brace-initialize breaks their inits without
+touching `examples/**`. Proven by the `cmake-examples-reorder-init-guard` ctest.
+If you add a NEW example struct pattern that a compiler tolerates but the release
+compiler rejects, extend that guard rather than discovering it at release time.
 
 ## Gate: framework-neutrality (`tools/scripts/framework_neutrality_check.py`)
 

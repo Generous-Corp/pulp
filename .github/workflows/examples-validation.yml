@@ -49,12 +49,20 @@ jobs:
             echo "examples=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if git diff --name-only "$base"...HEAD | grep -qE '^examples/'; then
+          # Trigger on examples/** AND on the core headers the examples
+          # brace-initialize (ParamInfo/ParamRange in core/state, the
+          # descriptor/bus/context structs in core/format). A field REORDER in
+          # one of those headers breaks every example's designated initializer
+          # without touching examples/** — GCC then fails the release build while
+          # a core-only PR sailed through. Watch the include dirs so that class
+          # of change compiles the examples here, at PR time.
+          if git diff --name-only "$base"...HEAD \
+               | grep -qE '^(examples/|core/state/include/|core/format/include/)'; then
             echo "examples=true" >> "$GITHUB_OUTPUT"
-            echo "examples/** changed — will run example validators."
+            echo "examples/** or a brace-initialized core header changed — will run example validators."
           else
             echo "examples=false" >> "$GITHUB_OUTPUT"
-            echo "no examples/** changes — skipping example validators."
+            echo "no examples/** or core/{state,format}/include change — skipping example validators."
           fi
 
   validate:
@@ -122,7 +130,7 @@ jobs:
           changed="${{ needs.changes.outputs.examples }}"
           result="${{ needs.validate.result }}"
           if [ "$changed" != "true" ]; then
-            echo "No examples/** changes — example validation not required. PASS."
+            echo "No examples/** or brace-initialized core-header changes — example validation not required. PASS."
             exit 0
           fi
           if [ "$result" = "success" ]; then
