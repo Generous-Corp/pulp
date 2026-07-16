@@ -7,8 +7,10 @@
 
 #include "harness/rt_allocation_probe.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <limits>
+#include <thread>
 #include <type_traits>
 
 using Catch::Matchers::WithinAbs;
@@ -24,6 +26,7 @@ using pulp::audio::SampleStreamRequesterToken;
 using pulp::audio::SampleStreamScheduleStatus;
 using pulp::audio::SampleStreamServiceStatus;
 using pulp::audio::SampleStreamSourceAddStatus;
+using pulp::audio::SampleStreamSourceRetireStatus;
 using pulp::audio::SampleStreamSourceToken;
 using pulp::audio::SampleStreamWindowReadRequest;
 
@@ -141,7 +144,7 @@ TEST_CASE("Sample stream RT commands drain in producer order",
             SampleStreamCommandPushStatus::Enqueued);
     REQUIRE(inbox.demand_page(demand(added.view.token, 71, 2)) ==
             SampleStreamCommandPushStatus::Enqueued);
-    REQUIRE(inbox.cancel_source_generation(added.view.token) ==
+    REQUIRE(inbox.cancel_pending_source_demands(added.view.token) ==
             SampleStreamCommandPushStatus::Enqueued);
     REQUIRE(inbox.demand_page(demand(added.view.token, 72, 3)) ==
             SampleStreamCommandPushStatus::Enqueued);
@@ -151,7 +154,7 @@ TEST_CASE("Sample stream RT commands drain in producer order",
     REQUIRE(drained.commands_drained == 6);
     REQUIRE(drained.demand_commands == 4);
     REQUIRE(drained.cancel_requester_commands == 1);
-    REQUIRE(drained.cancel_source_commands == 1);
+    REQUIRE(drained.cancel_pending_source_commands == 1);
     REQUIRE(drained.demands_inserted == 4);
     REQUIRE(drained.demands_refreshed == 0);
     REQUIRE(drained.demands_rejected_full == 0);
@@ -184,7 +187,7 @@ TEST_CASE("Sample stream RT command inbox reports bounded overflow",
         pulp::runtime::ScopedNoAlloc no_alloc;
         demand_status = inbox.demand_page(demand({1, 1}, 80, 0));
         cancel_status = inbox.cancel_requester({80, 1});
-        overflow_status = inbox.cancel_source_generation({1, 1});
+        overflow_status = inbox.cancel_pending_source_demands({1, 1});
         full = inbox.telemetry();
     }
 
@@ -241,6 +244,48 @@ TEST_CASE("Prepared sample stream command submission and cancellation do not all
     REQUIRE(inbox.telemetry().overflow_count == 0);
 }
 
+TEST_CASE("Sample stream command inbox preserves demand cancellation order across threads",
+          "[audio][sampler][stream-service][commands][spsc]") {
+    SampleStreamCacheService service;
+    REQUIRE(service.prepare({.scheduler_capacity = 4, .page_memory_budget_bytes = 32}));
+    const auto added = service.add_source(source_config(),
+        [](std::uint64_t, pulp::audio::BufferView<float>, std::uint64_t frames) {
+            return frames;
+        });
+    REQUIRE(added.added());
+
+    SampleStreamCommandInbox<64> inbox;
+    std::atomic<bool> producer_done{false};
+    std::thread producer([&] {
+        for (std::uint64_t generation = 1; generation <= 10000; ++generation) {
+            auto page_demand = demand(added.view.token, 91, 0);
+            page_demand.requester.requester_generation = generation;
+            while (inbox.demand_page(page_demand) ==
+                   SampleStreamCommandPushStatus::Full) {}
+            while (inbox.cancel_requester(page_demand.requester) ==
+                   SampleStreamCommandPushStatus::Full) {}
+        }
+        producer_done.store(true, std::memory_order_release);
+    });
+
+    std::size_t drained_commands = 0;
+    std::size_t inserted_demands = 0;
+    std::size_t cancelled_requests = 0;
+    do {
+        const auto drained = service.drain_commands(inbox);
+        drained_commands += drained.commands_drained;
+        inserted_demands += drained.demands_inserted;
+        cancelled_requests += drained.requests_cancelled;
+    } while (!producer_done.load(std::memory_order_acquire) ||
+             inbox.telemetry().pending != 0);
+    producer.join();
+
+    REQUIRE(drained_commands == 20000);
+    REQUIRE(inserted_demands == 10000);
+    REQUIRE(cancelled_requests == 10000);
+    REQUIRE(service.scheduler_stats().pending == 0);
+}
+
 TEST_CASE("Sample stream cache admits exact page budget and rejects overflow",
           "[audio][sampler][stream-service][budget]") {
     SampleStreamCacheService service;
@@ -278,6 +323,41 @@ TEST_CASE("Sample stream cache rejects stale source generations",
     REQUIRE(service.request_page(stale) == SampleStreamScheduleStatus::Invalid);
     REQUIRE(service.stats().stale_requests == 1);
     REQUIRE(service.scheduler_stats().pending == 0);
+}
+
+TEST_CASE("Sample stream cache keeps retiring sources alive through the audio watermark",
+          "[audio][sampler][stream-service][source-lifetime]") {
+    SampleStreamCacheService service;
+    REQUIRE(service.prepare({.scheduler_capacity = 4, .page_memory_budget_bytes = 32}));
+    REQUIRE(service.update_audio_generations(7, 6));
+    auto reader = [](std::uint64_t, pulp::audio::BufferView<float>,
+                     std::uint64_t frames) { return frames; };
+    const auto added = service.add_source(source_config(), reader);
+    REQUIRE(added.added());
+
+    REQUIRE(service.retire_source({1, 2}, 7) ==
+            SampleStreamSourceRetireStatus::StaleSource);
+    REQUIRE(service.retire_source(added.view.token, 6) ==
+            SampleStreamSourceRetireStatus::InvalidGeneration);
+    REQUIRE(service.retire_source(added.view.token, 7) ==
+            SampleStreamSourceRetireStatus::Scheduled);
+    REQUIRE(service.retire_source(added.view.token, 7) ==
+            SampleStreamSourceRetireStatus::AlreadyScheduled);
+    REQUIRE(service.collect_retired_sources() == 0);
+    REQUIRE(added.view.window->prepared());
+    REQUIRE(service.request_page(demand(added.view.token, 100, 0)) ==
+            SampleStreamScheduleStatus::Inserted);
+
+    REQUIRE(service.update_audio_generations(8, 7));
+    REQUIRE(service.collect_retired_sources() == 1);
+    REQUIRE(service.stats().source_count == 0);
+    REQUIRE(service.stats().reserved_page_bytes == 0);
+    REQUIRE(service.scheduler_stats().pending == 0);
+    REQUIRE(service.stats().sources_retire_scheduled == 1);
+    REQUIRE(service.stats().sources_collected == 1);
+
+    auto replacement = source_config(1, 2);
+    REQUIRE(service.add_source(replacement, reader).added());
 }
 
 TEST_CASE("Sample stream cache retains demand while every page slot is busy",

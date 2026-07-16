@@ -11,10 +11,9 @@ using pulp::audio::BufferView;
 using pulp::audio::SampleAsset;
 using pulp::audio::SampleAssetConfig;
 using pulp::audio::SampleAssetView;
+using pulp::audio::SampleStreamCacheService;
 using pulp::audio::SampleStreamCacheSourceView;
 using pulp::audio::SampleStreamSourceToken;
-using pulp::audio::SampleStreamWindow;
-using pulp::audio::SampleStreamWindowConfig;
 
 static_assert(std::is_trivially_copyable_v<SampleAssetView>);
 static_assert(std::is_standard_layout_v<SampleAssetView>);
@@ -74,20 +73,24 @@ TEST_CASE("Sample asset owns an immutable resident preload behind a trivial view
 
 TEST_CASE("Partial sample asset requires a matching prepared stream source",
           "[audio][sampler][sample-asset][streaming]") {
-    SampleStreamWindow window;
-    REQUIRE(window.prepare(SampleStreamWindowConfig{
-        .channels = 2,
-        .page_count = 2,
-        .page_frames = 4,
+    SampleStreamCacheService service;
+    REQUIRE(service.prepare({
+        .scheduler_capacity = 4,
+        .page_memory_budget_bytes = 64,
     }));
 
     const SampleStreamSourceToken source{30, 4};
-    const SampleStreamCacheSourceView stream{
+    const auto added = service.add_source({
         .token = source,
-        .window = &window,
+        .channels = 2,
         .total_frames = 12,
         .page_frames = 4,
-    };
+        .cache_page_count = 2,
+    }, [](std::uint64_t, pulp::audio::BufferView<float>, std::uint64_t frames) {
+        return frames;
+    });
+    REQUIRE(added.added());
+    const auto stream = added.view;
     SampleAssetConfig config{
         .asset = {11, 1},
         .source = source,
@@ -99,7 +102,8 @@ TEST_CASE("Partial sample asset requires a matching prepared stream source",
             .source_sample_rate = 44100,
             .host_sample_rate = 48000,
             .maximum_playback_ratio = 1.0,
-            .maximum_host_block_frames = 4,
+            .maximum_host_block_frames = 1,
+            .interpolation_guard_frames = 1,
             .configured_preload_frames = 4,
         },
         .stream_source = stream,
@@ -113,7 +117,7 @@ TEST_CASE("Partial sample asset requires a matching prepared stream source",
     REQUIRE(view.valid());
     REQUIRE_FALSE(view.fully_resident());
     REQUIRE(view.has_stream_source);
-    REQUIRE(view.stream_source.window == &window);
+    REQUIRE(view.stream_source.window == stream.window);
     REQUIRE(view.stream_source.token.source_id == source.source_id);
 
     config.stream_source.reset();
@@ -139,7 +143,28 @@ TEST_CASE("Partial sample asset requires a matching prepared stream source",
     config.preload_contract.reset();
     REQUIRE_FALSE(asset.prepare(config, preload.view()));
 
+    config.preload_contract = pulp::audio::SamplePreloadContract{
+        .source_sample_rate = 44100,
+        .host_sample_rate = 48000,
+        .maximum_playback_ratio = 1.0,
+        .maximum_host_block_frames = 1,
+        .interpolation_guard_frames = 1,
+        .configured_preload_frames = 4,
+    };
+    config.stream_source = SampleStreamCacheSourceView{
+        .token = source,
+        .window = stream.window,
+        .total_frames = 12,
+        .page_frames = 4,
+    };
+    REQUIRE_FALSE(asset.prepare(config, preload.view()));
+
     auto forged = view;
+    forged.stream_source.total_frames += 1;
+    REQUIRE_FALSE(forged.valid());
+
+    forged = view;
+    forged.total_frames += 1;
     forged.stream_source.total_frames += 1;
     REQUIRE_FALSE(forged.valid());
 }

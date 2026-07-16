@@ -26,6 +26,8 @@ struct SampleAssetConfig {
     std::uint64_t total_frames = 0;
     std::uint32_t sample_rate = 0;
     std::uint64_t preload_frames = 0;
+    // Required for a streamed tail. The loader supplies the sampler's actual
+    // prepared host/rate/block/interpolation limits, not source-authored metadata.
     std::optional<SamplePreloadContract> preload_contract;
     std::optional<SampleStreamCacheSourceView> stream_source;
 };
@@ -153,7 +155,9 @@ private:
             if (!config.preload_contract) return false;
             const auto& contract = *config.preload_contract;
             if (contract.source_sample_rate != static_cast<double>(config.sample_rate) ||
-                contract.configured_preload_frames != config.preload_frames) {
+                contract.configured_preload_frames != config.preload_frames ||
+                contract.maximum_host_block_frames == 0 ||
+                contract.interpolation_guard_frames == 0) {
                 return false;
             }
             const auto evaluated = evaluate_sample_preload_contract(contract);

@@ -15,9 +15,12 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -129,7 +132,173 @@ pulp::audio::FrameReader make_synth_reader(std::uint32_t channels,
 
 bool approx(float a, float b) { return std::fabs(a - b) < 1e-5f; }
 
+struct TeardownTrace {
+    std::atomic<std::uint64_t> sequence{0};
+    std::atomic<std::uint64_t> callback_exited{0};
+    std::atomic<std::uint64_t> owner_destroyed{0};
+    std::atomic<std::uint64_t> teardown_completed{0};
+
+    std::uint64_t next() noexcept {
+        return sequence.fetch_add(1, std::memory_order_seq_cst) + 1;
+    }
+};
+
+struct BlockingReaderGate {
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool block_tail_read = false;
+    bool tail_read_entered = false;
+    bool allow_tail_read_to_return = false;
+};
+
+struct CapturedReaderOwner {
+    std::shared_ptr<TeardownTrace> trace;
+
+    ~CapturedReaderOwner() {
+        trace->owner_destroyed.store(trace->next(), std::memory_order_seq_cst);
+    }
+};
+
+struct TeardownState {
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool started = false;
+    bool completed = false;
+};
+
+void verify_active_reader_teardown(bool destroy_source) {
+    auto trace = std::make_shared<TeardownTrace>();
+    auto gate = std::make_shared<BlockingReaderGate>();
+    auto owner = std::make_shared<CapturedReaderOwner>();
+    owner->trace = trace;
+    std::weak_ptr<CapturedReaderOwner> weak_owner = owner;
+
+    auto source = std::make_unique<StreamingSampleSource>();
+    StreamingSampleSourceConfig config;
+    config.channels = 1;
+    config.total_frames = 16;
+    config.preload_frames = 4;
+    config.ring_capacity_frames = 4;
+    config.read_chunk_frames = 4;
+    config.start_background_thread = true;
+
+    REQUIRE(source->prepare(
+        config,
+        [owner, gate](std::uint64_t start,
+                      BufferView<float> destination,
+                      std::uint64_t frames) -> std::uint64_t {
+            if (start >= 8) {
+                std::unique_lock lock(gate->mutex);
+                if (gate->block_tail_read) {
+                    gate->tail_read_entered = true;
+                    gate->condition.notify_all();
+                    gate->condition.wait(lock, [&gate] {
+                        return gate->allow_tail_read_to_return;
+                    });
+                }
+            }
+
+            for (std::uint64_t frame = 0; frame < frames; ++frame) {
+                destination.channel_ptr(0)[frame] = expected_sample(start + frame, 0);
+            }
+            if (start >= 8) {
+                owner->trace->callback_exited.store(
+                    owner->trace->next(), std::memory_order_seq_cst);
+            }
+            return frames;
+        }));
+    owner.reset();
+
+    {
+        std::lock_guard lock(gate->mutex);
+        gate->block_tail_read = true;
+    }
+    Buffer<float> output(1, 8);
+    const auto produced = source->pull(output.view(), 8);
+    {
+        std::unique_lock lock(gate->mutex);
+        gate->condition.wait(lock, [&gate] { return gate->tail_read_entered; });
+    }
+
+    TeardownState teardown;
+    auto perform_teardown = [&teardown, &trace](auto operation) mutable {
+        {
+            std::lock_guard lock(teardown.mutex);
+            teardown.started = true;
+            teardown.condition.notify_all();
+        }
+        operation();
+        trace->teardown_completed.store(trace->next(), std::memory_order_seq_cst);
+        {
+            std::lock_guard lock(teardown.mutex);
+            teardown.completed = true;
+            teardown.condition.notify_all();
+        }
+    };
+
+    std::thread teardown_thread;
+    if (destroy_source) {
+        teardown_thread = std::thread(
+            [owned = std::move(source), perform_teardown]() mutable {
+                perform_teardown([&owned] { owned.reset(); });
+            });
+    } else {
+        auto* source_ptr = source.get();
+        teardown_thread = std::thread([source_ptr, perform_teardown]() mutable {
+            perform_teardown([source_ptr] { source_ptr->release(); });
+        });
+    }
+
+    bool completed_while_reader_blocked = false;
+    {
+        std::unique_lock lock(teardown.mutex);
+        teardown.condition.wait(lock, [&teardown] { return teardown.started; });
+        completed_while_reader_blocked = teardown.completed;
+    }
+    const bool owner_alive_while_reader_blocked = !weak_owner.expired();
+    const auto callback_exit_before_unblock =
+        trace->callback_exited.load(std::memory_order_seq_cst);
+    const auto owner_destroyed_before_unblock =
+        trace->owner_destroyed.load(std::memory_order_seq_cst);
+
+    {
+        std::lock_guard lock(gate->mutex);
+        gate->allow_tail_read_to_return = true;
+        gate->condition.notify_all();
+    }
+    teardown_thread.join();
+
+    const auto callback_exit = trace->callback_exited.load(std::memory_order_seq_cst);
+    const auto owner_destroyed = trace->owner_destroyed.load(std::memory_order_seq_cst);
+    const auto teardown_completed =
+        trace->teardown_completed.load(std::memory_order_seq_cst);
+
+    REQUIRE(produced == 8);
+    REQUIRE_FALSE(completed_while_reader_blocked);
+    REQUIRE(owner_alive_while_reader_blocked);
+    REQUIRE(callback_exit_before_unblock == 0);
+    REQUIRE(owner_destroyed_before_unblock == 0);
+    REQUIRE(callback_exit != 0);
+    REQUIRE(owner_destroyed > callback_exit);
+    REQUIRE(teardown_completed > owner_destroyed);
+    REQUIRE(weak_owner.expired());
+}
+
 }  // namespace
+
+TEST_CASE("StreamingSampleSource teardown joins an entered FrameReader",
+          "[audio][streaming][thread][teardown]") {
+    // FrameReader has no cancellation channel, so release cannot interrupt
+    // arbitrary reader-owned I/O. Once that I/O returns, teardown must join the
+    // worker and destroy its captured state before returning to the caller.
+    SECTION("explicit release") {
+        verify_active_reader_teardown(false);
+    }
+
+    SECTION("destruction") {
+        verify_active_reader_teardown(true);
+    }
+}
 
 TEST_CASE("StreamingSampleSource resident fast path reproduces the source",
           "[audio][streaming][issue-streaming]") {
