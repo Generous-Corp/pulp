@@ -1301,6 +1301,19 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             node.children.push_back(parse_ir_node(children[static_cast<int>(i)]));
     }
 
+    // Alternate frames (multi-state capture). Array ORDER is the frame index a
+    // `swap` element's target_frame names, so it is preserved verbatim.
+    for (const char* arr_key : {"alternate_frames", "alternateFrames"}) {
+        if (!obj.hasObjectMember(arr_key) || !obj[arr_key].isArray()) continue;
+        const auto frames = obj[arr_key];
+        for (uint32_t i = 0; i < frames.size(); ++i) {
+            const auto f = frames[static_cast<int>(i)];
+            if (!f.isObject()) continue;
+            node.alternate_frames.push_back(parse_ir_node(f));
+        }
+        if (!node.alternate_frames.empty()) break;
+    }
+
     // ── Inherit rounded corners from rounded parent ─────────────────────
     // Figma stores a corner radius on the CONTAINER frame and relies on
     // overflow:clip to round the children that fill it. Pulp's renderer
@@ -1953,6 +1966,18 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
             if (!el.param_key.empty())
                 write_string_member(out, ef, "param_key", el.param_key);
             out << '}';
+        }
+        out << ']';
+    }
+
+    // Alternate frames — emitted only when captured, so a single-state design
+    // serializes exactly as it did before multi-state capture existed.
+    if (!node.alternate_frames.empty()) {
+        write_key(out, first, "alternate_frames");
+        out << '[';
+        for (size_t i = 0; i < node.alternate_frames.size(); ++i) {
+            if (i) out << ',';
+            write_ir_node_json(out, node.alternate_frames[i], include_source_metadata);
         }
         out << ']';
     }

@@ -898,7 +898,10 @@ static void print_usage() {
     std::cout << "  --from <source>   Design source (required)\n";
     std::cout << "  --file <path>     Input file path\n";
     std::cout << "  --url <url>       Design URL (Figma file URL or v0 share link)\n";
-    std::cout << "  --frame <name>    Frame/artboard to import (Figma; guid or name for --from fig)\n";
+    std::cout << "  --frame <name>    Frame/artboard to import (Figma; guid or name for --from fig).\n";
+    std::cout << "                    Repeatable: give it once per state to capture a multi-state\n";
+    std::cout << "                    design into one view. Order sets the frame index a \"swap <n>\"\n";
+    std::cout << "                    button targets (the first --frame is frame 0).\n";
     std::cout << "  --page <name>     Restrict frame lookup to one page (--from fig)\n";
     std::cout << "  --outline         List pages/frames of a .fig file and exit (--from fig)\n";
     std::cout << "  --json            With --outline, emit the inventory as JSON\n";
@@ -1000,6 +1003,7 @@ static void print_usage() {
     std::cout << "  pulp import-design --from claude --file design.html\n";
     std::cout << "  pulp import-design --from fig --file design.fig --outline\n";
     std::cout << "  pulp import-design --from fig --file design.fig --frame 'Main' --output ui.js\n";
+    std::cout << "  pulp import-design --from fig --file kbd.fig --frame Typing --frame Piano --output kbd.cpp\n";
     std::cout << "  pulp import-design --from figma --file design.json --format css-variables --tokens theme.css\n";
     std::cout << "  pulp import-design --export-tokens --format css-variables   # built-in dark theme → theme.css\n";
     std::cout << "  pulp import-design --from jsx --file bundle.js --mode live --emit js --output live-ui.js\n";
@@ -1696,7 +1700,10 @@ int main(int argc, char* argv[]) {
     std::string source_str;
     std::string input_file;
     std::string input_url;           // --url: Figma file URL or v0 share link
-    std::string frame_name;          // --frame: Figma frame/artboard name
+    // --frame: Figma frame/artboard name. Repeatable — two or more capture a
+    // multi-state design into one DesignFrameView, in the order given, so a
+    // `swap` element's target_frame is an index into this list.
+    std::vector<std::string> frame_names;
     std::string screen_name;         // --screen: Stitch screen name
     std::string page_name;           // --page: Figma page name (scopes the .fig lane)
     bool outline_mode = false;       // --outline: read-only page/frame inventory (fig lane)
@@ -1772,7 +1779,7 @@ int main(int argc, char* argv[]) {
         } else if (std::strcmp(argv[i], "--url") == 0 && i + 1 < argc) {
             input_url = argv[++i];
         } else if (std::strcmp(argv[i], "--frame") == 0 && i + 1 < argc) {
-            frame_name = argv[++i];
+            frame_names.push_back(argv[++i]);
         } else if (std::strcmp(argv[i], "--screen") == 0 && i + 1 < argc) {
             screen_name = argv[++i];
         } else if (std::strcmp(argv[i], "--page") == 0 && i + 1 < argc) {
@@ -2173,7 +2180,7 @@ int main(int argc, char* argv[]) {
     } fig_scratch_cleanup{fig_scratch_dir};
 
     pulp::import_design::fig::LaneArgs fig_args{
-        source_str, input_file, frame_name, page_name, outline_mode, outline_json};
+        source_str, input_file, frame_names, page_name, outline_mode, outline_json};
     fig_args.created_tmp_dir = &fig_scratch_dir;
     if (auto fig_code = pulp::import_design::fig::handle(fig_args)) {
         return *fig_code;
@@ -2480,7 +2487,18 @@ int main(int argc, char* argv[]) {
     if (!fetched_tmp.empty()) fs::remove(fetched_tmp);
 
     // Store frame/screen selection metadata
-    if (!frame_name.empty()) ir.root.attributes["frame"] = frame_name;
+    if (!frame_names.empty()) {
+        // Frame 0 keeps the plain "frame" attribute so a single-state import's
+        // metadata is unchanged; a multi-state capture additionally records the
+        // full ordered list, which is the frame index a swap target names.
+        ir.root.attributes["frame"] = frame_names.front();
+        if (frame_names.size() > 1) {
+            std::string all;
+            for (std::size_t i = 0; i < frame_names.size(); ++i)
+                all += (i ? "," : "") + frame_names[i];
+            ir.root.attributes["frames"] = all;
+        }
+    }
     if (!screen_name.empty()) ir.root.attributes["screen"] = screen_name;
 
     // ── Extensible key-based recognition manifest merge ──────────────────────
@@ -2621,6 +2639,11 @@ int main(int argc, char* argv[]) {
     apply_placement_verification(ir.root,
                                  ir.root.style.width.value_or(0.0f),
                                  ir.root.style.height.value_or(0.0f));
+    // Swap-target verification: a swap-link button whose target frame was never
+    // captured would render as a button that silently does nothing, so flag it
+    // here — before the report collects verification_pass — and let the same
+    // --import-report / --fail-on-unresolved channel carry it.
+    apply_swap_target_verification(ir.root);
     const auto import_report = collect_import_report(ir.root);
     if (!import_report.controls.empty())
         std::cerr << import_report_to_text(import_report);

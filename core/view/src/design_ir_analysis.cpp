@@ -41,6 +41,11 @@ static void collect_report_visit(const IRNode& node, ImportReport& report,
     }
     for (const auto& c : node.children)
         collect_report_visit(c, report, low_confidence_threshold);
+    // Alternate frames are a sibling axis to children, so their controls are only
+    // reported if we descend here too — otherwise every control on frame 1+ would
+    // be invisible to the report and to --fail-on-unresolved.
+    for (const auto& f : node.alternate_frames)
+        collect_report_visit(f, report, low_confidence_threshold);
 }
 
 ImportReport collect_import_report(const IRNode& root, float low_confidence_threshold) {
@@ -84,11 +89,68 @@ static int verify_placement_visit(IRNode& node, float fw, float fh) {
     // If nested faithful_svg nodes ever carry their own overlays, pass each such
     // node's own render dimensions here instead of inheriting the root's.
     for (auto& c : node.children) flagged += verify_placement_visit(c, fw, fh);
+    // Each alternate frame is its own render region — a mode toggle routinely
+    // swaps to a frame of a different size — so check its overlays against ITS
+    // dimensions, not the frame we arrived from. A frame that declares no size
+    // inherits, which keeps the bounds half at "unknown" rather than testing
+    // against the wrong box.
+    for (auto& f : node.alternate_frames) {
+        flagged += verify_placement_visit(f,
+                                          f.style.width.value_or(fw),
+                                          f.style.height.value_or(fh));
+    }
     return flagged;
 }
 
 int apply_placement_verification(IRNode& root, float frame_w, float frame_h) {
     return verify_placement_visit(root, frame_w, frame_h);
+}
+
+// Swap-target verification. A `swap` element addresses a frame POSITIONALLY
+// within the DesignFrameView that owns it, so validity is decided per
+// frame-owning node: frame 0 is the node itself, alternate_frames[i] is frame
+// i+1.
+
+// Flag `node`'s own swap elements that do not address one of `frame_count` frames.
+static int check_swap_targets(IRNode& node, int frame_count) {
+    int flagged = 0;
+    for (auto& e : node.interactive_elements) {
+        if (e.kind != InteractiveElementKind::swap) continue;
+        std::string issue;
+        if (e.target_frame < 0) {
+            issue = "swap link has no target frame (name the layer \"swap <n>\" to "
+                    "address a captured frame)";
+        } else if (e.target_frame >= frame_count) {
+            issue = "swap link targets frame " + std::to_string(e.target_frame) +
+                    " but only " + std::to_string(frame_count) + " frame" +
+                    (frame_count == 1 ? "" : "s") + " captured (valid indices 0.." +
+                    std::to_string(frame_count - 1) + ")";
+        }
+        if (!issue.empty()) {
+            e.verification_pass = false;
+            e.conflict_signals.push_back(std::move(issue));
+            ++flagged;
+        }
+    }
+    return flagged;
+}
+
+static int verify_swap_visit(IRNode& node) {
+    const int frame_count = 1 + static_cast<int>(node.alternate_frames.size());
+    int flagged = check_swap_targets(node, frame_count);
+    for (auto& f : node.alternate_frames) {
+        // An alternate's own swaps (the "back" toggle) address the OWNER's frame
+        // set, so they are checked against the owner's count rather than treated
+        // as a fresh owner. Its children are ordinary nodes and recurse normally.
+        flagged += check_swap_targets(f, frame_count);
+        for (auto& c : f.children) flagged += verify_swap_visit(c);
+    }
+    for (auto& c : node.children) flagged += verify_swap_visit(c);
+    return flagged;
+}
+
+int apply_swap_target_verification(IRNode& root) {
+    return verify_swap_visit(root);
 }
 
 std::string import_report_to_json(const ImportReport& r) {
