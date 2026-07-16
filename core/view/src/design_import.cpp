@@ -966,6 +966,7 @@ static std::vector<uint8_t> read_binary_file(const fs::path& path) {
 
 static bool write_binary_file(const fs::path& path,
                               const std::vector<uint8_t>& bytes);
+static fs::path default_asset_cache_directory();
 
 void enrich_imported_image_asset_metadata(DesignIR& ir,
                                           const IRAssetManifest& manifest,
@@ -1010,14 +1011,22 @@ void enrich_imported_image_asset_metadata(DesignIR& ir,
                                     if (auto img = decode_png_rgba_for_import(bytes)) {
                                         clean_baked_knob_indicator(*img, *core);
                                         if (auto enc = encode_rgba_png_for_import(*img)) {
-                                            fs::path dir = fs::temp_directory_path() /
-                                                           "pulp-import-assets";
+                                            // The cleaned disc lands in the durable
+                                            // asset cache, not the OS temp dir: this
+                                            // path is serialized into asset_path and
+                                            // reloaded at RUNTIME by a shipped baked
+                                            // UI, so a temp sweep would silently
+                                            // unskin the knob. Content-addressed by
+                                            // sha256 like the rest of the pipeline —
+                                            // std::hash is implementation-defined and
+                                            // unstable across runs and compilers.
+                                            fs::path dir = default_asset_cache_directory();
                                             std::error_code dec;
                                             fs::create_directories(dir, dec);
-                                            const auto key = std::hash<std::string>{}(
-                                                asset_ref->second + path.string());
+                                            const auto digest = pulp::runtime::sha256_hex(
+                                                enc->data(), enc->size());
                                             fs::path cleaned = dir /
-                                                ("knobclean_" + std::to_string(key) + ".png");
+                                                ("knobclean_" + digest.substr(0, 16) + ".png");
                                             if (write_binary_file(cleaned, *enc))
                                                 node.attributes["asset_path"] =
                                                     cleaned.string();
