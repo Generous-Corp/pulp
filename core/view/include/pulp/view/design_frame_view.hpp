@@ -237,6 +237,40 @@ struct UnregisteredCustomControl {
     std::string source_node_id;  ///< the design-source node id (e.g. Figma), if any
 };
 
+// A control whose VISIBLE option count disagrees with the value cardinality the
+// HOST reports for the parameter it is bound to (HostParamSurface::
+// param_step_count). Surfaced via DesignFrameView's opt-in diagnostic.
+//
+// This is the mis-scale that a hand-written control table produces silently: a
+// radio drawn with 3 positions, wired to a 6-value parameter, normalizes against
+// whichever count the code happened to reach for. The host's count is the
+// authoritative one and DesignFrameView uses it — but the disagreement itself is
+// still a defect in the binding (the design draws 3 of 6 reachable values, so
+// half the parameter's range has no control position), and it is reported rather
+// than silently absorbed. Same never-guess contract the import lane's
+// RecognitionResolver holds for an unmatched component.
+// Read the two counts — the arrival of a report is not by itself the diagnosis:
+//
+//   ui   host   meaning
+//   ---- -----  ---------------------------------------------------------------
+//    3     6    a MIS-SCALED control: the design draws 3 of 6 reachable values.
+//               The host's 6 is used; half the range has no control position.
+//    3     0    UNANSWERED, and the view had to GUESS by the 3 it draws. Either
+//               the parameter is genuinely continuous (a coarse choice control
+//               over a smooth range — fine, expected) or the surface cannot
+//               answer at all: do_param_step_count defaults to 0, so a surface
+//               that has not wired it reports 0 for every key, including
+//               discrete ones. Those two are indistinguishable from here, which
+//               is why this is reported instead of silently absorbed.
+//    0     6    an UNBOUND key: a commit to a key no element carries.
+//    0     0    a key nothing knows.
+struct ParamScaleMismatch {
+    std::string param_key;     ///< the bound host-parameter key
+    int ui_option_count = 0;   ///< positions the control draws (element_option_count)
+    int host_step_count = 0;   ///< values the host's parameter exposes (authoritative);
+                               ///< 0 means the surface reported no index domain
+};
+
 // Remove the first <rect> in `svg` whose x/y/width/height match (within `tol`)
 // the given box, returning true if one was erased. Used to suppress a design's
 // BAKED selected-tab highlight so the live overlay's pill is the only one shown
@@ -307,13 +341,15 @@ public:
     }
     // Number of discrete options element `i` offers (dropdown entries, tab_group
     // tabs, stepper positions), or 0 when the element is continuous (knob /
-    // fader / xy_pad) or out of range. This is the DENOMINATOR of the element's
-    // normalized value: a choice control reports selected_index /
-    // max(1, option_count - 1) (see choice_to_norm), so a binder that does not
-    // know the option count cannot map the element's normalized value onto a
-    // host parameter's own step count. A toggle reports 2 (off/on) even though
-    // it declares no `options` list. Non-zero exactly when
-    // element_is_discrete(i).
+    // fader / xy_pad) or out of range. A toggle reports 2 (off/on) even though it
+    // declares no `options` list. Non-zero exactly when element_is_discrete(i).
+    //
+    // This is what the control DRAWS, which is the element's normalized divisor
+    // only when no host parameter says otherwise. When a HostParamSurface
+    // resolves the element's param_key and reports a non-zero cardinality, THAT
+    // count wins (see choice_to_norm): a parameter owns its own range, and a
+    // control drawn with fewer positions than the parameter has values does not
+    // shrink it. The two disagreeing is reported via set_on_param_scale_mismatch.
     int element_option_count(int i) const;
     // Whether element `i` carries a finite set of positions (dropdown / tab_group
     // / stepper / toggle) rather than a continuous range. A toggle is discrete
@@ -393,14 +429,21 @@ public:
     int frame_count() const { return static_cast<int>(frames_.size()); }
     // Normalized [0,1] value of element `i`, or -1 if out of range / not a
     // value-bearing control (text_field). For a knob this is its turn; for a
-    // dropdown/tab_group/stepper it is the live selection mapped to
-    // selected_index / max(1, option_count - 1). Reads the live overlay widget
-    // when one exists. For tests/bindings.
+    // dropdown/tab_group/stepper it is the live selection mapped over the
+    // element's value count (the HOST's cardinality when a HostParamSurface
+    // resolves the element's param_key, else its own option count — see
+    // element_option_count). Reads the live overlay widget when one exists.
+    //
+    // CALL CONTEXT: for a choice element this may consult host_params(), which is
+    // legal from tick/update and NEVER from paint() (HostParamSurface's hard
+    // rule; a debug build asserts). A painter wanting a choice's position should
+    // read the value it was pushed at tick, not re-derive it mid-render.
     float element_value(int i) const;
     // Set element `i` from a normalized [0,1] value WITHOUT firing
     // on_element_changed (a host->view push: knob turn, or choice index =
     // round(v * (count-1)) applied to the live overlay widget silently). Use for
-    // automation/preset application so it doesn't echo back to the host.
+    // automation/preset application so it doesn't echo back to the host. Same
+    // tick-not-paint call context as element_value for a choice element.
     void set_element_value(int i, float v);
     // Set the live text of a Kind::value_label element and repaint. No-op for
     // other kinds / out of range. Use for readouts that must track state
@@ -500,6 +543,97 @@ public:
     // consumer can ignore it (sync_from_host_params resolves live). UI thread.
     std::function<void(int index, const std::string& key)> on_param_key_changed;
 
+    // ── Typed commit helpers (UI → host, gesture-bracketed) ──────────────────
+    // One call per user edit, keyed by host parameter. Each brackets the write in
+    // a gesture (begin → change → end) so the host groups it as ONE undo step,
+    // pushes the value into the bound element, and routes through the same
+    // emit_* funnel a pointer gesture uses — so host-param routing and the public
+    // callbacks stay consistent no matter who drives the control.
+    //
+    // These exist because the alternative is every consumer hand-writing the
+    // bracket + the normalization per control, which is exactly where a port
+    // accrues transcription bugs. `key` is a host-parameter key; the element it
+    // resolves to (element_for_param_key) may be a real control or a bind-grid
+    // stand-in (see build_bind_grid) — a commit works either way. A key with no
+    // element resolves to nothing and reports a mismatch rather than writing to a
+    // wrong index.
+    //
+    // Suited to a discrete edit (a click, a typed value, a step). A continuous
+    // drag should bracket ONCE around the whole drag — call emit_gesture_begin /
+    // emit_element_changed / emit_gesture_end directly for that, or the host sees
+    // one undo step per pixel moved.
+
+    // Commit a normalized [0, 1] value. Clamped.
+    void commit_value(const std::string& key, float normalized);
+
+    // Commit a bipolar [-1, 1] depth, mapped to normalized as (depth + 1) / 2 —
+    // so -1 → 0.0, 0 → 0.5 (center), +1 → 1.0. The mapping every bipolar control
+    // (pan, detune, mod depth) otherwise re-derives by hand. Clamped to [-1, 1].
+    void commit_bipolar(const std::string& key, float depth);
+
+    // Commit a discrete value INDEX. The divisor is the host's own value count
+    // (HostParamSurface::param_step_count(key) - 1) — deliberately NOT a caller-
+    // supplied denominator and NOT the control's visible option count. A caller
+    // that passes its own divisor is re-introducing the mis-scale this helper
+    // exists to remove: the count belongs to the parameter, not to the view.
+    // Falls back to the element's option count when no host surface resolves the
+    // key (preview / screenshot), and reports a ParamScaleMismatch when neither
+    // yields an index domain. `index` is clamped into the resolved domain.
+    void commit_discrete(const std::string& key, int index);
+
+    // ── Bind grid (one element per host parameter) ───────────────────────────
+    // Append an invisible, zero-hit stand-in element for every key in `keys` that
+    // the active frame does not already carry a control for. The result: EVERY
+    // host parameter has an element, so the two directions of the bind need no
+    // per-parameter plumbing —
+    //   host → UI: sync_from_host_params() pulls each key's current value at tick,
+    //              so automation and preset recall land with no extra wiring;
+    //   UI → host: commit_value / commit_bipolar / commit_discrete resolve any
+    //              key, whether or not the design drew a control for it.
+    // A stand-in draws nothing (no needle path), never hit-tests (zero hit radius
+    // AND disabled), and costs one struct plus a value copy per tick — a full
+    // plug-in's worth of parameters is not a measurable cost.
+    //
+    // Keys already bound to a real control are SKIPPED, so a design's own control
+    // always wins the element_for_param_key lookup; the grid only fills gaps. The
+    // grid is re-applied per frame on every frame swap, so a key drawn on frame A
+    // but absent on frame B gets a real control on A and a stand-in on B.
+    // Repeated calls REPLACE the grid's key set rather than accumulating.
+    //
+    // The keys are caller-supplied because HostParamSurface exposes no parameter
+    // ENUMERATION — it answers questions about a key you already have
+    // (has_param / get_param / param_step_count) and has no "list every
+    // parameter". A host reaching this surface over a C ABI has that list on its
+    // own side; passing it here is the honest wiring, not a guess.
+    void build_bind_grid(std::vector<std::string> keys);
+
+    // The keys the bind grid was last built with (build_bind_grid's argument),
+    // whether or not each one produced a stand-in element on the active frame.
+    const std::vector<std::string>& bind_grid_keys() const { return bind_grid_keys_; }
+
+    // Whether element `i` is a bind-grid stand-in rather than a design control.
+    bool element_is_bind_grid_stand_in(int i) const;
+
+    // ── Param-scale mismatch diagnostic (opt-in, default off) ────────────────
+    // Reports a control whose visible option count disagrees with the host's
+    // value cardinality for the parameter it is bound to, or a commit against a
+    // key with no resolvable index domain. DesignFrameView always normalizes
+    // against the HOST's count when it has one — this only ADDS the signal, it
+    // never changes what is emitted.
+    //
+    // Fires once per distinct param_key (de-duplicated, first-seen order) on the
+    // UI thread. Setting the callback REPLAYS the mismatches already seen, so a
+    // callback attached after the first tick still learns about them — matching
+    // set_on_unregistered_custom_control.
+    void set_on_param_scale_mismatch(std::function<void(const ParamScaleMismatch&)> cb);
+
+    // The distinct param-scale mismatches seen so far, first-seen order,
+    // de-duplicated by param_key. Queryable without a callback — handy for a
+    // `--validate` style assertion over a ported control table.
+    const std::vector<ParamScaleMismatch>& param_scale_mismatches() const {
+        return param_scale_mismatches_;
+    }
+
     // ── Host action/command channel ─────────────────────────────────────────
     // When enabled, a Kind::action button click is ALSO forwarded to
     // View::host_actions()->send_host_action(action, "{}") in addition to
@@ -595,10 +729,39 @@ protected:
     PanelTransform panel_transform(const Rect& bounds) const;
 
 private:
+    // The authoritative number of VALUES element `i`'s domain has — the count
+    // choice<->normalized divides against (as count-1; see
+    // param_index_to_normalized). Resolution order:
+    //   1. the HOST's cardinality for the element's param_key, when a
+    //      HostParamSurface resolves it and reports a non-zero step count. The
+    //      parameter owns its own range; a control drawn with fewer positions
+    //      than the parameter has values does not shrink the parameter.
+    //   2. otherwise the element's visible option count (element_option_count) —
+    //      the preview / screenshot / no-surface path, where there is no host to
+    //      ask and the control's own positions are the only domain that exists.
+    // Returns 0 when neither yields a domain (continuous, or unknown key with no
+    // options), which param_index_to_normalized reads as "no index domain".
+    //
+    // Reports a ParamScaleMismatch when both counts exist and disagree.
+    int resolve_value_count(int i) const;
+
+    // Record a distinct param-scale mismatch and fire the diagnostic callback.
+    // De-duplicates by param_key. Const because it is called from the const
+    // normalize path; the accumulator is a diagnostic log, not observable state.
+    void report_scale_mismatch(const std::string& key, int ui_count, int host_count) const;
+
+    // The host's value cardinality for `key`, or 0 when no surface resolves it.
+    int host_step_count_for(const std::string& key) const;
+
     // Map a choice element's selected index to a normalized [0,1] value and back,
-    // using its option count. Single source of truth for choice<->normalized.
+    // using resolve_value_count. Single source of truth for choice<->normalized.
     float choice_to_norm(int i, int selected) const;
     int   norm_to_choice(int i, float v) const;
+
+    // Append the bind grid's stand-in elements for keys the active frame carries
+    // no control for. Called after every frame activation (activate_frame copies
+    // frames_[i].elements over elements_, which would otherwise drop the grid).
+    void apply_bind_grid();
     // Sync a user choice change (overlay widget -> element + on_element_changed).
     void  notify_choice(int i, int selected);
 
@@ -663,6 +826,18 @@ private:
     // plus the accumulator rebuilt on every overlay build. UI-thread-only.
     std::function<void(const UnregisteredCustomControl&)> on_unregistered_custom_;
     std::vector<UnregisteredCustomControl> unregistered_custom_;
+
+    // Param-scale mismatch diagnostic. Mutable because the normalize path that
+    // detects a mismatch is const — the accumulator records what was observed and
+    // never feeds back into what the view emits or renders.
+    std::function<void(const ParamScaleMismatch&)> on_param_scale_mismatch_;
+    mutable std::vector<ParamScaleMismatch> param_scale_mismatches_;
+
+    // Bind grid: the caller-supplied host-parameter keys, and the index of the
+    // first stand-in in elements_ (all stand-ins are appended after the active
+    // frame's own elements, so one index bounds them). -1 = no grid applied.
+    std::vector<std::string> bind_grid_keys_;
+    int bind_grid_begin_ = -1;
     std::vector<Frame> frames_;    ///< swappable frames; [0] is the constructor's
     int active_frame_ = 0;         ///< index into frames_ currently rendered
     bool route_to_host_params_ = false;   ///< self-wire gestures to host_params()

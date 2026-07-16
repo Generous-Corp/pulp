@@ -263,7 +263,8 @@ range.
 > only authority on a parameter's divisor.
 >
 > If a control's option count disagrees with its parameter's step count, that is a
-> binding bug. Assert on the mismatch rather than scaling against the view.
+> binding bug. `DesignFrameView` scales against the parameter and reports the
+> disagreement — see [Choice controls scale themselves](#choice-controls-scale-themselves).
 
 `param_step_count()` matches the cardinality Pulp's format adapters advertise
 (`state::param_value_count`) — what the AU and AAX adapters pass through directly.
@@ -278,3 +279,96 @@ semantics, and adapters treat it the same way.
 
 A host surface that does not implement `do_param_step_count()` reports `0`, so an
 older surface degrades to "continuous" rather than to a wrong count.
+
+### Choice controls scale themselves
+
+A `DesignFrameView` choice control (dropdown / tab group / stepper / toggle) does
+not need a hand-written divisor. When a `HostParamSurface` resolves the element's
+`param_key` and reports a non-zero step count, the element normalizes against
+**that** count — so a 3-position tab group bound to a 6-value parameter emits
+`idx / 5`, and index 2 lands on the parameter's index 2.
+
+With **no surface installed** or an **unknown key**, the element scales against its
+own option count and stays quiet. Those are the paths where the element is not
+bound to a parameter at all — a preview render, a screenshot, a control the host
+never knew — so nothing has an opinion to override the control's positions.
+
+A **step count of 0 on a resolved key is different, and it is a trap.** `0` is
+ambiguous: the parameter may be genuinely continuous, **or the surface may simply
+be unable to answer**. `do_param_step_count()` is non-pure and defaults to `0`, so
+a surface whose parameter system has not wired the accessor reports `0` for *every*
+key — discrete ones included.
+
+For a continuous control that distinction is moot (no index domain either way).
+For a **discrete** control it is not: `0` there is an unanswered question, not
+evidence of a continuous parameter, and scaling by the count of things drawn is a
+guess — the original bug wearing a fix's clothes. The options remain the only
+domain available, so they are still used, but the guess is **reported** rather than
+absorbed.
+
+> If you implement a `HostParamSurface` over your own parameter system, override
+> `do_param_step_count()`. Until you do, every discrete control bound to it scales
+> against what the UI draws, and every one of them reports a mismatch saying so.
+
+You do **not** pass a denominator. A caller supplying its own divisor is
+re-introducing the exact defect this removes: the count belongs to the parameter,
+not to the view.
+
+```cpp
+dfv.set_host_params(&surface);
+dfv.route_changes_to_host_params(true);
+
+dfv.commit_value("gain", 0.75f);          // normalized 0..1
+dfv.commit_bipolar("pan", -0.5f);         // -1..1  ->  0.25 (0 is center)
+dfv.commit_discrete("lfo_waveform", 2);   // index  ->  2/5, divisor from the host
+```
+
+Each helper brackets its write in one gesture (begin → change → end) so the host
+groups it as a single undo step, and routes through the same funnel a pointer
+gesture uses. They suit a **discrete** edit — a click, a typed value, a step. A
+continuous drag should bracket **once** around the whole drag, so drive
+`emit_gesture_begin` / `emit_element_changed` / `emit_gesture_end` directly for
+that; otherwise the host sees one undo step per pixel moved.
+
+`commit_discrete` against a parameter with no index domain (continuous, or a key
+nothing resolves) has no divisor, so it **refuses to emit** rather than guess, and
+reports instead.
+
+### Mismatch reporting — never a silent mis-scale
+
+`set_on_param_scale_mismatch()` reports a control whose visible option count
+disagrees with its parameter's value count, de-duplicated per key and replayed to
+a callback attached late. It **adds a signal only** — the view already scales
+against the host either way.
+
+Read the two counts, not the mere arrival of a report:
+
+| `ui_option_count` | `host_step_count` | Means |
+|---|---|---|
+| 3 | 6 | a mis-scaled control — the design draws 3 of 6 reachable values |
+| 3 | 0 | unanswered — the view scaled by what it draws. Either a genuinely continuous parameter, or a surface that cannot answer (see above) |
+| 0 | 6 | an unbound key — a commit to a key no element carries |
+| 0 | 0 | a key nothing knows |
+
+`param_scale_mismatches()` returns the same list without a callback, which suits a
+`--validate` style assertion over a ported control table.
+
+### The bind grid — one element per host parameter
+
+`build_bind_grid(keys)` appends an invisible, zero-hit stand-in element for every
+key the active frame draws no control for. Every parameter then has an element, so
+both directions work with no per-parameter plumbing: `sync_from_host_params()`
+pulls each key at tick (automation and preset recall land for free), and the
+`commit_*` helpers resolve any key.
+
+A stand-in draws nothing, never hit-tests, and costs one struct plus a value copy
+per tick — a full plug-in's worth of parameters is not a measurable cost. Keys
+that already have a real control are skipped, so a design's own control always
+wins. The grid is re-fitted on every frame swap: a key drawn on frame A but absent
+on frame B gets a real control on A and a stand-in on B. Repeated calls replace
+the grid rather than accumulating.
+
+The keys are **caller-supplied** because `HostParamSurface` deliberately exposes
+no parameter *enumeration* — it answers questions about a key you already hold
+(`has_param` / `get_param` / `param_step_count`). A host reaching this surface has
+that list on its own side; passing it in is the honest wiring rather than a guess.

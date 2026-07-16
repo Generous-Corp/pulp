@@ -26,6 +26,13 @@ std::unordered_map<std::string, DesignControlFactory>& design_control_registry()
     static std::unordered_map<std::string, DesignControlFactory> registry;
     return registry;
 }
+
+// Where a bind-grid stand-in parks (SVG coordinates). Far outside any plausible
+// panel, so a stand-in carries no on-screen geometry even if a future painter
+// grows a fallback for a needle-less element. Not a hit-test guard on its own —
+// a stand-in is also disabled and has a zero hit radius; this is belt-and-braces
+// on the geometry axis.
+constexpr float kBindGridOffscreen = -1.0e6f;
 }  // namespace
 
 void register_design_control_factory(std::string factory_id,
@@ -306,6 +313,14 @@ void DesignFrameView::activate_frame(int index) {
     panel_x_ = f.panel_x; panel_y_ = f.panel_y;
     panel_w_ = f.panel_w; panel_h_ = f.panel_h;
     active_frame_ = index;
+    // elements_ was just replaced wholesale by the incoming frame's own set, so
+    // any stand-ins from the outgoing frame are gone. Re-append the grid against
+    // THIS frame's controls before overlays are built (build_overlays indexes
+    // into elements_): a key the incoming frame draws a real control for keeps
+    // that control; a key it does not gets a stand-in. This also re-establishes
+    // bind_grid_begin_ against the new elements_, so the tail it names is always
+    // the stand-ins and never a real control.
+    apply_bind_grid();
     build_overlays();
     invalidate_layout();
     on_active_frame_changed();
@@ -483,19 +498,82 @@ bool DesignFrameView::element_is_discrete(int i) const {
     }
 }
 
+void DesignFrameView::report_scale_mismatch(const std::string& key, int ui_count,
+                                            int host_count) const {
+    if (key.empty()) return;
+    const bool seen = std::any_of(param_scale_mismatches_.begin(),
+                                  param_scale_mismatches_.end(),
+                                  [&](const ParamScaleMismatch& m) {
+                                      return m.param_key == key;
+                                  });
+    if (seen) return;
+    ParamScaleMismatch m{key, ui_count, host_count};
+    param_scale_mismatches_.push_back(m);
+    if (on_param_scale_mismatch_) on_param_scale_mismatch_(m);
+}
+
+int DesignFrameView::resolve_value_count(int i) const {
+    if (i < 0 || i >= static_cast<int>(elements_.size())) return 0;
+    const int ui_count = element_option_count(i);
+
+    const std::string& key = elements_[i].param_key;
+    HostParamSurface* hp = host_params();
+    // No surface, or a key this host does not carry: the element is not bound to
+    // a parameter at all (preview / screenshot / a control the host never knew).
+    // Nothing has an opinion to override the control's own positions, and the
+    // rest of this class already treats an unresolved key as "degrade to local
+    // state" (sync_from_host_params skips it), so this stays quiet.
+    if (!hp || key.empty() || !hp->has_param(key)) return ui_count;
+
+    const int host_count = hp->param_step_count(key);
+    if (host_count <= 0) {
+        // 0 is never a divisor — but it is AMBIGUOUS, and that ambiguity is a
+        // trap. It means any of: the parameter is genuinely continuous; or this
+        // surface simply CANNOT answer (do_param_step_count is non-pure and
+        // defaults to 0, so a surface backed by a parameter system that has not
+        // wired the accessor reports 0 for every key, discrete ones included).
+        //
+        // For a CONTINUOUS element the distinction is moot: there is no index
+        // domain either way. But a DISCRETE element bound to a resolved key and
+        // told "0" is not evidence of a continuous parameter — it is an
+        // unanswered question. Scaling it by the count of things drawn is exactly
+        // the guess this class exists to stop making, and it is the guess that
+        // looks correct while being wrong.
+        //
+        // The control's own positions remain the only domain available, so that
+        // is still what is returned — but it is a guess, and it is reported
+        // rather than absorbed. A genuinely continuous parameter under a coarse
+        // choice control will report once; teach the surface to answer, or
+        // expect the report.
+        if (ui_count > 1) report_scale_mismatch(key, ui_count, 0);
+        return ui_count;
+    }
+
+    // Both sides claim a domain and they disagree — the control draws a different
+    // number of positions than the parameter has values. The host's count wins
+    // (it defines the automation range), but the binding is reported.
+    if (ui_count > 0 && ui_count != host_count)
+        report_scale_mismatch(key, ui_count, host_count);
+
+    return host_count;
+}
+
 float DesignFrameView::choice_to_norm(int i, int selected) const {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return 0.0f;
-    const int n = static_cast<int>(elements_[i].options.size());
-    if (n <= 1) return 0.0f;
-    return std::clamp(selected, 0, n - 1) / static_cast<float>(n - 1);
+    return static_cast<float>(param_index_to_normalized(selected, resolve_value_count(i)));
 }
 
 int DesignFrameView::norm_to_choice(int i, float v) const {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return 0;
-    const int n = static_cast<int>(elements_[i].options.size());
-    if (n <= 1) return 0;
-    return std::clamp(static_cast<int>(std::clamp(v, 0.0f, 1.0f) * (n - 1) + 0.5f),
-                      0, n - 1);
+    const int n = resolve_value_count(i);
+    const int index = param_normalized_to_index(v, n);
+    // A choice control can only SHOW a position it draws. When the host's domain
+    // is larger than the control's option list, clamp the incoming index into the
+    // options — the mismatch is already reported by resolve_value_count; picking
+    // an option that does not exist would be an out-of-range overlay selection.
+    const int ui_count = element_option_count(i);
+    if (ui_count > 0 && index > ui_count - 1) return ui_count - 1;
+    return index;
 }
 
 void DesignFrameView::notify_choice(int i, int selected) {
@@ -548,6 +626,118 @@ void DesignFrameView::sync_from_host_params() {
             set_element_value(i, static_cast<float>(norm));
         }
     }
+}
+
+// ── Typed commit helpers ─────────────────────────────────────────────────────
+
+void DesignFrameView::set_on_param_scale_mismatch(
+    std::function<void(const ParamScaleMismatch&)> cb) {
+    on_param_scale_mismatch_ = std::move(cb);
+    // Replay what was already observed, so a callback attached after the first
+    // tick still learns about it (matches set_on_unregistered_custom_control).
+    if (on_param_scale_mismatch_)
+        for (const auto& m : param_scale_mismatches_) on_param_scale_mismatch_(m);
+}
+
+// The host's own cardinality for `key`, or 0 when no surface resolves it.
+// Used to report an unbound key honestly (the host's count, not a placeholder).
+int DesignFrameView::host_step_count_for(const std::string& key) const {
+    HostParamSurface* hp = host_params();
+    if (!hp || key.empty() || !hp->has_param(key)) return 0;
+    return hp->param_step_count(key);
+}
+
+void DesignFrameView::commit_value(const std::string& key, float normalized) {
+    const int i = element_for_param_key(key);
+    if (i < 0) {
+        // No element for this key: with a bind grid built, every host parameter
+        // has one, so this is a key the view was never told about. Emitting
+        // against index -1 would skip host routing and hand the public callback a
+        // bogus index — report instead of writing to nothing. ui_option_count 0
+        // is what "the UI draws no control for this key" looks like; the host's
+        // count is reported as-is so the report names what the key really is.
+        report_scale_mismatch(key, 0, host_step_count_for(key));
+        return;
+    }
+    const float v = std::clamp(normalized, 0.0f, 1.0f);
+    emit_gesture_begin(i);
+    set_element_value(i, v);      // silent local push
+    emit_element_changed(i, v);   // routes to the host + fires on_element_changed
+    emit_gesture_end(i);
+}
+
+void DesignFrameView::commit_bipolar(const std::string& key, float depth) {
+    // -1 → 0.0, 0 → 0.5, +1 → 1.0.
+    commit_value(key, (std::clamp(depth, -1.0f, 1.0f) + 1.0f) * 0.5f);
+}
+
+void DesignFrameView::commit_discrete(const std::string& key, int index) {
+    const int i = element_for_param_key(key);
+    if (i < 0) {
+        report_scale_mismatch(key, 0, host_step_count_for(key));
+        return;
+    }
+    const int count = resolve_value_count(i);
+    if (count <= 1) {
+        // Neither the host nor the control offers an index domain, so there is no
+        // divisor and any value emitted would be a guess. A bind-grid stand-in
+        // draws no options, so this is what a discrete commit against a
+        // continuous/unknown parameter looks like.
+        report_scale_mismatch(key, element_option_count(i),
+                              count <= 0 ? 0 : count);
+        return;
+    }
+    commit_value(key, static_cast<float>(param_index_to_normalized(index, count)));
+}
+
+// ── Bind grid ────────────────────────────────────────────────────────────────
+
+void DesignFrameView::build_bind_grid(std::vector<std::string> keys) {
+    // Drop the previous grid before rebuilding: repeated calls replace, never
+    // accumulate. bind_grid_begin_ names the tail of elements_ that apply_bind_grid
+    // appended, and it is re-established on every frame activation, so erasing
+    // that tail can only ever remove stand-ins. Rebuilding the overlays is not
+    // needed: a stand-in never builds one (a needle-less knob is skipped), so the
+    // overlay->element indices of the real controls ahead of the tail are stable.
+    if (bind_grid_begin_ >= 0 && bind_grid_begin_ <= static_cast<int>(elements_.size()))
+        elements_.erase(elements_.begin() + bind_grid_begin_, elements_.end());
+    bind_grid_begin_ = -1;
+    bind_grid_keys_ = std::move(keys);
+    apply_bind_grid();
+}
+
+void DesignFrameView::apply_bind_grid() {
+    if (bind_grid_keys_.empty()) {
+        bind_grid_begin_ = -1;
+        return;
+    }
+    bind_grid_begin_ = static_cast<int>(elements_.size());
+    for (const std::string& key : bind_grid_keys_) {
+        if (key.empty()) continue;
+        // A design's own control for this key always wins: it is earlier in
+        // elements_, so element_for_param_key finds it first. Skipping keeps the
+        // grid to genuine gaps rather than shadowing a real control with a
+        // stand-in that can never be reached.
+        if (element_for_param_key(key) >= 0) continue;
+        DesignFrameElement e;
+        // A knob with no needle path is skipped by paint() and builds no overlay
+        // widget, so a stand-in renders nothing at all.
+        e.kind = DesignFrameElement::Kind::knob;
+        e.needle_d.clear();
+        e.hit_radius = 0.0f;   // knob hit-testing needs distance < radius: never true
+        e.enabled = false;     // and hit_element skips a disabled element outright
+        // Parked outside the panel so the element carries no on-screen geometry
+        // even if a future painter grows a fallback for a needle-less element.
+        e.cx = e.cy = e.x = e.y = kBindGridOffscreen;
+        e.w = e.h = 0.0f;
+        e.param_key = key;
+        elements_.push_back(std::move(e));
+    }
+}
+
+bool DesignFrameView::element_is_bind_grid_stand_in(int i) const {
+    return bind_grid_begin_ >= 0 && i >= bind_grid_begin_ &&
+           i < static_cast<int>(elements_.size());
 }
 
 // ── Per-element hover + enabled state ────────────────────────────────────────
