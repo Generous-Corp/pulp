@@ -884,12 +884,14 @@ ai_shader_design:
       state on Knob/Fader/Toggle work and are tested. Native Skottie rendering
       does NOT currently run on any target: the bundled Skia (chrome/m151) ships
       libskottie.a but not skottie's SkJSON dependency (modules/jsonreader), so
-      the link leaves four skjson DOM symbols unresolved and the configure-time
+      the link leaves skjson DOM symbols unresolved and the configure-time
       try-link in core/canvas/CMakeLists.txt auto-disables PULP_LOTTIE
-      everywhere. LottieView degrades to a no-op (covered by the
-      "not compiled in" case in test_lottie_view.cpp); the rendering/playback
-      cases are compiled out until a skia-builder re-cut includes jsonreader.
-      See external/skia-build/VERSION.md.
+      everywhere. LottieView degrades to a no-op. Note the coverage gap this
+      leaves: test_lottie_view.cpp's rendering/playback cases are guarded at
+      RUNTIME (`if (!LottieView::supported()) { SUCCEED(); return; }`), not
+      compiled out — so they run and pass VACUOUSLY, and no CI lane has ever
+      exercised the real skottie path. Fixing that needs a skia-builder re-cut
+      that includes jsonreader. See external/skia-build/VERSION.md.
   web_animations_api:
     status: usable
     notes: >
