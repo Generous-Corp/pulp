@@ -44,12 +44,12 @@ std::string fourcc(std::uint32_t v) {
                        static_cast<char>(v & 0xff)};
 }
 
-// First Apple-manufacturer audio Effect, as a "TYPE:SUBT:MANU" 4CC triplet
+// First Apple-manufacturer AU of `type`, as a "TYPE:SUBT:MANU" 4CC triplet
 // (what load_au_plugin parses). Empty if none is registered — a headless CI
 // VM may not surface Apple's bundled AUs.
-std::string first_apple_effect_unique_id() {
+std::string first_apple_unique_id(OSType type) {
     AudioComponentDescription want{};
-    want.componentType = kAudioUnitType_Effect;
+    want.componentType = type;
     want.componentManufacturer = kAudioUnitManufacturer_Apple;
     AudioComponent c = AudioComponentFindNext(nullptr, &want);
     if (!c) return {};
@@ -57,6 +57,16 @@ std::string first_apple_effect_unique_id() {
     if (AudioComponentGetDescription(c, &got) != noErr) return {};
     return fourcc(got.componentType) + ":" + fourcc(got.componentSubType) + ":" +
            fourcc(got.componentManufacturer);
+}
+
+std::string first_apple_effect_unique_id() {
+    return first_apple_unique_id(kAudioUnitType_Effect);
+}
+
+// Apple's bundled software synth (DLSMusicDevice) ships with macOS, so an
+// instrument is reachable wherever the effect above is.
+std::string first_apple_instrument_unique_id() {
+    return first_apple_unique_id(kAudioUnitType_MusicDevice);
 }
 
 }  // namespace
@@ -107,6 +117,60 @@ TEST_CASE("AU host output AudioBufferList reuses pre-sized storage (A2 RT no-all
             static_cast<UInt32>(frames) * sizeof(float));
     REQUIRE(abl->mBuffers[0].mData == ch0.data());
     REQUIRE(abl->mBuffers[1].mData == ch1.data());
+}
+
+TEST_CASE("AU host slot prepares an instrument, which has no input bus",
+          "[host][au][integration]") {
+    // An instrument (aumu) exposes zero input elements. prepare() used to set
+    // kAudioUnitProperty_StreamFormat on input element 0 unconditionally and
+    // treat the resulting kAudioUnitErr_InvalidElement (-10877) as fatal, so
+    // loading ANY instrument failed while every effect passed — which is why
+    // the effect-only integration test above never caught it. Instruments are
+    // the whole point of a host that wants to drive a synth offline.
+    const std::string uid = first_apple_instrument_unique_id();
+    if (uid.empty()) {
+        WARN("skipped: no Apple instrument AU registered in this environment");
+        return;
+    }
+
+    host::PluginInfo info;
+    info.name = "SystemInstrument";
+    info.unique_id = uid;
+    info.format = host::PluginFormat::AudioUnit;
+    info.is_instrument = true;
+    info.is_effect = false;
+    info.num_inputs = 0;
+    info.num_outputs = 2;
+
+    auto slot = host::PluginSlot::load(info);
+    if (!slot) {
+        WARN("skipped: system AU '" + uid + "' did not load in this environment");
+        return;
+    }
+
+    // The regression: this returned false for every instrument.
+    REQUIRE(slot->prepare(48000.0, 512));
+
+    // And it must actually render — proving we skipped the input-side setup
+    // rather than merely swallowing the error and leaving the AU uninitialized.
+    constexpr int channels = 2;
+    constexpr int frames = 512;
+    std::vector<float> out0(frames, 1.0f), out1(frames, 1.0f);
+    std::array<float*, channels> out_ptrs{out0.data(), out1.data()};
+    audio::BufferView<const float> input(nullptr, 0, frames);
+    audio::BufferView<float> output(out_ptrs.data(), channels, frames);
+    midi::MidiBuffer midi_in, midi_out;
+    host::ParameterEventQueue params;
+
+    slot->process(output, input, midi_in, midi_out, params, frames);
+
+    // Silent (no note on) but finite and written — a rendered buffer, not the
+    // untouched 1.0f fill and not NaN.
+    for (int c = 0; c < channels; ++c) {
+        for (int i = 0; i < frames; ++i) {
+            REQUIRE(std::isfinite(output.channel_ptr(static_cast<std::size_t>(c))[i]));
+        }
+    }
 }
 
 TEST_CASE("AU host slot renders a real system AudioUnit (A2 integration)",
