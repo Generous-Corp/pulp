@@ -278,8 +278,8 @@ pulp_add_test_suite(pulp-test-view-zindex-overflow LIBRARIES pulp::view)
 # paint routing (save_layer_with_mask routing).
 pulp_add_test_suite(pulp-test-view-mask-overflow LIBRARIES pulp::view)
 
-# DirtyTracker, GpuGraphRenderer, and RenderLoop timer-state tests
-# are pure helpers; keep them available in GPU-off sanitizer and coverage builds.
+# DirtyTracker and RenderLoop timer-state tests are pure helpers;
+# keep them available in GPU-off sanitizer and coverage builds.
 add_executable(pulp-test-dirty-tracker test_dirty_tracker.cpp)
 target_include_directories(pulp-test-dirty-tracker PRIVATE
     ${CMAKE_SOURCE_DIR}/core/render/include)
@@ -295,12 +295,6 @@ target_include_directories(pulp-test-partial-rendering-poc PRIVATE
     ${CMAKE_SOURCE_DIR}/core/render/include)
 target_link_libraries(pulp-test-partial-rendering-poc PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-partial-rendering-poc)
-
-add_executable(pulp-test-gpu-graph test_gpu_graph.cpp)
-target_include_directories(pulp-test-gpu-graph PRIVATE
-    ${CMAKE_SOURCE_DIR}/core/render/include)
-target_link_libraries(pulp-test-gpu-graph PRIVATE Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-gpu-graph)
 
 # Dawn GPU timestamp queries. The pure tick->ms resolution
 # math plus the CPU-only GpuTimestamps stub compile without a GPU link,
