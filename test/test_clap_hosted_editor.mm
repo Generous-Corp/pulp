@@ -20,6 +20,8 @@
 #import <AppKit/AppKit.h>
 
 #include <algorithm>
+#include <atomic>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -524,6 +526,133 @@ TEST_CASE("CLAP host relays the handler's refusal to the plugin", "[clap][editor
     REQUIRE_FALSE(host_gui->request_resize(fake.host, 1024, 768));
 
     slot->destroy_hosted_editor(std::move(ed));
+}
+
+TEST_CASE("CLAP editor asks can_resize before the size query", "[clap][editor]") {
+    // clap/ext/gui.h documents create -> set_scale -> can_resize -> get_size.
+    FakeClapPlugin fake;
+    auto slot = make_slot(fake);
+    REQUIRE(slot != nullptr);
+
+    ParentView parent;
+    auto ed = slot->create_hosted_editor(parent.handle());
+    REQUIRE(ed != nullptr);
+    REQUIRE(fake.index_of("can_resize") < fake.index_of("get_size"));
+
+    slot->destroy_hosted_editor(std::move(ed));
+}
+
+TEST_CASE("CLAP editor refuses a teardown handle it does not own", "[clap][editor]") {
+    FakeClapPlugin fake;
+    auto slot = make_slot(fake);
+    REQUIRE(slot != nullptr);
+
+    ParentView parent;
+    auto ed = slot->create_hosted_editor(parent.handle());
+    REQUIRE(ed != nullptr);
+
+    // A handle from somewhere else must not tear down this slot's editor.
+    auto foreign = std::make_unique<PluginSlot::HostedEditor>();
+    foreign->native_handle = reinterpret_cast<void*>(0xDEAD);
+    slot->destroy_hosted_editor(std::move(foreign));
+
+    REQUIRE_FALSE(fake.logged("destroy"));
+    REQUIRE(parent.subview_count() == 1);
+
+    slot->destroy_hosted_editor(std::move(ed));
+    REQUIRE(fake.logged("destroy"));
+    REQUIRE(parent.subview_count() == 0);
+}
+
+// ── off-thread host callbacks ────────────────────────────────────────────────
+//
+// clap_host_gui callbacks are [thread-safe]: a plugin may invoke them from any
+// thread (a render thread requesting a resize is the common case). Every
+// clap_plugin_gui call and every native-view touch is confined to the editor's
+// thread, so these must refuse or defer rather than walk into AppKit off-thread.
+
+TEST_CASE("CLAP resize request off the editor thread is denied, not run", "[clap][editor]") {
+    FakeClapPlugin fake;
+    auto slot = make_slot(fake);
+    REQUIRE(slot != nullptr);
+
+    ParentView parent;
+    auto ed = slot->create_hosted_editor(parent.handle());
+    REQUIRE(ed != nullptr);
+
+    std::atomic<int> handler_calls{0};
+    slot->set_editor_resize_request_handler([&](uint32_t, uint32_t) {
+        handler_calls.fetch_add(1);
+        return true;
+    });
+
+    auto* host_gui =
+        static_cast<const clap_host_gui_t*>(fake.host->get_extension(fake.host, CLAP_EXT_GUI));
+
+    bool accepted = true;
+    std::thread t([&] { accepted = host_gui->request_resize(fake.host, 1024, 768); });
+    t.join();
+
+    // Denial is spec-legal ("the host doesn't have to call set_size()"), and is
+    // honest: returning true would promise an async resize that never lands.
+    REQUIRE_FALSE(accepted);
+    // The handler resizes a native view, so it must not have run off-thread.
+    REQUIRE(handler_calls.load() == 0);
+
+    slot->destroy_hosted_editor(std::move(ed));
+}
+
+TEST_CASE("CLAP resize-hints change off the editor thread does not call the plugin",
+          "[clap][editor]") {
+    FakeClapPlugin fake;
+    auto slot = make_slot(fake);
+    REQUIRE(slot != nullptr);
+
+    ParentView parent;
+    auto ed = slot->create_hosted_editor(parent.handle());
+    REQUIRE(ed != nullptr);
+
+    auto* host_gui =
+        static_cast<const clap_host_gui_t*>(fake.host->get_extension(fake.host, CLAP_EXT_GUI));
+
+    const int before = static_cast<int>(
+        std::count(fake.calls.begin(), fake.calls.end(), std::string("can_resize")));
+    std::thread t([&] { host_gui->resize_hints_changed(fake.host); });
+    t.join();
+    const int after = static_cast<int>(
+        std::count(fake.calls.begin(), fake.calls.end(), std::string("can_resize")));
+
+    // can_resize is [main-thread]; re-querying it here would be an illegal call.
+    REQUIRE(after == before);
+
+    slot->destroy_hosted_editor(std::move(ed));
+}
+
+TEST_CASE("CLAP closed() off the editor thread defers destroy to teardown", "[clap][editor]") {
+    FakeClapPlugin fake;
+    auto slot = make_slot(fake);
+    REQUIRE(slot != nullptr);
+
+    ParentView parent;
+    auto ed = slot->create_hosted_editor(parent.handle());
+    REQUIRE(ed != nullptr);
+
+    auto* host_gui =
+        static_cast<const clap_host_gui_t*>(fake.host->get_extension(fake.host, CLAP_EXT_GUI));
+
+    std::thread t([&] { host_gui->closed(fake.host, /*was_destroyed=*/true); });
+    t.join();
+
+    // destroy() is [main-thread]; the acknowledgement is owed but must not be
+    // paid from the plugin's thread.
+    REQUIRE_FALSE(fake.logged("destroy"));
+
+    // Teardown on the editor's thread pays it, exactly once.
+    slot->destroy_hosted_editor(std::move(ed));
+    const int destroys = static_cast<int>(
+        std::count(fake.calls.begin(), fake.calls.end(), std::string("destroy")));
+    REQUIRE(destroys == 1);
+    REQUIRE(parent.subview_count() == 0);
 }
 
 TEST_CASE("CLAP gui closed(was_destroyed) acknowledges without dangling the handle",

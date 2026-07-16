@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <thread>
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -452,7 +453,14 @@ public:
     // owns a container view and reports THAT as the HostedEditor handle. See
     // hosted_editor_container.hpp.
     //
-    // Every clap_plugin_gui call below is [main-thread] per clap/ext/gui.h.
+    // Thread rules are asymmetric, and that asymmetry is the whole reason the
+    // host callbacks below are written the way they are. Every clap_plugin_gui
+    // call is [main-thread] per clap/ext/gui.h, but the clap_host_gui callbacks
+    // a plugin invokes are [thread-safe] — a plugin may call request_resize or
+    // closed from ANY thread (a render thread deciding to resize is the common
+    // case). So a host callback must never walk straight into a
+    // clap_plugin_gui call or into AppKit, both of which would then run off the
+    // editor's thread.
 
     bool has_editor() const override { return gui_ext_ != nullptr && gui_api_supported_; }
 
@@ -482,7 +490,7 @@ public:
             runtime::log_error("CLAP editor: gui->create failed for '{}'", info_.name);
             return nullptr;
         }
-        gui_created_ = true;
+        gui_created_.store(true);
 
         // Only the physical-size APIs get a scale. clap/ext/gui.h explicitly
         // says not to call set_scale() on cocoa/uikit, which are logical-size.
@@ -491,6 +499,12 @@ public:
             gui_ext_->set_scale(plugin_, editor_container_scale(parent_window));
         }
 
+        // Order per clap/ext/gui.h: can_resize before the size query. Pulp does
+        // not implement the "restore a prior session size via set_size()" branch
+        // the header also documents, so the size always comes from get_size().
+        const bool resizable = gui_ext_->can_resize && gui_ext_->can_resize(plugin_);
+        editor_resizable_ = resizable;
+
         uint32_t width = 0;
         uint32_t height = 0;
         if (!gui_ext_->get_size(plugin_, &width, &height) || width == 0 || height == 0) {
@@ -498,8 +512,6 @@ public:
             close_editor();
             return nullptr;
         }
-
-        const bool resizable = gui_ext_->can_resize && gui_ext_->can_resize(plugin_);
 
         void* container = create_editor_container(parent_window, width, height);
         if (!container) {
@@ -525,6 +537,9 @@ public:
         }
 
         editor_open_ = true;
+        // Whichever thread opened the editor IS its UI thread; a host callback
+        // arriving on any other thread cannot safely touch the gui or the view.
+        editor_thread_ = std::this_thread::get_id();
 
         auto ed = std::make_unique<HostedEditor>();
         ed->native_handle = container;
@@ -536,6 +551,16 @@ public:
 
     void destroy_hosted_editor(std::unique_ptr<HostedEditor> ed) override {
         if (!ed) return;
+        // Tearing down on a mismatched handle would silently close whatever this
+        // slot has open and leak the editor the caller actually meant. Say so
+        // instead of guessing.
+        if (ed->native_handle != editor_container_) {
+            runtime::log_error(
+                "CLAP editor: destroy_hosted_editor for '{}' got an editor this slot "
+                "does not own; ignoring",
+                info_.name);
+            return;
+        }
         close_editor();
     }
 
@@ -589,8 +614,10 @@ private:
     /// Tear the plugin's gui down: hide, then destroy. Leaves the container
     /// alone — see close_editor(). Idempotent.
     void destroy_gui() {
-        if (!gui_created_) return;
-        gui_created_ = false;
+        // exchange, not test-then-set: closed() is [thread-safe], so two callers
+        // can reach here at once and a plain bool would let both through and
+        // double-destroy the plugin's gui. Exactly one exchange sees true.
+        if (!gui_created_.exchange(false)) return;
         if (!plugin_ || !gui_ext_) return;
         if (gui_ext_->hide) gui_ext_->hide(plugin_);
         gui_ext_->destroy(plugin_);
@@ -601,12 +628,25 @@ private:
     /// gui that died on its own still leaves the container to be released
     /// exactly once.
     void close_editor() {
+        // Pays any destroy() deferred from an off-thread closed() callback; the
+        // exchange in destroy_gui() makes the deferred and normal paths converge
+        // on a single destroy.
+        gui_destroy_pending_.store(false);
         destroy_gui();
         if (editor_container_) {
             destroy_editor_container(editor_container_);
             editor_container_ = nullptr;
         }
         editor_open_ = false;
+    }
+
+    /// Whether the caller is on the thread that opened the editor. clap_host_gui
+    /// callbacks are [thread-safe], so a plugin may invoke them from anywhere,
+    /// while every clap_plugin_gui call and every native-view touch is confined
+    /// to the editor's own thread.
+    bool on_editor_thread() const {
+        return editor_thread_ != std::thread::id{} &&
+               std::this_thread::get_id() == editor_thread_;
     }
 
     static ClapSlot* self_from(const clap_host_t* host) {
@@ -625,6 +665,10 @@ private:
     static void CLAP_ABI host_gui_resize_hints_changed(const clap_host_t* host) {
         auto* self = self_from(host);
         if (!self || !self->plugin_ || !self->gui_ext_) return;
+        // can_resize is [main-thread]; this callback is not. Off-thread, leave
+        // the cached bit alone rather than calling into the plugin illegally —
+        // it is re-read on the next open.
+        if (!self->on_editor_thread()) return;
         // The only hint acted on today is whether the editor is resizable at
         // all; the concrete hints are re-read on the next resize negotiation.
         self->editor_resizable_ =
@@ -636,6 +680,19 @@ private:
                                                  uint32_t height) {
         auto* self = self_from(host);
         if (!self || !self->editor_open_) return false;
+        // The handler resizes a native view, which is not thread-safe on any
+        // platform. This callback is [thread-safe], so a plugin may reach here
+        // from a render thread. Refusing is spec-legal ("the host doesn't have
+        // to call set_size()") and is the honest answer until there is a
+        // main-thread dispatch to hand the request to — returning true would
+        // promise an async resize that never happens.
+        if (!self->on_editor_thread()) {
+            runtime::log_warn(
+                "CLAP editor: plugin '{}' requested a resize off the editor thread; "
+                "denying (no cross-thread editor dispatch)",
+                self->info_.name);
+            return false;
+        }
         // No handler means the host has not opted into plugin-driven resize.
         // Denying is spec-legal and the plugin must cope.
         if (!self->resize_request_handler_) return false;
@@ -656,8 +713,17 @@ private:
                           self->info_.name, was_destroyed);
         if (!was_destroyed) return;
 
-        // The spec requires acknowledging a was_destroyed close with destroy().
-        // Do exactly that and no more: the caller still holds a HostedEditor
+        // The spec requires acknowledging a was_destroyed close with destroy() —
+        // but destroy() is [main-thread] while this callback is [thread-safe].
+        // Off-thread, record the debt and let the next teardown on the editor's
+        // own thread pay it, rather than calling a main-thread-only API from
+        // whatever thread the plugin happened to use.
+        if (!self->on_editor_thread()) {
+            self->gui_destroy_pending_.store(true);
+            return;
+        }
+
+        // Acknowledge, and do no more: the caller still holds a HostedEditor
         // whose native_handle is our container, and freeing it here would
         // dangle that handle under EditorAttachment (which detaches by handle
         // on release). The container is released when the caller tears the
@@ -747,7 +813,11 @@ private:
     // can report its gui destroyed (clap_host_gui::closed) while the caller
     // still holds the HostedEditor handle to the container. Tracking them
     // separately keeps each torn down exactly once.
-    bool gui_created_ = false;
+    std::atomic<bool> gui_created_{false};
+    // Set when the editor opens; host callbacks compare against it because a
+    // plugin may invoke them from any thread.
+    std::thread::id editor_thread_{};
+    std::atomic<bool> gui_destroy_pending_{false};
     bool editor_open_ = false;
     bool editor_resizable_ = false;
     void* editor_container_ = nullptr;
