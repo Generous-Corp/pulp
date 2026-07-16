@@ -33,8 +33,12 @@ catch_discover_tests(pulp-test-design-frame-view
 # HostParamSurface / HostActionSurface — the SDK runtime host-param + action
 # surfaces: StateStore backing, DesignFrameView
 # sync/route/re-key, action forwarding, and cross-host binding via a fake.
+# The rt_allocation_probe harness intercepts global operator new, so the
+# paint-safe display-text reads can be asserted alloc-free rather than merely
+# documented as such.
 add_executable(pulp-test-host-param-surface
-    test_host_param_surface.cpp)
+    test_host_param_surface.cpp
+    harness/rt_allocation_probe.cpp)
 target_link_libraries(pulp-test-host-param-surface
     PRIVATE pulp::view pulp::state Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-host-param-surface

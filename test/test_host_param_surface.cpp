@@ -24,6 +24,8 @@
 #include <pulp/view/host_param_surface.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
+
 using namespace pulp;
 using pulp::view::DesignFrameElement;
 using pulp::view::DesignFrameView;
@@ -1526,4 +1528,288 @@ TEST_CASE("an unchanged host push does not repaint the editor",
     dfv.sync_from_host_params();
     CHECK(dfv.element_value(0) == Catch::Approx(0.75f));
     CHECK(host.repaints == before + 1);
+}
+
+// ── Paint-safe host readout ──────────────────────────────────────────────────
+// element_display_text() is the read half of the host readout channel: the one
+// legal from paint(). These cover the contract it advertises — alloc-free reads,
+// verbatim (untruncated) text, honest unbound behavior, and tick-granular
+// staleness.
+
+namespace {
+
+// A DesignFrameView subclass that reads its bound parameter's formatted text
+// from paint() — the end-to-end shape a rack/chain UI needs for a per-slot
+// readout it draws itself. Holds its key as a member: element_for_param_key
+// takes a const std::string&, so passing a literal would build a temporary and
+// allocate right where paint must not.
+class ReadoutPaintView : public DesignFrameView {
+public:
+    using DesignFrameView::DesignFrameView;
+
+    std::string key = "gain";
+    std::string painted;        // what paint() saw
+    bool painted_bound = false;
+    int paints = 0;
+    std::size_t paint_allocations = 0;
+
+    void paint(canvas::Canvas& canvas) override {
+        DesignFrameView::paint(canvas);
+        // Measure only OUR read: the probe is scoped to the two calls under
+        // test, so the base class's own painting cannot mask or inflate it.
+        pulp::test::RtAllocationProbe probe;
+        const int i = element_for_param_key(key);
+        const std::string& text = element_display_text(i);
+        const bool bound = element_has_display_text(i);
+        paint_allocations = probe.allocation_count();
+        // Copy out AFTER the probe's scope — the copy is the test's, not the
+        // read path's.
+        painted = text;
+        painted_bound = bound;
+        ++paints;
+    }
+};
+
+// Paint a view through the real paint_all path, so the read happens inside the
+// genuine ScopedNoAlloc region rather than a test-simulated one. A
+// HostParamSurface call from here would trip its own call-context assert.
+void paint_once(ReadoutPaintView& v) {
+    canvas::RecordingCanvas canvas;   // headless: records draws, opens no window
+    v.set_bounds({0, 0, 200, 200});
+    v.paint_all(canvas);
+}
+
+ReadoutPaintView make_readout_view(const std::string& param_key) {
+    const std::string svg =
+        R"(<svg width="100" height="100"><rect x="0" y="0" width="100" height="100"/></svg>)";
+    DesignFrameElement knob;
+    knob.kind = DesignFrameElement::Kind::knob;
+    knob.x = 10; knob.y = 10; knob.w = 20; knob.h = 20;
+    knob.cx = 20; knob.cy = 20;
+    knob.hit_radius = 20.0f;
+    knob.param_key = param_key;
+    return ReadoutPaintView(svg, {knob}, 0, 0, 100, 100);
+}
+
+} // namespace
+
+TEST_CASE("a subclass reads a host param's formatted text from paint()",
+          "[view][host-param][paint-safe]") {
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.6;
+    dfv.set_host_params(&params);
+
+    // The tick is what reaches the host. Paint only ever reads the cache.
+    dfv.sync_from_host_params();
+    paint_once(dfv);
+
+    REQUIRE(dfv.paints == 1);
+    CHECK(dfv.painted == "disp:gain");     // the fake's formatter output
+    CHECK(dfv.painted_bound);
+}
+
+TEST_CASE("the paint-time display-text read allocates nothing",
+          "[view][host-param][paint-safe][rt-safety]") {
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;
+    // A value long enough to defeat the small-string optimization: were the read
+    // path to copy or format, THIS is the case that would heap-allocate. A short
+    // string could pass on SSO alone and prove nothing.
+    params.values["a_parameter_key_far_longer_than_any_small_string_buffer"] = 0.25;
+    dfv.key = "a_parameter_key_far_longer_than_any_small_string_buffer";
+    dfv.set_element_param_key(0, dfv.key);
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+    REQUIRE(dfv.element_display_text(0).size() > 32);   // beyond any SSO buffer
+
+    paint_once(dfv);
+
+    REQUIRE(dfv.paints == 1);
+    CHECK(dfv.paint_allocations == 0);
+}
+
+TEST_CASE("display text is cached verbatim, with no length cap or truncation",
+          "[view][host-param][paint-safe]") {
+    // The channel stores the host's string as-is: no fixed buffer, so no
+    // truncation and no partial readout. A host formatter returning something
+    // pathologically long is reported in full rather than silently cut.
+    class LongTextSurface : public FakeHostParamSurface {
+    protected:
+        std::string do_param_display_text(std::string_view key, double v) override {
+            (void)key; (void)v;
+            return std::string(4096, 'x') + "!";
+        }
+    };
+    ReadoutPaintView dfv = make_readout_view("gain");
+    LongTextSurface params;
+    params.values["gain"] = 0.5;
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+
+    REQUIRE(dfv.element_display_text(0).size() == 4097);
+    CHECK(dfv.element_display_text(0).back() == '!');   // the tail survives
+
+    // And the read of it is still alloc-free — capacity is a tick-side cost.
+    paint_once(dfv);
+    CHECK(dfv.paint_allocations == 0);
+    CHECK(dfv.painted.size() == 4097);
+}
+
+TEST_CASE("a key with no host param reads as unbound, not as a stale or absent value",
+          "[view][host-param][paint-safe]") {
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;   // deliberately empty: nothing resolves "gain"
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+    paint_once(dfv);
+
+    CHECK(dfv.painted.empty());
+    CHECK_FALSE(dfv.painted_bound);
+    CHECK_FALSE(dfv.element_has_display_text(0));
+
+    // An out-of-range index is the same answer, not a crash and not UB.
+    CHECK(dfv.element_display_text(-1).empty());
+    CHECK(dfv.element_display_text(99).empty());
+    CHECK_FALSE(dfv.element_has_display_text(-1));
+    CHECK_FALSE(dfv.element_has_display_text(99));
+
+    // An element carrying no param_key at all is unbound too.
+    dfv.set_element_param_key(0, "");
+    dfv.sync_from_host_params();
+    CHECK_FALSE(dfv.element_has_display_text(0));
+}
+
+TEST_CASE("a host that stops resolving a key clears the readout rather than lying",
+          "[view][host-param][paint-safe]") {
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.6;
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+    REQUIRE(dfv.element_has_display_text(0));
+    REQUIRE(dfv.element_display_text(0) == "disp:gain");
+
+    // The host drops the parameter (a rack slot emptied, a preset swapped out).
+    params.values.erase("gain");
+    dfv.sync_from_host_params();
+
+    // The last text must NOT survive — a readout for a parameter that no longer
+    // exists is a stale lie.
+    CHECK(dfv.element_display_text(0).empty());
+    CHECK_FALSE(dfv.element_has_display_text(0));
+}
+
+TEST_CASE("bound-but-empty display text is distinguishable from unbound",
+          "[view][host-param][paint-safe]") {
+    // A host may legitimately format a value AS an empty string, so empty text
+    // alone cannot mean "no parameter here". The bound flag carries that.
+    class EmptyTextSurface : public FakeHostParamSurface {
+    protected:
+        std::string do_param_display_text(std::string_view, double) override { return {}; }
+    };
+    ReadoutPaintView dfv = make_readout_view("gain");
+    EmptyTextSurface params;
+    params.values["gain"] = 0.5;
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+
+    CHECK(dfv.element_display_text(0).empty());
+    CHECK(dfv.element_has_display_text(0));   // bound — the host formats it empty
+}
+
+TEST_CASE("paint sees the last tick's text: the readout is tick-granular, never torn",
+          "[view][host-param][paint-safe]") {
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.1;
+    dfv.set_host_params(&params);
+
+    // Before the FIRST sync there is nothing to show — not the host's current
+    // value, because paint has never been allowed to ask.
+    paint_once(dfv);
+    CHECK(dfv.painted.empty());
+    CHECK_FALSE(dfv.painted_bound);
+
+    dfv.sync_from_host_params();
+    paint_once(dfv);
+    CHECK(dfv.painted == "disp:gain");
+
+    // The host's value moves BETWEEN ticks (automation running under a frame).
+    // Paint keeps reporting the last synced text: one tick, one consistent
+    // snapshot. Repainting does not re-reach the host and cannot re-derive it.
+    class CountingSurface : public FakeHostParamSurface {
+    public:
+        int text_calls = 0;
+    protected:
+        std::string do_param_display_text(std::string_view key, double v) override {
+            ++text_calls;
+            (void)v;
+            return "disp:" + std::string(key);
+        }
+    };
+    CountingSurface counting;
+    counting.values["gain"] = 0.1;
+    dfv.set_host_params(&counting);
+    dfv.sync_from_host_params();
+    const int after_tick = counting.text_calls;
+    REQUIRE(after_tick == 1);
+
+    paint_once(dfv);
+    paint_once(dfv);
+    paint_once(dfv);
+    // Three paints, zero extra host formatter calls: the host round-trip is
+    // per-tick, not per-frame.
+    CHECK(counting.text_calls == after_tick);
+    CHECK(dfv.painted == "disp:gain");
+}
+
+TEST_CASE("every host parameter has a readout once the bind grid is built",
+          "[view][host-param][paint-safe]") {
+    // The keyed readout the ask actually needs: text for a parameter the design
+    // draws no control for. build_bind_grid gives that key an element, and the
+    // element carries the cached text.
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.5;
+    params.values["undrawn_mix"] = 0.25;    // no control in the design
+    dfv.set_host_params(&params);
+
+    REQUIRE(dfv.element_for_param_key("undrawn_mix") == -1);   // no element yet
+    dfv.build_bind_grid({"gain", "undrawn_mix"});
+    const int i = dfv.element_for_param_key("undrawn_mix");
+    REQUIRE(i >= 0);
+    REQUIRE(dfv.element_is_bind_grid_stand_in(i));
+
+    dfv.sync_from_host_params();
+    CHECK(dfv.element_has_display_text(i));
+    CHECK(dfv.element_display_text(i) == "disp:undrawn_mix");
+
+    // And it paints, keyed, alloc-free — the getEffectParamText shape.
+    dfv.key = "undrawn_mix";
+    paint_once(dfv);
+    CHECK(dfv.painted == "disp:undrawn_mix");
+    CHECK(dfv.paint_allocations == 0);
+}
+
+TEST_CASE("a value_label keeps its own painted readout alongside the cache",
+          "[view][host-param][paint-safe]") {
+    // display_text must not clobber, or be clobbered by, the author-owned `text`
+    // channel: both are populated for a value_label, and set_element_text on a
+    // non-label element leaves the host cache intact.
+    const std::string svg = R"(<svg width="100" height="100"/>)";
+    DesignFrameElement label;
+    label.kind = DesignFrameElement::Kind::value_label;
+    label.x = 10; label.y = 10; label.w = 40; label.h = 10;
+    label.param_key = "gain";
+    DesignFrameView dfv(svg, {label}, 0, 0, 100, 100);
+
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.6;
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+
+    CHECK(dfv.element_text(0) == "disp:gain");           // the label still paints
+    CHECK(dfv.element_display_text(0) == "disp:gain");   // and the cache carries it
+    CHECK(dfv.element_has_display_text(0));
 }

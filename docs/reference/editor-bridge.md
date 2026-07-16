@@ -418,3 +418,71 @@ The keys are **caller-supplied** because `HostParamSurface` deliberately exposes
 no parameter *enumeration* — it answers questions about a key you already hold
 (`has_param` / `get_param` / `param_step_count`). A host reaching this surface has
 that list on its own side; passing it in is the honest wiring rather than a guess.
+
+### Reading a host parameter's formatted text from `paint()`
+
+`param_display_text(key, normalized)` returns the host's own formatted readout —
+`"500 ms"`, `"-6.0 dB"`, `"Sine"`. It is **tick-only**: it calls the host's
+formatter (arbitrary code, which may hold locks shared with the audio thread) and
+returns a fresh `std::string`. Both make it illegal mid-render, and a debug build
+asserts if you call it from `paint()`.
+
+So the round-trip happens once per tick and `paint()` reads the cache:
+
+| | Call | Context |
+|---|---|---|
+| **Write** | `sync_from_host_params()` | tick — one host call per bound element |
+| **Read** | `element_display_text(i)` | `paint()` — no host call, no lock, no allocation |
+
+`sync_from_host_params()` caches the text for **every** element whose `param_key`
+the surface resolves, not just a `Kind::value_label`. A subclass painting its own
+readout — a rack slot's `"Mix 45%"`, a knob's hover tooltip — reads it back by
+index:
+
+```cpp
+class MySlotView : public DesignFrameView {
+    std::string key_ = "slot1_mix";   // a member, not a literal — see below
+
+    void paint(canvas::Canvas& canvas) override {
+        DesignFrameView::paint(canvas);
+        const int i = element_for_param_key(key_);
+        if (element_has_display_text(i))
+            canvas.fill_text(element_display_text(i), x, y);   // "45 %"
+    }
+};
+```
+
+Combined with the bind grid above, this is a complete keyed readout: every host
+parameter has an element, so a parameter the design draws **no** control for still
+has text to paint.
+
+**The returned reference is valid until the next `sync_from_host_params()` or
+frame swap** — paint reads it and draws; it does not store it.
+
+**Hold your keys as `std::string` members.** `element_for_param_key` takes a
+`const std::string&`, so passing a string literal from `paint()` builds a
+temporary and allocates in exactly the place that must not — or resolve the index
+once at tick and paint from that.
+
+**No truncation, no length cap.** The cache holds the host's string verbatim, so a
+readout is never a partial lie. A fixed-capacity buffer is needed only to cross a
+thread or a C ABI, and this channel does neither: `sync_from_host_params()` and
+`paint()` both run on the UI thread, so the read is a plain member read rather
+than a published frame. (Contrast `MeterSource` / `ScalarSource`, whose producer
+*is* the audio thread and which therefore ride a `TripleBuffer` of fixed-capacity,
+trivially-copyable frames.)
+
+**Staleness is tick-granular.** `paint()` sees the text from the most recent
+`sync_from_host_params()`, and repainting never re-reaches the host — three paints
+between two ticks make zero formatter calls and show one consistent snapshot.
+Before the first sync, the text is empty.
+
+**An unbound key reads as unbound, never as a stale value.** `element_display_text`
+returns empty and `element_has_display_text` returns `false` for an out-of-range
+index, an element with no `param_key`, and a key no surface resolves. A key the
+host *stops* resolving is **cleared** at the next sync rather than left at its last
+value — a readout for a parameter that no longer exists would be a stale lie.
+
+Empty text alone is therefore ambiguous: a host may legitimately format a value
+*as* an empty string. Gate on `element_has_display_text(i)` when the difference
+matters.

@@ -632,12 +632,31 @@ void DesignFrameView::sync_from_host_params() {
     HostParamSurface* surface = host_params();
     if (!surface) return;  // preview/screenshot: degrade to local state
     for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
-        const auto& e = elements_[i];
-        if (e.param_key.empty() || !surface->has_param(e.param_key)) continue;
+        auto& e = elements_[i];
+        if (e.param_key.empty() || !surface->has_param(e.param_key)) {
+            // Unbound (no key, or the host stopped resolving one it used to).
+            // Clear rather than leave the last text standing: paint must not
+            // keep drawing the readout of a parameter that is no longer there.
+            e.display_text.clear();
+            e.display_text_bound = false;
+            continue;
+        }
         const double norm = surface->get_param(e.param_key);
+
+        // Cache the host-formatted readout for EVERY bound element, not just a
+        // value_label. The formatter round-trip is legal here (tick) and illegal
+        // in paint, so a painter that draws its own readout — a rack slot's
+        // "Mix 45%", a knob's hover tooltip — has no other way to reach it. One
+        // host call and one string assign per bound element per tick; a full
+        // plug-in's worth of parameters is not a measurable cost, and it is the
+        // same call the value_label path already made.
+        e.display_text = surface->param_display_text(e.param_key, norm);
+        e.display_text_bound = true;
+
         if (e.kind == DesignFrameElement::Kind::value_label) {
-            // A readout tracks its param's host-formatted display text.
-            set_element_text(i, surface->param_display_text(e.param_key, norm));
+            // A readout also tracks the text as its own painted string, so a
+            // value_label keeps rendering with no subclass involvement.
+            set_element_text(i, e.display_text);
         } else {
             // Silent host->view push (no echo back to the surface).
             set_element_value(i, static_cast<float>(norm));
