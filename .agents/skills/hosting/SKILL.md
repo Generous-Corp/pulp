@@ -800,6 +800,19 @@ non-obvious parts:
   nullptr for every extension before editors existed, so a plugin could not call
   back at all. `request_show`/`request_hide` are denied — Pulp only creates
   embedded editors. Deny rather than pretend.
+- **The thread rules are ASYMMETRIC, and getting this backwards is the easy
+  mistake.** Every `clap_plugin_gui` call (`create`, `hide`, `destroy`,
+  `can_resize`, `set_size`…) is `[main-thread]`. But the `clap_host_gui`
+  callbacks a plugin invokes are `[thread-safe]` — `request_resize` and
+  `resize_hints_changed` are `[thread-safe & !floating]`, and
+  `request_show`/`request_hide`/`closed` are `[thread-safe]`. A plugin may call
+  them from a render thread. So a host callback must NEVER walk straight into a
+  `clap_plugin_gui` call or a native view — that runs a main-thread-only API off
+  the editor's thread. The slot records the thread that opened the editor and
+  refuses (`request_resize` → false, which the spec allows) or defers (`closed`
+  → pay the destroy at teardown) off-thread. Any `bool` a `[thread-safe]`
+  callback touches must be atomic: two callers can otherwise both pass a
+  test-then-set and double-destroy the plugin's gui.
 - **Do not call `set_scale()` on cocoa/uikit.** `clap/ext/gui.h` documents them
   as logical-size APIs that must not receive it; win32/x11 are physical-size and
   do want it.
