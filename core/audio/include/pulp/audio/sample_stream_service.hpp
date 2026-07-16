@@ -77,6 +77,8 @@ enum class SampleStreamServiceStatus : std::uint8_t {
     Idle,
     Published,
     AlreadyReady,
+    PageRetired,
+    WaitingForAudioGeneration,
     StaleSource,
     NoPageAvailable,
     ReadFailed,
@@ -89,6 +91,10 @@ struct SampleStreamCacheServiceStats {
     std::uint64_t decode_calls = 0;
     std::uint64_t pages_published = 0;
     std::uint64_t already_ready = 0;
+    std::uint64_t pages_retired = 0;
+    std::uint64_t retired_pages_reused = 0;
+    std::uint64_t retire_waits = 0;
+    std::uint64_t invalid_audio_generation_updates = 0;
     std::uint64_t stale_requests = 0;
     std::uint64_t no_page_available = 0;
     std::uint64_t read_failures = 0;
@@ -116,11 +122,31 @@ public:
         sources_.clear();
         scheduler_.reset();
         memory_budget_bytes_ = 0;
+        active_audio_generation_ = 0;
+        completed_audio_generation_ = 0;
         prepared_ = false;
         stats_ = {};
     }
 
     bool prepared() const noexcept { return prepared_; }
+
+    /// Updates the generation currently allowed to hold page views and the last
+    /// generation whose audio callback has completed. Values are monotonic. A
+    /// retired page is not writable again until completed reaches the generation
+    /// that was active when the page was retired.
+    bool update_audio_generations(std::uint64_t active_audio_generation,
+                                  std::uint64_t completed_audio_generation) noexcept {
+        if (active_audio_generation == 0 ||
+            completed_audio_generation > active_audio_generation ||
+            active_audio_generation < active_audio_generation_ ||
+            completed_audio_generation < completed_audio_generation_) {
+            ++stats_.invalid_audio_generation_updates;
+            return false;
+        }
+        active_audio_generation_ = active_audio_generation;
+        completed_audio_generation_ = completed_audio_generation;
+        return true;
+    }
 
     SampleStreamSourceAddResult add_source(const SampleStreamCacheSourceConfig& config,
                                            FrameReader reader) {
@@ -142,6 +168,7 @@ public:
             source->config = config;
             source->reader = std::move(reader);
             source->channel_ptrs.resize(config.channels);
+            source->slots.resize(config.cache_page_count);
             if (!source->window.prepare({
                     .channels = config.channels,
                     .page_count = config.cache_page_count,
@@ -201,19 +228,29 @@ public:
             return SampleStreamServiceStatus::AlreadyReady;
         }
 
-        const auto page_slot = reserve_empty_page(*source);
-        if (!page_slot) {
+        const auto reservation = reserve_page(*source);
+        if (reservation.status != PageReservationStatus::Reserved) {
+            if (reservation.status == PageReservationStatus::RetiredVictim) {
+                ++stats_.pages_retired;
+                return SampleStreamServiceStatus::PageRetired;
+            }
+            if (reservation.status == PageReservationStatus::WaitingForGeneration) {
+                ++stats_.retire_waits;
+                return SampleStreamServiceStatus::WaitingForAudioGeneration;
+            }
             ++stats_.no_page_available;
             return SampleStreamServiceStatus::NoPageAvailable;
         }
+        const auto page_slot = reservation.page_index;
+        if (reservation.reused_retired) ++stats_.retired_pages_reused;
 
         scheduler_.complete_page(*request);
 
         for (std::uint32_t channel = 0; channel < source->config.channels; ++channel) {
             source->channel_ptrs[channel] =
-                source->window.writable_channel_data(*page_slot, channel);
+                source->window.writable_channel_data(page_slot, channel);
             if (source->channel_ptrs[channel] == nullptr) {
-                source->window.cancel_fill_page(*page_slot);
+                source->window.cancel_fill_page(page_slot);
                 ++stats_.read_failures;
                 return SampleStreamServiceStatus::ReadFailed;
             }
@@ -231,25 +268,26 @@ public:
         }
 
         if (decoded != request->frame_count) {
-            source->window.cancel_fill_page(*page_slot);
+            source->window.cancel_fill_page(page_slot);
             ++stats_.read_failures;
             return SampleStreamServiceStatus::ReadFailed;
         }
 
         const bool final_page =
             request->frame_count == source->config.total_frames - start_frame;
-        if (!source->window.publish_page(*page_slot,
+        if (!source->window.publish_page(page_slot,
                                         {
                                             .stream_generation = request->source_generation,
                                             .start_frame = start_frame,
                                             .valid_frames = request->frame_count,
                                             .final_page = final_page,
                                         })) {
-            source->window.cancel_fill_page(*page_slot);
+            source->window.cancel_fill_page(page_slot);
             ++stats_.publish_failures;
             return SampleStreamServiceStatus::PublishFailed;
         }
 
+        source->slots[page_slot].publish_sequence = source->next_publish_sequence++;
         ++stats_.pages_published;
         return SampleStreamServiceStatus::Published;
     }
@@ -261,11 +299,30 @@ public:
     SampleStreamCacheServiceStats stats() const noexcept { return stats_; }
 
 private:
+    struct SlotRecord {
+        std::uint64_t publish_sequence = 0;
+    };
+
     struct Source {
         SampleStreamCacheSourceConfig config{};
         SampleStreamWindow window;
         FrameReader reader;
         std::vector<float*> channel_ptrs;
+        std::vector<SlotRecord> slots;
+        std::uint64_t next_publish_sequence = 1;
+    };
+
+    enum class PageReservationStatus : std::uint8_t {
+        Reserved,
+        RetiredVictim,
+        WaitingForGeneration,
+        Unavailable,
+    };
+
+    struct PageReservation {
+        PageReservationStatus status = PageReservationStatus::Unavailable;
+        std::uint32_t page_index = 0;
+        bool reused_retired = false;
     };
 
     static bool valid_source_config(const SampleStreamCacheSourceConfig& config) noexcept {
@@ -342,19 +399,56 @@ private:
         };
     }
 
-    static std::optional<std::uint32_t> reserve_empty_page(Source& source) noexcept {
+    PageReservation reserve_page(Source& source) noexcept {
         for (std::uint32_t page = 0; page < source.window.page_count(); ++page) {
             if (source.window.page_state(page) == SampleStreamPageState::Empty &&
                 source.window.begin_fill_page(page)) {
-                return page;
+                source.slots[page] = {};
+                return {PageReservationStatus::Reserved, page, false};
             }
         }
-        return std::nullopt;
+
+        bool has_retired_page = false;
+        for (std::uint32_t page = 0; page < source.window.page_count(); ++page) {
+            const auto state = source.window.page_state(page);
+            if (state != SampleStreamPageState::Retired &&
+                state != SampleStreamPageState::Retiring) {
+                continue;
+            }
+            has_retired_page = true;
+            if (state == SampleStreamPageState::Retired &&
+                source.window.begin_fill_page(page, completed_audio_generation_)) {
+                source.slots[page] = {};
+                return {PageReservationStatus::Reserved, page, true};
+            }
+        }
+        if (has_retired_page) {
+            return {PageReservationStatus::WaitingForGeneration, 0, false};
+        }
+
+        if (active_audio_generation_ == 0) return {};
+
+        std::optional<std::uint32_t> victim;
+        for (std::uint32_t page = 0; page < source.window.page_count(); ++page) {
+            if (source.window.page_state(page) != SampleStreamPageState::Ready) continue;
+            if (!victim ||
+                source.slots[page].publish_sequence <
+                    source.slots[*victim].publish_sequence) {
+                victim = page;
+            }
+        }
+        if (!victim ||
+            !source.window.retire_page(*victim, active_audio_generation_)) {
+            return {};
+        }
+        return {PageReservationStatus::RetiredVictim, *victim, false};
     }
 
     std::vector<std::unique_ptr<Source>> sources_;
     SampleStreamScheduler scheduler_;
     std::uint64_t memory_budget_bytes_ = 0;
+    std::uint64_t active_audio_generation_ = 0;
+    std::uint64_t completed_audio_generation_ = 0;
     bool prepared_ = false;
     SampleStreamCacheServiceStats stats_{};
 };

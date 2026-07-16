@@ -36,11 +36,14 @@ pulp_add_test_suite(pulp-test-waveform-headless-render-backend LIBRARIES pulp::v
 # Machine-checkable RT-safety labels for sampler/looper hot paths and off-thread helpers.
 pulp_add_test_suite(pulp-test-sampler-rt-safety-contract LIBRARIES pulp::audio)
 
-# Resident and manually-pumped streaming playback must remain bit-identical
-# across callback partitions, preload handoff, reset, and channel mapping.
+# Resident, manually-pumped, and prepared-page transport must remain
+# bit-identical across callback partitions, preload/page boundaries, seeks,
+# direction changes, reset, and channel mapping.
 pulp_add_test_suite(pulp-test-sampler-stream-parity
     SOURCES test_sampler_stream_parity.cpp
+            test_sampler_page_transport_parity.cpp
             support/sampler_parity.cpp
+            support/sample_page_transport_parity.cpp
             harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-stream-service LIBRARIES pulp::audio)
