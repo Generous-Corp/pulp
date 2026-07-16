@@ -31,6 +31,7 @@ struct SampleStreamVoiceBlockPlan {
     std::uint32_t output_frames = 0;
     SampleStreamVoiceSupply supply = SampleStreamVoiceSupply::InvalidContract;
     std::array<SampleStreamPageDemand, kSampleStreamVoiceMaxPageDemands> demands{};
+    std::array<SampleStreamPageView, kSampleStreamVoiceMaxPageDemands> ready_pages{};
     std::uint32_t demand_count = 0;
 };
 
@@ -42,6 +43,7 @@ struct SampleStreamVoiceBlockResult {
 struct SampleStreamVoiceDemandEnqueueResult {
     std::uint32_t demand_count = 0;
     std::uint32_t enqueued = 0;
+    std::uint32_t next_demand_index = 0;
     bool complete = false;
 };
 
@@ -102,6 +104,18 @@ public:
             !positive_finite(output_sample_rate)) {
             return plan;
         }
+        if (!asset.fully_resident()) {
+            const auto& contract = asset.preload_contract;
+            const auto maximum_source_frames_per_output =
+                static_cast<double>(asset.sample_rate) /
+                output_sample_rate * contract.maximum_playback_ratio;
+            if (!asset.has_preload_contract ||
+                output_frames > contract.maximum_host_block_frames ||
+                output_sample_rate != contract.host_sample_rate ||
+                source_frames_per_output > maximum_source_frames_per_output) {
+                return plan;
+            }
+        }
         if (!same_generation(asset)) {
             plan.supply = SampleStreamVoiceSupply::StaleGeneration;
             return plan;
@@ -128,16 +142,10 @@ public:
             if (position >= static_cast<double>(asset.total_frames)) break;
             const auto lower = static_cast<std::uint64_t>(std::floor(position));
             const auto upper = upper_tap(lower, asset.total_frames);
-            if (!append_page_demand(plan,
-                                    asset,
-                                    lower,
-                                    position,
-                                    consumption_frames_per_second) ||
-                !append_page_demand(plan,
-                                    asset,
-                                    upper,
-                                    position,
-                                    consumption_frames_per_second)) {
+            if (!append_page_demand(
+                    plan, asset, lower, consumption_frames_per_second) ||
+                !append_page_demand(
+                    plan, asset, upper, consumption_frames_per_second)) {
                 plan.demand_count = 0;
                 plan.supply = SampleStreamVoiceSupply::InvalidContract;
                 return plan;
@@ -151,19 +159,23 @@ public:
     template<std::size_t InboxCapacity>
     SampleStreamVoiceDemandEnqueueResult enqueue_demands(
         const SampleStreamVoiceBlockPlan& plan,
-        SampleStreamCommandInbox<InboxCapacity>& inbox) const noexcept {
+        SampleStreamCommandInbox<InboxCapacity>& inbox,
+        std::uint32_t start_index = 0) const noexcept {
         SampleStreamVoiceDemandEnqueueResult result;
         result.demand_count = plan.demand_count;
+        result.next_demand_index = start_index;
         if (plan.supply != SampleStreamVoiceSupply::Ready ||
-            plan.demand_count > plan.demands.size()) {
+            plan.demand_count > plan.demands.size() ||
+            start_index > plan.demand_count) {
             return result;
         }
-        for (std::uint32_t index = 0; index < plan.demand_count; ++index) {
+        for (std::uint32_t index = start_index; index < plan.demand_count; ++index) {
             if (inbox.demand_page(plan.demands[index]) !=
                 SampleStreamCommandPushStatus::Enqueued) {
                 return result;
             }
             ++result.enqueued;
+            ++result.next_demand_index;
         }
         result.complete = true;
         return result;
@@ -173,9 +185,16 @@ public:
                                               const SampleStreamVoiceBlockPlan& plan,
                                               BufferView<float> destination) noexcept {
         SampleStreamVoiceBlockResult result;
+        if (plan.output_frames == 0 ||
+            plan.output_frames > destination.num_samples()) {
+            return result;
+        }
+        for (std::size_t channel = 0; channel < destination.num_channels(); ++channel) {
+            if (destination.channel_ptr(channel) == nullptr) return result;
+        }
+        clear_from(destination, 0, plan.output_frames);
+
         if (!prepared_ || !asset.valid() ||
-            plan.output_frames == 0 ||
-            plan.output_frames > destination.num_samples() ||
             destination.num_channels() != asset.channels ||
             plan.start_source_frame != source_position_ ||
             !positive_finite(plan.source_frames_per_output)) {
@@ -196,11 +215,7 @@ public:
             result.supply = SampleStreamVoiceSupply::StaleGeneration;
             return result;
         }
-        for (std::size_t channel = 0; channel < destination.num_channels(); ++channel) {
-            if (destination.channel_ptr(channel) == nullptr) return result;
-        }
         if (plan.supply == SampleStreamVoiceSupply::EndOfSource) {
-            clear_from(destination, 0, plan.output_frames);
             result.supply = SampleStreamVoiceSupply::EndOfSource;
             return result;
         }
@@ -211,17 +226,15 @@ public:
                                   static_cast<double>(output) *
                                       plan.source_frames_per_output;
             if (position >= static_cast<double>(asset.total_frames)) {
-                clear_from(destination, output, plan.output_frames);
                 result.supply = SampleStreamVoiceSupply::EndOfSource;
                 break;
             }
 
             const auto lower_frame = static_cast<std::uint64_t>(std::floor(position));
             const auto upper_frame = upper_tap(lower_frame, asset.total_frames);
-            const auto lower = locate(asset, lower_frame);
-            const auto upper = locate(asset, upper_frame);
+            const auto lower = locate(plan, asset, lower_frame);
+            const auto upper = locate(plan, asset, upper_frame);
             if (!lower.ready || !upper.ready) {
-                clear_from(destination, output, plan.output_frames);
                 result.supply = SampleStreamVoiceSupply::Starved;
                 break;
             }
@@ -231,7 +244,6 @@ public:
                 const auto* lower_sample = sample_pointer(asset, lower, channel);
                 const auto* upper_sample = sample_pointer(asset, upper, channel);
                 if (lower_sample == nullptr || upper_sample == nullptr) {
-                    clear_from(destination, output, plan.output_frames);
                     result.supply = SampleStreamVoiceSupply::Starved;
                     advance_timeline(asset, plan);
                     return result;
@@ -273,7 +285,6 @@ private:
     bool append_page_demand(SampleStreamVoiceBlockPlan& plan,
                             const SampleAssetView& asset,
                             std::uint64_t source_frame,
-                            double current_position,
                             double consumption_frames_per_second) const noexcept {
         if (source_frame < asset.preload_frames) return true;
         if (!asset.has_stream_source || asset.stream_source.page_frames == 0) return false;
@@ -283,7 +294,8 @@ private:
         }
         if (plan.demand_count >= plan.demands.size()) return false;
 
-        const auto distance = static_cast<double>(source_frame) - current_position;
+        const auto distance = static_cast<double>(source_frame) -
+                              plan.start_source_frame;
         const auto max_frames =
             static_cast<double>(std::numeric_limits<std::uint64_t>::max());
         std::uint64_t resident_source_frames = 0;
@@ -292,6 +304,9 @@ private:
                 ? std::numeric_limits<std::uint64_t>::max()
                 : static_cast<std::uint64_t>(std::floor(distance));
         }
+        plan.ready_pages[plan.demand_count] =
+            asset.stream_source.window->ready_page_for_frame(
+                asset.source.source_generation, source_frame);
         plan.demands[plan.demand_count++] = {
             .source = asset.source,
             .requester = requester_,
@@ -305,7 +320,8 @@ private:
         return true;
     }
 
-    static LocatedFrame locate(const SampleAssetView& asset,
+    static LocatedFrame locate(const SampleStreamVoiceBlockPlan& plan,
+                               const SampleAssetView& asset,
                                std::uint64_t source_frame) noexcept {
         LocatedFrame located;
         located.source_frame = source_frame;
@@ -314,9 +330,22 @@ private:
             located.preload = true;
             return located;
         }
-        if (!asset.has_stream_source || asset.stream_source.window == nullptr) return located;
-        located.page = asset.stream_source.window->ready_page_for_frame(
-            asset.source.source_generation, source_frame);
+        if (!asset.has_stream_source || asset.stream_source.window == nullptr ||
+            asset.stream_source.page_frames == 0) {
+            return located;
+        }
+        const auto page_index = source_frame / asset.stream_source.page_frames;
+        for (std::uint32_t index = 0; index < plan.demand_count; ++index) {
+            if (plan.demands[index].page_index == page_index) {
+                located.page = plan.ready_pages[index];
+                if (located.page.valid &&
+                    source_frame >= located.page.start_frame) {
+                    located.page.local_offset =
+                        source_frame - located.page.start_frame;
+                }
+                break;
+            }
+        }
         located.ready = located.page.valid;
         return located;
     }

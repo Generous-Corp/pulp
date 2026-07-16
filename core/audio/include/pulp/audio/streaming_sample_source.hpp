@@ -34,6 +34,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <stop_token>
 #include <thread>
 
 #include <pulp/audio/buffer.hpp>
@@ -56,6 +57,22 @@ using FrameReader =
     std::function<std::uint64_t(std::uint64_t start_frame,
                                 BufferView<float> dest,
                                 std::uint64_t frames)>;
+
+enum class FrameReaderStopMode : std::uint8_t {
+    JoinOnly,
+    Cooperative,
+};
+
+using StoppableFrameReader =
+    std::function<std::uint64_t(std::uint64_t start_frame,
+                                BufferView<float> dest,
+                                std::uint64_t frames,
+                                std::stop_token stop_token)>;
+
+struct FrameReaderBinding {
+    StoppableFrameReader read;
+    FrameReaderStopMode stop_mode = FrameReaderStopMode::JoinOnly;
+};
 
 struct StreamingSampleSourceConfig {
     std::uint32_t channels = 0;          ///< Source channel count (1 or 2 typical).
@@ -98,6 +115,8 @@ public:
     /// (optionally) start the background reader thread. Control thread only.
     /// Returns false on invalid config or a failed preload read.
     bool prepare(const StreamingSampleSourceConfig& config, FrameReader reader);
+    bool prepare(const StreamingSampleSourceConfig& config,
+                 FrameReaderBinding reader);
 
     /// Stop the reader thread and free all storage. Control thread only.
     void release() noexcept;
@@ -174,7 +193,8 @@ private:
     Buffer<float> preload_;          ///< Resident head, frames [0, preload_valid_).
     PlanarAudioRingBuffer ring_;     ///< Streamed tail, frames [preload_valid_, ...).
     Buffer<float> read_scratch_;     ///< Background reader scratch (off audio thread).
-    FrameReader reader_;
+    FrameReaderBinding reader_;
+    std::stop_source reader_stop_source_;
 
     std::atomic<std::uint64_t> play_pos_{0};    ///< Audio-thread owned: next source frame to emit.
     std::atomic<std::uint64_t> reader_pos_{0};  ///< Background owned: next source frame to push.

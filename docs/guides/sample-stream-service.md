@@ -26,8 +26,10 @@ blocks; the producer retries commands according to voice/source generation.
 If a requester or pending-demand cancellation cannot be queued, its owner keeps
 the token and retries before reuse; failure may waste bounded decode work but
 cannot make an older requester generation satisfy a newer voice. Source memory
-reclamation uses the non-RT `retire_source()` watermark path, not a lossy inbox
-command.
+reclamation uses the non-RT `retire_source_after_asset_unpublish()` watermark
+path, not a lossy inbox command. The asset publisher must first stop issuing
+the old borrowed view; the service then captures the current audio generation
+instead of accepting a caller-invented retirement number.
 
 `service_once()` decodes at most one canonical page. Multiple requesters for
 that page produce one read. A requester cancellation removes only that voice's
@@ -46,6 +48,14 @@ Production multi-voice integration must add the worker pieces and prove
 joinable teardown, bounded queue behavior, active-page interest, and
 resident-versus-streamed render parity
 before advertising general long-sample streaming.
+
+`SampleStreamDecodePool` provides the separate prepared worker/completion
+primitive: fixed workers, preallocated planar scratch, one in-flight decode per
+source, bounded SPSC mailboxes, cooperative stop propagation, and leased
+completion audio. It is intentionally not wired to cache publication yet. That
+integration must reject every completion whose service registration, source
+generation, or page-reservation serial no longer matches, then cancel the old
+Filling slot before releasing worker scratch.
 
 `SampleAsset` accepts streamed tails only through a service-issued registration
 proof whose source identity and page geometry match the prepared cache. The
