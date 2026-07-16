@@ -1430,7 +1430,7 @@ source files into generated Pulp UI code.
 pulp import-design --from fig --file design.fig --outline
 pulp import-design --from fig --file design.fig --frame 'Plugin UI' --output ui.js
 pulp import-design --from figma --file frame.json
-pulp import-design --from figma --url 'https://figma.com/design/...' --frame 'Plugin UI'
+pulp import-design --from figma-plugin --file scene.pulp.json --frame 'Plugin UI'
 pulp import-design --from figma-plugin --file design.pulp.zip
 pulp import-design --from stitch --file screen.html --screen 'Main'
 pulp import-design --from v0 --url 'https://v0.dev/t/abc123' --output ui.js
