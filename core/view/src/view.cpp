@@ -10,6 +10,7 @@
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/value_source_binding.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <memory>
 #include <algorithm>
@@ -25,6 +26,16 @@
 #include <utility>
 
 namespace pulp::view {
+
+// Holds a view's value-source bindings behind one lazily allocated pointer, so
+// the common view (no live value) pays a single null pointer rather than two
+// bindings' worth of members. Defined before ~View so the unique_ptr member has
+// a complete type to destroy.
+struct ViewValueBindings {
+    explicit ViewValueBindings(View& owner) : meter(owner), scalar(owner) {}
+    MeterSourceBinding meter;
+    ScalarSourceBinding scalar;
+};
 
 namespace {
 
@@ -1677,10 +1688,56 @@ void View::set_frame_clock(FrameClock* clock) {
 }
 
 void View::notify_frame_clock_changed() {
+    sync_value_bindings();
     on_frame_clock_changed();
     for (auto& child : children_) {
         if (child) child->notify_frame_clock_changed();
     }
+}
+
+// ── Live host→view value sources ────────────────────────────────────────────
+
+void View::sync_value_bindings() {
+    if (!value_bindings_) return;
+    value_bindings_->meter.refresh();
+    value_bindings_->scalar.refresh();
+}
+
+void View::set_meter_source(std::shared_ptr<MeterSource> source, int channel) {
+    // Unbinding a view that never bound anything: nothing to allocate or drop.
+    if (!source && !value_bindings_) return;
+    if (!value_bindings_) value_bindings_ = std::make_unique<ViewValueBindings>(*this);
+    value_bindings_->meter.set_source(std::move(source), channel);
+}
+
+bool View::has_meter_source() const {
+    return value_bindings_ && value_bindings_->meter.has_source();
+}
+
+int View::meter_source_channel() const {
+    return value_bindings_ ? value_bindings_->meter.channel() : 0;
+}
+
+const MeterFrame& View::meter_frame() const {
+    // Paint-safe: a cached copy, or a shared all-zero frame when nothing is
+    // bound. Constant-initialized, so reading it costs no thread-safe-static
+    // guard (which would be a lock on the paint path).
+    static constexpr MeterFrame kNoFrame{};
+    return value_bindings_ ? value_bindings_->meter.frame() : kNoFrame;
+}
+
+void View::set_scalar_source(std::shared_ptr<ScalarSource> source) {
+    if (!source && !value_bindings_) return;
+    if (!value_bindings_) value_bindings_ = std::make_unique<ViewValueBindings>(*this);
+    value_bindings_->scalar.set_source(std::move(source));
+}
+
+bool View::has_scalar_source() const {
+    return value_bindings_ && value_bindings_->scalar.has_source();
+}
+
+float View::scalar_value() const {
+    return value_bindings_ ? value_bindings_->scalar.value() : 0.0f;
 }
 
 void View::request_repaint() {

@@ -1,9 +1,11 @@
 #pragma once
 
 #include <pulp/view/svg_fragment.hpp>
+#include <pulp/view/value_source_binding.hpp>
 #include <pulp/view/view.hpp>
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -543,6 +545,34 @@ public:
             if (elements_[i].param_key == key) return i;
         return -1;
     }
+    // ── Live per-element scalars ─────────────────────────────────────────────
+    // Bind a ScalarSource to the element bound to host parameter `param_key` —
+    // the live per-frame value a subclass paints over that element (an LFO's
+    // modulated position for a macro knob's modulation ring, say). The host
+    // publishes from the audio/host thread; `element_scalar` reads paint-safe.
+    // See View::set_meter_source for the shared lifecycle + lifetime contract.
+    //
+    // Why per-element, and why keyed by param_key: a DesignFrameView is ONE view
+    // painting MANY elements, so the view's own single scalar
+    // (View::set_scalar_source) cannot carry a value per ring. Elements are
+    // keyed by param_key rather than index because `elements_` is REPLACED
+    // wholesale on a frame swap (set_active_frame) — an index means a different
+    // control in a different frame, whereas param_key is the element's stable
+    // host-binding identity. A binding therefore survives a frame swap and
+    // re-points at whichever element carries that key in the new frame; a key no
+    // frame declares simply reads 0. An empty key never matches.
+    void set_element_scalar_source(const std::string& param_key,
+                                   std::shared_ptr<ScalarSource> source);
+
+    /// The latest value published for element `i` of the ACTIVE frame, or 0 when
+    /// `i` is out of range or its element has no bound source. Paint-safe: an
+    /// index into a per-frame slot table and a cached float read — no lookup, no
+    /// allocation, no lock.
+    float element_scalar(int i) const;
+
+    /// Whether element `i` of the active frame has a scalar source bound.
+    bool element_has_scalar_source(int i) const;
+
     // Active view group for per-view momentary keyboards (e.g. typing=0, piano=1).
     // hit_element only tests momentary elements whose view_group is -1 or equals
     // this. Switching it releases any held momentary key (note-off) so no notes
@@ -921,6 +951,17 @@ private:
 
     // Whether a live surface carries `key` — ParamScaleMismatch::host_has_param.
     bool host_has_param_for(const std::string& key) const;
+    // Keep every element scalar binding pointed at the reachable clock. The View
+    // base syncs its OWN two bindings non-virtually, so those survive any
+    // override; the per-element bindings live here and ride this hook, so a
+    // subclass that overrides it must chain to DesignFrameView's version or its
+    // rings quietly stop updating.
+    void on_frame_clock_changed() override;
+
+    // Re-point the active frame's slot table at the bindings whose param_key the
+    // new element set declares. Called after every elements_ swap, so a binding
+    // outlives a frame change and paint stays a plain index.
+    void rebuild_element_scalar_slots();
 
     // Map a choice element's selected index to a normalized [0,1] value and back,
     // using resolve_value_count. Single source of truth for choice<->normalized.
@@ -985,6 +1026,11 @@ private:
 
     std::string svg_;
     std::vector<DesignFrameElement> elements_;
+    // Element scalar bindings, owned by stable param_key so they survive a frame
+    // swap, plus the active frame's index-aligned view of them (non-owning; null
+    // where the element has no binding) so element_scalar() stays paint-safe.
+    std::unordered_map<std::string, std::unique_ptr<ScalarSourceBinding>> element_scalars_;
+    std::vector<ScalarSourceBinding*> active_element_scalars_;
     std::vector<Overlay> overlays_;
     float svg_w_ = 0.0f, svg_h_ = 0.0f;            // SVG intrinsic size
     float panel_x_ = 0, panel_y_ = 0, panel_w_ = 0, panel_h_ = 0;  // crop, SVG coords

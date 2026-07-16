@@ -325,8 +325,54 @@ void DesignFrameView::activate_frame(int index) {
     // the stand-ins and never a real control.
     apply_bind_grid();
     build_overlays();
+    rebuild_element_scalar_slots();
     invalidate_layout();
     on_active_frame_changed();
+}
+
+// ── Live per-element scalars ────────────────────────────────────────────────
+
+void DesignFrameView::set_element_scalar_source(const std::string& param_key,
+                                                std::shared_ptr<ScalarSource> source) {
+    if (param_key.empty()) return;  // never a valid element identity
+    if (!source) {
+        // Unbinding drops the binding (and its subscription), so an unbound view
+        // stops holding the editor's frames alive.
+        element_scalars_.erase(param_key);
+        rebuild_element_scalar_slots();
+        return;
+    }
+    auto& slot = element_scalars_[param_key];
+    if (!slot) slot = std::make_unique<ScalarSourceBinding>(*this);
+    slot->set_source(std::move(source));
+    rebuild_element_scalar_slots();
+}
+
+float DesignFrameView::element_scalar(int i) const {
+    if (i < 0 || i >= static_cast<int>(active_element_scalars_.size())) return 0.0f;
+    const ScalarSourceBinding* b = active_element_scalars_[i];
+    return b ? b->value() : 0.0f;
+}
+
+bool DesignFrameView::element_has_scalar_source(int i) const {
+    if (i < 0 || i >= static_cast<int>(active_element_scalars_.size())) return false;
+    return active_element_scalars_[i] != nullptr;
+}
+
+void DesignFrameView::on_frame_clock_changed() {
+    for (auto& [key, binding] : element_scalars_)
+        if (binding) binding->refresh();
+}
+
+void DesignFrameView::rebuild_element_scalar_slots() {
+    active_element_scalars_.assign(elements_.size(), nullptr);
+    if (element_scalars_.empty()) return;
+    for (size_t i = 0; i < elements_.size(); ++i) {
+        const std::string& key = elements_[i].param_key;
+        if (key.empty()) continue;
+        auto it = element_scalars_.find(key);
+        if (it != element_scalars_.end()) active_element_scalars_[i] = it->second.get();
+    }
 }
 
 int DesignFrameView::add_frame(std::string svg, std::vector<DesignFrameElement> elements,
