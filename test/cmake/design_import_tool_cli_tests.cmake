@@ -83,16 +83,24 @@ add_executable(pulp-test-import-design-tool test_import_design_tool.cpp
     ${CMAKE_SOURCE_DIR}/external/miniz/miniz_zip.c
     # Compile the fig lane in-process so its logic is exercised (and covered)
     # directly, not only through the CLI subprocess.
-    ${CMAKE_SOURCE_DIR}/tools/import-design/fig_lane.cpp)
+    ${CMAKE_SOURCE_DIR}/tools/import-design/fig_lane.cpp
+    # fig_lane's multi-state merge lives here (and is shared with the
+    # repeated---file lane), so the in-process fig_lane cases need it linked.
+    ${CMAKE_SOURCE_DIR}/tools/import-design/envelope_merge.cpp)
 target_include_directories(pulp-test-import-design-tool PRIVATE
     ${CMAKE_SOURCE_DIR}/external/miniz
-    ${CMAKE_SOURCE_DIR}/tools/import-design)
+    ${CMAKE_SOURCE_DIR}/tools/import-design
+    # envelope_merge.cpp parses the design envelope with choc::json. This target
+    # deliberately does not link pulp::view (which re-exports these headers), so
+    # the include path is named directly rather than dragging the pipeline in.
+    ${choc_SOURCE_DIR})
 target_link_libraries(pulp-test-import-design-tool
     PRIVATE pulp::platform Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-import-design-tool PRIVATE
     PULP_IMPORT_DESIGN_TOOL_PATH="$<TARGET_FILE:pulp-import-design>"
     PULP_FIG_FIXTURE="${CMAKE_SOURCE_DIR}/test/fixtures/imports/fig/synthetic.fig"
-    PULP_FIG_DECODE_SCRIPT="${CMAKE_SOURCE_DIR}/tools/import-design/fig_decode.mjs")
+    PULP_FIG_DECODE_SCRIPT="${CMAKE_SOURCE_DIR}/tools/import-design/fig_decode.mjs"
+    PULP_FIGMA_REST_EXPORT="${CMAKE_SOURCE_DIR}/tools/import-design/figma_rest_export.py")
 add_dependencies(pulp-test-import-design-tool pulp-import-design)
 if(WIN32)
     catch_discover_tests(pulp-test-import-design-tool

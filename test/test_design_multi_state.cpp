@@ -15,6 +15,7 @@
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_ir.hpp>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -279,4 +280,122 @@ TEST_CASE("a design with no swap links is untouched by swap verification",
     CHECK(apply_swap_target_verification(ir.root) == 0);
     CHECK(ir.root.interactive_elements[0].verification_pass);
     CHECK(collect_import_report(ir.root).ok());
+}
+
+TEST_CASE("a swap targeting the frame it sits on is reported as a no-op",
+          "[design-import][multi-state][honesty]") {
+    DesignIR ir = make_two_frame_ir();
+    // Frame 0's button re-pointed at frame 0: set_active_frame(0) on the frame
+    // already showing, so the button renders but does nothing.
+    ir.root.interactive_elements[0].target_frame = 0;
+
+    CHECK(apply_swap_target_verification(ir.root) == 1);
+    const auto& self = ir.root.interactive_elements[0];
+    CHECK_FALSE(self.verification_pass);
+    REQUIRE(self.conflict_signals.size() == 1);
+    CHECK(self.conflict_signals[0].find("already sits on") != std::string::npos);
+    CHECK_FALSE(collect_import_report(ir.root).ok());
+
+    // The alternate's swap back to frame 0 is NOT a self-target — it sits on
+    // frame 1 — so the check must not flag it just for naming frame 0.
+    CHECK(ir.root.alternate_frames[0].interactive_elements[0].verification_pass);
+}
+
+TEST_CASE("an alternate frame's swap onto itself is reported against its own index",
+          "[design-import][multi-state][honesty]") {
+    DesignIR ir = make_two_frame_ir();
+    ir.root.alternate_frames[0].interactive_elements[0].target_frame = 1;  // frame 1 → frame 1
+
+    CHECK(apply_swap_target_verification(ir.root) == 1);
+    const auto& self = ir.root.alternate_frames[0].interactive_elements[0];
+    CHECK_FALSE(self.verification_pass);
+    REQUIRE(self.conflict_signals.size() == 1);
+    CHECK(self.conflict_signals[0].find("already sits on") != std::string::npos);
+    CHECK(ir.root.interactive_elements[0].verification_pass);
+}
+
+TEST_CASE("a negative swap target is reported as an index, not as unset",
+          "[design-import][multi-state][honesty]") {
+    // -1 means "no target parsed"; any other negative means a target WAS parsed
+    // and is out of range. Reporting the second as the first sends the fix at the
+    // layer's name instead of its number.
+    DesignIR ir = make_two_frame_ir();
+    ir.root.interactive_elements.push_back(swap_to(-5));
+
+    CHECK(apply_swap_target_verification(ir.root) == 1);
+    const auto& bad = ir.root.interactive_elements[1];
+    REQUIRE(bad.conflict_signals.size() == 1);
+    CHECK(bad.conflict_signals[0].find("targets frame -5") != std::string::npos);
+    CHECK(bad.conflict_signals[0].find("not a frame index") != std::string::npos);
+    CHECK(bad.conflict_signals[0].find("no target frame") == std::string::npos);
+}
+
+// ── frames nobody can render ────────────────────────────────────────────────
+
+TEST_CASE("alternate frames on a non-faithful node are reported as unrenderable",
+          "[design-import][multi-state][honesty]") {
+    // What every capture lane that emits a widget-recognition tree produces: the
+    // states merge into the IR, but no generator lowers them, so they would be
+    // dropped and the import would look like it worked.
+    DesignIR ir = make_two_frame_ir();
+    ir.root.render_mode = NodeRenderMode::normal;
+
+    const auto dropped = find_unrenderable_alternate_frames(ir.root);
+    REQUIRE(dropped.size() == 1);
+    CHECK(dropped[0].node_name == "Typing");
+    CHECK(dropped[0].alternates == 1);
+    CHECK(dropped[0].reason.find("faithful_svg") != std::string::npos);
+}
+
+TEST_CASE("alternate frames on a faithful node with no asset are reported",
+          "[design-import][multi-state][honesty]") {
+    DesignIR ir = make_two_frame_ir();
+    ir.root.svg_asset_id.reset();
+
+    const auto dropped = find_unrenderable_alternate_frames(ir.root);
+    REQUIRE(dropped.size() == 1);
+    CHECK(dropped[0].reason.find("svg_asset_id") != std::string::npos);
+}
+
+TEST_CASE("a renderable frame set reports nothing unrenderable",
+          "[design-import][multi-state][honesty]") {
+    const DesignIR ir = make_two_frame_ir();
+    CHECK(find_unrenderable_alternate_frames(ir.root).empty());
+    // And a design with no alternates at all is trivially fine.
+    CHECK(find_unrenderable_alternate_frames(make_one_frame_ir().root).empty());
+}
+
+TEST_CASE("an unrenderable frame set nested under the root is found",
+          "[design-import][multi-state][honesty]") {
+    // The walk has to descend children AND alternates: a frame-owning node can
+    // sit on either axis, and one missed is a silently dropped state.
+    DesignIR ir = make_one_frame_ir();
+    IRNode child;
+    child.type = "frame";
+    child.name = "Inner";
+    child.render_mode = NodeRenderMode::normal;
+    child.alternate_frames.push_back(IRNode{});
+    ir.root.children.push_back(child);
+
+    IRNode buried;
+    buried.type = "frame";
+    buried.name = "Buried";
+    buried.render_mode = NodeRenderMode::normal;
+    buried.alternate_frames.push_back(IRNode{});
+    IRNode alt;
+    alt.type = "frame";
+    alt.name = "Alt";
+    alt.render_mode = NodeRenderMode::faithful_svg;
+    alt.svg_asset_id = "svg-piano";
+    alt.children.push_back(buried);
+    ir.root.alternate_frames.push_back(alt);
+
+    // Both are reported; the order the walk happens to reach them in is not part
+    // of the contract, so this asserts membership rather than pinning it.
+    const auto dropped = find_unrenderable_alternate_frames(ir.root);
+    REQUIRE(dropped.size() == 2);
+    std::vector<std::string> names;
+    for (const auto& d : dropped) names.push_back(d.node_name);
+    CHECK(std::find(names.begin(), names.end(), "Inner") != names.end());
+    CHECK(std::find(names.begin(), names.end(), "Buried") != names.end());
 }

@@ -100,27 +100,57 @@ pulp import-design --from fig --file design.fig --outline          # or --outlin
 
 # 2) Import ONE frame, by name or guid (from the outline). --page scopes the lookup.
 pulp import-design --from fig --file design.fig --frame '102:1624' --output ui.js
-
-# 3) Or capture a MULTI-STATE design: repeat --frame, once per state. Both states
-#    land in ONE DesignFrameView; --frame order IS the swap target index.
-pulp import-design --from fig --file design.fig \
-  --frame 'Typing' --frame 'Piano' --emit cpp --mode baked --output kbd.cpp
 ```
 Frame selection accepts a guid (`102:1624`, unambiguous) or an exact
 case-insensitive name.
 
-**Multi-state capture (`--frame` repeated).** The first `--frame` is frame 0,
-the second frame 1, … — that index is what a design's `swap <n>` layer targets,
-so **reordering the flags re-points every swap**. Each state is decoded on its
-own and merged into one envelope whose root carries the rest in
-`alternate_frames`; the C++ codegen and the native materializer each emit one
-`add_frame` per entry, in order. A single `--frame` skips the merge entirely and
-behaves exactly as it always has — keep it that way when touching this lane.
+**The `.fig` lane cannot capture multi-state designs.** Alternate frames are
+lowered ONLY by the faithful_svg path, and the `.fig` decoder emits a
+widget-recognition tree — no `render_mode`, no `svg_asset_id` (grep
+`tools/import-design/fig/*.mjs`: zero hits). Repeated `--frame` here is refused
+with exit 2. The lane's merge plumbing is written and tested and will start
+working the day the decoder learns faithful export; until then, do NOT wire a
+multi-state surface onto it.
+
+**Multi-state capture is `--file` repeated, on a faithful lane.** Export one
+envelope per state with a lane that emits faithful frames — the REST
+faithful-vector export (`figma_rest_export.py --faithful-vector`) or the Figma
+plugin — then merge them at import:
+
+```bash
+python3 tools/import-design/figma_rest_export.py \
+  --file-key <KEY> --node 187:15 --out typing.pulp.json --faithful-vector
+python3 tools/import-design/figma_rest_export.py \
+  --file-key <KEY> --node 187:349 --out piano.pulp.json --faithful-vector
+pulp import-design --from figma-plugin \
+  --file typing.pulp.json --file piano.pulp.json \
+  --emit cpp --mode baked --output kbd.cpp
+```
+
+The first `--file` is frame 0, the second frame 1, … — that index is what a
+design's `swap <n>` layer targets, so **reordering the flags re-points every
+swap**. The merge (`envelope_merge.cpp`, shared with the fig lane) folds each
+later envelope's root into the first's `alternate_frames`; the C++ codegen and
+the native materializer each emit one `add_frame` per entry, in order. A single
+`--file` skips the merge entirely and behaves exactly as it always has — keep
+it that way when touching this lane.
+
+**Captured states nobody can render are exit 2, not a diagnostic.**
+`find_unrenderable_alternate_frames` reports every node carrying
+`alternate_frames` that is not a renderable faithful node; the CLI refuses the
+import. Without it, the states are dropped and the import "succeeds" with one
+frame — the user asks for N states and silently gets one. That silent no-op is
+what this surface shipped as before the guard existed; keep the guard.
+
+**Swap elements come from the plugin lane only.** `faithful-vector.ts` reads a
+layer named `swap <n>` into a swap element; the REST exporter does not detect
+swaps. A REST-captured multi-state component holds all its frames but is driven
+by `set_active_frame(i)` from consumer code.
 
 **A swap whose target frame was never captured is reported, never silently
-dead.** `apply_swap_target_verification` flags an unset (`-1`), negative, or
-out-of-range target with a conflict signal, so it rides the SAME channel as any
-other unresolved control: `--import-report <json>` shows it and
+dead.** `apply_swap_target_verification` flags an unset (`-1`), negative,
+out-of-range, or self-targeting swap with a conflict signal, so it rides the
+SAME channel as any other unresolved control: `--import-report <json>` shows it and
 `--fail-on-unresolved` exits 2. Do NOT add a parallel diagnostic channel for
 frame problems — route through the import report. This fires on single-frame
 imports too (a design whose swap was always dead now says so).
