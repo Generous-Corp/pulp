@@ -18,10 +18,11 @@ metadata, reader state, and control-thread containers are outside that value.
 ## Thread boundary
 
 The current service is deliberately caller-driven. A single non-audio owner
-registers sources, submits drained demands, and calls `service_once()`. The
-audio callback may read prepared `SampleStreamWindow` views, but must not call
-the file reader or service methods directly. RT-originated requests belong in a
-prepared `SampleStreamRequestInbox` and are drained by the service owner.
+registers sources, drains `SampleStreamCommandInbox`, and calls
+`service_once()`. The audio callback may read prepared `SampleStreamWindow`
+views and push bounded demand/cancellation commands, but must not call the file
+reader or service methods directly. Inbox overflow is explicit and never
+blocks; the producer retries commands according to voice/source generation.
 
 `service_once()` decodes at most one canonical page. Multiple requesters for
 that page produce one read. A requester cancellation removes only that voice's
@@ -32,8 +33,8 @@ the request remains pending and `NoPageAvailable` is returned.
 
 This is the synchronous core needed to test identity, budgeting, scheduling,
 publication, cancellation, and generation-gated FIFO page reuse before adding
-concurrency. It does not yet own a worker pool, completion mailboxes, dynamic
-source replacement, or an audio-thread command port. Production multi-voice
+concurrency. It does not yet own a worker pool, completion mailboxes, or dynamic
+source replacement. Production multi-voice
 integration must add those pieces and prove joinable teardown, bounded queue
 behavior, active-page interest, and resident-versus-streamed render parity
 before advertising general long-sample streaming.

@@ -9,6 +9,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -44,6 +45,100 @@ struct SampleStreamPageDemand {
     std::uint64_t resident_source_frames = 0;
     double consumption_frames_per_second = 0.0;
     SampleStreamDemandClass demand_class = SampleStreamDemandClass::Sustain;
+};
+
+enum class SampleStreamCommandType : std::uint8_t {
+    DemandPage,
+    CancelRequester,
+    CancelSourceGeneration,
+};
+
+struct SampleStreamCommand {
+    SampleStreamCommandType type = SampleStreamCommandType::DemandPage;
+    SampleStreamPageDemand demand{};
+    SampleStreamRequesterToken requester{};
+    SampleStreamSourceToken source{};
+};
+
+static_assert(std::is_trivially_copyable_v<SampleStreamCommand>);
+
+enum class SampleStreamCommandPushStatus : std::uint8_t {
+    Enqueued,
+    Full,
+};
+
+struct SampleStreamCommandInboxTelemetry {
+    std::size_t pending = 0;
+    std::size_t capacity = 0;
+    std::uint64_t overflow_count = 0;
+};
+
+/// Prepared bounded command port from one RT producer to the service owner.
+/// Construct the inbox off the audio thread; subsequent command pushes are
+/// fixed-storage SPSC operations with no dynamic payload ownership.
+template<std::size_t Capacity>
+class SampleStreamCommandInbox {
+public:
+    SampleStreamCommandPushStatus demand_page(
+        const SampleStreamPageDemand& demand) noexcept {
+        return push({
+            .type = SampleStreamCommandType::DemandPage,
+            .demand = demand,
+        });
+    }
+
+    SampleStreamCommandPushStatus cancel_requester(
+        SampleStreamRequesterToken requester) noexcept {
+        return push({
+            .type = SampleStreamCommandType::CancelRequester,
+            .requester = requester,
+        });
+    }
+
+    SampleStreamCommandPushStatus cancel_source_generation(
+        SampleStreamSourceToken source) noexcept {
+        return push({
+            .type = SampleStreamCommandType::CancelSourceGeneration,
+            .source = source,
+        });
+    }
+
+    SampleStreamCommandInboxTelemetry telemetry() const noexcept {
+        const auto queue = queue_.telemetry();
+        return {
+            .pending = queue.size_approx,
+            .capacity = queue.capacity,
+            .overflow_count = queue.overflow_count,
+        };
+    }
+
+    static constexpr std::size_t capacity() noexcept { return Capacity; }
+
+private:
+    friend class SampleStreamCacheService;
+
+    SampleStreamCommandPushStatus push(const SampleStreamCommand& command) noexcept {
+        return queue_.try_push(command) ? SampleStreamCommandPushStatus::Enqueued
+                                        : SampleStreamCommandPushStatus::Full;
+    }
+
+    std::optional<SampleStreamCommand> try_pop() noexcept {
+        return queue_.try_pop();
+    }
+
+    runtime::SpscQueue<SampleStreamCommand, Capacity> queue_;
+};
+
+struct SampleStreamCommandDrainResult {
+    std::size_t commands_drained = 0;
+    std::size_t demand_commands = 0;
+    std::size_t cancel_requester_commands = 0;
+    std::size_t cancel_source_commands = 0;
+    std::size_t demands_inserted = 0;
+    std::size_t demands_refreshed = 0;
+    std::size_t demands_rejected_full = 0;
+    std::size_t demands_invalid = 0;
+    std::size_t requests_cancelled = 0;
 };
 
 struct SampleStreamCacheSourceView {
@@ -102,9 +197,9 @@ struct SampleStreamCacheServiceStats {
 };
 
 /// Bounded shared-page cache with deterministic caller-driven servicing.
-/// All methods belong to one non-audio owner. Audio code reads returned windows
-/// and hands trivially-owned demands to an external SPSC inbox before the owner
-/// calls request_page() and service_once().
+/// All direct methods belong to one non-audio owner. Audio code reads returned
+/// windows and pushes fixed commands into SampleStreamCommandInbox; the owner
+/// applies those commands in FIFO order through drain_commands().
 class SampleStreamCacheService {
 public:
     bool prepare(const SampleStreamCacheServiceConfig& config) {
@@ -208,6 +303,44 @@ public:
         if (source.source_id == 0 || source.source_generation == 0) return 0;
         return scheduler_.cancel_source_generation(source.source_id,
                                                    source.source_generation);
+    }
+
+    /// Applies all currently queued commands in producer order. Non-RT owner
+    /// only; demand application may mutate the scheduler's pending vector.
+    template<std::size_t Capacity>
+    SampleStreamCommandDrainResult drain_commands(
+        SampleStreamCommandInbox<Capacity>& inbox) noexcept {
+        SampleStreamCommandDrainResult result;
+        while (auto command = inbox.try_pop()) {
+            ++result.commands_drained;
+            switch (command->type) {
+                case SampleStreamCommandType::DemandPage: {
+                    ++result.demand_commands;
+                    const auto status = request_page(command->demand);
+                    if (status == SampleStreamScheduleStatus::Inserted) {
+                        ++result.demands_inserted;
+                    } else if (status == SampleStreamScheduleStatus::Refreshed) {
+                        ++result.demands_refreshed;
+                    } else if (status == SampleStreamScheduleStatus::Full) {
+                        ++result.demands_rejected_full;
+                    } else {
+                        ++result.demands_invalid;
+                    }
+                    break;
+                }
+                case SampleStreamCommandType::CancelRequester:
+                    ++result.cancel_requester_commands;
+                    result.requests_cancelled +=
+                        cancel_requester(command->requester);
+                    break;
+                case SampleStreamCommandType::CancelSourceGeneration:
+                    ++result.cancel_source_commands;
+                    result.requests_cancelled +=
+                        cancel_source_generation(command->source);
+                    break;
+            }
+        }
+        return result;
     }
 
     SampleStreamServiceStatus service_once() noexcept {
