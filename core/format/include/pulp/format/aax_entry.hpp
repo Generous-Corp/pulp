@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulp/format/aax_effect_gui.hpp>
 #include <pulp/format/aax_model.hpp>
 
 #include <AAX.h>
@@ -33,9 +34,15 @@ inline EntryConfig make_entry_config(ProcessorFactory factory,
 }
 
 IACFUnknown* create_effect_parameters(const EntryConfig& config);
+
+/// Describe the plugin to the host. @p create_proc builds the data model;
+/// @p create_gui_proc builds the custom editor and is registered under
+/// `kAAX_ProcPtrID_Create_EffectGUI`. Passing null for @p create_gui_proc
+/// registers no editor, leaving the host on its auto-generated parameter strip.
 AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
                                    const EntryConfig& config,
-                                   AAXCreateObjectProc create_proc);
+                                   AAXCreateObjectProc create_proc,
+                                   AAXCreateObjectProc create_gui_proc = nullptr);
 
 } // namespace pulp::format::aax
 
@@ -64,10 +71,14 @@ AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
         static IACFUnknown* AAX_CALLBACK _pulp_aax_create_effect_parameters() { \
             return ::pulp::format::aax::create_effect_parameters(_pulp_aax_entry_config()); \
         } \
+        static IACFUnknown* AAX_CALLBACK _pulp_aax_create_effect_gui() { \
+            return ::pulp::format::aax::create_effect_gui(); \
+        } \
     } \
     AAX_Result GetEffectDescriptions(AAX_ICollection* outCollection) { \
         return ::pulp::format::aax::get_effect_descriptions( \
             outCollection, \
             _pulp_aax_entry_config(), \
-            &_pulp_aax_create_effect_parameters); \
+            &_pulp_aax_create_effect_parameters, \
+            &_pulp_aax_create_effect_gui); \
     }

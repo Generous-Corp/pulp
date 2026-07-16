@@ -17,8 +17,60 @@ want to build and validate AAX plugins locally.
 
 - Supported hosts: macOS and Windows
 - Unsupported: Linux and Ubuntu
-- Current scope: AAX Native
-- Out of scope: bundling Avid assets, DSP/AudioSuite support, PACE release automation
+- Current scope: AAX Native, including the custom editor (`AAX_CEffectGUI`) and
+  parameter gestures
+- Out of scope: bundling Avid assets, DSP support, PACE release automation
+- Out of scope, with a caveat worth knowing: **AudioSuite**. The descriptor
+  declares `AAX_ePlugInRole_InsertOrAudioSuite`, so the role is advertised, but
+  Pulp registers no `AAX_IHostProcessor` — the dedicated offline-render path is
+  not implemented. Say "the role is declared; the offline path is not
+  implemented", not "AudioSuite works" and not "the role is absent".
+
+## The custom editor
+
+`core/format/src/aax_effect_gui.cpp` embeds a Pulp editor in the Pro Tools
+plugin window through the shared, format-agnostic `view::PluginViewHost` — the
+same seam VST3 / AU v2 / AU v3 / CLAP use, so there is no AAX-specific render
+path to maintain.
+
+Gotchas that are specific to AAX and cost time if you rediscover them:
+
+- **The proc pointer is the whole game.** A custom UI appears only because
+  `get_effect_descriptions()` registers `kAAX_ProcPtrID_Create_EffectGUI`
+  alongside `kAAX_ProcPtrID_Create_EffectParameters`. Drop that one
+  `AddProcPtr` and Pro Tools silently shows its auto-generated parameter strip
+  no matter how good `create_view()` is. The validator's "does not contain
+  EffectGUI" warning is the tell.
+- **The editor has its own `Processor`, deliberately.** AAX splits the
+  host-side data model from the real-time algorithm; the algorithm's
+  `Processor` lives in its private data block and the model cannot reach it. So
+  `EffectParameters` builds a *second* model-side `Processor` for
+  `create_view()`. This is the exact opposite of AU v2, where a second
+  `Processor` was a real bug (parameters drifted). The reason it is safe here:
+  the AAX parameter manager — not either `Processor` — is the value authority,
+  and the model mirrors it into the editor store both ways
+  (`UpdateParameterNormalizedValue` in, `AAX_IParameter::SetValueWithFloat`
+  out, with a re-entrancy guard so the mirror cannot ping-pong).
+- **Update values only through `AAX_IParameter::SetValue*`.** Avid's own header
+  is explicit that a GUI must never call `UpdateParameterNormalizedValue`
+  directly; `SetValue*` manages the automation locks and posts coefficients.
+- **Gestures are not optional.** Without `TouchParameter` / `ReleaseParameter`
+  a custom UI records every edit as an isolated automation point instead of a
+  stroke — worse than shipping no UI. `state::Binding` gestures route through
+  `GestureRouter` (`aax_editor.hpp`), which enforces AAX's balance invariant.
+- **`AAX_Point`'s constructor is `(vert, horz)` — vertical first.** Passing
+  width first silently transposes the editor.
+- **Sizing is plugin-driven.** AAX reads a size from `GetViewSize()`; the
+  plugin pushes later changes through `AAX_IViewContainer::SetViewSize`. Follow
+  the AU v2 model (forward native size changes), not VST3's.
+- **The editor needs Skia.** Without `PULP_HAS_SKIA` the Windows
+  `PluginViewHost` falls back to the no-op stub factory, `create()` returns
+  null, and the plugin loads with no editor.
+
+The SDK-free logic (gesture routing, sizing) lives in
+`core/format/include/pulp/format/aax_editor.hpp` on purpose, so it is testable
+with no Avid SDK: `pulp-test-aax-editor` runs everywhere, while
+`pulp-test-aax-effect-gui` is SDK-gated.
 
 
 - Never commit the AAX SDK, DigiShell, validator binaries, or Avid example code.

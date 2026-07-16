@@ -1,7 +1,10 @@
 #include <pulp/format/aax_entry.hpp>
+#include <pulp/format/aax_editor.hpp>
 #include <pulp/format/aax_midi_node.hpp>
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/runtime/log.hpp>
+#include <pulp/state/listener_token.hpp>
 #include <pulp/format/aax_midi_packets.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
@@ -484,7 +487,7 @@ void destroy_instance(PrivateDataBlock* block) {
     block->instance = nullptr;
 }
 
-class EffectParameters final : public AAX_CEffectParameters {
+class EffectParameters final : public AAX_CEffectParameters, public EditorHost {
 public:
     explicit EffectParameters(EntryConfig in_config)
         : config_(in_config)
@@ -495,6 +498,28 @@ public:
         } else {
             init_error_ = result.error;
         }
+    }
+
+    // ── EditorHost ─────────────────────────────────────────────────────────
+    //
+    // The editor model is built on first use rather than in EffectInit(): a
+    // scan, an offline render, or any GUI-less instantiation never pays for a
+    // Processor it will not show.
+
+    Processor* editor_processor() override {
+        ensure_editor_model();
+        return editor_ ? editor_->processor.get() : nullptr;
+    }
+
+    state::StateStore* editor_store() override {
+        ensure_editor_model();
+        return editor_ ? &editor_->store : nullptr;
+    }
+
+    const PluginDefinition& editor_definition() const override { return definition_; }
+
+    void release_editor_gestures() override {
+        if (editor_) editor_->gestures->release_all();
     }
 
     AAX_Result EffectInit() override {
@@ -552,7 +577,12 @@ public:
                                               double value,
                                               AAX_EUpdateSource source) override
     {
-        return AAX_CEffectParameters::UpdateParameterNormalizedValue(parameter_id, value, source);
+        const auto result =
+            AAX_CEffectParameters::UpdateParameterNormalizedValue(parameter_id, value, source);
+        if (result == AAX_SUCCESS) {
+            push_to_editor_store(parameter_id, value);
+        }
+        return result;
     }
 
     AAX_Result GenerateCoefficients() override {
@@ -599,9 +629,118 @@ public:
     }
 
 private:
+    /// Model-side editor state. AAX keeps the data model and the real-time
+    /// algorithm apart — the algorithm's Processor lives in its private data
+    /// block and is unreachable from here — so the editor needs its own
+    /// Processor to call create_view() on. The parameter manager stays the
+    /// value authority; this store is a mirror kept in sync both ways.
+    struct EditorModel {
+        std::unique_ptr<Processor> processor;
+        state::StateStore store;
+        std::unique_ptr<GestureRouter> gestures;
+        state::ListenerToken value_listener;
+    };
+
+    void ensure_editor_model() {
+        if (editor_ || editor_init_failed_ || !init_error_.empty() || !config_.factory) {
+            return;
+        }
+
+        auto processor = config_.factory();
+        if (!processor) {
+            editor_init_failed_ = true;
+            runtime::log_error("AAX editor: processor factory returned null");
+            return;
+        }
+
+        auto model = std::make_unique<EditorModel>();
+        model->processor = std::move(processor);
+        model->processor->set_state_store(&model->store);
+        model->processor->define_parameters(model->store);
+
+        // Seed the mirror from the parameter manager so an editor opened after
+        // automation or a session recall shows the current values, not defaults.
+        for (const auto& binding : definition_.parameters) {
+            if (auto* parameter = mParameterManager.GetParameterByID(binding.aax_id.c_str())) {
+                float value = binding.range.default_value;
+                parameter->GetValueAsFloat(&value);
+                model->store.set_value(binding.id, value);
+            }
+        }
+
+        // Editor gesture → AAX automation touch/release. Without this pair a
+        // custom UI's knob drag records automation the host never scoped, so
+        // every edit lands as an isolated point instead of a stroke.
+        model->gestures = std::make_unique<GestureRouter>(
+            definition_,
+            [this](const char* aax_id) { TouchParameter(aax_id); },
+            [this](const char* aax_id) { ReleaseParameter(aax_id); });
+        model->store.set_gesture_callbacks(
+            [this](state::ParamID id) {
+                if (editor_) editor_->gestures->begin(id);
+            },
+            [this](state::ParamID id) {
+                if (editor_) editor_->gestures->end(id);
+            });
+
+        // Editor edit → AAX parameter. Avid's contract is that a GUI updates
+        // values through AAX_IParameter::SetValue*, never by calling
+        // UpdateParameterNormalizedValue directly, so the automation locks and
+        // the coefficient post are managed for us.
+        model->value_listener = model->store.add_listener(
+            [this](state::ParamID id, float value) {
+                push_to_aax_parameter(id, value);
+            },
+            state::ListenerThread::Main);
+
+        editor_ = std::move(model);
+    }
+
+    /// Editor store → AAX parameter manager.
+    ///
+    /// The two directions must not chase each other. A transient "I am syncing"
+    /// flag around the store write cannot do that job: a Main listener is
+    /// dispatched through the host's EventLoop, so it runs after any such flag
+    /// is cleared. Comparing against the value AAX already holds closes the loop
+    /// wherever the callback lands — after a host update the mirror agrees with
+    /// the parameter, so this sends nothing, while a genuine editor edit differs
+    /// and goes through. This matters because StateStore::set_value() notifies
+    /// unconditionally, so an echo would not settle on its own.
+    void push_to_aax_parameter(state::ParamID id, float value) {
+        const auto* aax_id = editor_ ? editor_->gestures->aax_id_for(id) : nullptr;
+        if (!aax_id) {
+            return;
+        }
+        auto* parameter = mParameterManager.GetParameterByID(aax_id->c_str());
+        if (!parameter) {
+            return;
+        }
+        float current = 0.0f;
+        parameter->GetValueAsFloat(&current);
+        if (current == value) {
+            return;  // AAX already holds this value
+        }
+        parameter->SetValueWithFloat(value);
+    }
+
+    /// AAX parameter manager → editor store.
+    void push_to_editor_store(AAX_CParamID parameter_id, double normalized) {
+        if (!editor_ || !parameter_id) {
+            return;
+        }
+        state::ParamID id = 0;
+        if (!param_id_for_aax_id(definition_, parameter_id, id)) {
+            return;  // AAX's own master-bypass control has no store parameter
+        }
+        editor_->store.set_normalized(id, static_cast<float>(normalized));
+    }
+
     EntryConfig config_{};
     PluginDefinition definition_{};
     std::string init_error_;
+    std::unique_ptr<EditorModel> editor_;
+    bool editor_init_failed_ = false;
+    bool syncing_from_host_ = false;
 };
 
 int32_t AAX_CALLBACK instance_init(const AlgorithmContext* context,
@@ -903,7 +1042,8 @@ IACFUnknown* create_effect_parameters(const EntryConfig& config) {
 
 AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
                                    const EntryConfig& config,
-                                   AAXCreateObjectProc create_proc)
+                                   AAXCreateObjectProc create_proc,
+                                   AAXCreateObjectProc create_gui_proc)
 {
     if (!out_collection || !create_proc) {
         return AAX_ERROR_UNIMPLEMENTED;
@@ -963,6 +1103,19 @@ AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
         status != AAX_SUCCESS)
     {
         return status;
+    }
+
+    // The custom editor. Registering this proc is what makes Pro Tools
+    // instantiate a plug-in GUI at all; with only the parameters proc above the
+    // host falls back to its auto-generated parameter strip, whatever the
+    // plug-in's create_view() would have drawn.
+    if (create_gui_proc) {
+        if (auto status = effect->AddProcPtr(reinterpret_cast<void*>(create_gui_proc),
+                                             kAAX_ProcPtrID_Create_EffectGUI);
+            status != AAX_SUCCESS)
+        {
+            return status;
+        }
     }
 
     if (auto* effect_properties = effect->NewPropertyMap()) {

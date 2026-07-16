@@ -489,6 +489,9 @@
         "core/format/src/au_v2_cocoa_view.mm",
         "core/format/src/au_adapter.mm",
         "core/format/src/au_view_controller_ios.mm",
+        "core/format/src/aax_effect_gui.cpp",
+        "core/format/include/pulp/format/aax_effect_gui.hpp",
+        "core/format/include/pulp/format/aax_editor.hpp",
         "core/view/include/pulp/view/editor_bridge.hpp",
         "core/view/src/editor_bridge.cpp",
         "examples/view-bridge-demo/**"
