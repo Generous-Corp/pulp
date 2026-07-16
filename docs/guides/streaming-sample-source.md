@@ -16,8 +16,8 @@ page-cache sampler service described in the sampler hardening plan.
 
 `make_memory_mapped_frame_reader()` adapts a file to the source's `FrameReader`
 contract. The returned object retains its mapped reader for the callback's
-lifetime. WAV files use bounded ranged decode from mapped bytes; they are not
-decoded completely before playback.
+lifetime. WAV and uncompressed AIFF/AIFF-C `NONE` files use bounded ranged
+decode from mapped bytes; they are not decoded completely before playback.
 
 The adapter reports `supports_ranged_read`. A false value means the active file
 format uses `MemoryMappedAudioReader`'s decode-once fallback. Applications with

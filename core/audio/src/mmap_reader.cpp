@@ -1,5 +1,6 @@
 #include <pulp/audio/mmap_reader.hpp>
 #include <pulp/audio/format_registry.hpp>
+#include "aiff_parser.hpp"
 
 #include <choc/audio/choc_AudioFileFormat_WAV.h>
 #include <choc/audio/choc_SampleBuffers.h>
@@ -46,14 +47,14 @@ protected:
 
 }  // namespace
 
-// Ranged decoder state over the mapped bytes. Holds the memory streambuf, the
-// istream wrapping it, and a persistent choc reader that seeks per read. When
-// the active format can't be seek-read, `reader` is null and read_frames falls
+// Ranged decoder state over the mapped bytes. WAV uses a persistent choc reader;
+// uncompressed AIFF uses its parsed byte layout directly. Other formats fall
 // back to a one-time whole-file decode cached in `fallback`.
 struct MemoryMappedAudioReader::RangedState {
     MappedStreamBuf buf;
     std::shared_ptr<std::istream> stream;
     std::unique_ptr<choc::audio::AudioFileReader> reader;
+    std::optional<detail::AiffLayout> aiff;
     std::optional<AudioFileData> fallback;  // lazy whole-file decode (non-ranged path)
     // Planar scratch for channel-subset ranged reads (choc requires the view's
     // channel count to match the file exactly, so a mono-from-stereo read decodes
@@ -86,17 +87,19 @@ bool MemoryMappedAudioReader::open(std::string_view path) {
     }
     info_ = *file_info;
 
-    // Build a ranged, seek-based reader over the mapped bytes. choc's reader
-    // decodes only the frames requested by each readFrames() call, so this is a
-    // true ranged read with no whole-file decode. If the bytes can't be opened
-    // as a seekable format, ranged_ keeps a null reader and read_frames falls
-    // back to a one-time whole-file decode.
+    // Build a ranged decoder over the mapped bytes. WAV delegates requested
+    // frames to choc; uncompressed AIFF records the validated PCM byte layout.
+    // Other formats fall back to a one-time whole-file decode.
     if (mmap_.data() != nullptr && mmap_.size() > 0) {
         ranged_ = std::make_unique<RangedState>(
             reinterpret_cast<const char*>(mmap_.data()), mmap_.size());
         choc::audio::AudioFileFormatList formats;
         formats.addFormat<choc::audio::WAVAudioFileFormat<false>>();
         ranged_->reader = formats.createReader(ranged_->stream);
+        if (!ranged_->reader) {
+            ranged_->aiff = detail::parse_aiff_layout(
+                *ranged_->stream, mmap_.size(), true);
+        }
     }
     return true;
 }
@@ -109,7 +112,7 @@ void MemoryMappedAudioReader::close() {
 }
 
 bool MemoryMappedAudioReader::supports_ranged_read() const {
-    return ranged_ && ranged_->reader != nullptr;
+    return ranged_ && (ranged_->reader != nullptr || ranged_->aiff.has_value());
 }
 
 bool MemoryMappedAudioReader::read_frames(float** dest_channels, uint32_t num_channels,
@@ -131,8 +134,23 @@ bool MemoryMappedAudioReader::read_frames(float** dest_channels, uint32_t num_ch
             std::fill(dest_channels[c] + count, dest_channels[c] + num_frames, 0.0f);
     if (count == 0) return true;
 
-    // Ranged path: decode only [start, start+count) via the seeking reader.
+    // Ranged path: decode only [start, start+count) from the mapped bytes.
     if (supports_ranged_read()) {
+        if (ranged_->aiff) {
+            const auto& layout = *ranged_->aiff;
+            const auto* sample_data = mmap_.data() + layout.sample_data_offset;
+            for (uint64_t frame = 0; frame < count; ++frame) {
+                const auto* source_frame = sample_data
+                    + static_cast<size_t>(start + frame) * layout.bytes_per_frame;
+                for (uint32_t channel = 0; channel < ch_count; ++channel) {
+                    dest_channels[channel][frame] = detail::decode_aiff_pcm_sample(
+                        source_frame + static_cast<size_t>(channel) * layout.bytes_per_sample,
+                        layout.info.bits_per_sample);
+                }
+            }
+            return true;
+        }
+
         const auto fcount = static_cast<choc::buffer::FrameCount>(count);
         if (ch_count == info_.num_channels) {
             // Exact channel match: decode straight into the caller's buffers.
