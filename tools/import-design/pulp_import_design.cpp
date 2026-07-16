@@ -14,6 +14,7 @@
 #include "import_detect.hpp"
 #include "fig_lane.hpp"
 #include "envelope_merge.hpp"
+#include "figma_url.hpp"
 #include <miniz.h>
 // getpid() is POSIX-only via <unistd.h>; MSVC ships an equivalent
 // `_getpid` declaration in <process.h>. Wrap both to keep the
@@ -610,6 +611,13 @@ bool fetch_url_to_file(const std::string& url, const fs::path& output_path) {
         std::cerr << "Error: --url must start with http:// or https://\n";
         return false;
     }
+    // A figma.com scene URL can never import through the unauthenticated fetch
+    // below, so fail fast naming the lanes that work rather than surfacing a
+    // bare curl exit code. Rule + message live in figma_url.hpp.
+    if (pulp::import_design::is_figma_app_url(url)) {
+        std::cerr << pulp::import_design::figma_app_url_error();
+        return false;
+    }
     if (has_disallowed_url_char(url)) {
         std::cerr << "Error: --url contains characters that are not accepted by the import fetcher\n";
         return false;
@@ -905,7 +913,9 @@ static void print_usage() {
     std::cout << "                    multi-state design into one view. Order sets the frame\n";
     std::cout << "                    index a \"swap <n>\" button targets (the first --file is\n";
     std::cout << "                    frame 0).\n";
-    std::cout << "  --url <url>       Design URL (Figma file URL or v0 share link)\n";
+    std::cout << "  --url <url>       URL that serves design JSON/HTML directly (e.g. a v0 share\n";
+    std::cout << "                    link). Fetched unauthenticated; a figma.com file URL does\n";
+    std::cout << "                    NOT work — see 'Importing from Figma' below.\n";
     std::cout << "  --frame <name>    Frame/artboard to import (Figma; guid or name for --from fig).\n";
     std::cout << "                    Repeatable: give it once per state to capture a multi-state\n";
     std::cout << "                    design into one view. Order sets the frame index a \"swap <n>\"\n";
@@ -1011,9 +1021,18 @@ static void print_usage() {
     std::cout << "  Environment overrides: PULP_IMPORT_DESIGN_DEFAULT_MODE, PULP_IMPORT_DESIGN_DEFAULT_EMIT\n";
     std::cout << "  Each CLI flag overrides its matching preference. If only default_mode=baked is set, default_emit\n";
     std::cout << "  becomes ir-json unless explicitly configured.\n\n";
+    std::cout << "Importing from Figma:\n";
+    std::cout << "  There is no authenticated Figma fetch in this CLI, so a figma.com file URL\n";
+    std::cout << "  cannot be imported with --url. Use one of these lanes instead (local first):\n";
+    std::cout << "    1. Figma desktop MCP — get_design_context/get_metadata for inspection.\n";
+    std::cout << "    2. 'Design for Pulp' Figma desktop plugin — exports a .pulp.zip envelope;\n";
+    std::cout << "       import it with --from figma-plugin --file <export>.pulp.zip\n";
+    std::cout << "    3. --from fig --file design.fig — decodes a local .fig save file offline.\n";
+    std::cout << "    4. tools/import-design/figma_rest_export.py --token <pat> — headless/CI\n";
+    std::cout << "       fallback; hits the Figma REST API and emits the same envelope.\n\n";
     std::cout << "Examples:\n";
     std::cout << "  pulp import-design --from figma --file design.json\n";
-    std::cout << "  pulp import-design --from figma --url 'https://figma.com/design/...' --frame 'Plugin UI'\n";
+    std::cout << "  pulp import-design --from figma-plugin --file design.pulp.zip --frame 'Plugin UI'\n";
     std::cout << "  pulp import-design --from stitch --file screen.html --screen 'Main'\n";
     std::cout << "  pulp import-design --from v0 --url 'https://v0.dev/t/abc123' --output my-ui.js\n";
     std::cout << "  pulp import-design --from pencil --file design.json --dry-run\n";

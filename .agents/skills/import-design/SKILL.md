@@ -139,6 +139,20 @@ but the ordering above governs *which lane to start in*. `figma_rest_export.py`
 mirrors the desktop plugin field-for-field, so a scene from lane (2) or (3) is
 interchangeable downstream.
 
+**There is no lane (4): `pulp import-design --url` cannot import from Figma.**
+Do not reach for `--from figma --url 'https://figma.com/design/…'` — the CLI
+help and docs advertised it for a long time, but it never worked. `--url` is a
+bare unauthenticated `curl -fsSL` (`fetch_url_to_file`) and the CLI has no
+credential flag at all, so figma.com returns **403** for a private file and the
+web app's **HTML shell** for a public one; the shell then dies deep inside
+`choc::json::parse` with an error that looks like a parser bug rather than an
+auth problem. The CLI now rejects figma.com `design/`/`file/`/`proto/` URLs up
+front (`tools/import-design/figma_url.hpp`) and names the lanes above. Note the
+two `--url` flags are **different**: `figma_rest_export.py --url` is real — it
+parses `file-key` + `node-id` out of the link and fetches with a token. The only
+authenticated Figma REST client in the repo is that script; nothing in the C++
+CLI can talk to Figma.
+
 ## Figma → Pulp, faithful (1:1) — THE WORKING LANE (read first)
 
 When the goal is a **visually faithful (1:1)** import of a component that lives in

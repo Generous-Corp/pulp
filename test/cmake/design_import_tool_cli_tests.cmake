@@ -184,3 +184,23 @@ if(APPLE)
     catch_discover_tests(pulp-test-screenshot-compare
         PROPERTIES LABELS "parser-import" TIMEOUT 240)
 endif()
+
+# `pulp import-design --url <figma.com scene URL>` guard. The classifier lives
+# in the header-only, dependency-free figma_url.hpp (same rationale as
+# import_detect.hpp), so the rule is covered in every lane without linking the
+# import pipeline; the shell-out case additionally exercises the real CLI path
+# when the binary is built.
+add_executable(pulp-test-cli-import-figma-url test_cli_import_figma_url.cpp)
+target_include_directories(pulp-test-cli-import-figma-url PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/import-design)
+target_link_libraries(pulp-test-cli-import-figma-url
+    PRIVATE Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-import-figma-url pulp-cli)
+endif()
+if(TARGET pulp-import-design)
+    add_dependencies(pulp-test-cli-import-figma-url pulp-import-design)
+endif()
+catch_discover_tests(pulp-test-cli-import-figma-url
+    PROPERTIES LABELS "parser-import")
