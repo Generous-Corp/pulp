@@ -12,8 +12,8 @@
   "hotspots": [
     {
       "path": "core/view/src/widget_bridge.cpp",
-      "max_loc": 1141,
-      "note": "WidgetBridge shell after callback wiring + subtree cleanup extraction; keep widget callbacks in widget_bridge/widget_callbacks.cpp and cleanup in widget_bridge/subtree_cleanup.cpp"
+      "max_loc": 1002,
+      "note": "WidgetBridge shell after callback wiring + subtree cleanup extraction; keep widget callbacks in widget_bridge/widget_callbacks.cpp, cleanup in widget_bridge/subtree_cleanup.cpp, JS event dispatch in widget_bridge/bridge_dispatch.cpp, and the CSS color parser in widget_bridge/css_color.cpp"
     },
     {
       "path": "core/view/src/widget_bridge/canvas2d_api.cpp",
@@ -77,8 +77,8 @@
     },
     {
       "path": "core/render/src/renderer3d.cpp",
-      "max_loc": 3474,
-      "note": "Renderer3D implementation hotspot after CPU value-type extraction"
+      "max_loc": 3410,
+      "note": "Renderer3D implementation hotspot after CPU value-type extraction; frame device-acquisition + readback/PNG tail shared via acquire_dawn_frame/finish_frame_readback"
     },
     {
       "path": "tools/import-design/pulp_import_design.cpp",
@@ -102,13 +102,13 @@
     },
     {
       "path": "core/view/src/design_cpp_codegen.cpp",
-      "max_loc": 2197,
-      "note": "DesignIR C++ codegen contract hotspot; +12 for interactive-element param_key emit + host-param routing enable (parity with make_faithful_svg_frame)"
+      "max_loc": 2050,
+      "note": "DesignIR C++ codegen contract hotspot; +12 for interactive-element param_key emit + host-param routing enable (parity with make_faithful_svg_frame); hit-policy + image-sizing lowering now shared from design_import_native_common"
     },
     {
       "path": "core/view/src/design_import_native_common.cpp",
-      "max_loc": 2079,
-      "note": "native materialization/import boundary hotspot; +12 for the interactive-element param_key mapping + host-param routing auto-enable"
+      "max_loc": 2070,
+      "note": "native materialization/import boundary hotspot; +12 for the interactive-element param_key mapping + host-param routing auto-enable; owns the shared hit-policy + image-sizing lowering for the runtime and baked-C++ lanes"
     },
     {
       "path": "core/view/src/design_codegen.cpp",
@@ -132,8 +132,8 @@
     },
     {
       "path": "tools/cli/kit_commands.cpp",
-      "max_loc": 3927,
-      "note": "kit/package trust-boundary monolith; split per tools/cli/KIT_COMMANDS_MODULE_MAP.md"
+      "max_loc": 3909,
+      "note": "kit/package trust-boundary monolith; split per tools/cli/KIT_COMMANDS_MODULE_MAP.md; JSON escaping shared from tools/cli/json_writer.hpp"
     },
     {
       "path": "inspect/src/inspector_overlay.cpp",
