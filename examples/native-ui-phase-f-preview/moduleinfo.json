@@ -19,7 +19,7 @@
       "Name": "PulpChainerNativeUi",
       "Vendor": "Pulp",
       "Version": "0.1.0",
-      "SDKVersion": "VST 3.7.12",
+      "SDKVersion": "VST 3.8.0",
       "Sub Categories": "Fx",
       "Class Flags": 0,
       "Cardinality": 2147483647,

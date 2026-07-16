@@ -43,6 +43,46 @@ fail()  { echo "  ✗ $*"; ERRORS=$((ERRORS + 1)); }
 step()  { echo ""; echo "── $* ──"; }
 dry()   { if $DRY_RUN; then echo "  [dry-run] $*"; return 0; fi; return 1; }
 
+# Pulp redistributes VST3 headers inside its own MIT-licensed SDK artifacts, so
+# the checked-out tree must be MIT. Tags before v3.8.0 licensed the SDK under
+# "Steinberg VST3 License OR GPLv3", which is incompatible with that. Fail
+# loudly rather than let a drifted pin ship a non-redistributable tree.
+#
+# The license is declared in per-directory LICENSE.txt files, not in source
+# headers (which only reference the nearest LICENSE), so the LICENSE files are
+# what gets scanned. Match on "General Public License": v3.7.12 words it
+# "General Public License (GPL) Version 3", never "GNU General Public License",
+# and a bare "GPL" would false-positive on identifiers like gPluginFactory.
+# Only the directories Pulp compiles and installs are scanned — doc/ ships
+# dual-licensed jquery.js and the samples vendor their own third-party deps.
+assert_vst3_license_is_mit() {
+    local dir="$1"
+    local license="$dir/LICENSE.txt"
+
+    if [ ! -f "$license" ]; then
+        fail "VST3 SDK: LICENSE.txt missing at $license — cannot verify license"
+        return 1
+    fi
+
+    if ! grep -q "MIT License" "$license"; then
+        fail "VST3 SDK: $license is not MIT — pin must stay at v3.8.0 or newer"
+        return 1
+    fi
+
+    local f
+    for f in "$dir/LICENSE.txt" "$dir/pluginterfaces/LICENSE.txt" \
+             "$dir/base/LICENSE.txt" "$dir/public.sdk/LICENSE.txt"; do
+        [ -f "$f" ] || continue
+        if grep -q "General Public License" "$f"; then
+            fail "VST3 SDK: ${f#"$dir"/} offers a GPL alternative — tree is not MIT-only"
+            return 1
+        fi
+    done
+
+    info "VST3 SDK license verified MIT"
+    return 0
+}
+
 prepend_path_if_dir() {
     local dir="$1"
     [ -n "$dir" ] || return 0
@@ -749,12 +789,17 @@ ensure_shared_git_source_with_retry "Catch2" "https://github.com/catchorg/Catch2
     "v3.7.1" "$(fetchcontent_cache_dir_name "catch2" "v3.7.1")"
 
 # VST3 SDK
-VST3_SDK_REF="v3.7.12_build_20"
+# MIT only from v3.8.0 onward. Every earlier tag (including v3.7.12) ships
+# pluginterfaces under "Steinberg VST3 License OR GPLv3", which Pulp may not
+# redistribute in its MIT-licensed SDK artifacts. Do not move this pin below
+# v3.8.0; assert_vst3_license_is_mit below fails the setup if it drifts.
+VST3_SDK_REF="v3.8.0_build_66"
 VST3_SHARED_DIR="$FETCHCONTENT_CACHE_ROOT/$(fetchcontent_cache_dir_name "vst3sdk" "$VST3_SDK_REF")"
 ensure_shared_git_source_with_retry "VST3 SDK" "https://github.com/steinbergmedia/vst3sdk.git" \
     "$VST3_SDK_REF" "$(fetchcontent_cache_dir_name "vst3sdk" "$VST3_SDK_REF")"
 VST3_DIR="$REPO_ROOT/external/vst3sdk"
 reuse_shared_git_source "VST3 SDK" "$VST3_SHARED_DIR" "$VST3_DIR" "pluginterfaces"
+assert_vst3_license_is_mit "$VST3_DIR" || true
 
 # AudioUnit SDK (macOS only)
 if [ "$PLATFORM" = "macOS" ]; then

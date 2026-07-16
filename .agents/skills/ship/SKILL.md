@@ -888,8 +888,8 @@ newer) before cutting or debugging release jobs.
 
 Pulp's notarized macOS release workflow clones the Steinberg VST3 SDK directly
 inside `.github/workflows/sign-and-release.yml`. Keep that workflow pinned to
-the same upstream tag used everywhere else in the repo: `v3.7.12_build_20`.
-The shortened `v3.7.12` ref does not exist on Steinberg's repo and causes the
+the same upstream tag used everywhere else in the repo: `v3.8.0_build_66`.
+The shortened `v3.8.0` ref does not exist on Steinberg's repo and causes the
 tag-triggered macOS release job to fail immediately at `Clone VST3 SDK`, before
 configure, build, or signing begin.
 

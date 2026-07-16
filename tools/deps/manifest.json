@@ -1127,16 +1127,18 @@
       "name": "VST3 SDK",
       "category": "format-sdk",
       "license": "MIT",
-      "version": "v3.7.12_build_20",
+      "version": "v3.8.0_build_66",
       "source_kind": "external-clone",
       "repository": "https://github.com/steinbergmedia/vst3sdk.git",
-      "upstream": { "kind": "git-tag", "ref": "v3.7.12_build_20" },
+      "upstream": { "kind": "git-tag", "ref": "v3.8.0_build_66" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "notes": "Pin must stay at v3.8.0_build_66 or newer: that is the first Steinberg tag released under MIT. Earlier tags (including v3.7.12_build_20) offer only 'Steinberg VST3 License OR GPLv3', neither of which Pulp may redistribute inside its MIT-licensed SDK artifacts. assert_vst3_license_is_mit in setup.sh fails the setup if the pin drifts below that.",
       "source_files": [
         "CMakeLists.txt",
         "setup.sh",
-        ".github/workflows/sign-and-release.yml"
+        ".github/workflows/sign-and-release.yml",
+        ".github/workflows/format-baseline-diff.yml"
       ]
     },
     {

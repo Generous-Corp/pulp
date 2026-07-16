@@ -33,7 +33,7 @@ of Pulp's three first-class plugin formats alongside CLAP and AU v3.
 | Entry-point generator macro | `core/format/include/pulp/format/vst3_entry.hpp` |
 | Editor `IPlugView` implementation | `core/format/src/vst3_plug_view.cpp`, `core/format/include/pulp/format/vst3_plug_view.hpp` |
 | Info.plist template (macOS bundle) | `tools/cmake/PulpInfoPlist.vst3.in` |
-| VST3 SDK fetch | `external/vst3sdk` — `git clone --depth 1 --branch v3.7.12 https://github.com/steinbergmedia/vst3sdk.git` (MIT) |
+| VST3 SDK fetch | `external/vst3sdk` — `git clone --depth 1 --branch v3.8.0_build_66 https://github.com/steinbergmedia/vst3sdk.git` (MIT) |
 | CLI validator invocation | `tools/cli/cmd_validate.cpp` (`pluginval --strictness-level 5 --timeout-ms 30000 --validate …`) |
 
 There is no hand-written `PulpVst3.cmake` helper — the VST3 target is
@@ -736,10 +736,16 @@ verifying the descriptor, DSP, and `kSpeakerArr` constants align.
 
 ### VST3 SDK is MIT, fetched via `git clone` in setup.sh
 
-`external/vst3sdk` is not checked in. `setup.sh` clones v3.7.12 by
+`external/vst3sdk` is not checked in. `setup.sh` clones v3.8.0_build_66 by
 default. If you bump the SDK version, also update the note in
 `docs/guides/formats.md` and verify `public.sdk/source/...` ABI didn't
 shift.
+
+The pin may not go below v3.8.0: that is the first tag Steinberg released
+under MIT, and Pulp redistributes VST3 headers inside its own MIT-licensed
+SDK artifacts. Earlier tags offer only "Steinberg VST3 License OR GPLv3",
+neither of which Pulp can redistribute. `assert_vst3_license_is_mit` in
+`setup.sh` fails the setup if a re-pin drifts back.
 
 ## Validation recipes
 
