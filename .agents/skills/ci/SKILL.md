@@ -99,6 +99,39 @@ touching `examples/**`. Proven by the `cmake-examples-reorder-init-guard` ctest.
 If you add a NEW example struct pattern that a compiler tolerates but the release
 compiler rejects, extend that guard rather than discovering it at release time.
 
+## A test that "fails" on the required gate may only have run out of clock
+
+Before debugging what a failing gate test *does*, check whether it failed on
+**elapsed time** rather than behavior. A subprocess-spawning test that reddens
+`macos` on PRs that cannot possibly have caused it — a docs-only or CI-only PR —
+is the tell. `pulp ship sign discovers desktop bundles via env and config
+identities` read as a signing/keychain break for exactly this reason; it was a
+10s cap on a case that spawns `codesign` three times, runs ~2s unloaded, and
+loses its margin under a `-j8` run over 13k tests. The symptom is a bare
+`REQUIRE_FALSE(x.timed_out)` → `!true`, which names neither the subprocess nor
+the duration — so it reads like a logic failure.
+
+The layering rule that prevents this class:
+
+- **`ctest --timeout` is the binding guard.** `build.yml` runs
+  `ctest … --repeat until-pass:2 -j8 --timeout 120`: a per-test hang guard plus
+  one automatic retry. An in-test subprocess cap must stay comfortably **looser**
+  than it, so a slow machine fails at the outer layer — which reports the test
+  name and elapsed time — instead of at the inner one, which reports neither. An
+  inner cap tighter than the outer guard is strictly harmful: it fires first and
+  diagnoses worse.
+- **These caps are hang guards, not performance budgets**, so the costs are
+  asymmetric. Too generous only delays a genuinely wedged child (already bounded
+  at 120s). Too tight buys recurring false reds on unrelated PRs. Err generous.
+- **Don't make them adaptive.** Self-calibrating or load-scaled timeouts make
+  failures unreproducible and stretch to accommodate real perf regressions. A
+  fixed generous default plus an env override is the design.
+
+Root cause of the drift: the CLI shellout suites each hand-roll their own helper
+and hardcode a timeout, so there is no shared default to inherit and a
+codesign-heavy suite could sit at 10s while its siblings used 30-60s. When
+adding a shellout test, reuse the shared helper rather than picking a number.
+
 ## Gate: framework-neutrality (`tools/scripts/framework_neutrality_check.py`)
 
 Hard-fails a PR when Pulp's own source names another UI framework — in a
@@ -4190,3 +4223,26 @@ loud on a no-op. The pre-push hook (`.githooks/pre-push`) adds two backstop guar
 pushes: it refuses a **detached-HEAD** push and an **empty-diff-vs-base** push (the latter
 catches a rebase that flattened a branch to zero files). Root cause + the four-fix plan:
 `planning/friction/2026-07-15-git-state-in-shared-worktree-hell.md`.
+
+## Coverage-on-main can go red from a time-budget kill (not a code failure) (2026-07-15)
+
+The `Coverage` workflow (`coverage.yml`) is **advisory** — never a merge gate (the
+authoritative gate is the separate `Diff coverage required` check). It runs the instrumented
+build + full ctest suite under an internal watchdog that SIGTERMs the suite before the job cap
+and **drops any partial Cobertura report**. Historically only the `os-windows` leg was
+neutralized (job-level `continue-on-error: matrix.os=='windows'`), on the assumption that
+macOS/linux always finish under budget. The suite grew (~13.5k ctest cases) and the macOS leg
+started crossing the budget too — killed suite → dropped XML → the mandatory `Verify Cobertura
+XML exists` step reddened `main`, repeatedly. **A red `Coverage` run on main whose macOS/linux
+leg failed at "Verify Cobertura XML exists" / "Upload Cobertura XML" is almost always this
+budget kill, not a real build break** — look for `Terminated: 15` / exit `143` in the "Run
+coverage suite" step.
+
+Now a budget hit is a clean **non-fatal skip on every OS**: the suite emits
+`steps.coverage-suite.outputs.budget_hit=true`, and Verify + Cobertura-upload skip on it. A
+genuine build failure (no budget hit, no report) still fails loudly. The suite also runs ctest
+in parallel (`-j`, capped like `build.yml`) with a per-test `--timeout` in
+`scripts/run_coverage.sh` so it finishes well under budget. If coverage genuinely stops
+flowing, the `coverage-staleness-check` watchdog is the alarm — not a red PR. Editing
+`coverage.yml` requires a `docs/guides/versioning.md` touch (config-doc map) and updating this
+skill (skill-sync map).
