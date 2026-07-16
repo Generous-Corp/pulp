@@ -7,20 +7,18 @@
 /// through the streaming machinery (resident preload + background-filled ring +
 /// RT-safe pull) — the audio thread never decodes or allocates.
 ///
-/// Current limitation (honest): the file is decoded ONCE, off the audio thread,
-/// into a resident PCM buffer, and the reader then serves frame ranges from that
-/// buffer. It is therefore not yet a "too large to hold resident" path — true
-/// ranged / zero-copy disk streaming awaits ranged-decode support in
-/// MemoryMappedAudioReader (today its read_frames decodes the whole file per
-/// call). The StreamingSampleSource primitive itself is codec-agnostic: any
-/// FrameReader that range-reads from disk gets true streaming with no change
-/// here. Header-only; composes existing pulp::audio APIs.
+/// The returned callback retains one MemoryMappedAudioReader and delegates each
+/// request to read_frames(). Seek-readable formats such as WAV therefore decode
+/// only the requested range. Formats without a ranged decoder use the reader's
+/// explicit decode-once fallback; callers can inspect supports_ranged_read before
+/// admitting a source under a strict streaming-memory policy.
 
 #include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/buffer.hpp>
@@ -36,53 +34,52 @@ struct FileFrameReader {
     std::uint32_t channels = 0;
     std::uint64_t total_frames = 0;
     std::uint32_t sample_rate = 0;
+    bool supports_ranged_read = false;
     bool valid = false;
 };
 
-/// Open + decode @p path once (off the audio thread) and return a FrameReader
-/// that serves frame ranges from the resident decode. On failure returns a
+/// Open and retain a mapped reader for @p path. On failure returns a
 /// FileFrameReader with valid == false. Control thread only.
 inline FileFrameReader make_memory_mapped_frame_reader(std::string_view path) {
     FileFrameReader result;
 
-    MemoryMappedAudioReader mmap;
-    if (!mmap.open(path)) {
+    auto mapped = std::make_shared<MemoryMappedAudioReader>();
+    if (!mapped->open(path)) {
         return result;  // valid == false
     }
-    auto decoded = std::make_shared<AudioFileData>();
-    if (auto data = mmap.read_all()) {
-        *decoded = std::move(*data);
-    } else {
-        return result;
-    }
-    mmap.close();  // the resident decode owns the PCM now
 
-    const std::uint32_t channels = decoded->num_channels();
-    const std::uint64_t total = decoded->num_frames();
+    const auto& info = mapped->info();
+    const std::uint32_t channels = info.num_channels;
+    const std::uint64_t total = info.num_frames;
     if (channels == 0 || total == 0) {
         return result;  // unusable file
     }
 
     result.channels = channels;
     result.total_frames = total;
-    result.sample_rate = decoded->sample_rate;
-    result.reader = [decoded, channels, total](std::uint64_t start_frame,
+    result.sample_rate = info.sample_rate;
+    result.supports_ranged_read = mapped->supports_ranged_read();
+    result.reader = [mapped = std::move(mapped), channels, total,
+                     destinations = std::vector<float*>(channels)](
+                                               std::uint64_t start_frame,
                                                BufferView<float> dest,
                                                std::uint64_t frames)
-        -> std::uint64_t {
+        mutable -> std::uint64_t {
         if (start_frame >= total) return 0;
-        const std::uint64_t n = std::min(frames, total - start_frame);
+        const std::uint64_t n = std::min({
+            frames,
+            total - start_frame,
+            static_cast<std::uint64_t>(dest.num_samples()),
+        });
         if (n == 0) return 0;
-        // Fill only the channels the destination actually has — never write
-        // through a missing channel. Extra source channels are dropped; extra
-        // dest channels are left as-is (the source clears unfilled channels).
         const std::uint32_t use_ch = std::min<std::uint32_t>(
             channels, static_cast<std::uint32_t>(dest.num_channels()));
-        for (std::uint32_t ch = 0; ch < use_ch; ++ch) {
-            const float* src = decoded->channels[ch].data() +
-                               static_cast<std::size_t>(start_frame);
-            std::copy_n(src, static_cast<std::size_t>(n), dest.channel_ptr(ch));
-        }
+        if (use_ch == 0) return 0;
+
+        for (std::uint32_t ch = 0; ch < use_ch; ++ch)
+            destinations[ch] = dest.channel_ptr(ch);
+        if (!mapped->read_frames(destinations.data(), use_ch, start_frame, n))
+            return 0;
         return n;
     };
     result.valid = true;
