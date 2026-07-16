@@ -411,10 +411,14 @@ build (which lists or globs them) keeps working, and this hand-list silently goe
 failure is a wall of `undefined symbol:` at wasm-ld link time, and it lands far from the PR that
 caused it.
 
-It merges green because the web-build lanes (`web-plugins.yml`, `wclap-cloudflare.yml`) are
-**path-filtered and advisory** — a PR touching only `core/canvas/**` or `core/view/**` never
-triggers them. So a core-only refactor breaks the wasm UI build with nothing red. (Making the
-WebCLAP lane a required check is the durable fix; until then, assume this can be broken on main.)
+`web-plugins.yml`'s `paths:` filter watches the trees `PulpWebUi.cmake` enumerates
+(`core/view/**`, `core/canvas/**`, `core/render/**`, `core/runtime/**`, `core/events/**`), so a
+core-only refactor does get a red lane on its own PR. **Keep that filter in step with the source
+list**: enumerating a tree here that `paths:` does not watch restores the silent-breakage hole,
+which is what let a split TU reach `main` twice. The lane is still **advisory** — red does not
+block the merge, so a core refactor can still land broken if the red is ignored; making it a
+required check is the remaining durable fix. `wclap-cloudflare.yml` is a wasi/WebCLAP deploy lane
+that does not build the UI stack, so it does not cover this at all.
 
 When you hit it: don't chase symbols one build at a time. Read the symbol's namespace, find the
 defining TU (`git grep -l 'Thing::method' -- core/.../src`), and **mirror what the native build

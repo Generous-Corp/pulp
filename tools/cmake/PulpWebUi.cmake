@@ -184,6 +184,12 @@ set(_PULP_WEBUI_CANVAS_SOURCES
 
 # View: the widget + layout + theme core. NO scripting, NO design-import
 # authoring, NO window hosts other than the browser one below.
+#
+# This list is a curated subset, so it does not follow core/view/CMakeLists.txt
+# automatically: splitting code out of a TU that is listed here into a new file
+# leaves the new file unbuilt for wasm, and the only symptom is an
+# `undefined symbol` from wasm-ld in the web lane. When a listed TU is split,
+# list every piece it was split into.
 set(_PULP_WEBUI_VIEW_SOURCES
     ${_PULP_WEBUI_ROOT}/core/view/src/view.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/value_source_binding.cpp

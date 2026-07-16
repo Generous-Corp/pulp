@@ -10,6 +10,15 @@ on:
     paths:
       - "core/format/src/wasm/**"
       - "core/format/include/pulp/format/web/**"
+      # PulpWebUi.cmake hand-enumerates a curated subset of these trees, so a
+      # change to any of them can break the wasm link without touching a single
+      # file matched above. They are cheap to watch: together they carry ~14
+      # merges a month, and the macOS job below runs ~2 minutes.
+      - "core/view/**"
+      - "core/canvas/**"
+      - "core/render/**"
+      - "core/runtime/**"
+      - "core/events/**"
       - "examples/web-demos/**"
       - "examples/pulp-gain/**"
       - "examples/super-convolver/**"

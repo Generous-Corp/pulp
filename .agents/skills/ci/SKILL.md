@@ -1022,6 +1022,17 @@ on a busy `main` is *designed* to be superseded while queued — the
 supersession-immune **scheduled** run, cron `17 */8 * * *`, is the one that
 produces the green full-matrix upload that clears the coverage-stale watchdog.)
 
+`build.yml` and `coverage.yml` are not the only consumers of the shared gate
+pool: **`web-plugins.yml`'s `GPU audio proof (macOS, real WebGPU)` job also
+resolves `runs-on` from `PULP_LOCAL_MACOS_RUNS_ON_JSON`**, so it lands on the
+same runners as the required `macos` check (it self-disables when that variable
+is empty). It is tolerated there because it is short — ~90s-2min per run, versus
+the hour-plus lanes coverage deliberately keeps off the pool. That budget is the
+thing to check before widening its `paths:` filter: the filter watches every tree
+`PulpWebUi.cmake` enumerates, and those carry ~14 merges/30d combined. If that
+job ever grows long, move it off the pool rather than narrowing the filter — the
+filter is what keeps the hand-maintained wasm source list honest.
+
 The **os-windows** coverage leg is best-effort. The instrumented MSVC build +
 ~9k instrumented tests + `llvm-cov` over 1000+ objects exceeds the 150-min job
 cap on GitHub-hosted `windows-latest` (it is ~1h on Linux/macOS), and the
