@@ -6,6 +6,7 @@
 #include <pulp/view/geometry.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/theme.hpp>
+#include <pulp/view/value_source.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/view_effect.hpp>
 #include <optional>
@@ -24,6 +25,7 @@ class GestureArbiter; class GestureRecognizer;
 class FrameClock;
 class WidgetPainter;     // pulp/view/widget_painter.hpp — pluggable paint delegate
 class WidgetMetrics;     // pulp/view/widget_metrics.hpp — pluggable sizing delegate
+struct ViewValueBindings; // pulp/view/src/view.cpp — lazily allocated value-source bindings
 struct FileDragRequest;  // pulp/view/drag_drop.hpp
 struct ActiveDrag;       // pulp/view/drag_drop.hpp
 struct DropData;         // pulp/view/drag_drop.hpp
@@ -354,6 +356,47 @@ public:
 
     /// Get the frame clock (walks up parent chain to find it).
     FrameClock* frame_clock() const;
+
+    // ── Live host→view value sources ────────────────────────────────────────
+    // Bind a lock-free channel the host publishes to from the audio/host thread
+    // and this view reads paint-safe: the binding snapshots the source once per
+    // frame on the reachable FrameClock, and `paint()` reads that snapshot, so a
+    // paint-time read never locks, blocks, or allocates. The seam a view showing
+    // a live value uses instead of hand-rolling a frame-clock-polled reader.
+    // nullptr unbinds. UI thread. Subscription lifecycle, the frames-alive
+    // effect, and the FrameClock lifetime contract: value_source_binding.hpp.
+
+    /// Bind a MeterSource. `channel` is the primary channel — the one
+    /// `on_meter_frame` drives a single-value widget from. A view painting
+    /// several meters reads the whole snapshot via `meter_frame()` instead.
+    void set_meter_source(std::shared_ptr<MeterSource> source, int channel = 0);
+    bool has_meter_source() const;
+    int meter_source_channel() const;
+
+    /// The latest MeterFrame snapshotted on the clock. Paint-safe: a cached
+    /// copy, never the source. All-zero (channels == 0) until the first frame,
+    /// or when nothing is bound. Bound your channel index by
+    /// `min(frame.channels, MeterFrame::kMaxChannels)` — `publish()` stores the
+    /// frame verbatim and never trusts the count to gate an access.
+    const MeterFrame& meter_frame() const;
+
+    /// Bind a ScalarSource — one paint-safe cached number (a readout, a
+    /// modulation ring's modulated position).
+    void set_scalar_source(std::shared_ptr<ScalarSource> source);
+    bool has_scalar_source() const;
+
+    /// The latest scalar snapshotted on the clock. Paint-safe. 0 until the first
+    /// frame, or when nothing is bound.
+    float scalar_value() const;
+
+    /// A new MeterFrame was snapshotted this frame, `dt` seconds after the last.
+    /// Default no-op — `meter_frame()` already exposes it to `paint()`. A widget
+    /// that advances per-frame state from the reading (ballistics, smoothing)
+    /// overrides this. UI thread, on the FrameClock.
+    virtual void on_meter_frame(const MeterFrame& frame, float dt) {
+        (void)frame;
+        (void)dt;
+    }
 
     // ── Transient-animation glue ─────────────────────────────────────────────
     // Tween/easing already exist; what a faithful port re-rolls every time is
@@ -1652,6 +1695,12 @@ private:
     /// after the subtree was built reaches self-subscribing descendants.
     void notify_frame_clock_changed();
 
+    /// Re-point this view's own value-source bindings at the currently reachable
+    /// clock. Called non-virtually from `notify_frame_clock_changed()` so a
+    /// subclass that overrides `on_frame_clock_changed()` without calling the
+    /// base still keeps its bindings live. No-op when nothing is bound.
+    void sync_value_bindings();
+
     /// Seed corner_radii_ from the uniform corner_radius_ on the first
     /// transition into per-corner mode. Idempotent: subsequent calls (when
     /// has_corner_radii_ is already true) are no-ops.
@@ -1710,6 +1759,9 @@ private:
     bool requires_gpu_host_ = false;
     bool contains_native_overlay_ = false;
     FrameClock* frame_clock_ = nullptr;
+    // Lazily allocated on the first set_meter_source / set_scalar_source, so a
+    // view that shows no live value costs one null pointer.
+    std::unique_ptr<ViewValueBindings> value_bindings_;
 
     // Visual properties
     float opacity_ = 1.0f;
