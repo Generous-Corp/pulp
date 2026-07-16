@@ -262,7 +262,7 @@ def test_recent_landings_honors_the_window() -> None:
           f"found={[m.merge_id[:8] for m in outside]}")
 
 
-def test_real_6082_replay() -> None:
+def test_real_incident_replay() -> None:
     """The real shape, replayed from this repo's history with real blob shas."""
     print("\n[real] replays the actual incident in this repository's history")
     if not _have_history():
@@ -345,7 +345,7 @@ def test_real_branch_would_have_been_blocked_at_push() -> None:
     check("names all 5 paths", len(v.reverted_paths) == 5, f"got {v.reverted_paths}")
 
 
-def test_real_6082_end_to_end() -> None:
+def test_real_incident_end_to_end() -> None:
     """The whole guard, via its public entry point, on the real incident.
 
     Anchored to the moment the revert actually happened. Wall-clock time would
@@ -408,6 +408,10 @@ def _fixture(repo: str) -> None:
     _git_in(repo, "init", "-q", "-b", "main")
     _git_in(repo, "config", "user.email", "t@example.com")
     _git_in(repo, "config", "user.name", "t")
+    # A throwaway fixture repo must never inherit the developer's signing config:
+    # with commit.gpgsign on and the key unusable, every commit here dies and the
+    # whole suite aborts on a traceback rather than reporting a result.
+    _git_in(repo, "config", "commit.gpgsign", "false")
     _write(repo, "a.txt", "original a\n")
     _write(repo, "b.txt", "original b\n")
     _git_in(repo, "add", "a.txt", "b.txt")
@@ -547,8 +551,8 @@ def main() -> int:
     test_since_arg_is_absolute()
     test_recent_landings_path_filter()
     test_recent_landings_honors_the_window()
-    test_real_6082_replay()
-    test_real_6082_end_to_end()
+    test_real_incident_replay()
+    test_real_incident_end_to_end()
     test_real_branch_would_have_been_blocked_at_push()
     test_e2e_blocks_silent_revert()
     test_e2e_hint_mode_never_fails()
