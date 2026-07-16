@@ -385,7 +385,12 @@ std::vector<double> segment_group_delay(
         const double denom = std::norm(spec[k]);
         // A bin with no energy has no phase to differentiate. Zero here is a
         // placeholder only: such bins are gated to `defined = false` by the
-        // caller and never surface as a measurement.
+        // caller and never surface as a measurement. That holds only while the
+        // caller gates on THIS quantity and threshold — `std::norm(spec) >
+        // kLinearFloor` — on both the reference and the output spectrum. A
+        // caller that gates on some other measure of "quiet enough" (|H|, a
+        // dB floor relative to a peak) can admit a bin that landed here, and
+        // the placeholder then reads out as a measured zero delay.
         tau[k] = denom > kLinearFloor
                      ? (ramp_spec[k] * std::conj(spec[k])).real() / denom
                      : 0.0;
@@ -454,9 +459,9 @@ double PhaseCurve::phase_radians_at(double hz) const {
                         : std::numeric_limits<double>::quiet_NaN();
 }
 
-double PhaseCurve::magnitude_db_at(double hz) const {
+double PhaseCurve::magnitude_db_rel_peak_at(double hz) const {
     const auto* p = nearest_phase_point(full, hz, bin_hz);
-    return p != nullptr ? p->magnitude_db : kSilenceFloorDb;
+    return p != nullptr ? p->magnitude_db_rel_peak : kSilenceFloorDb;
 }
 
 PhaseCurve measure_group_delay(
@@ -543,19 +548,32 @@ PhaseCurve measure_group_delay(
     curve.full.reserve(static_cast<std::size_t>(bins));
     for (int i = 0; i < bins; ++i) {
         const auto idx = static_cast<std::size_t>(i);
-        const double mag_db =
+        const double mag_db_rel_peak =
             20.0 * std::log10(std::max(std::abs(h[idx]), kLinearFloor) / peak);
-        // Two independent gates. The relative one rejects a stopband; the
-        // ABSOLUTE one rejects a curve with no signal anywhere, which the
-        // relative gate cannot see — for a silent output the peak is itself
-        // the numerical floor, every bin sits at 0 dB relative to it, and the
-        // curve would otherwise claim a flat, fully-defined, zero-delay
-        // response for a processor that emitted nothing at all.
+        // Three independent gates.
+        //
+        // The RELATIVE one (magnitude_floor_db) rejects a stopband.
+        //
+        // The ABSOLUTE transfer gate rejects a curve with no signal anywhere,
+        // which the relative gate cannot see — for a silent output the peak is
+        // itself the numerical floor, every bin sits at 0 dB relative to it,
+        // and the curve would otherwise claim a flat, fully-defined,
+        // zero-delay response for a processor that emitted nothing at all.
+        //
+        // The OUTPUT-ENERGY gate tests the same quantity and threshold that
+        // segment_group_delay uses to decide a bin has phase worth
+        // differentiating. Without it the two disagree: |H| > kLinearFloor
+        // admits a bin whose |X_out| is still far below the tau estimator's
+        // own floor, so the bin inherits tau's zero placeholder and reports a
+        // measured-looking group delay of exactly 0. The input side already
+        // pairs `reference_present` with in_tau's floor this way; this keeps
+        // the output side aligned.
         const bool defined = reference_present[idx] &&
+                             std::norm(out_spec[idx]) > kLinearFloor &&
                              std::abs(h[idx]) > kLinearFloor &&
-                             mag_db >= options.magnitude_floor_db;
+                             mag_db_rel_peak >= options.magnitude_floor_db;
         curve.full.push_back(
-            {i * curve.bin_hz, mag_db, defined ? phase[idx] : nan,
+            {i * curve.bin_hz, mag_db_rel_peak, defined ? phase[idx] : nan,
              defined ? out_tau[idx] - in_tau[idx] : nan, defined});
     }
 

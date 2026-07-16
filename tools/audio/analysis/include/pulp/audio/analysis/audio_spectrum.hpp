@@ -280,12 +280,25 @@ ResponseCurve magnitude_spectrum_curve(
 ///
 /// `defined` is the honesty gate: phase carries no information where the
 /// transfer magnitude is at the noise floor (a stopband), so every field
-/// below except `hz` and `magnitude_db` is meaningless when it is false, and
-/// `phase_rad` / `group_delay_samples` are NaN there rather than a plausible
-/// number. Check `defined` before reading them.
+/// below except `hz` and `magnitude_db_rel_peak` is meaningless when it is
+/// false, and `phase_rad` / `group_delay_samples` are NaN there rather than a
+/// plausible number. Check `defined` before reading them.
+///
+/// **`magnitude_db_rel_peak` is NOT the same quantity as
+/// `ResponsePoint::magnitude_db`**, despite both curves coming from the same
+/// Doctor run over the same stimulus. `ResponsePoint::magnitude_db` from
+/// `response_relative_to_input` is the ABSOLUTE transfer ratio
+/// (20*log10(|out|/|in|)), so a processor with 12 dB of passband gain reports
+/// +12 there. This field is normalized to the phase curve's OWN peak transfer
+/// magnitude (20*log10(|H|/peak|H|)), so that same processor reports 0 here —
+/// it is the input to the relative half of the `defined` gate, and reads 0 dB
+/// at the loudest bin whatever the overall gain is. The name carries the
+/// distinction because the two are written to sibling artifacts.
 struct PhasePoint {
     double hz = 0.0;
-    double magnitude_db = 0.0;        ///< Transfer magnitude — the gate input.
+    /// Transfer magnitude in dB relative to the curve's own peak transfer
+    /// magnitude (peak bin = 0 dB, everything else negative) — the gate input.
+    double magnitude_db_rel_peak = 0.0;
     double phase_rad = 0.0;           ///< Unwrapped transfer phase; NaN if !defined.
     double group_delay_samples = 0.0; ///< -dφ/dω in samples; NaN if !defined.
     bool defined = false;             ///< False where magnitude is below the floor.
@@ -335,9 +348,12 @@ struct PhaseCurve {
     /// Unwrapped transfer phase in radians at `hz`. NaN when undefined. See
     /// `measure_group_delay` for the ambiguity a stopband null leaves behind.
     double phase_radians_at(double hz) const;
-    /// Transfer magnitude in dB at `hz` — always defined (it IS the gate input).
-    /// Returns kSilenceFloorDb for an empty curve.
-    double magnitude_db_at(double hz) const;
+    /// Transfer magnitude at `hz` in dB **relative to this curve's own peak
+    /// transfer magnitude** — always defined (it IS the gate input). NOT the
+    /// absolute out/in ratio that `ResponseCurve::magnitude_db_at` returns;
+    /// see `PhasePoint::magnitude_db_rel_peak`. Returns kSilenceFloorDb for an
+    /// empty curve.
+    double magnitude_db_rel_peak_at(double hz) const;
 };
 
 /// Options for the phase/group-delay analyzer. Lengths must be powers of two.
@@ -345,7 +361,14 @@ struct GroupDelayOptions {
     /// Power of two; also the impulse render length. Must exceed twice the
     /// largest group delay present — see `measure_group_delay`.
     int fft_length = 16384;
-    int analysis_offset = 0; ///< Samples skipped before the analysis segment.
+    /// Samples skipped before the analysis segment. **Meaningful only on the
+    /// buffer-level `measure_group_delay(input, output, ...)` overload with a
+    /// caller-supplied non-impulse reference.** The scenario overload always
+    /// synthesizes its reference impulse at frame 0, so any nonzero offset
+    /// moves the window past the only sample the reference has and throws
+    /// ("reference (input) analysis window is effectively silent") rather than
+    /// dividing noise by noise. Leave it 0 there.
+    int analysis_offset = 0;
     /// Rectangular by default, for the same reason as the response analyzer
     /// (an impulse at frame 0 would be annihilated by a Hann window) and
     /// because the group-delay estimator is exact only for a rectangular
