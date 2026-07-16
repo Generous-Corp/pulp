@@ -235,6 +235,21 @@ if [ -f "$ROOT/tools/deps/test_audit.py" ]; then
     fi
 fi
 
+# ── 7a-bis. setup.sh shared-source-cache tests ─────────────────────────────
+# Guards the cross-version cache seeding path, which only misbehaves when a
+# dependency is re-pinned on a machine that already cached the old version —
+# a state no cold CI runner reproduces.
+if [ -f "$ROOT/tools/scripts/test_setup_source_cache.sh" ]; then
+    echo "" >&2
+    echo "▸ setup.sh source-cache tests" >&2
+    if ! bash "$ROOT/tools/scripts/test_setup_source_cache.sh" >/dev/null 2>&1; then
+        echo "  setup.sh source-cache tests: failing — run \`bash tools/scripts/test_setup_source_cache.sh\` for details." >&2
+        fail=1
+    else
+        echo "  setup.sh source-cache tests: ok" >&2
+    fi
+fi
+
 # ── 7b. manifest-mirror drift (tooling-consumed pin mirrors) ────────────────
 # Global invariant — the Skia/V8 pin data is hand-mirrored into files that
 # tooling actually trusts: external/skia-build/VERSION.md's digest table is a

@@ -466,6 +466,33 @@ ensure_shared_git_source_with_retry() {
     done
 }
 
+# A source cache is seeded by cloning any existing cache with the same
+# origin, which can be a different version (find_local_git_seed matches on
+# origin URL alone). Those caches are `--filter=blob:none` partial clones, and
+# `git clone --local` copies the incomplete object store WITHOUT the promisor
+# configuration that tells git it may still fetch the missing blobs on demand.
+# Re-point the copy at the real remote so a checkout can materialize blobs the
+# seed never had.
+restore_partial_clone_wiring() {
+    local dir="$1"
+    local filter="$2"
+    git -C "$dir" config extensions.partialClone origin
+    git -C "$dir" config remote.origin.promisor true
+    git -C "$dir" config remote.origin.partialclonefilter "${filter:-blob:none}"
+}
+
+git_partial_clone_filter() {
+    git -C "$1" config remote.origin.partialclonefilter 2>/dev/null || true
+}
+
+# `git checkout` exits 0 even when it cannot read a blob: it prints
+# "unable to read sha1 file", leaves that path deleted in the worktree, and
+# still reports success. The exit code therefore proves nothing — a checkout
+# has to be verified against the worktree afterwards.
+git_worktree_is_complete() {
+    [ -z "$(git -C "$1" status --porcelain 2>/dev/null)" ]
+}
+
 ensure_shared_git_source() {
     local label="$1"
     local repo="$2"
@@ -521,6 +548,12 @@ ensure_shared_git_source() {
                 info "Updating shared $label cache origin to $repo"
                 dry "git -C $target remote set-url origin $repo" || git -C "$target" remote set-url origin "$repo"
             fi
+
+            if [ -n "$seed_repo" ] && \
+               [ "$(git -C "$seed_repo" config remote.origin.promisor 2>/dev/null)" = "true" ]; then
+                dry "git -C $target config extensions.partialClone origin" || \
+                    restore_partial_clone_wiring "$target" "$(git_partial_clone_filter "$seed_repo")"
+            fi
         fi
 
         if ! git -C "$target" cat-file -e "${ref}^{commit}" 2>/dev/null; then
@@ -540,6 +573,21 @@ ensure_shared_git_source() {
             :
         else
             git -C "$target" checkout --detach "$checkout_ref"
+
+            # Self-heal a cache already left incomplete by an earlier run:
+            # restoring the promisor wiring lets a forced re-checkout fetch
+            # the blobs the first attempt could not read.
+            if ! git_worktree_is_complete "$target"; then
+                warn "Shared $label source cache is missing objects; repairing"
+                restore_partial_clone_wiring "$target" "$(git_partial_clone_filter "$target")"
+                git -C "$target" checkout --force "$checkout_ref" -- . || true
+            fi
+
+            if ! git_worktree_is_complete "$target"; then
+                fail "$label source cache at $target is incomplete after checking out $ref"
+                git -C "$target" status --porcelain | head -5
+                exit 1
+            fi
         fi
 
         if [ -f "$target/.gitmodules" ]; then
@@ -552,6 +600,13 @@ ensure_shared_git_source() {
         fi
     )
 }
+
+# Everything above is definitions; everything below performs setup. Sourcing
+# with PULP_SETUP_LIB_ONLY=1 exposes the helpers to tests without bootstrapping
+# a machine.
+if [ -n "${PULP_SETUP_LIB_ONLY:-}" ]; then
+    return 0 2>/dev/null || exit 0
+fi
 
 # ── Platform detection ───────────────────────────────────────────────────────
 
