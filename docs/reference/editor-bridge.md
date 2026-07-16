@@ -214,7 +214,20 @@ view.route_changes_to_host_params(true);   // OFF by default
 
 With routing on, a user gesture on a key-tagged control drives the surface directly
 (`begin_gesture` / `set_param` / `end_gesture`), and `sync_from_host_params()` pulls
-current values and display text back at tick.
+current values and display text back the other way.
+
+Both directions are wired for you in a plugin editor. `ViewBridge::open()` installs
+a `StateStore`-backed surface on the tree, and the editor idle pump calls
+`ViewBridge::sync_design_frames_from_host()` on every UI tick, so an imported
+design's controls **follow host automation and host-side edits** with no per-plugin
+wiring. (A `bind_parameter` widget gets this from a store listener that
+`pump_listeners()` drains; a `DesignFrameView` binds through the abstract surface
+and registers no listener, so it is pulled instead.)
+
+The pull is **silent** — it writes the element directly and does not re-emit
+`on_element_changed` — so it cannot echo back into the surface or fight automation.
+Embedding Pulp views in your own host? Call `sync_from_host_params()` from your own
+UI tick to get the same behavior.
 
 > ### ⚠️ Pick exactly ONE path — wiring both double-writes
 >

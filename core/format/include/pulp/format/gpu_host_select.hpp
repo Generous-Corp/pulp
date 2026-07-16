@@ -118,6 +118,12 @@ inline std::function<void()> make_scripted_idle_pump(ViewBridge& bridge) {
         // adapter writes the store from the audio thread, this propagates it
         // to the editor. Cheap when the queue is empty.
         bridge_ptr->store().pump_listeners();
+        // The sibling channel, for imported designs. A DesignFrameView resolves
+        // its param_keys against the abstract HostParamSurface and registers no
+        // store listener, so pump_listeners() above cannot reach it: it must be
+        // pulled. Without this an imported design routes gestures TO the host
+        // but never follows it back — a knob sits still under automation.
+        bridge_ptr->sync_design_frames_from_host();
         // Live editor reload (1.9): when the processor's logic hot-swaps
         // (ReloadableShell), rebuild the OPEN editor in place and request a
         // repaint, so the DAW shows the new UI live without re-instantiating the
