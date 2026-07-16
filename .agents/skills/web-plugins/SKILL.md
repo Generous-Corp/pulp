@@ -559,6 +559,40 @@ Every full-canvas editor MUST handle these, all learned the hard way on SuperCon
   truncate, so flipping state never bumps the page; debounce fast-toggling values (~0.8s
   hysteresis) so a single dropped poll doesn't strobe the text.
 
+### Verifying the GPU-AUDIO path on macOS: use REAL Safari, not Playwright WebKit
+
+This one wastes hours if you don't know it. To verify a WebGPU-audio demo (the GPU
+engine actually producing blocks) on macOS:
+
+- **Playwright's bundled "WebKit" has NO WebGPU** — `navigator.gpu` is `undefined`, so it
+  can never exercise the GPU lane. It is NOT real Safari. Do not conclude "Safari can't"
+  from it.
+- **Drive REAL `Safari.app` via `safaridriver`** (W3C WebDriver) — it has WebGPU on the
+  system GPU. One-time: `sudo safaridriver --enable` + Safari → Develop → "Allow Remote
+  Automation". Client: `selenium-webdriver` (`forBrowser("safari")`). Reusable runner:
+  `examples/web-demos/tools/measure-safari-gpu.mjs --url <demo>`.
+- **The GPU-wedge asymmetry:** repeated HEADLESS-Chrome (Dawn) WebGPU runs wedge that
+  context's GPU for the session — it silently produces 0 blocks and stays dark, and even
+  the baseline that worked earlier reads zero (that's the tell it's the environment, not
+  your change). REAL Safari runs in its own process on the system GPU and is NOT wedged by
+  that, so it keeps working when headless Chrome goes dark. (Memory:
+  verify-gpu-ui-via-skia-raster.)
+- **A fast Mac may be too fast to reproduce a slow device's MISS RATE** (0% here vs 37% on
+  a user's phone). So real Safari verifies CORRECTNESS (does the lane produce? does a change
+  keep audio right? does a stat appear?); verify miss-rate LOGIC deterministically in the
+  native stub-GPU harness `test/test_super_convolver_web_gpu.cpp`, whose fake worker can be
+  made to fall behind and drop/expire blocks with no browser and no GPU.
+- **Audio etiquette:** safaridriver opens a real window and the demo plays the synth loop
+  out the speakers — announce before, cap the run, `driver.quit()` after (CLAUDE.md).
+- For Safari/WebGPU specifics (timestamp-query support, small-dispatch quantization, feature
+  gating) search the web or Apple docs via the **`sosumi`** CLI (`sosumi search "WebGPU"`,
+  `sosumi fetch <developer.apple.com URL>`) — Safari's WebGPU lags Dawn's, so never assume a
+  Chrome capability is present. BETTER: query the REAL device via safaridriver
+  (`requestAdapter().features`), because Safari advertises optional features on the ADAPTER but
+  only grants them on a DEVICE created with `requiredFeatures:[...]`. Measured 2026-07-16:
+  Safari's adapter lists `timestamp-query`, but `requestDevice()` without it returns a device
+  WITHOUT it — so a WebGPU-timing path must opt the feature in explicitly or it silently gets 0.
+
 ### Verifying it: a browser pass at three sizes is PART OF THE JOB, not a favor to ask for
 
 Do NOT ship a full-canvas editor and let the user discover overlapping text. Before calling
