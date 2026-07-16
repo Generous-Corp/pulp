@@ -23,7 +23,9 @@
 #   tart-runner-linux.sh --labels self-hosted,Linux,ARM64,pulp-build
 set -euo pipefail
 
-export TART_HOME="${TART_HOME:-/Volumes/Workshop/VMs}"
+# TART_HOME comes from the host, not from this repo — see tools/ci/lib/tart-home.sh.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/tart-home.sh"
+
 SSH_KEY_PRIV="${PULP_VM_SSH_KEY:-$HOME/.ssh/id_ed25519}"
 VM_USER="${PULP_VM_USER:-admin}"
 CACHE_ROOT="${PULP_CI_CACHE:-$HOME/.cache/pulp-ci}"
@@ -37,6 +39,7 @@ SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLeve
 
 note(){ printf '\033[36m• %s\033[0m\n' "$*" >&2; }
 die(){ printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+pulp_require_tart_home
 command -v tart >/dev/null 2>&1 || die "tart not installed"
 command -v gh   >/dev/null 2>&1 || die "gh not installed / authed (need admin to mint JIT config)"
 

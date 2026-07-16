@@ -36,7 +36,11 @@
 #   tart-runner.sh --golden pulp-build-runner:latest --repo danielraffel/pulp
 set -euo pipefail
 
-export TART_HOME="${TART_HOME:-/Volumes/Workshop/VMs}"
+# TART_HOME is resolved from the host (env, else its tartci profile) just before
+# the first `tart` call — see tools/ci/lib/tart-home.sh. Resolving lazily keeps
+# the pure --print-name hook usable on a machine with no VM store at all.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/tart-home.sh"
+
 SSH_KEY_PRIV="${PULP_VM_SSH_KEY:-$HOME/.ssh/id_ed25519}"
 VM_USER="${PULP_VM_USER:-admin}"
 CACHE_ROOT="${PULP_CI_CACHE:-$HOME/.cache/pulp-ci}"
@@ -113,6 +117,7 @@ RUNNER_NAME="$(derive_runner_name)"
 
 if [ "$PRINT_NAME" = 1 ]; then printf '%s\n' "$RUNNER_NAME"; exit 0; fi
 
+pulp_require_tart_home
 command -v tart >/dev/null 2>&1 || die "tart not installed"
 command -v gh   >/dev/null 2>&1 || die "gh not installed / authed (need admin to mint JIT config)"
 
