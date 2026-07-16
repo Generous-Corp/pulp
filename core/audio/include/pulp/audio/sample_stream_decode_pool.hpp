@@ -321,6 +321,14 @@ public:
         return SampleStreamDecodeCancelStatus::Canceled;
     }
 
+    bool remove_idle_source(SampleStreamSourceToken token) noexcept {
+        if (!prepared_) return false;
+        auto* source = find_source(token);
+        if (source == nullptr || source->in_flight) return false;
+        clear_source(*source);
+        return true;
+    }
+
     std::optional<SampleStreamDecodeCompletionView> try_pop_completion(
         std::uint32_t worker_index) noexcept {
         if (!prepared_ || worker_index >= config_.worker_count) return std::nullopt;

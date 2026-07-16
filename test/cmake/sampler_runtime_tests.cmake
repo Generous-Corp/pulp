@@ -48,6 +48,9 @@ pulp_add_test_suite(pulp-test-sampler-stream-parity
 pulp_add_test_suite(pulp-test-sample-stream-service
     SOURCES test_sample_stream_service.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-stream-async-service
+    SOURCES test_sample_stream_async_service.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-stream-decode-pool
     SOURCES test_sample_stream_decode_pool.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
