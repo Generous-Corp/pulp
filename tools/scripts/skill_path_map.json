@@ -390,6 +390,7 @@
         "tools/ci/tart-*.sh",
         "tools/ci/pulp-worktree.sh",
         "tools/ci/setup-ci-host.sh",
+        "tools/ci/governed-build.sh",
         "tools/ci/examples/vm-image.*",
         "tools/launchd/pulp-tart-runner.plist.template",
         ".shipyard/vm-image.toml",
