@@ -227,6 +227,83 @@ the authoring model; reach for the graph only when routing is dynamic at run tim
 Full guidance and reserved terminology: `docs/reference/processing-models.md`.
 Run `python3 tools/scripts/processing_model_terms_lint.py` to check terminology.
 
+### Measuring DSP — read the harness BEFORE you write the DSP
+
+Pulp has **two mature measurement lanes**. Load the [`audio-harness`](.agents/skills/audio-harness/SKILL.md)
+skill at the **start** of any DSP or audio-pipeline work — when you are choosing
+acceptance gates, not only when something already sounds wrong. Most of what a
+DSP task needs is already written; hand-rolling it is the default failure mode.
+
+| Lane | What | Use for |
+|------|------|---------|
+| **C++** — `tools/audio/analysis/` (lib `pulp-audio-analysis`, linked by the shipped CLI) + `test/support/` (scenario/stimulus/contract wiring) | Seeded generators, metrics, assertions (incl. `assert_null_near`), `RenderScenario` over `HeadlessHost` (offline render, SR×block matrix), contracts, Audio Doctor (frequency response, THD/THD+N), FFT + windowing | **Required per-PR ctest gates.** Fast, no venv, already CI-wired. |
+| **Python** — `tools/audio/quality-lab/` (`pulp tool install audio-quality-lab`) | Null residual **with alignment** (`estimate_global_lag`/`local_align`), LTAS log-spectral distance (**phase-blind**), spectral flux/centroid, HNR, Theil-Sen slope, Kaiser-sinc resampling, license-guarded corpus + provenance, `regression_net` ratchet | **Advisory/offline**: deep investigation, A/B packs, model fitting, perceptual artifacts. **Not in CI** — it cannot hold a required gate as-is. |
+
+**The closed A/B loop — use it instead of asking a human to listen.** Pulp can
+host a reference plugin offline, render it, render your candidate under identical
+stimulus, and diff them per-detector with timestamps — agent-driven, no DAW, no
+device, nobody listening. Every piece already exists:
+
+```bash
+# Reference and candidate, identical stimulus, offline (no DAW, no audio device)
+pulp audio render --plugin Reference.vst3 --out /tmp/ref.wav  --duration-ms 2000 ...
+pulp audio render --plugin Candidate.clap --out /tmp/cand.wav --duration-ms 2000 ...
+# Per-detector, timestamped verdicts (transient smear, dulling, metallic HF, graininess)
+pulp tool run audio-quality-lab -- compare /tmp/ref.wav /tmp/cand.wav
+```
+
+`core/host/plugin_slot.hpp` (`PluginSlot`: load → prepare → process, VST3/AU/CLAP/LV2)
+and `offline_signal_graph_host.hpp` are the hosting spine; `regression_net.py`
+already shells to `pulp audio render --plugin` to ratchet it. See the
+[`hosting`](.agents/skills/hosting/SKILL.md) skill. **Caveat:** `pulp audio render`
+is bundle-only — an in-tree `Processor` must be rendered test-side via
+`RenderScenario` and written to WAV first.
+
+**What you point it at is a licensing decision, not a technical one.** Safe:
+Pulp's own renders (old vs new), plugins we own, permissively licensed plugins
+(record `license_id` via the lab's `corpus.py`), and hardware captures — measured
+hardware behavior is *fact*, not copyrightable expression. Risky, and requires a
+deliberate call: hosting a **commercial competitor's** plugin and iterating a
+model until it matches — plugin EULAs commonly forbid reverse
+engineering/benchmarking (hardware carries no such clause), and an automated
+"iterate until it matches product X" loop drifts from measuring a fact toward
+producing a derivative. Hold the repo's clean-room line.
+
+Non-obvious things that cost real time when you don't know them:
+
+- **`OversamplerT`'s default `Kind` is `fir_biquad` — only ~7 dB worst-case alias
+  rejection.** Any anti-aliasing measurement that doesn't explicitly pin
+  `Kind::linear_phase_fir` (96 dB standard / 140 dB pristine) or `polyphase_iir`
+  is measuring the filter, not your DSP.
+- **Deep-dynamic-range measurement is a window problem, and no ordinary window
+  solves it.** The analysis `Window` enum exposes only `{rectangular, hann}`, and
+  Hann's −31.5 dB first side lobe cannot resolve a −100 dB component beside a 0 dB
+  fundamental. Widening it from `core/signal/windowing.hpp` does **not** fix that
+  by itself: blackman is ~−58 dB and **flat_top is only ~−93 dB** (flat_top buys
+  amplitude accuracy, *not* dynamic range) — neither can gate −100 dBc at any FFT
+  length. Only a high-β Kaiser (β≈14, ~−126 dB) could. **Prefer least-squares tone
+  projection**, which sidesteps leakage entirely: prior art is `tone_residual_db()`
+  in `test/test_oversampling_quality.cpp`, which already asserts `< -100 dB` in a
+  passing test.
+- **State every analyzer's detection floor, and keep gate thresholds above it.**
+  A gate that passes because the measurement cannot see the failure is worse than
+  no gate — it fails silently. And **prove the floor, don't derive it**: the usual
+  analytic bound (~2σ from the residual) assumes a *white* residual, which is
+  false exactly when it matters — aliases and distortion products are **discrete
+  tones**, not noise, so the residual is sparse lines. Prove a floor with a
+  **negative control**: run the identical measurement on a signal with the defect
+  *removed* and show the reading collapses. A test that only asserts the computed
+  floor is the analyzer grading its own homework.
+- **`pulp audio render` is bundle-only** (`--plugin` via `PluginSlot`). An in-tree
+  `Processor` is unreachable from the CLI/MCP/`regression_net` — test-side
+  `RenderScenario` is the only path unless you render to WAV first.
+- **`estimate_frequency()` is a zero-crossing detector** and its own doc disclaims
+  harmonically dense material. It is not a pitch tracker; a saw will defeat it.
+- **`test_golden_audio.cpp` is not a golden corpus** — it holds computed-expectation
+  tests. There are no stored reference renders and no audio ratchet in CI.
+- **DSP perf is tracked, not gated** (`tools/scripts/bench_diff.py` + committed
+  `planning/bench/*.json`). Perf assertions flake on shared runners.
+
 ### Thread Model
 
 - **Audio thread**: reads params via `std::atomic<float>` (relaxed), processes buffers, pushes meter data via `TripleBuffer`
