@@ -17,16 +17,21 @@ Current branch evidence, without implying completion of later gates:
   and deterministic missing-page recovery.
 - S1 partial: WAV and uncompressed AIFF/AIFF-C `NONE` retain mapped ranged
   readers. Codec capability is explicit, ranged reads are bounded, and preload
-  admission uses the checked latency/rate/guard formula. Active-I/O teardown
-  remains to be proved.
+  admission uses the checked latency/rate/guard formula. Synchronized release
+  and destruction tests prove that entered reader work is joined before its
+  captured owner is destroyed; arbitrary reader I/O still requires its own
+  stoppable contract to make teardown promptly interruptible.
 - S2 partial: requester-aware scheduling, checked page-memory admission, shared
   page coalescing, explicit pressure, and generation-gated FIFO retirement/reuse
   are implemented in a deterministic caller-driven service. A bounded ordered
   RT command port carries demand and generation-qualified cancellation, and an
   immutable asset owner publishes trivial audio views under a checked preload
-  contract. The bounded worker/completion plane, active-page interest, dynamic
-  source retirement, streamed voice reader, and example integration remain
-  open.
+  contract and service-issued source-registration proof. Source collection is
+  audio-watermark gated. An allocation-free linear forward voice reader plans
+  coalesced page demand, crosses preload/page boundaries, and advances the
+  current source timeline through explicit starvation. The bounded
+  worker/completion plane, active-page interest, loop/reverse voice policy, and
+  example integration remain open.
 - The existing Release audio harness baseline and all 375 Audio Quality Lab
   self-tests pass. Quality Lab remains supplementary to exact transport,
   telemetry, lifetime, and allocation gates.

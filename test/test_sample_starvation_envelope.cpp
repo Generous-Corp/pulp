@@ -9,7 +9,7 @@ using Catch::Matchers::WithinAbs;
 using pulp::audio::SampleStarvationEnvelope;
 using pulp::audio::SampleStarvationMode;
 
-TEST_CASE("Sample starvation envelope fades valid audio out and current audio back in",
+TEST_CASE("Sample starvation envelope fades valid gains to silence and back",
           "[audio][sampler][starvation]") {
     SampleStarvationEnvelope envelope;
     REQUIRE(envelope.prepare({.fade_out_frames = 5, .recovery_frames = 5}));
@@ -58,6 +58,36 @@ TEST_CASE("Sample starvation envelope counts unexpected misses and interrupted r
 
     envelope.begin_predicted_fade(4);
     REQUIRE(envelope.mode() == SampleStarvationMode::Silent);
+}
+
+TEST_CASE("Sample starvation envelope cancels an averted prediction without muting",
+          "[audio][sampler][starvation][recovery]") {
+    SampleStarvationEnvelope envelope;
+    REQUIRE_FALSE(envelope.prepare({.fade_out_frames = 1, .recovery_frames = 8}));
+    REQUIRE(envelope.prepare({.fade_out_frames = 8, .recovery_frames = 8}));
+
+    envelope.begin_predicted_fade(8);
+    const float first = envelope.next_valid_gain();
+    const float second = envelope.next_valid_gain();
+    REQUIRE(first == 1.0f);
+    REQUIRE(second < first);
+    REQUIRE(second > 0.0f);
+    envelope.cancel_predicted_fade();
+    REQUIRE(envelope.mode() == SampleStarvationMode::Recovering);
+    REQUIRE_THAT(envelope.next_valid_gain(), WithinAbs(second, 1.0e-6f));
+    float recovered = 0.0f;
+    for (int frame = 1; frame < 8; ++frame)
+        recovered = envelope.next_valid_gain();
+    REQUIRE_THAT(recovered, WithinAbs(1.0f, 1.0e-6f));
+    REQUIRE(envelope.mode() == SampleStarvationMode::Ready);
+    REQUIRE(envelope.stats().emergency_events == 0);
+    REQUIRE(envelope.stats().recovery_events == 1);
+
+    envelope.begin_predicted_fade(1);
+    REQUIRE(envelope.mode() == SampleStarvationMode::Ready);
+    REQUIRE(envelope.stats().insufficient_lead_events == 1);
+    envelope.mark_starved(1);
+    REQUIRE(envelope.stats().emergency_events == 1);
 }
 
 TEST_CASE("Prepared sample starvation envelope hot operations do not allocate",
