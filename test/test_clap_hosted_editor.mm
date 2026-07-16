@@ -587,17 +587,22 @@ TEST_CASE("CLAP gui closed(was_destroyed=false) leaves an embedded editor alone"
 TEST_CASE("CLAP slot destroyed with an open editor still tears the gui down", "[clap][editor]") {
     FakeClapPlugin fake;
     ParentView parent;
+    PluginSlot::HostedEditor* orphaned = nullptr;
     {
         auto slot = make_slot(fake);
         REQUIRE(slot != nullptr);
         auto ed = slot->create_hosted_editor(parent.handle());
         REQUIRE(ed != nullptr);
         REQUIRE(parent.subview_count() == 1);
-        // Deliberately leak the HostedEditor: this is the caller violating the
-        // lifetime contract. The slot must still not leave the plugin's view
-        // parented into a container it is about to free.
-        (void) ed.release();
+        // Drop the slot WITHOUT calling destroy_hosted_editor() — the caller
+        // violating the lifetime contract. The slot must still not leave the
+        // plugin's view parented into a container it is about to free.
+        orphaned = ed.release();
     }
     REQUIRE(fake.logged("destroy"));
     REQUIRE(parent.subview_count() == 0);
+
+    // The slot owned the gui and the container and released both; only the
+    // caller's struct is left over, which the caller owns.
+    delete orphaned;
 }
