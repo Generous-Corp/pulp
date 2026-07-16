@@ -112,10 +112,8 @@ public:
             });
         if (existing != pending_.end()) {
             const auto stable_sequence = existing->sequence;
-            if (more_urgent(request, *existing)) {
-                *existing = request;
-                existing->sequence = stable_sequence;
-            }
+            *existing = request;
+            existing->sequence = stable_sequence;
             ++stats_.refreshed;
             return SampleStreamScheduleStatus::Refreshed;
         }
@@ -132,6 +130,7 @@ public:
             pending_.erase(least);
             ++stats_.displaced_less_urgent;
         }
+        if (next_sequence_ == 0) renumber_sequences();
         request.sequence = next_sequence_++;
         pending_.push_back(request);
         ++stats_.inserted;
@@ -148,18 +147,29 @@ public:
         return drained;
     }
 
-    std::optional<SampleStreamPageRequest> pop_most_urgent() noexcept {
+    std::optional<SampleStreamPageRequest> most_urgent() const noexcept {
         if (pending_.empty()) return std::nullopt;
         auto best = pending_.begin();
         for (auto candidate = std::next(best); candidate != pending_.end(); ++candidate) {
             if (more_urgent(*candidate, *best)) best = candidate;
         }
-        auto request = *best;
+        return *best;
+    }
+
+    std::size_t complete_page(const SampleStreamPageRequest& request) noexcept {
         const auto old_size = pending_.size();
         std::erase_if(pending_, [&request](const SampleStreamPageRequest& candidate) noexcept {
             return same_page(candidate, request);
         });
-        stats_.coalesced += old_size - pending_.size() - 1;
+        const auto removed = old_size - pending_.size();
+        if (removed > 1) stats_.coalesced += removed - 1;
+        return removed;
+    }
+
+    std::optional<SampleStreamPageRequest> pop_most_urgent() noexcept {
+        auto request = most_urgent();
+        if (!request) return std::nullopt;
+        complete_page(*request);
         return request;
     }
 
@@ -231,6 +241,16 @@ private:
         if (left.demand_class != right.demand_class)
             return left.demand_class < right.demand_class;
         return left.sequence < right.sequence;
+    }
+
+    void renumber_sequences() noexcept {
+        std::sort(pending_.begin(), pending_.end(),
+            [](const auto& left, const auto& right) noexcept {
+                return left.sequence < right.sequence;
+            });
+        std::uint64_t sequence = 1;
+        for (auto& request : pending_) request.sequence = sequence++;
+        next_sequence_ = sequence;
     }
 
     std::vector<SampleStreamPageRequest> pending_;
