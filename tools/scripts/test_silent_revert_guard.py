@@ -34,6 +34,11 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 # walks --first-parent and not --merges.
 LANDING = "0bb759ecc4d96656f068e4458e5ed059a3eaccec"
 REVERTER = "f37d4c09c2327ff14779f9bb92587fb083dfe442"
+# The reverter's ORIGINATING BRANCH, still on the remote. Its merge-base with the
+# landing IS the landing, so the reverting bytes were already in the branch before
+# it was pushed — which is what makes this guard's placement (pre-push) the right
+# one, and is provable rather than assumed.
+REVERTER_BRANCH = "48007987ee2f5a1ece95adb3173e3f55033c7149"
 
 _failures: list[str] = []
 _passes = 0
@@ -56,6 +61,17 @@ def _have_history() -> bool:
             cwd=REPO_ROOT,
             capture_output=True,
             check=True,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _have_reverter_branch() -> bool:
+    try:
+        subprocess.run(
+            ["git", "cat-file", "-e", f"{REVERTER_BRANCH}^{{commit}}"],
+            cwd=REPO_ROOT, capture_output=True, check=True,
         )
         return True
     except Exception:
@@ -247,6 +263,42 @@ def test_real_6082_replay() -> None:
         cwd=REPO_ROOT, capture_output=True, text=True,
     ).stdout.split()
     check("a --first-parent walk does see it", LANDING in first_parent)
+
+
+def test_real_branch_would_have_been_blocked_at_push() -> None:
+    """The claim that matters: this guard, on that branch, at that moment.
+
+    Replays the ORIGINATING BRANCH exactly as it stood against main's tip when it
+    was pushed. Anything less leaves the useful question unanswered — a guard that
+    only recognizes the shape after it has landed on main is a post-mortem, not a
+    gate. The branch's merge-base with the landing is the landing itself, so the
+    reverting bytes were in the branch pre-push and a pre-push check can see them.
+
+    Skips if the branch has since been deleted from the remote; the assertion is
+    about a real ref, so a fabricated stand-in would prove nothing.
+    """
+    print("\n[real] the originating branch would have been blocked at push time")
+    if not _have_reverter_branch():
+        print("  SKIP  the originating branch is no longer fetchable")
+        return
+    when = subprocess.run(
+        ["git", "log", "-1", "--format=%cI", REVERTER_BRANCH],
+        cwd=REPO_ROOT, capture_output=True, text=True,
+    ).stdout.strip()
+    at = datetime.fromisoformat(when)
+
+    # The branch's base was main's tip at the time — which was the landing.
+    mb = subprocess.run(
+        ["git", "merge-base", REVERTER_BRANCH, LANDING],
+        cwd=REPO_ROOT, capture_output=True, text=True,
+    ).stdout.strip()
+    check("the branch was up to date with the landing", mb == LANDING, mb)
+
+    v = G.check_push(REPO_ROOT, base_ref=LANDING, head_ref=REVERTER_BRANCH,
+                     since_hours=72.0, now=at)
+    check("BLOCKED at push time", v.blocked is True, f"reason={v.reason}")
+    check("names the landing it would have erased", v.merge_id == LANDING)
+    check("names all 5 paths", len(v.reverted_paths) == 5, f"got {v.reverted_paths}")
 
 
 def test_real_6082_end_to_end() -> None:
@@ -452,6 +504,7 @@ def main() -> int:
     test_recent_landings_path_filter()
     test_real_6082_replay()
     test_real_6082_end_to_end()
+    test_real_branch_would_have_been_blocked_at_push()
     test_e2e_blocks_silent_revert()
     test_e2e_hint_mode_never_fails()
     test_e2e_behind_base_is_clean()
