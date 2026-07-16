@@ -489,8 +489,12 @@ git_partial_clone_filter() {
 # "unable to read sha1 file", leaves that path deleted in the worktree, and
 # still reports success. The exit code therefore proves nothing — a checkout
 # has to be verified against the worktree afterwards.
+#
+# Submodules are excluded: they are still at the previous ref's commits until
+# the `submodule update` below runs, so a re-pin legitimately leaves them
+# reported as modified. Only the repo's own blobs are in question here.
 git_worktree_is_complete() {
-    [ -z "$(git -C "$1" status --porcelain 2>/dev/null)" ]
+    [ -z "$(git -C "$1" status --porcelain --ignore-submodules=all 2>/dev/null)" ]
 }
 
 ensure_shared_git_source() {

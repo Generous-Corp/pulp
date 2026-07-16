@@ -164,6 +164,46 @@ echo "== git_worktree_is_complete"
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 
+echo "== git_worktree_is_complete: submodules pending update are not incompleteness"
+(
+    load_setup_lib
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+
+    git init -q "$tmp/sub"
+    git -C "$tmp/sub" config user.email t@t.t
+    git -C "$tmp/sub" config user.name t
+    printf 'one\n' > "$tmp/sub/s.txt"
+    git -C "$tmp/sub" add s.txt; git -C "$tmp/sub" commit -qm s1
+    printf 'two\n' > "$tmp/sub/s.txt"
+    git -C "$tmp/sub" add s.txt; git -C "$tmp/sub" commit -qm s2
+    sub2="$(git -C "$tmp/sub" rev-parse HEAD)"
+    sub1="$(git -C "$tmp/sub" rev-parse HEAD~1)"
+
+    # A parent whose submodule pointer MOVES between the two tags — the shape
+    # of the VST3 SDK, which carries five sub-submodules across a re-pin.
+    git init -q "$tmp/par"
+    git -C "$tmp/par" config user.email t@t.t
+    git -C "$tmp/par" config user.name t
+    git -C "$tmp/par" -c protocol.file.allow=always submodule add -q "$tmp/sub" sub 2>/dev/null
+    git -C "$tmp/par/sub" checkout -q "$sub1"
+    git -C "$tmp/par" add .; git -C "$tmp/par" commit -qm v1; git -C "$tmp/par" tag v1
+    git -C "$tmp/par/sub" checkout -q "$sub2"
+    git -C "$tmp/par" add .; git -C "$tmp/par" commit -qm v2; git -C "$tmp/par" tag v2
+
+    # Re-pin v1 -> v2 with the submodule not yet updated: `submodule update`
+    # runs after the checkout, so this state is normal, not damage.
+    git -C "$tmp/par" checkout -q --detach v1
+    git -C "$tmp/par" -c protocol.file.allow=always submodule update -q 2>/dev/null
+    git -C "$tmp/par" checkout -q --detach v2
+
+    check "$(git -C "$tmp/par" status --porcelain | wc -l | tr -d ' ')" "1" \
+        "a pending submodule does show as modified (test precondition)"
+    git_worktree_is_complete "$tmp/par" && r=yes || r=no
+    check "$r" "yes" "a pending submodule is not mistaken for a missing blob"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
 echo
 if [ "$FAIL" -gt 0 ]; then
     echo "FAILED ($FAIL failing group(s))"
