@@ -4278,3 +4278,15 @@ in parallel (`-j`, capped like `build.yml`) with a per-test `--timeout` in
 flowing, the `coverage-staleness-check` watchdog is the alarm — not a red PR. Editing
 `coverage.yml` requires a `docs/guides/versioning.md` touch (config-doc map) and updating this
 skill (skill-sync map).
+
+## Coverage watchdogs require PROOF OF UPLOAD, not just a green run
+
+Both coverage watchdogs historically keyed off "a `conclusion==success` coverage.yml
+run on main." That proxy is blinded once a budget/timeout hit is made non-fatal: the run
+concludes `success` but its C++ Cobertura upload was skipped, so coverage silently stops
+while CI stays green (the 2-week silent-degradation class these watchdogs exist to catch).
+`coverage-upload-watchdog.yml` now requires a `coverage-cobertura-*` **artifact** on the
+run before counting it as fresh coverage (checked via the actions API — `actions: read`,
+no Codecov token). So a persistently over-budget leg raises the stalled-uploads issue
+within the window instead of hiding. If you ever make a coverage leg non-fatal, make sure
+its silent-drop is still detectable by artifact presence — do not trust run conclusion alone.
