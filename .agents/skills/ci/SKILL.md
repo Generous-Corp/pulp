@@ -99,6 +99,39 @@ touching `examples/**`. Proven by the `cmake-examples-reorder-init-guard` ctest.
 If you add a NEW example struct pattern that a compiler tolerates but the release
 compiler rejects, extend that guard rather than discovering it at release time.
 
+## A test that "fails" on the required gate may only have run out of clock
+
+Before debugging what a failing gate test *does*, check whether it failed on
+**elapsed time** rather than behavior. A subprocess-spawning test that reddens
+`macos` on PRs that cannot possibly have caused it — a docs-only or CI-only PR —
+is the tell. `pulp ship sign discovers desktop bundles via env and config
+identities` read as a signing/keychain break for exactly this reason; it was a
+10s cap on a case that spawns `codesign` three times, runs ~2s unloaded, and
+loses its margin under a `-j8` run over 13k tests. The symptom is a bare
+`REQUIRE_FALSE(x.timed_out)` → `!true`, which names neither the subprocess nor
+the duration — so it reads like a logic failure.
+
+The layering rule that prevents this class:
+
+- **`ctest --timeout` is the binding guard.** `build.yml` runs
+  `ctest … --repeat until-pass:2 -j8 --timeout 120`: a per-test hang guard plus
+  one automatic retry. An in-test subprocess cap must stay comfortably **looser**
+  than it, so a slow machine fails at the outer layer — which reports the test
+  name and elapsed time — instead of at the inner one, which reports neither. An
+  inner cap tighter than the outer guard is strictly harmful: it fires first and
+  diagnoses worse.
+- **These caps are hang guards, not performance budgets**, so the costs are
+  asymmetric. Too generous only delays a genuinely wedged child (already bounded
+  at 120s). Too tight buys recurring false reds on unrelated PRs. Err generous.
+- **Don't make them adaptive.** Self-calibrating or load-scaled timeouts make
+  failures unreproducible and stretch to accommodate real perf regressions. A
+  fixed generous default plus an env override is the design.
+
+Root cause of the drift: the CLI shellout suites each hand-roll their own helper
+and hardcode a timeout, so there is no shared default to inherit and a
+codesign-heavy suite could sit at 10s while its siblings used 30-60s. When
+adding a shellout test, reuse the shared helper rather than picking a number.
+
 ## Gate: framework-neutrality (`tools/scripts/framework_neutrality_check.py`)
 
 Hard-fails a PR when Pulp's own source names another UI framework — in a
