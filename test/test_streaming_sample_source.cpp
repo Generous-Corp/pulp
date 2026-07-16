@@ -7,6 +7,8 @@
 
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/buffer.hpp>
+#include <pulp/audio/format_registry.hpp>
+#include <pulp/audio/sample_preload_contract.hpp>
 #include <pulp/audio/streaming_sample_source.hpp>
 #include <pulp/audio/streaming_sample_source_file.hpp>
 
@@ -24,6 +26,68 @@ using pulp::audio::Buffer;
 using pulp::audio::BufferView;
 using pulp::audio::StreamingSampleSource;
 using pulp::audio::StreamingSampleSourceConfig;
+
+TEST_CASE("Sampler preload contract includes service, pitch, block, and read guards",
+          "[audio][streaming][preload]") {
+    const auto result = pulp::audio::evaluate_sample_preload_contract({
+        .source_sample_rate = 48000.0,
+        .host_sample_rate = 48000.0,
+        .maximum_playback_ratio = 4.0,
+        .certified_io_latency_seconds = 0.010,
+        .scheduler_margin_seconds = 0.002,
+        .decoder_latency_seconds = 0.003,
+        .maximum_host_block_frames = 512,
+        .interpolation_guard_frames = 32,
+        .loop_prefetch_guard_frames = 128,
+        .configured_preload_frames = 5088,
+    });
+
+    REQUIRE(result.valid());
+    REQUIRE(result.latency_guard_frames == 2880);
+    REQUIRE(result.block_guard_frames == 2048);
+    REQUIRE(result.required_preload_frames == 5088);
+    REQUIRE(result.sufficient);
+}
+
+TEST_CASE("Sampler preload contract rounds source-rate block demand upward",
+          "[audio][streaming][preload]") {
+    const auto result = pulp::audio::evaluate_sample_preload_contract({
+        .source_sample_rate = 44100.0,
+        .host_sample_rate = 48000.0,
+        .maximum_playback_ratio = 2.0,
+        .maximum_host_block_frames = 128,
+        .configured_preload_frames = 235,
+    });
+
+    REQUIRE(result.valid());
+    REQUIRE(result.block_guard_frames == 236);
+    REQUIRE(result.required_preload_frames == 236);
+    REQUIRE_FALSE(result.sufficient);
+}
+
+TEST_CASE("Sampler preload contract rejects invalid and overflowing inputs",
+          "[audio][streaming][preload]") {
+    using Status = pulp::audio::SamplePreloadContractStatus;
+
+    auto invalid_rate = pulp::audio::evaluate_sample_preload_contract({});
+    REQUIRE(invalid_rate.status == Status::InvalidSourceSampleRate);
+
+    auto invalid_latency = pulp::audio::evaluate_sample_preload_contract({
+        .source_sample_rate = 48000.0,
+        .host_sample_rate = 48000.0,
+        .certified_io_latency_seconds = -0.001,
+    });
+    REQUIRE(invalid_latency.status == Status::InvalidLatency);
+
+    auto overflow = pulp::audio::evaluate_sample_preload_contract({
+        .source_sample_rate = 48000.0,
+        .host_sample_rate = 48000.0,
+        .maximum_playback_ratio = 1.0,
+        .maximum_host_block_frames = 1,
+        .interpolation_guard_frames = std::numeric_limits<std::uint64_t>::max(),
+    });
+    REQUIRE(overflow.status == Status::Overflow);
+}
 
 namespace {
 
@@ -243,12 +307,13 @@ TEST_CASE("make_memory_mapped_frame_reader fails gracefully on a bad path",
           "[audio][streaming][issue-streaming]") {
     auto fr = pulp::audio::make_memory_mapped_frame_reader("/no/such/file.wav");
     REQUIRE_FALSE(fr.valid);
+    REQUIRE_FALSE(fr.supports_ranged_read);
 }
 
 TEST_CASE("StreamingSampleSource streams a real WAV file from disk",
           "[audio][streaming][issue-streaming]") {
-    // Write a deterministic stereo WAV, then stream it via the memory-mapped
-    // FrameReader. This exercises the true zero-copy disk-streaming path.
+    // Write a deterministic stereo WAV, then stream it via a retained mapped
+    // ranged reader without materializing the complete decoded file.
     const std::uint32_t channels = 2;
     const std::uint64_t total = 12000;
     const std::string path = temp_wav(".wav");
@@ -267,6 +332,15 @@ TEST_CASE("StreamingSampleSource streams a real WAV file from disk",
     REQUIRE(fr.valid);
     REQUIRE(fr.channels == channels);
     REQUIRE(fr.total_frames == total);
+    REQUIRE(fr.sample_rate == 48000);
+    REQUIRE(fr.supports_ranged_read);
+
+    Buffer<float> ranged(channels, 37);
+    REQUIRE(fr.reader(7891, ranged.view(), 37) == 37);
+    for (std::uint64_t i = 0; i < 37; ++i) {
+        REQUIRE(std::fabs(ranged.channel(0)[i] - expected_sample(7891 + i, 0)) < 2e-4f);
+        REQUIRE(std::fabs(ranged.channel(1)[i] - expected_sample(7891 + i, 1)) < 2e-4f);
+    }
 
     StreamingSampleSourceConfig cfg;
     cfg.channels = fr.channels;
@@ -295,6 +369,28 @@ TEST_CASE("StreamingSampleSource streams a real WAV file from disk",
         pos += want;
     }
     REQUIRE(src.finished());
+    std::remove(path.c_str());
+}
+
+TEST_CASE("File frame reader reports decode-once fallback formats honestly",
+          "[audio][streaming][file-reader]") {
+    const std::string path = temp_wav(".aiff");
+    pulp::audio::AudioFileData data;
+    data.sample_rate = 44100;
+    data.channels = {{0.125f, -0.25f, 0.5f, -0.75f}};
+    REQUIRE(pulp::audio::FormatRegistry::instance().write(path, data));
+
+    auto reader = pulp::audio::make_memory_mapped_frame_reader(path);
+    REQUIRE(reader.valid);
+    REQUIRE_FALSE(reader.supports_ranged_read);
+    REQUIRE(reader.channels == 1);
+    REQUIRE(reader.total_frames == 4);
+
+    Buffer<float> out(1, 2);
+    REQUIRE(reader.reader(1, out.view(), 2) == 2);
+    REQUIRE(std::fabs(out.channel(0)[0] + 0.25f) < 2e-4f);
+    REQUIRE(std::fabs(out.channel(0)[1] - 0.5f) < 2e-4f);
+    REQUIRE(reader.reader(0, out.view(), 20) == 2);
     std::remove(path.c_str());
 }
 
