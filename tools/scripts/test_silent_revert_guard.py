@@ -172,12 +172,27 @@ def test_since_arg_is_absolute() -> None:
     either direction. An absolute ISO cutoff is the only honest form.
     """
     print("\n[window] the --since cutoff is an absolute timestamp, not approxidate")
+
+    def as_instant(arg: str) -> datetime | None:
+        """Parse, or report unparseable as a failure — never raise.
+
+        A non-absolute cutoff is exactly what this test exists to catch, so it
+        must land as a FAIL. Letting fromisoformat raise aborts the whole suite
+        at this point and hides every later test, which is precisely when the
+        remaining coverage matters most.
+        """
+        try:
+            return datetime.fromisoformat(arg)
+        except ValueError:
+            return None
+
     arg = G._since_arg(72.0, now=NOW)
     check("no 'ago' phrasing", "ago" not in arg, arg)
     check("parses back as a real instant",
-          datetime.fromisoformat(arg) == NOW - timedelta(hours=72), arg)
+          as_instant(arg) == NOW - timedelta(hours=72), arg)
+    fractional = G._since_arg(1.5, now=NOW)
     check("a fractional window stays exact",
-          datetime.fromisoformat(G._since_arg(1.5, now=NOW)) == NOW - timedelta(hours=1.5))
+          as_instant(fractional) == NOW - timedelta(hours=1.5), fractional)
 
     if not _have_history():
         print("  SKIP  history not present for the live approxidate comparison")
@@ -216,6 +231,35 @@ def test_recent_landings_path_filter() -> None:
     none = G.recent_landings(REPO_ROOT, REVERTER, since_hours=1.0,
                              paths=["does/not/exist.txt"], now=at + timedelta(minutes=30))
     check("an unrelated scope finds nothing", LANDING not in {m.merge_id for m in none})
+
+
+def test_recent_landings_honors_the_window() -> None:
+    """The git walk itself must honor the cutoff — in both directions.
+
+    The rest of the suite pins `_since_arg`'s output as a string. That is
+    white-box: it cannot fail if the walk stops passing the cutoff to git, and
+    it cannot fail in the direction that actually takes the guard offline. This
+    drives the real walk over the real landing and asserts the boundary moves
+    with `now`, which is the only thing that distinguishes a working window from
+    a filter that silently matches everything (or nothing).
+    """
+    print("\n[window] the git walk excludes a landing older than the cutoff")
+    if not _have_history():
+        print("  SKIP  history not present")
+        return
+    record = G.landing_record(REPO_ROOT, LANDING)
+    paths = sorted(record.touched_paths())
+    at = record.merged_at
+    inside = G.recent_landings(REPO_ROOT, REVERTER, since_hours=72.0,
+                               paths=paths, now=at + timedelta(hours=1))
+    check("inside the window: the landing is found",
+          LANDING in {m.merge_id for m in inside})
+    # Same commit, same paths, same call — only `now` moves past the window.
+    outside = G.recent_landings(REPO_ROOT, REVERTER, since_hours=72.0,
+                                paths=paths, now=at + timedelta(hours=73))
+    check("outside the window: the landing is gone",
+          LANDING not in {m.merge_id for m in outside},
+          f"found={[m.merge_id[:8] for m in outside]}")
 
 
 def test_real_6082_replay() -> None:
@@ -502,6 +546,7 @@ def main() -> int:
     test_predicate_noop_landing()
     test_since_arg_is_absolute()
     test_recent_landings_path_filter()
+    test_recent_landings_honors_the_window()
     test_real_6082_replay()
     test_real_6082_end_to_end()
     test_real_branch_would_have_been_blocked_at_push()
