@@ -25,7 +25,7 @@ pulp import-design --from <source> [options]
 |------|-------------|---------|
 | `--from <source>` | Design source (required) | — |
 | `--file <path>` | Input file path | — |
-| `--url <url>` | Design URL (Figma file URL, v0 share link) | — |
+| `--url <url>` | URL that serves design JSON/HTML directly (e.g. a v0 share link). Fetched unauthenticated — a figma.com file URL does **not** work; see [Importing from Figma](#importing-from-figma) | — |
 | `--frame <name>` | Frame/artboard to import. For `--from fig`, pass a frame guid or name; required unless using `--outline`. | first frame for `figma` |
 | `--page <name>` | Restrict local `.fig` frame lookup to one page | — |
 | `--outline` | List pages/frames of a local `.fig` file and exit | — |
@@ -58,6 +58,23 @@ pulp import-design --from <source> [options]
 | `--report-new-format` | Emit a fingerprint-diff JSON for a new format-version. Implies `--detect-only` | — |
 
 Either `--file` or `--url` is required (or `--directory` for `--detect-only`). When `--url` is provided without `--file`, the URL is fetched through an argv-safe `curl` invocation into a unique temporary file. Literal `--file` paths are read directly and may contain normal filesystem punctuation; `--url` still rejects shell metacharacters before fetching.
+
+`--url` fetches **unauthenticated** and sends no credential of any kind. It is therefore only useful for URLs that serve the design data itself — a v0 share link, or any host that returns design JSON/HTML directly. It is not a Figma import path; see below.
+
+### Importing from Figma
+
+A `figma.com` file URL cannot be imported with `--url`. The CLI has no Figma credential (there is no token flag, and the fetch is a bare unauthenticated `curl`), so a private file returns HTTP 403 and a public one returns the Figma web app's HTML shell rather than design data. The CLI rejects such URLs up front and points at the lanes below. The only authenticated Figma REST client in the repo is `tools/import-design/figma_rest_export.py`.
+
+Use these instead, local-first:
+
+| Lane | Command | When |
+|------|---------|------|
+| Figma desktop MCP | `get_design_context` / `get_metadata` / `get_screenshot` | Inspecting or verifying a design; no rate limit |
+| "Design for Pulp" desktop plugin | `pulp import-design --from figma-plugin --file <export>.pulp.zip` | Exporting a scene for import — see the [Figma plugin guide](../guides/figma-plugin.md) |
+| Local `.fig` file | `pulp import-design --from fig --file design.fig --outline` | Fully offline, from a `.fig` save file |
+| Figma REST (headless/CI) | `tools/import-design/figma_rest_export.py --token <pat>` | Only when neither desktop lane is available; subject to REST rate limits (HTTP 429) |
+
+`--from figma --file design.json` remains valid for IR-format JSON you already have on disk (for example, translated from Figma MCP output).
 
 The shipped default is live runtime import: `--mode live --emit js`. In that
 mode Pulp keeps the generated JS/runtime artifact, which is the right default
