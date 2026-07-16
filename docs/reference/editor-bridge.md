@@ -323,32 +323,78 @@ dfv.commit_bipolar("pan", -0.5f);         // -1..1  ->  0.25 (0 is center)
 dfv.commit_discrete("lfo_waveform", 2);   // index  ->  2/5, divisor from the host
 ```
 
-Each helper brackets its write in one gesture (begin → change → end) so the host
-groups it as a single undo step, and routes through the same funnel a pointer
-gesture uses. They suit a **discrete** edit — a click, a typed value, a step. A
-continuous drag should bracket **once** around the whole drag, so drive
-`emit_gesture_begin` / `emit_element_changed` / `emit_gesture_end` directly for
-that; otherwise the host sees one undo step per pixel moved.
+Each helper brackets its edit in one gesture (begin → change → end) so it groups as
+a single undo step, and routes through the same funnel a pointer gesture uses. They
+suit a **discrete** edit — a click, a typed value, a step. A continuous drag should
+bracket **once** around the whole drag, so drive `emit_gesture_begin` /
+`emit_element_changed` / `emit_gesture_end` directly for that; otherwise the host
+sees one undo step per pixel moved.
+
+#### Where a commit's write actually goes
+
+A commit is **not** a direct line to the host — it is the same funnel a pointer
+gesture uses, and it has the same precondition. Note the `route_changes_to_host_params(true)`
+line in the snippet above: it is doing work.
+
+| `route_changes_to_host_params` | Where `commit_*` lands |
+|---|---|
+| `true` | `begin_gesture` / `set_param` / `end_gesture` on the surface — the bracket reaches the **host** |
+| `false` (**the default**) | `on_element_changed` / `on_gesture_begin` / `on_gesture_end` only — **your** callback owns the write |
+
+The default is `false` on purpose, and flipping it is not always right: a consumer
+that already has its own store→host funnel (the embed C ABI does) must keep routing
+**off** or every edit is written twice. So pick one funnel:
+
+- **No funnel of your own?** Call `route_changes_to_host_params(true)`. This is the
+  common case for a design-frame editor bound straight to a `StateStore`.
+- **Own funnel?** Leave routing off and wire `on_element_changed`.
+
+Wire **neither** and a commit updates the element locally and reaches nothing —
+a debug build asserts rather than dropping the edit quietly.
+
+One asymmetry worth knowing: the value **count** a commit scales against is read
+from the host surface *regardless* of routing. The divisor is a question, not a
+write, so it is never gated.
+
+The element index handed to `on_element_changed` for a bind-grid **stand-in** is its
+position in `elements_`, assigned per frame activation — it shifts with the active
+frame's real-element count. It is valid at the moment it fires and nothing more.
+Switch on the **key**, or gate on `element_is_bind_grid_stand_in(index)`; never
+persist the index or use it to identify a control.
 
 `commit_discrete` against a parameter with no index domain (continuous, or a key
 nothing resolves) has no divisor, so it **refuses to emit** rather than guess, and
 reports instead.
 
-### Mismatch reporting — never a silent mis-scale
+### Mismatch reporting — no silent mis-scale against a live host
 
 `set_on_param_scale_mismatch()` reports a control whose visible option count
 disagrees with its parameter's value count, de-duplicated per key and replayed to
 a callback attached late. It **adds a signal only** — the view already scales
 against the host either way.
 
-Read the two counts, not the mere arrival of a report:
+The scope is exact, and it is the scope that matters: **whenever a host surface is
+installed, a choice control that scales by anything other than its parameter's own
+count says so.** Every way that can happen reports — a count that disagrees, a
+surface that will not answer, and a key the host does not carry. With **no** surface
+installed (preview, screenshot, `render_to_png`) nothing is reported, because there
+is no parameter to misrepresent: the control's own positions are the only domain
+that exists, and using them is correct rather than a guess.
 
-| `ui_option_count` | `host_step_count` | Means |
-|---|---|---|
-| 3 | 6 | a mis-scaled control — the design draws 3 of 6 reachable values |
-| 3 | 0 | unanswered — the view scaled by what it draws. Either a genuinely continuous parameter, or a surface that cannot answer (see above) |
-| 0 | 6 | an unbound key — a commit to a key no element carries |
-| 0 | 0 | a key nothing knows |
+Read the fields, not the mere arrival of a report:
+
+| `ui_option_count` | `host_step_count` | `host_has_param` | Means |
+|---|---|---|---|
+| 3 | 6 | `true` | a mis-scaled control — the design draws 3 of 6 reachable values |
+| 3 | 0 | **`false`** | **an unresolved key on a live host** — a stale or renamed key. The element is bound to nothing: it never syncs, its edits never route, and it scales by what it draws. **Check the key's spelling.** |
+| 3 | 0 | `true` | unanswered — the view scaled by what it draws. Either a genuinely continuous parameter, or a surface that cannot answer (see above) |
+| 0 | 6 | `true` | an unbound key — a commit to a key no element carries |
+| 0 | 0 | `false` | a key nothing knows |
+
+`host_has_param` is what separates the two `ui=3 / host=0` rows, and they need
+different repairs: fix the key, or override `do_param_step_count()`. `host_step_count`
+always reports what the **host** said — never a count the view fell back to — so the
+field never points you at the host for a number the view invented.
 
 `param_scale_mismatches()` returns the same list without a callback, which suits a
 `--validate` style assertion over a ported control table.

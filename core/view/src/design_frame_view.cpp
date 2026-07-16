@@ -6,12 +6,14 @@
 #include <pulp/view/ui_components.hpp>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -499,7 +501,7 @@ bool DesignFrameView::element_is_discrete(int i) const {
 }
 
 void DesignFrameView::report_scale_mismatch(const std::string& key, int ui_count,
-                                            int host_count) const {
+                                            int host_count, bool host_has_param) const {
     if (key.empty()) return;
     const bool seen = std::any_of(param_scale_mismatches_.begin(),
                                   param_scale_mismatches_.end(),
@@ -507,7 +509,7 @@ void DesignFrameView::report_scale_mismatch(const std::string& key, int ui_count
                                       return m.param_key == key;
                                   });
     if (seen) return;
-    ParamScaleMismatch m{key, ui_count, host_count};
+    ParamScaleMismatch m{key, ui_count, host_count, host_has_param};
     param_scale_mismatches_.push_back(m);
     if (on_param_scale_mismatch_) on_param_scale_mismatch_(m);
 }
@@ -518,12 +520,27 @@ int DesignFrameView::resolve_value_count(int i) const {
 
     const std::string& key = elements_[i].param_key;
     HostParamSurface* hp = host_params();
-    // No surface, or a key this host does not carry: the element is not bound to
-    // a parameter at all (preview / screenshot / a control the host never knew).
-    // Nothing has an opinion to override the control's own positions, and the
-    // rest of this class already treats an unresolved key as "degrade to local
-    // state" (sync_from_host_params skips it), so this stays quiet.
-    if (!hp || key.empty() || !hp->has_param(key)) return ui_count;
+
+    // No surface at all (preview / screenshot / render_to_png), or an element
+    // that names no parameter. There is no host, so there is no parameter whose
+    // range could be misrepresented: the control's own positions are the only
+    // domain that exists, and using them is correct rather than a guess. Quiet.
+    if (!hp || key.empty()) return ui_count;
+
+    if (!hp->has_param(key)) {
+        // A LIVE host that does not carry this key. This is NOT the quiet case
+        // above and must never be folded into it: a host exists, it owns a
+        // parameter set, and this element is not in it. In a ported control
+        // table that is a stale or renamed key — one typo — and its cost is the
+        // reported defect exactly: the element binds to nothing, so it never
+        // syncs, never routes, and scales by the positions it draws (a
+        // 3-position control emitting idx/2 where the real parameter wanted
+        // idx/5). Absorbing that silently is the whole bug. The options remain
+        // the only domain available, so they are still returned — but the view
+        // says so.
+        report_scale_mismatch(key, ui_count, 0, /*host_has_param=*/false);
+        return ui_count;
+    }
 
     const int host_count = hp->param_step_count(key);
     if (host_count <= 0) {
@@ -545,7 +562,7 @@ int DesignFrameView::resolve_value_count(int i) const {
         // rather than absorbed. A genuinely continuous parameter under a coarse
         // choice control will report once; teach the surface to answer, or
         // expect the report.
-        if (ui_count > 1) report_scale_mismatch(key, ui_count, 0);
+        if (ui_count > 1) report_scale_mismatch(key, ui_count, 0, /*host_has_param=*/true);
         return ui_count;
     }
 
@@ -553,7 +570,7 @@ int DesignFrameView::resolve_value_count(int i) const {
     // number of positions than the parameter has values. The host's count wins
     // (it defines the automation range), but the binding is reported.
     if (ui_count > 0 && ui_count != host_count)
-        report_scale_mismatch(key, ui_count, host_count);
+        report_scale_mismatch(key, ui_count, host_count, /*host_has_param=*/true);
 
     return host_count;
 }
@@ -639,12 +656,18 @@ void DesignFrameView::set_on_param_scale_mismatch(
         for (const auto& m : param_scale_mismatches_) on_param_scale_mismatch_(m);
 }
 
+// Whether a live surface carries `key` at all — the field that splits "the host
+// answered 'no index domain'" from "the host has never heard of this key".
+bool DesignFrameView::host_has_param_for(const std::string& key) const {
+    HostParamSurface* hp = host_params();
+    return hp && !key.empty() && hp->has_param(key);
+}
+
 // The host's own cardinality for `key`, or 0 when no surface resolves it.
 // Used to report an unbound key honestly (the host's count, not a placeholder).
 int DesignFrameView::host_step_count_for(const std::string& key) const {
-    HostParamSurface* hp = host_params();
-    if (!hp || key.empty() || !hp->has_param(key)) return 0;
-    return hp->param_step_count(key);
+    if (!host_has_param_for(key)) return 0;
+    return host_params()->param_step_count(key);
 }
 
 void DesignFrameView::commit_value(const std::string& key, float normalized) {
@@ -656,9 +679,21 @@ void DesignFrameView::commit_value(const std::string& key, float normalized) {
         // bogus index — report instead of writing to nothing. ui_option_count 0
         // is what "the UI draws no control for this key" looks like; the host's
         // count is reported as-is so the report names what the key really is.
-        report_scale_mismatch(key, 0, host_step_count_for(key));
+        report_scale_mismatch(key, 0, host_step_count_for(key),
+                              host_has_param_for(key));
         return;
     }
+    // A commit routes through the same funnel a pointer gesture does, and that
+    // funnel must exist. With host routing off AND no on_element_changed wired,
+    // emit_element_changed reaches neither the host nor a consumer: the element
+    // updates locally and the edit is dropped. Both shapes of consumer satisfy
+    // this — one enables route_changes_to_host_params, the other funnels through
+    // on_element_changed — so a failure here is a genuinely unwired view rather
+    // than a supported configuration. Debug-only, matching HostParamSurface's own
+    // call-context assert; a release build keeps the local push either way.
+    assert((route_to_host_params_ || on_element_changed) &&
+           "commit_* has no funnel: enable route_changes_to_host_params(true) or "
+           "wire on_element_changed, or the edit reaches neither host nor consumer");
     const float v = std::clamp(normalized, 0.0f, 1.0f);
     emit_gesture_begin(i);
     set_element_value(i, v);      // silent local push
@@ -674,7 +709,8 @@ void DesignFrameView::commit_bipolar(const std::string& key, float depth) {
 void DesignFrameView::commit_discrete(const std::string& key, int index) {
     const int i = element_for_param_key(key);
     if (i < 0) {
-        report_scale_mismatch(key, 0, host_step_count_for(key));
+        report_scale_mismatch(key, 0, host_step_count_for(key),
+                              host_has_param_for(key));
         return;
     }
     const int count = resolve_value_count(i);
@@ -683,8 +719,14 @@ void DesignFrameView::commit_discrete(const std::string& key, int index) {
         // divisor and any value emitted would be a guess. A bind-grid stand-in
         // draws no options, so this is what a discrete commit against a
         // continuous/unknown parameter looks like.
+        //
+        // host_step_count reports what the HOST said, never `count`: when count
+        // is 1 it came from the control's own option list (the UI fallback), and
+        // putting that in a field documented as "values the host's parameter
+        // exposes" would make the diagnostic misstate its own provenance —
+        // pointing the reader at the host for a number the view invented.
         report_scale_mismatch(key, element_option_count(i),
-                              count <= 0 ? 0 : count);
+                              host_step_count_for(key), host_has_param_for(key));
         return;
     }
     commit_value(key, static_cast<float>(param_index_to_normalized(index, count)));
@@ -712,13 +754,23 @@ void DesignFrameView::apply_bind_grid() {
         return;
     }
     bind_grid_begin_ = static_cast<int>(elements_.size());
+    // The keys already spoken for, gathered once. element_for_param_key is a
+    // linear scan, so asking it per key would be O(keys x elements) — ~35k string
+    // compares for a 188-parameter plug-in, on every frame swap. A stand-in's own
+    // key joins the set as it is created, so a duplicate key in bind_grid_keys_
+    // still produces exactly one stand-in, as the per-key scan did.
+    std::unordered_set<std::string> bound;
+    bound.reserve(elements_.size() + bind_grid_keys_.size());
+    for (const auto& e : elements_)
+        if (!e.param_key.empty()) bound.insert(e.param_key);
+
     for (const std::string& key : bind_grid_keys_) {
         if (key.empty()) continue;
         // A design's own control for this key always wins: it is earlier in
         // elements_, so element_for_param_key finds it first. Skipping keeps the
         // grid to genuine gaps rather than shadowing a real control with a
         // stand-in that can never be reached.
-        if (element_for_param_key(key) >= 0) continue;
+        if (!bound.insert(key).second) continue;
         DesignFrameElement e;
         // A knob with no needle path is skipped by paint() and builds no overlay
         // widget, so a stand-in renders nothing at all.
@@ -892,10 +944,21 @@ void DesignFrameView::set_element_value(int i, float v) {
         case DesignFrameElement::Kind::knob:
         case DesignFrameElement::Kind::fader:
         case DesignFrameElement::Kind::toggle:
-        case DesignFrameElement::Kind::xy_pad:
-            e.value = std::clamp(v, 0.0f, 1.0f);  // xy_pad: sets X; value_y unchanged
-            request_repaint();
-            break;
+        case DesignFrameElement::Kind::xy_pad: {
+            const float clamped = std::clamp(v, 0.0f, 1.0f);
+            // Early-return on no change, matching set_element_text. Not a micro-
+            // optimization: sync_from_host_params pushes EVERY element every tick,
+            // including bind-grid stand-ins, so an unconditional repaint here is
+            // one request_repaint() per parameter per tick. On the window-host path
+            // those coalesce through mark_dirty(); on the plugin-view-host path —
+            // the plugin editor these bindings target — View::request_repaint calls
+            // plugin_view_host_->repaint() directly, with no coalescing, so a
+            // full-size parameter set repaints the editor hundreds of times a tick
+            // while nothing on screen has moved.
+            if (e.value == clamped) return;  // xy_pad: sets X; value_y unchanged
+            e.value = clamped;
+            break;  // the request_repaint() past the switch covers this
+        }
         case DesignFrameElement::Kind::dropdown:
         case DesignFrameElement::Kind::tab_group:
         case DesignFrameElement::Kind::stepper: {

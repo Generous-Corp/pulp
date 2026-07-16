@@ -249,26 +249,43 @@ struct UnregisteredCustomControl {
 // half the parameter's range has no control position), and it is reported rather
 // than silently absorbed. Same never-guess contract the import lane's
 // RecognitionResolver holds for an unmatched component.
-// Read the two counts — the arrival of a report is not by itself the diagnosis:
+// Read the FIELDS — the arrival of a report is not by itself the diagnosis:
 //
-//   ui   host   meaning
-//   ---- -----  ---------------------------------------------------------------
-//    3     6    a MIS-SCALED control: the design draws 3 of 6 reachable values.
-//               The host's 6 is used; half the range has no control position.
-//    3     0    UNANSWERED, and the view had to GUESS by the 3 it draws. Either
-//               the parameter is genuinely continuous (a coarse choice control
-//               over a smooth range — fine, expected) or the surface cannot
-//               answer at all: do_param_step_count defaults to 0, so a surface
-//               that has not wired it reports 0 for every key, including
-//               discrete ones. Those two are indistinguishable from here, which
-//               is why this is reported instead of silently absorbed.
-//    0     6    an UNBOUND key: a commit to a key no element carries.
-//    0     0    a key nothing knows.
+//   ui  host  knows  meaning
+//   --- ----- -----  ---------------------------------------------------------
+//    3    6    yes   a MIS-SCALED control: the design draws 3 of 6 reachable
+//                    values. The host's 6 is used; half the range has no
+//                    control position.
+//    3    0    NO    an UNRESOLVED KEY on a LIVE host: the element names a
+//                    parameter this host does not carry — a stale or renamed
+//                    key in a ported control table. The element is bound to
+//                    NOTHING: it never syncs from the host, its edits never
+//                    route, and it scales by the 3 positions it draws. That
+//                    last part is the reported porting defect verbatim (a
+//                    3-position control emitting idx/2 instead of idx/5), so
+//                    it is never silent. Check the key's spelling first.
+//    3    0    yes   UNANSWERED, and the view had to GUESS by the 3 it draws.
+//                    Either the parameter is genuinely continuous (a coarse
+//                    choice control over a smooth range — fine, expected) or
+//                    the surface cannot answer: do_param_step_count defaults
+//                    to 0, so a surface that has not wired it reports 0 for
+//                    every key, discrete ones included. Those two are
+//                    indistinguishable from here, which is why this is
+//                    reported instead of silently absorbed.
+//    0    6    yes   an UNBOUND key: a commit to a key no element carries.
+//    0    0    no    a key nothing knows.
 struct ParamScaleMismatch {
     std::string param_key;     ///< the bound host-parameter key
     int ui_option_count = 0;   ///< positions the control draws (element_option_count)
     int host_step_count = 0;   ///< values the host's parameter exposes (authoritative);
                                ///< 0 means the surface reported no index domain
+    bool host_has_param = false;  ///< whether a live surface resolved param_key at all.
+                                  ///< Splits the two ways host_step_count can be 0: a
+                                  ///< surface that answered "no index domain" (true)
+                                  ///< from a key the host has never heard of (false).
+                                  ///< Always false when no surface is installed — but
+                                  ///< then nothing is reported, since a preview with no
+                                  ///< host has no parameter to misrepresent.
 };
 
 // Remove the first <rect> in `svg` whose x/y/width/height match (within `tol`)
@@ -544,11 +561,27 @@ public:
     std::function<void(int index, const std::string& key)> on_param_key_changed;
 
     // ── Typed commit helpers (UI → host, gesture-bracketed) ──────────────────
-    // One call per user edit, keyed by host parameter. Each brackets the write in
-    // a gesture (begin → change → end) so the host groups it as ONE undo step,
-    // pushes the value into the bound element, and routes through the same
-    // emit_* funnel a pointer gesture uses — so host-param routing and the public
-    // callbacks stay consistent no matter who drives the control.
+    // One call per user edit, keyed by host parameter. Each brackets the edit in
+    // a gesture (begin → change → end) so it groups as ONE undo step, pushes the
+    // value into the bound element, and routes through the same emit_* funnel a
+    // pointer gesture uses — so a commit and a drag are indistinguishable
+    // downstream, no matter who drives the control.
+    //
+    // WHERE THE EDIT GOES — the same precondition a pointer gesture has, because
+    // it is the same funnel. A commit is NOT a direct line to the host:
+    //   * route_changes_to_host_params(true) — emit_* calls the surface's
+    //     begin_gesture / set_param / end_gesture. This is what makes the gesture
+    //     bracket reach the HOST.
+    //   * otherwise (THE DEFAULT — route_to_host_params_ is false) — emit_* fires
+    //     on_element_changed / on_gesture_begin / on_gesture_end ONLY, and the
+    //     consumer owns the write. This is deliberate and load-bearing: a
+    //     consumer with its own store->host funnel (the embed C ABI does exactly
+    //     this) must keep routing OFF or every edit is written twice.
+    // With NEITHER wired, a commit updates the element locally and the edit
+    // reaches nothing — a debug build asserts rather than dropping it quietly.
+    // Note the asymmetry: the value COUNT a commit scales against is read from
+    // host_params() regardless of routing (see resolve_value_count), because the
+    // divisor is a question, not a write.
     //
     // These exist because the alternative is every consumer hand-writing the
     // bracket + the normalization per control, which is exactly where a port
@@ -557,6 +590,13 @@ public:
     // stand-in (see build_bind_grid) — a commit works either way. A key with no
     // element resolves to nothing and reports a mismatch rather than writing to a
     // wrong index.
+    //
+    // The index handed to on_element_changed / on_gesture_* for a STAND-IN is its
+    // position in elements_, which is assigned per frame activation and therefore
+    // shifts with the active frame's real-element count. It is a valid index into
+    // this view at the moment it fires and nothing more — do not persist it, and
+    // do not switch on it to identify a control. Switch on the KEY (the commit's
+    // own argument), or gate on element_is_bind_grid_stand_in(index).
     //
     // Suited to a discrete edit (a click, a typed value, a step). A continuous
     // drag should bracket ONCE around the whole drag — call emit_gesture_begin /
@@ -748,10 +788,14 @@ private:
     // Record a distinct param-scale mismatch and fire the diagnostic callback.
     // De-duplicates by param_key. Const because it is called from the const
     // normalize path; the accumulator is a diagnostic log, not observable state.
-    void report_scale_mismatch(const std::string& key, int ui_count, int host_count) const;
+    void report_scale_mismatch(const std::string& key, int ui_count, int host_count,
+                               bool host_has_param) const;
 
     // The host's value cardinality for `key`, or 0 when no surface resolves it.
     int host_step_count_for(const std::string& key) const;
+
+    // Whether a live surface carries `key` — ParamScaleMismatch::host_has_param.
+    bool host_has_param_for(const std::string& key) const;
 
     // Map a choice element's selected index to a normalized [0,1] value and back,
     // using resolve_value_count. Single source of truth for choice<->normalized.

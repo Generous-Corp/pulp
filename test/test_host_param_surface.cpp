@@ -22,6 +22,7 @@
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_param_surface.hpp>
+#include <pulp/view/plugin_view_host.hpp>
 
 using namespace pulp;
 using pulp::view::DesignFrameElement;
@@ -924,16 +925,62 @@ TEST_CASE("with no host surface a choice control falls back to its own option co
 
     CHECK(dfv.element_value(0) == Catch::Approx(1.0f));        // index 2 of 3 -> 2/2
     CHECK(dfv.param_scale_mismatches().empty());               // nothing to disagree with
+}
 
-    // An unknown key is the same story: the element is not bound to this host at
-    // all, so the options are still the only domain, and it stays quiet.
+TEST_CASE("a key a LIVE host does not carry is reported, never quietly absorbed",
+          "[view][host-param][design-import][frame]") {
+    // The porting defect in its most likely disguise: one typo. A ported control
+    // table names "lfo_wavefrom"; the host carries "lfo_waveform" with 6 values.
+    //
+    // A live host is NOT the hostless preview case, and folding the two together
+    // is what made the reported bug survive its own fix: with a host installed,
+    // an unresolved key means the element is bound to NOTHING — it never syncs,
+    // its edits never route, and it scales by the 3 positions it draws. Index 2
+    // then emits 2/2 == 1.0, the exact value the fix exists to prevent.
+    //
+    // The options remain the only domain available, so 1.0 is still what comes
+    // out — the contract is that it is never SILENT.
     FakeHostParamSurface params;
-    params.values["gain"] = 0.0;
-    DesignFrameView other = make_three_option_tabs("not_a_param", 2);
-    other.set_bounds({0, 0, 200, 100});
-    other.set_host_params(&params);
-    CHECK(other.element_value(0) == Catch::Approx(1.0f));
-    CHECK(other.param_scale_mismatches().empty());
+    params.values["lfo_waveform"] = 0.0;   // the host's real key...
+    params.steps["lfo_waveform"] = 6;
+    DesignFrameView dfv = make_three_option_tabs("lfo_wavefrom", 2);  // ...and the typo
+    dfv.set_bounds({0, 0, 200, 100});
+    dfv.set_host_params(&params);
+
+    CHECK(dfv.element_value(0) == Catch::Approx(1.0f));  // the guess, unavoidable...
+
+    REQUIRE(dfv.param_scale_mismatches().size() == 1);   // ...but reported
+    const auto& m = dfv.param_scale_mismatches()[0];
+    CHECK(m.param_key == "lfo_wavefrom");
+    CHECK(m.ui_option_count == 3);
+    CHECK(m.host_step_count == 0);
+    // The field that names the diagnosis. false = "this host has never heard of
+    // the key" (check the spelling), which is a different repair from a surface
+    // that answered 0 because it cannot answer at all.
+    CHECK_FALSE(m.host_has_param);
+}
+
+TEST_CASE("an unresolved key on a live host reports distinctly from an unanswered one",
+          "[view][host-param][design-import][frame]") {
+    // Both report ui=3 / host=0 and both scale by the option list, so the counts
+    // alone cannot tell a consumer which repair to make. host_has_param is the
+    // whole difference: fix the key, or wire do_param_step_count.
+    FakeHostParamSurface params;
+    params.values["known_but_silent"] = 0.0;   // resolves; steps deliberately unset
+
+    DesignFrameView answered = make_three_option_tabs("known_but_silent", 2);
+    answered.set_bounds({0, 0, 200, 100});
+    answered.set_host_params(&params);
+    (void)answered.element_value(0);
+    REQUIRE(answered.param_scale_mismatches().size() == 1);
+    CHECK(answered.param_scale_mismatches()[0].host_has_param);      // key is real
+
+    DesignFrameView unresolved = make_three_option_tabs("no_such_key", 2);
+    unresolved.set_bounds({0, 0, 200, 100});
+    unresolved.set_host_params(&params);
+    (void)unresolved.element_value(0);
+    REQUIRE(unresolved.param_scale_mismatches().size() == 1);
+    CHECK_FALSE(unresolved.param_scale_mismatches()[0].host_has_param);  // key is not
 }
 
 TEST_CASE("a discrete control told '0' by its surface guesses, and says so",
@@ -1318,4 +1365,165 @@ TEST_CASE("the bind grid survives a frame swap and re-fits the incoming frame",
     dfv.commit_value("tone", 0.8f);
     CHECK(params.values["mix"] == Catch::Approx(0.3));
     CHECK(params.values["tone"] == Catch::Approx(0.8));
+}
+
+
+TEST_CASE("a real store scales a real view's choice control by the parameter",
+          "[view][host-param][state][design-import][frame]") {
+    // The PRODUCTION seam, joined end to end: a real StateStore, the real
+    // StateStoreHostParamSurface that core/format/src/view_bridge.cpp constructs
+    // and hands to set_host_params, and a real DesignFrameView. Every other test
+    // here proves one half — a view against a hand-populated fake, or the surface
+    // standalone against a store — and the halves passing does not prove the
+    // seam between them carries the count.
+    //
+    // This is the reported bug verbatim: a 3-position control on a 6-value
+    // parameter must emit idx/5, never idx/2, with no per-control override.
+    state::StateStore store;
+    state::ParamInfo waveform;
+    waveform.id = 1;
+    waveform.name = "lfo_waveform";
+    waveform.kind = state::ParamKind::Enum;
+    waveform.range = state::ParamRange::linear(0.0f, 5.0f, 0.0f, 1.0f);
+    waveform.value_labels = {"Sine", "Triangle", "Saw", "Ramp", "Square", "Random"};
+    store.add_parameter(waveform);
+
+    // The resolver view_bridge uses: a design param_key names a registered param.
+    StateStoreHostParamSurface surface(store);
+
+    // The store's count reaches the view's divisor with nothing in between:
+    // every drawn position is idx/5, never idx/2. A fresh view per index so each
+    // selection is the one the design authored, not a round-trip artifact.
+    const double expected[] = {0.0, 0.2, 0.4};
+    for (int idx = 0; idx < 3; ++idx) {
+        DesignFrameView dfv = make_three_option_tabs("lfo_waveform", idx);
+        dfv.set_bounds({0, 0, 200, 100});
+        dfv.set_host_params(&surface);
+        CHECK(dfv.element_value(0) == Catch::Approx(expected[idx]));
+    }
+
+    // The value the option list would have produced, proven distinct: index 2 of
+    // 3 drawn options is 2/2 == 1.0, which selects the parameter's SIXTH value
+    // instead of its third. 0.4 != 1.0 is the entire customer report.
+    DesignFrameView dfv = make_three_option_tabs("lfo_waveform", 2);
+    dfv.set_bounds({0, 0, 200, 100});
+    dfv.set_host_params(&surface);
+    CHECK(dfv.element_value(0) != Catch::Approx(1.0f));
+
+    // And the 3-of-6 binding is reported, since the design draws half the range.
+    REQUIRE(dfv.param_scale_mismatches().size() == 1);
+    const auto& m = dfv.param_scale_mismatches()[0];
+    CHECK(m.param_key == "lfo_waveform");
+    CHECK(m.ui_option_count == 3);
+    CHECK(m.host_step_count == 6);     // straight from the store's value_labels
+    CHECK(m.host_has_param);
+
+    // ...and the value the view emits lands on the parameter the author
+    // declared: index 2 of 6, not index 5. The customer's report, closed.
+    dfv.route_changes_to_host_params(true);
+    dfv.commit_discrete("lfo_waveform", 2);
+    CHECK(surface.get_param("lfo_waveform") == Catch::Approx(0.4));
+    CHECK(store.get_value(1) == Catch::Approx(2.0f));   // the THIRD label ("Saw")
+}
+
+TEST_CASE("a refused discrete commit reports the HOST's count, not the view's",
+          "[view][host-param][design-import][frame]") {
+    // host_step_count is documented as "values the host's parameter exposes". A
+    // refused commit must honor that even when the count it refused on came from
+    // somewhere else: a single-option control resolves count == 1 from its OWN
+    // option list (the UI fallback), and echoing that 1 into host_step_count
+    // would point the reader at the host for a number the view invented — a
+    // diagnostic misstating its own provenance, on the one path a reader consults
+    // BECAUSE something is already wrong.
+    const std::string svg =
+        R"(<svg width="200" height="100"><rect x="0" y="0" width="200" height="100"/></svg>)";
+    DesignFrameElement one;
+    one.kind = DesignFrameElement::Kind::tab_group;
+    one.x = 10; one.y = 10; one.w = 90; one.h = 20;
+    one.options = {"Only"};                 // ONE position: no index domain
+    one.param_key = "mode";
+    DesignFrameView dfv(svg, {one}, 0, 0, 200, 100);
+    dfv.set_bounds({0, 0, 200, 100});
+
+    FakeHostParamSurface params;
+    params.values["mode"] = 0.0;
+    params.steps["mode"] = 0;               // the host says "continuous"
+    dfv.set_host_params(&params);
+    dfv.route_changes_to_host_params(true);
+
+    const int before = params.set_calls;
+    dfv.commit_discrete("mode", 0);
+    CHECK(params.set_calls == before);      // refused: no divisor anywhere
+
+    REQUIRE(dfv.param_scale_mismatches().size() == 1);
+    const auto& m = dfv.param_scale_mismatches()[0];
+    CHECK(m.ui_option_count == 1);          // the view's own count, in the view's field
+    CHECK(m.host_step_count == 0);          // what the HOST actually said — never the 1
+    CHECK(m.host_has_param);                // the key is real; only the domain is absent
+}
+
+namespace {
+
+// Counts repaint() calls. The plugin-editor path is the one that matters here:
+// View::request_repaint calls plugin_view_host_->repaint() DIRECTLY, with none of
+// the mark_dirty() coalescing the window-host path has, so every request is a
+// real editor repaint.
+class CountingPluginViewHost : public pulp::view::PluginViewHost {
+public:
+    int repaints = 0;
+
+    void repaint() override { ++repaints; }
+
+    // Not exercised: this fake exists to observe repaint(), not to host a view.
+    pulp::view::NativeViewHandle native_handle() override { return nullptr; }
+    void attach_to_parent(pulp::view::NativeViewHandle) override {}
+    void detach() override {}
+    void set_size(uint32_t, uint32_t) override {}
+    Size get_size() const override { return {100, 100}; }
+};
+
+} // namespace
+
+TEST_CASE("an unchanged host push does not repaint the editor",
+          "[view][host-param][design-import][frame]") {
+    // sync_from_host_params pushes EVERY element every tick, bind-grid stand-ins
+    // included. set_element_value must therefore early-return on no change, the
+    // way set_element_text already does — otherwise a steady host (the common
+    // case: nothing is being automated) repaints the editor once per parameter
+    // per tick while nothing on screen has moved.
+    DesignFrameView dfv = make_single_knob("gain");
+    dfv.set_bounds({0, 0, 100, 100});
+
+    CountingPluginViewHost host;
+    dfv.set_plugin_view_host(&host);
+
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.5;
+    dfv.set_host_params(&params);
+
+    // Counts are measured as DELTAS around each action: attaching a host and
+    // wiring a surface legitimately repaint on their own, and this test is about
+    // what a per-tick SYNC costs, not about pinning unrelated setup.
+    int before = host.repaints;
+    dfv.sync_from_host_params();                       // first push: 0 -> 0.5
+    CHECK(dfv.element_value(0) == Catch::Approx(0.5f));
+    // Exactly ONE. A changed value is worth a repaint; it is not worth two, and
+    // this path used to ask twice — once inside the switch and once past it.
+    CHECK(host.repaints == before + 1);
+
+    // Steady state: the host keeps reporting 0.5, so nothing changes and nothing
+    // needs painting. Not ONE repaint across eight ticks — this is the assertion
+    // that fails without the equality check in set_element_value.
+    before = host.repaints;
+    for (int tick = 0; tick < 8; ++tick) dfv.sync_from_host_params();
+    CHECK(host.repaints == before);
+    CHECK(dfv.element_value(0) == Catch::Approx(0.5f));  // and the value holds
+
+    // A real change still lands — the early-return is an equality check, not a
+    // freeze.
+    before = host.repaints;
+    params.values["gain"] = 0.75;
+    dfv.sync_from_host_params();
+    CHECK(dfv.element_value(0) == Catch::Approx(0.75f));
+    CHECK(host.repaints == before + 1);
 }
