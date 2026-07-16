@@ -99,9 +99,16 @@ fs::path pulp_binary() {
 
 bool binary_exists() { return fs::exists(pulp_binary()); }
 
+// Guards against a wedged child, not a performance budget. `ship sign` shells
+// out to codesign once per discovered bundle plus the signing-ready preflight,
+// so a full-suite parallel run on a loaded machine can push a single case past
+// a tight cap and fail it for elapsed time rather than behavior. The outer
+// `ctest --timeout` is the binding guard; keep this looser than it so a slow
+// machine surfaces there, with a test name and elapsed time, instead of here as
+// a bare `timed_out`. Matches the 60s the other CLI shellout suites use.
 ProcessResult run_pulp_in(const fs::path& cwd,
                           const std::vector<std::string>& args,
-                          int timeout_ms = 10000) {
+                          int timeout_ms = 60000) {
     auto bin = pulp_binary();
     ProcessOptions opts;
     opts.timeout_ms = timeout_ms;
