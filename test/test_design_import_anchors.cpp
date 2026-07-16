@@ -601,8 +601,18 @@ TEST_CASE("anchor vector divergence annotations agree with the recorded columns"
             // some vectors stack a second axis on top (see $divergence_axes).
             CHECK(v["known_divergence"].toString() == "utf8-vs-utf16");
             CHECK(v["divergence_axes"].size() > 0);
-            // Only the hashing strategies can diverge — path and adapter are
-            // pure string concatenation on both sides.
+            // Among the RECORDED vectors, only the hashing strategy diverges:
+            // path and adapter are pure string concatenation on both sides, so
+            // long as the adapter inputs are present.
+            //
+            // Scope this carefully — "adapter never diverges" would be false.
+            // With an EMPTY source_node_id/adapter, C++ soft-falls back to
+            // content-hash and returns an anchor while TS throws
+            // (anchor_strategy.cpp:204-224 vs anchors.ts:101-109). That is a
+            // deliberate, documented design split, but it means the two lanes
+            // disagree on whether a malformed adapter node is an error at all.
+            // These vectors cover only the adapter happy path; see the
+            // `adapter-missing-id-softfail-vs-throw` axis in the fixture.
             CHECK(v["strategy"].toString() == "content-hash");
         }
     }
