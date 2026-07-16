@@ -139,7 +139,10 @@ auto thd = measure_thd(sc, /*fundamental_hz=*/999.0); // steady bin-coherent sin
 auto gd = measure_group_delay(sc, {100.0, 8000.0});
 if (gd.defined_at(100.0))
     REQUIRE(gd.group_delay_samples_at(100.0) < 8.0); // "≤ 8 samples latency"
-// gd.group_delay_seconds_at(hz), gd.phase_radians_at(hz), gd.magnitude_db_at(hz)
+// gd.group_delay_seconds_at(hz), gd.phase_radians_at(hz)
+// gd.magnitude_db_rel_peak_at(hz) — peak-relative, NOT the absolute out/in
+// ratio that ResponseCurve::magnitude_db_at returns. The two curves use
+// different names for this reason; a +12 dB passband reads +12 there and 0 here.
 ```
 
 Measure audio that did NOT come from a scenario — e.g. rendered through a real
@@ -191,6 +194,17 @@ has decayed within it — a truncated IR is the one real error source, and the
 analyzer will faithfully report the delay of the *truncated* signal. Reported
 `phase_rad` IS unwrapped, and unlike the group delay it carries an unresolved
 2πk ambiguity above a deep stopband null.
+
+**`defined` is not only a stopband test — it also rejects a near-silent
+output.** The estimator divides by `|X|²`, so it has an energy floor of its own
+below which a bin has no phase to differentiate. A processor whose output has
+collapsed (a dead gain stage, a degenerate filter) can still produce a
+*perfectly shaped* impulse response, just at −160 dBFS: its peak-relative
+magnitude looks like a clean 0 dB passband, but every bin is under the
+estimator's floor. Those bins are `defined = false`. If a group-delay curve
+comes back entirely undefined for a processor you expected to measure, check the
+output's absolute level before suspecting the analyzer — an all-undefined curve
+usually means the processor emitted (almost) nothing, which is the finding.
 
 ## Discipline that keeps it trustworthy
 
