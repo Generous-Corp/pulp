@@ -8,6 +8,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06750"></a>
+## [0.675.0] - 2026-07-16
+
+- feature/ccache durable fix ([#6150](https://github.com/danielraffel/pulp/pull/6150))
+- build(examples): fail the reordered-designator bug on Clang, at PR time ([#6149](https://github.com/danielraffel/pulp/pull/6149))
+- docs(migrations): record the v0.666.0 Oversampler Biquad behavior change ([#6148](https://github.com/danielraffel/pulp/pull/6148))
+- docs: add contributor-agent review contract + CONTRIBUTING pointer ([#6147](https://github.com/danielraffel/pulp/pull/6147))
+- ci(git): harden safe-push optional arguments ([#6142](https://github.com/danielraffel/pulp/pull/6142))
+
 <a id="v06740"></a>
 ## [0.674.0] - 2026-07-15
 
@@ -6435,6 +6444,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.675.0]: https://github.com/danielraffel/pulp/releases/tag/v0.675.0
 [0.674.0]: https://github.com/danielraffel/pulp/releases/tag/v0.674.0
 [0.673.0]: https://github.com/danielraffel/pulp/releases/tag/v0.673.0
 [0.672.0]: https://github.com/danielraffel/pulp/releases/tag/v0.672.0
