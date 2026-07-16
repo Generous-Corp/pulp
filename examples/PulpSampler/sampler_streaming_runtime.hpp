@@ -15,6 +15,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stop_token>
@@ -73,6 +74,14 @@ public:
         active_sources_.store(0, std::memory_order_relaxed);
         preload_frames_.store(0, std::memory_order_relaxed);
         service_dispatch_paused_.store(false, std::memory_order_relaxed);
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        reverse_prewarm_pending_for_test_.store(false, std::memory_order_relaxed);
+        block_next_reverse_decode_for_test_.store(false, std::memory_order_relaxed);
+        reverse_decode_entered_for_test_.store(false, std::memory_order_relaxed);
+        release_reverse_decode_for_test_.store(true, std::memory_order_relaxed);
+        unpublished_rollback_count_for_test_.store(0, std::memory_order_relaxed);
+#endif
+        unpublished_rollbacks_.fill({});
         published_source_.write({});
 
         const auto maximum_source_frames_per_block =
@@ -123,13 +132,16 @@ public:
     }
 
     void release() noexcept {
-        service_running_.store(false, std::memory_order_release);
-        service_wake_.notify_all();
         {
             std::lock_guard lock(file_request_mutex_);
+            service_running_.store(false, std::memory_order_release);
             file_request_complete_ = true;
             file_request_result_ = false;
         }
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        release_reverse_decode_for_test_.store(true, std::memory_order_release);
+#endif
+        service_wake_.notify_all();
         file_request_changed_.notify_all();
         if (service_thread_.joinable()) service_thread_.join();
 
@@ -141,6 +153,10 @@ public:
             service_.drain_commands(commands_);
         }
         service_.release();
+        unpublished_rollbacks_.fill({});
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        unpublished_rollback_count_for_test_.store(0, std::memory_order_relaxed);
+#endif
         for (auto& slot : slots_) {
             if (slot) slot->asset.release();
             slot.reset();
@@ -246,6 +262,8 @@ private:
     static constexpr double kCertifiedIoLatencySeconds = 0.020;
     static constexpr double kSchedulerMarginSeconds = 0.005;
     static constexpr double kDecoderLatencySeconds = 0.005;
+    static constexpr std::uint64_t kAdmissionRequesterId =
+        std::numeric_limits<std::uint64_t>::max();
 
     struct StreamedSlot {
         audio::SampleAsset asset;
@@ -268,9 +286,18 @@ private:
     audio::SampleStreamAsyncService<> service_;
     CommandInbox commands_;
     std::array<std::unique_ptr<StreamedSlot>, kSourceCapacity> slots_{};
+    std::array<audio::SampleStreamSourceToken, kSourceCapacity>
+        unpublished_rollbacks_{};
     std::thread service_thread_;
     std::atomic<bool> service_running_{false};
     std::atomic<bool> service_dispatch_paused_{false};
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+    std::atomic<bool> reverse_prewarm_pending_for_test_{false};
+    std::atomic<bool> block_next_reverse_decode_for_test_{false};
+    std::atomic<bool> reverse_decode_entered_for_test_{false};
+    std::atomic<bool> release_reverse_decode_for_test_{true};
+    std::atomic<std::uint32_t> unpublished_rollback_count_for_test_{0};
+#endif
     bool service_ready_ = false;
     float host_sample_rate_ = 44100.0f;
     std::uint32_t maximum_host_block_frames_ = 512;
@@ -278,6 +305,7 @@ private:
     std::uint64_t selection_generation_ = 0;
     std::uint64_t next_source_id_ = 1;
     std::uint64_t next_asset_id_ = 1;
+    std::chrono::milliseconds reverse_prewarm_timeout_{250};
     std::mutex source_load_mutex_;
     std::mutex file_request_mutex_;
     std::condition_variable file_request_changed_;
@@ -296,6 +324,7 @@ private:
             process_file_request();
             service_.drain_commands(commands_);
             service_.drain_completions();
+            collect_unpublished_rollbacks();
             if (!service_dispatch_paused_.load(std::memory_order_acquire)) {
                 for (std::uint32_t attempt = 0;
                      attempt < kSourceCapacity * 2;
@@ -342,7 +371,8 @@ private:
         }
         {
             std::lock_guard lock(file_request_mutex_);
-            file_request_result_ = loaded;
+            file_request_result_ =
+                loaded && service_running_.load(std::memory_order_acquire);
             file_request_complete_ = true;
         }
         file_request_changed_.notify_all();
@@ -389,6 +419,35 @@ private:
                               std::stop_token{}) != preload_frames) {
             return false;
         }
+        if (!service_running_.load(std::memory_order_acquire)) return false;
+
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        if (block_next_reverse_decode_for_test_.exchange(
+                false, std::memory_order_acq_rel)) {
+            auto reader = std::move(file.binding.read);
+            file.binding.read =
+                [this, reader = std::move(reader)](
+                    std::uint64_t start,
+                    audio::BufferView<float> destination,
+                    std::uint64_t frames,
+                    std::stop_token stop_token) {
+                    reverse_decode_entered_for_test_.store(
+                        true, std::memory_order_release);
+                    while (!release_reverse_decode_for_test_.load(
+                               std::memory_order_acquire) &&
+                           service_running_.load(std::memory_order_acquire) &&
+                           !stop_token.stop_requested()) {
+                        std::this_thread::yield();
+                    }
+                    if (!service_running_.load(std::memory_order_acquire) ||
+                        stop_token.stop_requested()) {
+                        return std::uint64_t{0};
+                    }
+                    return reader(start, destination, frames, stop_token);
+                };
+            file.binding.stop_mode = audio::FrameReaderStopMode::Cooperative;
+        }
+#endif
 
         const audio::SampleStreamSourceToken source{next_source_id_++, 1};
         const auto added = service_.add_source(
@@ -402,6 +461,15 @@ private:
             std::move(file.binding));
         if (!added.added()) return false;
 
+        if (preload_frames < file.total_frames &&
+            !prewarm_reverse_entry_page(source,
+                                        added.view,
+                                        file.total_frames,
+                                        file.sample_rate)) {
+            rollback_unpublished_source(source);
+            return false;
+        }
+
         const audio::SampleAssetConfig asset_config{
             .asset = {next_asset_id_++, 1},
             .source = source,
@@ -413,22 +481,124 @@ private:
             .stream_source = added.view,
         };
         if (!slot->asset.prepare(asset_config, preload.view())) {
-            (void) service_.discard_unpublished_source(source);
+            rollback_unpublished_source(source);
             return false;
         }
 
-        slot->source = source;
-        slot->selection_generation = ++selection_generation_;
-        slot->occupied = true;
-        slot->retirement_scheduled = false;
-        published_source_.write({
-            .kind = SamplerPublishedSourceKind::Streamed,
-            .selection_generation = slot->selection_generation,
-            .streamed = slot->asset.view(),
+        {
+            std::lock_guard lock(file_request_mutex_);
+            if (service_running_.load(std::memory_order_acquire)) {
+                slot->source = source;
+                slot->selection_generation = ++selection_generation_;
+                slot->occupied = true;
+                slot->retirement_scheduled = false;
+                published_source_.write({
+                    .kind = SamplerPublishedSourceKind::Streamed,
+                    .selection_generation = slot->selection_generation,
+                    .streamed = slot->asset.view(),
+                });
+                active_sources_.fetch_add(1, std::memory_order_relaxed);
+                preload_frames_.store(preload_frames, std::memory_order_relaxed);
+                return true;
+            }
+        }
+        slot->asset.release();
+        rollback_unpublished_source(source);
+        return false;
+    }
+
+    bool prewarm_reverse_entry_page(
+        audio::SampleStreamSourceToken source,
+        const audio::SampleStreamCacheSourceView& view,
+        std::uint64_t total_frames,
+        std::uint32_t sample_rate) noexcept {
+        const auto tail_frame = total_frames - 1;
+        const audio::SampleStreamRequesterToken requester{
+            kAdmissionRequesterId, source.source_id};
+        const auto scheduled = service_.request_page({
+            .source = source,
+            .requester = requester,
+            .page_index = tail_frame / page_frames_,
+            .resident_source_frames = 0,
+            .consumption_frames_per_second =
+                static_cast<double>(sample_rate) * kMaximumPitchRatio,
+            .demand_class = audio::SampleStreamDemandClass::Attack,
         });
-        active_sources_.fetch_add(1, std::memory_order_relaxed);
-        preload_frames_.store(preload_frames, std::memory_order_relaxed);
-        return true;
+        if (scheduled != audio::SampleStreamScheduleStatus::Inserted &&
+            scheduled != audio::SampleStreamScheduleStatus::Refreshed) {
+            (void) service_.cancel_requester(requester);
+            return false;
+        }
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        reverse_prewarm_pending_for_test_.store(true, std::memory_order_release);
+#endif
+
+        const auto deadline =
+            std::chrono::steady_clock::now() + reverse_prewarm_timeout_;
+        while (service_running_.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline) {
+            service_.drain_commands(commands_);
+            service_.drain_completions();
+            if (view.window->ready_page_for_frame(
+                    source.source_generation, tail_frame).valid) {
+                (void) service_.cancel_requester(requester);
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+                reverse_prewarm_pending_for_test_.store(
+                    false, std::memory_order_release);
+#endif
+                return service_running_.load(std::memory_order_acquire);
+            }
+            if (!service_dispatch_paused_.load(std::memory_order_acquire)) {
+                for (std::uint32_t attempt = 0;
+                     attempt < kSourceCapacity * 2;
+                     ++attempt) {
+                    if (service_.dispatch_once().status !=
+                        audio::SampleStreamAsyncDispatchStatus::Queued) {
+                        break;
+                    }
+                }
+            }
+            std::this_thread::yield();
+        }
+        service_.drain_completions();
+        const bool ready = view.window->ready_page_for_frame(
+            source.source_generation, tail_frame).valid;
+        (void) service_.cancel_requester(requester);
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        reverse_prewarm_pending_for_test_.store(false, std::memory_order_release);
+#endif
+        return ready && service_running_.load(std::memory_order_acquire);
+    }
+
+    void rollback_unpublished_source(
+        audio::SampleStreamSourceToken source) noexcept {
+        (void) service_.cancel_pending_source_demands(source);
+        service_.drain_completions();
+        if (service_.discard_unpublished_source(source)) return;
+        for (auto& pending : unpublished_rollbacks_) {
+            if (pending.source_id == 0) {
+                pending = source;
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+                unpublished_rollback_count_for_test_.fetch_add(
+                    1, std::memory_order_release);
+#endif
+                return;
+            }
+        }
+    }
+
+    void collect_unpublished_rollbacks() noexcept {
+        for (auto& pending : unpublished_rollbacks_) {
+            if (pending.source_id == 0) continue;
+            (void) service_.cancel_pending_source_demands(pending);
+            if (service_.discard_unpublished_source(pending)) {
+                pending = {};
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+                unpublished_rollback_count_for_test_.fetch_sub(
+                    1, std::memory_order_release);
+#endif
+            }
+        }
     }
 
     void retire_sources() noexcept {

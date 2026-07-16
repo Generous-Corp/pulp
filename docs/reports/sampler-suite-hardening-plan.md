@@ -43,7 +43,16 @@ Current branch evidence, without implying completion of later gates:
   ranged WAV/AIFF forward one-shots with contract-derived preload/lookahead,
   a bounded eight-voice cache working set, explicit starvation, coherent source
   replacement, and 10,000 allocation-probed callbacks. Streamed loop/reverse
-  policy remains open.
+  policy remains open. The resident loop state machine has now been extracted
+  into a storage-independent, trivially copyable `LoopPlaybackCursor`; the
+  existing renderer delegates to it without changing ordinary-step or
+  crossfade output. Independent-oracle parity covers reverse entry, two-phase
+  direction changes, high-rate fade-zone probes, multiple wraps/reflections,
+  and short-loop residual travel. Stream admission also prepares the tail page
+  before publication so reverse entry cannot begin on an uncached page;
+  shutdown and timed-out in-flight admission roll back without leaking either
+  source-registration slot. Wiring the shared cursor into the streamed voice
+  reader and its lookahead scheduler remains open.
 - The existing Release audio harness baseline and all 375 Audio Quality Lab
   self-tests pass. Quality Lab remains supplementary to exact transport,
   telemetry, lifetime, and allocation gates.

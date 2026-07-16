@@ -53,9 +53,14 @@ windows are destroyed.
 uncompressed AIFF, forward linear one-shots, two decode workers, and a bounded
 eight-page working set for each of eight independently positioned voices. Its
 service thread owns file/source/cache mutation; the callback owns only voice
-state and the SPSC producer. The Loop parameter remains resident-only in this
-gate. Streamed loops, reverse playback, starvation gain shaping, interpolation
-quality selection, and mip assets remain later gates.
+state and the SPSC producer. File admission prepares the tail page before it
+publishes the asset, which gives reverse entry a ready attack neighborhood;
+timeout and shutdown paths cancel and reclaim unpublished registrations. The
+resident renderer now delegates traversal to the storage-independent
+`LoopPlaybackCursor`, whose plans are checked against an independent loop
+oracle. The Loop parameter remains resident-only until that cursor is wired to
+the paged reader and loop-aware lookahead. Starvation gain shaping,
+interpolation quality selection, and mip assets remain later gates.
 
 `SampleAsset` accepts streamed tails only through a service-issued registration
 proof whose source identity and page geometry match the prepared cache. The
