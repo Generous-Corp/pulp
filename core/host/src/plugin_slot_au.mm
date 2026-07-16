@@ -27,6 +27,20 @@
 namespace pulp::host {
 namespace {
 
+// How many elements (buses) the AU exposes on `scope`. An instrument reports 0
+// on the input scope, and addressing input element 0 on one returns
+// kAudioUnitErr_InvalidElement — so ask before setting per-element properties
+// rather than inferring the bus layout from the component type. An AU that does
+// not answer is treated as having none, which is the conservative reading: skip
+// the property instead of failing the load over it.
+UInt32 scope_element_count(AudioUnit au, AudioUnitScope scope) {
+    UInt32 count = 0;
+    UInt32 size = sizeof(count);
+    const OSStatus st = AudioUnitGetProperty(
+        au, kAudioUnitProperty_ElementCount, scope, 0, &count, &size);
+    return st == noErr ? count : 0;
+}
+
 bool parse_4cc_triplet(const std::string& id, OSType& t, OSType& s, OSType& m) {
     // Expect "XXXX:YYYY:ZZZZ" with each field exactly 4 ASCII characters.
     if (id.size() != 14 || id[4] != ':' || id[9] != ':') return false;
@@ -79,8 +93,17 @@ public:
         asbd.mChannelsPerFrame = static_cast<UInt32>(channels);
         asbd.mBitsPerChannel   = 32;
 
-        // Set on both scopes so the AU knows what stream shape to expect.
+        // An instrument (aumu/aumi) has NO input element, so input scope element
+        // 0 does not exist and setting a format on it returns
+        // kAudioUnitErr_InvalidElement (-10877). Ask the AU how many input buses
+        // it has rather than assuming one: treating that error as fatal rejects
+        // every instrument on the system.
+        const bool has_input_bus = scope_element_count(au_, kAudioUnitScope_Input) > 0;
+
+        // Set on each scope the AU actually exposes, so it knows what stream
+        // shape to expect.
         for (auto scope : {kAudioUnitScope_Input, kAudioUnitScope_Output}) {
+            if (scope == kAudioUnitScope_Input && !has_input_bus) continue;
             OSStatus st = AudioUnitSetProperty(
                 au_, kAudioUnitProperty_StreamFormat, scope, 0,
                 &asbd, sizeof(asbd));
@@ -97,18 +120,22 @@ public:
             kAudioUnitScope_Global, 0,
             &max_frames, sizeof(max_frames));
 
-        // Install a render callback that pulls the host's current input
-        // view; the callback reads from input_frames_ set in process().
-        AURenderCallbackStruct cb{};
-        cb.inputProc       = &AuSlot::render_callback;
-        cb.inputProcRefCon = this;
-        OSStatus st = AudioUnitSetProperty(
-            au_, kAudioUnitProperty_SetRenderCallback,
-            kAudioUnitScope_Input, 0,
-            &cb, sizeof(cb));
-        if (st != noErr) {
-            runtime::log_warn("AU: SetRenderCallback failed (status {}) — instrument only?",
-                              static_cast<int>(st));
+        // Install a render callback that pulls the host's current input view;
+        // the callback reads from input_frames_ set in process(). An instrument
+        // has nothing to pull, so there is no input element to attach it to.
+        OSStatus st = noErr;
+        if (has_input_bus) {
+            AURenderCallbackStruct cb{};
+            cb.inputProc       = &AuSlot::render_callback;
+            cb.inputProcRefCon = this;
+            st = AudioUnitSetProperty(
+                au_, kAudioUnitProperty_SetRenderCallback,
+                kAudioUnitScope_Input, 0,
+                &cb, sizeof(cb));
+            if (st != noErr) {
+                runtime::log_warn("AU: SetRenderCallback failed (status {})",
+                                  static_cast<int>(st));
+            }
         }
 
         st = AudioUnitInitialize(au_);
