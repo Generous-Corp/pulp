@@ -51,6 +51,90 @@ and harder to reason about than a straight `process()`.
 | A user-editable effects rack / modular patch | `SignalGraph` |
 | A visual node editor | `SignalGraph` (the editor is UI over the graph) |
 
+## What goes inside a node
+
+Deciding you genuinely need a `SignalGraph` raises the next question: what does
+each node actually contain? There are three sources, and they are not
+interchangeable.
+
+| Node content | Where it comes from | Use it for |
+|--------------|---------------------|------------|
+| **Built-ins** — `Input`, `Output`, `Gain`, `MidiInput`, `MidiOutput` | The graph itself; no code to write | Plumbing — host I/O, a gain stage, MIDI in and out. |
+| **`Plugin` node**, wrapping a `PluginSlot` | A VST3 / AU / CLAP / LV2 binary on disk, discovered by `PluginScanner` and opened by `PluginSlot::load()` | **Third-party components** — units you did not write and cannot recompile. |
+| **`Custom` node**, from a registered `CustomNodeType` | Your own C++, registered per graph with a `type_id`, version, and port shape | **Your own graph-native components** — utility and extension nodes. |
+
+The line between the last two rows is the one worth internalizing: a
+`CustomNodeType` is a graph utility, **not** a plugin authoring surface. If the
+unit is a plugin you intend to ship, author it as a `Processor` and let a graph
+host it like any other. Reach for `CustomNodeType` when the node only ever makes
+sense *inside* your graph.
+
+A `CustomNodeType` can be stateless (just a `process` callback) or stateful
+(supply `create`/`destroy` and the graph owns one instance per node, with
+`prepare`/`release`/`reset`/`save_state`/`load_state` on it). Stateful custom
+nodes follow the same threading contract as `PluginSlot`: lifecycle calls on the
+UI/main thread, `process_instance` on the audio thread and real-time-safe.
+
+### If you are building a node editor
+
+The graph is designed to be the model under an editor, so the pieces an editor
+needs are already contracts rather than conventions:
+
+- **`NodeId` is stable** across connection edits, so it is a safe identity anchor
+  for the editor's own view state.
+- **Unresolved types survive a round trip.** Serialization stores each custom
+  node's `type_id` and `version`. Loading a topology whose custom types this
+  machine has not registered still produces a placeholder node with the saved
+  identity, port shape, connections, and opaque state, and reports the type in
+  `LoadResult::missing_custom_node_types` — so a patch does not silently lose
+  nodes when it moves between machines.
+- **Bound user-built graphs** with `SignalGraph::set_limits()` before `prepare()`,
+  and preflight generated or scripted topologies with
+  `validate_generated_graph()`. A graph assembled by a user (or a script) is
+  untrusted input.
+- **Editing while it plays** is supported: connection edits, and hot-swapping the
+  plugin inside a node via the `begin_swap_edit()` / `prepare_swap()`
+  transaction.
+- **`GraphEditorView`** (`pulp::view::widgets`) already renders a `SignalGraph`
+  as a draggable, connectable canvas if you want the model and the view together.
+
+### Embedding a hosted plugin's own editor
+
+A `Plugin` node can show the plugin's real GUI rather than a parameter list you
+rebuild yourself. `pulp::view::EditorAttachment::create(slot, window)` asks the
+slot for its editor and embeds it in a `WindowHost`, returning an RAII handle
+that detaches and destroys in the right order.
+
+Two constraints shape what you can build on top of it:
+
+- **A native child always composites ABOVE Pulp's GPU layer.** The OS window
+  server draws it over the Skia surface, so a node editor cannot paint wires,
+  selection chrome, or overlays *on top of* an embedded plugin GUI. Native
+  children suit full-region embeds — a detail pane, an inspector — better than a
+  live GUI floating mid-canvas under other widgets. Clipping still works:
+  `set_native_child_view_clip` masks a child to its scroll viewport.
+- **Coverage is per format and per platform.** CLAP editors embed on macOS
+  today. VST3, AU, and LV2 slots report no editor, and Windows/Linux have no
+  desktop `WindowHost` implementing the native-child seam, so
+  `EditorAttachment::create` returns nullptr there. Null is the honest
+  "no editor" answer everywhere — branch on it rather than assuming a view.
+
+
+## The two layers compose
+
+`Processor` and `SignalGraph` are altitudes, not a fork in the road. A graph that
+has stopped being dynamic can be lowered back down: `bake()` freezes a prepared
+graph into a `BakedGraphProcessor` — a self-contained `Processor` you can ship
+like any other. It drives the frozen plan through the same executor the live
+graph uses, so its output matches the live walk for the lowerable subset.
+
+Baking fails loudly rather than silently mis-baking. A hosted `Plugin` node is
+refused because it owns opaque external state and the result would not be
+self-contained; a `Custom` node lowers only if its type opted in with
+`lowerable = true`, matches the node's shape, and is transport-independent. See
+[Signal Graph Reference](signal-graph.md#baking-a-graph-to-a-shippable-artifact)
+for the `.pulpbake` file format and its signature gate.
+
 ## Reserved terminology
 
 To keep the two layers from blurring, these terms each mean exactly one thing.
