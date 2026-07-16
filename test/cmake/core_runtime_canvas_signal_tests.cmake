@@ -143,7 +143,10 @@ pulp_add_test_suite(pulp-test-canvas-image-fit LIBRARIES pulp::canvas)
 
 # Signal/DSP tests
 pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-oversampling-quality LIBRARIES pulp::signal)
+# Alias/passband claims here are measured with the shared tone-projection
+# analyzers, hence the analysis lib alongside the DSP under test.
+pulp_add_test_suite(pulp-test-oversampling-quality
+    LIBRARIES pulp::signal pulp::audio-analysis)
 pulp_add_test_suite(pulp-test-transition-mixer LIBRARIES pulp::signal)
 # Signal filter tests extracted from test_signal.cpp.
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
