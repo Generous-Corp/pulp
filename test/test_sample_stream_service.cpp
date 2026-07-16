@@ -335,13 +335,11 @@ TEST_CASE("Sample stream cache keeps retiring sources alive through the audio wa
     const auto added = service.add_source(source_config(), reader);
     REQUIRE(added.added());
 
-    REQUIRE(service.retire_source({1, 2}, 7) ==
+    REQUIRE(service.retire_source_after_asset_unpublish({1, 2}) ==
             SampleStreamSourceRetireStatus::StaleSource);
-    REQUIRE(service.retire_source(added.view.token, 6) ==
-            SampleStreamSourceRetireStatus::InvalidGeneration);
-    REQUIRE(service.retire_source(added.view.token, 7) ==
+    REQUIRE(service.retire_source_after_asset_unpublish(added.view.token) ==
             SampleStreamSourceRetireStatus::Scheduled);
-    REQUIRE(service.retire_source(added.view.token, 7) ==
+    REQUIRE(service.retire_source_after_asset_unpublish(added.view.token) ==
             SampleStreamSourceRetireStatus::AlreadyScheduled);
     REQUIRE(service.collect_retired_sources() == 0);
     REQUIRE(added.view.window->prepared());
@@ -356,6 +354,8 @@ TEST_CASE("Sample stream cache keeps retiring sources alive through the audio wa
     REQUIRE(service.stats().sources_retire_scheduled == 1);
     REQUIRE(service.stats().sources_collected == 1);
 
+    REQUIRE(service.add_source(source_config(), reader).status ==
+            SampleStreamSourceAddStatus::StaleGeneration);
     auto replacement = source_config(1, 2);
     REQUIRE(service.add_source(replacement, reader).added());
 }

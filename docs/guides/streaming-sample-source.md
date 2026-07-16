@@ -38,12 +38,17 @@ pulp::audio::StreamingSampleSourceConfig config{
     .ring_capacity_frames = 32768,
     .read_chunk_frames = 4096,
 };
-return source.prepare(config, std::move(file.reader));
+return source.prepare(config, std::move(file.binding));
 ```
 
 `prepare()` synchronously fills the preload and primes the ring, so it belongs
 on a control or loading thread. `release()` stops and joins the worker before
-freeing storage. Destruction calls `release()`.
+freeing storage. Destruction calls `release()`. Legacy `FrameReader` callbacks
+are join-only: teardown waits for an entered call to return. A
+`FrameReaderBinding` marked `Cooperative` receives a `std::stop_token`; mapped
+ranged WAV/AIFF bindings check it between bounded read chunks so teardown can
+request prompt cooperative exit. Decode-once fallbacks remain honestly marked
+`JoinOnly` because their initial full decode cannot be interrupted.
 
 ## Underruns
 
@@ -66,5 +71,8 @@ the same injected I/O schedule and recovery policy.
   driver when `start_background_thread` is false.
 - `FrameReader`: one background caller at a time; it may seek, decode, allocate,
   and lock, but it must not retain the destination view after returning.
+- `FrameReaderBinding`: the same single-caller rule plus an explicit join-only
+  or cooperative-stop capability. Cooperative readers must observe their token
+  within a documented bounded interval.
 
 Do not share one `StreamingSampleSource` between concurrent audio callbacks.

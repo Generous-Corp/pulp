@@ -23,9 +23,26 @@ StreamingSampleSource::~StreamingSampleSource() { release(); }
 
 bool StreamingSampleSource::prepare(const StreamingSampleSourceConfig& config,
                                     FrameReader reader) {
+    if (!reader) {
+        release();
+        return false;
+    }
+    FrameReaderBinding binding;
+    binding.read = [reader = std::move(reader)](
+                       std::uint64_t start_frame,
+                       BufferView<float> destination,
+                       std::uint64_t frames,
+                       std::stop_token) mutable {
+        return reader(start_frame, destination, frames);
+    };
+    return prepare(config, std::move(binding));
+}
+
+bool StreamingSampleSource::prepare(const StreamingSampleSourceConfig& config,
+                                    FrameReaderBinding reader) {
     release();
 
-    if (config.channels == 0 || config.total_frames == 0 || !reader) {
+    if (config.channels == 0 || config.total_frames == 0 || !reader.read) {
         return false;
     }
 
@@ -33,6 +50,7 @@ bool StreamingSampleSource::prepare(const StreamingSampleSourceConfig& config,
     total_frames_ = config.total_frames;
     sample_rate_ = config.sample_rate;
     reader_ = std::move(reader);
+    reader_stop_source_ = std::stop_source{};
 
     preload_valid_ = std::min(config.preload_frames, total_frames_);
     fully_resident_ = (preload_valid_ >= total_frames_);
@@ -52,7 +70,8 @@ bool StreamingSampleSource::prepare(const StreamingSampleSourceConfig& config,
     // play immediately.
     if (preload_valid_ > 0) {
         preload_.resize(channels_, static_cast<std::size_t>(preload_valid_));
-        const auto got = reader_(0, preload_.view(), preload_valid_);
+        const auto got = reader_.read(
+            0, preload_.view(), preload_valid_, reader_stop_source_.get_token());
         if (got < preload_valid_) {
             // Source produced fewer frames than declared — treat the realized
             // length as authoritative so we never read past valid data.
@@ -109,6 +128,7 @@ bool StreamingSampleSource::prepare(const StreamingSampleSourceConfig& config,
 void StreamingSampleSource::stop_thread() noexcept {
     if (thread_.joinable()) {
         run_.store(false, std::memory_order_release);
+        reader_stop_source_.request_stop();
         cv_.notify_all();
         thread_.join();
     }
@@ -119,7 +139,8 @@ void StreamingSampleSource::release() noexcept {
     ring_.release();
     preload_ = Buffer<float>{};
     read_scratch_ = Buffer<float>{};
-    reader_ = nullptr;
+    reader_ = {};
+    reader_stop_source_ = std::stop_source{};
     channels_ = 0;
     total_frames_ = 0;
     sample_rate_ = 0;
@@ -143,6 +164,7 @@ bool StreamingSampleSource::reset() noexcept {
     if (!prepared_) return false;
     const bool had_thread = use_thread_;
     stop_thread();
+    reader_stop_source_ = std::stop_source{};
 
     play_pos_.store(0, std::memory_order_relaxed);
     streamed_frames_.store(0, std::memory_order_relaxed);
@@ -272,7 +294,7 @@ std::uint64_t StreamingSampleSource::pull(BufferView<float> dest,
 std::uint64_t StreamingSampleSource::pump_background() noexcept {
     // Note: deliberately not gated on prepared_ — prepare() primes the ring via
     // this method before flipping prepared_ true.
-    if (fully_resident_ || !reader_) return 0;
+    if (fully_resident_ || !reader_.read) return 0;
 
     const std::uint64_t rpos = reader_pos_.load(std::memory_order_relaxed);
     if (rpos >= total_frames_) return 0;  // tail fully streamed
@@ -290,10 +312,12 @@ std::uint64_t StreamingSampleSource::pump_background() noexcept {
     // escape this noexcept function (→ std::terminate). Treat it as a read error.
     std::uint64_t got = 0;
     try {
-        got = reader_(rpos, scratch, want);
+        got = reader_.read(
+            rpos, scratch, want, reader_stop_source_.get_token());
     } catch (...) {
         got = 0;
     }
+    if (reader_stop_source_.stop_requested()) return 0;
     if (got == 0) {
         // EOF or read error before the declared end. All frames [0, rpos) are
         // already available (preload + what's in the ring), so rpos is the true

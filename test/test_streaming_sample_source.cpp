@@ -284,6 +284,83 @@ void verify_active_reader_teardown(bool destroy_source) {
     REQUIRE(weak_owner.expired());
 }
 
+void verify_cooperative_reader_teardown(bool destroy_source) {
+    auto trace = std::make_shared<TeardownTrace>();
+    auto gate = std::make_shared<BlockingReaderGate>();
+    auto owner = std::make_shared<CapturedReaderOwner>();
+    owner->trace = trace;
+    std::weak_ptr<CapturedReaderOwner> weak_owner = owner;
+
+    auto source = std::make_unique<StreamingSampleSource>();
+    StreamingSampleSourceConfig config;
+    config.channels = 1;
+    config.total_frames = 16;
+    config.preload_frames = 4;
+    config.ring_capacity_frames = 4;
+    config.read_chunk_frames = 4;
+    config.start_background_thread = true;
+
+    pulp::audio::FrameReaderBinding binding;
+    binding.stop_mode = pulp::audio::FrameReaderStopMode::Cooperative;
+    binding.read = [owner, gate](std::uint64_t start,
+                                 BufferView<float> destination,
+                                 std::uint64_t frames,
+                                 std::stop_token stop_token) -> std::uint64_t {
+        if (start >= 8) {
+            std::unique_lock lock(gate->mutex);
+            if (gate->block_tail_read) {
+                gate->tail_read_entered = true;
+                gate->condition.notify_all();
+                std::stop_callback notify_stop(stop_token, [&gate] {
+                    gate->condition.notify_all();
+                });
+                gate->condition.wait(lock, [&gate, stop_token] {
+                    return gate->allow_tail_read_to_return ||
+                           stop_token.stop_requested();
+                });
+            }
+        }
+
+        for (std::uint64_t frame = 0; frame < frames; ++frame) {
+            destination.channel_ptr(0)[frame] = expected_sample(start + frame, 0);
+        }
+        if (start >= 8) {
+            owner->trace->callback_exited.store(
+                owner->trace->next(), std::memory_order_seq_cst);
+        }
+        return frames;
+    };
+    REQUIRE(source->prepare(config, std::move(binding)));
+    owner.reset();
+
+    {
+        std::lock_guard lock(gate->mutex);
+        gate->block_tail_read = true;
+    }
+    Buffer<float> output(1, 8);
+    REQUIRE(source->pull(output.view(), 8) == 8);
+    {
+        std::unique_lock lock(gate->mutex);
+        gate->condition.wait(lock, [&gate] { return gate->tail_read_entered; });
+    }
+
+    if (destroy_source) {
+        std::thread teardown([owned = std::move(source)]() mutable {
+            owned.reset();
+        });
+        teardown.join();
+    } else {
+        std::thread teardown([source_ptr = source.get()] { source_ptr->release(); });
+        teardown.join();
+    }
+
+    const auto callback_exit = trace->callback_exited.load(std::memory_order_seq_cst);
+    const auto owner_destroyed = trace->owner_destroyed.load(std::memory_order_seq_cst);
+    REQUIRE(callback_exit != 0);
+    REQUIRE(owner_destroyed > callback_exit);
+    REQUIRE(weak_owner.expired());
+}
+
 }  // namespace
 
 TEST_CASE("StreamingSampleSource teardown joins an entered FrameReader",
@@ -297,6 +374,17 @@ TEST_CASE("StreamingSampleSource teardown joins an entered FrameReader",
 
     SECTION("destruction") {
         verify_active_reader_teardown(true);
+    }
+}
+
+TEST_CASE("StreamingSampleSource teardown requests cooperative reader stop",
+          "[audio][streaming][thread][teardown][stop]") {
+    SECTION("explicit release") {
+        verify_cooperative_reader_teardown(false);
+    }
+
+    SECTION("destruction") {
+        verify_cooperative_reader_teardown(true);
     }
 }
 
@@ -503,6 +591,7 @@ TEST_CASE("StreamingSampleSource streams a real WAV file from disk",
     REQUIRE(fr.total_frames == total);
     REQUIRE(fr.sample_rate == 48000);
     REQUIRE(fr.supports_ranged_read);
+    REQUIRE(fr.binding.stop_mode == pulp::audio::FrameReaderStopMode::Cooperative);
 
     Buffer<float> ranged(channels, 37);
     REQUIRE(fr.reader(7891, ranged.view(), 37) == 37);
@@ -552,6 +641,8 @@ TEST_CASE("File frame reader range-reads uncompressed AIFF",
     auto reader = pulp::audio::make_memory_mapped_frame_reader(path);
     REQUIRE(reader.valid);
     REQUIRE(reader.supports_ranged_read);
+    REQUIRE(reader.binding.stop_mode ==
+            pulp::audio::FrameReaderStopMode::Cooperative);
     REQUIRE(reader.channels == 1);
     REQUIRE(reader.total_frames == 4);
 

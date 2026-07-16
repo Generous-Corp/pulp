@@ -31,6 +31,7 @@ namespace pulp::audio {
 /// StreamingSampleSourceConfig (channels / total_frames / sample_rate).
 struct FileFrameReader {
     FrameReader reader;
+    FrameReaderBinding binding;
     std::uint32_t channels = 0;
     std::uint64_t total_frames = 0;
     std::uint32_t sample_rate = 0;
@@ -59,12 +60,17 @@ inline FileFrameReader make_memory_mapped_frame_reader(std::string_view path) {
     result.total_frames = total;
     result.sample_rate = info.sample_rate;
     result.supports_ranged_read = mapped->supports_ranged_read();
-    result.reader = [mapped = std::move(mapped), channels, total,
-                     destinations = std::vector<float*>(channels)](
+    result.binding.stop_mode = result.supports_ranged_read
+        ? FrameReaderStopMode::Cooperative
+        : FrameReaderStopMode::JoinOnly;
+    result.binding.read = [mapped = std::move(mapped), channels, total,
+                           destinations = std::vector<float*>(channels)](
                                                std::uint64_t start_frame,
                                                BufferView<float> dest,
-                                               std::uint64_t frames)
+                                               std::uint64_t frames,
+                                               std::stop_token stop_token)
         mutable -> std::uint64_t {
+        constexpr std::uint64_t kStopCheckFrames = 16384;
         if (start_frame >= total) return 0;
         const std::uint64_t n = std::min({
             frames,
@@ -76,11 +82,27 @@ inline FileFrameReader make_memory_mapped_frame_reader(std::string_view path) {
             channels, static_cast<std::uint32_t>(dest.num_channels()));
         if (use_ch == 0) return 0;
 
-        for (std::uint32_t ch = 0; ch < use_ch; ++ch)
-            destinations[ch] = dest.channel_ptr(ch);
-        if (!mapped->read_frames(destinations.data(), use_ch, start_frame, n))
-            return 0;
-        return n;
+        std::uint64_t produced = 0;
+        while (produced < n && !stop_token.stop_requested()) {
+            const auto chunk = std::min(kStopCheckFrames, n - produced);
+            for (std::uint32_t ch = 0; ch < use_ch; ++ch) {
+                destinations[ch] = dest.channel_ptr(ch) + produced;
+            }
+            if (!mapped->read_frames(destinations.data(),
+                                     use_ch,
+                                     start_frame + produced,
+                                     chunk)) {
+                return produced;
+            }
+            produced += chunk;
+        }
+        return produced;
+    };
+    const auto stoppable = result.binding.read;
+    result.reader = [stoppable](std::uint64_t start_frame,
+                                BufferView<float> destination,
+                                std::uint64_t frames) mutable {
+        return stoppable(start_frame, destination, frames, {});
     };
     result.valid = true;
     return result;
