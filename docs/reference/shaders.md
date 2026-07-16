@@ -39,8 +39,9 @@ What you can do through this API:
 
 - **Fragment shaders** that fill a rectangle of the active `Canvas`.
 - **Post-effects** layered on a `View`'s composited content via the
-  `ViewEffect` chain (blur, bloom, custom SkSL, vignette, chromatic
-  aberration).
+  `ViewEffect` chain (blur, glow, vignette, chromatic aberration). Note
+  these composite *layers*; they are not SkSL over the subtree — see the
+  honesty note below.
 - **Uniforms** for time, value, resolution, and up to five named colors
   per draw call (see `Canvas::ShaderUniforms`).
 
@@ -174,10 +175,19 @@ cached by Skia / Dawn per backend; you do not need to manage it.
 
 ## Post-effects on a `View` subtree
 
-For effects that wrap an entire view subtree (blur the background
-behind a popover, bloom a meter, run a custom SkSL film-grain pass
-over a panel), use `ViewEffect` from
-`core/canvas/include/pulp/canvas/view_effect.hpp`:
+For effects that wrap an entire view subtree (blur the background behind a
+popover, add a soft glow to a meter), use `ViewEffect` from
+`core/canvas/include/pulp/canvas/view_effect.hpp`.
+
+> **What `ViewEffect` is not.** These effects composite *layers* (blur,
+> opacity, transform). **You cannot currently run an SkSL pass over a
+> view's rendered content.** A `CustomShaderEffect` that appeared to do
+> so was removed in PR #6046 because it silently ignored its shader — it
+> needed a child-shader compositor Pulp does not yet wire up. Widget-body
+> shaders (`setWidgetShader`, `CustomShaderHost`) are real, but they paint
+> a *fresh* rect and cannot see rendered content. Read the per-effect doc
+> comments before relying on one: `GpuBloomEffect` is a blur-based glow
+> approximation, not a true bloom.
 
 ```cpp
 #include <pulp/canvas/view_effect.hpp>
