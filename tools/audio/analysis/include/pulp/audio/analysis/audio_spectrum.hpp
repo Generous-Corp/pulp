@@ -413,7 +413,16 @@ struct GroupDelayOptions {
 /// `options.magnitude_floor_db` below the curve's peak is therefore reported
 /// `defined = false` with NaN phase and group delay. A bin whose reference
 /// (input) spectrum is itself negligible is undefined for the same reason.
-/// The analyzer reports no group delay it did not measure.
+///
+/// That relative gate is backstopped by an absolute one, because the two fail
+/// in different places: the relative gate is measured against the curve's own
+/// peak, so a processor whose output is entirely silent has a peak that IS the
+/// numerical floor, putting every bin at 0 dB relative to it. Such a curve
+/// would report a flat, fully-defined, zero-delay response for a processor that
+/// emitted nothing. Bins whose absolute transfer magnitude is at the numerical
+/// floor are therefore undefined regardless of the relative reading, and a
+/// silent output yields a curve with no defined bins at all — which is the
+/// honest answer. The analyzer reports no group delay it did not measure.
 ///
 /// Computed in double precision (`Fft64`) throughout: the estimator's numerator
 /// is a difference of products that can cancel heavily near a null, and the

@@ -133,6 +133,8 @@ public:
                  const pulp::format::ProcessContext&) override {
         const std::size_t channels =
             std::min(out.num_channels(), in.num_channels());
+        if (channels == 0)
+            return;
         for (std::size_t n = 0; n < out.channel(0).size(); ++n) {
             for (std::size_t ch = 0; ch < channels && ch < history_.size(); ++ch) {
                 out.channel(ch)[n] = history_[ch][pos_];
@@ -177,6 +179,8 @@ public:
                  const pulp::format::ProcessContext&) override {
         const std::size_t channels =
             std::min(out.num_channels(), in.num_channels());
+        if (channels == 0)
+            return;
         for (std::size_t n = 0; n < out.channel(0).size(); ++n) {
             for (std::size_t ch = 0; ch < channels && ch < history_.size(); ++ch) {
                 history_[ch][pos_] = in.channel(ch)[n];
@@ -823,6 +827,40 @@ TEST_CASE("Doctor: group delay reports a stopband as undefined",
             CHECK(std::isnan(p.group_delay_samples));
         }
     }
+}
+
+TEST_CASE("Doctor: group delay reports a silent output as undefined",
+          "[audio][doctor][group-delay]") {
+    // The degenerate case the relative magnitude gate cannot see. A silent
+    // output has no peak to be relative TO — the peak collapses onto the
+    // numerical floor, every bin reads 0 dB against it, and the curve would
+    // claim a flat, fully-defined, zero-delay response for a processor that
+    // emitted nothing. Nothing was measured here, so nothing may be reported.
+    // Tolerance class: exact (the gate is a boolean).
+    constexpr int kFft = 1024;
+    auto impulse = make_impulse(/*channels=*/1, kFft, 1.0f, /*position=*/0);
+    pulp::audio::Buffer<float> silent(1, kFft); // all zeros — emits nothing
+
+    GroupDelayOptions opts;
+    opts.fft_length = kFft;
+    const double checkpoints[] = {1000.0};
+    const auto curve =
+        measure_group_delay(std::as_const(impulse).view(),
+                            std::as_const(silent).view(), kSampleRate,
+                            checkpoints, opts);
+
+    // Not one bin may claim a measurement, and no accessor may hand back a
+    // number — a silent processor is not a zero-latency processor.
+    int defined_bins = 0;
+    for (const auto& p : curve.full)
+        if (p.defined)
+            ++defined_bins;
+    INFO("defined bins in a silent-output curve: " << defined_bins << " of "
+                                                   << curve.full.size());
+    CHECK(defined_bins == 0);
+    CHECK_FALSE(curve.defined_at(1000.0));
+    CHECK(std::isnan(curve.group_delay_samples_at(1000.0)));
+    CHECK(std::isnan(curve.phase_radians_at(1000.0)));
 }
 
 TEST_CASE("Doctor: group-delay artifact round-trips",
