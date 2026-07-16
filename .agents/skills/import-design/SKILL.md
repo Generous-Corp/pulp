@@ -1515,6 +1515,21 @@ Gotchas:
   to skin, and it falls through to the default/standard knob. To get a
   captured-art sprite knob you need the **figma-plugin "Export to Pulp"**
   envelope (e.g. the ELYSIUM `.pulp.zip`), which captures the disc PNG.
+- The knob's `asset_path` is a **RUNTIME** path, not build scratch. When the
+  disc carries a baked-in indicator (`knob_ind_r_out`), `enrich_imported_image_
+  asset_metadata` re-encodes a *cleaned* disc and repoints `asset_path` at it —
+  and that path is serialized into DesignIR JSON and baked verbatim into
+  codegen (`setKnobSpriteStrip('<abs path>')`), then loaded when the SHIPPED
+  plugin's editor opens. So it must outlive the import process: write derived
+  assets to `default_asset_cache_directory()` (`PULP_IMPORT_ASSET_CACHE`, then
+  a per-user cache dir), NEVER `fs::temp_directory_path()`. A temp-hosted
+  cleaned disc survives local testing and then silently unskins the knob after
+  a temp sweep or reboot, with zero diagnostics — the failure surfaces on a
+  customer's machine, far from the import. Key derived filenames by **sha256**
+  of the content (`pulp::runtime::sha256_hex`), like `asset_id_for()` and
+  `IRAssetRef::content_hash`; `std::hash` is implementation-defined and
+  unstable across runs and compilers. Note `--asset-cache` currently steers
+  only the manifest lane; the cleaned-disc write follows the env var / default.
 - Validate turning headlessly: render the imported knob at value 0.0 / 0.5 /
   1.0 with `pulp-screenshot` and confirm the white notch sweeps
   lower-left → up → lower-right. The engine unit tests
