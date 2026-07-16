@@ -750,10 +750,7 @@ DesignMdParseResult parse_designmd(const std::string& markdown) {
     walk_components_map(root["components"], result);
 
     // Frontmatter is authoritative, but it is not the ONLY token source: scan
-    // the Markdown body too and let it fill gaps the frontmatter left. Every
-    // emit above uses `emplace`, which no-ops on an existing key, so a token
-    // defined in both forms keeps its frontmatter value and the body only adds
-    // what frontmatter never said.
+    // the Markdown body too and let it fill gaps the frontmatter left.
     //
     // This is load-bearing, not a convenience. A body `## Shadows` table used
     // to be read only when the document had NO frontmatter at all, so adding
@@ -761,7 +758,66 @@ DesignMdParseResult parse_designmd(const std::string& markdown) {
     // token — no diagnostic, no warning, an empty shadow set. Sections the
     // frontmatter schema has no key for (shadows before this change) had the
     // body as their only home, which made that loss total and invisible.
+    //
+    // Precedence needs a normalized comparison, NOT `emplace`. The two sides
+    // spell keys differently — `walk_color_node` dot-joins and preserves case
+    // (`brand.500`, `Primary`), while `normalize_body_name` lowercases and
+    // dash-joins (`brand-500`, `primary`) — so colliding concepts never collide
+    // as map keys and `emplace` would never fire. Left alone, a value defined
+    // in both forms would emit BOTH spellings with different values into the
+    // theme, silently. So: snapshot the frontmatter keys, let the body emit,
+    // then drop any body token whose normalized name matches a frontmatter one.
+    // Snapshot the frontmatter's OWN keys (verbatim) alongside their normalized
+    // forms. Both halves are needed: a token is body-added only if its exact key
+    // was absent before the scan, and it is a restatement only if its normalized
+    // name matches a frontmatter one. Testing the normalized form alone would
+    // delete the frontmatter tokens themselves, since `Primary` normalizes to
+    // `primary` and would appear to collide with its own entry.
+    // `normalize_body_name` alone is not enough to compare the two spellings:
+    // it preserves '.', so a frontmatter `brand.500` stays `brand.500` while the
+    // body's `Brand 500` becomes `brand-500`. Canonicalize both by folding every
+    // separator ('.', '-', '_') to one form, so the same concept compares equal
+    // however it was written.
+    auto canonical_key = [](const std::string& raw) {
+        std::string s = normalize_body_name(raw);
+        std::string out;
+        for (char c : s) out += (c == '.' || c == '_') ? '-' : c;
+        return out;
+    };
+    struct KeySnapshot {
+        std::set<std::string> verbatim;
+        std::set<std::string> canonical;
+    };
+    auto snapshot = [&](const auto& m) {
+        KeySnapshot s;
+        for (const auto& [k, v] : m) {
+            (void)v;
+            s.verbatim.insert(k);
+            s.canonical.insert(canonical_key(k));
+        }
+        return s;
+    };
+    const auto fm_colors = snapshot(result.ir.tokens.colors);
+    const auto fm_dims   = snapshot(result.ir.tokens.dimensions);
+    const auto fm_strs   = snapshot(result.ir.tokens.strings);
+
     int recovered = parse_body_tokens(slice.body, result);
+
+    // Frontmatter wins: erase body-emitted tokens that restate a frontmatter
+    // key under the body's normalized spelling.
+    int shadowed = 0;
+    auto drop_shadowed = [&](auto& m, const KeySnapshot& fm) {
+        for (auto it = m.begin(); it != m.end();) {
+            const bool added_by_body = fm.verbatim.count(it->first) == 0;
+            const bool restates_fm   = fm.canonical.count(canonical_key(it->first)) > 0;
+            if (added_by_body && restates_fm) { it = m.erase(it); ++shadowed; } else { ++it; }
+        }
+    };
+    drop_shadowed(result.ir.tokens.colors, fm_colors);
+    drop_shadowed(result.ir.tokens.dimensions, fm_dims);
+    drop_shadowed(result.ir.tokens.strings, fm_strs);
+    recovered -= shadowed;
+
     if (recovered > 0) {
         result.diagnostics.push_back(make_diag(
             DesignMdSeverity::info, "body-tokens", "", 0, 0,

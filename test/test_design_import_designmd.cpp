@@ -862,3 +862,46 @@ TEST_CASE("numeric and boolean component property scalars flow through as string
     REQUIRE(result.ir.tokens.strings.at("components.toggle.fontWeight") == "600");
     REQUIRE(result.ir.tokens.strings.at("components.toggle.enabled") == "true");
 }
+
+// ── Frontmatter precedence is REAL, not an emplace accident ──────────────
+// The two sides spell keys differently: walk_color_node dot-joins and keeps
+// case (`brand.500`, `Primary`), normalize_body_name lowercases and dash-joins
+// (`brand-500`, `primary`). So a colliding concept never collides as a map key,
+// and the `emplace` no-op that the additive body scan originally relied on for
+// precedence would NEVER fire — emitting both spellings, with different values,
+// silently into the theme. This pins the normalized comparison that fixes it.
+TEST_CASE("frontmatter beats a body table that restates the same token",
+          "[view][import][designmd][parse][body-tokens]") {
+    const std::string doc =
+        "---\n"
+        "name: Precedence\n"
+        "colors:\n"
+        "  Primary: \"#111111\"\n"
+        "  brand:\n"
+        "    500: \"#aaaaaa\"\n"
+        "---\n"
+        "\n"
+        "## Colors\n"
+        "\n"
+        "| Token | Value |\n"
+        "| --- | --- |\n"
+        "| Primary | #999999 |\n"
+        "| Brand 500 | #bbbbbb |\n"
+        "| Accent | #00ff00 |\n";
+
+    auto result = parse_designmd(doc);
+
+    // The frontmatter values survive under their own spelling.
+    REQUIRE(result.ir.tokens.colors.at("Primary") == "#111111");
+    REQUIRE(result.ir.tokens.colors.at("brand.500") == "#aaaaaa");
+
+    // And the body's restatements do NOT sneak in under a normalized alias.
+    // Before the normalized comparison, these were both present with the body's
+    // (wrong) values alongside the frontmatter ones.
+    CHECK(result.ir.tokens.colors.count("primary") == 0);
+    CHECK(result.ir.tokens.colors.count("brand-500") == 0);
+
+    // Control: a token the frontmatter never mentioned still comes through, so
+    // the shadow-drop isn't just suppressing the whole body scan.
+    REQUIRE(result.ir.tokens.colors.at("accent") == "#00ff00");
+}
