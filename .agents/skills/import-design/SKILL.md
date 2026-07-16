@@ -100,9 +100,43 @@ pulp import-design --from fig --file design.fig --outline          # or --outlin
 
 # 2) Import ONE frame, by name or guid (from the outline). --page scopes the lookup.
 pulp import-design --from fig --file design.fig --frame '102:1624' --output ui.js
+
+# 3) Or capture a MULTI-STATE design: repeat --frame, once per state. Both states
+#    land in ONE DesignFrameView; --frame order IS the swap target index.
+pulp import-design --from fig --file design.fig \
+  --frame 'Typing' --frame 'Piano' --emit cpp --mode baked --output kbd.cpp
 ```
 Frame selection accepts a guid (`102:1624`, unambiguous) or an exact
-case-insensitive name. The decoder is purely structural — geometry, style, text,
+case-insensitive name.
+
+**Multi-state capture (`--frame` repeated).** The first `--frame` is frame 0,
+the second frame 1, … — that index is what a design's `swap <n>` layer targets,
+so **reordering the flags re-points every swap**. Each state is decoded on its
+own and merged into one envelope whose root carries the rest in
+`alternate_frames`; the C++ codegen and the native materializer each emit one
+`add_frame` per entry, in order. A single `--frame` skips the merge entirely and
+behaves exactly as it always has — keep it that way when touching this lane.
+
+**A swap whose target frame was never captured is reported, never silently
+dead.** `apply_swap_target_verification` flags an unset (`-1`), negative, or
+out-of-range target with a conflict signal, so it rides the SAME channel as any
+other unresolved control: `--import-report <json>` shows it and
+`--fail-on-unresolved` exits 2. Do NOT add a parallel diagnostic channel for
+frame problems — route through the import report. This fires on single-frame
+imports too (a design whose swap was always dead now says so).
+
+**Gotcha — an alternate frame is a SIBLING axis to `children`, not a
+descendant.** Any pass that walks the IR and must see every control has to
+descend `alternate_frames` as well (`collect_import_report` and
+`apply_placement_verification` both do). A walk that only follows `children`
+silently ignores every control on frame 1+. Each alternate is also its own
+render region: verify its overlays against ITS width/height, not frame 0's — a
+mode toggle routinely swaps to a differently sized frame.
+
+**Gotcha — never skip an alternate frame whose SVG fails to resolve.** Frame
+indices are positional, so dropping frame k renumbers every later frame and
+silently re-points the swaps that target them. Both generators add the frame
+blank (overlays intact) and diagnose it instead. The decoder is purely structural — geometry, style, text,
 and bundled raster assets; **widget recognition stays the importer's job** (a
 node's name flows through untouched for the resolver to classify). Fidelity
 losses are reported as named warnings in the emitted envelope's `diagnostics`
@@ -110,6 +144,19 @@ losses are reported as named warnings in the emitted envelope's `diagnostics`
 silently dropped. External-library instances and cross-file variables that a
 local file can't resolve surface the same way — treat them as data, not failures,
 and fill in the critical ones by hand.
+
+**Gotcha — a hand-written envelope fixture using `data:` URI SVG assets loses
+its faithful node under `--mode baked`.** The baked lanes run
+`refresh_design_ir_asset_manifest`, which resolves assets against the filesystem
+and drops inline `data:` entries ("0 assets"); the faithful node then can't
+resolve its SVG and falls back to plain widgets, so `render_mode`,
+`svg_asset_id`, and `interactive_elements` all vanish from the output and the
+import report goes empty. This looks exactly like a codegen bug and is not one.
+Write real `.svg` files and reference them by relative `local_path` (what a real
+`.fig` decode emits). Note also that `--emit cpp` requires `--mode baked`, and
+`looks_like_figma_plugin_export` keys off `figma-plugin-v1` /
+`"adapter": "figma-plugin"` — a fixture missing those but containing `"version"`
++ `"root"` is parsed as a serialized DesignIR instead of an envelope.
 
 **Gotcha — the `.fig` fixture-determinism test compares decoded content, not raw
 bytes.** `fig.test.mjs`'s "generator output is deterministic" test regenerates

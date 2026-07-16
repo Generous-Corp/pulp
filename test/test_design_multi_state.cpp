@@ -261,6 +261,7 @@ TEST_CASE("a single-state design's swaps are still verified",
     DesignIR ir = make_one_frame_ir();
     ir.root.interactive_elements.push_back(swap_to(1));
     CHECK(apply_swap_target_verification(ir.root) == 1);
+    REQUIRE(ir.root.interactive_elements[0].conflict_signals.size() == 1);
     CHECK(ir.root.interactive_elements[0].conflict_signals[0].find("only 1 frame captured") !=
           std::string::npos);
     CHECK_FALSE(collect_import_report(ir.root).ok());
