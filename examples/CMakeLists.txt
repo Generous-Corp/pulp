@@ -1,6 +1,21 @@
 # Pulp example projects
 # Each example exercises a framework path or integration surface.
 
+# A designated initializer whose fields are out of declaration order is a hard
+# ERROR under GCC (ISO C++), but Clang only WARNS and builds on. So a reordered
+# `.field` init in an example compiles clean on a macOS/Clang dev box and on the
+# macOS CI legs, then breaks BOTH Linux legs of the release build — where the
+# example is compiled only by release-cli.yml (the required PR gate builds with
+# PULP_BUILD_EXAMPLES=OFF). That asymmetry once shipped an unpublishable tag.
+#
+# Promote the diagnostic to an error under Clang so it fails here, early and on
+# every compiler, exactly as GCC already does. Scoped to the example targets in
+# this directory tree ONLY — deliberately NOT on the public pulp_add_plugin()
+# helper, so a downstream plugin author's build contract is unchanged.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")  # matches AppleClang + Clang; GCC errors by default
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX,OBJCXX>:-Werror=reorder-init-list>)
+endif()
+
 # Local-only dev: chainer-synth lives in this dir gitignored when present,
 # used for AU v3 / GPU editor validation. Not shipped on main.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/chainer-synth/CMakeLists.txt")
