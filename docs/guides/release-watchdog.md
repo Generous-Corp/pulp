@@ -301,9 +301,19 @@ For an unbumped live signal, it:
 The tracker is keyed on the tip SHA so multiple stranded merges produce
 distinct issues — each needs its own catch-up bump PR. Unlike version-keyed
 release watchdogs, a SHA-keyed tracker cannot be auto-closed from its title
-alone because the affected surface is not encoded there. Close it only after
-verifying that surface's later tag or published release contains the stranded
-commit. Its generated recovery command starts from fetched `origin/main`,
+alone because the affected surface is not encoded there — but it is encoded in
+the body. `watchdog-reaper.yml` (daily) parses the body for the full tip SHA and
+the uncovered surfaces, then auto-closes the tracker once a *later* release tag
+for **every** uncovered surface contains the stranded commit
+(`git tag --contains <tip>`, filtered per surface: SDK tags `vX.Y.Z`, plugin
+tags `plugin-vX.Y.Z`). That means the missing bump has since shipped and
+consumers can reach the change. The close decision lives in the pure,
+unit-tested `tools/scripts/reap_stranded_tracker.py`
+(`tools/scripts/test_reap_stranded_tracker.py`); it fails safe — an unparseable
+field or any still-unshipped surface leaves the tracker open, so a genuinely
+active strand is never closed. This keeps the SHA-keyed trackers from orphaning
+forever (102 had piled up by 2026-07, burying real signal). Its generated
+recovery command starts from fetched `origin/main`,
 preserves the historical analysis range, and passes the explicitly uncovered
 surface list. Current `main` is the version-arithmetic base, while
 `--recover-stranded-release` ignores a historical marker-only
