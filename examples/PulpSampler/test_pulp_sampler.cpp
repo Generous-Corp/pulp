@@ -1,11 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "pulp_sampler.hpp"
+#include "rt_allocation_probe.hpp"
+#include <pulp/audio/audio_file.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <limits>
 #include <thread>
 #include <vector>
@@ -13,6 +16,59 @@
 using namespace pulp;
 using namespace pulp::examples;
 using Catch::Matchers::WithinAbs;
+
+namespace pulp::examples {
+
+struct PulpSamplerTestAccess {
+    static void pause_stream_dispatch(PulpSamplerProcessor& processor, bool paused) {
+        processor.streaming_.service_dispatch_paused_.store(
+            paused, std::memory_order_release);
+        processor.streaming_.service_wake_.notify_all();
+    }
+};
+
+}  // namespace pulp::examples
+
+struct TempSamplerWav {
+    std::string path;
+
+    TempSamplerWav(const char* label, std::uint64_t frames, float value) {
+        static std::atomic<std::uint64_t> sequence{0};
+        path = (std::filesystem::temp_directory_path() /
+                (std::string("pulp_sampler_stream_") + label + "_" +
+                 std::to_string(sequence.fetch_add(1)) + ".wav")).string();
+        audio::AudioFileData data;
+        data.sample_rate = 44100;
+        data.channels = {std::vector<float>(static_cast<std::size_t>(frames), value)};
+        REQUIRE(audio::write_wav_file(path, data, audio::WavBitDepth::Float32));
+    }
+
+    ~TempSamplerWav() {
+        std::error_code error;
+        std::filesystem::remove(path, error);
+    }
+};
+
+struct SamplerProcessBlock {
+    explicit SamplerProcessBlock(std::uint32_t frames = 512)
+        : left(frames), right(frames), output_ptrs{left.data(), right.data()},
+          output(output_ptrs, 2, frames), input(input_ptrs, 0, frames),
+          context{44100, static_cast<int>(frames)} {}
+
+    void run(PulpSamplerProcessor& processor) {
+        processor.process(output, input, midi_in, midi_out, context);
+    }
+
+    std::vector<float> left;
+    std::vector<float> right;
+    float* output_ptrs[2];
+    const float* input_ptrs[2]{nullptr, nullptr};
+    audio::BufferView<float> output;
+    audio::BufferView<const float> input;
+    midi::MidiBuffer midi_in;
+    midi::MidiBuffer midi_out;
+    format::ProcessContext context;
+};
 
 // Generate a 1-second sine wave at 440 Hz
 static std::vector<float> make_sine(float freq = 440.0f, float sr = 44100.0f, int samples = 44100) {
@@ -838,4 +894,143 @@ TEST_CASE("PulpSampler state round-trip", "[sampler]") {
     f.store.reset_all_to_defaults();
     REQUIRE(f.store.deserialize(saved));
     REQUIRE(std::abs(f.store.get_value(kSamplerGain) - (-12.0f)) < 0.01f);
+}
+
+TEST_CASE("PulpSampler streams continuously across the preload boundary",
+          "[sampler][stream]") {
+    TempSamplerWav wav("boundary", 24000, 0.5f);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+
+    const auto preload = fixture.proc->stream_stats().preload_frames;
+    REQUIRE(preload > 0);
+    REQUIRE(preload < 24000);
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    block.run(*fixture.proc);
+    REQUIRE(wait_for_condition([&] {
+        return fixture.proc->stream_stats().pages_published > 0;
+    }));
+
+    std::vector<float> rendered = block.left;
+    block.midi_in.clear();
+    while (rendered.size() < preload + 32) {
+        block.run(*fixture.proc);
+        rendered.insert(rendered.end(), block.left.begin(), block.left.end());
+    }
+
+    REQUIRE(fixture.proc->stream_stats().starved_output_frames == 0);
+    for (std::uint64_t frame = preload - 8; frame < preload + 8; ++frame) {
+        REQUIRE_THAT(rendered[static_cast<std::size_t>(frame)], WithinAbs(0.5f, 1e-6));
+    }
+}
+
+TEST_CASE("PulpSampler reports deterministic streamed starvation",
+          "[sampler][stream]") {
+    TempSamplerWav wav("starvation", 24000, 0.5f);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+    PulpSamplerTestAccess::pause_stream_dispatch(*fixture.proc, true);
+
+    const auto preload = fixture.proc->stream_stats().preload_frames;
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    block.run(*fixture.proc);
+    block.midi_in.clear();
+    const auto blocks = static_cast<std::uint32_t>(preload / 512) + 3;
+    for (std::uint32_t index = 1; index < blocks; ++index) {
+        block.run(*fixture.proc);
+    }
+
+    REQUIRE(fixture.proc->stream_stats().starved_output_frames > 0);
+    REQUIRE_THAT(block.left.back(), WithinAbs(0.0f, 0.0f));
+    PulpSamplerTestAccess::pause_stream_dispatch(*fixture.proc, false);
+}
+
+TEST_CASE("PulpSampler keeps staggered streamed voices supplied",
+          "[sampler][stream][polyphony]") {
+    TempSamplerWav wav("polyphony", 200000, 0.25f);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+
+    SamplerProcessBlock block;
+    for (int voice = 0; voice < PulpSamplerProcessor::kMaxVoices; ++voice) {
+        block.midi_in.clear();
+        block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+        block.run(*fixture.proc);
+        block.midi_in.clear();
+        for (int spacing = 1; spacing < 16; ++spacing) {
+            block.run(*fixture.proc);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    for (int tail = 0; tail < 20; ++tail) {
+        block.run(*fixture.proc);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    REQUIRE(fixture.proc->stream_stats().pages_published > 0);
+    REQUIRE(fixture.proc->stream_stats().starved_output_frames == 0);
+    REQUIRE_THAT(block.left.front(), WithinAbs(2.0f, 1e-5));
+}
+
+TEST_CASE("PulpSampler retains a replaced stream until its voice acknowledges",
+          "[sampler][stream]") {
+    TempSamplerWav first("replacement_a", 24000, 0.75f);
+    TempSamplerWav second("replacement_b", 24000, 0.25f);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerRelease, 0.0f);
+    REQUIRE(fixture.proc->load_sample_file(first.path));
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    block.run(*fixture.proc);
+    REQUIRE(fixture.proc->load_sample_file(second.path));
+    REQUIRE(fixture.proc->stream_stats().active_sources == 2);
+    REQUIRE(fixture.proc->stream_stats().sources_retired == 0);
+
+    block.midi_in.clear();
+    block.midi_in.add(midi::MidiEvent::note_off(0, 60));
+    block.run(*fixture.proc);
+    REQUIRE(wait_for_condition([&] {
+        return fixture.proc->stream_stats().active_sources == 1 &&
+               fixture.proc->stream_stats().sources_retired == 1;
+    }));
+}
+
+TEST_CASE("PulpSampler streamed process stays allocation-free for 10000 callbacks",
+          "[sampler][stream][rt]") {
+    TempSamplerWav wav("rt", 24000, 0.5f);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+
+    SamplerProcessBlock block(64);
+    const auto note_on = midi::MidiEvent::note_on(0, 60, 127);
+    block.midi_in.add(note_on);
+    block.run(*fixture.proc);
+    block.midi_in.clear();
+
+    pulp::test::RtAllocationProbe probe;
+    for (int callback = 0; callback < 10000; ++callback) {
+        block.midi_in.clear();
+        if ((callback % 512) == 0) block.midi_in.add(note_on);
+        block.run(*fixture.proc);
+    }
+    REQUIRE(probe.allocation_count() == 0);
 }

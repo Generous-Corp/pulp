@@ -347,3 +347,25 @@ TEST_CASE("Async source registration rolls back the pool when cache admission fa
     REQUIRE(service.collect_retired_sources() == 1);
     REQUIRE(service.add_source(one_page_source(61), constant_reader(61.0f)).added());
 }
+
+TEST_CASE("Async service discards a source that was never published",
+          "[audio][sampler][async-stream][registration]") {
+    SampleStreamAsyncService<1, 1> service;
+    REQUIRE(service.prepare({
+        .cache = {
+            .scheduler_capacity = 4,
+            .page_memory_budget_bytes = 16,
+        },
+        .decode = {
+            .worker_count = 1,
+            .source_capacity = 1,
+            .maximum_channels = 1,
+            .maximum_frames_per_job = 4,
+        },
+    }));
+
+    REQUIRE(service.add_source(one_page_source(70), constant_reader(70.0f)).added());
+    REQUIRE(service.discard_unpublished_source({70, 1}));
+    REQUIRE_FALSE(service.cache_service().contains_source({70, 1}));
+    REQUIRE(service.add_source(one_page_source(71), constant_reader(71.0f)).added());
+}

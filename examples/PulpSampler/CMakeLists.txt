@@ -22,8 +22,12 @@ endif()
 
 # Test
 if(PULP_BUILD_TESTS)
-    add_executable(pulp-sampler-test test_pulp_sampler.cpp)
+    add_executable(pulp-sampler-test
+        test_pulp_sampler.cpp
+        ${PROJECT_SOURCE_DIR}/test/harness/rt_allocation_probe.cpp)
     target_link_libraries(pulp-sampler-test PRIVATE pulp::format pulp::audio pulp::signal Catch2::Catch2WithMain)
-    target_include_directories(pulp-sampler-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_include_directories(pulp-sampler-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/test/harness)
     catch_discover_tests(pulp-sampler-test)
 endif()

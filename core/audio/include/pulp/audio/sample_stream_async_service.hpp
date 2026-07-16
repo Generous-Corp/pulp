@@ -180,6 +180,13 @@ public:
         return status;
     }
 
+    bool discard_unpublished_source(
+        SampleStreamSourceToken source) noexcept {
+        if (!prepared_ || !cache_.discard_unpublished_source(source))
+            return false;
+        return decode_.remove_idle_source(source);
+    }
+
     std::size_t collect_retired_sources() noexcept {
         for (const auto source : retirements_) {
             if (!cache_.retirement_watermark_reached(source)) continue;

@@ -62,7 +62,7 @@ TEST_CASE("MemoryMappedAudioReader ranged read of a WAV", "[audio][mmap][ranged]
     auto read_at = [&](std::uint64_t start, std::uint64_t n) {
         std::vector<float> l(n, 999.0f), rch(n, 999.0f);
         float* dst[2] = {l.data(), rch.data()};
-        REQUIRE(r.read_frames(dst, 2, start, n));
+        REQUIRE(r.read_frames_ranged_only(dst, 2, start, n));
         return std::pair{l, rch};
     };
 
@@ -115,7 +115,7 @@ TEST_CASE("MemoryMappedAudioReader ranged read of a WAV", "[audio][mmap][ranged]
     auto read_mono_at = [&](std::uint64_t start, std::uint64_t n) {
         std::vector<float> m(n, 999.0f);
         float* dst[1] = {m.data()};
-        REQUIRE(r.read_frames(dst, 1, start, n));
+        REQUIRE(r.read_frames_ranged_only(dst, 1, start, n));
         return m;
     };
 

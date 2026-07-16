@@ -39,9 +39,13 @@ struct FileFrameReader {
     bool valid = false;
 };
 
-/// Open and retain a mapped reader for @p path. On failure returns a
-/// FileFrameReader with valid == false. Control thread only.
-inline FileFrameReader make_memory_mapped_frame_reader(std::string_view path) {
+/// Open and retain a mapped reader for @p path. With @p require_ranged_read,
+/// unsupported formats are rejected and a later ranged decode failure is
+/// reported rather than falling back to a whole-file decode. On failure returns
+/// a FileFrameReader with valid == false. Control thread only.
+inline FileFrameReader make_memory_mapped_frame_reader(
+    std::string_view path,
+    bool require_ranged_read = false) {
     FileFrameReader result;
 
     auto mapped = std::make_shared<MemoryMappedAudioReader>();
@@ -60,10 +64,12 @@ inline FileFrameReader make_memory_mapped_frame_reader(std::string_view path) {
     result.total_frames = total;
     result.sample_rate = info.sample_rate;
     result.supports_ranged_read = mapped->supports_ranged_read();
+    if (require_ranged_read && !result.supports_ranged_read) return result;
     result.binding.stop_mode = result.supports_ranged_read
         ? FrameReaderStopMode::Cooperative
         : FrameReaderStopMode::JoinOnly;
     result.binding.read = [mapped = std::move(mapped), channels, total,
+                           require_ranged_read,
                            destinations = std::vector<float*>(channels)](
                                                std::uint64_t start_frame,
                                                BufferView<float> dest,
@@ -88,10 +94,16 @@ inline FileFrameReader make_memory_mapped_frame_reader(std::string_view path) {
             for (std::uint32_t ch = 0; ch < use_ch; ++ch) {
                 destinations[ch] = dest.channel_ptr(ch) + produced;
             }
-            if (!mapped->read_frames(destinations.data(),
-                                     use_ch,
-                                     start_frame + produced,
-                                     chunk)) {
+            const auto read = require_ranged_read
+                ? mapped->read_frames_ranged_only(destinations.data(),
+                                                  use_ch,
+                                                  start_frame + produced,
+                                                  chunk)
+                : mapped->read_frames(destinations.data(),
+                                      use_ch,
+                                      start_frame + produced,
+                                      chunk);
+            if (!read) {
                 return produced;
             }
             produced += chunk;

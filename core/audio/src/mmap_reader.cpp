@@ -117,6 +117,31 @@ bool MemoryMappedAudioReader::supports_ranged_read() const {
 
 bool MemoryMappedAudioReader::read_frames(float** dest_channels, uint32_t num_channels,
                                           uint64_t start_frame, uint64_t num_frames) {
+    return read_frames_impl(dest_channels,
+                            num_channels,
+                            start_frame,
+                            num_frames,
+                            true);
+}
+
+bool MemoryMappedAudioReader::read_frames_ranged_only(
+    float** dest_channels,
+    uint32_t num_channels,
+    uint64_t start_frame,
+    uint64_t num_frames) {
+    return read_frames_impl(dest_channels,
+                            num_channels,
+                            start_frame,
+                            num_frames,
+                            false);
+}
+
+bool MemoryMappedAudioReader::read_frames_impl(
+    float** dest_channels,
+    uint32_t num_channels,
+    uint64_t start_frame,
+    uint64_t num_frames,
+    bool allow_whole_file_fallback) {
     if (!is_open()) return false;
     if (num_channels == 0 || num_frames == 0) return true;
     if (dest_channels == nullptr) return false;
@@ -180,8 +205,10 @@ bool MemoryMappedAudioReader::read_frames(float** dest_channels, uint32_t num_ch
                 return true;
             }
         }
-        // A seek/read failure falls through to the whole-file decode below.
+        // A seek/read failure may fall through to the compatibility path below.
     }
+
+    if (!allow_whole_file_fallback) return false;
 
     // Fallback: decode the whole file once, cache it, and serve ranges from it.
     if (!ranged_) {
