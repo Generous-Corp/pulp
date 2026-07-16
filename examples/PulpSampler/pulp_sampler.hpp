@@ -5,6 +5,7 @@
 /// rendering, ADSR, pitch shifting, and processor parameter serialization.
 
 #include "sampler_components.hpp"
+#include "sampler_streaming_runtime.hpp"
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/loop_renderer.hpp>
@@ -21,6 +22,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <string_view>
 #include <vector>
 
 namespace pulp::examples {
@@ -37,9 +39,12 @@ enum SamplerParams : state::ParamID {
 
 class PulpSamplerProcessor : public format::Processor {
 public:
-    static constexpr int kMaxVoices = 8;
+    static constexpr int kMaxVoices =
+        static_cast<int>(SamplerStreamingRuntime::maximum_voice_count());
     static constexpr std::uint32_t kMaxSampleChannels = SamplerSampleStore::kMaxChannels;
     static constexpr std::uint32_t kMaxOutputChannels = 8;
+
+    ~PulpSamplerProcessor() override { release(); }
 
     format::PluginDescriptor descriptor() const override {
         return {
@@ -75,25 +80,56 @@ public:
 
     /// Load a mono sample buffer. Call off the audio thread after prepare().
     bool load_sample(const float* data, int num_samples, float sample_rate) {
-        return sample_store_.load_mono(data,
-                                       num_samples,
-                                       sample_rate,
-                                       audio_ack_generation_.load(std::memory_order_acquire));
+        return streaming_.load_and_publish_resident(
+            [&] {
+                return sample_store_.load_mono(
+                    data,
+                    num_samples,
+                    sample_rate,
+                    audio_ack_generation_.load(std::memory_order_acquire));
+            },
+            [&] { return sample_store_.read_published_view(); });
     }
 
     /// Load a sample from interleaved stereo. Call off the audio thread after prepare().
     bool load_sample_stereo(const float* interleaved, int num_frames, float sample_rate) {
-        return sample_store_.load_interleaved_stereo(
-            interleaved,
-            num_frames,
-            sample_rate,
-            audio_ack_generation_.load(std::memory_order_acquire));
+        return streaming_.load_and_publish_resident(
+            [&] {
+                return sample_store_.load_interleaved_stereo(
+                    interleaved,
+                    num_frames,
+                    sample_rate,
+                    audio_ack_generation_.load(std::memory_order_acquire));
+            },
+            [&] { return sample_store_.read_published_view(); });
     }
 
-    bool has_sample() const { return sample_store_.has_sample(); }
-    int sample_length() const { return sample_store_.sample_length(); }
+    /// Load a true ranged WAV or uncompressed AIFF asset. The call may perform
+    /// file I/O and wait for the sampler's non-audio owner thread.
+    bool load_sample_file(std::string_view path) {
+        return streaming_.load_sample_file(path);
+    }
+
+    bool has_sample() const {
+        return streaming_.published_source().kind != SamplerPublishedSourceKind::None;
+    }
+
+    int sample_length() const {
+        const auto source = streaming_.published_source();
+        const auto frames = source.kind == SamplerPublishedSourceKind::Streamed
+            ? source.streamed.total_frames
+            : source.resident.num_frames;
+        return frames > static_cast<std::uint64_t>(std::numeric_limits<int>::max())
+            ? std::numeric_limits<int>::max()
+            : static_cast<int>(frames);
+    }
+
+    PulpSamplerStreamStats stream_stats() const noexcept {
+        return streaming_.stats();
+    }
 
     void prepare(const format::PrepareContext& ctx) override {
+        release();
         host_sample_rate_ = static_cast<float>(ctx.sample_rate);
         max_block_frames_ = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(ctx.max_buffer_size));
         prepared_output_channels_ = std::clamp<std::uint32_t>(
@@ -104,7 +140,17 @@ public:
         }
         sample_store_.prepare();
         for (auto& voice : voices_) voice.reset();
+        for (auto& generation : requester_generations_) generation = 0;
+        for (auto& cancellation : pending_cancellations_) cancellation = {};
+        streaming_.prepare(host_sample_rate_, max_block_frames_);
         publish_audio_acknowledgement(sample_store_.read_published_view());
+    }
+
+    void release() override {
+        for (auto& voice : voices_) voice.reset();
+        for (auto& cancellation : pending_cancellations_) cancellation = {};
+        streaming_.release();
+        sample_store_.release();
     }
 
     void process(
@@ -116,8 +162,11 @@ public:
     {
         clear_output(output);
 
-        const auto published = sample_store_.read_published_view();
-        const bool can_trigger = sample_store_.slot_view_valid(published);
+        const auto audio_generation = streaming_.begin_audio_callback();
+        flush_pending_cancellations();
+
+        const auto published = streaming_.published_source();
+        const bool can_trigger = published_source_valid(published);
 
         const auto params = current_params();
         const auto block_frames = static_cast<std::uint32_t>(output.num_samples());
@@ -147,10 +196,15 @@ public:
             render_active_voices(output, cursor, block_frames - cursor, params);
         }
 
-        publish_audio_acknowledgement(published);
+        publish_audio_acknowledgement(sample_store_.read_published_view());
+        publish_stream_audio_acknowledgement(published);
+        flush_pending_cancellations();
+        streaming_.complete_audio_callback(audio_generation);
     }
 
 private:
+    friend struct PulpSamplerTestAccess;
+
     struct RenderParams {
         float gain = 1.0f;
         signal::Adsr::Params adsr;
@@ -158,7 +212,13 @@ private:
         bool loop = false;
     };
 
+    struct PendingCancellation {
+        audio::SampleStreamRequesterToken requester{};
+        bool valid = false;
+    };
+
     SamplerSampleStore sample_store_;
+    SamplerStreamingRuntime streaming_;
     audio::SampleKeyMap key_map_;
     std::array<std::vector<float>, kMaxOutputChannels> voice_scratch_{};
     std::array<float*, kMaxOutputChannels> voice_scratch_ptrs_{};
@@ -167,6 +227,8 @@ private:
     std::uint32_t max_block_frames_ = 512;
     std::uint32_t prepared_output_channels_ = 2;
     SamplerVoice voices_[kMaxVoices]{};
+    std::array<std::uint64_t, kMaxVoices> requester_generations_{};
+    std::array<PendingCancellation, kMaxVoices> pending_cancellations_{};
 
     std::uint64_t audio_safe_generation(const audio::PublishedSampleView& published) const noexcept {
         std::array<audio::PublishedSampleView, kMaxVoices> active_views{};
@@ -183,6 +245,27 @@ private:
         const audio::PublishedSampleView& published) noexcept {
         const auto generation = audio_safe_generation(published);
         audio_ack_generation_.store(generation, std::memory_order_release);
+    }
+
+    void publish_stream_audio_acknowledgement(
+        const SamplerPublishedSource& published) noexcept {
+        std::uint64_t generation = published.selection_generation;
+        bool have_generation = published.kind != SamplerPublishedSourceKind::None;
+        for (const auto& voice : voices_) {
+            if (!voice.active || voice.selection_generation == 0) continue;
+            generation = have_generation
+                ? std::min(generation, voice.selection_generation)
+                : voice.selection_generation;
+            have_generation = true;
+        }
+        streaming_.acknowledge_selection(have_generation ? generation : 0);
+    }
+
+    bool published_source_valid(const SamplerPublishedSource& source) const noexcept {
+        if (source.kind == SamplerPublishedSourceKind::Resident)
+            return sample_store_.slot_view_valid(source.resident);
+        return source.kind == SamplerPublishedSourceKind::Streamed &&
+               source.streamed.valid();
     }
 
     RenderParams current_params() const {
@@ -242,7 +325,7 @@ private:
              kMaxOutputChannels});
         if (output_channels == 0) return;
 
-        for (std::uint32_t ch = 0; ch < output_channels; ++ch) {
+        for (std::uint32_t ch = 0; ch < kMaxOutputChannels; ++ch) {
             voice_scratch_ptrs_[ch] = voice_scratch_[ch].data();
         }
 
@@ -252,8 +335,20 @@ private:
             audio::BufferView<float> scratch(voice_scratch_ptrs_.data(),
                                              output_channels,
                                              chunk);
-            for (auto& voice : voices_) {
+            for (std::size_t voice_index = 0; voice_index < kMaxVoices; ++voice_index) {
+                auto& voice = voices_[voice_index];
                 if (!voice.active) continue;
+
+                if (voice.streamed) {
+                    render_streamed_voice(voice_index,
+                                          voice,
+                                          output,
+                                          start_frame + rendered,
+                                          chunk,
+                                          output_channels,
+                                          params);
+                    continue;
+                }
 
                 std::array<const float*, kMaxSampleChannels> sample_ptrs{};
                 if (!sample_store_.populate_channel_ptrs(voice.sample,
@@ -296,23 +391,180 @@ private:
         }
     }
 
+    void render_streamed_voice(std::size_t voice_index,
+                               SamplerVoice& voice,
+                               audio::BufferView<float>& output,
+                               std::uint32_t output_start,
+                               std::uint32_t frames,
+                               std::uint32_t output_channels,
+                               const RenderParams& params) noexcept {
+        const auto pitch_ratio = key_map_.pitch_ratio_for_note(
+            voice.note, params.pitch_semitones);
+        if (!(pitch_ratio > 0.0) ||
+            pitch_ratio > SamplerStreamingRuntime::maximum_pitch_ratio()) {
+            queue_voice_cancellation(voice_index, voice.requester);
+            voice.reset();
+            return;
+        }
+        const auto source_frames_per_output =
+            pitch_ratio * static_cast<double>(voice.streamed_asset.sample_rate) /
+            static_cast<double>(host_sample_rate_);
+
+        enqueue_stream_lookahead(voice, frames, source_frames_per_output);
+        auto plan = voice.stream_reader.plan_block(voice.streamed_asset,
+                                                   frames,
+                                                   source_frames_per_output,
+                                                   host_sample_rate_);
+        audio::BufferView<float> source_scratch(voice_scratch_ptrs_.data(),
+                                                voice.streamed_asset.channels,
+                                                frames);
+        const auto rendered =
+            voice.stream_reader.render_block(voice.streamed_asset, plan, source_scratch);
+        if (rendered.supply == audio::SampleStreamVoiceSupply::Starved) {
+            streaming_.add_starved_frames(frames - rendered.ready_output_frames);
+        }
+
+        voice.adsr.set_params(params.adsr);
+        bool voice_finished = false;
+        for (std::uint32_t frame = 0; frame < frames; ++frame) {
+            const float envelope = voice.adsr.next();
+            if (envelope <= 0.0001f && voice.released) {
+                voice_finished = true;
+                break;
+            }
+            const float scale = envelope * voice.velocity * params.gain;
+            for (std::uint32_t channel = 0; channel < output_channels; ++channel) {
+                float sample = 0.0f;
+                if (voice.streamed_asset.channels == 1) {
+                    sample = voice_scratch_[0][frame];
+                } else if (channel < voice.streamed_asset.channels) {
+                    sample = voice_scratch_[channel][frame];
+                }
+                output.channel_ptr(channel)[output_start + frame] += sample * scale;
+            }
+        }
+
+        if (voice_finished ||
+            rendered.supply == audio::SampleStreamVoiceSupply::EndOfSource ||
+            voice.stream_reader.source_position() >=
+                static_cast<double>(voice.streamed_asset.total_frames)) {
+            queue_voice_cancellation(voice_index, voice.requester);
+            voice.reset();
+        }
+    }
+
+    void enqueue_stream_lookahead(SamplerVoice& voice,
+                                  std::uint32_t frames,
+                                  double source_frames_per_output) noexcept {
+        if (voice.pending_lookahead_valid) {
+            const auto retry = voice.lookahead_reader.enqueue_demands(
+                voice.pending_lookahead,
+                streaming_.command_inbox(),
+                voice.pending_demand_index);
+            voice.pending_demand_index = retry.next_demand_index;
+            if (!retry.complete) return;
+            voice.pending_lookahead_valid = false;
+            voice.pending_demand_index = 0;
+        }
+
+        const auto future = std::min(
+            voice.stream_reader.source_position() +
+                static_cast<double>(voice.streamed_asset.preload_frames - 1),
+            static_cast<double>(voice.streamed_asset.total_frames));
+        if (!voice.lookahead_reader.seek(voice.streamed_asset, future)) return;
+        auto plan = voice.lookahead_reader.plan_block(voice.streamed_asset,
+                                                      frames,
+                                                      source_frames_per_output,
+                                                      host_sample_rate_);
+        if (plan.supply != audio::SampleStreamVoiceSupply::Ready ||
+            plan.demand_count == 0) {
+            return;
+        }
+        const auto queued = voice.lookahead_reader.enqueue_demands(
+            plan, streaming_.command_inbox());
+        if (!queued.complete) {
+            voice.pending_lookahead = plan;
+            voice.pending_demand_index = queued.next_demand_index;
+            voice.pending_lookahead_valid = true;
+        }
+    }
+
     void trigger_note(int note,
                       float velocity,
-                      const audio::PublishedSampleView& sample,
+                      const SamplerPublishedSource& source,
                       const RenderParams& params) {
         SamplerVoice* target = nullptr;
-        for (auto& voice : voices_) {
-            if (!voice.active) {
-                target = &voice;
+        std::size_t target_index = 0;
+        for (std::size_t index = 0; index < kMaxVoices; ++index) {
+            if (!voices_[index].active && !pending_cancellations_[index].valid) {
+                target = &voices_[index];
+                target_index = index;
                 break;
             }
         }
-        if (target == nullptr) target = &voices_[0];
+        if (target == nullptr) {
+            for (std::size_t index = 0; index < kMaxVoices; ++index) {
+                if (pending_cancellations_[index].valid) continue;
+                target = &voices_[index];
+                target_index = index;
+                break;
+            }
+        }
+        if (target == nullptr) return;
 
+        if (target->streamed) {
+            queue_voice_cancellation(target_index, target->requester);
+            if (pending_cancellations_[target_index].valid) return;
+        }
+
+        if (source.kind == SamplerPublishedSourceKind::Streamed) {
+            const auto pitch_ratio = key_map_.pitch_ratio_for_note(
+                note, params.pitch_semitones);
+            if (!(pitch_ratio > 0.0) ||
+                pitch_ratio > SamplerStreamingRuntime::maximum_pitch_ratio())
+                return;
+            auto& requester_generation = requester_generations_[target_index];
+            if (++requester_generation == 0) ++requester_generation;
+            target->start_streamed(
+                note,
+                velocity,
+                host_sample_rate_,
+                source.streamed,
+                {target_index + 1, requester_generation},
+                source.selection_generation);
+            return;
+        }
+
+        const auto& sample = source.resident;
         const auto region = make_region(sample, params.loop);
         const auto speed = playback_speed(note, sample, params);
         if (speed == 0.0) return;
         target->start(note, velocity, speed, host_sample_rate_, sample, region, sample.num_frames);
+        target->selection_generation = source.selection_generation;
+    }
+
+    void queue_voice_cancellation(
+        std::size_t voice_index,
+        audio::SampleStreamRequesterToken requester) noexcept {
+        if (requester.requester_id == 0 || requester.requester_generation == 0)
+            return;
+        if (streaming_.command_inbox().cancel_requester(requester) ==
+            audio::SampleStreamCommandPushStatus::Enqueued) {
+            return;
+        }
+        auto& pending = pending_cancellations_[voice_index];
+        if (!pending.valid) pending = {requester, true};
+    }
+
+    void flush_pending_cancellations() noexcept {
+        for (auto& pending : pending_cancellations_) {
+            if (!pending.valid) continue;
+            if (streaming_.command_inbox().cancel_requester(pending.requester) !=
+                audio::SampleStreamCommandPushStatus::Enqueued) {
+                return;
+            }
+            pending = {};
+        }
     }
 
     void release_note(int note) {
