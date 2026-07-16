@@ -456,21 +456,42 @@ Combined with the bind grid above, this is a complete keyed readout: every host
 parameter has an element, so a parameter the design draws **no** control for still
 has text to paint.
 
-**The returned reference is valid until the next `sync_from_host_params()` or
-frame swap** — paint reads it and draws; it does not store it.
+**The returned reference is valid until the next `sync_from_host_params()`, a
+frame swap, or a `build_bind_grid()` rebuild** — paint reads it and draws; it does
+not store it. The last two *reallocate* `elements_`, so they invalidate every
+outstanding reference.
+
+> ### ⚠️ Do not cache the index either
+>
+> A frame swap and a `build_bind_grid()` rebuild replace the element set, so an
+> index resolved before one **silently means a different parameter after it**.
+> `element_display_text` bounds-checks, so this does not crash — it returns
+> *another parameter's readout*, which is precisely the stale lie the rest of this
+> channel is built to prevent.
+>
+> **Resolve the index in `paint()`, every paint** (`element_for_param_key` is a
+> vector scan over a handful of elements, not a host call). If you do hold an
+> index across ticks, re-resolve it on `on_param_key_changed`, on
+> `on_active_frame_changed`, and after any `build_bind_grid()` you issue.
 
 **Hold your keys as `std::string` members.** `element_for_param_key` takes a
 `const std::string&`, so passing a string literal from `paint()` builds a
-temporary and allocates in exactly the place that must not — or resolve the index
-once at tick and paint from that.
+temporary and allocates in exactly the place that must not.
 
-**No truncation, no length cap.** The cache holds the host's string verbatim, so a
-readout is never a partial lie. A fixed-capacity buffer is needed only to cross a
-thread or a C ABI, and this channel does neither: `sync_from_host_params()` and
-`paint()` both run on the UI thread, so the read is a plain member read rather
-than a published frame. (Contrast `MeterSource` / `ScalarSource`, whose producer
-*is* the audio thread and which therefore ride a `TripleBuffer` of fixed-capacity,
-trivially-copyable frames.)
+**The cache does not truncate and carries no length cap** — it holds whatever the
+host returned, verbatim, so *the cache* is never where a readout becomes a partial
+lie. That is a claim about the cache, not about the whole path: a surface's own
+formatter may cap before the text ever reaches it. `StateStoreHostParamSurface`'s
+fallback for a parameter that declares no `ParamInfo::to_string` formats through a
+`char[64]`, so its default numeric+unit rendering is bounded at 63 characters.
+
+A fixed-capacity buffer here would only be needed to cross a thread or a C ABI, and
+this channel does neither: `sync_from_host_params()` and `paint()` both run on the
+UI thread **by contract** (`sync_from_host_params()` asserts it in debug builds),
+so the read is a plain member read rather than a published frame. (Contrast
+`MeterSource` / `ScalarSource`, whose producer genuinely *is* the audio thread and
+which therefore ride a `TripleBuffer` of fixed-capacity, trivially-copyable
+frames.)
 
 **Staleness is tick-granular.** `paint()` sees the text from the most recent
 `sync_from_host_params()`, and repainting never re-reaches the host — three paints
@@ -482,6 +503,19 @@ returns empty and `element_has_display_text` returns `false` for an out-of-range
 index, an element with no `param_key`, and a key no surface resolves. A key the
 host *stops* resolving is **cleared** at the next sync rather than left at its last
 value — a readout for a parameter that no longer exists would be a stale lie.
+
+**Display text is a host cache, not local state — a frame swap empties it.**
+Removing the surface entirely (the preview/screenshot path) makes
+`sync_from_host_params()` a no-op, so the elements *currently loaded* keep their
+last readout. That is the same "degrade to local state" the value channel has, but
+it does **not** survive a frame swap, and the difference is structural rather than
+an oversight: `value` and `text` have authored counterparts in each frame's own
+element set, so a swap restores something meaningful, whereas display text exists
+only in the cache the tick fills. A swap installs elements that have never been
+synced, so their readout is empty — the same state as before the first sync — and
+stays empty until a sync against a live surface. It reads as **unbound**, so a
+painter gated on `element_has_display_text` draws nothing rather than the previous
+frame's value.
 
 Empty text alone is therefore ambiguous: a host may legitimately format a value
 *as* an empty string. Gate on `element_has_display_text(i)` when the difference

@@ -155,6 +155,17 @@ struct DesignFrameElement {
     /// via element_display_text() / element_has_display_text() rather than
     /// directly — those bound the index and carry the contract.
     ///
+    /// Purely a HOST CACHE, with no authored counterpart — which is what makes
+    /// it behave differently from `value` and `text` when the host goes away.
+    /// Those two have an authored value in the frame's own element set, so a
+    /// frame swap restores something meaningful ("degrade to local state"). This
+    /// has none: the frames_ copy never carries display text, so a swap installs
+    /// elements that have simply never been synced, and their readout is empty
+    /// until the next sync against a live surface — the same state as before the
+    /// first sync. That reads as UNBOUND (display_text_bound == false), so a
+    /// painter gated on element_has_display_text() draws nothing rather than a
+    /// stale value from the frame it just left.
+    ///
     /// Distinct from `text`, which is the value_label's own painted readout and
     /// is author-owned (set_element_text): an element may carry a caller-set
     /// `text` AND a host-formatted `display_text` without either clobbering the
@@ -442,16 +453,32 @@ public:
     //
     // Paint-safe: bounds `i` and returns a reference to the cached string. No
     // host call, no lock, no allocation, no copy. The reference is valid until
-    // the next sync_from_host_params() or frame swap; a painter reads it and
-    // draws, it does not store it.
+    // the next sync_from_host_params(), a frame swap, or a build_bind_grid()
+    // rebuild — each replaces or reallocates elements_. A painter reads it and
+    // draws; it does not store it, and it does not cache the INDEX across those
+    // either (see element_for_param_key).
     //
-    // The text is NOT truncated and carries no length cap: the cache holds the
-    // host's string verbatim, so a readout is never a partial lie. A fixed
-    // buffer would be needed only to cross a thread or a C ABI, and this channel
-    // does neither — sync_from_host_params() and paint() both run on the UI
-    // thread, so the cache is a plain member read rather than a published frame.
-    // (Contrast MeterSource/ScalarSource, whose producer IS the audio thread and
-    // which therefore ride a TripleBuffer of fixed-capacity frames.)
+    // Returning a reference rather than publishing a fixed-capacity frame is the
+    // same call `text` / element_text() already make: both fields live in the
+    // same elements_ vector, are written by the same tick, and are read by the
+    // same paint. Whatever is true of one is true of the other, so a TripleBuffer
+    // on this one and a bare reference on the field beside it would be
+    // incoherent. What makes it safe is not that a tick is somehow guaranteed to
+    // be on the paint thread — nothing here enforces that, which is why
+    // sync_from_host_params() asserts it in debug — but that the ONE writer and
+    // the ONE reader are the same UI thread by contract. (Contrast
+    // MeterSource/ScalarSource, whose producer genuinely IS the audio thread and
+    // which therefore ride a TripleBuffer of fixed-capacity frames. That is the
+    // shape this would need if the tick ever moved off the UI thread — and
+    // display_text is the field that would hurt, since a >SSO string reassigned
+    // under a concurrent reader is a use-after-free, not a torn value.)
+    //
+    // The CACHE does not truncate and carries no length cap: it holds whatever
+    // string the host returned, verbatim, so the cache is never where a readout
+    // becomes a partial lie. That is a claim about this cache only, not about the
+    // whole path — a surface's own formatter may cap before the text ever
+    // arrives (StateStoreHostParamSurface's no-formatter fallback builds through
+    // a char[64], so its default numeric+unit rendering is bounded at 63 chars).
     //
     // Every host parameter has an element once build_bind_grid() has run, so
     // `element_for_param_key(key)` + this is a complete keyed readout for a

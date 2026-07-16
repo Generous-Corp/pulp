@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/design_frame_view.hpp>
@@ -1785,7 +1786,8 @@ TEST_CASE("every host parameter has a readout once the bind grid is built",
     CHECK(dfv.element_has_display_text(i));
     CHECK(dfv.element_display_text(i) == "disp:undrawn_mix");
 
-    // And it paints, keyed, alloc-free — the getEffectParamText shape.
+    // And it paints, keyed, alloc-free: a host can ask for any parameter's
+    // formatted text by key and draw it, with no control behind it.
     dfv.key = "undrawn_mix";
     paint_once(dfv);
     CHECK(dfv.painted == "disp:undrawn_mix");
@@ -1814,7 +1816,7 @@ TEST_CASE("a value_label keeps its own painted readout alongside the cache",
     CHECK(dfv.element_has_display_text(0));
 }
 
-TEST_CASE("dropping the surface entirely degrades to local state, as values do",
+TEST_CASE("dropping the surface leaves the loaded elements' text standing",
           "[view][host-param][paint-safe]") {
     // Removing the surface is the preview/screenshot path, and sync_from_host_params
     // early-returns on it — so the last text stands rather than being cleared.
@@ -1823,6 +1825,9 @@ TEST_CASE("dropping the surface entirely degrades to local state, as values do",
     // a host keeps its last known readout instead of blanking. It is distinct from
     // a LIVE surface that stops resolving a key, which does clear (above), because
     // there the host is present and authoritative.
+    //
+    // Scoped to the elements CURRENTLY LOADED. A frame swap replaces them and the
+    // incoming set has no cached text to stand — see the frame-swap case below.
     ReadoutPaintView dfv = make_readout_view("gain");
     FakeHostParamSurface params;
     params.values["gain"] = 0.6;
@@ -1839,4 +1844,117 @@ TEST_CASE("dropping the surface entirely degrades to local state, as values do",
     paint_once(dfv);
     CHECK(dfv.painted == "disp:gain");
     CHECK(dfv.paint_allocations == 0);
+}
+
+TEST_CASE("a frame swap empties the readout cache rather than carrying it over",
+          "[view][host-param][paint-safe]") {
+    // display_text is a HOST CACHE with no authored counterpart, and a frame swap
+    // installs the incoming frame's pristine elements — which have never been
+    // synced. So the readout is empty afterwards even though the outgoing frame
+    // had one, and even with no surface to re-fill it. That is not the "degrade
+    // to local state" promise failing: there IS no local display text to degrade
+    // to (contrast `text`, which each frame authors and therefore restores).
+    //
+    // What matters is that it reads as UNBOUND, not as the previous frame's
+    // value: a painter gated on element_has_display_text draws nothing rather
+    // than a readout belonging to a frame the user already left.
+    ReadoutPaintView dfv = make_readout_view("mix");
+    FakeHostParamSurface params;
+    params.values["mix"] = 0.5;
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+    REQUIRE(dfv.element_display_text(0) == "disp:mix");
+
+    DesignFrameElement knob;
+    knob.kind = DesignFrameElement::Kind::knob;
+    knob.x = 10; knob.y = 10; knob.w = 20; knob.h = 20;
+    knob.cx = 20; knob.cy = 20;
+    knob.hit_radius = 20.0f;
+    knob.param_key = "mix";           // the SAME key the outgoing frame carried
+    const int second = dfv.add_frame(R"(<svg width="100" height="100"/>)", {knob},
+                                     0, 0, 100, 100);
+
+    // No surface: the preview/screenshot path, where nothing can re-fill the cache.
+    dfv.set_host_params(nullptr);
+    dfv.set_active_frame(second);
+
+    CHECK(dfv.element_display_text(0).empty());
+    CHECK_FALSE(dfv.element_has_display_text(0));   // unbound, not stale
+    dfv.sync_from_host_params();                    // no-op: no surface
+    CHECK(dfv.element_display_text(0).empty());
+
+    // And paint draws nothing rather than the frame the user left.
+    paint_once(dfv);
+    CHECK(dfv.painted.empty());
+    CHECK_FALSE(dfv.painted_bound);
+
+    // A live surface re-fills it, so the empty is a "not synced yet", not a wedge.
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+    CHECK(dfv.element_display_text(0) == "disp:mix");
+    CHECK(dfv.element_has_display_text(0));
+}
+
+TEST_CASE("an index cached across a bind-grid rebuild names a different parameter",
+          "[view][host-param][paint-safe]") {
+    // build_bind_grid erases and re-appends the stand-in tail, so an index
+    // resolved before it does not survive it. This is bounds-safe and therefore
+    // SILENT: the stale index reads another parameter's readout rather than
+    // crashing. Pinning it here is what keeps the docs' "re-resolve, never cache
+    // the index" guidance from being advice nobody can check.
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.5;
+    params.values["mix"] = 0.5;
+    params.values["pan"] = 0.5;
+    dfv.set_host_params(&params);
+
+    dfv.build_bind_grid({"mix"});
+    const int cached = dfv.element_for_param_key("mix");
+    REQUIRE(cached >= 0);
+    dfv.sync_from_host_params();
+    REQUIRE(dfv.element_display_text(cached) == "disp:mix");
+
+    // Re-grid with a key ordered ahead of "mix": the tail is rebuilt beneath the
+    // held index.
+    dfv.build_bind_grid({"pan", "mix"});
+    dfv.sync_from_host_params();
+
+    // The cached index still resolves and still reports "bound" — it just means
+    // something else now. Exactly the readout-for-the-wrong-parameter the
+    // unbound/stale rules elsewhere in this channel prevent.
+    CHECK(dfv.element_has_display_text(cached));
+    CHECK(dfv.element_display_text(cached) == "disp:pan");
+
+    // Re-resolving is the fix, and it is what a painter must do every paint.
+    CHECK(dfv.element_display_text(dfv.element_for_param_key("mix")) == "disp:mix");
+}
+
+TEST_CASE("the tick's main-thread guard passes when a backend reports the main thread",
+          "[view][host-param][paint-safe]") {
+    // sync_from_host_params writes the very strings paint() holds references
+    // into, so it asserts (debug builds) that it is on the host main thread.
+    // The guard keys off MainThreadDispatcher, which most headless tests never
+    // register — leaving it inert. Register one that reports "on main" and drive
+    // a real sync: the legitimate path must stay quiet rather than trip on the
+    // presence of a backend alone. Without this, the guard's inert-by-default
+    // shape means nothing would ever exercise it.
+    const auto token = events::MainThreadDispatcher::register_backend(
+        {/*post=*/[](events::Task t) { t(); return true; },
+         /*is_main_thread=*/[] { return true; },
+         /*post_after=*/{}});
+    REQUIRE(events::MainThreadDispatcher::has_backend());
+    REQUIRE(events::MainThreadDispatcher::is_main_thread());
+
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.75;
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();   // must not trip the assert
+
+    CHECK(dfv.element_display_text(0) == "disp:gain");
+    CHECK(dfv.element_has_display_text(0));
+
+    events::MainThreadDispatcher::unregister_backend(token);
+    CHECK_FALSE(events::MainThreadDispatcher::has_backend());
 }
