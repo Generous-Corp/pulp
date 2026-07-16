@@ -50,7 +50,7 @@ struct SampleStreamPageDemand {
 enum class SampleStreamCommandType : std::uint8_t {
     DemandPage,
     CancelRequester,
-    CancelSourceGeneration,
+    CancelPendingSourceDemands,
 };
 
 struct SampleStreamCommand {
@@ -95,10 +95,10 @@ public:
         });
     }
 
-    SampleStreamCommandPushStatus cancel_source_generation(
+    SampleStreamCommandPushStatus cancel_pending_source_demands(
         SampleStreamSourceToken source) noexcept {
         return push({
-            .type = SampleStreamCommandType::CancelSourceGeneration,
+            .type = SampleStreamCommandType::CancelPendingSourceDemands,
             .source = source,
         });
     }
@@ -133,7 +133,7 @@ struct SampleStreamCommandDrainResult {
     std::size_t commands_drained = 0;
     std::size_t demand_commands = 0;
     std::size_t cancel_requester_commands = 0;
-    std::size_t cancel_source_commands = 0;
+    std::size_t cancel_pending_source_commands = 0;
     std::size_t demands_inserted = 0;
     std::size_t demands_refreshed = 0;
     std::size_t demands_rejected_full = 0;
@@ -141,17 +141,61 @@ struct SampleStreamCommandDrainResult {
     std::size_t requests_cancelled = 0;
 };
 
+class SampleStreamCacheService;
+
+class SampleStreamSourceRegistrationProof {
+public:
+    SampleStreamSourceRegistrationProof() = default;
+
+    bool matches(SampleStreamSourceToken token,
+                 const SampleStreamWindow* window,
+                 std::uint64_t total_frames,
+                 std::uint64_t page_frames) const noexcept {
+        return window_ != nullptr && window_ == window &&
+               source_id_ == token.source_id &&
+               source_generation_ == token.source_generation &&
+               total_frames_ == total_frames && page_frames_ == page_frames;
+    }
+
+private:
+    friend class SampleStreamCacheService;
+
+    SampleStreamSourceRegistrationProof(SampleStreamSourceToken token,
+                                        const SampleStreamWindow* window,
+                                        std::uint64_t total_frames,
+                                        std::uint64_t page_frames) noexcept
+        : window_(window),
+          source_id_(token.source_id),
+          source_generation_(token.source_generation),
+          total_frames_(total_frames),
+          page_frames_(page_frames) {}
+
+    const SampleStreamWindow* window_ = nullptr;
+    std::uint64_t source_id_ = 0;
+    std::uint64_t source_generation_ = 0;
+    std::uint64_t total_frames_ = 0;
+    std::uint64_t page_frames_ = 0;
+};
+
+static_assert(std::is_trivially_copyable_v<SampleStreamSourceRegistrationProof>);
+static_assert(std::is_standard_layout_v<SampleStreamSourceRegistrationProof>);
+
 struct SampleStreamCacheSourceView {
     SampleStreamSourceToken token{};
     SampleStreamWindow* window = nullptr;
     std::uint64_t total_frames = 0;
     std::uint64_t page_frames = 0;
+    SampleStreamSourceRegistrationProof registration{};
 
     bool valid() const noexcept {
         return token.source_id != 0 && token.source_generation != 0 &&
-               window != nullptr && total_frames != 0 && page_frames != 0;
+               window != nullptr && total_frames != 0 && page_frames != 0 &&
+               registration.matches(token, window, total_frames, page_frames);
     }
 };
+
+static_assert(std::is_trivially_copyable_v<SampleStreamCacheSourceView>);
+static_assert(std::is_standard_layout_v<SampleStreamCacheSourceView>);
 
 enum class SampleStreamSourceAddStatus : std::uint8_t {
     Added,
@@ -159,6 +203,13 @@ enum class SampleStreamSourceAddStatus : std::uint8_t {
     DuplicateSource,
     BudgetExceeded,
     AllocationFailed,
+};
+
+enum class SampleStreamSourceRetireStatus : std::uint8_t {
+    Scheduled,
+    InvalidGeneration,
+    StaleSource,
+    AlreadyScheduled,
 };
 
 struct SampleStreamSourceAddResult {
@@ -183,6 +234,8 @@ enum class SampleStreamServiceStatus : std::uint8_t {
 struct SampleStreamCacheServiceStats {
     std::uint64_t reserved_page_bytes = 0;
     std::uint64_t source_count = 0;
+    std::uint64_t sources_retire_scheduled = 0;
+    std::uint64_t sources_collected = 0;
     std::uint64_t decode_calls = 0;
     std::uint64_t pages_published = 0;
     std::uint64_t already_ready = 0;
@@ -282,6 +335,44 @@ public:
         }
     }
 
+    SampleStreamSourceRetireStatus retire_source(
+        SampleStreamSourceToken token,
+        std::uint64_t retire_after_audio_generation) noexcept {
+        if (retire_after_audio_generation == 0 || active_audio_generation_ == 0 ||
+            retire_after_audio_generation < active_audio_generation_) {
+            return SampleStreamSourceRetireStatus::InvalidGeneration;
+        }
+        auto* source = find_source(token);
+        if (source == nullptr) return SampleStreamSourceRetireStatus::StaleSource;
+        if (source->retire_after_audio_generation != 0)
+            return SampleStreamSourceRetireStatus::AlreadyScheduled;
+        source->retire_after_audio_generation = retire_after_audio_generation;
+        ++stats_.sources_retire_scheduled;
+        return SampleStreamSourceRetireStatus::Scheduled;
+    }
+
+    std::size_t collect_retired_sources() noexcept {
+        std::size_t collected = 0;
+        for (auto source = sources_.begin(); source != sources_.end();) {
+            const auto retire_after = (*source)->retire_after_audio_generation;
+            if (retire_after == 0 || completed_audio_generation_ < retire_after) {
+                ++source;
+                continue;
+            }
+            scheduler_.cancel_source_generation(
+                (*source)->config.token.source_id,
+                (*source)->config.token.source_generation);
+            const auto bytes = page_storage_bytes((*source)->config).value_or(0);
+            stats_.reserved_page_bytes -=
+                std::min(stats_.reserved_page_bytes, bytes);
+            source = sources_.erase(source);
+            ++collected;
+        }
+        stats_.source_count = sources_.size();
+        stats_.sources_collected += collected;
+        return collected;
+    }
+
     SampleStreamScheduleStatus request_page(const SampleStreamPageDemand& demand) noexcept {
         auto* source = find_source(demand.source);
         if (source == nullptr) {
@@ -299,7 +390,7 @@ public:
                                            requester.requester_generation);
     }
 
-    std::size_t cancel_source_generation(SampleStreamSourceToken source) noexcept {
+    std::size_t cancel_pending_source_demands(SampleStreamSourceToken source) noexcept {
         if (source.source_id == 0 || source.source_generation == 0) return 0;
         return scheduler_.cancel_source_generation(source.source_id,
                                                    source.source_generation);
@@ -333,10 +424,10 @@ public:
                     result.requests_cancelled +=
                         cancel_requester(command->requester);
                     break;
-                case SampleStreamCommandType::CancelSourceGeneration:
-                    ++result.cancel_source_commands;
+                case SampleStreamCommandType::CancelPendingSourceDemands:
+                    ++result.cancel_pending_source_commands;
                     result.requests_cancelled +=
-                        cancel_source_generation(command->source);
+                        cancel_pending_source_demands(command->source);
                     break;
             }
         }
@@ -443,6 +534,7 @@ private:
         std::vector<float*> channel_ptrs;
         std::vector<SlotRecord> slots;
         std::uint64_t next_publish_sequence = 1;
+        std::uint64_t retire_after_audio_generation = 0;
     };
 
     enum class PageReservationStatus : std::uint8_t {
@@ -485,6 +577,11 @@ private:
             .window = &source.window,
             .total_frames = source.config.total_frames,
             .page_frames = source.config.page_frames,
+            .registration = SampleStreamSourceRegistrationProof(
+                source.config.token,
+                &source.window,
+                source.config.total_frames,
+                source.config.page_frames),
         };
     }
 

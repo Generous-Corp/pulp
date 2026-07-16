@@ -12,11 +12,10 @@
 ///
 /// Short samples (total length <= preload window) take a zero-overhead
 /// fully-resident fast path: no ring, no background thread, free looping. This
-/// makes the primitive a safe drop-in for samplers that mix long one-shots with
-/// short slices — short material behaves exactly like an in-memory player while
-/// long material streams. Consumers such as the offline-stretch / tempo sampler
-/// and the example PulpSampler can adopt it per-voice (see
-/// docs/guides/streaming-sample-source.md).
+/// makes the primitive useful for one sequential long-sample transport beside
+/// resident short material. Polyphonic samplers should share decoded pages
+/// through SampleStreamCacheService rather than instantiate this source, its
+/// ring, and its worker once per voice (see docs/guides/streaming-sample-source.md).
 ///
 /// Thread model:
 ///   * prepare()/release()/reset()  — control thread, may allocate, never on
