@@ -18,7 +18,7 @@ set -euo pipefail
 # ── configuration ───────────────────────────────────────────────────────────
 PINNED_XCODE_VERSION="${PULP_PINNED_XCODE:-26.5}"   # Xcode 26.5 (17F42)
 CI_ROOT="${PULP_CI_ROOT:-/Users/Shared/pulp-ci}"
-CCACHE_MAX_SIZE="${PULP_CCACHE_MAX_SIZE:-80G}"
+CCACHE_MAX_SIZE="${PULP_CCACHE_MAX_SIZE:-200G}"
 REPO_SLUG="${PULP_REPO_SLUG:-danielraffel/pulp}"
 RUNNER_LABELS="${PULP_RUNNER_LABELS:-self-hosted,macos,arm64,pulp-build}"
 # Runner name prefix; instances are named "<prefix>-NN". Use a machine
@@ -111,12 +111,36 @@ tune_ccache() {
   # config was the bug fixed here: jobs were silently capped at ccache's
   # 5 GB default.
   do_ ccache --set-config "cache_dir=$newdir"
-  for kv in "max_size=$CCACHE_MAX_SIZE" "compression=true" "inode_cache=true"; do
+  # Cross-worktree cache hits + correctness, written into the SHARED config so
+  # env-less ccache invocations inherit them (not just runner jobs that carry
+  # the per-runner .env). A CI host runs many worktrees off one .git, so with
+  # no path normalization every worktree is a COLD cache by construction:
+  #   - base_dir → rewrite absolute source paths under the CI work root to
+  #     relative, so a hit compiled in one workspace serves another. Derived as
+  #     the PARENT of the runner work root ($CI_ROOT/tmp/<name>) — never a
+  #     hardcoded user home, so it is correct on any host.
+  #   - hash_dir=false → keep the build CWD out of the hash (pairs with base_dir).
+  #   - compiler_check=content + depend_mode=false → the #3504 correctness combo.
+  #     Depend mode with mtime compiler keying on a cache shared across worktrees
+  #     serves a stale/false-hit object that corrupts unrelated TUs (a pure
+  #     function returns "" and change-unrelated tests fail). build.yml forces
+  #     the same combo via job env for the GH-runner lane; this is its durable
+  #     twin for every other consumer of the shared cache. Depend mode stays OFF
+  #     fleet-wide.
+  local work_root="$CI_ROOT/tmp" base_dir
+  base_dir="$(dirname "$work_root")"
+  for kv in \
+    "max_size=$CCACHE_MAX_SIZE" \
+    "compression=true" \
+    "inode_cache=true" \
+    "base_dir=$base_dir" \
+    "hash_dir=false" \
+    "compiler_check=content" \
+    "depend_mode=false"; do
     do_ env CCACHE_DIR="$newdir" ccache --set-config "$kv"
   done
-  ok "ccache: cache_dir=$newdir, max_size=$CCACHE_MAX_SIZE (in \$CCACHE_DIR/ccache.conf)"
-  note "cross-worktree path normalization (CCACHE_BASEDIR + CCACHE_NOHASHDIR)"
-  note "is applied per runner workspace by the --with-runners phase"
+  ok "ccache: cache_dir=$newdir, max_size=$CCACHE_MAX_SIZE, base_dir=$base_dir, hash_dir=false, compiler_check=content, depend_mode=false (in \$CCACHE_DIR/ccache.conf)"
+  note "per-runner CCACHE_BASEDIR/CCACHE_NOHASHDIR still layer on top in the --with-runners phase"
 }
 
 # ── Skia ─────────────────────────────────────────────────────────────────────
