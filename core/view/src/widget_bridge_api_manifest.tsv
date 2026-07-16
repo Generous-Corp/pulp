@@ -388,8 +388,6 @@ __gpuQueuePresentTextureImpl	gpu	function	core/view/src/widget_bridge/gpu_api.cp
 __gpuCanvasPresentImpl	gpu	function	core/view/src/widget_bridge/gpu_api.cpp
 __requestAdapterImpl	gpu	promise_function	core/view/src/widget_bridge/gpu_api.cpp
 __gpuComputeDispatchImpl	gpu	function	core/view/src/widget_bridge/gpu_api.cpp
-__registerNativeBuffer	gpu	function	core/view/src/widget_bridge/gpu_api.cpp
-__writeNativeBuffer	gpu	function	core/view/src/widget_bridge/gpu_api.cpp
 __dracoDecodeBuffer	gpu	function	core/view/src/widget_bridge/gpu_api.cpp
 queryIndexBuild	query	function	core/view/src/widget_bridge/query_service_api.cpp
 queryIndexSearch	query	function	core/view/src/widget_bridge/query_service_api.cpp
