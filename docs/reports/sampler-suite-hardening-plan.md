@@ -97,6 +97,23 @@ inside an audio-callback API.
 - Spectral gates declare stimulus, window, warm-up, estimator, seed, sample
   rate, and named tolerance.
 
+The assertion domains stay separate:
+
+- Raw float-bit comparison and `pulp audio validate compare --mode null` gate
+  lossless transport, block independence, and resident/streamed equivalence.
+- Explicit counters gate underruns, decode errors, stale generations, cache
+  misses, and final source position. A perceptual result cannot waive a
+  nonzero transport residual or service error.
+- `RtAllocationProbe` gates prepared callback work across at least 10,000
+  invocations. `ScopedNoAlloc` alone is not Release evidence.
+- Audio Quality Lab profiles (`added-hf`, `transient-integrity`,
+  `noise-roughness`, `graininess`, `stereo-width`, and `tonal-balance`) provide
+  supplementary regression evidence over exported float WAV artifacts.
+  Quality Lab alignment is inspection support, not latency proof.
+- Strict alias-rejection thresholds wait for the oscillator lane's stable
+  shared analyzer. Until then, independent-reference nulls are hard gates and
+  generic spectrum/THD results are characterization only.
+
 ### S1 — Honest file-backed streaming
 
 - The file adapter retains a mapped ranged reader rather than decoding the

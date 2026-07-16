@@ -542,7 +542,7 @@ TEST_CASE("Prepared sample stream scheduler hot operations do not allocate",
     REQUIRE(selected->source_id == 11);
 }
 
-TEST_CASE("Sample stream scheduler deduplicates shared pages at the highest urgency",
+TEST_CASE("Sample stream scheduler refreshes a requester with its latest urgency",
           "[audio][sampler][stream-scheduler]") {
     SampleStreamScheduler scheduler;
     REQUIRE(scheduler.prepare(2));
@@ -573,8 +573,8 @@ TEST_CASE("Sample stream scheduler deduplicates shared pages at the highest urge
 
     const auto selected = scheduler.pop_most_urgent();
     REQUIRE(selected.has_value());
-    REQUIRE(selected->resident_source_frames == 256);
-    REQUIRE(selected->demand_class == pulp::audio::SampleStreamDemandClass::Attack);
+    REQUIRE(selected->resident_source_frames == 10000);
+    REQUIRE(selected->demand_class == pulp::audio::SampleStreamDemandClass::Release);
     REQUIRE(scheduler.stats().inserted == 1);
     REQUIRE(scheduler.stats().refreshed == 2);
 }
