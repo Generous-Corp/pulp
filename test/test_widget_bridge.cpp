@@ -4253,6 +4253,35 @@ TEST_CASE("WidgetBridge __gpuQueueSubmitImpl returns boolean for all engine inpu
     }
 }
 
+TEST_CASE("WidgetBridge does not expose the write-only native buffer stubs",
+          "[widget_bridge][gpu][native-buffer]") {
+    // __registerNativeBuffer / __writeNativeBuffer were a planned zero-copy
+    // upload pool that never grew a consumer: the only writer was the resize
+    // in __registerNativeBuffer, and __writeNativeBuffer validated its args,
+    // found the buffer, DISCARDED the base64 payload, and returned true. No
+    // code path ever read a registered buffer back out for a GPU upload, so
+    // the map was write-only and the "success" was a lie — JS that uploaded a
+    // mesh through it got a truthy result and no bytes.
+    //
+    // They are removed rather than made to fail honestly: with no upload
+    // consumer, an honest-failing entry point is still dead surface published
+    // in packages/pulp-react's generated d.ts. If zero-copy upload is revived,
+    // land the register/write/upload path together, re-add the manifest rows,
+    // and regenerate. Absence is the contract until then.
+    pulp::view::ScriptEngine engine;
+    pulp::view::View root;
+    root.set_bounds({0, 0, 200, 200});
+    pulp::state::StateStore store;
+    pulp::view::WidgetBridge bridge(engine, root, store);
+
+    REQUIRE(engine.evaluate("typeof __registerNativeBuffer").toString() == "undefined");
+    REQUIRE(engine.evaluate("typeof __writeNativeBuffer").toString() == "undefined");
+
+    // A neighboring gpu_api.cpp registration is still present, so the two
+    // checks above prove targeted removal — not a wholesale missing GPU API.
+    REQUIRE(engine.evaluate("typeof __dracoDecodeBuffer").toString() == "function");
+}
+
 TEST_CASE("WidgetBridge __gpuCanvasConfigureImpl surfaces presentable flag",
           "[widget_bridge][gpu-canvas][ios-d3b-slice4]") {
     // The configure result must carry a `presentable` boolean that reflects
