@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <random>
 #include <vector>
 
 using namespace pulp::signal;
@@ -331,6 +332,253 @@ TEST_CASE("FFT64 runs a double-precision round trip and real transform",
     std::vector<double> db(1, 0.0);
     fft.magnitude_db(bins.data(), db.data(), 1);
     REQUIRE_THAT(db[0], WithinAbs(-40.0, 1e-12));
+}
+
+// ── FFT inverse_real ─────────────────────────────────────────────────────────
+
+namespace {
+
+// Deterministic (fixed-seed) pseudo-random signal — no system randomness, so
+// runs are reproducible across machines and CI.
+std::vector<float> random_signal(int n, std::uint32_t seed) {
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::vector<float> x(static_cast<size_t>(n));
+    for (auto& v : x) v = dist(rng);
+    return x;
+}
+
+std::vector<float> impulse_signal(int n) {
+    std::vector<float> x(static_cast<size_t>(n), 0.0f);
+    x[0] = 1.0f;
+    return x;
+}
+
+std::vector<float> dc_signal(int n) {
+    return std::vector<float>(static_cast<size_t>(n), 0.37f);
+}
+
+std::vector<float> sine_signal(int n, int bin) {
+    std::vector<float> x(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i)
+        x[static_cast<size_t>(i)] =
+            std::sin(2.0f * 3.14159265358979323846f * static_cast<float>(bin) * i / n);
+    return x;
+}
+
+std::vector<float> multi_tone_signal(int n) {
+    std::vector<float> x(static_cast<size_t>(n), 0.0f);
+    for (int bin : {1, 3, 7, 11}) {
+        if (bin >= n / 2) continue;
+        for (int i = 0; i < n; ++i)
+            x[static_cast<size_t>(i)] +=
+                0.25f * std::sin(2.0f * 3.14159265358979323846f * bin * i / n);
+    }
+    return x;
+}
+
+// inverse_real(forward_real(x)) should reproduce x for every FftT instantiation
+// (this exercises whichever backend `Fft` resolves to — vdsp on Apple).
+void check_round_trip(int n, const std::vector<float>& signal, float tol) {
+    Fft fft(n);
+    std::vector<std::complex<float>> spectrum(static_cast<size_t>(n));
+    std::vector<float> recovered(static_cast<size_t>(n));
+
+    fft.forward_real(signal.data(), spectrum.data());
+    fft.inverse_real(spectrum.data(), recovered.data());
+
+    for (int i = 0; i < n; ++i) {
+        REQUIRE_THAT(recovered[static_cast<size_t>(i)],
+                     WithinAbs(signal[static_cast<size_t>(i)], tol));
+    }
+}
+
+} // namespace
+
+TEST_CASE("FFT inverse_real round-trip recovers forward_real input",
+          "[signal][fft][inverse_real]") {
+    for (int n : {64, 128, 256, 1024, 4096}) {
+        // Float32 error accumulates with transform size; scale tolerance accordingly.
+        const float tol = 5e-4f + 2e-7f * static_cast<float>(n);
+
+        check_round_trip(n, impulse_signal(n), tol);
+        check_round_trip(n, dc_signal(n), tol);
+        check_round_trip(n, sine_signal(n, 5), tol);
+        check_round_trip(n, multi_tone_signal(n), tol);
+        check_round_trip(n, random_signal(n, 0xF17700D5u), tol);
+    }
+}
+
+TEST_CASE("FFT inverse_real survives moving the FftT that owns its scratch",
+          "[signal][fft][inverse_real][move]") {
+    // FftT's move ctor/assignment enumerate their members explicitly, so a new
+    // owning member has to be transferred in both or the moved-to object is left
+    // with an empty (move-ctor) or wrong-sized (move-assign) scratch and
+    // inverse_real() writes out of bounds.
+    //
+    // Fft64 is deliberate, not incidental: inverse_real_scratch_ is only touched
+    // by inverse_real_fallback(), and FftT<float> takes the vDSP branch on Apple,
+    // so a float-only move test would pass whether or not the scratch is
+    // transferred. Fft64 never satisfies the vDSP gate, so it always drives the
+    // fallback and is the only variant here that can actually observe the bug.
+    constexpr int n = 256;
+    constexpr double tol = 1e-9;
+    std::vector<double> signal(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i)
+        signal[static_cast<size_t>(i)] =
+            std::sin(2.0 * 3.14159265358979323846 * 5.0 * i / n) +
+            0.5 * std::cos(2.0 * 3.14159265358979323846 * 11.0 * i / n);
+
+    std::vector<std::complex<double>> spectrum(static_cast<size_t>(n));
+    std::vector<double> recovered(static_cast<size_t>(n));
+
+    SECTION("move-constructed") {
+        Fft64 source(n);
+        Fft64 fft(std::move(source));
+        fft.forward_real(signal.data(), spectrum.data());
+        fft.inverse_real(spectrum.data(), recovered.data());
+        for (int i = 0; i < n; ++i)
+            REQUIRE_THAT(recovered[static_cast<size_t>(i)],
+                         WithinAbs(signal[static_cast<size_t>(i)], tol));
+    }
+
+    SECTION("move-assigned over a smaller instance") {
+        Fft64 fft(64);  // its own scratch is too small for n
+        fft = Fft64(n);
+        fft.forward_real(signal.data(), spectrum.data());
+        fft.inverse_real(spectrum.data(), recovered.data());
+        for (int i = 0; i < n; ++i)
+            REQUIRE_THAT(recovered[static_cast<size_t>(i)],
+                         WithinAbs(signal[static_cast<size_t>(i)], tol));
+    }
+
+    SECTION("move-constructed Fft (float) still round-trips") {
+        // Covers the vDSP branch's own moved members; does not exercise the
+        // scratch (see note above), but pins that moving doesn't break float.
+        const float ftol = 5e-4f + 2e-7f * static_cast<float>(n);
+        const std::vector<float> fsignal = multi_tone_signal(n);
+        std::vector<std::complex<float>> fspectrum(static_cast<size_t>(n));
+        std::vector<float> frecovered(static_cast<size_t>(n));
+
+        Fft source(n);
+        Fft fft(std::move(source));
+        fft.forward_real(fsignal.data(), fspectrum.data());
+        fft.inverse_real(fspectrum.data(), frecovered.data());
+        for (int i = 0; i < n; ++i)
+            REQUIRE_THAT(frecovered[static_cast<size_t>(i)],
+                         WithinAbs(fsignal[static_cast<size_t>(i)], ftol));
+    }
+}
+
+TEST_CASE("FFT64 inverse_real round-trip exercises the scalar fallback backend",
+          "[signal][fft][inverse_real][f64]") {
+    // Fft64 (double) never satisfies FftT's `is_same_v<SampleType, float>` vDSP
+    // gate, so this always drives inverse_real_fallback() -- the counterpart
+    // to the vdsp-backed Fft coverage above.
+    for (int n : {64, 256, 1024}) {
+        Fft64 fft(n);
+        std::vector<double> signal(static_cast<size_t>(n));
+        for (int i = 0; i < n; ++i)
+            signal[static_cast<size_t>(i)] =
+                std::sin(2.0 * 3.14159265358979323846 * 5.0 * i / n) +
+                0.5 * std::cos(2.0 * 3.14159265358979323846 * 11.0 * i / n);
+
+        std::vector<std::complex<double>> spectrum(static_cast<size_t>(n));
+        std::vector<double> recovered(static_cast<size_t>(n));
+        fft.forward_real(signal.data(), spectrum.data());
+        fft.inverse_real(spectrum.data(), recovered.data());
+
+        for (int i = 0; i < n; ++i) {
+            REQUIRE_THAT(recovered[static_cast<size_t>(i)],
+                         WithinAbs(signal[static_cast<size_t>(i)], 1e-10));
+        }
+    }
+}
+
+TEST_CASE("FFT inverse_real matches hand-composed complex inverse() + real part",
+          "[signal][fft][inverse_real]") {
+    // Proves the dedicated real-optimized (vdsp zrip) path agrees with the
+    // generic route every consumer used before this function existed:
+    // forward_real() -> complex inverse() -> take the real part.
+    constexpr int N = 512;
+    Fft fft(N);
+
+    auto signal = multi_tone_signal(N);
+    std::vector<std::complex<float>> spectrum(N);
+    fft.forward_real(signal.data(), spectrum.data());
+
+    std::vector<float> via_inverse_real(N);
+    fft.inverse_real(spectrum.data(), via_inverse_real.data());
+
+    std::vector<std::complex<float>> hand_composed = spectrum;
+    fft.inverse(hand_composed.data());
+
+    for (int i = 0; i < N; ++i) {
+        REQUIRE_THAT(via_inverse_real[static_cast<size_t>(i)],
+                     WithinAbs(hand_composed[static_cast<size_t>(i)].real(), 1e-4f));
+        // The hand-composed route's imaginary part should be ~0 for a
+        // conjugate-symmetric spectrum -- confirms the input really was one.
+        REQUIRE_THAT(hand_composed[static_cast<size_t>(i)].imag(), WithinAbs(0.0f, 1e-3f));
+    }
+}
+
+TEST_CASE("FFT inverse_real reconstructs DC-only and Nyquist-only spectra",
+          "[signal][fft][inverse_real][issue-645]") {
+    // DC and Nyquist are the two bins folded into realp[0]/imagp[0] by the real
+    // FFT packing trick -- exactly where real-FFT bugs tend to hide.
+    constexpr int N = 32;
+    Fft fft(N);
+
+    SECTION("DC-only spectrum reconstructs a constant signal") {
+        constexpr float dc = 8.0f; // forward_real()'s unnormalized DC for a constant c is c*N
+        std::vector<std::complex<float>> spectrum(N, {0.0f, 0.0f});
+        spectrum[0] = {dc, 0.0f};
+
+        std::vector<float> recovered(N);
+        fft.inverse_real(spectrum.data(), recovered.data());
+
+        for (int i = 0; i < N; ++i) {
+            REQUIRE_THAT(recovered[static_cast<size_t>(i)],
+                         WithinAbs(dc / static_cast<float>(N), 1e-4f));
+        }
+    }
+
+    SECTION("Nyquist-only spectrum reconstructs an alternating signal") {
+        constexpr float nyquist = 8.0f;
+        std::vector<std::complex<float>> spectrum(N, {0.0f, 0.0f});
+        spectrum[N / 2] = {nyquist, 0.0f};
+
+        std::vector<float> recovered(N);
+        fft.inverse_real(spectrum.data(), recovered.data());
+
+        const float expected_amplitude = nyquist / static_cast<float>(N);
+        for (int i = 0; i < N; ++i) {
+            const float expected = (i % 2 == 0 ? expected_amplitude : -expected_amplitude);
+            REQUIRE_THAT(recovered[static_cast<size_t>(i)], WithinAbs(expected, 1e-4f));
+        }
+    }
+
+    SECTION("An alternating (+-A) input signal round-trips through the Nyquist bin") {
+        constexpr float amplitude = 0.75f;
+        std::vector<float> signal(N);
+        for (int i = 0; i < N; ++i)
+            signal[static_cast<size_t>(i)] = (i % 2 == 0 ? amplitude : -amplitude);
+
+        std::vector<std::complex<float>> spectrum(N);
+        fft.forward_real(signal.data(), spectrum.data());
+
+        // All energy should land in the Nyquist bin.
+        REQUIRE_THAT(spectrum[N / 2].real(), WithinAbs(amplitude * N, 1e-3f));
+        REQUIRE_THAT(spectrum[N / 2].imag(), WithinAbs(0.0f, 1e-4f));
+        REQUIRE_THAT(spectrum[0].real(), WithinAbs(0.0f, 1e-4f));
+
+        std::vector<float> recovered(N);
+        fft.inverse_real(spectrum.data(), recovered.data());
+        for (int i = 0; i < N; ++i) {
+            REQUIRE_THAT(recovered[static_cast<size_t>(i)],
+                         WithinAbs(signal[static_cast<size_t>(i)], 1e-4f));
+        }
+    }
 }
 
 // ── Convolver ────────────────────────────────────────────────────────────────

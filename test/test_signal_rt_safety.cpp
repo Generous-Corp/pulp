@@ -482,6 +482,7 @@ TEST_CASE("FFT and simple convolver hot paths are allocation-free after setup",
         fft.forward(complex_samples.data());
         fft.inverse(complex_samples.data());
         fft.forward_real(real_samples.data(), complex_samples.data());
+        fft.inverse_real(complex_samples.data(), real_samples.data());
         fft.magnitude(complex_samples.data(), magnitudes.data(), static_cast<int>(magnitudes.size()));
         fft.magnitude_db(complex_samples.data(), magnitudes_db.data(), static_cast<int>(magnitudes_db.size()));
         (void)fft.size();
