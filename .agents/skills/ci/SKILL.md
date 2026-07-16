@@ -4190,3 +4190,26 @@ loud on a no-op. The pre-push hook (`.githooks/pre-push`) adds two backstop guar
 pushes: it refuses a **detached-HEAD** push and an **empty-diff-vs-base** push (the latter
 catches a rebase that flattened a branch to zero files). Root cause + the four-fix plan:
 `planning/friction/2026-07-15-git-state-in-shared-worktree-hell.md`.
+
+## Coverage-on-main can go red from a time-budget kill (not a code failure) (2026-07-15)
+
+The `Coverage` workflow (`coverage.yml`) is **advisory** — never a merge gate (the
+authoritative gate is the separate `Diff coverage required` check). It runs the instrumented
+build + full ctest suite under an internal watchdog that SIGTERMs the suite before the job cap
+and **drops any partial Cobertura report**. Historically only the `os-windows` leg was
+neutralized (job-level `continue-on-error: matrix.os=='windows'`), on the assumption that
+macOS/linux always finish under budget. The suite grew (~13.5k ctest cases) and the macOS leg
+started crossing the budget too — killed suite → dropped XML → the mandatory `Verify Cobertura
+XML exists` step reddened `main`, repeatedly. **A red `Coverage` run on main whose macOS/linux
+leg failed at "Verify Cobertura XML exists" / "Upload Cobertura XML" is almost always this
+budget kill, not a real build break** — look for `Terminated: 15` / exit `143` in the "Run
+coverage suite" step.
+
+Now a budget hit is a clean **non-fatal skip on every OS**: the suite emits
+`steps.coverage-suite.outputs.budget_hit=true`, and Verify + Cobertura-upload skip on it. A
+genuine build failure (no budget hit, no report) still fails loudly. The suite also runs ctest
+in parallel (`-j`, capped like `build.yml`) with a per-test `--timeout` in
+`scripts/run_coverage.sh` so it finishes well under budget. If coverage genuinely stops
+flowing, the `coverage-staleness-check` watchdog is the alarm — not a red PR. Editing
+`coverage.yml` requires a `docs/guides/versioning.md` touch (config-doc map) and updating this
+skill (skill-sync map).

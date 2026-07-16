@@ -291,6 +291,22 @@ It runs advisory (`--mode=hint`) in the agent PostToolUse hook, enforcing
 `version-skill-check.yml` PR gate. Bypass a genuinely doc-irrelevant edit with
 a `Config-Doc: skip reason="..."` trailer on any commit in the range.
 
+### Coverage lane failure semantics
+
+C++ coverage (`coverage.yml`) is **advisory**, never a merge gate — the
+authoritative diff-coverage gate is the separate `Diff coverage required` check.
+The coverage matrix runs the instrumented build + full ctest suite under an
+internal time budget (below the job's `timeout-minutes`) enforced by a watchdog
+that terminates the suite before the job cap. When that budget is hit the leg
+drops any partial report and records `budget_hit`, and the verify + Cobertura
+upload steps **skip on every OS** so the leg concludes non-fatally rather than
+reddening `main` (previously only the `os-windows` leg was spared, so a slow
+macOS/linux run broke `main`). A genuine build failure — no budget hit, no
+report — still fails loudly. The suite runs ctest in parallel with a per-test
+`--timeout` (`scripts/run_coverage.sh`) so it finishes well under budget; the
+`coverage-staleness-check` watchdog is the alarm if coverage genuinely stops
+flowing.
+
 ---
 
 ## Shipyard-binary pin bumps

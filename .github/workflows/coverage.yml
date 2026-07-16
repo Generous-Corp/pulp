@@ -529,6 +529,7 @@ jobs:
           python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
 
       - name: Run coverage suite
+        id: coverage-suite
         # Coverage never fails the run — thresholds come later per
         # the #290 hardening initiative. `continue-on-error` combined
         # with `strategy.fail-fast: false` above means a flake on any
@@ -590,9 +591,20 @@ jobs:
           # to publish as a truncated, valid-looking number. A clean miss beats a
           # wrong number.
           if [ -f "${budget_hit}" ] || [ "${rc}" -eq 143 ] || [ "${rc}" -eq 137 ]; then
-            echo "::warning::dropping any partial Cobertura/LCOV from the interrupted coverage run (best-effort os-windows)."
+            echo "::warning::coverage suite interrupted at the internal budget on ${{ matrix.os }}; dropping any partial Cobertura/LCOV and marking this leg as a non-fatal skip."
             rm -f build-coverage/coverage.cobertura.xml \
                   build-coverage/coverage/coverage.lcov 2>/dev/null || true
+            # Signal the interruption so the verify + cobertura-upload steps
+            # below SKIP instead of hard-failing the job. Previously only the
+            # os-windows leg was spared (via the job-level
+            # `continue-on-error: matrix.os=='windows'`); the macOS/linux legs
+            # reddened main whenever the growing suite crossed the budget. A
+            # dropped report is a clean miss on every OS — the
+            # coverage-staleness watchdog is the alarm if coverage genuinely
+            # stops flowing.
+            echo "budget_hit=true" >> "${GITHUB_OUTPUT}"
+            { echo "### Coverage suite interrupted (${{ matrix.os }})";
+              echo "The instrumented suite hit the internal time budget and was terminated; this leg uploaded no coverage (non-fatal). If this recurs, the suite is too slow for the budget — investigate parallelism/wedged tests, not a code failure."; } >> "${GITHUB_STEP_SUMMARY}"
           fi
           rm -f "${budget_hit}" 2>/dev/null || true
           exit "${rc}"
@@ -691,6 +703,12 @@ jobs:
           if-no-files-found: error
 
       - name: Verify Cobertura XML exists
+        # Skipped when the suite was interrupted at the internal budget
+        # (steps.coverage-suite.outputs.budget_hit): the report was dropped on
+        # purpose, so hard-failing here would redden main on macOS/linux — the
+        # exact recurring break this replaces. A real build failure (no budget
+        # hit) still produces no XML and fails loudly, as before.
+        if: steps.coverage-suite.outputs.budget_hit != 'true'
         # Fail loudly if the coverage build didn't produce a cobertura file.
         # Without this check, a silent build failure (e.g. a missing transitive
         # include that breaks under Clang strict mode) produces zero profraw
@@ -771,7 +789,12 @@ jobs:
         # `pull_request` events only the macOS leg runs, so only the
         # macOS artifact is produced and the gate measures the macOS
         # development surface (see the `matrix-config` job).
-        if: always()
+        #
+        # Skipped on a budget-interrupted leg: the report was intentionally
+        # dropped, so `if-no-files-found: error` would otherwise fail the job
+        # (the recurring macOS/linux break). `always()` still covers a normal
+        # ctest-failure run, which emits a partial report worth uploading.
+        if: always() && steps.coverage-suite.outputs.budget_hit != 'true'
         uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.os == 'linux' && format('coverage-cobertura-{0}', github.sha) || format('coverage-cobertura-{0}-{1}', matrix.os, github.sha) }}
