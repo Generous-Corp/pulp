@@ -3959,6 +3959,34 @@ tools/scripts/format_baseline_capture.sh --build --plugin PulpEffect
 
 Commit the updated `test/fixtures/format-baseline/*.txt` files in the same PR. No exception path — intentional behavior changes update the baseline; unintentional regressions get fixed at the source.
 
+### When this gate goes red, read the validator's own output first
+
+The failure that looks like a Pulp regression is usually the validators not
+running at all, and the message `All N validator(s) exited non-zero` does not
+distinguish the two. Do not start from the workflow log's summary line:
+
+- The job uploads a **`format-baseline-validator-output-*` artifact** on every
+  run (`if: always()`) holding each validator's raw output, its exit code, and
+  the normalized capture. That is the evidence; start there.
+- The log also carries each failing validator's exit code and the first 20
+  lines of its output, which is usually enough without downloading anything.
+- **A non-zero validator exit is ambiguous by nature.** `auval` and
+  `clap-validator` exit non-zero both when they run and report findings and
+  when they cannot load the plugin at all. A fast fail (well under a second)
+  points at the latter — a real `auval` pass takes seconds.
+- Nothing outside `--diag-dir` survives: the capture writes into a temp dir the
+  diff script deletes on every return path. A run invoked without `--diag-dir`
+  leaves no evidence at all.
+
+Two structural properties worth knowing before trusting a red here: the gate
+**passes when 1 of 2 validators fails and fails when 2 of 2 do**, so its verdict
+turns on validator availability as much as on plugin behavior; and with no
+committed fixtures in `test/fixtures/format-baseline/` it is in bootstrap mode,
+where it cannot detect a regression at all. `concurrency.group` is per-ref, so
+it does not serialize two different PRs — co-located runners sharing a `$HOME`
+can race over the fixed `~/Library/Audio/Plug-Ins/PulpEffect.*` install paths
+and each other's `if: always()` cleanup.
+
 Companion-track item U-3 in `planning/2026-05-17-refactor-roadmap-final.md`.
 
 ## Source-tree pollution: root-allowlist mode
