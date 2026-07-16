@@ -39,8 +39,11 @@ Current branch evidence, without implying completion of later gates:
   rejection, two-phase audio-watermark retirement, and decode-before-cache
   teardown. Release and AddressSanitizer coverage exercise registration
   rollback, reprepare identity, active-I/O retirement, slot recycling, and
-  completion lease release. Loop/reverse voice policy and example integration
-  remain open.
+  completion lease release. `PulpSampler` now exercises this path for strict
+  ranged WAV/AIFF forward one-shots with contract-derived preload/lookahead,
+  a bounded eight-voice cache working set, explicit starvation, coherent source
+  replacement, and 10,000 allocation-probed callbacks. Streamed loop/reverse
+  policy remains open.
 - The existing Release audio harness baseline and all 375 Audio Quality Lab
   self-tests pass. Quality Lab remains supplementary to exact transport,
   telemetry, lifetime, and allocation gates.

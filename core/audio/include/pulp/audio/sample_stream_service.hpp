@@ -430,6 +430,31 @@ public:
         return SampleStreamSourceRetireStatus::Scheduled;
     }
 
+    /// Remove a source that never became reachable from an audio-thread asset.
+    /// The owner may use this only before retirement or async work begins.
+    bool discard_unpublished_source(SampleStreamSourceToken token) noexcept {
+        const auto found = std::find_if(
+            sources_.begin(),
+            sources_.end(),
+            [token](const auto& source) noexcept {
+                return source->config.token.source_id == token.source_id &&
+                       source->config.token.source_generation ==
+                           token.source_generation;
+            });
+        if (found == sources_.end() || (*found)->async_in_flight ||
+            (*found)->retire_after_audio_generation != 0) {
+            return false;
+        }
+        scheduler_.cancel_source_generation(token.source_id,
+                                            token.source_generation);
+        const auto bytes = page_storage_bytes((*found)->config).value_or(0);
+        stats_.reserved_page_bytes -=
+            std::min(stats_.reserved_page_bytes, bytes);
+        sources_.erase(found);
+        stats_.source_count = sources_.size();
+        return true;
+    }
+
     bool retirement_watermark_reached(
         SampleStreamSourceToken token) const noexcept {
         const auto* source = find_source(token);

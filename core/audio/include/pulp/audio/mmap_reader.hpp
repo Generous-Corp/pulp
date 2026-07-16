@@ -37,17 +37,24 @@ public:
     /// File info (available after open)
     const AudioFileInfo& info() const { return info_; }
 
-    /// Read a range of frames into deinterleaved float buffers, decoding only
-    /// the requested range from the mapped data (true ranged read — no
-    /// whole-file decode). Returns false on error. Frames past end-of-file are
-    /// zero-filled. RT note: this performs decode/copy work, so it is for the
-    /// control / background-reader thread, never the audio callback.
+    /// Read a range of frames into deinterleaved float buffers. Seekable formats
+    /// use the mapped ranged decoder; unsupported formats or an unexpected
+    /// ranged decode failure fall back to a cached whole-file decode.
+    /// Returns false on error. Frames past end-of-file are zero-filled. RT note:
+    /// this performs decode/copy work, so it is for the control or background
+    /// reader thread, never the audio callback.
     /// Not thread-safe: the persistent ranged reader carries a single seek
     /// position plus lazily-initialized scratch/fallback state, so concurrent
     /// calls on one instance race. Serialize calls (one streaming reader thread
     /// per reader), or use one MemoryMappedAudioReader per thread.
     bool read_frames(float** dest_channels, uint32_t num_channels,
                      uint64_t start_frame, uint64_t num_frames);
+
+    /// Strict counterpart to read_frames(). Returns false unless the requested
+    /// frames were served by the mapped ranged decoder; it never starts or uses
+    /// the whole-file fallback cache.
+    bool read_frames_ranged_only(float** dest_channels, uint32_t num_channels,
+                                 uint64_t start_frame, uint64_t num_frames);
 
     /// True when a ranged (seek-based, no whole-file decode) reader is active
     /// for this file. False means read_frames falls back to a one-time
@@ -72,6 +79,10 @@ private:
     AudioFileInfo info_;
     std::string path_;
     std::unique_ptr<RangedState> ranged_;
+
+    bool read_frames_impl(float** dest_channels, uint32_t num_channels,
+                          uint64_t start_frame, uint64_t num_frames,
+                          bool allow_whole_file_fallback);
 };
 
 }  // namespace pulp::audio
