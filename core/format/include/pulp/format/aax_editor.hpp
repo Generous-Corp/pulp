@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -69,6 +70,12 @@ public:
     /// `editor_processor()` is null.
     virtual state::StateStore* editor_store() = 0;
 
+    /// The plugin's declared `ViewSize` hints, or nullopt when it has no editor
+    /// to size. Reachable before any editor exists — AAX asks for a size through
+    /// `GetViewSize` independently of the window lifecycle, and the answer comes
+    /// from `Processor::view_size()`, which needs no view tree.
+    virtual std::optional<ViewSize> editor_view_size() = 0;
+
     /// The parameter/bus model this plugin registered with AAX.
     virtual const PluginDefinition& editor_definition() const = 0;
 
@@ -124,6 +131,110 @@ inline EditorSizePlan plan_editor_size(const ViewSize& hints) {
     return plan;
 }
 
+/// `state::ParamID` → the AAX parameter-ID string the model registered under.
+///
+/// The stored strings are stable for the map's lifetime, so a caller may hand
+/// one straight to an `AAX_CParamID` parameter without copying.
+class ParameterIdMap {
+public:
+    explicit ParameterIdMap(const PluginDefinition& definition) {
+        ids_.reserve(definition.parameters.size());
+        for (const auto& binding : definition.parameters) {
+            ids_.emplace(binding.id, binding.aax_id);
+        }
+    }
+
+    /// The AAX parameter-ID string for `id`, or nullptr when Pulp knows the
+    /// parameter but AAX never registered it.
+    const std::string* find(state::ParamID id) const {
+        const auto it = ids_.find(id);
+        return it == ids_.end() ? nullptr : &it->second;
+    }
+
+private:
+    std::unordered_map<state::ParamID, std::string> ids_;
+};
+
+/// Writes editor-store changes back to the AAX parameter manager without the
+/// two mirrors chasing each other.
+///
+/// The manager is the value authority; the editor's store is a mirror. Both
+/// directions are live at once, so the write-back needs a rule that terminates:
+///
+///   - editor edit: the store changes, AAX still holds the old value, the write
+///     goes through. `AAX_IParameter::SetValueWithFloat` does not store the
+///     value — it asks the host for it, and the value arrives later through
+///     `UpdateParameterNormalizedValue`, which is also what a fader move or a
+///     control surface produces. The editor's own edits therefore come back to
+///     the model on exactly the host path an external change takes.
+///   - that return leg: the parameter manager is updated *before* the model
+///     mirrors the value into the store, so by the time this rule runs the two
+///     agree and nothing is sent. The loop closes here.
+///
+/// Equality closes it rather than an "I am syncing" flag because the rule holds
+/// wherever and whenever the store listener lands — it is a statement about the
+/// two values, not about control flow. It is also load-bearing rather than a
+/// mere optimization: `StateStore::set_value()` notifies unconditionally, even
+/// when the value did not change, so the echo has no fixed point of its own and
+/// would ping-pong at the host's dispatch rate.
+///
+/// Exact float comparison is sound here because both sides derive the value
+/// from the same normalized input with the same function: the adapter's taper
+/// delegate maps normalized→real through `state::ParamRange::denormalize`,
+/// which is precisely what `StateStore::set_normalized()` applies. The mirror
+/// therefore lands bit-identical to the parameter, not merely close to it.
+/// Where the store additionally constrains a value the taper does not — a
+/// discrete parameter quantizing to its step — the two disagree for exactly one
+/// more round trip: this writes the constrained value, AAX takes it, and the
+/// next echo compares equal because the store's constraint is idempotent.
+///
+/// Free of AAX types: the manager is reached through two sinks, so the whole
+/// contract is exercised by tests that never see the SDK.
+class ParameterMirror {
+public:
+    /// Reads the value the AAX parameter manager currently holds. Returns false
+    /// when `aax_param_id` names no registered parameter.
+    using ValueReader = std::function<bool(const char* aax_param_id, float& out_value)>;
+
+    /// Requests `value` for `aax_param_id` — `AAX_IParameter::SetValueWithFloat`.
+    using ValueWriter = std::function<void(const char* aax_param_id, float value)>;
+
+    ParameterMirror(const PluginDefinition& definition, ValueReader reader, ValueWriter writer)
+        : ids_(definition)
+        , reader_(std::move(reader))
+        , writer_(std::move(writer))
+    {}
+
+    /// Editor store → AAX parameter manager. Wire to a `StateStore` value
+    /// listener. Returns true when a write was issued.
+    bool on_store_value_changed(state::ParamID id, float store_value) {
+        const auto* aax_id = ids_.find(id);
+        if (!aax_id) {
+            return false;  // not an AAX-registered parameter
+        }
+        float aax_value = 0.0f;
+        if (!reader_ || !reader_(aax_id->c_str(), aax_value)) {
+            return false;
+        }
+        if (aax_value == store_value) {
+            ++suppressed_count_;
+            return false;  // AAX already holds this value — this is an echo
+        }
+        if (writer_) writer_(aax_id->c_str(), store_value);
+        return true;
+    }
+
+    /// Echoes absorbed. Non-zero is the healthy case — it counts the write-backs
+    /// the equality rule swallowed rather than bouncing at the host.
+    std::uint64_t suppressed_count() const { return suppressed_count_; }
+
+private:
+    ParameterIdMap ids_;
+    ValueReader reader_;
+    ValueWriter writer_;
+    std::uint64_t suppressed_count_ = 0;
+};
+
 /// Maps `StateStore` gesture callbacks onto AAX automation touch/release.
 ///
 /// The sinks receive the AAX parameter-ID string owned by this router; it stays
@@ -147,14 +258,10 @@ public:
     using Sink = std::function<void(const char* aax_param_id)>;
 
     GestureRouter(const PluginDefinition& definition, Sink touch, Sink release)
-        : touch_(std::move(touch))
+        : ids_(definition)
+        , touch_(std::move(touch))
         , release_(std::move(release))
-    {
-        ids_.reserve(definition.parameters.size());
-        for (const auto& binding : definition.parameters) {
-            ids_.emplace(binding.id, binding.aax_id);
-        }
-    }
+    {}
 
     /// Route `Binding::begin_gesture()` to `AAX_IEffectParameters::TouchParameter`.
     /// Returns true when a touch was emitted.
@@ -211,14 +318,11 @@ public:
     const std::string* aax_id_for(state::ParamID id) const { return lookup(id); }
 
 private:
-    const std::string* lookup(state::ParamID id) const {
-        const auto it = ids_.find(id);
-        return it == ids_.end() ? nullptr : &it->second;
-    }
+    const std::string* lookup(state::ParamID id) const { return ids_.find(id); }
 
+    ParameterIdMap ids_;
     Sink touch_;
     Sink release_;
-    std::unordered_map<state::ParamID, std::string> ids_;
     std::unordered_set<state::ParamID> touched_;
     std::uint64_t unknown_count_ = 0;
 };

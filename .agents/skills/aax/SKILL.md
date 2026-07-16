@@ -50,7 +50,30 @@ Gotchas that are specific to AAX and cost time if you rediscover them:
   the AAX parameter manager — not either `Processor` — is the value authority,
   and the model mirrors it into the editor store both ways
   (`UpdateParameterNormalizedValue` in, `AAX_IParameter::SetValueWithFloat`
-  out, with a re-entrancy guard so the mirror cannot ping-pong).
+  out), via `ParameterMirror` in `aax_editor.hpp`.
+- **The mirror stops the echo by comparing values, not with a re-entrancy
+  flag.** `ParameterMirror` writes back only when the store's value differs from
+  what the parameter manager already holds. A transient "I am syncing" bool
+  around the inbound write looks equivalent and is not: it encodes *when* the
+  listener runs, and that is not guaranteed. `StateStore` runs a
+  `ListenerThread::Main` listener inline only while no `EventLoop` is installed
+  (`set_main_loop()` is never called on this store today) — install one and the
+  flag is long cleared before the deferred listener fires. The value comparison
+  is a statement about the two values, so it holds wherever the callback lands.
+  It is load-bearing, not an optimization: `StateStore::set_value()` notifies
+  unconditionally, even when nothing changed, so the echo has no fixed point of
+  its own and would re-enter the host at its dispatch rate forever. Covered by
+  `pulp-test-aax-editor` (SDK-free), which fails with a 16-deep loop if the
+  comparison is removed.
+- **`AAX_IParameter::SetValueWithFloat` does not store the value.** It posts a
+  request through the automation delegate (`AAX_CParameter::SetValue`), so
+  `GetValueAsFloat` keeps returning the old value until the host answers with
+  `UpdateParameterNormalizedValue` — the same path a fader or control surface
+  takes. Code that assumes a synchronous write will misread the parameter.
+  Exact float comparison against it is nonetheless sound: the adapter's taper
+  delegate maps normalized→real through `state::ParamRange::denormalize`, which
+  is exactly what `StateStore::set_normalized()` applies, so the mirror lands
+  bit-identical rather than merely close.
 - **Update values only through `AAX_IParameter::SetValue*`.** Avid's own header
   is explicit that a GUI must never call `UpdateParameterNormalizedValue`
   directly; `SetValue*` manages the automation locks and posts coefficients.
@@ -63,6 +86,25 @@ Gotchas that are specific to AAX and cost time if you rediscover them:
 - **Sizing is plugin-driven.** AAX reads a size from `GetViewSize()`; the
   plugin pushes later changes through `AAX_IViewContainer::SetViewSize`. Follow
   the AU v2 model (forward native size changes), not VST3's.
+- **Never defer to `AAX_CEffectGUI::GetViewSize()` / `GetMinimumViewSize()`.**
+  Both base implementations `return AAX_SUCCESS` *without writing the point*, so
+  the host reads back whatever it passed in and the plug-in appears to have
+  agreed to it. There is no "let the base class answer" fallback here. AAX may
+  ask for a size before any window exists, but the plug-in's hints are always
+  reachable: `GetEffectParameters()` yields the data model, and
+  `EditorHost::editor_view_size()` returns `Processor::view_size()`, which needs
+  no view tree. Answer from that, and report `AAX_ERROR_NULL_OBJECT` when the
+  plug-in genuinely has no editor.
+- **The editor model's member declaration order is load-bearing.**
+  `EditorModel` in `aax_runtime.cpp` declares `store` before `processor` because
+  members die in reverse declaration order and `Processor::state()` dereferences
+  a pointer to that store — a Processor may touch it from its destructor or from
+  a worker thread that destructor joins. The router is declared before the
+  Processor too: a parameter write from `~Processor` routes through the store's
+  gesture callbacks. `static_assert(offsetof(...))` guards both, so a reorder
+  fails the build rather than the teardown. Every other adapter
+  (`vst3_adapter.hpp`, `standalone.hpp`, `au_v2_instrument.hpp`, `headless.hpp`)
+  carries the same store-before-Processor convention.
 - **The editor needs Skia.** Without `PULP_HAS_SKIA` the Windows
   `PluginViewHost` falls back to the no-op stub factory, `create()` returns
   null, and the plugin loads with no editor.

@@ -26,6 +26,7 @@
 #include <AAX_IViewContainer.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace pulp::format::aax {
@@ -89,14 +90,14 @@ private:
             return;
         }
 
-        auto* host_model = dynamic_cast<EditorHost*>(GetEffectParameters());
-        if (!host_model) {
+        auto* model = host_model();
+        if (!model) {
             runtime::log_error("AAX editor: data model does not expose an EditorHost");
             return;
         }
 
-        Processor* processor = host_model->editor_processor();
-        state::StateStore* store = host_model->editor_store();
+        Processor* processor = model->editor_processor();
+        state::StateStore* store = model->editor_store();
         if (!processor || !store) {
             runtime::log_error("AAX editor: no model-side processor for the editor");
             return;
@@ -192,12 +193,11 @@ private:
         if (!oViewSize) {
             return AAX_ERROR_NULL_ARGUMENT;
         }
-        // Before the editor is built the plug-in's declared hints are not
-        // reachable, so let the base class answer rather than invent a size.
-        if (!bridge_) {
-            return AAX_CEffectGUI::GetViewSize(oViewSize);
+        const auto hints = size_hints();
+        if (!hints) {
+            return AAX_ERROR_NULL_OBJECT;
         }
-        const auto plan = plan_editor_size(bridge_->size_hints());
+        const auto plan = plan_editor_size(*hints);
         oViewSize->horz = static_cast<float>(plan.width);
         oViewSize->vert = static_cast<float>(plan.height);
         return AAX_SUCCESS;
@@ -209,10 +209,11 @@ private:
         if (!oMinimumViewSize) {
             return AAX_ERROR_NULL_ARGUMENT;
         }
-        if (!bridge_) {
-            return AAX_CEffectGUI::GetMinimumViewSize(oMinimumViewSize);
+        const auto hints = size_hints();
+        if (!hints) {
+            return AAX_ERROR_NULL_OBJECT;
         }
-        const auto plan = plan_editor_size(bridge_->size_hints());
+        const auto plan = plan_editor_size(*hints);
         oMinimumViewSize->horz = static_cast<float>(plan.min_width);
         oMinimumViewSize->vert = static_cast<float>(plan.min_height);
         return AAX_SUCCESS;
@@ -236,14 +237,42 @@ private:
 
     // ── helpers ────────────────────────────────────────────────────────────
 
+    /// The data model behind this editor.
+    ///
+    /// `GetEffectParameters()` has a const overload returning a const pointer,
+    /// but the model is not itself const — the const-ness belongs to this GUI
+    /// object, and the sizing queries AAX declares const still have to reach it.
+    EditorHost* host_model() const {
+        return dynamic_cast<EditorHost*>(
+            const_cast<PulpAaxEffectGUI*>(this)->GetEffectParameters());
+    }
+
+    /// The hints the sizing queries answer from, or nullopt when this plug-in
+    /// has no editor to size.
+    ///
+    /// AAX asks for a size whenever it likes, including before any window
+    /// exists, so this cannot depend on the bridge. The plug-in's declared
+    /// `Processor::view_size()` is reachable through the data model at any
+    /// point; once the editor is open the bridge's hints supersede it, because a
+    /// scripted UI may revise them as it loads. Deferring to
+    /// `AAX_CEffectGUI::GetViewSize()` is not an option: it returns AAX_SUCCESS
+    /// without writing the point, so the host would read whatever it passed in.
+    std::optional<ViewSize> size_hints() const {
+        if (bridge_) {
+            return bridge_->size_hints();
+        }
+        auto* model = host_model();
+        return model ? model->editor_view_size() : std::nullopt;
+    }
+
     void teardown() {
         if (!bridge_ && !host_) {
             return;  // editor never opened
         }
         // A window closed mid-drag would strand an open automation record on
         // the host; the router outlives this editor, so it cannot notice.
-        if (auto* host_model = dynamic_cast<EditorHost*>(GetEffectParameters())) {
-            host_model->release_editor_gestures();
+        if (auto* model = host_model()) {
+            model->release_editor_gestures();
         }
         if (host_) {
             // Drop the idle/resize callbacks with the host before the bridge

@@ -13,6 +13,7 @@
 #include <pulp/format/max_block_contract.hpp>
 #include <pulp/format/parameter_text.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
+#include <pulp/runtime/exceptions.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
 #include <AAX_CEffectParameters.h>
@@ -29,6 +30,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -464,8 +466,12 @@ struct InstanceState {
 
     EntryConfig config;
     PluginDefinition definition;
-    std::unique_ptr<Processor> processor;
+    // The store is declared before the Processor so it is destroyed after it.
+    // `Processor::state()` dereferences a pointer to this store, and a Processor
+    // may read it from its destructor or from a worker thread that destructor is
+    // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
+    std::unique_ptr<Processor> processor;
     PluginDescriptor descriptor;
     std::vector<const float*> input_ptrs;
     std::vector<float*> output_ptrs;
@@ -514,6 +520,17 @@ public:
     state::StateStore* editor_store() override {
         ensure_editor_model();
         return editor_ ? &editor_->store : nullptr;
+    }
+
+    std::optional<ViewSize> editor_view_size() override {
+        auto* processor = editor_processor();
+        if (!processor || !processor->has_editor()) {
+            return std::nullopt;
+        }
+        // A plugin's view_size() is its own code; a throw here must not cross
+        // back into the host, and the sizing query has no way to report one.
+        PULP_TRY { return processor->view_size(); }
+        PULP_CATCH_ALL { return std::nullopt; }
     }
 
     const PluginDefinition& editor_definition() const override { return definition_; }
@@ -635,11 +652,38 @@ private:
     /// Processor to call create_view() on. The parameter manager stays the
     /// value authority; this store is a mirror kept in sync both ways.
     struct EditorModel {
-        std::unique_ptr<Processor> processor;
+        // Declaration order is destruction order reversed, and every line below
+        // depends on it.
+        //
+        // The store is declared before the Processor so it is destroyed after
+        // it. `Processor::state()` dereferences a pointer to this store, and a
+        // Processor may read it from its destructor or from a worker thread that
+        // destructor is about to join. Reversing these two lines hands that
+        // thread a freed store. Every other adapter declares the pair this way.
+        //
+        // The router sits between them for the same reason one step further out:
+        // a parameter write from `~Processor` reaches the store's gesture
+        // callbacks, which route through the router.
+        //
+        // The listener token is last so it is destroyed first, unsubscribing
+        // from the store before anything the callback touches goes away.
         state::StateStore store;
         std::unique_ptr<GestureRouter> gestures;
+        std::unique_ptr<ParameterMirror> mirror;
+        std::unique_ptr<Processor> processor;
         state::ListenerToken value_listener;
     };
+
+    // Members are destroyed in reverse declaration order, and declaration order
+    // is the only thing holding the lifetimes above together. Fail the build
+    // rather than the teardown if someone reorders them.
+    static_assert(offsetof(EditorModel, store) < offsetof(EditorModel, processor),
+                  "EditorModel::store must be declared before ::processor so the "
+                  "store outlives the Processor that points at it");
+    static_assert(offsetof(EditorModel, gestures) < offsetof(EditorModel, processor),
+                  "EditorModel::gestures must be declared before ::processor: a "
+                  "parameter write from ~Processor routes through the gesture "
+                  "callbacks");
 
     void ensure_editor_model() {
         if (editor_ || editor_init_failed_ || !init_error_.empty() || !config_.factory) {
@@ -686,44 +730,33 @@ private:
         // Editor edit → AAX parameter. Avid's contract is that a GUI updates
         // values through AAX_IParameter::SetValue*, never by calling
         // UpdateParameterNormalizedValue directly, so the automation locks and
-        // the coefficient post are managed for us.
+        // the coefficient post are managed for us. ParameterMirror owns the rule
+        // that keeps this direction from chasing the one below.
+        model->mirror = std::make_unique<ParameterMirror>(
+            definition_,
+            [this](const char* aax_id, float& out) {
+                auto* parameter = mParameterManager.GetParameterByID(aax_id);
+                if (!parameter) return false;
+                parameter->GetValueAsFloat(&out);
+                return true;
+            },
+            [this](const char* aax_id, float value) {
+                if (auto* parameter = mParameterManager.GetParameterByID(aax_id)) {
+                    parameter->SetValueWithFloat(value);
+                }
+            });
         model->value_listener = model->store.add_listener(
             [this](state::ParamID id, float value) {
-                push_to_aax_parameter(id, value);
+                if (editor_) editor_->mirror->on_store_value_changed(id, value);
             },
             state::ListenerThread::Main);
 
         editor_ = std::move(model);
     }
 
-    /// Editor store → AAX parameter manager.
-    ///
-    /// The two directions must not chase each other. A transient "I am syncing"
-    /// flag around the store write cannot do that job: a Main listener is
-    /// dispatched through the host's EventLoop, so it runs after any such flag
-    /// is cleared. Comparing against the value AAX already holds closes the loop
-    /// wherever the callback lands — after a host update the mirror agrees with
-    /// the parameter, so this sends nothing, while a genuine editor edit differs
-    /// and goes through. This matters because StateStore::set_value() notifies
-    /// unconditionally, so an echo would not settle on its own.
-    void push_to_aax_parameter(state::ParamID id, float value) {
-        const auto* aax_id = editor_ ? editor_->gestures->aax_id_for(id) : nullptr;
-        if (!aax_id) {
-            return;
-        }
-        auto* parameter = mParameterManager.GetParameterByID(aax_id->c_str());
-        if (!parameter) {
-            return;
-        }
-        float current = 0.0f;
-        parameter->GetValueAsFloat(&current);
-        if (current == value) {
-            return;  // AAX already holds this value
-        }
-        parameter->SetValueWithFloat(value);
-    }
-
-    /// AAX parameter manager → editor store.
+    /// AAX parameter manager → editor store. The base class has already stored
+    /// the new value by the time this runs, which is what lets ParameterMirror
+    /// recognize the resulting store notification as an echo and drop it.
     void push_to_editor_store(AAX_CParamID parameter_id, double normalized) {
         if (!editor_ || !parameter_id) {
             return;
@@ -740,7 +773,6 @@ private:
     std::string init_error_;
     std::unique_ptr<EditorModel> editor_;
     bool editor_init_failed_ = false;
-    bool syncing_from_host_ = false;
 };
 
 int32_t AAX_CALLBACK instance_init(const AlgorithmContext* context,
