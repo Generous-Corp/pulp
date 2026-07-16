@@ -373,7 +373,7 @@ int main(int argc, char* argv[]) {
         if (std::string(argv[i]) != "--compare") continue;
         const std::string ref = argv[i + 1];
         const std::string rendered = argv[i + 2];
-        float threshold = 0.85f;
+        float threshold = pulp::view::kDefaultSimilarityThreshold;
         std::string diff_out;
         for (int j = 1; j < argc; ++j) {
             const std::string a = argv[j];

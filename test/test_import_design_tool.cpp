@@ -2937,3 +2937,153 @@ TEST_CASE("merging states does not fail a hash-keyed lane that omits content_has
     REQUIRE_FALSE(rc.has_value());
     CHECK(fs::exists(tmp.path / "merged.pulp.json"));
 }
+// ── --fail-below: turning the --validate similarity into an exit code ──
+//
+// Before --fail-below existed, `--validate --reference` printed PASS or
+// NEEDS REVIEW and exited 0 either way — a 0%-similar render (reference = a
+// solid fill) and a 100%-similar one were indistinguishable to a caller, so no
+// CI gate could be built on it. These cases pin all three legs of the fix: the
+// gate fires, it stays opt-in, and it does not simply always fire.
+namespace {
+
+// Read a PNG's IHDR width/height without decoding it. The synthesized
+// reference has to match the render's dimensions exactly —
+// compare_screenshot_files treats a size mismatch as an error (exit 1), which
+// would mask the exit codes under test.
+bool read_png_size(const fs::path& p, uint32_t& w, uint32_t& h) {
+    std::ifstream f(p, std::ios::binary);
+    if (!f) return false;
+    unsigned char hdr[24]{};
+    f.read(reinterpret_cast<char*>(hdr), sizeof(hdr));
+    if (f.gcount() != static_cast<std::streamsize>(sizeof(hdr))) return false;
+    if (std::memcmp(hdr, "\x89PNG\r\n\x1a\n", 8) != 0) return false;
+    auto be32 = [](const unsigned char* b) {
+        return (static_cast<uint32_t>(b[0]) << 24) | (static_cast<uint32_t>(b[1]) << 16) |
+               (static_cast<uint32_t>(b[2]) << 8) | static_cast<uint32_t>(b[3]);
+    };
+    w = be32(hdr + 16);
+    h = be32(hdr + 20);
+    return w > 0 && h > 0;
+}
+
+// A solid-colour PNG, via the miniz writer this suite already links. White is
+// deliberately nothing like the dark-themed render, so the similarity is far
+// below any sane threshold and the case does not sit near the bar.
+bool write_solid_png(const fs::path& p, uint32_t w, uint32_t h, uint8_t value) {
+    std::vector<uint8_t> rgb(static_cast<size_t>(w) * h * 3, value);
+    size_t len = 0;
+    void* png = tdefl_write_image_to_png_file_in_memory(
+        rgb.data(), static_cast<int>(w), static_cast<int>(h), 3, &len);
+    if (!png) return false;
+    std::ofstream f(p, std::ios::binary);
+    f.write(static_cast<const char*>(png), static_cast<std::streamsize>(len));
+    mz_free(png);
+    return f.good();
+}
+
+// The render lands next to the output as "<name>-<source>-render.png"; scan
+// rather than reconstruct the name, which is assembled from the source label.
+fs::path find_render_png(const fs::path& dir) {
+    for (const auto& e : fs::directory_iterator(dir)) {
+        const auto n = e.path().filename().string();
+        if (n.size() > 11 && n.compare(n.size() - 11, 11, "-render.png") == 0)
+            return e.path();
+    }
+    return {};
+}
+
+} // namespace
+
+TEST_CASE("pulp-import-design --fail-below gates the --validate similarity",
+          "[cli][import-design][tool][validate][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-fail-below");
+    const auto input = tmp.path / "screen.html";
+    const auto output = tmp.path / "ui.js";
+    write_text(input,
+               "<!DOCTYPE html><html><body>"
+               "<main class=\"panel\"><h1>Gain</h1><button>Bypass</button></main>"
+               "</body></html>");
+
+    // Establish the render once, and use it as its own perfect reference below.
+    auto seed = run_import_design_in(tmp.path, {"--from", "stitch",
+                                               "--file", input.string(),
+                                               "--output", output.string(),
+                                               "--validate"}, 60000);
+    REQUIRE_FALSE(seed.timed_out);
+    const auto render = find_render_png(tmp.path);
+    if (seed.exit_code != 0 || render.empty()) {
+        // No headless render here (no Skia-linked build / no raster backend).
+        // Skip loudly rather than assert on an exit code the gate never reached.
+        SUCCEED("skipped: --validate produced no render in this build");
+        return;
+    }
+
+    uint32_t w = 0, h = 0;
+    REQUIRE(read_png_size(render, w, h));
+    const auto wrong = tmp.path / "wrong-reference.png";
+    REQUIRE(write_solid_png(wrong, w, h, 0xFF));
+
+    SECTION("a mismatched reference under --fail-below exits 5") {
+        auto r = run_import_design_in(tmp.path, {"--from", "stitch",
+                                                "--file", input.string(),
+                                                "--output", output.string(),
+                                                "--validate",
+                                                "--reference", wrong.string(),
+                                                "--fail-below", "85"}, 60000);
+        REQUIRE_FALSE(r.timed_out);
+        CHECK(r.exit_code == 5);
+        CHECK(r.stdout_output.find("NEEDS REVIEW") != std::string::npos);
+    }
+
+    SECTION("the same mismatch without --fail-below still exits 0") {
+        // The gate is opt-in: callers that only read the printed similarity
+        // must keep seeing exit 0, at any similarity.
+        auto r = run_import_design_in(tmp.path, {"--from", "stitch",
+                                                "--file", input.string(),
+                                                "--output", output.string(),
+                                                "--validate",
+                                                "--reference", wrong.string()}, 60000);
+        REQUIRE_FALSE(r.timed_out);
+        CHECK(r.exit_code == 0);
+        CHECK(r.stdout_output.find("NEEDS REVIEW") != std::string::npos);
+    }
+
+    SECTION("a matching reference under --fail-below exits 0") {
+        // Control: proves exit 5 above is the similarity verdict and not
+        // --fail-below failing unconditionally.
+        auto r = run_import_design_in(tmp.path, {"--from", "stitch",
+                                                "--file", input.string(),
+                                                "--output", output.string(),
+                                                "--validate",
+                                                "--reference", render.string(),
+                                                "--fail-below", "85"}, 60000);
+        REQUIRE_FALSE(r.timed_out);
+        CHECK(r.exit_code == 0);
+        CHECK(r.stdout_output.find("Validation: PASS") != std::string::npos);
+    }
+
+    SECTION("a fraction is rejected rather than read as a sub-1% threshold") {
+        auto r = run_import_design_in(tmp.path, {"--from", "stitch",
+                                                "--file", input.string(),
+                                                "--output", output.string(),
+                                                "--validate",
+                                                "--reference", wrong.string(),
+                                                "--fail-below", "0.85"}, 60000);
+        REQUIRE_FALSE(r.timed_out);
+        CHECK(r.exit_code == 2);
+        CHECK(r.stderr_output.find("percentage") != std::string::npos);
+    }
+
+    SECTION("--fail-below without --reference is a usage error") {
+        auto r = run_import_design_in(tmp.path, {"--from", "stitch",
+                                                "--file", input.string(),
+                                                "--output", output.string(),
+                                                "--validate",
+                                                "--fail-below", "85"}, 60000);
+        REQUIRE_FALSE(r.timed_out);
+        CHECK(r.exit_code == 2);
+        CHECK(r.stderr_output.find("--fail-below requires --reference") != std::string::npos);
+    }
+}

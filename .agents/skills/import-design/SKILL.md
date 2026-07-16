@@ -2845,14 +2845,24 @@ After generating Pulp code, ALWAYS validate by comparing with the source design:
    ```bash
    python3 tools/import-design/fidelity_diff.py --render render.png --scene scene.pulp.json --frame-reference source.png
    ```
-   > **Do not treat `--validate`'s exit code as a gate.** It prints `PASS` or
-   > `NEEDS REVIEW` but **exits 0 either way**, at any similarity — a 0%-similar
-   > render still exits 0. Read the printed similarity (and the diff image); never
-   > infer success from `$?`.
+   > **`--validate` alone is advisory.** It prints `PASS` or `NEEDS REVIEW` but
+   > **exits 0 either way**, at any similarity — a 0%-similar render still exits
+   > 0. Read the printed similarity (and the diff image); never infer success
+   > from `$?` unless you asked for a gate.
+   >
+   > **To gate on it, add `--fail-below <pct>`** — the run then exits 5 when the
+   > similarity is under `<pct>`. The value is a percentage 0-100 (`85`, not
+   > `0.85`; a fraction is rejected rather than silently treated as 0.85%, which
+   > would never fire). It requires `--reference`, since there is otherwise
+   > nothing to compare against:
+   > ```bash
+   > pulp import-design --from X --file input \
+   >     --validate --reference source.png --fail-below 85
+   > ```
 
 4. **Review the diff image** — red highlights show differences
 
-5. **Iterate if needed** — adjust the generated code and re-render until similarity is acceptable (>85%)
+5. **Iterate if needed** — adjust the generated code and re-render until similarity is acceptable (>=85%, the shared default in `pulp::view::kDefaultSimilarityThreshold`)
 
 **Always show comparisons as a LABELED montage** — `tools/import-design/montage.py` stacks N renders into one image with a titled bar above each panel (labels ON by default), so a reference-vs-render(s) comparison is self-documenting (you can tell which panel is which without an external caption — a bare montage gets misread):
 ```bash
