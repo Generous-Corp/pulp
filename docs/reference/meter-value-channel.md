@@ -66,8 +66,11 @@ channels are for. Bound your channel index by
 verbatim and never trusts the count to gate an array access.
 
 `set_scalar_source` / `scalar_value()` are the same shape for a single number.
-Passing `nullptr` to either unbinds and drops the last snapshot, so a view never
-paints a reading the plugin has stopped producing.
+Changing either binding drops the last snapshot — whether you pass `nullptr` to
+unbind or re-point at a different source — so a view never paints a reading no
+bound source is producing. (Re-pointing matters in its own right: a channel strip
+retargeted to another plugin instance would otherwise paint the previous strip's
+levels until the next tick.)
 
 ### Widgets
 
@@ -87,7 +90,15 @@ those with `set_element_scalar_source(param_key, source)` and read them with
 Bindings are keyed by **`param_key`, not element index**, because
 `set_active_frame` replaces the element list wholesale — index `0` is a different
 control in a different frame. A binding therefore follows its key across a frame
-swap; a key no frame declares reads `0`.
+swap. A key the active frame does not declare reads `0` and stays parked: it does
+not subscribe, so a typo'd key — or a param dropped from a redesign — cannot
+quietly hold the editor at full frame rate. It starts reading if a later frame
+declares that key.
+
+You do **not** have to forward anything from your subclass to keep these live.
+Every binding enrols with the `View` base, which re-points them all from a
+non-virtual funnel, so overriding `on_frame_clock_changed()` without chaining to
+the base cannot strand a binding on a clock your view can no longer reach.
 
 ## Paint-safety
 

@@ -118,7 +118,7 @@
     {
       "path": "core/view/include/pulp/view/view.hpp",
       "max_loc": 1742,
-      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions; +16 for the FrameClock reachability hook \u2014 on_frame_clock_changed + out-of-line set_frame_clock + notify_frame_clock_changed \u2014 powering paint-safe meter sources; +35 for the bounded sub-view invalidation public API \u2014 request_repaint(Rect) plus the has_filter_effect / applies_child_paint_offset escalation predicates; +7 for generalized virtual-list layout/input routing hooks)"
+      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions; +16 for the FrameClock reachability hook \u2014 on_frame_clock_changed + out-of-line set_frame_clock + notify_frame_clock_changed \u2014 powering paint-safe meter sources; +35 for the bounded sub-view invalidation public API \u2014 request_repaint(Rect) plus the has_filter_effect / applies_child_paint_offset escalation predicates; +7 for generalized virtual-list layout/input routing hooks; +63 for the live host\u2192view value-source seam \u2014 set_meter_source / meter_frame / set_scalar_source / scalar_value / on_meter_frame plus the binding-enrolment members, of which 35 lines are the per-declaration docs an SDK consumer reads at the call site)"
     },
     {
       "path": "core/canvas/include/pulp/canvas/canvas.hpp",

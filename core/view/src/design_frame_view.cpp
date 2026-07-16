@@ -359,19 +359,33 @@ bool DesignFrameView::element_has_scalar_source(int i) const {
     return active_element_scalars_[i] != nullptr;
 }
 
-void DesignFrameView::on_frame_clock_changed() {
-    for (auto& [key, binding] : element_scalars_)
-        if (binding) binding->refresh();
-}
-
 void DesignFrameView::rebuild_element_scalar_slots() {
     active_element_scalars_.assign(elements_.size(), nullptr);
     if (element_scalars_.empty()) return;
+
     for (size_t i = 0; i < elements_.size(); ++i) {
         const std::string& key = elements_[i].param_key;
         if (key.empty()) continue;
         auto it = element_scalars_.find(key);
-        if (it != element_scalars_.end()) active_element_scalars_[i] = it->second.get();
+        if (it == element_scalars_.end() || !it->second) continue;
+        active_element_scalars_[i] = it->second.get();
+    }
+
+    // A binding is live iff the ACTIVE frame declares its key. A key no frame
+    // carries — a typo, or a param dropped from a redesign — would otherwise
+    // hold the editor at full frame rate forever to feed a ring nothing paints,
+    // silently costing the plugin the idle-at-0-fps behavior the whole unbind
+    // path exists to protect. Decided from the rebuilt table rather than by
+    // parking everything and un-parking the matches, so a binding that stays
+    // matched is never toggled off and on — that would drop its cached value and
+    // churn its subscription on every rebuild, including the rebuild that runs
+    // when a SIBLING element is bound.
+    for (auto& [key, binding] : element_scalars_) {
+        if (!binding) continue;
+        const bool declared = std::find(active_element_scalars_.begin(),
+                                        active_element_scalars_.end(),
+                                        binding.get()) != active_element_scalars_.end();
+        binding->set_active(declared);
     }
 }
 

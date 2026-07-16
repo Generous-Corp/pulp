@@ -58,7 +58,10 @@ TEST_CASE("a source-bound Meter subscribes when the clock is installed AFTER bui
           "[view][meter-source][lifecycle]") {
     // The order real Pulp hosts use: build the tree + bind the source, THEN
     // install the frame clock on the root. The propagation hook must reach the
-    // meter or it silently never updates.
+    // meter or it silently never updates. (The clock is DECLARED first only so
+    // it outlives the views bound to it, as its lifetime contract requires; what
+    // this covers is installing it late, below.)
+    FrameClock clock;
     auto root = std::make_unique<View>();
     auto meter = std::make_unique<Meter>();
     Meter* m = meter.get();
@@ -67,7 +70,6 @@ TEST_CASE("a source-bound Meter subscribes when the clock is installed AFTER bui
     auto src = std::make_shared<MeterSource>();
     m->set_source(src, 0);
 
-    FrameClock clock;
     REQUIRE_FALSE(clock.has_active_subscribers());
     root->set_frame_clock(&clock);  // propagates → the meter subscribes
     REQUIRE(clock.has_active_subscribers());
@@ -79,8 +81,8 @@ TEST_CASE("a source-bound Meter subscribes when the clock is installed AFTER bui
 
 TEST_CASE("a source bound AFTER the clock exists still subscribes",
           "[view][meter-source][lifecycle]") {
-    auto root = std::make_unique<View>();
     FrameClock clock;
+    auto root = std::make_unique<View>();
     root->set_frame_clock(&clock);
     auto meter = std::make_unique<Meter>();
     Meter* m = meter.get();
@@ -94,8 +96,8 @@ TEST_CASE("grafting a pre-built source-bound subtree under a clocked root subscr
           "[view][meter-source][lifecycle]") {
     // Build container + meter + source entirely offline, then graft into an
     // already-clocked root. add_child must notify the grafted subtree.
-    auto root = std::make_unique<View>();
     FrameClock clock;
+    auto root = std::make_unique<View>();
     root->set_frame_clock(&clock);
 
     auto container = std::make_unique<View>();
@@ -110,8 +112,8 @@ TEST_CASE("grafting a pre-built source-bound subtree under a clocked root subscr
 }
 
 TEST_CASE("unbinding a Meter's source unsubscribes", "[view][meter-source][lifecycle]") {
-    auto root = std::make_unique<View>();
     FrameClock clock;
+    auto root = std::make_unique<View>();
     root->set_frame_clock(&clock);
     auto meter = std::make_unique<Meter>();
     Meter* m = meter.get();
@@ -126,8 +128,8 @@ TEST_CASE("detaching a descendant Meter drops its subscription",
           "[view][meter-source][lifecycle]") {
     // The meter is a DESCENDANT of the removed node, so remove_child never fires
     // on_detached on it — the clock-change notification must still unsubscribe it.
-    auto root = std::make_unique<View>();
     FrameClock clock;
+    auto root = std::make_unique<View>();
     root->set_frame_clock(&clock);
     auto container = std::make_unique<View>();
     View* c = container.get();
@@ -143,8 +145,8 @@ TEST_CASE("detaching a descendant Meter drops its subscription",
 }
 
 TEST_CASE("a Meter ignores an out-of-range source channel", "[view][meter-source]") {
-    auto root = std::make_unique<View>();
     FrameClock clock;
+    auto root = std::make_unique<View>();
     root->set_frame_clock(&clock);
     auto meter = std::make_unique<Meter>();
     Meter* m = meter.get();
@@ -176,8 +178,8 @@ TEST_CASE("a destroyed source-bound Meter leaves no dangling FrameClock subscrib
 
 TEST_CASE("a Meter never reads out of bounds on a malformed channel count",
           "[view][meter-source]") {
-    auto root = std::make_unique<View>();
     FrameClock clock;
+    auto root = std::make_unique<View>();
     root->set_frame_clock(&clock);
     auto meter = std::make_unique<Meter>();
     Meter* m = meter.get();
@@ -358,8 +360,8 @@ public:
 
 TEST_CASE("a View subclass reads a published meter frame from paint()",
           "[view][meter-source]") {
-    auto root = std::make_unique<View>();
     FrameClock clock;
+    auto root = std::make_unique<View>();
     root->set_frame_clock(&clock);
     auto panel = std::make_unique<MeterPanel>();
     MeterPanel* p = panel.get();
@@ -405,8 +407,8 @@ TEST_CASE("a View subclass reads a published meter frame from paint()",
 
 TEST_CASE("a View subclass reads a published scalar from paint()",
           "[view][meter-source]") {
-    auto root = std::make_unique<View>();
     FrameClock clock;
+    auto root = std::make_unique<View>();
     root->set_frame_clock(&clock);
     auto panel = std::make_unique<MeterPanel>();
     MeterPanel* p = panel.get();
@@ -508,37 +510,42 @@ TEST_CASE("a destroyed source-bound View leaves no dangling FrameClock subscribe
 // in behavior tests and only shows up as an audible glitch in a real host, so
 // assert it directly with the shared allocation probe.
 
-namespace {
-// Escape hatches that stop the optimizer eliding the positive control's
-// allocation. A new-expression whose result the compiler can prove unused is
-// elidable outright at -O3, so the size comes from a volatile (the compiler
-// cannot fold the request away) and the pointer escapes through a volatile sink
-// (it cannot prove the storage is dead). Without both, the control silently
-// measures nothing and every zero-allocation assertion below becomes vacuous.
-volatile std::size_t g_alloc_count = 32;
-void* volatile g_alloc_sink = nullptr;
-}  // namespace
-
-TEST_CASE("the allocation probe observes a real allocation on this thread",
+TEST_CASE("the allocation probe observes an allocation made inside pulp::view",
           "[view][meter-source][rt-safety]") {
-    // Positive control for the probe itself. Without this, "0 allocations"
-    // could mean "paint is clean" OR "the interposer was never linked" — and
-    // the two are indistinguishable from a passing test.
+    // Positive control for the probe itself. Without one, "0 allocations" could
+    // mean "paint is clean" OR "the interposer was never linked" — and the two
+    // are indistinguishable from a passing test.
+    //
+    // It must allocate THROUGH a pulp::view entry point rather than in this TU.
+    // What the assertions below actually claim is that allocations made inside
+    // pulp-view-core are observed; a `new` right here would only prove operator
+    // new is replaced in the test binary's own object. Those two coincide only
+    // while pulp-view-core resolves to a static library — under
+    // BUILD_SHARED_LIBS the dylib's operator new binds straight to libc++ under
+    // macOS's two-level namespace, the probe goes blind, and a TU-local control
+    // would still pass. That is the exact false assurance a positive control
+    // exists to prevent.
+    //
+    // set_meter_source is the entry point: on a view that has never bound a
+    // source it allocates the binding block inside view.cpp — the same library,
+    // and the same TU, whose paint path is asserted allocation-free below. The
+    // result escapes into the view, so it is not elidable.
+    MeterPanel p;
+    auto src = std::make_shared<MeterSource>();  // allocate the source OUTSIDE the probe
     std::size_t seen = 0;
     {
         pulp::test::RtAllocationProbe probe;
-        float* buf = new float[g_alloc_count];
-        g_alloc_sink = buf;
-        delete[] buf;
+        p.set_meter_source(src, 0);
         seen = probe.allocation_count();
     }
+    REQUIRE(p.has_meter_source());
     CHECK(seen >= 1);
 }
 
 TEST_CASE("reading a bound meter and scalar from paint() never allocates",
           "[view][meter-source][rt-safety]") {
-    auto root = std::make_unique<View>();
     FrameClock clock;
+    auto root = std::make_unique<View>();
     root->set_frame_clock(&clock);
     auto panel = std::make_unique<MeterPanel>();
     MeterPanel* p = panel.get();
@@ -578,8 +585,8 @@ TEST_CASE("snapshotting a meter frame on the clock never allocates",
     // The tick side matters too: it runs every frame on the UI thread, and a
     // MeterFrame is fixed-capacity + trivially copyable precisely so the
     // snapshot is a plain copy.
-    auto root = std::make_unique<View>();
     FrameClock clock;
+    auto root = std::make_unique<View>();
     root->set_frame_clock(&clock);
     auto panel = std::make_unique<MeterPanel>();
     MeterPanel* p = panel.get();
@@ -636,8 +643,8 @@ public:
 
 TEST_CASE("a DesignFrameView subclass paints a live scalar per element",
           "[view][meter-source][design-frame]") {
-    auto root = std::make_unique<View>();
     FrameClock clock;
+    auto root = std::make_unique<View>();
     root->set_frame_clock(&clock);
 
     std::vector<DesignFrameElement> els{knob_with_key("macro1", 25.0f),
@@ -678,8 +685,8 @@ TEST_CASE("an element scalar binding survives a frame swap and follows its param
     // REPLACES the element list, so "element 0" is a different control per frame.
     // A binding must follow its key across the swap, not silently re-point at
     // whatever now sits at that index.
-    auto root = std::make_unique<View>();
     FrameClock clock;
+    auto root = std::make_unique<View>();
     root->set_frame_clock(&clock);
 
     std::vector<DesignFrameElement> frame0{knob_with_key("drive", 25.0f),
@@ -716,8 +723,8 @@ TEST_CASE("an element scalar binding survives a frame swap and follows its param
 
 TEST_CASE("unbinding an element scalar releases its subscription",
           "[view][meter-source][design-frame][lifecycle]") {
-    auto root = std::make_unique<View>();
     FrameClock clock;
+    auto root = std::make_unique<View>();
     root->set_frame_clock(&clock);
     std::vector<DesignFrameElement> els{knob_with_key("macro1", 25.0f)};
     auto panel = std::make_unique<RingPanel>(kPanelSvg, els);
@@ -734,8 +741,8 @@ TEST_CASE("unbinding an element scalar releases its subscription",
 
 TEST_CASE("reading an element scalar from paint() never allocates",
           "[view][meter-source][design-frame][rt-safety]") {
-    auto root = std::make_unique<View>();
     FrameClock clock;
+    auto root = std::make_unique<View>();
     root->set_frame_clock(&clock);
     std::vector<DesignFrameElement> els{knob_with_key("macro1", 25.0f),
                                         knob_with_key("macro2", 75.0f)};
@@ -753,5 +760,228 @@ TEST_CASE("reading an element scalar from paint() never allocates",
         for (int i = 0; i < 64; ++i) p->paint(canvas);
         CHECK(probe.allocation_count() == 0);
     }
+    root->set_frame_clock(nullptr);
+}
+
+
+// ── Bindings ride the View funnel, not a virtual hook ────────────────────────
+// Every binding — the View's own two AND a subclass's per-element ones — enrols
+// with the View base, which re-points them all from its NON-virtual funnel. So a
+// subclass that overrides on_frame_clock_changed() without chaining to the base
+// cannot strand a binding on a clock its owner can no longer reach. That shape
+// is normal, not exotic (StepGridViewBase is exactly it), and the audience for
+// per-element scalars is precisely people writing DesignFrameView subclasses.
+
+namespace {
+
+// A DesignFrameView subclass that overrides the clock hook and deliberately does
+// NOT chain to the base — the shape that must not be able to break its bindings.
+class QuietRingPanel : public RingPanel {
+public:
+    QuietRingPanel(std::string svg, std::vector<DesignFrameElement> els)
+        : RingPanel(std::move(svg), std::move(els)) {}
+    void on_frame_clock_changed() override {}
+};
+
+}  // namespace
+
+TEST_CASE("element scalars re-point across clocks even when a subclass swallows the hook",
+          "[view][meter-source][design-frame][lifecycle]") {
+    FrameClock clock_a, clock_b;
+    auto root_a = std::make_unique<View>();
+    root_a->set_frame_clock(&clock_a);
+    auto root_b = std::make_unique<View>();
+    root_b->set_frame_clock(&clock_b);
+
+    std::vector<DesignFrameElement> els{knob_with_key("macro1", 25.0f)};
+    auto panel = std::make_unique<QuietRingPanel>(kPanelSvg, els);
+    QuietRingPanel* p = panel.get();
+    root_a->add_child(std::move(panel));
+
+    auto lfo = std::make_shared<ScalarSource>();
+    p->set_element_scalar_source("macro1", lfo);
+    REQUIRE(clock_a.has_active_subscribers());
+    lfo->publish(0.5f);
+    clock_a.tick(0.016f);
+    REQUIRE(p->element_scalar(0) == Catch::Approx(0.5f));
+
+    auto moved = root_a->remove_child(p);
+    CHECK_FALSE(clock_a.has_active_subscribers());  // dropped, not stranded on A
+    root_b->add_child(std::move(moved));
+    CHECK(clock_b.has_active_subscribers());        // re-pointed at B
+
+    lfo->publish(0.9f);
+    clock_b.tick(0.016f);
+    CHECK(p->element_scalar(0) == Catch::Approx(0.9f));  // B drives the ring now
+    root_b->set_frame_clock(nullptr);
+}
+
+TEST_CASE("a re-parented element binding never unsubscribes from a destroyed clock",
+          "[view][meter-source][design-frame][lifecycle]") {
+    // A binding stranded on a clock its owner can no longer reach still holds
+    // that clock's raw pointer, so tearing the view down would call
+    // unsubscribe() on freed memory. Destroy the old clock FIRST, which is what
+    // makes the strand fatal rather than merely stale: under ASan this is a
+    // heap-use-after-free, and it is silent without it.
+    auto clock_a = std::make_unique<FrameClock>();
+    FrameClock clock_b;
+    auto root_a = std::make_unique<View>();
+    root_a->set_frame_clock(clock_a.get());
+    auto root_b = std::make_unique<View>();
+    root_b->set_frame_clock(&clock_b);
+
+    std::vector<DesignFrameElement> els{knob_with_key("macro1", 25.0f)};
+    auto panel = std::make_unique<QuietRingPanel>(kPanelSvg, els);
+    QuietRingPanel* p = panel.get();
+    root_a->add_child(std::move(panel));
+    p->set_element_scalar_source("macro1", std::make_shared<ScalarSource>());
+    REQUIRE(clock_a->has_active_subscribers());
+
+    auto moved = root_a->remove_child(p);
+    root_b->add_child(std::move(moved));
+
+    clock_a.reset();  // the host destroys the old clock while the view lives on
+    root_b->set_frame_clock(nullptr);
+    CHECK_FALSE(clock_b.has_active_subscribers());
+    // ~panel runs at scope exit and must unsubscribe from B (or from nothing) —
+    // never from the freed A.
+}
+
+// ── Rebinding drops the old source's snapshot ────────────────────────────────
+
+TEST_CASE("re-pointing a meter source at a different source drops the old snapshot",
+          "[view][meter-source]") {
+    // Not just unbind: a channel strip retargeted to a different plugin instance
+    // must not paint the PREVIOUS strip's levels for a frame.
+    FrameClock clock;
+    auto root = std::make_unique<View>();
+    root->set_frame_clock(&clock);
+    auto panel = std::make_unique<MeterPanel>();
+    MeterPanel* p = panel.get();
+    root->add_child(std::move(panel));
+
+    auto a = std::make_shared<MeterSource>();
+    p->set_meter_source(a, 0);
+    a->publish(stereo(0.3f, 0.9f));
+    clock.tick(0.016f);
+    REQUIRE(p->meter_frame().channels == 2);
+
+    auto b = std::make_shared<MeterSource>();
+    p->set_meter_source(b, 0);  // re-point; b has published nothing yet
+    CHECK(p->meter_frame().channels == 0);
+    CHECK(p->meter_frame().peak[0] == Catch::Approx(0.0f));
+    CHECK(clock.has_active_subscribers());  // still live, just with no reading yet
+
+    b->publish(stereo(0.1f, 0.2f));
+    clock.tick(0.016f);
+    CHECK(p->meter_frame().peak[0] == Catch::Approx(0.2f));  // now B's reading
+    root->set_frame_clock(nullptr);
+}
+
+TEST_CASE("re-pointing a scalar source at a different source drops the old value",
+          "[view][meter-source]") {
+    FrameClock clock;
+    auto root = std::make_unique<View>();
+    root->set_frame_clock(&clock);
+    auto panel = std::make_unique<MeterPanel>();
+    MeterPanel* p = panel.get();
+    root->add_child(std::move(panel));
+
+    auto a = std::make_shared<ScalarSource>();
+    p->set_scalar_source(a);
+    a->publish(0.77f);
+    clock.tick(0.016f);
+    REQUIRE(p->scalar_value() == Catch::Approx(0.77f));
+
+    p->set_scalar_source(std::make_shared<ScalarSource>());
+    CHECK(p->scalar_value() == Catch::Approx(0.0f));
+    root->set_frame_clock(nullptr);
+}
+
+// ── An element key no frame declares stays parked ────────────────────────────
+
+TEST_CASE("an element scalar bound to a key no frame declares never subscribes",
+          "[view][meter-source][design-frame][idle-gate]") {
+    // A typo'd param_key, or a param dropped from a redesign, must not hold the
+    // editor at full frame rate forever to feed a ring nothing paints — that is
+    // the idle-at-0-fps property the unbind path exists to protect.
+    FrameClock clock;
+    auto root = std::make_unique<View>();
+    root->set_frame_clock(&clock);
+    std::vector<DesignFrameElement> els{knob_with_key("macro1", 25.0f)};
+    auto panel = std::make_unique<RingPanel>(kPanelSvg, els);
+    RingPanel* p = panel.get();
+    root->add_child(std::move(panel));
+
+    p->set_element_scalar_source("typo", std::make_shared<ScalarSource>());
+    CHECK_FALSE(clock.has_active_subscribers());
+
+    // A real key still subscribes, and unbinding it goes quiet again.
+    p->set_element_scalar_source("macro1", std::make_shared<ScalarSource>());
+    CHECK(clock.has_active_subscribers());
+    p->set_element_scalar_source("macro1", nullptr);
+    CHECK_FALSE(clock.has_active_subscribers());
+}
+
+TEST_CASE("an element scalar parked by one frame wakes when another frame declares its key",
+          "[view][meter-source][design-frame][idle-gate]") {
+    // Parking is re-evaluated on every element swap, so a key only frame 1
+    // carries costs nothing while frame 0 is active and reads the moment it
+    // goes live.
+    FrameClock clock;
+    auto root = std::make_unique<View>();
+    root->set_frame_clock(&clock);
+    std::vector<DesignFrameElement> frame0{knob_with_key("drive", 25.0f)};
+    auto panel = std::make_unique<RingPanel>(kPanelSvg, frame0);
+    RingPanel* p = panel.get();
+    root->add_child(std::move(panel));
+    std::vector<DesignFrameElement> frame1{knob_with_key("tone", 25.0f)};
+    const int f1 = p->add_frame(kPanelSvg, frame1, -1, -1, -1, -1);
+
+    auto tone_lfo = std::make_shared<ScalarSource>();
+    p->set_element_scalar_source("tone", tone_lfo);
+    CHECK_FALSE(clock.has_active_subscribers());  // frame 0 has no "tone"
+
+    p->set_active_frame(f1);
+    CHECK(clock.has_active_subscribers());        // frame 1 does
+    tone_lfo->publish(0.6f);
+    clock.tick(0.016f);
+    CHECK(p->element_scalar(0) == Catch::Approx(0.6f));
+
+    p->set_active_frame(0);
+    CHECK_FALSE(clock.has_active_subscribers());  // parked again
+    CHECK(p->element_scalar(0) == Catch::Approx(0.0f));  // and reads zero, not 0.6
+    root->set_frame_clock(nullptr);
+}
+
+TEST_CASE("binding one element scalar does not disturb another element's cached value",
+          "[view][meter-source][design-frame]") {
+    // Binding an element rebuilds the whole slot table. A rebuild must leave a
+    // sibling binding that is still declared exactly as it was: re-pointing its
+    // subscription or dropping its snapshot would blank a live ring for a frame
+    // every time an unrelated element is bound.
+    FrameClock clock;
+    auto root = std::make_unique<View>();
+    root->set_frame_clock(&clock);
+    std::vector<DesignFrameElement> els{knob_with_key("macro1", 25.0f),
+                                        knob_with_key("macro2", 75.0f)};
+    auto panel = std::make_unique<RingPanel>(kPanelSvg, els);
+    RingPanel* p = panel.get();
+    root->add_child(std::move(panel));
+
+    auto lfo1 = std::make_shared<ScalarSource>();
+    p->set_element_scalar_source("macro1", lfo1);
+    lfo1->publish(0.42f);
+    clock.tick(0.016f);
+    REQUIRE(p->element_scalar(0) == Catch::Approx(0.42f));
+
+    // Bind a SIBLING element — macro1's live reading must survive untouched.
+    p->set_element_scalar_source("macro2", std::make_shared<ScalarSource>());
+    CHECK(p->element_scalar(0) == Catch::Approx(0.42f));
+
+    // And unbinding the sibling again must not disturb it either.
+    p->set_element_scalar_source("macro2", nullptr);
+    CHECK(p->element_scalar(0) == Catch::Approx(0.42f));
+    CHECK(clock.has_active_subscribers());
     root->set_frame_clock(nullptr);
 }
