@@ -182,6 +182,8 @@ pulp_add_test_suite(pulp-test-osc-phase LIBRARIES pulp::signal)
 # The BLEP/BLAMP kernels are gated on measured alias rejection, so this suite
 # links the analysis lib for the shared tone-projection analyzers.
 pulp_add_test_suite(pulp-test-osc-blep LIBRARIES pulp::signal pulp::audio-analysis)
+# The VA shapes are gated on measured alias rejection, hence the analysis lib.
+pulp_add_test_suite(pulp-test-osc-va LIBRARIES pulp::signal pulp::audio-analysis)
 # SF-2 crossfade unification: live_kernel structural-swap fade now matches the
 # native signal::TransitionMixer (EqualPower) law bit-for-bit — an intended,
 # documented behavior change (the fade previously used a linear theta).
