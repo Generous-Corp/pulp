@@ -26,7 +26,7 @@ pulp import-design --from <source> [options]
 | `--from <source>` | Design source (required) | — |
 | `--file <path>` | Input file path | — |
 | `--url <url>` | Design URL (Figma file URL, v0 share link) | — |
-| `--frame <name>` | Frame/artboard to import. For `--from fig`, pass a frame guid or name; required unless using `--outline`. | first frame for `figma` |
+| `--frame <name>` | Frame/artboard to import. For `--from fig`, pass a frame guid or name; required unless using `--outline`. **Repeatable** — give it once per state to capture a multi-state design into one `DesignFrameView`; the order given is the frame index a `swap <n>` layer targets (the first `--frame` is frame 0). | first frame for `figma` |
 | `--page <name>` | Restrict local `.fig` frame lookup to one page | — |
 | `--outline` | List pages/frames of a local `.fig` file and exit | — |
 | `--screen <name>` | Screen to import (Stitch) | first screen |

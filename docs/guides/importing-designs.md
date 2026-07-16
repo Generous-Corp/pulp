@@ -272,26 +272,57 @@ Some components have more than one *state frame* — e.g. a keyboard with a
   rect calls `set_active_frame(target_frame)`. This is how an in-design toggle
   control (the 🎹/⌨ buttons in the Musical Typing Keyboard) drives the swap.
 
-### Worked example — re-importing two mode frames
+### Capturing every state in one import
 
-When a design stacks its states in one spec frame (to show them side-by-side),
-import each state **sub-frame** standalone — they become the swap targets:
+Repeat `--frame` once per state. The importer captures each one and emits a
+single view holding them all — no hand-editing:
 
 ```bash
-# Typing mode (Figma node 187:15) and piano mode (187:349) of one component.
-python3 tools/import-design/figma_rest_export.py \
-  --file-key <KEY> --node 187:15  --out typing.pulp.json --faithful-vector
-python3 tools/import-design/figma_rest_export.py \
-  --file-key <KEY> --node 187:349 --out piano.pulp.json  --faithful-vector
+# Typing mode and piano mode of one component, captured together.
+pulp import-design --from fig --file keyboard.fig \
+  --frame "Typing" --frame "Piano" \
+  --emit cpp --mode baked --output keyboard.cpp
 ```
 
-Each export's faithful SVG (a `data:image/svg+xml;base64` asset in the
-`asset_manifest`) is embedded; the component adds both as frames and wires the
-toggle's buttons as `swap` elements. Re-importing a revised frame is the same
-command on the same node — re-export, re-embed, re-extract rects. Name the link
-in plain English at import time using the interaction-linking vocabulary (swap /
-resize / modal / popover / navigate / open-window / drawer); `swap` is the one
-used here. (`MusicalTypingKeyboard` is the reference consumer.)
+**`--frame` order is the frame index.** The first `--frame` is frame 0, the
+second is frame 1, and so on — that index is what a swap button targets, so
+reordering the flags re-points the swaps. Name the swap layer `swap 1` in the
+design to target frame 1. (The trailing number in the layer name is the
+target; a layer named just `swap` has no target and is reported as an error.)
+
+A single `--frame` behaves exactly as it always has: one frame, no swap wiring.
+
+Under the hood each state is captured on its own and merged into one envelope
+whose root carries the rest as `alternate_frames`; both the C++ codegen and
+the native materializer emit one `add_frame` per entry, in order.
+
+### A swap with no captured target is an error, not a dead button
+
+A swap button pointing at a frame you didn't capture would render as a control
+that silently does nothing. The importer refuses to let that pass quietly — it
+reports the swap through the same channel as any other unresolved control:
+
+```bash
+pulp import-design --from fig --file keyboard.fig --frame "Typing" \
+  --emit cpp --mode baked --output keyboard.cpp \
+  --import-report report.json --fail-on-unresolved
+```
+
+```
+import report: 1 control(s), 1 conflicted, 0 low-confidence, 0 unresolved (inert)
+  - 12:7  kind=swap rung=0 confidence=1 [verify-FAIL]
+      conflict: swap link targets frame 1 but only 1 frame captured (valid indices 0..0)
+```
+
+`--fail-on-unresolved` exits `2`, so CI catches it. The fix is either to
+capture the missing state (add its `--frame`) or to correct the layer's target
+number. This applies to a single-frame import too — a design whose swap was
+always dead now says so.
+
+Name the link in plain English at import time using the interaction-linking
+vocabulary (swap / resize / modal / popover / navigate / open-window /
+drawer); `swap` is the one used here. (`MusicalTypingKeyboard` is the
+reference consumer, hand-written before multi-state capture existed.)
 
 > Hit-rects for a standalone sub-frame are in the sub-frame's own coordinate
 > space. Extract them from the node's `absoluteBoundingBox` geometry minus the
