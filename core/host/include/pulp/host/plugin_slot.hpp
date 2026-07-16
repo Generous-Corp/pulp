@@ -134,8 +134,15 @@ public:
     // Format-specific editor surfaces:
     //   CLAP   — clap_plugin_gui: create / set_parent / show / get_size
     //   VST3   — IEditController::createView("editor") + IPlugView::attached
-    //   AU     — AUAudioUnit.requestViewControllerWithCompletionHandler
+    //   AU     — kAudioUnitProperty_CocoaUI on the v2 AudioUnit handle. Both
+    //            AudioUnit and AudioUnitV3 load through the v2 C API
+    //            (AudioComponentInstanceNew), so there is no AUAudioUnit object
+    //            here and no requestViewControllerWithCompletionHandler.
     //   LV2    — ui: extension + shared-object UI
+    //
+    // CLAP and VST3 CONSUME a parent view rather than returning one, so those
+    // slots hand back a host-owned container as `native_handle`. See
+    // hosted_editor_container.hpp.
     struct HostedEditor {
         void* native_handle = nullptr;   ///< NSView*, HWND, GdkWindow*, clap_plugin_gui* etc.
         uint32_t width = 0;
@@ -270,6 +277,31 @@ public:
     /// value from the plugin. The LV2 backend overrides it, because Pulp's
     /// hosted LV2 slot cannot currently read the plugin's latency port.
     virtual LatencyQuery latency_query() const { return LatencyQuery::Available; }
+
+    // Editor resize negotiation. Both appended last to preserve the existing
+    // PluginSlot virtual ordering; the defaults make every slot that does not
+    // override them behave exactly as before.
+    //
+    // Main thread only, and only meaningful between create_hosted_editor() and
+    // destroy_hosted_editor().
+
+    /// Called when the plugin asks the host to resize its editor. Return true
+    /// if the host honored the request. Refusing is legal in every format —
+    /// the plugin must cope with a denial.
+    using EditorResizeRequestHandler = std::function<bool(uint32_t width, uint32_t height)>;
+
+    /// Install the handler invoked on a plugin-initiated resize request. Pass a
+    /// null handler to clear it. The handler must outlive the open editor.
+    /// Slots that cannot report resize requests ignore this.
+    virtual void set_editor_resize_request_handler(EditorResizeRequestHandler /*handler*/) {}
+
+    /// Host-initiated resize: ask the plugin to adopt (width, height). The
+    /// plugin may snap to its own constraints, so the accepted size is written
+    /// back through `width`/`height`. Returns false when the slot has no open
+    /// editor, the format cannot resize, or the plugin refused.
+    virtual bool set_hosted_editor_size(uint32_t& /*width*/, uint32_t& /*height*/) {
+        return false;
+    }
 };
 
 } // namespace pulp::host

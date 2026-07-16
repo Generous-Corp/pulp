@@ -86,3 +86,14 @@ if(APPLE)
     )
     target_compile_definitions(pulp-host PUBLIC PULP_HOST_HAS_AU=1)
 endif()
+
+# Host-owned container for an embedded plugin editor. Real on macOS; every other
+# platform gets the stub, so the per-format negotiation code still compiles and
+# create_hosted_editor() degrades to "no editor".
+if(APPLE)
+    target_sources(pulp-host PRIVATE src/hosted_editor_container_mac.mm)
+    target_link_libraries(pulp-host PRIVATE "-framework AppKit")
+    target_compile_definitions(pulp-host PUBLIC PULP_HOST_HAS_EDITOR_CONTAINER=1)
+else()
+    target_sources(pulp-host PRIVATE src/hosted_editor_container_stub.cpp)
+endif()
