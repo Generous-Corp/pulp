@@ -37,9 +37,11 @@ namespace pulp::test::audio {
 
 /// Drive `scenario` with a unit impulse and return the magnitude response,
 /// sampled at `checkpoints_hz` plus the full-resolution curve. The scenario's
-/// own input/duration are overridden: a single impulse of length
-/// `options.fft_length` is rendered so the captured segment is the impulse
-/// response. Parameter/MIDI scripts and `set_param` calls are preserved.
+/// own input/duration are overridden: a single impulse is rendered for
+/// `options.analysis_offset + options.fft_length` samples, so the captured
+/// segment beginning at `analysis_offset` is a full `fft_length` of impulse
+/// response rather than a zero-padded tail. Parameter/MIDI scripts and
+/// `set_param` calls are preserved.
 ///
 /// Delegates the spectral math to the buffer-level
 /// `response_relative_to_input(input, output, ...)` in audio_spectrum.hpp.
@@ -49,9 +51,15 @@ ResponseCurve response_relative_to_input(const RenderScenario& scenario,
 
 /// Drive `scenario` with a unit impulse and return the phase / group-delay
 /// curve, sampled at `checkpoints_hz` plus the full-resolution curve. As with
-/// the magnitude response, the scenario's own input/duration are overridden
-/// with an impulse render of length `options.fft_length`; parameter/MIDI
-/// scripts and `set_param` calls are preserved.
+/// the magnitude response, the scenario's own input/duration are overridden:
+/// the impulse is rendered for `options.analysis_offset + options.fft_length`
+/// samples, so the analysis segment beginning at `analysis_offset` is a full
+/// `fft_length` long. Parameter/MIDI scripts and `set_param` calls are
+/// preserved.
+///
+/// `options.analysis_offset` must be 0 here — the reference impulse sits at
+/// frame 0, so any nonzero offset leaves the reference window silent and
+/// throws. See `GroupDelayOptions::analysis_offset`.
 ///
 /// Group delay is reported in samples at the scenario's sample rate, positive
 /// for a causal delay. Bins in a stopband are reported undefined rather than

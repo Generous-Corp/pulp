@@ -125,7 +125,11 @@ std::string phase_curve_to_json(const PhaseCurve& curve,
     const auto point_value = [](const PhasePoint& p, double sample_rate) {
         auto pt = choc::value::createObject("PhasePoint");
         pt.setMember("hz", p.hz);
-        pt.setMember("magnitude_db", p.magnitude_db);
+        // Deliberately NOT "magnitude_db": this is peak-relative, while the
+        // sibling .response.json's "magnitude_db" is the absolute out/in
+        // transfer ratio. The key carries the difference so a reader holding
+        // both artifacts cannot conflate them.
+        pt.setMember("magnitude_db_rel_peak", p.magnitude_db_rel_peak);
         pt.setMember("defined", p.defined);
         if (p.defined) {
             pt.setMember("phase_rad", p.phase_rad);

@@ -589,7 +589,7 @@ TEST_CASE("Doctor: half-band round-trip group delay", "[audio][doctor][group-del
          << curve.group_delay_samples_at(5000.0) << "; 9.6 kHz "
          << curve.group_delay_samples_at(9600.0)
          << "; closed-form DC prediction " << expected_dc
-         << "; magnitude at 9.6 kHz " << curve.magnitude_db_at(9600.0) << " dB");
+         << "; magnitude at 9.6 kHz " << curve.magnitude_db_rel_peak_at(9600.0) << " dB");
 
     // The passband is defined — the round trip is allpass (unity magnitude at
     // every frequency), so there is real signal to measure a phase from
@@ -655,7 +655,7 @@ TEST_CASE("Doctor: half-band filter group delay at its own rate",
          << " samples at the 2x rate (closed form " << expected_dc_at_2x
          << "), i.e. " << measured_2x / 2.0
          << " samples at the half-band's input rate. Stopband probe at 40 kHz: "
-         << curve.magnitude_db_at(40000.0) << " dB, defined="
+         << curve.magnitude_db_rel_peak_at(40000.0) << " dB, defined="
          << curve.defined_at(40000.0));
 
     REQUIRE(curve.defined_at(100.0));
@@ -671,7 +671,7 @@ TEST_CASE("Doctor: half-band filter group delay at its own rate",
     // The gate is a signal-present test, not a passband test: a filter with a
     // shallow stopband is measurable there, and this analyzer says so rather
     // than discarding data it does have.
-    CHECK(curve.magnitude_db_at(40000.0) < -20.0);
+    CHECK(curve.magnitude_db_rel_peak_at(40000.0) < -20.0);
     CHECK(curve.defined_at(40000.0));
     CHECK(std::isfinite(curve.group_delay_samples_at(40000.0)));
 }
@@ -792,9 +792,9 @@ TEST_CASE("Doctor: group delay reports a stopband as undefined",
     const double checkpoints[] = {50.0, 20000.0};
     const auto curve = measure_group_delay(scenario, checkpoints, opts);
 
-    INFO("passband 50 Hz: " << curve.magnitude_db_at(50.0) << " dB, defined="
+    INFO("passband 50 Hz: " << curve.magnitude_db_rel_peak_at(50.0) << " dB, defined="
                             << curve.defined_at(50.0) << "; stopband 20 kHz: "
-                            << curve.magnitude_db_at(20000.0) << " dB, defined="
+                            << curve.magnitude_db_rel_peak_at(20000.0) << " dB, defined="
                             << curve.defined_at(20000.0) << "; floor "
                             << curve.magnitude_floor_db << " dB");
 
@@ -804,7 +804,7 @@ TEST_CASE("Doctor: group delay reports a stopband as undefined",
 
     // The deep stopband does not, and must be reported as undefined rather
     // than handed a number read out of the noise floor.
-    CHECK(curve.magnitude_db_at(20000.0) < curve.magnitude_floor_db);
+    CHECK(curve.magnitude_db_rel_peak_at(20000.0) < curve.magnitude_floor_db);
     CHECK_FALSE(curve.defined_at(20000.0));
 
     // Undefined means NaN, not a plausible zero: a caller who ignores the gate
@@ -815,15 +815,15 @@ TEST_CASE("Doctor: group delay reports a stopband as undefined",
 
     // The gate is a magnitude decision, so magnitude stays readable either way
     // — it is the evidence for the verdict.
-    CHECK(std::isfinite(curve.magnitude_db_at(20000.0)));
+    CHECK(std::isfinite(curve.magnitude_db_rel_peak_at(20000.0)));
 
     // Every undefined bin in the curve obeys the same contract, and the gate
     // is driven by the stated floor rather than an ad-hoc rule.
     for (const auto& p : curve.full) {
         if (p.defined) {
-            CHECK(p.magnitude_db >= curve.magnitude_floor_db);
+            CHECK(p.magnitude_db_rel_peak >= curve.magnitude_floor_db);
         } else {
-            CHECK(p.magnitude_db < curve.magnitude_floor_db);
+            CHECK(p.magnitude_db_rel_peak < curve.magnitude_floor_db);
             CHECK(std::isnan(p.group_delay_samples));
         }
     }
@@ -857,6 +857,51 @@ TEST_CASE("Doctor: group delay reports a silent output as undefined",
             ++defined_bins;
     INFO("defined bins in a silent-output curve: " << defined_bins << " of "
                                                    << curve.full.size());
+    CHECK(defined_bins == 0);
+    CHECK_FALSE(curve.defined_at(1000.0));
+    CHECK(std::isnan(curve.group_delay_samples_at(1000.0)));
+    CHECK(std::isnan(curve.phase_radians_at(1000.0)));
+}
+
+TEST_CASE("Doctor: group delay reports a near-silent output as undefined",
+          "[audio][doctor][group-delay]") {
+    // An exactly-zero output is the easy half of this. The hard half is an
+    // output that is a PERFECTLY VALID impulse response — a delay line, here —
+    // scaled to nothing: a collapsed gain stage, a numerically degenerate
+    // filter. It carries real phase, so the relative gate sees a clean 0 dB
+    // peak, and its magnitude clears any absolute transfer-ratio threshold.
+    // But it sits below the group-delay estimator's own energy floor, so the
+    // estimator has nothing to differentiate and yields its zero placeholder.
+    // A curve that called such a bin `defined` would report group delay 0 for
+    // a delay of exactly kDelay samples — a specific, confident, wrong number
+    // that the analyzer never measured. It must be undefined instead.
+    // Tolerance class: exact (the gate is a boolean).
+    constexpr int kFft = 1024;
+    constexpr int kDelay = 8;
+    constexpr float kCollapsedGain = 1e-8f; // ~-160 dBFS
+
+    auto impulse = make_impulse(/*channels=*/1, kFft, 1.0f, /*position=*/0);
+    // The impulse response of a delay-by-kDelay line, at -160 dBFS.
+    auto tiny = make_impulse(/*channels=*/1, kFft, kCollapsedGain,
+                             /*position=*/kDelay);
+
+    GroupDelayOptions opts;
+    opts.fft_length = kFft;
+    const double checkpoints[] = {1000.0};
+    const auto curve =
+        measure_group_delay(std::as_const(impulse).view(),
+                            std::as_const(tiny).view(), kSampleRate,
+                            checkpoints, opts);
+
+    int defined_bins = 0;
+    for (const auto& p : curve.full)
+        if (p.defined)
+            ++defined_bins;
+    INFO("defined bins in a "
+         << kCollapsedGain << "-scaled delay-by-" << kDelay
+         << " curve: " << defined_bins << " of " << curve.full.size()
+         << "; group delay at 1 kHz " << curve.group_delay_samples_at(1000.0)
+         << " (true delay " << kDelay << ")");
     CHECK(defined_bins == 0);
     CHECK_FALSE(curve.defined_at(1000.0));
     CHECK(std::isnan(curve.group_delay_samples_at(1000.0)));
@@ -903,7 +948,7 @@ TEST_CASE("Doctor: group-delay artifact round-trips",
     // delay number at all.
     const auto stopband = parsed["checkpoints"][1];
     REQUIRE_FALSE(stopband["defined"].getWithDefault<bool>(true));
-    CHECK(stopband.hasObjectMember("magnitude_db"));
+    CHECK(stopband.hasObjectMember("magnitude_db_rel_peak"));
     CHECK_FALSE(stopband.hasObjectMember("group_delay_samples"));
     CHECK_FALSE(stopband.hasObjectMember("group_delay_seconds"));
     CHECK_FALSE(stopband.hasObjectMember("phase_rad"));

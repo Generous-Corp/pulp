@@ -43,6 +43,12 @@ std::string thd_to_json(const ThdResult& thd, std::string_view scenario);
 /// entirely: their in-memory value is NaN, which JSON cannot represent, and
 /// writing a placeholder would hand a reader a number the analyzer never
 /// measured. Read `defined` before reaching for the delay fields.
+///
+/// The magnitude key is `magnitude_db_rel_peak`, not the `.response.json`
+/// artifact's `magnitude_db`, because the two are different quantities: this
+/// one is normalized to the phase curve's own peak transfer magnitude, while
+/// `.response.json`'s is the absolute out/in transfer ratio. A processor with
+/// 12 dB of passband gain reports +12 in the sibling artifact and 0 here.
 std::string phase_curve_to_json(const PhaseCurve& curve,
                                 std::string_view scenario);
 

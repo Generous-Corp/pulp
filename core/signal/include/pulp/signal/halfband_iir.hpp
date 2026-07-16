@@ -52,10 +52,15 @@
 /// ## Upsampling (2x)
 /// `HalfBandUpsampler2x::process(x, out_lo, out_hi)` takes one input
 /// sample and produces two output samples at twice the rate. The two
-/// allpass paths are evaluated on the input, summed for the "low"
-/// output (the one aligned with the input phase) and differenced for
-/// the "high" output (the in-between sample). This matches the
-/// standard polyphase identity for half-band interpolation.
+/// allpass paths are evaluated on the input and emitted directly —
+/// path A becomes the "low" output (the phase aligned with the input),
+/// path B the "high" output (the in-between sample). Neither is summed
+/// nor differenced: each path is individually allpass, and the
+/// half-band response emerges only once the two are interleaved into a
+/// single 2x-rate stream, where the paths' phase difference is 0 in
+/// the passband (samples reinforce) and pi in the stopband (they
+/// cancel). This is the standard polyphase identity for half-band
+/// interpolation.
 ///
 /// ## Downsampling (2x)
 /// `HalfBandDownsampler2x::process(in_lo, in_hi)` consumes two input
@@ -164,8 +169,8 @@ using HalfBandAllpassSection64 = HalfBandAllpassSectionT<double>;
 ///     Delay is frequency-dependent and rises toward the transition
 ///     band; these figures are the DC/passband end. The Audio Doctor's
 ///     group-delay analyzer measures all three and agrees with the
-///     closed form to four significant figures
-///     (test/test_audio_doctor.cpp).
+///     closed form to within 0.01 samples — which is what the suite
+///     actually asserts (test/test_audio_doctor.cpp).
 ///
 /// Lineage: derived from the published polyphase IIR half-band
 /// literature (Vaidyanathan, "Multirate Systems and Filter Banks"
