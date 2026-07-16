@@ -1,6 +1,7 @@
 #include <pulp/format/graph_runtime_executor.hpp>
 
 #include <pulp/audio/load_measurer.hpp>
+#include <pulp/midi/block_ops.hpp>
 
 #include <algorithm>
 #include <array>
@@ -112,51 +113,13 @@ void gather_node_inputs(const graph::GraphRuntimePlan& plan,
     }
 }
 
-// Clear a MIDI buffer's events, sysex, and attached UMP — the full reset the
-// host walk applies before gathering a node's inbound MIDI.
-void clear_routed_midi(midi::MidiBuffer& block) noexcept {
-    block.clear();
-    block.clear_sysex();
-    if (auto* ump = block.ump()) ump->clear();
-}
-
-// True if a buffer dropped any event / sysex / UMP message (capacity limit hit),
-// matching the host walk's drop check.
-bool routed_midi_has_drops(const midi::MidiBuffer& block) noexcept {
-    if (block.dropped_event_count() > 0 || block.dropped_sysex_count() > 0) return true;
-    const auto* ump = block.ump();
-    return ump != nullptr && ump->dropped_event_count() > 0;
-}
-
-// Append every event / sysex / UMP message from `src` to `dst`, the same
-// whole-buffer copy the host walk uses to gather an inbound MIDI edge. Returns
-// false if `src` already carried a drop or an add() dropped here (the
-// incompleteness the host propagates downstream). RT-safe when both buffers are
-// reserved (add() respects the realtime capacity limit).
-bool copy_routed_midi(const midi::MidiBuffer& src, midi::MidiBuffer& dst) noexcept {
-    bool copied_all = !routed_midi_has_drops(src);
-    for (const auto& ev : src) {
-        if (!dst.add(ev)) copied_all = false;
-    }
-    for (const auto& sx : src.sysex()) {
-        if (sx.data.empty()) {
-            if (!dst.add_sysex({}, sx.sample_offset, sx.timestamp)) copied_all = false;
-        } else if (!dst.add_sysex_copy(sx.data.data(), sx.data.size(), sx.sample_offset,
-                                       sx.timestamp)) {
-            copied_all = false;
-        }
-    }
-    const auto* src_ump = src.ump();
-    auto* dst_ump = dst.ump();
-    if (src_ump != nullptr && dst_ump != nullptr) {
-        for (const auto& ev : *src_ump) {
-            if (!dst_ump->add(ev)) copied_all = false;
-        }
-    } else if (src_ump != nullptr && !src_ump->empty()) {
-        copied_all = false;
-    }
-    return copied_all;
-}
+// The routed MIDI clear / drop-check / whole-buffer copy the host reference
+// walk also applies when gathering a node's inbound MIDI. Shared with the host
+// layer via core/midi so routed-vs-walk output stays bit-exact across the
+// host/format boundary.
+using midi::clear_midi_block;
+using midi::copy_midi_block;
+using midi::midi_block_has_drops;
 
 // Clear this node's gathered MIDI input, then append every inbound event
 // connection's source MIDI output into it (whole-buffer copy, summed in inbound
@@ -169,7 +132,7 @@ void gather_node_midi(const graph::GraphRuntimePlan& plan,
                       std::uint32_t node_index) noexcept {
     midi::MidiBuffer* in = midi.in(node_index);
     if (in == nullptr) return;
-    clear_routed_midi(*in);
+    clear_midi_block(*in);
     bool incomplete = false;
     for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
         const auto conn_index =
@@ -182,7 +145,7 @@ void gather_node_midi(const graph::GraphRuntimePlan& plan,
         // marks this node's input incomplete (matching the host walk's
         // node-to-node incompleteness propagation).
         if (midi.out_incomplete(conn.source_index)) incomplete = true;
-        if (!copy_routed_midi(*src, *in)) incomplete = true;
+        if (!copy_midi_block(*src, *in)) incomplete = true;
     }
     midi.set_in_incomplete(node_index, incomplete);
 }
@@ -546,7 +509,7 @@ GraphRuntimeExecutorErrorCode run_routed_node(
         midi->set_out_incomplete(
             node_index,
             midi->in_incomplete(node_index) ||
-                routed_midi_has_drops(*context.node_midi_out));
+                midi_block_has_drops(*context.node_midi_out));
     }
     return GraphRuntimeExecutorErrorCode::None;
 }

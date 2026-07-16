@@ -6,6 +6,7 @@
 #include "content_commands.hpp"
 
 #include "json_parser.hpp"
+#include "json_writer.hpp"
 #include "kit_commands.hpp"
 
 #include <pulp/runtime/crypto.hpp>
@@ -71,25 +72,6 @@ bool write_text(const fs::path& path, const std::string& body) {
     if (!f.is_open()) return false;
     f << body;
     return f.good();
-}
-
-std::string json_escape(std::string_view s) {
-    std::string out;
-    for (char c : s) {
-        switch (c) {
-            case '"': out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default: out += c; break;
-        }
-    }
-    return out;
-}
-
-std::string json_string(std::string_view s) {
-    return "\"" + json_escape(s) + "\"";
 }
 
 std::string strings_json(const std::vector<std::string>& values) {

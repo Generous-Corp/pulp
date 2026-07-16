@@ -4,6 +4,7 @@
 // with the Pulp StateStore during processing
 
 #include <pulp/format/vst3_adapter.hpp>
+#include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/detail/midi_out_offset.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
@@ -90,23 +91,6 @@ inline void resize_sample_scratch(std::vector<std::vector<float>>& scratch,
     scratch.resize(channel_count);
     for (auto& channel : scratch)
         channel.assign(frame_count, 0.0f);
-}
-
-inline void copy_f64_to_f32(const double* src, float* dst, int32 count) {
-    if (!src || !dst || count <= 0) return;
-    for (int32 i = 0; i < count; ++i)
-        dst[i] = static_cast<float>(src[i]);
-}
-
-inline void copy_f32_to_f64(const float* src, double* dst, int32 count) {
-    if (!src || !dst || count <= 0) return;
-    for (int32 i = 0; i < count; ++i)
-        dst[i] = static_cast<double>(src[i]);
-}
-
-inline void zero_f64(double* dst, int32 count) {
-    if (!dst || count <= 0) return;
-    std::fill_n(dst, count, 0.0);
 }
 
 }  // namespace
@@ -836,19 +820,10 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     // host compensates the plugin path by getLatencySamples(), so the
     // bypassed dry copy must be delayed by exactly that many samples to stay
     // aligned with the host's plugin-delay-compensation. Allocate here, never
-    // in process(); a 0 latency keeps the delay line empty so the bypass
+    // in process(); a 0 latency leaves the delay lines unused so the bypass
     // pass-through stays a zero-copy memcpy.
-    bypass_delay_samples_ = static_cast<int>(
-        reported_latency_samples(processor_->latency_samples(), quirks_));
-    if (bypass_delay_samples_ < 0) bypass_delay_samples_ = 0;
-    if (bypass_delay_samples_ > 0) {
-        bypass_dry_delay_.resize(static_cast<std::size_t>(ctx.output_channels));
-        for (auto& line : bypass_dry_delay_) {
-            line.prepare(bypass_delay_samples_);
-        }
-    } else {
-        bypass_dry_delay_.clear();
-    }
+    bypass_.prepare(static_cast<int>(
+        reported_latency_samples(processor_->latency_samples(), quirks_)));
 
     return SingleComponentEffect::setupProcessing(setup);
 }
@@ -1087,20 +1062,20 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                             continue;
                         }
                         const auto param_id = static_cast<state::ParamID>(id);
+                        // VST3 hands normalized 0-1 values; the DSP cursor and
+                        // the store both want the plain (denormalized) value.
+                        // Denormalize once here so the shared dual-write pushes
+                        // the same plain value to the sample-accurate queue and
+                        // to the RT-safe store path (set_value_rt): identical to
+                        // the prior push + set_normalized_rt pair, which
+                        // denormalized the same value through the same range.
                         float plain_value = static_cast<float>(value);
                         if (const auto* info = store_.info(param_id)) {
                             plain_value = info->range.denormalize(plain_value);
                         }
-                        param_events_.push({
-                            param_id,
-                            static_cast<int32_t>(offset),
-                            plain_value,
-                        });
-                        // VST3 uses normalized 0-1 values — sync to Pulp store
-                        // via the RT-safe path so any Main listeners are
-                        // deferred to pump_listeners() instead of allocating
-                        // a dispatch lambda on the audio thread.
-                        store_.set_normalized_rt(param_id, static_cast<float>(value));
+                        boundary::apply_param_value(
+                            param_events_, store_, param_id,
+                            static_cast<int32_t>(offset), plain_value);
                     }
                 }
             }
@@ -1151,7 +1126,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                     ? data.inputs[0].channelBuffers64[ch]
                     : nullptr;
                 input64_ptrs_[ch] = src;
-                copy_f64_to_f32(src, dst, num_samples);
+                boundary::copy_f64_to_f32(src, dst,
+                                          static_cast<std::uint32_t>(num_samples));
                 input_ptrs_[ch] = src ? dst : nullptr;
             } else {
                 input64_ptrs_[ch] = nullptr;
@@ -1192,7 +1168,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                     ? data.inputs[1].channelBuffers64[ch]
                     : nullptr;
                 sidechain64_ptrs_[ch] = src;
-                copy_f64_to_f32(src, dst, num_samples);
+                boundary::copy_f64_to_f32(src, dst,
+                                          static_cast<std::uint32_t>(num_samples));
                 sidechain_ptrs_[ch] = src ? dst : nullptr;
             } else {
                 sidechain64_ptrs_[ch] = nullptr;
@@ -1245,8 +1222,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                 if (host_f64) {
                     if (data.outputs[0].channelBuffers64 &&
                         data.outputs[0].channelBuffers64[ch]) {
-                        zero_f64(data.outputs[0].channelBuffers64[ch] + num_samples,
-                                 original_num_samples - num_samples);
+                        boundary::zero_f64(
+                            data.outputs[0].channelBuffers64[ch] + num_samples,
+                            static_cast<std::uint32_t>(original_num_samples - num_samples));
                     }
                 } else if (output_ptrs_[ch] != nullptr) {
                     std::memset(output_ptrs_[ch] + num_samples, 0,
@@ -1268,7 +1246,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         auto& bus = data.outputs[b];
         for (int32 ch = 0; ch < bus.numChannels; ++ch) {
             if (host_f64 && bus.channelBuffers64 && bus.channelBuffers64[ch]) {
-                zero_f64(bus.channelBuffers64[ch], original_num_samples);
+                boundary::zero_f64(bus.channelBuffers64[ch],
+                                   static_cast<std::uint32_t>(original_num_samples));
             } else if (!host_f64 && bus.channelBuffers32 && bus.channelBuffers32[ch]) {
                 std::memset(bus.channelBuffers32[ch], 0,
                             sizeof(float) * original_num_samples);
@@ -1287,7 +1266,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     if (silence_unsupported_active_) {
         for (int ch = 0; ch < out_channels; ++ch) {
             if (host_f64 && output64_ptrs_[ch] != nullptr) {
-                zero_f64(output64_ptrs_[ch], num_samples);
+                boundary::zero_f64(output64_ptrs_[ch],
+                                   static_cast<std::uint32_t>(num_samples));
             } else if (!host_f64 && output_ptrs_[ch] != nullptr) {
                 std::memset(output_ptrs_[ch], 0, sizeof(float) * num_samples);
             }
@@ -1460,14 +1440,13 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // bypassed MIDI FX does not leak notes into the host bus.
     if (bypass_param_id_ != 0 &&
         store_.get_value(bypass_param_id_) >= 0.5f) {
-        // All-or-nothing across the block: only delay when a line was prepared
-        // for every output channel. If the host ever drives more channels than
-        // setupProcessing() negotiated (channel count is pinned by
-        // setBusArrangements in practice, so this is a corner), the whole block
-        // falls back to a zero-delay copy — degrading to pre-fix behavior, not
-        // a mix of delayed and undelayed channels.
-        const bool delayed = bypass_delay_samples_ > 0 &&
-            static_cast<int>(bypass_dry_delay_.size()) >= out_channels;
+        // All-or-nothing across the block: only delay when the boundary owns a
+        // dry-delay line for every output channel. A channel count above the
+        // shared boundary ceiling (kBoundaryMaxChannels) falls back to a
+        // zero-delay copy for the whole block — degrading uniformly, never a
+        // mix of delayed and undelayed channels.
+        const bool delayed = bypass_.is_latency_compensated() &&
+            out_channels <= static_cast<int>(bypass_.channel_capacity());
         for (int ch = 0; ch < out_channels; ++ch) {
             // A VST3 bus can report numChannels > 0 while individual
             // channelBuffers32[ch] entries are null; null-check before
@@ -1484,18 +1463,18 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                     : nullptr;
                 if (in64 != nullptr) {
                     if (delayed) {
-                        auto& line = bypass_dry_delay_[ch];
                         for (int n = 0; n < original_num_samples; ++n) {
-                            out64[n] = static_cast<double>(
-                                line.process(static_cast<float>(in64[n]),
-                                             bypass_delay_samples_));
+                            out64[n] = static_cast<double>(bypass_.process_sample(
+                                static_cast<float>(in64[n]),
+                                static_cast<std::size_t>(ch)));
                         }
                     } else {
                         std::memcpy(out64, in64,
                                     sizeof(double) * static_cast<std::size_t>(original_num_samples));
                     }
                 } else {
-                    zero_f64(out64, original_num_samples);
+                    boundary::zero_f64(out64,
+                                       static_cast<std::uint32_t>(original_num_samples));
                 }
                 continue;
             }
@@ -1513,15 +1492,15 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                     // the same amount to stay sample-aligned with the host's
                     // plugin-delay-compensation. The delay line is fed only
                     // while bypassed: a one-time transient in the first
-                    // `bypass_delay_samples_` samples after engaging bypass is
+                    // reported-latency samples after engaging bypass is
                     // accepted (bypass toggling is a user action, not
                     // sample-critical) in exchange for a zero-cost
                     // non-bypassed path. Steady state emits input[n - latency].
-                    auto& line = bypass_dry_delay_[ch];
                     const float* in = input_ptrs_[ch];
                     float* out = output_ptrs_[ch];
                     for (int n = 0; n < original_num_samples; ++n) {
-                        out[n] = line.process(in[n], bypass_delay_samples_);
+                        out[n] = bypass_.process_sample(
+                            in[n], static_cast<std::size_t>(ch));
                     }
                 } else {
                     std::memcpy(output_ptrs_[ch], input_ptrs_[ch],
@@ -1824,10 +1803,10 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     if (boundary_f64) {
         if (data.numOutputs > 0 && data.outputs[0].channelBuffers64) {
             for (int ch = 0; ch < out_channels; ++ch) {
-                copy_f32_to_f64(
+                boundary::copy_f32_to_f64(
                     output_ptrs_[ch],
                     data.outputs[0].channelBuffers64[ch],
-                    num_samples);
+                    static_cast<std::uint32_t>(num_samples));
             }
         }
         for (std::size_t b = 1; b < routed_output_buses; ++b) {
@@ -1843,9 +1822,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             const int aux_channels =
                 static_cast<int>(output_buses[b].buffer.num_channels());
             for (int ch = 0; ch < aux_channels; ++ch) {
-                copy_f32_to_f64(ptrs[static_cast<std::size_t>(ch)],
-                                bus.channelBuffers64[ch],
-                                num_samples);
+                boundary::copy_f32_to_f64(ptrs[static_cast<std::size_t>(ch)],
+                                          bus.channelBuffers64[ch],
+                                          static_cast<std::uint32_t>(num_samples));
             }
         }
     }

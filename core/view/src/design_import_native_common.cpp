@@ -717,72 +717,6 @@ bool attr_bool(const IRNode& node, std::string_view key, bool fallback = false) 
     return fallback;
 }
 
-struct ImportedImageSizing {
-    float width = 0.0f;
-    float height = 0.0f;
-    std::optional<float> left;
-    std::optional<float> top;
-};
-
-std::optional<ImportedImageSizing> imported_image_sizing_override(const IRNode& node) {
-    const float box_w = node.style.width.value_or(0.0f);
-    const float box_h = node.style.height.value_or(0.0f);
-    if (box_w <= 0.0f || box_h <= 0.0f) return std::nullopt;
-
-    const float png_w = attr_float(node, "png_natural_w").value_or(0.0f);
-    const float png_h = attr_float(node, "png_natural_h").value_or(0.0f);
-    const float core_w = attr_float(node, "art_core_w").value_or(0.0f);
-    const float core_h = attr_float(node, "art_core_h").value_or(0.0f);
-    const float core_x = attr_float(node, "art_core_x").value_or(0.0f);
-    const float core_y = attr_float(node, "art_core_y").value_or(0.0f);
-
-    const bool have_core =
-        png_w > 0.0f && png_h > 0.0f &&
-        core_w > 0.0f && core_h > 0.0f;
-    const bool is_bleed_sprite =
-        node.style.render_bounds.has_value() ||
-        (node.attributes.count("asset_bleed") && node.attributes.at("asset_bleed") == "1");
-
-    ImportedImageSizing out;
-    const bool absolute =
-        node.style.position && lower_copy(*node.style.position) == "absolute";
-
-    if (have_core) {
-        const float scale = std::min(box_w / core_w, box_h / core_h);
-        out.width = png_w * scale;
-        out.height = png_h * scale;
-
-        const float core_box_w = core_w * scale;
-        const float core_box_h = core_h * scale;
-        const float pad_x = (box_w - core_box_w) * 0.5f;
-        const float pad_y = (box_h - core_box_h) * 0.5f;
-        if (absolute && node.style.left)
-            out.left = *node.style.left - core_x * scale + pad_x;
-        if (absolute && node.style.top)
-            out.top = *node.style.top - core_y * scale + pad_y;
-        return out;
-    }
-
-    if (is_bleed_sprite && png_w > 0.0f && png_h > 0.0f) {
-        const float png_aspect = png_w / png_h;
-        if (box_w / box_h > png_aspect) {
-            out.height = box_h;
-            out.width = box_h * png_aspect;
-        } else {
-            out.width = box_w;
-            out.height = box_w / png_aspect;
-        }
-
-        if (absolute && node.style.left)
-            out.left = *node.style.left + (box_w - out.width) * 0.5f;
-        if (absolute && node.style.top)
-            out.top = *node.style.top + (box_h - out.height) * 0.5f;
-        return out;
-    }
-
-    return std::nullopt;
-}
-
 void apply_imported_image_sizing(View& view, const IRNode& node) {
     const auto sizing = imported_image_sizing_override(node);
     if (!sizing) return;
@@ -1148,92 +1082,6 @@ void apply_identity(View& view, const IRNode& node, const ResolvedNativeNode& re
     }
     if (auto label = resolved.text; label && !label->empty())
         view.set_access_label(*label);
-}
-
-bool is_interactive_native_kind(NativeWidgetKind kind) {
-    switch (kind) {
-        case NativeWidgetKind::text_button:
-        case NativeWidgetKind::text_editor:
-        case NativeWidgetKind::checkbox:
-        case NativeWidgetKind::toggle_button:
-        case NativeWidgetKind::combo_box:
-        case NativeWidgetKind::knob:
-        case NativeWidgetKind::fader:
-        case NativeWidgetKind::xy_pad:
-            return true;
-        case NativeWidgetKind::view:
-        case NativeWidgetKind::label:
-        case NativeWidgetKind::meter:
-        case NativeWidgetKind::waveform:
-        case NativeWidgetKind::spectrum:
-        case NativeWidgetKind::image_view:
-        case NativeWidgetKind::canvas:
-        case NativeWidgetKind::svg_path:
-        case NativeWidgetKind::svg_rect:
-        case NativeWidgetKind::svg_line:
-            return false;
-    }
-    return false;
-}
-
-bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
-    switch (kind) {
-        case NativeWidgetKind::text_button:
-        case NativeWidgetKind::text_editor:
-        case NativeWidgetKind::checkbox:
-        case NativeWidgetKind::toggle_button:
-        case NativeWidgetKind::combo_box:
-        case NativeWidgetKind::knob:
-        case NativeWidgetKind::fader:
-        case NativeWidgetKind::meter:
-        case NativeWidgetKind::xy_pad:
-        case NativeWidgetKind::waveform:
-        case NativeWidgetKind::spectrum:
-            return true;
-        case NativeWidgetKind::view:
-        case NativeWidgetKind::label:
-        case NativeWidgetKind::image_view:
-        case NativeWidgetKind::canvas:
-        case NativeWidgetKind::svg_path:
-        case NativeWidgetKind::svg_rect:
-        case NativeWidgetKind::svg_line:
-            return false;
-    }
-    return false;
-}
-
-bool subtree_contains_interactive_hit_target(const IRNode& node,
-                                             const ResolvedNativeNode& resolved) {
-    if (auto hit_testable = attr(node, "pulpHitTestable"))
-        return attr_bool(node, "pulpHitTestable");
-    if (is_interactive_native_kind(resolved.kind))
-        return true;
-
-    const auto count = std::min(node.children.size(), resolved.children.size());
-    for (std::size_t i = 0; i < count; ++i) {
-        if (subtree_contains_interactive_hit_target(node.children[i], resolved.children[i]))
-            return true;
-    }
-    return false;
-}
-
-enum class PromotedChildHitPolicy {
-    unchanged,
-    disabled,
-    pass_through_self,
-};
-
-PromotedChildHitPolicy promoted_widget_child_hit_policy(const IRNode& child,
-                                                        const ResolvedNativeNode& resolved_child) {
-    if (auto hit_testable = attr(child, "pulpHitTestable"))
-        return attr_bool(child, "pulpHitTestable")
-            ? PromotedChildHitPolicy::unchanged
-            : PromotedChildHitPolicy::disabled;
-    if (is_interactive_native_kind(resolved_child.kind))
-        return PromotedChildHitPolicy::unchanged;
-    if (subtree_contains_interactive_hit_target(child, resolved_child))
-        return PromotedChildHitPolicy::pass_through_self;
-    return PromotedChildHitPolicy::disabled;
 }
 
 void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection> parent_direction) {
@@ -1843,6 +1691,149 @@ std::unique_ptr<View> materialize_error_view(const char* message,
 }
 
 } // namespace
+
+// Exported (design_import_native_common.hpp). Defined in the named namespace so
+// both the runtime materializer and the C++ codegen size an imported image and
+// resolve hit ownership from one definition. Call the attr/lower helpers from
+// the anonymous namespace above (visible throughout this translation unit).
+std::optional<ImportedImageSizing> imported_image_sizing_override(const IRNode& node) {
+    const float box_w = node.style.width.value_or(0.0f);
+    const float box_h = node.style.height.value_or(0.0f);
+    if (box_w <= 0.0f || box_h <= 0.0f) return std::nullopt;
+
+    const float png_w = attr_float(node, "png_natural_w").value_or(0.0f);
+    const float png_h = attr_float(node, "png_natural_h").value_or(0.0f);
+    const float core_w = attr_float(node, "art_core_w").value_or(0.0f);
+    const float core_h = attr_float(node, "art_core_h").value_or(0.0f);
+    const float core_x = attr_float(node, "art_core_x").value_or(0.0f);
+    const float core_y = attr_float(node, "art_core_y").value_or(0.0f);
+
+    const bool have_core =
+        png_w > 0.0f && png_h > 0.0f &&
+        core_w > 0.0f && core_h > 0.0f;
+    const bool is_bleed_sprite =
+        node.style.render_bounds.has_value() ||
+        (node.attributes.count("asset_bleed") && node.attributes.at("asset_bleed") == "1");
+
+    ImportedImageSizing out;
+    const bool absolute =
+        node.style.position && lower_copy(*node.style.position) == "absolute";
+
+    if (have_core) {
+        const float scale = std::min(box_w / core_w, box_h / core_h);
+        out.width = png_w * scale;
+        out.height = png_h * scale;
+
+        const float core_box_w = core_w * scale;
+        const float core_box_h = core_h * scale;
+        const float pad_x = (box_w - core_box_w) * 0.5f;
+        const float pad_y = (box_h - core_box_h) * 0.5f;
+        if (absolute && node.style.left)
+            out.left = *node.style.left - core_x * scale + pad_x;
+        if (absolute && node.style.top)
+            out.top = *node.style.top - core_y * scale + pad_y;
+        return out;
+    }
+
+    if (is_bleed_sprite && png_w > 0.0f && png_h > 0.0f) {
+        const float png_aspect = png_w / png_h;
+        if (box_w / box_h > png_aspect) {
+            out.height = box_h;
+            out.width = box_h * png_aspect;
+        } else {
+            out.width = box_w;
+            out.height = box_w / png_aspect;
+        }
+
+        if (absolute && node.style.left)
+            out.left = *node.style.left + (box_w - out.width) * 0.5f;
+        if (absolute && node.style.top)
+            out.top = *node.style.top + (box_h - out.height) * 0.5f;
+        return out;
+    }
+
+    return std::nullopt;
+}
+
+bool is_interactive_native_kind(NativeWidgetKind kind) {
+    switch (kind) {
+        case NativeWidgetKind::text_button:
+        case NativeWidgetKind::text_editor:
+        case NativeWidgetKind::checkbox:
+        case NativeWidgetKind::toggle_button:
+        case NativeWidgetKind::combo_box:
+        case NativeWidgetKind::knob:
+        case NativeWidgetKind::fader:
+        case NativeWidgetKind::xy_pad:
+            return true;
+        case NativeWidgetKind::view:
+        case NativeWidgetKind::label:
+        case NativeWidgetKind::meter:
+        case NativeWidgetKind::waveform:
+        case NativeWidgetKind::spectrum:
+        case NativeWidgetKind::image_view:
+        case NativeWidgetKind::canvas:
+        case NativeWidgetKind::svg_path:
+        case NativeWidgetKind::svg_rect:
+        case NativeWidgetKind::svg_line:
+            return false;
+    }
+    return false;
+}
+
+bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
+    switch (kind) {
+        case NativeWidgetKind::text_button:
+        case NativeWidgetKind::text_editor:
+        case NativeWidgetKind::checkbox:
+        case NativeWidgetKind::toggle_button:
+        case NativeWidgetKind::combo_box:
+        case NativeWidgetKind::knob:
+        case NativeWidgetKind::fader:
+        case NativeWidgetKind::meter:
+        case NativeWidgetKind::xy_pad:
+        case NativeWidgetKind::waveform:
+        case NativeWidgetKind::spectrum:
+            return true;
+        case NativeWidgetKind::view:
+        case NativeWidgetKind::label:
+        case NativeWidgetKind::image_view:
+        case NativeWidgetKind::canvas:
+        case NativeWidgetKind::svg_path:
+        case NativeWidgetKind::svg_rect:
+        case NativeWidgetKind::svg_line:
+            return false;
+    }
+    return false;
+}
+
+bool subtree_contains_interactive_hit_target(const IRNode& node,
+                                             const ResolvedNativeNode& resolved) {
+    if (auto hit_testable = attr(node, "pulpHitTestable"))
+        return attr_bool(node, "pulpHitTestable");
+    if (is_interactive_native_kind(resolved.kind))
+        return true;
+
+    const auto count = std::min(node.children.size(), resolved.children.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        if (subtree_contains_interactive_hit_target(node.children[i], resolved.children[i]))
+            return true;
+    }
+    return false;
+}
+
+PromotedChildHitPolicy promoted_widget_child_hit_policy(const IRNode& child,
+                                                        const ResolvedNativeNode& resolved_child) {
+    if (auto hit_testable = attr(child, "pulpHitTestable"))
+        return attr_bool(child, "pulpHitTestable")
+            ? PromotedChildHitPolicy::unchanged
+            : PromotedChildHitPolicy::disabled;
+    if (is_interactive_native_kind(resolved_child.kind))
+        return PromotedChildHitPolicy::unchanged;
+    if (subtree_contains_interactive_hit_target(child, resolved_child))
+        return PromotedChildHitPolicy::pass_through_self;
+    return PromotedChildHitPolicy::disabled;
+}
 
 // Exported (design_import_native_common.hpp). Defined in the named namespace so
 // both the runtime materializer and the C++ codegen lower a faithful_svg node

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "package_registry.hpp"
+#include "json_writer.hpp"
 #include <pulp/platform/child_process.hpp>
 
 #include <algorithm>
@@ -185,21 +186,6 @@ struct JsonParser {
 
     JsonValue parse() { return parse_value(); }
 };
-
-static std::string json_escape(const std::string& s) {
-    std::string r;
-    for (char c : s) {
-        switch (c) {
-            case '"': r += "\\\""; break;
-            case '\\': r += "\\\\"; break;
-            case '\n': r += "\\n"; break;
-            case '\r': r += "\\r"; break;
-            case '\t': r += "\\t"; break;
-            default: r += c;
-        }
-    }
-    return r;
-}
 
 // ── Platform Targets ──
 

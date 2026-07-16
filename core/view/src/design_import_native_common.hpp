@@ -84,6 +84,37 @@ struct ImportedWidgetSemantics {
 ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
                                                   const ResolvedNativeNode& resolved);
 
+// On-screen box (and optional absolute offset) for an imported image node,
+// derived from the PNG's natural size, its art-core rect, or its bleed aspect.
+// Shared by the runtime materializer and the C++ codegen so both size an
+// imported image identically. Returns nullopt when no override applies.
+struct ImportedImageSizing {
+    float width = 0.0f;
+    float height = 0.0f;
+    std::optional<float> left;
+    std::optional<float> top;
+};
+
+std::optional<ImportedImageSizing> imported_image_sizing_override(const IRNode& node);
+
+// Hit-ownership contract shared by the runtime materializer and the C++ codegen.
+// A single definition here keeps the two lowerers from drifting on which widget
+// kinds are interactive, which own their promoted children's hits, and how a
+// promoted child's hit-testing is rewritten.
+bool is_interactive_native_kind(NativeWidgetKind kind);
+bool native_kind_owns_imported_child_hits(NativeWidgetKind kind);
+bool subtree_contains_interactive_hit_target(const IRNode& node,
+                                             const ResolvedNativeNode& resolved);
+
+enum class PromotedChildHitPolicy {
+    unchanged,
+    disabled,
+    pass_through_self,
+};
+
+PromotedChildHitPolicy promoted_widget_child_hit_policy(const IRNode& child,
+                                                        const ResolvedNativeNode& resolved_child);
+
 ResolvedNativeNode resolve_design_ir_native(const DesignIR& ir,
                                             const IRAssetManifest& manifest);
 

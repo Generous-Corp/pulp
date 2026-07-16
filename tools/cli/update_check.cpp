@@ -5,6 +5,7 @@
 // pulp-cli's runtime link surface.
 
 #include "update_check.hpp"
+#include "json_writer.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -79,31 +80,6 @@ std::string normalize_tag(std::string tag) {
         tag.erase(tag.begin());
     }
     return tag;
-}
-
-// Minimal JSON escape for strings we write.
-std::string json_escape(const std::string& s) {
-    std::string out;
-    out.reserve(s.size() + 2);
-    for (char c : s) {
-        switch (c) {
-            case '"':  out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default:
-                if (static_cast<unsigned char>(c) < 0x20) {
-                    char buf[8];
-                    std::snprintf(buf, sizeof(buf), "\\u%04x",
-                                  static_cast<unsigned>(static_cast<unsigned char>(c)));
-                    out += buf;
-                } else {
-                    out += c;
-                }
-        }
-    }
-    return out;
 }
 
 // Shell out and capture stdout. POSIX only uses popen; Windows invokes

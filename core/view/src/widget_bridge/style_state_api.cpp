@@ -2,6 +2,7 @@
 
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
+#include "css_color.hpp"
 
 #include <functional>
 #include <string>
@@ -9,14 +10,12 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_style_state_api(
-    std::function<canvas::Color(const std::string&)> parse_color) {
+void WidgetBridge::register_widget_style_state_api() {
     BridgeApiContext api{engine_};
-    auto parseColor = std::move(parse_color);
 
     // setStateStyle(id, state, property, value) - declarative state-driven styling.
     // Replaces manual hover callback wiring. States: hover, active, focus, disabled.
-    register_bridge_function(api, "setStateStyle", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setStateStyle", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto state = args.get<std::string>(1, "hover");
         auto prop = args.get<std::string>(2, "");
@@ -30,7 +29,7 @@ void WidgetBridge::register_widget_style_state_api(
         if (state == "hover") {
             // Capture current value as "normal" state.
             if (prop == "background") {
-                auto target_color = parseColor(val_str);
+                auto target_color = parse_bridge_css_color(val_str);
                 auto* view = v;
                 // Wire hover enter/leave to apply/revert background.
                 view->on_hover_enter = [this, id, view, target_color]() {

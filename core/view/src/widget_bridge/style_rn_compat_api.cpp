@@ -2,6 +2,7 @@
 
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
+#include "css_color.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -10,10 +11,8 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_style_rn_compat_api(
-    std::function<canvas::Color(const std::string&)> parse_color) {
+void WidgetBridge::register_widget_style_rn_compat_api() {
     BridgeApiContext api{engine_};
-    auto parseHexColor = std::move(parse_color);
 
     // RN iOS-legacy shadow{Color,Offset,Opacity,Radius} per-attribute setters for
     // box-shadow. Mirrors the textShadow* pattern above so a JSX prop
@@ -24,11 +23,11 @@ void WidgetBridge::register_widget_style_rn_compat_api(
     // styling. Each setter mutates one field of View::shadow_ and
     // flips has_shadow_ on, mirroring how text-shadow longhand works.
     register_bridge_function(api, "setShadowColor",
-        [this, parseHexColor](choc::javascript::ArgumentList args) {
+        [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto hex = args.get<std::string>(1, "");
             auto* v = id.empty() ? &root_ : widget(id);
-            if (v) v->set_box_shadow_color(parseHexColor(hex));
+            if (v) v->set_box_shadow_color(parse_bridge_css_color(hex));
             return choc::value::Value();
         });
     register_bridge_function(api, "setShadowOffset",

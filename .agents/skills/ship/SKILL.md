@@ -1244,3 +1244,11 @@ Facts worth keeping (measured):
 - **Host-label hygiene matters for pinning.** A supervisor advertising two host labels
   (e.g. both `pulp-host-m5` and `pulp-host-macstudio`) makes `pin` land somewhere you
   did not choose. Check the labels before trusting a pin.
+
+## cmd_ship shells out with shell_quote(), never concatenated quotes
+
+Every shell-out in `tools/cli/cmd_ship.cpp` goes through `shell_quote()` from
+`cli_common.hpp`. It previously mixed three idioms — the shared helper, a local `sh_quote`
+lambda, and ~18 naive `'"' + path + '"'` splices — including on the signing-keychain reload
+and `gh secret set` paths, so identically-shaped paths behaved differently per call site.
+Adding a subcommand: quote with `shell_quote()`, do not copy whichever idiom is nearest.

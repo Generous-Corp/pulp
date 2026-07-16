@@ -1340,6 +1340,20 @@ private:
     enum class CompileMode { Normal, SwapNoAnticipation };
     std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size,
                                             CompileMode mode = CompileMode::Normal);
+    // Build one routed-executor snapshot for compile_, defining the live-value
+    // resolver set (gain / plugin slot / custom process / custom transport / load
+    // measurer / plugin latency / plugin params) ONCE. compile_ builds two
+    // snapshots — the serial (parallel_safe=false) and the parallel-safe
+    // (parallel_safe=true) path — and both go through here, so the resolvers can
+    // never drift between them. The plugin-metadata resolvers read
+    // prepared_plugin_meta_, never the live PluginSlot, so a swap-time recompile
+    // makes no live metadata call. Called from compile_ (caller holds
+    // graph_mutation_mutex_); load resolution takes node_load_mu_ internally.
+    bool build_routing_snapshot_locked_(
+        CompiledGraph& cg, bool parallel_safe,
+        std::vector<PluginBindingContext>& plugin_ctx,
+        std::vector<CustomBindingContext>& custom_ctx,
+        format::GraphRuntimeSnapshot& out);
     // Shared preflight (generated-graph limits + audio-rate automation
     // event-capacity gate) for prepare() and (2.2b) prepare_swap(). PURE — mutates
     // no live state. Caller holds graph_mutation_mutex_. Returns false (logged) on

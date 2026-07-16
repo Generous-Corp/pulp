@@ -1302,3 +1302,14 @@ and hoping the result looks wrong.
 A Processor should not *rely* on this either: a worker thread that reads the store on
 every tick is one host away from the same crash. Publish what the thread needs to
 atomics from `process()` instead.
+
+## UMP word lengths come from core/midi, and the MIDIEventList walk is testable
+
+Do not hand-roll a words-per-message-type table in the adapter. `core/midi`'s
+`ump_words_for_message_type(uint8_t)` is the single spec-complete source (every nibble
+0x0-0xF, including the reserved ranges and the 128-bit UMP-Stream type 0xF), and
+`UmpPacket::size_for_type` delegates to it. A second, under-covering table is exactly the
+UMP-cursor-advance bug class: advancing an unrecognized message by 1 word re-reads its
+trailing words as fresh headers. The AU v3 MIDIEventList word-cursor walk is extracted out
+of the ObjC render block so it is unit-testable (truncated-packet + multi-word-advance
+vectors) rather than only reachable through a live AU host.

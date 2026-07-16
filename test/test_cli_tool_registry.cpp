@@ -619,7 +619,7 @@ TEST_CASE("tool registry coverage preserves platform sources and home helpers",
     TempDir tmp;
     ScopedEnv home{"PULP_HOME", tmp.path / "custom-home"};
 
-    REQUIRE(pulp_home() == tmp.path / "custom-home");
+    REQUIRE(tools_install_home() == tmp.path / "custom-home");
     REQUIRE(tools_dir() == tmp.path / "custom-home" / "tools");
     REQUIRE_FALSE(current_platform_key().empty());
     REQUIRE(current_platform_key() != "unknown");
@@ -665,7 +665,7 @@ TEST_CASE("tool lookup prefers pulp-managed binaries and python wrappers",
     ScopedEnv home{"PULP_HOME", tmp.path / "home"};
 
     auto managed = binary_tool("managed-fixture", "managed-bin");
-    auto managed_path = managed_binary_path(pulp_home(), managed.id, "1.2.3", "managed-bin");
+    auto managed_path = managed_binary_path(tools_install_home(), managed.id, "1.2.3", "managed-bin");
     touch_file(managed_path);
 
     auto located = locate_tool(managed);
@@ -674,7 +674,7 @@ TEST_CASE("tool lookup prefers pulp-managed binaries and python wrappers",
     REQUIRE(located.path == managed_path);
 
     auto default_name = binary_tool("default-name-fixture");
-    auto default_path = managed_binary_path(pulp_home(), default_name.id, "1.2.3", default_name.id);
+    auto default_path = managed_binary_path(tools_install_home(), default_name.id, "1.2.3", default_name.id);
     touch_file(default_path);
     auto located_default = locate_tool(default_name);
     REQUIRE(located_default.found);
@@ -684,9 +684,9 @@ TEST_CASE("tool lookup prefers pulp-managed binaries and python wrappers",
     py.id = "python-fixture";
     py.install_method = "python_pip";
 #ifdef _WIN32
-    auto wrapper = pulp_home() / "tools" / "python-envs" / py.id / "run.bat";
+    auto wrapper = tools_install_home() / "tools" / "python-envs" / py.id / "run.bat";
 #else
-    auto wrapper = pulp_home() / "tools" / "python-envs" / py.id / "run.sh";
+    auto wrapper = tools_install_home() / "tools" / "python-envs" / py.id / "run.sh";
 #endif
     touch_file(wrapper);
 
@@ -699,9 +699,9 @@ TEST_CASE("tool lookup prefers pulp-managed binaries and python wrappers",
     npm.id = "npm-fixture";
     npm.install_method = "npm_package";
 #ifdef _WIN32
-    auto npm_wrapper = pulp_home() / "tools" / "npm-packages" / npm.id / "run.bat";
+    auto npm_wrapper = tools_install_home() / "tools" / "npm-packages" / npm.id / "run.bat";
 #else
-    auto npm_wrapper = pulp_home() / "tools" / "npm-packages" / npm.id / "run.sh";
+    auto npm_wrapper = tools_install_home() / "tools" / "npm-packages" / npm.id / "run.sh";
 #endif
     touch_file(npm_wrapper);
     auto located_npm = locate_tool(npm);
@@ -728,7 +728,7 @@ TEST_CASE("tool install helpers have deterministic local exits",
     ScopedEnv home{"PULP_HOME", tmp.path / "home"};
 
     auto existing = binary_tool("cached-tool", "cached-bin");
-    auto cached_path = managed_binary_path(pulp_home(), existing.id, existing.pinned_version, "cached-bin");
+    auto cached_path = managed_binary_path(tools_install_home(), existing.id, existing.pinned_version, "cached-bin");
     touch_file(cached_path);
     write_file(cached_path.parent_path() / "manifest.json",
                "{\"version\":\"1.2.3\",\"tool_id\":\"cached-tool\"}\n");
@@ -739,7 +739,7 @@ TEST_CASE("tool install helpers have deterministic local exits",
     REQUIRE(cached.installed_version == existing.pinned_version);
 
     ToolDescriptor cached_without_manifest = binary_tool("cached-no-manifest");
-    auto no_manifest_path = managed_binary_path(pulp_home(),
+    auto no_manifest_path = managed_binary_path(tools_install_home(),
                                                 cached_without_manifest.id,
                                                 cached_without_manifest.pinned_version,
                                                 cached_without_manifest.id);
@@ -753,7 +753,7 @@ TEST_CASE("tool install helpers have deterministic local exits",
     stale_manifest.display_name = "Stale Manifest Tool";
     stale_manifest.install_method = "binary_download";
     stale_manifest.pinned_version = "2.0.0";
-    auto stale_path = managed_binary_path(pulp_home(), stale_manifest.id,
+    auto stale_path = managed_binary_path(tools_install_home(), stale_manifest.id,
                                           stale_manifest.pinned_version,
                                           stale_manifest.id);
     touch_file(stale_path);
@@ -789,9 +789,9 @@ TEST_CASE("tool install helpers have deterministic local exits",
     ToolRegistry with_uv;
     auto uv = binary_tool("uv", "uv-bin");
     with_uv.tools["uv"] = uv;
-    touch_file(managed_binary_path(pulp_home(), "uv", "1.2.3", "uv-bin"));
+    touch_file(managed_binary_path(tools_install_home(), "uv", "1.2.3", "uv-bin"));
 
-    auto venv_dir = pulp_home() / "tools" / "python-envs" / py.id;
+    auto venv_dir = tools_install_home() / "tools" / "python-envs" / py.id;
     fs::create_directories(venv_dir / ".venv");
 #ifdef _WIN32
     auto wrapper = venv_dir / "run.bat";
@@ -836,9 +836,9 @@ TEST_CASE("tool install helpers have deterministic local exits",
     npm.npm_default_script = "smoke-video-proof";
     npm.pinned_version = "0.0.0";
 #ifdef _WIN32
-    auto npm_wrapper = pulp_home() / "tools" / "npm-packages" / npm.id / "run.bat";
+    auto npm_wrapper = tools_install_home() / "tools" / "npm-packages" / npm.id / "run.bat";
 #else
-    auto npm_wrapper = pulp_home() / "tools" / "npm-packages" / npm.id / "run.sh";
+    auto npm_wrapper = tools_install_home() / "tools" / "npm-packages" / npm.id / "run.sh";
 #endif
     touch_file(npm_wrapper);
     auto cached_npm = install_npm_tool(npm, tmp.path / "repo" / "tools" / "packages" / "tool-registry.json", /*force=*/false);
@@ -979,17 +979,17 @@ TEST_CASE("tool install all succeeds with cached binary and python tools",
     write_file(tmp.path / "repo" / "tools" / "packages" / "tool-registry.json",
                registry_json);
 
-    auto cached_bin = managed_binary_path(pulp_home(), "cached-bin", "1.0.0", "cached-bin");
+    auto cached_bin = managed_binary_path(tools_install_home(), "cached-bin", "1.0.0", "cached-bin");
     touch_file(cached_bin);
     write_file(cached_bin.parent_path() / "manifest.json",
                "{\"version\":\"1.0.0\",\"tool_id\":\"cached-bin\"}\n");
 
-    auto uv_bin = managed_binary_path(pulp_home(), "uv", "3.0.0", "uv");
+    auto uv_bin = managed_binary_path(tools_install_home(), "uv", "3.0.0", "uv");
     touch_file(uv_bin);
     write_file(uv_bin.parent_path() / "manifest.json",
                "{\"version\":\"3.0.0\",\"tool_id\":\"uv\"}\n");
 
-    auto py_dir = pulp_home() / "tools" / "python-envs" / "cached-py";
+    auto py_dir = tools_install_home() / "tools" / "python-envs" / "cached-py";
     fs::create_directories(py_dir / ".venv");
 #ifdef _WIN32
     touch_file(py_dir / "run.bat");
@@ -1009,17 +1009,17 @@ TEST_CASE("tool uninstall removes managed binary and python tool roots",
     TempDir tmp;
     ScopedEnv home{"PULP_HOME", tmp.path / "home"};
 
-    auto binary_root = pulp_home() / "tools" / "binary-tool";
+    auto binary_root = tools_install_home() / "tools" / "binary-tool";
     touch_file(binary_root / "1.0.0" / "binary-tool");
     REQUIRE(uninstall_tool("binary-tool"));
     REQUIRE_FALSE(fs::exists(binary_root));
 
-    auto py_root = pulp_home() / "tools" / "python-envs" / "py-tool";
+    auto py_root = tools_install_home() / "tools" / "python-envs" / "py-tool";
     touch_file(py_root / "run.sh");
     REQUIRE(uninstall_tool("py-tool"));
     REQUIRE_FALSE(fs::exists(py_root));
 
-    auto npm_root = pulp_home() / "tools" / "npm-packages" / "npm-tool";
+    auto npm_root = tools_install_home() / "tools" / "npm-packages" / "npm-tool";
     touch_file(npm_root / "run.sh");
     REQUIRE(uninstall_tool("npm-tool"));
     REQUIRE_FALSE(fs::exists(npm_root));
@@ -1078,7 +1078,7 @@ TEST_CASE("tool command handles local list path doctor and error branches",
   }
 }
 )");
-    auto managed_path = managed_binary_path(pulp_home(), "managed-cmd", "1.0.0",
+    auto managed_path = managed_binary_path(tools_install_home(), "managed-cmd", "1.0.0",
                                             "managed-cmd-bin");
     touch_file(managed_path);
 
@@ -1233,7 +1233,7 @@ TEST_CASE("tool command handles local list path doctor and error branches",
         REQUIRE(cmd_tool({"uninstall", "managed-cmd"}) == 0);
         REQUIRE(output.out.str().find("Uninstalled managed-cmd") != std::string::npos);
     }
-    REQUIRE_FALSE(fs::exists(pulp_home() / "tools" / "managed-cmd"));
+    REQUIRE_FALSE(fs::exists(tools_install_home() / "tools" / "managed-cmd"));
 
     {
         ScopedOutput output;
@@ -1350,7 +1350,7 @@ TEST_CASE("tool command installs npm package tools through the registry",
         REQUIRE(output.out.str().find("Installed Video Proof 0.0.0") != std::string::npos);
     }
 
-    auto wrapper = pulp_home() / "tools" / "npm-packages" / "video-proof" / "run.sh";
+    auto wrapper = tools_install_home() / "tools" / "npm-packages" / "video-proof" / "run.sh";
     auto manifest = wrapper.parent_path() / "manifest.json";
     REQUIRE(fs::exists(wrapper));
     REQUIRE(fs::exists(manifest));
@@ -1488,7 +1488,7 @@ TEST_CASE("tool command reports registry and argument failures deterministically
         REQUIRE(output.err.str().find("Failed to install dependency unavailable-tool") !=
                 std::string::npos);
     }
-    auto available_path = managed_binary_path(pulp_home(), "available-tool-fixture", "1.0.0",
+    auto available_path = managed_binary_path(tools_install_home(), "available-tool-fixture", "1.0.0",
                                               "available-tool-fixture");
     touch_file(available_path);
     write_file(available_path.parent_path() / "manifest.json",

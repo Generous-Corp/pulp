@@ -17,6 +17,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/gap_widgets.hpp>
 
 #include <memory>
 #include <vector>
@@ -258,6 +259,20 @@ TEST_CASE("advance_widget_animations drives widgets and CSS with the host dt",
     advance_widget_animations(&root, 0.5f);
     REQUIRE(knob_ptr->hover_glow() > 0.0f);
     REQUIRE_THAT(knob_ptr->active_animations()[0].elapsed_seconds, WithinAbs(0.5f, 1e-5f));
+}
+
+TEST_CASE("advance_widget_animations drives every View subclass via the virtual",
+          "[view][frame-pump][timing]") {
+    // Dispatch runs through View::advance_animations(), so a widget reached by
+    // no hand-written type check — a Spinner here — still advances each frame.
+    View root;
+    auto spinner = std::make_unique<Spinner>();
+    Spinner* spinner_ptr = spinner.get();
+    root.add_child(std::move(spinner));
+
+    REQUIRE_THAT(spinner_ptr->phase(), WithinAbs(0.0f, 1e-6f));
+    advance_widget_animations(&root, 0.25f);
+    REQUIRE_THAT(spinner_ptr->phase(), WithinAbs(0.25f, 1e-5f));
 }
 
 // ── The gated host: the vsyncs a real macOS host does NOT dispatch ───────────

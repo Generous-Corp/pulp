@@ -1497,6 +1497,190 @@ GpuSurface::AdapterBackendPreference map_backend_preference(
     return GpuSurface::AdapterBackendPreference::default_backend;
 }
 
+// Owns the Dawn frame resources every offscreen Renderer3D entry point needs:
+// the GpuSurface plus its device/queue/instance handles and the color + depth
+// render targets. Held by value so the device outlives the render.
+struct FrameContext {
+    std::unique_ptr<GpuSurface> gpu;
+    wgpu::Device device;
+    wgpu::Queue queue;
+    wgpu::Instance instance;
+    wgpu::Texture color_texture;
+    wgpu::TextureView color_view;
+    wgpu::Texture depth_texture;
+    wgpu::TextureView depth_view;
+    uint32_t width = 0;
+    uint32_t height = 0;
+};
+
+// Create + initialize an offscreen Dawn surface and its color/depth targets,
+// recording the gpu_available / adapter-info / *_target_allocated result flags.
+// `color_label` / `depth_label` name the two textures for GPU debugging.
+// Returns nullopt (with result.error set) on any failure.
+template <typename Config>
+std::optional<FrameContext> acquire_dawn_frame(
+    const Config& config, HardcodedCubeRenderResult& result,
+    const char* color_label, const char* depth_label) {
+    FrameContext ctx;
+    ctx.width = config.width;
+    ctx.height = config.height;
+
+    ctx.gpu = GpuSurface::create_dawn();
+    if (!ctx.gpu) {
+        result.error = "Renderer3D: failed to create Dawn GpuSurface";
+        return std::nullopt;
+    }
+
+    GpuSurface::Config gpu_config;
+    gpu_config.width = config.width;
+    gpu_config.height = config.height;
+    gpu_config.native_surface_handle = nullptr;
+    gpu_config.force_fallback_adapter = config.force_fallback_adapter;
+    gpu_config.backend_preference =
+        map_backend_preference(config.backend_preference);
+    if (!ctx.gpu->initialize(gpu_config)) {
+        result.error = "Renderer3D: failed to initialize offscreen Dawn surface";
+        return std::nullopt;
+    }
+    result.gpu_available = true;
+    record_adapter_info(*ctx.gpu, result);
+
+    auto* device_ptr = static_cast<wgpu::Device*>(ctx.gpu->dawn_device_handle());
+    auto* queue_ptr = static_cast<wgpu::Queue*>(ctx.gpu->dawn_queue_handle());
+    auto* instance_ptr = static_cast<wgpu::Instance*>(ctx.gpu->dawn_instance_handle());
+    if (device_ptr == nullptr || queue_ptr == nullptr || instance_ptr == nullptr ||
+        !(*device_ptr) || !(*queue_ptr) || !(*instance_ptr)) {
+        result.error = "Renderer3D: missing Dawn device, queue, or instance";
+        return std::nullopt;
+    }
+    ctx.device = *device_ptr;
+    ctx.queue = *queue_ptr;
+    ctx.instance = *instance_ptr;
+
+    wgpu::TextureDescriptor color_desc{};
+    color_desc.label = color_label;
+    color_desc.dimension = wgpu::TextureDimension::e2D;
+    color_desc.size = {config.width, config.height, 1};
+    color_desc.format = wgpu::TextureFormat::RGBA8Unorm;
+    color_desc.mipLevelCount = 1;
+    color_desc.sampleCount = 1;
+    color_desc.usage = wgpu::TextureUsage::RenderAttachment |
+                       wgpu::TextureUsage::CopySrc;
+    ctx.color_texture = ctx.device.CreateTexture(&color_desc);
+    if (!ctx.color_texture) {
+        result.error = "Renderer3D: failed to allocate color target";
+        return std::nullopt;
+    }
+    ctx.color_view = ctx.color_texture.CreateView();
+    result.color_target_allocated = ctx.color_view != nullptr;
+    if (!result.color_target_allocated) {
+        result.error = "Renderer3D: failed to create color target view";
+        return std::nullopt;
+    }
+
+    wgpu::TextureDescriptor depth_desc{};
+    depth_desc.label = depth_label;
+    depth_desc.dimension = wgpu::TextureDimension::e2D;
+    depth_desc.size = {config.width, config.height, 1};
+    depth_desc.format = wgpu::TextureFormat::Depth24Plus;
+    depth_desc.mipLevelCount = 1;
+    depth_desc.sampleCount = 1;
+    depth_desc.usage = wgpu::TextureUsage::RenderAttachment;
+    ctx.depth_texture = ctx.device.CreateTexture(&depth_desc);
+    if (!ctx.depth_texture) {
+        result.error = "Renderer3D: failed to allocate depth target";
+        return std::nullopt;
+    }
+    ctx.depth_view = ctx.depth_texture.CreateView();
+    result.depth_target_allocated = ctx.depth_view != nullptr;
+    if (!result.depth_target_allocated) {
+        result.error = "Renderer3D: failed to create depth target view";
+        return std::nullopt;
+    }
+
+    return ctx;
+}
+
+// Blocking readback of the rendered color target into result.rgba: waits for
+// the MapAsync to resolve (spinning the Dawn event loop on ctx.instance),
+// de-pads each row, tallies the distinct-color / non-transparent-pixel census,
+// and PNG-encodes the frame. Returns false (result.error set) on map timeout, a
+// null mapping, or PNG-encode failure. Not real-time safe.
+bool finish_frame_readback(FrameContext& ctx,
+                           HardcodedCubeRenderResult& result,
+                           const wgpu::Buffer& readback_buffer,
+                           uint64_t readback_size,
+                           uint32_t padded_bytes_per_row,
+                           uint32_t compact_bytes_per_row) {
+    bool mapped = false;
+    bool map_ok = false;
+    readback_buffer.MapAsync(wgpu::MapMode::Read,
+                             0,
+                             readback_size,
+                             wgpu::CallbackMode::AllowProcessEvents,
+                             [&mapped, &map_ok](wgpu::MapAsyncStatus status,
+                                                wgpu::StringView) {
+                                 mapped = true;
+                                 map_ok = (status == wgpu::MapAsyncStatus::Success);
+                             });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!mapped && std::chrono::steady_clock::now() < deadline) {
+        ctx.instance.ProcessEvents();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (!mapped || !map_ok) {
+        result.error = "Renderer3D: readback map failed or timed out";
+        return false;
+    }
+
+    const auto* padded = static_cast<const uint8_t*>(
+        readback_buffer.GetConstMappedRange(0, readback_size));
+    if (padded == nullptr) {
+        result.error = "Renderer3D: mapped readback returned null";
+        readback_buffer.Unmap();
+        return false;
+    }
+
+    result.rgba.resize(static_cast<size_t>(compact_bytes_per_row) * ctx.height);
+    for (uint32_t y = 0; y < ctx.height; ++y) {
+        std::memcpy(result.rgba.data() + static_cast<size_t>(y) * compact_bytes_per_row,
+                    padded + static_cast<size_t>(y) * padded_bytes_per_row,
+                    compact_bytes_per_row);
+    }
+    readback_buffer.Unmap();
+    result.readback_completed = true;
+
+    std::unordered_set<uint32_t> colors;
+    uint32_t non_transparent = 0;
+    for (size_t i = 0; i + 3 < result.rgba.size(); i += 4) {
+        const uint32_t color =
+            static_cast<uint32_t>(result.rgba[i]) |
+            (static_cast<uint32_t>(result.rgba[i + 1]) << 8u) |
+            (static_cast<uint32_t>(result.rgba[i + 2]) << 16u) |
+            (static_cast<uint32_t>(result.rgba[i + 3]) << 24u);
+        colors.insert(color);
+        if (result.rgba[i + 3] != 0) {
+            ++non_transparent;
+        }
+    }
+    result.distinct_color_count = static_cast<uint32_t>(colors.size());
+    result.non_transparent_pixel_count = non_transparent;
+
+    HeadlessSurface::Rgba rgba;
+    rgba.width = ctx.width;
+    rgba.height = ctx.height;
+    rgba.pixels = result.rgba;
+    std::string png_error;
+    result.png = HeadlessSurface::encode_png(rgba, &png_error);
+    if (result.png.empty()) {
+        result.error = png_error.empty()
+            ? "Renderer3D: PNG encode failed"
+            : png_error;
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 #endif
 
@@ -1519,78 +1703,16 @@ HardcodedCubeRenderResult Renderer3D::render_hardcoded_textured_cube(
     result.error = "Renderer3D: built without Dawn/WebGPU";
     return result;
 #else
-    auto gpu = GpuSurface::create_dawn();
-    if (!gpu) {
-        result.error = "Renderer3D: failed to create Dawn GpuSurface";
-        return result;
-    }
-
-    GpuSurface::Config gpu_config;
-    gpu_config.width = config.width;
-    gpu_config.height = config.height;
-    gpu_config.native_surface_handle = nullptr;
-    gpu_config.force_fallback_adapter = config.force_fallback_adapter;
-    gpu_config.backend_preference =
-        map_backend_preference(config.backend_preference);
-    if (!gpu->initialize(gpu_config)) {
-        result.error = "Renderer3D: failed to initialize offscreen Dawn surface";
-        return result;
-    }
-    result.gpu_available = true;
-    record_adapter_info(*gpu, result);
-
-    auto* device_ptr = static_cast<wgpu::Device*>(gpu->dawn_device_handle());
-    auto* queue_ptr = static_cast<wgpu::Queue*>(gpu->dawn_queue_handle());
-    auto* instance_ptr = static_cast<wgpu::Instance*>(gpu->dawn_instance_handle());
-    if (device_ptr == nullptr || queue_ptr == nullptr || instance_ptr == nullptr ||
-        !(*device_ptr) || !(*queue_ptr) || !(*instance_ptr)) {
-        result.error = "Renderer3D: missing Dawn device, queue, or instance";
-        return result;
-    }
-    auto& device = *device_ptr;
-    auto& queue = *queue_ptr;
-    auto& instance = *instance_ptr;
-
-    wgpu::TextureDescriptor color_desc{};
-    color_desc.label = "Pulp Renderer3D hardcoded cube color";
-    color_desc.dimension = wgpu::TextureDimension::e2D;
-    color_desc.size = {config.width, config.height, 1};
-    color_desc.format = wgpu::TextureFormat::RGBA8Unorm;
-    color_desc.mipLevelCount = 1;
-    color_desc.sampleCount = 1;
-    color_desc.usage = wgpu::TextureUsage::RenderAttachment |
-                       wgpu::TextureUsage::CopySrc;
-    auto color_texture = device.CreateTexture(&color_desc);
-    if (!color_texture) {
-        result.error = "Renderer3D: failed to allocate color target";
-        return result;
-    }
-    auto color_view = color_texture.CreateView();
-    result.color_target_allocated = color_view != nullptr;
-    if (!result.color_target_allocated) {
-        result.error = "Renderer3D: failed to create color target view";
-        return result;
-    }
-
-    wgpu::TextureDescriptor depth_desc{};
-    depth_desc.label = "Pulp Renderer3D hardcoded cube depth";
-    depth_desc.dimension = wgpu::TextureDimension::e2D;
-    depth_desc.size = {config.width, config.height, 1};
-    depth_desc.format = wgpu::TextureFormat::Depth24Plus;
-    depth_desc.mipLevelCount = 1;
-    depth_desc.sampleCount = 1;
-    depth_desc.usage = wgpu::TextureUsage::RenderAttachment;
-    auto depth_texture = device.CreateTexture(&depth_desc);
-    if (!depth_texture) {
-        result.error = "Renderer3D: failed to allocate depth target";
-        return result;
-    }
-    auto depth_view = depth_texture.CreateView();
-    result.depth_target_allocated = depth_view != nullptr;
-    if (!result.depth_target_allocated) {
-        result.error = "Renderer3D: failed to create depth target view";
-        return result;
-    }
+    auto frame = acquire_dawn_frame(config, result,
+                                    "Pulp Renderer3D hardcoded cube color",
+                                    "Pulp Renderer3D hardcoded cube depth");
+    if (!frame) return result;
+    auto& ctx = *frame;
+    auto& device = ctx.device;
+    auto& queue = ctx.queue;
+    auto& color_texture = ctx.color_texture;
+    auto& color_view = ctx.color_view;
+    auto& depth_view = ctx.depth_view;
 
     struct Vertex {
         float x, y, z;
@@ -1912,70 +2034,8 @@ fn fs_main(input: VertexOut) -> @location(0) vec4f {
     queue.Submit(1, &command_buffer);
     result.command_submitted = true;
 
-    bool mapped = false;
-    bool map_ok = false;
-    readback_buffer.MapAsync(wgpu::MapMode::Read,
-                             0,
-                             readback_size,
-                             wgpu::CallbackMode::AllowProcessEvents,
-                             [&mapped, &map_ok](wgpu::MapAsyncStatus status,
-                                                wgpu::StringView) {
-                                 mapped = true;
-                                 map_ok = (status == wgpu::MapAsyncStatus::Success);
-                             });
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (!mapped && std::chrono::steady_clock::now() < deadline) {
-        instance.ProcessEvents();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    if (!mapped || !map_ok) {
-        result.error = "Renderer3D: readback map failed or timed out";
-        return result;
-    }
-
-    const auto* padded = static_cast<const uint8_t*>(
-        readback_buffer.GetConstMappedRange(0, readback_size));
-    if (padded == nullptr) {
-        result.error = "Renderer3D: mapped readback returned null";
-        readback_buffer.Unmap();
-        return result;
-    }
-
-    result.rgba.resize(static_cast<size_t>(compact_bytes_per_row) * config.height);
-    for (uint32_t y = 0; y < config.height; ++y) {
-        std::memcpy(result.rgba.data() + static_cast<size_t>(y) * compact_bytes_per_row,
-                    padded + static_cast<size_t>(y) * padded_bytes_per_row,
-                    compact_bytes_per_row);
-    }
-    readback_buffer.Unmap();
-    result.readback_completed = true;
-
-    std::unordered_set<uint32_t> colors;
-    uint32_t non_transparent = 0;
-    for (size_t i = 0; i + 3 < result.rgba.size(); i += 4) {
-        const uint32_t color =
-            static_cast<uint32_t>(result.rgba[i]) |
-            (static_cast<uint32_t>(result.rgba[i + 1]) << 8u) |
-            (static_cast<uint32_t>(result.rgba[i + 2]) << 16u) |
-            (static_cast<uint32_t>(result.rgba[i + 3]) << 24u);
-        colors.insert(color);
-        if (result.rgba[i + 3] != 0) {
-            ++non_transparent;
-        }
-    }
-    result.distinct_color_count = static_cast<uint32_t>(colors.size());
-    result.non_transparent_pixel_count = non_transparent;
-
-    HeadlessSurface::Rgba rgba;
-    rgba.width = config.width;
-    rgba.height = config.height;
-    rgba.pixels = result.rgba;
-    std::string png_error;
-    result.png = HeadlessSurface::encode_png(rgba, &png_error);
-    if (result.png.empty()) {
-        result.error = png_error.empty()
-            ? "Renderer3D: PNG encode failed"
-            : png_error;
+    if (!finish_frame_readback(ctx, result, readback_buffer, readback_size,
+                               padded_bytes_per_row, compact_bytes_per_row)) {
         return result;
     }
 
@@ -2214,78 +2274,16 @@ SceneDataRenderResult Renderer3D::render_scene_data(
         }
     }
 
-    auto gpu = GpuSurface::create_dawn();
-    if (!gpu) {
-        result.error = "Renderer3D: failed to create Dawn GpuSurface";
-        return result;
-    }
-
-    GpuSurface::Config gpu_config;
-    gpu_config.width = config.width;
-    gpu_config.height = config.height;
-    gpu_config.native_surface_handle = nullptr;
-    gpu_config.force_fallback_adapter = config.force_fallback_adapter;
-    gpu_config.backend_preference =
-        map_backend_preference(config.backend_preference);
-    if (!gpu->initialize(gpu_config)) {
-        result.error = "Renderer3D: failed to initialize offscreen Dawn surface";
-        return result;
-    }
-    result.gpu_available = true;
-    record_adapter_info(*gpu, result);
-
-    auto* device_ptr = static_cast<wgpu::Device*>(gpu->dawn_device_handle());
-    auto* queue_ptr = static_cast<wgpu::Queue*>(gpu->dawn_queue_handle());
-    auto* instance_ptr = static_cast<wgpu::Instance*>(gpu->dawn_instance_handle());
-    if (device_ptr == nullptr || queue_ptr == nullptr || instance_ptr == nullptr ||
-        !(*device_ptr) || !(*queue_ptr) || !(*instance_ptr)) {
-        result.error = "Renderer3D: missing Dawn device, queue, or instance";
-        return result;
-    }
-    auto& device = *device_ptr;
-    auto& queue = *queue_ptr;
-    auto& instance = *instance_ptr;
-
-    wgpu::TextureDescriptor color_desc{};
-    color_desc.label = "Pulp Renderer3D SceneData color";
-    color_desc.dimension = wgpu::TextureDimension::e2D;
-    color_desc.size = {config.width, config.height, 1};
-    color_desc.format = wgpu::TextureFormat::RGBA8Unorm;
-    color_desc.mipLevelCount = 1;
-    color_desc.sampleCount = 1;
-    color_desc.usage = wgpu::TextureUsage::RenderAttachment |
-                       wgpu::TextureUsage::CopySrc;
-    auto color_texture = device.CreateTexture(&color_desc);
-    if (!color_texture) {
-        result.error = "Renderer3D: failed to allocate color target";
-        return result;
-    }
-    auto color_view = color_texture.CreateView();
-    result.color_target_allocated = color_view != nullptr;
-    if (!result.color_target_allocated) {
-        result.error = "Renderer3D: failed to create color target view";
-        return result;
-    }
-
-    wgpu::TextureDescriptor depth_desc{};
-    depth_desc.label = "Pulp Renderer3D SceneData depth";
-    depth_desc.dimension = wgpu::TextureDimension::e2D;
-    depth_desc.size = {config.width, config.height, 1};
-    depth_desc.format = wgpu::TextureFormat::Depth24Plus;
-    depth_desc.mipLevelCount = 1;
-    depth_desc.sampleCount = 1;
-    depth_desc.usage = wgpu::TextureUsage::RenderAttachment;
-    auto depth_texture = device.CreateTexture(&depth_desc);
-    if (!depth_texture) {
-        result.error = "Renderer3D: failed to allocate depth target";
-        return result;
-    }
-    auto depth_view = depth_texture.CreateView();
-    result.depth_target_allocated = depth_view != nullptr;
-    if (!result.depth_target_allocated) {
-        result.error = "Renderer3D: failed to create depth target view";
-        return result;
-    }
+    auto frame = acquire_dawn_frame(config, result,
+                                    "Pulp Renderer3D SceneData color",
+                                    "Pulp Renderer3D SceneData depth");
+    if (!frame) return result;
+    auto& ctx = *frame;
+    auto& device = ctx.device;
+    auto& queue = ctx.queue;
+    auto& color_texture = ctx.color_texture;
+    auto& color_view = ctx.color_view;
+    auto& depth_view = ctx.depth_view;
 
     struct Uniforms {
         float angle;
@@ -3368,70 +3366,8 @@ fn fs_main(input: VertexOut) -> @location(0) vec4f {
     queue.Submit(1, &command_buffer);
     result.command_submitted = true;
 
-    bool mapped = false;
-    bool map_ok = false;
-    readback_buffer.MapAsync(wgpu::MapMode::Read,
-                             0,
-                             readback_size,
-                             wgpu::CallbackMode::AllowProcessEvents,
-                             [&mapped, &map_ok](wgpu::MapAsyncStatus status,
-                                                wgpu::StringView) {
-                                 mapped = true;
-                                 map_ok = (status == wgpu::MapAsyncStatus::Success);
-                             });
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (!mapped && std::chrono::steady_clock::now() < deadline) {
-        instance.ProcessEvents();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    if (!mapped || !map_ok) {
-        result.error = "Renderer3D: readback map failed or timed out";
-        return result;
-    }
-
-    const auto* padded = static_cast<const uint8_t*>(
-        readback_buffer.GetConstMappedRange(0, readback_size));
-    if (padded == nullptr) {
-        result.error = "Renderer3D: mapped readback returned null";
-        readback_buffer.Unmap();
-        return result;
-    }
-
-    result.rgba.resize(static_cast<size_t>(compact_bytes_per_row) * config.height);
-    for (uint32_t y = 0; y < config.height; ++y) {
-        std::memcpy(result.rgba.data() + static_cast<size_t>(y) * compact_bytes_per_row,
-                    padded + static_cast<size_t>(y) * padded_bytes_per_row,
-                    compact_bytes_per_row);
-    }
-    readback_buffer.Unmap();
-    result.readback_completed = true;
-
-    std::unordered_set<uint32_t> colors;
-    uint32_t non_transparent = 0;
-    for (size_t i = 0; i + 3 < result.rgba.size(); i += 4) {
-        const uint32_t color =
-            static_cast<uint32_t>(result.rgba[i]) |
-            (static_cast<uint32_t>(result.rgba[i + 1]) << 8u) |
-            (static_cast<uint32_t>(result.rgba[i + 2]) << 16u) |
-            (static_cast<uint32_t>(result.rgba[i + 3]) << 24u);
-        colors.insert(color);
-        if (result.rgba[i + 3] != 0) {
-            ++non_transparent;
-        }
-    }
-    result.distinct_color_count = static_cast<uint32_t>(colors.size());
-    result.non_transparent_pixel_count = non_transparent;
-
-    HeadlessSurface::Rgba rgba;
-    rgba.width = config.width;
-    rgba.height = config.height;
-    rgba.pixels = result.rgba;
-    std::string png_error;
-    result.png = HeadlessSurface::encode_png(rgba, &png_error);
-    if (result.png.empty()) {
-        result.error = png_error.empty()
-            ? "Renderer3D: PNG encode failed"
-            : png_error;
+    if (!finish_frame_readback(ctx, result, readback_buffer, readback_size,
+                               padded_bytes_per_row, compact_bytes_per_row)) {
         return result;
     }
 
