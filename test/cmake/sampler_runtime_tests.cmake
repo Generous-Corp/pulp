@@ -47,6 +47,9 @@ pulp_add_test_suite(pulp-test-sampler-stream-parity
             harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-stream-service LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-starvation-envelope
+    SOURCES test_sample_starvation_envelope.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
 # Sibling drift check for the core-runtime RT-safety contract registry
 # (lock-free primitives, automation queue, graph walk, Processor entry).
 pulp_add_test_suite(pulp-test-core-runtime-rt-safety-contract LIBRARIES pulp::audio)

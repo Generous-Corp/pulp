@@ -6,6 +6,28 @@
 
 **Scope:** CPU audio, storage, import, and verification paths
 
+## Implementation ledger
+
+Current branch evidence, without implying completion of later gates:
+
+- S0 partial: bit-exact nonvacuous resident/sequential parity covers unaligned
+  preload handoff, callback partitions, reset, channel mapping, and 10,000
+  one-frame allocation-probed callbacks. Prepared-page coordinate parity covers
+  canonical boundaries, forward/reverse integer steps, seeks, stale generations,
+  and deterministic missing-page recovery.
+- S1 partial: WAV and uncompressed AIFF/AIFF-C `NONE` retain mapped ranged
+  readers. Codec capability is explicit, ranged reads are bounded, and preload
+  admission uses the checked latency/rate/guard formula. Active-I/O teardown
+  remains to be proved.
+- S2 partial: requester-aware scheduling, checked page-memory admission, shared
+  page coalescing, explicit pressure, and generation-gated FIFO retirement/reuse
+  are implemented in a deterministic caller-driven service. The RT command
+  port, bounded worker/completion plane, active-page interest, dynamic source
+  retirement, and example integration remain open.
+- The existing Release audio harness baseline and all 375 Audio Quality Lab
+  self-tests pass. Quality Lab remains supplementary to exact transport,
+  telemetry, lifetime, and allocation gates.
+
 ## Decision
 
 Pulp's sampler hardening is CPU-first and CPU-complete. Live audio processing,
