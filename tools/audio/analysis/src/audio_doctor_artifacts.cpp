@@ -118,6 +118,42 @@ std::string thd_to_json(const ThdResult& thd, std::string_view scenario) {
     return choc::json::toString(root, /*useLineBreaks=*/true);
 }
 
+std::string phase_curve_to_json(const PhaseCurve& curve,
+                                std::string_view scenario) {
+    // Undefined bins omit the phase/delay members rather than emit a
+    // placeholder — see the header's schema note.
+    const auto point_value = [](const PhasePoint& p, double sample_rate) {
+        auto pt = choc::value::createObject("PhasePoint");
+        pt.setMember("hz", p.hz);
+        pt.setMember("magnitude_db", p.magnitude_db);
+        pt.setMember("defined", p.defined);
+        if (p.defined) {
+            pt.setMember("phase_rad", p.phase_rad);
+            pt.setMember("group_delay_samples", p.group_delay_samples);
+            if (sample_rate > 0.0)
+                pt.setMember("group_delay_seconds",
+                             p.group_delay_samples / sample_rate);
+        }
+        return pt;
+    };
+
+    auto points = choc::value::createEmptyArray();
+    for (const auto& p : curve.full)
+        points.addArrayElement(point_value(p, curve.sample_rate));
+    auto checkpoints = choc::value::createEmptyArray();
+    for (const auto& p : curve.checkpoints)
+        checkpoints.addArrayElement(point_value(p, curve.sample_rate));
+
+    auto root = choc::value::createObject("AudioDoctorPhaseCurve");
+    add_contract_fields(root, curve.analyzer, scenario, curve.stimulus,
+                        curve.window, curve.fft_length, curve.analysis_offset,
+                        curve.sample_rate, curve.bin_hz);
+    root.setMember("magnitude_floor_db", curve.magnitude_floor_db);
+    root.setMember("checkpoints", checkpoints);
+    root.setMember("curve", points);
+    return choc::json::toString(root, /*useLineBreaks=*/true);
+}
+
 std::filesystem::path write_response_artifact(const ResponseCurve& curve,
                                               std::string_view scenario) {
     return write(response_curve_to_json(curve, scenario), scenario,
@@ -127,6 +163,12 @@ std::filesystem::path write_response_artifact(const ResponseCurve& curve,
 std::filesystem::path write_thd_artifact(const ThdResult& thd,
                                          std::string_view scenario) {
     return write(thd_to_json(thd, scenario), scenario, ".thd.json");
+}
+
+std::filesystem::path write_phase_artifact(const PhaseCurve& curve,
+                                           std::string_view scenario) {
+    return write(phase_curve_to_json(curve, scenario), scenario,
+                 ".groupdelay.json");
 }
 
 } // namespace pulp::test::audio

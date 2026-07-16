@@ -47,6 +47,23 @@ ResponseCurve response_relative_to_input(const RenderScenario& scenario,
                                          std::span<const double> checkpoints_hz,
                                          const ResponseOptions& options = {});
 
+/// Drive `scenario` with a unit impulse and return the phase / group-delay
+/// curve, sampled at `checkpoints_hz` plus the full-resolution curve. As with
+/// the magnitude response, the scenario's own input/duration are overridden
+/// with an impulse render of length `options.fft_length`; parameter/MIDI
+/// scripts and `set_param` calls are preserved.
+///
+/// Group delay is reported in samples at the scenario's sample rate, positive
+/// for a causal delay. Bins in a stopband are reported undefined rather than
+/// given a number read out of the noise floor — read `defined_at(hz)` first.
+///
+/// Delegates the spectral math to the buffer-level
+/// `measure_group_delay(input, output, ...)` in audio_spectrum.hpp, which
+/// documents the estimator, the unwrapping method, and the stopband contract.
+PhaseCurve measure_group_delay(const RenderScenario& scenario,
+                               std::span<const double> checkpoints_hz,
+                               const GroupDelayOptions& options = {});
+
 /// Drive `scenario` with a steady sine at `fundamental_hz` and measure THD /
 /// THD+N from the rendered output. The scenario's input/duration are
 /// overridden with the analysis sine; parameter/MIDI scripts are preserved

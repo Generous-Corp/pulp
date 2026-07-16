@@ -25,7 +25,13 @@
 ///
 ///   * passband ripple < 0.001 dB up to 0.4 * Nyquist (well under
 ///     the 0.1 dB design target),
-///   * group delay ~ 6 samples at the half-band's input rate,
+///   * group delay ~ 3.96 samples at the filter's own (2x) rate near
+///     DC — equivalently ~ 1.98 samples at the upsampler's input rate
+///     — rising toward the transition band, as any minimum-phase IIR
+///     does. A full 2x oversampling round trip (upsample, then
+///     downsample) cascades both allpass paths and costs ~ 3.46
+///     samples at the input rate. See `kDefaultCoefficientsA` for how
+///     these follow in closed form from the coefficients,
 ///   * stopband attenuation that grows monotonically from ~ -25 dB at
 ///     the transition-band edge (0.6 * Nyquist) to ~ -60 dB deep in
 ///     the stopband (0.98 * Nyquist).
@@ -61,7 +67,7 @@
 /// ## Coefficient lineage
 /// The default coefficients (`kDefaultCoefficientsA`,
 /// `kDefaultCoefficientsB`) are a published Tier-2 half-band design
-/// (three sections per path / six sections total) reached from the
+/// (six sections per path / twelve sections total) reached from the
 /// general allpass half-band literature (Vaidyanathan, "Multirate
 /// Systems and Filter Banks"; Regalia, Mitra & Vaidyanathan, "The
 /// Digital All-Pass Filter: A Versatile Signal Processing Building
@@ -147,7 +153,19 @@ using HalfBandAllpassSection64 = HalfBandAllpassSectionT<double>;
 ///     pattern. For single-stage 2x oversampling, callers needing
 ///     deeper rejection at the transition edge should pass a custom
 ///     higher-order coefficient set to the constructor.
-///   * group delay ~ 6 samples at the half-band's input rate.
+///   * group delay near DC that follows in closed form from the
+///     coefficients: a first-order allpass (a + z^-1) / (1 + a*z^-1)
+///     delays by (1-a)/(1+a) at DC, so path A sums to ~ 1.99 and path
+///     B to ~ 1.47 samples at the rate the sections are clocked at.
+///     The half-band `A(z^2) + z^-1 * B(z^2)` therefore delays by
+///     ~ 3.96 samples at its own (2x) rate — ~ 1.98 at the upsampler's
+///     input rate — and an up-then-down round trip, which cascades
+///     both paths at the input rate, costs their sum: ~ 3.46 samples.
+///     Delay is frequency-dependent and rises toward the transition
+///     band; these figures are the DC/passband end. The Audio Doctor's
+///     group-delay analyzer measures all three and agrees with the
+///     closed form to four significant figures
+///     (test/test_audio_doctor.cpp).
 ///
 /// Lineage: derived from the published polyphase IIR half-band
 /// literature (Vaidyanathan, "Multirate Systems and Filter Banks"

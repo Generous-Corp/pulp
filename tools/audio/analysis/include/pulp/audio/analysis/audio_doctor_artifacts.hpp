@@ -36,6 +36,16 @@ std::string response_curve_to_json(const ResponseCurve& curve,
 /// Serialize a THD result to a JSON string (including the harmonic breakdown).
 std::string thd_to_json(const ThdResult& thd, std::string_view scenario);
 
+/// Serialize a phase/group-delay curve to a JSON string.
+///
+/// Undefined points (stopband — see `PhaseCurve`) carry `"defined": false` and
+/// **omit** `phase_rad` / `group_delay_samples` / `group_delay_seconds`
+/// entirely: their in-memory value is NaN, which JSON cannot represent, and
+/// writing a placeholder would hand a reader a number the analyzer never
+/// measured. Read `defined` before reaching for the delay fields.
+std::string phase_curve_to_json(const PhaseCurve& curve,
+                                std::string_view scenario);
+
 /// Write `response_curve_to_json` to
 /// `<temp>/pulp-audio-doctor/<sanitized-scenario>.response.json` and return
 /// the path (overwriting any previous run's artifact for the same scenario).
@@ -46,5 +56,11 @@ std::filesystem::path write_response_artifact(const ResponseCurve& curve,
 /// `<temp>/pulp-audio-doctor/<sanitized-scenario>.thd.json` and return path.
 std::filesystem::path write_thd_artifact(const ThdResult& thd,
                                          std::string_view scenario);
+
+/// Write `phase_curve_to_json` to
+/// `<temp>/pulp-audio-doctor/<sanitized-scenario>.groupdelay.json` and return
+/// the path.
+std::filesystem::path write_phase_artifact(const PhaseCurve& curve,
+                                           std::string_view scenario);
 
 } // namespace pulp::test::audio
