@@ -372,7 +372,7 @@ TEST_CASE("StreamingSampleSource streams a real WAV file from disk",
     std::remove(path.c_str());
 }
 
-TEST_CASE("File frame reader reports decode-once fallback formats honestly",
+TEST_CASE("File frame reader range-reads uncompressed AIFF",
           "[audio][streaming][file-reader]") {
     const std::string path = temp_wav(".aiff");
     pulp::audio::AudioFileData data;
@@ -382,7 +382,7 @@ TEST_CASE("File frame reader reports decode-once fallback formats honestly",
 
     auto reader = pulp::audio::make_memory_mapped_frame_reader(path);
     REQUIRE(reader.valid);
-    REQUIRE_FALSE(reader.supports_ranged_read);
+    REQUIRE(reader.supports_ranged_read);
     REQUIRE(reader.channels == 1);
     REQUIRE(reader.total_frames == 4);
 
