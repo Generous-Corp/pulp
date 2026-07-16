@@ -1813,3 +1813,30 @@ TEST_CASE("a value_label keeps its own painted readout alongside the cache",
     CHECK(dfv.element_display_text(0) == "disp:gain");   // and the cache carries it
     CHECK(dfv.element_has_display_text(0));
 }
+
+TEST_CASE("dropping the surface entirely degrades to local state, as values do",
+          "[view][host-param][paint-safe]") {
+    // Removing the surface is the preview/screenshot path, and sync_from_host_params
+    // early-returns on it — so the last text stands rather than being cleared.
+    // That is deliberately the SAME semantic the value channel already has ("no
+    // surface: degrade to local state"), not an oversight: a view rendered without
+    // a host keeps its last known readout instead of blanking. It is distinct from
+    // a LIVE surface that stops resolving a key, which does clear (above), because
+    // there the host is present and authoritative.
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.6;
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+    REQUIRE(dfv.element_display_text(0) == "disp:gain");
+
+    dfv.set_host_params(nullptr);
+    dfv.sync_from_host_params();   // no crash, no change
+    CHECK(dfv.element_display_text(0) == "disp:gain");
+    CHECK(dfv.element_has_display_text(0));
+
+    // And it is still paint-safe with no surface behind it at all.
+    paint_once(dfv);
+    CHECK(dfv.painted == "disp:gain");
+    CHECK(dfv.paint_allocations == 0);
+}
