@@ -52,11 +52,34 @@ TEST_CASE("GpuBloomEffect emits a bloom layer with its parameters",
     REQUIRE(cmd.floats[0] == Catch::Approx(12.0f));  // radius
 }
 
-TEST_CASE("VignetteEffect has meaningful intensity", "[render][effect]") {
-    canvas::VignetteEffect vignette;
-    vignette.intensity = 0.8f;
-    REQUIRE(vignette.intensity == Catch::Approx(0.8f));
-    REQUIRE(vignette.needs_layer());
+// A View with a vignette must paint the edge-darkening overlay INSIDE its
+// compositing layer — i.e. after the subtree draws and before the layer is
+// popped. Its pixel behavior is proven on a raster surface in test_canvas.cpp
+// ("VignetteEffect darkens the corners more than the center"); here we assert
+// the overlay is emitted in the right place and the save stack stays balanced.
+TEST_CASE("A View with a vignette paints the edge-darkening overlay in its layer",
+          "[render][effect][view]") {
+    view::View root;
+    root.set_bounds({0, 0, 100, 100});
+    root.set_effect(std::make_shared<canvas::VignetteEffect>());
+
+    canvas::RecordingCanvas canvas;
+    const int depth_before = canvas.save_count();
+    root.paint_all(canvas);
+    REQUIRE(canvas.save_count() == depth_before);  // balanced
+
+    // The overlay drew a radial gradient, and a restore comes AFTER it — so the
+    // darkening composited inside the effect layer, not after the pop.
+    const auto& cmds = canvas.commands();
+    std::size_t grad = SIZE_MAX, last_restore = 0;
+    for (std::size_t i = 0; i < cmds.size(); ++i) {
+        if (cmds[i].type == canvas::DrawCommand::Type::set_fill_gradient_radial)
+            grad = i;
+        if (cmds[i].type == canvas::DrawCommand::Type::restore)
+            last_restore = i;
+    }
+    REQUIRE(grad != SIZE_MAX);
+    REQUIRE(last_restore > grad);
 }
 
 // ChromaticAberrationEffect must route its subtree through exactly one

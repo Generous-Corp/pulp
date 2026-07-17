@@ -752,6 +752,13 @@ void View::paint_all(canvas::Canvas& canvas) {
         // skip the generic ring.
     }
 
+    // Effect overlay — painted on TOP of the subtree but INSIDE the effect's
+    // compositing layer(s), so it composites as part of the effect (e.g. a
+    // vignette's radial-gradient edge darkening). Only meaningful when the
+    // effect actually pushed a layer.
+    if (effect_ && layers_pushed > 0)
+        effect_->paint_overlay(canvas, 0, 0, bounds_.width, bounds_.height);
+
     // End compositing layer(s) — each restore pops one saveLayer, compositing
     // the subtree back through that layer's filter / opacity. An EffectChain
     // pushes one layer per effect, so pop what we actually pushed rather than

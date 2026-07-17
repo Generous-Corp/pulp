@@ -1652,6 +1652,39 @@ TEST_CASE("ChromaticAberrationEffect splits color channels at an edge",
     REQUIRE(SkColorGetB(right) > SkColorGetR(right) + 60);
 }
 
+// Real vignette: the corners must be darkened MORE than the center by the
+// radial-gradient overlay. The effect it replaced only reduced the whole
+// layer's opacity uniformly (no edge darkening at all).
+TEST_CASE("VignetteEffect darkens the corners more than the center",
+          "[canvas][skia][vignette][effect]") {
+    SkImageInfo info = SkImageInfo::Make(64, 64, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+    SkiaCanvas canvas(surface->getCanvas());
+
+    VignetteEffect vignette;
+    vignette.intensity = 0.8f;
+    // Mimic View::paint_all: open the layer, paint the subtree, overlay, pop.
+    vignette.configure_layer(canvas, 0, 0, 64, 64);
+    canvas.set_fill_color(Color::rgba8(128, 128, 128, 255));  // mid-grey subtree
+    canvas.fill_rect(0, 0, 64, 64);
+    vignette.paint_overlay(canvas, 0, 0, 64, 64);
+    canvas.restore();
+
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    SkColor center = pm.getColor(32, 32);
+    SkColor corner = pm.getColor(2, 2);
+    unsigned center_lum =
+        SkColorGetR(center) + SkColorGetG(center) + SkColorGetB(center);
+    unsigned corner_lum =
+        SkColorGetR(corner) + SkColorGetG(corner) + SkColorGetB(corner);
+    INFO("center_lum=" << center_lum << " corner_lum=" << corner_lum);
+    REQUIRE(corner_lum + 30 < center_lum);  // corners meaningfully darker
+}
+
 #endif  // PULP_HAS_SKIA
 
 

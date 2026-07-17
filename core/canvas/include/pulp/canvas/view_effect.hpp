@@ -1,6 +1,8 @@
 #pragma once
 
 #include <pulp/canvas/canvas.hpp>
+#include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <vector>
@@ -31,6 +33,17 @@ public:
 
     /// Whether this effect requires a compositing layer (most do).
     virtual bool needs_layer() const { return true; }
+
+    /// Paint an overlay on TOP of the already-painted subtree, but still INSIDE
+    /// the effect's compositing layer(s) (called by `View::paint_all` just
+    /// before the layers are popped). This is how an effect that darkens or
+    /// tints the finished content — a vignette drawing a radial gradient — is
+    /// implemented, instead of the wrong "reduce the whole layer's opacity"
+    /// approximation. Default: nothing.
+    virtual void paint_overlay(Canvas& canvas, float x, float y,
+                               float w, float h) {
+        (void)canvas; (void)x; (void)y; (void)w; (void)h;
+    }
 };
 
 /// GPU blur effect — multi-pass Gaussian blur via SkImageFilters.
@@ -82,19 +95,41 @@ struct ChromaticAberrationEffect : ViewEffect {
     }
 };
 
-/// Vignette — darken edges of the view by drawing a radial gradient overlay.
-/// The overlay is drawn ON TOP of the content after the subtree paints,
-/// so we use needs_layer=false and instead paint the overlay in a post-paint hook.
-/// For now, we apply it as a slight opacity reduction on the layer.
+/// Vignette — darken the edges of the view by drawing a real radial-gradient
+/// overlay on top of the finished content: transparent at the center, fading to
+/// `edge_color` (scaled by `intensity`) at the corners. The overlay is painted
+/// in `paint_overlay()`, INSIDE the effect's compositing layer, so it darkens
+/// the edges rather than uniformly fading the whole view (the old
+/// approximation, which just reduced the layer opacity).
 struct VignetteEffect : ViewEffect {
-    float intensity = 0.5f;     ///< Darkening strength (0=none, 1=full black edges)
-    float radius = 0.75f;       ///< Fraction of view size where darkening starts
+    float intensity = 0.5f;     ///< Darkening strength (0=none, 1=full edge_color)
+    float radius = 0.75f;       ///< Fraction of view half-extent where darkening starts
     Color edge_color = Color::rgba(0.0f, 0.0f, 0.0f, 0.5f);
 
     void configure_layer(Canvas& canvas, float x, float y, float w, float h) override {
-        // Apply as a layer — the vignette darkening happens via reduced edge opacity.
-        // A full implementation would draw a radial gradient overlay after the content.
-        canvas.save_layer(x, y, w, h, 1.0f - intensity * 0.2f);
+        // Plain compositing layer; the darkening happens in paint_overlay().
+        canvas.save_layer(x, y, w, h, 1.0f, 0.0f);
+    }
+
+    void paint_overlay(Canvas& canvas, float x, float y,
+                       float w, float h) override {
+        if (intensity <= 0.0f || w <= 0.0f || h <= 0.0f) return;
+        const float cx = x + w * 0.5f;
+        const float cy = y + h * 0.5f;
+        const float outer = 0.5f * std::sqrt(w * w + h * h);  // center→corner
+        const float inner = radius * std::min(w, h) * 0.5f;   // darkening start
+        const float inner_frac =
+            outer > 0.0f ? std::min(inner / outer, 0.99f) : 0.0f;
+
+        const Color clear = Color::rgba(edge_color.r, edge_color.g,
+                                        edge_color.b, 0.0f);
+        const Color edge = Color::rgba(edge_color.r, edge_color.g, edge_color.b,
+                                       edge_color.a * intensity);
+        const Color colors[3] = {clear, clear, edge};
+        const float positions[3] = {0.0f, inner_frac, 1.0f};
+        canvas.set_fill_gradient_radial(cx, cy, outer, colors, positions, 3);
+        canvas.fill_rect(x, y, w, h);
+        canvas.clear_fill_gradient();
     }
 };
 
@@ -134,6 +169,14 @@ public:
 
     bool needs_layer() const override {
         return !effects_.empty();
+    }
+
+    /// Forward the overlay to every child (in order). Non-overlay effects have
+    /// an empty paint_overlay, so only the overlay-drawing ones (vignette) act.
+    void paint_overlay(Canvas& canvas, float x, float y,
+                       float w, float h) override {
+        for (auto& effect : effects_)
+            effect->paint_overlay(canvas, x, y, w, h);
     }
 
     const std::vector<std::shared_ptr<ViewEffect>>& effects() const { return effects_; }
