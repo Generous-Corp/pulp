@@ -21,6 +21,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -122,6 +123,11 @@ public:
                                                      std::memory_order_relaxed);
         service_command_drain_paused_ack_for_test_.store(
             false, std::memory_order_relaxed);
+        file_stage_paused_for_test_.store(false, std::memory_order_relaxed);
+        file_stage_paused_ack_for_test_.store(false, std::memory_order_relaxed);
+        file_stage_attempts_for_test_.store(0, std::memory_order_relaxed);
+        throw_during_file_stage_for_test_.store(false,
+                                                std::memory_order_relaxed);
         reverse_prewarm_timeout_override_for_test_ = false;
         reverse_prewarm_timeout_for_test_ = std::chrono::milliseconds{0};
 #endif
@@ -188,10 +194,12 @@ public:
         release_reverse_decode_for_test_.store(true, std::memory_order_release);
         pause_before_bundle_publish_for_test_.store(false,
                                                     std::memory_order_release);
+        file_stage_paused_for_test_.store(false, std::memory_order_release);
 #endif
         service_wake_.notify_all();
         file_request_changed_.notify_all();
         if (service_thread_.joinable()) service_thread_.join();
+        std::lock_guard source_lock(source_load_mutex_);
 
         published_source_.write({});
         if (service_ready_) {
@@ -216,7 +224,7 @@ public:
         {
             std::lock_guard lock(file_request_mutex_);
             file_request_pending_ = false;
-            file_request_path_.clear();
+            file_request_prepared_.reset();
         }
     }
 
@@ -245,10 +253,22 @@ public:
     bool load_sample_file(std::string_view path) {
         if (path.empty()) return false;
         std::lock_guard source_lock(source_load_mutex_);
+        if (!service_running_.load(std::memory_order_acquire)) return false;
+        if (active_sources_.load(std::memory_order_acquire) >= kBundleSlotCount)
+            return false;
+
+        std::unique_ptr<PreparedStreamedFile> prepared;
+        try {
+            prepared = stage_streamed_file(path);
+        } catch (...) {
+            return false;
+        }
+        if (!prepared) return false;
+
         std::unique_lock request_lock(file_request_mutex_);
         if (!service_running_.load(std::memory_order_acquire) || file_request_pending_)
             return false;
-        file_request_path_ = std::string(path);
+        file_request_prepared_ = std::move(prepared);
         file_request_result_ = false;
         file_request_complete_ = false;
         file_request_pending_ = true;
@@ -357,6 +377,16 @@ private:
         bool occupied = false;
     };
 
+    struct PreparedStreamedFile {
+        std::array<audio::FileFrameReader, kMaximumBundleMembers> files{};
+        std::array<double, kMaximumBundleMembers> logical_rates{};
+        std::array<std::uint32_t, kMaximumBundleMembers> octaves{};
+        std::array<audio::SamplePreloadContract, kMaximumBundleMembers> contracts{};
+        std::array<audio::Buffer<float>, kMaximumBundleMembers> preloads{};
+        std::array<std::uint64_t, kMaximumBundleMembers> preload_counts{};
+        std::uint32_t member_count = 0;
+    };
+
     runtime::SeqLock<SamplerPublishedSource> published_source_;
     std::atomic<std::uint64_t> stream_audio_ack_selection_{0};
     std::atomic<std::uint64_t> audio_active_generation_{1};
@@ -387,6 +417,10 @@ private:
     std::atomic<bool> bundle_publish_paused_ack_for_test_{false};
     std::atomic<bool> service_command_drain_paused_for_test_{false};
     std::atomic<bool> service_command_drain_paused_ack_for_test_{false};
+    std::atomic<bool> file_stage_paused_for_test_{false};
+    std::atomic<bool> file_stage_paused_ack_for_test_{false};
+    std::atomic<std::uint64_t> file_stage_attempts_for_test_{0};
+    std::atomic<bool> throw_during_file_stage_for_test_{false};
     bool reverse_prewarm_timeout_override_for_test_ = false;
     std::chrono::milliseconds reverse_prewarm_timeout_for_test_{0};
 #endif
@@ -402,7 +436,7 @@ private:
     std::condition_variable file_request_changed_;
     std::condition_variable service_wake_;
     std::mutex service_wait_mutex_;
-    std::string file_request_path_;
+    std::unique_ptr<PreparedStreamedFile> file_request_prepared_;
     bool file_request_pending_ = false;
     bool file_request_complete_ = false;
     bool file_request_result_ = false;
@@ -456,17 +490,17 @@ private:
     }
 
     void process_file_request() noexcept {
-        std::string path;
+        std::unique_ptr<PreparedStreamedFile> prepared;
         {
             std::lock_guard lock(file_request_mutex_);
             if (!file_request_pending_) return;
-            path = std::move(file_request_path_);
+            prepared = std::move(file_request_prepared_);
             file_request_pending_ = false;
         }
 
         bool loaded = false;
         try {
-            loaded = prepare_streamed_file(path);
+            loaded = prepared && publish_streamed_file(*prepared);
         } catch (...) {
             loaded = false;
         }
@@ -479,7 +513,110 @@ private:
         file_request_changed_.notify_all();
     }
 
-    bool prepare_streamed_file(const std::string& path) {
+    std::unique_ptr<PreparedStreamedFile> stage_streamed_file(
+        std::string_view path) {
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        file_stage_attempts_for_test_.fetch_add(1, std::memory_order_relaxed);
+        if (throw_during_file_stage_for_test_.exchange(
+                false, std::memory_order_acq_rel)) {
+            throw std::bad_alloc{};
+        }
+#endif
+        const bool has_sidecar = sampler_stream_mip_sidecar_exists(path);
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        file_stage_paused_ack_for_test_.store(
+            file_stage_paused_for_test_.load(std::memory_order_acquire),
+            std::memory_order_release);
+        while (file_stage_paused_for_test_.load(std::memory_order_acquire) &&
+               service_running_.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        file_stage_paused_ack_for_test_.store(false, std::memory_order_release);
+#endif
+        if (!service_running_.load(std::memory_order_acquire)) return {};
+
+        auto base = audio::make_memory_mapped_frame_reader(
+            path, true, has_sidecar);
+        if (!base.valid || !base.supports_ranged_read ||
+            base.channels == 0 || base.channels > kMaximumChannels ||
+            base.sample_rate == 0 || base.sample_rate > kMaximumSourceRate) {
+            return {};
+        }
+
+        auto sidecar = has_sidecar
+            ? load_sampler_stream_mip_sidecar(path, base)
+            : SamplerStreamMipSidecar{};
+        auto prepared = std::make_unique<PreparedStreamedFile>();
+        auto& files = prepared->files;
+        auto& logical_rates = prepared->logical_rates;
+        auto& octaves = prepared->octaves;
+        prepared->member_count = 1;
+        logical_rates[0] = static_cast<double>(base.sample_rate);
+        files[0] = std::move(base);
+        if (sidecar.status == SamplerStreamMipSidecarStatus::Valid) {
+            prepared->member_count += sidecar.level_count;
+            for (std::uint32_t level = 0;
+                 level < sidecar.level_count;
+                 ++level) {
+                files[level + 1] = std::move(sidecar.levels[level].reader);
+                logical_rates[level + 1] = sidecar.levels[level].sample_rate;
+                octaves[level + 1] = sidecar.levels[level].octave;
+            }
+        }
+
+        for (std::uint32_t member = 0;
+             member < prepared->member_count;
+             ++member) {
+            const auto& file = files[member];
+            const auto logical_rate = logical_rates[member];
+            if (!file.valid || !file.supports_ranged_read ||
+                file.channels != files[0].channels ||
+                !(logical_rate > 0.0) || !std::isfinite(logical_rate) ||
+                logical_rate > kMaximumSourceRate) {
+                return {};
+            }
+            auto& contract = prepared->contracts[member];
+            contract = {
+                .source_sample_rate = logical_rate,
+                .host_sample_rate = static_cast<double>(host_sample_rate_),
+                .maximum_playback_ratio = kMaximumPitchRatio,
+                .certified_io_latency_seconds = kCertifiedIoLatencySeconds,
+                .scheduler_margin_seconds = kSchedulerMarginSeconds,
+                .decoder_latency_seconds = kDecoderLatencySeconds,
+                .maximum_host_block_frames = maximum_host_block_frames_,
+                .interpolation_guard_frames = audio::kDefaultSampleSincHalfWidth,
+            };
+            const auto block_source_frames = std::ceil(
+                static_cast<double>(maximum_host_block_frames_) * logical_rate /
+                static_cast<double>(host_sample_rate_) * kMaximumPitchRatio);
+            if (!std::isfinite(block_source_frames) ||
+                block_source_frames >= static_cast<double>(
+                    std::numeric_limits<std::uint64_t>::max())) {
+                return {};
+            }
+            contract.loop_prefetch_guard_frames =
+                static_cast<std::uint64_t>(block_source_frames);
+            const auto required = audio::evaluate_sample_preload_contract(contract);
+            if (!required.valid() || required.required_preload_frames == 0)
+                return {};
+            const auto preload_frames = std::min(
+                file.total_frames, required.required_preload_frames);
+            contract.configured_preload_frames = preload_frames;
+            prepared->preloads[member].resize(
+                file.channels, static_cast<std::size_t>(preload_frames));
+            if (file.binding.read(0,
+                                  prepared->preloads[member].view(),
+                                  preload_frames,
+                                  std::stop_token{}) != preload_frames) {
+                return {};
+            }
+            prepared->preload_counts[member] = preload_frames;
+        }
+        if (!service_running_.load(std::memory_order_acquire)) return {};
+        return prepared;
+    }
+
+    bool publish_streamed_file(PreparedStreamedFile& prepared) {
         StreamedSlot* slot = nullptr;
         for (auto& candidate : slots_) {
             if (candidate && !candidate->occupied) {
@@ -498,86 +635,13 @@ private:
         slot->member_count = 0;
         slot->selection_generation = 0;
 
-        const bool has_sidecar = sampler_stream_mip_sidecar_exists(path);
-        auto base = audio::make_memory_mapped_frame_reader(
-            path, true, has_sidecar);
-        if (!base.valid || !base.supports_ranged_read ||
-            base.channels == 0 || base.channels > kMaximumChannels ||
-            base.sample_rate == 0 || base.sample_rate > kMaximumSourceRate) {
-            return false;
-        }
-
-        auto sidecar = has_sidecar
-            ? load_sampler_stream_mip_sidecar(path, base)
-            : SamplerStreamMipSidecar{};
-        std::array<audio::FileFrameReader, kMaximumBundleMembers> files{};
-        std::array<double, kMaximumBundleMembers> logical_rates{};
-        std::array<std::uint32_t, kMaximumBundleMembers> octaves{};
-        std::uint32_t member_count = 1;
-        logical_rates[0] = static_cast<double>(base.sample_rate);
-        files[0] = std::move(base);
-        if (sidecar.status == SamplerStreamMipSidecarStatus::Valid) {
-            member_count += sidecar.level_count;
-            for (std::uint32_t level = 0;
-                 level < sidecar.level_count;
-                 ++level) {
-                files[level + 1] = std::move(sidecar.levels[level].reader);
-                logical_rates[level + 1] = sidecar.levels[level].sample_rate;
-                octaves[level + 1] = sidecar.levels[level].octave;
-            }
-        }
-
-        std::array<audio::SamplePreloadContract, kMaximumBundleMembers>
-            contracts{};
-        std::array<audio::Buffer<float>, kMaximumBundleMembers> preloads{};
-        std::array<std::uint64_t, kMaximumBundleMembers> preload_counts{};
-        for (std::uint32_t member = 0; member < member_count; ++member) {
-            const auto& file = files[member];
-            const auto logical_rate = logical_rates[member];
-            if (!file.valid || !file.supports_ranged_read ||
-                file.channels != files[0].channels ||
-                !(logical_rate > 0.0) || !std::isfinite(logical_rate) ||
-                logical_rate > kMaximumSourceRate) {
-                return false;
-            }
-            auto& contract = contracts[member];
-            contract = {
-                .source_sample_rate = logical_rate,
-                .host_sample_rate = static_cast<double>(host_sample_rate_),
-                .maximum_playback_ratio = kMaximumPitchRatio,
-                .certified_io_latency_seconds = kCertifiedIoLatencySeconds,
-                .scheduler_margin_seconds = kSchedulerMarginSeconds,
-                .decoder_latency_seconds = kDecoderLatencySeconds,
-                .maximum_host_block_frames = maximum_host_block_frames_,
-                .interpolation_guard_frames = audio::kDefaultSampleSincHalfWidth,
-            };
-            const auto block_source_frames = std::ceil(
-                static_cast<double>(maximum_host_block_frames_) * logical_rate /
-                static_cast<double>(host_sample_rate_) * kMaximumPitchRatio);
-            if (!std::isfinite(block_source_frames) ||
-                block_source_frames >= static_cast<double>(
-                    std::numeric_limits<std::uint64_t>::max())) {
-                return false;
-            }
-            contract.loop_prefetch_guard_frames =
-                static_cast<std::uint64_t>(block_source_frames);
-            const auto required = audio::evaluate_sample_preload_contract(contract);
-            if (!required.valid() || required.required_preload_frames == 0)
-                return false;
-            const auto preload_frames = std::min(
-                file.total_frames, required.required_preload_frames);
-            contract.configured_preload_frames = preload_frames;
-            preloads[member].resize(
-                file.channels, static_cast<std::size_t>(preload_frames));
-            if (file.binding.read(0,
-                                  preloads[member].view(),
-                                  preload_frames,
-                                  std::stop_token{}) != preload_frames) {
-                return false;
-            }
-            preload_counts[member] = preload_frames;
-        }
-        if (!service_running_.load(std::memory_order_acquire)) return false;
+        auto& files = prepared.files;
+        auto& logical_rates = prepared.logical_rates;
+        auto& octaves = prepared.octaves;
+        auto& contracts = prepared.contracts;
+        auto& preloads = prepared.preloads;
+        auto& preload_counts = prepared.preload_counts;
+        const auto member_count = prepared.member_count;
 
 #if defined(PULP_SAMPLER_TEST_HOOKS)
         if (block_next_reverse_decode_for_test_.exchange(

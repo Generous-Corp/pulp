@@ -86,6 +86,27 @@ struct PulpSamplerTestAccess {
                    std::memory_order_acquire) == paused;
     }
 
+    static void pause_file_stage(PulpSamplerProcessor& processor, bool paused) {
+        processor.streaming_.file_stage_paused_for_test_.store(
+            paused, std::memory_order_release);
+    }
+
+    static bool file_stage_paused(const PulpSamplerProcessor& processor) {
+        return processor.streaming_.file_stage_paused_ack_for_test_.load(
+            std::memory_order_acquire);
+    }
+
+    static std::uint64_t file_stage_attempts(
+        const PulpSamplerProcessor& processor) {
+        return processor.streaming_.file_stage_attempts_for_test_.load(
+            std::memory_order_acquire);
+    }
+
+    static void throw_during_next_file_stage(PulpSamplerProcessor& processor) {
+        processor.streaming_.throw_during_file_stage_for_test_.store(
+            true, std::memory_order_release);
+    }
+
     static std::size_t fill_stream_command_inbox(
         PulpSamplerProcessor& processor,
         std::size_t remaining_capacity = 0) {
@@ -571,6 +592,16 @@ struct LoaderThreadGuard {
         if (loader.joinable()) {
             loader.join();
         }
+    }
+};
+
+struct FileStageLoaderGuard {
+    PulpSamplerProcessor& processor;
+    std::thread& loader;
+
+    ~FileStageLoaderGuard() {
+        PulpSamplerTestAccess::pause_file_stage(processor, false);
+        if (loader.joinable()) loader.join();
     }
 };
 
@@ -1897,6 +1928,47 @@ TEST_CASE("PulpSampler prewarms reverse entry before publishing a stream",
     REQUIRE(contract.loop_prefetch_guard_frames == evaluated.block_guard_frames);
 }
 
+TEST_CASE("PulpSampler services active streams while staging a replacement",
+          "[sampler][stream][sidecar]") {
+    TempSamplerWav active("stage_service_active", 24000, 0.25f);
+    TempSamplerWav replacement("stage_service_replacement", 24000, 0.75f);
+    TempSamplerMipSidecar sidecar(replacement);
+    SamplerFixture fixture;
+    REQUIRE(fixture.proc->load_sample_file(active.path));
+
+    PulpSamplerTestAccess::pause_file_stage(*fixture.proc, true);
+    std::atomic<bool> load_result{false};
+    std::thread loader([&] {
+        load_result.store(fixture.proc->load_sample_file(replacement.path),
+                          std::memory_order_release);
+    });
+    FileStageLoaderGuard loader_guard{*fixture.proc, loader};
+    REQUIRE(wait_for_condition([&] {
+        return PulpSamplerTestAccess::file_stage_paused(*fixture.proc);
+    }));
+
+    REQUIRE(PulpSamplerTestAccess::fill_stream_command_inbox(*fixture.proc) > 0);
+    REQUIRE(wait_for_condition([&] {
+        return PulpSamplerTestAccess::stream_command_count(*fixture.proc) == 0;
+    }));
+
+    PulpSamplerTestAccess::pause_file_stage(*fixture.proc, false);
+    loader.join();
+    REQUIRE(load_result.load(std::memory_order_acquire));
+    REQUIRE(PulpSamplerTestAccess::published_stream_mip_count(*fixture.proc) == 2);
+}
+
+TEST_CASE("PulpSampler reports file staging exceptions as load failures",
+          "[sampler][stream]") {
+    TempSamplerWav source("stage_exception", 24000, 0.5f);
+    SamplerFixture fixture;
+    PulpSamplerTestAccess::throw_during_next_file_stage(*fixture.proc);
+
+    REQUIRE_FALSE(fixture.proc->load_sample_file(source.path));
+    REQUIRE(PulpSamplerTestAccess::published_source_kind(*fixture.proc) ==
+            SamplerPublishedSourceKind::Resident);
+}
+
 TEST_CASE("PulpSampler establishes the certified lookahead for small blocks",
           "[sampler][stream]") {
     TempSamplerWav wav("small_block_lookahead", 24000, 0.5f);
@@ -2415,7 +2487,11 @@ TEST_CASE("PulpSampler rejects a third streamed mip bundle until a slot retires"
     REQUIRE(fixture.proc->load_sample_file(second.path));
     const auto second_generation =
         PulpSamplerTestAccess::published_selection_generation(*fixture.proc);
+    const auto stage_attempts =
+        PulpSamplerTestAccess::file_stage_attempts(*fixture.proc);
     REQUIRE_FALSE(fixture.proc->load_sample_file(third.path));
+    REQUIRE(PulpSamplerTestAccess::file_stage_attempts(*fixture.proc) ==
+            stage_attempts);
     REQUIRE(PulpSamplerTestAccess::published_selection_generation(
                 *fixture.proc) == second_generation);
     REQUIRE(PulpSamplerTestAccess::physical_stream_source_count(*fixture.proc) == 6);
