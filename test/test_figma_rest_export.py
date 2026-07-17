@@ -1097,5 +1097,59 @@ class ExportCacheTest(unittest.TestCase):
         self.assertEqual(called["n"], 0)
 
 
+class ShapePrimitiveTypingTest(unittest.TestCase):
+    """Shape leaves must reach the IR as the shape they are.
+
+    Asserted through node_tree_to_ir — the producer's real entry point — so the
+    assertion is about what this exporter actually WRITES, not what a helper
+    returns in isolation.
+    """
+
+    @staticmethod
+    def _shape(**over):
+        # Figma's own default layer name. A widget-ish name ("knob base") would
+        # be name-promoted to audio_widget=knob, and synthesize_node returns
+        # early on a recognized widget — so this fixture would then assert
+        # nothing about the shape path it is here to cover.
+        n = {"type": "ELLIPSE", "name": "Ellipse 1", "id": "3:1",
+             "absoluteBoundingBox": {"x": 0, "y": 0, "width": 40, "height": 40},
+             "fills": [{"type": "SOLID", "color": {"r": 1, "g": 0, "b": 0, "a": 1}}]}
+        n.update(over)
+        return n
+
+    def test_filled_ellipse_is_typed_ellipse_not_frame(self):
+        # A filled ELLIPSE typed `frame` renders as a SQUARE: a frame paints its
+        # own background box, and codegen has no painter for a circle, so the
+        # fill has no way to become round. `ellipse` is what the C++ side has
+        # accepted all along (is_synthesizable_primitive → synth_ellipse_path).
+        out, _ctx = frx.node_tree_to_ir(self._shape())
+        self.assertEqual(out["type"], "ellipse")
+        # Plain art, not a recognized widget — the case where synthesize_node
+        # actually runs and needs the type to be right.
+        self.assertIsNone(out.get("audio_widget"))
+        # The fill must survive: synthesize_node moves background_color onto the
+        # synthesized path. A typed ellipse with no fill would paint nothing.
+        self.assertEqual(out["style"]["background_color"], "#ff0000")
+
+    def test_rectangle_stays_frame(self):
+        # The control for the rule above: a rect IS a box, so a frame's own
+        # background paints it correctly and it must NOT be re-typed.
+        rect = self._shape(type="RECTANGLE", name="Rectangle 1")
+        self.assertEqual(frx.node_tree_to_ir(rect)[0]["type"], "frame")
+
+    def test_star_and_polygon_are_captured_as_images_not_frames(self):
+        # Pins the reason ELLIPSE needs a fix and these do not: is_vector_like()
+        # captures them as PNG assets before frame typing can matter. If this
+        # ever regresses to "frame", they become squares the same way — and this
+        # test says so instead of leaving the omission looking like an oversight.
+        for figma_type in ("STAR", "POLYGON", "REGULAR_POLYGON"):
+            with self.subTest(figma_type=figma_type):
+                out, ctx = frx.node_tree_to_ir(self._shape(type=figma_type,
+                                                           name="Pentagon"))
+                self.assertEqual(out["type"], "image")
+                self.assertEqual(out["asset_ref"], "3:1")
+                self.assertIn("3:1", ctx.asset_ids)
+
+
 if __name__ == "__main__":
     unittest.main()

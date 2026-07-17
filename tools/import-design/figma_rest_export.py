@@ -182,8 +182,21 @@ def gradient_conic_css(p):
             if p.get("gradientStops") else None)
 
 def map_node_type(t):
+    # An ELLIPSE is a circle, not a box. "Has a fill means renderable" holds for
+    # a RECTANGLE (a frame paints its own background box) and is FALSE for a
+    # circle: codegen has no painter for one, so a filled ellipse typed `frame`
+    # paints a SQUARE. The IR already has `ellipse` (is_synthesizable_primitive)
+    # and synthesize_node gives it a real path — this decoder just never said
+    # what the node was. Mirrors the .fig lane's envelopeType (fig/scene.mjs).
+    #
+    # STAR / POLYGON / REGULAR_POLYGON need no equivalent line: is_vector_like()
+    # captures them as PNG assets below (type `image`) before their frame typing
+    # can matter. They reach this fallback only when that export fails, which
+    # emits its own diagnostic.
+    if t == "ELLIPSE":
+        return "ellipse"
     if t in ("FRAME", "GROUP", "SECTION", "COMPONENT", "COMPONENT_SET", "INSTANCE",
-             "RECTANGLE", "ELLIPSE", "POLYGON", "STAR", "LINE", "SLICE"):
+             "RECTANGLE", "POLYGON", "STAR", "LINE", "SLICE"):
         return "frame"
     if t == "TEXT": return "text"
     if t in ("VECTOR", "BOOLEAN_OPERATION"): return "vector"

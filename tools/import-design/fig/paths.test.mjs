@@ -245,6 +245,71 @@ test('a gradient we cannot express falls back to the mean rather than guessing',
   assert.notEqual(v.fill, '#000000');
 });
 
+test("a stroke-only vector's GRADIENT stroke reaches the path as a gradient", () => {
+  // The knob rim highlight, and the single busiest paint path in the reference
+  // design: 41 of its 236 resolved vectors paint from `strokePaints`, and every
+  // one of the 40 `Oval` rims is a GRADIENT_LINEAR stroke — white@0.24 fading to
+  // transparent — on a node with NO fill paint at all.
+  //
+  // Nothing covered it, and that gap cost real time: material_audit.mjs scores a
+  // declared stroke by looking for `style.border`, which a vector never emits
+  // (its stroke rides on the PATH, as fill/fillGradient), so the audit reports
+  // all 40 as silent drops. That false positive was read as a real one and
+  // chased to a fix for a bug that was not there — the geometry pick, which
+  // `hasVisibleFill` already gets right for exactly these nodes. The audit
+  // cannot see this path; this test is the only thing that can.
+  const node = strokeOnlyNode();          // fillPaints: [] — stroke geometry wins
+  node.strokePaints = [{
+    type: 'GRADIENT_LINEAR',
+    visible: true,
+    opacity: 1,
+    transform: TOP_TO_BOTTOM,
+    stops: [
+      { color: { r: 1, g: 1, b: 1, a: 0.24 }, position: 0 },
+      { color: { r: 0, g: 0, b: 0, a: 0 }, position: 1 },
+    ],
+  }];
+  const { scene, frame } = sceneWith(node);
+  const { envelope } = materializeFrame(scene, frame, CTX);
+  const v = firstVector(envelope.root);
+  // The stroke paint must be the one that lands, not the empty fill: an empty
+  // fillPaints resolves to no colour, so reading the wrong paint list here emits
+  // `fill: 'none'` and the rim disappears silently.
+  assert.ok(v.fillGradient, "a stroke gradient must survive AS a gradient, not flatten");
+  assert.match(v.fillGradient, /^linear-gradient\(180deg,/);
+  // The ramp's own colours, alpha included — a rim emitted opaque is a rim that
+  // reads as a hard ring instead of a highlight.
+  assert.match(v.fillGradient, /#ffffff3d/, 'the white@0.24 stop must keep its alpha');
+  assert.match(v.fillGradient, /#00000000/, 'the transparent stop must stay transparent');
+  // The mean rides along only as the widget's parse-failure fallback.
+  assert.ok(v.fill && v.fill !== 'none', 'the flattened fallback must still be emitted');
+});
+
+test("a stroke paint's own opacity folds into its gradient stops", () => {
+  // Figma multiplies paint.opacity by each stop's alpha. Reading only the stop
+  // renders a rim the designer set to half strength at FULL strength — which
+  // does not look like a dropped property, it looks like the design just has a
+  // harder edge than it should, so nobody calls it a bug. The solid stroke path
+  // takes this product already; so must this one.
+  const node = strokeOnlyNode();
+  node.strokePaints = [{
+    type: 'GRADIENT_LINEAR',
+    visible: true,
+    opacity: 0.5,
+    transform: TOP_TO_BOTTOM,
+    stops: [
+      { color: { r: 1, g: 1, b: 1, a: 1 }, position: 0 },
+      { color: { r: 1, g: 1, b: 1, a: 1 }, position: 1 },
+    ],
+  }];
+  const { scene, frame } = sceneWith(node);
+  const { envelope } = materializeFrame(scene, frame, CTX);
+  const v = firstVector(envelope.root);
+  // 1.0 stop alpha x 0.5 paint opacity = 0x80, NOT 0xff.
+  assert.match(v.fillGradient, /#ffffff80/, 'paint opacity x stop alpha, not the stop alone');
+  assert.doesNotMatch(v.fillGradient, /#ffffffff/);
+});
+
 test('a vector with no expressible paint clears the fill rather than defaulting to black', () => {
   const node = strokeOnlyNode();
   node.fillGeometry = [{ commandsBlob: 1 }];

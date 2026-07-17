@@ -1350,7 +1350,19 @@ export function materializeFrame(scene, frame, ctx) {
         }
         delete style.background_color;
         if (resolved.droppedStroke) {
-          pushDiag('vector-simplified', node, `${type} stroke dropped: fill and stroke cannot both render on one path`);
+          // The reason is DECODER-side, not widget-side. SvgPathWidget fills and
+          // then strokes the same path (svg_path_widget.cpp:728 / :762), so
+          // "fill and stroke cannot both render on one path" — what this said
+          // until now — is false, and it sent a reader looking for a widget
+          // limit that does not exist. The real constraint: Figma's fill and
+          // stroke are two DIFFERENT outlines (strokeGeometry is the stroke
+          // already expanded into a fillable region, not the fill's path), and
+          // one emitted node carries one `path_data`. Expressing both means
+          // emitting the stroke outline as a SIBLING vector — which is exactly
+          // what a stroke-only node already does — not setting a stroke on this
+          // one. Fires for a single node in the reference design.
+          pushDiag('vector-simplified', node,
+            `${type} stroke dropped: fill and stroke are separate outlines and one node carries one path; the stroke outline would need a sibling vector`);
         }
       }
     }

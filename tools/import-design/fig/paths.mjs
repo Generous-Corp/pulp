@@ -129,12 +129,24 @@ export function toPathData(commands) {
 /**
  * Resolve a node's geometry into parent-space SVG path data.
  *
- * Figma stores fill and stroke as two independent outlines, but a native
- * SvgPathWidget renders exactly one path — so a node that has both is emitted as
- * its fill, and the caller is told (`droppedStroke`) rather than left to guess.
+ * Figma stores fill and stroke as two independent outlines, and one emitted node
+ * carries one path — so a node that has both is emitted as its fill, and the
+ * caller is told (`droppedStroke`) rather than left to guess.
+ *
+ * Note what the limit is NOT: SvgPathWidget fills and then strokes the same path
+ * (svg_path_widget.cpp:728 / :762), so this is not a widget that "renders only a
+ * fill". Nor would setting a stroke on the fill path recover the drop —
+ * `strokeGeometry` is the stroke ALREADY EXPANDED into its own fillable region,
+ * a different shape from the fill's path, and it may carry its own gradient.
+ * Expressing both means emitting that outline as a SIBLING vector. Worth knowing
+ * before reaching for it: in the reference design exactly one node has both a
+ * stroke outline and a visible fill, because `hasVisibleFill` below already
+ * hands every stroke-only shape its stroke.
+ *
  * A stroke-only vector resolves to its stroke outline, which is a *fillable*
  * shape: it must be painted with the stroke colour as a FILL, never re-stroked,
- * or the outline would itself be outlined. `paint` names which colour applies.
+ * or the outline would itself be outlined. `paint` names which colour applies —
+ * and that colour may be a GRADIENT, which is how the knob rim highlights render.
  *
  * @returns {{ d: string, box: object, paint: 'fill'|'stroke', droppedStroke: boolean }|null}
  */
