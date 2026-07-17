@@ -665,6 +665,31 @@ TEST_CASE("scripted idle pump no-ops after its bridge is destroyed (no UAF)",
     SUCCEED("idle pump no-oped after the bridge was destroyed");
 }
 
+// The AU/VST3/CLAP instance owns both Processor and StateStore, while a host may
+// retain its editor after destroying that instance. The bridge itself is still
+// alive in this ordering, so its bridge-lifetime token cannot protect the store.
+// The adapter-owned token must fail closed before either referenced object dies.
+TEST_CASE("scripted idle pump no-ops after its processor owner is destroyed",
+          "[view_bridge][idle-pump][crash][owner-lifetime][lifecycle]") {
+    struct Owner {
+        state::StateStore store;
+        StubProcessor processor;
+        runtime::AliveToken alive;  // destroyed first; declared last
+    };
+
+    auto owner = std::make_unique<Owner>();
+    auto bridge = std::make_unique<format::ViewBridge>(
+        owner->processor, owner->store, owner->alive.capture());
+    auto pump = format::make_scripted_idle_pump(*bridge);
+
+    pump();
+    owner.reset();  // Processor + StateStore are now dangling bridge references.
+    pump();         // must reject the entire owner-facing tick before either use
+    REQUIRE_FALSE(bridge->owner_is_alive());
+    REQUIRE_FALSE(bridge->open());
+    bridge.reset(); // teardown must also avoid Processor lifecycle callbacks
+}
+
 // ── Runtime host-parameter surface (W3) ──────────────────────────────────────
 //
 // An imported design turns its knobs against `View::host_params()`. Nothing in
@@ -740,6 +765,39 @@ TEST_CASE("ViewBridge installs a StateStore-backed host-param surface on the vie
     // ...and it is detached before the view dies, so nothing dangles.
     bridge.close();
     CHECK(bridge.host_params() == nullptr);
+}
+
+TEST_CASE("routed host-param UI fails closed after its owner is destroyed",
+          "[view-bridge][host-param][crash][owner-lifetime][lifecycle]") {
+    struct Owner {
+        state::StateStore store;
+        RoutedFrameProcessor processor;
+        runtime::AliveToken alive;  // retires before processor/store destruct
+    };
+
+    auto owner = std::make_unique<Owner>();
+    owner->processor.define_parameters(owner->store);
+    auto bridge = std::make_unique<format::ViewBridge>(
+        owner->processor, owner->store, owner->alive.capture());
+    REQUIRE(bridge->open());
+
+    auto* frame = owner->processor.last_frame;
+    auto* surface = bridge->host_params();
+    REQUIRE(frame != nullptr);
+    REQUIRE(surface != nullptr);
+    REQUIRE(surface->has_param("gain"));
+
+    owner.reset();  // frame + surface remain, their Processor/StateStore do not
+
+    CHECK_FALSE(surface->has_param("gain"));
+    CHECK(surface->get_param("gain") == 0.0);
+    CHECK(surface->param_display_text("gain", 0.5).empty());
+    surface->begin_gesture("gain");
+    surface->set_param("gain", 0.75);
+    surface->end_gesture("gain");
+    frame->simulate_drag({20, 20}, {20, 5});
+
+    bridge.reset();
 }
 
 TEST_CASE("a routed design control drives the store exactly once per gesture",

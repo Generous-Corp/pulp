@@ -67,6 +67,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
 #include <pulp/runtime/assert.hpp>
+#include <pulp/runtime/alive_token.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
@@ -235,6 +236,9 @@ struct ScopedAuV3HostWriting {
 
 @interface PulpAudioUnit : AUAudioUnit {
     pulp::format::au::AUBridge _bridge;
+    // Captured by AUv3 view controllers. They may outlive this AUAudioUnit
+    // when a host tears down the audio instance before its retained editor.
+    pulp::runtime::AliveToken _ownerAlive;
     AUAudioUnitBus *_inputBus;
     AUAudioUnitBus *_outputBus;
     AUAudioUnitBusArray *_inputBusArray;
@@ -261,6 +265,7 @@ struct ScopedAuV3HostWriting {
 /// bug that the AU v2 path used to hit).
 - (pulp::format::Processor *)pulpProcessor;
 - (pulp::state::StateStore *)pulpStore;
+- (pulp::runtime::AliveToken::Handle)pulpOwnerAlive;
 
 /// ARA companion factory, surfaced under the KVO-standard property
 /// name Apple's ARA-aware AU hosts observe ("audioUnitARAFactory" —
@@ -703,6 +708,10 @@ struct ScopedAuV3HostWriting {
 
 // Symmetric teardown of the MainThreadDispatcher backend installed in init.
 - (void)dealloc {
+    // Retained AUv3 editors must stop touching _bridge.processor/_bridge.store
+    // before either C++ object begins destruction.
+    _ownerAlive.retire();
+
     // Tear down parameter-automation wiring while the C++ StateStore (_bridge) is
     // still alive: drop the gesture callbacks + store listener that capture self,
     // remove our host observer token, and release the retained (MRC) tree.
@@ -1314,6 +1323,10 @@ struct ScopedAuV3HostWriting {
 
 - (pulp::state::StateStore *)pulpStore {
     return &_bridge.store;
+}
+
+- (pulp::runtime::AliveToken::Handle)pulpOwnerAlive {
+    return _ownerAlive.capture();
 }
 
 - (uint32_t)pulpBypassParameterId {

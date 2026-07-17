@@ -12,6 +12,8 @@
 
 #import <AudioToolbox/AudioToolbox.h>
 
+#include <pulp/runtime/alive_token.hpp>
+
 namespace pulp {
 namespace format {
 class Processor;
@@ -29,6 +31,7 @@ class StateStore;
 // dual-Processor parameter-drift bug the AU v2 path used to hit).
 - (pulp::format::Processor *)pulpProcessor;
 - (pulp::state::StateStore *)pulpStore;
+- (pulp::runtime::AliveToken::Handle)pulpOwnerAlive;
 
 // Bypass-wiring diagnostic. Returns the StateStore ParamID the adapter
 // chose to route the AUv3 `shouldBypassEffect` surface to, or 0 when no

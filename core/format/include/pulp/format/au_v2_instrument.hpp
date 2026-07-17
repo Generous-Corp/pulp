@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/runtime/alive_token.hpp>
+
 // The AU v2 instrument adapter wraps Apple's AudioUnitSDK (Apple-only,
 // developer-supplied). The whole header is gated on __APPLE__ so it stays
 // self-contained — an empty no-op — on the Linux header-hygiene check and any
@@ -139,6 +141,9 @@ private:
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
+    // Declared after processor_ so reverse member destruction retires retained
+    // editor handles before either referenced object is released.
+    runtime::AliveToken owner_alive_;
 
     // Immutable plugin metadata, cached once in the constructor. Owns the bus
     // name strings that the per-block `ProcessBusBufferInfo`s view — copying it

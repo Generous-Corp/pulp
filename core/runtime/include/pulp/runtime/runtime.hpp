@@ -33,6 +33,7 @@
 //     reclaim retired resources away from the audio thread after a grace point
 
 #include <pulp/runtime/assert.hpp>
+#include <pulp/runtime/alive_token.hpp>
 #include <pulp/runtime/background_job.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/node_abi.hpp>

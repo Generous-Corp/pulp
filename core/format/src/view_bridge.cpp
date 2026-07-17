@@ -30,10 +30,20 @@ ViewBridge::ViewBridge(Processor& processor, state::StateStore& store)
     : ViewBridge(processor, store, Options{}) {}
 
 ViewBridge::ViewBridge(Processor& processor, state::StateStore& store, Options options)
+    : ViewBridge(processor, store, {}, options) {}
+
+ViewBridge::ViewBridge(Processor& processor, state::StateStore& store,
+                       runtime::AliveToken::Handle owner_alive)
+    : ViewBridge(processor, store, std::move(owner_alive), Options{}) {}
+
+ViewBridge::ViewBridge(Processor& processor, state::StateStore& store,
+                       runtime::AliveToken::Handle owner_alive, Options options)
     : processor_(processor),
       store_(store),
       options_(options),
       supports_editor_reload_(processor.supports_editor_reload()),
+      owner_alive_(owner_alive ? std::move(owner_alive)
+                               : local_owner_alive_.capture()),
       size_hints_(safe_view_size(processor)) {
     width_ = size_hints_.preferred_width;
     height_ = size_hints_.preferred_height;
@@ -52,6 +62,10 @@ ViewBridge::~ViewBridge() {
 }
 
 bool ViewBridge::open(std::string* error) {
+    if (!owner_is_alive()) {
+        if (error) *error = "ViewBridge: processor owner has been destroyed";
+        return false;
+    }
     if (view_raw_) return true;
     last_error_.clear();
 
@@ -81,7 +95,7 @@ bool ViewBridge::open(std::string* error) {
     // its knobs against nothing. The surface resolves a design param_key to the
     // store parameter whose ParamInfo::name matches it.
     host_param_surface_ =
-        std::make_unique<view::StateStoreHostParamSurface>(store_);
+        std::make_unique<view::StateStoreHostParamSurface>(store_, owner_alive_);
     view_raw_->set_host_params(host_param_surface_.get());
     view_raw_->set_host_actions(host_actions_);
 
@@ -116,7 +130,7 @@ bool ViewBridge::poll_editor_reload() {
     // host-ordered lifetimes) -- so the pump must never make a virtual call on
     // processor_ for the common non-reload case. This crashed the AU embedded in
     // Ableton Live: EXC_BAD_ACCESS in this call on a dangling processor_.
-    if (!processor_alive_ || !view_raw_ || !supports_editor_reload_) return false;
+    if (!owner_is_alive() || !view_raw_ || !supports_editor_reload_) return false;
     const uint64_t gen = processor_.editor_reload_generation();
     if (gen == last_reload_generation_) return false;
     // Consume the generation only on a SUCCESSFUL rebuild. If create_view()
@@ -130,7 +144,7 @@ bool ViewBridge::poll_editor_reload() {
 }
 
 bool ViewBridge::rebuild_primary_view() {
-    if (!view_raw_) return false;
+    if (!owner_is_alive() || !view_raw_) return false;
     // Re-run create_view() on the (hot-swapped) processor to get the new editor.
     auto fresh = safe_create_view(processor_);
     if (!fresh) return false;
@@ -175,12 +189,13 @@ bool ViewBridge::rebuild_primary_view() {
 
 view::ScriptedUiSession* ViewBridge::scripted_ui() {
     if (scripted_ui_) return scripted_ui_.get();
-    if (!processor_alive_) return nullptr;  // host freed the processor
+    if (!owner_is_alive()) return nullptr;  // host freed the owner
     return safe_active_scripted_ui(processor_);
 }
 
 const view::ScriptedUiSession* ViewBridge::scripted_ui() const {
     if (scripted_ui_) return scripted_ui_.get();
+    if (!owner_is_alive()) return nullptr;
     PULP_TRY { return processor_.active_scripted_ui(); }
     PULP_CATCH_ALL { return nullptr; }
 }
@@ -188,7 +203,7 @@ const view::ScriptedUiSession* ViewBridge::scripted_ui() const {
 void ViewBridge::notify_attached() {
     if (!view_raw_ || attached_) return;
     attached_ = true;
-    if (processor_alive_) {
+    if (owner_is_alive()) {
         PULP_TRY { processor_.on_view_opened(*view_raw_); }
         PULP_CATCH_ALL {}
     }
@@ -200,10 +215,14 @@ std::unique_ptr<view::View> ViewBridge::release_view() {
     return std::move(view_);  // view_raw_ stays valid so lifecycle keeps dispatching
 }
 
+void ViewBridge::pump_store_listeners() {
+    if (owner_is_alive()) store_.pump_listeners();
+}
+
 void ViewBridge::close() {
     if (!view_raw_) return;
     if (attached_) {
-        if (processor_alive_) {
+        if (owner_is_alive()) {
             PULP_TRY { processor_.on_view_closed(*view_raw_); }
             PULP_CATCH_ALL {}
         }
@@ -229,7 +248,7 @@ void ViewBridge::close() {
 void ViewBridge::resize(uint32_t width, uint32_t height) {
     width_ = width;
     height_ = height;
-    if (view_raw_ && attached_ && processor_alive_) {
+    if (view_raw_ && attached_ && owner_is_alive()) {
         PULP_TRY { processor_.on_view_resized(*view_raw_, width, height); }
         PULP_CATCH_ALL {}
     }
@@ -291,6 +310,10 @@ RemoteViewSession* ViewBridge::attach_remote_channel(
     std::unique_ptr<runtime::MessageChannel> channel,
     std::string label)
 {
+    if (!owner_is_alive()) {
+        last_error_ = "attach_remote_channel: processor owner has been destroyed";
+        return nullptr;
+    }
     if (!channel) {
         last_error_ = "attach_remote_channel: null channel";
         return nullptr;
