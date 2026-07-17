@@ -514,6 +514,122 @@ TEST_CASE("modal bank holds pitch on low-frequency long-decay modes",
     }
 }
 
+namespace {
+
+// Cost-model probe for NONLINEAR COUPLED modal synthesis. Linear modes are
+// O(M) per sample; physically coupled schemes (von Karman plates, coupled
+// strings) additionally apply dense mode-coupling linear algebra every
+// sample — the O(M^2) term that dominates. This probe pairs the same
+// two-pole lane update with one dense MxM coupling matvec per sample plus a
+// memoryless cubic injection, which is representative of the per-sample cost
+// shape of energy-quadratised coupled schemes (those need one to two
+// matvec-equivalents per sample). It is a measurement instrument for the
+// CPU ceiling, not a shipped instrument model.
+class CoupledCostProbe {
+public:
+    void prepare(double fs, int modes, unsigned seed) {
+        modes_ = modes;
+        coupling_.assign(static_cast<std::size_t>(modes) * modes, 0.0f);
+        a1_.assign(static_cast<std::size_t>(modes), 0.0f);
+        a2_.assign(static_cast<std::size_t>(modes), 0.0f);
+        b0_.assign(static_cast<std::size_t>(modes), 0.0f);
+        s1_.assign(static_cast<std::size_t>(modes), 0.0f);
+        s2_.assign(static_cast<std::size_t>(modes), 0.0f);
+        force_.assign(static_cast<std::size_t>(modes), 0.0f);
+        std::mt19937 rng(seed);
+        std::uniform_real_distribution<float> freq(40.0f, 16000.0f);
+        std::uniform_real_distribution<float> t60(0.3f, 4.0f);
+        std::uniform_real_distribution<float> cpl(-1.0f, 1.0f);
+        for (int m = 0; m < modes; ++m) {
+            const double f = freq(rng);
+            const double r = std::pow(10.0, -3.0 / (t60(rng) * fs));
+            const double w = 2.0 * kPi * f / fs;
+            a1_[static_cast<std::size_t>(m)] = static_cast<float>(2.0 * r * std::cos(w));
+            a2_[static_cast<std::size_t>(m)] = static_cast<float>(-r * r);
+            b0_[static_cast<std::size_t>(m)] =
+                static_cast<float>(std::sin(w) / static_cast<double>(modes));
+        }
+        // Small couplings keep the probe stable so the timing loop measures
+        // sustained cost, not a blow-up transient.
+        const float scale = 1e-3f / static_cast<float>(modes);
+        for (auto& c : coupling_) c = scale * cpl(rng);
+    }
+
+    float process_sample(float x) {
+        // Dense coupling force: f = C * s1 — the O(M^2) per-sample core.
+        // Sixteen independent accumulator lanes so the dot product
+        // vectorizes without reassociation; fixed pairwise tree at the end.
+        const float* s1v = s1_.data();
+        for (int i = 0; i < modes_; ++i) {
+            const float* row =
+                coupling_.data() + static_cast<std::size_t>(i) * modes_;
+            float acc[16] = {};
+            int j = 0;
+            for (; j + 16 <= modes_; j += 16)
+                for (int l = 0; l < 16; ++l) acc[l] += row[j + l] * s1v[j + l];
+            for (int step = 8; step > 0; step >>= 1)
+                for (int l = 0; l < step; ++l) acc[l] += acc[l + step];
+            float a = acc[0];
+            for (; j < modes_; ++j) a += row[j] * s1v[j];
+            force_[static_cast<std::size_t>(i)] = a;
+        }
+        float out = 0.0f;
+        for (int i = 0; i < modes_; ++i) {
+            const std::size_t si = static_cast<std::size_t>(i);
+            const float nl = force_[si] * s1_[si] * s1_[si];
+            const float y = b0_[si] * x + a1_[si] * s1_[si] + a2_[si] * s2_[si] + nl;
+            s2_[si] = s1_[si];
+            s1_[si] = y;
+            out += y;
+        }
+        return out;
+    }
+
+    int modes() const { return modes_; }
+
+private:
+    int modes_ = 0;
+    std::vector<float> coupling_, a1_, a2_, b0_, s1_, s2_, force_;
+};
+
+} // namespace
+
+TEST_CASE("coupled nonlinear modal cost curve locates the CPU ceiling",
+          "[signal][modal][bench]") {
+    const double fs = 48000.0;
+    const std::size_t duration = 12000; // 0.25 s per rep keeps the sweep bounded
+
+    std::printf("\ncoupled nonlinear modal cost (single core, dense MxM coupling "
+                "per sample, %.0f Hz)\n", fs);
+    std::printf("%10s %14s %14s %20s\n", "modes", "us/sample", "x realtime",
+                "x realtime (2 matvec)");
+
+    for (int m : {32, 64, 128, 192, 256, 384, 512, 768, 1024}) {
+        CoupledCostProbe probe;
+        probe.prepare(fs, m, 0xC0FFEEu + static_cast<unsigned>(m));
+        double best_s = 1e30;
+        float sink = 0.0f;
+        for (int rep = 0; rep < 3; ++rep) {
+            CoupledCostProbe fresh;
+            fresh.prepare(fs, m, 0xC0FFEEu + static_cast<unsigned>(m));
+            const auto t0 = std::chrono::steady_clock::now();
+            float x = 1.0f;
+            for (std::size_t i = 0; i < duration; ++i) {
+                sink += fresh.process_sample(x);
+                x = 0.0f;
+            }
+            const auto t1 = std::chrono::steady_clock::now();
+            best_s = std::min(best_s,
+                              std::chrono::duration<double>(t1 - t0).count());
+        }
+        REQUIRE(std::isfinite(sink));
+        const double s_per_sample = best_s / static_cast<double>(duration);
+        const double x_rt = s_per_sample * fs;
+        std::printf("%10d %14.3f %14.4f %20.4f\n", m, s_per_sample * 1e6, x_rt,
+                    2.0 * x_rt);
+    }
+}
+
 TEST_CASE("modal bank throughput scales to large banks in real time",
           "[signal][modal][bench]") {
     using pulp::signal::ModalBank;
