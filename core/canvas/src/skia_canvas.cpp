@@ -1195,9 +1195,9 @@ void SkiaCanvas::stroke_current_path() {
 
 std::string Canvas::compile_sksl(const std::string& sksl) {
     if (sksl.empty()) return "Empty shader code";
-    auto& cache = RuntimeEffectCache::instance();
-    auto effect = cache.get_or_compile(sksl);
-    return effect ? "" : cache.last_error();
+    std::string error;
+    auto effect = RuntimeEffectCache::instance().get_or_compile(sksl, error);
+    return effect ? std::string() : error;
 }
 
 bool Canvas::sksl_declares_uniform(const std::string& sksl,

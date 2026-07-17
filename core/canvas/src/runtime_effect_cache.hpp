@@ -22,6 +22,20 @@ public:
     // Compile and cache an SkSL shader. Returns nullptr on failure.
     // Thread-safe via mutex (one compilation at a time).
     sk_sp<SkRuntimeEffect> get_or_compile(const std::string& sksl) {
+        std::string ignored;
+        return get_or_compile(sksl, ignored);
+    }
+
+    // Compile and cache an SkSL shader, returning the error text for THIS
+    // compile via `error_out` (empty on success). The error is a local of this
+    // call, never a cache-global: a previous version stored it in a shared
+    // `last_error_` member written between two lock scopes, so a concurrent
+    // compile of a different shader could overwrite it and a caller reading it
+    // afterwards would attribute another shader's error to its own. Returning
+    // the error from the call removes that race entirely.
+    sk_sp<SkRuntimeEffect> get_or_compile(const std::string& sksl,
+                                          std::string& error_out) {
+        error_out.clear();
         auto hash = std::hash<std::string>{}(sksl);
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -29,19 +43,17 @@ public:
             if (it != effects_.end()) return it->second;
         }
 
-        // Compile outside lock (may be slow)
+        // Compile outside lock (may be slow).
         auto result = SkRuntimeEffect::MakeForShader(SkString(sksl.c_str()));
-        last_error_ = result.errorText.c_str();
-
-        if (!result.effect) return nullptr;
+        if (!result.effect) {
+            error_out = result.errorText.c_str();
+            return nullptr;
+        }
 
         std::lock_guard<std::mutex> lock(mutex_);
         effects_[hash] = result.effect;
         return result.effect;
     }
-
-    // Last compilation error string
-    const std::string& last_error() const { return last_error_; }
 
     // Clear all cached effects (for hot reload)
     void clear() {
@@ -53,7 +65,6 @@ private:
     RuntimeEffectCache() = default;
     std::unordered_map<size_t, sk_sp<SkRuntimeEffect>> effects_;
     std::mutex mutex_;
-    std::string last_error_;
 };
 
 } // namespace pulp::canvas

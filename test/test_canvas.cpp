@@ -5,7 +5,9 @@
 #include <pulp/canvas/sdf_atlas.hpp>
 #include <pulp/canvas/view_effect.hpp>
 #include <array>
+#include <atomic>
 #include <functional>
+#include <thread>
 #include <vector>
 
 #ifdef PULP_HAS_SKIA
@@ -1684,6 +1686,45 @@ TEST_CASE("VignetteEffect darkens the corners more than the center",
         SkColorGetR(corner) + SkColorGetG(corner) + SkColorGetB(corner);
     INFO("center_lum=" << center_lum << " corner_lum=" << corner_lum);
     REQUIRE(corner_lum + 30 < center_lum);  // corners meaningfully darker
+}
+
+// Concurrent compiles must each get their OWN error. The RuntimeEffectCache
+// used to stash the last error in a shared member written between two lock
+// scopes, so two threads compiling different bad shaders could read each
+// other's error. Each thread here compiles a bad shader carrying a distinctive
+// identifier and asserts the returned error names ITS identifier — a race
+// would surface as the other thread's marker (or an empty error).
+TEST_CASE("compile_sksl reports each shader's own error under concurrent compiles",
+          "[canvas][shader][thread][compile]") {
+    std::atomic<int> good_failures{0};
+    std::atomic<int> mismatches{0};
+
+    auto run = [&](const char* marker) {
+        // `marker` is an undefined identifier, so the shader fails to compile
+        // and the SkSL error names it. A distinct marker per thread makes any
+        // cross-thread error attribution detectable.
+        const std::string bad =
+            std::string("half4 main(float2 p) { return ") + marker + "; }";
+        for (int i = 0; i < 300; ++i) {
+            // A shared good shader compiles (exercises the cache concurrently).
+            if (!Canvas::compile_sksl(
+                    "half4 main(float2 p) { return half4(1); }").empty()) {
+                ++good_failures;
+            }
+            const std::string err = Canvas::compile_sksl(bad);
+            if (err.empty() || err.find(marker) == std::string::npos) {
+                ++mismatches;
+            }
+        }
+    };
+
+    std::thread ta([&] { run("ZZMARKERAAA"); });
+    std::thread tb([&] { run("ZZMARKERBBB"); });
+    ta.join();
+    tb.join();
+
+    REQUIRE(good_failures.load() == 0);  // the good shader always compiled
+    REQUIRE(mismatches.load() == 0);     // no cross-thread error attribution
 }
 
 #endif  // PULP_HAS_SKIA
