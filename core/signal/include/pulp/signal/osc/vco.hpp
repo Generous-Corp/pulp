@@ -16,16 +16,34 @@
 /// a default-constructed OSC-VCO is bit-for-bit a `VaOscillator` (see the null in
 /// `test_osc_vco.cpp`).
 ///
-/// It is NOT the whole VCO. **Drift and jitter are deliberately absent as
-/// behavior**: the per-sample `increment` argument to `next()` is where a pitch-
-/// noise source modulates the clock, and `set_drift_depth`/`set_jitter_depth`
-/// reserve the knobs so the API need not change — but no stochastic source is
-/// wired here, because separating drift from jitter needs the time-domain
-/// pitch/drift analyzer that does not exist yet. The depths are inert until then,
-/// and a test pins that they are (a reserved knob that silently half-worked would
-/// be worse than an absent one). The offline fitting tool and data-driven
-/// profiles are also out of scope: this is the ENGINE that has the deterministic
-/// parameters, hand-set, not the estimator that recovers them.
+/// It also carries the VCO's two stochastic pitch sources — **drift** and
+/// **jitter** — as a seeded frequency modulation of the per-sample `increment`
+/// before it reaches the bandlimited core. They are two distinct processes:
+///
+///   * **Drift** is a slow, bandlimited random walk of the pitch: white noise
+///     colored by a one-pole (leaky-integrator / Ornstein–Uhlenbeck) filter
+///     whose corner (`set_drift_rate_hz`, default `kDefaultDriftRateHz`) sets a
+///     wander that evolves over hundreds of milliseconds, not per sample. Its
+///     stationary output has unit variance, so `drift_depth` reads directly as
+///     the RMS pitch excursion **in cents**.
+///   * **Jitter** is fast, near-white cycle-to-cycle frequency noise:
+///     independent per sample, so `jitter_depth` is the RMS per-sample frequency
+///     deviation **in cents**. In the time domain the two separate by their
+///     autocorrelation (drift is coherent frame-to-frame, jitter is not) — the
+///     Allan-slope regime split (drift ∝ τ^{+1/2}, jitter ∝ τ^{-1/2}) that names
+///     them rigorously is a later offline (Python Quality-Lab) increment, not
+///     computed here.
+///
+/// Both are converted from cents to a frequency multiplier by `2^(cents/1200)`
+/// and injected at ONE site, `pitch_noise_factor()`, which multiplies the
+/// increment. **When both depths are 0 that factor is exactly 1.0 (an early-out
+/// that advances no noise state), so a default-constructed OSC-VCO stays bit-for-
+/// bit a `VaOscillator`** (see the master null in `test_osc_vco.cpp`). The source
+/// is deterministic and seed-reproducible (`set_seed`; no `random_device`, no
+/// clock) — the same seed and inputs yield bit-identical output, which the suite
+/// gates. The offline fitting tool and data-driven profiles remain out of scope:
+/// this is the ENGINE that has the parameters, hand-set, not the estimator that
+/// recovers them.
 ///
 /// ── Circuit-accuracy of the correction, honestly ─────────────────────────
 ///
@@ -56,6 +74,8 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <numbers>
 
 namespace pulp::signal::osc {
@@ -122,9 +142,15 @@ struct WaveshaperParams {
 /// no sample rate.
 class VcoOscillator {
 public:
+    /// Seed the drift filter coefficients for the default sample rate so a
+    /// default-constructed oscillator is valid before `prepare()`; `prepare()`
+    /// recomputes them for the real rate.
+    VcoOscillator() noexcept { update_drift_coeffs(); }
+
     void prepare(double sample_rate) noexcept {
         sample_rate_ = sample_rate > 0.0 ? sample_rate : sample_rate_;
         update_ac_pole();
+        update_drift_coeffs();
     }
 
     void set_shape(VaShape shape) noexcept { core_.set_shape(shape); }
@@ -183,23 +209,52 @@ public:
     /// LTI response the VCO applies.
     double ac_pole() const noexcept { return ac_enabled_ ? ac_pole_ : 1.0; }
 
-    // ── Reserved: drift / jitter ───────────────────────────────────────────
-    /// Reserved pitch-noise depths. They default to 0 and are INERT: no
-    /// stochastic source is wired in this increment, so setting them changes
-    /// nothing. The injection point is the `increment` handed to `next()` (a
-    /// source will multiply it here); the knobs exist so wiring that source later
-    /// is not an API break. Separating drift from jitter needs the time-domain
-    /// analyzer the suite does not have yet — until then these stay unimplemented
-    /// on purpose, and `test_osc_vco.cpp` pins that they do nothing.
-    void set_drift_depth(double depth) noexcept { drift_depth_ = depth; }
+    // ── Drift / jitter (seeded pitch noise) ─────────────────────────────────
+    /// RMS of the slow drift wander, in cents. 0 disables drift (its stream does
+    /// not advance). The drift is a one-pole-colored random walk whose stationary
+    /// output has unit variance, so this depth is the RMS pitch excursion the
+    /// wander reaches; its timescale is `set_drift_rate_hz`. Off by default, so a
+    /// neutral VCO is unaffected.
+    void set_drift_depth(double depth_cents) noexcept { drift_depth_ = depth_cents; }
     double drift_depth() const noexcept { return drift_depth_; }
-    void set_jitter_depth(double depth) noexcept { jitter_depth_ = depth; }
+
+    /// Corner of the drift coloring filter, in Hz. Lower is a slower wander; the
+    /// default puts the wander in the hundreds-of-milliseconds range. Recomputes
+    /// the filter pole against the current sample rate.
+    void set_drift_rate_hz(double corner_hz) noexcept {
+        drift_rate_hz_ = corner_hz > 0.0 ? corner_hz : 0.0;
+        update_drift_coeffs();
+    }
+    double drift_rate_hz() const noexcept { return drift_rate_hz_; }
+
+    /// RMS of the fast, near-white cycle-to-cycle jitter, in cents per sample. 0
+    /// disables jitter (its stream does not advance). Independent per sample, so
+    /// this is the RMS of the per-sample frequency deviation. Off by default.
+    void set_jitter_depth(double depth_cents) noexcept { jitter_depth_ = depth_cents; }
     double jitter_depth() const noexcept { return jitter_depth_; }
 
-    /// Reset the phase (and the AC-coupling and correction state) to a known point.
+    /// Seed for both noise streams. Determinism is a contract: the same seed and
+    /// inputs reproduce the output bit-for-bit. Takes effect on the streams
+    /// immediately and is re-applied by `reset()`, so a seeded render starts from
+    /// a known point.
+    void set_seed(std::uint64_t seed) noexcept {
+        seed_ = seed;
+        seed_streams();
+    }
+    std::uint64_t seed() const noexcept { return seed_; }
+
+    /// Default drift corner (Hz): a wander whose correlation time is a few hundred
+    /// milliseconds — slow relative to any audio-rate structure.
+    static constexpr double kDefaultDriftRateHz = 0.4;
+
+    /// Reset the phase (and the AC-coupling and correction state) to a known
+    /// point, and restart the noise streams from `seed()` so a reset render
+    /// reproduces bit-for-bit.
     void reset(double phase = 0.0) noexcept {
         core_.reset(phase);
         dc_blocker_.reset();
+        drift_state_ = 0.0;
+        seed_streams();
     }
 
     double phase() const noexcept { return core_.phase(); }
@@ -207,7 +262,7 @@ public:
     /// Generate one sample and advance by `increment` cycles.
     ///
     /// `increment` is the per-sample phase step (frequency ÷ sample rate) and is
-    /// read every call, so FM and per-sample pitch modulation — and, later, a
+    /// read every call, so FM and per-sample pitch modulation — and the
     /// drift/jitter source at this site — compose without an API change.
     double next(double increment) noexcept {
         const double modulated = increment * pitch_noise_factor();
@@ -274,12 +329,80 @@ private:
         return gain;
     }
 
-    /// The clock multiplier for the reserved drift/jitter site. Exactly 1.0 until
-    /// a source is wired — see `set_drift_depth`.
-    double pitch_noise_factor() const noexcept {
-        // No stochastic source in this increment; the depths are inert. Kept as a
-        // named site so the source lands here without touching `next()`.
-        return 1.0;
+    /// The frequency multiplier the drift and jitter sources apply to the
+    /// increment this sample.
+    ///
+    /// Both depths neutral is an exact bypass: it returns 1.0 bit-for-bit and
+    /// advances no noise state, so a neutral VCO is unperturbed and the master
+    /// null holds. Otherwise each active source contributes a cents deviation —
+    /// drift from the one-pole-colored (unit-variance) random walk, jitter from
+    /// an independent per-sample normal — summed and mapped to a ratio by
+    /// `2^(cents/1200)`. `exp2` is always positive, so the increment keeps its
+    /// sign (noise never reverses the phase) and stays finite.
+    double pitch_noise_factor() noexcept {
+        if (drift_depth_ == 0.0 && jitter_depth_ == 0.0) return 1.0;
+
+        double cents = 0.0;
+        if (drift_depth_ != 0.0) {
+            drift_state_ = drift_pole_ * drift_state_ + drift_norm_ * drift_rng_.next_gaussian();
+            cents += drift_depth_ * drift_state_;
+        }
+        if (jitter_depth_ != 0.0)
+            cents += jitter_depth_ * jitter_rng_.next_gaussian();
+
+        return std::exp2(cents / 1200.0);
+    }
+
+    /// A deterministic, seed-reproducible white-Gaussian source. splitmix64 for
+    /// the uniform stream (no `random_device`, no clock — determinism is the
+    /// contract), Box–Muller for the normal variate. Pure integer plus libcall
+    /// arithmetic: no allocation, no lock, no I/O, so it is safe on the audio
+    /// thread, exactly like the `sin`/`exp`/`tanh` the deterministic stages call.
+    struct NoiseSource {
+        std::uint64_t state = 0;
+
+        void seed(std::uint64_t s) noexcept { state = s; }
+
+        std::uint64_t next_u64() noexcept {
+            std::uint64_t z = (state += 0x9E3779B97F4A7C15ull);
+            z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+            z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+            return z ^ (z >> 31);
+        }
+
+        /// A double in (0, 1): the top 53 bits, nudged off exact 0 so the log in
+        /// the normal transform stays finite.
+        double next_uniform() noexcept {
+            const double u =
+                static_cast<double>(next_u64() >> 11) * (1.0 / 9007199254740992.0);
+            return u > 0.0 ? u : std::numeric_limits<double>::min();
+        }
+
+        double next_gaussian() noexcept {
+            const double u1 = next_uniform();
+            const double u2 = next_uniform();
+            return std::sqrt(-2.0 * std::log(u1)) *
+                   std::cos(2.0 * std::numbers::pi * u2);
+        }
+    };
+
+    /// Reseed both streams from `seed_`. The jitter stream is offset by a fixed
+    /// constant so drift and jitter are independent sequences from one seed.
+    void seed_streams() noexcept {
+        drift_rng_.seed(seed_);
+        jitter_rng_.seed(seed_ ^ 0xD1B54A32D192ED03ull);
+    }
+
+    /// One-pole (Ornstein–Uhlenbeck) coloring coefficients for the drift wander:
+    /// the pole sets the timescale, and the input gain is chosen so the stationary
+    /// output has unit variance — the variance of `a·x + b·w` (w unit-variance) is
+    /// `b^2 / (1 - a^2)`, so `b = sqrt(1 - a^2)` gives variance 1. `drift_depth`
+    /// then scales that unit wander straight to cents RMS.
+    void update_drift_coeffs() noexcept {
+        drift_pole_ = drift_rate_hz_ > 0.0
+                          ? std::exp(-2.0 * std::numbers::pi * drift_rate_hz_ / sample_rate_)
+                          : 0.0;
+        drift_norm_ = std::sqrt(1.0 - drift_pole_ * drift_pole_);
     }
 
     void update_ac_pole() noexcept {
@@ -308,6 +431,13 @@ private:
 
     double drift_depth_ = 0.0;
     double jitter_depth_ = 0.0;
+    double drift_rate_hz_ = kDefaultDriftRateHz;
+    double drift_pole_ = 0.0;
+    double drift_norm_ = 1.0;
+    double drift_state_ = 0.0;
+    std::uint64_t seed_ = 0x0123456789ABCDEFull;
+    NoiseSource drift_rng_{seed_};
+    NoiseSource jitter_rng_{seed_ ^ 0xD1B54A32D192ED03ull};
 };
 
 } // namespace pulp::signal::osc
