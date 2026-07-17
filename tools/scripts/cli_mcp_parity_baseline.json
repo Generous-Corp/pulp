@@ -49,6 +49,7 @@
     "pulp_audio_model_activate": "Sub-tool of `pulp audio` — audio service surface, no top-level CLI peer",
     "pulp_audio_model_list": "Sub-tool of `pulp audio` — audio service surface, no top-level CLI peer",
     "pulp_audio_model_status": "Sub-tool of `pulp audio` — audio service surface, no top-level CLI peer",
+    "pulp_audio_plugin_inspect": "Sub-tool of `pulp audio` — isolated hosted-plugin API discovery RPC, no top-level CLI peer",
     "pulp_audio_probe_json": "One-shot wrapper around `pulp run --audio-probe-json`; no separate top-level CLI peer",
     "pulp_audio_read_bundle": "Sub-tool of `pulp audio` — audio service surface, no top-level CLI peer",
     "pulp_audio_render": "Sub-tool of `pulp audio` — offline render RPC, no top-level CLI peer",

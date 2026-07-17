@@ -54,7 +54,17 @@ TEST_CASE("UmpPacket size_for_type covers supported packet classes",
     REQUIRE(UmpPacket::size_for_type(UmpMessageType::DataSysEx) == 2);
     REQUIRE(UmpPacket::size_for_type(UmpMessageType::Midi2ChannelVoice) == 2);
     REQUIRE(UmpPacket::size_for_type(UmpMessageType::Data128) == 4);
-    REQUIRE(UmpPacket::size_for_type(static_cast<UmpMessageType>(0x0F)) == 1);
+    // size_for_type is now spec-complete for every message-type nibble (it
+    // delegates to ump_words_for_message_type). Type 0xF is UMP Stream — a
+    // 128-bit message, i.e. 4 words — not the 1-word default the old
+    // switch fell through to. A cursor that advanced by 1 here would re-read
+    // a UMP-Stream message's trailing 3 words as fresh headers (the
+    // UMP-cursor-advance bug class).
+    REQUIRE(UmpPacket::size_for_type(static_cast<UmpMessageType>(0x0F)) == 4);
+    // Reserved ranges also have defined lengths so a cursor can skip them:
+    REQUIRE(UmpPacket::size_for_type(static_cast<UmpMessageType>(0x0B)) == 3);
+    REQUIRE(UmpPacket::size_for_type(static_cast<UmpMessageType>(0x08)) == 2);
+    REQUIRE(UmpPacket::size_for_type(static_cast<UmpMessageType>(0x06)) == 1);
 }
 
 TEST_CASE("UmpPacket helper factories mask groups channels and data fields",

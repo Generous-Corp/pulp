@@ -2,6 +2,7 @@
 
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
+#include "css_color.hpp"
 
 #include <cctype>
 #include <functional>
@@ -11,17 +12,15 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_style_filter_clip_api(
-    std::function<canvas::Color(const std::string&)> parse_color) {
+void WidgetBridge::register_widget_style_filter_clip_api() {
     BridgeApiContext api{engine_};
-    auto parseColor = std::move(parse_color);
 
     // setFilter(id, "blur(4px) brightness(0.8) saturate(1.2) drop-shadow(...)")
     // Walks the function sequence and builds View::FilterOp entries; the
     // View paint path passes the chain to canvas.save_layer_with_filters,
     // which composes via SkImageFilters on the Skia backend (CG falls
     // through to blur-only for now).
-    register_bridge_function(api, "setFilter", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setFilter", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto filter_str = args.get<std::string>(1, "");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -118,7 +117,7 @@ void WidgetBridge::register_widget_style_filter_clip_api(
                         std::string color_str = tokens[3];
                         for (size_t k = 4; k < tokens.size(); ++k) color_str += " " + tokens[k];
                         // Lean on the existing Color::from_string parser.
-                        op.ds_color = parseColor(color_str);
+                        op.ds_color = parse_bridge_css_color(color_str);
                     } else {
                         op.ds_color = canvas::Color::rgba(0.0f, 0.0f, 0.0f, 1.0f);
                     }

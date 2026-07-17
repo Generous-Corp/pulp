@@ -1,4 +1,4 @@
-#include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/recording_canvas.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -324,6 +324,17 @@ bool RecordingCanvas::draw_image_from_data(const uint8_t* data, size_t size,
     // Recording backend doesn't actually rasterize anything but we
     // succeeded at capturing the intent.
     return true;
+}
+
+void RecordingCanvas::draw_image(void* native_handle,
+                                 float x, float y, float w, float h) {
+    (void)native_handle;
+    DrawCommand cmd{DrawCommand::Type::draw_image};
+    cmd.f[0] = x; cmd.f[1] = y; cmd.f[2] = w; cmd.f[3] = h;
+    // `text` intentionally left empty — an opaque-handle draw has no source
+    // path / data URL, and the empty string is how a test tells a handle draw
+    // apart from a file / data draw in the recorded command stream.
+    commands_.push_back(std::move(cmd));
 }
 
 bool RecordingCanvas::draw_image_from_file(const std::string& path,

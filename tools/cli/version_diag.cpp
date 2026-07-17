@@ -5,6 +5,7 @@
 // binary. Only `render_report` writes to std::cout.
 
 #include "version_diag.hpp"
+#include "json_writer.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -474,33 +475,6 @@ int render_report(const VersionReport& report) {
 }
 
 namespace {
-
-// Local JSON string escaper. The render_report_json surface is small
-// enough that we deliberately don't pull in the pkg::JsonValue
-// machinery — keeping version_diag link-light for the unit test.
-std::string json_escape(const std::string& s) {
-    std::string out;
-    out.reserve(s.size() + 4);
-    for (char c : s) {
-        switch (c) {
-            case '"':  out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n";  break;
-            case '\r': out += "\\r";  break;
-            case '\t': out += "\\t";  break;
-            default:
-                if (static_cast<unsigned char>(c) < 0x20) {
-                    char buf[8];
-                    std::snprintf(buf, sizeof(buf), "\\u%04x",
-                                  static_cast<unsigned>(c) & 0xff);
-                    out += buf;
-                } else {
-                    out += c;
-                }
-        }
-    }
-    return out;
-}
 
 void write_semver_json(std::ostream& os, const Semver& v) {
     os << "{\"raw\": \"" << json_escape(v.raw) << "\""

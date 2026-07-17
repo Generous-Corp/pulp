@@ -6,7 +6,9 @@
 
 #include "kit_commands.hpp"
 
+#include "cli_fs_util.hpp"
 #include "json_parser.hpp"
+#include "json_writer.hpp"
 #include "package_registry.hpp"
 #include "pulp_version_gen.h"
 
@@ -16,7 +18,6 @@
 #include "../../external/miniz/miniz.h"
 
 #include <algorithm>
-#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -38,6 +39,13 @@
 namespace pulp::cli::kit {
 
 namespace {
+
+// Archive-safety and temp-root helpers shared with the other package
+// commands; see cli_fs_util.hpp for the containment contract.
+using pulp::cli::fsutil::is_package_archive_path;
+using pulp::cli::fsutil::path_is_within;
+using pulp::cli::fsutil::safe_archive_rel;
+using pulp::cli::fsutil::temporary_archive_root;
 
 using pulp::cli::pkg::JsonValue;
 using pulp::cli::pkg::JsonParser;
@@ -68,25 +76,6 @@ bool write_text(const fs::path& path, const std::string& body) {
     return f.good();
 }
 
-std::string json_escape(std::string_view s) {
-    std::string out;
-    for (char c : s) {
-        switch (c) {
-            case '"': out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default: out += c; break;
-        }
-    }
-    return out;
-}
-
-std::string json_string(std::string_view s) {
-    return "\"" + json_escape(s) + "\"";
-}
-
 int hex_value(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
@@ -113,17 +102,6 @@ void print_ok_local(const std::string& msg) {
 
 void print_fail_local(const std::string& msg) {
     std::cerr << "Error: " << msg << "\n";
-}
-
-bool path_is_within_local(const fs::path& path, const fs::path& root) {
-    auto p = path.lexically_normal();
-    auto r = root.lexically_normal();
-    auto pit = p.begin();
-    auto rit = r.begin();
-    for (; rit != r.end(); ++rit, ++pit) {
-        if (pit == p.end() || *pit != *rit) return false;
-    }
-    return true;
 }
 
 void add_issue(KitValidationResult& result,
@@ -516,7 +494,7 @@ bool path_value_exists(const fs::path& root, const std::string& rel) {
     if (ec) normalized = (root / p).lexically_normal();
     auto root_norm = fs::weakly_canonical(root, ec);
     if (ec) root_norm = root.lexically_normal();
-    if (!path_is_within_local(normalized, root_norm)) return false;
+    if (!path_is_within(normalized, root_norm)) return false;
     return fs::exists(normalized);
 }
 
@@ -1310,7 +1288,7 @@ bool remove_owned_path(const fs::path& project_root,
     if (ec) root = project_root.lexically_normal();
     auto target = fs::weakly_canonical(project_root / rel_path, ec);
     if (ec) target = (project_root / rel_path).lexically_normal();
-    if (!path_is_within_local(target, root)) {
+    if (!path_is_within(target, root)) {
         error = "Refusing to remove unsafe owned path `" + rel + "`";
         return false;
     }
@@ -1394,7 +1372,7 @@ bool copy_declared_path(const fs::path& kit_root,
     if (ec) source = (kit_root / rel_path).lexically_normal();
     auto root = fs::weakly_canonical(kit_root, ec);
     if (ec) root = kit_root.lexically_normal();
-    if (!path_is_within_local(source, root) || !fs::exists(source)) {
+    if (!path_is_within(source, root) || !fs::exists(source)) {
         error = "Refusing to copy missing or unsafe kit path `" + rel + "`";
         return false;
     }
@@ -1470,28 +1448,6 @@ std::string sha256_file_hex_local(const fs::path& path) {
     const auto bytes = read_bytes(path);
     if (bytes.empty() && fs::file_size(path) != 0) return {};
     return pulp::runtime::sha256_hex(bytes.data(), bytes.size());
-}
-
-bool safe_archive_rel(const fs::path& rel) {
-    if (rel.empty() || rel.is_absolute()) return false;
-    for (const auto& part : rel) {
-        const auto s = part.string();
-        if (s.empty() || s == "." || s == "..") return false;
-    }
-    return true;
-}
-
-bool is_package_archive_path(const fs::path& path) {
-    const auto ext = path.extension().string();
-    return ext == ".pulpkit" || ext == ".pulpcontent";
-}
-
-fs::path temporary_archive_root() {
-    static std::atomic<unsigned> seq{0};
-    const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
-    return fs::temp_directory_path() /
-           ("pulp-kit-archive-" + std::to_string(ticks) + "-" +
-            std::to_string(seq.fetch_add(1)));
 }
 
 bool zip_read_file(mz_zip_archive& zip, const char* name, std::string& out) {
@@ -1611,7 +1567,7 @@ bool validate_and_extract_kit_archive(const fs::path& archive,
         const fs::path rel(stat.m_filename);
         const auto dest = (dest_root / rel).lexically_normal();
         const auto dest_abs = fs::absolute(dest, ec).lexically_normal();
-        if (ec || !path_is_within_local(dest_abs, root_norm)) {
+        if (ec || !path_is_within(dest_abs, root_norm)) {
             issues.push_back("archive-entry: unsafe extraction path `" + rel.generic_string() + "`");
             ok = false;
             continue;

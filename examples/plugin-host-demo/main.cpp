@@ -10,6 +10,8 @@
 //   pulp-plugin-host-demo --path <bundle>      # load a CLAP/VST3/LV2 bundle directly
 //   pulp-plugin-host-demo --id <plugin-id>     # select a scanned descriptor by id
 //                                              # (required for path-less AU components)
+//   pulp-plugin-host-demo --warmup-ms 500       # service native host events
+//                                              # before inspecting/rendering
 //   pulp-plugin-host-demo --manage             # headless plugin-manager UX
 //                                              # (issue #494 demo)
 //
@@ -19,6 +21,7 @@
 // and processes audio through the same host boundary used by richer surfaces.
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/events/message_loop_integration.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/scan_blacklist.hpp>
 #include <pulp/host/scanner.hpp>
@@ -29,8 +32,10 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <mutex>
@@ -50,6 +55,42 @@ using pulp::host::ScanOptions;
 constexpr double kSampleRate    = 48000.0;
 constexpr int    kBlockSize     = 256;
 constexpr int    kNumChannels   = 2;
+
+bool parse_nonnegative_int(std::string_view text, int& value) {
+    const auto* begin = text.data();
+    const auto* end = begin + text.size();
+    const auto [ptr, error] = std::from_chars(begin, end, value);
+    return error == std::errc{} && ptr == end && value >= 0;
+}
+
+void warm_up_native_host_events(int duration_ms) {
+    if (duration_ms <= 0) return;
+
+    const auto deadline = std::chrono::steady_clock::now()
+                        + std::chrono::milliseconds(duration_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+        const auto result =
+            pulp::events::MessageLoopIntegration::pump_main_loop_for(
+                std::chrono::milliseconds(25));
+        if (result == pulp::events::MainLoopPumpResult::Unsupported) {
+            std::fprintf(stderr,
+                "Native main-loop pumping is unsupported on this platform.\n");
+            return;
+        }
+        if (result == pulp::events::MainLoopPumpResult::WrongThread) {
+            std::fprintf(stderr,
+                "Native main-loop pumping must run on the process main thread.\n");
+            return;
+        }
+        // CFRunLoop may report Finished immediately when it has no source at
+        // this instant. Keep the requested elapsed-time policy without
+        // hot-spinning while a later XPC/main-queue callback is still pending.
+        if (result == pulp::events::MainLoopPumpResult::Finished
+            || result == pulp::events::MainLoopPumpResult::Stopped) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+}
 
 const char* format_name(PluginFormat f) {
     switch (f) {
@@ -364,6 +405,7 @@ int main(int argc, char** argv) {
     std::string filter_id;
     bool list_only = false;
     bool manage_mode = false;
+    int warmup_ms = 0;
 
     for (int i = 1; i < argc; ++i) {
         std::string_view a = argv[i];
@@ -375,9 +417,15 @@ int main(int argc, char** argv) {
             filter_path = argv[++i];
         } else if (a == "--id" && i + 1 < argc) {
             filter_id = argv[++i];
+        } else if (a == "--warmup-ms" && i + 1 < argc) {
+            if (!parse_nonnegative_int(argv[++i], warmup_ms)) {
+                std::fprintf(stderr, "--warmup-ms requires a non-negative integer\n");
+                return 2;
+            }
         } else if (a == "--help" || a == "-h") {
             std::printf("Usage: %s [--list] [--manage] "
-                        "[--path <bundle>] [--id <plugin-id>]\n", argv[0]);
+                        "[--path <bundle>] [--id <plugin-id>] "
+                        "[--warmup-ms <milliseconds>]\n", argv[0]);
             return 0;
         } else {
             std::fprintf(stderr, "Unknown arg: %s\n", argv[i]);
@@ -453,6 +501,12 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Some Audio Units complete licensing or initialization asynchronously
+    // through XPC, timers, or dispatch-main callbacks. A headless host can
+    // service those events explicitly before reading parameters or rendering.
+    // This is only a bounded warm-up policy, not a readiness signal.
+    warm_up_native_host_events(warmup_ms);
+
     print_plugin_summary(*slot);
 
     // Build a stereo test signal and process one block.
@@ -468,14 +522,32 @@ int main(int argc, char** argv) {
     pulp::midi::MidiBuffer mi, mo;
 
     pulp::host::ParameterEventQueue pe;
-    slot->process(out, in, mi, mo, pe, kBlockSize);
-
+    const auto latency_blocks = std::clamp<std::int64_t>(
+        (std::max<std::int64_t>(0, slot->latency_samples()) + kBlockSize - 1)
+            / kBlockSize + 1,
+        1, 32);
+    const int blocks_to_process = slot->info().is_instrument
+        ? 32
+        : static_cast<int>(latency_blocks);
     float peak = 0.f;
-    for (int i = 0; i < kBlockSize; ++i) {
-        peak = std::max(peak, std::max(std::abs(out_l[i]), std::abs(out_r[i])));
+    for (int block = 0; block < blocks_to_process; ++block) {
+        std::fill(out_l.begin(), out_l.end(), 0.f);
+        std::fill(out_r.begin(), out_r.end(), 0.f);
+        mi.clear();
+        mo.clear();
+        if (slot->info().is_instrument && block == 0) {
+            mi.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
+        }
+
+        slot->process(out, in, mi, mo, pe, kBlockSize);
+        for (int i = 0; i < kBlockSize; ++i) {
+            peak = std::max(peak,
+                std::max(std::abs(out_l[i]), std::abs(out_r[i])));
+        }
     }
-    std::printf("Processed %d samples @ %.0f Hz. Output peak: %.4f\n",
-                kBlockSize, kSampleRate, peak);
+    std::printf("Processed %d samples @ %.0f Hz%s. Output peak: %.4f\n",
+                blocks_to_process * kBlockSize, kSampleRate,
+                slot->info().is_instrument ? " with MIDI note C4" : "", peak);
 
     slot->release();
     return 0;

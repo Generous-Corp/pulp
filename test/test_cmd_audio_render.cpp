@@ -6,6 +6,7 @@
 
 #include "../tools/cli/cmd_audio_render.hpp"
 #include "../tools/cli/cmd_audio_render_step.hpp"
+#include "../tools/cli/cmd_audio_plugin_inspect.hpp"
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
@@ -249,6 +250,49 @@ TEST_CASE("audio render parser: --duration-ms resolves against sample rate", "[a
         {"--plugin", "p", "--out", "o", "--sample-rate", "48000", "--duration-ms", "100"});
     REQUIRE(r.ok);
     REQUIRE(r.duration_frames == 4800);
+}
+
+TEST_CASE("audio render parser: isolated-host lifecycle and analysis WAV flags",
+          "[audio-render][plugin-lab]") {
+    const auto r = parse_audio_render_args(
+        {"--plugin", "p.component", "--format", "au", "--out", "o.wav",
+         "--duration-ms", "100", "--tail-ms", "50", "--warmup-ms", "1200",
+         "--initial-param", "17=0.75", "--settle-ms", "300",
+         "--timeout-ms", "45000", "--wav-format", "float32"});
+    REQUIRE(r.ok);
+    REQUIRE(r.duration_frames == 4800);
+    REQUIRE(r.tail_frames == 2400);
+    REQUIRE(r.warmup_ms == 1200);
+    REQUIRE(r.settle_ms == 300);
+    REQUIRE(r.timeout_ms == 45000);
+    REQUIRE(r.wav_format == AudioRenderWavFormat::Float32);
+    REQUIRE(r.initial_params.size() == 1);
+    REQUIRE(r.initial_params[0].id == 17);
+    REQUIRE(r.initial_params[0].value == 0.75f);
+
+    REQUIRE_FALSE(parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "10",
+         "--initial-param", "17=0.5@4"}).ok);
+    REQUIRE_FALSE(parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-frames", "10",
+         "--wav-format", "pcm20"}).ok);
+}
+
+TEST_CASE("audio render parser rejects frame-count overflow",
+          "[audio-render][plugin-lab]") {
+    const auto result = parse_audio_render_args(
+        {"--plugin", "p", "--out", "o", "--duration-ms", "1",
+         "--tail-ms", "18446744073709551615"});
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error.find("too long") != std::string::npos);
+}
+
+TEST_CASE("plugin inspect timeout scales with warm-up unless explicitly pinned",
+          "[audio-render][plugin-lab]") {
+    REQUIRE(plugin_inspect_timeout_ms(std::nullopt, 0) == 30'000);
+    REQUIRE(plugin_inspect_timeout_ms(std::nullopt, 1'000) == 30'000);
+    REQUIRE(plugin_inspect_timeout_ms(std::nullopt, 30'000) == 310'000);
+    REQUIRE(plugin_inspect_timeout_ms(2'500, 30'000) == 2'500);
 }
 
 TEST_CASE("audio render parser: required + mutually-exclusive flags", "[audio-render]") {

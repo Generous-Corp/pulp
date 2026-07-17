@@ -42,7 +42,7 @@ set(PULP_SDK_SMOKE_REQUIRE_FORMATS ""
 find_package(Pulp REQUIRED CONFIG)
 
 foreach(_pulp_alias_target
-        format signal view standalone gpu-audio)
+        dsl events format host signal state view standalone gpu-audio)
     if(TARGET "Pulp::${_pulp_alias_target}"
        AND NOT TARGET "pulp::${_pulp_alias_target}")
         message(FATAL_ERROR
@@ -54,6 +54,35 @@ foreach(_pulp_alias_target
     endif()
 endforeach()
 unset(_pulp_alias_target)
+
+# Installed host/state/dsl header + link probe. These targets were exported
+# before all of their public headers were reliably copied into the SDK, so a
+# target-existence check alone produced a linkable-looking but unusable package.
+if(TARGET Pulp::host)
+    if(NOT TARGET Pulp::state OR NOT TARGET Pulp::dsl)
+        message(FATAL_ERROR
+            "Pulp SDK smoke: installed host/state/dsl probe surfaces are incomplete")
+    endif()
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/host_export_probe.cpp"
+"#include <pulp/dsl/dsl_processor.hpp>\n"
+"#include <pulp/events/message_loop_integration.hpp>\n"
+"#include <pulp/host/plugin_slot.hpp>\n"
+"#include <pulp/state/preset_manager.hpp>\n"
+"\n"
+"int main() {\n"
+"    const auto pump =\n"
+"        pulp::events::MessageLoopIntegration::pump_main_loop_for(\n"
+"            std::chrono::milliseconds(0));\n"
+"    pulp::host::PluginInfo info;\n"
+"    auto slot = pulp::host::PluginSlot::load(info);\n"
+"    return slot || pump == pulp::events::MainLoopPumpResult::WrongThread\n"
+"        ? 1 : 0;\n"
+"}\n")
+    add_executable(PulpSDKSmokeHostProbe
+        "${CMAKE_CURRENT_BINARY_DIR}/host_export_probe.cpp")
+    target_link_libraries(PulpSDKSmokeHostProbe PRIVATE
+        Pulp::dsl Pulp::events Pulp::host Pulp::state)
+endif()
 
 # C++ baseline export probe.
 #

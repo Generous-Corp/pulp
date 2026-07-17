@@ -150,7 +150,7 @@ public:
     void on_mouse_drag(Point pos) override;
     void on_mouse_enter() override;
     void on_mouse_leave() override;
-    void advance_animations(float dt) { hover_scale_.advance(dt); }
+    void advance_animations(float dt) override { hover_scale_.advance(dt); }
     float hover_scale() const { return hover_scale_.value(); }
     bool wants_wheel_value() const override { return true; }
     bool wants_mouse_input() const override { return true; }
@@ -236,7 +236,7 @@ class Spinner : public View {
 public:
     void set_progress(float p) { progress_ = p; }   ///< <0 = indeterminate (spins)
     float progress() const { return progress_; }
-    void advance_animations(float dt) { phase_ += dt; }
+    void advance_animations(float dt) override { phase_ += dt; }
     float phase() const { return phase_; }
     void paint(canvas::Canvas& canvas) override;
     float intrinsic_height() const override { return 24.0f; }

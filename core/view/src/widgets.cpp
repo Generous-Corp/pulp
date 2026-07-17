@@ -416,6 +416,20 @@ void Toggle::set_on(bool v, bool animate) {
     request_repaint();
 }
 
+bool Toggle::set_on(bool v, Notify notify, bool animate) {
+    const bool was = on_;
+    set_on(v, animate);        // silent state + animation + ARIA + repaint path
+    if (on_ == was) return false;
+    if (notify == Notify::sync) {
+        if (on_toggle) on_toggle(on_);
+    } else if (notify == Notify::async && on_toggle) {
+        auto fn = on_toggle;
+        const bool nv = on_;
+        queue_async_notification([fn, nv] { fn(nv); });
+    }
+    return true;
+}
+
 void Toggle::on_mouse_down(Point) {
     bool new_state = !on_;
     set_on(new_state);
@@ -1088,7 +1102,7 @@ void Fader::paint(canvas::Canvas& canvas) {
 // HTML <input type="range"> equivalent. Track + handle, no decorative
 // fader chrome. Min/max/step quantisation lives here so the painted
 // position and the value seen by JS callers always agree.
-void RangeSlider::clamp_and_quantize_() {
+void RangeSlider::clamp_and_quantize_(Notify notify) {
     // Defensive: if max < min, treat the range as collapsed at min.
     float lo = min_;
     float hi = std::max(min_, max_);
@@ -1107,7 +1121,13 @@ void RangeSlider::clamp_and_quantize_() {
 
     if (v != value_) {
         value_ = v;
-        if (on_change) on_change(value_);
+        if (notify == Notify::sync) {
+            if (on_change) on_change(value_);
+        } else if (notify == Notify::async && on_change) {
+            auto fn = on_change;
+            const float nv = value_;
+            queue_async_notification([fn, nv] { fn(nv); });
+        }
     }
 }
 
@@ -1739,11 +1759,17 @@ void DualRangeSlider::on_mouse_up(Point) {
 
 // ── GroupBox ───────────────────────────────────────────────────────────────
 
-void GroupBox::set_collapsed(bool c) {
+void GroupBox::set_collapsed(bool c, Notify notify) {
     if (c == collapsed_) return;
     collapsed_ = c;
     apply_child_visibility();
-    if (on_toggle) on_toggle(collapsed_);
+    if (notify == Notify::sync) {
+        if (on_toggle) on_toggle(collapsed_);
+    } else if (notify == Notify::async && on_toggle) {
+        auto fn = on_toggle;
+        const bool nv = collapsed_;
+        queue_async_notification([fn, nv] { fn(nv); });
+    }
     request_repaint();
 }
 
@@ -1844,12 +1870,18 @@ float WaveformRecorder::transport_radius_() const {
     return std::clamp(std::min(wf.width, wf.height) * 0.18f, 18.0f, 44.0f);
 }
 
-void WaveformRecorder::set_state(State s) {
+void WaveformRecorder::set_state(State s, Notify notify) {
     if (s == state_) return;
     state_ = s;
     dragging_threshold_ = false;
     request_repaint();
-    if (on_state_change) on_state_change(state_);
+    if (notify == Notify::sync) {
+        if (on_state_change) on_state_change(state_);
+    } else if (notify == Notify::async && on_state_change) {
+        auto fn = on_state_change;
+        const State ns = state_;
+        queue_async_notification([fn, ns] { fn(ns); });
+    }
 }
 
 void WaveformRecorder::advance_state_() {

@@ -250,6 +250,11 @@ public:
     virtual void on_resized() {}
     virtual void on_attached() {}
     virtual void on_detached() {}
+    /// Advance any per-widget non-CSS animation state (hover glows, thumb
+    /// tweens, spinner phase) by `dt` seconds. Default no-op; widgets with
+    /// interactive animation override this. Driven every frame by the host
+    /// frame pump alongside the CSS `tick_animations()` timeline.
+    virtual void advance_animations(float dt) { (void)dt; }
     /// The FrameClock reachable from this view (via `frame_clock()`) may have
     /// changed — a clock was installed on an ancestor, or this subtree was
     /// re-parented. A view that self-subscribes to the clock (e.g. a Meter with

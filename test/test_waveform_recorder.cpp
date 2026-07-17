@@ -155,3 +155,39 @@ TEST_CASE("WaveformRecorder accessors round-trip",
     rec.set_threshold(0.25f);
     REQUIRE(rec.threshold() == 0.25f);
 }
+
+// ── Notify on set_state ──────────────────────────────────────────────────────
+//
+// set_state can drive on_state_change; a Notify chooses whether it does. This
+// lets a programmatic re-seed of the transport state avoid echoing back into
+// whatever just set it.
+
+TEST_CASE("WaveformRecorder::set_state Notify::none is silent",
+          "[view][waveform_recorder][notify]") {
+    WaveformRecorder rec;
+    int fired = 0;
+    rec.on_state_change = [&](WaveformRecorder::State) { ++fired; };
+
+    rec.set_state(WaveformRecorder::State::recording, Notify::none);
+    REQUIRE(rec.state() == WaveformRecorder::State::recording);
+    REQUIRE(fired == 0);
+}
+
+TEST_CASE("WaveformRecorder::set_state Notify::sync / async",
+          "[view][waveform_recorder][notify]") {
+    pulp::view::flush_async_notifications();
+    WaveformRecorder rec;
+    std::vector<WaveformRecorder::State> seen;
+    rec.on_state_change = [&](WaveformRecorder::State s) { seen.push_back(s); };
+
+    rec.set_state(WaveformRecorder::State::recording, Notify::sync);
+    rec.set_state(WaveformRecorder::State::recording, Notify::sync);  // no-op
+    REQUIRE(seen.size() == 1);
+    REQUIRE(seen.back() == WaveformRecorder::State::recording);
+
+    rec.set_state(WaveformRecorder::State::captured, Notify::async);
+    REQUIRE(seen.size() == 1);
+    pulp::view::flush_async_notifications();
+    REQUIRE(seen.size() == 2);
+    REQUIRE(seen.back() == WaveformRecorder::State::captured);
+}

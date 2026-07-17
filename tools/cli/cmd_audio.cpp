@@ -23,6 +23,7 @@
 #include <pulp/render/headless_surface.hpp>
 
 #include "cmd_audio_compare.hpp"
+#include "cmd_audio_plugin_inspect.hpp"
 #include "cmd_audio_render.hpp"
 #include "cmd_audio_validate.hpp"
 
@@ -44,6 +45,7 @@ static void print_audio_usage() {
     std::cout << "  pulp audio validate <verb> ...   (summarize|doctor|compare|assert)\n";
     std::cout << "  pulp audio compare <reference.wav> <candidate.wav> [--profile <axis>] [--reference-role <peer|golden>] [--threshold <t>] [--json <path>]\n";
     std::cout << "  pulp audio render --plugin <bundle> --out <file.wav> (--duration-ms <n> | --duration-frames <n>) [options]\n";
+    std::cout << "  pulp audio plugin-inspect --plugin <bundle> [--format <fmt>] [--id <id>]  # JSON\n";
 }
 
 namespace {
@@ -430,6 +432,18 @@ int cmd_audio(const std::vector<std::string>& args) {
 
     if (args[0] == "render") {
         return cmd_audio_render({args.begin() + 1, args.end()});
+    }
+
+    if (args[0] == "__render-worker") {
+        return cmd_audio_render_worker({args.begin() + 1, args.end()});
+    }
+
+    if (args[0] == "plugin-inspect") {
+        return cmd_audio_plugin_inspect({args.begin() + 1, args.end()});
+    }
+
+    if (args[0] == "__plugin-inspect-worker") {
+        return cmd_audio_plugin_inspect_worker({args.begin() + 1, args.end()});
     }
 
     if (args[0] == "scope") {

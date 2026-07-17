@@ -198,6 +198,7 @@ set(_PULP_WEBUI_VIEW_SOURCES
     ${_PULP_WEBUI_ROOT}/core/view/src/slider_core.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/context_menu.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/yoga_layout.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/grid_layout.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/layout_snapshot.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/pointer_dispatch.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/gesture.cpp

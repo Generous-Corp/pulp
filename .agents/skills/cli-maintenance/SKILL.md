@@ -30,6 +30,55 @@ For Rust-native commands, the source of truth is
 `experimental/pulp-rs/src/help.rs` too; the installed Rust binary's help banner
 is user-facing even when there is no C++ table entry.
 
+#### Where a new helper declaration goes
+
+`cli_common.hpp` is split along the implementation seam — each header carries
+the declarations for one sibling `.cpp`. Put a new helper's declaration in the
+header that matches the `.cpp` you implement it in:
+
+| Header | Implementation | Owns |
+|--------|----------------|------|
+| `cli_common.hpp` | `cli_common.cpp` | Command forward decls, repo/build-dir discovery, build + validator helpers, interactive prompts |
+| `cli_sdk.hpp` | `cli_sdk.cpp` | SDK resolution, `pulp.toml` / user-config reads and writes, PR-workflow selection, version banners |
+| `cli_doctor.hpp` | `cli_doctor_helpers.cpp` | `DoctorCheck` and the `run_doctor_*` probes |
+| `cli_fs_util.hpp` | `cli_fs_util.cpp` | Filesystem/archive-safety helpers, in `namespace pulp::cli::fsutil` |
+
+Two things about this that are easy to get wrong:
+
+- **The split is enforced by discipline only.** `cli_common.hpp` includes
+  `cli_doctor.hpp` and `cli_sdk.hpp`, so every command file that includes
+  `cli_common.hpp` still sees the whole API and nothing fails when you park a
+  new SDK or doctor decl back in `cli_common.hpp`. It compiles, and
+  `cli_common.hpp` quietly regrows into the grab-bag the split undid. Check
+  which `.cpp` your definition lives in and declare it in that `.cpp`'s header.
+- **`cli_fs_util.hpp` is deliberately NOT included by `cli_common.hpp`.** It is
+  namespaced and included directly (`kit_commands.cpp` includes it without
+  `cli_common.hpp` at all), which keeps archive handling off the `cli_common`
+  dep chain. Don't "simplify" by adding it to the `cli_common.hpp` include
+  block.
+
+#### `path_is_within` exists twice, with different semantics
+
+There are two same-signature `path_is_within` functions, and they do not agree:
+
+- `::path_is_within` (`cli_common.{hpp,cpp}`, used by `cmd_create.cpp`) calls
+  `fs::absolute()` on both arguments first, so a relative path is resolved
+  against the process CWD.
+- `pulp::cli::fsutil::path_is_within` (`cli_fs_util.{hpp,cpp}`, used by
+  `kit_commands.cpp`) is **purely lexical** — no `fs::absolute`. The caller owns
+  resolution and must pass both arguments in the same frame of reference; a
+  relative/absolute pair shares no prefix and always answers "not within".
+
+They look like an obvious duplicate to collapse. Collapsing them by pointing the
+`cli_common` callers at the `fsutil` one silently drops the absolute-ising step
+and changes the answer for any relative input — a containment check that quietly
+starts answering a different question. If they are ever merged, the
+`fs::absolute()` has to move out into the `cmd_create.cpp` call sites, not
+disappear. The `fsutil` contract (including the lexical-normalization caveat
+that a symlink inside the root still reads as "within") is pinned in the header
+comments and covered by the `[fs-safety]` cases in
+`test/test_cli_kit_commands.cpp` — update both sides when changing it.
+
 ### 2. Update the CLI commands manifest
 - [ ] Add entry to `docs/status/cli-commands.yaml` with:
   - `name`, `status` (use status vocabulary: stable/usable/experimental), `summary`
@@ -455,6 +504,48 @@ Gotchas / invariants when touching this surface:
   index the structural checks still run and the scan reports as skipped. Wired
   into `gates.sh` as an **opt-in** lane (`PULP_IMPORT_PROVENANCE_DIRS`) so it's a
   no-op for normal Pulp-repo pushes and only fires on a PR that lands a scaffold.
+
+### `pulp import install <url>` / `uninstall <id>` — URL-driven importer install
+
+`tools/cli/importer_git_install.{hpp,cpp}` (namespace `pulp::cli::import_install`)
+is the install path an importer add-on actually reaches in practice: cloned from
+a git URL, not resolved from the shipped registry. `cmd_import.cpp` dispatches
+`install`/`uninstall` as the first token (a different arg shape from the
+detect/inspect/emit verbs). This is DISTINCT from `pulp tool install <importer>`
+below (registry entry + per-platform sha256-pinned artifact) — same install tree
+(`~/.pulp/tools/<id>/`) and record dir (`~/.pulp/importers/`), different source.
+
+Gotchas / invariants when touching this surface:
+
+- **Everything the SDK learns comes from the CLONED repo, never a shipped
+  registry.** `install_from_git` runs `git clone --depth 1 <url>` with the user's
+  own git (so a private repo works iff they can clone it), then reads `tool.json`
+  (`parse_tool_manifest`: `id`, `category=="importer"`, `spi_min/max`,
+  `terms_version`, `terms_file`, `pinned_version`) and the terms body from the
+  repo's `terms_file`. There is no shipped `tool.json`, no artifact, no sha256.
+- **PRIVACY INVARIANT — a failed fetch must leak nothing.** On clone failure the
+  SDK-authored `error` is a single fixed URL-agnostic string ("could not fetch
+  importer from the provided URL"); git's own words go in a SEPARATE `git_output`
+  field (surfaced verbatim so a human sees the real reason, but it is git's claim,
+  not the SDK's). The SDK must NEVER state/infer/record whether a repo exists or
+  is public/private — a user with access and one without get identical
+  SDK-authored text. `test_cli_import_install.cpp` asserts two different
+  unreachable URLs produce byte-identical `error` and that it contains none of
+  `private`/`public`/`exists`/`not found`/`permission`. Keep the `Fetch` stage
+  URL-agnostic; only the LATER stages (which run after a successful clone) may
+  reference repo contents.
+- **The SPI-window + terms gates are REUSED, not re-implemented.** SPI enforcement
+  goes through `tools::check_importer_compat` (the SDK speaks the degenerate
+  `[kSpiVersion, kSpiVersion]` window); the accept-to-run gate is
+  `import_terms::run_gate` against `acceptance_store_path()`. `--accept-importer-terms`
+  is the CI path; `--force` reinstalls over an up-to-date record. Uninstall reuses
+  `tools::uninstall_importer(id)`. The clone is staged under `tools_dir()/.staging`
+  (same filesystem → atomic rename into place) and removed on any pre-placement
+  failure, so a declined terms gate or bad manifest leaves nothing behind.
+- **Tests clone a REAL local git repo** (git-init a temp dir with `tool.json` +
+  `TERMS.md`), so the git path itself is exercised with no network. Terms IO is
+  injected via `GateIo`. Keep this file (and the test) vendor-free — it is under
+  the `pulp-test-cli-import*` neutrality scan.
 
 ### `pulp tool install <importer>` — importer add-on packaging
 
@@ -2405,3 +2496,42 @@ artifact's *existence* is not the result. `handle_audio_render` does this for
 never as a payload the caller has to remember to inspect.
 
 Plain `exec()` is still correct for commands whose output *is* the whole result.
+
+## CLI shared primitives: one home each
+
+- **JSON escaping:** use `tools/cli/json_writer.hpp` (`json_escape` / `json_string`). It is
+  header-only so standalone test targets need no link change. There were 17 hand-rolled
+  copies, several of which did not escape control bytes; do not add an 18th.
+- **Shell quoting:** use `shell_quote()` from `cli_common.hpp`. `cmd_ship.cpp` previously
+  mixed three idioms including raw `'"' + path + '"'` concatenation on the signing-key and
+  `gh secret set` paths. Never concatenate quotes around a path you shell out with.
+- **Home directories are NOT one concept.** `pulp_home()` (cli_common) is the user-facing
+  root (`%USERPROFILE%\.pulp` on Windows; missing HOME is an error). `tools_install_home()`
+  (tool_registry) is the managed-tool install root (`%LOCALAPPDATA%\Pulp` on Windows; falls
+  back to a temp dir when HOME is unset). They were both once named `pulp_home` with
+  different contracts — a silent two-sources-of-truth for a filesystem-layout invariant.
+  Pick deliberately; do not "unify" them without deciding the Windows root + fallback.
+
+## Exit 2 means "could not measure" — keep it distinct from failure
+
+`audio compare` and `audio validate` both return **2** when an analyzer refuses:
+the input made the measurement meaningless, so it declined rather than answered.
+`1` stays "an error, or a check that ran and failed", `0` stays success. A script
+has to tell "your plugin is bad" from "I could not measure your plugin" — those
+call for different responses, and collapsing both into 1 destroys the
+distinction the analyzers went to some trouble to draw. New verbs that wrap a
+refusing analyzer should follow the same mapping.
+
+Catch the refusal narrowly. The spectral analyzers throw `std::invalid_argument`
+from `require()` and nothing else — no other exception type reaches the CLI from
+that layer. Catching every `std::exception` would relabel a genuine bug, or a
+`bad_alloc`, as a polite "cannot measure"; let the unexpected crash loudly.
+
+Surface the analyzer's own message verbatim. It already names the input problem
+and the fix ("use a shorter fft_length"); a vaguer wrapper is strictly worse.
+
+**A test for this must tell a refusal from a crash.** An uncaught exception dies
+with exit -1 while libc++abi prints the message on stderr anyway — so a test
+asserting only "nonzero exit and the message is present" passes on the crash and
+proves nothing. Assert the exact code, and that stderr carries no termination
+banner.

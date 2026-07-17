@@ -66,8 +66,13 @@ reproduces the design; the others below do NOT and waste hours:
 ```bash
 # 1) Export the Figma NODE to a scene (faithful vectors + geometry + assets).
 #    Token resolves from --token, $FIGMA_TOKEN, then ~/.config/pulp/figma-token.
+#    ALWAYS pass --cache-dir: it memoizes the /nodes JSON + frame SVG, so a
+#    fix-loop iteration costs ZERO REST calls on a cache hit. Figma MCP allows
+#    only ~6 calls/MONTH on a View seat — re-fetching every iteration burns the
+#    quota for nothing.
 python3 tools/import-design/figma_rest_export.py \
   --file-key q9iDYZzg86YrOQKr6I3bY0 --node 187:2 \
+  --cache-dir .pulp-figma-cache \
   --out scene.pulp.json            # → "N nodes, faithful-vector SVG, interactive elements"
 
 # 2) Import the scene (the source-of-truth lane: audio-widget + library matching,
@@ -1572,12 +1577,12 @@ in `design_import.cpp` beside the sibling importer passes `enrich_*` /
   and the erase predicate removes `__knob_pointer` nodes too. Test:
   `[knob][sprite]` "recognizes a stroke-demoted pointer frame".
 - **Import-time disc clean** (`clean_baked_knob_indicator` →
-  `clear_baked_knob_antenna`, `design_import.cpp`), NOT a render-time cover. Many
+  `clear_baked_knob_antenna`, `design_import_png.cpp`), NOT a render-time cover. Many
   captured discs (ELYSIUM's included) BAKE an indicator into the disc PNG — here
   it's a thin vertical ANTENNA standing straight up ABOVE the disc at 12 o'clock.
   Since we draw our own rotating pointer, the baked one is a stuck second line. So
   when a knob carries `knob_ind_*`, `enrich_imported_image_asset_metadata` decodes
-  the disc PNG and removes the antenna, re-encodes via a minimal in-file PNG
+  the disc PNG and removes the antenna, re-encodes via a minimal PNG
   encoder (`encode_rgba_png_for_import`, filter-0 scanlines + runtime
   `zlib_compress` + IHDR/IDAT/IEND with hand-rolled CRC32), writes
   `$TMPDIR/pulp-import-assets/knobclean_<hash>.png`, and repoints `asset_path`.
@@ -1712,7 +1717,7 @@ color.** ELYSIUM's shapes are uniquely colored (DEPTH purple, POSITION magenta,
 OFFSET green, SHIMMER amber). A single `set_fill_color` made all of them fill the
 same purple — visually wrong. So the importer SAMPLES each shape's own vertical
 gradient from its art and stamps `shape_fill_gradient` (`sample_shape_fill_gradient`
-in `design_import.cpp`: average the opaque pixels in N bands bottom→top, emit
+in `design_import_png.cpp`: average the opaque pixels in N bands bottom→top, emit
 `#rrggbb` stops). `ImageView::set_fill_gradient(stops)` then paints that gradient
 revealed to `fill_value` instead of the flat color, so the shape fills with its
 real colors — "mapped to the original", only adjustable. **This is independent of
@@ -2585,27 +2590,41 @@ After generating Pulp code, ALWAYS validate by comparing with the source design:
    pulp-screenshot --script generated.js --output render.png --width W --height H --backend skia
    ```
 
-   > ⚠️ **`pulp-screenshot` is the ONLY render that decodes image assets.** Use it
-   > to *see* what an import looks like. The importer's `--validate` render is a
-   > **layout-only** check — it does NOT decode `setImageSource`/`createImage`
-   > files; `ImageView::paint` draws the filename as a placeholder (e.g.
-   > "3_228.png"). Native widgets (knob/fader/meter, CPU-canvas vectors) render in
-   > both, so a Pulp-library design looks fine under `--validate`, but any
-   > image-`asset_ref` design (generic-vector frames like ELYSIUM → captured PNGs)
-   > shows filename placeholders there. **Seeing placeholders means you used
-   > `--validate`/a non-Skia backend — NOT that image rendering regressed.**
-   > `pulp-screenshot` needs a `PULP_ENABLE_GPU=ON` (Skia-linked) build. This is
-   > exactly the path that produced the accurate ELYSIUM sprite-strip /
-   > native-silver-knob comparison renders in #3138.
+   > ⚠️ **Placeholders mean the wrong backend, not a broken import.** If a render
+   > shows an image's *filename* in a box (e.g. "3_228.png") instead of the
+   > picture, `ImageView::paint` drew a placeholder because the renderer could not
+   > composite file-backed images. That is a backend problem — do NOT go looking
+   > for an import bug.
+   >
+   > Only two things cause it:
+   > 1. **`--screenshot-backend coregraphics`** — an explicit escape hatch.
+   >    CoreGraphics does not composite file-backed images.
+   > 2. **A GPU-off (non-Skia-linked) build** — the real decode lives in the Skia
+   >    renderer, which isn't linked in a `PULP_ENABLE_GPU=OFF` importer build.
+   >
+   > **`--validate` defaults to the Skia backend and DOES composite file-backed
+   > images** (`--screenshot-backend {skia|coregraphics}`, default `skia`; see
+   > `pulp import-design --help`). So you do **not** need a separate
+   > `pulp-screenshot` pass just because a design has image assets — that costs an
+   > extra round-trip per iteration for nothing. Reach for `pulp-screenshot` when
+   > you want a live/host-surface capture or a size/scale the importer's render
+   > doesn't offer, not as a routine workaround.
+   >
+   > Both paths need a Skia-linked (`PULP_ENABLE_GPU=ON`) build to show images.
+   > Verify the backend before diagnosing anything visual.
 
-3. **Compare** reference vs render. For designs WITHOUT image assets (pure native widgets/text), the importer's built-in `--validate --reference` diff is fine:
+3. **Compare** reference vs render. The importer's built-in `--validate --reference` diff works for designs **with or without** image assets, because `--validate` renders on the Skia backend by default and composites file-backed images:
    ```bash
    pulp import-design --from X --file input --validate --reference source.png --diff diff.png
    ```
-   But for designs WITH image `asset_ref`s, do NOT diff through `--validate` — its render placeholders images (see the ⚠️ above), so the diff would flag every image as a mismatch. Instead diff the **`pulp-screenshot`** render (step 2) against the reference directly with `fidelity_diff.py` / `figma_import_diff.py`:
+   Use `fidelity_diff.py` when you want **per-widget region checks** rather than one global similarity number — it detects widget regions and checks aspect/gradient/text per widget, which a whole-board score cannot:
    ```bash
    python3 tools/import-design/fidelity_diff.py --render render.png --scene scene.pulp.json --frame-reference source.png
    ```
+   > **Do not treat `--validate`'s exit code as a gate.** It prints `PASS` or
+   > `NEEDS REVIEW` but **exits 0 either way**, at any similarity — a 0%-similar
+   > render still exits 0. Read the printed similarity (and the diff image); never
+   > infer success from `$?`.
 
 4. **Review the diff image** — red highlights show differences
 
@@ -3516,3 +3535,53 @@ rasterized shapes). Each cost a visible fidelity bug.
     thin feature can still read as "high edge agreement". The
     `int16` cast fixes it. `golden_regression.py --selftest` (ctest
     `golden-regression-selftest`, skips 77 without numpy) pins this.
+
+## Runtime materializer and baked-C++ emitter share their lowering decisions
+
+`PromotedChildHitPolicy` + the hit-ownership functions and `ImportedImageSizing` +
+`imported_image_sizing_override` live ONCE in `design_import_native_common.{hpp,cpp}` and are
+consumed by both the runtime import path and `design_cpp_codegen.cpp`. They used to be
+copy-pasted per lane and had already drifted — the baked-C++ copy omitted `combo_box`, so a
+baked plugin's hit ownership silently diverged from what the runtime importer produced from
+the same IR. A Catch2 case now asserts the policy for every `NativeWidgetKind`, so the next
+drift fails a test instead of shipping. When you add a widget kind or change a lowering
+DECISION (as opposed to per-target emission syntax), it belongs in native_common — only the
+target-specific string emission stays per-lane.
+
+## Shared IR helpers — editing one is a cross-lane decision
+
+Under native_common sits a second, narrower shared home: `design_ir_helpers.hpp` holds the
+one definition of **how a lane reads the IR** (`attr`, `attr_bool`, `first_asset_id`,
+`asset_uri`) plus the pure parsers those reads need (`parse_hex_color_rgba`, `hex_digit`,
+`lower_copy`). Three lanes include it — the native materializer
+(`design_import_native_common.cpp`), the baked-C++ emitter (`design_cpp_codegen.cpp`), and
+the Swift emitter (`design_swift_codegen.cpp`). Each used to carry its own copy, so the same
+IR value could lower differently per target by accident rather than by decision.
+
+The consequence to internalize: **"fix `first_asset_id` for my lane" is no longer a local
+edit.** One change to that header moves what the runtime importer, a baked plugin, and a
+Swift export all resolve. That is the point of the header — but it means a genuinely
+lane-specific need is met by **adapting at the call site, not by forking the helper**.
+`parse_hex_color` in `design_import_native_common.cpp` is the pattern to copy: the shared
+parser returns the raw 0..255 quad, the native lane wraps it into a `Color`, and
+`design_cpp_codegen.cpp` turns the same quad into a `Color::rgba8(…)` source literal. The
+parse decision is shared; the representation is not. Per-target string escaping, indenting,
+and number formatting stay in their emitters for the same reason — a helper only belongs in
+the shared header when its contract is identical for every lane.
+
+Two things to watch:
+- **The JS lane is NOT a consumer.** `design_codegen.cpp` (`generate_pulp_js` — web-compat
+  and bridge-native JS) still reads `node.attributes` directly, so a helper fix does not
+  reach it. Same separate-lanes hazard as background gradients above.
+- **`parse_hex_color` still exists as a per-lane name.** In native_common it is now a thin
+  wrapper over the shared `parse_hex_color_rgba`. Grepping the old name finds the wrapper,
+  not the rules — those live in `design_ir_helpers.hpp`.
+
+Tests: `[design-ir-helpers]` in `pulp-test-design-import-native-common` pins the contracts a
+lane would otherwise re-guess — asset-key priority then a sorted fallback scan, both bool
+polarities plus the fallback for unrecognized spellings, local-file-over-remote asset URIs,
+and every accepted hex shape. Change a rule there and the failure lands in the lane-neutral
+place, rather than surfacing later as one target's fidelity drift.
+
+`design_ir_helpers.hpp` is private to `core/view/src/` and is not part of the installed SDK
+surface — do not reference it from a public header.

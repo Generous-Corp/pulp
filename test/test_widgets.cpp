@@ -2525,3 +2525,217 @@ TEST_CASE("Knob format setter requests repaint without changing value [issue-73]
     REQUIRE(knob.value() == 0.25f);
     REQUIRE(host.repaint_count > before);
 }
+
+// ── Notify on programmatic value setters ─────────────────────────────────────
+//
+// Every widget value setter that can reach a change callback takes a Notify:
+//   * Notify::none  — change the state, fire nothing (the right choice when the
+//                     widget is being synced FROM the value it drives).
+//   * Notify::sync  — fire the callback before returning.
+//   * Notify::async — defer the callback to flush_async_notifications().
+// Fires exactly once per real change, and never when the value did not move.
+
+TEST_CASE("Fader::set_value Notify::none writes silently", "[view][notify]") {
+    Fader f;
+    int fired = 0;
+    f.on_change = [&](float) { ++fired; };
+
+    REQUIRE(f.set_value(0.7f, Notify::none));
+    REQUIRE(f.value() == Catch::Approx(0.7f));
+    REQUIRE(fired == 0);
+}
+
+TEST_CASE("Fader::set_value Notify::sync fires once per real change",
+          "[view][notify]") {
+    Fader f;
+    std::vector<float> seen;
+    f.on_change = [&](float v) { seen.push_back(v); };
+
+    REQUIRE(f.set_value(0.3f, Notify::sync));
+    REQUIRE_FALSE(f.set_value(0.3f, Notify::sync));  // unchanged → no fire
+    REQUIRE(seen.size() == 1);
+    REQUIRE(seen.back() == Catch::Approx(0.3f));
+}
+
+TEST_CASE("Fader::set_value Notify::async defers to the flush", "[view][notify]") {
+    pulp::view::flush_async_notifications();  // drain
+    Fader f;
+    int fired = 0;
+    float last = -1.0f;
+    f.on_change = [&](float v) { ++fired; last = v; };
+
+    f.set_value(0.6f, Notify::async);
+    REQUIRE(f.value() == Catch::Approx(0.6f));
+    REQUIRE(fired == 0);
+
+    pulp::view::flush_async_notifications();
+    REQUIRE(fired == 1);
+    REQUIRE(last == Catch::Approx(0.6f));
+}
+
+TEST_CASE("Toggle::set_on Notify::none flips state silently", "[view][notify]") {
+    Toggle t;
+    int fired = 0;
+    t.on_toggle = [&](bool) { ++fired; };
+
+    REQUIRE(t.set_on(true, Notify::none, /*animate=*/false));
+    REQUIRE(t.is_on());
+    REQUIRE(fired == 0);
+}
+
+TEST_CASE("Toggle::set_on Notify::sync fires once, not on a no-op",
+          "[view][notify]") {
+    Toggle t;
+    std::vector<bool> seen;
+    t.on_toggle = [&](bool v) { seen.push_back(v); };
+
+    REQUIRE(t.set_on(true, Notify::sync, false));
+    REQUIRE_FALSE(t.set_on(true, Notify::sync, false));  // already on
+    REQUIRE(seen.size() == 1);
+    REQUIRE(seen.back() == true);
+}
+
+TEST_CASE("Toggle::set_on Notify::async defers", "[view][notify]") {
+    pulp::view::flush_async_notifications();
+    Toggle t;
+    int fired = 0;
+    t.on_toggle = [&](bool) { ++fired; };
+
+    t.set_on(true, Notify::async, false);
+    REQUIRE(t.is_on());
+    REQUIRE(fired == 0);
+    pulp::view::flush_async_notifications();
+    REQUIRE(fired == 1);
+}
+
+TEST_CASE("Checkbox::set_checked Notify::none writes silently", "[view][notify]") {
+    Checkbox c;
+    int fired = 0;
+    c.on_change = [&](bool) { ++fired; };
+
+    REQUIRE(c.set_checked(true, Notify::none));
+    REQUIRE(c.is_checked());
+    REQUIRE(fired == 0);
+}
+
+TEST_CASE("Checkbox::set_checked Notify::sync / async", "[view][notify]") {
+    pulp::view::flush_async_notifications();
+    Checkbox c;
+    std::vector<bool> seen;
+    c.on_change = [&](bool v) { seen.push_back(v); };
+
+    REQUIRE(c.set_checked(true, Notify::sync));
+    REQUIRE_FALSE(c.set_checked(true, Notify::sync));  // no-op
+    REQUIRE(seen.size() == 1);
+
+    c.set_checked(false, Notify::async);
+    REQUIRE(seen.size() == 1);           // still queued
+    pulp::view::flush_async_notifications();
+    REQUIRE(seen.size() == 2);
+    REQUIRE(seen.back() == false);
+}
+
+TEST_CASE("ToggleButton::set_on Notify::none writes silently", "[view][notify]") {
+    ToggleButton b;
+    int fired = 0;
+    b.on_toggle = [&](bool) { ++fired; };
+
+    REQUIRE(b.set_on(true, Notify::none));
+    REQUIRE(b.is_on());
+    REQUIRE(fired == 0);
+}
+
+TEST_CASE("ToggleButton::set_on Notify::sync / async", "[view][notify]") {
+    pulp::view::flush_async_notifications();
+    ToggleButton b;
+    int fired = 0;
+    bool last = false;
+    b.on_toggle = [&](bool v) { ++fired; last = v; };
+
+    REQUIRE(b.set_on(true, Notify::sync));
+    REQUIRE_FALSE(b.set_on(true, Notify::sync));  // no-op
+    REQUIRE(fired == 1);
+    REQUIRE(last == true);
+
+    b.set_on(false, Notify::async);
+    REQUIRE(fired == 1);
+    pulp::view::flush_async_notifications();
+    REQUIRE(fired == 2);
+    REQUIRE(last == false);
+}
+
+TEST_CASE("RangeSlider::set_value Notify::none suppresses the change callback",
+          "[view][notify]") {
+    RangeSlider s;
+    s.set_min(0.0f);
+    s.set_max(10.0f);
+    s.set_step(1.0f);
+    int fired = 0;
+    s.on_change = [&](float) { ++fired; };
+
+    // An out-of-range write is exactly the case that quantisation adjusts and
+    // that would otherwise reach on_change — Notify::none must swallow it.
+    s.set_value(100.0f, Notify::none);
+    REQUIRE(s.value() == Catch::Approx(10.0f));
+    REQUIRE(fired == 0);
+}
+
+TEST_CASE("RangeSlider::set_value Notify::sync fires the quantised change",
+          "[view][notify]") {
+    RangeSlider s;
+    s.set_min(0.0f);
+    s.set_max(10.0f);
+    s.set_step(1.0f);
+    std::vector<float> seen;
+    s.on_change = [&](float v) { seen.push_back(v); };
+
+    s.set_value(100.0f, Notify::sync);          // clamps to 10 → fires
+    REQUIRE(seen.size() == 1);
+    REQUIRE(seen.back() == Catch::Approx(10.0f));
+}
+
+TEST_CASE("RangeSlider::set_value Notify::async defers the quantised change",
+          "[view][notify]") {
+    pulp::view::flush_async_notifications();
+    RangeSlider s;
+    s.set_min(0.0f);
+    s.set_max(10.0f);
+    s.set_step(1.0f);
+    int fired = 0;
+    s.on_change = [&](float) { ++fired; };
+
+    s.set_value(-5.0f, Notify::async);          // clamps to 0
+    REQUIRE(s.value() == Catch::Approx(0.0f));
+    REQUIRE(fired == 0);
+    pulp::view::flush_async_notifications();
+    REQUIRE(fired == 1);
+}
+
+TEST_CASE("GroupBox::set_collapsed Notify::none toggles silently",
+          "[view][notify]") {
+    GroupBox g;
+    int fired = 0;
+    g.on_toggle = [&](bool) { ++fired; };
+
+    g.set_collapsed(true, Notify::none);
+    REQUIRE(g.collapsed());
+    REQUIRE(fired == 0);
+}
+
+TEST_CASE("GroupBox::set_collapsed Notify::sync / async", "[view][notify]") {
+    pulp::view::flush_async_notifications();
+    GroupBox g;
+    std::vector<bool> seen;
+    g.on_toggle = [&](bool c) { seen.push_back(c); };
+
+    g.set_collapsed(true, Notify::sync);
+    g.set_collapsed(true, Notify::sync);   // no-op — same state
+    REQUIRE(seen.size() == 1);
+    REQUIRE(seen.back() == true);
+
+    g.set_collapsed(false, Notify::async);
+    REQUIRE(seen.size() == 1);
+    pulp::view::flush_async_notifications();
+    REQUIRE(seen.size() == 2);
+    REQUIRE(seen.back() == false);
+}

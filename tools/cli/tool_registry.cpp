@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "tool_registry.hpp"
 #include "json_parser.hpp"
+#include "json_writer.hpp"
 #include <pulp/platform/child_process.hpp>
 
 #include <algorithm>
@@ -41,7 +42,16 @@ static bool write_file(const fs::path& path, const std::string& content) {
 
 // ── Pulp Home ──
 
-fs::path pulp_home() {
+// Install-tree root for managed tools/importers. Deliberately NOT the same
+// contract as the SDK-side pulp_home() in cli_sdk.cpp:
+//   - On Windows it roots under %LOCALAPPDATA%\Pulp (per-machine cache
+//     location) rather than %USERPROFILE%\.pulp, matching where cached
+//     binary artifacts belong.
+//   - It silently falls back to a temp dir when HOME/LOCALAPPDATA are unset,
+//     so tool discovery never hard-errors on a stripped environment; the
+//     SDK path treats a missing HOME as an error instead. The two are kept
+//     separate on purpose — do not converge them.
+fs::path tools_install_home() {
     if (auto env = std::getenv("PULP_HOME")) return env;
 #ifdef __APPLE__
     if (auto home = std::getenv("HOME")) return fs::path(home) / ".pulp";
@@ -53,7 +63,7 @@ fs::path pulp_home() {
     return fs::temp_directory_path() / "pulp";
 }
 
-fs::path tools_dir() { return pulp_home() / "tools"; }
+fs::path tools_dir() { return tools_install_home() / "tools"; }
 
 // ── Platform Detection ──
 
@@ -192,34 +202,6 @@ static bool tool_available_on_platform(const ToolDescriptor& tool, const std::st
     return tool.binary_sources.count(platform) > 0
         || tool.install_method == "python_pip"
         || tool.install_method == "npm_package";
-}
-
-static std::string json_escape(const std::string& input) {
-    std::string out;
-    out.reserve(input.size() + 8);
-    for (char c : input) {
-        switch (c) {
-            case '"': out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\b': out += "\\b"; break;
-            case '\f': out += "\\f"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default:
-                if (static_cast<unsigned char>(c) < 0x20) {
-                    std::ostringstream hex;
-                    hex << "\\u" << std::hex << std::uppercase;
-                    hex.width(4);
-                    hex.fill('0');
-                    hex << static_cast<int>(static_cast<unsigned char>(c));
-                    out += hex.str();
-                } else {
-                    out.push_back(c);
-                }
-        }
-    }
-    return out;
 }
 
 static void print_tool_info_json(const ToolDescriptor& tool,

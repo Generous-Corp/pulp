@@ -21,11 +21,13 @@ MIT-licensed. No royalties. No copyleft.
 
 - [Getting Started](guides/getting-started.md) — build your first plugin step by step
 - [Examples](examples/index.md) — browse example projects by category
+- **Plugin hosting and analysis** — [host third-party plugins](guides/hosting.md) or [inspect, render, and compare them](guides/plugin-interrogation.md)
 - [Capabilities](reference/capabilities.md) — full capability matrix with status
 - [Overview](concepts/overview.md) — what Pulp is and how it is organized
 
 ## Reference
 
+- [Processing Models](reference/processing-models.md) — author a `Processor` (the default) vs. compose with `SignalGraph`, and what goes inside a node
 - [Modules](reference/modules.md) — 13 subsystems with status, dependencies, and key headers
 - [Skills](reference/skills.md) — the full catalog of AI-agent skills Pulp ships (Claude Code + Codex)
 - [API Reference](api/index.html) — Doxygen-generated class and function documentation
@@ -38,6 +40,8 @@ MIT-licensed. No royalties. No copyleft.
 
 - [Building](guides/build.md) — requirements, options, platform notes
 - [Testing](guides/testing.md) — running tests, validation, writing tests
+- [Hosting Plugins](guides/hosting.md) — embed CLAP, VST3, AU, and LV2 plugins in a Pulp application
+- [Plugin Interrogation](guides/plugin-interrogation.md) — inspect parameters and run automated A/B renders from the CLI or MCP
 - [Web Plugins](guides/web-plugins.md) — WAMv2, WebCLAP, browser-host status
 - [Design from Figma](guides/figma-plugin.md) — the "Design for Pulp" plugin, export, and import ([model](reference/design-import-model.md))
 - [Docs Maintenance](guides/docs-maintenance.md) — how docs stay consistent with code

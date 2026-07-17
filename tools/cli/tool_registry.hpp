@@ -138,7 +138,11 @@ struct ToolInstallResult {
 
 // ── Pulp Home ──
 
-fs::path pulp_home();
+// Install-tree root for managed tools/importers. Distinct contract from the
+// SDK-side pulp_home() (cli_sdk.cpp): Windows roots under %LOCALAPPDATA%\Pulp,
+// and a missing HOME/LOCALAPPDATA falls back to a temp dir rather than erroring.
+// Kept separate on purpose — do not converge with pulp_home().
+fs::path tools_install_home();
 fs::path tools_dir();
 
 // ── Current Platform ──
@@ -180,7 +184,7 @@ int cmd_tool(const std::vector<std::string>& args);
 // ── Importer Install (#19) ──
 //
 // Skills directory honoring $PULP_HOME (~/.agents/skills/<importer>/...).
-// Records of installed importers live under `pulp_home()/importers/`.
+// Records of installed importers live under `tools_install_home()/importers/`.
 fs::path skills_dir();
 fs::path importer_records_dir();
 
@@ -216,7 +220,7 @@ std::string sha256_file_hex(const fs::path& path);
 struct ImporterInstallResult {
     bool ok = false;
     std::string installed_version;
-    fs::path install_dir;     // unpacked importer tree under pulp_home()/tools/<id>/<ver>
+    fs::path install_dir;     // unpacked importer tree under tools_install_home()/tools/<id>/<ver>
     fs::path skill_path;      // installed SKILL.md path (empty when none shipped)
     fs::path record_path;     // install record JSON under importer_records_dir()
     std::string error;

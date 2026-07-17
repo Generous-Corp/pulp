@@ -24,6 +24,7 @@
 #include <pulp/view/design_codegen.hpp>
 
 #include "design_import_native_common.hpp"
+#include "design_ir_helpers.hpp"
 #include "design_binding_metadata.hpp"
 
 #include <algorithm>
@@ -196,40 +197,6 @@ std::string swift_type_name(std::string_view input, std::string_view fallback) {
     return camel;
 }
 
-int hex_digit(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
-// Parse "#rgb", "#rgba", "#rrggbb", "#rrggbbaa" → [r,g,b,a] in 0..255.
-std::optional<std::array<unsigned, 4>> parse_hex_color(std::string_view value) {
-    if (value.empty() || value.front() != '#') return std::nullopt;
-    auto nibble = [](int v) -> unsigned { return static_cast<unsigned>((v << 4) | v); };
-    if (value.size() == 4 || value.size() == 5) {
-        const int r = hex_digit(value[1]);
-        const int g = hex_digit(value[2]);
-        const int b = hex_digit(value[3]);
-        const int a = value.size() == 5 ? hex_digit(value[4]) : 15;
-        if (r < 0 || g < 0 || b < 0 || a < 0) return std::nullopt;
-        return std::array<unsigned, 4>{nibble(r), nibble(g), nibble(b), nibble(a)};
-    }
-    if (value.size() == 7 || value.size() == 9) {
-        auto pair = [&](std::size_t off) -> std::optional<unsigned> {
-            const int hi = hex_digit(value[off]);
-            const int lo = hex_digit(value[off + 1]);
-            if (hi < 0 || lo < 0) return std::nullopt;
-            return static_cast<unsigned>((hi << 4) | lo);
-        };
-        auto r = pair(1), g = pair(3), b = pair(5);
-        auto a = value.size() == 9 ? pair(7) : std::optional<unsigned>(255);
-        if (!r || !g || !b || !a) return std::nullopt;
-        return std::array<unsigned, 4>{*r, *g, *b, *a};
-    }
-    return std::nullopt;
-}
-
 // Parse a CSS `rgb(r,g,b)` / `rgba(r,g,b,a)` token → [r,g,b,a] in 0..255.
 // r/g/b are 0..255 integers (percentages and the modern slash syntax are not
 // emitted by Pulp's adapters, so they are intentionally unhandled); alpha is a
@@ -280,7 +247,7 @@ std::optional<std::array<unsigned, 4>> parse_rgb_color(std::string_view value) {
 
 // Parse any CSS color token Pulp's adapters emit (hex or rgb/rgba) → 0..255.
 std::optional<std::array<unsigned, 4>> parse_css_color(std::string_view value) {
-    if (auto hex = parse_hex_color(value)) return hex;
+    if (auto hex = parse_hex_color_rgba(value)) return hex;
     return parse_rgb_color(value);
 }
 

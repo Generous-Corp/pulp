@@ -37,6 +37,16 @@
     },
     {
       "paths": [
+        "tools/scripts/runner_topology.json",
+        ".github/workflows/runner-topology-check.yml"
+      ],
+      "docs": [
+        "docs/guides/local-ci.md"
+      ],
+      "why": "The routing contract IS the documented lane->label topology; local-ci.md was already drifted from the live variables (it described the macOS overflow lane as pointing at a label the variable had not named for months) precisely because the two could move independently. Changing a lane without updating the guide re-opens that gap."
+    },
+    {
+      "paths": [
         ".github/workflows/auto-release.yml",
         ".github/workflows/auto-release-watchdog.yml",
         ".github/workflows/release-cadence-check.yml"
@@ -45,6 +55,16 @@
         "docs/guides/release-watchdog.md"
       ],
       "why": "The auto-release + watchdog + cadence-check trio is the release-watchdog design; changing any of them without a doc edit drifts the documented three-layer release-failure protection."
+    },
+    {
+      "paths": [
+        ".github/workflows/runner-health-check.yml",
+        "tools/scripts/queue_age_watchdog.py"
+      ],
+      "docs": [
+        "docs/guides/local-ci.md"
+      ],
+      "why": "The off-fleet queue-age watchdog's thresholds and its two-condition alarm rule (age AND lane-liveness) are documented in local-ci.md, including the measured queue-age baseline they are calibrated against. Retuning the guard without a doc edit drifts the operator-facing account of when CI pages a human — and a monitor whose documented behavior is wrong gets muted."
     },
     {
       "paths": [

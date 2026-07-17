@@ -185,46 +185,6 @@
       ]
     },
     {
-      "name": "fastgltf",
-      "category": "scene",
-      "license": "MIT",
-      "version": "v0.9.0",
-      "source_kind": "fetchcontent",
-      "repository": "https://github.com/spnda/fastgltf.git",
-      "upstream": { "kind": "git-tag", "ref": "v0.9.0" },
-      "documented_in_dependencies_md": true,
-      "documented_in_notice_md": true,
-      "notes": "Optional native no-JS glTF/GLB parser, fetched only when PULP_ENABLE_SCENE3D=ON. Kept behind core/scene so fastgltf types do not leak into public Pulp APIs.",
-      "source_files": [
-        "tools/cmake/PulpDependencies.cmake",
-        "core/scene/CMakeLists.txt",
-        "core/scene/src/gltf_loader.cpp",
-        "DEPENDENCIES.md",
-        "NOTICE.md",
-        "docs/reference/licensing.md"
-      ]
-    },
-    {
-      "name": "ffmpeg-static",
-      "category": "developer-tooling",
-      "license": "ffmpeg-static wrapper MIT; bundled FFmpeg binaries GPL/LGPL depending on build",
-      "version": "5.2.0",
-      "source_kind": "developer-supplied",
-      "repository": "https://github.com/eugeneware/ffmpeg-static",
-      "upstream": { "kind": "none" },
-      "external_names": ["ffmpeg-static", "ffmpeg"],
-      "documented_in_dependencies_md": true,
-      "documented_in_notice_md": false,
-      "notes": "Optional developer-only ffmpeg provider for the desktop video-proof composer (tools/local-ci). npm-installed on demand into a gitignored node_modules; the runtime resolver also accepts a system ffmpeg via PULP_FFMPEG/PATH. Never committed, bundled, exported by cmake --install, shipped in plugins, or required by public CI.",
-      "source_files": [
-        "tools/local-ci/package.json",
-        "tools/local-ci/package-lock.json",
-        "tools/local-ci/remotion-proof/README.md",
-        "DEPENDENCIES.md",
-        "docs/reference/licensing.md"
-      ]
-    },
-    {
       "name": "esbuild",
       "category": "developer-tooling",
       "license": "MIT",
@@ -242,6 +202,26 @@
         "packages/pulp-import-ir/package.json",
         "packages/pulp-react/package.json",
         "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
+      "name": "fastgltf",
+      "category": "scene",
+      "license": "MIT",
+      "version": "v0.9.0",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/spnda/fastgltf.git",
+      "upstream": { "kind": "git-tag", "ref": "v0.9.0" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Optional native no-JS glTF/GLB parser, fetched only when PULP_ENABLE_SCENE3D=ON. Kept behind core/scene so fastgltf types do not leak into public Pulp APIs.",
+      "source_files": [
+        "tools/cmake/PulpDependencies.cmake",
+        "core/scene/CMakeLists.txt",
+        "core/scene/src/gltf_loader.cpp",
+        "DEPENDENCIES.md",
+        "NOTICE.md",
         "docs/reference/licensing.md"
       ]
     },
@@ -264,130 +244,21 @@
       ]
     },
     {
-      "name": "json-schema-to-typescript",
+      "name": "ffmpeg-static",
       "category": "developer-tooling",
-      "license": "MIT",
-      "version": "^15.0.0",
-      "source_kind": "npm",
-      "repository": "https://github.com/bcherny/json-schema-to-typescript",
+      "license": "ffmpeg-static wrapper MIT; bundled FFmpeg binaries GPL/LGPL depending on build",
+      "version": "5.2.0",
+      "source_kind": "developer-supplied",
+      "repository": "https://github.com/eugeneware/ffmpeg-static",
       "upstream": { "kind": "none" },
-      "external_names": ["json-schema-to-typescript"],
+      "external_names": ["ffmpeg-static", "ffmpeg"],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
-      "notes": "Generates TypeScript types from JSON Schema for the developer-only Figma plugin. npm devDependency, build-time only; never bundled or shipped.",
+      "notes": "Optional developer-only ffmpeg provider for the desktop video-proof composer (tools/local-ci). npm-installed on demand into a gitignored node_modules; the runtime resolver also accepts a system ffmpeg via PULP_FFMPEG/PATH. Never committed, bundled, exported by cmake --install, shipped in plugins, or required by public CI.",
       "source_files": [
-        "tools/figma-plugin/package.json",
-        "DEPENDENCIES.md",
-        "docs/reference/licensing.md"
-      ]
-    },
-    {
-      "name": "numpy",
-      "category": "developer-tooling",
-      "license": "BSD-3-Clause",
-      "version": ">=1.24",
-      "source_kind": "python-pip",
-      "repository": "https://github.com/numpy/numpy",
-      "upstream": { "kind": "none" },
-      "external_names": ["numpy"],
-      "documented_in_dependencies_md": true,
-      "documented_in_notice_md": false,
-      "notes": "Array ops for the developer-only Motion visual-analysis lane (tools/motion/visual). pip-installed on demand; analysis-only, never bundled or shipped in plugin/app artifacts.",
-      "source_files": [
-        "tools/motion/visual/requirements.txt",
-        "DEPENDENCIES.md",
-        "docs/reference/licensing.md"
-      ]
-    },
-    {
-      "name": "opencv-python",
-      "category": "developer-tooling",
-      "license": "Apache-2.0 (OpenCV); opencv-python packaging MIT",
-      "version": ">=4.8",
-      "source_kind": "python-pip",
-      "repository": "https://github.com/opencv/opencv-python",
-      "upstream": { "kind": "none" },
-      "external_names": ["opencv-python", "cv2"],
-      "documented_in_dependencies_md": true,
-      "documented_in_notice_md": false,
-      "notes": "Optional affine first->last estimation for the Motion visual-analysis lane; the pipeline falls back to a PIL/FFT estimator when absent. pip-installed on demand; analysis-only, never bundled or shipped.",
-      "source_files": [
-        "tools/motion/visual/requirements-optional.txt",
-        "DEPENDENCIES.md",
-        "docs/reference/licensing.md"
-      ]
-    },
-    {
-      "name": "Pillow",
-      "category": "developer-tooling",
-      "license": "HPND (BSD-style)",
-      "version": ">=10.0",
-      "source_kind": "python-pip",
-      "repository": "https://github.com/python-pillow/Pillow",
-      "upstream": { "kind": "none" },
-      "external_names": ["Pillow", "PIL"],
-      "documented_in_dependencies_md": true,
-      "documented_in_notice_md": false,
-      "notes": "Image IO for the developer-only Motion visual-analysis lane (tools/motion/visual). pip-installed on demand; analysis-only, never bundled or shipped.",
-      "source_files": [
-        "tools/motion/visual/requirements.txt",
-        "DEPENDENCIES.md",
-        "docs/reference/licensing.md"
-      ]
-    },
-    {
-      "name": "scikit-image",
-      "category": "developer-tooling",
-      "license": "BSD-3-Clause",
-      "version": ">=0.22",
-      "source_kind": "python-pip",
-      "repository": "https://github.com/scikit-image/scikit-image",
-      "upstream": { "kind": "none" },
-      "external_names": ["scikit-image", "skimage"],
-      "documented_in_dependencies_md": true,
-      "documented_in_notice_md": false,
-      "notes": "Image metrics for the developer-only Motion visual-analysis lane (tools/motion/visual). pip-installed on demand; analysis-only, never bundled or shipped.",
-      "source_files": [
-        "tools/motion/visual/requirements.txt",
-        "DEPENDENCIES.md",
-        "docs/reference/licensing.md"
-      ]
-    },
-    {
-      "name": "TypeScript",
-      "category": "developer-tooling",
-      "license": "Apache-2.0",
-      "version": "^5.4.0 / ^5.6.0",
-      "source_kind": "npm",
-      "repository": "https://github.com/microsoft/TypeScript",
-      "upstream": { "kind": "none" },
-      "external_names": ["typescript"],
-      "documented_in_dependencies_md": true,
-      "documented_in_notice_md": false,
-      "notes": "Type-checking and build for @pulp/react, pulp-import-ir, and the Figma plugin. npm devDependency, build-time only; never bundled or shipped.",
-      "source_files": [
-        "packages/pulp-react/package.json",
-        "packages/pulp-import-ir/package.json",
-        "tools/figma-plugin/package.json",
-        "DEPENDENCIES.md",
-        "docs/reference/licensing.md"
-      ]
-    },
-    {
-      "name": "Vitest",
-      "category": "developer-tooling",
-      "license": "MIT",
-      "version": "^1.6.0",
-      "source_kind": "npm",
-      "repository": "https://github.com/vitest-dev/vitest",
-      "upstream": { "kind": "none" },
-      "external_names": ["vitest", "@vitest/coverage-v8"],
-      "documented_in_dependencies_md": true,
-      "documented_in_notice_md": false,
-      "notes": "Unit-test runner (with @vitest/coverage-v8) for @pulp/react and pulp-import-ir. npm devDependency, test-only; never bundled or shipped.",
-      "source_files": [
-        "packages/pulp-react/package.json",
-        "packages/pulp-import-ir/package.json",
+        "tools/local-ci/package.json",
+        "tools/local-ci/package-lock.json",
+        "tools/local-ci/remotion-proof/README.md",
         "DEPENDENCIES.md",
         "docs/reference/licensing.md"
       ]
@@ -468,6 +339,24 @@
         "external/fonts/README.md",
         "docs/reference/text-shaping.md",
         "ci/visual-harness.Dockerfile"
+      ]
+    },
+    {
+      "name": "json-schema-to-typescript",
+      "category": "developer-tooling",
+      "license": "MIT",
+      "version": "^15.0.0",
+      "source_kind": "npm",
+      "repository": "https://github.com/bcherny/json-schema-to-typescript",
+      "upstream": { "kind": "none" },
+      "external_names": ["json-schema-to-typescript"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Generates TypeScript types from JSON Schema for the developer-only Figma plugin. npm devDependency, build-time only; never bundled or shipped.",
+      "source_files": [
+        "tools/figma-plugin/package.json",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
       ]
     },
     {
@@ -639,6 +528,23 @@
       ]
     },
     {
+      "name": "msdfgen",
+      "category": "canvas",
+      "license": "MIT",
+      "version": "1.12",
+      "source_kind": "planned-fetchcontent",
+      "repository": "https://github.com/Chlumsky/msdfgen",
+      "upstream": { "kind": "none" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "DEPENDENCIES.md",
+        "NOTICE.md",
+        "core/canvas/include/pulp/canvas/msdf_atlas.hpp",
+        "core/canvas/src/msdf_atlas.cpp"
+      ]
+    },
+    {
       "name": "MTS-ESP",
       "category": "music-theory",
       "license": "0BSD",
@@ -661,48 +567,6 @@
         "DEPENDENCIES.md",
         "NOTICE.md",
         "docs/reference/licensing.md"
-      ]
-    },
-    {
-      "name": "Surge Synth Team tuning-library",
-      "category": "music-theory",
-      "license": "MIT",
-      "version": "release_1.1.0",
-      "source_kind": "fetchcontent",
-      "repository": "https://github.com/surge-synthesizer/tuning-library.git",
-      "upstream": { "kind": "git-commit", "ref": "64a939111891cb698f37d6ca9ecfc4b8c260053d" },
-      "documented_in_dependencies_md": true,
-      "documented_in_notice_md": true,
-      "notes": "Optional, opt-in Scala .scl/.kbm parser and tuning-table lookup. Fetched source-only via FetchContent only when PULP_ENABLE_SCALA_TUNING=ON or when a developer runs `pulp add sst-tuning-library`; Pulp exposes it through `pulp::midi::ScalaTuningProvider` behind the provider-neutral TuningProvider API. Installed SDKs may ship Pulp-owned wrapper glue for pulp_enable_midi_tuning_provider(), but Surge's tuning-library source is fetched only on opt-in. The upstream CMake tools/tests are intentionally not added to Pulp or consumer builds. Not part of the default dependency chain.",
-      "source_files": [
-        "CMakeLists.txt",
-        "tools/cmake/PulpDependencies.cmake",
-        "core/midi/CMakeLists.txt",
-        "core/midi/include/pulp/midi/tuning.hpp",
-        "core/midi/include/pulp/midi/scala_tuning.hpp",
-        "core/midi/src/tuning.cpp",
-        "core/midi/src/scala_tuning.cpp",
-        "tools/packages/registry.json",
-        "DEPENDENCIES.md",
-        "NOTICE.md",
-        "docs/reference/licensing.md"
-      ]
-    },
-    {
-      "name": "msdfgen",
-      "category": "canvas",
-      "license": "MIT",
-      "version": "1.12",
-      "source_kind": "planned-fetchcontent",
-      "repository": "https://github.com/Chlumsky/msdfgen",
-      "upstream": { "kind": "none" },
-      "documented_in_dependencies_md": true,
-      "documented_in_notice_md": true,
-      "source_files": [
-        "DEPENDENCIES.md",
-        "NOTICE.md",
-        "core/canvas/include/pulp/canvas/msdf_atlas.hpp",
-        "core/canvas/src/msdf_atlas.cpp"
       ]
     },
     {
@@ -754,6 +618,24 @@
       ]
     },
     {
+      "name": "numpy",
+      "category": "developer-tooling",
+      "license": "BSD-3-Clause",
+      "version": ">=1.24",
+      "source_kind": "python-pip",
+      "repository": "https://github.com/numpy/numpy",
+      "upstream": { "kind": "none" },
+      "external_names": ["numpy"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Array ops for the developer-only Motion visual-analysis lane (tools/motion/visual). pip-installed on demand; analysis-only, never bundled or shipped in plugin/app artifacts.",
+      "source_files": [
+        "tools/motion/visual/requirements.txt",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
       "name": "Oboe",
       "category": "audio",
       "license": "Apache-2.0",
@@ -766,6 +648,24 @@
       "platforms": ["android"],
       "source_files": [
         "tools/cmake/PulpAndroid.cmake"
+      ]
+    },
+    {
+      "name": "opencv-python",
+      "category": "developer-tooling",
+      "license": "Apache-2.0 (OpenCV); opencv-python packaging MIT",
+      "version": ">=4.8",
+      "source_kind": "python-pip",
+      "repository": "https://github.com/opencv/opencv-python",
+      "upstream": { "kind": "none" },
+      "external_names": ["opencv-python", "cv2"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Optional affine first->last estimation for the Motion visual-analysis lane; the pipeline falls back to a PIL/FFT estimator when absent. pip-installed on demand; analysis-only, never bundled or shipped.",
+      "source_files": [
+        "tools/motion/visual/requirements-optional.txt",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
       ]
     },
     {
@@ -782,6 +682,24 @@
       "source_files": [
         "tools/cmake/PulpTracing.cmake",
         "experimental/pulp-rs/src/cmd/trace_fetch.rs"
+      ]
+    },
+    {
+      "name": "Pillow",
+      "category": "developer-tooling",
+      "license": "HPND (BSD-style)",
+      "version": ">=10.0",
+      "source_kind": "python-pip",
+      "repository": "https://github.com/python-pillow/Pillow",
+      "upstream": { "kind": "none" },
+      "external_names": ["Pillow", "PIL"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Image IO for the developer-only Motion visual-analysis lane (tools/motion/visual). pip-installed on demand; analysis-only, never bundled or shipped.",
+      "source_files": [
+        "tools/motion/visual/requirements.txt",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
       ]
     },
     {
@@ -878,21 +796,6 @@
       ]
     },
     {
-      "name": "scheduler",
-      "category": "packages/pulp-react",
-      "license": "MIT",
-      "version": "^0.23.2",
-      "source_kind": "npm",
-      "repository": "https://github.com/facebook/react",
-      "upstream": { "kind": "none" },
-      "documented_in_dependencies_md": true,
-      "documented_in_notice_md": true,
-      "notes": "Cooperative-scheduling runtime pulled in transitively by react-reconciler for @pulp/react. npm-installed; never bundled into Pulp's C++ tree. Added 2026-04-29 under #1042.",
-      "source_files": [
-        "packages/pulp-react/package.json"
-      ]
-    },
-    {
       "name": "Remotion",
       "category": "developer-tooling",
       "license": "Remotion License (source-available; free under Remotion's usage threshold, paid company license above it)",
@@ -908,6 +811,39 @@
         "tools/local-ci/package.json",
         "tools/local-ci/package-lock.json",
         "tools/local-ci/remotion-proof/README.md",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
+      "name": "scheduler",
+      "category": "packages/pulp-react",
+      "license": "MIT",
+      "version": "^0.23.2",
+      "source_kind": "npm",
+      "repository": "https://github.com/facebook/react",
+      "upstream": { "kind": "none" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Cooperative-scheduling runtime pulled in transitively by react-reconciler for @pulp/react. npm-installed; never bundled into Pulp's C++ tree. Added 2026-04-29 under #1042.",
+      "source_files": [
+        "packages/pulp-react/package.json"
+      ]
+    },
+    {
+      "name": "scikit-image",
+      "category": "developer-tooling",
+      "license": "BSD-3-Clause",
+      "version": ">=0.22",
+      "source_kind": "python-pip",
+      "repository": "https://github.com/scikit-image/scikit-image",
+      "upstream": { "kind": "none" },
+      "external_names": ["scikit-image", "skimage"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Image metrics for the developer-only Motion visual-analysis lane (tools/motion/visual). pip-installed on demand; analysis-only, never bundled or shipped.",
+      "source_files": [
+        "tools/motion/visual/requirements.txt",
         "DEPENDENCIES.md",
         "docs/reference/licensing.md"
       ]
@@ -1038,6 +974,31 @@
       ]
     },
     {
+      "name": "Surge Synth Team tuning-library",
+      "category": "music-theory",
+      "license": "MIT",
+      "version": "release_1.1.0",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/surge-synthesizer/tuning-library.git",
+      "upstream": { "kind": "git-commit", "ref": "64a939111891cb698f37d6ca9ecfc4b8c260053d" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Optional, opt-in Scala .scl/.kbm parser and tuning-table lookup. Fetched source-only via FetchContent only when PULP_ENABLE_SCALA_TUNING=ON or when a developer runs `pulp add sst-tuning-library`; Pulp exposes it through `pulp::midi::ScalaTuningProvider` behind the provider-neutral TuningProvider API. Installed SDKs may ship Pulp-owned wrapper glue for pulp_enable_midi_tuning_provider(), but Surge's tuning-library source is fetched only on opt-in. The upstream CMake tools/tests are intentionally not added to Pulp or consumer builds. Not part of the default dependency chain.",
+      "source_files": [
+        "CMakeLists.txt",
+        "tools/cmake/PulpDependencies.cmake",
+        "core/midi/CMakeLists.txt",
+        "core/midi/include/pulp/midi/tuning.hpp",
+        "core/midi/include/pulp/midi/scala_tuning.hpp",
+        "core/midi/src/tuning.cpp",
+        "core/midi/src/scala_tuning.cpp",
+        "tools/packages/registry.json",
+        "DEPENDENCIES.md",
+        "NOTICE.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
       "name": "three.js",
       "category": "render",
       "license": "MIT",
@@ -1070,6 +1031,26 @@
       ]
     },
     {
+      "name": "TypeScript",
+      "category": "developer-tooling",
+      "license": "Apache-2.0",
+      "version": "^5.4.0 / ^5.6.0",
+      "source_kind": "npm",
+      "repository": "https://github.com/microsoft/TypeScript",
+      "upstream": { "kind": "none" },
+      "external_names": ["typescript"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Type-checking and build for @pulp/react, pulp-import-ir, and the Figma plugin. npm devDependency, build-time only; never bundled or shipped.",
+      "source_files": [
+        "packages/pulp-react/package.json",
+        "packages/pulp-import-ir/package.json",
+        "tools/figma-plugin/package.json",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
       "name": "V8",
       "category": "view",
       "license": "BSD-3-Clause",
@@ -1080,6 +1061,11 @@
       "upstream": { "kind": "none" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "source_files": [
+        "tools/cmake/FindV8.cmake",
+        "tools/cmake/PulpV8Windows.cmake",
+        "tools/scripts/fetch_v8_for_release.py"
+      ],
       "notes": "Optional JS engine backend, selected with PULP_JS_ENGINE=v8 (default is QuickJS; JSC on Apple). Sealed, embeddable, shared V8 prebuilt via the danielraffel/v8-builder fork — exports only v8::/cppgc::, keeps ICU/zlib/Abseil internal so it coexists with Skia's bundled ICU without ODR clashes; Intl on. iOS is JSC-only (V8 needs JIT, forbidden in iOS apps/AUv3 extensions) — the ios-simulator asset ships headers only, no library. Each release records the Skia/Dawn revision it was seal+ODR validated against in paired_skia/paired_dawn; because the seal exports only v8::/cppgc:: and keeps ICU/zlib/Abseil internal, V8 coexists with a different pinned Skia without ODR clashes. v8-15.2.24 was validated against Skia chrome/m150 (paired_skia c0e2b966.../paired_dawn 3f761495...); Pulp pins Skia chrome/m151, one milestone ahead — the provider-identity/ODR gate (examples/threejs-native-demo/provider_identity_test.cmake) proves coexistence at the pinned Skia. Re-bake CI goldens when the pin moves. Consumed by tools/scripts/fetch_v8_for_release.py + tools/cmake/FindV8.cmake (unpacks to external/v8-build/<platform>/).",
       "determinism": {
         "v8_builder_fork": "https://github.com/danielraffel/v8-builder",
@@ -1124,19 +1110,40 @@
       }
     },
     {
+      "name": "Vitest",
+      "category": "developer-tooling",
+      "license": "MIT",
+      "version": "^1.6.0",
+      "source_kind": "npm",
+      "repository": "https://github.com/vitest-dev/vitest",
+      "upstream": { "kind": "none" },
+      "external_names": ["vitest", "@vitest/coverage-v8"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Unit-test runner (with @vitest/coverage-v8) for @pulp/react and pulp-import-ir. npm devDependency, test-only; never bundled or shipped.",
+      "source_files": [
+        "packages/pulp-react/package.json",
+        "packages/pulp-import-ir/package.json",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
       "name": "VST3 SDK",
       "category": "format-sdk",
       "license": "MIT",
-      "version": "v3.7.12_build_20",
+      "version": "v3.8.0_build_66",
       "source_kind": "external-clone",
       "repository": "https://github.com/steinbergmedia/vst3sdk.git",
-      "upstream": { "kind": "git-tag", "ref": "v3.7.12_build_20" },
+      "upstream": { "kind": "git-tag", "ref": "v3.8.0_build_66" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "notes": "Pin must stay at v3.8.0_build_66 or newer: that is the first Steinberg tag released under MIT. Earlier tags (including v3.7.12_build_20) offer only 'Steinberg VST3 License OR GPLv3', neither of which Pulp may redistribute inside its MIT-licensed SDK artifacts. assert_vst3_license_is_mit in setup.sh fails the setup if the pin drifts below that.",
       "source_files": [
         "CMakeLists.txt",
         "setup.sh",
-        ".github/workflows/sign-and-release.yml"
+        ".github/workflows/sign-and-release.yml",
+        ".github/workflows/format-baseline-diff.yml"
       ]
     },
     {

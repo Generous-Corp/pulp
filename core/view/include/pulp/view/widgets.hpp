@@ -14,8 +14,7 @@
 #include <pulp/view/sprite_strip.hpp>
 #include <pulp/view/widget_painter.hpp>
 #include <pulp/view/value_source.hpp>
-#include <pulp/signal/spectrogram.hpp>
-#include <pulp/signal/multi_channel_meter.hpp>
+#include <pulp/view/visualizers.hpp>  // SpectrogramView/MultiMeter/CorrelationMeter — include directly in new code
 #include <string>
 #include <string_view>
 #include <cstddef>
@@ -541,7 +540,7 @@ public:
 
     // Animation accessors for testing
     float hover_glow() const { return hover_glow_.value(); }
-    void advance_animations(float dt);
+    void advance_animations(float dt) override;
 
     // Arc range in radians (default: 270-degree sweep)
     static constexpr float start_angle = 2.356f;  // 135 degrees (bottom-left)
@@ -743,12 +742,35 @@ public:
     WidgetRenderStyle render_style() const { return render_style_; }
 
     // Same programmatic repaint contract as Knob::set_value(), including the
-    // no-change guard for bridge sync/reload loops.
+    // no-change guard for bridge sync/reload loops. This form is silent (no
+    // change callback), which is what a sync FROM the bound parameter wants.
     void set_value(float v) {
         float clamped = std::clamp(v, 0.0f, 1.0f);
         if (clamped == value_) return;
         value_ = clamped;
         request_repaint();
+    }
+
+    /// Notifying overload. `Notify::none` matches the historical `set_value(v)`
+    /// (repaint, no callback) — the right choice when the fader is being synced
+    /// FROM the thing it drives. `Notify::sync` fires `on_change` before
+    /// returning; `Notify::async` defers it to the next
+    /// `pulp::view::flush_async_notifications()`. Fires only on a real change,
+    /// so a redundant write in a sync loop is free. Returns true if the stored
+    /// value moved.
+    bool set_value(float v, Notify notify) {
+        float clamped = std::clamp(v, 0.0f, 1.0f);
+        if (clamped == value_) return false;
+        value_ = clamped;
+        request_repaint();
+        if (notify == Notify::sync) {
+            if (on_change) on_change(value_);
+        } else if (notify == Notify::async && on_change) {
+            auto fn = on_change;
+            const float nv = value_;
+            queue_async_notification([fn, nv] { fn(nv); });
+        }
+        return true;
     }
     float value() const { return value_; }
 
@@ -810,7 +832,7 @@ public:
 
     // Animation accessors for testing
     float hover_scale() const { return hover_thumb_scale_.value(); }
-    void advance_animations(float dt);
+    void advance_animations(float dt) override;
 
     /// Skew / response curve (see RangeSlider::set_skew). 1 = linear (default);
     /// <1 gives finer control near the bottom of the fader. Value is normalized
@@ -976,10 +998,17 @@ public:
     /// request_repaint() lets programmatic preset application reach the screen,
     /// not just the next user-input event. Gate on actual changes to avoid
     /// redundant invalidations during sync_from_store / restore_values loops.
-    void set_value(float v) {
+    ///
+    /// `notify` controls whether the (post-quantisation) change reaches
+    /// `on_change`. `Notify::sync` (the default) fires it before returning, so
+    /// existing callers are unchanged; `Notify::none` writes silently, the right
+    /// choice when the slider is being synced FROM the value it drives (firing
+    /// back would echo into a feedback loop); `Notify::async` defers the
+    /// callback to the next `pulp::view::flush_async_notifications()`.
+    void set_value(float v, Notify notify = Notify::sync) {
         float prev = value_;
         value_ = v;
-        clamp_and_quantize_();
+        clamp_and_quantize_(notify);
         if (value_ != prev) request_repaint();
     }
     float value() const { return value_; }
@@ -1044,7 +1073,7 @@ public:
     void on_mouse_enter() override;
     void on_mouse_leave() override;
     bool wants_mouse_input() const override { return true; }
-    void advance_animations(float dt) { hover_scale_.advance(dt); }
+    void advance_animations(float dt) override { hover_scale_.advance(dt); }
     float hover_scale() const { return hover_scale_.value(); }
 
 private:
@@ -1054,8 +1083,10 @@ private:
     float position_to_value_(float t) const;
 
     /// Clamp value_ to [min_,max_] and snap it to the nearest step, then
-    /// fire on_change if the post-quantisation value actually changed.
-    void clamp_and_quantize_();
+    /// notify on_change (per `notify`) if the post-quantisation value actually
+    /// changed. `Notify::sync` fires now, `Notify::none` suppresses, and
+    /// `Notify::async` defers to the next flush.
+    void clamp_and_quantize_(Notify notify = Notify::sync);
 
     /// Common drag/click handler — `pos` is in local coordinates.
     void update_from_position_(Point pos);
@@ -1098,6 +1129,15 @@ public:
     void set_on(bool v, bool animate = true);
     bool is_on() const { return on_; }
 
+    /// Notifying overload. The plain `set_on(v)` / `set_on(v, animate)` forms
+    /// are silent (the mouse handler fires `on_toggle` for user input); this
+    /// form lets a programmatic write choose whether to fire it. `Notify::none`
+    /// changes state silently (matches the plain setter — the right choice when
+    /// syncing FROM the bound parameter); `Notify::sync` fires `on_toggle`
+    /// before returning; `Notify::async` defers it to the next flush. Fires only
+    /// on a real state change. Returns true if the state moved.
+    bool set_on(bool v, Notify notify, bool animate = true);
+
     void set_label(std::string text) {
         label_ = std::move(text);
         set_derived_access_label(label_);  // the visible label is the accessible name
@@ -1116,7 +1156,7 @@ public:
     // Animation accessors for testing
     float thumb_position() const { return thumb_position_.value(); }
     float hover_opacity() const { return hover_opacity_.value(); }
-    void advance_animations(float dt);
+    void advance_animations(float dt) override;
 
     // Custom body shader comes from CustomShaderHost.
     void set_widget_schema(std::string json) { widget_schema_ = std::move(json); }
@@ -1161,6 +1201,28 @@ public:
         set_access_checked(v ? "true" : "false");
         request_repaint();
     }
+
+    /// Notifying overload. The plain `set_checked(v)` is silent (the mouse
+    /// handler fires `on_change` for user input); this form lets a programmatic
+    /// write choose whether to fire it. `Notify::none` changes state silently
+    /// (matches the plain setter — the right choice when syncing FROM the bound
+    /// parameter); `Notify::sync` fires `on_change` before returning;
+    /// `Notify::async` defers it to the next flush. Fires only on a real change.
+    /// Returns true if the state moved.
+    bool set_checked(bool v, Notify notify) {
+        if (checked_ == v) return false;
+        checked_ = v;
+        set_access_checked(v ? "true" : "false");
+        request_repaint();
+        if (notify == Notify::sync) {
+            if (on_change) on_change(checked_);
+        } else if (notify == Notify::async && on_change) {
+            auto fn = on_change;
+            const bool nv = checked_;
+            queue_async_notification([fn, nv] { fn(nv); });
+        }
+        return true;
+    }
     bool is_checked() const { return checked_; }
 
     std::function<void(bool)> on_change;
@@ -1191,6 +1253,28 @@ public:
         on_ = v;
         set_access_checked(v ? "true" : "false");
         request_repaint();
+    }
+
+    /// Notifying overload. The plain `set_on(v)` is silent (the mouse handler
+    /// fires `on_toggle`, and drives radio-group exclusivity, for user input);
+    /// this form lets a programmatic write choose whether to fire it.
+    /// `Notify::none` changes state silently (matches the plain setter — the
+    /// right choice when syncing FROM the bound parameter); `Notify::sync` fires
+    /// `on_toggle` before returning; `Notify::async` defers it to the next
+    /// flush. Fires only on a real change. Returns true if the state moved.
+    bool set_on(bool v, Notify notify) {
+        if (on_ == v) return false;
+        on_ = v;
+        set_access_checked(v ? "true" : "false");
+        request_repaint();
+        if (notify == Notify::sync) {
+            if (on_toggle) on_toggle(on_);
+        } else if (notify == Notify::async && on_toggle) {
+            auto fn = on_toggle;
+            const bool nv = on_;
+            queue_async_notification([fn, nv] { fn(nv); });
+        }
+        return true;
     }
     bool is_on() const { return on_; }
 
@@ -1695,8 +1779,11 @@ public:
     void set_collapsible(bool c) { collapsible_ = c; request_repaint(); }
     bool collapsible() const { return collapsible_; }
 
-    // Collapsed hides all child content; expanded shows it. Fires on_toggle.
-    void set_collapsed(bool c);
+    // Collapsed hides all child content; expanded shows it. `notify` controls
+    // whether the change reaches `on_toggle`: `Notify::sync` (default) fires it,
+    // `Notify::none` writes silently (syncing FROM the bound state), and
+    // `Notify::async` defers it to the next flush. Fires only on a real change.
+    void set_collapsed(bool c, Notify notify = Notify::sync);
     bool collapsed() const { return collapsed_; }
 
     // Y at which child content begins (below the header band).
@@ -1827,93 +1914,6 @@ private:
                                                ///< leak the sub with a dangling `this`
 };
 
-// ── SpectrogramView ──────────────────────────────────────────────────────────
-// Scrolling time-frequency display. Each STFT frame becomes a column of
-// colored pixels, scrolling left as new frames arrive.
-
-class SpectrogramView : public View {
-public:
-    SpectrogramView() = default;
-
-    /// Push a new STFT frame (dB magnitudes) for display.
-    void push_spectrum(const float* magnitudes_db, int num_bins);
-
-    /// Configure display dimensions and color mapping.
-    void configure(int history_columns, int freq_rows,
-                   signal::ColorRamp ramp = signal::ColorRamp::inferno,
-                   float min_db = -80.0f, float max_db = 0.0f);
-
-    void set_color_ramp(signal::ColorRamp ramp) { mapper_.set_ramp(ramp); }
-    void set_range(float min_db, float max_db) { min_db_ = min_db; max_db_ = max_db; }
-
-    int history_columns() const { return buffer_.width(); }
-    int freq_rows() const { return buffer_.height(); }
-
-    void paint(canvas::Canvas& canvas) override;
-
-private:
-    signal::SpectrogramBuffer buffer_;
-    signal::ColorMapper mapper_{signal::ColorRamp::inferno};
-    float min_db_ = -80.0f;
-    float max_db_ = 0.0f;
-    bool configured_ = false;
-};
-
-// ── MultiMeter ──────────────────────────────────────────────────────────────
-// Multi-channel level meter with configurable layout. Supports arbitrary
-// channel counts (mono through ambisonic). Uses MultiChannelBallistics
-// for smooth display.
-
-class MultiMeter : public View {
-public:
-    enum class Layout { vertical, horizontal };
-    enum class DisplayStyle { continuous, segmented };
-
-    MultiMeter() { set_access_role(AccessRole::meter); }
-
-    /// Update from multi-channel meter data. Call once per UI frame.
-    void update(const signal::MultiChannelMeterData& data, float dt);
-
-    void set_layout(Layout l) { layout_ = l; }
-    Layout layout() const { return layout_; }
-
-    void set_display_style(DisplayStyle s) { display_style_ = s; }
-    DisplayStyle display_style() const { return display_style_; }
-
-    void set_channel_count(int count);
-    int channel_count() const { return ballistics_.num_channels; }
-
-    /// Access ballistics for testing.
-    const signal::MultiChannelBallistics& ballistics() const { return ballistics_; }
-
-    void paint(canvas::Canvas& canvas) override;
-
-private:
-    Layout layout_ = Layout::vertical;
-    DisplayStyle display_style_ = DisplayStyle::continuous;
-    signal::MultiChannelBallistics ballistics_;
-};
-
-// ── CorrelationMeter ────────────────────────────────────────────────────────
-// Stereo correlation display (-1 to +1). Shows phase relationship between
-// left and right channels.
-
-class CorrelationMeter : public View {
-public:
-    CorrelationMeter() { set_access_role(AccessRole::meter); }
-
-    /// Update with new correlation value (-1 to +1). Call once per UI frame.
-    void update(float correlation, float dt);
-
-    float display_correlation() const { return display_correlation_; }
-
-    void paint(canvas::Canvas& canvas) override;
-
-private:
-    float display_correlation_ = 0.0f;
-    float smoothing_coeff_ = 0.1f; // Exponential smoothing
-};
-
 // ── WaveformRecorder ─────────────────────────────────────────────────────────
 // Three-state recorder control (Ink & Signal "Recorder" component). One widget
 // composes a filled waveform display, a bottom level meter with a draggable
@@ -1941,8 +1941,11 @@ public:
         set_focusable(true);
     }
 
-    /// Transport state. Setting a new state repaints and fires on_state_change.
-    void set_state(State s);
+    /// Transport state. Setting a new state repaints and, per `notify`, fires
+    /// on_state_change: `Notify::sync` (default) fires it now, `Notify::none`
+    /// writes silently (syncing FROM the bound state), `Notify::async` defers it
+    /// to the next flush. Fires only on a real change.
+    void set_state(State s, Notify notify = Notify::sync);
     State state() const { return state_; }
     std::function<void(State)> on_state_change;
 

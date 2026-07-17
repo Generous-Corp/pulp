@@ -135,7 +135,7 @@ static fs::path signing_doctor_script(const fs::path& root) {
 static void run_signing_preflight(const fs::path& root) {
     auto script = signing_doctor_script(root);
     if (fs::exists(script))
-        run("/bin/bash \"" + script.string() + "\" --quiet >/dev/null 2>&1 || true");
+        run("/bin/bash " + shell_quote(script.string()) + " --quiet >/dev/null 2>&1 || true");
 }
 
 // Ship-time PULP_TRACING guard. Refuses to sign/package/release an artifact
@@ -181,15 +181,10 @@ reload_signing_key_from_keychain(const std::string& plugin_id) {
     namespace reload = pulp::format::reload;
     const std::string service = reload::reload_keychain_service(reload::KeyRole::Signing, plugin_id);
     const std::string account = "gen1";
-    auto sh_quote = [](const std::string& s) {
-        std::string q = "'";
-        for (char c : s) { if (c == '\'') q += "'\\''"; else q += c; }
-        return q + "'";
-    };
 
     // Read an existing key.
-    std::string find_cmd = "security find-generic-password -s " + sh_quote(service) +
-                           " -a " + sh_quote(account) + " -w 2>/dev/null";
+    std::string find_cmd = "security find-generic-password -s " + shell_quote(service) +
+                           " -a " + shell_quote(account) + " -w 2>/dev/null";
     std::string stored;
     if (FILE* pipe = popen(find_cmd.c_str(), "r")) {
         char buf[256];
@@ -214,8 +209,8 @@ reload_signing_key_from_keychain(const std::string& plugin_id) {
     const std::string blob = reload::serialize_key_blob(km);
     const std::string b64 = pulp::runtime::base64_encode(
         reinterpret_cast<const std::uint8_t*>(blob.data()), blob.size());
-    std::string add_cmd = "security add-generic-password -U -s " + sh_quote(service) +
-                          " -a " + sh_quote(account) + " -w " + sh_quote(b64);
+    std::string add_cmd = "security add-generic-password -U -s " + shell_quote(service) +
+                          " -a " + shell_quote(account) + " -w " + shell_quote(b64);
     if (run(add_cmd) != 0) {
         std::cerr << "pulp ship swap-pack: failed to store the signing key in the keychain\n";
         return std::nullopt;
@@ -250,9 +245,9 @@ int cmd_ship(const std::vector<std::string>& args) {
             std::cerr << "pulp ship doctor: missing " << script.string() << "\n";
             return 1;
         }
-        std::string cmd = "/bin/bash \"" + script.string() + "\"";
+        std::string cmd = "/bin/bash " + shell_quote(script.string());
         for (size_t i = 1; i < args.size(); ++i)
-            cmd += " \"" + args[i] + "\"";
+            cmd += " " + shell_quote(args[i]);
         return run(cmd);
     }
 
@@ -804,13 +799,13 @@ int cmd_ship(const std::vector<std::string>& args) {
                 auto pkg_path = artifacts / (name + "-" + dir_name + "-" + version + ".pkg");
                 std::cout << "Packaging " << name << " (" << dir_name << " → .pkg"
                           << (installer_identity.empty() ? "" : ", signed") << ")...\n";
-                std::string cmd = "pkgbuild --component \"" + entry.path().string() + "\""
-                    + " --identifier \"com.pulp." + name + "." + format_lower + "\""
-                    + " --version \"" + version + "\""
-                    + " --install-location \"" + install_loc + "\"";
+                std::string cmd = "pkgbuild --component " + shell_quote(entry.path().string())
+                    + " --identifier " + shell_quote("com.pulp." + name + "." + format_lower)
+                    + " --version " + shell_quote(version)
+                    + " --install-location " + shell_quote(install_loc);
                 if (!installer_identity.empty())
-                    cmd += " --sign \"" + installer_identity + "\"";
-                cmd += " \"" + pkg_path.string() + "\" 2>/dev/null";
+                    cmd += " --sign " + shell_quote(installer_identity);
+                cmd += " " + shell_quote(pkg_path.string()) + " 2>/dev/null";
                 if (run(cmd) == 0) ++pkg_count;
                 else std::cerr << "  FAILED\n";
             }
@@ -1087,15 +1082,15 @@ int cmd_ship(const std::vector<std::string>& args) {
             // a placeholder bundle when no bundles are present.
             std::string sample_bundle = bundles.empty()
                 ? std::string("<bundle>") : bundles.front();
-            std::string cmd = "xcrun notarytool submit \"" + sample_bundle + "\"";
+            std::string cmd = "xcrun notarytool submit " + shell_quote(sample_bundle);
             if (use_asc) {
-                cmd += " --key \"" + asc.key_path + "\""
-                    +  " --key-id \"" + asc.key_id + "\""
-                    +  " --issuer \"" + asc.issuer_id + "\"";
+                cmd += " --key " + shell_quote(asc.key_path)
+                    +  " --key-id " + shell_quote(asc.key_id)
+                    +  " --issuer " + shell_quote(asc.issuer_id);
             } else {
-                cmd += " --apple-id \"" + apple_id + "\""
-                    +  " --team-id \"" + team_id + "\""
-                    +  " --password \"" + password + "\"";
+                cmd += " --apple-id " + shell_quote(apple_id)
+                    +  " --team-id " + shell_quote(team_id)
+                    +  " --password " + shell_quote(password);
             }
             cmd += " --wait";
             std::cout << "(--dry-run) would invoke:\n  " << cmd << "\n";
@@ -1344,8 +1339,8 @@ int cmd_ship(const std::vector<std::string>& args) {
         for (auto& a : release_artifacts) {
             auto ext = fs::path(a).extension().string();
             std::string verify = (ext == ".pkg")
-                ? "pkgutil --check-signature \"" + a + "\" >/dev/null 2>&1"
-                : "codesign --verify \"" + a + "\" >/dev/null 2>&1";
+                ? "pkgutil --check-signature " + shell_quote(a) + " >/dev/null 2>&1"
+                : "codesign --verify " + shell_quote(a) + " >/dev/null 2>&1";
             if (run(verify) == 0) {
                 signed_artifacts.push_back(a);
             } else {
@@ -1965,7 +1960,7 @@ int cmd_ship(const std::vector<std::string>& args) {
             std::string target = repo;
             if (target.empty()) {
                 // Default to the bundle's own git origin.
-                std::string cmd = "git -C '" + bundle + "' remote get-url origin 2>/dev/null";
+                std::string cmd = "git -C " + shell_quote(bundle) + " remote get-url origin 2>/dev/null";
                 if (FILE* p = popen(cmd.c_str(), "r")) {
                     char buf[512];
                     while (fgets(buf, sizeof(buf), p)) target += buf;
@@ -2003,8 +1998,8 @@ int cmd_ship(const std::vector<std::string>& args) {
             std::error_code pec;
             fs::permissions(tmp, fs::perms::owner_read | fs::perms::owner_write,
                             fs::perm_options::replace, pec);
-            std::string gh = "gh secret set '" + secret + "' --repo '" + norm + "' < '" +
-                             tmp.string() + "'";
+            std::string gh = "gh secret set " + shell_quote(secret) + " --repo " +
+                             shell_quote(norm) + " < " + shell_quote(tmp.string());
             int rc = run(gh);
             fs::remove(tmp, pec);
             if (rc != 0) {

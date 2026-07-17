@@ -136,11 +136,7 @@ bool write_binary_file(const std::filesystem::path& path, const std::vector<uint
 
 void advance_widget_animations(View* view, float dt) {
     if (!view) return;
-    if (auto* knob = dynamic_cast<Knob*>(view)) knob->advance_animations(dt);
-    else if (auto* toggle = dynamic_cast<Toggle*>(view)) toggle->advance_animations(dt);
-    else if (auto* fader = dynamic_cast<Fader*>(view)) fader->advance_animations(dt);
-    else if (auto* scroll = dynamic_cast<ScrollView*>(view)) scroll->advance_animations(dt);
-    else if (auto* tooltip = dynamic_cast<Tooltip*>(view)) tooltip->advance_animations(dt);
+    view->advance_animations(dt);
 
     for (size_t i = 0; i < view->child_count(); ++i) {
         advance_widget_animations(view->child_at(i), dt);
@@ -1279,7 +1275,7 @@ int main(int argc, char* argv[]) {
             static_cast<uint32_t>(render_h),
             screenshot_path.c_str());
         std::cout << (ok ? "Screenshot saved to " + screenshot_path + "\n" : "Screenshot failed\n");
-        pulp::inspect::g_active_inspector = nullptr;
+        pulp::inspect::uninstall_inspector_hooks();
         return ok ? 0 : 1;
     }
 
@@ -1819,5 +1815,9 @@ int main(int argc, char* argv[]) {
 
     std::cout << "Opening window... (Cmd+I for inspector)\n";
     window->run_event_loop();
+    // The inspector is a stack local about to be destroyed; tear down the View
+    // static hooks it installed (open_inspector calls install_inspector_hooks)
+    // so nothing dangles past this scope.
+    pulp::inspect::uninstall_inspector_hooks();
     return automation_exit_code;
 }

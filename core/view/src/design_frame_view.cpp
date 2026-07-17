@@ -1,17 +1,20 @@
 #include <pulp/view/design_frame_view.hpp>
 
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/view/host_param_surface.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -26,6 +29,13 @@ std::unordered_map<std::string, DesignControlFactory>& design_control_registry()
     static std::unordered_map<std::string, DesignControlFactory> registry;
     return registry;
 }
+
+// Where a bind-grid stand-in parks (SVG coordinates). Far outside any plausible
+// panel, so a stand-in carries no on-screen geometry even if a future painter
+// grows a fallback for a needle-less element. Not a hit-test guard on its own —
+// a stand-in is also disabled and has a zero hit radius; this is belt-and-braces
+// on the geometry axis.
+constexpr float kBindGridOffscreen = -1.0e6f;
 }  // namespace
 
 void register_design_control_factory(std::string factory_id,
@@ -306,6 +316,14 @@ void DesignFrameView::activate_frame(int index) {
     panel_x_ = f.panel_x; panel_y_ = f.panel_y;
     panel_w_ = f.panel_w; panel_h_ = f.panel_h;
     active_frame_ = index;
+    // elements_ was just replaced wholesale by the incoming frame's own set, so
+    // any stand-ins from the outgoing frame are gone. Re-append the grid against
+    // THIS frame's controls before overlays are built (build_overlays indexes
+    // into elements_): a key the incoming frame draws a real control for keeps
+    // that control; a key it does not gets a stand-in. This also re-establishes
+    // bind_grid_begin_ against the new elements_, so the tail it names is always
+    // the stand-ins and never a real control.
+    apply_bind_grid();
     build_overlays();
     invalidate_layout();
     on_active_frame_changed();
@@ -483,19 +501,97 @@ bool DesignFrameView::element_is_discrete(int i) const {
     }
 }
 
+void DesignFrameView::report_scale_mismatch(const std::string& key, int ui_count,
+                                            int host_count, bool host_has_param) const {
+    if (key.empty()) return;
+    const bool seen = std::any_of(param_scale_mismatches_.begin(),
+                                  param_scale_mismatches_.end(),
+                                  [&](const ParamScaleMismatch& m) {
+                                      return m.param_key == key;
+                                  });
+    if (seen) return;
+    ParamScaleMismatch m{key, ui_count, host_count, host_has_param};
+    param_scale_mismatches_.push_back(m);
+    if (on_param_scale_mismatch_) on_param_scale_mismatch_(m);
+}
+
+int DesignFrameView::resolve_value_count(int i) const {
+    if (i < 0 || i >= static_cast<int>(elements_.size())) return 0;
+    const int ui_count = element_option_count(i);
+
+    const std::string& key = elements_[i].param_key;
+    HostParamSurface* hp = host_params();
+
+    // No surface at all (preview / screenshot / render_to_png), or an element
+    // that names no parameter. There is no host, so there is no parameter whose
+    // range could be misrepresented: the control's own positions are the only
+    // domain that exists, and using them is correct rather than a guess. Quiet.
+    if (!hp || key.empty()) return ui_count;
+
+    if (!hp->has_param(key)) {
+        // A LIVE host that does not carry this key. This is NOT the quiet case
+        // above and must never be folded into it: a host exists, it owns a
+        // parameter set, and this element is not in it. In a ported control
+        // table that is a stale or renamed key — one typo — and its cost is the
+        // reported defect exactly: the element binds to nothing, so it never
+        // syncs, never routes, and scales by the positions it draws (a
+        // 3-position control emitting idx/2 where the real parameter wanted
+        // idx/5). Absorbing that silently is the whole bug. The options remain
+        // the only domain available, so they are still returned — but the view
+        // says so.
+        report_scale_mismatch(key, ui_count, 0, /*host_has_param=*/false);
+        return ui_count;
+    }
+
+    const int host_count = hp->param_step_count(key);
+    if (host_count <= 0) {
+        // 0 is never a divisor — but it is AMBIGUOUS, and that ambiguity is a
+        // trap. It means any of: the parameter is genuinely continuous; or this
+        // surface simply CANNOT answer (do_param_step_count is non-pure and
+        // defaults to 0, so a surface backed by a parameter system that has not
+        // wired the accessor reports 0 for every key, discrete ones included).
+        //
+        // For a CONTINUOUS element the distinction is moot: there is no index
+        // domain either way. But a DISCRETE element bound to a resolved key and
+        // told "0" is not evidence of a continuous parameter — it is an
+        // unanswered question. Scaling it by the count of things drawn is exactly
+        // the guess this class exists to stop making, and it is the guess that
+        // looks correct while being wrong.
+        //
+        // The control's own positions remain the only domain available, so that
+        // is still what is returned — but it is a guess, and it is reported
+        // rather than absorbed. A genuinely continuous parameter under a coarse
+        // choice control will report once; teach the surface to answer, or
+        // expect the report.
+        if (ui_count > 1) report_scale_mismatch(key, ui_count, 0, /*host_has_param=*/true);
+        return ui_count;
+    }
+
+    // Both sides claim a domain and they disagree — the control draws a different
+    // number of positions than the parameter has values. The host's count wins
+    // (it defines the automation range), but the binding is reported.
+    if (ui_count > 0 && ui_count != host_count)
+        report_scale_mismatch(key, ui_count, host_count, /*host_has_param=*/true);
+
+    return host_count;
+}
+
 float DesignFrameView::choice_to_norm(int i, int selected) const {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return 0.0f;
-    const int n = static_cast<int>(elements_[i].options.size());
-    if (n <= 1) return 0.0f;
-    return std::clamp(selected, 0, n - 1) / static_cast<float>(n - 1);
+    return static_cast<float>(param_index_to_normalized(selected, resolve_value_count(i)));
 }
 
 int DesignFrameView::norm_to_choice(int i, float v) const {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return 0;
-    const int n = static_cast<int>(elements_[i].options.size());
-    if (n <= 1) return 0;
-    return std::clamp(static_cast<int>(std::clamp(v, 0.0f, 1.0f) * (n - 1) + 0.5f),
-                      0, n - 1);
+    const int n = resolve_value_count(i);
+    const int index = param_normalized_to_index(v, n);
+    // A choice control can only SHOW a position it draws. When the host's domain
+    // is larger than the control's option list, clamp the incoming index into the
+    // options — the mismatch is already reported by resolve_value_count; picking
+    // an option that does not exist would be an out-of-range overlay selection.
+    const int ui_count = element_option_count(i);
+    if (ui_count > 0 && index > ui_count - 1) return ui_count - 1;
+    return index;
 }
 
 void DesignFrameView::notify_choice(int i, int selected) {
@@ -534,20 +630,222 @@ void DesignFrameView::emit_gesture_end(int i) {
 }
 
 void DesignFrameView::sync_from_host_params() {
+    // The whole channel's safety rests on writer and reader sharing a thread:
+    // element_display_text() hands paint a reference INTO elements_, which this
+    // loop reassigns. Nothing in the type system enforces that, so make the
+    // violation loud where it happens rather than letting it surface as a torn
+    // readout — or, for a string past the small-string buffer, a use-after-free
+    // of the heap block paint is mid-read. Inert when no backend is registered
+    // (every headless test), so an inline-driven test never trips it, and the
+    // whole check sits inside assert() — so it compiles out entirely under
+    // NDEBUG rather than costing a release build anything.
+    assert((!events::MainThreadDispatcher::has_backend() ||
+            events::MainThreadDispatcher::is_main_thread()) &&
+           "DesignFrameView::sync_from_host_params called off the host main "
+           "thread; it writes the cache paint() reads");
+
     HostParamSurface* surface = host_params();
     if (!surface) return;  // preview/screenshot: degrade to local state
     for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
-        const auto& e = elements_[i];
-        if (e.param_key.empty() || !surface->has_param(e.param_key)) continue;
+        auto& e = elements_[i];
+        if (e.param_key.empty() || !surface->has_param(e.param_key)) {
+            // Unbound (no key, or the host stopped resolving one it used to).
+            // Clear rather than leave the last text standing: paint must not
+            // keep drawing the readout of a parameter that is no longer there.
+            e.display_text.clear();
+            e.display_text_bound = false;
+            continue;
+        }
         const double norm = surface->get_param(e.param_key);
+
+        // Cache the host-formatted readout for EVERY bound element, not just a
+        // value_label. The formatter round-trip is legal here (tick) and illegal
+        // in paint, so a painter that draws its own readout — a rack slot's
+        // "Mix 45%", a knob's hover tooltip — has no other way to reach it. A
+        // bind-grid stand-in draws nothing itself and is cached for exactly that
+        // reason: its whole purpose is to give a subclass text to paint for a
+        // parameter the design has no control for.
+        //
+        // COST: this is one formatter call per BOUND ELEMENT per tick, where the
+        // old code made one per value_label — same call, but the count now scales
+        // with the bind grid rather than with the handful of readouts a design
+        // draws. A 200-key grid at 60 Hz is ~12k calls/sec, each of which on the
+        // native path is a resolver lookup + a snprintf + a string construction.
+        // That is not free, and it is deliberately NOT dirty-checked against the
+        // last `norm`: display text is not a pure function of (key, normalized).
+        // ParamInfo::to_string is a std::function whose closure may capture other
+        // state, do_param_display_text is virtual and a foreign host's override
+        // may consult anything, and the canonical case is real — a tempo-synced
+        // delay reformats "500 ms" to "1/4" when a sync toggle flips while its own
+        // value never moves. A last-norm guard would freeze exactly that readout,
+        // which is the stale lie this channel exists to avoid. Memoization is the
+        // HOST's call because only the host knows whether its formatting is pure
+        // in the value; HostParamSurface asks for it in the contract.
+        e.display_text = surface->param_display_text(e.param_key, norm);
+        e.display_text_bound = true;
+
         if (e.kind == DesignFrameElement::Kind::value_label) {
-            // A readout tracks its param's host-formatted display text.
-            set_element_text(i, surface->param_display_text(e.param_key, norm));
+            // A readout also tracks the text as its own painted string, so a
+            // value_label keeps rendering with no subclass involvement. This
+            // copies: `text` and `display_text` are two owning fields that must
+            // both hold the value, so a value_label costs one assign more than a
+            // plain bound element. Keeping them distinct is the point — an
+            // author-set `text` and a host `display_text` must not clobber each
+            // other — so the copy is the price of that separation, not an
+            // oversight.
+            set_element_text(i, e.display_text);
         } else {
             // Silent host->view push (no echo back to the surface).
             set_element_value(i, static_cast<float>(norm));
         }
     }
+}
+
+// ── Typed commit helpers ─────────────────────────────────────────────────────
+
+void DesignFrameView::set_on_param_scale_mismatch(
+    std::function<void(const ParamScaleMismatch&)> cb) {
+    on_param_scale_mismatch_ = std::move(cb);
+    // Replay what was already observed, so a callback attached after the first
+    // tick still learns about it (matches set_on_unregistered_custom_control).
+    if (on_param_scale_mismatch_)
+        for (const auto& m : param_scale_mismatches_) on_param_scale_mismatch_(m);
+}
+
+// Whether a live surface carries `key` at all — the field that splits "the host
+// answered 'no index domain'" from "the host has never heard of this key".
+bool DesignFrameView::host_has_param_for(const std::string& key) const {
+    HostParamSurface* hp = host_params();
+    return hp && !key.empty() && hp->has_param(key);
+}
+
+// The host's own cardinality for `key`, or 0 when no surface resolves it.
+// Used to report an unbound key honestly (the host's count, not a placeholder).
+int DesignFrameView::host_step_count_for(const std::string& key) const {
+    if (!host_has_param_for(key)) return 0;
+    return host_params()->param_step_count(key);
+}
+
+void DesignFrameView::commit_value(const std::string& key, float normalized) {
+    const int i = element_for_param_key(key);
+    if (i < 0) {
+        // No element for this key: with a bind grid built, every host parameter
+        // has one, so this is a key the view was never told about. Emitting
+        // against index -1 would skip host routing and hand the public callback a
+        // bogus index — report instead of writing to nothing. ui_option_count 0
+        // is what "the UI draws no control for this key" looks like; the host's
+        // count is reported as-is so the report names what the key really is.
+        report_scale_mismatch(key, 0, host_step_count_for(key),
+                              host_has_param_for(key));
+        return;
+    }
+    // A commit routes through the same funnel a pointer gesture does, and that
+    // funnel must exist. With host routing off AND no on_element_changed wired,
+    // emit_element_changed reaches neither the host nor a consumer: the element
+    // updates locally and the edit is dropped. Both shapes of consumer satisfy
+    // this — one enables route_changes_to_host_params, the other funnels through
+    // on_element_changed — so a failure here is a genuinely unwired view rather
+    // than a supported configuration. Debug-only, matching HostParamSurface's own
+    // call-context assert; a release build keeps the local push either way.
+    assert((route_to_host_params_ || on_element_changed) &&
+           "commit_* has no funnel: enable route_changes_to_host_params(true) or "
+           "wire on_element_changed, or the edit reaches neither host nor consumer");
+    const float v = std::clamp(normalized, 0.0f, 1.0f);
+    emit_gesture_begin(i);
+    set_element_value(i, v);      // silent local push
+    emit_element_changed(i, v);   // routes to the host + fires on_element_changed
+    emit_gesture_end(i);
+}
+
+void DesignFrameView::commit_bipolar(const std::string& key, float depth) {
+    // -1 → 0.0, 0 → 0.5, +1 → 1.0.
+    commit_value(key, (std::clamp(depth, -1.0f, 1.0f) + 1.0f) * 0.5f);
+}
+
+void DesignFrameView::commit_discrete(const std::string& key, int index) {
+    const int i = element_for_param_key(key);
+    if (i < 0) {
+        report_scale_mismatch(key, 0, host_step_count_for(key),
+                              host_has_param_for(key));
+        return;
+    }
+    const int count = resolve_value_count(i);
+    if (count <= 1) {
+        // Neither the host nor the control offers an index domain, so there is no
+        // divisor and any value emitted would be a guess. A bind-grid stand-in
+        // draws no options, so this is what a discrete commit against a
+        // continuous/unknown parameter looks like.
+        //
+        // host_step_count reports what the HOST said, never `count`: when count
+        // is 1 it came from the control's own option list (the UI fallback), and
+        // putting that in a field documented as "values the host's parameter
+        // exposes" would make the diagnostic misstate its own provenance —
+        // pointing the reader at the host for a number the view invented.
+        report_scale_mismatch(key, element_option_count(i),
+                              host_step_count_for(key), host_has_param_for(key));
+        return;
+    }
+    commit_value(key, static_cast<float>(param_index_to_normalized(index, count)));
+}
+
+// ── Bind grid ────────────────────────────────────────────────────────────────
+
+void DesignFrameView::build_bind_grid(std::vector<std::string> keys) {
+    // Drop the previous grid before rebuilding: repeated calls replace, never
+    // accumulate. bind_grid_begin_ names the tail of elements_ that apply_bind_grid
+    // appended, and it is re-established on every frame activation, so erasing
+    // that tail can only ever remove stand-ins. Rebuilding the overlays is not
+    // needed: a stand-in never builds one (a needle-less knob is skipped), so the
+    // overlay->element indices of the real controls ahead of the tail are stable.
+    if (bind_grid_begin_ >= 0 && bind_grid_begin_ <= static_cast<int>(elements_.size()))
+        elements_.erase(elements_.begin() + bind_grid_begin_, elements_.end());
+    bind_grid_begin_ = -1;
+    bind_grid_keys_ = std::move(keys);
+    apply_bind_grid();
+}
+
+void DesignFrameView::apply_bind_grid() {
+    if (bind_grid_keys_.empty()) {
+        bind_grid_begin_ = -1;
+        return;
+    }
+    bind_grid_begin_ = static_cast<int>(elements_.size());
+    // The keys already spoken for, gathered once. element_for_param_key is a
+    // linear scan, so asking it per key would be O(keys x elements) — ~35k string
+    // compares for a 188-parameter plug-in, on every frame swap. A stand-in's own
+    // key joins the set as it is created, so a duplicate key in bind_grid_keys_
+    // still produces exactly one stand-in, as the per-key scan did.
+    std::unordered_set<std::string> bound;
+    bound.reserve(elements_.size() + bind_grid_keys_.size());
+    for (const auto& e : elements_)
+        if (!e.param_key.empty()) bound.insert(e.param_key);
+
+    for (const std::string& key : bind_grid_keys_) {
+        if (key.empty()) continue;
+        // A design's own control for this key always wins: it is earlier in
+        // elements_, so element_for_param_key finds it first. Skipping keeps the
+        // grid to genuine gaps rather than shadowing a real control with a
+        // stand-in that can never be reached.
+        if (!bound.insert(key).second) continue;
+        DesignFrameElement e;
+        // A knob with no needle path is skipped by paint() and builds no overlay
+        // widget, so a stand-in renders nothing at all.
+        e.kind = DesignFrameElement::Kind::knob;
+        e.needle_d.clear();
+        e.hit_radius = 0.0f;   // knob hit-testing needs distance < radius: never true
+        e.enabled = false;     // and hit_element skips a disabled element outright
+        // Parked outside the panel so the element carries no on-screen geometry
+        // even if a future painter grows a fallback for a needle-less element.
+        e.cx = e.cy = e.x = e.y = kBindGridOffscreen;
+        e.w = e.h = 0.0f;
+        e.param_key = key;
+        elements_.push_back(std::move(e));
+    }
+}
+
+bool DesignFrameView::element_is_bind_grid_stand_in(int i) const {
+    return bind_grid_begin_ >= 0 && i >= bind_grid_begin_ &&
+           i < static_cast<int>(elements_.size());
 }
 
 // ── Per-element hover + enabled state ────────────────────────────────────────
@@ -648,6 +946,32 @@ Rect DesignFrameView::element_rect(int i) const {
     return {e.x, e.y, e.w, e.h};
 }
 
+bool DesignFrameView::element_hit_point(int i, Point& out) const {
+    if (i < 0 || i >= static_cast<int>(elements_.size())) return false;
+    const auto t = panel_transform(local_bounds());
+    if (t.scale <= 0.0f) return false;  // not laid out: no point exists yet
+    const auto& e = elements_[i];
+    // The anchor hit_element() matches this kind by: a knob by distance to its
+    // pivot, every other kind by containment in its rect.
+    const bool by_pivot = e.kind == DesignFrameElement::Kind::knob;
+    const float sx = by_pivot ? e.cx : e.x + e.w * 0.5f;
+    const float sy = by_pivot ? e.cy : e.y + e.h * 0.5f;
+    // Forward the paint/hit fit: SVG coords -> view px (hit_element inverts this).
+    const Point p{t.ox + (sx - panel_x_) * t.scale, t.oy + (sy - panel_y_) * t.scale};
+    // Prove the anchor before promising it. An element with a native overlay is
+    // clicked through its child widget, which View::hit_test reaches before this
+    // parent, and layout_children() puts that widget on exactly this rect — so the
+    // rect center lands on it. Every other kind must round-trip through the real
+    // hit-tester, which is the only thing that knows the element is disabled, is a
+    // momentary key outside the active view group, has a degenerate hit radius or
+    // rect, or is occluded by a rect-tested element ahead of it. In each of those
+    // cases NO point hits `i`, and saying so beats handing back a coordinate that
+    // misses silently and reads as a dead control.
+    if (overlay_widget(i) == nullptr && hit_element(p) != i) return false;
+    out = p;
+    return true;
+}
+
 float DesignFrameView::element_value(int i) const {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return -1.0f;
     const auto& e = elements_[i];
@@ -702,10 +1026,21 @@ void DesignFrameView::set_element_value(int i, float v) {
         case DesignFrameElement::Kind::knob:
         case DesignFrameElement::Kind::fader:
         case DesignFrameElement::Kind::toggle:
-        case DesignFrameElement::Kind::xy_pad:
-            e.value = std::clamp(v, 0.0f, 1.0f);  // xy_pad: sets X; value_y unchanged
-            request_repaint();
-            break;
+        case DesignFrameElement::Kind::xy_pad: {
+            const float clamped = std::clamp(v, 0.0f, 1.0f);
+            // Early-return on no change, matching set_element_text. Not a micro-
+            // optimization: sync_from_host_params pushes EVERY element every tick,
+            // including bind-grid stand-ins, so an unconditional repaint here is
+            // one request_repaint() per parameter per tick. On the window-host path
+            // those coalesce through mark_dirty(); on the plugin-view-host path —
+            // the plugin editor these bindings target — View::request_repaint calls
+            // plugin_view_host_->repaint() directly, with no coalescing, so a
+            // full-size parameter set repaints the editor hundreds of times a tick
+            // while nothing on screen has moved.
+            if (e.value == clamped) return;  // xy_pad: sets X; value_y unchanged
+            e.value = clamped;
+            break;  // the request_repaint() past the switch covers this
+        }
         case DesignFrameElement::Kind::dropdown:
         case DesignFrameElement::Kind::tab_group:
         case DesignFrameElement::Kind::stepper: {

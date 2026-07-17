@@ -64,7 +64,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | three.js | 077dd13c0e86 | MIT | Native WebGPU bridge demos and tests (optional, fetched only when `PULP_BUILD_TESTS` and `PULP_ENABLE_GPU` are ON) | pulp-render | 2026-04-21 |
 | TweetNaCl | 20140427 | Public domain | Ed25519 sign/verify per RFC 8032 — Sparkle appcast signatures and signed node/package metadata | pulp-runtime | 2026-05-25 |
 | V8 | v8-15.2.24-lkgr-97440bd4f523 | BSD-3-Clause | JIT JavaScript engine backend (optional, selected with `PULP_JS_ENGINE=v8`; default is QuickJS, JSC on Apple). Sealed prebuilt `libv8` (exports only `v8::`/`cppgc::`; bundles ICU/zlib/Abseil internally) via the [danielraffel/v8-builder](https://github.com/danielraffel/v8-builder) per-platform releases; fetched by `tools/scripts/fetch_v8_for_release.py` into `external/v8-build/`. iOS is JSC-only (V8 needs JIT). See NOTICE.md for bundled ICU/zlib/Abseil attribution. | pulp-view | 2026-06-06 |
-| VST3 SDK | v3.7.12_build_20 | MIT | VST3 plugin format (pluginterfaces + base) | pulp-format | 2026-03-24 |
+| VST3 SDK | v3.8.0_build_66 | MIT | VST3 plugin format (pluginterfaces + base) | pulp-format | 2026-03-24 |
 | WebGPU-distribution | 17dcd42a7683 | MIT | WebGPU C API wrapper for Dawn (FetchContent) | pulp-render | 2026-03-25 |
 | yaml-cpp | 0.8.0 | MIT | YAML frontmatter parser for the DESIGN.md import source (FetchContent) | pulp-view | 2026-05-13 |
 | Yoga | 3.2.1 | MIT | CSS Flexbox/Grid layout engine (Meta, FetchContent) | pulp-view | 2026-03-29 |

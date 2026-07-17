@@ -42,9 +42,12 @@ Rules of thumb:
 - **A struct-layout change must compile EVERYWHERE before shipping**: when a
   change alters the field layout of a struct that is brace-initialized
   positionally (adding/removing a field, swapping a `bool` for an `enum`), run a
-  FULL `cmake --build build -j$(sysctl -n hw.ncpu)` over ALL targets — not just
-  the named feature/parity targets — and run it in the background (a full build
-  exceeds a short foreground budget). Stray positional inits in unrelated test
+  FULL `pulp build` over ALL targets — not just the named feature/parity
+  targets — and run it in the background (a full build exceeds a short foreground
+  budget). This is the longest build anyone runs, so it is the one that most
+  needs to take a governed *share* of the machine rather than every core; `pulp
+  build` (or `tools/ci/governed-build.sh cmake --build build`) does that, a raw
+  `cmake --build … -j$(sysctl -n hw.ncpu)` does not. Stray positional inits in unrelated test
   files fail *closed* at compile time, so they are safe, but only a full build
   surfaces them; building a subset and shipping pushes the discovery to CI. A
   uniform build failure across macOS/Linux/Windows is the tell for a real
@@ -58,8 +61,8 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 # Or preferred for repo + example builds:
 ./build/pulp build
 
-# Build everything
-cmake --build build -j$(sysctl -n hw.ncpu)
+# Build everything (takes its job count from the host build governor)
+./build/pulp build
 
 # Run all tests
 ctest --test-dir build --output-on-failure
@@ -89,19 +92,47 @@ cmake --build build --target pulp-test-state
 cmake -S . -B build -DPULP_SANITIZER=address
 ```
 
-**Builds are always bounded.** Every build command Pulp emits or ships carries
-an explicit job count — a literal, a `$(getconf _NPROCESSORS_ONLN)` expansion,
-or a value from the tartci host lease. `pulp build/dev/loop` and the local-SDK
-build fall back to a host default of `min(cores, RAM_budget / 1.5 GiB)` when no
-lease store is present (override with `PULP_BUILD_MEM_BUDGET_MB`), so a build can
-never fan out unbounded and oversubscribe a shared machine. A bare
-`cmake --build … --parallel` (which maps to unbounded `make -j`) is rejected
-repo-wide by `tools/scripts/build_parallelism_guard.py` (a ctest and a Shipyard
-gate). When adding a build command anywhere — CLI, script, `.shipyard/config.toml`,
-CI workflow — give `--parallel`/`-j` an explicit count.
+**Builds take a share of a shared host, not the whole machine.** "Bounded" does
+NOT mean "not infinite" — a `-j$(sysctl -n hw.ncpu)` / `-j$(nproc)` /
+`--parallel $(getconf _NPROCESSORS_ONLN)` carries an explicit count and is still
+the melt: it claims *every* core, so four concurrent agent builds on one shared
+Mac request 4 × cores and starve each other — and the required `macos` gate
+validating in one of those checkouts starves with them. The bound that matters
+on a shared host is a *share*, and a share comes from the governor, never from
+the hardware. **Prefer `pulp build`** (and `pulp dev` / `pulp loop`): they take
+their `-j` from the tartci host lease when one is present, acquiring it before
+building, so concurrent builds divide the host. Shipyard's `local` mac lane —
+which does not go through the CLI — routes its raw `cmake --build` through
+`tools/ci/governed-build.sh` for the same reason. Reach for a raw `cmake --build`
+only for a one-off target, and give it a literal (`-j8`) or a derived share
+(`-j$(( $(sysctl -n hw.ncpu) / 4 ))`), never an undivided core count.
+
+Without a lease store — the ordinary single-machine / external-cloner case —
+`pulp build/dev/loop` and the local-SDK build still bound themselves to
+`min(cores, RAM_budget / 1.5 GiB)` (override with `PULP_BUILD_MEM_BUDGET_MB`), so
+a build cannot fan out unbounded. That floor is a *memory* guard, not a fairness
+one: on a big-RAM host the memory axis never binds and it resolves to the full
+core count — fine for a solo builder, which is why the public repo needs nothing
+more. Fairness under contention comes from the lease, not from this fallback.
+
+`tools/scripts/build_parallelism_guard.py` (a ctest and a Shipyard gate) rejects
+a bare `cmake --build … --parallel` (unbounded `make -j`) *everywhere*, and an
+explicit-but-whole-machine core-count expansion on the shared-host surfaces
+agents copy from (`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`). It
+does NOT scan `.github/workflows/**` for whole-machine — **not** because those
+runners never share a box, but because a workflow's `runs-on` is resolved
+dynamically (e.g. `${{ fromJSON(matrix.runs_on_json) }}`) and a static scan
+cannot tell whether a leg is ephemeral or one of the shared self-hosted Studios
+(the macOS matrix leg resolves to `PULP_LOCAL_MACOS_RUNS_ON_JSON` — the shared
+Studios that host the required `macos` gate). In a workflow, bounding a
+whole-machine build is therefore the **author's** job: route a self-hosted leg
+through `tools/ci/governed-build.sh` (as `build.yml`, `examples-validation.yml`,
+`web-plugins.yml`, and `format-baseline-diff.yml` do for their macOS legs). When
+adding a build command anywhere, give `--parallel`/`-j` a bounded share (or route
+it through the governor), not the machine's core count.
 
 **External SDKs** (not committed, cloned at configure time or manually):
-- VST3 SDK → `external/vst3sdk` (MIT, `git clone --depth 1 --branch v3.7.12_build_20`)
+- VST3 SDK → `external/vst3sdk` (MIT, `git clone --depth 1 --branch v3.8.0_build_66`)
 - AudioUnitSDK → `external/AudioUnitSDK` (Apache 2.0, `git clone --depth 1`)
 - CLAP → fetched automatically via CMake FetchContent
 - Skia → pre-built binaries in `external/skia-build/`
@@ -226,6 +257,83 @@ the authoring model; reach for the graph only when routing is dynamic at run tim
 
 Full guidance and reserved terminology: `docs/reference/processing-models.md`.
 Run `python3 tools/scripts/processing_model_terms_lint.py` to check terminology.
+
+### Measuring DSP — read the harness BEFORE you write the DSP
+
+Pulp has **two mature measurement lanes**. Load the [`audio-harness`](.agents/skills/audio-harness/SKILL.md)
+skill at the **start** of any DSP or audio-pipeline work — when you are choosing
+acceptance gates, not only when something already sounds wrong. Most of what a
+DSP task needs is already written; hand-rolling it is the default failure mode.
+
+| Lane | What | Use for |
+|------|------|---------|
+| **C++** — `tools/audio/analysis/` (lib `pulp-audio-analysis`, linked by the shipped CLI) + `test/support/` (scenario/stimulus/contract wiring) | Seeded generators, metrics, assertions (incl. `assert_null_near`), `RenderScenario` over `HeadlessHost` (offline render, SR×block matrix), contracts, Audio Doctor (frequency response, THD/THD+N), FFT + windowing | **Required per-PR ctest gates.** Fast, no venv, already CI-wired. |
+| **Python** — `tools/audio/quality-lab/` (`pulp tool install audio-quality-lab`) | Null residual **with alignment** (`estimate_global_lag`/`local_align`), LTAS log-spectral distance (**phase-blind**), spectral flux/centroid, HNR, Theil-Sen slope, Kaiser-sinc resampling, license-guarded corpus + provenance, `regression_net` ratchet | **Advisory/offline**: deep investigation, A/B packs, model fitting, perceptual artifacts. **Not in CI** — it cannot hold a required gate as-is. |
+
+**The closed A/B loop — use it instead of asking a human to listen.** Pulp can
+host a reference plugin offline, render it, render your candidate under identical
+stimulus, and diff them per-detector with timestamps — agent-driven, no DAW, no
+device, nobody listening. Every piece already exists:
+
+```bash
+# Reference and candidate, identical stimulus, offline (no DAW, no audio device)
+pulp audio render --plugin Reference.vst3 --out /tmp/ref.wav  --duration-ms 2000 ...
+pulp audio render --plugin Candidate.clap --out /tmp/cand.wav --duration-ms 2000 ...
+# Per-detector, timestamped verdicts (transient smear, dulling, metallic HF, graininess)
+pulp tool run audio-quality-lab -- compare /tmp/ref.wav /tmp/cand.wav
+```
+
+`core/host/plugin_slot.hpp` (`PluginSlot`: load → prepare → process, VST3/AU/CLAP/LV2)
+and `offline_signal_graph_host.hpp` are the hosting spine; `regression_net.py`
+already shells to `pulp audio render --plugin` to ratchet it. See the
+[`hosting`](.agents/skills/hosting/SKILL.md) skill. **Caveat:** `pulp audio render`
+is bundle-only — an in-tree `Processor` must be rendered test-side via
+`RenderScenario` and written to WAV first.
+
+**What you point it at is a licensing decision, not a technical one.** Safe:
+Pulp's own renders (old vs new), plugins we own, permissively licensed plugins
+(record `license_id` via the lab's `corpus.py`), and hardware captures — measured
+hardware behavior is *fact*, not copyrightable expression. Risky, and requires a
+deliberate call: hosting a **commercial competitor's** plugin and iterating a
+model until it matches — plugin EULAs commonly forbid reverse
+engineering/benchmarking (hardware carries no such clause), and an automated
+"iterate until it matches product X" loop drifts from measuring a fact toward
+producing a derivative. Hold the repo's clean-room line.
+
+Non-obvious things that cost real time when you don't know them:
+
+- **`OversamplerT`'s default `Kind` is `fir_biquad` — only ~7 dB worst-case alias
+  rejection.** Any anti-aliasing measurement that doesn't explicitly pin
+  `Kind::linear_phase_fir` (96 dB standard / 140 dB pristine) or `polyphase_iir`
+  is measuring the filter, not your DSP.
+- **Deep-dynamic-range measurement is a window problem, and no ordinary window
+  solves it.** The analysis `Window` enum exposes only `{rectangular, hann}`, and
+  Hann's −31.5 dB first side lobe cannot resolve a −100 dB component beside a 0 dB
+  fundamental. Widening it from `core/signal/windowing.hpp` does **not** fix that
+  by itself: blackman is ~−58 dB and **flat_top is only ~−93 dB** (flat_top buys
+  amplitude accuracy, *not* dynamic range) — neither can gate −100 dBc at any FFT
+  length. Only a high-β Kaiser (β≈14, ~−126 dB) could. **Prefer least-squares tone
+  projection**, which sidesteps leakage entirely: prior art is `tone_residual_db()`
+  in `test/test_oversampling_quality.cpp`, which already asserts `< -100 dB` in a
+  passing test.
+- **State every analyzer's detection floor, and keep gate thresholds above it.**
+  A gate that passes because the measurement cannot see the failure is worse than
+  no gate — it fails silently. And **prove the floor, don't derive it**: the usual
+  analytic bound (~2σ from the residual) assumes a *white* residual, which is
+  false exactly when it matters — aliases and distortion products are **discrete
+  tones**, not noise, so the residual is sparse lines. Prove a floor with a
+  **negative control**: run the identical measurement on a signal with the defect
+  *removed* and show the reading collapses. A test that only asserts the computed
+  floor is the analyzer grading its own homework.
+- **`pulp audio render` is bundle-only** (`--plugin` via `PluginSlot`). An in-tree
+  `Processor` is unreachable from the CLI/MCP/`regression_net` — test-side
+  `RenderScenario` is the only path unless you render to WAV first.
+- **`estimate_frequency()` is a zero-crossing detector** and its own doc disclaims
+  harmonically dense material. It is not a pitch tracker; a saw will defeat it.
+- **`test_golden_audio.cpp` is not a golden corpus** — it holds computed-expectation
+  tests. There are no stored reference renders and no audio ratchet in CI.
+- **DSP perf is tracked, not gated** (`tools/scripts/bench_diff.py` + committed
+  `planning/bench/*.json`). Perf assertions flake on shared runners.
 
 ### Thread Model
 
@@ -662,6 +770,19 @@ What "CI green is enough" cost us on 2026-04-16: a UMP-cursor-advance P1 bug (`#
 | UI interaction | Widgets respond correctly | Headless simulate_click/type + assertions | Every PR touching view/widget code |
 | Build matrix | Builds on all platforms | GitHub Actions CI | Every PR |
 | DAW compatibility | Plugin works in real DAWs | Manual + automated (future) | Before releases |
+
+### Test Lanes — what gates the required `macos` check
+
+Not every test runs on the per-PR required gate. Tests route by CTest `LABELS`:
+`slow` (long, e.g. iOS try-compile) and `validation` (the **example** plugins'
+real-host `pluginval`/`auval`/`clap-dlopen` validators — the only users of that
+label) are **excluded** from the required gate and enforced elsewhere. Example
+*compile* is still gated (the gate builds `PULP_BUILD_EXAMPLES=ON`); example
+runtime *validation* runs on the path-filtered `example-validation` lane (blocks
+PRs that touch `examples/**`) and nightly. Before moving any test off the required
+gate by labeling it `slow`/`validation`, confirm something still enforces it — the
+nightly is an informational backstop, not a gate. Full model, label taxonomy, and
+how to add tests: **[docs/guides/test-lanes.md](docs/guides/test-lanes.md)**.
 
 ### Automated Testing Process
 
@@ -1490,6 +1611,13 @@ live on m3/m5/m1, layered in tiers:
 Every build path is bounded — the CLI (Tier 0), the shipyard-local wrapper, and
 the VM runners (Tier 1 leases). `pulp status` prints a `Build governance: Tier N
 (…)` line reporting which layer bounds the current host. A bare
-`--parallel`/`-j` anywhere in the repo is rejected by
-`tools/scripts/build_parallelism_guard.py`. Host-side tartci details (lease
-store, memory axis, role profiles) live in `docs/guides/local-ci.md`.
+`--parallel`/`-j` anywhere in the repo — and, on the shared-host surfaces agents
+copy from (`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`), an
+explicit-but-whole-machine core-count expansion (`-j$(nproc)` and friends) — is
+rejected by `tools/scripts/build_parallelism_guard.py`. The guard does not scan
+`.github/workflows/**` for whole-machine, because a workflow's `runs-on` is
+dynamic and may itself resolve to a shared self-hosted runner — so bounding a
+whole-machine build there is the workflow author's job (route the self-hosted leg
+through the governor), not something the scan can enforce. Host-side tartci
+details (lease store, memory axis, role profiles) live in
+`docs/guides/local-ci.md`.

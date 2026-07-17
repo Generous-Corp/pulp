@@ -107,6 +107,12 @@ BadgePlacement compute_badge_placement(float sel_x, float sel_y, float sel_h,
 void install_inspector_hooks(InspectorOverlay& inspector) {
     g_active_inspector = &inspector;
     // Install all hooks via function pointers — no circular dependency.
+    // Every hook dereferences g_active_inspector rather than capturing the
+    // InspectorOverlay by reference, so uninstall_inspector_hooks() (or a bare
+    // `g_active_inspector = nullptr` on an old teardown path) makes the still-
+    // installed hooks inert instead of firing on a destroyed inspector. A null
+    // global returns each hook's no-op default (skip paint / don't handle / -1).
+    //
     // Gate overlay paint on the inspected root. The overlay's
     // selection box / handles / drop indicators are positioned in the inspected
     // root's coordinate space, so they must paint ONLY when the root being
@@ -115,13 +121,16 @@ void install_inspector_hooks(InspectorOverlay& inspector) {
     // root coordinates — a stray box at a random spot inside the inspector
     // window. nullptr (root unknown, legacy caller) paints unconditionally.
     View::set_inspector_paint_hook(
-        [&inspector](Canvas& canvas, View* painting_root) {
-            if (painting_root && painting_root != &inspector.inspected_root())
+        [](Canvas& canvas, View* painting_root) {
+            InspectorOverlay* insp = g_active_inspector;
+            if (!insp) return;
+            if (painting_root && painting_root != &insp->inspected_root())
                 return;
-            inspector.paint(canvas);
+            insp->paint(canvas);
         });
-    View::set_inspector_key_hook([&inspector](const KeyEvent& e) -> bool {
-        return inspector.handle_key_event(e);
+    View::set_inspector_key_hook([](const KeyEvent& e) -> bool {
+        InspectorOverlay* insp = g_active_inspector;
+        return insp ? insp->handle_key_event(e) : false;
     });
     // Window-gate the mouse hook, mirroring the paint-hook gate above. A
     // secondary window (the floating InspectorWindow) routes its
@@ -130,10 +139,12 @@ void install_inspector_hooks(InspectorOverlay& inspector) {
     // the inspector window would highlight/affect the canvas. nullptr (root
     // unknown, legacy/headless caller) runs unconditionally.
     View::set_inspector_mouse_hook(
-        [&inspector](const MouseEvent& e, View* event_root) -> bool {
-            if (event_root && event_root != &inspector.inspected_root())
+        [](const MouseEvent& e, View* event_root) -> bool {
+            InspectorOverlay* insp = g_active_inspector;
+            if (!insp) return false;
+            if (event_root && event_root != &insp->inspected_root())
                 return false;
-            return inspector.handle_mouse_event(e);
+            return insp->handle_mouse_event(e);
         });
     // Install the inline-text-edit hook here so the standalone host (and any
     // other install_inspector_hooks() caller) can
@@ -143,21 +154,37 @@ void install_inspector_hooks(InspectorOverlay& inspector) {
     // canvas overlay's inline edit. nullptr (root unknown, legacy/headless
     // caller) runs unconditionally.
     View::set_inspector_text_hook(
-        [&inspector](const TextInputEvent& e, View* event_root) -> bool {
-            if (event_root && event_root != &inspector.inspected_root())
+        [](const TextInputEvent& e, View* event_root) -> bool {
+            InspectorOverlay* insp = g_active_inspector;
+            if (!insp) return false;
+            if (event_root && event_root != &insp->inspected_root())
                 return false;
-            return inspector.handle_text_input(e);
+            return insp->handle_text_input(e);
         });
     // Cursor-affordance hook for move/resize cursor feedback over a selected
     // element. Same root gate; returns -1 to defer to the
     // normal hit-view cursor() path when off the selection or in another
     // window.
     View::set_inspector_cursor_hook(
-        [&inspector](const MouseEvent& e, View* event_root) -> int {
-            if (event_root && event_root != &inspector.inspected_root())
+        [](const MouseEvent& e, View* event_root) -> int {
+            InspectorOverlay* insp = g_active_inspector;
+            if (!insp) return -1;
+            if (event_root && event_root != &insp->inspected_root())
                 return -1;
-            return inspector.cursor_style_for(e.position);
+            return insp->cursor_style_for(e.position);
         });
+}
+
+void uninstall_inspector_hooks() {
+    // Clear the global first so any hook that fires between the two steps sees
+    // a null inspector and no-ops, then release the five View hook slots so no
+    // stale std::function outlives the inspector it was installed for.
+    g_active_inspector = nullptr;
+    View::set_inspector_paint_hook({});
+    View::set_inspector_key_hook({});
+    View::set_inspector_mouse_hook({});
+    View::set_inspector_text_hook({});
+    View::set_inspector_cursor_hook({});
 }
 
 void InspectorOverlay::set_active(bool active) {
@@ -1768,11 +1795,8 @@ SourceJumpResult InspectorOverlay::jump_to_selection_source(bool dry_run) {
     return jump_to_source(config_, selected_, dry_run);
 }
 
-bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
-    if (!active_) return false;
-
-    auto pos = event.position;
-
+InspectorOverlay::MouseGesture
+InspectorOverlay::resolve_mouse_gesture(const MouseEvent& event) const {
     // ── Gesture-phase resolution ──────────────────────────────────
     // The move/resize gesture machines below need to distinguish a
     // PRESS (begin), a DRAG TICK (live update), and a RELEASE (commit).
@@ -1791,23 +1815,26 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     // it decides how the legacy is_down value is read for THIS event.
     const bool gesture_active = (active_drag_ != DragCorner::none) ||
                                 move_active_;
-    bool is_press, is_drag_tick, is_release;
+    MouseGesture g{event, event.position, false, false, false};
     if (event.hasExplicitPhase()) {
-        is_press = event.isPress();
-        is_drag_tick = event.isDrag();
-        is_release = event.isRelease();
+        g.is_press = event.isPress();
+        g.is_drag_tick = event.isDrag();
+        g.is_release = event.isRelease();
     } else if (gesture_active) {
         // Legacy convention DURING a gesture: is_down=false is a drag
         // tick, is_down=true is the release.
-        is_press = false;
-        is_drag_tick = !event.is_down;
-        is_release = event.is_down;
+        g.is_drag_tick = !event.is_down;
+        g.is_release = event.is_down;
     } else {
         // No gesture in flight: a button-down may BEGIN one.
-        is_press = event.is_down;
-        is_drag_tick = false;
-        is_release = false;
+        g.is_press = event.is_down;
     }
+    return g;
+}
+
+std::optional<bool> InspectorOverlay::mouse_text_tool(const MouseGesture& g) {
+    const Point pos = g.pos;
+    const bool is_press = g.is_press;
 
     // ── Text tool: click a text element to edit its copy ───────────
     //
@@ -1835,6 +1862,11 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         }
         return true;  // Text tool owns canvas presses (no drag/select)
     }
+    return std::nullopt;  // declined — the next handler looks
+}
+
+void InspectorOverlay::mouse_zoom_loupe(const MouseGesture& g) {
+    const Point pos = g.pos;
 
     // The loupe re-centers on the cursor for every mouse
     // event (move, press, release) while it's active. We only record
@@ -1847,6 +1879,11 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     if (zoom_active_) {
         zoom_sample_center_ = pos;
     }
+}
+
+std::optional<bool> InspectorOverlay::mouse_eyedropper(const MouseGesture& g) {
+    const Point pos = g.pos;
+    const bool is_press = g.is_press;
 
     // ── Eyedropper mode ────────────────────────────────────────────
     // When the eyedropper is armed it owns canvas-area mouse events:
@@ -1862,7 +1899,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     // record the cursor position and let paint() do the readback.
     if (eyedropper_active_ && !point_in_panel(pos)) {
         eyedropper_cursor_ = pos;
-        if (event.is_down) {
+        if (is_press) {
             // Resolved-style sampling is synchronous + frame-
             // independent, so a click without a prior move still
             // picks a real color (covers headless / scripted use).
@@ -1896,6 +1933,13 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         }
         return false;  // don't consume moves — let hover effects run
     }
+    return std::nullopt;  // declined — the next handler looks
+}
+
+std::optional<bool> InspectorOverlay::mouse_active_resize(const MouseGesture& g) {
+    const Point pos = g.pos;
+    const bool is_drag_tick = g.is_drag_tick;
+    const bool is_release = g.is_release;
 
     // ── Drag-handle gesture state machine ─────────────────────────
     // Under the state-CHANGED convention above, is_down=true arrives
@@ -2065,6 +2109,13 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             return true;  // consume the move event
         }
     }
+    return std::nullopt;  // declined — the next handler looks
+}
+
+std::optional<bool> InspectorOverlay::mouse_begin_resize(const MouseGesture& g) {
+    const Point pos = g.pos;
+    const MouseEvent& event = g.event;
+    const bool is_press = g.is_press;
 
     // Hand-off from selection to drag: if drag-handles
     // mode is enabled, a view is selected, and the press lands on a
@@ -2098,6 +2149,13 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             return true;  // consume the press; subsequent moves are ours
         }
     }
+    return std::nullopt;  // declined — the next handler looks
+}
+
+std::optional<bool> InspectorOverlay::mouse_active_move(const MouseGesture& g) {
+    const Point pos = g.pos;
+    const bool is_drag_tick = g.is_drag_tick;
+    const bool is_release = g.is_release;
 
     // ── Drag-to-move gesture state machine ─────────────────────────
     // Same press/move/release convention as the resize machine: while a
@@ -2321,6 +2379,13 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             return true;  // consume the move event
         }
     }
+    return std::nullopt;  // declined — the next handler looks
+}
+
+std::optional<bool> InspectorOverlay::mouse_begin_move(const MouseGesture& g) {
+    const Point pos = g.pos;
+    const MouseEvent& event = g.event;
+    const bool is_press = g.is_press;
 
     // Hand-off from selection to move: if dragging mode is enabled,
     // a view is selected, and the press lands on the view's BODY (not a
@@ -2389,7 +2454,12 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         if (move_float_) seed_move_origin(selected_);
         return true;  // consume the press; subsequent moves are ours
     }
-    move_refused_grid_ = false;
+    return std::nullopt;  // declined — the next handler looks
+}
+
+std::optional<bool> InspectorOverlay::mouse_panel(const MouseGesture& g) {
+    const Point pos = g.pos;
+    const bool is_press = g.is_press;
 
     // Check if mouse is in the panel area
     if (point_in_panel(pos)) {
@@ -2401,7 +2471,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         // the cursor has left the view area.
         alt_hover_target_ = nullptr;
 
-        if (event.is_down) {
+        if (is_press) {
             // Clicks on the semantic-knob controls / send-to-agent field at the
             // top of the tweaks panel. Checked first so a knob or field click
             // never falls through to a tweak-row icon or tree selection. The hit
@@ -2533,12 +2603,21 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         }
         return true;  // consume all panel events
     }
+    return std::nullopt;  // declined — the next handler looks
+}
+
+std::optional<bool> InspectorOverlay::mouse_select(const MouseGesture& g) {
+    const Point pos = g.pos;
+    const MouseEvent& event = g.event;
+    const bool is_press = g.is_press;
+    const bool is_drag_tick = g.is_drag_tick;
+    const bool is_release = g.is_release;
 
     // Clicking outside the panel while editing commits the open edit
     // (matches the blur-to-commit convention of the spec). We do NOT
     // consume the click — the user is presumably selecting a different
     // view in the canvas, which should proceed normally.
-    if (event.is_down && !editing_field_.empty()) {
+    if (is_press && !editing_field_.empty()) {
         commit_field_edit();
     }
 
@@ -2561,8 +2640,13 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         // mid-edit hover were allowed to move selected_, the edit would commit
         // to the wrong node (or a no-longer-valid target). follows_focus mode
         // is already safe here because it never chases the pointer.
+        // A pure hover-move only: neither press, drag tick, nor release, so
+        // an explicit-phase drag begun on empty canvas never re-selects
+        // mid-drag. In the state-CHANGED convention this reduces to the old
+        // !event.is_down test for a fresh (no active gesture) event.
         if (selection_mode_ == SelectionMode::follows_mouse &&
-            !event.is_down && !event.isAltDown() && !is_editing()) {
+            !is_press && !is_drag_tick && !is_release && !event.isAltDown() &&
+            !is_editing()) {
             selected_ = hit;
         }
     }
@@ -2609,7 +2693,32 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         return true;
 
     // Hover events: don't consume — let normal hover effects work
-    return false;
+    return std::nullopt;  // declined: the dispatcher reads this as "not consumed"
+}
+
+// Mouse-event modality precedence. Each handler either CONSUMES the event
+// (its optional holds what handle_mouse_event returns) or declines and lets the
+// next one look. THE ORDER IS THE CONTRACT: it is what makes the text tool beat
+// the eyedropper, an in-flight gesture beat a fresh press, and the panel beat the
+// canvas. Each handler documents why it sits where it does; do not reorder them
+// to make a new feature fit.
+bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
+    if (!active_) return false;
+
+    const MouseGesture g = resolve_mouse_gesture(event);
+
+    if (auto r = mouse_text_tool(g)) return *r;
+    mouse_zoom_loupe(g);  // passive: the loupe records the cursor, never consumes
+    if (auto r = mouse_eyedropper(g)) return *r;
+    if (auto r = mouse_active_resize(g)) return *r;
+    if (auto r = mouse_begin_resize(g)) return *r;
+    if (auto r = mouse_active_move(g)) return *r;
+    if (auto r = mouse_begin_move(g)) return *r;
+    // No move began this event, so no grid refusal stands.
+    move_refused_grid_ = false;
+    if (auto r = mouse_panel(g)) return *r;
+    // The canvas fallback always answers.
+    return mouse_select(g).value_or(false);
 }
 
 bool InspectorOverlay::point_in_panel(Point p) const {

@@ -1,6 +1,6 @@
 ---
 name: audio-harness
-description: Prove and debug what a Pulp processor actually emits — the audio observability harness (signal generators, metrics, assertions, RenderScenario, effect contracts) plus the offline Audio Doctor analyzers (magnitude/frequency response, THD/THD+N). TRIGGER on phrases like "is there sound / no audio / I hear nothing", "does this filter/compressor/synth/delay produce the right signal", "prove the DSP / prove the contract", "measure the frequency response", "what's the THD / is it distorting / aliasing", "render a test tone and assert", "audio regression", "64-frame works but 128 is silent", "sample-rate change pitch-shifted it", "describe what's in this buffer", "audio doctor", "magnitude response curve", "compare before/after a DSP refactor". Test/tool layer over HeadlessHost — deterministic, no audio device, no speakers. Off the realtime thread entirely.
+description: The measurement surface for ALL Pulp DSP and audio-pipeline work — read it BEFORE writing or gating DSP, not only when something already sounds wrong. Covers the C++ harness (signal generators, metrics, assertions, RenderScenario, contracts), the offline Audio Doctor (magnitude/frequency response, THD/THD+N), and their Python sibling the Audio Quality Lab (tools/audio/quality-lab — null residual + alignment, LTAS log-spectral distance, spectral flux/centroid, HNR, Theil-Sen drift slope, Kaiser-sinc resampling, license-guarded corpus, regression-net ratchet). TRIGGER on AUTHORING work — "build/design an oscillator/filter/synth/effect", "add a DSP module", "what should the acceptance gate be", "how do I measure aliasing / anti-aliasing / alias floor", "null against a reference", "is this DSP correct", "choose a tolerance", "golden/regression corpus for audio", "measure drift or jitter", "A/B two renders" — AND on DEBUGGING work — "is there sound / no audio / I hear nothing", "does this filter/compressor/synth/delay produce the right signal", "prove the DSP / prove the contract", "measure the frequency response", "what's the THD / is it distorting", "render a test tone and assert", "audio regression", "64-frame works but 128 is silent", "sample-rate change pitch-shifted it", "describe what's in this buffer", "audio doctor", "compare before/after a DSP refactor". Reach for this BEFORE hand-rolling any FFT, null test, alias measurement, pitch tracker, or golden-render script — most of it already exists in one of the two lanes. Test/tool layer over HeadlessHost — deterministic, no audio device, no speakers. Off the realtime thread entirely.
 ---
 
 # Audio harness (observability + validation)
@@ -10,10 +10,24 @@ Pulp's agent-first way to turn "I can't hear it" / "does this sound right?" into
 debugger. You are reading this skill because you need to prove, measure, debug, or
 regression-guard the audio a Pulp `Processor` emits.
 
-Everything here is the **test/tool layer** (`test/support/audio_*`), driven by
+Everything here is the **test/tool layer**, driven by
 `pulp::format::HeadlessHost`. Nothing in this skill runs on the realtime audio
 thread — measurements analyze buffers that have already left `process()`. The
 realtime probe path is a separate concern (see *Roadmap*).
+
+It lives in **two** places, and the split is load-bearing:
+
+- **`tools/audio/analysis/`** — the `pulp::audio-analysis` lib (headers under
+  `<pulp/audio/analysis/…>`). The pure buffer/file analysis: metrics,
+  assertions, artifacts, and the FFT spectrum analyzers. It knows nothing about
+  `Processor`, so the shipped `pulp audio validate …` CLI links it directly
+  without pulling in any `test/` library.
+- **`test/support/`** — the layers that need a `Processor`: signal generators,
+  `RenderScenario`, contracts, and the scenario-driven Doctor wiring. Test-only;
+  links the lib above.
+
+Both use namespace `pulp::test::audio`, so the namespace does NOT tell you which
+target a symbol comes from — the include path does.
 
 ## When to rope this skill in
 
@@ -30,18 +44,37 @@ realtime probe path is a separate concern (see *Roadmap*).
 ## The layering (each layer builds only on the ones below — no back-edges)
 
 ```
-signal generators → metrics → assertions → artifacts → scenarios → contracts → doctor
+                    ── pulp::audio-analysis lib (also linked by the pulp CLI) ──
+metrics → assertions → artifacts → spectrum
+                    ── test/support (needs a Processor) ──
+signal generators → scenarios → contracts → doctor
 ```
 
-| Layer | Header (`test/support/`) | What it gives you |
-|-------|--------------------------|-------------------|
-| Generators | `audio_test_signals.hpp`, `audio_signal_generators.hpp` | Deterministic stimulus: sine/square/saw, impulse(+train), step, DC, multi-sine, swept sine, seeded white/pink/brown noise, stepped automation + MIDI note scripts. No clocks, no `random_device`. |
-| Metrics | `audio_metrics.hpp` | `analyze()` → `BufferMetrics`: peak, RMS, DC, NaN/Inf, clip count, silence-run; `estimate_frequency()` (zero-crossing, documented limits); `to_dbfs`; `summarize()` (agent-readable signal description). |
-| Assertions | `audio_assertions.hpp` | `assert_no_nan_inf / not_clipped / silent / not_silent / peak_between / rms_between / frequency_near / null_near / channels_independent` — each returns `CheckResult{passed,message}` with dBFS/Hz/cents messages, never a bare float. |
-| Artifacts | `audio_artifacts.hpp` | `BufferMetrics` → JSON (`schema_version` + provenance) for failing CI/local runs. |
-| Scenarios | `render_scenario.hpp` | `RenderScenario` builder over HeadlessHost (factory, sample rate, block size, channels, duration, input/MIDI/param scripts); `render()` → `ScenarioResult`. `run_matrix()` (SR × block sweeps) + `assert_block_partition_invariant()`. |
-| Contracts | `audio_contracts.hpp` | `AudioContract` — a named claim + scenario + accumulated `CheckResult`s; failures read `contract '<name>': ...`. Family helpers `expect_{passthrough,silence_preserved,tone,finite_and_unclipped}`. |
-| Doctor (offline) | `audio_doctor.hpp`, `audio_doctor_artifacts.hpp` | Plugin-Doctor-style measurements: `response_relative_to_input()` (magnitude/frequency response curve + `attenuation_db_at(hz)`), `measure_thd()` (THD / THD+N + harmonic breakdown), curve JSON artifacts. FFT lives test-side only — never `core/view`/runtime. |
+| Layer | Header | Target | What it gives you |
+|-------|--------|--------|-------------------|
+| Metrics | `<pulp/audio/analysis/audio_metrics.hpp>` | lib | `analyze()` → `BufferMetrics`: peak, RMS, DC, NaN/Inf, clip count, silence-run; `estimate_frequency()` (zero-crossing, documented limits); `to_dbfs`; `summarize()` (agent-readable signal description). |
+| Assertions | `<pulp/audio/analysis/audio_assertions.hpp>` | lib | `assert_no_nan_inf / not_clipped / silent / not_silent / peak_between / rms_between / frequency_near / null_near / channels_independent` — each returns `CheckResult{passed,message}` with dBFS/Hz/cents messages, never a bare float. |
+| Artifacts | `<pulp/audio/analysis/audio_artifacts.hpp>` | lib | `BufferMetrics` → JSON (`schema_version` + provenance) for failing CI/local runs. |
+| Spectrum | `<pulp/audio/analysis/audio_spectrum.hpp>` | lib | The FFT-bearing core of the Doctor, over **already-rendered buffers** (no `Processor`): `response_relative_to_input(input, output, …)`, `magnitude_spectrum_curve()`, `measure_thd(signal, …)`, plus the shared `ResponseCurve` / `ThdResult` / `Window` types. This is what the `pulp audio validate doctor` CLI runs over decoded WAVs — and what you call directly when your audio came from somewhere other than a scenario (e.g. rendered through a real format adapter). |
+| Doctor artifacts | `<pulp/audio/analysis/audio_doctor_artifacts.hpp>` | lib | `write_response_artifact()` / `write_thd_artifact()` + the JSON serializers; `kDoctorCurveSchemaVersion`. |
+| Latency evidence | `<pulp/audio/analysis/latency_evidence.hpp>` | lib | Delayed-null + impulse-marker latency policies as pure functions (see *Proving reported latency*). |
+| Generators | `"support/audio_test_signals.hpp"`, `"support/audio_signal_generators.hpp"` | test | Deterministic stimulus: sine/square/saw, impulse(+train), step, DC, multi-sine, swept sine, seeded white/pink/brown noise, stepped automation + MIDI note scripts. No clocks, no `random_device`. |
+| Scenarios | `"support/render_scenario.hpp"` | test | `RenderScenario` builder over HeadlessHost (factory, sample rate, block size, channels, duration, input/MIDI/param scripts); `render()` → `ScenarioResult`. `run_matrix()` (SR × block sweeps) + `assert_block_partition_invariant()`. |
+| Contracts | `"support/audio_contracts.hpp"` | test | `AudioContract` — a named claim + scenario + accumulated `CheckResult`s; failures read `contract '<name>': ...`. Family helpers `expect_{passthrough,silence_preserved,tone,finite_and_unclipped}`. |
+| Doctor (offline) | `"support/audio_doctor.hpp"` | test | The **scenario-driven** entry points: `response_relative_to_input(scenario, …)` and `measure_thd(scenario, …)` synthesize the stimulus, drive the `Processor`, and delegate the math to `audio_spectrum.hpp`. It re-exports that header's result types, so a test that includes it needs nothing else. |
+
+Two traps this table exists to prevent:
+
+- **`response_relative_to_input` and `measure_thd` are each overloaded across
+  both targets.** The scenario overloads (`audio_doctor.hpp`) drive a
+  `Processor` and synthesize their own stimulus, overriding the scenario's
+  input/duration. The buffer overloads (`audio_spectrum.hpp`) analyze audio you
+  already rendered and synthesize nothing. Same names, different layers — pick
+  by where your audio comes from.
+- **The heavy FFT lives in `pulp-audio-analysis` and is never linked into a
+  runtime/plugin build.** That is enforced by a CMake target boundary, so a
+  violation is a link error rather than a review comment. Do not add FFT code
+  anywhere else.
 
 Read `test/support/README.md` for the authoritative layering contract.
 
@@ -50,11 +83,19 @@ Read `test/support/README.md` for the authoritative layering contract.
 ```bash
 # Build + run the whole harness (Release — Debug is meaningless for DSP timing/levels)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(sysctl -n hw.ncpu) --target \
+tools/ci/governed-build.sh cmake --build build --target \
   pulp-test-audio-support pulp-test-render-scenario pulp-test-audio-contracts \
-  pulp-test-audio-doctor pulp-test-golden pulp-test-audio-matrix pulp-test-audio-tone-regression
+  pulp-test-audio-doctor pulp-test-adapter-audio-parity pulp-test-golden \
+  pulp-test-audio-matrix pulp-test-audio-tone-regression pulp-test-latency-contract
 ctest --test-dir build -R 'audio|golden|render|contract|doctor' --output-on-failure
 ```
+
+That ctest regex matches on test-case NAMES, so it is deliberately wide — it
+sweeps in several hundred unrelated `render`/`contract` cases from other
+subsystems. It is the right net when you want "did I break anything audio-
+shaped"; when you want just the harness, run the built binaries directly
+(`./build/test/pulp-test-audio-doctor`) or filter by tag (`-R` won't do tags —
+pass `'[doctor]'` to the binary itself).
 
 The `/audio-harness` slash command wraps this. JSON metric/curve artifacts (on failure or
 on demand) land under a temp `pulp-audio-metrics/` dir and are INFO-logged.
@@ -81,7 +122,7 @@ c.expect(expect_finite_and_unclipped(c.result()))
 REQUIRE(c.verify().passed);     // failure says `contract 'mylp.attenuates_8k': ...`
 ```
 
-Measure it like Plugin Doctor (offline Doctor):
+Measure it like Plugin Doctor (offline Doctor, scenario-driven):
 
 ```cpp
 auto curve = response_relative_to_input(sc, {50.0, 8000.0});
@@ -89,6 +130,46 @@ REQUIRE(curve.attenuation_db_at(8000.0) >= 20.0);   // "drops ≥20 dB at 8 kHz"
 auto thd = measure_thd(sc, /*fundamental_hz=*/999.0); // steady bin-coherent sine
 // thd.thd_percent(), thd.thd_plus_n, thd.harmonics[...]
 ```
+
+Measure audio that did NOT come from a scenario — e.g. rendered through a real
+format adapter, or decoded from a WAV. Drop to the buffer overloads in
+`audio_spectrum.hpp`; you supply the stimulus AND the render, so nothing is
+synthesized for you:
+
+```cpp
+#include <pulp/audio/analysis/audio_spectrum.hpp>
+const auto impulse  = /* your stimulus  */;
+const auto rendered = /* what came back */;
+const double checkpoints[] = {50.0, 1000.0, 8000.0};
+auto curve = response_relative_to_input(impulse.view(), rendered.view(),
+                                        48000.0, checkpoints, {.fft_length = 16384});
+```
+
+`test/test_adapter_audio_parity.cpp` is the worked example of driving the real
+adapter: it renders one Processor through `clap_process()` and through
+HeadlessHost and requires the bits to match.
+
+**Measure the path the code under test actually runs.** Driving `clap_process()`
+is not by itself proof that you measured the adapter. A `clap_process_t proc{}`
+leaves `out_events` null, and the whole output-parameter publication phase sits
+behind `if (out_events)` — so a test that never sets it renders audio through the
+adapter while silently skipping the param path, and stays green no matter how
+badly that path breaks. Before trusting an adapter measurement, check that the
+lines you care about are reachable from your fixture, then break them on purpose
+and confirm your test goes red.
+
+**Two things that will bite you when measuring an adapter path:**
+
+- **THD is blind to anything non-harmonic.** It sums energy at integer multiples
+  of the fundamental only. Chop each 256-frame block in half and you amplitude-
+  modulate the tone at 187.5 Hz; the sidebands land *between* harmonics, so THD
+  reads a serene −170 dB while the signal is visibly destroyed. `thd_plus_n`
+  counts every non-fundamental bin and reads ~0 dB (100%). Assert THD+N against
+  a stated floor, not just `thd_plus_n >= thd` — that comparison is a tautology
+  and proves nothing.
+- **Response and THD are both RATIOS, so they cannot see a broadband gain
+  error.** A wrong-by-0.5 dB adapter path passes every Doctor check. Level is a
+  null test's job.
 
 ## Discipline that keeps it trustworthy
 
@@ -99,8 +180,27 @@ auto thd = measure_thd(sc, /*fundamental_hz=*/999.0); // steady bin-coherent sin
   estimator, seed, sample rate, and tolerance *class*. State them in the test so a
   red is a real DSP change, not an analyzer artifact.
 - **Named tolerances**, never magic numbers — see the plan's Threshold Policy.
-- **Layering is one-way.** Doctor may use scenarios + FFT; nothing below may
-  include `audio_doctor`/`audio_contracts`.
+- **Layering is one-way.** Doctor may use scenarios + spectrum; nothing below
+  scenarios may include `audio_doctor`/`audio_contracts`, and the
+  `pulp::audio-analysis` lib may never depend on the test-only layers (it has no
+  `Processor`/scenario knowledge).
+- **Prove the assertion can fail.** A green measurement is not evidence until
+  you have seen it go red. Mutate the thing under test — drop the param event,
+  zero the output, route the id wrong — rebuild, and confirm the check you are
+  relying on actually turns red. This is cheap and it repeatedly catches
+  tolerances that are too loose to detect the bug they were written for: a
+  200 Hz lowpass check at 8 kHz looks decisive but still passes with the filter
+  left at its 1000 Hz default, because 8 kHz is ~36 dB down either way. Only the
+  1 kHz checkpoint separates them.
+- **Compiling a harness TU by hand? Copy `CXX_DEFINES`, not just `CXX_FLAGS`
+  and `CXX_INCLUDES`.** Both live in the target's `build/**/flags.make`.
+  Adapter structs are gated on defines (`PULP_CLAP_GUI` adds members to
+  `PulpClapPlugin` — the header says so at the top), so a TU built without them
+  disagrees with the prebuilt `libpulp-format.a` about the struct's size and
+  `clap_init` writes off the end of your object. The symptom is a
+  `__stack_chk_fail` abort *after* every assertion has already printed PASSED,
+  and it appears/disappears with unrelated stack layout changes — it will read
+  as a product bug and it is not one.
 
 ## Live inspection (Audio Inspector window) — landed
 
@@ -638,6 +738,55 @@ prove `0 == 0` is ceremony. This is for DSP whose latency is *derived* — FFT
 size, partition scheme, lookahead window, oversampling ratio — because that is
 the number a refactor silently changes. User-facing rationale, including when
 NOT to use it: `docs/guides/latency-proof.md`.
+
+## The spectral analyzers fail closed — a refusal is the answer, not a bug
+
+`measure_thd`, `measure_aliasing`, and `magnitude_spectrum_curve` throw rather
+than return a number they cannot stand behind: silence (no fundamental to be
+relative to), a capture shorter than `fft_length` (zero-padding would measure
+the truncation edge), a fundamental at or above Nyquist, and — the one that
+surprises people — an alias series that never reaches Nyquist. **Size
+`num_harmonics` from the sample rate**: the default 64 models no alias site at
+all below ~375 Hz at 48 kHz, and that used to read as *clean* on a maximally
+aliased saw, because "no aliases among the zero places I looked" is technically
+true. Through the CLI a refusal is exit 2, distinct from a failed check.
+
+Every one of those paths previously returned a confident number that passed a
+gate. If a refusal surprises you, the input is usually wrong — not the tool.
+
+## Measuring an oscillator's pitch — `estimate_pitch`, not `estimate_frequency`
+
+`estimate_frequency` (audio_metrics.hpp) is a zero-crossing detector and its own
+doc disclaims harmonically-dense material. A real oscillator IS dense: on a
+bright tone it locks to a harmonic (measured ~1900 cents high on a formant
+waveform), so it cannot measure a VCO's drift or a DCO's few-cent quantization
+error. Reach for **`estimate_pitch` / `track_pitch`** (`pitch_track.hpp`)
+instead: a coarse `magnitude_spectrum_curve` peak seeds a golden-section refine
+over the shipped `fit_tone` projection, so it is leakage-free and sub-cent
+(<0.002 cent on a clean tone, coherent or not) and FFT-backend-stable. It
+**refuses** silence, noise, and a missing fundamental rather than octave-guessing
+— honor the confidence gate. `track_pitch` gives the `f0(t)` trajectory; the
+drift/jitter statistics over it (Allan deviation, Theil-Sen slope) stay in the
+Quality Lab per the C++/Python split. A steep glide needs the window short
+relative to the sweep, and a fully flat missing-fundamental comb is refused, not
+solved — both fail closed.
+
+## Never gate on `detection_floor_db`
+
+It is a ~2σ bound that assumes a **white** residual. Aliases are discrete tones,
+so it is wrong exactly where it is most tempting, and asserting it is the
+analyzer grading its own homework. Its one legitimate use is deciding whether a
+reading is conclusive at all — a gate means something only while the measured
+value clears the floor.
+
+**Prove a floor with a negative control**: a fixture whose alias content is zero
+by construction must read collapsed, and injected impurities of known level must
+come back at that level. Prefer `tone_residual_db` (least-squares projection) to
+reading a windowed spectrum near a loud tone — it sidesteps leakage entirely.
+Window floors are measured, not assumed: `flat_top` is amplitude-accurate at
+about −93 dB with a flat skirt and **cannot** gate −100 dBc; only `kaiser` at
+β=14 resolves it, and even then not at bins 1–3, where the DC-removal pedestal
+dominates regardless of window.
 
 The schema and both evaluators live in `pulp::audio-analysis`
 (`latency_evidence.hpp`) as pure functions over buffers, so the test harness, the

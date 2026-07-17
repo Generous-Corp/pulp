@@ -1537,8 +1537,25 @@ pulp audio validate doctor <file.wav> [--thd] [--response f1,f2,...] [--fundamen
 pulp audio validate compare <a.wav> <b.wav> [--mode null|spectral] [--tolerance <dbfs>]
 pulp audio validate assert <audio-run-dir-or-assertions.json>
 pulp audio compare <reference.wav> <candidate.wav> [--profile tonal-balance|added-hf|noise-roughness|graininess|stereo-width|transient-integrity] [--reference-role peer|golden] [--align none|latency|varispeed:R|stretch:R|pitch:S|ratio:auto] [--threshold <t>] [--json report.json]
+pulp audio plugin-inspect --plugin <bundle> [--format clap|vst3|au|auv3|lv2]
 pulp audio render --plugin <bundle> --out <file.wav> (--duration-ms <n> | --duration-frames <n>) [options]
 ```
+
+**Exit codes** (`audio validate`, matching `audio compare`):
+
+| Code | Meaning |
+|------|---------|
+| `0` | The measurement ran and passed. |
+| `1` | An error, or a check that ran and failed. |
+| `2` | The analyzer refused: it could not measure this input, and stderr names why. |
+
+`2` is distinct from `1` on purpose. "Your audio is bad" and "I could not
+measure your audio" call for different responses from a script, and the
+analyzers refuse rather than answer whenever the input would make the number
+meaningless — silence has no fundamental to be relative to, a capture shorter
+than the FFT would measure its own truncation edge, and a fundamental at or
+above Nyquist has no harmonics below it. Reading a refusal as a failure is the
+same mistake as reading it as a pass.
 
 **Subcommands**:
 
@@ -1555,13 +1572,18 @@ pulp audio render --plugin <bundle> --out <file.wav> (--duration-ms <n> | --dura
 | `validate compare` | Sample-residual (null) verdict between two WAVs; exits nonzero past tolerance. `--mode spectral` currently applies a looser default tolerance to the same residual (a true spectral-distance metric is a later slice) |
 | `validate assert` | Re-check a stored `assertions.json` (or an `audio-run/` dir holding one); exits nonzero on any failing assertion |
 | `compare` | Advisory, agent-facing before/after judgment between two WAVs (measure → compare → judge). Delegates to the opt-in [Audio Quality Lab](../guides/audio-quality-lab.md) tool (no DSP links into the CLI); level-matches, runs one `--profile` axis (`tonal-balance` \| `added-hf` \| `noise-roughness` \| `graininess` \| `stereo-width` \| `transient-integrity`), prints a typed evidence envelope + verdict. Exits nonzero **only** when it could not measure (invalid), never for a judgment — distinct from the pass/fail `validate compare` gate. Prints an install hint + exit 1 when the tool is absent |
-| `render` | Offline scenario render of a plugin bundle through the host slot (no DAW, no audio device): load `--plugin`, drive it from declarative flags, write a WAV, and emit metrics JSON matching `validate summarize --json`. `--latency-report` additionally **proves** the plugin's reported latency against the delay actually in its audio |
+| `plugin-inspect` | Load a third-party plugin in a disposable worker and emit `pulp.audio.plugin-inspect.v1` JSON: identity, buses, latency, tail, and every host-visible parameter's ID, plain range, current/default value, and flags |
+| `render` | Render a plugin in a disposable worker (no DAW, audio device, or sound): warm up, apply initial state, settle, drive it from declarative flags, append a tail, and write int16/int24/float32 WAV. `--latency-report` additionally **proves** the plugin's reported latency against its audio |
 
 Useful `excerpt-find` flags: `--text`, `--input`, `--model`, `--recursive`, `--top`, `--window-ms`, `--hop-ms`, `--min-score`, `--max-candidates-per-file`, `--bundle-out`, `--dry-run`. Inputs are WAV files or directories of WAV files today; unsupported files are reported as skipped. The `model`/`excerpt-find`/`read-bundle` subcommands accept `--json` for machine-readable output.
 
 The `validate` subcommands are the offline analysis CLI over captured audio. They analyze decoded WAV files and re-check `assertions.json` manifests (or directories containing one) with the reusable `pulp::audio-analysis` library — they do **not** instantiate a plugin (the generic CLI is not tied to a `Processor`; controlled-stimulus render is the test-side `RenderScenario`). The `assertions.json` schema is a `{"schema_version", "assertions": [...]}` document where each entry names a `check` (`not_silent`, `silent`, `no_nan_inf`, `peak_below`, `frequency_near`), a `file` (relative to the JSON), and the check's named tolerance.
 
-`render` is the offline counterpart that *does* load a plugin: it takes an explicit `--plugin <bundle>` (the generic CLI has no registered factory, so a bundle is the only render source), drives it through `pulp::host::PluginSlot` block-by-block from declarative flags, writes an int16 WAV, and emits the same `pulp::audio-analysis` metrics JSON as `validate summarize --json` (`--manifest <file>` to a file, `--json` to stdout). Drive it with `--input-signal silence|sine:<hz>[,<dbfs>]|noise[:<seed>]|impulse[:<frame>]` or `--input <file.wav>` (used as-is at `--sample-rate`; no resampling — a rate mismatch shifts pitch), `--param <id>=<value>[@frame]`, and `--midi note:<note>,<vel>,<on>[,<off>]`. **`--param` values are in the PLAIN parameter domain** (the parameter's native `min..max`), **not normalized `[0,1]`** — matching `PluginSlot::set_parameter` / `ParameterEvent::value`; an `@frame` suffix delivers the change **sample-accurately** at that frame. The per-block parameter queue is forwarded straight to `PluginSlot::process`, which every loader applies at the event's sample offset — CLAP (`clap_event_param_value` at `header.time`), VST3 (`IParameterChanges` add-point), AU (`AudioUnitScheduleParameters` buffer offset); LV2 applies it block-rate, which is LV2's control-port contract. (A plugin that itself reads its parameters once per block will still step at block boundaries — that is the plugin's own rate, not the CLI's.) The render uses the `--in-channels`/`--out-channels` bus widths you specify (like `pulp host`); use `--in-channels 0` for instrument/no-input renders, and use at least one input channel for `--input` or sine `--input-signal`. The metrics JSON is computed from the float render — it matches the int16 WAV except below the ~−96 dBFS int16 floor, and at clipping the command warns that the float peak exceeds the hard-clamped file.
+`plugin-inspect` and `render` load arbitrary vendor code only in disposable child processes with bounded timeouts. This is crash/hang containment, not a security sandbox for malicious software. `plugin-inspect` is the discovery step; its parameter IDs and plain-domain ranges feed `render`.
+
+`render` takes an explicit `--plugin <bundle>`, drives it through `pulp::host::PluginSlot` block-by-block, writes a WAV, and emits the same `pulp::audio-analysis` metrics JSON as `validate summarize --json` (`--manifest <file>` to a file, `--json` to stdout). Drive it with `--input-signal silence|sine:<hz>[,<dbfs>]|noise[:<seed>]|impulse[:<frame>]` or `--input <file.wav>`, `--param <id>=<value>[@frame]`, and `--midi note:<note>,<vel>,<on>[,<off>]`. Use `--warmup-ms`, repeatable `--initial-param <id>=<value>`, and `--settle-ms` when asynchronous initialization or parameter smoothing must finish before capture; AU defaults are conservative but configurable. `--tail-ms` continues with silent input, and `--wav-format float32` avoids analysis quantization.
+
+**`--param` and `--initial-param` values are in the PLAIN parameter domain** (the parameter's native `min..max`), **not normalized `[0,1]`**. An `@frame` suffix on `--param` delivers the change sample-accurately (LV2 control ports remain block-rate by format contract). Use `--in-channels 0` for instruments.
 
 #### Proving reported latency (`--latency-report`)
 
@@ -1797,6 +1819,8 @@ The command is **vendor-agnostic**: framework identity is runtime DATA loaded fr
 ```bash
 pulp import detect ./MyProject                                  # Rank candidates; print install hint
 pulp import ./MyProject                                         # Alias for detect
+pulp import install https://example.com/owner/importer.git      # Clone an add-on importer + register it
+pulp import uninstall <importer-id>                             # Remove an installed importer
 pulp import inspect --from <framework> ./MyProject -o ir.json   # Resolve importer → SPI analyze → ProjectIR
 pulp import inspect --from <framework> ./MyProject --importer-cmd "python3 spi.py"
 pulp import emit --from <framework> ./MyProject --output ./scaffold
@@ -1807,8 +1831,14 @@ Subcommands:
 | Subcommand | Description |
 |------------|-------------|
 | `detect <dir>` | Scan the directory against the known-frameworks markers and print ranked candidates (framework id + confidence + evidence) plus the install hint for the top match. Works with **no importer installed**. |
+| `install <url>` | Clone an add-on importer from a git URL with the user's own git credentials, read its `tool.json` + terms **from the cloned repo** (never from anything the SDK ships), enforce the SPI version window, run the accept-to-run terms gate, and install the tree under `~/.pulp/tools/<id>/` with an install record. Detection merges the installed importer's own `known-frameworks.json` on the next `pulp import detect`. A private repo works exactly when the user can `git clone` it. |
+| `uninstall <id>` | Remove an installed importer by id: deletes the install tree under `~/.pulp/tools/<id>/`, the install record under `~/.pulp/importers/`, and any installed skill. |
 | `inspect --from <fw> <dir>` | Resolve the importer (tool registry or `--importer-cmd`) and run its SPI `analyze` verb to produce a ProjectIR. When no importer is resolvable, prints the install hint and exits non-zero. ProjectIR can include `integration_requirements` for optional packages, SDK/provider options, and source assets the scaffold needs to preserve. |
 | `emit --from <fw> <dir> --output <out>` | Resolves the importer, runs its SPI `analyze` then `emit` verbs to get an **EmissionManifest**, then the **SDK writes** a buildable Pulp migration scaffold under `<out>`. The importer only proposes files (generated/stub carry inline content; verbatim portable-core copies and safe source assets carry an absolute `copy_from`); the SDK materialises them, runs a clean-room output scan over every generated file, and writes `migration_status.json` + a `.pulp-import-provenance.json` marker. Skewed/symmetric source parameter curves emit as shaped `ParamRange`s (skew + symmetric fields), no longer downgraded to linear. |
+
+**`install` flags:** `--accept-importer-terms` accepts the terms non-interactively for CI (still recorded under `~/.pulp`); `--force` reinstalls even when an up-to-date record already exists.
+
+**Privacy invariant.** The SDK only ever knows the URL it was handed. A clone that fails is surfaced with git's own error plus a single URL-agnostic message ("could not fetch importer from the provided URL"). The SDK never states, infers, or records whether a given repository exists, or whether it is public or private — a user with access and a user without get the same SDK-authored failure text. This is what lets an importer stay entirely private: installing one by URL reveals nothing to anyone without the URL and the credentials to fetch it.
 
 `inspect` / `emit` flags:
 

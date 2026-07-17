@@ -8,6 +8,57 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06780"></a>
+## [0.678.0] - 2026-07-16
+
+- ci(watchdog): report a dead runner lane by queue age, off-fleet ([#6176](https://github.com/danielraffel/pulp/pull/6176))
+
+<a id="v06761"></a>
+## [0.676.1] - 2026-07-16
+
+- docs(skill): friction-report — retarget the confirm-the-failure cross-reference ([#6180](https://github.com/danielraffel/pulp/pull/6180))
+
+<a id="v06760"></a>
+## [0.676.0] - 2026-07-16
+
+- refactor(render): delete GPU graph renderers that contain no GPU code ([#6165](https://github.com/danielraffel/pulp/pull/6165))
+- fix(import-design): correct the stale --validate placeholder warning ([#6160](https://github.com/danielraffel/pulp/pull/6160))
+
+<a id="v06750"></a>
+## [0.675.0] - 2026-07-16
+
+- feature/ccache durable fix ([#6150](https://github.com/danielraffel/pulp/pull/6150))
+- build(examples): fail the reordered-designator bug on Clang, at PR time ([#6149](https://github.com/danielraffel/pulp/pull/6149))
+- docs(migrations): record the v0.666.0 Oversampler Biquad behavior change ([#6148](https://github.com/danielraffel/pulp/pull/6148))
+- docs: add contributor-agent review contract + CONTRIBUTING pointer ([#6147](https://github.com/danielraffel/pulp/pull/6147))
+- ci(git): harden safe-push optional arguments ([#6142](https://github.com/danielraffel/pulp/pull/6142))
+
+<a id="v06740"></a>
+## [0.674.0] - 2026-07-15
+
+- feat(audio): add isolated third-party plugin interrogation ([#6138](https://github.com/danielraffel/pulp/pull/6138))
+- ci: restore docs and Codecov gates ([#6143](https://github.com/danielraffel/pulp/pull/6143))
+- ci: take example format-validators off the required gate; add example-validation lane + test-lanes guide ([#6135](https://github.com/danielraffel/pulp/pull/6135))
+- test(coreaudio): gate input-only device opens behind an opt-in env ([#6124](https://github.com/danielraffel/pulp/pull/6124))
+- test(canvas): cover Path, AffineTransform, and view Rect geometry ([#6141](https://github.com/danielraffel/pulp/pull/6141))
+
+<a id="v06730"></a>
+## [0.673.0] - 2026-07-15
+
+- feat(canvas): close image placement + a headless waveform-overview view ([#6140](https://github.com/danielraffel/pulp/pull/6140))
+
+<a id="v06720"></a>
+## [0.672.0] - 2026-07-15
+
+- feat(view): extend Notify to widget value-setters across core/view ([#6139](https://github.com/danielraffel/pulp/pull/6139))
+
+<a id="v06710"></a>
+## [0.671.0] - 2026-07-15
+
+- feat(import): add `pulp import install <url>` / `uninstall <id>` ([#6129](https://github.com/danielraffel/pulp/pull/6129))
+- fix/fastmath tanh provenance ([#6136](https://github.com/danielraffel/pulp/pull/6136))
+- fix/main test baseline ([#6137](https://github.com/danielraffel/pulp/pull/6137))
+
 <a id="v06701"></a>
 ## [0.670.1] - 2026-07-15
 
@@ -6409,6 +6460,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.678.0]: https://github.com/danielraffel/pulp/releases/tag/v0.678.0
+[0.676.1]: https://github.com/danielraffel/pulp/releases/tag/v0.676.1
+[0.676.0]: https://github.com/danielraffel/pulp/releases/tag/v0.676.0
+[0.675.0]: https://github.com/danielraffel/pulp/releases/tag/v0.675.0
+[0.674.0]: https://github.com/danielraffel/pulp/releases/tag/v0.674.0
+[0.673.0]: https://github.com/danielraffel/pulp/releases/tag/v0.673.0
+[0.672.0]: https://github.com/danielraffel/pulp/releases/tag/v0.672.0
+[0.671.0]: https://github.com/danielraffel/pulp/releases/tag/v0.671.0
 [0.670.1]: https://github.com/danielraffel/pulp/releases/tag/v0.670.1
 [0.670.0]: https://github.com/danielraffel/pulp/releases/tag/v0.670.0
 [0.669.1]: https://github.com/danielraffel/pulp/releases/tag/v0.669.1

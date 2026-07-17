@@ -125,17 +125,34 @@ window. `StandaloneConfig::headless`, `PULP_HEADLESS`, `PULP_TEST_MODE`,
 `run_with_editor()` fails before creating the host so tests cannot park a
 hidden live window forever.
 
-The `--audio-probe-json` / `PULP_AUDIO_PROBE_JSON` path (gated by
-`PULP_ENABLE_AUDIO_PROBES`) is a SECOND headless one-shot that reuses the same
-`screenshot_frame_delay` counter (`detail::DelayedAction`): after the
-delay it writes `output_probe().latest()` as JSON via the pure
-`audio::audio_probe_snapshot_to_json()` helper, then closes the host. When a
-screenshot is ALSO requested the JSON write rides the screenshot `capture_fn`
-(same frame, before the window closes); when only the JSON dump is requested it
-drives a dedicated `DelayedAction` so no fake PNG bytes or cleared screenshot
-path are involved. So a headless run without a screenshot path is valid as long
-as `audio_probe_json_path` is set — don't tighten the "headless requires
-screenshot" guard to also reject it.
+The audio dumps (`audio_probe_json_path`, `audio_scope_json_path`,
+`audio_capture_wav_path`, `audio_capture_rolling_path`; gated by
+`PULP_ENABLE_AUDIO_PROBES`) are a SECOND headless one-shot family that reuses
+the same `screenshot_frame_delay` counter (`detail::DelayedAction`): after the
+delay the mode's writer runs — probe-json writes `output_probe().latest()` via
+the pure `audio::audio_probe_snapshot_to_json()` helper — then the host closes.
+No fake PNG bytes or cleared screenshot path are involved; a dump has no image
+to validate, so the plain `DelayedAction` drives it with the write as its side
+effect. A headless run without a screenshot path is valid as long as ANY of the
+four is set (`standalone_headless_requires_screenshot` accepts all four) — don't
+tighten the "headless requires screenshot" guard to reject them.
+
+**The two arming paths do not compose alike, and only one of them is plural.**
+With a screenshot, every dump writer is called from the screenshot `capture_fn`
+(same frame, before the window closes) and each no-ops on an empty path — so any
+combination of dumps works. Without a screenshot, the modes are a table in
+`run_with_editor()` and the loop `break`s after arming the FIRST non-empty entry;
+the rest are dropped silently, no error. Table order (probe-json, scope-json,
+capture-wav, capture-rolling) IS the precedence. Two consequences:
+
+- A headless run asking for two dumps at once yields one file. Pass a screenshot
+  path too if you need both.
+- **A new dump mode is a new row in that table, not a branch beside it.** Each
+  arming wraps `pre_screenshot_idle` — not whatever callback is currently
+  installed — and hands the result to `WindowHost::set_idle_callback`, which
+  holds ONE callback. A second arming therefore overwrites the first one's
+  one-shot rather than chaining after it, and the earlier dump never writes.
+  The `break` is what keeps that unreachable.
 
 ## AU v3 controller lifecycle — runs on XPC queue, NOT main (Phase 3.5)
 
@@ -441,7 +458,7 @@ cp core/view/include/pulp/view/widget_bridge.hpp \
 rm -rf "$CONSUMER/build/CMakeFiles/<your-target>.dir"
 
 # Rebuild the consumer from clean
-cmake --build "$CONSUMER/build" --target <your-target> -j
+tools/ci/governed-build.sh cmake --build "$CONSUMER/build" --target <your-target>
 ```
 
 When you `pulp upgrade --install` this is automatic because the SDK
@@ -1106,6 +1123,13 @@ this boundary. Parameter text and custom state have matching containment in
 - `core/format/src/view_bridge.cpp` — implementation
 - `core/format/include/pulp/format/processor.hpp` — `create_view`,
   `view_size`, `on_view_*`
+- `core/format/include/pulp/format/plugin_descriptor.hpp` — the `ViewSize`
+  struct and `view_size_from_design(...)`. The editor *hooks* stay on
+  `Processor`; only their value type lives here. `processor.hpp` includes this
+  header, so plugins and adapters that include `processor.hpp` reach `ViewSize`
+  unchanged — that include is the compatibility contract, not an incidental
+  one. The same split moved `ProcessContext` to `process_context.hpp` and
+  `PrepareContext` to `prepare_resources.hpp`.
 - `core/format/include/pulp/format/remote_view_session.hpp` — remote session API
 - `core/view/include/pulp/view/editor_bridge.hpp` — EditorBridge API
 - `core/view/src/editor_bridge.cpp` — EditorBridge implementation
@@ -1478,3 +1502,22 @@ Related: an element re-keyed at runtime with `set_element_param_key()` now
 re-binds. It previously kept driving the parameter it was first bound to, so a
 view that re-keyed on a preset change was quietly writing to the **wrong
 parameter**.
+
+## Widget-bridge JS dispatch and CSS color parsing have one home each
+
+**Dispatch:** all `__dispatch__` event emission goes through
+`core/view/src/widget_bridge/bridge_dispatch.{hpp,cpp}` — one `safe_dispatch_eval` (the
+alive-flag overload) plus `dispatch_event(alive, engine, id, event_name, payload_expr)`.
+It ALWAYS routes the target id through `js_string_literal`. Do not hand-build
+`"__dispatch__('" + id + "', ...)"` by string concatenation: that pattern was copy-pasted
+across ~40 call sites with *inconsistent* escaping, so an id containing a quote or
+backslash broke out of the JS string literal and the exception was silently swallowed by
+the surrounding catch. New events call `dispatch_event`.
+
+**CSS color:** the bridge's full CSS-Color-4 parser is
+`parse_bridge_css_color(std::string_view)` in `widget_bridge/css_color.hpp` — deliberately
+NOT named `parse_css_color`, because `css_gradient.hpp` already declares a *weaker*
+`pulp::view::parse_css_color(const std::string&)` (hex/rgb/rgba/transparent only — no named
+colors, no hsl). Naming them alike makes `std::string` call sites silently bind to the weaker
+overload and regress named/hsl handling. Keep the names distinct until the two parsers are
+deliberately converged.

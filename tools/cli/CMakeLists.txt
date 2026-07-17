@@ -45,6 +45,7 @@ add_executable(pulp-cli
     shell_redirect.cpp
     tartci_lease.cpp
     cli_sdk.cpp
+    cli_fs_util.cpp
     cli_doctor_helpers.cpp
     cmd_build.cpp
     cmd_config.cpp
@@ -68,8 +69,10 @@ add_executable(pulp-cli
     cmd_validate.cpp
     cmd_sdk.cpp
     cmd_audio.cpp
+    cmd_audio_plugin_common.cpp
     cmd_audio_render.cpp
     cmd_audio_render_parse.cpp
+    cmd_audio_plugin_inspect.cpp
     cmd_audio_validate.cpp
     cmd_audio_compare.cpp
     cmd_version.cpp
@@ -84,6 +87,7 @@ add_executable(pulp-cli
     import_emit.cpp
     import_emit_scan.cpp
     import_terms.cpp
+    importer_git_install.cpp
     content_commands.cpp
     kit_commands.cpp
     cmd_pr.cpp

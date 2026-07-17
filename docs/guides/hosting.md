@@ -1,5 +1,9 @@
 # Hosting Plugins in Pulp
 
+> **Looking to analyze or compare a plugin?** Use the
+> [Plugin Interrogation guide](plugin-interrogation.md) for the ready-to-use
+> CLI and MCP workflow. This guide covers embedding the C++ hosting APIs.
+
 Pulp can both *be* a plugin and *host* plugins. The hosting APIs live in
 `pulp::host` and let you load VST3 / AU / CLAP / LV2 binaries, wire them
 into a DAG, and process audio through the chain.
@@ -8,9 +12,13 @@ Current scope: CLAP, VST3, AU, and LV2 have real `PluginSlot` loaders
 when the matching SDK or platform support is compiled in. Each loader can
 open a bundle, prepare it, and process audio through the common host
 interface. Feature depth still varies by format: parameter, MIDI, state,
-editor, and extension support are not identical across loaders.
+editor, and extension support are not identical across loaders. In
+particular, **instruments are hostable through AU, VST3, and CLAP but not
+LV2** — see [Limits](#limits).
 `SignalGraph` topology, block processing, automation routing, and delay
 compensation are implemented over the same `PluginSlot` interface.
+The VST3 and AU loaders are not stubs: both instantiate and process third-party
+plug-ins in supported desktop builds.
 
 ## Quick start
 
@@ -95,8 +103,8 @@ cmake --build build --target pulp-plugin-host-demo
   --path "/Library/Audio/Plug-Ins/VST3/MyPlugin.vst3"
 ```
 
-An Audio Unit has no bundle path, so select it by the component identity printed
-by `--list`:
+AudioComponent enumeration may return an Audio Unit descriptor without a bundle
+path, so the demo can select it by the component identity printed by `--list`:
 
 ```bash
 ./build/examples/plugin-host-demo/pulp-plugin-host-demo --id TYPE:SUBT:MANU
@@ -105,6 +113,62 @@ by `--list`:
 This example loads the plug-in in-process and is meant for trusted local
 testing. An unattended analyzer should put the load / prepare / process / state
 probes behind a child-process timeout, as noted above.
+
+## Headless Audio Unit initialization
+
+Some licensed Audio Units finish initialization asynchronously using XPC,
+timers, or dispatch-main callbacks. A GUI application naturally services those
+events. An offline analyzer or renderer must do so explicitly on its process
+main thread:
+
+```cpp
+#include <pulp/events/message_loop_integration.hpp>
+
+#include <thread>
+
+using namespace std::chrono_literals;
+
+// After load/prepare, and before reading or writing parameters:
+const auto deadline = std::chrono::steady_clock::now() + 500ms;
+while (std::chrono::steady_clock::now() < deadline) {
+    const auto result =
+        pulp::events::MessageLoopIntegration::pump_main_loop_for(25ms);
+    if (result == pulp::events::MainLoopPumpResult::Unsupported ||
+        result == pulp::events::MainLoopPumpResult::WrongThread) {
+        break;
+    }
+    if (result == pulp::events::MainLoopPumpResult::Finished ||
+        result == pulp::events::MainLoopPumpResult::Stopped) {
+        std::this_thread::sleep_for(1ms);
+    }
+}
+```
+
+This API services at most one bounded slice and must never be called from an
+audio callback. It reports event-loop progress, not plug-in or license
+readiness. Analysis tools should make their warm-up and post-parameter-write
+settle periods configurable, apply parameter writes after warm-up, and continue
+servicing bounded slices between offline blocks when the plug-in requires it.
+For plug-ins that slew parameter changes, render and discard an appropriate
+settle interval before capturing the measurement.
+
+## Runnable example
+
+[`examples/plugin-host-demo`](../../examples/plugin-host-demo/) scans installed
+plug-ins, selects a descriptor, loads and prepares it, prints metadata and
+parameters, then processes a synthetic audio block. Build the examples and run:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=ON
+cmake --build build --config Release --target pulp-plugin-host-demo -j4
+build/examples/plugin-host-demo/pulp-plugin-host-demo --list
+build/examples/plugin-host-demo/pulp-plugin-host-demo --id <plugin-id> --warmup-ms 500
+```
+
+`--warmup-ms` demonstrates the headless main-loop policy above. It is not a
+universal value; choose and validate a duration for the plug-ins being analyzed.
+The demo is itself a convenient probe executable, but a production tool should
+launch equivalent deep probes as disposable child processes.
 
 ## Signal graph
 
@@ -141,6 +205,51 @@ carries no signing or trust surface. See
 [Live plugin swap](../reference/signal-graph.md#live-plugin-swap) for the
 full workflow and the fail-closed checks that protect the stream.
 
+## Showing a hosted plugin's editor
+
+`EditorAttachment` embeds a hosted plugin's own GUI in a `WindowHost`, so you
+can show the vendor's interface instead of rebuilding it from the parameter
+list. It is RAII: the attachment owns the editor and detaches and destroys it in
+the right order.
+
+```cpp
+#include <pulp/view/hosted_editor_attachment.hpp>
+
+auto attachment = pulp::view::EditorAttachment::create(slot.get(), window);
+if (!attachment) {
+    // No editor for this format/platform, or the plugin refused. Fall back to
+    // your own parameter UI — this is a normal answer, not an error.
+}
+```
+
+Available for CLAP on macOS today; see Limits below.
+
+Two things to design around:
+
+- **A native child composites ABOVE Pulp's whole GPU layer.** The window server
+  draws it over the Skia surface, so you cannot paint Pulp chrome on top of an
+  embedded editor. Use `set_native_child_view_clip` (which `NativeViewHost` does
+  for you) to keep a child inside a scroll viewport.
+- **Editor calls are main-thread only.** Create, resize, and destroy on the main
+  thread; never from `process()`. Destroy the attachment before dropping the
+  slot — the CLAP slot logs an error and force-tears-down if you don't, but that
+  is a diagnostic for a contract violation, not a supported path.
+
+Resize negotiates in both directions. A plugin asking to resize itself reaches
+the handler you install; refusing is legal and the plugin must cope:
+
+```cpp
+slot->set_editor_resize_request_handler([&](uint32_t w, uint32_t h) {
+    return attachment->set_bounds(0.0f, 0.0f, float(w), float(h));
+});
+
+// Host-initiated: the plugin may snap to its own constraints, so read back.
+uint32_t w = 900, h = 700;
+if (slot->set_hosted_editor_size(w, h)) {
+    attachment->set_bounds(0.0f, 0.0f, float(w), float(h));  // w/h are the accepted size
+}
+```
+
 ## Delay compensation (PDC)
 
 `PluginSlot::latency_samples()` reports per-node latency. The graph sums
@@ -171,10 +280,19 @@ These exist to smoke-test the loaders outside a full DAW context.
 - Feature coverage is format-specific. CLAP, VST3, and AU route parameter
   automation through their native event paths; LV2 routes host parameter
   events through block-rate control ports, so the last event in a block wins.
-- LV2 atom sysex and other variable-length atom events are not routed yet;
-  only short MIDI messages in the atom input sequence reach the processor.
+- **LV2 cannot host instruments.** The LV2 loader discovers only
+  `lv2:AudioPort` and `lv2:ControlPort`, so atom, event, and CV ports are
+  never `connect_port`'d — and LV2 requires *every* port be connected before
+  `run()`. Every LV2 instrument has an atom MIDI input port, so running one
+  is undefined behavior rather than a clean failure. No MIDI reaches an LV2
+  plugin at all: `process()` accepts the host's `MidiBuffer` and discards it.
+  Host instruments through **AU, VST3, or CLAP**, which do route MIDI.
 - Only one factory descriptor per `.clap` is selected (first one, or one
   matching `info.unique_id`).
-- Third-party hosted editor embedding is not wired in the current host
-  loaders; the typed hosted-editor API exists, but CLAP / VST3 / AU / LV2
-  slots still report no hosted editor.
+- Hosted editor embedding is wired for CLAP on macOS. VST3, AU, and LV2 slots
+  still report no editor, and Windows and Linux have no desktop `WindowHost`
+  implementing the native-child seam, so nothing can be parented there yet.
+  Where an editor is unavailable, `has_editor()` is false and
+  `EditorAttachment::create` returns nullptr — branch on that rather than
+  assuming a view. A missing editor never blocks metadata, parameter, state,
+  MIDI, or audio work; it only means the vendor's own UI cannot be shown.

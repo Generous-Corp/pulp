@@ -33,7 +33,7 @@
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/mpe_voice_tracker.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
-#include <pulp/signal/delay_line.hpp>
+#include <pulp/format/adapter_boundary.hpp>
 
 #include <array>
 #include <atomic>
@@ -318,10 +318,11 @@ private:
     // A plugin that reports latency gets host plugin-delay-compensation on
     // its path, so the bypassed dry signal must be delayed by exactly that
     // many samples to stay sample-aligned with the compensated timeline.
-    // Sized once in setupProcessing() (off the audio thread). Empty / unused
-    // when the reported latency is 0, preserving the zero-copy fast path.
-    std::vector<signal::DelayLine> bypass_dry_delay_;
-    int bypass_delay_samples_ = 0;
+    // Sized once in setupProcessing() (off the audio thread); leaves the
+    // zero-copy fast path in place when the reported latency is 0. Shared
+    // adapter-boundary component so every format's bypass latency behaves
+    // identically (CLAP uses the same class).
+    boundary::LatencyCompensatedBypass bypass_;
 
     // Host accommodations, resolved once in initialize() via the runtime
     // policy (env / API / compile default). Adapters consult these flags

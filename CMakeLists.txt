@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.670.1
+    VERSION 0.684.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/danielraffel/pulp"
     LANGUAGES CXX C
@@ -485,6 +485,21 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET PulpGain_CLAP)
             add_dependencies(${_pulp_clap_host_test} PulpGain_CLAP)
         endif()
     endforeach()
+
+    if(TARGET pulp-cli AND TARGET PulpTone_CLAP)
+        add_dependencies(pulp-cli PulpGain_CLAP PulpTone_CLAP)
+        add_test(
+            NAME plugin-lab-clap-roundtrip
+            COMMAND ${CMAKE_COMMAND}
+                -DCLI=$<TARGET_FILE:pulp-cli>
+                -DEFFECT=${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap
+                -DINSTRUMENT=${CMAKE_BINARY_DIR}/CLAP/PulpTone.clap
+                -DOUTPUT_DIR=${CMAKE_BINARY_DIR}/plugin-lab-test
+                -P ${CMAKE_SOURCE_DIR}/test/cmake/plugin_lab_clap_roundtrip.cmake)
+        set_tests_properties(plugin-lab-clap-roundtrip PROPERTIES
+            LABELS "validation;clap;cli;plugin-lab"
+            TIMEOUT 60)
+    endif()
 endif()
 
 # ── Android Shared Library ─────────────────────────────────────────────────

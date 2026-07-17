@@ -1,9 +1,12 @@
 #include "../core/view/src/design_import_native_common.hpp"
 #include "../core/view/src/design_import_internal.hpp"
+#include "../core/view/src/design_ir_helpers.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -316,4 +319,172 @@ TEST_CASE("native resolver recognizes the Ink & Signal design-system vocabulary"
 
     // None of these should be flagged as an unsupported node anymore.
     REQUIRE_FALSE(has_diag(resolved, "native-unsupported-node"));
+}
+
+TEST_CASE("native hit-ownership contract is exhaustive across widget kinds",
+          "[design-import][hit-policy]") {
+    // The runtime materializer and the baked-C++ codegen share one definition of
+    // these predicates, so this table is the single canonical contract. Every
+    // NativeWidgetKind is listed explicitly; a new kind or a flipped answer must
+    // be reconciled here, which is what keeps the two lowerers from drifting
+    // (combo_box, in particular, is interactive and owns its children's hits).
+    struct HitPolicyRow {
+        NativeWidgetKind kind;
+        bool interactive;
+        bool owns_child_hits;
+    };
+    const HitPolicyRow rows[] = {
+        {NativeWidgetKind::view,          false, false},
+        {NativeWidgetKind::label,         false, false},
+        {NativeWidgetKind::text_button,   true,  true},
+        {NativeWidgetKind::text_editor,   true,  true},
+        {NativeWidgetKind::checkbox,      true,  true},
+        {NativeWidgetKind::toggle_button, true,  true},
+        {NativeWidgetKind::combo_box,     true,  true},
+        {NativeWidgetKind::knob,          true,  true},
+        {NativeWidgetKind::fader,         true,  true},
+        {NativeWidgetKind::meter,         false, true},
+        {NativeWidgetKind::xy_pad,        true,  true},
+        {NativeWidgetKind::waveform,      false, true},
+        {NativeWidgetKind::spectrum,      false, true},
+        {NativeWidgetKind::image_view,    false, false},
+        {NativeWidgetKind::canvas,        false, false},
+        {NativeWidgetKind::svg_path,      false, false},
+        {NativeWidgetKind::svg_rect,      false, false},
+        {NativeWidgetKind::svg_line,      false, false},
+    };
+
+    for (const auto& row : rows) {
+        INFO("kind=" << native_widget_kind_name(row.kind));
+        CHECK(is_interactive_native_kind(row.kind) == row.interactive);
+        CHECK(native_kind_owns_imported_child_hits(row.kind) == row.owns_child_hits);
+    }
+}
+
+// ── Shared design-IR helpers ─────────────────────────────────────────────
+// design_ir_helpers.hpp holds the one definition of the accessors and parsers
+// every design lane (native materializer, C++ emitter, Swift emitter) reads the
+// IR through. These pin the contract each lane now depends on, so a change here
+// is a deliberate cross-lane decision rather than a silent per-copy drift.
+
+TEST_CASE("shared attr accessors read design-IR attributes", "[design-ir-helpers]") {
+    IRNode node;
+    node.attributes["src"] = "logo.png";
+    node.attributes["empty"] = "";
+
+    CHECK(attr(node, "src") == std::optional<std::string>("logo.png"));
+    CHECK(attr(node, "empty") == std::optional<std::string>(""));
+    CHECK_FALSE(attr(node, "absent").has_value());
+}
+
+TEST_CASE("shared attr_bool accepts both polarities and falls back", "[design-ir-helpers]") {
+    IRNode node;
+    for (const char* truthy : {"true", "1", "yes", "on", "TRUE", "On", "YES"}) {
+        node.attributes["flag"] = truthy;
+        INFO("value=" << truthy);
+        CHECK(attr_bool(node, "flag"));
+        CHECK(attr_bool(node, "flag", true));
+    }
+    for (const char* falsy : {"false", "0", "no", "off", "FALSE", "Off"}) {
+        node.attributes["flag"] = falsy;
+        INFO("value=" << falsy);
+        CHECK_FALSE(attr_bool(node, "flag"));
+        CHECK_FALSE(attr_bool(node, "flag", true));
+    }
+    // An unrecognized spelling and an absent attribute both yield the fallback.
+    node.attributes["flag"] = "maybe";
+    CHECK_FALSE(attr_bool(node, "flag"));
+    CHECK(attr_bool(node, "flag", true));
+    CHECK_FALSE(attr_bool(node, "absent"));
+    CHECK(attr_bool(node, "absent", true));
+}
+
+TEST_CASE("shared first_asset_id honors key priority then sorts", "[design-ir-helpers]") {
+    IRNode node;
+    node.attributes["zAssetId"] = "z";
+    node.attributes["hrefAssetId"] = "href";
+    node.attributes["backgroundImageAssetId"] = "bg";
+    node.attributes["srcAssetId"] = "src";
+    CHECK(first_asset_id(node) == std::optional<std::string>("src"));
+
+    node.attributes.erase("srcAssetId");
+    CHECK(first_asset_id(node) == std::optional<std::string>("bg"));
+    node.attributes.erase("backgroundImageAssetId");
+    CHECK(first_asset_id(node) == std::optional<std::string>("href"));
+    node.attributes.erase("hrefAssetId");
+
+    // asset_ref is the last explicit key, ahead of the sorted `*AssetId` scan.
+    node.attributes["asset_ref"] = "ref";
+    CHECK(first_asset_id(node) == std::optional<std::string>("ref"));
+    node.attributes.erase("asset_ref");
+
+    // Fallback scan: lowest key wins, deterministically, and an empty value is
+    // not a match.
+    node.attributes["aAssetId"] = "a";
+    CHECK(first_asset_id(node) == std::optional<std::string>("a"));
+    node.attributes["aAssetId"] = "";
+    CHECK(first_asset_id(node) == std::optional<std::string>("z"));
+
+    IRNode bare;
+    bare.attributes["notAnAsset"] = "x";
+    CHECK_FALSE(first_asset_id(bare).has_value());
+}
+
+TEST_CASE("shared asset_uri prefers a local file and rejects remote", "[design-ir-helpers]") {
+    IRAssetRef asset;
+    asset.local_path = "/tmp/art.png";
+    asset.original_uri = "https://example.com/art.png";
+    CHECK(asset_uri(asset) == "file:///tmp/art.png");
+
+    asset.local_path.reset();
+    // A remote URI is not loadable by anything downstream — report unresolved.
+    CHECK(asset_uri(asset).empty());
+
+    for (const char* self_contained : {"data:image/png;base64,AA==",
+                                       "resource://icons/knob.png",
+                                       "memory://cache/0"}) {
+        asset.original_uri = self_contained;
+        INFO("uri=" << self_contained);
+        CHECK(asset_uri(asset) == self_contained);
+    }
+
+    asset.original_uri.clear();
+    CHECK(asset_uri(asset).empty());
+}
+
+TEST_CASE("shared lower_copy lowercases ASCII only", "[design-ir-helpers]") {
+    CHECK(lower_copy("Flex-Start") == "flex-start");
+    CHECK(lower_copy("") == "");
+    // Non-ASCII bytes pass through untouched.
+    CHECK(lower_copy("Ünicode") == "Ünicode");
+}
+
+TEST_CASE("shared hex_digit maps hex characters", "[design-ir-helpers]") {
+    CHECK(hex_digit('0') == 0);
+    CHECK(hex_digit('9') == 9);
+    CHECK(hex_digit('a') == 10);
+    CHECK(hex_digit('F') == 15);
+    CHECK(hex_digit('g') == -1);
+    CHECK(hex_digit('#') == -1);
+}
+
+TEST_CASE("shared parse_hex_color_rgba covers every hex shape", "[design-ir-helpers]") {
+    using Rgba = std::array<unsigned, 4>;
+
+    // Short forms expand each nibble to a byte; alpha defaults to opaque.
+    CHECK(parse_hex_color_rgba("#abc") == std::optional<Rgba>(Rgba{0xaa, 0xbb, 0xcc, 0xff}));
+    CHECK(parse_hex_color_rgba("#abcd") == std::optional<Rgba>(Rgba{0xaa, 0xbb, 0xcc, 0xdd}));
+    CHECK(parse_hex_color_rgba("#1a2b3c") == std::optional<Rgba>(Rgba{0x1a, 0x2b, 0x3c, 0xff}));
+    CHECK(parse_hex_color_rgba("#1a2b3c4d") == std::optional<Rgba>(Rgba{0x1a, 0x2b, 0x3c, 0x4d}));
+    CHECK(parse_hex_color_rgba("#ABCDEF") == std::optional<Rgba>(Rgba{0xab, 0xcd, 0xef, 0xff}));
+
+    // Anything that is not a well-formed hex triplet is the caller's problem —
+    // notably a CSS rgb()/rgba() token, which only the Swift lane parses.
+    CHECK_FALSE(parse_hex_color_rgba("").has_value());
+    CHECK_FALSE(parse_hex_color_rgba("abc").has_value());
+    CHECK_FALSE(parse_hex_color_rgba("#ab").has_value());
+    CHECK_FALSE(parse_hex_color_rgba("#abcde").has_value());
+    CHECK_FALSE(parse_hex_color_rgba("#gggggg").has_value());
+    CHECK_FALSE(parse_hex_color_rgba("rgb(1,2,3)").has_value());
+    CHECK_FALSE(parse_hex_color_rgba("rebeccapurple").has_value());
 }

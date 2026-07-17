@@ -2047,8 +2047,26 @@ commands:
             kind: option
           - name: --json
             kind: option
+      - name: plugin-inspect
+        summary: "Load a third-party plugin in a disposable worker and emit its host-visible metadata, buses, latency, tail, and complete parameter API as pulp.audio.plugin-inspect.v1 JSON."
+        args:
+          - name: --plugin
+            kind: option
+            required: true
+          - name: --format
+            kind: option
+          - name: --id
+            kind: option
+          - name: --sample-rate
+            kind: option
+          - name: --block
+            kind: option
+          - name: --warmup-ms
+            kind: option
+          - name: --timeout-ms
+            kind: option
       - name: render
-        summary: "Offline scenario render of a plugin bundle through the host slot (no DAW, no audio device): load --plugin, drive it from declarative flags, write a WAV, and emit metrics JSON matching validate summarize --json. --param values are in the PLAIN domain (native min..max), not normalized."
+        summary: "Isolated offline scenario render of a plugin bundle (no DAW, no audio device): warm up, apply initial state, settle, drive it from declarative flags, append an optional tail, write an int16/int24/float32 WAV, and emit metrics JSON matching validate summarize --json. --param values are in the PLAIN domain (native min..max), not normalized."
         args:
           - name: --plugin
             kind: option
@@ -2086,10 +2104,28 @@ commands:
           - name: --input-signal
             kind: option
             required: false
+          - name: --warmup-ms
+            kind: option
+            required: false
+          - name: --initial-param
+            kind: option
+            required: false
+          - name: --settle-ms
+            kind: option
+            required: false
+          - name: --timeout-ms
+            kind: option
+            required: false
           - name: --param
             kind: option
             required: false
           - name: --midi
+            kind: option
+            required: false
+          - name: --tail-ms
+            kind: option
+            required: false
+          - name: --wav-format
             kind: option
             required: false
           - name: --manifest
@@ -2287,6 +2323,26 @@ commands:
           - name: --accept-importer-terms
             kind: flag
             description: Accept the importer's terms of use non-interactively (CI); acceptance is recorded under ~/.pulp
+      - name: install
+        summary: Clone an add-on importer from a git URL with the user's own git credentials, read its tool.json + terms from the cloned repo (never a shipped registry), enforce the SPI version window, run the accept-to-run terms gate, and install it under ~/.pulp/tools/<id>/ with an install record. A failed fetch is surfaced with git's own error and a single URL-agnostic message; the SDK never reveals whether a repo exists or is public/private.
+        args:
+          - name: url
+            kind: positional
+            required: true
+            description: Git URL (or local path) of the importer add-on repository
+          - name: --accept-importer-terms
+            kind: flag
+            description: Accept the importer's terms of use non-interactively (CI); acceptance is recorded under ~/.pulp
+          - name: --force
+            kind: flag
+            description: Reinstall even when an up-to-date install record already exists
+      - name: uninstall
+        summary: Remove an installed importer by id — deletes the install tree under ~/.pulp/tools/<id>/, the install record, and any installed skill.
+        args:
+          - name: id
+            kind: positional
+            required: true
+            description: Installed importer id (from the repo's tool.json)
     docs: reference/cli.md#import
 
   - name: identity

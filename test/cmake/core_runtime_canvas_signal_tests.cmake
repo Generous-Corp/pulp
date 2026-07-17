@@ -138,9 +138,19 @@ pulp_add_test_suite(pulp-test-vector-scene LIBRARIES pulp::canvas)
 # Effects tests
 pulp_add_test_suite(pulp-test-effects LIBRARIES pulp::canvas)
 
+# Canvas image placement: affine transform, preserve-aspect fit, tiled fill.
+pulp_add_test_suite(pulp-test-canvas-image-fit LIBRARIES pulp::canvas)
+
 # Signal/DSP tests
 pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-oversampling-quality LIBRARIES pulp::signal)
+# Alias/passband claims here are measured with the shared tone-projection
+# analyzers, hence the analysis lib alongside the DSP under test.
+pulp_add_test_suite(pulp-test-oversampling-quality
+    LIBRARIES pulp::signal pulp::audio-analysis)
+# Fundamental-frequency estimator for harmonically-dense oscillator output plus
+# the f0(t) trajectory extractor — proven accurate to well under a cent, and
+# proven to beat the shipped zero-crossing detector on dense material.
+pulp_add_test_suite(pulp-test-pitch-track LIBRARIES pulp::audio-analysis)
 pulp_add_test_suite(pulp-test-transition-mixer LIBRARIES pulp::signal)
 # Signal filter tests extracted from test_signal.cpp.
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
@@ -172,6 +182,17 @@ pulp_add_test_suite(pulp-test-fft-backends LIBRARIES pulp::signal-fft-backend)
 pulp_add_test_suite(pulp-test-signal-meter LIBRARIES pulp::signal)
 # Biquad filter tests
 pulp_add_test_suite(pulp-test-biquad LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-osc-phase LIBRARIES pulp::signal)
+# The BLEP/BLAMP kernels are gated on measured alias rejection, so this suite
+# links the analysis lib for the shared tone-projection analyzers.
+pulp_add_test_suite(pulp-test-osc-blep LIBRARIES pulp::signal pulp::audio-analysis)
+# The VA shapes are gated on measured alias rejection, hence the analysis lib.
+pulp_add_test_suite(pulp-test-osc-va LIBRARIES pulp::signal pulp::audio-analysis)
+# Sync and through-zero FM are gated on measured alias rejection too.
+pulp_add_test_suite(pulp-test-osc-sync LIBRARIES pulp::signal pulp::audio-analysis)
+# The circuit-flavored VCO's core is gated on measured alias rejection, and its
+# deterministic character stages on level/DC/pitch correctness.
+pulp_add_test_suite(pulp-test-osc-vco LIBRARIES pulp::signal pulp::audio-analysis)
 # SF-2 crossfade unification: live_kernel structural-swap fade now matches the
 # native signal::TransitionMixer (EqualPower) law bit-for-bit — an intended,
 # documented behavior change (the fade previously used a linear theta).
@@ -362,6 +383,10 @@ pulp_add_test_suite(pulp-test-sample-resource
 # WaveformOverview + WaveformOverviewCache (item 6.12).
 # Links pulp::view so the WaveformView integration smoke compiles.
 pulp_add_test_suite(pulp-test-waveform-overview LIBRARIES pulp::audio pulp::view)
+
+# WaveformOverviewView: Canvas (non-GPU) min/max-column rendering over a
+# caller-set viewport, asserted headlessly through RecordingCanvas.
+pulp_add_test_suite(pulp-test-waveform-overview-view LIBRARIES pulp::audio pulp::view)
 
 # Memory-mapped reader: true ranged (seek-based) decode, no whole-file decode.
 pulp_add_test_suite(pulp-test-mmap-reader-ranged LIBRARIES pulp::audio)

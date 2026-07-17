@@ -17,6 +17,7 @@
     "**/coreaudio_device.mm",
     "**/sdl_window_host.cpp",
     "**/scanner_clap.cpp",
+    "**/plugin_slot_au.mm",
     "**/au_v2_adapter.cpp",
     "**/au_v2_instrument.cpp",
     "**/aax_midi_node.cpp",

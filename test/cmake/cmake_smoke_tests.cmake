@@ -376,6 +376,19 @@ if(UNIX)
         LABELS "android;smoke;manual")
 endif()
 
+# Example designated-initializer guard. Proves the example build rejects an
+# out-of-declaration-order `.field` init — a hard GCC error that Clang only
+# warns on, so it once passed the macOS gate and broke the release's Linux legs
+# (the required PR gate builds PULP_BUILD_EXAMPLES=OFF; only release-cli compiles
+# the examples). examples/CMakeLists.txt promotes it to an error under Clang;
+# this asserts the guard is load-bearing on whatever compiler is present.
+add_test(NAME cmake-examples-reorder-init-guard
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_examples_reorder_init_guard.sh)
+set_tests_properties(cmake-examples-reorder-init-guard PROPERTIES
+    SKIP_RETURN_CODE 77
+    LABELS "cmake;examples"
+    TIMEOUT 60)
+
 # Validation contract tests — schema and reality snapshot
 add_executable(pulp-test-validation-contract test_validation_contract.cpp)
 target_link_libraries(pulp-test-validation-contract PRIVATE Catch2::Catch2WithMain)

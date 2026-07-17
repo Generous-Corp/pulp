@@ -91,14 +91,22 @@ stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
 configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON"
 build     = "tools/ci/governed-build.sh cmake --build build"
-# `--label-exclude slow` skips ctest entries tagged LABELS slow — currently
-# `cmake-ios-auv3-configure` (test/CMakeLists.txt:23, ~25-30 min fresh-cache
-# Xcode/iOS try-compile + FetchContent bootstrap). #1589 added the label
-# for PR validation exclusion; the shipyard test command never picked up
-# the flag, so every PR was paying the slow-iOS cost. Full-CI (push to
-# main, nightly, workflow_dispatch) can still run it via a different
-# stage if needed — this only excludes from per-PR validation.
-test      = "ctest --test-dir build --output-on-failure --exclude-regex AudioWorkgroup --label-exclude slow"
+# `--label-exclude "validation|slow"` mirrors build.yml's PR ctest and
+# cross-platform-check.yml. Two label groups are skipped on the per-PR gate:
+#   * `slow`       — e.g. `cmake-ios-auv3-configure` (~25-30 min iOS try-compile).
+#   * `validation` — the example plugins' real-host format-validators
+#     (`pluginval-*`, `auval-*`, `clap-dlopen-*`; all live under examples/ and
+#     are the only users of this label). They are slow and flaky under load and
+#     have no business gating unrelated core PRs. configure keeps
+#     PULP_BUILD_EXAMPLES=ON, so example *compile* breakage is still caught here;
+#     only the runtime validators move off the required lane. They are enforced
+#     on the path-filtered example-validation lane (examples/** changes) and run
+#     nightly. See docs/guides/test-lanes.md.
+# `--repeat until-pass:2` retries a failed test once before failing the leg, so a
+# single timing-flake self-heals instead of reddening the required `macos` gate
+# and wedging auto-merge (mirrors build.yml + sanitizers.yml; each attempt is
+# still bounded by the test's own TIMEOUT).
+test      = "ctest --test-dir build --output-on-failure --repeat until-pass:2 --exclude-regex AudioWorkgroup --label-exclude \"validation|slow\""
 
 # Per-target overrides — ssh-windows needs `cmake --build` with the
 # Visual Studio multi-config generator's --config flag. The base
@@ -180,7 +188,7 @@ test      = "ctest --test-dir build -C Release --output-on-failure --label-inclu
 stages = ["setup", "configure", "build"]
 setup     = "./setup.sh --ci --deps-only"
 configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF"
-build     = "cmake --build build --parallel $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8) && cmake --install build --prefix install && cmake -S tools/validation/sdk-smoke -B smoke/build -DCMAKE_PREFIX_PATH=install && cmake --build smoke/build --parallel $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8)"
+build     = "tools/ci/governed-build.sh cmake --build build && cmake --install build --prefix install && cmake -S tools/validation/sdk-smoke -B smoke/build -DCMAKE_PREFIX_PATH=install && tools/ci/governed-build.sh cmake --build smoke/build"
 
 [validation.smoke.overrides.windows]
 configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF"

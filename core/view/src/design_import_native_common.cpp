@@ -1,4 +1,5 @@
 #include "design_import_native_common.hpp"
+#include "design_ir_helpers.hpp"
 
 #include "design_binding_metadata.hpp"
 
@@ -34,21 +35,9 @@
 namespace pulp::view {
 namespace {
 
-std::string lower_copy(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return value;
-}
-
 bool ends_with(std::string_view value, std::string_view suffix) {
     return value.size() >= suffix.size() &&
            value.substr(value.size() - suffix.size()) == suffix;
-}
-
-std::optional<std::string> attr(const IRNode& node, std::string_view key) {
-    if (auto it = node.attributes.find(std::string(key)); it != node.attributes.end())
-        return it->second;
-    return std::nullopt;
 }
 
 std::string node_id(const IRNode& node, std::string_view path) {
@@ -708,81 +697,6 @@ std::optional<float> attr_float(const IRNode& node, std::string_view key) {
     return parse_float(*value);
 }
 
-bool attr_bool(const IRNode& node, std::string_view key, bool fallback = false) {
-    auto value = attr(node, key);
-    if (!value) return fallback;
-    const auto lower = lower_copy(*value);
-    if (lower == "true" || lower == "1" || lower == "yes" || lower == "on") return true;
-    if (lower == "false" || lower == "0" || lower == "no" || lower == "off") return false;
-    return fallback;
-}
-
-struct ImportedImageSizing {
-    float width = 0.0f;
-    float height = 0.0f;
-    std::optional<float> left;
-    std::optional<float> top;
-};
-
-std::optional<ImportedImageSizing> imported_image_sizing_override(const IRNode& node) {
-    const float box_w = node.style.width.value_or(0.0f);
-    const float box_h = node.style.height.value_or(0.0f);
-    if (box_w <= 0.0f || box_h <= 0.0f) return std::nullopt;
-
-    const float png_w = attr_float(node, "png_natural_w").value_or(0.0f);
-    const float png_h = attr_float(node, "png_natural_h").value_or(0.0f);
-    const float core_w = attr_float(node, "art_core_w").value_or(0.0f);
-    const float core_h = attr_float(node, "art_core_h").value_or(0.0f);
-    const float core_x = attr_float(node, "art_core_x").value_or(0.0f);
-    const float core_y = attr_float(node, "art_core_y").value_or(0.0f);
-
-    const bool have_core =
-        png_w > 0.0f && png_h > 0.0f &&
-        core_w > 0.0f && core_h > 0.0f;
-    const bool is_bleed_sprite =
-        node.style.render_bounds.has_value() ||
-        (node.attributes.count("asset_bleed") && node.attributes.at("asset_bleed") == "1");
-
-    ImportedImageSizing out;
-    const bool absolute =
-        node.style.position && lower_copy(*node.style.position) == "absolute";
-
-    if (have_core) {
-        const float scale = std::min(box_w / core_w, box_h / core_h);
-        out.width = png_w * scale;
-        out.height = png_h * scale;
-
-        const float core_box_w = core_w * scale;
-        const float core_box_h = core_h * scale;
-        const float pad_x = (box_w - core_box_w) * 0.5f;
-        const float pad_y = (box_h - core_box_h) * 0.5f;
-        if (absolute && node.style.left)
-            out.left = *node.style.left - core_x * scale + pad_x;
-        if (absolute && node.style.top)
-            out.top = *node.style.top - core_y * scale + pad_y;
-        return out;
-    }
-
-    if (is_bleed_sprite && png_w > 0.0f && png_h > 0.0f) {
-        const float png_aspect = png_w / png_h;
-        if (box_w / box_h > png_aspect) {
-            out.height = box_h;
-            out.width = box_h * png_aspect;
-        } else {
-            out.width = box_w;
-            out.height = box_w / png_aspect;
-        }
-
-        if (absolute && node.style.left)
-            out.left = *node.style.left + (box_w - out.width) * 0.5f;
-        if (absolute && node.style.top)
-            out.top = *node.style.top + (box_h - out.height) * 0.5f;
-        return out;
-    }
-
-    return std::nullopt;
-}
-
 void apply_imported_image_sizing(View& view, const IRNode& node) {
     const auto sizing = imported_image_sizing_override(node);
     if (!sizing) return;
@@ -796,45 +710,14 @@ void apply_imported_image_sizing(View& view, const IRNode& node) {
     if (sizing->top) view.set_top(*sizing->top);
 }
 
-int hex_digit(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
+// The native lane wants a canvas Color rather than the raw 0..255 quad.
 std::optional<Color> parse_hex_color(std::string_view value) {
-    if (value.empty() || value.front() != '#') return std::nullopt;
-
-    auto pair = [](char high, char low) -> std::optional<uint8_t> {
-        const int h = hex_digit(high);
-        const int l = hex_digit(low);
-        if (h < 0 || l < 0) return std::nullopt;
-        return static_cast<uint8_t>((h << 4) | l);
-    };
-
-    if (value.size() == 4 || value.size() == 5) {
-        const int r = hex_digit(value[1]);
-        const int g = hex_digit(value[2]);
-        const int b = hex_digit(value[3]);
-        const int a = value.size() == 5 ? hex_digit(value[4]) : 15;
-        if (r < 0 || g < 0 || b < 0 || a < 0) return std::nullopt;
-        return Color::rgba8(static_cast<uint8_t>((r << 4) | r),
-                            static_cast<uint8_t>((g << 4) | g),
-                            static_cast<uint8_t>((b << 4) | b),
-                            static_cast<uint8_t>((a << 4) | a));
-    }
-
-    if (value.size() == 7 || value.size() == 9) {
-        auto r = pair(value[1], value[2]);
-        auto g = pair(value[3], value[4]);
-        auto b = pair(value[5], value[6]);
-        auto a = value.size() == 9 ? pair(value[7], value[8]) : std::optional<uint8_t>(255);
-        if (!r || !g || !b || !a) return std::nullopt;
-        return Color::rgba8(*r, *g, *b, *a);
-    }
-
-    return std::nullopt;
+    auto rgba = parse_hex_color_rgba(value);
+    if (!rgba) return std::nullopt;
+    return Color::rgba8(static_cast<uint8_t>((*rgba)[0]),
+                        static_cast<uint8_t>((*rgba)[1]),
+                        static_cast<uint8_t>((*rgba)[2]),
+                        static_cast<uint8_t>((*rgba)[3]));
 }
 
 FlexJustify to_flex_justify(LayoutAlign align) {
@@ -921,34 +804,6 @@ void append_resolved_diagnostics(const ResolvedNativeNode& node,
     diagnostics.insert(diagnostics.end(), node.diagnostics.begin(), node.diagnostics.end());
     for (const auto& child : node.children)
         append_resolved_diagnostics(child, diagnostics);
-}
-
-std::optional<std::string> first_asset_id(const IRNode& node) {
-    for (std::string_view key : {"srcAssetId", "backgroundImageAssetId", "hrefAssetId", "asset_ref"}) {
-        auto value = attr(node, key);
-        if (value && !value->empty()) return value;
-    }
-
-    std::vector<std::pair<std::string, std::string>> candidates;
-    for (const auto& [key, value] : node.attributes) {
-        if (ends_with(key, "AssetId") && !value.empty())
-            candidates.emplace_back(key, value);
-    }
-    std::sort(candidates.begin(), candidates.end());
-    if (!candidates.empty()) return candidates.front().second;
-    return std::nullopt;
-}
-
-std::string asset_uri(const IRAssetRef& asset) {
-    if (asset.local_path && !asset.local_path->empty())
-        return "file://" + *asset.local_path;
-    if (!asset.original_uri.empty() &&
-        (asset.original_uri.rfind("data:", 0) == 0 ||
-         asset.original_uri.rfind("resource:", 0) == 0 ||
-         asset.original_uri.rfind("memory:", 0) == 0)) {
-        return asset.original_uri;
-    }
-    return {};
 }
 
 // ── Faithful-vector import: resolve an SVG asset to its document text ─────────
@@ -1148,92 +1003,6 @@ void apply_identity(View& view, const IRNode& node, const ResolvedNativeNode& re
     }
     if (auto label = resolved.text; label && !label->empty())
         view.set_access_label(*label);
-}
-
-bool is_interactive_native_kind(NativeWidgetKind kind) {
-    switch (kind) {
-        case NativeWidgetKind::text_button:
-        case NativeWidgetKind::text_editor:
-        case NativeWidgetKind::checkbox:
-        case NativeWidgetKind::toggle_button:
-        case NativeWidgetKind::combo_box:
-        case NativeWidgetKind::knob:
-        case NativeWidgetKind::fader:
-        case NativeWidgetKind::xy_pad:
-            return true;
-        case NativeWidgetKind::view:
-        case NativeWidgetKind::label:
-        case NativeWidgetKind::meter:
-        case NativeWidgetKind::waveform:
-        case NativeWidgetKind::spectrum:
-        case NativeWidgetKind::image_view:
-        case NativeWidgetKind::canvas:
-        case NativeWidgetKind::svg_path:
-        case NativeWidgetKind::svg_rect:
-        case NativeWidgetKind::svg_line:
-            return false;
-    }
-    return false;
-}
-
-bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
-    switch (kind) {
-        case NativeWidgetKind::text_button:
-        case NativeWidgetKind::text_editor:
-        case NativeWidgetKind::checkbox:
-        case NativeWidgetKind::toggle_button:
-        case NativeWidgetKind::combo_box:
-        case NativeWidgetKind::knob:
-        case NativeWidgetKind::fader:
-        case NativeWidgetKind::meter:
-        case NativeWidgetKind::xy_pad:
-        case NativeWidgetKind::waveform:
-        case NativeWidgetKind::spectrum:
-            return true;
-        case NativeWidgetKind::view:
-        case NativeWidgetKind::label:
-        case NativeWidgetKind::image_view:
-        case NativeWidgetKind::canvas:
-        case NativeWidgetKind::svg_path:
-        case NativeWidgetKind::svg_rect:
-        case NativeWidgetKind::svg_line:
-            return false;
-    }
-    return false;
-}
-
-bool subtree_contains_interactive_hit_target(const IRNode& node,
-                                             const ResolvedNativeNode& resolved) {
-    if (auto hit_testable = attr(node, "pulpHitTestable"))
-        return attr_bool(node, "pulpHitTestable");
-    if (is_interactive_native_kind(resolved.kind))
-        return true;
-
-    const auto count = std::min(node.children.size(), resolved.children.size());
-    for (std::size_t i = 0; i < count; ++i) {
-        if (subtree_contains_interactive_hit_target(node.children[i], resolved.children[i]))
-            return true;
-    }
-    return false;
-}
-
-enum class PromotedChildHitPolicy {
-    unchanged,
-    disabled,
-    pass_through_self,
-};
-
-PromotedChildHitPolicy promoted_widget_child_hit_policy(const IRNode& child,
-                                                        const ResolvedNativeNode& resolved_child) {
-    if (auto hit_testable = attr(child, "pulpHitTestable"))
-        return attr_bool(child, "pulpHitTestable")
-            ? PromotedChildHitPolicy::unchanged
-            : PromotedChildHitPolicy::disabled;
-    if (is_interactive_native_kind(resolved_child.kind))
-        return PromotedChildHitPolicy::unchanged;
-    if (subtree_contains_interactive_hit_target(child, resolved_child))
-        return PromotedChildHitPolicy::pass_through_self;
-    return PromotedChildHitPolicy::disabled;
 }
 
 void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection> parent_direction) {
@@ -1843,6 +1612,149 @@ std::unique_ptr<View> materialize_error_view(const char* message,
 }
 
 } // namespace
+
+// Exported (design_import_native_common.hpp). Defined in the named namespace so
+// both the runtime materializer and the C++ codegen size an imported image and
+// resolve hit ownership from one definition. Call the attr/lower helpers from
+// the anonymous namespace above (visible throughout this translation unit).
+std::optional<ImportedImageSizing> imported_image_sizing_override(const IRNode& node) {
+    const float box_w = node.style.width.value_or(0.0f);
+    const float box_h = node.style.height.value_or(0.0f);
+    if (box_w <= 0.0f || box_h <= 0.0f) return std::nullopt;
+
+    const float png_w = attr_float(node, "png_natural_w").value_or(0.0f);
+    const float png_h = attr_float(node, "png_natural_h").value_or(0.0f);
+    const float core_w = attr_float(node, "art_core_w").value_or(0.0f);
+    const float core_h = attr_float(node, "art_core_h").value_or(0.0f);
+    const float core_x = attr_float(node, "art_core_x").value_or(0.0f);
+    const float core_y = attr_float(node, "art_core_y").value_or(0.0f);
+
+    const bool have_core =
+        png_w > 0.0f && png_h > 0.0f &&
+        core_w > 0.0f && core_h > 0.0f;
+    const bool is_bleed_sprite =
+        node.style.render_bounds.has_value() ||
+        (node.attributes.count("asset_bleed") && node.attributes.at("asset_bleed") == "1");
+
+    ImportedImageSizing out;
+    const bool absolute =
+        node.style.position && lower_copy(*node.style.position) == "absolute";
+
+    if (have_core) {
+        const float scale = std::min(box_w / core_w, box_h / core_h);
+        out.width = png_w * scale;
+        out.height = png_h * scale;
+
+        const float core_box_w = core_w * scale;
+        const float core_box_h = core_h * scale;
+        const float pad_x = (box_w - core_box_w) * 0.5f;
+        const float pad_y = (box_h - core_box_h) * 0.5f;
+        if (absolute && node.style.left)
+            out.left = *node.style.left - core_x * scale + pad_x;
+        if (absolute && node.style.top)
+            out.top = *node.style.top - core_y * scale + pad_y;
+        return out;
+    }
+
+    if (is_bleed_sprite && png_w > 0.0f && png_h > 0.0f) {
+        const float png_aspect = png_w / png_h;
+        if (box_w / box_h > png_aspect) {
+            out.height = box_h;
+            out.width = box_h * png_aspect;
+        } else {
+            out.width = box_w;
+            out.height = box_w / png_aspect;
+        }
+
+        if (absolute && node.style.left)
+            out.left = *node.style.left + (box_w - out.width) * 0.5f;
+        if (absolute && node.style.top)
+            out.top = *node.style.top + (box_h - out.height) * 0.5f;
+        return out;
+    }
+
+    return std::nullopt;
+}
+
+bool is_interactive_native_kind(NativeWidgetKind kind) {
+    switch (kind) {
+        case NativeWidgetKind::text_button:
+        case NativeWidgetKind::text_editor:
+        case NativeWidgetKind::checkbox:
+        case NativeWidgetKind::toggle_button:
+        case NativeWidgetKind::combo_box:
+        case NativeWidgetKind::knob:
+        case NativeWidgetKind::fader:
+        case NativeWidgetKind::xy_pad:
+            return true;
+        case NativeWidgetKind::view:
+        case NativeWidgetKind::label:
+        case NativeWidgetKind::meter:
+        case NativeWidgetKind::waveform:
+        case NativeWidgetKind::spectrum:
+        case NativeWidgetKind::image_view:
+        case NativeWidgetKind::canvas:
+        case NativeWidgetKind::svg_path:
+        case NativeWidgetKind::svg_rect:
+        case NativeWidgetKind::svg_line:
+            return false;
+    }
+    return false;
+}
+
+bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
+    switch (kind) {
+        case NativeWidgetKind::text_button:
+        case NativeWidgetKind::text_editor:
+        case NativeWidgetKind::checkbox:
+        case NativeWidgetKind::toggle_button:
+        case NativeWidgetKind::combo_box:
+        case NativeWidgetKind::knob:
+        case NativeWidgetKind::fader:
+        case NativeWidgetKind::meter:
+        case NativeWidgetKind::xy_pad:
+        case NativeWidgetKind::waveform:
+        case NativeWidgetKind::spectrum:
+            return true;
+        case NativeWidgetKind::view:
+        case NativeWidgetKind::label:
+        case NativeWidgetKind::image_view:
+        case NativeWidgetKind::canvas:
+        case NativeWidgetKind::svg_path:
+        case NativeWidgetKind::svg_rect:
+        case NativeWidgetKind::svg_line:
+            return false;
+    }
+    return false;
+}
+
+bool subtree_contains_interactive_hit_target(const IRNode& node,
+                                             const ResolvedNativeNode& resolved) {
+    if (auto hit_testable = attr(node, "pulpHitTestable"))
+        return attr_bool(node, "pulpHitTestable");
+    if (is_interactive_native_kind(resolved.kind))
+        return true;
+
+    const auto count = std::min(node.children.size(), resolved.children.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        if (subtree_contains_interactive_hit_target(node.children[i], resolved.children[i]))
+            return true;
+    }
+    return false;
+}
+
+PromotedChildHitPolicy promoted_widget_child_hit_policy(const IRNode& child,
+                                                        const ResolvedNativeNode& resolved_child) {
+    if (auto hit_testable = attr(child, "pulpHitTestable"))
+        return attr_bool(child, "pulpHitTestable")
+            ? PromotedChildHitPolicy::unchanged
+            : PromotedChildHitPolicy::disabled;
+    if (is_interactive_native_kind(resolved_child.kind))
+        return PromotedChildHitPolicy::unchanged;
+    if (subtree_contains_interactive_hit_target(child, resolved_child))
+        return PromotedChildHitPolicy::pass_through_self;
+    return PromotedChildHitPolicy::disabled;
+}
 
 // Exported (design_import_native_common.hpp). Defined in the named namespace so
 // both the runtime materializer and the C++ codegen lower a faithful_svg node
