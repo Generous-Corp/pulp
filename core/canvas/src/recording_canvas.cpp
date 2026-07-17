@@ -486,7 +486,12 @@ bool RecordingCanvas::draw_with_sksl(const std::string& sksl, float x, float y,
     cmd.color = uniforms.fill_color;
     cmd.text = sksl;
     commands_.push_back(std::move(cmd));
-    return false;  // a recorder never actually renders the shader
+    // Return true: the recorder accepted and captured the shader draw, which is
+    // the success path a headless test wants to model. A widget paint path uses
+    // this bool to decide whether to fall back to its C++ body (see WI-10 /
+    // draw_custom_shader_body); returning false here would make every shader
+    // widget spuriously record its fallback body on a RecordingCanvas.
+    return true;
 }
 
 // ── Box-shadow primitive ────────────────────────────────────────────────────

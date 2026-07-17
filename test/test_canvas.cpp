@@ -385,12 +385,13 @@ TEST_CASE("RecordingCanvas records the save_layer family and sksl draws",
     REQUIRE(filt.floats.size() == 1);
     REQUIRE(filt.floats[0] == Catch::Approx(2.0f));  // filter count reached the canvas
 
-    // draw_with_sksl records a draw_sksl command, returns false, and does NOT
-    // run the base CPU placeholder fill on the recorder.
+    // draw_with_sksl records a draw_sksl command, returns true (the recorder
+    // accepted the draw — the success path), and does NOT run the base CPU
+    // placeholder fill on the recorder.
     Canvas::ShaderUniforms u;
     u.value = 0.25f;
-    REQUIRE_FALSE(rc.draw_with_sksl("half4 main(float2 p){return half4(1);}",
-                                    1, 2, 3, 4, u));
+    REQUIRE(rc.draw_with_sksl("half4 main(float2 p){return half4(1);}",
+                              1, 2, 3, 4, u));
     REQUIRE(rc.count(DrawCommand::Type::draw_sksl) == 1);
     REQUIRE(rc.count(DrawCommand::Type::fill_rect) == 0);
     const auto& sk = rc.commands().back();

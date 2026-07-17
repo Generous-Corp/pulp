@@ -296,10 +296,11 @@ public:
                                float intensity, float threshold,
                                float radius) override;
 
-    // Record a custom SkSL draw as intent and return false — a recorder
-    // cannot compile or execute SkSL, so it makes no claim of success. This
-    // is what lets a headless test assert that an effect / widget routed a
-    // shader draw through the canvas without a GPU.
+    // Record a custom SkSL draw as intent and return true — the recorder
+    // accepted and captured the draw (the success path). This lets a headless
+    // test assert that an effect / widget routed a shader draw through the
+    // canvas without a GPU, and keeps shader widgets on the shader path rather
+    // than recording their C++ fallback body (see draw_custom_shader_body).
     bool draw_with_sksl(const std::string& sksl, float x, float y,
                         float w, float h,
                         const ShaderUniforms& uniforms) override;

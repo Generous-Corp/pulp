@@ -2746,3 +2746,60 @@ TEST_CASE("GroupBox::set_collapsed Notify::sync / async", "[view][notify]") {
     REQUIRE(seen.size() == 2);
     REQUIRE(seen.back() == false);
 }
+
+#ifdef PULP_HAS_SKIA
+#include <pulp/canvas/skia_canvas.hpp>
+#include "include/core/SkCanvas.h"
+#include "include/core/SkColor.h"
+#include "include/core/SkColorSpace.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkPixmap.h"
+#include "include/core/SkSurface.h"
+
+// A body shader that fails at DRAW time (not just install time) must not blank
+// the widget: the paint path falls back to the default C++ body and logs once.
+// Before WI-10 the draw_with_sksl bool was ignored, so a failing draw-time
+// shader left an empty body with only labels on top.
+TEST_CASE("Draw-time shader failure paints the default widget body, logging once",
+          "[view][widget][shader][skia][issue-493]") {
+    SkImageInfo info = SkImageInfo::Make(80, 80, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+    SkiaCanvas canvas(surface->getCanvas());
+
+    Knob knob;
+    knob.set_bounds({0, 0, 80, 80});
+    knob.set_value(0.6f);
+    // Install an uncompilable shader directly on the host, bypassing
+    // setWidgetShader's install-time compile gate — models a shader that
+    // compiles at install but fails when the backend draws it.
+    knob.set_custom_shader("this will not compile {{{");
+    REQUIRE(knob.has_custom_shader());
+    REQUIRE_FALSE(knob.shader_draw_failure_logged());
+
+    knob.paint(canvas);
+
+    // The default knob body painted (a meaningful number of non-black pixels),
+    // not a blank frame.
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    unsigned painted = 0;
+    for (int y = 0; y < 80; ++y) {
+        for (int x = 0; x < 80; ++x) {
+            SkColor c = pm.getColor(x, y);
+            if (SkColorGetR(c) + SkColorGetG(c) + SkColorGetB(c) > 0) ++painted;
+        }
+    }
+    INFO("painted pixels = " << painted);
+    REQUIRE(painted > 200u);
+    // The failure was logged, exactly once (latched).
+    REQUIRE(knob.shader_draw_failure_logged());
+
+    // A second paint keeps the latch set (no per-frame re-log).
+    knob.paint(canvas);
+    REQUIRE(knob.shader_draw_failure_logged());
+}
+#endif  // PULP_HAS_SKIA
