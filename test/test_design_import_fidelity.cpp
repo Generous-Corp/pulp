@@ -650,11 +650,17 @@ TEST_CASE("a solid-filled ellipse renders as a filled circle, not a dropped node
     CHECK_FALSE(dropped);
 }
 
-TEST_CASE("a gradient-filled ellipse keeps its box paint rather than going blank",
+TEST_CASE("a gradient-filled ellipse rides its gradient onto the path",
           "[view][import][codegen][vector]") {
-    // The counterpart bound: a gradient cannot move onto a path, so synthesizing
-    // one would yield svg_fill:none — an invisible circle, strictly worse than
-    // the filled box we render today. The guard must still bail here.
+    // This case used to bail: a gradient could not move onto a path, so
+    // synthesizing one yielded svg_fill:none — an invisible circle, strictly
+    // worse than the filled box. setSvgFillGradient lets the path carry it, so
+    // the knob body is a lit disc instead of a flat one.
+    //
+    // The square-behind-the-circle rule still binds, and now binds to BOTH
+    // paints: whatever moves onto the path must be cleared off the node's own
+    // background, or the frame paints a gradient rectangle behind the circle —
+    // the exact failure the old bail existed to avoid.
     DesignIR ir;
     ir.root.type = "frame";
     ir.root.name = "Root";
@@ -666,13 +672,52 @@ TEST_CASE("a gradient-filled ellipse keeps its box paint rather than going blank
     blob.name = "GradDot";
     blob.style.width = 10.0f;
     blob.style.height = 10.0f;
-    blob.style.background_gradient = "linear-gradient(#111, #222)";
+    blob.style.background_gradient = "linear-gradient(180deg, #111111 0%, #222222 100%)";
     ir.root.children.push_back(blob);
 
     CodeGenOptions opts;
     const auto js = generate_pulp_js(ir, opts);
     INFO("js=\n" << js);
-    CHECK(js.find("setSvgFill('GradDot") == std::string::npos);
+
+    CHECK(js.find("createSvgPath('GradDot") != std::string::npos);
+    CHECK(js.find("A5 5") != std::string::npos);   // it really is the circle
+    CHECK(js.find("linear-gradient(180deg, #111111 0%, #222222 100%)") != std::string::npos);
+    CHECK(js.find("setSvgFillGradient('GradDot") != std::string::npos);
+    // No gradient rectangle and no stale solid behind the circle.
+    CHECK(js.find("setBackgroundGradient('GradDot") == std::string::npos);
+    CHECK(js.find("setBackgroundColor('GradDot") == std::string::npos);
+}
+
+TEST_CASE("a gradient ellipse's solid fill follows it onto the path as the fallback",
+          "[view][import][codegen][vector]") {
+    // SvgPathWidget prefers the gradient and drops back to fill_color_ only when
+    // the string won't parse, so carrying both is a safety net rather than a
+    // conflict — and emission order cannot decide the paint. What must NOT
+    // happen is the solid staying behind on the node as a background box.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 400.0f;
+
+    IRNode blob;
+    blob.type = "ellipse";
+    blob.name = "Knob";
+    blob.style.width = 28.0f;
+    blob.style.height = 28.0f;
+    blob.style.background_color = "#5d5e63";
+    blob.style.background_gradient = "linear-gradient(180deg, #5d5e63 0%, #56575c 100%)";
+    ir.root.children.push_back(blob);
+
+    CodeGenOptions opts;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO("js=\n" << js);
+
+    CHECK(js.find("setSvgFillGradient('Knob") != std::string::npos);
+    CHECK(js.find("setSvgFill('Knob") != std::string::npos);
+    CHECK(js.find("'#5d5e63')") != std::string::npos);
+    CHECK(js.find("setBackgroundColor('Knob") == std::string::npos);
+    CHECK(js.find("setBackgroundGradient('Knob") == std::string::npos);
 }
 
 TEST_CASE("synthesized rect honors border-radius and stroke-only borders",

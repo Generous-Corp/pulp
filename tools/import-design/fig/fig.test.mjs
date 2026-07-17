@@ -792,3 +792,126 @@ test('a nested rotated transform composes rather than accumulating translations'
   // +30 on ITS x into +30 on the frame's y.
   assert.deepEqual([pip.x, pip.y], [100, 50]);
 });
+
+// ---------------------------------------------------------------------------
+// Gradient paints → CSS. Asserted through materializeFrame, so what is checked
+// is what design_ir_json actually reads off the envelope (`backgroundGradient`
+// on the style, `fillGradient` on a vector), not a producer-side convenience.
+// ---------------------------------------------------------------------------
+
+// Figma's paint transform for a plain top→bottom ramp: it maps the node's box
+// INTO gradient space, so this is the INVERSE of the axis it produces.
+const TOP_TO_BOTTOM = { m00: 0, m01: 1, m02: 0, m10: -1, m11: 0, m12: 1 };
+
+function gradientScene(paint, { size = { x: 100, y: 100 }, type = 'ELLIPSE' } = {}) {
+  return buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+      size: { x: 200, y: 200 } },
+    { guid: { sessionID: 0, localID: 3 }, type, name: 'Shape',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' },
+      size, fillPaints: [paint] },
+  ]});
+}
+
+const CTX_MIN = { images: new Map(), fileKey: 'K', fileName: 'F', frameName: 'Root' };
+
+function findByName(node, name) {
+  if (node.name === name) return node;
+  for (const c of node.children || []) {
+    const hit = findByName(c, name);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function linearPaint(stops, extra = {}) {
+  return { type: 'GRADIENT_LINEAR', visible: true, opacity: 1,
+           transform: TOP_TO_BOTTOM, stops, ...extra };
+}
+
+const WHITE_TO_BLACK = [
+  { color: { r: 1, g: 1, b: 1, a: 1 }, position: 0 },
+  { color: { r: 0, g: 0, b: 0, a: 1 }, position: 1 },
+];
+
+test('a linear gradient lowers to a real CSS gradient, not its mean colour', () => {
+  const scene = gradientScene(linearPaint(WHITE_TO_BLACK));
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const shape = findByName(envelope.root, 'Shape');
+  const css = shape.style.background_gradient;
+  assert.ok(css, 'a linear gradient must survive as a gradient');
+  assert.match(css, /^linear-gradient\(/);
+  // The mean (#808080) is what flattening produced; it must no longer be the
+  // paint, and no stale solid may sit under the gradient to show through it.
+  assert.equal(shape.style.background_color, undefined);
+  // Nothing was approximated, so nothing may claim it was.
+  assert.equal(diagnostics.filter((d) => d.code === 'gradient-approximated').length, 0);
+});
+
+test('the paint transform is inverted, so a top→bottom ramp is not flipped', () => {
+  // The regression this guards is silent and total: using Figma's matrix
+  // forward renders EVERY gradient 180° off — the design's knob rim highlight
+  // lights from below. Verified against Figma's own export of the source file.
+  const scene = gradientScene(linearPaint(WHITE_TO_BLACK));
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const css = findByName(envelope.root, 'Shape').style.background_gradient;
+  assert.match(css, /^linear-gradient\(180deg,/, 'top→bottom is 180deg (`to bottom`)');
+  // White leads, black trails: light at the top, dark at the bottom.
+  const first = css.indexOf('#ffffff');
+  const last = css.indexOf('#000000');
+  assert.ok(first > 0 && last > 0, `both stops present: ${css}`);
+  assert.ok(first < last, `white must lead black, got: ${css}`);
+});
+
+test('a left→right ramp reads as 90deg', () => {
+  // Inverse of a (1,0)→(0,1)-style axis: dx=1,dy=0 must be `to right`.
+  const scene = gradientScene(linearPaint(WHITE_TO_BLACK, {
+    // Identity ⇒ its inverse is identity ⇒ axis (0,0)→(1,0).
+    transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+  }));
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const css = findByName(envelope.root, 'Shape').style.background_gradient;
+  assert.match(css, /^linear-gradient\(90deg,/, `dx=1,dy=0 is 90deg, got: ${css}`);
+});
+
+test('stop alpha and paint opacity both fold into the emitted colour', () => {
+  // The rim highlight is white at alpha 0.24 fading to transparent. Dropping
+  // either factor turns it into a hard white ring.
+  const scene = gradientScene(linearPaint([
+    { color: { r: 1, g: 1, b: 1, a: 0.5 }, position: 0 },
+    { color: { r: 1, g: 1, b: 1, a: 0 }, position: 1 },
+  ], { opacity: 0.5 }));
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const css = findByName(envelope.root, 'Shape').style.background_gradient;
+  // 0.5 stop alpha * 0.5 paint opacity = 0.25 ⇒ 0x40.
+  assert.match(css, /#ffffff40/, `stop alpha x paint opacity must fold, got: ${css}`);
+  assert.match(css, /#ffffff00/, `the transparent end must stay transparent, got: ${css}`);
+});
+
+test('a radial gradient keeps flattening, and keeps saying so', () => {
+  // parse_svg_linear_gradient matches on the literal `linear-gradient(`, so a
+  // radial paint has no lowering. Emitting one anyway would silently paint the
+  // wrong gradient; the honest mean + warning is the correct behaviour.
+  const scene = gradientScene({
+    type: 'GRADIENT_RADIAL', visible: true, opacity: 1,
+    transform: TOP_TO_BOTTOM, stops: WHITE_TO_BLACK,
+  });
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const shape = findByName(envelope.root, 'Shape');
+  assert.equal(shape.style.background_gradient, undefined, 'radial must not claim a gradient');
+  assert.equal(shape.style.background_color, '#808080', 'radial falls back to the mean');
+  assert.ok(diagnostics.some((d) => d.code === 'gradient-approximated'),
+            'an approximation must be diagnosed');
+});
+
+test('a single-stop gradient falls back rather than emitting a broken ramp', () => {
+  // parse_svg_linear_gradient requires >= 2 colours and returns nullopt below
+  // that, which would drop the widget back to its solid fill anyway.
+  const scene = gradientScene(linearPaint([{ color: { r: 1, g: 0, b: 0, a: 1 }, position: 0 }]));
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const shape = findByName(envelope.root, 'Shape');
+  assert.equal(shape.style.background_gradient, undefined);
+  assert.equal(shape.style.background_color, '#ff0000');
+});

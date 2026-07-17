@@ -2279,13 +2279,20 @@ void synthesize_node(IRNode& n) {
     // fine. Their fill is only expressible as a path, so synthesize one and
     // carry the colour across.
     //
-    // A gradient still bails: it cannot be moved onto the path, and an
-    // svg_fill:none circle would be strictly worse than the box we render today.
+    // A gradient rides the path too, via setSvgFillGradient. It used to bail
+    // here because a gradient could not move onto the path, and emitting one
+    // anyway painted a gradient SQUARE behind the circle — strictly worse than
+    // a flat disc. The path can carry it now, so the only rule left is the one
+    // that made the square: whatever moves onto the path must be cleared off
+    // the node's own background.
     const bool fill_needs_path = n.type == "ellipse" || n.type == "circle" ||
                                  n.type == "polygon" || n.type == "star";
     const bool solid_filled =
         n.style.background_color && !n.style.background_color->empty();
-    if (node_has_visible_fill(n) && !(fill_needs_path && solid_filled)) return;
+    const bool gradient_filled =
+        n.style.background_gradient && !n.style.background_gradient->empty();
+    if (node_has_visible_fill(n) && !(fill_needs_path && (solid_filled || gradient_filled)))
+        return;
     const float w = n.style.width.value_or(0.0f);
     const float h = n.style.height.value_or(0.0f);
     const bool is_line = (n.type == "line" || n.type == "svg_line");
@@ -2315,7 +2322,16 @@ void synthesize_node(IRNode& n) {
     // The synthesized path now IS this node's paint, so a solid fill moves onto
     // it and the background is cleared. Leaving the background set would paint a
     // square behind the circle — the stray box that shows up behind a knob.
-    if (solid_filled) {
+    if (gradient_filled) {
+        n.attributes["svg_fill_gradient"] = *n.style.background_gradient;
+        n.style.background_gradient.reset();
+        // The solid, when present, follows it onto the path as the widget's
+        // parse-failure fallback. Either way the node's own background is
+        // cleared: leaving it would paint the box behind the circle.
+        n.attributes["svg_fill"] =
+            solid_filled ? *n.style.background_color : std::string("none");
+        n.style.background_color.reset();
+    } else if (solid_filled) {
         n.attributes["svg_fill"] = *n.style.background_color;
         n.style.background_color.reset();
     } else {

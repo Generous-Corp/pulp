@@ -1121,6 +1121,10 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             }
         };
         capture_color("fill", "svg_fill");
+        // A path's own gradient paint. Carried beside `fill` rather than
+        // instead of it: SvgPathWidget prefers the gradient and falls back to
+        // the solid only when the string won't parse.
+        capture_color("fillGradient", "svg_fill_gradient");
         capture_color("stroke", "svg_stroke");
         if (!node.attributes.count("svg_stroke_width")) {
             for (const char* k : {"strokeWidth", "stroke_width"}) {

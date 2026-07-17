@@ -1250,6 +1250,14 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
             if (auto f = node.attributes.find("svg_fill"); f != node.attributes.end())
                 ss << ind << "setSvgFill('" << id << "', '"
                    << js_single_quote_escape(f->second) << "');\n";
+            // Emission order is irrelevant — SvgPathWidget resolves the two at
+            // paint time, preferring the gradient and using the solid only as
+            // the parse-failure fallback — but the solid is emitted first so
+            // the generated JS reads the way it resolves.
+            if (auto g = node.attributes.find("svg_fill_gradient");
+                g != node.attributes.end() && !g->second.empty())
+                ss << ind << "setSvgFillGradient('" << id << "', '"
+                   << js_single_quote_escape(g->second) << "');\n";
             if (auto s = node.attributes.find("svg_stroke"); s != node.attributes.end())
                 ss << ind << "setSvgStroke('" << id << "', '"
                    << js_single_quote_escape(s->second) << "');\n";

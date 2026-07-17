@@ -3248,6 +3248,45 @@ CLI surface:
 
 What's NOT in Phase A: Pulp-framework defaults for the built-in `SettingsPanel` Audio/MIDI sub-tabs (`Cmd+Opt+A` / `Cmd+Opt+M`). Phase B follow-up — needs `TabPanel` select-tab JS API + standalone-only emission gate. Spec: `planning/2026-05-16-default-keyboard-shortcuts.md`.
 
+## Gradient paints — the transform is inverted, and only linear survives
+
+`scene.mjs` lowers a Figma `GRADIENT_LINEAR` paint to a CSS
+`linear-gradient(...)` string that `SvgPathWidget` / `setBackgroundGradient`
+paints. Four things about that pipeline are non-obvious, and three of them fail
+SILENTLY — the render just looks subtly wrong rather than erroring.
+
+- **Figma's paint `transform` maps the node's box INTO gradient space.** The
+  ramp runs (0,0)→(1,0) in gradient space, so the axis you want is the
+  **inverse** image of those points. Using the matrix forward renders every
+  gradient **180° flipped** — highlights light from below — and nothing warns
+  you. `gradientPaintToCss` inverts it; the guard is the `fig.test.mjs` case
+  "the paint transform is inverted, so a top→bottom ramp is not flipped".
+- **Scale the axis into PIXEL space (×w, ×h) before taking its angle.** A
+  normalized-space `atan2` is wrong on any non-square box.
+- **Only linear is expressible.** `parse_svg_linear_gradient`
+  (`svg_path_widget.cpp`) matches on the literal `linear-gradient(`, so RADIAL /
+  ANGULAR / DIAMOND have no lowering even though `Canvas` itself has
+  `set_fill_gradient_radial`. They keep flattening to the mean stop colour and
+  keep their `gradient-approximated` diagnostic. Emitting a radial as a linear
+  would silently paint the wrong gradient — worse than an honest approximation.
+- **The widget's gradient line is the box's HALF-DIAGONAL, not the CSS
+  gradient-line length**, and Figma's axis may start/end outside the box. So an
+  angle + the raw stops is still wrong on the ramp's extent; the stops are
+  resampled onto the widget's own axis.
+
+`setSvgFill` and `setSvgFillGradient` do **not** race: the widget prefers the
+gradient and falls back to `fill_color_` only when the string won't parse, so
+carrying both is a safety net and emission order cannot decide the paint.
+
+Whatever paint moves onto a synthesized path must be **cleared off the node's
+own background** (`design_import.cpp`), or the frame paints a gradient/solid
+RECTANGLE behind the circle — the stray box behind a knob.
+
+**Counting `gradient-approximated` is not a fidelity metric.** The warnings are
+per-INSTANCE, so a handful of distinct paints in a symbol master reports as
+dozens (SmallTriaz2: 80 warnings from 9 distinct paints). Judge the fix by the
+distinct nodes and the pixels, not the count.
+
 ## Figma-plugin lane — failure modes + fixes (2026-05)
 
 Hard-won lessons from porting the ELYSIUM synthesizer Figma file end-to-end. Every item below was a SUBTLE visual bug that took a user callout to catch the first time. The fixes are all generalizable importer rules, NOT design-specific patches.

@@ -396,6 +396,147 @@ function firstGradient(paints) {
   ) || null;
 }
 
+// Invert a Figma affine paint transform, or null when it is degenerate.
+function invertPaintTransform(t) {
+  if (!t) return null;
+  const det = t.m00 * t.m11 - t.m01 * t.m10;
+  if (!Number.isFinite(det) || Math.abs(det) < 1e-12) return null;
+  const i00 = t.m11 / det;
+  const i01 = -t.m01 / det;
+  const i10 = -t.m10 / det;
+  const i11 = t.m00 / det;
+  return {
+    m00: i00, m01: i01, m02: -(i00 * t.m02 + i01 * t.m12),
+    m10: i10, m11: i11, m12: -(i10 * t.m02 + i11 * t.m12),
+  };
+}
+
+function applyPaintTransform(t, x, y) {
+  return { x: t.m00 * x + t.m01 * y + t.m02, y: t.m10 * x + t.m11 * y + t.m12 };
+}
+
+// Sample a stop list at parameter `t`, with Figma's clamp-at-the-ends
+// behaviour (the first/last stop's colour extends past it).
+function sampleStops(stops, t) {
+  if (t <= stops[0].position) return stops[0].color;
+  const last = stops[stops.length - 1];
+  if (t >= last.position) return last.color;
+  for (let i = 1; i < stops.length; i++) {
+    const a = stops[i - 1];
+    const b = stops[i];
+    if (t <= b.position) {
+      const span = b.position - a.position;
+      const f = span <= 1e-9 ? 0 : (t - a.position) / span;
+      return {
+        r: a.color.r + (b.color.r - a.color.r) * f,
+        g: a.color.g + (b.color.g - a.color.g) * f,
+        b: a.color.b + (b.color.b - a.color.b) * f,
+        a: (a.color.a ?? 1) + ((b.color.a ?? 1) - (a.color.a ?? 1)) * f,
+      };
+    }
+  }
+  return last.color;
+}
+
+/**
+ * A Figma GRADIENT_LINEAR paint → a CSS `linear-gradient(...)` string that
+ * SvgPathWidget / setBackgroundGradient can paint, or null when the paint
+ * cannot be expressed and the caller must fall back to the flattened mean.
+ *
+ * Only LINEAR is expressible: `parse_svg_linear_gradient`
+ * (svg_path_widget.cpp) matches on the literal `linear-gradient(`, so a
+ * RADIAL / ANGULAR / DIAMOND paint has no lowering and keeps its honest
+ * `gradient-approximated` diagnostic rather than silently rendering as the
+ * wrong gradient.
+ *
+ * Two corrections the obvious implementation gets wrong, both verified
+ * against Figma's own export of this file rather than reasoned about:
+ *
+ *  1. The paint `transform` maps the node's normalized box INTO gradient
+ *     space, where the ramp runs (0,0)→(1,0). The axis in box space is the
+ *     INVERSE image of those points. Using the matrix forward renders every
+ *     gradient 180° flipped — the knob rim highlight lights from below.
+ *  2. The axis must be scaled into PIXEL space before its angle is taken.
+ *     A normalized-space angle is wrong on any non-square box.
+ *
+ * The widget derives its endpoints from the box's half-diagonal rather than
+ * the CSS gradient-line length, and Figma's axis is free to start and end
+ * outside the box (the rim highlight runs y=-0.26→0.67). Neither matches CSS
+ * `<angle>` semantics, so the stops are RESAMPLED onto the widget's own axis:
+ * the emitted 0% / 100% carry the colour the source ramp actually has where
+ * the widget's line enters and leaves. That keeps the paint faithful without
+ * depending on the widget and CSS agreeing about extent.
+ */
+function gradientPaintToCss(paint, w, h) {
+  if (!paint || paint.type !== 'GRADIENT_LINEAR') return null;
+  const stops = (paint.stops || [])
+    .filter((s) => s && s.color && typeof s.position === 'number')
+    .slice()
+    .sort((a, b) => a.position - b.position);
+  if (stops.length < 2) return null;
+  if (!(w > 0) || !(h > 0)) return null;
+
+  const inv = invertPaintTransform(paint.transform);
+  if (!inv) return null;
+  const a0 = applyPaintTransform(inv, 0, 0);
+  const a1 = applyPaintTransform(inv, 1, 0);
+  // Normalized box space → pixels, before any angle is taken.
+  const p0 = { x: a0.x * w, y: a0.y * h };
+  const p1 = { x: a1.x * w, y: a1.y * h };
+  const dx = p1.x - p0.x;
+  const dy = p1.y - p0.y;
+  const len2 = dx * dx + dy * dy;
+  if (!Number.isFinite(len2) || len2 < 1e-9) return null;
+
+  // Screen y is down: dx=1,dy=0 → 90deg (`to right`); dx=0,dy=1 → 180deg
+  // (`to bottom`).
+  let deg = (Math.atan2(dy, dx) * 180) / Math.PI + 90;
+  deg = ((deg % 360) + 360) % 360;
+
+  // The widget's own gradient line, mirrored from parse_svg_linear_gradient.
+  const rad = ((deg - 90) * Math.PI) / 180;
+  const halfDiag = 0.5 * Math.sqrt(w * w + h * h);
+  const ex = Math.cos(rad) * halfDiag;
+  const ey = Math.sin(rad) * halfDiag;
+  const s = { x: w / 2 - ex, y: h / 2 - ey };
+  const e = { x: w / 2 + ex, y: h / 2 + ey };
+  const sedx = e.x - s.x;
+  const sedy = e.y - s.y;
+  const seLen2 = sedx * sedx + sedy * sedy;
+  if (seLen2 < 1e-9) return null;
+
+  // Widget-axis parameter → source-ramp parameter, so each emitted stop
+  // carries the colour the source actually has at that point on the line.
+  const sourceParamAt = (nt) => {
+    const qx = s.x + sedx * nt - p0.x;
+    const qy = s.y + sedy * nt - p0.y;
+    return (qx * dx + qy * dy) / len2;
+  };
+  const widgetParamOf = (t) => {
+    const qx = p0.x + dx * t - s.x;
+    const qy = p0.y + dy * t - s.y;
+    return (qx * sedx + qy * sedy) / seLen2;
+  };
+
+  const out = [{ pos: 0, color: sampleStops(stops, sourceParamAt(0)) }];
+  for (const st of stops) {
+    const nt = widgetParamOf(st.position);
+    if (nt > 1e-4 && nt < 1 - 1e-4) out.push({ pos: nt, color: st.color });
+  }
+  out.push({ pos: 1, color: sampleStops(stops, sourceParamAt(1)) });
+  out.sort((a, b) => a.pos - b.pos);
+
+  const opacity = paint.opacity ?? 1;
+  const parts = out.map((st) => {
+    // Stop alpha and the paint's own opacity both fold into the emitted
+    // colour, exactly as the solid paths do — the rim highlight is white at
+    // alpha 0.24, and dropping either makes it a hard white ring.
+    const hex = colorToHex({ ...st.color, a: (st.color.a ?? 1) * opacity });
+    return `${hex} ${round2(st.pos * 100)}%`;
+  });
+  return `linear-gradient(${round2(deg)}deg, ${parts.join(', ')})`;
+}
+
 /**
  * A single representative colour for a paint list, for consumers that can only
  * express a solid fill.
@@ -597,16 +738,26 @@ export function materializeFrame(scene, frame, ctx) {
     // gradient-filled box on the floor: Figma's `knob base` is an ELLIPSE with a
     // GRADIENT_LINEAR body, so it arrived with no fill at all and fell back to an
     // empty frame — the mystery square behind every knob. The same drop is why a
-    // near-white gradient panel imported as a dark hole. `background_color` can
-    // only carry one colour, so a gradient collapses to the mean of its stops:
-    // an honest approximation (diagnosed below), and far closer than nothing.
-    // Real multi-stop gradients need a paint-server lowering — tracked separately.
+    // near-white gradient panel imported as a dark hole.
+    //
+    // A LINEAR gradient lowers to a real `background_gradient`. Anything else
+    // (radial / angular / diamond) has no lowering downstream, so it still
+    // collapses to the mean of its stops and still says so: an honest
+    // approximation, and far closer than nothing.
     if (node.type !== 'TEXT') {
-      const hex = approximatePaintColor(node.fillPaints);
-      if (hex) style.background_color = hex;
-      if (!firstSolidFill(node) && firstGradient(node.fillPaints)) {
-        pushDiag('gradient-approximated', node,
-                 `${node.type} gradient fill flattened to its mean stop colour`);
+      const grad = firstGradient(node.fillPaints);
+      const css = firstSolidFill(node)
+        ? null
+        : gradientPaintToCss(grad, style.width, style.height);
+      if (css) {
+        style.background_gradient = css;
+      } else {
+        const hex = approximatePaintColor(node.fillPaints);
+        if (hex) style.background_color = hex;
+        if (!firstSolidFill(node) && grad) {
+          pushDiag('gradient-approximated', node,
+                   `${node.type} ${grad.type} flattened to its mean stop colour`);
+        }
       }
     }
     const image = firstImageFill(node);
@@ -902,10 +1053,23 @@ export function materializeFrame(scene, frame, ctx) {
         // renders a black silhouette — strictly worse than the plain box this
         // lane used to emit, and the one way this change could regress a file.
         out.fill = hex || 'none';
-        if (!hex && firstGradient(paints)) {
-          pushDiag('gradient-approximated', node, `${type} gradient has no stops; fill cleared`);
-        } else if (hex && firstGradient(paints)) {
-          pushDiag('gradient-approximated', node, `${type} gradient flattened to its mean stop colour`);
+        const grad = firstGradient(paints);
+        // The gradient rides the path alongside the flattened fill rather than
+        // replacing it: SvgPathWidget prefers the gradient and only falls back
+        // to fill_color_ when the string fails to parse, so the mean stays as
+        // the safety net and neither ordering nor a stale solid can bite.
+        //
+        // The box here is the geometry's, which a stroke outline overhangs by
+        // half the stroke weight, so the axis is off by that much against
+        // Figma's node box. That is sub-pixel on these rims and far smaller
+        // than the error it replaces.
+        const css = gradientPaintToCss(grad, style.width, style.height);
+        if (css) {
+          out.fillGradient = css;
+        } else if (!hex && grad) {
+          pushDiag('gradient-approximated', node, `${type} ${grad.type} has no stops; fill cleared`);
+        } else if (hex && grad) {
+          pushDiag('gradient-approximated', node, `${type} ${grad.type} flattened to its mean stop colour`);
         }
         delete style.background_color;
         if (resolved.droppedStroke) {
@@ -1000,10 +1164,16 @@ export function materializeFrame(scene, frame, ctx) {
       }
     }
 
+    // Only when nothing above managed to express it. This used to fire for
+    // every gradient unconditionally, double-counting each node the fill
+    // branch had already diagnosed — and now that a linear gradient really is
+    // lowered, an unconditional warning would be a lie.
     const gradient = (node.fillPaints || []).find(
       (p) => typeof p.type === 'string' && p.type.startsWith('GRADIENT') && p.visible !== false,
     );
-    if (gradient) pushDiag('gradient-approximated', node, gradient.type);
+    if (gradient && !out.fillGradient && !out.style?.background_gradient) {
+      pushDiag('gradient-approximated', node, gradient.type);
+    }
 
     if ((node.strokePaints || []).length && typeof node.strokeWeight === 'number' && node.strokeWeight > 0) {
       const s = firstSolidStroke(node);
