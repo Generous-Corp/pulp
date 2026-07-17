@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06940"></a>
+## [0.694.0] - 2026-07-17
+
+- docs(skill): correct pitch-analyzer octave/missing-fundamental behavior ([#6229](https://github.com/danielraffel/pulp/pull/6229))
+- fix(aax): default the entry point to the host parameter strip ([#6225](https://github.com/danielraffel/pulp/pull/6225))
+
 <a id="v06930"></a>
 ## [0.693.0] - 2026-07-17
 
@@ -6505,6 +6511,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.694.0]: https://github.com/danielraffel/pulp/releases/tag/v0.694.0
 [0.693.0]: https://github.com/danielraffel/pulp/releases/tag/v0.693.0
 [0.692.0]: https://github.com/danielraffel/pulp/releases/tag/v0.692.0
 [0.690.0]: https://github.com/danielraffel/pulp/releases/tag/v0.690.0

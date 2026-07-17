@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <stdexcept>
 #include <tuple>
 
@@ -208,11 +209,26 @@ PitchEstimate estimate_pitch(std::span<const float> samples, double sample_rate,
     // explains the segment just as well (a vibrato/glide frame is nearly a pure
     // tone, so f0/4 refined to put its 4th harmonic on the tone scores as high as
     // f0). Only the TRUE root has a partial at the root itself; a subharmonic that
-    // is merely a harmonic-alignment artifact — or that collects broadband noise
-    // or short-window spectral leakage — has its own tooth sitting at the
-    // noise/leakage floor (< 0.1% of the loudest partial), far below a genuine
-    // fundamental (an 8%-amplitude fundamental under a loud 2nd harmonic is ~0.6%
-    // of the loudest partial's energy). `kFundamentalFloor` sits between them.
+    // is merely a harmonic-alignment artifact has its own tooth sitting at the
+    // noise/leakage floor, far below a genuine fundamental (an 8%-amplitude
+    // fundamental under a loud 2nd harmonic is ~0.6% of the loudest partial's
+    // energy). `kFundamentalFloor` is the absolute noise floor between them.
+    //
+    // But that fixed floor is not enough on its own: the tooth of a subharmonic
+    // f0/m of a plain saw is fed by SPECTRAL LEAKAGE from the loud coarse partial,
+    // and the leakage grows as the analysis window shortens (a rectangular-window
+    // LSQ fit at a distance Δf from a strong tone leaks ~1/(π·Δf·T) in amplitude,
+    // energy ~ its square). At the default window a low bass saw holds only a
+    // handful of periods and the f0/2 leakage exceeds the fixed floor — the
+    // estimator would then confidently report an octave (or two) DOWN. So the
+    // tooth must clear a LEAKAGE-AWARE floor: the expected leakage of the coarse
+    // peak into the candidate root, `(kLeakageSafety/(π·Δf·T))²` of the peak
+    // partial, with Δf the root-to-coarse distance and T the window duration. A
+    // genuine fundamental far below a loud harmonic (Δf large) or measured over a
+    // long window (T large) sees a negligible leakage floor and is still adopted;
+    // a leaky subharmonic of a saw over a short window (Δf and T both small) does
+    // not clear it and is correctly rejected in favor of the coarse peak (which,
+    // for a saw, IS the true fundamental).
     //
     // Residual limitation (documented, not a false contract): a true
     // missing-fundamental signal — energy only at 2·f0 and 3·f0, none at f0 —
@@ -220,9 +236,19 @@ PitchEstimate estimate_pitch(std::span<const float> samples, double sample_rate,
     // rejected; the estimate stays on the loudest present partial (2·f0), an
     // octave above the perceived pitch. The refined score of that partial is what
     // gates voicing, so the case is reported honestly, never as a fabricated f0.
+    // Symmetrically, a genuine faint fundamental that falls BELOW the leakage
+    // floor at a short window is not resolvable there and is not adopted (the
+    // estimate stays on the loudest partial) rather than guessed — resolve it with
+    // a longer analysis window.
     constexpr int kMaxSubharmonic = 8;
     constexpr double kExplainedEnergyMargin = 0.02;
     constexpr double kFundamentalFloor = 2.5e-3;
+    // Safety factor over the theoretical rectangular-window leakage envelope
+    // (1/(π·Δf·T)); tuned so a real BLEP saw's f0/2 leakage is rejected at the
+    // few-period windows where it bites while genuine faint fundamentals over the
+    // suite's long fixtures still clear the floor.
+    constexpr double kLeakageSafety = 3.0;
+    const double window_dur = static_cast<double>(seg.size()) / sample_rate;
 
     // Refine a candidate root within its one-bin bracket; report the refined
     // frequency, the fraction of segment energy its refined harmonic comb
@@ -278,13 +304,23 @@ PitchEstimate estimate_pitch(std::span<const float> samples, double sample_rate,
     }
 
     // Adopt the lowest-frequency surviving candidate that both explains the
-    // segment within the margin of the best and clears the fundamental-tooth
-    // floor at its refined root; otherwise keep the coarse peak (index 0).
+    // segment within the margin of the best and clears its fundamental-tooth floor
+    // at its refined root; otherwise keep the coarse peak (index 0). The floor is
+    // the larger of the absolute noise floor and the leakage the coarse peak sheds
+    // into this root over this window (see the leakage note above) — so a leaky
+    // subharmonic of a saw over a short window is rejected while a genuine faint
+    // fundamental clears it.
     double refined = refined_hz[0];
     double ratio = explained[0];
     for (int i = candidates - 1; i >= 1; --i) {
+        const double delta_f = coarse_hz - refined_hz[i]; // > 0 for a subharmonic
+        const double leak_amp =
+            delta_f > 0.0 ? kLeakageSafety / (std::numbers::pi * delta_f * window_dur)
+                          : 1.0;
+        const double leak_floor = leak_amp * leak_amp * peak_partial;
+        const double tooth_floor = std::max(partial_floor, leak_floor);
         if (explained[i] >= best_explained - kExplainedEnergyMargin &&
-            fundamental_tooth[i] >= partial_floor) {
+            fundamental_tooth[i] >= tooth_floor) {
             refined = refined_hz[i];
             ratio = explained[i];
             break;

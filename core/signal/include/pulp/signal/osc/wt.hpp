@@ -79,6 +79,11 @@ public:
         table_count_ = tables.size();
         bank_ = WavetableBank64(std::move(tables));
         bank_.set_sample_rate(sample_rate_);
+        // The fresh bank starts on its default band with nothing audible to fade
+        // FROM, so the next frequency must SNAP to its band, not crossfade up from
+        // the default — otherwise swapping the wavetable set mid-note replays the
+        // aliased band-switch onset that `reset()`'s snap exists to prevent.
+        pending_band_snap_ = true;
         update_scan_coeff();
     }
 
