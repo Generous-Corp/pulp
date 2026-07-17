@@ -8,6 +8,16 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06880"></a>
+## [0.688.0] - 2026-07-17
+
+- fix/keychain search list converge ([#6197](https://github.com/danielraffel/pulp/pull/6197))
+- test/anchor cross language conformance ([#6183](https://github.com/danielraffel/pulp/pull/6183))
+- fix/baseline diff diagnosable ([#6174](https://github.com/danielraffel/pulp/pull/6174))
+- fix/ship sign flake ([#6158](https://github.com/danielraffel/pulp/pull/6158))
+- docs/downstream capability plan ([#6146](https://github.com/danielraffel/pulp/pull/6146))
+- fix/web render loop reentrancy ([#6145](https://github.com/danielraffel/pulp/pull/6145))
+
 <a id="v06870"></a>
 ## [0.687.0] - 2026-07-17
 
@@ -6479,6 +6489,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.688.0]: https://github.com/danielraffel/pulp/releases/tag/v0.688.0
 [0.687.0]: https://github.com/danielraffel/pulp/releases/tag/v0.687.0
 [0.685.0]: https://github.com/danielraffel/pulp/releases/tag/v0.685.0
 [0.681.0]: https://github.com/danielraffel/pulp/releases/tag/v0.681.0
