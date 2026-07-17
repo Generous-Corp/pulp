@@ -453,7 +453,11 @@ TEST_CASE("EqCurveView paint covers grid spectrum and enabled handles",
     RecordingCanvas canvas;
     eq.paint(canvas);
 
-    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) > 1);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) >= 1);   // background
+    // The spectrum is now a smooth gradient-filled envelope (not per-column
+    // bars): its soft vertical wash plus the band's own fill both go through
+    // set_fill_gradient_linear, so at least one gradient fill is recorded.
+    REQUIRE(canvas.count(DrawCommand::Type::set_fill_gradient_linear) >= 1);
     REQUIRE(canvas.count(DrawCommand::Type::stroke_line) > 200);
     REQUIRE(canvas.count(DrawCommand::Type::fill_circle) == 1);
     REQUIRE(canvas.count(DrawCommand::Type::stroke_circle) == 1);

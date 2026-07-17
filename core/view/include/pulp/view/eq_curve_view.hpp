@@ -81,6 +81,13 @@ public:
     void set_show_band_curves(bool show) { show_band_curves_ = show; }
     bool show_band_curves() const { return show_band_curves_; }
 
+    // Draw handles for DISABLED (bypassed) bands as dimmed dots instead of
+    // hiding them. Off by default so existing callers are unaffected; a host
+    // that models bypass (the composite already excludes a disabled band) turns
+    // this on so a bypassed band still shows a faded, re-grabbable handle.
+    void set_show_disabled_handles(bool show) { show_disabled_handles_ = show; }
+    bool show_disabled_handles() const { return show_disabled_handles_; }
+
     // dB (vertical) and frequency (horizontal) axis labels. On by default.
     void set_show_labels(bool show) { show_labels_ = show; }
     bool show_labels() const { return show_labels_; }
@@ -89,6 +96,33 @@ public:
     // dragged. On by default.
     void set_show_readout(bool show) { show_readout_ = show; }
     bool show_readout() const { return show_readout_; }
+
+    // Reserve empty space at the TOP of the plotting area (pixels). The grid,
+    // curve, handles, and the top dB axis label are all pushed down by this
+    // amount so a host with no chrome above the graph (a plugin editor with no
+    // header) has room to paint its own readout / controls in the gap without
+    // clipping the "+12" label against the window edge. Off (0) by default so
+    // existing callers are unaffected. The bottom axis (frequency labels) does
+    // not move.
+    void set_content_top_padding(float px) { content_top_pad_ = px > 0.0f ? px : 0.0f; }
+    float content_top_padding() const { return content_top_pad_; }
+
+    // Index of the band handle at a local point, or -1. Exposes the handle
+    // hit-test so a host that layers its own gestures on the dots (e.g.
+    // ⌥-click to bypass) can reuse the exact handle geometry instead of
+    // duplicating it. Additive; existing callers are unaffected.
+    int hit_test_handle(Point pos) const { return hit_test_band(pos); }
+
+    // Ease each handle's radius toward its target (resting vs. hovered/active)
+    // instead of snapping, so a hover reads as a small settle rather than a pop.
+    // Off by default (existing callers snap as before). A host that turns this
+    // on should keep the render loop alive while hover_animating() is true — the
+    // shared needs_continuous_frames() predicate already consults it.
+    void set_hover_animation(bool on) { hover_animation_ = on; }
+    bool hover_animation() const { return hover_animation_; }
+
+    // True while any handle radius is mid-transition (drives continuous frames).
+    bool hover_animating() const { return hover_animating_; }
 
     // Default color assigned to band i when its Band::color is unset, from a
     // built-in palette. Exposed so callers can match handles or legends to it.
@@ -112,6 +146,11 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
+    // Trackpad pinch adjusts the Q of the hovered (else selected) band: pinch-in
+    // narrows (higher Q), pinch-out widens (lower Q). Targets the hovered/selected
+    // band rather than the gesture position — the platform reports the gesture
+    // center in window coords, which a nested/offset view cannot hit-test.
+    void on_gesture_event(const GestureEvent& event) override;
     void on_mouse_down(Point pos) override;
     void on_mouse_up(Point pos) override;
     void on_mouse_drag(Point pos) override;
@@ -130,9 +169,18 @@ private:
     float sample_rate_ = 48000.0f;
     bool show_grid_ = true;
     bool show_band_curves_ = true;
+    bool show_disabled_handles_ = false;
     bool show_labels_ = true;
     bool show_readout_ = true;
+    float content_top_pad_ = 0.0f;  // empty space reserved at the top (px)
+    bool hover_animation_ = false;  // ease handle radius toward target (opt-in)
+    bool hover_animating_ = false;  // any handle mid-transition this frame
+    std::vector<float> handle_radius_;  // per-band eased radius (-1 = uninit)
     std::vector<float> spectrum_;
+    // Persistent temporally-smoothed spectrum (fast attack / slow release),
+    // updated per frame in set_spectrum() and drawn from in paint() so the
+    // analyzer flows instead of flickering.
+    std::vector<float> spectrum_smoothed_;
     int selected_band_ = -1;
     int dragging_band_ = -1;
     int hovered_band_ = -1;

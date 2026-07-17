@@ -91,7 +91,7 @@ public:
             store.add_parameter({.id = eq_freq_param(b),
                                  .name = band_param_name(b, "Freq"),
                                  .unit = "Hz",
-                                 .range = state::ParamRange::with_centre(
+                                 .range = state::ParamRange::with_center(
                                      20.0f, 20000.0f, std::sqrt(20.0f * 20000.0f),
                                      layout.default_freq)});
             // Gain: linear -18..+18 dB, default flat.

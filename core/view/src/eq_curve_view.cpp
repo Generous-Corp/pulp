@@ -168,15 +168,34 @@ LogFrequencyScale EqCurveView::frequency_scale() const {
 
 DecibelScale EqCurveView::gain_scale() const {
     auto b = local_bounds();
-    return {min_db_, max_db_, b.y, b.height};
+    // Reserve content_top_pad_ pixels at the top: max_db moves down by the
+    // padding, the bottom (min_db / frequency labels) stays put.
+    const float pad = std::min(content_top_pad_, b.height);
+    return {min_db_, max_db_, b.y + pad, b.height - pad};
 }
 
 void EqCurveView::set_spectrum(const float* magnitudes_db, size_t bin_count) {
     spectrum_.assign(magnitudes_db, magnitudes_db + bin_count);
+    // Temporal smoothing: ease a persistent display buffer toward the incoming
+    // frame per-bin — FAST attack (rise) so transients register, SLOW release
+    // (fall) so the display flows and stops flickering. The paint path draws
+    // from this smoothed buffer, not the raw frame. Reset on a bin-count change.
+    constexpr float kSpectrumAttack  = 0.5f;   // rise toward a louder bin
+    constexpr float kSpectrumRelease = 0.15f;  // fall toward a quieter bin
+    if (spectrum_smoothed_.size() != bin_count) {
+        spectrum_smoothed_.assign(magnitudes_db, magnitudes_db + bin_count);
+        return;
+    }
+    for (size_t i = 0; i < bin_count; ++i) {
+        const float target = magnitudes_db[i];
+        const float a = target > spectrum_smoothed_[i] ? kSpectrumAttack : kSpectrumRelease;
+        spectrum_smoothed_[i] += (target - spectrum_smoothed_[i]) * a;
+    }
 }
 
 void EqCurveView::clear_spectrum() {
     spectrum_.clear();
+    spectrum_smoothed_.clear();
 }
 
 // The four axis conversions all defer to the shared scales, so anything
@@ -191,9 +210,11 @@ int EqCurveView::hit_test_band(Point pos) const {
     auto b = local_bounds();
     for (size_t i = 0; i < bands_.size(); ++i) {
         float bx = freq_to_x(bands_[i].frequency);
-        // Clamp to the viewport so a dot pushed past the top/bottom stops at the
-        // edge (half-visible) and stays grabbable, rather than vanishing.
-        float by = std::clamp(db_to_y(band_handle_db(bands_[i])), b.y, b.y + b.height);
+        // Clamp to the plotting area (respecting the reserved top padding) so a
+        // dot pushed past the top/bottom stops at the edge (half-visible) and
+        // stays grabbable, rather than vanishing.
+        const float top = b.y + std::min(content_top_pad_, b.height);
+        float by = std::clamp(db_to_y(band_handle_db(bands_[i])), top, b.y + b.height);
         float dx = pos.x - bx;
         float dy = pos.y - by;
         if (dx * dx + dy * dy <= hit_radius * hit_radius)
@@ -289,20 +310,69 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
         }
     }
 
-    // Spectrum overlay, resampled from linear FFT bins onto the log axis so it
-    // sits in the same x-spacing as the curve below and has a value in every
-    // pixel column (raw bins leave the bottom decade nearly empty).
-    if (!spectrum_.empty() && b.width >= 1.0f) {
+    // Spectrum analyzer overlay — a smooth translucent envelope in the accent
+    // ("spec") color, drawn UNDER the EQ curve so the white composite line and
+    // colored bands stay the hero. The FFT is (a) temporally smoothed in
+    // set_spectrum(); here it is (b) resampled from linear bins onto the log
+    // axis, (c) frequency-smoothed (~1/12-octave box average) into a clean
+    // contour instead of a picket fence, then rendered as (d) a soft vertical
+    // gradient fill (dense at the top, fading to nothing at 0 dB) beneath a thin
+    // brighter top stroke.
+    if (!spectrum_smoothed_.empty() && b.width >= 4.0f) {
         const auto columns = static_cast<size_t>(b.width);
         spectrum_db_.resize(columns);
-        resample_spectrum_log(spectrum_, sample_rate_, freq_axis, spectrum_db_);
+        resample_spectrum_log(spectrum_smoothed_, sample_rate_, freq_axis, spectrum_db_);
 
-        canvas.set_fill_color(with_alpha(curve_color, 0.16f));
-        const float baseline = gain_axis.to_y(min_db_);
+        // (c) Frequency smoothing: a box moving average over the log-spaced
+        // columns. The 10-octave span maps across b.width px, so ~1/12 octave is
+        // about width/120 px; a half-window near that reads as a smooth energy
+        // curve. band_db_ is reused as the read-only source (its per-band-curve
+        // use above is finished by now).
+        const int hw = std::max(2, static_cast<int>(b.width / 120.0f));
+        band_db_.assign(spectrum_db_.begin(), spectrum_db_.end());
         for (size_t i = 0; i < columns; ++i) {
-            const float x = b.x + static_cast<float>(i);
-            const float y = gain_axis.to_y(spectrum_db_[i]);
-            if (y < baseline) canvas.fill_rect(x, y, 1.0f, baseline - y);
+            const int lo = std::max(0, static_cast<int>(i) - hw);
+            const int hi = std::min(static_cast<int>(columns) - 1, static_cast<int>(i) + hw);
+            float acc = 0.0f;
+            for (int k = lo; k <= hi; ++k) acc += band_db_[static_cast<size_t>(k)];
+            spectrum_db_[i] = acc / static_cast<float>(hi - lo + 1);
+        }
+
+        // (d) Build a top-edge polyline sampled every ~3 px, plus baseline anchors
+        // at the 0 dB line, as one closed fill polygon. Points [1 .. n-2] are the
+        // envelope; [0] and [n-1] are the baseline anchors.
+        const Color spec = Color::rgba8(0x64, 0xaf, 0xeb);
+        const float y_top  = gain_axis.to_y(max_db_);  // +max dB line (gradient top)
+        const float y_zero = gain_axis.to_y(0.0f);      // 0 dB line (gradient bottom)
+        const float plot_top = b.y + std::min(content_top_pad_, b.height);
+
+        fill_poly_.clear();
+        fill_poly_.push_back({b.x, y_zero});
+        constexpr float step = 3.0f;
+        for (float fx = 0.0f; fx <= b.width; fx += step) {
+            const size_t ci = std::min(columns - 1, static_cast<size_t>(fx));
+            // Clamp within the plot and never below the 0 dB baseline — the fill
+            // is a hump above 0 dB, not a band that dips below it.
+            const float y = std::clamp(gain_axis.to_y(spectrum_db_[ci]), plot_top, y_zero);
+            fill_poly_.push_back({b.x + fx, y});
+        }
+        fill_poly_.push_back({b.x + b.width, y_zero});
+
+        // Fill: vertical gradient, ~0x44 alpha at +max dB fading to ~0x06 at 0 dB.
+        const Color stops[2] = {with_alpha(spec, 0x44 / 255.0f),
+                                with_alpha(spec, 0x06 / 255.0f)};
+        const float positions[2] = {0.0f, 1.0f};
+        canvas.set_fill_gradient_linear(b.x, y_top, b.x, y_zero, stops, positions, 2);
+        canvas.fill_path(fill_poly_.data(), fill_poly_.size());
+
+        // Top stroke: a thin brighter accent line along the envelope only (skip
+        // the two baseline anchor points), round joins for a smooth contour.
+        if (fill_poly_.size() > 3) {
+            canvas.set_stroke_color(with_alpha(spec, 0x99 / 255.0f));
+            canvas.set_line_width(1.3f);
+            canvas.set_line_cap(canvas::LineCap::round);
+            canvas.set_line_join(canvas::LineJoin::round);
+            canvas.stroke_path(&fill_poly_[1], fill_poly_.size() - 2);
         }
     }
 
@@ -354,18 +424,45 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
     // Band handles — filled in the band's color, white ring, drawn last so they
     // sit above every curve. The active band (dragged, or hovered) grows.
     const int active_band = dragging_band_ >= 0 ? dragging_band_ : hovered_band_;
+    // Per-band eased radius (opt-in). Resize (and mark uninitialized with -1) if
+    // the band count changed so the next frame snaps rather than animating from 0.
+    if (hover_animation_ && handle_radius_.size() != bands_.size())
+        handle_radius_.assign(bands_.size(), -1.0f);
+    hover_animating_ = false;
     for (size_t i = 0; i < bands_.size(); ++i) {
         auto& band = bands_[i];
-        if (!band.enabled) continue;
+        // A disabled (bypassed) band drops out of the composite; its handle is
+        // hidden unless show_disabled_handles_ opts in, in which case it is
+        // drawn dimmed and slightly smaller so it stays re-grabbable.
+        const bool disabled = !band.enabled;
+        if (disabled && !show_disabled_handles_) continue;
 
         float hx = freq_to_x(band.frequency);
-        float hy = std::clamp(db_to_y(band_handle_db(band)), b.y, b.y + b.height);
+        const float handle_top = b.y + std::min(content_top_pad_, b.height);
+        float hy = std::clamp(db_to_y(band_handle_db(band)), handle_top, b.y + b.height);
         const bool is_active = static_cast<int>(i) == active_band;
-        float radius = is_active ? 8.5f : 6.0f;
+        const float target_radius = (is_active ? 8.5f : 6.0f) * (disabled ? 0.8f : 1.0f);
+        // Ease-out lerp toward the target (never overshoots). ~0.3/frame settles
+        // to within ~0.06px in ~10 frames (~160ms @ 60fps) — a subtle settle, not
+        // a bounce. Snaps on the first frame (cur == -1) so a fresh band or a
+        // band-count change doesn't animate up from nothing.
+        float radius = target_radius;
+        if (hover_animation_ && i < handle_radius_.size()) {
+            float& cur = handle_radius_[i];
+            if (cur < 0.0f) {
+                cur = target_radius;
+            } else {
+                cur += (target_radius - cur) * 0.3f;
+                if (std::abs(cur - target_radius) < 0.06f) cur = target_radius;
+                else hover_animating_ = true;
+            }
+            radius = cur;
+        }
 
-        canvas.set_fill_color(band_color(band, i));
+        const float dim = disabled ? 0.32f : 1.0f;
+        canvas.set_fill_color(band_color(band, i).with_alpha(dim));
         canvas.fill_circle(hx, hy, radius);
-        canvas.set_stroke_color(Color::rgba8(255, 255, 255));
+        canvas.set_stroke_color(Color::rgba8(255, 255, 255, disabled ? 90 : 255));
         canvas.set_line_width(is_active ? 2.0f : 1.5f);
         canvas.stroke_circle(hx, hy, radius);
     }
@@ -439,12 +536,19 @@ void EqCurveView::on_mouse_drag(Point pos) {
 void EqCurveView::on_mouse_event(const MouseEvent& event) {
     // Scroll wheel over a band adjusts its Q — the width of a peak, the slope of
     // a shelf. Multiplicative so it feels even across the range, and clamped to
-    // the same bounds a drag respects.
+    // the same bounds a drag respects. The step scales with the wheel-delta
+    // MAGNITUDE (not just its sign): a slow notch nudges Q, a fast trackpad flick
+    // moves it further — but the per-event exponent is capped so momentum can
+    // never slam Q onto a rail in a single event. scroll_delta_y > 0 (down)
+    // narrows toward lower Q, preserving the prior sign convention.
     if (event.is_wheel) {
         const int band = hit_test_band(event.position);
         if (band >= 0) {
             auto& b = bands_[static_cast<size_t>(band)];
-            const float factor = event.scroll_delta_y > 0 ? 1.0f / 1.1f : 1.1f;
+            constexpr float kQWheelGain = 0.02f;  // exponent per delta unit
+            const float exponent =
+                std::clamp(event.scroll_delta_y * kQWheelGain, -0.3f, 0.3f);
+            const float factor = std::exp(-exponent);
             b.q = std::clamp(b.q * factor, 0.1f, 12.0f);
             rebuild_coefficients();
             selected_band_ = band;
@@ -479,6 +583,28 @@ void EqCurveView::on_mouse_event(const MouseEvent& event) {
         hovered_band_ = hit_test_band(event.position);
 
     View::on_mouse_event(event);
+}
+
+void EqCurveView::on_gesture_event(const GestureEvent& event) {
+    // Only the continuous (changed) phase carries a scale delta worth applying;
+    // begin/end/cancel are boundaries.
+    if (event.phase != GesturePhase::changed) return;
+    int band = hovered_band_ >= 0 ? hovered_band_ : selected_band_;
+    if (band < 0 || band >= static_cast<int>(bands_.size())) return;
+    auto& b = bands_[static_cast<size_t>(band)];
+    // macOS reports pinch-OUT (fingers apart) as a POSITIVE magnification and
+    // pinch-IN as NEGATIVE. Pinch-in should narrow (raise Q), pinch-out widen
+    // (lower Q): factor = exp(-delta_scale*k) maps delta<0 → factor>1 (narrower)
+    // and delta>0 → factor<1 (wider). Multiplicative for an even feel; clamped to
+    // the same bounds a drag/scroll respects.
+    constexpr float kPinchGain = 3.0f;
+    const float factor = std::exp(-event.delta_scale * kPinchGain);
+    b.q = std::clamp(b.q * factor, 0.1f, 12.0f);
+    rebuild_coefficients();
+    selected_band_ = band;
+    hovered_band_ = band;
+    if (on_band_changed) on_band_changed(static_cast<size_t>(band), b);
+    request_repaint();
 }
 
 void EqCurveView::on_hover_move(Point local_pos) {
