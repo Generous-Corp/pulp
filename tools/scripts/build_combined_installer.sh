@@ -100,24 +100,54 @@ xml_escape() {  # escape XML metacharacters so titles/descriptions with & < > " 
   printf '%s' "$s"
 }
 
-CHOICES=""; DEFS=""; REFS=""
-add_ref() {  # $1=choice-id (already [a-z0-9-])  $2=title  $3=desc  $4=pkgfile
+CHOICES=""; DEFS=""; REFS=""; APP_LINES=""
+# A choice with a real payload. $1=unique choice-id  $2=title  $3=desc  $4=pkgfile
+add_ref() {
   local title desc; title="$(xml_escape "$2")"; desc="$(xml_escape "$3")"
-  CHOICES="$CHOICES<line choice=\"$1\"/>"
   DEFS="$DEFS<choice id=\"$1\" title=\"$title\" description=\"$desc\"><pkg-ref id=\"com.pulp.$NAME.$1.pkg\"/></choice>"
   REFS="$REFS<pkg-ref id=\"com.pulp.$NAME.$1.pkg\" version=\"$VERSION\">$4</pkg-ref>"
 }
+slug() { echo "$1" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9'; }
 
+# Plugin bundles are grouped by plugin name so the installer can nest formats
+# under each plugin. Keying packages by plugin+format (not by format alone) is
+# what makes a multi-plugin installer work at all -- otherwise every plugin's AU
+# package shares one identifier and only the last survives. macOS ships bash 3.2
+# (no associative arrays), so the plugin->format mapping is a tab-delimited
+# accumulator post-processed with awk.
+PLUGIN_ENTRIES=""    # one "pluginName<TAB>choiceId" line per plugin+format
 echo "== plugins =="
 for ((i=0; i<${#P_KIND[@]}; i++)); do
   k="${P_KIND[$i]}"; p="${P_PATH[$i]}"; [[ -d "$p" ]] || { echo "missing: $p" >&2; exit 2; }
   deep_sign "$p"
-  f="$(basename "$p").pkg"
-  pkgbuild --component "$p" --identifier "com.pulp.$NAME.$k.pkg" --version "$VERSION" \
+  pname="$(basename "$p")"; pname="${pname%.*}"        # e.g. VaDrum
+  cid="$(slug "$pname")-$k"                            # unique per plugin+format
+  f="${pname}.${k}.pkg"
+  pkgbuild --component "$p" --identifier "com.pulp.$NAME.$cid.pkg" --version "$VERSION" \
     --install-location "$(plugin_dir "$k")" "$STAGE/comp/$f" >/dev/null
   case "$k" in au) d="Logic, GarageBand";; vst3) d="Most DAWs";; clap) d="REAPER, Bitwig";; esac
-  add_ref "$k" "$(echo "$k" | tr a-z A-Z)" "$d" "$f"
+  add_ref "$cid" "$(echo "$k" | tr a-z A-Z)" "$d" "$f"
+  PLUGIN_ENTRIES="${PLUGIN_ENTRIES}${pname}	${cid}
+"
 done
+
+# Outline: one expandable group per plugin when there is more than one; a flat
+# list of formats when there is only one (nothing to disambiguate).
+PLUGIN_NAMES="$(printf '%s' "$PLUGIN_ENTRIES" | awk -F'\t' 'NF && !seen[$1]++{print $1}')"
+NPLUG="$(printf '%s\n' "$PLUGIN_NAMES" | grep -c .)"
+if [[ "$NPLUG" -le 1 ]]; then
+  CHOICES="$CHOICES$(printf '%s' "$PLUGIN_ENTRIES" | awk -F'\t' 'NF{printf "<line choice=\"%s\"/>",$2}')"
+else
+  while IFS= read -r pn; do
+    [[ -z "$pn" ]] && continue
+    gid="grp-$(slug "$pn")"
+    DEFS="$DEFS<choice id=\"$gid\" title=\"$(xml_escape "$pn")\" description=\"\" selected=\"true\"></choice>"
+    inner="$(printf '%s' "$PLUGIN_ENTRIES" | awk -F'\t' -v p="$pn" 'NF && $1==p{printf "<line choice=\"%s\"/>",$2}')"
+    CHOICES="$CHOICES<line choice=\"$gid\">$inner</line>"
+  done <<EOF
+$PLUGIN_NAMES
+EOF
+fi
 
 echo "== apps → /Applications =="
 for ((i=0; i<${#A_TITLE[@]}; i++)); do
@@ -129,6 +159,7 @@ for ((i=0; i<${#A_TITLE[@]}; i++)); do
   pkgbuild --root "$r" --identifier "com.pulp.$NAME.$id.pkg" --version "$VERSION" \
     --install-location / "$STAGE/comp/$f" >/dev/null
   add_ref "$id" "$t" "$t" "$f"
+  CHOICES="$CHOICES<line choice=\"$id\"/>"   # apps sit at the top level
 done
 
 echo "== content =="
@@ -141,6 +172,7 @@ for ((i=0; i<${#C_TITLE[@]}; i++)); do
   pkgbuild --root "$r" --identifier "com.pulp.$NAME.$id.pkg" --version "$VERSION" \
     --install-location / "$STAGE/comp/$f" >/dev/null
   add_ref "$id" "$t" "$desc" "$f"
+  CHOICES="$CHOICES<line choice=\"$id\"/>"   # content sits at the top level
 done
 
 cat > "$STAGE/distribution.xml" <<XML
