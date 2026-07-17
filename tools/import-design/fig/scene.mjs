@@ -351,10 +351,19 @@ function applyOverrideEntry(clone, entry) {
   // that re-points a node at a style WITHOUT supplying a literal means the
   // style is the answer and the inherited literal is the master's stale colour;
   // an override that supplies a literal means the opposite.
-  if (entry.styleIdForFill && !entry.fillPaints) clone.__fillFromStyle = true;
-  if (entry.fillPaints) clone.__fillFromStyle = false;
-  if (entry.styleIdForStrokeFill && !entry.strokePaints) clone.__strokeFromStyle = true;
-  if (entry.strokePaints) clone.__strokeFromStyle = false;
+  // A ref wins even when a literal rides along with it, because that literal is
+  // Figma's CACHE of the style and the cache is LOSSY: "button / icon off" is
+  // white at 20% paint opacity, and the cached paint beside it is white at 100%
+  // — the transparency simply is not in it. Preferring the cache rendered every
+  // toolbar icon as hard opaque white over a design of soft grey ones.
+  //
+  // The literal only wins when an override sets fillPaints and NO ref: that is
+  // an instance recolouring the node outright, and the master's ref left behind
+  // is the stale thing.
+  if (entry.styleIdForFill) clone.__fillFromStyle = true;
+  else if (entry.fillPaints) clone.__fillFromStyle = false;
+  if (entry.styleIdForStrokeFill) clone.__strokeFromStyle = true;
+  else if (entry.strokePaints) clone.__strokeFromStyle = false;
   for (const [k, v] of Object.entries(entry)) {
     if (v === undefined || OVERRIDE_SKIP_KEYS.has(k)) continue;
     clone[k] = v;
