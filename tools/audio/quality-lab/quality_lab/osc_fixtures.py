@@ -137,11 +137,11 @@ def inject_pop(y: np.ndarray, sr: int, at_sample: int, delta: float, decay_ms: f
 def band_switch_seam(
     sr: int, f0: float, dur_s: float, at_s: float, delta: float, amp: float = 0.7
 ) -> np.ndarray:
-    """A wavetable band-switch seam: the oscillator swaps to a neighbouring band's table
+    """A wavetable band-switch seam: the oscillator swaps to a neighboring band's table
     mid-cycle without a crossfade, so the output jumps by `delta` at the switch and the
     waveform continues from the wrong value.
 
-    Modelled as a saw whose amplitude is scaled after the switch such that the step at
+    Modeled as a saw whose amplitude is scaled after the switch such that the step at
     the seam is exactly `delta`. Keeping the step exact (rather than deriving it from a
     harmonic-count difference) is what makes a magnitude sweep meaningful.
     """
