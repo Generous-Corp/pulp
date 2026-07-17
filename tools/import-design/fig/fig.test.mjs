@@ -307,6 +307,45 @@ test('absolute children keep their Figma coordinates; auto-layout children do no
   assert.ok(!('top' in row.style), 'auto-layout child carries no coordinates');
 });
 
+test('a blend mode survives; one CSS lacks is diagnosed, not approximated', () => {
+  // A layer that COMPOSITES differently is not cosmetic. This design lays a
+  // 912x300 noise texture over its panels at opacity 0.10 blendMode MULTIPLY.
+  // The texture's mean luminance is 229/255 — it is LIGHT. Multiplied it darkens
+  // the panel (75 -> ~74); composited NORMAL the same light pixels lighten it
+  // (75 -> ~90). Reading no blend mode made every panel ~+25/255 too bright,
+  // uniformly, and nothing warned — an ignored blend mode still paints.
+  const mk = (localID, name, mode, pos) => ({
+    guid: { sessionID: 0, localID }, type: 'RECTANGLE', name,
+    parentIndex: { guid: { sessionID: 0, localID: 2 }, position: pos },
+    size: { x: 10, y: 10 },
+    transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+    blendMode: mode,
+    fillPaints: [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.32, a: 1 } }],
+  });
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    mk(3, 'noise', 'MULTIPLY', 'a'),
+    mk(4, 'soft', 'SOFT_LIGHT', 'b'),
+    mk(5, 'plain', 'NORMAL', 'c'),
+    mk(6, 'burn', 'LINEAR_BURN', 'd'),   // real in Figma, absent from CSS
+  ]});
+  const f = materializeFrame(scene, findFrame(scene, 'Root'), { images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
+  const [noise, soft, plain, burn] = f.envelope.root.children;
+
+  assert.equal(noise.style.mix_blend_mode, 'multiply');
+  assert.equal(soft.style.mix_blend_mode, 'soft-light', 'underscores become hyphens');
+  assert.ok(!('mix_blend_mode' in plain.style), 'NORMAL is the default — never emitted');
+  // CSS has no linear-burn. Approximating it would paint confidently wrong
+  // pixels, so it composites normally AND says so.
+  assert.ok(!('mix_blend_mode' in burn.style), 'a mode CSS lacks is not approximated');
+  const codes = (f.envelope.diagnostics || []).filter((d) => d.code === 'blend-unsupported');
+  assert.equal(codes.length, 1, 'and the gap is reported rather than silent');
+  assert.match(codes[0].detail, /LINEAR_BURN/);
+});
+
 test('drop shadows survive as box_shadow; unsupported effects are skipped', () => {
   // Shadows are what make a control read as an object instead of a decal. The
   // design stacks two drop shadows under every knob; dropping them rendered

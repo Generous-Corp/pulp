@@ -254,6 +254,25 @@ function effectsToBoxShadow(effects) {
   return layers.length ? layers.join(', ') : null;
 }
 
+// Blend modes that mean "just composite it" — never emitted.
+const BLEND_IS_DEFAULT = new Set(['NORMAL', 'PASS_THROUGH']);
+
+// Figma blend mode → the CSS name `normalize_blend_mode` (design_ir_json.cpp:227)
+// accepts. Every mode listed is a real CSS mix-blend-mode value; LINEAR_BURN and
+// LINEAR_DODGE are deliberately absent because CSS has no equivalent, and naming
+// the nearest one would paint confidently wrong pixels instead of reporting the
+// gap.
+const FIGMA_BLEND_CSS = new Set([
+  'DARKEN', 'MULTIPLY', 'COLOR_BURN', 'LIGHTEN', 'SCREEN', 'COLOR_DODGE',
+  'OVERLAY', 'SOFT_LIGHT', 'HARD_LIGHT', 'DIFFERENCE', 'EXCLUSION',
+  'HUE', 'SATURATION', 'COLOR', 'LUMINOSITY',
+]);
+
+function blendModeToCss(mode) {
+  if (!mode || BLEND_IS_DEFAULT.has(mode) || !FIGMA_BLEND_CSS.has(mode)) return null;
+  return mode.toLowerCase().replace(/_/g, '-');
+}
+
 function colorToHex(color) {
   if (!color) return null;
   const r = channel(color.r);
@@ -395,6 +414,7 @@ function firstGradient(paints) {
     (p) => typeof p.type === 'string' && p.type.startsWith('GRADIENT') && p.visible !== false,
   ) || null;
 }
+
 
 // Invert a Figma affine paint transform, or null when it is degenerate.
 function invertPaintTransform(t) {
@@ -784,6 +804,29 @@ export function materializeFrame(scene, frame, ctx) {
     if (typeof node.opacity === 'number' && node.opacity < 1 && parent) {
       style.opacity = round2(node.opacity);
     }
+
+    // Blend mode. A layer that COMPOSITES differently is not a cosmetic detail:
+    // this design lays a 912x300 noise texture over its panels at opacity 0.10,
+    // blendMode MULTIPLY. The texture's mean luminance is 229/255 — it is light.
+    // Multiplied it DARKENS the panel (75 -> ~74); composited NORMAL, the same
+    // light pixels LIGHTEN it (75 -> ~90). We read no blend mode at all, so every
+    // panel imported ~+25/255 too bright, uniformly, over exactly the region the
+    // texture covers. Nothing warned: a blend mode that is silently ignored still
+    // paints something.
+    //
+    // The rest of the chain has been there all along — setMixBlendMode
+    // (widget_bridge/style_effects_api.cpp), IRStyle::mix_blend_mode parsed from
+    // `mixBlendMode` via normalize_blend_mode (design_ir_json.cpp:227,293), and
+    // codegen emitting it for every node kind from emit_node_visual_overrides.
+    // Only the decoder never read it.
+    const blend = blendModeToCss(node.blendMode);
+    if (blend) style.mix_blend_mode = blend;
+    else if (node.blendMode && !BLEND_IS_DEFAULT.has(node.blendMode)) {
+      // Figma has modes CSS does not (LINEAR_BURN / LINEAR_DODGE). Say so rather
+      // than approximate: a wrong blend paints confidently wrong pixels.
+      pushDiag('blend-unsupported', node, `${node.blendMode} has no CSS equivalent; composited normally`);
+    }
+
 
     // Shadows. `box_shadow` is what parse_ir_style reads (design_ir_json.cpp:312
     // resolves boxShadow -> box_shadow), and it takes CSS syntax directly.
@@ -1335,6 +1378,7 @@ function collectVariableTokens(scene, seen, pushDiag) {
 export const DIAGNOSTIC_SEVERITY = {
   'vector-simplified': 'warning',
   'gradient-approximated': 'warning',
+  'blend-unsupported': 'warning',
   'asset-missing': 'warning',
   'external-component': 'warning',
   'unresolved-token': 'warning',
