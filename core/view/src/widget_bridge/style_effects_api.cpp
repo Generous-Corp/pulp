@@ -2,6 +2,7 @@
 
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/canvas/view_effect.hpp>
+#include <pulp/runtime/log.hpp>
 #include "api_registry.hpp"
 #include "css_color.hpp"
 
@@ -232,17 +233,27 @@ void WidgetBridge::register_widget_style_filter_clip_api() {
             return choc::value::Value();
         });
 
-    // setClipPath(id, value) - CSS `clip-path`. The paint side feeds the
-    // stored slot to `Canvas::clip_path_svg` which calls
-    // `SkPath::FromSVGString`; that parser only accepts raw SVG path "d"
-    // data. Unwrap `path("...")` here and explicitly skip shapes / URL
-    // refs the paint side cannot honor.
+    // setClipPath(id, value) - CSS `clip-path` -> {applied, warning}. The paint
+    // side feeds the stored slot to `Canvas::clip_path_svg` which calls
+    // `SkPath::FromSVGString`; that parser only accepts raw SVG path "d" data.
+    // Unwrap `path("...")` here. The CSS basic-shape / url() forms
+    // (circle/ellipse/inset/polygon/rect/xywh/url) cannot be honored by the
+    // paint side, so instead of clearing the clip SILENTLY (which reads like a
+    // rendering bug) we name the unsupported shape in the returned `warning` and
+    // a host log line — the same "surface the reason" contract setWidgetShader
+    // uses for compile errors.
     register_bridge_function(api, "setClipPath",
         [this](choc::javascript::ArgumentList args) {
+            auto clip_result = [](bool applied, const std::string& warning) {
+                auto r = choc::value::createObject("");
+                r.addMember("applied", choc::value::createBool(applied));
+                r.addMember("warning", choc::value::createString(warning));
+                return r;
+            };
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
             auto* v = id.empty() ? &root_ : widget(id);
-            if (!v) return choc::value::Value();
+            if (!v) return clip_result(false, "No widget with id '" + id + "'");
             auto trim = [](std::string s) {
                 auto a = s.find_first_not_of(" \t\n\r");
                 if (a == std::string::npos) return std::string{};
@@ -258,26 +269,33 @@ void WidgetBridge::register_widget_style_filter_clip_api() {
             for (auto& c : t_lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             if (t_lower.empty() || t_lower == "none") {
                 v->set_clip_path("");
-            } else if (t_lower.size() > 6 && t_lower.rfind("path(", 0) == 0 && t.back() == ')') {
+                return clip_result(true, "");
+            }
+            if (t_lower.size() > 6 && t_lower.rfind("path(", 0) == 0 && t.back() == ')') {
                 std::string inner = trim(t.substr(5, t.size() - 6));
                 if (inner.size() >= 2 && (inner.front() == '"' || inner.front() == '\'')
                     && inner.back() == inner.front()) {
                     inner = inner.substr(1, inner.size() - 2);
                 }
                 v->set_clip_path(inner);
-            } else {
-                bool deferred_shape = false;
-                for (const char* p : {"circle(", "ellipse(", "inset(", "polygon(",
-                                       "rect(", "xywh(", "url("}) {
-                    if (t_lower.rfind(p, 0) == 0) { deferred_shape = true; break; }
-                }
-                if (deferred_shape) {
-                    v->set_clip_path("");
-                } else {
-                    v->set_clip_path(t);
+                return clip_result(true, "");
+            }
+            for (const char* p : {"circle(", "ellipse(", "inset(", "polygon(",
+                                   "rect(", "xywh(", "url("}) {
+                if (t_lower.rfind(p, 0) == 0) {
+                    v->set_clip_path("");  // cannot honor — leave unclipped
+                    std::string warning =
+                        "clip-path '" + t + "' is not supported: Pulp can only "
+                        "clip to a path(\"<svg-d>\") (basic-shape and url() "
+                        "clip-path forms need primitives Pulp does not implement). "
+                        "No clip applied.";
+                    runtime::log_warn("[clip-path] {}", warning);
+                    return clip_result(false, warning);
                 }
             }
-            return choc::value::Value();
+            // A bare SVG path "d" string (no wrapper) — install as-is.
+            v->set_clip_path(t);
+            return clip_result(true, "");
         });
 
     // setViewEffect(id, specJson) -> {success, error}
