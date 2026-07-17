@@ -222,7 +222,11 @@ does not contain crashes in deeper plug-in code.
   (per-node latency is propagated through the topology in the buffer assignment,
   and each feedforward connection that needs it gets a delay ring sized in the
   `GraphRuntimeBufferPool`), so fan-in paths of differing latency time-align
-  identically. MIDI edges route through per-node MIDI scratch buffers owned by
+  identically. Each pool ring's mutable samples + write cursor live in a
+  shareable state object while the RT lookup still returns raw pointers; this
+  is the seam `prepare_swap` uses off-RT to adopt identity-matched PDC history
+  without reading or copying live ring contents. MIDI edges route through
+  per-node MIDI scratch buffers owned by
   the executor (`GraphRuntimeMidiScratch`); SignalGraph bridges its MIDI
   mailboxes (inject_midi / extract_midi) around the routed call. External
   per-block parameter events cross the same boundary through a per-node
@@ -268,6 +272,23 @@ does not contain crashes in deeper plug-in code.
     real-time capacities for both the compile path and the swap warm-up probe) is
     a fix, not a violation. Everything in the live-swap TU runs on the CONTROL
     thread.
+  - **Gap-free PDC carry is identity-based and conservative.** `connections_`
+    has a private parallel vector of monotonic identities; every insertion and
+    erasure must update both vectors. `CompiledGraph` snapshots those identities
+    beside `connections`. During `prepare_swap`, the old and candidate delayed
+    edge sets must form an identity-keyed bijection with equal delay sizes and
+    equal total graph latency. The candidate then shares, never copies, each old
+    domain's audio-thread-owned ring state: legacy `ConnectionDelay`,
+    `routed.serial.pool`, and `routed.parallel.pool`. Disconnect+reconnect mints a
+    new identity and is refused even when the public `Connection` values compare
+    equal. Because those domains keep independent histories, a PDC-active
+    `CompiledGraph` pins the execution domain chosen during `prepare()`; relaxed
+    routing toggles remain dynamic only for zero-PDC snapshots, and a live swap
+    that would change the pinned domain is refused. Feedback graphs,
+    routed-validity changes, and latency/delay-structure changes are also refused.
+    Tests: `test_signal_graph_pdc_swap_continuity.cpp`
+    uses D=97 with 64-frame blocks across all three execution domains and includes
+    the reconnect negative plus a concurrent swap hammer.
   - **`_locked_` is a contract, and it is now asserted.** A `SignalGraph` helper
     suffixed `_locked_` requires the caller to already hold
     `graph_mutation_mutex_`; the convention now spans `signal_graph.cpp` and

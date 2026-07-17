@@ -226,10 +226,10 @@ TEST_CASE("prepare_swap rejects non-reinit-free edits -> NeedsEagerPrepare (2.2b
         CHECK(g.prepare_swap(kSr, kFrames)
               == SignalGraph::SwapResult::NeedsEagerPrepare);
     }
-    SECTION("plugin PDC delay ring -> NeedsEagerPrepare (M3 latency gate)") {
+    SECTION("unchanged plugin PDC delay ring -> Swapped with state carry") {
         // Parallel merge: a latent plugin path (128) + a direct path (0) into the
-        // same output ports → the direct branch gets a compensating delay ring, so
-        // has_pdc(live_) is true and any swap must fall back to eager.
+        // same output ports → the direct branch gets a compensating delay ring.
+        // An otherwise unchanged swap carries that ring state forward.
         SignalGraph g;
         const auto in = g.add_input_node(2, "In");
         const auto p = g.add_plugin_node(std::make_unique<LatencySlot>(128), 2, 2, "P");
@@ -242,7 +242,7 @@ TEST_CASE("prepare_swap rejects non-reinit-free edits -> NeedsEagerPrepare (2.2b
         REQUIRE(g.prepare(kSr, kFrames));
         g.begin_swap_edit();
         CHECK(g.prepare_swap(kSr, kFrames)
-              == SignalGraph::SwapResult::NeedsEagerPrepare);
+              == SignalGraph::SwapResult::Swapped);
     }
     SECTION("smoothed automation edge -> NeedsEagerPrepare (CX3)") {
         SignalGraph g;

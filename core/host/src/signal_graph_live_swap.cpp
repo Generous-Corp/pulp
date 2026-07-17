@@ -33,6 +33,7 @@
 #include <span>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -729,23 +730,117 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
                     0,
                     "candidate graph did not compile");
     }
-    // Reject a total-latency change (audible splice + wrong host PDC) or any PDC
-    // delay ring on either side — a nonzero delay_samples carries per-snapshot ring
-    // state a fresh snapshot zeroes (click). Compare the delay STRUCTURE, not the
-    // ConnectionDelay objects (ring/slew contents legitimately differ per snapshot,
-    // and the delay vectors are not index-aligned once connections change).
-    const auto has_pdc = [](const CompiledGraph& g) {
-        for (const auto& d : g.connection_delays) {
-            if (d.delay_samples != 0) return true;
-        }
-        return false;
+    // A latency-changing edit still needs the eager/crossfade path: adopting
+    // delay history across a host-PDC change would splice different timelines.
+    // Feedback is likewise excluded because its previous-block state is local
+    // to each executor snapshot and is not part of feed-forward PDC carry.
+    auto& old = *live_slot_.live();
+    const auto has_feedback = [](const CompiledGraph& graph) {
+        return std::any_of(graph.connections.begin(), graph.connections.end(),
+                           [](const Connection& c) { return c.feedback; });
     };
-    if (next->total_latency_samples != live_slot_.live()->total_latency_samples ||
-        has_pdc(*next) || has_pdc(*live_slot_.live())) {
+    if (next->total_latency_samples != old.total_latency_samples ||
+        has_feedback(*next) || has_feedback(old)) {
         rollback_candidate_view();
         return fail(LiveSwapFallbackReason::PredicateExcluded,
                     0,
-                    "candidate graph changes latency or delay state");
+                    "candidate graph changes latency or carries feedback state");
+    }
+
+    // The routed execution domain used before and after publication must stay
+    // identical. Otherwise adopting only the legacy state (or only one routed
+    // pool) could restart a different execution domain at zero on the next
+    // block. The serial and parallel pools intentionally carry independent
+    // histories because only one is advanced for any given block.
+    if (next->routed.serial.valid != old.routed.serial.valid ||
+        next->routed.parallel.valid != old.routed.parallel.valid ||
+        next->pdc_execution_domain != old.pdc_execution_domain) {
+        rollback_candidate_view();
+        return fail(LiveSwapFallbackReason::PredicateExcluded,
+                    0,
+                    "candidate graph changes routed execution availability or PDC domain");
+    }
+
+    // Build an identity-keyed bijection for every live PDC ring. Public
+    // Connection values are intentionally insufficient: disconnect+reconnect of
+    // an equal-looking edge mints a new private identity and must start clean.
+    // Only immutable identity/delay metadata is inspected while audio runs; the
+    // ring samples and write cursors remain audio-thread-owned and are shared,
+    // never copied.
+    if (old.connection_identities.size() != old.connection_delays.size() ||
+        next->connection_identities.size() != next->connection_delays.size()) {
+        rollback_candidate_view();
+        return fail(LiveSwapFallbackReason::PredicateExcluded,
+                    0,
+                    "candidate graph has inconsistent connection identities");
+    }
+    std::unordered_map<std::uint64_t, std::size_t> old_delayed;
+    for (std::size_t i = 0; i < old.connection_delays.size(); ++i) {
+        if (old.connection_delays[i].delay_samples > 0) {
+            old_delayed.emplace(old.connection_identities[i], i);
+        }
+    }
+    std::vector<std::pair<std::size_t, std::size_t>> matched_delays;
+    matched_delays.reserve(old_delayed.size());
+    bool delay_structure_ok = true;
+    for (std::size_t i = 0; i < next->connection_delays.size(); ++i) {
+        const auto& candidate_delay = next->connection_delays[i];
+        if (candidate_delay.delay_samples <= 0) continue;
+        const auto found = old_delayed.find(next->connection_identities[i]);
+        if (found == old_delayed.end()) {
+            delay_structure_ok = false;
+            break;
+        }
+        const auto old_index = found->second;
+        const auto& live_delay = old.connection_delays[old_index];
+        if (candidate_delay.delay_samples != live_delay.delay_samples ||
+            !candidate_delay.state || !live_delay.state ||
+            candidate_delay.state->ring.size() != live_delay.state->ring.size()) {
+            delay_structure_ok = false;
+            break;
+        }
+        matched_delays.emplace_back(i, old_index);
+    }
+    if (!delay_structure_ok || matched_delays.size() != old_delayed.size()) {
+        rollback_candidate_view();
+        return fail(LiveSwapFallbackReason::PredicateExcluded,
+                    0,
+                    "candidate graph changes PDC connection identity or delay");
+    }
+
+    const auto routed_can_adopt = [&](const CompiledGraph::RoutedPath& candidate,
+                                      const CompiledGraph::RoutedPath& live) {
+        if (!candidate.valid) return true;
+        for (const auto [candidate_index, live_index] : matched_delays) {
+            if (!candidate.pool.can_adopt_delay_ring_state(
+                    static_cast<std::uint32_t>(candidate_index), live.pool,
+                    static_cast<std::uint32_t>(live_index))) {
+                return false;
+            }
+        }
+        return true;
+    };
+    if (!routed_can_adopt(next->routed.serial, old.routed.serial) ||
+        !routed_can_adopt(next->routed.parallel, old.routed.parallel)) {
+        rollback_candidate_view();
+        return fail(LiveSwapFallbackReason::PredicateExcluded,
+                    0,
+                    "candidate routed pool cannot adopt PDC state");
+    }
+
+    for (const auto [candidate_index, live_index] : matched_delays) {
+        next->connection_delays[candidate_index].state =
+            old.connection_delays[live_index].state;
+        if (next->routed.serial.valid) {
+            (void)next->routed.serial.pool.adopt_delay_ring_state(
+                static_cast<std::uint32_t>(candidate_index), old.routed.serial.pool,
+                static_cast<std::uint32_t>(live_index));
+        }
+        if (next->routed.parallel.valid) {
+            (void)next->routed.parallel.pool.adopt_delay_ring_state(
+                static_cast<std::uint32_t>(candidate_index), old.routed.parallel.pool,
+                static_cast<std::uint32_t>(live_index));
+        }
     }
 
     observer_calls.reserve(staged_replacements_.size());
@@ -806,10 +901,12 @@ bool SignalGraph::snapshot_is_plugin_reinit_free_locked_(const CompiledGraph& ol
     // note) and (5) a smoothed sparse-automation edge would snap its destination
     // mid-ramp when the fresh snapshot re-primes the slew.
     for (const auto& c : connections_) {
+        if (c.feedback) return false;
         if (c.midi) return false;
         if (c.automation && c.automation_smoothing_ms > 0.0f) return false;
     }
     for (const auto& c : old_cg.connections) {
+        if (c.feedback) return false;
         if (c.midi) return false;  // defensive: the live snapshot itself had MIDI
     }
     // (6) Identical node SET (no node added / removed / re-typed since this
