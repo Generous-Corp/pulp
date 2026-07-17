@@ -1398,3 +1398,72 @@ test('a paint-level blend mode is recorded even though nothing lowers it', () =>
   const plain = materials.nodes.find((n) => n.node_id === '0:4');
   assert.equal(plain.declared.fill[0].blend_mode, null, 'NORMAL is not a declaration');
 });
+
+// A variant built by nesting the OTHER variant and overriding it. This is the
+// real shape of the design's switch: the "on" SYMBOL's only child is an
+// INSTANCE of the "off" symbol, and three overrides turn one into the other —
+// hide the master's visible dot, show the master's hidden one, repaint the
+// track. Every one of those overrides reaches its target through TWO hops, so
+// nothing here is exercised by a direct-guid override test.
+//
+// What this pins, established by breaking each candidate and watching: it is
+// the ONLY test that fails when `cloneSymbolChildren` decides visibility from
+// the master instead of from the post-override state. Sabotaging the
+// deeper-override FORWARDING leaves it green — the nested instance authors
+// these overrides itself, so they resolve at depth 1 inside its own expansion,
+// and the first draft of this comment claiming otherwise was wrong.
+//
+// Nothing else covered the ordering, so the toggle could have gone back to
+// rendering the wrong dot in silence — a plausible switch in the wrong state
+// reads as a design decision, not a bug, which is how it survived.
+function nestedVariantScene() {
+  const g = (l, s = 0) => ({ sessionID: s, localID: l });
+  return buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page' },
+    // Master OFF: a track plus two dots. The master shows "on position" and
+    // hides "off position" — backwards-looking, and copied from the real file,
+    // because a fixture that tidies this up stops testing it.
+    { guid: g(10), type: 'SYMBOL', name: 'switch / off', size: { x: 18, y: 10 } },
+    { guid: g(11), type: 'ROUNDED_RECTANGLE', name: 'track', overrideKey: g(21, 1554),
+      parentIndex: { guid: g(10), position: 'a' }, size: { x: 18, y: 10 },
+      fillPaints: [{ type: 'SOLID', visible: true, opacity: 0.35,
+                     color: { r: 0, g: 0, b: 0, a: 1 } }] },
+    { guid: g(12), type: 'ELLIPSE', name: 'on position', overrideKey: g(22, 1554),
+      visible: true, parentIndex: { guid: g(10), position: 'b' }, size: { x: 6, y: 6 },
+      fillPaints: [{ type: 'SOLID', visible: true, color: { r: 0.47, g: 0.48, b: 0.48, a: 1 } }] },
+    { guid: g(13), type: 'ELLIPSE', name: 'off position', overrideKey: g(50262, 1956),
+      visible: false, parentIndex: { guid: g(10), position: 'c' }, size: { x: 6, y: 6 },
+      fillPaints: [{ type: 'SOLID', visible: true, color: { r: 0.2, g: 0.21, b: 0.22, a: 1 } }] },
+    // Master ON: nothing of its own — just an INSTANCE of OFF, flipped by
+    // overrides that this instance authors.
+    { guid: g(14), type: 'SYMBOL', name: 'switch / on', size: { x: 18, y: 10 } },
+    { guid: g(15), type: 'INSTANCE', name: 'switch / off', overrideKey: g(98, 0),
+      parentIndex: { guid: g(14), position: 'a' }, size: { x: 18, y: 10 },
+      symbolData: { symbolID: g(10), symbolOverrides: [
+        { guidPath: { guids: [g(22, 1554)] }, visible: false },
+        { guidPath: { guids: [g(50262, 1956)] }, visible: true },
+      ] } },
+    { guid: g(2), type: 'FRAME', name: 'Root',
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 100, y: 40 } },
+    { guid: g(20), type: 'INSTANCE', name: 'sound / button / switch / on',
+      parentIndex: { guid: g(2), position: 'a' }, size: { x: 18, y: 10 },
+      symbolData: { symbolID: g(14) } },
+  ]});
+}
+
+test('a variant nested inside a variant flips visibility through both hops', () => {
+  const scene = nestedVariantScene();
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+
+  // The master's visible dot is OFF in this variant, and its hidden one is ON.
+  // Getting this backwards renders a plausible switch in the wrong state, which
+  // is why it survived: it looks like a design decision, not a bug.
+  assert.ok(!findByName(envelope.root, 'on position'),
+    'the master-visible dot must be hidden by the nested override');
+  const dot = findByName(envelope.root, 'off position');
+  assert.ok(dot, 'the master-hidden dot must be shown by the nested override');
+
+  // The track comes through untouched, so a test that passes by dropping the
+  // whole subtree cannot look like a pass.
+  assert.ok(findByName(envelope.root, 'track'), 'the track must survive expansion');
+});
