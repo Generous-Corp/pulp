@@ -2620,6 +2620,7 @@ TEST_CASE("border shorthand normalization defers and declines",
     root.children.push_back(mid);
     normalize_border_shorthand(root);
     REQUIRE(*root.children[0].children[0].style.border_color == "#123456");
+}
 // ── rgba() must survive the baked-C++ lane, not just the live-JS one ─────
 // color_literal_expr() parsed hex only and returned an empty expression for
 // rgb()/rgba(), so the baked-C++ emitter silently dropped colors the live

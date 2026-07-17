@@ -1517,6 +1517,7 @@ TEST_CASE("an unrecognized interactive kind degrades to knob rather than failing
     // The geometry still lands, so the fallback renders where the design put it.
     CHECK(parsed.root.interactive_elements[0].x == 10);
     CHECK(parsed.root.interactive_elements[0].w == 30);
+}
 // ── Captured-art knob cleaned-disc asset durability ─────────────────────
 
 namespace {
