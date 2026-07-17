@@ -200,7 +200,7 @@ function checkFill(decl, emitted, diagKinds) {
   };
 }
 
-function checkPaintBlend(decl, emitted, diagKinds) {
+function checkPaintBlend(decl) {
   // A PAINT-level blendMode. Figma composites an individual paint with its own
   // mode; we have no per-paint primitive, and the node-level mix_blend_mode is
   // NOT a substitute (lifting one there is only sound when the node has exactly
@@ -215,9 +215,14 @@ function checkPaintBlend(decl, emitted, diagKinds) {
   // node-visibility is already handled upstream. The reference file's only
   // paint-level blend sits on `Waveform B`, which is visible:false — so it
   // renders in neither Figma nor here, and this correctly stays quiet.
+  //
+  // There is deliberately no "∨ diagnosed" arm here: no diagnostic for this
+  // exists. An earlier cut guarded on a `paint-blend-unsupported` code that is
+  // emitted nowhere — a guard for a phantom, which reads to the next person as
+  // proof the decoder announces this when it does not. When such a diagnostic
+  // lands, wire the arm then; until it does, this finding IS the only notice.
   const blended = decl.fill.filter((p) => p.blend_mode);
   if (!blended.length) return null;
-  if (diagKinds.includes('paint-blend-unsupported')) return null;
   return {
     property: 'fill.paint_blend',
     declared: blended.map((p) => p.blend_mode).join('+'),
@@ -314,7 +319,7 @@ export function auditMaterials(materials, envelope, diagnostics) {
         if (f) found.push(f);
       }
       if (d.fill.some((p) => p.blend_mode)) {
-        const f = checkPaintBlend(d, emitted, diagKinds);
+        const f = checkPaintBlend(d);
         tally('fill.paint_blend', !f, !!f && false);
         if (f) found.push(f);
       }
