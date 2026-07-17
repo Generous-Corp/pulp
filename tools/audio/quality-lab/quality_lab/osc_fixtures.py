@@ -4,7 +4,9 @@ Two families, both seeded and closed-form so ground truth is known by constructi
 
 * **Clean** — waveforms that are *full of legitimate discontinuities*: square edges,
   saw wraps, hard-sync resets. A click detector that fires on these is worse than no
-  detector, so these are the true negatives that carry the weight.
+  detector, so these are the true negatives that carry the weight. Also the
+  moving-pitch renders (`vibrato_square`, `tzfm_sine`), which are clean in exactly the
+  same sense and additionally break the periodicity a comb-null rule rests on.
 * **Defective** — a clean waveform plus ONE injected discontinuity of a known
   magnitude and at a known time: a wavetable band-switch seam, a block-rate parameter
   zipper, a crossfade seam, a voice-steal pop. These are the true positives.
@@ -114,6 +116,63 @@ def hard_synced_saw(
     for k in range(1, n_harm + 1):
         y += 2.0 * np.real(coeffs[k] * np.exp(1j * 2.0 * np.pi * k * f_master * t))
     return amp * y / (np.max(np.abs(y)) + 1e-12)
+
+
+def vibrato_square(
+    sr: int, f0: float, cents: float, rate_hz: float, dur_s: float, amp: float = 0.7
+) -> np.ndarray:
+    """A CLEAN bandlimited square whose pitch swings +/-`cents` at `rate_hz`.
+
+    Nothing is injected: every discontinuity here is a legitimate square edge, exactly
+    as in `bandlimited_square`. The pitch simply moves. That makes it a true negative
+    for any click rule, and a hard one — the periodicity a comb-null rule depends on is
+    gone, so it must REFUSE rather than report.
+
+    Bandlimited at the swing's top, so the partial count never crosses Nyquist mid-render
+    (which would itself be a band-switch seam — the very defect under test).
+    """
+    n = int(round(dur_s * sr))
+    t = np.arange(n) / sr
+    inst = f0 * 2.0 ** ((cents * np.sin(2 * np.pi * rate_hz * t)) / 1200.0)
+    phase = 2 * np.pi * np.cumsum(inst) / sr
+    y = np.zeros(n, dtype=np.float64)
+    for k in range(1, _harmonic_count(sr, f0 * 2.0 ** (cents / 1200.0)) + 1, 2):
+        y += np.sin(k * phase) / k
+    return (amp * (4.0 / np.pi)) * y
+
+
+def tzfm_sine(
+    sr: int, f_carrier: float, f_mod: float, index: float, dur_s: float, amp: float = 0.7
+) -> np.ndarray:
+    """Through-zero FM with a sine carrier — a CLEAN render.
+
+    Instantaneous frequency is ``f_carrier + index * f_mod * sin(2*pi*f_mod*t)``, which
+    goes NEGATIVE when ``index * f_mod > f_carrier``: that is what "through zero" means,
+    and it is the case a wrapping phase accumulator gets wrong.
+
+    **This render is periodic at the MODULATOR period whenever f_carrier/f_mod is an
+    integer**, which is not obvious and matters a lot. Integrating the expression above
+    gives ``phase(t + 1/f_mod) - phase(t) = 2*pi*f_carrier/f_mod``, so the waveform
+    repeats exactly once per modulator cycle for integer ratios — the classic harmonic-FM
+    case. A period-synchronous analyzer therefore handles harmonic TZFM with no changes
+    at all, provided it is told the MODULATOR rate rather than the carrier. At
+    non-integer ratios the render never repeats and no such analyzer applies.
+
+    Keep ``f_carrier + f_mod * (index + 1)`` (the Carson bandwidth edge) below Nyquist,
+    or the sidebands alias and the fixture stops being a clean reference.
+    """
+    n = int(round(dur_s * sr))
+    t = np.arange(n) / sr
+    inst = f_carrier + index * f_mod * np.sin(2 * np.pi * f_mod * t)
+    return amp * np.sin(2 * np.pi * np.cumsum(inst) / sr)
+
+
+def tzfm_is_periodic(f_carrier: float, f_mod: float, tol: float = 1e-9) -> bool:
+    """Whether `tzfm_sine` repeats at the modulator period — i.e. f_carrier/f_mod is an
+    integer. The dividing line between "a period-synchronous rule applies" and "nothing
+    reference-free applies"."""
+    ratio = f_carrier / f_mod
+    return abs(ratio - round(ratio)) < tol
 
 
 def inject_step(y: np.ndarray, at_sample: int, delta: float) -> np.ndarray:

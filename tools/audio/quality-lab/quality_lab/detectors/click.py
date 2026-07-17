@@ -83,16 +83,17 @@ than no gate. Each of these is measured by a test in `tests/test_click.py`:
   commanded period and the ambiguity disappears, so the hint path DOES catch it
   (`analyze` fits the hint directly and never searches multiples). Pass `f0_hint` when
   gating; the unaided path is a convenience.
-* **A pitch that moves FAST — vibrato above a few Hz, audio-rate FM — is NOT caught,
-  and produces a confident false positive.** Slow movement (glide, slow vibrato) is
-  refused via `period_drift`; fast movement defeats it, because the guard fits the
-  period on segments and a segment averages over any modulation cycle it contains.
-  Vibrato of 0.08 cents at 40 Hz reads -43.7 dB — a false positive on a CLEAN
-  oscillator — while scoring a drift of 8.6e-6, below the clean fixtures' own worst.
-  No threshold separates that; see `detect` for the measured sweep. **This detector
-  gates steady-pitch renders. It cannot gate a modulated one, and it cannot reliably
-  detect that it is being handed one.** A caller measuring VCO drift or TZFM needs a
-  different instrument.
+* **A pitch that moves FAST and SHALLOW can produce a confident false positive.** Slow
+  movement (glide, slow vibrato) is refused via `period_drift`; fast movement defeats
+  the guard, because it fits the period on segments and a segment averages over any
+  modulation cycle it contains. Vibrato of 0.08 cents at 40 Hz reads -43.7 dB — a false
+  positive on a CLEAN oscillator — while scoring a drift of 8.6e-6, below the clean
+  fixtures' own worst. No threshold separates that; see `detect` for the measured sweep.
+  Deep modulation IS refused (a full-semitone vibrato scores 1.4e-2, ~500x the guard),
+  so the exposure is narrow — pitch jitter too small to hear as modulation but large
+  enough to break the null. **Renders whose pitch genuinely moves need a reference; see
+  "Which detector to reach for" below.** Note this does NOT include hard sync or harmonic
+  FM, both of which are periodic and fully covered.
 * **Content above 0.8 x Nyquist**, per the band qualification above.
 
 Two things that might be expected to be blind spots, but measure otherwise: a defect
@@ -101,26 +102,45 @@ SUBTRACTS the edge rather than thresholding around it, so the edge does not mask
 anything), and a hard-sync reset does not need special-casing — fitting the period
 finds the master period on its own.
 
-## Why not spectral flux, and what is still missing
+## Which detector to reach for
 
-A spectral-flux outlier rule (per-hop flux, flag hops exceeding median + 12 dB) is a
-real contender, not a straw man. A steady oscillator's magnitude spectrum does not
-change at its own edges, so flux does not false-fire on a square (+2.9 dB against a
-+12 dB rule); it catches a one-shot seam to about -40 dB; and it is immune to the
-moving-pitch problem that defeats this detector. But it has a structural hole of its
-own: a block-rate parameter zipper is STATIONARY churn, so it lifts the median along
-with every hop and produces no outlier at any magnitude — a -20 dB zipper reads
-+2.6 dB, indistinguishable from a clean square. The residual route covers all four
-defect classes and reads in physical units (the step's height), so it is the primary.
-`tests/test_click.py` pins both halves of that comparison.
+**Steady pitch — including hard sync — use this module.** Sync is steady-pitch despite
+appearances: it retriggers at the master rate, but the composite repeats at the master
+period, so the rule covers it unchanged. Hint the master.
 
-**The gap that leaves is real and NOT covered by anything shipped here.** Flux would
-complement this detector exactly where it is weakest — moving pitch — but no
-reference-free flux-outlier detector exists in this package; the registry's
-`spectral_flux` is a pairwise reference/candidate detector and does not apply. So a
-defect on a modulated render is caught by nothing: this rule false-fires or refuses,
-and there is no second opinion. Moving-pitch coverage is future work, and until it
-lands the honest scope of this module is steady-pitch renders only.
+**FM — use this module, but hint the MODULATOR, not the carrier.** A TZFM render is
+periodic at the modulator period whenever carrier/modulator is an integer (the classic
+harmonic-FM case): integrating the instantaneous frequency gives
+`phase(t + 1/f_mod) - phase(t) = 2*pi*f_carrier/f_mod`, so the waveform repeats once per
+modulator cycle. Hinted with the modulator it reads -75 to -88 dB on a clean render and
+catches seams; hinted with the CARRIER, confidence collapses to 0.18 and the reading is
+worthless. `osc_fixtures.tzfm_is_periodic` is the test for which case you are in.
+
+**Moving pitch that never repeats — vibrato, inharmonic FM — use a REFERENCE.** Nothing
+here covers it, and that is not a gap awaiting a cleverer rule (below). Diff against the
+same patch rendered without the defect: `dsp.null_residual_db` reads the seam's height
+with an exact 1:1 slope down to about -100 dB on precisely the carriers this module
+refuses. That is the lab's frozen-reference policy, and it is the answer.
+
+## Why there is no reference-free complement for moving pitch
+
+A spectral-flux outlier rule (per-hop flux, flag hops exceeding median + 12 dB) looks
+like the obvious complement, since it does not false-fire on moving pitch: a clean
+vibrato of a full semitone reads +2.6 dB against a +12 dB rule, and clean through-zero FM
+reads +1.3 dB. **But that immunity IS its blindness — the same fact, not a trade to be
+tuned.** A modulated carrier's whole harmonic stack slides every hop, so every hop's flux
+is high, so the median rises with any outlier. Measured: a -20 dB seam reads +30.2 dB on
+a steady square and +4.4 dB on a +/-50 cent vibrato, against that vibrato's own clean
++2.7. It never fires on a moving carrier at ANY magnitude or defect class, and a local
+median in place of the global one does not recover it — the seam's flux is genuinely
+swamped, not mis-normalized.
+
+On steady pitch flux would add nothing either: it reaches -45 dB where this module
+reaches -44 dB in physical units, and it is blind to a block-rate zipper at every level
+(stationary churn lifts the median with the outlier — a -20 dB zipper reads +2.6 dB).
+
+`tests/test_click.py` pins all of it, so "just add a flux detector for the FM case" is
+answered with a number rather than re-litigated.
 """
 from __future__ import annotations
 
