@@ -367,6 +367,30 @@ TEST_CASE("sigh depth tracks strike amplitude", "[bridged-t][sigh]") {
     REQUIRE(soft == Catch::Approx(49.44).epsilon(0.01));
 }
 
+TEST_CASE("sigh deepens with the decay knob", "[bridged-t][sigh]") {
+    // The sigh feeds on the ring, and the decay knob sets how much of the ring
+    // the feedback buffer returns, so a longer decay sustains a larger ring,
+    // leaks more, and holds the centre frequency higher for longer. This is the
+    // coupling from the feedback loop into the leakage path: cut the loop and
+    // the sigh would no longer respond to decay at all.
+    auto early_mean_f = [](double decay) {
+        RenderSpec spec;
+        spec.duration_s = 2.0;
+        spec.decay = decay;
+        spec.accent = kAccentMax;
+        // Past the attack shunt, early enough that the ring is still large.
+        return mean_frequency(render(spec), 0.100, 0.250);
+    };
+
+    const double f_short = early_mean_f(0.3);
+    const double f_mid = early_mean_f(0.6);
+    const double f_long = early_mean_f(1.0);
+    INFO("early f0 by decay: 0.3 -> " << f_short << ", 0.6 -> " << f_mid
+                                      << ", 1.0 -> " << f_long);
+    REQUIRE(f_short < f_mid);
+    REQUIRE(f_mid < f_long);
+}
+
 TEST_CASE("instantaneous centre frequency swings within each cycle",
           "[bridged-t][sigh]") {
     // The sigh is driven by Vcomm sample by sample, and Vcomm swings through
