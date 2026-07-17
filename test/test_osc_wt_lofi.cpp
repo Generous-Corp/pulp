@@ -80,14 +80,6 @@ std::vector<double> harmonic_table(std::size_t L, int h) {
     return t;
 }
 
-// The same symmetric mid-tread quantizer the engine stores its table with, so
-// the test can build its own reference quantized table for the SNR reading.
-double quantize(double x, int bits) {
-    if (bits <= 0 || bits >= 53) return x;
-    const double levels = std::ldexp(1.0, bits - 1) - 1.0;
-    return std::round(x * levels) / levels;
-}
-
 LofiWtOscillator make_lofi(std::vector<std::vector<double>> tables, int bit_depth,
                            bool reconstruction, int oversample = 16) {
     LofiWtOscillator osc;
@@ -154,7 +146,7 @@ TEST_CASE("OSC-WT lo-fi image ladder matches the analytic variable-clock model",
 
     // Each rung of the ladder, measured vs the closed-form sinc model. The
     // reconstruction passband is flat here, so measured == analytic to a tight
-    // tolerance — the spike's ~0.001 dB agreement, budgeted for filter ripple.
+    // tolerance, budgeted for the reconstruction filter's passband ripple.
     struct Rung { int n; int sign; };
     for (const Rung r : {Rung{1, -1}, Rung{1, +1}, Rung{2, -1}, Rung{2, +1}}) {
         const double hz = (static_cast<double>(r.n * static_cast<int>(kTableLength)) +
@@ -230,26 +222,30 @@ TEST_CASE("OSC-WT lo-fi 8-bit quantization grit is odd-harmonic",
     const double f0 = 55.0;
     constexpr int kLength = 65536;
 
-    // The aggregate quantization SNR is a property of the STORED 8-bit table:
-    // rms(table) / rms(quantization error). This is the ~49.9 dB ideal for a
-    // full-scale sine (6.02·8 + 1.76), the aggregate figure spread across the odd
-    // harmonic lines — NOT any single line.
-    const auto table = sine_table(kTableLength);
+    // The aggregate quantization SNR is a property of the engine's STORED 8-bit
+    // table: rms(table) / rms(quantization error). It is graded on the engine's
+    // OWN stored data — read back via `stored_table` — not on a private
+    // re-quantization in the test, so a drift in the engine's quantizer moves this
+    // reading rather than passing vacuously against a stale expectation. This is
+    // the ~49.9 dB ideal for a full-scale sine (6.02·8 + 1.76), the aggregate
+    // figure spread across the odd harmonic lines — NOT any single line.
+    LofiWtOscillator quantized = make_lofi({sine_table(kTableLength)}, 8, true);
+    const auto stored = quantized.stored_table(0);
+    REQUIRE(stored.size() == kTableLength);
+    const auto reference = sine_table(kTableLength);
     std::vector<double> error(kTableLength);
     for (std::size_t k = 0; k < kTableLength; ++k)
-        error[k] = quantize(table[k], 8) - table[k];
-    const double snr_db = 20.0 * std::log10(rms(table) / rms(error));
-    INFO("8-bit table SNR " << snr_db << " dB (ideal ~49.9)");
+        error[k] = stored[k] - reference[k];
+    const double snr_db = 20.0 * std::log10(rms(reference) / rms(error));
+    INFO("engine 8-bit stored-table SNR " << snr_db << " dB (ideal ~49.9)");
     CHECK_THAT(snr_db, WithinAbs(49.9, 2.0));
 
-    // The grit's harmonic structure, measured the way WP-R2 specifies: the DELTA
-    // between the quantized render and the same wave at full precision. That
-    // difference is exactly the quantization spuria — and it removes the 0 dB
-    // fundamental, so a projection at a low harmonic is not swamped by the
-    // fundamental's own leakage. For a symmetric table the quantizer preserves
-    // half-wave symmetry, so only ODD harmonics appear: h3, h5 present; h2, h4
-    // absent.
-    LofiWtOscillator quantized = make_lofi({sine_table(kTableLength)}, 8, true);
+    // The grit's harmonic structure, measured as the DELTA between the quantized
+    // render and the same wave at full precision. That difference is exactly the
+    // quantization spuria — and it removes the 0 dB fundamental, so a projection at
+    // a low harmonic is not swamped by the fundamental's own leakage. For a
+    // symmetric table the quantizer preserves half-wave symmetry, so only ODD
+    // harmonics appear: h3, h5 present; h2, h4 absent.
     LofiWtOscillator full =
         make_lofi({sine_table(kTableLength)}, LofiWtOscillator::kFullPrecision, true);
     const auto out_q = render(quantized, f0, kLength);
@@ -267,7 +263,7 @@ TEST_CASE("OSC-WT lo-fi 8-bit quantization grit is odd-harmonic",
     const double h5 = grit_db(5.0 * f0);
     INFO("quantization spuria (delta vs full precision): h2=" << h2 << " h3=" << h3
          << " h4=" << h4 << " h5=" << h5 << " dBc");
-    // Odd harmonics present (the grit) — around -70 dBc per the spike.
+    // Odd harmonics present (the grit) — around -70 dBc for an 8-bit table.
     CHECK(h3 > -90.0);
     CHECK(h3 < -55.0);
     CHECK(h5 > -90.0);
@@ -303,7 +299,7 @@ TEST_CASE("OSC-WT lo-fi reconstruction stage kills the naive in-band fold",
     INFO("(4L-1)·f0 = " << image_hz << " Hz folds to " << fold_hz
          << " Hz: naive " << naive_db << " dBc, reconstructed " << recon_db
          << " dBc (improvement " << naive_db - recon_db << " dB)");
-    // Naive folds an audible in-band spur (~-54 dBc per the spike).
+    // Naive folds an audible in-band spur (~-54 dBc).
     CHECK(naive_db > -60.0);
     CHECK(naive_db < -45.0);
     // The reconstruction stage knocks it below -77 dBc — the proof it is real.
@@ -366,6 +362,48 @@ TEST_CASE("OSC-WT lo-fi wave-scan steps between tables",
     // inauthentic click.
     CHECK(scan_step <= inter_wave_bound * 1.01);
     CHECK(scan_step > 1.5); // maximal-difference switch: ~2.
+}
+
+// ── A length-mismatched table set is rejected, never silently truncated ─────
+
+TEST_CASE("OSC-WT lo-fi rejects a length-mismatched table set",
+          "[signal][osc][wt][lofi]") {
+    LofiWtOscillator osc;
+    osc.prepare(kSampleRate);
+    osc.set_reconstruction(false); // raw ZOH — the pitch reading is unfiltered.
+
+    // A well-formed single-length set is accepted and installs cleanly.
+    REQUIRE(osc.set_tables({sine_table(kTableLength)},
+                           LofiWtOscillator::kFullPrecision));
+    REQUIRE(osc.table_count() == 1);
+    REQUIRE(osc.table_length() == kTableLength);
+
+    // A set whose tables differ in length is REJECTED. Truncating the longer table
+    // to the shorter length would play a fraction of its cycle as a full cycle — a
+    // DC-laden, off-pitch waveform (a 2L sine truncated to L reads as a half-cycle:
+    // DC ~0.64, half-amplitude fundamental). The call must be a no-op that returns
+    // false and leaves the good set intact.
+    const bool accepted =
+        osc.set_tables({sine_table(kTableLength), sine_table(2 * kTableLength)},
+                       LofiWtOscillator::kFullPrecision);
+    CHECK_FALSE(accepted);
+    CHECK(osc.table_count() == 1);            // the previous set survived untouched.
+    CHECK(osc.table_length() == kTableLength);
+
+    // And the surviving table still plays a clean single cycle: near-zero DC and a
+    // unit fundamental — a full sine, not the corrupted half-cycle a silent
+    // truncation would have installed.
+    const double f0 = 200.0;
+    constexpr int kLength = 16384;
+    const auto out = render(osc, f0, kLength);
+    double mean = 0.0;
+    for (double v : out) mean += v;
+    mean /= static_cast<double>(out.size());
+    const double fundamental = tone_amp(out, f0, /*offset=*/0);
+    INFO("surviving table: DC " << mean << ", fundamental amp " << fundamental
+         << " (a silent truncation would read DC ~0.64, fundamental ~0.42)");
+    CHECK(std::fabs(mean) < 0.05);
+    CHECK_THAT(fundamental, WithinAbs(1.0, 0.1));
 }
 
 // ── Determinism ────────────────────────────────────────────────────────────

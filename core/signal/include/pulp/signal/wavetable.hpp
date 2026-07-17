@@ -105,6 +105,24 @@ public:
         }
     }
 
+    /// Select the band for `hz` with NO crossfade — snap straight to it. For the
+    /// first frequency after construction or `reset`, there is no previously
+    /// audible band to fade FROM: a fresh voice must start already settled on the
+    /// correct band. `set_frequency` would instead begin a crossfade UP from the
+    /// default band, playing that band's harmonic content at the new pitch for the
+    /// fade window (an aliased onset on every note-on). The mid-stream
+    /// `set_frequency` still crossfades — that fade is between two real playing
+    /// bands and must stay smooth.
+    void set_frequency_immediate(SampleType hz) {
+        if (hz <= SampleType{0.0f}) return;
+        frequency_ = hz;
+        target_band_ = select_band_for(frequency_);
+        crossfade_source_ = target_band_;
+        crossfade_samples_remaining_ = 0;
+        has_in_flight_ = false;
+        in_flight_remaining_ = 0;
+    }
+
     void reset() {
         phase_ = 0.0f;
         crossfade_samples_remaining_ = 0;
@@ -241,6 +259,12 @@ public:
     }
     void set_frequency(SampleType hz) {
         for (auto& t : tables_) t.set_frequency(hz);
+    }
+    /// Snap every table to the band for `hz` with no crossfade — the first
+    /// frequency after construction/reset, where there is no audible band to fade
+    /// from. See `WavetableT::set_frequency_immediate`.
+    void set_frequency_immediate(SampleType hz) {
+        for (auto& t : tables_) t.set_frequency_immediate(hz);
     }
     void set_position(SampleType pos) {
         position_ = std::clamp(pos, SampleType{0.0f}, SampleType{1.0f});
