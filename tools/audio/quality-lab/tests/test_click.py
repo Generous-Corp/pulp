@@ -158,6 +158,92 @@ def test_a_param_zipper_never_reads_clean(block, db):
     assert r.fired or r.low_coverage, f"a {db} dB zipper at block {block} read CLEAN"
 
 
+@pytest.mark.parametrize("f_master,f_slave", [(110.0, 277.0), (220.0, 661.0), (130.81, 392.0)])
+def test_hard_sync_defect_fires(f_master, f_slave):
+    """Hard sync is STEADY-pitch — it retriggers at the master rate, but the composite
+    repeats at the master period — so it is fully covered here and needs no second
+    opinion. Pinned because "sync moves the pitch, so sync is uncovered" is the
+    intuitive guess and it is wrong."""
+    sr = 48000
+    s = fx.hard_synced_saw(sr, f_master, f_slave, DUR)
+    peak = float(np.max(np.abs(s - s.mean())))
+    for db in (-20, -30, -40):
+        seam = fx.inject_step(s, int(0.2 * sr), peak * 10 ** (db / 20.0))
+        assert click.detect(seam, sr, f0_hint=f_master).fired, f"missed a {db} dB seam on hard sync"
+
+
+# TZFM is periodic at the MODULATOR period when carrier/modulator is an integer, so the
+# comb-null rule covers harmonic TZFM unchanged. These are the ratios that are integers.
+HARMONIC_TZFM = [(220.0, 110.0, 4.0), (440.0, 55.0, 8.0), (660.0, 110.0, 5.0), (110.0, 55.0, 6.0)]
+
+
+@pytest.mark.parametrize("fc,fm,index", HARMONIC_TZFM)
+def test_clean_harmonic_tzfm_does_not_fire(fc, fm, index):
+    assert fx.tzfm_is_periodic(fc, fm), "fixture premise: this ratio is harmonic"
+    y = fx.tzfm_sine(48000, fc, fm, index, DUR)
+    r = click.detect(y, 48000, f0_hint=fm)
+    assert not r.fired, f"clean TZFM {fc}/{fm} flagged: {r.notes}"
+    assert r.scalar <= MEASURED_CLEAN_FLOOR_DB, f"floor regressed: {r.scalar:.1f} dB"
+
+
+@pytest.mark.parametrize("fc,fm,index", HARMONIC_TZFM)
+def test_a_defect_on_harmonic_tzfm_is_never_passed(fc, fm, index):
+    """Harmonic TZFM is covered, but with the same caveat as the zipper: a LOUD defect
+    perturbs the period fit enough that the drift guard refuses it rather than
+    diagnosing it. Seen either way — never a silent pass."""
+    y = fx.tzfm_sine(48000, fc, fm, index, DUR)
+    peak = float(np.max(np.abs(y - y.mean())))
+    for db in (-20, -30, -40):
+        seam = fx.inject_step(y, int(0.2 * 48000), peak * 10 ** (db / 20.0))
+        r = click.detect(seam, 48000, f0_hint=fm)
+        assert r.fired or r.low_coverage, f"a {db} dB seam on TZFM {fc}/{fm} read CLEAN"
+        assert click.analyze(seam, 48000, f0_hint=fm).click_db == pytest.approx(db, abs=2.0), (
+            "the measurement must still SEE the defect at its true height"
+        )
+
+
+def test_tzfm_needs_the_modulator_hint_not_the_carrier():
+    """The non-obvious operating rule for FM, and the one a caller will get wrong.
+
+    A TZFM render repeats at the MODULATOR period, not the carrier's. Hinting the
+    carrier makes the fit land on a period the signal does not repeat at: confidence
+    collapses to 0.18 and the reading becomes +3.9 dB — refused, and worthless. Hinting
+    the modulator gives confidence 1.000 and -87.8 dB.
+    """
+    sr, fc, fm = 48000, 220.0, 110.0
+    y = fx.tzfm_sine(sr, fc, fm, 4.0, DUR)
+
+    good = click.analyze(y, sr, f0_hint=fm)
+    assert good.period_confidence > 0.9
+    assert good.period_samples == pytest.approx(sr / fm, abs=0.1)
+    assert good.click_db <= MEASURED_CLEAN_FLOOR_DB
+
+    bad = click.analyze(y, sr, f0_hint=fc)
+    assert bad.period_confidence < 0.5, "a carrier hint must read as low confidence, not a wrong answer"
+    assert not click.detect(y, sr, f0_hint=fc).fired, "a wrong hint must refuse, never false-fire"
+    assert click.detect(y, sr, f0_hint=fc).low_coverage
+
+
+@pytest.mark.parametrize("fc,fm", [(330.0, 70.0), (440.0, 133.0), (220.0, 91.0)])
+def test_inharmonic_tzfm_is_refused_never_passed(fc, fm):
+    """At a non-integer carrier/modulator ratio the render NEVER repeats, so no
+    period-synchronous rule applies — and no reference-free rule of any kind covers it
+    (see `test_flux_cannot_see_a_defect_on_a_moving_carrier`). The honest behavior is a
+    refusal, both clean and defective: "not proven" rather than a guess in either
+    direction."""
+    sr = 48000
+    assert not fx.tzfm_is_periodic(fc, fm), "fixture premise: this ratio is inharmonic"
+    y = fx.tzfm_sine(sr, fc, fm, 5.0, DUR)
+    peak = float(np.max(np.abs(y - y.mean())))
+
+    clean = click.detect(y, sr, f0_hint=fm)
+    assert not clean.fired and clean.low_coverage, "clean inharmonic TZFM must refuse, not false-fire"
+
+    seam = fx.inject_step(y, int(0.2 * sr), peak * 10 ** (-20 / 20.0))
+    r = click.detect(seam, sr, f0_hint=fm)
+    assert not r.fired and r.low_coverage, "a defect here must refuse, never read clean"
+
+
 def test_defect_is_localized_to_where_it_was_injected():
     sr, f0 = 48000, 440.0
     y, peak = _square(sr, f0)
@@ -545,6 +631,84 @@ def test_the_flux_outlier_alternative_misses_a_zipper_and_the_residual_rule_does
     zipped = fx.zipper(y, loud, 256)
     assert _flux_outlier_margin_db(zipped) < 12.0, "the flux route's hole: a zipper is invisible to it"
     assert click.detect(zipped, sr, f0_hint=f0).fired, "the residual route must cover that hole"
+
+
+def test_flux_cannot_see_a_defect_on_a_moving_carrier():
+    """The measured reason there is no flux-based moving-pitch complement.
+
+    Flux's immunity to moving pitch and its blindness to defects there are the SAME
+    fact, not a trade to be tuned around: a modulated carrier's whole harmonic stack
+    slides every hop, so every hop's flux is high, so the median rises with the outlier.
+    On a steady square a -20 dB seam reads +30.2 dB — a huge outlier. On a +/-50 cent
+    vibrato the same seam reads +4.4 dB, against a clean carrier's +2.7: nothing.
+
+    Sweeping magnitude does not help (it never fires at any level), and neither does a
+    local median in place of the global one — the seam's flux is genuinely swamped, not
+    merely mis-normalized. Pinned so "just add a flux detector for the FM case" is
+    answered with a number instead of being re-litigated.
+    """
+    sr, f0 = 48000, 440.0
+    steady, peak = _square(sr, f0)
+    loud = peak * 10 ** (-20 / 20.0)
+    at = int(0.2 * sr)
+
+    on_steady = _flux_outlier_margin_db(fx.inject_step(steady, at, loud))
+    assert on_steady > 25.0, "premise: flux sees a loud seam plainly on a STEADY carrier"
+
+    for carrier in (
+        fx.vibrato_square(sr, f0, 50.0, 5.0, DUR),
+        fx.tzfm_sine(sr, 220.0, 110.0, 4.0, DUR),
+    ):
+        clean_margin = _flux_outlier_margin_db(carrier)
+        cpk = float(np.max(np.abs(carrier - carrier.mean())))
+        seam = _flux_outlier_margin_db(fx.inject_step(carrier, at, cpk * 10 ** (-20 / 20.0)))
+        assert clean_margin < 12.0, "premise: flux does not false-fire on a clean moving carrier"
+        assert seam < 12.0, "if flux now SEES a moving-carrier defect, the complement is worth revisiting"
+        assert seam - clean_margin < 6.0, (
+            f"the defect lifts flux by only {seam - clean_margin:.1f} dB on a moving carrier "
+            f"vs {on_steady - _flux_outlier_margin_db(steady):.1f} dB on a steady one"
+        )
+
+
+def test_the_reference_route_does_cover_what_no_reference_free_rule_can():
+    """What to reach for when the pitch genuinely moves, measured rather than asserted.
+
+    Reference-free detection on an inharmonic-TZFM or vibrato render is not a gap to be
+    plugged with a cleverer rule: the render never repeats, so there is nothing to
+    predict it from, and flux is swamped. But a REFERENCE render collapses the problem —
+    `dsp.null_residual_db` against the same patch without the defect reads the seam's
+    true height on carriers this module must refuse, to about -78 dB.
+
+    This is the lab's existing frozen-reference policy and its existing primitive; it is
+    pinned here so the recommendation in `click.py`'s docs is backed by a number.
+
+    The claim asserted is the SLOPE, not absolute calibration: `null_residual_db` is
+    RMS-relative while an injected step is quoted peak-relative, so the two differ by a
+    fixed offset that depends on the carrier's crest factor and on how much of the render
+    the step covers. The offset is a units difference; the 1:1 slope is the measurement.
+    """
+    from quality_lab.dsp import null_residual_db
+
+    sr = 48000
+    for carrier in (
+        fx.tzfm_sine(sr, 220.0, 110.0, 4.0, DUR),
+        fx.vibrato_square(sr, 440.0, 50.0, 5.0, DUR),
+    ):
+        peak = float(np.max(np.abs(carrier - carrier.mean())))
+        assert null_residual_db(carrier, carrier).residual_db < -100.0, "identity must null"
+
+        levels = (-40.0, -60.0, -80.0, -100.0)
+        reads = [
+            null_residual_db(carrier, fx.inject_step(carrier, int(0.2 * sr), peak * 10 ** (db / 20.0))).residual_db
+            for db in levels
+        ]
+        for db, got in zip(levels, reads):
+            assert got < db + 6.0, f"reference route read only {got:.1f} for a {db} dB seam"
+        for i in range(len(levels) - 1):
+            assert reads[i] - reads[i + 1] == pytest.approx(20.0, abs=1.5), (
+                f"slope broke between {levels[i]} and {levels[i+1]}: {reads[i]:.1f} -> {reads[i+1]:.1f}"
+            )
+        assert reads[-1] < -90.0, "sensitivity must reach ~-100 dB where nothing reference-free works"
 
 
 def test_click_is_standalone_not_in_the_mono_pipeline_registry():
