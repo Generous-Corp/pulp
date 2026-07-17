@@ -74,6 +74,9 @@ pulp_add_test_suite(pulp-test-sample-stream-voice-reader
 pulp_add_test_suite(pulp-test-sample-stream-loop-voice-reader
     SOURCES test_sample_stream_loop_voice_reader.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-sinc-kernel
+    SOURCES test_sample_sinc_kernel.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-asset LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-starvation-envelope
     SOURCES test_sample_starvation_envelope.cpp harness/rt_allocation_probe.cpp

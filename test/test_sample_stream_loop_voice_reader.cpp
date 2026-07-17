@@ -7,7 +7,9 @@
 #include "harness/rt_allocation_probe.hpp"
 
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 
 using namespace pulp::audio;
 
@@ -15,7 +17,7 @@ namespace {
 
 struct LoopStreamFixture {
     SampleStreamCacheService service;
-    Buffer<float> preload{1, 36};
+    Buffer<float> preload{1, 48};
     Buffer<float> resident{1, 64};
     SampleAsset asset;
 
@@ -44,7 +46,7 @@ struct LoopStreamFixture {
         for (std::uint64_t frame = 0; frame < 64; ++frame) {
             resident.channel(0)[frame] =
                 static_cast<float>((frame * 37 + 11) % 101) / 53.0f - 1.0f;
-            if (frame < 36) preload.channel(0)[frame] = resident.channel(0)[frame];
+            if (frame < 48) preload.channel(0)[frame] = resident.channel(0)[frame];
         }
         const SampleAssetConfig config{
             .asset = {100, 1},
@@ -52,15 +54,15 @@ struct LoopStreamFixture {
             .channels = 1,
             .total_frames = 64,
             .sample_rate = 48000,
-            .preload_frames = 36,
+            .preload_frames = 48,
             .preload_contract = SamplePreloadContract{
                 .source_sample_rate = 48000.0,
                 .host_sample_rate = 48000.0,
                 .maximum_playback_ratio = 4.0,
                 .maximum_host_block_frames = 8,
-                .interpolation_guard_frames = 2,
+                .interpolation_guard_frames = kDefaultSampleSincHalfWidth,
                 .loop_prefetch_guard_frames = 0,
-                .configured_preload_frames = 36,
+                .configured_preload_frames = 48,
             },
             .stream_source = added.view,
         };
@@ -96,17 +98,23 @@ LoopRegion region(LoopPlaybackMode mode, bool reverse_entry = false) {
     return loop;
 }
 
-void require_matches_resident(LoopPlaybackMode mode, bool reverse_entry) {
+void require_matches_resident(
+    LoopPlaybackMode mode,
+    bool reverse_entry,
+    PreparedSampleInterpolation interpolation = {
+        .policy = SampleInterpolationPolicy::Linear},
+    double playback_rate = 4.0) {
     LoopStreamFixture fixture;
     fixture.publish_pages();
     const auto asset = fixture.asset.view();
     const auto loop = region(mode, reverse_entry);
 
     SampleStreamLoopVoiceReader streamed;
-    REQUIRE(streamed.prepare(asset, {1, 1}, loop, 4.0));
+    REQUIRE(streamed.prepare(asset, {1, 1}, loop, playback_rate, interpolation));
     LoopRenderer resident;
     REQUIRE(resident.set_region(loop, 64));
-    resident.set_playback_rate(4.0);
+    REQUIRE(resident.set_interpolation(interpolation));
+    resident.set_playback_rate(playback_rate);
     resident.start();
 
     const std::array<const float*, 1> input_ptrs{fixture.resident.channel(0).data()};
@@ -143,6 +151,209 @@ TEST_CASE("Paged loop reader matches resident reverse crossfade traversal",
 TEST_CASE("Paged loop reader matches resident reverse one-shot traversal",
           "[audio][sampler][stream-loop]") {
     require_matches_resident(LoopPlaybackMode::ReverseOnce, true);
+}
+
+TEST_CASE("Paged loop reader matches resident nearest and Lagrange policies",
+          "[audio][sampler][stream-loop][interpolation]") {
+    require_matches_resident(LoopPlaybackMode::Forward, false,
+                             {.policy = SampleInterpolationPolicy::Nearest}, 1.25);
+    require_matches_resident(LoopPlaybackMode::Forward, false,
+                             {.policy = SampleInterpolationPolicy::CubicLagrange}, 1.25);
+}
+
+TEST_CASE("Paged loop reader matches resident ratio-tracking sinc",
+          "[audio][sampler][stream-loop][interpolation][sinc]") {
+    SampleSincKernelBank bank;
+    REQUIRE(bank.build(4));
+    const PreparedSampleInterpolation interpolation{
+        .policy = SampleInterpolationPolicy::RatioTrackingSinc,
+        .sinc = bank.view().select(1.25),
+    };
+    require_matches_resident(LoopPlaybackMode::OneShot, false,
+                             interpolation, 1.25);
+}
+
+TEST_CASE("Paged sinc matches resident forward and reverse crossfade seams",
+          "[audio][sampler][stream-loop][interpolation][sinc][crossfade]") {
+    SampleSincKernelBank bank;
+    REQUIRE(bank.build(4));
+    const PreparedSampleInterpolation interpolation{
+        .policy = SampleInterpolationPolicy::RatioTrackingSinc,
+        .sinc = bank.view().select(1.25),
+    };
+    require_matches_resident(LoopPlaybackMode::Forward, false,
+                             interpolation, 1.25);
+    require_matches_resident(LoopPlaybackMode::Reverse, true,
+                             interpolation, 1.25);
+    require_matches_resident(LoopPlaybackMode::ReverseOnce, true,
+                             interpolation, 1.25);
+}
+
+TEST_CASE("Paged sinc rejects a preload contract with a narrow tap guard",
+          "[audio][sampler][stream-loop][interpolation][sinc][contract]") {
+    LoopStreamFixture fixture;
+    const auto source = fixture.asset.view();
+    SampleAsset narrow_asset;
+    REQUIRE(narrow_asset.prepare(
+        SampleAssetConfig{
+            .asset = {101, 1},
+            .source = source.source,
+            .channels = 1,
+            .total_frames = 64,
+            .sample_rate = 48000,
+            .preload_frames = 48,
+            .preload_contract = SamplePreloadContract{
+                .source_sample_rate = 48000.0,
+                .host_sample_rate = 48000.0,
+                .maximum_playback_ratio = 4.0,
+                .maximum_host_block_frames = 8,
+                .interpolation_guard_frames = 2,
+                .configured_preload_frames = 48,
+            },
+            .stream_source = source.stream_source,
+        },
+        fixture.preload.view()));
+
+    SampleSincKernelBank bank;
+    REQUIRE(bank.build(4));
+    const PreparedSampleInterpolation interpolation{
+        .policy = SampleInterpolationPolicy::RatioTrackingSinc,
+        .sinc = bank.view().select(1.25),
+    };
+    SampleStreamLoopVoiceReader reader;
+    const auto asset = narrow_asset.view();
+    REQUIRE(reader.prepare(asset, {2, 1}, region(LoopPlaybackMode::OneShot),
+                           1.25, interpolation));
+    REQUIRE(reader.plan_block(asset, 8, 48000.0).supply ==
+            SampleStreamVoiceSupply::InvalidContract);
+}
+
+TEST_CASE("Paged sinc rejects an over-capacity page geometry before note start",
+          "[audio][sampler][stream-loop][interpolation][sinc][contract]") {
+    SampleStreamCacheService service;
+    REQUIRE(service.prepare({
+        .scheduler_capacity = 32,
+        .page_memory_budget_bytes = 17 * sizeof(float),
+    }));
+    const auto added = service.add_source(
+        {
+            .token = {300, 1},
+            .channels = 1,
+            .total_frames = 82,
+            .page_frames = 1,
+            .cache_page_count = 17,
+        },
+        [](std::uint64_t start, BufferView<float> destination,
+           std::uint64_t frames) {
+            for (std::uint64_t frame = 0; frame < frames; ++frame)
+                destination.channel_ptr(0)[frame] =
+                    static_cast<float>(start + frame);
+            return frames;
+        });
+    REQUIRE(added.added());
+
+    Buffer<float> preload(1, 65);
+    SampleAsset asset_owner;
+    REQUIRE(asset_owner.prepare(
+        SampleAssetConfig{
+            .asset = {301, 1},
+            .source = {300, 1},
+            .channels = 1,
+            .total_frames = 82,
+            .sample_rate = 48000,
+            .preload_frames = 65,
+            .preload_contract = SamplePreloadContract{
+                .source_sample_rate = 48000.0,
+                .host_sample_rate = 48000.0,
+                .maximum_playback_ratio = 1.0,
+                .maximum_host_block_frames = 1,
+                .interpolation_guard_frames = 64,
+                .configured_preload_frames = 65,
+            },
+            .stream_source = added.view,
+        },
+        preload.view()));
+
+    SampleSincKernelBank bank;
+    REQUIRE(bank.build(1, 64, 16));
+    const PreparedSampleInterpolation interpolation{
+        .policy = SampleInterpolationPolicy::RatioTrackingSinc,
+        .sinc = bank.view().select(1.0),
+    };
+    auto resident_region = region(LoopPlaybackMode::OneShot);
+    resident_region.end_frame = 64;
+    SampleStreamLoopVoiceReader resident_reader;
+    REQUIRE(resident_reader.prepare(asset_owner.view(), {3, 2},
+                                    resident_region, 1.0, interpolation));
+    REQUIRE(resident_reader.plan_block(asset_owner.view(), 1, 48000.0)
+                .demand_count == 0);
+
+    auto one_shot = region(LoopPlaybackMode::OneShot);
+    one_shot.end_frame = 82;
+    SampleStreamLoopVoiceReader reader;
+    REQUIRE_FALSE(reader.prepare(asset_owner.view(), {3, 1}, one_shot,
+                                 1.0, interpolation));
+}
+
+TEST_CASE("Paged loop playback-rate changes preserve page-capacity admission",
+          "[audio][sampler][stream-loop][contract]") {
+    SampleStreamCacheService service;
+    REQUIRE(service.prepare({
+        .scheduler_capacity = 32,
+        .page_memory_budget_bytes = 7 * 4 * sizeof(float),
+    }));
+    const auto added = service.add_source(
+        {
+            .token = {400, 1},
+            .channels = 1,
+            .total_frames = 256,
+            .page_frames = 4,
+            .cache_page_count = 7,
+        },
+        [](std::uint64_t, BufferView<float>, std::uint64_t frames) {
+            return frames;
+        });
+    REQUIRE(added.added());
+    Buffer<float> preload(1, 48);
+    SampleAsset asset_owner;
+    REQUIRE(asset_owner.prepare(
+        SampleAssetConfig{
+            .asset = {401, 1},
+            .source = {400, 1},
+            .channels = 1,
+            .total_frames = 256,
+            .sample_rate = 48000,
+            .preload_frames = 48,
+            .preload_contract = SamplePreloadContract{
+                .source_sample_rate = 48000.0,
+                .host_sample_rate = 48000.0,
+                .maximum_playback_ratio = 4.0,
+                .maximum_host_block_frames = 8,
+                .interpolation_guard_frames = 2,
+                .configured_preload_frames = 48,
+            },
+            .stream_source = added.view,
+        },
+        preload.view()));
+    const auto asset = asset_owner.view();
+    auto loop = region(LoopPlaybackMode::Forward);
+    loop.end_frame = 256;
+    SampleStreamLoopVoiceReader reader;
+    REQUIRE(reader.prepare(asset, {4, 1}, loop,
+                           1.0, SampleInterpolationPolicy::Linear));
+    REQUIRE(reader.cursor().step() == 1.0);
+    REQUIRE_FALSE(reader.set_playback_rate(asset, 4.0));
+    REQUIRE(reader.cursor().step() == 1.0);
+    REQUIRE_FALSE(reader.set_playback_rate(4.0));
+    REQUIRE(reader.cursor().step() == 1.0);
+    REQUIRE_FALSE(reader.set_playback_rate(
+        asset, std::ldexp(1.0, std::numeric_limits<std::uint64_t>::digits)));
+    REQUIRE(reader.cursor().step() == 1.0);
+
+    auto imported = reader.cursor();
+    imported.set_playback_rate(4.0);
+    REQUIRE_FALSE(reader.synchronize_cursor(asset, imported));
+    REQUIRE(reader.cursor().step() == 1.0);
 }
 
 TEST_CASE("Paged loop reader snapshots missing crossfade pages and advances time",
@@ -233,8 +444,15 @@ TEST_CASE("Paged loop planning and rendering stay allocation-free for 10000 bloc
     LoopStreamFixture fixture;
     fixture.publish_pages();
     const auto asset = fixture.asset.view();
+    SampleSincKernelBank bank;
+    REQUIRE(bank.build(4));
+    const PreparedSampleInterpolation interpolation{
+        .policy = SampleInterpolationPolicy::RatioTrackingSinc,
+        .sinc = bank.view().select(1.25),
+    };
     SampleStreamLoopVoiceReader reader;
-    REQUIRE(reader.prepare(asset, {1, 1}, region(LoopPlaybackMode::Forward), 1.25));
+    REQUIRE(reader.prepare(asset, {1, 1}, region(LoopPlaybackMode::Forward),
+                           1.25, interpolation));
     SampleStreamCommandInbox<32> inbox;
     Buffer<float> output(1, 8);
 

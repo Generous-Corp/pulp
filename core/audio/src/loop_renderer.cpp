@@ -11,6 +11,8 @@ bool LoopRenderer::set_region(const LoopRegion& region,
         reset();
         return false;
     }
+    interpolation_ = {
+        .policy = sample_interpolation_policy(region.interpolation)};
     reset();
     return true;
 }
@@ -44,6 +46,18 @@ void LoopRenderer::set_playback_rate(double rate) noexcept {
     cursor_.set_playback_rate(rate);
 }
 
+bool LoopRenderer::set_interpolation_policy(
+    SampleInterpolationPolicy policy) noexcept {
+    return set_interpolation({.policy = policy});
+}
+
+bool LoopRenderer::set_interpolation(
+    const PreparedSampleInterpolation& interpolation) noexcept {
+    if (!interpolation.valid()) return false;
+    interpolation_ = interpolation;
+    return true;
+}
+
 float LoopRenderer::fade_gain() noexcept {
     double gain = 1.0;
     if (start_fade_frames_ > 1 && start_fade_position_ < start_fade_frames_) {
@@ -75,14 +89,14 @@ float LoopRenderer::apply_crossfade_plan(BufferView<const float> source,
     const auto& region = cursor_.region();
     if (!plan.blend) {
         return LoopReader::read_validated(source, region, output_channel,
-                                          plan.read_position);
+                                          plan.read_position, interpolation_);
     }
     const auto primary = static_cast<double>(
         LoopReader::read_validated(source, region, output_channel,
-                                   plan.read_position));
+                                   plan.read_position, interpolation_));
     const auto blend = static_cast<double>(
         LoopReader::read_validated(source, region, output_channel,
-                                   plan.blend_position));
+                                   plan.blend_position, interpolation_));
     return static_cast<float>(primary * plan.primary_gain +
                               blend * plan.blend_gain);
 }

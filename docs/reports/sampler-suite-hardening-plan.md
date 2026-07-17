@@ -71,8 +71,17 @@ Current branch evidence, without implying completion of later gates:
   Production demand order is checked against an independent paged-loop oracle,
   reverse rendering crosses the loop seam without starvation at more than 10x
   realtime test pacing, and the new plan/enqueue/render path has a 10,000-block
-  allocation probe. Ping-pong example policy and starvation gain shaping remain
-  later gates.
+  allocation probe. S4 is now partial: interpolation is a sample-read policy
+  separate from traversal, with hold and true-nearest kept semantically
+  distinct. Resident and paged readers share footprints and evaluation for
+  linear, cubic Hermite, and cubic Lagrange, while `PulpSampler` exposes those
+  tiers plus an immutable ratio-tracking Kaiser-sinc bank. Phase-normalized
+  cutoff tables preserve DC within 2e-6 in the focused harness, adjacent tables
+  blend to the requested downsample cutoff, a known aliased 4x-downsample tone
+  is rejected, and both the kernel and streamed callback paths have 10,000-call
+  allocation probes. The certified preload guard now covers the selected sinc
+  footprint. Persisted octave mip assets, ping-pong example policy, and
+  starvation gain shaping remain later gates.
 - The existing Release audio harness baseline and all 375 Audio Quality Lab
   self-tests pass. Quality Lab remains supplementary to exact transport,
   telemetry, lifetime, and allocation gates.
@@ -102,10 +111,11 @@ oscillator mip infrastructure already exists. Neither assumption is current:
 - `StreamingSampleSource` already owns a joinable reader thread, preload head,
   SPSC ring, deterministic manual-pump mode, underrun counters, and a resident
   fast path.
-- `SampleStreamWindow` already provides prepared generation-qualified pages,
-  but it is not connected to a multi-voice scheduler.
-- The example `PulpSampler` remains an eight-voice, fully resident integration
-  and does not exercise the streaming primitives.
+- `SampleStreamWindow` now feeds the bounded multi-voice cache scheduler and
+  allocation-free paged loop reader built in S2.
+- `PulpSampler` now exercises ranged file admission, shared paged streaming,
+  reverse/crossfade traversal, and the prepared CPU interpolation tiers across
+  its eight voices.
 - The oscillator suite's alias-analysis changes are uncommitted in a separate
   worktree. Its production mip representation has not been designed. Sampler
   asset mips therefore belong under `core/audio`; only stable analysis helpers
@@ -225,8 +235,12 @@ The assertion domains stay separate:
 
 ### S4 — Interpolation tiers
 
-- Playback exposes nearest, linear, cubic Hermite, optimal polynomial, and
+- Playback exposes nearest, linear, cubic Hermite, a specifically defined and
+  tested high-quality polynomial tier, and
   ratio-tracking windowed-sinc policies without overloading loop semantics.
+- The current four-point Lagrange tier remains named Lagrange. It must not be
+  relabeled "optimal" unless an approximation objective, order, coefficient
+  derivation, and independent error fixture are selected and pinned.
 - Polynomial high-quality modes select persisted octave sample mips. They do
   not claim anti-alias performance without a suitably filtered source level.
 - The sinc kernel scales its cutoff for source-consumption ratios above one and

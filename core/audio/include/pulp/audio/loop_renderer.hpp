@@ -26,6 +26,14 @@ public:
     void stop() noexcept;
 
     void set_playback_rate(double rate) noexcept;
+    bool set_interpolation_policy(SampleInterpolationPolicy policy) noexcept;
+    bool set_interpolation(const PreparedSampleInterpolation& interpolation) noexcept;
+    SampleInterpolationPolicy interpolation_policy() const noexcept {
+        return interpolation_.policy;
+    }
+    const PreparedSampleInterpolation& interpolation() const noexcept {
+        return interpolation_;
+    }
     // Change the loop playback mode in place, preserving the current position — so a
     // sustaining voice can switch Forward<->OneShot without restarting (e.g. a LOOP
     // toggle acting on already-held notes). Does not re-arm fades or reset position.
@@ -53,6 +61,8 @@ private:
     float fade_gain() noexcept;
 
     LoopPlaybackCursor cursor_;
+    PreparedSampleInterpolation interpolation_{
+        .policy = SampleInterpolationPolicy::Linear};
     std::uint64_t start_fade_frames_ = 0;
     std::uint64_t stop_fade_frames_ = 0;
     std::uint64_t start_fade_position_ = 0;
