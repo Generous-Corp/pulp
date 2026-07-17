@@ -252,10 +252,40 @@ TEST_CASE("Pitch estimator reports the loudest partial for a missing fundamental
     const double f0 = 220.0;
     const auto x = make_partials(f0, n, {{2, 1.0}, {3, 0.6}});
     const auto est = estimate_pitch(std::span<const float>(x), kSampleRate);
-    if (est.voiced) {
-        // A real, present partial (the loudest, 2·f0) — never the absent f0.
-        REQUIRE(std::abs(cents_between(est.hz, 2.0 * f0)) < 2.0);
-        REQUIRE(std::abs(cents_between(est.hz, f0)) > 100.0);
+    // 2·f0 is a strong present partial whose comb explains the segment, so this
+    // resolves voiced — assert it (a bare `if (voiced)` would pass vacuously if the
+    // estimator ever started refusing this fixture, hiding a real drift).
+    REQUIRE(est.voiced);
+    // A real, present partial (the loudest, 2·f0) — never the absent f0.
+    REQUIRE(std::abs(cents_between(est.hz, 2.0 * f0)) < 2.0);
+    REQUIRE(std::abs(cents_between(est.hz, f0)) > 100.0);
+}
+
+TEST_CASE("Pitch estimator does not drop a plain saw to a subharmonic at a short "
+          "window",
+          "[audio][pitch]") {
+    // Regression: the harmonic-recovery descent, guarded only by a FIXED tooth
+    // floor, confidently reported an octave (or two) DOWN on the most ordinary
+    // waveform in the suite — a plain bandlimited saw whose coarse peak already IS
+    // the fundamental. Over a short analysis window (few periods of a low note),
+    // rectangular-window LSQ leakage from the loud fundamental into the f0/2 fit
+    // exceeded the fixed floor, so f0/2 was adopted: e.g. an 82 Hz saw over 4096
+    // samples read 41 Hz at confidence 0.97, and a 41 Hz saw over 8192 read 20 Hz.
+    // The leakage-aware tooth floor must reject the leaky subharmonic and keep the
+    // true fundamental. Straddles the failing few-period regime and a long window.
+    struct Case { double f0; int n; };
+    for (const Case c : {Case{82.41, 4096}, Case{41.20, 8192}, Case{55.0, 4096},
+                         Case{41.20, 1 << 15}}) {
+        const auto x = make_saw(c.f0, c.n);
+        const auto est = estimate_pitch(std::span<const float>(x), kSampleRate);
+        INFO("saw f0=" << c.f0 << " over " << c.n << " samples -> " << est.hz
+                       << " Hz, conf " << est.confidence);
+        REQUIRE(est.voiced);
+        // The true fundamental, within the short-window refine tolerance...
+        REQUIRE(std::abs(cents_between(est.hz, c.f0)) < 20.0);
+        // ...and specifically NEVER a confident octave-or-more DOWN.
+        REQUIRE(std::abs(cents_between(est.hz, 0.5 * c.f0)) > 100.0);
+        REQUIRE(std::abs(cents_between(est.hz, 0.25 * c.f0)) > 100.0);
     }
 }
 
@@ -336,17 +366,19 @@ TEST_CASE("f0(t) trajectory recovers a known sinusoidal vibrato",
 TEST_CASE("Pitch estimator resolves a DCO-style quantization error",
           "[audio][pitch]") {
     // A DCO produces f_clk / N for integer N, so its achievable pitch is
-    // quantized. Linearizing the divider rounding bounds the worst-case error by
-    // |e| <= 865.617·f_note/f_clk
-    // cents. With f_note = 440 Hz and f_clk = 1 MHz the nearest divider gives
-    // ~-0.21 cents of detuning; the estimator must measure that few-cent error,
-    // not round it away — that sensitivity is what gates the DCO pitch table.
+    // quantized. The half-LSB divider rounding bounds the worst-case error by the
+    // EXACT |e| <= 1200·log2(N*/(N*−½)) with N* = f_clk/f_note (NOT the linear
+    // tangent 865.617·f_note/f_clk, which the round-DOWN side exceeds — see the
+    // OSC-DCO bound). With f_note = 440 Hz and f_clk = 1 MHz the nearest divider
+    // gives ~-0.21 cents of detuning; the estimator must measure that few-cent
+    // error, not round it away — that sensitivity is what gates the DCO pitch table.
     const double f_note = 440.0;
     const double f_clk = 1.0e6;
-    const double divider = std::round(f_clk / f_note);
+    const double n_star = f_clk / f_note;
+    const double divider = std::round(n_star);
     const double f_dco = f_clk / divider;
     const double true_error_cents = cents_between(f_dco, f_note);
-    const double quantization_bound_cents = 865.617 * f_note / f_clk;
+    const double quantization_bound_cents = 1200.0 * std::log2(n_star / (n_star - 0.5));
 
     // Sanity: the physical DCO error obeys the divider-quantization bound.
     REQUIRE(std::abs(true_error_cents) <= quantization_bound_cents);

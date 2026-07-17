@@ -182,8 +182,11 @@ public:
     double effective_note_hz() const noexcept { return effective_note_hz_; }
     /// Pitch-quantization error in cents: `1200 · log2(realized / f_note_eff)`.
     /// For BOTH schemes this obeys `|detune| <= quantization_bound_cents()`
-    /// whenever the divider is not clamped (i.e. `f_note_eff < 2·f_clk`, always
-    /// true for an audio note below the master clock).
+    /// whenever the divider is not clamped — integer-N: `f_note_eff < 2·f_clk`
+    /// (the `N ≥ 1` lower clamp); fractional-N: additionally below the `Δ ≤ 2^B−1`
+    /// upper clamp, i.e. roughly `f_note_eff < f_clk`. Both hold for any audio note
+    /// well below the master clock; `quantization_bound_cents()` returns 0 (no
+    /// bound) in the clamp regimes rather than a false one.
     double detune_cents() const noexcept {
         return (realized_hz_ > 0.0 && effective_note_hz_ > 0.0)
                    ? 1200.0 * std::log2(realized_hz_ / effective_note_hz_)
@@ -217,6 +220,13 @@ public:
         // applies. Report no bound there rather than a false one (unreachable for
         // any audio note below the master clock).
         if (!(ideal_divider > 0.5)) return 0.0;
+        // Fractional-N also clamps the tuning word at the TOP (`Δ ≤ 2^B − 1`): as
+        // the note approaches the clock the ideal `Δ` exceeds that and the clamp,
+        // not ½-LSB rounding, governs the realized pitch — so the envelope does not
+        // apply there either. Report no bound rather than a false tiny one.
+        if (profile_.divider_scheme == DcoDivider::fractional_n &&
+            !(ideal_divider < static_cast<double>(two_b_) - 0.5))
+            return 0.0;
         return 1200.0 * std::log2(ideal_divider / (ideal_divider - 0.5));
     }
 
