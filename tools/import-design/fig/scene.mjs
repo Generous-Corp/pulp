@@ -458,6 +458,26 @@ export function materializeFrame(scene, frame, ctx) {
   const assetHashes = new Set();
   const geometryNodes = [];
   const seenTokens = new Map();
+  // How much text to lower to glyph outlines. Figma bakes an outline for EVERY
+  // text node, so this is a fidelity/liveness trade, not a capability one:
+  //
+  //   auto (default) — outline only icon fonts, whose "characters" are ligature
+  //                    names and are never real text. Everything else stays a
+  //                    live label: an imported knob caption has to remain
+  //                    editable, themeable and reflowable to be worth anything.
+  //   always         — outline every string. Pixel-faithful to what Figma drew,
+  //                    including designs whose font we do not have, at the cost
+  //                    of every label. The logo reads "TRI  Z" and relies on
+  //                    Sofia Pro's metrics to reserve the gap its A-mark sits
+  //                    in; with a fallback font the gap collapses and the Z
+  //                    lands on top of the A. Outlines place it exactly.
+  //   never          — no outlining at all, icon fonts included.
+  const textMode = (ctx && ctx.textAsOutlines) || process.env.PULP_FIG_TEXT_AS_OUTLINES || 'auto';
+  const shouldOutlineText = (family) => {
+    if (textMode === 'never') return false;
+    if (textMode === 'always') return true;
+    return isIconFont(family);
+  };
   // Every font family the frame references. Reported at the end so a
   // missing font is a stated result, not a mystery in the pixels.
   const fontsSeen = new Set();
@@ -863,7 +883,7 @@ export function materializeFrame(scene, frame, ctx) {
       // the font is licensed and absent. But Figma bakes each glyph's outline
       // into the file, so the icons are already here: lower them to the same
       // vector path a VECTOR node uses and they render with no font at all.
-      if (isIconFont(node.fontName && node.fontName.family)) {
+      if (shouldOutlineText(node.fontName && node.fontName.family)) {
         let glyphs = null;
         try {
           glyphs = glyphsToPath(node, scene.blobs || []);

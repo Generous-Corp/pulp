@@ -307,6 +307,57 @@ test('absolute children keep their Figma coordinates; auto-layout children do no
   assert.ok(!('top' in row.style), 'auto-layout child carries no coordinates');
 });
 
+test('icon-font text lowers to a glyph outline; real text stays a live label', () => {
+  // An icon font's characters are LIGATURE NAMES — "lock" means a padlock — so
+  // emitting them as text is always wrong and no font we can ship fixes it.
+  // Figma bakes every glyph outline into the file, so the icon renders with no
+  // font at all. Real text must NOT be swept up in that: a knob caption has to
+  // stay editable and themeable, so it stays a label under the default mode.
+  // A glyph outline in EM units, encoded the way Figma does: [u8 tag][f32 args].
+  const encode = (...cmds) => Buffer.concat(cmds.map(([tag, ...args]) => {
+    const b = Buffer.alloc(1 + args.length * 4);
+    b.writeUInt8(tag, 0);
+    args.forEach((v, i) => b.writeFloatLE(v, 1 + i * 4));
+    return b;
+  }));
+  const em = encode([1, 0, 0], [2, 1, 0], [2, 1, 1], [0]);  // MOVE LINE LINE CLOSE
+  const mk = (name, family, localID, pos) => ({
+    guid: { sessionID: 0, localID }, type: 'TEXT', name,
+    parentIndex: { guid: { sessionID: 0, localID: 2 }, position: pos },
+    size: { x: 12, y: 12 },
+    transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+    fontName: { family },
+    textData: { characters: 'lock' },
+    fillPaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 } }],
+    derivedTextData: { characters: 'lock', glyphs: [{ commandsBlob: 0, position: { x: 0, y: 12 }, fontSize: 12 }] },
+  });
+  const nodeChanges = [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 40 } },
+    mk('icon', 'Font Awesome 6 Pro', 3, 'a'),
+    mk('caption', 'Roboto', 4, 'b'),
+  ];
+  const scene = buildScene({ nodeChanges, blobs: [{ bytes: em }] });
+  const f = materializeFrame(scene, findFrame(scene, 'Root'), { images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
+  const [icon, caption] = f.envelope.root.children;
+
+  assert.equal(icon.type, 'vector', 'an icon font lowers to its outline');
+  assert.ok(icon.path_data, 'and carries path data');
+  assert.ok(!('content' in icon), 'the ligature name is not content');
+  assert.equal(icon.fill, '#ffffff', 'the glyph paints in the text colour');
+
+  assert.equal(caption.type, 'text', 'real text stays live');
+  assert.equal(caption.content, 'lock');
+
+  // `always` trades every label for pixel-faithful text — opt-in only.
+  const all = materializeFrame(scene, findFrame(scene, 'Root'), { images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z',
+    textAsOutlines: 'always' });
+  assert.equal(all.envelope.root.children[1].type, 'vector', "`always` outlines real text too");
+});
+
 test('a style-referenced fill resolves to the style, not the master default', () => {
   // Shared styles are the design's tokens, and Figma caches the resolved colour
   // on the referencing node only sometimes. In one real design only the FOLEY
