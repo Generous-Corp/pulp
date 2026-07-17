@@ -1,6 +1,11 @@
 #include "../core/view/src/design_import_native_common.hpp"
 #include "../core/view/src/design_import_internal.hpp"
 
+#include <pulp/view/svg_path_widget.hpp>
+#include <pulp/view/widgets/svg_line.hpp>
+#include <pulp/view/widgets/svg_rect.hpp>
+
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
@@ -42,6 +47,18 @@ std::string resolved_snapshot(const ResolvedNativeNode& node, int depth = 0) {
     for (const auto& resolved_child : node.children)
         out << resolved_snapshot(resolved_child, depth + 1);
     return out.str();
+}
+
+// Channel-wise colour check. CSS 8-bit channels round-trip through floats, so
+// exact equality is unavailable; naming every expected channel (rather than
+// asserting "not the default") is what makes a dropped alpha or a
+// wrong-parser result fail instead of passing on a plausible-looking colour.
+void check_color(const pulp::canvas::Color& actual,
+                 float r, float g, float b, float a) {
+    CHECK(actual.r == Catch::Approx(r).margin(0.01f));
+    CHECK(actual.g == Catch::Approx(g).margin(0.01f));
+    CHECK(actual.b == Catch::Approx(b).margin(0.01f));
+    CHECK(actual.a == Catch::Approx(a).margin(0.01f));
 }
 
 } // namespace
@@ -356,4 +373,152 @@ TEST_CASE("native hit-ownership contract is exhaustive across widget kinds",
         CHECK(is_interactive_native_kind(row.kind) == row.interactive);
         CHECK(native_kind_owns_imported_child_hits(row.kind) == row.owns_child_hits);
     }
+}
+
+TEST_CASE("every per-side border colour accepts non-hex CSS",
+          "[view][import][native-common][css-color]") {
+    // The four per-side border colours are the paint sites furthest from the one
+    // branch that historically owned the rgb()/rgba() fallback, so they are where
+    // a call-site-local fix silently stops. Each side carries a DIFFERENT colour
+    // syntax: a per-side assertion fails loudly if a side reverts to hex-only,
+    // where a single shared colour would let a copy-paste slip through.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "grid";
+    ir.root.style.width = 100.0f;
+    ir.root.style.height = 40.0f;
+    ir.root.style.border_top_width = 1.0f;
+    ir.root.style.border_right_width = 1.0f;
+    ir.root.style.border_bottom_width = 1.0f;
+    ir.root.style.border_left_width = 1.0f;
+    // The real Figma shape: a hairline stroke demoted to a 1px frame whose fill
+    // carries the alpha. Dropping the alpha renders the grid at full opacity;
+    // dropping the colour renders it not at all. Assert the alpha, not just a>0.
+    ir.root.style.border_top_color = "rgba(171, 171, 171, 0.1)";
+    ir.root.style.border_right_color = "rgb(137, 180, 250)";
+    ir.root.style.border_bottom_color = "#89b4fa";
+    ir.root.style.border_left_color = "transparent";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+
+    check_color(root->border_top_color(), 171.0f / 255.0f, 171.0f / 255.0f,
+                171.0f / 255.0f, 0.1f);
+    check_color(root->border_right_color(), 137.0f / 255.0f, 180.0f / 255.0f,
+                250.0f / 255.0f, 1.0f);
+    // The hex fast path shares the helper's first branch — asserted here so a
+    // regression that breaks hex while chasing rgb() is caught in the same test.
+    check_color(root->border_bottom_color(), 137.0f / 255.0f, 180.0f / 255.0f,
+                250.0f / 255.0f, 1.0f);
+    check_color(root->border_left_color(), 0.0f, 0.0f, 0.0f, 0.0f);
+}
+
+TEST_CASE("an unparseable CSS colour leaves the paint site untouched",
+          "[view][import][native-common][css-color]") {
+    // A colour the helper recognizes neither as hex nor as a functional syntax
+    // must yield nullopt so the paint site keeps its default. This matters
+    // because the shared CSS parser returns opaque WHITE for anything it fails
+    // to understand: routing an unknown token into it would repaint the border
+    // white rather than leave it alone — a wrong colour is worse than no colour,
+    // since it can't be told apart from a deliberate one downstream.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "panel";
+    ir.root.style.width = 100.0f;
+    ir.root.style.height = 40.0f;
+    ir.root.style.border_width = 1.0f;
+    ir.root.style.border_color = "chartreuse";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+
+    // View's untouched default — NOT the parser's white fallback.
+    check_color(root->border_color(), 0.0f, 0.0f, 0.0f, 1.0f);
+}
+
+TEST_CASE("hsl() is admitted by the colour helper but not implemented downstream",
+          "[view][import][native-common][css-color]") {
+    // KNOWN GAP, characterized deliberately — this is NOT the desired behavior.
+    //
+    // The helper admits an `hsl(` prefix and hands it to the shared CSS parser,
+    // but that parser implements only #hex, rgb(), rgba(), and `transparent`.
+    // Anything else falls off its end and returns its opaque-WHITE default. So an
+    // hsl() design does not fall back to the untouched default the way an unknown
+    // token does — it paints white, which is worse: a wrong colour is
+    // indistinguishable downstream from a deliberate one.
+    //
+    // Asserted rather than left silent so the gap is visible at head, and so
+    // whichever change closes it (teaching the parser hsl, or dropping `hsl` from
+    // the helper's guard so it returns nullopt) must come here and say so.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "panel";
+    ir.root.style.width = 100.0f;
+    ir.root.style.height = 40.0f;
+    ir.root.style.border_width = 1.0f;
+    ir.root.style.border_color = "hsl(210, 90%, 60%)";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+
+    // A correct hsl() parse would be ~rgb(61, 138, 245).
+    check_color(root->border_color(), 1.0f, 1.0f, 1.0f, 1.0f);
+}
+
+TEST_CASE("SVG fill and stroke accept non-hex CSS across every shape widget",
+          "[view][import][native-common][css-color]") {
+    // The three SVG paint helpers are separate overloads, each with its own
+    // fill/stroke pair, so each is its own chance to miss the shared helper.
+    // A Figma vector export writes rgba() strokes directly, so a hex-only site
+    // here renders the shape in the widget's default black.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "vector-root";
+
+    IRNode path;
+    path.type = "path";
+    path.stable_anchor_id = "curve";
+    path.attributes["d"] = "M0 0L10 10";
+    path.attributes["fill"] = "rgba(126, 106, 255, 0.25)";
+    path.attributes["stroke"] = "rgb(137, 180, 250)";
+    ir.root.children.push_back(path);
+
+    IRNode rect;
+    rect.type = "rect";
+    rect.stable_anchor_id = "pad";
+    rect.attributes["width"] = "10";
+    rect.attributes["height"] = "10";
+    rect.attributes["fill"] = "rgb(255, 0, 128)";
+    rect.attributes["stroke"] = "#89b4fa";
+    ir.root.children.push_back(rect);
+
+    IRNode line;
+    line.type = "line";
+    line.stable_anchor_id = "hairline";
+    line.attributes["x2"] = "10";
+    line.attributes["stroke"] = "rgba(171, 171, 171, 0.1)";
+    ir.root.children.push_back(line);
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 3);
+
+    auto* svg_path = dynamic_cast<SvgPathWidget*>(root->child_at(0));
+    REQUIRE(svg_path != nullptr);
+    check_color(svg_path->fill_color(), 126.0f / 255.0f, 106.0f / 255.0f,
+                255.0f / 255.0f, 0.25f);
+    check_color(svg_path->stroke_color(), 137.0f / 255.0f, 180.0f / 255.0f,
+                250.0f / 255.0f, 1.0f);
+
+    auto* svg_rect = dynamic_cast<SvgRectWidget*>(root->child_at(1));
+    REQUIRE(svg_rect != nullptr);
+    check_color(svg_rect->fill_color(), 1.0f, 0.0f, 128.0f / 255.0f, 1.0f);
+    // Hex kept under assertion alongside its rgb() sibling on the same widget.
+    check_color(svg_rect->stroke_color(), 137.0f / 255.0f, 180.0f / 255.0f,
+                250.0f / 255.0f, 1.0f);
+
+    auto* svg_line = dynamic_cast<SvgLineWidget*>(root->child_at(2));
+    REQUIRE(svg_line != nullptr);
+    check_color(svg_line->stroke_color(), 171.0f / 255.0f, 171.0f / 255.0f,
+                171.0f / 255.0f, 0.1f);
 }
