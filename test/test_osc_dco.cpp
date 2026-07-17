@@ -335,6 +335,34 @@ TEST_CASE("the quantization bound holds on the round-DOWN side too, where the "
     }
 }
 
+TEST_CASE("the quantization bound reports no bound in a divider-clamp regime, "
+          "never a false one",
+          "[signal][osc][dco][quantization]") {
+    // The ½-LSB envelope is only a valid bound while the divider is NOT clamped.
+    // Fractional-N clamps the tuning word at the TOP (Δ ≤ 2^B − 1) as the note
+    // approaches the clock: there the clamp, not rounding, governs, and the true
+    // detune can far exceed the envelope. The bound must report 0 (no bound) there
+    // rather than a tiny false one — a downstream `|detune| <= bound` invariant
+    // check must not be handed a value the reality blows past.
+    const double f_clk = 10000.0; // a deliberately low clock so a note can reach it.
+    DcoProfile frac = fractional_profile(24, f_clk);
+    DcoOscillator osc;
+    osc.prepare(kSampleRate);
+    osc.set_profile(frac);
+
+    // A note above the clock drives Δ past the 2^B−1 clamp.
+    osc.set_note_hz(15000.0);
+    INFO("note 15 kHz / clk 10 kHz: detune " << osc.detune_cents() << " cents, bound "
+                                             << osc.quantization_bound_cents());
+    CHECK(osc.quantization_bound_cents() == 0.0); // no false bound in the clamp regime.
+
+    // Well below the clock the bound is real and the invariant holds.
+    osc.set_note_hz(440.0);
+    const double bound = osc.quantization_bound_cents();
+    CHECK(bound > 0.0);
+    CHECK(std::fabs(osc.detune_cents()) <= bound + 1e-12);
+}
+
 TEST_CASE("the quantization error is larger at high notes than low ones",
           "[signal][osc][dco][quantization]") {
     // |e|_max ≈ 1200·log2(N*/(N*−½)) with N* = f_clk/f_note — it roughly DOUBLES

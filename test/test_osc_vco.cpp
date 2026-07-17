@@ -735,6 +735,35 @@ TEST_CASE("the waveshaper's character is correct and its null is exact",
         CHECK(differing == 0);
     }
 
+    SECTION("an out-of-range blend amount is clamped to [0,1], keeping output bounded") {
+        // `amount` is a blend; outside [0,1] it extrapolates the shaped/unshaped mix
+        // past the [-1,1] output contract (amount 2 reaches ~3x on a full-scale
+        // shape). The setter must clamp like every other unit-range control.
+        VcoOscillator osc;
+        osc.prepare(kSampleRate);
+        osc.set_shape(VaShape::saw);
+        WaveshaperParams hot;
+        hot.amount = 2.0; // way past the top of the blend range.
+        hot.drive = 4.0;
+        osc.set_waveshaper(VaShape::saw, hot);
+        CHECK(osc.waveshaper(VaShape::saw).amount == 1.0); // stored value clamped.
+
+        WaveshaperParams cold = hot;
+        cold.amount = -0.5;
+        osc.set_waveshaper(VaShape::saw, cold);
+        CHECK(osc.waveshaper(VaShape::saw).amount == 0.0);
+
+        // And the rendered output stays inside the [-1,1] contract even though the
+        // caller commanded an over-driven blend (re-set the hot params first).
+        osc.set_waveshaper(VaShape::saw, hot);
+        osc.reset(0.0);
+        double peak = 0.0;
+        for (int i = 0; i < kRenderLength; ++i)
+            peak = std::max(peak, std::fabs(osc.next(f0 / kSampleRate)));
+        INFO("peak with commanded amount 2.0 (clamped to 1.0): " << peak);
+        CHECK(peak <= 1.0 + 1e-9);
+    }
+
     SECTION("a symmetric drive makes odd harmonics, not even ones") {
         WaveshaperParams sym;
         sym.amount = 1.0;
@@ -949,7 +978,13 @@ TEST_CASE("drift wanders the pitch slowly at ~the commanded RMS",
             const PitchStats st = pitch_stats(sig, kWin, kHop);
             INFO("drift rate " << rate << ": f0(t) RMS " << st.rms_cents << " cents");
             REQUIRE_FALSE(st.any_nonfinite);
-            CHECK(st.rms_cents < 1.0); // frozen ~= no wander, far below 20 cents.
+            // The frozen walk sits at the analyzer floor (~8e-5 cents). The
+            // pre-fix bug — pole mapped to 0, i.e. full-depth per-sample WHITE FM —
+            // measures ~0.31 cents RMS here (20-cent depth averaged over the
+            // 4096-sample window), so this 0.01-cent gate FAILS against the bug and
+            // clears the frozen walk with ~100x margin. A slack 1.0-cent gate let
+            // the white-noise bug pass, so it did not protect the fix.
+            CHECK(st.rms_cents < 0.01);
         }
     }
 }
