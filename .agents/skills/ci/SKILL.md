@@ -960,6 +960,28 @@ Do not push empty commits just to churn queued macOS checks. Cancel
 superseded SHAs, rebase or push only when a PR needs current `main`, and
 wait unless a check has actually failed.
 
+### Gotcha: `.shipyard.local` can silently route the macOS lane off the gate
+
+`.shipyard/config.toml` declares `[targets.mac] backend = "local"`, and
+Shipyard merges the gitignored `.shipyard.local/config.toml` on TOP of it. A
+`[targets.mac]` block there overrides the backend — and the failure does not
+look like a misconfiguration, it looks like a hang: `shipyard status` reports
+`mac: cloud`, shipyard watches a redundant GitHub-hosted run and times out at
+3600s, and the required `macos` check (posted ONLY by the local runner) never
+appears. That is why the block in Pulp's own `.shipyard.local/config.toml` is
+commented out and annotated `DISABLED 2026-07-09`.
+
+**A missing `.shipyard.local/` is the CORRECT state, not a gap** — the repo
+config's local mac target stands on its own, which is how the Mac Studio runs.
+Do not "fix" a fresh worktree by copying a config in; that is what causes the
+reroute. In particular never `cp -R` over `.shipyard.local/` — `config.toml` is
+gitignored but `config.toml.example` next to it is TRACKED, so a recursive copy
+clobbers a tracked file.
+
+`tools/scripts/gates.sh` runs `shipyard_local_check.py` as an advisory that
+reports an active non-local mac override before you push. It is read-only by
+design: it never copies or repairs, because the repair instinct is the hazard.
+
 `coverage.yml`'s macOS leg resolves its `runs-on` via
 `resolve_runs_on.py --deny-labels pulp-build,pulp-build-vm`: a coverage
 selector (repo var `PULP_COVERAGE_MACOS_RUNS_ON_JSON` or a dispatch input)
