@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/audio/sample_interpolation.hpp>
 #include <pulp/audio/loop_types.hpp>
 
 namespace pulp::audio {
@@ -23,6 +24,18 @@ public:
                       std::uint32_t output_channel,
                       double position) noexcept;
 
+    static float read(BufferView<const float> source,
+                      const LoopRegion& region,
+                      std::uint32_t output_channel,
+                      double position,
+                      SampleInterpolationPolicy interpolation) noexcept;
+
+    static float read(BufferView<const float> source,
+                      const LoopRegion& region,
+                      std::uint32_t output_channel,
+                      double position,
+                      const PreparedSampleInterpolation& interpolation) noexcept;
+
     // Fast path for renderers that already validated `region` against the
     // source length for the current block. Public `read()` remains the safe
     // guard rail for arbitrary callers.
@@ -30,6 +43,19 @@ public:
                                 const LoopRegion& region,
                                 std::uint32_t output_channel,
                                 double position) noexcept;
+
+    static float read_validated(BufferView<const float> source,
+                                const LoopRegion& region,
+                                std::uint32_t output_channel,
+                                double position,
+                                SampleInterpolationPolicy interpolation) noexcept;
+
+    static float read_validated(
+        BufferView<const float> source,
+        const LoopRegion& region,
+        std::uint32_t output_channel,
+        double position,
+        const PreparedSampleInterpolation& interpolation) noexcept;
 };
 
 }  // namespace pulp::audio

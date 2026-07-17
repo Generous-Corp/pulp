@@ -4,8 +4,8 @@
 #include <pulp/audio/loop_playback_cursor.hpp>
 #include <pulp/audio/loop_reader.hpp>
 #include <pulp/audio/sample_asset.hpp>
+#include <pulp/audio/sample_interpolation.hpp>
 #include <pulp/audio/sample_stream_voice_reader.hpp>
-#include <pulp/signal/interpolator.hpp>
 
 #include <algorithm>
 #include <array>
@@ -27,6 +27,7 @@ struct SampleStreamLoopBlockPlan {
     std::uint64_t timeline_serial = 0;
     std::uint32_t output_frames = 0;
     SampleStreamVoiceSupply supply = SampleStreamVoiceSupply::InvalidContract;
+    PreparedSampleInterpolation interpolation{};
     std::array<SampleStreamPageDemand, kSampleStreamLoopMaxPageDemands> demands{};
     std::array<SampleStreamPageView, kSampleStreamLoopMaxPageDemands> ready_pages{};
     std::uint32_t demand_count = 0;
@@ -44,18 +45,44 @@ public:
                  SampleStreamRequesterToken requester,
                  const LoopRegion& region,
                  double playback_rate) noexcept {
+        return prepare(asset, requester, region, playback_rate,
+                       sample_interpolation_policy(region.interpolation));
+    }
+
+    bool prepare(const SampleAssetView& asset,
+                 SampleStreamRequesterToken requester,
+                 const LoopRegion& region,
+                 double playback_rate,
+                 SampleInterpolationPolicy interpolation) noexcept {
+        return prepare(asset, requester, region, playback_rate,
+                       PreparedSampleInterpolation{.policy = interpolation});
+    }
+
+    bool prepare(const SampleAssetView& asset,
+                 SampleStreamRequesterToken requester,
+                 const LoopRegion& region,
+                 double playback_rate,
+                 const PreparedSampleInterpolation& interpolation) noexcept {
         reset();
         if (!asset.valid() || requester.requester_id == 0 ||
             requester.requester_generation == 0 ||
             !positive_finite(playback_rate) ||
+            !interpolation.valid() ||
             !cursor_.set_region(region, asset.total_frames)) {
             return false;
         }
         cursor_.set_playback_rate(playback_rate);
+        if (!plan_capacity_accepts(asset, region, interpolation,
+                                   std::abs(cursor_.step()))) {
+            reset();
+            return false;
+        }
         cursor_.start();
         asset_ = asset.asset;
         source_ = asset.source;
+        admission_asset_ = asset;
         requester_ = requester;
+        interpolation_ = interpolation;
         prepared_ = true;
         return true;
     }
@@ -63,7 +90,9 @@ public:
     void reset() noexcept {
         asset_ = {};
         source_ = {};
+        admission_asset_ = {};
         requester_ = {};
+        interpolation_ = {};
         cursor_ = {};
         timeline_serial_ = 1;
         prepared_ = false;
@@ -71,18 +100,49 @@ public:
 
     bool set_playback_rate(double playback_rate) noexcept {
         if (!prepared_ || !positive_finite(playback_rate)) return false;
-        cursor_.set_playback_rate(playback_rate);
+        auto candidate = cursor_;
+        candidate.set_playback_rate(playback_rate);
+        if (!plan_capacity_accepts(admission_asset_, candidate.region(),
+                                   interpolation_, std::abs(candidate.step()))) {
+            return false;
+        }
+        cursor_ = candidate;
+        ++timeline_serial_;
+        return true;
+    }
+
+    bool set_playback_rate(const SampleAssetView& asset,
+                           double playback_rate) noexcept {
+        return prepared_ && same_generation(asset) &&
+               set_playback_rate(playback_rate);
+    }
+
+    bool set_interpolation(
+        const SampleAssetView& asset,
+        const PreparedSampleInterpolation& interpolation) noexcept {
+        if (!prepared_ || !same_generation(asset) || !interpolation.valid() ||
+            !plan_capacity_accepts(asset, cursor_.region(), interpolation,
+                                   std::abs(cursor_.step()))) {
+            return false;
+        }
+        if (same_sample_interpolation(interpolation_, interpolation)) return true;
+        interpolation_ = interpolation;
         ++timeline_serial_;
         return true;
     }
 
     const LoopPlaybackCursor& cursor() const noexcept { return cursor_; }
+    const PreparedSampleInterpolation& interpolation() const noexcept {
+        return interpolation_;
+    }
     bool active() const noexcept { return prepared_ && cursor_.active(); }
 
     bool synchronize_cursor(const SampleAssetView& asset,
                             const LoopPlaybackCursor& cursor) noexcept {
         if (!prepared_ || !same_generation(asset) ||
-            !validate_loop_region(cursor.region(), asset.total_frames).ok) {
+            !validate_loop_region(cursor.region(), asset.total_frames).ok ||
+            !plan_capacity_accepts(asset, cursor.region(), interpolation_,
+                                   std::abs(cursor.step()))) {
             return false;
         }
         cursor_ = cursor;
@@ -102,6 +162,7 @@ public:
         plan.end_cursor = cursor_;
         plan.timeline_serial = timeline_serial_;
         plan.output_frames = output_frames;
+        plan.interpolation = interpolation_;
 
         if (!prepared_ || !asset.valid() || output_frames == 0 ||
             !positive_finite(output_sample_rate)) {
@@ -112,8 +173,9 @@ public:
             return plan;
         }
         const auto step = std::abs(cursor_.step());
-        if (!positive_finite(step) || !contract_accepts(asset, output_frames, step,
-                                                        output_sample_rate)) {
+        if (!positive_finite(step) ||
+            !contract_accepts(asset, interpolation_, output_frames, step,
+                              output_sample_rate)) {
             return plan;
         }
         if (!cursor_.active()) {
@@ -125,11 +187,13 @@ public:
         const auto consumption_frames_per_second = step * output_sample_rate;
         for (std::uint32_t output = 0; output < output_frames && scan.active(); ++output) {
             const auto frame_plan = scan.frame_read_plan();
-            if (!append_position(plan, asset, scan.region(), frame_plan.read_position,
+            if (!append_position(plan, asset, scan.region(), interpolation_,
+                                 frame_plan.read_position,
                                  output, step, consumption_frames_per_second,
                                  demand_class) ||
                 (frame_plan.blend &&
-                 !append_position(plan, asset, scan.region(), frame_plan.blend_position,
+                 !append_position(plan, asset, scan.region(), interpolation_,
+                                  frame_plan.blend_position,
                                   output, step, consumption_frames_per_second,
                                   demand_class))) {
                 plan.demand_count = 0;
@@ -266,17 +330,17 @@ public:
 
 private:
     struct LocatedFrame {
-        std::uint64_t source_frame = 0;
-        SampleStreamPageView page{};
-        bool ready = false;
-        bool preload = false;
+        std::uint64_t source_frame;
+        SampleStreamPageView page;
+        bool ready;
+        bool preload;
     };
 
     struct ResolvedRead {
-        std::array<LocatedFrame, 4> taps{};
-        float fraction = 0.0f;
-        LoopInterpolationMode interpolation = LoopInterpolationMode::None;
-        std::uint32_t tap_count = 0;
+        std::array<LocatedFrame, kMaximumSampleInterpolationTaps> taps;
+        float fraction;
+        PreparedSampleInterpolation interpolation;
+        std::uint32_t tap_count;
     };
 
     struct InterpolatedSample { float sample = 0.0f; bool ready = false; };
@@ -301,6 +365,7 @@ private:
     }
 
     static bool contract_accepts(const SampleAssetView& asset,
+                                 const PreparedSampleInterpolation& interpolation,
                                  std::uint32_t output_frames,
                                  double step,
                                  double output_sample_rate) noexcept {
@@ -310,33 +375,76 @@ private:
         const auto maximum_step = static_cast<double>(asset.sample_rate) /
                                   output_sample_rate * contract.maximum_playback_ratio;
         return output_frames <= contract.maximum_host_block_frames &&
-               output_sample_rate == contract.host_sample_rate && step <= maximum_step;
+               output_sample_rate == contract.host_sample_rate &&
+               step <= maximum_step &&
+               interpolation.guard_frames() <=
+                   contract.interpolation_guard_frames;
     }
 
-    static std::uint32_t tap_count(LoopInterpolationMode mode) noexcept {
-        return mode == LoopInterpolationMode::Cubic ? 4u
-             : mode == LoopInterpolationMode::Linear ? 2u : 1u;
-    }
-
-    static std::int64_t tap_offset(LoopInterpolationMode mode,
-                                   std::uint32_t tap) noexcept {
-        if (mode == LoopInterpolationMode::Cubic) return static_cast<std::int64_t>(tap) - 1;
-        return static_cast<std::int64_t>(tap);
+    static bool plan_capacity_accepts(
+        const SampleAssetView& asset,
+        const LoopRegion& region,
+        const PreparedSampleInterpolation& interpolation,
+        double step) noexcept {
+        if (asset.fully_resident()) return true;
+        if (!asset.has_preload_contract || !asset.has_stream_source ||
+            asset.stream_source.page_frames == 0 || !positive_finite(step)) {
+            return false;
+        }
+        const auto footprint = interpolation.footprint(0.0f);
+        if (footprint.tap_count == 0 ||
+            footprint.tap_count > kMaximumSampleInterpolationTaps) {
+            return false;
+        }
+        const auto advance = std::ceil(
+            step * static_cast<double>(
+                       asset.preload_contract.maximum_host_block_frames));
+        if (!std::isfinite(advance) || advance < 0.0 ||
+            advance >= static_cast<double>(
+                           std::numeric_limits<std::uint64_t>::max())) {
+            return false;
+        }
+        const auto span = static_cast<std::uint64_t>(advance) +
+                          footprint.tap_count;
+        const auto page_frames = asset.stream_source.page_frames;
+        const auto pages_per_region = span / page_frames +
+            (span % page_frames == 0 ? 0u : 1u) + 2u;
+        const auto crossfaded_loop = region.crossfade_frames != 0 &&
+            (region.playback_mode == LoopPlaybackMode::Forward ||
+             region.playback_mode == LoopPlaybackMode::Reverse);
+        const auto read_regions = crossfaded_loop ? 2u : 1u;
+        if (pages_per_region >
+            std::numeric_limits<std::uint64_t>::max() / read_regions) {
+            return false;
+        }
+        const auto first_stream_frame =
+            std::max(region.start_frame, asset.preload_frames);
+        if (first_stream_frame >= region.end_frame) return true;
+        const auto first_stream_page = first_stream_frame / page_frames;
+        const auto last_stream_page = (region.end_frame - 1) / page_frames;
+        const auto total_stream_pages = last_stream_page - first_stream_page + 1;
+        const auto maximum_demands = std::min(
+            total_stream_pages, pages_per_region * read_regions);
+        return maximum_demands <= kSampleStreamLoopMaxPageDemands;
     }
 
     bool append_position(SampleStreamLoopBlockPlan& plan,
                          const SampleAssetView& asset,
                          const LoopRegion& region,
+                         const PreparedSampleInterpolation& interpolation,
                          double position,
                          std::uint32_t first_output,
                          double step,
                          double consumption_frames_per_second,
                          SampleStreamDemandClass demand_class) const noexcept {
         const auto normalized = LoopReader::normalize_position(region, position);
-        const auto base = static_cast<std::int64_t>(std::floor(normalized));
-        for (std::uint32_t tap = 0; tap < tap_count(region.interpolation); ++tap) {
+        const auto resolved = resolve_sample_interpolation_position(
+            normalized, interpolation);
+        if (!resolved.valid) return false;
+        for (std::uint32_t tap = 0; tap < resolved.footprint.tap_count; ++tap) {
             const auto frame = LoopReader::source_frame_for_tap(
-                region, asset.total_frames, base + tap_offset(region.interpolation, tap));
+                region, asset.total_frames,
+                resolved.base_frame + resolved.footprint.first_offset + tap);
             if (!append_page(plan, asset, frame, first_output, step,
                              consumption_frames_per_second, demand_class)) {
                 return false;
@@ -412,13 +520,18 @@ private:
                              double position,
                              ResolvedRead& resolved) noexcept {
         const auto normalized = LoopReader::normalize_position(region, position);
-        const auto base = static_cast<std::int64_t>(std::floor(normalized));
-        resolved.fraction = static_cast<float>(normalized - static_cast<double>(base));
-        resolved.interpolation = region.interpolation;
-        resolved.tap_count = tap_count(region.interpolation);
+        resolved.interpolation = plan.interpolation;
+        const auto position_plan = resolve_sample_interpolation_position(
+            normalized, resolved.interpolation);
+        if (!position_plan.valid ||
+            position_plan.footprint.tap_count > resolved.taps.size()) return false;
+        resolved.fraction = position_plan.fraction;
+        resolved.tap_count = position_plan.footprint.tap_count;
         for (std::uint32_t tap = 0; tap < resolved.tap_count; ++tap) {
             const auto frame = LoopReader::source_frame_for_tap(
-                region, asset.total_frames, base + tap_offset(region.interpolation, tap));
+                region, asset.total_frames,
+                position_plan.base_frame +
+                    position_plan.footprint.first_offset + tap);
             resolved.taps[tap] = locate(plan, asset, frame);
             if (!resolved.taps[tap].ready) return false;
         }
@@ -439,25 +552,23 @@ private:
     static InterpolatedSample interpolate(const SampleAssetView& asset,
                                           const ResolvedRead& read,
                                           std::uint32_t channel) noexcept {
-        std::array<float, 4> samples{};
+        if (read.tap_count == 0 || read.tap_count > read.taps.size()) return {};
+        std::array<float, kMaximumSampleInterpolationTaps> samples;
         for (std::uint32_t tap = 0; tap < read.tap_count; ++tap) {
             const auto* sample = sample_pointer(asset, read.taps[tap], channel);
             if (sample == nullptr) return {};
             samples[tap] = *sample;
         }
-        if (read.interpolation == LoopInterpolationMode::Cubic) {
-            return {signal::Interpolator::hermite(
-                        read.fraction, samples[0], samples[1], samples[2], samples[3]), true};
-        }
-        if (read.interpolation == LoopInterpolationMode::Linear) {
-            return {signal::Interpolator::linear(read.fraction, samples[0], samples[1]), true};
-        }
-        return {samples[0], true};
+        return {read.interpolation.evaluate(
+                    read.fraction,
+                    std::span<const float>(samples.data(), read.tap_count)), true};
     }
 
     SampleAssetToken asset_{};
     SampleStreamSourceToken source_{};
+    SampleAssetView admission_asset_{};
     SampleStreamRequesterToken requester_{};
+    PreparedSampleInterpolation interpolation_{};
     LoopPlaybackCursor cursor_{};
     std::uint64_t timeline_serial_ = 1;
     bool prepared_ = false;

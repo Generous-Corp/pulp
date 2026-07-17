@@ -36,6 +36,7 @@ enum SamplerParams : state::ParamID {
     kSamplerPitch    = 6,  // semitones offset
     kSamplerLoop     = 7,  // 0 = one-shot, 1 = loop
     kSamplerReverse  = 8,  // 0 = forward entry, 1 = reverse entry
+    kSamplerInterpolation = 9,
 };
 
 class PulpSamplerProcessor : public format::Processor {
@@ -79,6 +80,8 @@ public:
             .unit = "", .range = {0, 1, 0, 1}});
         store.add_parameter({.id = kSamplerReverse, .name = "Reverse",
             .unit = "", .range = {0, 1, 0, 1}});
+        store.add_parameter({.id = kSamplerInterpolation, .name = "Interpolation",
+            .unit = "", .range = {0, 5, 2, 1}});
     }
 
     /// Load a mono sample buffer. Call off the audio thread after prepare().
@@ -142,6 +145,12 @@ public:
             voice_scratch_[ch].assign(max_block_frames_, 0.0f);
         }
         sample_store_.prepare();
+        const auto maximum_source_frames_per_output =
+            SamplerStreamingRuntime::maximum_pitch_ratio() *
+            SamplerStreamingRuntime::maximum_source_sample_rate() /
+            static_cast<double>(host_sample_rate_);
+        sinc_bank_.build_for_maximum_consumption(
+            maximum_source_frames_per_output);
         for (auto& voice : voices_) voice.reset();
         for (auto& generation : requester_generations_) generation = 0;
         for (auto& cancellation : pending_cancellations_) cancellation = {};
@@ -157,6 +166,7 @@ public:
         for (auto& cancellation : pending_cancellations_) cancellation = {};
         streaming_.release();
         sample_store_.release();
+        sinc_bank_.release();
     }
 
     void process(
@@ -217,6 +227,8 @@ private:
         float pitch_semitones = 0.0f;
         bool loop = false;
         bool reverse = false;
+        audio::SampleInterpolationPolicy interpolation =
+            audio::SampleInterpolationPolicy::Linear;
     };
 
     struct PendingCancellation {
@@ -226,6 +238,7 @@ private:
 
     SamplerSampleStore sample_store_;
     SamplerStreamingRuntime streaming_;
+    audio::SampleSincKernelBank sinc_bank_;
     audio::SampleKeyMap key_map_;
     std::array<std::vector<float>, kMaxOutputChannels> voice_scratch_{};
     std::array<float*, kMaxOutputChannels> voice_scratch_ptrs_{};
@@ -290,6 +303,11 @@ private:
         params.pitch_semitones = state().get_value(kSamplerPitch);
         params.loop = state().get_value(kSamplerLoop) >= 0.5f;
         params.reverse = state().get_value(kSamplerReverse) >= 0.5f;
+        const auto interpolation = std::clamp(
+            static_cast<int>(std::lround(
+                state().get_value(kSamplerInterpolation))), 0, 5);
+        params.interpolation = static_cast<audio::SampleInterpolationPolicy>(
+            interpolation);
         return params;
     }
 
@@ -335,6 +353,21 @@ private:
                                                sample.sample_rate,
                                                static_cast<double>(host_sample_rate_),
                                                params.pitch_semitones);
+    }
+
+    audio::PreparedSampleInterpolation prepared_interpolation(
+        audio::SampleInterpolationPolicy policy,
+        double source_frames_per_output) const noexcept {
+        audio::PreparedSampleInterpolation interpolation{.policy = policy};
+        if (policy == audio::SampleInterpolationPolicy::RatioTrackingSinc) {
+            interpolation.sinc =
+                sinc_bank_.view().select(source_frames_per_output);
+            if (!interpolation.sinc.valid()) {
+                interpolation = {
+                    .policy = audio::SampleInterpolationPolicy::CubicHermite};
+            }
+        }
+        return interpolation;
     }
 
     void render_active_voices(audio::BufferView<float>& output,
@@ -387,7 +420,17 @@ private:
                     static_cast<std::size_t>(voice.sample.num_frames));
 
                 voice.adsr.set_params(params.adsr);
-                voice.renderer.set_playback_rate(playback_speed(voice.note, voice.sample, params));
+                const auto source_frames_per_output =
+                    playback_speed(voice.note, voice.sample, params);
+                const auto interpolation = prepared_interpolation(
+                    params.interpolation, source_frames_per_output);
+                if (!(source_frames_per_output > 0.0) ||
+                    !interpolation.valid() ||
+                    !voice.renderer.set_interpolation(interpolation)) {
+                    voice.reset();
+                    continue;
+                }
+                voice.renderer.set_playback_rate(source_frames_per_output);
                 // LoopRenderer::render() is overwrite-only, so this scratch
                 // buffer can be reused for each voice before additive mixdown.
                 const auto loop_result = voice.renderer.render(source, scratch, chunk);
@@ -433,9 +476,26 @@ private:
         const auto source_frames_per_output =
             pitch_ratio * static_cast<double>(voice.streamed_asset.sample_rate) /
             static_cast<double>(host_sample_rate_);
+        const auto interpolation = prepared_interpolation(
+            params.interpolation, source_frames_per_output);
+        if (!interpolation.valid()) {
+            queue_voice_cancellation(voice_index, voice.requester);
+            voice.reset();
+            return;
+        }
 
-        if (voice.stream_playback_rate != source_frames_per_output) {
-            if (!voice.stream_reader.set_playback_rate(source_frames_per_output) ||
+        const bool rate_changed =
+            voice.stream_playback_rate != source_frames_per_output;
+        const bool interpolation_changed = !audio::same_sample_interpolation(
+            voice.stream_reader.interpolation(), interpolation);
+        if (rate_changed || interpolation_changed) {
+            if ((rate_changed &&
+                 !voice.stream_reader.set_playback_rate(
+                     voice.streamed_asset, source_frames_per_output)) ||
+                !voice.stream_reader.set_interpolation(
+                    voice.streamed_asset, interpolation) ||
+                !voice.lookahead_reader.set_interpolation(
+                    voice.streamed_asset, interpolation) ||
                 !voice.lookahead_reader.synchronize_cursor(
                     voice.streamed_asset, voice.stream_reader.cursor())) {
                 queue_voice_cancellation(voice_index, voice.requester);
@@ -468,6 +528,12 @@ private:
         auto plan = voice.stream_reader.plan_block(voice.streamed_asset,
                                                    frames,
                                                    host_sample_rate_);
+        if (plan.supply == audio::SampleStreamVoiceSupply::InvalidContract ||
+            plan.supply == audio::SampleStreamVoiceSupply::StaleGeneration) {
+            queue_voice_cancellation(voice_index, voice.requester);
+            voice.reset();
+            return;
+        }
         if (holding_stream_attack && !stream_plan_pages_ready(plan)) {
             streaming_.add_starved_frames(frames);
             return;
@@ -478,6 +544,12 @@ private:
                                                 frames);
         const auto rendered =
             voice.stream_reader.render_block(voice.streamed_asset, plan, source_scratch);
+        if (rendered.supply == audio::SampleStreamVoiceSupply::InvalidContract ||
+            rendered.supply == audio::SampleStreamVoiceSupply::StaleGeneration) {
+            queue_voice_cancellation(voice_index, voice.requester);
+            voice.reset();
+            return;
+        }
         voice.lookahead_lead_source_frames -=
             static_cast<double>(frames) * source_frames_per_output;
         if (rendered.supply == audio::SampleStreamVoiceSupply::Starved) {
@@ -803,6 +875,8 @@ private:
                 source.streamed,
                 region,
                 source_frames_per_output,
+                prepared_interpolation(params.interpolation,
+                                       source_frames_per_output),
                 {target_index + 1, requester_generation},
                 source.selection_generation);
             return;
@@ -812,7 +886,11 @@ private:
         const auto region = make_region(sample, params);
         const auto speed = playback_speed(note, sample, params);
         if (speed == 0.0) return;
-        target->start(note, velocity, speed, host_sample_rate_, sample, region, sample.num_frames);
+        const auto interpolation = prepared_interpolation(
+            params.interpolation, speed);
+        if (!interpolation.valid()) return;
+        target->start(note, velocity, speed, host_sample_rate_, sample, region,
+                      sample.num_frames, interpolation);
         target->selection_generation = source.selection_generation;
     }
 

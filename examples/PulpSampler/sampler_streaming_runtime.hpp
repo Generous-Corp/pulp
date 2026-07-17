@@ -102,7 +102,7 @@ public:
             .scheduler_margin_seconds = kSchedulerMarginSeconds,
             .decoder_latency_seconds = kDecoderLatencySeconds,
             .maximum_host_block_frames = maximum_host_block_frames_,
-            .interpolation_guard_frames = 2,
+            .interpolation_guard_frames = audio::kDefaultSampleSincHalfWidth,
             .loop_prefetch_guard_frames =
                 static_cast<std::uint64_t>(maximum_source_frames_per_block),
         });
@@ -252,6 +252,10 @@ public:
 
     static constexpr std::uint32_t maximum_voice_count() noexcept {
         return kMaximumVoices;
+    }
+
+    static constexpr double maximum_source_sample_rate() noexcept {
+        return kMaximumSourceRate;
     }
 
 private:
@@ -437,7 +441,7 @@ private:
             .scheduler_margin_seconds = kSchedulerMarginSeconds,
             .decoder_latency_seconds = kDecoderLatencySeconds,
             .maximum_host_block_frames = maximum_host_block_frames_,
-            .interpolation_guard_frames = 2,
+            .interpolation_guard_frames = audio::kDefaultSampleSincHalfWidth,
         };
         const auto block_source_frames = std::ceil(
             static_cast<double>(maximum_host_block_frames_) * file.sample_rate /
