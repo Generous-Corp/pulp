@@ -285,6 +285,33 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
   (they depend on process spawning and `MACOSX_BUNDLE` install rules).
 - **`pulp::inspect` is desktop-only** — it needs Dawn/Skia GPU. Gate the link
   in `core/format/CMakeLists.txt`.
+- **`clang -fsyntax-only` iOS check — two flags matter or you get false
+  errors.** When syntax-checking an ObjC++ host file (e.g.
+  `window_host_ios.mm`) against the iPhoneOS SDK, (1) target **iOS 16.3 or
+  later** (`-target arm64-apple-ios17.0`): `runtime::log.hpp` pulls in
+  `std::format`, whose float path calls `std::to_chars`, marked *unavailable
+  before iOS 16.3* — a lower target fails deep in libc++ with an error that
+  looks like your code but isn't; and (2) do **NOT** pass `-fobjc-arc` — the iOS
+  host files use manual retain/release (`[super dealloc]`), so ARC turns
+  pre-existing, correct code into "ARC forbids explicit dealloc" errors. Pull
+  the real include dirs from the build's `OBJCXX_INCLUDES` line in
+  `build/core/view/CMakeFiles/pulp-view-core.dir/flags.make` (note: the .mm uses
+  `OBJCXX_INCLUDES`, not `CXX_INCLUDES`).
+
+### Window host (GPU) — dpi_scale + design viewport
+
+- **`IOSGpuWindowHost` implements `dpi_scale()` + the design viewport**, mirroring
+  the macOS GPU host: `dpi_scale()` returns `window_.screen.scale` (the base
+  default 1.0 was a live Retina coordinate bug on every 2x/3x device);
+  `set_design_viewport` / `design_viewport_transform` pin the root to design
+  size and letterbox it in `render_frame` via the shared, x-platform-tested
+  `WindowHost::compute_design_viewport_transform`. `set_fixed_aspect_ratio` is
+  deliberately left to the base (self-diagnosing) no-op — iOS has no
+  user-resizable window to aspect-lock. NOTE: the standalone GPU host's
+  `PulpMetalWindowView` currently processes **no touches**, so the paint-side
+  design viewport has no touch coordinate to misalign yet; touch inverse-mapping
+  is the follow-up when that view gains touch handling (contrast with
+  `IOSGpuPluginViewHost` below, which does own the `pointTransform` touch map).
 
 ### Input
 
