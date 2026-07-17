@@ -138,9 +138,9 @@ RESIDUAL_BAND_FRACTION = 0.8
 
 # Fractional-delay kernel. 256 taps at beta=13 nulls a bandlimited saw to roughly
 # -60 dB or better across the tested frequency/rate grid. The period fit uses this SAME
-# kernel: fitting with a cheaper one biases the optimum toward whatever the cheap kernel
-# cannot represent, which measured as a 0.03-sample period error and a -28 dB floor at
-# 55 Hz. The fit must minimize the residual the detector actually reports.
+# kernel, because a cheaper one biases the optimum toward whatever it cannot represent:
+# at 32 taps the fit lands ~0.03 samples off and the floor at 55 Hz collapses to -28 dB.
+# The fit must minimize the residual the detector actually reports.
 _DELAY_TAPS = 256
 _DELAY_BETA = 13.0
 
@@ -198,7 +198,7 @@ def sinc_delay(y: np.ndarray, delay: float, taps: int = _DELAY_TAPS, beta: float
     y = np.asarray(y, dtype=np.float64)
     d_int = int(np.floor(delay))
     frac = float(delay - d_int)
-    # `mode="same"` already centres the kernel, so the convolution alone realizes the
+    # `mode="same"` already centers the kernel, so the convolution alone realizes the
     # fractional part; the integer part is a plain shift.
     frac_delayed = np.convolve(y, _delay_kernel(frac, taps, beta), mode="same")
     return np.roll(frac_delayed, d_int)
@@ -424,10 +424,10 @@ def analyze(y: np.ndarray, sr: int, f0_hint: float | None = None) -> ClickAnalys
 
     # A hint is the COMMANDED period, so it is fitted directly. Searching its multiples
     # would be worse than pointless: a period-doubling defect (alternate cycles
-    # differing — an audible f0/2 subharmonic) makes the true period score badly, so the
-    # search adopts 2P/3P/4P and nulls the defect away. A -20 dB glitch on every second
-    # period read -236.7 dB and PASSED CLEAN. A signal that only repeats at a multiple of
-    # the commanded period deserves to read dirty, and only the hint can say so.
+    # differing — an audible f0/2 subharmonic) makes the commanded period score badly, so
+    # the search prefers 2P/3P/4P, which explain the defect away and null it to below
+    # -230 dB — a clean pass on a -20 dB defect. A signal that only repeats at a multiple
+    # of the commanded period deserves to read dirty, and only the hint can say so.
     period = fit_period(y, seed, guard) if f0_hint else _resolve_period(y, seed, guard)
     # The guard must follow the period actually used, not the seed. When the seed is the
     # slave period and the resolved period is a multiple of it, a seed-sized guard is

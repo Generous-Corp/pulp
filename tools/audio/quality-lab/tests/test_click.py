@@ -452,7 +452,7 @@ def test_a_steady_clean_oscillator_is_not_refused():
 
 def test_blind_spot_c_a_defect_on_an_edge_is_NOT_masked():
     """Worth pinning because the opposite is the intuitive guess: since the comb
-    SUBTRACTS the neighbouring period rather than thresholding around it, an edge
+    SUBTRACTS the neighboring period rather than thresholding around it, an edge
     cancels and cannot hide anything sitting on top of it."""
     sr, f0 = 48000, 440.0
     y, peak = _square(sr, f0)
