@@ -3175,11 +3175,27 @@ public:
         auto readback_buf = acquire_readback_buffer(big);
         if (!readback_buf) return 0;
 
+        // Opt-in GPU-busy timing (default OFF → this whole block is skipped and the
+        // encoding below is byte-identical). Gated on ts_in_flight_ so only one async
+        // sample uses the single 2-slot dev_ts_qs_ at a time. A tiny pool buffer holds
+        // the two resolved ticks; if it can't be had, timing is silently skipped this
+        // block rather than holding the audio path hostage.
+        const uint64_t ts_bytes = 2u * sizeof(uint64_t);
+        const bool want_ts = async_timing_enabled_ && has_timestamp_ && !ts_in_flight_
+                             && ensure_device_ts();
+        wgpu::Buffer ts_buf = want_ts ? acquire_readback_buffer(
+                                            static_cast<uint32_t>(ts_bytes))
+                                      : wgpu::Buffer{};
+        const bool ts = want_ts && ts_buf;
+
         queue_.WriteBuffer(plan.buf_a, 0, in_complex, big);
 
         wgpu::CommandEncoderDescriptor enc_desc{};
         auto encoder = device_.CreateCommandEncoder(&enc_desc);
-        encode_fft_passes(encoder, plan.fwd_bgs, fft_wg);
+        // Begin timestamp rides the forward FFT's first pass; end timestamp rides the
+        // inverse FFT's last pass — bracketing the whole convolution's GPU-busy time.
+        encode_fft_passes(encoder, plan.fwd_bgs, fft_wg,
+                          ts ? dev_ts_qs_ : wgpu::QuerySet{});
         {
             wgpu::ComputePassDescriptor pd{};
             auto pass = encoder.BeginComputePass(&pd);
@@ -3189,9 +3205,14 @@ public:
             pass.End();
         }
         encoder.CopyBufferToBuffer(plan.buf_c, 0, plan.buf_a, 0, big);
-        encode_fft_passes(encoder, plan.inv_bgs, fft_wg);
+        encode_fft_passes(encoder, plan.inv_bgs, fft_wg, wgpu::QuerySet{},
+                          ts ? dev_ts_qs_ : wgpu::QuerySet{});
         wgpu::Buffer& inv_buf = (plan.log2n & 1u) ? plan.buf_b : plan.buf_a;
         encoder.CopyBufferToBuffer(inv_buf, 0, readback_buf, 0, big);
+        if (ts) {
+            encoder.ResolveQuerySet(dev_ts_qs_, 0, 2, dev_ts_resolve_, 0);
+            encoder.CopyBufferToBuffer(dev_ts_resolve_, 0, ts_buf, 0, ts_bytes);
+        }
         auto cmd = encoder.Finish();
         queue_.Submit(1, &cmd);
         ++stats_->submits;
@@ -3210,8 +3231,37 @@ public:
         // read_back_async() re-checks the cap and hands the buffer back itself if
         // it rejects; the check above means it cannot, but the id is what the
         // caller keys off either way.
-        return read_back_async(readback_buf, out_complex, big, deadline,
-                               std::move(scale_then_complete));
+        const uint64_t audio_id = read_back_async(readback_buf, out_complex, big,
+                                                  deadline,
+                                                  std::move(scale_then_complete));
+
+        // Register the ticks readback through the SAME non-blocking machinery. Its
+        // callback smooths (end - begin) ns into last_gpu_busy_ns_ and clears the
+        // in-flight gate on EVERY outcome, so a dropped/expired sample can never wedge
+        // timing. WebGPU timestamps are already nanoseconds. `this` is valid whenever
+        // the callback fires — the readback queue is a member, drained by
+        // poll_readbacks() or in the dtor, both with this alive.
+        if (ts) {
+            const uint64_t ts_id = read_back_async(
+                ts_buf, ts_ticks_, static_cast<uint32_t>(ts_bytes), deadline,
+                [this](const ReadbackResult& r) {
+                    if (r.status == ReadbackStatus::Success
+                        && ts_ticks_[1] >= ts_ticks_[0]) {
+                        const double ns =
+                            static_cast<double>(ts_ticks_[1] - ts_ticks_[0]);
+                        // Metal/Chrome quantize a small dispatch to 0 ns; hold the
+                        // last good number rather than blink the readout to 0.
+                        if (ns > 0.0)
+                            last_gpu_busy_ns_ = last_gpu_busy_ns_ > 0.0
+                                ? last_gpu_busy_ns_ * 0.8 + ns * 0.2
+                                : ns;
+                    }
+                    ts_in_flight_ = false;
+                });
+            ts_in_flight_ = (ts_id != 0);
+        }
+
+        return audio_id;
     }
 
     void set_max_readbacks_in_flight(std::size_t max_in_flight) override {
@@ -3349,6 +3399,24 @@ private:
         dev_ts_readback_ = device_.CreateBuffer(&bd);
         return dev_ts_qs_ && dev_ts_resolve_ && dev_ts_readback_;
     }
+
+    // ── Async GPU-busy timing (opt-in; OFF by default) ───────────────────
+    // The blocking *_timed() paths own dev_ts_qs_/dev_ts_resolve_ and read
+    // dev_ts_readback_ with a BLOCKING map — safe to share only because each such op
+    // finishes before the next starts. The async path below must never block, so it
+    // resolves into dev_ts_resolve_ and copies the two ticks into a POOL readback
+    // buffer drained by poll_readbacks(); it serialises itself with ts_in_flight_ (one
+    // in-flight async sample at a time, since dev_ts_qs_ is a single 2-slot set) and
+    // never touches dev_ts_readback_. Native audio leaves async_timing_enabled_ false,
+    // so this whole path is dormant and the async convolution is byte-identical there;
+    // only the browser GPU demo turns it on.
+    bool async_timing_enabled_ = false;
+    bool ts_in_flight_ = false;
+    uint64_t ts_ticks_[2] = {0, 0};   // stable async-readback destination for the ticks
+    double last_gpu_busy_ns_ = 0.0;   // EMA of (end - begin) ns; 0 = no honest number
+
+    void set_async_timing_enabled(bool enabled) override { async_timing_enabled_ = enabled; }
+    double last_gpu_busy_ns() const override { return last_gpu_busy_ns_; }
 
 #ifdef PULP_BENCHMARK
     bench::PerfCounters* bench_counters_ = nullptr;
@@ -3719,29 +3787,45 @@ private:
     // Encode one Stockham FFT pass per bind group into an existing encoder (no
     // submit). Each pass is its own compute pass so Dawn inserts the required
     // cross-pass synchronization. Shared by the fused convolution path.
-    // Optionally writes a beginning-of-pass timestamp into slot 0 of `ts_qs` on
-    // the FIRST pass encoded here — used to bracket a multi-pass op's GPU-busy
-    // time from its very first compute pass. Pass a null QuerySet to disable.
+    // Optionally writes a beginning-of-pass timestamp into slot 0 of `begin_ts_qs`
+    // on the FIRST pass, and/or an end-of-pass timestamp into slot 1 of `end_ts_qs`
+    // on the LAST pass — used to bracket a multi-pass op's GPU-busy time. The `multi`
+    // path ends its bracket on a separate combine pass and so passes only a begin
+    // here; the fused batch path has no trailing pass, so it ends the bracket on the
+    // inverse FFT's last pass via `end_ts_qs`. Pass null QuerySets to disable (the
+    // default — every non-timing caller is unchanged).
     void encode_fft_passes(wgpu::CommandEncoder& encoder,
                            const std::vector<wgpu::BindGroup>& stage_bgs,
                            uint32_t workgroups,
-                           const wgpu::QuerySet& ts_qs = {}) {
-        bool first = true;
+                           const wgpu::QuerySet& begin_ts_qs = {},
+                           const wgpu::QuerySet& end_ts_qs = {}) {
+        const std::size_t last = stage_bgs.empty() ? 0 : stage_bgs.size() - 1;
+        std::size_t idx = 0;
         for (const auto& bg : stage_bgs) {
             wgpu::ComputePassDescriptor pd{};
             wgpu::PassTimestampWrites tw{};
-            if (ts_qs && first) {
-                tw.querySet = ts_qs;
+            tw.beginningOfPassWriteIndex = wgpu::kQuerySetIndexUndefined;
+            tw.endOfPassWriteIndex = wgpu::kQuerySetIndexUndefined;
+            bool want_ts = false;
+            if (begin_ts_qs && idx == 0) {
+                tw.querySet = begin_ts_qs;
                 tw.beginningOfPassWriteIndex = 0;
-                tw.endOfPassWriteIndex = wgpu::kQuerySetIndexUndefined;
-                pd.timestampWrites = &tw;
+                want_ts = true;
             }
+            if (end_ts_qs && idx == last) {
+                // begin and end share one 2-slot set, so the querySet is consistent
+                // even when both land on a single-pass FFT (last == first).
+                tw.querySet = end_ts_qs;
+                tw.endOfPassWriteIndex = 1;
+                want_ts = true;
+            }
+            if (want_ts) pd.timestampWrites = &tw;
             auto pass = encoder.BeginComputePass(&pd);
             pass.SetPipeline(fft_pipeline_);
             pass.SetBindGroup(0, bg);
             pass.DispatchWorkgroups(workgroups);
             pass.End();
-            first = false;
+            ++idx;
         }
     }
 

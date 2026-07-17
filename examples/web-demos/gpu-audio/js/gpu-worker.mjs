@@ -395,9 +395,10 @@ async function runLoop(blockPeriodMs, latencyBlocks) {
 
     if (now - lastStats >= STATS_PERIOD_MS) {
       lastStats = now;
-      // stat(4) is the module's ONLY honest source of a GPU-busy number, and it
-      // is always 0 today (no async timestamp-query path). Render 0 as "no
-      // timing", never as a stall. Never synthesize one from the callback.
+      // stat(4) is the module's ONLY honest source of a GPU-busy number: the async
+      // convolution shader's timestamp-query span in ns (0 when unsupported or the
+      // device quantized a small dispatch to 0). Render 0 as "no timing", never as a
+      // stall. Never synthesize one from the callback.
       state.gpuNsLast = gpu.api.stat(4);
       ring.publishStats(state);
     }

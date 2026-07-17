@@ -1073,11 +1073,15 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
             put("es-covered", (stats.miss || 0).toLocaleString());
             put("es-us", Math.round(avg_us).toLocaleString());
             put("es-pct", pct.toFixed(1) + "%");
-            // Only present when the async timestamp path is compiled in AND the device
-            // reported a non-zero shader time (Metal can quantize a fast pass to 0 ns).
-            const gpuMathUs = stats.gpuMathUs || 0;
+            // Only present when the async timestamp path reported a non-zero shader
+            // time (Metal/Chrome can quantize a fast pass to 0 ns). gpuNsLast is the
+            // GPU-busy span in ns from pulp_gpu_stat(4); show it in µs beside the
+            // round-trip so the two costs are honestly distinct.
+            const gpuMathUs = (stats.gpuNsLast || 0) / 1000;
             show("es-gpumath-wrap", gpuMathUs > 0);
-            if (gpuMathUs > 0) put("es-gpumath", Math.round(gpuMathUs).toLocaleString());
+            if (gpuMathUs > 0)
+                put("es-gpumath", (gpuMathUs >= 10 ? Math.round(gpuMathUs)
+                                                   : gpuMathUs.toFixed(1)).toLocaleString());
           }
           window.__gpuStats = stats;
         }, 100);
