@@ -60,6 +60,14 @@ if(Python3_Interpreter_FOUND)
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
     endif()
 
+    # Combined installer graph: fake the macOS signing/package tools and inspect
+    # the generated Distribution XML. This pins unique plugin+format package IDs
+    # and the multi-plugin nested outline without using credentials or bundles.
+    if(APPLE)
+        add_test(NAME combined-installer-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_combined_installer.py")
+    endif()
+
     # TART_HOME resolution: the Tart VM store is a per-host value, so the VM
     # tooling must read it from the host (env, else the tartci profile) and hard
     # error otherwise. A repo-side default is wrong on some host and wrong

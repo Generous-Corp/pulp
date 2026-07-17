@@ -73,7 +73,7 @@ source ~/.config/pulp/secrets/keychain.env 2>/dev/null || true
 # login password is rejected. Single source of truth — no inline keychain juggling
 # here, and it covers the fresh-machine case (keychain/.p12 not yet imported) too.
 _self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -x "$_self_dir/ensure_signing_ready.sh" ]]; then
+if [[ "${PULP_SKIP_SIGNING_PREFLIGHT:-0}" != 1 && -x "$_self_dir/ensure_signing_ready.sh" ]]; then
   "$_self_dir/ensure_signing_ready.sh" >/dev/null 2>&1 \
     && echo "[installer] signing keychain ready (pulp ship doctor preflight)" \
     || echo "[installer] WARN: ensure_signing_ready.sh returned non-zero — signing may prompt; run 'pulp ship doctor'" >&2
@@ -100,24 +100,59 @@ xml_escape() {  # escape XML metacharacters so titles/descriptions with & < > " 
   printf '%s' "$s"
 }
 
-CHOICES=""; DEFS=""; REFS=""
-add_ref() {  # $1=choice-id (already [a-z0-9-])  $2=title  $3=desc  $4=pkgfile
+CHOICES=""; DEFS=""; REFS=""; APP_LINES=""
+# A choice with a real payload. $1=unique choice-id  $2=title  $3=desc  $4=pkgfile
+add_ref() {
   local title desc; title="$(xml_escape "$2")"; desc="$(xml_escape "$3")"
-  CHOICES="$CHOICES<line choice=\"$1\"/>"
   DEFS="$DEFS<choice id=\"$1\" title=\"$title\" description=\"$desc\"><pkg-ref id=\"com.pulp.$NAME.$1.pkg\"/></choice>"
   REFS="$REFS<pkg-ref id=\"com.pulp.$NAME.$1.pkg\" version=\"$VERSION\">$4</pkg-ref>"
 }
-
+# Plugin bundles are grouped by plugin name so the installer can nest formats
+# under each plugin. Keying packages by plugin+format (not by format alone) is
+# what makes a multi-plugin installer work at all -- otherwise every plugin's AU
+# package shares one identifier and only the last survives. IDs use the plugin's
+# first-seen index rather than a lossy name slug: "Foo-Bar" and "Foo Bar" must
+# remain distinct products. macOS ships bash 3.2 (no associative arrays), so a
+# small indexed-array lookup assigns each plugin its stable index.
+PLUGIN_NAMES=()
+PLUGIN_ENTRIES=""    # one "pluginIndex<TAB>pluginName<TAB>choiceId" line per format
 echo "== plugins =="
 for ((i=0; i<${#P_KIND[@]}; i++)); do
   k="${P_KIND[$i]}"; p="${P_PATH[$i]}"; [[ -d "$p" ]] || { echo "missing: $p" >&2; exit 2; }
   deep_sign "$p"
-  f="$(basename "$p").pkg"
-  pkgbuild --component "$p" --identifier "com.pulp.$NAME.$k.pkg" --version "$VERSION" \
+  pname="$(basename "$p")"; pname="${pname%.*}"        # e.g. VaDrum
+  plugin_idx=-1
+  for ((j=0; j<${#PLUGIN_NAMES[@]}; j++)); do
+    [[ "${PLUGIN_NAMES[$j]}" == "$pname" ]] && { plugin_idx="$j"; break; }
+  done
+  if [[ "$plugin_idx" -lt 0 ]]; then
+    plugin_idx="${#PLUGIN_NAMES[@]}"
+    PLUGIN_NAMES+=("$pname")
+  fi
+  cid="plugin-${plugin_idx}-${k}"                       # unique per plugin+format
+  f="${pname}.${k}.pkg"
+  pkgbuild --component "$p" --identifier "com.pulp.$NAME.$cid.pkg" --version "$VERSION" \
     --install-location "$(plugin_dir "$k")" "$STAGE/comp/$f" >/dev/null
   case "$k" in au) d="Logic, GarageBand";; vst3) d="Most DAWs";; clap) d="REAPER, Bitwig";; esac
-  add_ref "$k" "$(echo "$k" | tr a-z A-Z)" "$d" "$f"
+  add_ref "$cid" "$(echo "$k" | tr a-z A-Z)" "$d" "$f"
+  PLUGIN_ENTRIES="${PLUGIN_ENTRIES}${plugin_idx}	${pname}	${cid}
+"
 done
+
+# Outline: one expandable group per plugin when there is more than one; a flat
+# list of formats when there is only one (nothing to disambiguate).
+NPLUG="${#PLUGIN_NAMES[@]}"
+if [[ "$NPLUG" -le 1 ]]; then
+  CHOICES="$CHOICES$(printf '%s' "$PLUGIN_ENTRIES" | awk -F'\t' 'NF{printf "<line choice=\"%s\"/>",$3}')"
+else
+  for ((j=0; j<NPLUG; j++)); do
+    pn="${PLUGIN_NAMES[$j]}"
+    gid="plugin-$j"
+    DEFS="$DEFS<choice id=\"$gid\" title=\"$(xml_escape "$pn")\" description=\"\" selected=\"true\"></choice>"
+    inner="$(printf '%s' "$PLUGIN_ENTRIES" | awk -F'\t' -v p="$j" 'NF && $1==p{printf "<line choice=\"%s\"/>",$3}')"
+    CHOICES="$CHOICES<line choice=\"$gid\">$inner</line>"
+  done
+fi
 
 echo "== apps → /Applications =="
 for ((i=0; i<${#A_TITLE[@]}; i++)); do
@@ -129,6 +164,7 @@ for ((i=0; i<${#A_TITLE[@]}; i++)); do
   pkgbuild --root "$r" --identifier "com.pulp.$NAME.$id.pkg" --version "$VERSION" \
     --install-location / "$STAGE/comp/$f" >/dev/null
   add_ref "$id" "$t" "$t" "$f"
+  CHOICES="$CHOICES<line choice=\"$id\"/>"   # apps sit at the top level
 done
 
 echo "== content =="
@@ -141,6 +177,7 @@ for ((i=0; i<${#C_TITLE[@]}; i++)); do
   pkgbuild --root "$r" --identifier "com.pulp.$NAME.$id.pkg" --version "$VERSION" \
     --install-location / "$STAGE/comp/$f" >/dev/null
   add_ref "$id" "$t" "$desc" "$f"
+  CHOICES="$CHOICES<line choice=\"$id\"/>"   # content sits at the top level
 done
 
 cat > "$STAGE/distribution.xml" <<XML
