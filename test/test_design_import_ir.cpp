@@ -1290,3 +1290,48 @@ TEST_CASE("parse_param_binding_manifest_json reads a node-id → key object",
     auto arr = parse_param_binding_manifest_json(R"(["10:1"])", &err);
     REQUIRE_FALSE(arr.has_value());
 }
+
+TEST_CASE("a path's gradient paint survives the IR JSON round-trip",
+          "[view][import][svg]") {
+    using namespace pulp::view;
+
+    // A vector's gradient rides on the path, not on the box behind it, so it
+    // travels as its own `fillGradient` field rather than as a background. The
+    // decoder writes the field and the bridge has setSvgFillGradient; this
+    // asserts the middle link, which is the one that has repeatedly been the
+    // unplugged end of a chain like this. The node is named "Wedge", not
+    // "Dial": a vector named for a knob is recognized INTO a knob widget and
+    // never reaches the svg branch at all.
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version": 1, "source": "figma",
+      "root": {
+        "type": "frame", "name": "Panel",
+        "children": [{
+          "type": "path", "name": "Wedge",
+          "pathData": "M0 0 L10 0 L10 10 Z",
+          "viewBox": "0 0 10 10",
+          "fill": "#ff0000",
+          "fillGradient": "linear-gradient(180deg, #ffffff 0%, #000000 100%)"
+        }]
+      }
+    })JSON");
+
+    REQUIRE(ir.root.children.size() == 1);
+    const auto& dial = ir.root.children[0].attributes;
+
+    // Carried BESIDE the solid, not instead of it: the widget falls back to the
+    // solid when the gradient string won't parse, which needs both present.
+    REQUIRE(dial.count("svg_fill_gradient") == 1);
+    REQUIRE(dial.at("svg_fill_gradient") ==
+            "linear-gradient(180deg, #ffffff 0%, #000000 100%)");
+    REQUIRE(dial.at("svg_fill") == "#ff0000");
+
+    // And it reaches the generated JS — a parsed attribute nothing emits is
+    // the same silent drop as never parsing it.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    REQUIRE(js.find("setSvgFillGradient(") != std::string::npos);
+    REQUIRE(js.find("linear-gradient(180deg, #ffffff 0%, #000000 100%)") !=
+            std::string::npos);
+}

@@ -2428,3 +2428,32 @@ TEST_CASE("native codegen keeps a synthesized primitive's gradient off its box",
     REQUIRE(js.find("setBackgroundGradient(") == std::string::npos);
     REQUIRE(js.find("setOpacity('") != std::string::npos);
 }
+
+TEST_CASE("native codegen paints a gradient behind a transparent image",
+          "[view][import][visual-overrides]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 300.0f;
+
+    // The canonical case: a transparent PNG over a gradient plate. The image
+    // node owns BOTH, and the gradient paints the box behind the bitmap — so a
+    // codegen that emits the image and forgets the box loses the plate and the
+    // art lands on nothing.
+    IRNode image;
+    image.type = "image";
+    image.name = "Grain";
+    image.attributes["asset_path"] = "/tmp/grain.png";
+    image.style.width = 64.0f;
+    image.style.height = 64.0f;
+    image.style.background_gradient = "linear-gradient(180deg, #ffffff, #000000)";
+    ir.root.children.push_back(image);
+
+    const auto js = native_js(ir);
+    REQUIRE(js.find("setBackgroundGradient('") != std::string::npos);
+    REQUIRE(js.find("linear-gradient(180deg, #ffffff, #000000)") != std::string::npos);
+    // Both, not either: the plate is behind the bitmap, not instead of it.
+    REQUIRE(js.find("setImageSource(") != std::string::npos);
+}
