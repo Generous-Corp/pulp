@@ -1338,3 +1338,46 @@ TEST_CASE("an undersized widget reports informational (never a hard finding)",
     }
     CHECK(saw_undersized);
 }
+
+TEST_CASE("codegen emits an IR node's flex_shrink instead of dropping it",
+          "[view][import][codegen][layout]") {
+    // flex_shrink was the one flex property the IR could parse
+    // (design_ir_json.cpp reads "flexShrink") and write, but codegen never
+    // emitted — so a source lane that set it was silently overruled by Yoga's
+    // default of 1. It cost a .fig import its toolbar icons: the importer
+    // pinned shrink to 0, nothing carried it to the bridge, and a 12px icon
+    // inside a button whose padding exceeded its width collapsed to width 0.
+    //
+    // Assert on the emitted setFlex call, because that is the only thing the
+    // bridge reads. A test that checked the IR round-trip alone stays green
+    // through this bug — the IR was never where it was lost.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 400.0f;
+
+    IRNode pinned;
+    pinned.type = "frame";
+    pinned.name = "Pinned";
+    pinned.style.width = 12.0f;
+    pinned.style.height = 12.0f;
+    pinned.layout.flex_shrink = 0.0f;
+    ir.root.children.push_back(pinned);
+
+    // Control: a node that says nothing about shrink must stay silent, so Yoga's
+    // default still governs everything that has not opted out.
+    IRNode plain;
+    plain.type = "frame";
+    plain.name = "Plain";
+    plain.style.width = 12.0f;
+    plain.style.height = 12.0f;
+    ir.root.children.push_back(plain);
+
+    const auto js = generate_pulp_js(ir, CodeGenOptions{});
+    INFO("js=\n" << js);
+
+    CHECK(js.find("setFlex('Pinned") != std::string::npos);
+    CHECK(js.find("'flex_shrink', 0") != std::string::npos);
+    CHECK(js.find("setFlex('Plain1', 'flex_shrink'") == std::string::npos);
+}

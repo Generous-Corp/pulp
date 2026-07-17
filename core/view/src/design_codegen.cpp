@@ -541,6 +541,12 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
     auto emit_layout_constraints = [&](const std::string& target_id) {
         if (depth == 0) return;  // the root is not laid out within a parent
         const auto& L = node.layout;
+        // flex-shrink is the one flex property the IR could carry but codegen
+        // never wrote, so a source lane that set it was overruled by Yoga's
+        // default of 1 without a word. An importer replaying an already-solved
+        // layout needs shrink:0 to keep the sizes it emitted.
+        if (L.flex_shrink)
+            ss << ind << "setFlex('" << target_id << "', 'flex_shrink', " << *L.flex_shrink << ");\n";
         bool grow_done = false, stretch_done = false;
         auto grow = [&] {
             if (grow_done) return;
