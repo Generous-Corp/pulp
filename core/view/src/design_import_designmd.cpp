@@ -483,8 +483,7 @@ void resolve_references(DesignMdParseResult& result) {
 // "no frontmatter at all" is what made adding frontmatter to a prose file
 // silently drop its body tokens.
 //
-// Clean-room (reimplemented from the documented design.md structure, not
-// copied): recognizes `## Colors|Spacing|Border Radius|Shadows` and reads
+// Recognizes `## Colors|Spacing|Border Radius|Shadows` and reads
 // `name: value` list items or `| name | value |` table rows. Because a body
 // section mixes token rows with prose, each arm below must decide whether a
 // value is a TOKEN or a SENTENCE; the per-section value predicates do that.
