@@ -48,3 +48,30 @@ pulp_add_test_suite(pulp-test-mpe-buffer
 pulp_add_test_suite(pulp-test-midi-subblock
     SOURCES test_midi_subblock.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::format)
+
+pulp_add_test_suite(pulp-test-modal-bank
+    SOURCES test_modal_bank.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
+# Drives the bridged-T core through the VaDrum voice, so it needs the example's
+# include dir rather than the plugin target itself (the voice is header-only).
+pulp_add_test_suite(pulp-test-bridged-t-resonator
+    SOURCES test_bridged_t_resonator.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/va-drum
+    TIMEOUT 300)
+
+# PULP_SOURCE_DIR locates examples/modal-specs/, which the test loads as real
+# on-disk spec files rather than string literals.
+pulp_add_test_suite(pulp-test-modal-spec
+    SOURCES test_modal_spec.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal-modal-spec
+    COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    TIMEOUT 300)
+
+# Header-only metric over caller-supplied render callbacks; its fixtures are
+# source-owned resonators, so it needs no plugin and no library.
+pulp_add_test_suite(pulp-test-interaction-residual
+    SOURCES test_interaction_residual.cpp
+    TIMEOUT 300)

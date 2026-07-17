@@ -27,6 +27,7 @@
 #include <pulp/signal/ballistics_filter.hpp>
 #include <pulp/signal/log_ramped_value.hpp>
 #include <pulp/signal/matrix.hpp>
+#include <pulp/signal/modal_bank.hpp>
 #include <pulp/signal/processor_chain.hpp>
 #include <pulp/signal/processor_duplicator.hpp>
 #include <pulp/signal/lookup_table.hpp>

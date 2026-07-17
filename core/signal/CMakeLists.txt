@@ -37,3 +37,20 @@ endif()
 if(NOT WIN32)
     target_link_libraries(pulp-signal-fft-backend PUBLIC ${CMAKE_DL_LIBS})
 endif()
+
+# Modal spec load/save. Source-bearing static library rather than part of the
+# INTERFACE umbrella because it is the only TU that parses JSON: keeping choc
+# PRIVATE here stops a choc include dir propagating into every DSP translation
+# unit that pulls in pulp::signal.
+add_library(pulp-signal-modal-spec STATIC
+    src/modal_spec.cpp
+)
+add_library(pulp::signal-modal-spec ALIAS pulp-signal-modal-spec)
+target_include_directories(pulp-signal-modal-spec
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    PRIVATE
+        $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
+)
+target_link_libraries(pulp-signal-modal-spec PUBLIC pulp::signal)
