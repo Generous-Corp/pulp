@@ -119,6 +119,11 @@ add_subdirectory(pulp-kit)
 # ModalInstrument: one spec-driven modal Processor plays any ModalSpec instrument
 add_subdirectory(modal-instrument)
 
+# PreparedPiano: a struck modal string with a movable one-sided preparation —
+# buzz (a one-sided collision), mute (position-dependent damping), and mass
+# (position-dependent detune), all continuous and per-note.
+add_subdirectory(prepared-piano)
+
 # FAUST DSL examples: offline codegen to Processor
 add_subdirectory(faust-gain)
 add_subdirectory(faust-filter)

@@ -192,6 +192,18 @@ pulp_add_test_suite(pulp-test-modal-instrument
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/modal-instrument
     TIMEOUT 300)
 
+# PreparedPiano: drives the prepared-string Processor through its MIDI +
+# parameter surface and measures the rendered output (clean-string inharmonicity,
+# pitch, buzz-vs-velocity nonlinearity, position-dependent mute/mass, stability,
+# RT-safety). Needs the calibrated modal analyzer (audio-test-support) and the
+# example header on the include path. Builds its string in code, so no on-disk
+# spec files.
+pulp_add_test_suite(pulp-test-prepared-piano
+    SOURCES test_prepared_piano.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp-audio-test-support
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/prepared-piano
+    TIMEOUT 300)
+
 # PulpKit snare + rim/clave: two struck bridged-T bodies summed with a filtered-
 # noise snappy. Renders and measures tone/noise balance and body pitch with the
 # calibrated modal analyzer (audio-test-support), so it links that lib. Needs
