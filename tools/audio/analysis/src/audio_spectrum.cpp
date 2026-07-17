@@ -91,36 +91,39 @@ std::vector<double> raw_periodic_window(Window w, int n, double kaiser_beta) {
 // mean subtracted) when `remove_dc` is true — true for steady tones, but false
 // for an impulse-response segment, where subtracting the mean would add a
 // constant pedestal across the whole window and bias the low bins.
-// Out-of-range frames read as zero.
+//
+// The segment must lie entirely within the channel. Zero-padding a short
+// buffer would window a TRUNCATED signal, and the truncation edge leaks like
+// any other discontinuity: a clean coherent tone over 4096 samples analyzed
+// at fft_length 16384 reads THD −48.7 dB (true value −176.7) and a kaiser
+// spectrum's floor collapses from −135 dB to −14 dB — confidently wrong
+// numbers, while the result still claims coherence. Refusing is the only
+// honest answer; callers with a short capture must shrink fft_length instead
+// (the doctor CLI already does).
 std::vector<float> windowed_segment(std::span<const float> channel, int offset,
                                     int N, std::span<const double> win,
                                     bool remove_dc) {
     require(win.size() == static_cast<std::size_t>(N),
             "window coefficient count must match the segment length");
+    require(offset >= 0 &&
+                static_cast<std::int64_t>(offset) + N <=
+                    static_cast<std::int64_t>(channel.size()),
+            "analysis segment [analysis_offset, analysis_offset + fft_length) "
+            "must lie within the signal — zero-padding a short buffer would "
+            "measure the truncation edge, not the signal; use a shorter "
+            "fft_length");
     double mean = 0.0;
     if (remove_dc) {
-        int counted = 0;
-        for (int i = 0; i < N; ++i) {
-            const int idx = offset + i;
-            if (idx >= 0 && idx < static_cast<int>(channel.size())) {
-                mean += channel[static_cast<std::size_t>(idx)];
-                ++counted;
-            }
-        }
-        if (counted > 0)
-            mean /= counted;
+        for (int i = 0; i < N; ++i)
+            mean += channel[static_cast<std::size_t>(offset + i)];
+        mean /= N;
     }
 
-    std::vector<float> out(static_cast<std::size_t>(N), 0.0f);
-    for (int i = 0; i < N; ++i) {
-        const int idx = offset + i;
-        const double sample =
-            (idx >= 0 && idx < static_cast<int>(channel.size()))
-                ? channel[static_cast<std::size_t>(idx)] - mean
-                : 0.0;
-        out[static_cast<std::size_t>(i)] =
-            static_cast<float>(sample * win[static_cast<std::size_t>(i)]);
-    }
+    std::vector<float> out(static_cast<std::size_t>(N));
+    for (int i = 0; i < N; ++i)
+        out[static_cast<std::size_t>(i)] = static_cast<float>(
+            (channel[static_cast<std::size_t>(offset + i)] - mean) *
+            win[static_cast<std::size_t>(i)]);
     return out;
 }
 
@@ -350,6 +353,11 @@ ThdResult measure_thd(const pulp::audio::BufferView<const float>& signal,
     require(options.num_harmonics >= 1, "num_harmonics must be >= 1");
     require(signal.num_channels() > 0, "thd needs at least one channel");
     require(sample_rate > 0.0, "sample_rate must be > 0");
+    // A "fundamental" at or above Nyquist would clamp to the Nyquist bin and
+    // measure nothing at all — thd = 0, i.e. a gate pass fabricated from a
+    // caller error. The alias analyzer rejects the same input.
+    require(fundamental_hz < sample_rate * 0.5,
+            "fundamental_hz must be below Nyquist");
     const int N = options.fft_length;
     const double bin_hz = sample_rate / N;
 
@@ -395,6 +403,12 @@ ThdResult measure_thd(const pulp::audio::BufferView<const float>& signal,
     // measure against and would make thd/thd+n divide by a near-zero floor.
     require(fund_bin >= 1, "fundamental_hz must resolve to a non-DC bin");
     const double fund_mag = mag[static_cast<std::size_t>(fund_bin)];
+    // Every ratio below is relative to the fundamental. With nothing there —
+    // a silent buffer, or a tone that is not where the caller said — thd
+    // would come back 0 and a "thd below X" gate would PASS on a dead
+    // processor. Refuse instead, as the alias analyzer does.
+    require(fund_mag > kLinearFloor,
+            "no energy at the fundamental — thd and thd+n are relative to it");
     thd.harmonics.push_back({1, fundamental_hz, fund_mag, 0.0});
 
     double harmonic_sq = 0.0;
@@ -505,8 +519,8 @@ bool solve_normal_equations(std::vector<double>& G, std::vector<double>& b,
 //     limit, and this analyzer deliberately admits sites only 2 bins apart.
 //   * It FAILS LOUDLY. A joint solve's pivot collapses when the segment genuinely
 //     cannot separate two sites, which is what lets the caller be told "cannot
-//     measure" instead of being handed a number (harness plan 2.8). A sequential
-//     pass has no such signal — it always returns something.
+//     measure" instead of being handed a number. A sequential pass has no such
+//     signal — it always returns something.
 //
 // The constant column is load-bearing and NOT a substitute for subtracting the
 // mean up front. Subtracting the mean is the least-squares fit of a constant
@@ -748,6 +762,17 @@ AliasReport measure_aliasing(const pulp::audio::BufferView<const float>& signal,
             "max_alias_frequency_hz must be in (0, Nyquist] — a band qualifier "
             "at or above Nyquist is a full-band gate, which no finite "
             "anti-aliasing method can pass");
+    // When every modeled harmonic sits below Nyquist the series contains no
+    // fold site at all: whatever aliasing the signal actually has lands in
+    // noise_db, worst_alias_db stays at the silence floor, and a gate reads
+    // "clean" from a measurement that modeled nowhere to look — on a naive
+    // 300 Hz saw under default options the report came back spotless. Refuse
+    // outright rather than hand that report to a caller.
+    require(fundamental_hz * options.num_harmonics >= nyquist,
+            "no harmonic of the requested series reaches Nyquist, so there is "
+            "no alias site to measure and any report would read as clean on "
+            "any signal — raise num_harmonics (num_harmonics * fundamental_hz "
+            "should be several times the sample rate for a saw or pulse)");
 
     const int channel =
         std::clamp(options.channel, 0,
@@ -779,7 +804,7 @@ AliasReport measure_aliasing(const pulp::audio::BufferView<const float>& signal,
             "Nyquist — supply more samples");
 
     // Copy the segment out as double. The segment mean is subtracted only to
-    // keep the values centred for the fit; the constant that actually matters
+    // keep the values centered for the fit; the constant that actually matters
     // is solved for jointly with the tones (see fit_tone_set), because the mean
     // alone is the wrong constant and leaves a DC pedestal in the residual. A
     // component folding to exactly 0 Hz is indistinguishable from a DC offset
@@ -894,12 +919,12 @@ AliasReport measure_aliasing(const pulp::audio::BufferView<const float>& signal,
         report.fundamental_amplitude / std::numbers::sqrt2_v<double>;
     report.noise_db = ratio_to_db(residual_rms, fundamental_rms);
 
-    // Detection floor (harness plan §2.8). Fitting a tone to a residual of RMS
-    // σ over M samples yields a spurious amplitude whose per-quadrature standard
-    // deviation is σ·√(2/M); the amplitude is the quadrature magnitude, so ≈2σ·
-    // √(2/M) is a ~2-sigma bound on what this fit could mistake for a component.
-    // A component below it is not distinguishable from the residual — which is
-    // why every gate threshold must sit above this number.
+    // Detection floor. Fitting a tone to a residual of RMS σ over M samples
+    // yields a spurious amplitude whose per-quadrature standard deviation is
+    // σ·√(2/M); the amplitude is the quadrature magnitude, so ≈2σ·√(2/M) is a
+    // ~2-sigma bound on what this fit could mistake for a component — under a
+    // WHITE-residual assumption. See the header for why that makes this
+    // number an inconclusiveness check, never a gate assertion.
     const double floor_amplitude =
         2.0 * residual_rms * std::sqrt(2.0 / static_cast<double>(M));
     report.detection_floor_db =

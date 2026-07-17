@@ -226,7 +226,7 @@ const AliasComponent& component(const AliasReport& report, int h) {
 }
 
 // Worst (highest) side lobe within ±`span` bins of `centre_bin`, skipping the
-// main lobe (|bin − centre| ≤ `main_lobe_radius`). The scan is bounded to the
+// main lobe (|bin − center| ≤ `main_lobe_radius`). The scan is bounded to the
 // tone's neighborhood on purpose: DC removal of a non-integer-cycle tone leaves
 // a pedestal near bin 0 that is louder than every far side lobe and would win
 // an unbounded scan while saying nothing about leakage.
@@ -506,7 +506,7 @@ TEST_CASE("Doctor: window coefficients are periodic and coherent-gain normalized
 TEST_CASE("Doctor: each window's first side lobe matches its design",
           "[audio][doctor][window]") {
     // Determinism contract: single 0.5-amplitude tone at bin 1000.5 (a
-    // deliberate HALF-BIN offset — a bin-centred tone samples every cosine-sum
+    // deliberate HALF-BIN offset — a bin-centered tone samples every cosine-sum
     // kernel at its nulls and leaks nothing, which would measure the float
     // noise floor instead of the window), 48 kHz, 16384-point FFT,
     // peak-normalized self-spectrum. Tolerance class: numeric — each band is
@@ -973,9 +973,11 @@ TEST_CASE("Doctor: a clean bandlimited signal reports no alias",
     // every fold site (h = 6..20) is empty, so every one must read at the noise
     // floor rather than picking up the fundamental's skirt.
     //
-    // This is also the harness plan's §2.8 BLOCKING ACCEPTANCE TEST: the
-    // measurement must demonstrate a detection floor at or below −110 dB on a
-    // synthetic fixture before any oscillator gate built on it is trusted.
+    // This is also the suite's blocking acceptance bar: the measurement must
+    // demonstrate a detection floor at or below −110 dB on a synthetic
+    // fixture before any oscillator gate built on it is trusted — a gate
+    // read through a floor above its own threshold passes because it cannot
+    // see the failure.
     AliasOptions opts;
     opts.num_harmonics = 20;
     opts.analysis_length = kAliasFft;
@@ -1008,9 +1010,13 @@ TEST_CASE("Doctor: a clean bandlimited signal reports no alias",
     // -69 dB — this assertion is the one that catches it outright.)
     CHECK(report.noise_db < -120.0);
 
-    // §2.8: the floor must be BELOW the -100 dB gate the suite intends to run
+    // The floor must be BELOW the -100 dB gate the suite intends to run
     // through it, with margin. A gate at -100 dB read through a -85 dB floor is
     // not a gate. Measured here ≈ -187 dB, limited only by that quantization.
+    // (Asserting the derived floor is legitimate HERE and only here: this
+    // fixture's residual is float quantization — genuinely white — and the
+    // injected-alias test corroborates the floor by recovering known levels.
+    // A gate on real oscillator output must never assert it; see the header.)
     CHECK(report.detection_floor_db <= -110.0);
 
     // The stated floor must not be a fiction: no site may read below it.
@@ -1125,8 +1131,8 @@ TEST_CASE("Doctor: the band qualifier is what makes an alias gate passable",
 TEST_CASE("Doctor: an unmeasurable alias is reported, not silently passed",
           "[audio][doctor][alias]") {
     // A gate that passes because the measurement cannot see the failure is the
-    // worst outcome available (harness plan §2.8), so the analyzer has to be
-    // honest about the cases it cannot resolve.
+    // worst outcome available, so the analyzer has to be honest about the
+    // cases it cannot resolve.
     //
     // f0 = fs/4 = 12 kHz is the clean degenerate case:
     //   h=2 → 24000 Hz = EXACTLY Nyquist — no sin quadrature there, so
@@ -1173,6 +1179,50 @@ TEST_CASE("Doctor: an unmeasurable alias is reported, not silently passed",
     CHECK(report.worst_alias_index == 0);
 }
 
+TEST_CASE("Doctor: alias analyzer refuses a series with no alias site",
+          "[audio][doctor][alias]") {
+    // The fail-open this guard closes: when every modeled harmonic sits below
+    // Nyquist, the series contains NO fold site, so all of the signal's actual
+    // aliasing lands in `noise_db` and `worst_alias_db` stays at
+    // kSilenceFloorDb — a "< -100 dB" gate then PASSES on a maximally aliased
+    // naive saw. Measured before the guard: a naive 300 Hz saw under DEFAULT
+    // options (num_harmonics = 64; 64 · 300 = 19200 < 24000) reported
+    // worst_alias_db = -200 with has_unresolved_in_band_alias = false. The
+    // analyzer must refuse to produce a report that reads as clean when it
+    // modeled nowhere to look.
+    const auto saw300 = make_saw(1, kAliasFft, 300.0, kSampleRate);
+    REQUIRE_THROWS_AS(
+        measure_aliasing(std::as_const(saw300).view(), 300.0, kSampleRate),
+        std::invalid_argument);
+
+    // The same trap at a mid-band f0 with num_harmonics set too low.
+    const auto saw1103 = make_saw(1, kAliasFft, 1103.0, kSampleRate);
+    AliasOptions low;
+    low.num_harmonics = 16; // 16 · 1103 = 17648 < Nyquist: nowhere to look.
+    low.analysis_length = kAliasFft;
+    REQUIRE_THROWS_AS(measure_aliasing(std::as_const(saw1103).view(), 1103.0,
+                                       kSampleRate, low),
+                      std::invalid_argument);
+
+    // The remedy the guard's message directs to: enough harmonics that fold
+    // sites exist. The identical saw then reads LOUD aliasing — the positive
+    // control proving the guard rejects blind reports, not aliased signals.
+    AliasOptions enough;
+    enough.num_harmonics = 64; // 64 · 1103 ≈ 1.47 · fs.
+    enough.analysis_length = kAliasFft;
+    const auto report = measure_aliasing(std::as_const(saw1103).view(), 1103.0,
+                                         kSampleRate, enough);
+    INFO("naive 1103 Hz saw: worst in-band alias " << report.worst_alias_db
+         << " dBc at " << report.worst_alias_hz << " Hz (h="
+         << report.worst_alias_index << ")");
+    CHECK_FALSE(report.has_unresolved_in_band_alias);
+    CHECK(report.worst_alias_index > 0);
+    // A naive saw's worst audible alias sits tens of dB above any real gate
+    // (measured: -28.3 dBc at 19322 Hz, from h = 26).
+    CHECK(report.worst_alias_db > -40.0);
+    CHECK(report.worst_alias_db < -15.0);
+}
+
 TEST_CASE("Doctor: alias analyzer rejects arguments it cannot honor",
           "[audio][doctor][alias]") {
     const auto sig = make_series(1024, kSampleRate, bandlimited_base());
@@ -1193,6 +1243,80 @@ TEST_CASE("Doctor: alias analyzer rejects arguments it cannot honor",
     opts.analysis_offset = 4096; // past the end of a 1024-sample buffer
     CHECK_THROWS_AS(measure_aliasing(view, kAliasF0, kSampleRate, opts),
                     std::invalid_argument);
+}
+
+TEST_CASE("Doctor: THD refuses inputs it would silently misread",
+          "[audio][doctor]") {
+    // THD's fail-open modes, each measured before its guard existed. All
+    // three returned a NUMBER rather than an error, and two of the numbers
+    // would pass a gate.
+    constexpr int kFft = 16384;
+    const double tone = coherent_tone(341, kFft, kSampleRate);
+    ThdOptions topts;
+    topts.fft_length = kFft;
+
+    SECTION("silence throws instead of reading THD = 0") {
+        // An all-zero buffer measured thd = 0 (-200 dB): a DEAD processor
+        // passed any "thd below X" gate. measure_aliasing already throws on
+        // the same input; this is its sibling guard.
+        auto silence = make_silence(1, kFft);
+        REQUIRE_THROWS_AS(measure_thd(std::as_const(silence).view(), tone,
+                                      kSampleRate, topts),
+                          std::invalid_argument);
+    }
+
+    SECTION("a buffer shorter than the analysis window throws") {
+        // Zero-padding a short buffer windows a TRUNCATED tone, and the
+        // truncation edge leaks like any other discontinuity. Measured: a
+        // clean coherent sine over 4096 samples analyzed at fft_length 16384
+        // read THD -48.7 dB (truth -176.7) and THD+N +4.8 dB — while
+        // recording coherent = true in the artifact.
+        auto shortbuf = make_sine(1, kFft / 4, static_cast<float>(tone),
+                                  kSampleRate, 0.5f);
+        REQUIRE_THROWS_AS(measure_thd(std::as_const(shortbuf).view(), tone,
+                                      kSampleRate, topts),
+                          std::invalid_argument);
+
+        // An offset that pushes a full-length window past the end is the
+        // same trap from the other side.
+        auto full = make_sine(1, kFft, static_cast<float>(tone), kSampleRate,
+                              0.5f);
+        ThdOptions off = topts;
+        off.analysis_offset = 1;
+        REQUIRE_THROWS_AS(measure_thd(std::as_const(full).view(), tone,
+                                      kSampleRate, off),
+                          std::invalid_argument);
+    }
+
+    SECTION("a fundamental at or above Nyquist throws") {
+        // Accepted before the guard: 30 kHz at 48 kHz clamped to the Nyquist
+        // bin and returned thd = 0 (gate passes) with thd_plus_n ~ 4e15.
+        auto sig = make_sine(1, kFft, static_cast<float>(tone), kSampleRate,
+                             0.5f);
+        REQUIRE_THROWS_AS(measure_thd(std::as_const(sig).view(),
+                                      kSampleRate / 2.0, kSampleRate, topts),
+                          std::invalid_argument);
+        REQUIRE_THROWS_AS(measure_thd(std::as_const(sig).view(), 30000.0,
+                                      kSampleRate, topts),
+                          std::invalid_argument);
+    }
+
+    SECTION("the spectrum analyzer refuses the same zero-pad trap") {
+        // magnitude_spectrum_curve shares the segment extraction. Measured: a
+        // 4096-sample tone at fft_length 16384 through kaiser read a -14 dB
+        // floor 16 bins from the tone (full-length control: -135 dB) — the
+        // truncation edge reported as if it were signal, through the one
+        // window whose whole purpose is a floor below -110 dB.
+        auto shortbuf = make_sine(1, kFft / 4, static_cast<float>(tone),
+                                  kSampleRate, 0.5f);
+        ResponseOptions opts;
+        opts.fft_length = kFft;
+        opts.window = Window::kaiser;
+        REQUIRE_THROWS_AS(
+            magnitude_spectrum_curve(std::as_const(shortbuf).view(),
+                                     kSampleRate, {}, opts),
+            std::invalid_argument);
+    }
 }
 
 TEST_CASE("Doctor: THD rejects a DC-bin fundamental", "[audio][doctor]") {

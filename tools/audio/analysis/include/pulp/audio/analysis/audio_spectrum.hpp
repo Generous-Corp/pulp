@@ -10,7 +10,7 @@
 /// (the `pulp audio validate doctor` CLI) — and returns the curve/THD data
 /// structures the artifact serializers (audio_doctor_artifacts) write to JSON.
 ///
-/// Target-boundary rule (harness plan §9): heavy FFT/analyzer code lives ONLY
+/// Target-boundary rule: heavy FFT/analyzer code lives ONLY
 /// in test/tool targets. This lib (`pulp-audio-analysis`) depends on core/signal
 /// for the FFT and is never linked into a runtime/plugin build — a CMake target
 /// boundary makes a violation a link error. The scenario-driven entry points
@@ -29,7 +29,12 @@
 ///   * report dB relative to a stated reference, so the FFT backend's absolute
 ///     normalization (vDSP vs the radix-2 fallback differ by a constant scale)
 ///     cancels — results are backend-stable to the tolerance the tests state;
-///   * take all lengths as powers of two (the radix-2 FFT requirement).
+///   * take all lengths as powers of two (the radix-2 FFT requirement);
+///   * require the analysis segment to lie entirely within the supplied
+///     buffer(s) — throws `std::invalid_argument` otherwise. Zero-padding a
+///     short capture would window a truncated signal, whose edge leaks like
+///     any discontinuity and reads as distortion; shrink `fft_length` to fit
+///     the capture instead.
 ///
 /// Test/tool layer only — analysis happens entirely off the audio thread.
 
@@ -135,6 +140,14 @@ enum class Window {
 /// generic β = 3 fallback: ≈ −36 dB, useless here. Raise β for a deeper floor
 /// and a wider main lobe; lower it for sharper resolution of close-in
 /// components you do not need −100 dB of range on.
+///
+/// That floor holds in the tone's NEIGHBORHOOD, not at the bottom of the
+/// spectrum: removing the mean of a non-integer-cycle tone leaves a DC-removal
+/// pedestal that no window touches — measured on the same fixture, bins 1–3
+/// read ≈ −66 / −75 / −92 dB through kaiser β = 14. A component landing within
+/// a few bins of DC is pedestal-limited through ANY window; measure it with
+/// the projection path instead (`measure_aliasing` fits the constant jointly
+/// and reads a −100 dBc component exactly even under a 0.5 DC offset).
 inline constexpr double kDefaultKaiserBeta = 14.0;
 
 /// Human-readable window name for artifacts/messages ("rectangular", "hann",
@@ -347,6 +360,13 @@ struct ThdOptions {
 /// steady tone at that frequency over the analysis segment; `coherent` is
 /// computed from `fundamental_hz`, `fft_length`, and `sample_rate` and recorded
 /// for the reader to judge the tolerance.
+///
+/// Fails closed rather than fabricating a pass: throws `std::invalid_argument`
+/// for a fundamental at or above Nyquist (it would clamp to the Nyquist bin
+/// and read thd = 0), for a buffer that does not cover the analysis segment
+/// (see the determinism contract above), and for a signal with no energy at
+/// the fundamental bin — silence would otherwise measure thd = 0, letting a
+/// dead processor pass a distortion gate.
 ThdResult measure_thd(const pulp::audio::BufferView<const float>& signal,
                       double fundamental_hz, double sample_rate,
                       const ThdOptions& options = {});
@@ -509,6 +529,13 @@ struct AliasOptions {
     /// fit spends conditioning on sites with nothing at them. For a saw or
     /// pulse, go high enough that `num_harmonics · f0` is several times the
     /// sample rate.
+    ///
+    /// A series with NO harmonic at or above Nyquist is rejected outright
+    /// (`measure_aliasing` throws): it models no fold site, so its report
+    /// would read as clean on ANY signal, however aliased. Note the default
+    /// hits that wall for a low fundamental — 64 harmonics of anything below
+    /// 375 Hz at 48 kHz never reach Nyquist — so size this from the sample
+    /// rate, not from habit.
     int num_harmonics = 64;
 
     int analysis_offset = 0;  ///< Samples skipped (settling / plugin latency).
@@ -581,16 +608,23 @@ struct AliasReport {
 
     /// The quietest single component this measurement could have detected, in
     /// dB relative to the fundamental — a ≈2σ statistical bound derived from
-    /// the residual and the fit length.
+    /// the residual and the fit length, ASSUMING the residual is white.
     ///
-    /// **Every gate threshold must sit ABOVE this floor** (harness plan §2.8).
-    /// A −100 dB gate read through a measurement whose floor is −85 dB is not a
-    /// gate: it passes because it cannot see the failure. Assert on this
-    /// alongside the gate itself.
+    /// **Never assert a gate on this number.** That would be the analyzer
+    /// grading its own homework, and the white-residual assumption fails
+    /// exactly when it matters: an unmodeled alias is a discrete TONE, and a
+    /// tone-dominated residual makes this bound optimistic (`noise_db`
+    /// sitting near `worst_alias_db` is the tell). The floor a gate leans on
+    /// must be PROVEN by negative control instead — a fixture with zero alias
+    /// content by construction must read collapsed, and injected components
+    /// of known level must be recovered. `test_audio_doctor.cpp`'s
+    /// clean-series and injected-alias tests are the pattern.
     ///
-    /// Caveat: it assumes the residual is roughly white. A residual dominated
-    /// by one strong unmodeled tone breaks that assumption and makes this
-    /// optimistic — `noise_db` sitting near `worst_alias_db` is the tell.
+    /// Its one legitimate use is the inconclusiveness check: a gate is
+    /// trustworthy only while `worst_alias_db` clears this floor. When it
+    /// does not, the measurement could not distinguish its own residual from
+    /// a component and the report is INCONCLUSIVE — fail closed rather than
+    /// reading it as a pass.
     double detection_floor_db = kSilenceFloorDb;
 
     /// True when at least one ALIAS inside the band could not be resolved. A
@@ -606,8 +640,10 @@ struct AliasReport {
 /// The caller is responsible for the signal being a steady tone at
 /// `fundamental_hz` over the analysis segment; use `analysis_offset` to skip
 /// settling. Throws `std::invalid_argument` on a non-positive rate/frequency,
-/// a fundamental at or above Nyquist, a band qualifier outside (0, Nyquist], or
-/// a segment too short to fit the requested series.
+/// a fundamental at or above Nyquist, a band qualifier outside (0, Nyquist],
+/// a series whose harmonics all sit below Nyquist (no alias site to measure —
+/// see `AliasOptions::num_harmonics`), a segment too short to fit the
+/// requested series, or a signal with no energy at the fundamental.
 AliasReport measure_aliasing(const pulp::audio::BufferView<const float>& signal,
                              double fundamental_hz, double sample_rate,
                              const AliasOptions& options = {});
