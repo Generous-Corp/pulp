@@ -149,8 +149,8 @@ target_link_libraries(pulp-test-matrix-sampler PRIVATE pulp::format pulp::signal
 target_include_directories(pulp-test-matrix-sampler PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpSampler)
 catch_discover_tests(pulp-test-matrix-sampler)
 # Harness support lib: Processor-driven helpers; file-analysis lives in pulp::audio-analysis (tools/audio/analysis). See test/support/README.md.
-add_library(pulp-audio-test-support STATIC support/audio_signal_generators.cpp support/render_scenario.cpp support/audio_contracts.cpp support/audio_doctor.cpp)
-target_link_libraries(pulp-audio-test-support PUBLIC pulp::format pulp::signal pulp::audio-analysis)
+add_library(pulp-audio-test-support STATIC support/audio_signal_generators.cpp support/render_scenario.cpp support/audio_contracts.cpp support/audio_doctor.cpp support/wav_bridge.cpp support/osc_wav_scenario.cpp)
+target_link_libraries(pulp-audio-test-support PUBLIC pulp::format pulp::signal pulp::audio-analysis pulp::audio)
 add_executable(pulp-test-golden test_golden_audio.cpp)
 target_link_libraries(pulp-test-golden PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-golden PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
@@ -175,6 +175,48 @@ add_executable(pulp-test-audio-doctor test_audio_doctor.cpp)
 target_link_libraries(pulp-test-audio-doctor PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-doctor PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-effect)
 catch_discover_tests(pulp-test-audio-doctor)
+# WAV bridge: render an in-tree oscillator to a WAV the offline Python lane can
+# read. The test proves the file round-trips the samples; the tool is the
+# argv surface the Quality Lab shells out to.
+add_executable(pulp-test-wav-bridge test_wav_bridge.cpp)
+target_link_libraries(pulp-test-wav-bridge PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-wav-bridge)
+add_executable(pulp-osc-render-wav osc_render_wav.cpp)
+target_link_libraries(pulp-osc-render-wav PRIVATE pulp-audio-test-support)
+if(PULP_HAS_VST3)
+    # The VST3 sibling of the CLAP null above: same deterministic Processor,
+    # same stimulus, driven through the real PulpVst3Processor::process()
+    # IAudioProcessor surface (ProcessData / AudioBusBuffers / IEventList /
+    # IParameterChanges) instead of a C struct, and required to match the
+    # HeadlessHost render bit-for-bit. Compiles vst3_plug_view.cpp for the GUI
+    # symbols PulpVst3Processor::createView() references, mirroring
+    # pulp-test-vst3-plugin-state.
+    add_executable(pulp-test-vst3-audio-parity
+        test_vst3_audio_parity.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp
+    )
+    target_link_libraries(pulp-test-vst3-audio-parity
+        PRIVATE pulp-audio-test-support pulp::format Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-vst3-audio-parity PRIVATE
+        PULP_VST3=1
+        PULP_VST3_GUI=1
+    )
+    catch_discover_tests(pulp-test-vst3-audio-parity)
+endif()
+
+if(PULP_HAS_CLAP)
+    # Adapter-vs-direct audio null: renders one deterministic Processor through
+    # HeadlessHost and through the real CLAP adapter and requires the bits to
+    # match across a sample-rate x block-size sweep, plus the output-parameter
+    # publication the audio itself cannot observe. HeadlessHost shares no adapter
+    # code, so the reference cannot drift with the thing it is checking.
+    add_executable(pulp-test-adapter-audio-parity test_adapter_audio_parity.cpp)
+    target_link_libraries(pulp-test-adapter-audio-parity PRIVATE pulp-audio-test-support clap Catch2::Catch2WithMain)
+    # PulpClapPlugin gates members on PULP_CLAP_GUI; a TU that disagrees with
+    # libpulp-format about the struct size gets clap_init writing past the object.
+    target_compile_definitions(pulp-test-adapter-audio-parity PRIVATE PULP_CLAP_GUI=1)
+    catch_discover_tests(pulp-test-adapter-audio-parity)
+endif()
 # Measured-versus-reported latency. Its fixture is a source-owned delay line, so
 # it needs no example plugin.
 add_executable(pulp-test-latency-contract test_latency_contract.cpp)

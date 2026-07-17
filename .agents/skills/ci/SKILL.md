@@ -99,6 +99,39 @@ touching `examples/**`. Proven by the `cmake-examples-reorder-init-guard` ctest.
 If you add a NEW example struct pattern that a compiler tolerates but the release
 compiler rejects, extend that guard rather than discovering it at release time.
 
+## A test that "fails" on the required gate may only have run out of clock
+
+Before debugging what a failing gate test *does*, check whether it failed on
+**elapsed time** rather than behavior. A subprocess-spawning test that reddens
+`macos` on PRs that cannot possibly have caused it — a docs-only or CI-only PR —
+is the tell. `pulp ship sign discovers desktop bundles via env and config
+identities` read as a signing/keychain break for exactly this reason; it was a
+10s cap on a case that spawns `codesign` three times, runs ~2s unloaded, and
+loses its margin under a `-j8` run over 13k tests. The symptom is a bare
+`REQUIRE_FALSE(x.timed_out)` → `!true`, which names neither the subprocess nor
+the duration — so it reads like a logic failure.
+
+The layering rule that prevents this class:
+
+- **`ctest --timeout` is the binding guard.** `build.yml` runs
+  `ctest … --repeat until-pass:2 -j8 --timeout 120`: a per-test hang guard plus
+  one automatic retry. An in-test subprocess cap must stay comfortably **looser**
+  than it, so a slow machine fails at the outer layer — which reports the test
+  name and elapsed time — instead of at the inner one, which reports neither. An
+  inner cap tighter than the outer guard is strictly harmful: it fires first and
+  diagnoses worse.
+- **These caps are hang guards, not performance budgets**, so the costs are
+  asymmetric. Too generous only delays a genuinely wedged child (already bounded
+  at 120s). Too tight buys recurring false reds on unrelated PRs. Err generous.
+- **Don't make them adaptive.** Self-calibrating or load-scaled timeouts make
+  failures unreproducible and stretch to accommodate real perf regressions. A
+  fixed generous default plus an env override is the design.
+
+Root cause of the drift: the CLI shellout suites each hand-roll their own helper
+and hardcode a timeout, so there is no shared default to inherit and a
+codesign-heavy suite could sit at 10s while its siblings used 30-60s. When
+adding a shellout test, reuse the shared helper rather than picking a number.
+
 ## Gate: framework-neutrality (`tools/scripts/framework_neutrality_check.py`)
 
 Hard-fails a PR when Pulp's own source names another UI framework — in a
@@ -279,6 +312,89 @@ defaults to `ubuntu-latest` (no-op) until set. A tartci launchd detector watches
 for this triad; full design in
 `planning/2026-07-06-ci-queue-saturation-watchdog.md`.
 
+## A dead lane is only visible as queue age — never as a missing runner
+
+`.github/workflows/runner-health-check.yml` sweeps every 30 min from
+`ubuntu-latest` (off-fleet on purpose — a guard on the fleet dies with the
+fleet) and opens/updates one tracking issue when a lane stops serving work. Read
+its issue before hand-diagnosing a stuck PR: it names the labels the stalled
+jobs asked for, which is the "which lane is sick" answer step 3 above otherwise
+costs you a fleet probe to get.
+
+**Do not "improve" this into a runner-label check.** The macOS lanes are
+JIT/ephemeral: a runner registers with GitHub only while it serves a job.
+`gh api .../actions/runners` returning zero runners for label `pulp-studio-01`
+is therefore BOTH the healthy-idle state AND the dead-lane state — the two are
+indistinguishable from GitHub's side. This is a trap that has already been
+walked into: a label-satisfiability probe was recommended, built on, and used to
+declare a perfectly healthy lane dead. An empty runner list at 3am is not
+evidence of anything. Queue age is the only observable that separates alive from
+dead, and it is cause-agnostic, so it catches failure modes nobody enumerated.
+
+**The alarm needs two conditions, and the second one is the important one.** An
+alarm requires age >= 45 min AND no sign of life on the lane (nothing comparable
+`in_progress`, nothing comparable *started* since the job queued). Age alone is
+not enough: the measured healthy baseline is median 5 min / oldest 31 min / 3
+runs past 30 min, so a "queued > 30 min" rule fires every busy afternoon. It
+also mis-reads one runner grinding a 90-min job with a queue behind it as death.
+A busy runner is a live runner. If you retune the thresholds, do it in
+`tools/scripts/queue_age_watchdog.py` — `test_queue_age_watchdog.py` pins the
+measured baseline as a must-stay-quiet case and will fail a tuning that
+re-introduces afternoon false alarms. Rationale + operator surface:
+[docs/guides/local-ci.md](../../../docs/guides/local-ci.md) (the `config-doc`
+gate maps the workflow and the script to that guide).
+
+### Gotcha: a lane pointed at a label NO runner carries is silent — and looks exactly like saturation
+
+The trap behind step 3. Before concluding "the pool is saturated", check that the
+lane can be served **at all**. GitHub does not validate `runs-on`: a job asking
+for a label no runner carries is **not rejected, it is queued — forever**. No
+error, no annotation, no failed check. The only symptom is jobs piling up while
+the pool looks busy, which is indistinguishable from a genuine burst. So "18 runs
+queued + every runner busy" is *not* evidence of saturation; it is equally
+consistent with a lane routed into a black hole.
+
+Found live 2026-07-16: `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` targeted
+`["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]`, and **zero
+runners carried `pulp-build-vm`** — the intended Tart-VM topology had drifted to
+bare-metal (`pulp-build-studio`) and the variable was never reconciled. The
+relief valve had been routing into nothing for an unknown period, so the queue it
+existed to drain simply grew behind it. A relief valve routed into a black hole
+is worse than none: it reports healthy and relieves nothing.
+
+Check it directly — a runner must carry **every** label in the array (subset
+containment, not "any label overlaps"):
+
+```bash
+# Authoritative: reconciles every lane against the live fleet.
+python3 tools/scripts/runner_topology_check.py --mode=report
+```
+
+Watch for three traps when reading this by hand:
+
+- **Zero runners ≠ broken.** Tart runners register JIT/ephemeral and exist only
+  while a job runs. An idle ephemeral lane has no registered runner and is
+  perfectly healthy — the release lanes look "dead" between releases. Judge those
+  on *service history* (did a job recently run with that exact label set?), not
+  on the registry.
+- **Offline ≠ absent.** A registered-but-offline runner may just be asleep (m1 is
+  intermittent). A label *nothing owns* is always a black hole. Different
+  failures; don't conflate them.
+- **The fleet mutates while you look.** Runner count changed between two API
+  calls during this investigation. Re-read before concluding.
+
+Related instance of the same class: `build.yml`'s busy probe needs
+`Administration: Read` to call `actions/runners`; the default `GITHUB_TOKEN`
+lacks it, so the probe 403s and falls back to `BUSY=0` — **silently disabling
+overflow**. Whenever routing "does nothing", suspect a silent read failure before
+suspecting load.
+
+The standing guard is `runner-topology-check.yml` (hourly, opens a tracking
+issue) plus the `runner-topology-selftest` ctest. Lane→label intent lives in
+`tools/scripts/runner_topology.json` — edit a routing variable and its lane
+together, or the drift check fails. Full rationale:
+`docs/guides/local-ci.md` → "Routing contract (checked)".
+
 ## Host-vitals preflight — back off before a saturating CI host reboots
 
 The self-hosted Mac Studio that runs the required `macos` gate ALSO hosts the
@@ -445,25 +561,48 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   (`CMakeLists.txt`, `tools/cmake/PulpAndroid.cmake`,
   `tools/cmake/PulpDependencies.cmake`, `tools/deps/manifest.json`, plus Android
   Gradle files), and do not give `.cxx` a restore key that ignores those inputs.
-- **`intent-bump-on-merge.yml` is the merge-time half of the version-bump
-  intent-trailer model — and it ships DORMANT.** It exists to kill the
-  version-bump merge treadmill (PRs editing `CMakeLists` VERSION /
-  `plugin.json` / `marketplace.json` re-conflict every time main advances). The
-  endgame: a PR declares `Version-Bump: <surface>=<level>` and touches NO
-  version files, and this workflow assigns the exact number after merge from
-  main's current version via `tools/scripts/apply_intent_bump.py`. **Phase 1
-  (current): no-op.** Nothing emits intent trailers yet (Shipyard still file-
-  bumps on the PR side; `version-skill-check.yml` still runs WITHOUT
-  `--accept-intent-trailers`), so every run finds no trailer and exits clean.
-  Two things must be verified before the **phase-2** flip (a separate, reviewed
-  change): (1) `RELEASE_BOT_TOKEN` can push a *commit* to protected `main`
-  (it already pushes tags from `auto-release.yml`; a commit needs the bot on the
-  branch-protection bypass list), and (2) the `Version-Bump:` trailer survives
-  squash-merge into main's commit message. The workflow has a recursion guard
-  (skips its own `chore: bump versions` commit) and a `concurrency` group so
-  near-simultaneous merges bump the version line one at a time. The
-  `chore: bump versions` commit it pushes triggers `auto-release.yml` exactly
-  like a PR-side bump.
+- **`version-at-land.yml` + `version_at_land.py` are the single-writer,
+  post-merge half of the version-bump intent-trailer model — and the workflow
+  ships in DRY-RUN.** They exist to kill the version-bump merge treadmill (PRs
+  editing `CMakeLists` VERSION / `plugin.json` / `marketplace.json` re-conflict
+  every time main advances, and N parallel PRs endlessly re-bump the same
+  shared counter). The endgame: a PR declares `Version-Bump: <surface>=<level>`
+  and touches NO version files, and this bot assigns the exact number AFTER
+  merge from main's current version — so no two PRs ever contend for the same
+  number. **Today (dry-run): computes and logs what it WOULD assign; writes and
+  pushes nothing**, so it is safe to land while PRs still hand-bump. The
+  `--push` path (`apply_and_push`) is built and unit-tested but the workflow
+  does not call it yet.
+  - **Intent is read `--no-merges`-scoped.** `version_at_land.intent_trailers`
+    reads `Version-Bump:` trailers only from the range's NON-merge commits
+    (`git_range_trailers(..., no_merges=True)`). A "Merge origin/main into
+    <branch>" re-sync commit can carry a stale intent trailer that was never
+    meant to declare this range's release; honoring it would silently escalate
+    the version. A PR's real intent lives on its own commits (or the squash
+    commit, single-parent), so this keeps every genuine declaration while
+    dropping re-sync noise. Do NOT change `git_range_trailers`' default
+    (merge-walking) — the bypass-trailer gates depend on it; use the opt-in
+    `no_merges=` flag.
+  - **The `--push` transaction is race-safe by construction:** it recomputes
+    from a fresh `origin/main` each attempt, pushes with no `--force` (git's
+    default non-fast-forward rejection IS the `--ff-only` guarantee), and on
+    rejection re-syncs to the new tip — where the drain range now starts after
+    the winner's `Version-Bump-Applied` marker and collapses to empty, so the
+    loser no-ops instead of double-bumping. **This is why the older
+    `intent-bump-on-merge.yml` was DELETED:** it did a bare
+    `git push origin HEAD:main` with no `--ff-only` + retry, so a second merge
+    during its ~30s window silently discarded the bump (a SILENT RELEASE LOSS).
+    Never reintroduce a force/unguarded push on this path.
+  - **Before the `--push` flip** (a separate, reviewed change — see
+    `docs/guides/version-at-land-cutover.md`): verify the release bot can push a
+    *commit* to protected `main` (it already pushes tags from
+    `auto-release.yml`; a commit needs the bot on the branch-protection bypass
+    list, and the bot commit must be SSH-signed via
+    `configure_release_bot_ssh_signing.sh`), that the `Version-Bump:` trailer
+    survives squash-merge into main's message, and that the one-time in-flight
+    straggler rule (PRs already carrying `chore: bump versions` commits) is
+    applied. The `chore: bump versions` commit the bot pushes triggers
+    `auto-release.yml` exactly like a PR-side bump.
 - **`test/CMakeLists.txt` is now an include hub, not a registration
   manifest.** Add new `add_test`, `add_executable`, and
   `pulp_add_test_suite` blocks to the matching `test/cmake/*_tests.cmake`
@@ -653,8 +792,9 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   Keep it credential-free (notarize/sign stay in the real path) so it can run
   on a schedule without secrets.
 - **Release-bot source refs must be SSH-signed.** `auto-release.yml` creates
-  signed annotated `v*` tags with `git tag -s`, and the bot commit workflows
-  (`intent-bump-on-merge.yml`, `post-tag-sync.yml`) configure the same SSH
+  signed annotated `v*` tags with `git tag -s`, and the bot commit workflow
+  (`post-tag-sync.yml`, and `version-at-land.yml` once flipped to `--push`)
+  configures the same SSH
   signing helper before committing. The required Actions secret is
   `RELEASE_BOT_SSH_SIGNING_KEY`; it is a file-backed OpenSSH private key backed
   up outside the repo. The workflow uses `25807+danielraffel@users.noreply.github.com`
@@ -906,6 +1046,28 @@ use GitHub-hosted runners by default. macOS routes through the self-hosted
 Do not push empty commits just to churn queued macOS checks. Cancel
 superseded SHAs, rebase or push only when a PR needs current `main`, and
 wait unless a check has actually failed.
+
+### Gotcha: `.shipyard.local` can silently route the macOS lane off the gate
+
+`.shipyard/config.toml` declares `[targets.mac] backend = "local"`, and
+Shipyard merges the gitignored `.shipyard.local/config.toml` on TOP of it. A
+`[targets.mac]` block there overrides the backend — and the failure does not
+look like a misconfiguration, it looks like a hang: `shipyard status` reports
+`mac: cloud`, shipyard watches a redundant GitHub-hosted run and times out at
+3600s, and the required `macos` check (posted ONLY by the local runner) never
+appears. That is why the block in Pulp's own `.shipyard.local/config.toml` is
+commented out and annotated `DISABLED 2026-07-09`.
+
+**A missing `.shipyard.local/` is the CORRECT state, not a gap** — the repo
+config's local mac target stands on its own, which is how the Mac Studio runs.
+Do not "fix" a fresh worktree by copying a config in; that is what causes the
+reroute. In particular never `cp -R` over `.shipyard.local/` — `config.toml` is
+gitignored but `config.toml.example` next to it is TRACKED, so a recursive copy
+clobbers a tracked file.
+
+`tools/scripts/gates.sh` runs `shipyard_local_check.py` as an advisory that
+reports an active non-local mac override before you push. It is read-only by
+design: it never copies or repairs, because the repair instinct is the hazard.
 
 `coverage.yml`'s macOS leg resolves its `runs-on` via
 `resolve_runs_on.py --deny-labels pulp-build,pulp-build-vm`: a coverage
@@ -1338,6 +1500,56 @@ skill; examples/config-only diffs still need a `Version-Bump: skip` trailer unde
 a `feat:`/`fix:` title) — expect to add those trailers too.
 
 ### Shipyard pin and behaviour notes
+
+#### `shipyard update` is an updater, not a converger — it will not go backwards
+
+`shipyard update --to vX.Y.Z` silently does **nothing** when `X.Y.Z` is older
+than the installed version: it reports `update_available: false` and exits 0.
+Verified against v0.70.0 — asked for `--to v0.60.0` with 0.70.0 installed it
+reports no update available, exactly as it does for an already-current
+machine. The two outcomes are indistinguishable from the exit code.
+
+Two consequences:
+
+- **A bare `shipyard update` tracks `latest`, not the pin.** Run it on a fleet
+  machine and that machine leaves the pin permanently — `latest` ran 7 minors
+  ahead of the pin on 2026-07-16 (pin v0.70.0, latest v0.77.1). It is then
+  running a Shipyard that was never validated against Pulp's CI matrix and
+  that disagrees with every workflow's `SHIPYARD_VERSION` (the exact drift
+  `check_shipyard_pin.py` exists to prevent). Always `--to` the pin.
+- **Coming back to the pin needs `tools/install-shipyard.sh`**, which installs
+  the pinned version unconditionally (via the upstream, checksum-verifying
+  `install.sh`). Routing a downgrade through `shipyard update` is a silent
+  no-op, so an ahead-of-pin machine would never converge.
+
+Never trust either path's exit code alone — re-read `shipyard --version` and
+compare it to the pin. `tools/scripts/shipyard_autoupdate.py` encodes all of
+this (direction dispatch + outcome verification); `--check --json` reports
+pin-vs-installed without touching anything.
+
+#### Optional: keep a fleet Mac on the pin automatically
+
+`tools/scripts/install_shipyard_autoupdate.sh` installs an hourly launchd agent
+that converges this machine onto the pin when it is idle. Opt-in per machine
+and irrelevant to public Pulp (which just runs `install-shipyard.sh` once).
+Kill switch, no uninstall needed:
+
+```bash
+echo off > ~/.config/pulp/shipyard-autoupdate   # stop; `on` resumes
+tools/scripts/install_shipyard_autoupdate.sh --status
+```
+
+Two gotchas worth knowing if you touch it:
+
+- **The pin it obeys is `origin/main`'s, not the working tree's.** A dev
+  checkout is routinely parked on a feature branch, and a branch may carry an
+  experimental pin; converging the machine onto that would be a bug. Override
+  with `PULP_SHIPYARD_AUTOUPDATE_PIN_REF=worktree`.
+- **The idle probe must parse the `shipyard` command line, not substring-match
+  it.** The persistent daemon runs as `shipyard --mode shipyard daemon run` —
+  a substring match on `run` reads it as a live ship and the machine then never
+  updates at all, while `--mode shipyard` puts the literal token `shipyard`
+  where a subcommand would be.
 
 Pin bumps must go through `shipyard pin bump --to vX.Y.Z`, not a hand edit.
 Shipyard v0.50.0+ is Rust-backed and macOS ships as an Apple-Silicon-only
@@ -3328,7 +3540,7 @@ version files and changelog are correctly edited. Let `shipyard pr` create
 the bump commit when possible; if you need to repair it manually, use the
 canonical subject `chore: bump versions`.
 
-**Release-workflow VST3 pin:** `sign-and-release.yml` must clone the same Steinberg tag pinned everywhere else in the repo: `v3.7.12_build_20`. The shorthand `v3.7.12` does not exist upstream and will make tag-time macOS release jobs fail before configure/build even start.
+**Release-workflow VST3 pin:** `sign-and-release.yml` must clone the same Steinberg tag pinned everywhere else in the repo: `v3.8.0_build_66`. The shorthand `v3.8.0` does not exist upstream and will make tag-time macOS release jobs fail before configure/build even start.
 
 **Release-workflow ctest must skip the `validation` label (#720):** the `Test` step in `sign-and-release.yml` MUST pass `-LE validation` to ctest. Without it, the suite includes the `auval-Pulp*` tests that copy a fresh `.component` to `~/Library/Audio/Plug-Ins/Components/` and immediately call `auval`. Hosted GitHub macOS runners' `AudioComponentRegistrar` does not pick up the new bundle reliably, so auval returns `Cannot get Component's Name strings / Error -50`, the Test step exits non-zero, and the entire sign / notarize / publish pipeline silently fails. This was the failure mode of the 30+ consecutive sign-and-release runs preceding v0.41.0. The validation gates are owned by `validate.yml` on PR; do not duplicate them into the release workflow. `tools/scripts/test_release_workflow_test_step.py` (wired into `workflow-lint.yml`) is the regression test that prevents reintroduction.
 
@@ -3805,6 +4017,34 @@ tools/scripts/format_baseline_capture.sh --build --plugin PulpEffect
 
 Commit the updated `test/fixtures/format-baseline/*.txt` files in the same PR. No exception path — intentional behavior changes update the baseline; unintentional regressions get fixed at the source.
 
+### When this gate goes red, read the validator's own output first
+
+The failure that looks like a Pulp regression is usually the validators not
+running at all, and the message `All N validator(s) exited non-zero` does not
+distinguish the two. Do not start from the workflow log's summary line:
+
+- The job uploads a **`format-baseline-validator-output-*` artifact** on every
+  run (`if: always()`) holding each validator's raw output, its exit code, and
+  the normalized capture. That is the evidence; start there.
+- The log also carries each failing validator's exit code and the first 20
+  lines of its output, which is usually enough without downloading anything.
+- **A non-zero validator exit is ambiguous by nature.** `auval` and
+  `clap-validator` exit non-zero both when they run and report findings and
+  when they cannot load the plugin at all. A fast fail (well under a second)
+  points at the latter — a real `auval` pass takes seconds.
+- Nothing outside `--diag-dir` survives: the capture writes into a temp dir the
+  diff script deletes on every return path. A run invoked without `--diag-dir`
+  leaves no evidence at all.
+
+Two structural properties worth knowing before trusting a red here: the gate
+**passes when 1 of 2 validators fails and fails when 2 of 2 do**, so its verdict
+turns on validator availability as much as on plugin behavior; and with no
+committed fixtures in `test/fixtures/format-baseline/` it is in bootstrap mode,
+where it cannot detect a regression at all. `concurrency.group` is per-ref, so
+it does not serialize two different PRs — co-located runners sharing a `$HOME`
+can race over the fixed `~/Library/Audio/Plug-Ins/PulpEffect.*` install paths
+and each other's `if: always()` cleanup.
+
 Companion-track item U-3 in `planning/2026-05-17-refactor-roadmap-final.md`.
 
 ## Source-tree pollution: root-allowlist mode
@@ -4038,29 +4278,45 @@ but no published release", check both legs' runs AND the coordinator. A manual
 release-cli workflow_dispatch backfill still publishes directly (draft only on
 `push`).
 
-## Build strings must be bounded
+## Build strings must take a share, not the machine
 
-Every build command in `.shipyard/config.toml` and the CI workflows must pass an
-explicit `--parallel`/`-j` count — a literal, or `$(getconf _NPROCESSORS_ONLN
-2>/dev/null || echo N)` on POSIX backends. A bare `--parallel` maps to unbounded
-`make -j` and can exhaust memory / oversubscribe a shared runner (the mac
-`local` backend runs these strings directly on the host). The Windows
-(ssh-windows / PowerShell) overrides use a fixed literal — `$(…)` doesn't parse
-there, and unbounded MSBuild link parallelism trips LNK1104 on ARM64.
+A `.shipyard/config.toml` POSIX `build` string runs on the shared self-hosted
+Mac, so it must take a *share* of the host — route it through
+`tools/ci/governed-build.sh` and carry NO `--parallel`/`-j` (the wrapper injects
+a leased/bounded `-j`). "Bounded" is not enough: `--parallel $(getconf
+_NPROCESSORS_ONLN)` has a count yet claims every core, so it starves concurrent
+builds and the required `macos` gate — the guard rejects that whole-machine shape
+on shared-host surfaces (see below). A bare `--parallel` is worse (unbounded
+`make -j`) and is rejected everywhere. The CI *workflows* (`.github/workflows/**`)
+run on ephemeral GitHub-hosted runners where `-j$(nproc)` is correct and allowed.
+The Windows (ssh-windows / PowerShell) overrides use a fixed literal `--parallel 4`
+— `$(…)` doesn't parse there, and unbounded MSBuild link parallelism trips
+LNK1104 on ARM64.
 `tools/scripts/build_parallelism_guard.py` enforces this in the `validation.gates`
-setup chain and as a ctest; a bare `--parallel`/`-j` fails the gate.
+setup chain and as a ctest. It rejects two shapes: a **bare** `--parallel`/`-j`
+(unbounded) anywhere, and — on the shared-host surfaces agents copy from
+(`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`) — an explicit but
+**whole-machine** core-count expansion (`-j$(nproc)` / `-j$(sysctl -n hw.ncpu)` /
+`--parallel $(getconf _NPROCESSORS_ONLN)`): it has a count, so it is not
+unbounded, but on a shared Mac it claims every core, so concurrent builds starve
+each other and the required `macos` gate validating alongside them. The same
+expansion stays allowed on `.github/workflows/**` (ephemeral runners, nothing
+else on the box) — the rule is a property of the host, not the command.
 
-The mac `local` and ssh-linux `build` strings run through
-`tools/ci/governed-build.sh`, NOT a bare `cmake --build`. Shipyard's `local`
-backend executes the config string directly on the host (bypassing the pulp
-CLI's lease integration), so the wrapper is what puts a host-native validation
-build under a tartci host lease: it sizes `-j` from `tartci host-profile`,
-holds a `build`-priority lease for the build's duration (released via an EXIT
-trap — it runs the build as a child, never `exec`, so the trap fires), and
-falls back to a bounded local `-j` when tartci is absent (build VM / plain
-checkout) or the lease is denied (it never fails the build and never piles onto
-a saturated host). Keep new POSIX build strings routed through it; don't add a
-bare `cmake --build … --parallel` back to the `local`/ssh-linux lanes.
+Every POSIX `build` stage in `.shipyard/config.toml` — `default`, `parser`, AND
+`smoke` — runs through `tools/ci/governed-build.sh`, NOT a bare/whole-machine
+`cmake --build`. (The `smoke` lane used to run `--parallel $(getconf
+_NPROCESSORS_ONLN)` whole-machine on the shared Mac; it is now governed like the
+others.) Shipyard's `local` backend executes the config string directly on the
+host (bypassing the pulp CLI's lease integration), so the wrapper is what puts a
+host-native validation build under a tartci host lease: it sizes `-j` from
+`tartci host-profile`, holds a `build`-priority lease for the build's duration
+(released via an EXIT trap — it runs the build as a child, never `exec`, so the
+trap fires), and falls back to a bounded local `-j` when tartci is absent (build
+VM / plain checkout) or the lease is denied (it never fails the build and never
+piles onto a saturated host). Keep new POSIX build strings routed through it;
+don't add a bare or `$(nproc)`-style `cmake --build … --parallel` back to the
+`local`/ssh-linux lanes.
 
 ## macOS Intel (x86_64) CI tiering
 
@@ -4202,3 +4458,38 @@ loud on a no-op. The pre-push hook (`.githooks/pre-push`) adds two backstop guar
 pushes: it refuses a **detached-HEAD** push and an **empty-diff-vs-base** push (the latter
 catches a rebase that flattened a branch to zero files). Root cause + the four-fix plan:
 `planning/friction/2026-07-15-git-state-in-shared-worktree-hell.md`.
+
+## Coverage-on-main can go red from a time-budget kill (not a code failure) (2026-07-15)
+
+The `Coverage` workflow (`coverage.yml`) is **advisory** — never a merge gate (the
+authoritative gate is the separate `Diff coverage required` check). It runs the instrumented
+build + full ctest suite under an internal watchdog that SIGTERMs the suite before the job cap
+and **drops any partial Cobertura report**. Historically only the `os-windows` leg was
+neutralized (job-level `continue-on-error: matrix.os=='windows'`), on the assumption that
+macOS/linux always finish under budget. The suite grew (~13.5k ctest cases) and the macOS leg
+started crossing the budget too — killed suite → dropped XML → the mandatory `Verify Cobertura
+XML exists` step reddened `main`, repeatedly. **A red `Coverage` run on main whose macOS/linux
+leg failed at "Verify Cobertura XML exists" / "Upload Cobertura XML" is almost always this
+budget kill, not a real build break** — look for `Terminated: 15` / exit `143` in the "Run
+coverage suite" step.
+
+Now a budget hit is a clean **non-fatal skip on every OS**: the suite emits
+`steps.coverage-suite.outputs.budget_hit=true`, and Verify + Cobertura-upload skip on it. A
+genuine build failure (no budget hit, no report) still fails loudly. The suite also runs ctest
+in parallel (`-j`, capped like `build.yml`) with a per-test `--timeout` in
+`scripts/run_coverage.sh` so it finishes well under budget. If coverage genuinely stops
+flowing, the `coverage-staleness-check` watchdog is the alarm — not a red PR. Editing
+`coverage.yml` requires a `docs/guides/versioning.md` touch (config-doc map) and updating this
+skill (skill-sync map).
+
+## Coverage watchdogs require PROOF OF UPLOAD, not just a green run
+
+Both coverage watchdogs historically keyed off "a `conclusion==success` coverage.yml
+run on main." That proxy is blinded once a budget/timeout hit is made non-fatal: the run
+concludes `success` but its C++ Cobertura upload was skipped, so coverage silently stops
+while CI stays green (the 2-week silent-degradation class these watchdogs exist to catch).
+`coverage-upload-watchdog.yml` now requires a `coverage-cobertura-*` **artifact** on the
+run before counting it as fresh coverage (checked via the actions API — `actions: read`,
+no Codecov token). So a persistently over-budget leg raises the stalled-uploads issue
+within the window instead of hiding. If you ever make a coverage leg non-fatal, make sure
+its silent-drop is still detectable by artifact presence — do not trust run conclusion alone.

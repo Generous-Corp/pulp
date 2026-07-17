@@ -4,6 +4,7 @@
 // with the Pulp StateStore during processing
 
 #include <pulp/format/vst3_adapter.hpp>
+#include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/detail/midi_out_offset.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
@@ -11,6 +12,7 @@
 #include <pulp/format/detail/vst3_midi_mapping.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/format/max_block_contract.hpp>
+#include <pulp/format/mpe_expression.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/parameter_text.hpp>
 #include <pulp/format/vst3_plug_view.hpp>
@@ -82,6 +84,117 @@ inline bool is_declared_note_expr_type(NoteExpressionTypeID id) {
     return false;
 }
 
+// Decode the host's VST3 process context into Pulp's neutral ProcessContext and
+// raise this block's transport change flags.
+//
+// `playhead_prev` is the adapter's previous-block transport snapshot and is
+// advanced in place, so a first block after construction raises no spurious
+// change flags. A host that supplies no process context leaves every transport
+// field at its ProcessContext default; only the change-flag diff still runs.
+pulp::format::ProcessContext build_process_context(
+    const ProcessData& data,
+    const ProcessSetup& setup,
+    int32 num_samples,
+    pulp::format::detail::PlayheadSnapshot& playhead_prev) {
+    pulp::format::ProcessContext ctx;
+    ctx.sample_rate = setup.sampleRate;
+    ctx.num_samples = num_samples;
+    ctx.process_mode = setup.processMode == Steinberg::Vst::kOffline
+        ? pulp::format::ProcessMode::Offline
+        : pulp::format::ProcessMode::Realtime;
+    ctx.render_speed_hint = ctx.process_mode == pulp::format::ProcessMode::Offline
+        ? pulp::format::RenderSpeedHint::FasterThanRealtime
+        : pulp::format::RenderSpeedHint::Realtime;
+    if (data.processContext) {
+        const auto* pc = data.processContext;
+        const uint32_t state = pc->state;
+        ctx.is_playing = (state & Steinberg::Vst::ProcessContext::kPlaying) != 0;
+        ctx.is_recording = (state & Steinberg::Vst::ProcessContext::kRecording) != 0;
+        ctx.position_samples = pc->projectTimeSamples;
+        if (state & Steinberg::Vst::ProcessContext::kTempoValid) {
+            ctx.tempo_bpm = pc->tempo;
+        }
+        if (state & Steinberg::Vst::ProcessContext::kProjectTimeMusicValid) {
+            ctx.position_beats = pc->projectTimeMusic;
+        }
+        if (state & Steinberg::Vst::ProcessContext::kTimeSigValid) {
+            ctx.time_sig_numerator = pc->timeSigNumerator;
+            ctx.time_sig_denominator = pc->timeSigDenominator;
+        }
+
+        // kCycleValid covers cycleStartMusic + cycleEndMusic; kCycleActive
+        // indicates the host is currently looping. Both must be set for
+        // the loop range to be meaningful.
+        ctx.is_looping = (state & Steinberg::Vst::ProcessContext::kCycleActive) != 0;
+        if (state & Steinberg::Vst::ProcessContext::kCycleValid) {
+            ctx.loop_start_beats = pc->cycleStartMusic;
+            ctx.loop_end_beats = pc->cycleEndMusic;
+        }
+
+        // Host clock for video sync.
+        if (state & Steinberg::Vst::ProcessContext::kSystemTimeValid) {
+            ctx.host_time_ns = pc->systemTime;
+        }
+
+        // SMPTE frame rate enum. VST3 reports it as an integer
+        // framesPerSecond plus pulldown / drop flags. Map the documented
+        // combinations from the VST3 FrameRate docs onto Pulp's enum.
+        if (state & Steinberg::Vst::ProcessContext::kSmpteValid) {
+            const auto fps = pc->frameRate.framesPerSecond;
+            const auto fr_flags = pc->frameRate.flags;
+            const bool pulldown =
+                (fr_flags & Steinberg::Vst::FrameRate::kPullDownRate) != 0;
+            const bool drop =
+                (fr_flags & Steinberg::Vst::FrameRate::kDropRate) != 0;
+            // Mapping table is extracted to vst3_frame_rate.hpp so it is
+            // unit-testable without pulling the Steinberg VST3 SDK into
+            // the test binary. Critically, 59.94 (= 60 + pulldown) MUST
+            // NOT map to fps_60 — that bug broke SMPTE math in plugins
+            // that trust ctx.frame_rate.
+            ctx.frame_rate = pulp::format::detail::vst3_frame_rate(
+                static_cast<int>(fps), pulldown, drop);
+        }
+
+        // Derive bar index from position_beats + time-sig. VST3 also
+        // exposes `barPositionMusic` directly when kBarPositionValid is
+        // set, but that is the quarter-note position of the last bar
+        // start, not a bar index. Deriving matches `ProcessContext::bar`
+        // and stays consistent with the AU/CLAP paths.
+        pulp::format::detail::derive_bar_from_beats(ctx);
+    }
+
+    // Diff against the previous block to populate the transport change flags.
+    pulp::format::detail::compute_playhead_changes(ctx, playhead_prev);
+    return ctx;
+}
+
+// Bridge the processor's outbound MIDI back to the host's event list. Only note
+// on/off cross this boundary; other message types the processor emits have no
+// VST3 Event representation here and are not forwarded.
+void write_midi_output(const ProcessData& data, const midi::MidiBuffer& midi_out) {
+    if (!data.outputEvents || midi_out.empty()) return;
+    for (const auto& me : midi_out) {
+        Event evt{};
+        // Shared cross-format outbound-offset contract (offset N in -> N out;
+        // see detail/midi_out_offset.hpp + test_midi_out_offset_parity.cpp).
+        evt.sampleOffset =
+            pulp::format::detail::vst3_output_offset(me.sample_offset);
+        if (me.is_note_on()) {
+            evt.type = Event::kNoteOnEvent;
+            evt.noteOn.channel = me.channel();
+            evt.noteOn.pitch = me.note();
+            evt.noteOn.velocity = me.velocity() / 127.0f;
+            data.outputEvents->addEvent(evt);
+        } else if (me.is_note_off()) {
+            evt.type = Event::kNoteOffEvent;
+            evt.noteOff.channel = me.channel();
+            evt.noteOff.pitch = me.note();
+            evt.noteOff.velocity = me.velocity() / 127.0f;
+            data.outputEvents->addEvent(evt);
+        }
+    }
+}
+
 inline void resize_sample_scratch(std::vector<std::vector<float>>& scratch,
                                   int channels,
                                   int frames) {
@@ -90,23 +203,6 @@ inline void resize_sample_scratch(std::vector<std::vector<float>>& scratch,
     scratch.resize(channel_count);
     for (auto& channel : scratch)
         channel.assign(frame_count, 0.0f);
-}
-
-inline void copy_f64_to_f32(const double* src, float* dst, int32 count) {
-    if (!src || !dst || count <= 0) return;
-    for (int32 i = 0; i < count; ++i)
-        dst[i] = static_cast<float>(src[i]);
-}
-
-inline void copy_f32_to_f64(const float* src, double* dst, int32 count) {
-    if (!src || !dst || count <= 0) return;
-    for (int32 i = 0; i < count; ++i)
-        dst[i] = static_cast<double>(src[i]);
-}
-
-inline void zero_f64(double* dst, int32 count) {
-    if (!dst || count <= 0) return;
-    std::fill_n(dst, count, 0.0);
 }
 
 }  // namespace
@@ -836,19 +932,10 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     // host compensates the plugin path by getLatencySamples(), so the
     // bypassed dry copy must be delayed by exactly that many samples to stay
     // aligned with the host's plugin-delay-compensation. Allocate here, never
-    // in process(); a 0 latency keeps the delay line empty so the bypass
+    // in process(); a 0 latency leaves the delay lines unused so the bypass
     // pass-through stays a zero-copy memcpy.
-    bypass_delay_samples_ = static_cast<int>(
-        reported_latency_samples(processor_->latency_samples(), quirks_));
-    if (bypass_delay_samples_ < 0) bypass_delay_samples_ = 0;
-    if (bypass_delay_samples_ > 0) {
-        bypass_dry_delay_.resize(static_cast<std::size_t>(ctx.output_channels));
-        for (auto& line : bypass_dry_delay_) {
-            line.prepare(bypass_delay_samples_);
-        }
-    } else {
-        bypass_dry_delay_.clear();
-    }
+    bypass_.prepare(static_cast<int>(
+        reported_latency_samples(processor_->latency_samples(), quirks_)));
 
     return SingleComponentEffect::setupProcessing(setup);
 }
@@ -1087,20 +1174,20 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                             continue;
                         }
                         const auto param_id = static_cast<state::ParamID>(id);
+                        // VST3 hands normalized 0-1 values; the DSP cursor and
+                        // the store both want the plain (denormalized) value.
+                        // Denormalize once here so the shared dual-write pushes
+                        // the same plain value to the sample-accurate queue and
+                        // to the RT-safe store path (set_value_rt): identical to
+                        // the prior push + set_normalized_rt pair, which
+                        // denormalized the same value through the same range.
                         float plain_value = static_cast<float>(value);
                         if (const auto* info = store_.info(param_id)) {
                             plain_value = info->range.denormalize(plain_value);
                         }
-                        param_events_.push({
-                            param_id,
-                            static_cast<int32_t>(offset),
-                            plain_value,
-                        });
-                        // VST3 uses normalized 0-1 values — sync to Pulp store
-                        // via the RT-safe path so any Main listeners are
-                        // deferred to pump_listeners() instead of allocating
-                        // a dispatch lambda on the audio thread.
-                        store_.set_normalized_rt(param_id, static_cast<float>(value));
+                        boundary::apply_param_value(
+                            param_events_, store_, param_id,
+                            static_cast<int32_t>(offset), plain_value);
                     }
                 }
             }
@@ -1151,7 +1238,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                     ? data.inputs[0].channelBuffers64[ch]
                     : nullptr;
                 input64_ptrs_[ch] = src;
-                copy_f64_to_f32(src, dst, num_samples);
+                boundary::copy_f64_to_f32(src, dst,
+                                          static_cast<std::uint32_t>(num_samples));
                 input_ptrs_[ch] = src ? dst : nullptr;
             } else {
                 input64_ptrs_[ch] = nullptr;
@@ -1192,7 +1280,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                     ? data.inputs[1].channelBuffers64[ch]
                     : nullptr;
                 sidechain64_ptrs_[ch] = src;
-                copy_f64_to_f32(src, dst, num_samples);
+                boundary::copy_f64_to_f32(src, dst,
+                                          static_cast<std::uint32_t>(num_samples));
                 sidechain_ptrs_[ch] = src ? dst : nullptr;
             } else {
                 sidechain64_ptrs_[ch] = nullptr;
@@ -1245,8 +1334,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                 if (host_f64) {
                     if (data.outputs[0].channelBuffers64 &&
                         data.outputs[0].channelBuffers64[ch]) {
-                        zero_f64(data.outputs[0].channelBuffers64[ch] + num_samples,
-                                 original_num_samples - num_samples);
+                        boundary::zero_f64(
+                            data.outputs[0].channelBuffers64[ch] + num_samples,
+                            static_cast<std::uint32_t>(original_num_samples - num_samples));
                     }
                 } else if (output_ptrs_[ch] != nullptr) {
                     std::memset(output_ptrs_[ch] + num_samples, 0,
@@ -1268,7 +1358,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         auto& bus = data.outputs[b];
         for (int32 ch = 0; ch < bus.numChannels; ++ch) {
             if (host_f64 && bus.channelBuffers64 && bus.channelBuffers64[ch]) {
-                zero_f64(bus.channelBuffers64[ch], original_num_samples);
+                boundary::zero_f64(bus.channelBuffers64[ch],
+                                   static_cast<std::uint32_t>(original_num_samples));
             } else if (!host_f64 && bus.channelBuffers32 && bus.channelBuffers32[ch]) {
                 std::memset(bus.channelBuffers32[ch], 0,
                             sizeof(float) * original_num_samples);
@@ -1287,7 +1378,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     if (silence_unsupported_active_) {
         for (int ch = 0; ch < out_channels; ++ch) {
             if (host_f64 && output64_ptrs_[ch] != nullptr) {
-                zero_f64(output64_ptrs_[ch], num_samples);
+                boundary::zero_f64(output64_ptrs_[ch],
+                                   static_cast<std::uint32_t>(num_samples));
             } else if (!host_f64 && output_ptrs_[ch] != nullptr) {
                 std::memset(output_ptrs_[ch], 0, sizeof(float) * num_samples);
             }
@@ -1460,14 +1552,13 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // bypassed MIDI FX does not leak notes into the host bus.
     if (bypass_param_id_ != 0 &&
         store_.get_value(bypass_param_id_) >= 0.5f) {
-        // All-or-nothing across the block: only delay when a line was prepared
-        // for every output channel. If the host ever drives more channels than
-        // setupProcessing() negotiated (channel count is pinned by
-        // setBusArrangements in practice, so this is a corner), the whole block
-        // falls back to a zero-delay copy — degrading to pre-fix behavior, not
-        // a mix of delayed and undelayed channels.
-        const bool delayed = bypass_delay_samples_ > 0 &&
-            static_cast<int>(bypass_dry_delay_.size()) >= out_channels;
+        // All-or-nothing across the block: only delay when the boundary owns a
+        // dry-delay line for every output channel. A channel count above the
+        // shared boundary ceiling (kBoundaryMaxChannels) falls back to a
+        // zero-delay copy for the whole block — degrading uniformly, never a
+        // mix of delayed and undelayed channels.
+        const bool delayed = bypass_.is_latency_compensated() &&
+            out_channels <= static_cast<int>(bypass_.channel_capacity());
         for (int ch = 0; ch < out_channels; ++ch) {
             // A VST3 bus can report numChannels > 0 while individual
             // channelBuffers32[ch] entries are null; null-check before
@@ -1484,18 +1575,18 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                     : nullptr;
                 if (in64 != nullptr) {
                     if (delayed) {
-                        auto& line = bypass_dry_delay_[ch];
                         for (int n = 0; n < original_num_samples; ++n) {
-                            out64[n] = static_cast<double>(
-                                line.process(static_cast<float>(in64[n]),
-                                             bypass_delay_samples_));
+                            out64[n] = static_cast<double>(bypass_.process_sample(
+                                static_cast<float>(in64[n]),
+                                static_cast<std::size_t>(ch)));
                         }
                     } else {
                         std::memcpy(out64, in64,
                                     sizeof(double) * static_cast<std::size_t>(original_num_samples));
                     }
                 } else {
-                    zero_f64(out64, original_num_samples);
+                    boundary::zero_f64(out64,
+                                       static_cast<std::uint32_t>(original_num_samples));
                 }
                 continue;
             }
@@ -1513,15 +1604,15 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                     // the same amount to stay sample-aligned with the host's
                     // plugin-delay-compensation. The delay line is fed only
                     // while bypassed: a one-time transient in the first
-                    // `bypass_delay_samples_` samples after engaging bypass is
+                    // reported-latency samples after engaging bypass is
                     // accepted (bypass toggling is a user action, not
                     // sample-critical) in exchange for a zero-cost
                     // non-bypassed path. Steady state emits input[n - latency].
-                    auto& line = bypass_dry_delay_[ch];
                     const float* in = input_ptrs_[ch];
                     float* out = output_ptrs_[ch];
                     for (int n = 0; n < original_num_samples; ++n) {
-                        out[n] = line.process(in[n], bypass_delay_samples_);
+                        out[n] = bypass_.process_sample(
+                            in[n], static_cast<std::size_t>(ch));
                     }
                 } else {
                     std::memcpy(output_ptrs_[ch], input_ptrs_[ch],
@@ -1621,42 +1712,21 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                         midi::MidiEvent me{};
                         bool emitted = false;
                         if (ne.typeId == kTuningTypeID) {
-                            // VST3 tuning spans ±120 st; normalize to the MPE
-                            // member-bend default so the tracker expands it
-                            // back to the right per-note bend (mirrors CLAP).
-                            const double semis =
-                                vst3_tuning_norm_to_semitones(norm);
-                            const double bend_norm = std::clamp(
-                                semis / static_cast<double>(
-                                    midi::MpeVoiceTracker::
-                                        kDefaultMemberBendSemitones),
-                                -1.0, 1.0);
-                            const int bend14 = static_cast<int>(
-                                std::lround(8192.0 + bend_norm * 8191.0));
-                            me = midi::MidiEvent::pitch_bend(
-                                channel,
-                                static_cast<uint16_t>(
-                                    std::clamp(bend14, 0, 16383)));
+                            // VST3 tuning is normalized over ±120 st; decode
+                            // it to semitones here, then let the shared mapping
+                            // normalize to the MPE member-bend default so the
+                            // tracker expands it back to the right per-note
+                            // bend (mirrors CLAP).
+                            me = mpe::pitch_bend_from_semitones(
+                                channel, vst3_tuning_norm_to_semitones(norm));
                             emitted = true;
                         } else if (ne.typeId == kVolumeTypeID) {
                             // Loudness axis -> channel pressure (status 0xD0).
-                            const auto v7 = static_cast<uint8_t>(
-                                std::clamp<int>(
-                                    static_cast<int>(norm * 127.0 + 0.5),
-                                    0, 127));
-                            me = midi::MidiEvent{
-                                choc::midi::ShortMessage(
-                                    static_cast<uint8_t>(0xD0 | (channel & 0x0F)),
-                                    v7, 0),
-                                0, 0.0};
+                            me = mpe::channel_pressure(channel, norm);
                             emitted = true;
                         } else if (ne.typeId == kBrightnessTypeID) {
                             // Timbre -> CC 74.
-                            const auto v7 = static_cast<uint8_t>(
-                                std::clamp<int>(
-                                    static_cast<int>(norm * 127.0 + 0.5),
-                                    0, 127));
-                            me = midi::MidiEvent::cc(channel, 74, v7);
+                            me = mpe::timbre_cc(channel, norm);
                             emitted = true;
                         }
                         // kPanTypeID (and any other declared/unknown type) has
@@ -1696,87 +1766,15 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // events vector does not allocate.
     midi_in_.sort();
 
-    // Build process context
-    pulp::format::ProcessContext ctx;
-    ctx.sample_rate = processSetup.sampleRate;
-    ctx.num_samples = num_samples;
-    ctx.process_mode = processSetup.processMode == Steinberg::Vst::kOffline
-        ? pulp::format::ProcessMode::Offline
-        : pulp::format::ProcessMode::Realtime;
-    ctx.render_speed_hint = ctx.process_mode == pulp::format::ProcessMode::Offline
-        ? pulp::format::RenderSpeedHint::FasterThanRealtime
-        : pulp::format::RenderSpeedHint::Realtime;
-    if (data.processContext) {
-        const auto* pc = data.processContext;
-        const uint32_t state = pc->state;
-        ctx.is_playing = (state & Steinberg::Vst::ProcessContext::kPlaying) != 0;
-        ctx.is_recording = (state & Steinberg::Vst::ProcessContext::kRecording) != 0;
-        ctx.position_samples = pc->projectTimeSamples;
-        if (state & Steinberg::Vst::ProcessContext::kTempoValid) {
-            ctx.tempo_bpm = pc->tempo;
-        }
-        if (state & Steinberg::Vst::ProcessContext::kProjectTimeMusicValid) {
-            ctx.position_beats = pc->projectTimeMusic;
-        }
-        if (state & Steinberg::Vst::ProcessContext::kTimeSigValid) {
-            ctx.time_sig_numerator = pc->timeSigNumerator;
-            ctx.time_sig_denominator = pc->timeSigDenominator;
-        }
-
-        // kCycleValid covers cycleStartMusic + cycleEndMusic; kCycleActive
-        // indicates the host is currently looping. Both must be set for
-        // the loop range to be meaningful.
-        ctx.is_looping = (state & Steinberg::Vst::ProcessContext::kCycleActive) != 0;
-        if (state & Steinberg::Vst::ProcessContext::kCycleValid) {
-            ctx.loop_start_beats = pc->cycleStartMusic;
-            ctx.loop_end_beats = pc->cycleEndMusic;
-        }
-
-        // Host clock for video sync.
-        if (state & Steinberg::Vst::ProcessContext::kSystemTimeValid) {
-            ctx.host_time_ns = pc->systemTime;
-        }
-
-        // SMPTE frame rate enum. VST3 reports it as an integer
-        // framesPerSecond plus pulldown / drop flags. Map the documented
-        // combinations from the VST3 FrameRate docs onto Pulp's enum.
-        if (state & Steinberg::Vst::ProcessContext::kSmpteValid) {
-            const auto fps = pc->frameRate.framesPerSecond;
-            const auto fr_flags = pc->frameRate.flags;
-            const bool pulldown =
-                (fr_flags & Steinberg::Vst::FrameRate::kPullDownRate) != 0;
-            const bool drop =
-                (fr_flags & Steinberg::Vst::FrameRate::kDropRate) != 0;
-            // Mapping table is extracted to vst3_frame_rate.hpp so it is
-            // unit-testable without pulling the Steinberg VST3 SDK into
-            // the test binary. Critically, 59.94 (= 60 + pulldown) MUST
-            // NOT map to fps_60 — that bug broke SMPTE math in plugins
-            // that trust ctx.frame_rate.
-            ctx.frame_rate = pulp::format::detail::vst3_frame_rate(
-                static_cast<int>(fps), pulldown, drop);
-        }
-
-        // Derive bar index from position_beats + time-sig. VST3 also
-        // exposes `barPositionMusic` directly when kBarPositionValid is
-        // set, but that is the quarter-note position of the last bar
-        // start, not a bar index. Deriving matches `ProcessContext::bar`
-        // and stays consistent with the AU/CLAP paths.
-        pulp::format::detail::derive_bar_from_beats(ctx);
-    }
-
-    // Diff against the previous block to populate the transport change
-    // flags. Stateful; updates `playhead_prev_` in place.
-    pulp::format::detail::compute_playhead_changes(ctx, playhead_prev_);
+    auto ctx = build_process_context(data, processSetup, num_samples,
+                                     playhead_prev_);
 
     // Snapshot parameter values before processing so we can detect
     // plugin-side changes and report them to the host for automation recording
     auto all_params = store_.all_params();
-    param_snapshot_.resize(all_params.size());
+    boundary::snapshot_param_values(store_, all_params, param_snapshot_);
     output_param_has_event_.assign(all_params.size(), 0);
     output_param_queue_cache_.assign(all_params.size(), nullptr);
-    for (std::size_t i = 0; i < all_params.size(); ++i) {
-        param_snapshot_[i] = store_.get_value(all_params[i].id);
-    }
     processor_->set_param_events(&param_events_);
     output_param_events_.clear();
     processor_->set_output_param_events(&output_param_events_);
@@ -1824,10 +1822,10 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     if (boundary_f64) {
         if (data.numOutputs > 0 && data.outputs[0].channelBuffers64) {
             for (int ch = 0; ch < out_channels; ++ch) {
-                copy_f32_to_f64(
+                boundary::copy_f32_to_f64(
                     output_ptrs_[ch],
                     data.outputs[0].channelBuffers64[ch],
-                    num_samples);
+                    static_cast<std::uint32_t>(num_samples));
             }
         }
         for (std::size_t b = 1; b < routed_output_buses; ++b) {
@@ -1843,9 +1841,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             const int aux_channels =
                 static_cast<int>(output_buses[b].buffer.num_channels());
             for (int ch = 0; ch < aux_channels; ++ch) {
-                copy_f32_to_f64(ptrs[static_cast<std::size_t>(ch)],
-                                bus.channelBuffers64[ch],
-                                num_samples);
+                boundary::copy_f32_to_f64(ptrs[static_cast<std::size_t>(ch)],
+                                          bus.channelBuffers64[ch],
+                                          static_cast<std::uint32_t>(num_samples));
             }
         }
     }
@@ -1873,11 +1871,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         output_param_events_.sort();
         const int32 last_frame = data.numSamples > 0 ? data.numSamples - 1 : 0;
         for (const auto& ev : output_param_events_) {
-            std::size_t idx = all_params.size();
-            for (std::size_t i = 0; i < all_params.size(); ++i) {
-                if (all_params[i].id == ev.param_id) { idx = i; break; }
-            }
-            if (idx == all_params.size()) continue;  // unknown param — drop
+            const std::size_t idx =
+                boundary::find_param_index(all_params, ev.param_id);
+            if (idx == boundary::kParamIndexNotFound) continue;  // unknown — drop
             int32 offset = ev.sample_offset;
             if (offset < 0) offset = 0;
             if (offset > last_frame) offset = last_frame;  // clamp into the block
@@ -1904,7 +1900,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                 continue;
             }
             float current = store_.get_value(all_params[i].id);
-            if (std::memcmp(&current, &param_snapshot_[i], sizeof(float)) != 0) {
+            if (boundary::changed_since_snapshot(current, param_snapshot_[i])) {
                 int32 index = 0;
                 auto* queue = data.outputParameterChanges->addParameterData(
                     static_cast<ParamID>(all_params[i].id), index);
@@ -1944,29 +1940,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         restart_publisher_.note_pending(flags);
     }
 
-    // Write MIDI output
-    if (data.outputEvents && !midi_out_.empty()) {
-        for (const auto& me : midi_out_) {
-            Event evt{};
-            // Shared cross-format outbound-offset contract (offset N in -> N out;
-            // see detail/midi_out_offset.hpp + test_midi_out_offset_parity.cpp).
-            evt.sampleOffset =
-                pulp::format::detail::vst3_output_offset(me.sample_offset);
-            if (me.is_note_on()) {
-                evt.type = Event::kNoteOnEvent;
-                evt.noteOn.channel = me.channel();
-                evt.noteOn.pitch = me.note();
-                evt.noteOn.velocity = me.velocity() / 127.0f;
-                data.outputEvents->addEvent(evt);
-            } else if (me.is_note_off()) {
-                evt.type = Event::kNoteOffEvent;
-                evt.noteOff.channel = me.channel();
-                evt.noteOff.pitch = me.note();
-                evt.noteOff.velocity = me.velocity() / 127.0f;
-                data.outputEvents->addEvent(evt);
-            }
-        }
-    }
+    write_midi_output(data, midi_out_);
 
     return kResultOk;
 }

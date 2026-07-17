@@ -43,6 +43,46 @@ fail()  { echo "  ✗ $*"; ERRORS=$((ERRORS + 1)); }
 step()  { echo ""; echo "── $* ──"; }
 dry()   { if $DRY_RUN; then echo "  [dry-run] $*"; return 0; fi; return 1; }
 
+# Pulp redistributes VST3 headers inside its own MIT-licensed SDK artifacts, so
+# the checked-out tree must be MIT. Tags before v3.8.0 licensed the SDK under
+# "Steinberg VST3 License OR GPLv3", which is incompatible with that. Fail
+# loudly rather than let a drifted pin ship a non-redistributable tree.
+#
+# The license is declared in per-directory LICENSE.txt files, not in source
+# headers (which only reference the nearest LICENSE), so the LICENSE files are
+# what gets scanned. Match on "General Public License": v3.7.12 words it
+# "General Public License (GPL) Version 3", never "GNU General Public License",
+# and a bare "GPL" would false-positive on identifiers like gPluginFactory.
+# Only the directories Pulp compiles and installs are scanned — doc/ ships
+# dual-licensed jquery.js and the samples vendor their own third-party deps.
+assert_vst3_license_is_mit() {
+    local dir="$1"
+    local license="$dir/LICENSE.txt"
+
+    if [ ! -f "$license" ]; then
+        fail "VST3 SDK: LICENSE.txt missing at $license — cannot verify license"
+        return 1
+    fi
+
+    if ! grep -q "MIT License" "$license"; then
+        fail "VST3 SDK: $license is not MIT — pin must stay at v3.8.0 or newer"
+        return 1
+    fi
+
+    local f
+    for f in "$dir/LICENSE.txt" "$dir/pluginterfaces/LICENSE.txt" \
+             "$dir/base/LICENSE.txt" "$dir/public.sdk/LICENSE.txt"; do
+        [ -f "$f" ] || continue
+        if grep -q "General Public License" "$f"; then
+            fail "VST3 SDK: ${f#"$dir"/} offers a GPL alternative — tree is not MIT-only"
+            return 1
+        fi
+    done
+
+    info "VST3 SDK license verified MIT"
+    return 0
+}
+
 prepend_path_if_dir() {
     local dir="$1"
     [ -n "$dir" ] || return 0
@@ -426,6 +466,37 @@ ensure_shared_git_source_with_retry() {
     done
 }
 
+# A source cache is seeded by cloning any existing cache with the same
+# origin, which can be a different version (find_local_git_seed matches on
+# origin URL alone). Those caches are `--filter=blob:none` partial clones, and
+# `git clone --local` copies the incomplete object store WITHOUT the promisor
+# configuration that tells git it may still fetch the missing blobs on demand.
+# Re-point the copy at the real remote so a checkout can materialize blobs the
+# seed never had.
+restore_partial_clone_wiring() {
+    local dir="$1"
+    local filter="$2"
+    git -C "$dir" config extensions.partialClone origin
+    git -C "$dir" config remote.origin.promisor true
+    git -C "$dir" config remote.origin.partialclonefilter "${filter:-blob:none}"
+}
+
+git_partial_clone_filter() {
+    git -C "$1" config remote.origin.partialclonefilter 2>/dev/null || true
+}
+
+# `git checkout` exits 0 even when it cannot read a blob: it prints
+# "unable to read sha1 file", leaves that path deleted in the worktree, and
+# still reports success. The exit code therefore proves nothing — a checkout
+# has to be verified against the worktree afterwards.
+#
+# Submodules are excluded: they are still at the previous ref's commits until
+# the `submodule update` below runs, so a re-pin legitimately leaves them
+# reported as modified. Only the repo's own blobs are in question here.
+git_worktree_is_complete() {
+    [ -z "$(git -C "$1" status --porcelain --ignore-submodules=all 2>/dev/null)" ]
+}
+
 ensure_shared_git_source() {
     local label="$1"
     local repo="$2"
@@ -481,6 +552,12 @@ ensure_shared_git_source() {
                 info "Updating shared $label cache origin to $repo"
                 dry "git -C $target remote set-url origin $repo" || git -C "$target" remote set-url origin "$repo"
             fi
+
+            if [ -n "$seed_repo" ] && \
+               [ "$(git -C "$seed_repo" config remote.origin.promisor 2>/dev/null)" = "true" ]; then
+                dry "git -C $target config extensions.partialClone origin" || \
+                    restore_partial_clone_wiring "$target" "$(git_partial_clone_filter "$seed_repo")"
+            fi
         fi
 
         if ! git -C "$target" cat-file -e "${ref}^{commit}" 2>/dev/null; then
@@ -500,6 +577,21 @@ ensure_shared_git_source() {
             :
         else
             git -C "$target" checkout --detach "$checkout_ref"
+
+            # Self-heal a cache already left incomplete by an earlier run:
+            # restoring the promisor wiring lets a forced re-checkout fetch
+            # the blobs the first attempt could not read.
+            if ! git_worktree_is_complete "$target"; then
+                warn "Shared $label source cache is missing objects; repairing"
+                restore_partial_clone_wiring "$target" "$(git_partial_clone_filter "$target")"
+                git -C "$target" checkout --force "$checkout_ref" -- . || true
+            fi
+
+            if ! git_worktree_is_complete "$target"; then
+                fail "$label source cache at $target is incomplete after checking out $ref"
+                git -C "$target" status --porcelain | head -5
+                exit 1
+            fi
         fi
 
         if [ -f "$target/.gitmodules" ]; then
@@ -512,6 +604,13 @@ ensure_shared_git_source() {
         fi
     )
 }
+
+# Everything above is definitions; everything below performs setup. Sourcing
+# with PULP_SETUP_LIB_ONLY=1 exposes the helpers to tests without bootstrapping
+# a machine.
+if [ -n "${PULP_SETUP_LIB_ONLY:-}" ]; then
+    return 0 2>/dev/null || exit 0
+fi
 
 # ── Platform detection ───────────────────────────────────────────────────────
 
@@ -749,12 +848,17 @@ ensure_shared_git_source_with_retry "Catch2" "https://github.com/catchorg/Catch2
     "v3.7.1" "$(fetchcontent_cache_dir_name "catch2" "v3.7.1")"
 
 # VST3 SDK
-VST3_SDK_REF="v3.7.12_build_20"
+# MIT only from v3.8.0 onward. Every earlier tag (including v3.7.12) ships
+# pluginterfaces under "Steinberg VST3 License OR GPLv3", which Pulp may not
+# redistribute in its MIT-licensed SDK artifacts. Do not move this pin below
+# v3.8.0; assert_vst3_license_is_mit below fails the setup if it drifts.
+VST3_SDK_REF="v3.8.0_build_66"
 VST3_SHARED_DIR="$FETCHCONTENT_CACHE_ROOT/$(fetchcontent_cache_dir_name "vst3sdk" "$VST3_SDK_REF")"
 ensure_shared_git_source_with_retry "VST3 SDK" "https://github.com/steinbergmedia/vst3sdk.git" \
     "$VST3_SDK_REF" "$(fetchcontent_cache_dir_name "vst3sdk" "$VST3_SDK_REF")"
 VST3_DIR="$REPO_ROOT/external/vst3sdk"
 reuse_shared_git_source "VST3 SDK" "$VST3_SHARED_DIR" "$VST3_DIR" "pluginterfaces"
+assert_vst3_license_is_mit "$VST3_DIR" || true
 
 # AudioUnit SDK (macOS only)
 if [ "$PLATFORM" = "macOS" ]; then

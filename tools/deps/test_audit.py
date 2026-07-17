@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
 import textwrap
 import unittest
 from pathlib import Path
@@ -293,6 +294,229 @@ class StrictAuditTests(unittest.TestCase):
             0,
             msg=f"audit.py --strict failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
+
+
+class LicenseVerificationTests(unittest.TestCase):
+    """Truthfulness gate (``--verify-licenses``).
+
+    The consistency and completeness gates only ask whether a dependency is
+    *named* in each attribution file. Both of the bugs below passed a green
+    ``--strict`` audit: NOTICE.md reproduced a truncated MIT license for 25 of
+    its 26 MIT entries, and the VST3 SDK was labeled MIT on all four surfaces
+    while the pinned tree was "Steinberg VST3 License OR GPLv3".
+    """
+
+    def _write_notice(self, body: str):
+        tmp = ROOT / "tools" / "deps" / "_test_notice_verify.md"
+        tmp.write_text(body)
+        self.addCleanup(tmp.unlink)
+        original = audit.NOTICE_MD
+        audit.NOTICE_MD = tmp
+        self.addCleanup(lambda: setattr(audit, "NOTICE_MD", original))
+
+    def test_complete_mit_notice_is_accepted(self) -> None:
+        self._write_notice(
+            "## dep\n\nCopyright (c) 2026 Someone\n\n"
+            "Permission is hereby granted, free of charge, to any person "
+            "obtaining a copy of this software ..., to deal in the Software "
+            "without restriction, ...\n\n"
+            "The above copyright notice and this permission notice "
+            "shall be included in all copies.\n\n"
+            'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.\n'
+        )
+        self.assertEqual(audit.find_notice_truncations(), [])
+
+    def test_notice_missing_warranty_disclaimer_is_flagged(self) -> None:
+        self._write_notice(
+            "## dep\n\nPermission is hereby granted, free of charge, to any person "
+            "obtaining a copy of this software ..., to deal in the Software "
+            "without restriction, ...\n\n"
+            "The above copyright notice and this permission notice "
+            "shall be included in all copies.\n"
+        )
+        self.assertEqual(
+            audit.find_notice_truncations(), [("dep", ["warranty disclaimer"])]
+        )
+
+    def test_notice_missing_inclusion_condition_is_flagged(self) -> None:
+        self._write_notice(
+            "## dep\n\nPermission is hereby granted, free of charge, to any person "
+            "obtaining a copy of this software ..., to deal in the Software "
+            "without restriction, ...\n\n"
+            'THE SOFTWARE IS PROVIDED "AS IS".\n'
+        )
+        self.assertEqual(
+            audit.find_notice_truncations(), [("dep", ["inclusion condition"])]
+        )
+
+    def test_boost_license_is_not_judged_as_truncated_mit(self) -> None:
+        """BSL-1.0 opens with MIT's "Permission is hereby granted" line but
+        words its condition "must be included in all copies". Matching on the
+        shared opener reported Catch2 (BSL-1.0) as a truncated MIT entry."""
+        self._write_notice(
+            "## Catch2\n\nCopyright (c) 2022 Two Blue Cubes Ltd.\n\n"
+            "Boost Software License - Version 1.0\n\n"
+            "Permission is hereby granted, free of charge, to any person or "
+            "organization obtaining a copy of the software ...\n\n"
+            "The copyright notices in the Software and this entire statement "
+            "must be included in all copies.\n\n"
+            'THE SOFTWARE IS PROVIDED "AS IS".\n'
+        )
+        self.assertEqual(audit.find_notice_truncations(), [])
+
+    def test_truncated_boost_license_is_flagged(self) -> None:
+        self._write_notice(
+            "## Catch2\n\nBoost Software License - Version 1.0\n\n"
+            "Permission is hereby granted, free of charge, ...\n"
+        )
+        self.assertEqual(
+            audit.find_notice_truncations(),
+            [("Catch2", ["inclusion condition", "warranty disclaimer"])],
+        )
+
+    def test_non_mit_notice_entries_are_left_alone(self) -> None:
+        """BSD/Apache/zlib/public-domain entries have no MIT grant line and
+        must not be judged against MIT's structure."""
+        self._write_notice(
+            "## a bsd dep\n\nRedistribution and use in source and binary forms"
+            ", with or without modification, are permitted provided that ...\n"
+        )
+        self.assertEqual(audit.find_notice_truncations(), [])
+
+    def test_repo_notice_has_no_truncated_mit_entries(self) -> None:
+        truncated = audit.find_notice_truncations()
+        self.assertEqual(
+            truncated,
+            [],
+            "NOTICE.md reproduces an incomplete MIT permission notice for: "
+            + ", ".join(f"{n} (missing {', '.join(m)})" for n, m in truncated),
+        )
+
+    def test_copyleft_tree_contradicting_an_mit_claim_is_flagged(self) -> None:
+        """The VST3 regression itself: a tree whose LICENSE offers a GPL
+        alternative while the manifest declares MIT."""
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / "LICENSE.txt").write_text(
+            "This Software Development Kit is licensed under the terms of the "
+            "Steinberg VST3 License,\nor alternatively under the terms of the "
+            "General Public License (GPL) Version 3.\n"
+        )
+        original = audit.local_source_tree
+        audit.local_source_tree = lambda dep: tree
+        self.addCleanup(lambda: setattr(audit, "local_source_tree", original))
+
+        status, problems = audit.verify_dep_license({"name": "x", "license": "MIT"})
+        self.assertEqual(status, "verified")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("General Public License", problems[0])
+        self.assertIn("FORBIDDEN", problems[0])
+
+    def test_bare_gpl_substring_does_not_false_positive(self) -> None:
+        """"GPL" appears inside identifiers such as gPluginFactory, so the
+        scan matches the spelled-out phrase instead."""
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / "LICENSE.txt").write_text(
+            "MIT License\n\ngPluginFactory = new CPluginFactory (factoryInfo);\n"
+        )
+        original = audit.local_source_tree
+        audit.local_source_tree = lambda dep: tree
+        self.addCleanup(lambda: setattr(audit, "local_source_tree", original))
+
+        _, problems = audit.verify_dep_license({"name": "x", "license": "MIT"})
+        self.assertEqual(problems, [])
+
+    def test_missing_tree_reports_unverified_not_pass(self) -> None:
+        """An absent tree is not evidence of a correct license."""
+        original = audit.local_source_tree
+        audit.local_source_tree = lambda dep: None
+        self.addCleanup(lambda: setattr(audit, "local_source_tree", original))
+
+        status, problems = audit.verify_dep_license({"name": "x", "license": "MIT"})
+        self.assertEqual(status, "unverified")
+        self.assertEqual(problems, [])
+
+    def test_external_tree_wins_over_stale_cache_entry(self) -> None:
+        """external/<dep> is what the build compiles. A cache holding an older
+        ref of the same dependency must not shadow it — that made the audit
+        verify a version the repo does not use."""
+        base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        external = base / "external"
+        (external / "widget").mkdir(parents=True)
+        cache = base / "cache"
+        (cache / "widget-v1.0.0").mkdir(parents=True)
+
+        originals = (audit.EXTERNAL_DIR, audit.FETCHCONTENT_CACHE)
+        audit.EXTERNAL_DIR, audit.FETCHCONTENT_CACHE = external, cache
+        self.addCleanup(
+            lambda: setattr(audit, "EXTERNAL_DIR", originals[0])
+            or setattr(audit, "FETCHCONTENT_CACHE", originals[1])
+        )
+
+        tree = audit.local_source_tree(
+            {"name": "widget", "version": "v1.0.0", "external_names": ["widget"]}
+        )
+        self.assertEqual(tree, external / "widget")
+
+    def test_cache_hit_must_match_the_pinned_version(self) -> None:
+        """The cache accumulates every ref ever fetched, so a name match alone
+        would verify whichever version happened to be lying around."""
+        base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        external = base / "external"
+        external.mkdir()
+        cache = base / "cache"
+        (cache / "widget-v1.0.0").mkdir(parents=True)
+
+        originals = (audit.EXTERNAL_DIR, audit.FETCHCONTENT_CACHE)
+        audit.EXTERNAL_DIR, audit.FETCHCONTENT_CACHE = external, cache
+        self.addCleanup(
+            lambda: setattr(audit, "EXTERNAL_DIR", originals[0])
+            or setattr(audit, "FETCHCONTENT_CACHE", originals[1])
+        )
+
+        dep = {"name": "widget", "external_names": ["widget"]}
+        self.assertEqual(
+            audit.local_source_tree({**dep, "version": "v1.0.0"}), cache / "widget-v1.0.0"
+        )
+        self.assertIsNone(audit.local_source_tree({**dep, "version": "v2.0.0"}))
+
+    def test_multi_hyphen_ref_resolves(self) -> None:
+        """Cache dirs are "<name>-<ref>" and refs contain hyphens, so the ref
+        is stripped using the pinned version rather than by splitting on "-"."""
+        base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        external = base / "external"
+        external.mkdir()
+        cache = base / "cache"
+        (cache / "sdl3-release-3.2.12").mkdir(parents=True)
+
+        originals = (audit.EXTERNAL_DIR, audit.FETCHCONTENT_CACHE)
+        audit.EXTERNAL_DIR, audit.FETCHCONTENT_CACHE = external, cache
+        self.addCleanup(
+            lambda: setattr(audit, "EXTERNAL_DIR", originals[0])
+            or setattr(audit, "FETCHCONTENT_CACHE", originals[1])
+        )
+
+        tree = audit.local_source_tree(
+            {"name": "SDL3", "version": "release-3.2.12", "external_names": ["sdl3"]}
+        )
+        self.assertEqual(tree, cache / "sdl3-release-3.2.12")
+
+    def test_vst3_pin_is_the_mit_relicensed_tag(self) -> None:
+        """Every tag before v3.8.0 offers only "Steinberg VST3 License OR
+        GPLv3"; Pulp redistributes these headers in its MIT SDK artifacts."""
+        dep = next(
+            d for d in audit.load_manifest() if d["name"] == "VST3 SDK"
+        )
+        self.assertEqual(dep["license"], "MIT")
+        self.assertEqual(dep["version"], "v3.8.0_build_66")
+        self.assertEqual(dep["upstream"]["ref"], "v3.8.0_build_66")
+
+    def test_license_files_deduplicated_on_case_insensitive_filesystems(self) -> None:
+        """macOS resolves LICENSE.txt and license.txt to one file, which
+        otherwise gets scanned and reported twice."""
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / "LICENSE.txt").write_text("MIT License\n")
+        found = audit.find_license_files(tree)
+        self.assertEqual(len(found), 1)
 
 
 if __name__ == "__main__":

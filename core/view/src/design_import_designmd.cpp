@@ -10,6 +10,9 @@
 //   - YAML frontmatter (between `---` fences) → IR token maps via yaml-cpp.
 //   - `## Section` headings in the Markdown body → ordered section list
 //     (the section-order lint rule reads this).
+//   - Token rows under those body sections → IR token maps. This runs
+//     whether or not frontmatter is present; frontmatter wins on conflict
+//     and the body only fills gaps. See `parse_body_tokens`.
 //
 // What this file does NOT do:
 //   - Emit a UI tree. DESIGN.md describes a *system*, not a *screen*. The
@@ -344,6 +347,37 @@ void walk_dimension_map(const YAML::Node& node,
     }
 }
 
+// Walk one `shadows` node into `shadow-<subpath>` string tokens.
+// A shadow value is an opaque CSS shadow string ("0 1px 3px rgba(...)"), not a
+// dimension, so every scalar lands in `tokens.strings` — the same slot and the
+// same `shadow-` prefix the `## Shadows` body scanner uses, so a token means
+// the same thing whichever form authored it. Nested maps recurse and dot-join,
+// matching `walk_dimension_node`.
+void walk_shadow_node(const std::string& subpath,
+                      const YAML::Node& node,
+                      DesignMdParseResult& result) {
+    if (node.IsScalar()) {
+        result.ir.tokens.strings.emplace("shadow-" + subpath, node.as<std::string>(""));
+    } else if (node.IsMap()) {
+        for (auto sub = node.begin(); sub != node.end(); ++sub) {
+            std::string key = sub->first.as<std::string>("");
+            if (key.empty()) continue;
+            walk_shadow_node(subpath.empty() ? key : subpath + "." + key,
+                             sub->second, result);
+        }
+    }
+}
+
+void walk_shadow_map(const YAML::Node& node,
+                     DesignMdParseResult& result) {
+    if (!node || !node.IsMap()) return;
+    for (auto it = node.begin(); it != node.end(); ++it) {
+        std::string key = it->first.as<std::string>("");
+        if (key.empty()) continue;
+        walk_shadow_node(key, it->second, result);
+    }
+}
+
 void walk_components_map(const YAML::Node& node,
                           DesignMdParseResult& result) {
     if (!node || !node.IsMap()) return;
@@ -439,13 +473,21 @@ void resolve_references(DesignMdParseResult& result) {
 
 // ── Public API ──────────────────────────────────────────────────────────
 
-// ── Body-section token scan (frontmatter-less DESIGN.md) ─────────────────
+// ── Body-section token scan ──────────────────────────────────────────────
 // Some tools (e.g. Google Stitch brand exports) author DESIGN.md as Markdown
-// prose with NO YAML frontmatter, so the structured-frontmatter path above
-// recovers zero tokens. Scan the body sections so those files still import a
-// usable token set. Clean-room (reimplemented from the documented design.md
-// structure, not copied): recognizes `## Colors|Spacing|Border Radius|Shadows`
-// and reads `name: value` list items or `| name | value |` table rows.
+// prose, putting tokens in body tables rather than YAML frontmatter. Scan the
+// body sections so those files import a usable token set.
+//
+// This runs for EVERY document, not just frontmatter-less ones — the caller
+// treats it as additive and lets frontmatter win on conflict. Gating it on
+// "no frontmatter at all" is what made adding frontmatter to a prose file
+// silently drop its body tokens.
+//
+// Reads the documented design.md structure: recognizes
+// `## Colors|Spacing|Border Radius|Shadows` and reads
+// `name: value` list items or `| name | value |` table rows. Because a body
+// section mixes token rows with prose, each arm below must decide whether a
+// value is a TOKEN or a SENTENCE; the per-section value predicates do that.
 // `### Light Mode` / `### Dark Mode` subsections route colors to the bare name
 // (light/default) or a `<name>.dark` suffix (dark) — the SAME multi-mode
 // convention the Figma plugin uses, so dark themes survive into the flat maps.
@@ -498,9 +540,24 @@ std::optional<std::string> first_hex(const std::string& value) {
     return std::nullopt;
 }
 
-bool value_has_digit(const std::string& s) {
-    for (char c : s) if (std::isdigit(static_cast<unsigned char>(c))) return true;
-    return false;
+// Does this cell hold a CSS shadow value rather than prose or a table header?
+//
+// The guard has to be shape-based, not "contains a digit". A DESIGN.md body
+// mixes token tables with prose under the very same `## Shadows` /
+// `## Elevation & Depth` heading — "Shadows are diffused and soft (Blur:
+// 20px-40px, Opacity: 4-8%)" is a sentence, not a token, yet it is full of
+// digits. Anchor on the CSS box-shadow grammar instead: the value opens with
+// an offset length, an `inset` keyword, `none`, or a `{token.ref}`. Prose
+// opens with a word, so it falls out here.
+bool looks_like_css_shadow(const std::string& s) {
+    std::string v = choc::text::trim(s);
+    if (v.empty()) return false;
+    if (is_token_reference(v)) return true;
+    std::string lv = choc::text::toLowerCase(v);
+    if (lv == "none") return true;
+    if (lv.rfind("inset", 0) == 0) return true;
+    char c = v.front();
+    return std::isdigit(static_cast<unsigned char>(c)) || c == '-' || c == '+' || c == '.';
 }
 
 // Split a `name: value` list item or `| name | value |` table row into parts.
@@ -604,7 +661,7 @@ int parse_body_tokens(const std::string& body, DesignMdParseResult& result) {
                 break;
             }
             case BodySection::shadows: {
-                if (!value_has_digit(rawValue)) break;  // skip header rows
+                if (!looks_like_css_shadow(rawValue)) break;  // skip headers / prose
                 if (result.ir.tokens.strings.emplace("shadow-" + name, choc::text::trim(rawValue)).second) ++emitted;
                 break;
             }
@@ -689,7 +746,86 @@ DesignMdParseResult parse_designmd(const std::string& markdown) {
     walk_typography_map(root["typography"], result);
     walk_dimension_map(root["rounded"],   "rounded", result);
     walk_dimension_map(root["spacing"],   "spacing", result);
+    walk_shadow_map(root["shadows"],      result);
     walk_components_map(root["components"], result);
+
+    // Frontmatter is authoritative, but it is not the ONLY token source: scan
+    // the Markdown body too and let it fill gaps the frontmatter left.
+    //
+    // This is load-bearing, not a convenience. A body `## Shadows` table used
+    // to be read only when the document had NO frontmatter at all, so adding
+    // frontmatter to a prose-authored DESIGN.md silently dropped every body
+    // token — no diagnostic, no warning, an empty shadow set. Sections the
+    // frontmatter schema has no key for (shadows before this change) had the
+    // body as their only home, which made that loss total and invisible.
+    //
+    // Precedence needs a normalized comparison, NOT `emplace`. The two sides
+    // spell keys differently — `walk_color_node` dot-joins and preserves case
+    // (`brand.500`, `Primary`), while `normalize_body_name` lowercases and
+    // dash-joins (`brand-500`, `primary`) — so colliding concepts never collide
+    // as map keys and `emplace` would never fire. Left alone, a value defined
+    // in both forms would emit BOTH spellings with different values into the
+    // theme, silently. So: snapshot the frontmatter keys, let the body emit,
+    // then drop any body token whose normalized name matches a frontmatter one.
+    // Snapshot the frontmatter's OWN keys (verbatim) alongside their normalized
+    // forms. Both halves are needed: a token is body-added only if its exact key
+    // was absent before the scan, and it is a restatement only if its normalized
+    // name matches a frontmatter one. Testing the normalized form alone would
+    // delete the frontmatter tokens themselves, since `Primary` normalizes to
+    // `primary` and would appear to collide with its own entry.
+    // `normalize_body_name` alone is not enough to compare the two spellings:
+    // it preserves '.', so a frontmatter `brand.500` stays `brand.500` while the
+    // body's `Brand 500` becomes `brand-500`. Canonicalize both by folding every
+    // separator ('.', '-', '_') to one form, so the same concept compares equal
+    // however it was written.
+    auto canonical_key = [](const std::string& raw) {
+        std::string s = normalize_body_name(raw);
+        std::string out;
+        for (char c : s) out += (c == '.' || c == '_') ? '-' : c;
+        return out;
+    };
+    struct KeySnapshot {
+        std::set<std::string> verbatim;
+        std::set<std::string> canonical;
+    };
+    auto snapshot = [&](const auto& m) {
+        KeySnapshot s;
+        for (const auto& [k, v] : m) {
+            (void)v;
+            s.verbatim.insert(k);
+            s.canonical.insert(canonical_key(k));
+        }
+        return s;
+    };
+    const auto fm_colors = snapshot(result.ir.tokens.colors);
+    const auto fm_dims   = snapshot(result.ir.tokens.dimensions);
+    const auto fm_strs   = snapshot(result.ir.tokens.strings);
+
+    int recovered = parse_body_tokens(slice.body, result);
+
+    // Frontmatter wins: erase body-emitted tokens that restate a frontmatter
+    // key under the body's normalized spelling.
+    int shadowed = 0;
+    auto drop_shadowed = [&](auto& m, const KeySnapshot& fm) {
+        for (auto it = m.begin(); it != m.end();) {
+            const bool added_by_body = fm.verbatim.count(it->first) == 0;
+            const bool restates_fm   = fm.canonical.count(canonical_key(it->first)) > 0;
+            if (added_by_body && restates_fm) { it = m.erase(it); ++shadowed; } else { ++it; }
+        }
+    };
+    drop_shadowed(result.ir.tokens.colors, fm_colors);
+    drop_shadowed(result.ir.tokens.dimensions, fm_dims);
+    drop_shadowed(result.ir.tokens.strings, fm_strs);
+    recovered -= shadowed;
+
+    if (recovered > 0) {
+        result.diagnostics.push_back(make_diag(
+            DesignMdSeverity::info, "body-tokens", "", 0, 0,
+            "recovered " + std::to_string(recovered) +
+            " token(s) from Markdown body sections not covered by frontmatter "
+            "(Colors/Spacing/Border Radius/Shadows). Frontmatter wins on conflict; "
+            "dark-mode colors use a \".dark\" suffix."));
+    }
 
     // Warn on frontmatter keys outside the DESIGN.md schema. Unknown keys are
     // not an error (the file still imports — known groups are already parsed),
@@ -698,6 +834,12 @@ DesignMdParseResult parse_designmd(const std::string& markdown) {
     static const std::unordered_set<std::string> known_keys = {
         "version", "name", "description",
         "colors", "typography", "rounded", "spacing", "components",
+        // `shadows` is a Pulp extension, not an upstream 0.3.0 key. The
+        // `shadow-*` token namespace already exists (the `## Shadows` body
+        // scanner emits into it) but upstream frontmatter has no door to it,
+        // so a structured DESIGN.md had no way to declare a shadow at all.
+        // Listing it here keeps the extension from self-reporting as a typo.
+        "shadows",
     };
     for (auto it = root.begin(); it != root.end(); ++it) {
         std::string key = it->first.as<std::string>("");

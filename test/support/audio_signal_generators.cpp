@@ -44,6 +44,33 @@ void require(bool ok, const char* what) {
         throw std::invalid_argument(what);
 }
 
+// Closed-form normalized phase in [0, 1) for sample `i` — the shared
+// expression documented on make_saw/make_square. Computed from the index
+// rather than accumulated, so a sample never depends on the block partition.
+double wrapped_phase(double phase, double f0_hz, double sample_rate,
+                     int i) {
+    const double t = phase + f0_hz * i / sample_rate;
+    return t - std::floor(t);
+}
+
+// Shared shape for the closed-form naive waveform generators: render channel
+// 0 once, copy to the others (same signal per channel, per the header).
+template <typename SampleFn>
+pulp::audio::Buffer<float> generate_waveform(int channels, int frames,
+                                             SampleFn&& sample_at) {
+    auto buf = make_silence(channels, frames);
+    if (frames == 0 || channels == 0)
+        return buf;
+    auto first = buf.channel(0);
+    for (int i = 0; i < frames; ++i)
+        first[static_cast<std::size_t>(i)] = sample_at(i);
+    for (int ch = 1; ch < channels; ++ch) {
+        auto span = buf.channel(static_cast<std::size_t>(ch));
+        std::copy(first.begin(), first.end(), span.begin());
+    }
+    return buf;
+}
+
 // Shared shape for the per-channel filtered-noise generators.
 template <typename PerChannelFn>
 pulp::audio::Buffer<float> generate_noise(int channels, int frames,
@@ -157,6 +184,30 @@ pulp::audio::Buffer<float> make_swept_sine(int channels, int frames,
         std::copy(first.begin(), first.end(), span.begin());
     }
     return buf;
+}
+
+pulp::audio::Buffer<float> make_saw(int channels, int frames, double f0_hz,
+                                    double sample_rate, float amplitude,
+                                    double phase) {
+    require(sample_rate > 0.0, "make_saw: sample_rate must be > 0");
+    return generate_waveform(channels, frames,
+        [=](int i) {
+            const double p = wrapped_phase(phase, f0_hz, sample_rate, i);
+            return static_cast<float>(amplitude * (2.0 * p - 1.0));
+        });
+}
+
+pulp::audio::Buffer<float> make_square(int channels, int frames, double f0_hz,
+                                       double sample_rate, float amplitude,
+                                       double pulse_width, double phase) {
+    require(sample_rate > 0.0, "make_square: sample_rate must be > 0");
+    require(pulse_width >= 0.0 && pulse_width <= 1.0,
+            "make_square: pulse_width must be in [0, 1]");
+    return generate_waveform(channels, frames,
+        [=](int i) {
+            const double p = wrapped_phase(phase, f0_hz, sample_rate, i);
+            return p < pulse_width ? amplitude : -amplitude;
+        });
 }
 
 pulp::audio::Buffer<float> make_white_noise(int channels, int frames,

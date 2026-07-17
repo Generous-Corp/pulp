@@ -11,6 +11,15 @@
 
 namespace pulp::view {
 
+/// The default similarity a render must reach to count as matching its
+/// reference, as a fraction (0.0-1.0). This is the single source of truth for
+/// the C++ side — `passes()`, `pulp-screenshot --compare`, and
+/// `pulp import-design --validate` all resolve their default here rather than
+/// hard-coding a literal. The out-of-process harnesses under
+/// `tools/import-validation/` mirror this value in their own language and
+/// should be updated alongside it.
+inline constexpr float kDefaultSimilarityThreshold = 0.85f;
+
 /// Result of comparing two screenshots.
 struct CompareResult {
     bool valid = false;           ///< True if comparison completed successfully
@@ -20,8 +29,11 @@ struct CompareResult {
     float mean_error = 0.0f;     ///< Mean per-channel error (0-255 scale)
     std::string error;           ///< Error message if comparison failed
 
-    /// Returns true if similarity is above the given threshold (default 0.85)
-    bool passes(float threshold = 0.85f) const { return valid && similarity >= threshold; }
+    /// Returns true if similarity is at or above the given threshold, which
+    /// defaults to kDefaultSimilarityThreshold.
+    bool passes(float threshold = kDefaultSimilarityThreshold) const {
+        return valid && similarity >= threshold;
+    }
 };
 
 /// Bounding box of changed pixels between two screenshots.

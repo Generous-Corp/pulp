@@ -116,7 +116,7 @@ that is the smell. Split it. Usually the failures need *different* mechanisms �
 one, a hook for another, a habit for a third — and some may have **no clean mechanism at all**,
 which you must say plainly rather than paper over.
 
-*(This is the same discipline as the personal `verify-the-instrument` skill, applied to the
+*(This is the same discipline as the personal `confirm-the-failure` skill, applied to the
 FIX rather than to a measurement: prove the instrument can report the thing before you trust
 it. If that skill is available in your environment, use it here.)*
 
@@ -285,7 +285,7 @@ calendar date.**
 - **Verify the instrument before acting on it.** Before an agent acts on a report's finding —
   especially to change code, revert, or block a merge — it must confirm the finding is real
   (run the check against a known-good control). A report is a *claim*, not a verdict. See the
-  `verify-the-instrument` discipline.
+  `confirm-the-failure` discipline.
 
 ### The anti-goal (restate at every level)
 

@@ -150,6 +150,24 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 )wgsl";
 
+// Host mirror of the WGSL `FftParams` uniform block above. The 16-byte layout
+// (u32 n, u32 ns, f32 sign, u32 batch) is the binary ABI contract with the
+// shader — keep it byte-identical.
+struct FftParams {
+    uint32_t n;
+    uint32_t ns;
+    float    sign;
+    uint32_t batch;
+};
+
+// Passes needed for a radix-2 Stockham transform of a power-of-two `n`
+// (log2(N)). `n` must be a power of two (callers gate on is_power_of_two).
+inline uint32_t log2_of_pow2(uint32_t n) {
+    uint32_t r = 0;
+    for (uint32_t v = n; v > 1u; v >>= 1) ++r;
+    return r;
+}
+
 static constexpr const char* kComplexMulBroadcastShader = R"wgsl(
 // Element-wise complex multiply with the second operand BROADCAST: result has
 // `batch` blocks of `ir` pairs; each block is multiplied by the same `ir`.
@@ -1215,39 +1233,17 @@ public:
             wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
         auto readback_buf = acquire_readback_buffer(output_bytes);
 
-#ifdef PULP_BENCHMARK
-        {
-            const double t0 = bench::now_us();
+        timed_write([&] {
             queue_.WriteBuffer(input_buf, 0, complex_pairs, input_bytes);
-            if (bench_counters_) {
-                bench_counters_->gpu_upload_total_us.fetch_add(
-                    bench::now_us() - t0, std::memory_order_relaxed);
-                bench_counters_->cpu_to_gpu_bytes_total.fetch_add(
-                    static_cast<double>(input_bytes),
-                    std::memory_order_relaxed);
-            }
-        }
-#else
-        queue_.WriteBuffer(input_buf, 0, complex_pairs, input_bytes);
-#endif
+        }, static_cast<double>(input_bytes));
 
         auto bind_group = create_bind_group(magnitude_pipeline_, {input_buf, output_buf});
 
         uint32_t workgroups = (num_bins + 255) / 256;
-#ifdef PULP_BENCHMARK
-        {
-            const double t0 = bench::now_us();
+        timed_dispatch_copy([&] {
             dispatch(magnitude_pipeline_, bind_group, workgroups);
             copy_buffer(output_buf, readback_buf, output_bytes);
-            if (bench_counters_) {
-                bench_counters_->gpu_dispatch_total_us.fetch_add(
-                    bench::now_us() - t0, std::memory_order_relaxed);
-            }
-        }
-#else
-        dispatch(magnitude_pipeline_, bind_group, workgroups);
-        copy_buffer(output_buf, readback_buf, output_bytes);
-#endif
+        });
 
         // Register OnSubmittedWorkDone to release the storage buffers once the
         // GPU confirms the dispatch+copy submission completed. The readback
@@ -1288,42 +1284,19 @@ public:
             wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
         auto readback_buf = acquire_readback_buffer(bytes);
 
-#ifdef PULP_BENCHMARK
-        {
-            const double t0 = bench::now_us();
+        timed_write([&] {
             queue_.WriteBuffer(buf_a, 0, a, bytes);
             queue_.WriteBuffer(buf_b, 0, b, bytes);
-            if (bench_counters_) {
-                bench_counters_->gpu_upload_total_us.fetch_add(
-                    bench::now_us() - t0, std::memory_order_relaxed);
-                bench_counters_->cpu_to_gpu_bytes_total.fetch_add(
-                    static_cast<double>(bytes) * 2.0,
-                    std::memory_order_relaxed);
-            }
-        }
-#else
-        queue_.WriteBuffer(buf_a, 0, a, bytes);
-        queue_.WriteBuffer(buf_b, 0, b, bytes);
-#endif
+        }, static_cast<double>(bytes) * 2.0);
 
         auto bind_group = create_bind_group(complex_mul_pipeline_,
             {buf_a, buf_b, buf_result});
 
         uint32_t workgroups = (count + 255) / 256;
-#ifdef PULP_BENCHMARK
-        {
-            const double t0 = bench::now_us();
+        timed_dispatch_copy([&] {
             dispatch(complex_mul_pipeline_, bind_group, workgroups);
             copy_buffer(buf_result, readback_buf, bytes);
-            if (bench_counters_) {
-                bench_counters_->gpu_dispatch_total_us.fetch_add(
-                    bench::now_us() - t0, std::memory_order_relaxed);
-            }
-        }
-#else
-        dispatch(complex_mul_pipeline_, bind_group, workgroups);
-        copy_buffer(buf_result, readback_buf, bytes);
-#endif
+        });
 
         // Release storage buffers via OnSubmittedWorkDone; readback_buf stays
         // live until read_back() unmaps it. See compute_magnitude() for the
@@ -1381,8 +1354,7 @@ public:
 
         ConvPlan plan;
         plan.n = n;
-        plan.log2n = 0;
-        for (uint32_t v = n; v > 1u; v >>= 1) ++plan.log2n;
+        plan.log2n = log2_of_pow2(n);
 
         const uint32_t bytes = n * 2u * static_cast<uint32_t>(sizeof(float));
         const auto sc = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst
@@ -1400,27 +1372,10 @@ public:
         // Forward (sign=-1) and inverse (sign=+1) per-pass uniforms + bind
         // groups; both ping-pong starting from buf_a. Uniforms are constant per
         // pass, so write them once here.
-        for (uint32_t s = 0; s < plan.log2n; ++s) {
-            struct FftParams { uint32_t n; uint32_t ns; float sign; uint32_t batch; };
-            const bool src_is_a = (s % 2u == 0u);
-            for (int dir = 0; dir < 2; ++dir) {
-                const float sign = (dir == 0) ? -1.0f : 1.0f;
-                wgpu::BufferDescriptor ud{};
-                ud.size = 16;
-                ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-                wgpu::Buffer u = device_.CreateBuffer(&ud);
-                if (!u) return false;
-                FftParams p{n, 1u << s, sign, 1u};
-                queue_.WriteBuffer(u, 0, &p, sizeof(p));
-                wgpu::BindGroup bg = create_bind_group(
-                    fft_pipeline_,
-                    src_is_a ? std::initializer_list<wgpu::Buffer>{plan.buf_a, plan.buf_b, u}
-                             : std::initializer_list<wgpu::Buffer>{plan.buf_b, plan.buf_a, u});
-                if (!bg) return false;
-                if (dir == 0) { plan.fwd_u.push_back(std::move(u)); plan.fwd_bgs.push_back(std::move(bg)); }
-                else          { plan.inv_u.push_back(std::move(u)); plan.inv_bgs.push_back(std::move(bg)); }
-            }
-        }
+        if (!build_fft_pass_chain(n, plan.log2n, -1.0f, 1u, plan.buf_a, plan.buf_b,
+                                  plan.fwd_u, plan.fwd_bgs)) return false;
+        if (!build_fft_pass_chain(n, plan.log2n, 1.0f, 1u, plan.buf_a, plan.buf_b,
+                                  plan.inv_u, plan.inv_bgs)) return false;
 
         // Forward result lands in buf_b for odd log2n, buf_a for even. The
         // complex-multiply reads it × irspec → buf_c.
@@ -1485,8 +1440,7 @@ public:
         BatchConvPlan plan;
         plan.n = n;
         plan.batch = batch;
-        plan.log2n = 0;
-        for (uint32_t v = n; v > 1u; v >>= 1) ++plan.log2n;
+        plan.log2n = log2_of_pow2(n);
 
         const uint32_t big = batch * n * 2u * static_cast<uint32_t>(sizeof(float));
         const uint32_t irb = n * 2u * static_cast<uint32_t>(sizeof(float));
@@ -1502,27 +1456,10 @@ public:
             return false;
         }
 
-        for (uint32_t s = 0; s < plan.log2n; ++s) {
-            struct FftParams { uint32_t n; uint32_t ns; float sign; uint32_t batch; };
-            const bool src_is_a = (s % 2u == 0u);
-            for (int dir = 0; dir < 2; ++dir) {
-                const float sign = (dir == 0) ? -1.0f : 1.0f;
-                wgpu::BufferDescriptor ud{};
-                ud.size = 16;
-                ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-                wgpu::Buffer u = device_.CreateBuffer(&ud);
-                if (!u) return false;
-                FftParams p{n, 1u << s, sign, batch};
-                queue_.WriteBuffer(u, 0, &p, sizeof(p));
-                wgpu::BindGroup bg = create_bind_group(
-                    fft_pipeline_,
-                    src_is_a ? std::initializer_list<wgpu::Buffer>{plan.buf_a, plan.buf_b, u}
-                             : std::initializer_list<wgpu::Buffer>{plan.buf_b, plan.buf_a, u});
-                if (!bg) return false;
-                if (dir == 0) { plan.fwd_u.push_back(std::move(u)); plan.fwd_bgs.push_back(std::move(bg)); }
-                else          { plan.inv_u.push_back(std::move(u)); plan.inv_bgs.push_back(std::move(bg)); }
-            }
-        }
+        if (!build_fft_pass_chain(n, plan.log2n, -1.0f, batch, plan.buf_a, plan.buf_b,
+                                  plan.fwd_u, plan.fwd_bgs)) return false;
+        if (!build_fft_pass_chain(n, plan.log2n, 1.0f, batch, plan.buf_a, plan.buf_b,
+                                  plan.inv_u, plan.inv_bgs)) return false;
 
         wgpu::Buffer& fwd_buf = (plan.log2n & 1u) ? plan.buf_b : plan.buf_a;
         plan.bmul_bg = create_bind_group(conv_bmul_pipeline_,
@@ -1598,8 +1535,7 @@ public:
         MultiConvPlan plan;
         plan.n = n;
         plan.num_ir = num_ir;
-        plan.log2n = 0;
-        for (uint32_t v = n; v > 1u; v >>= 1) ++plan.log2n;
+        plan.log2n = log2_of_pow2(n);
 
         const uint32_t small = n * 2u * static_cast<uint32_t>(sizeof(float));   // 2n
         const uint32_t big = num_ir * small;                                    // 2n*num_ir
@@ -1629,44 +1565,10 @@ public:
         // Forward passes: a single n-point transform ping-ponging fx_a/fx_b
         // (batch=1). Inverse passes: num_ir transforms ping-ponging big_a/big_b
         // (batch=num_ir).
-        for (uint32_t s = 0; s < plan.log2n; ++s) {
-            struct FftParams { uint32_t n; uint32_t ns; float sign; uint32_t batch; };
-            const bool src_is_a = (s % 2u == 0u);
-            // forward (sign=-1, batch=1) over fx_a/fx_b
-            {
-                wgpu::BufferDescriptor ud{};
-                ud.size = 16;
-                ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-                wgpu::Buffer u = device_.CreateBuffer(&ud);
-                if (!u) return false;
-                FftParams p{n, 1u << s, -1.0f, 1u};
-                queue_.WriteBuffer(u, 0, &p, sizeof(p));
-                wgpu::BindGroup bg = create_bind_group(
-                    fft_pipeline_,
-                    src_is_a ? std::initializer_list<wgpu::Buffer>{plan.fx_a, plan.fx_b, u}
-                             : std::initializer_list<wgpu::Buffer>{plan.fx_b, plan.fx_a, u});
-                if (!bg) return false;
-                plan.fwd_u.push_back(std::move(u));
-                plan.fwd_bgs.push_back(std::move(bg));
-            }
-            // inverse (sign=+1, batch=num_ir) over big_a/big_b
-            {
-                wgpu::BufferDescriptor ud{};
-                ud.size = 16;
-                ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-                wgpu::Buffer u = device_.CreateBuffer(&ud);
-                if (!u) return false;
-                FftParams p{n, 1u << s, 1.0f, num_ir};
-                queue_.WriteBuffer(u, 0, &p, sizeof(p));
-                wgpu::BindGroup bg = create_bind_group(
-                    fft_pipeline_,
-                    src_is_a ? std::initializer_list<wgpu::Buffer>{plan.big_a, plan.big_b, u}
-                             : std::initializer_list<wgpu::Buffer>{plan.big_b, plan.big_a, u});
-                if (!bg) return false;
-                plan.inv_u.push_back(std::move(u));
-                plan.inv_bgs.push_back(std::move(bg));
-            }
-        }
+        if (!build_fft_pass_chain(n, plan.log2n, -1.0f, 1u, plan.fx_a, plan.fx_b,
+                                  plan.fwd_u, plan.fwd_bgs)) return false;
+        if (!build_fft_pass_chain(n, plan.log2n, 1.0f, num_ir, plan.big_a, plan.big_b,
+                                  plan.inv_u, plan.inv_bgs)) return false;
 
         // Forward result lands in fx_b for odd log2n, fx_a for even. The
         // multiply broadcasts it across num_ir IR spectra into big_a (the
@@ -1720,8 +1622,7 @@ public:
         plan.num_ir = num_ir;
         plan.num_part = num_part;
         plan.head = 0;
-        plan.log2n = 0;
-        for (uint32_t v = n; v > 1u; v >>= 1) ++plan.log2n;
+        plan.log2n = log2_of_pow2(n);
         plan.prev_time.assign(plan.block, 0.0f);
 
         const uint32_t small = n * 2u * static_cast<uint32_t>(sizeof(float));  // 2n
@@ -1754,36 +1655,12 @@ public:
         // The ring is Dawn zero-initialized; upload the resident IR partition spectra.
         queue_.WriteBuffer(plan.irspecs, 0, ir_part_specs, static_cast<uint32_t>(ir_bytes));
 
-        struct FftParams { uint32_t n; uint32_t ns; float sign; uint32_t batch; };
-        for (uint32_t s = 0; s < plan.log2n; ++s) {
-            const bool src_is_a = (s % 2u == 0u);
-            // Forward (sign=-1, batch=1) over fx_a/fx_b.
-            {
-                wgpu::Buffer u = device_.CreateBuffer(&ud16);
-                if (!u) return false;
-                FftParams p{n, 1u << s, -1.0f, 1u};
-                queue_.WriteBuffer(u, 0, &p, sizeof(p));
-                wgpu::BindGroup bg = create_bind_group(fft_pipeline_,
-                    src_is_a ? std::initializer_list<wgpu::Buffer>{plan.fx_a, plan.fx_b, u}
-                             : std::initializer_list<wgpu::Buffer>{plan.fx_b, plan.fx_a, u});
-                if (!bg) return false;
-                plan.fwd_u.push_back(std::move(u));
-                plan.fwd_bgs.push_back(std::move(bg));
-            }
-            // Inverse (sign=+1, batch=num_ir) over accum_a/accum_b.
-            {
-                wgpu::Buffer u = device_.CreateBuffer(&ud16);
-                if (!u) return false;
-                FftParams p{n, 1u << s, 1.0f, num_ir};
-                queue_.WriteBuffer(u, 0, &p, sizeof(p));
-                wgpu::BindGroup bg = create_bind_group(fft_pipeline_,
-                    src_is_a ? std::initializer_list<wgpu::Buffer>{plan.accum_a, plan.accum_b, u}
-                             : std::initializer_list<wgpu::Buffer>{plan.accum_b, plan.accum_a, u});
-                if (!bg) return false;
-                plan.inv_u.push_back(std::move(u));
-                plan.inv_bgs.push_back(std::move(bg));
-            }
-        }
+        // Forward (sign=-1, batch=1) over fx_a/fx_b; inverse (sign=+1,
+        // batch=num_ir) over accum_a/accum_b.
+        if (!build_fft_pass_chain(n, plan.log2n, -1.0f, 1u, plan.fx_a, plan.fx_b,
+                                  plan.fwd_u, plan.fwd_bgs)) return false;
+        if (!build_fft_pass_chain(n, plan.log2n, 1.0f, num_ir, plan.accum_a, plan.accum_b,
+                                  plan.inv_u, plan.inv_bgs)) return false;
 
         // MAC writes accum_a (inverse pass s=0 reads accum_a). head lives in
         // fdl_uniform, rewritten each block.
@@ -1998,8 +1875,7 @@ public:
         plan.n = n;
         plan.num_layers = num_layers;
         plan.hop_ratio = static_cast<float>(hop) / static_cast<float>(n);
-        plan.log2n = 0;
-        for (uint32_t v = n; v > 1u; v >>= 1) ++plan.log2n;
+        plan.log2n = log2_of_pow2(n);
 
         const uint32_t small = n * 2u * static_cast<uint32_t>(sizeof(float));   // 2n
         const uint32_t res = num_layers * n * static_cast<uint32_t>(sizeof(float));
@@ -2042,24 +1918,8 @@ public:
         if (!plan.combine_bg) return false;
 
         // Inverse FFT passes (sign +1, batch 1) ping-ponging comb_a/comb_b.
-        for (uint32_t s = 0; s < plan.log2n; ++s) {
-            wgpu::BufferDescriptor ud{};
-            ud.size = 16;
-            ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-            wgpu::Buffer u = device_.CreateBuffer(&ud);
-            if (!u) return false;
-            struct FftParams { uint32_t n; uint32_t ns; float sign; uint32_t batch; };
-            FftParams fp{n, 1u << s, 1.0f, 1u};
-            queue_.WriteBuffer(u, 0, &fp, sizeof(fp));
-            const bool src_is_a = (s % 2u == 0u);
-            wgpu::BindGroup bg = create_bind_group(
-                fft_pipeline_,
-                src_is_a ? std::initializer_list<wgpu::Buffer>{plan.comb_a, plan.comb_b, u}
-                         : std::initializer_list<wgpu::Buffer>{plan.comb_b, plan.comb_a, u});
-            if (!bg) return false;
-            plan.inv_u.push_back(std::move(u));
-            plan.inv_bgs.push_back(std::move(bg));
-        }
+        if (!build_fft_pass_chain(n, plan.log2n, 1.0f, 1u, plan.comb_a, plan.comb_b,
+                                  plan.inv_u, plan.inv_bgs)) return false;
 
         spectral_stack_plans_.insert_or_assign(n, std::move(plan));
         return true;
@@ -3175,11 +3035,27 @@ public:
         auto readback_buf = acquire_readback_buffer(big);
         if (!readback_buf) return 0;
 
+        // Opt-in GPU-busy timing (default OFF → this whole block is skipped and the
+        // encoding below is byte-identical). Gated on ts_in_flight_ so only one async
+        // sample uses the single 2-slot dev_ts_qs_ at a time. A tiny pool buffer holds
+        // the two resolved ticks; if it can't be had, timing is silently skipped this
+        // block rather than holding the audio path hostage.
+        const uint64_t ts_bytes = 2u * sizeof(uint64_t);
+        const bool want_ts = async_timing_enabled_ && has_timestamp_ && !ts_in_flight_
+                             && ensure_device_ts();
+        wgpu::Buffer ts_buf = want_ts ? acquire_readback_buffer(
+                                            static_cast<uint32_t>(ts_bytes))
+                                      : wgpu::Buffer{};
+        const bool ts = want_ts && ts_buf;
+
         queue_.WriteBuffer(plan.buf_a, 0, in_complex, big);
 
         wgpu::CommandEncoderDescriptor enc_desc{};
         auto encoder = device_.CreateCommandEncoder(&enc_desc);
-        encode_fft_passes(encoder, plan.fwd_bgs, fft_wg);
+        // Begin timestamp rides the forward FFT's first pass; end timestamp rides the
+        // inverse FFT's last pass — bracketing the whole convolution's GPU-busy time.
+        encode_fft_passes(encoder, plan.fwd_bgs, fft_wg,
+                          ts ? dev_ts_qs_ : wgpu::QuerySet{});
         {
             wgpu::ComputePassDescriptor pd{};
             auto pass = encoder.BeginComputePass(&pd);
@@ -3189,9 +3065,14 @@ public:
             pass.End();
         }
         encoder.CopyBufferToBuffer(plan.buf_c, 0, plan.buf_a, 0, big);
-        encode_fft_passes(encoder, plan.inv_bgs, fft_wg);
+        encode_fft_passes(encoder, plan.inv_bgs, fft_wg, wgpu::QuerySet{},
+                          ts ? dev_ts_qs_ : wgpu::QuerySet{});
         wgpu::Buffer& inv_buf = (plan.log2n & 1u) ? plan.buf_b : plan.buf_a;
         encoder.CopyBufferToBuffer(inv_buf, 0, readback_buf, 0, big);
+        if (ts) {
+            encoder.ResolveQuerySet(dev_ts_qs_, 0, 2, dev_ts_resolve_, 0);
+            encoder.CopyBufferToBuffer(dev_ts_resolve_, 0, ts_buf, 0, ts_bytes);
+        }
         auto cmd = encoder.Finish();
         queue_.Submit(1, &cmd);
         ++stats_->submits;
@@ -3210,8 +3091,37 @@ public:
         // read_back_async() re-checks the cap and hands the buffer back itself if
         // it rejects; the check above means it cannot, but the id is what the
         // caller keys off either way.
-        return read_back_async(readback_buf, out_complex, big, deadline,
-                               std::move(scale_then_complete));
+        const uint64_t audio_id = read_back_async(readback_buf, out_complex, big,
+                                                  deadline,
+                                                  std::move(scale_then_complete));
+
+        // Register the ticks readback through the SAME non-blocking machinery. Its
+        // callback smooths (end - begin) ns into last_gpu_busy_ns_ and clears the
+        // in-flight gate on EVERY outcome, so a dropped/expired sample can never wedge
+        // timing. WebGPU timestamps are already nanoseconds. `this` is valid whenever
+        // the callback fires — the readback queue is a member, drained by
+        // poll_readbacks() or in the dtor, both with this alive.
+        if (ts) {
+            const uint64_t ts_id = read_back_async(
+                ts_buf, ts_ticks_, static_cast<uint32_t>(ts_bytes), deadline,
+                [this](const ReadbackResult& r) {
+                    if (r.status == ReadbackStatus::Success
+                        && ts_ticks_[1] >= ts_ticks_[0]) {
+                        const double ns =
+                            static_cast<double>(ts_ticks_[1] - ts_ticks_[0]);
+                        // Metal/Chrome quantize a small dispatch to 0 ns; hold the
+                        // last good number rather than blink the readout to 0.
+                        if (ns > 0.0)
+                            last_gpu_busy_ns_ = last_gpu_busy_ns_ > 0.0
+                                ? last_gpu_busy_ns_ * 0.8 + ns * 0.2
+                                : ns;
+                    }
+                    ts_in_flight_ = false;
+                });
+            ts_in_flight_ = (ts_id != 0);
+        }
+
+        return audio_id;
     }
 
     void set_max_readbacks_in_flight(std::size_t max_in_flight) override {
@@ -3349,6 +3259,24 @@ private:
         dev_ts_readback_ = device_.CreateBuffer(&bd);
         return dev_ts_qs_ && dev_ts_resolve_ && dev_ts_readback_;
     }
+
+    // ── Async GPU-busy timing (opt-in; OFF by default) ───────────────────
+    // The blocking *_timed() paths own dev_ts_qs_/dev_ts_resolve_ and read
+    // dev_ts_readback_ with a BLOCKING map — safe to share only because each such op
+    // finishes before the next starts. The async path below must never block, so it
+    // resolves into dev_ts_resolve_ and copies the two ticks into a POOL readback
+    // buffer drained by poll_readbacks(); it serializes itself with ts_in_flight_ (one
+    // in-flight async sample at a time, since dev_ts_qs_ is a single 2-slot set) and
+    // never touches dev_ts_readback_. Native audio leaves async_timing_enabled_ false,
+    // so this whole path is dormant and the async convolution is byte-identical there;
+    // only the browser GPU demo turns it on.
+    bool async_timing_enabled_ = false;
+    bool ts_in_flight_ = false;
+    uint64_t ts_ticks_[2] = {0, 0};   // stable async-readback destination for the ticks
+    double last_gpu_busy_ns_ = 0.0;   // EMA of (end - begin) ns; 0 = no honest number
+
+    void set_async_timing_enabled(bool enabled) override { async_timing_enabled_ = enabled; }
+    double last_gpu_busy_ns() const override { return last_gpu_busy_ns_; }
 
 #ifdef PULP_BENCHMARK
     bench::PerfCounters* bench_counters_ = nullptr;
@@ -3719,30 +3647,77 @@ private:
     // Encode one Stockham FFT pass per bind group into an existing encoder (no
     // submit). Each pass is its own compute pass so Dawn inserts the required
     // cross-pass synchronization. Shared by the fused convolution path.
-    // Optionally writes a beginning-of-pass timestamp into slot 0 of `ts_qs` on
-    // the FIRST pass encoded here — used to bracket a multi-pass op's GPU-busy
-    // time from its very first compute pass. Pass a null QuerySet to disable.
+    // Optionally writes a beginning-of-pass timestamp into slot 0 of `begin_ts_qs`
+    // on the FIRST pass, and/or an end-of-pass timestamp into slot 1 of `end_ts_qs`
+    // on the LAST pass — used to bracket a multi-pass op's GPU-busy time. The `multi`
+    // path ends its bracket on a separate combine pass and so passes only a begin
+    // here; the fused batch path has no trailing pass, so it ends the bracket on the
+    // inverse FFT's last pass via `end_ts_qs`. Pass null QuerySets to disable (the
+    // default — every non-timing caller is unchanged).
     void encode_fft_passes(wgpu::CommandEncoder& encoder,
                            const std::vector<wgpu::BindGroup>& stage_bgs,
                            uint32_t workgroups,
-                           const wgpu::QuerySet& ts_qs = {}) {
-        bool first = true;
+                           const wgpu::QuerySet& begin_ts_qs = {},
+                           const wgpu::QuerySet& end_ts_qs = {}) {
+        const std::size_t last = stage_bgs.empty() ? 0 : stage_bgs.size() - 1;
+        std::size_t idx = 0;
         for (const auto& bg : stage_bgs) {
             wgpu::ComputePassDescriptor pd{};
             wgpu::PassTimestampWrites tw{};
-            if (ts_qs && first) {
-                tw.querySet = ts_qs;
+            tw.beginningOfPassWriteIndex = wgpu::kQuerySetIndexUndefined;
+            tw.endOfPassWriteIndex = wgpu::kQuerySetIndexUndefined;
+            bool want_ts = false;
+            if (begin_ts_qs && idx == 0) {
+                tw.querySet = begin_ts_qs;
                 tw.beginningOfPassWriteIndex = 0;
-                tw.endOfPassWriteIndex = wgpu::kQuerySetIndexUndefined;
-                pd.timestampWrites = &tw;
+                want_ts = true;
             }
+            if (end_ts_qs && idx == last) {
+                // begin and end share one 2-slot set, so the querySet is consistent
+                // even when both land on a single-pass FFT (last == first).
+                tw.querySet = end_ts_qs;
+                tw.endOfPassWriteIndex = 1;
+                want_ts = true;
+            }
+            if (want_ts) pd.timestampWrites = &tw;
             auto pass = encoder.BeginComputePass(&pd);
             pass.SetPipeline(fft_pipeline_);
             pass.SetBindGroup(0, bg);
             pass.DispatchWorkgroups(workgroups);
             pass.End();
-            first = false;
+            ++idx;
         }
+    }
+
+    // Build a Stockham ping-pong pass chain (one uniform + one bind group per
+    // pass) for a single transform direction, appending to `out_uniforms` /
+    // `out_bgs`. `sign` selects forward (-1) / inverse (+1); `batch` is the
+    // number of independent transforms packed back-to-back. Passes ping-pong
+    // between `buf_a` and `buf_b` starting from `buf_a`. Returns false if any
+    // GPU resource fails to allocate.
+    bool build_fft_pass_chain(uint32_t n, uint32_t log2n, float sign,
+                              uint32_t batch, const wgpu::Buffer& buf_a,
+                              const wgpu::Buffer& buf_b,
+                              std::vector<wgpu::Buffer>& out_uniforms,
+                              std::vector<wgpu::BindGroup>& out_bgs) {
+        for (uint32_t s = 0; s < log2n; ++s) {
+            wgpu::BufferDescriptor ud{};
+            ud.size = 16;
+            ud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+            wgpu::Buffer u = device_.CreateBuffer(&ud);
+            if (!u) return false;
+            FftParams p{n, 1u << s, sign, batch};
+            queue_.WriteBuffer(u, 0, &p, sizeof(p));
+            const bool src_is_a = (s % 2u == 0u);
+            wgpu::BindGroup bg = create_bind_group(
+                fft_pipeline_,
+                src_is_a ? std::initializer_list<wgpu::Buffer>{buf_a, buf_b, u}
+                         : std::initializer_list<wgpu::Buffer>{buf_b, buf_a, u});
+            if (!bg) return false;
+            out_uniforms.push_back(std::move(u));
+            out_bgs.push_back(std::move(bg));
+        }
+        return true;
     }
 
     // Build (or fetch) the persistent ping-pong plan for a given FFT size.
@@ -3754,8 +3729,7 @@ private:
 
         FftPlan plan;
         plan.n = n;
-        plan.log2n = 0;
-        for (uint32_t v = n; v > 1u; v >>= 1) ++plan.log2n;
+        plan.log2n = log2_of_pow2(n);
 
         const uint32_t bytes = n * 2u * static_cast<uint32_t>(sizeof(float));
         const auto buf_usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst
@@ -3836,7 +3810,6 @@ private:
         const uint32_t bytes = n * 2u * static_cast<uint32_t>(sizeof(float));
         queue_.WriteBuffer(plan->buf_a, 0, complex_in, bytes);
         for (uint32_t s = 0; s < plan->log2n; ++s) {
-            struct FftParams { uint32_t n; uint32_t ns; float sign; uint32_t batch; };
             FftParams params{n, 1u << s, sign, 1u};
             queue_.WriteBuffer(plan->uniforms[s], 0, &params, sizeof(params));
         }
@@ -4005,6 +3978,61 @@ private:
         encoder.CopyBufferToBuffer(src, 0, dst, 0, size);
         auto cmd = encoder.Finish();
         queue_.Submit(1, &cmd);
+    }
+
+    // ── Benchmark timing wrappers ───────────────────────────────────────────
+    //
+    // Run a block of work, attributing its elapsed time (and, for uploads,
+    // `bytes` moved) to the benchmark counters when PULP_BENCHMARK is defined.
+    // Compiled out to a bare call to the work otherwise.
+
+    // Time a host→GPU upload block (one or more WriteBuffer calls).
+    template <typename Fn>
+    void timed_write(Fn&& writes, double bytes) {
+#ifdef PULP_BENCHMARK
+        const double t0 = bench::now_us();
+        writes();
+        if (bench_counters_) {
+            bench_counters_->gpu_upload_total_us.fetch_add(
+                bench::now_us() - t0, std::memory_order_relaxed);
+            bench_counters_->cpu_to_gpu_bytes_total.fetch_add(
+                bytes, std::memory_order_relaxed);
+        }
+#else
+        (void)bytes;
+        writes();
+#endif
+    }
+
+    // Time a dispatch (+ result copy) block.
+    template <typename Fn>
+    void timed_dispatch_copy(Fn&& work) {
+#ifdef PULP_BENCHMARK
+        const double t0 = bench::now_us();
+        work();
+        if (bench_counters_) {
+            bench_counters_->gpu_dispatch_total_us.fetch_add(
+                bench::now_us() - t0, std::memory_order_relaxed);
+        }
+#else
+        work();
+#endif
+    }
+
+    // Time the GPU→host copy out of a mapped readback buffer.
+    void timed_readback_memcpy(void* dest, const void* src, uint32_t size) {
+#ifdef PULP_BENCHMARK
+        const double t0 = bench::now_us();
+        std::memcpy(dest, src, size);
+        if (bench_counters_) {
+            bench_counters_->gpu_readback_total_us.fetch_add(
+                bench::now_us() - t0, std::memory_order_relaxed);
+            bench_counters_->gpu_to_cpu_bytes_total.fetch_add(
+                static_cast<double>(size), std::memory_order_relaxed);
+        }
+#else
+        std::memcpy(dest, src, size);
+#endif
     }
 
     // ── Backend seam ────────────────────────────────────────────────────
@@ -4220,21 +4248,7 @@ private:
         const void* data = buffer.GetConstMappedRange(0, size);
         if (!data) return false;
 
-#ifdef PULP_BENCHMARK
-        {
-            const double t0 = bench::now_us();
-            std::memcpy(dest, data, size);
-            if (bench_counters_) {
-                bench_counters_->gpu_readback_total_us.fetch_add(
-                    bench::now_us() - t0, std::memory_order_relaxed);
-                bench_counters_->gpu_to_cpu_bytes_total.fetch_add(
-                    static_cast<double>(size),
-                    std::memory_order_relaxed);
-            }
-        }
-#else
-        std::memcpy(dest, data, size);
-#endif
+        timed_readback_memcpy(dest, data, size);
         buffer.Unmap();
         return true;
     }

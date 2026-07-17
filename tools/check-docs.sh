@@ -248,6 +248,16 @@ if [ -f "$ROOT/tools/scripts/widgets_doc_check.py" ]; then
     fi
 fi
 
+# ── Tool registry (docs/status/tools.yaml ⇔ the tree ⇔ the CLAUDE.md digest) ──
+if [ -f "$ROOT/tools/scripts/tools_registry_check.py" ]; then
+    echo "Checking tool registry (docs/status/tools.yaml) is complete and in sync..."
+    if ! python3 "$ROOT/tools/scripts/tools_registry_check.py" --check; then
+        error "docs/status/tools.yaml is invalid, missing a tool, or its CLAUDE.md \
+digest is stale — see the errors above. Regenerate the digest with: \
+python3 tools/scripts/tools_registry_check.py --write"
+    fi
+fi
+
 # ── Skills catalog sync (docs/reference/skills.md ⇔ every SKILL.md) ────────────
 if [ -f "$ROOT/tools/scripts/skills_doc_check.py" ]; then
     echo "Checking skills catalog (docs/reference/skills.md) is in sync..."

@@ -119,8 +119,8 @@ void WidgetBridge::register_widget_value_controls_api() {
             if (hex.empty()) {
                 range->clear_accent_color();
             } else {
-                // parseColor is defined later in register_api; rebuild the
-                // same parser inline so registration order does not matter.
+                // Inline hex parse, self-contained so this setter carries no
+                // dependency on registration order.
                 canvas::Color c = canvas::Color::rgba(1.0f, 1.0f, 1.0f, 1.0f);
                 if (!hex.empty() && hex[0] == '#') {
                     if (hex.size() == 4) {

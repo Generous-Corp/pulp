@@ -38,11 +38,29 @@ DELIBERATELY NOT FLAGGED
   three classes are: clean-room provenance (host-quirks), the importer's own
   denylist (removing the strings would DISABLE the check that rejects vendored
   foreign code), and free-form user input echoed in a CLI fixture.
-* Out of scope entirely (not scanned): `docs/`, `.agents/`, `tools/`,
-  `.github/`, `README.md`, `CHANGELOG.md`. Those legitimately DISCUSS interop
-  with other frameworks — `docs/guides/coming-from-juce.md` exists precisely to
-  tell those users how to adopt Pulp. And `planning/` + `external/`, which are
-  not Pulp's source.
+* Out of scope entirely (not scanned): `docs/` — EXCEPT `docs/reports/`, see
+  below — plus `.agents/`, `.github/`, `README.md`, `CHANGELOG.md`. Those
+  legitimately DISCUSS interop with other frameworks —
+  `docs/guides/coming-from-juce.md` exists precisely to tell those users how to
+  adopt Pulp. And `planning/` + `external/`, which are not Pulp's source.
+
+WHY `docs/reports/` IS SCANNED AND THE REST OF `docs/` IS NOT
+-------------------------------------------------------------
+The three kinds of doc under `docs/` have different jobs, and only one of them
+has a reason to name a framework:
+
+  * `docs/guides/` MIGRATES. A migration guide must name what you migrate FROM,
+    or it cannot do its job.
+  * `docs/reference/` COMPARES APIs and records attribution.
+  * `docs/reports/` is a WORK RECORD — what Pulp hardened, and the evidence. It
+    is public, but it is written for us. That combination is exactly how a
+    private-shaped document ends up on a public surface: a report has no
+    audience reason to name a framework, so a name in one is a comparison that
+    leaked rather than a fact a reader needs.
+
+So the seam is drawn at `docs/reports/`, not at `docs/`. Scanning all of `docs/`
+would flag ~78 legitimate hits, 55 of them in the two files whose entire purpose
+is to name what you are coming from.
 
 Usage:
     python3 tools/scripts/framework_neutrality_check.py             # scan (exit 1 on a finding)
@@ -71,6 +89,8 @@ SCANNED_ROOTS = [
     "test",
     "apple",
     "tools",
+    # Work records only — NOT all of `docs/`. See the docstring for the seam.
+    "docs/reports",
 ]
 
 # Directories never worth walking (third-party trees and build output that can
@@ -324,6 +344,18 @@ def selftest() -> int:
     case("the CLI tree is scanned; docs are not",
          {"docs/guides/coming-from-juce.md": "Moving a JUCE plugin to Pulp\n",
           "tools/import/terms.cpp": '// map JUCE::Slider -> pulp::view::Slider\n'},
+         1)
+
+    # The `docs/` exemption stops at `docs/reports/`. A report is a work record
+    # with no audience reason to name a framework, so a name in one is leaked
+    # comparison material. Pinning BOTH halves here means widening the scope back
+    # out to all of `docs/` — or narrowing it away from reports — has to be a
+    # deliberate edit to this case, not a quiet drift in SCANNED_ROOTS.
+    case("docs/reports is scanned; the rest of docs is not",
+         {"docs/reports/some-hardening-plan.md":
+          "gaps identified by comparing Pulp with JUCE and iPlug2\n",
+          "docs/guides/coming-from-juce.md": "Moving a JUCE plugin to Pulp\n",
+          "docs/reference/licensing.md": "| iPlug2 | zlib-like | attribution |\n"},
          1)
 
     print()

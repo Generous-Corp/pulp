@@ -178,6 +178,20 @@ the audio callback path. Tests live in
 `pulp-test-processor-layout-latency` plus the existing
 `pulp-test-au-v2-effect` suite.
 
+### Bypass audio must be latency-compensated (PDC alignment)
+
+The `ProcessBufferLists` bypass short-circuit must NOT `memcpy` the dry input
+straight to the output. When the Processor reports a non-zero latency, the host
+has delay-aligned the plugin's *wet* path by that latency (PDC), so a raw dry
+copy arrives `latency` samples early — comb-filtering on parallel busses.
+Route the bypass pass-through through `boundary::render_bypass_passthrough`
+(`adapter_boundary.hpp`), sizing the member `bypass_` delay line to
+`reported_latency_samples(processor_->latency_samples(), host_quirks_)` in
+`Initialize()`. A zero latency collapses to a straight passthrough. The real
+adapter is pinned by `pulp-test-au-v2-effect [bypass]` (drives
+`ProcessBufferLists` with a latency-reporting, bypass-engaged processor and
+asserts the impulse lands at frame `latency`, not frame 0).
+
 ### Channel-config negotiation (`kAudioUnitProperty_SupportedNumChannels`)
 
 `PulpAUEffect::SupportedNumChannels()` reports the supported (input, output)

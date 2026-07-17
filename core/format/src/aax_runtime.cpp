@@ -1,15 +1,20 @@
 #include <pulp/format/aax_entry.hpp>
+#include <pulp/format/aax_editor.hpp>
 #include <pulp/format/aax_midi_node.hpp>
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/runtime/log.hpp>
+#include <pulp/state/listener_token.hpp>
 #include <pulp/format/aax_midi_packets.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/max_block_contract.hpp>
 #include <pulp/format/parameter_text.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
+#include <pulp/runtime/exceptions.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
 #include <AAX_CEffectParameters.h>
@@ -26,6 +31,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -175,41 +181,9 @@ uint32_t category_to_aax(PluginCategory category) {
     return AAX_ePlugInCategory_Effect;
 }
 
-void clear_audio(float** channels, int channel_count, int sample_count) {
-    if (!channels) {
-        return;
-    }
-    for (int ch = 0; ch < channel_count; ++ch) {
-        if (channels[ch]) {
-            std::fill_n(channels[ch], sample_count, 0.0f);
-        }
-    }
-}
-
-void copy_audio(float** output,
-                int output_channels,
-                float** input,
-                int input_channels,
-                int sample_count)
-{
-    if (!output) {
-        return;
-    }
-
-    const int shared_channels = std::min(output_channels, input_channels);
-    for (int ch = 0; ch < shared_channels; ++ch) {
-        if (!output[ch] || !input || !input[ch]) {
-            continue;
-        }
-        std::memcpy(output[ch], input[ch], static_cast<std::size_t>(sample_count) * sizeof(float));
-    }
-
-    for (int ch = shared_channels; ch < output_channels; ++ch) {
-        if (output[ch]) {
-            std::fill_n(output[ch], sample_count, 0.0f);
-        }
-    }
-}
+// The bypass audio pass-through (copy main input → output, silence-pad, and
+// latency-compensate the dry signal) is the shared
+// `boundary::render_bypass_passthrough` helper — see the render loop below.
 
 void copy_midi(const midi::MidiBuffer& in, midi::MidiBuffer& out) {
     // Short MidiEvent entries (note/CC/pitchbend/etc).
@@ -260,14 +234,18 @@ struct FloatTaperDelegate final : AAX_ITaperDelegate<float> {
     AAX_ITaperDelegate<float>* Clone() const override { return new FloatTaperDelegate(*this); }
     float GetMaximumValue() const override { return range.max; }
     float GetMinimumValue() const override { return range.min; }
+
+    // The map itself lives in aax_editor.hpp. ParameterMirror has to model what
+    // this delegate does to a value in order to know when a write-back would be
+    // a no-op, and a private copy of the math here is how the two drift apart.
     float ConstrainRealValue(float value) const override {
-        return range.denormalize(range.normalize(value));
+        return taper_constrain_real(range, value);
     }
     float NormalizedToReal(double normalizedValue) const override {
-        return range.denormalize(static_cast<float>(normalizedValue));
+        return taper_normalized_to_real(range, normalizedValue);
     }
     double RealToNormalized(float realValue) const override {
-        return range.normalize(ConstrainRealValue(realValue));
+        return taper_real_to_normalized(range, realValue);
     }
 
     state::ParamRange range;
@@ -441,6 +419,13 @@ struct InstanceState {
         prepared_input_channels = input_channels;
         prepared_output_channels = output_channels;
 
+        // Size the bypass dry-delay line to the SAME latency the controller
+        // reports to the host via SetSignalLatency(aax_reported_latency(...)),
+        // so a bypassed block emits `input[n - latency]` and stays aligned with
+        // the host's PDC on the wet path. Off the render thread; a 0 latency
+        // leaves it a zero-copy passthrough. Same policy as CLAP/VST3/AU.
+        bypass.prepare(aax_reported_latency(definition.latency_samples));
+
         // Pre-reserve the render-thread pointer scratch so the per-block
         // clear()/push_back() below never allocates (they stay within this
         // reserved capacity), keeping the process() region no-alloc.
@@ -461,12 +446,21 @@ struct InstanceState {
 
     EntryConfig config;
     PluginDefinition definition;
-    std::unique_ptr<Processor> processor;
+    // The store is declared before the Processor so it is destroyed after it.
+    // `Processor::state()` dereferences a pointer to this store, and a Processor
+    // may read it from its destructor or from a worker thread that destructor is
+    // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
+    std::unique_ptr<Processor> processor;
     PluginDescriptor descriptor;
     std::vector<const float*> input_ptrs;
     std::vector<float*> output_ptrs;
     std::vector<const float*> sidechain_ptrs;
+    // Dry-delay line for the bypass pass-through. Sized to the processor's
+    // reported latency in ensure_prepared(); keeps the bypassed dry signal
+    // aligned with the host's plugin-delay-compensation instead of arriving
+    // `latency` samples early (a 0 latency leaves it a zero-copy passthrough).
+    boundary::LatencyCompensatedBypass bypass;
     midi::MidiBuffer midi_in;
     midi::MidiBuffer midi_out;
     bool prepared = false;
@@ -476,6 +470,12 @@ struct InstanceState {
     int prepared_output_channels = 0;
 };
 
+// Same reasoning as EditorModel's asserts below, and the same failure if it is
+// ever violated. Fail the build rather than the teardown.
+static_assert(offsetof(InstanceState, store) < offsetof(InstanceState, processor),
+              "InstanceState::store must be declared before ::processor so the "
+              "store outlives the Processor that points at it");
+
 void destroy_instance(PrivateDataBlock* block) {
     if (!block || !block->instance) {
         return;
@@ -484,7 +484,7 @@ void destroy_instance(PrivateDataBlock* block) {
     block->instance = nullptr;
 }
 
-class EffectParameters final : public AAX_CEffectParameters {
+class EffectParameters final : public AAX_CEffectParameters, public EditorHost {
 public:
     explicit EffectParameters(EntryConfig in_config)
         : config_(in_config)
@@ -495,6 +495,39 @@ public:
         } else {
             init_error_ = result.error;
         }
+    }
+
+    // ── EditorHost ─────────────────────────────────────────────────────────
+    //
+    // The editor model is built on first use rather than in EffectInit(): a
+    // scan, an offline render, or any GUI-less instantiation never pays for a
+    // Processor it will not show.
+
+    Processor* editor_processor() override {
+        ensure_editor_model();
+        return editor_ ? editor_->processor.get() : nullptr;
+    }
+
+    state::StateStore* editor_store() override {
+        ensure_editor_model();
+        return editor_ ? &editor_->store : nullptr;
+    }
+
+    std::optional<ViewSize> editor_view_size() override {
+        auto* processor = editor_processor();
+        if (!processor || !processor->has_editor()) {
+            return std::nullopt;
+        }
+        // A plugin's view_size() is its own code; a throw here must not cross
+        // back into the host, and the sizing query has no way to report one.
+        PULP_TRY { return processor->view_size(); }
+        PULP_CATCH_ALL { return std::nullopt; }
+    }
+
+    const PluginDefinition& editor_definition() const override { return definition_; }
+
+    void release_editor_gestures() override {
+        if (editor_) editor_->gestures->release_all();
     }
 
     AAX_Result EffectInit() override {
@@ -552,7 +585,12 @@ public:
                                               double value,
                                               AAX_EUpdateSource source) override
     {
-        return AAX_CEffectParameters::UpdateParameterNormalizedValue(parameter_id, value, source);
+        const auto result =
+            AAX_CEffectParameters::UpdateParameterNormalizedValue(parameter_id, value, source);
+        if (result == AAX_SUCCESS) {
+            push_to_editor_store(parameter_id, value);
+        }
+        return result;
     }
 
     AAX_Result GenerateCoefficients() override {
@@ -599,9 +637,142 @@ public:
     }
 
 private:
+    /// Model-side editor state. AAX keeps the data model and the real-time
+    /// algorithm apart — the algorithm's Processor lives in its private data
+    /// block and is unreachable from here — so the editor needs its own
+    /// Processor to call create_view() on. The parameter manager stays the
+    /// value authority; this store is a mirror kept in sync both ways.
+    struct EditorModel {
+        // Declaration order is destruction order reversed, and every line below
+        // depends on it.
+        //
+        // The store is declared before the Processor so it is destroyed after
+        // it. `Processor::state()` dereferences a pointer to this store, and a
+        // Processor may read it from its destructor or from a worker thread that
+        // destructor is about to join. Reversing these two lines hands that
+        // thread a freed store. Every other adapter declares the pair this way.
+        //
+        // The router sits between them for the same reason one step further out:
+        // a parameter write from `~Processor` reaches the store's gesture
+        // callbacks, which route through the router.
+        //
+        // The listener token is last so it is destroyed first, unsubscribing
+        // from the store before anything the callback touches goes away.
+        state::StateStore store;
+        std::unique_ptr<GestureRouter> gestures;
+        std::unique_ptr<ParameterMirror> mirror;
+        std::unique_ptr<Processor> processor;
+        state::ListenerToken value_listener;
+    };
+
+    // Members are destroyed in reverse declaration order, and declaration order
+    // is the only thing holding the lifetimes above together. Fail the build
+    // rather than the teardown if someone reorders them.
+    static_assert(offsetof(EditorModel, store) < offsetof(EditorModel, processor),
+                  "EditorModel::store must be declared before ::processor so the "
+                  "store outlives the Processor that points at it");
+    static_assert(offsetof(EditorModel, gestures) < offsetof(EditorModel, processor),
+                  "EditorModel::gestures must be declared before ::processor: a "
+                  "parameter write from ~Processor routes through the gesture "
+                  "callbacks");
+    static_assert(offsetof(EditorModel, value_listener) > offsetof(EditorModel, processor),
+                  "EditorModel::value_listener must be declared last so it is "
+                  "destroyed first, unsubscribing from the store before the "
+                  "mirror and Processor the callback touches go away");
+
+    void ensure_editor_model() {
+        if (editor_ || editor_init_failed_ || !init_error_.empty() || !config_.factory) {
+            return;
+        }
+
+        auto processor = config_.factory();
+        if (!processor) {
+            editor_init_failed_ = true;
+            runtime::log_error("AAX editor: processor factory returned null");
+            return;
+        }
+
+        auto model = std::make_unique<EditorModel>();
+        model->processor = std::move(processor);
+        model->processor->set_state_store(&model->store);
+        model->processor->define_parameters(model->store);
+
+        // Seed the mirror from the parameter manager so an editor opened after
+        // automation or a session recall shows the current values, not defaults.
+        for (const auto& binding : definition_.parameters) {
+            if (auto* parameter = mParameterManager.GetParameterByID(binding.aax_id.c_str())) {
+                float value = binding.range.default_value;
+                parameter->GetValueAsFloat(&value);
+                model->store.set_value(binding.id, value);
+            }
+        }
+
+        // Editor gesture → AAX automation touch/release. Without this pair a
+        // custom UI's knob drag records automation the host never scoped, so
+        // every edit lands as an isolated point instead of a stroke.
+        model->gestures = std::make_unique<GestureRouter>(
+            definition_,
+            [this](const char* aax_id) { TouchParameter(aax_id); },
+            [this](const char* aax_id) { ReleaseParameter(aax_id); });
+        model->store.set_gesture_callbacks(
+            [this](state::ParamID id) {
+                if (editor_) editor_->gestures->begin(id);
+            },
+            [this](state::ParamID id) {
+                if (editor_) editor_->gestures->end(id);
+            });
+
+        // Editor edit → AAX parameter. Avid's contract is that a GUI updates
+        // values through AAX_IParameter::SetValue*, never by calling
+        // UpdateParameterNormalizedValue directly, so the automation locks and
+        // the coefficient post are managed for us. ParameterMirror owns the rule
+        // that keeps this direction from chasing the one below.
+        model->mirror = std::make_unique<ParameterMirror>(
+            definition_,
+            [this](const char* aax_id, float& out) {
+                auto* parameter = mParameterManager.GetParameterByID(aax_id);
+                if (!parameter) return false;
+                // AAX_IParameter::GetValueAsFloat answers false — without
+                // writing through the out-pointer — for a parameter whose value
+                // type is not float. Reporting success would hand the mirror an
+                // untouched `out` and invite it to "correct" AAX to that.
+                return parameter->GetValueAsFloat(&out);
+            },
+            [this](const char* aax_id, float value) {
+                auto* parameter = mParameterManager.GetParameterByID(aax_id);
+                if (!parameter) return false;
+                // Refuses the same way, rather than converting, for a non-float
+                // parameter: report the refusal instead of claiming the write.
+                return parameter->SetValueWithFloat(value);
+            });
+        model->value_listener = model->store.add_listener(
+            [this](state::ParamID id, float value) {
+                if (editor_) editor_->mirror->on_store_value_changed(id, value);
+            },
+            state::ListenerThread::Main);
+
+        editor_ = std::move(model);
+    }
+
+    /// AAX parameter manager → editor store. The base class has already stored
+    /// the new value by the time this runs, which is what lets ParameterMirror
+    /// recognize the resulting store notification as an echo and drop it.
+    void push_to_editor_store(AAX_CParamID parameter_id, double normalized) {
+        if (!editor_ || !parameter_id) {
+            return;
+        }
+        state::ParamID id = 0;
+        if (!param_id_for_aax_id(definition_, parameter_id, id)) {
+            return;  // AAX's own master-bypass control has no store parameter
+        }
+        editor_->store.set_normalized(id, static_cast<float>(normalized));
+    }
+
     EntryConfig config_{};
     PluginDefinition definition_{};
     std::string init_error_;
+    std::unique_ptr<EditorModel> editor_;
+    bool editor_init_failed_ = false;
 };
 
 int32_t AAX_CALLBACK instance_init(const AlgorithmContext* context,
@@ -738,15 +909,16 @@ void AAX_CALLBACK process_callback(AlgorithmContext* const instances_begin[],
         const bool bypass = context->parameter_packet && context->parameter_packet[0] >= 0.5f;
         if (bypass) {
             if (component.main_output_channels > 0) {
-                if (component.main_input_channels > 0) {
-                    copy_audio(context->audio_output,
-                               component.main_output_channels,
-                               context->audio_input,
-                               component.main_input_channels,
-                               process_count);
-                } else {
-                    clear_audio(context->audio_output, component.main_output_channels, process_count);
-                }
+                // Copy main input → main output latency-compensated through the
+                // shared dry-delay line so the bypassed dry signal stays aligned
+                // with the host's PDC on the wet path (channels beyond the
+                // boundary ceiling fall back to an undelayed copy uniformly);
+                // an absent input bus (main_input_channels == 0) yields silence.
+                boundary::render_bypass_passthrough(
+                    state.bypass, context->audio_output,
+                    component.main_output_channels, context->audio_input,
+                    component.main_input_channels,
+                    static_cast<std::uint32_t>(process_count));
             }
             if (definition.supports_midi_output) {
                 copy_midi(state.midi_in, state.midi_out);
@@ -903,7 +1075,8 @@ IACFUnknown* create_effect_parameters(const EntryConfig& config) {
 
 AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
                                    const EntryConfig& config,
-                                   AAXCreateObjectProc create_proc)
+                                   AAXCreateObjectProc create_proc,
+                                   AAXCreateObjectProc create_gui_proc)
 {
     if (!out_collection || !create_proc) {
         return AAX_ERROR_UNIMPLEMENTED;
@@ -963,6 +1136,19 @@ AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
         status != AAX_SUCCESS)
     {
         return status;
+    }
+
+    // The custom editor. Registering this proc is what makes Pro Tools
+    // instantiate a plug-in GUI at all; with only the parameters proc above the
+    // host falls back to its auto-generated parameter strip, whatever the
+    // plug-in's create_view() would have drawn.
+    if (create_gui_proc) {
+        if (auto status = effect->AddProcPtr(reinterpret_cast<void*>(create_gui_proc),
+                                             kAAX_ProcPtrID_Create_EffectGUI);
+            status != AAX_SUCCESS)
+        {
+            return status;
+        }
     }
 
     if (auto* effect_properties = effect->NewPropertyMap()) {

@@ -76,7 +76,7 @@ drift. Non-zero exit on any build failure or drift.
 ```bash
 # Build the SDK and install it to a prefix the sweep can point at:
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j"$(getconf _NPROCESSORS_ONLN)"
+tools/ci/governed-build.sh cmake --build build
 cmake --install build --prefix /tmp/pulp-sdk
 
 # Dry-run first — prints the plan (what will build, what is skipped) without cloning:

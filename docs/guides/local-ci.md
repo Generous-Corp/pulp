@@ -216,6 +216,57 @@ between the remote HEAD and the target SHA. Typical cycles drop from
 full bundle automatically when the delta would be larger than the full
 pack.
 
+## Keeping fleet Macs on the Shipyard pin (optional)
+
+`tools/shipyard.toml` pins the Shipyard version every checkout uses, and
+`tools/install-shipyard.sh` installs exactly that pin. On a machine that ships
+PRs every day the pin moves underneath you, and a machine that quietly falls
+behind — or, worse, drifts *ahead* after a stray `shipyard update` — runs a
+Shipyard that was never validated against Pulp's CI matrix and that disagrees
+with the `SHIPYARD_VERSION` every workflow declares.
+
+`tools/scripts/shipyard_autoupdate.py` converges one machine onto the pin.
+Nothing about it is required: a public cloner runs `install-shipyard.sh` once
+and never thinks about this again. It exists for the local Macs.
+
+```bash
+# What would happen, without touching anything:
+python3 tools/scripts/shipyard_autoupdate.py --check --json
+
+# Converge now (no-op and silent if already at the pin):
+python3 tools/scripts/shipyard_autoupdate.py
+
+# Run it hourly, in the background, per machine:
+tools/scripts/install_shipyard_autoupdate.sh
+tools/scripts/install_shipyard_autoupdate.sh --status
+tools/scripts/install_shipyard_autoupdate.sh --uninstall
+```
+
+**Kill switch.** Auto-update is on once installed, and off everywhere it is
+not installed. To stop it without uninstalling:
+
+```bash
+echo off > ~/.config/pulp/shipyard-autoupdate    # `on` resumes
+```
+
+`PULP_SHIPYARD_AUTOUPDATE=0` does the same for a shell or a one-off run, and
+overrides the file. The **file** is the one that matters for the background
+agent: a launchd agent inherits no shell environment, so an env-only kill
+switch could not reach the thing it is meant to kill.
+
+What it guarantees, and why each one is there:
+
+| Behaviour | Why |
+|---|---|
+| Converges to the pin, **never to `latest`** | The pin is the source of truth; a bare `shipyard update` tracks `latest` and strands the machine ahead of the pin (7 minors ahead on 2026-07-16). |
+| Handles **both** directions | `shipyard update` refuses to go backwards — it reports `update_available: false` and exits 0 — so coming back from ahead of the pin goes through `install-shipyard.sh`. |
+| Reads the pin from **`origin/main`** | A dev checkout is usually parked on a feature branch, which may carry an experimental pin. `PULP_SHIPYARD_AUTOUPDATE_PIN_REF=worktree` overrides. |
+| **Never updates mid-job** | Swapping the binary under an in-flight ship could corrupt a run. It defers while a Pulp `Runner.Worker` or a validating `shipyard` subcommand is alive. The always-on `shipyard daemon` does not count as busy. |
+| **Fails closed** | Any probe that cannot answer (`ps` fails, version unreadable, host offline) means "do not update". The working binary is left in place and the machine converges on a later tick — which is also how an intermittently-offline laptop is meant to behave. |
+| **Verifies the outcome** | Exit 0 is not proof. The installed version is re-read and must equal the pin, so a declined update or a swallowed checksum failure reports as a failure instead of a false success. |
+| **One installer at a time** | A hand-run converger and a background tick both writing `~/.local/bin/shipyard` is exactly the half-installed binary to avoid; the install step is held under a machine-wide lock. |
+| **Silent when nothing changed** | The steady state prints nothing. Every decision is still published to `~/.local/state/pulp/shipyard_autoupdate.json`. |
+
 ## Host resource governance
 
 Pulp's local Macs are shared: CI validation builds run alongside agent and
@@ -227,8 +278,26 @@ It is tiered:
 - **Tier 0 — always, zero config.** The `pulp` CLI bounds build parallelism to
   `min(cores, RAM_budget / 1.5 GiB)` on every build it emits (`pulp
   build/dev/loop`, the local-SDK build). No lease store required; override the
-  RAM axis with `PULP_BUILD_MEM_BUDGET_MB`. A bare `--parallel`/`-j` anywhere in
-  the repo is rejected by `tools/scripts/build_parallelism_guard.py`.
+  RAM axis with `PULP_BUILD_MEM_BUDGET_MB`. `tools/scripts/build_parallelism_guard.py`
+  rejects a bare `--parallel`/`-j` (unbounded) anywhere in the repo, and — on the
+  shared-host surfaces agents copy from (`CLAUDE.md`, `.shipyard/config.toml`,
+  `.agents/skills/**`) — also rejects an *explicit but whole-machine* count
+  (`-j$(nproc)` / `-j$(sysctl -n hw.ncpu)` / `--parallel $(getconf
+  _NPROCESSORS_ONLN)`): it has a count, so it is not unbounded, but on a shared
+  Mac it claims every core, so N concurrent builds request N × cores and starve
+  each other. The rule is a property of the host, not the command — so the guard
+  fires only where a static scan can *prove* the surface is shared. It does NOT
+  scan `.github/workflows/**`, and **not** because a workflow leg never shares a
+  box: a workflow's `runs-on` is resolved dynamically (often
+  `${{ fromJSON(matrix.runs_on_json) }}` or a repo var) and can point at the
+  shared self-hosted Studios — Pulp's own macOS matrix leg resolves to
+  `PULP_LOCAL_MACOS_RUNS_ON_JSON`, the Studios that host the required `macos`
+  gate. A file scan cannot resolve that, so in a workflow the bound is the
+  **author's** responsibility: route a self-hosted macOS leg through
+  `tools/ci/governed-build.sh` (as `build.yml`'s intel-canary compile,
+  `examples-validation.yml`, `web-plugins.yml`'s `gpu-audio-macos` job, and
+  `format-baseline-diff.yml` now do). The steer everywhere is `pulp build` /
+  `tools/ci/governed-build.sh`, which take their `-j` from the governor.
 - **Tier 1 — tartci per-host lease governor.** On a host running a tartci lease
   store, builds and VM runners acquire a weighted core+memory lease before
   starting; admission is `min(core-budget, memory-budget)`, so a build that
@@ -245,12 +314,19 @@ It is tiered:
 
 The **mac local lane** is the one that historically escaped the CLI: Shipyard's
 `local` backend runs the `.shipyard/config.toml` build string directly on the
-host and does not pass through the `pulp` CLI. That build is now wrapped by
+host and does not pass through the `pulp` CLI. Every build stage in that config
+— `default`, `parser`, **and** `smoke` — is therefore wrapped by
 `tools/ci/governed-build.sh`, which acquires a tartci build lease sized from the
 host profile, exports the granted `-j`, runs the build as a child process, and
 releases the lease on exit. When tartci is absent (a build VM or a plain
 checkout) or the lease is denied (host saturated), it falls back to the Tier-0
-bound — it never fails the build and never piles onto a saturated host.
+bound — it never fails the build and never piles onto a saturated host. (The
+`smoke` lane previously used a raw `--parallel $(getconf _NPROCESSORS_ONLN)` and
+so ran whole-machine on the shared Mac while the required gate validated
+alongside it; it now takes a governed share like the other lanes.) The
+version-controlled `overrides.windows` recipes keep a fixed `--parallel 4`
+instead: they run under PowerShell with no wrapper-path or `$(…)` assumptions,
+and unbounded MSBuild link parallelism trips LNK1104 on ARM64.
 
 `pulp status` reports the active tier with a `Build governance: Tier N (…)`
 line. Host-side setup and the deeper lease/role/memory-axis mechanics live in
@@ -266,7 +342,7 @@ Pulp's `.shipyard/config.toml` defines three:
 |---------|-------------|--------------|
 | `default` | Most PRs. The lane every cross-platform target gates on. | Full `setup → configure → build → test`. Examples ON. Excludes the `slow` ctest label. |
 | `parser` | PRs that only touch runtime-import parser code. | Same stages with `PULP_BUILD_EXAMPLES=OFF`; tests filter to `--label-include parser-import`. Skips plugin validators (auval / pluginval / clap-validator) and the broader format-adapter smoke surface. |
-| `smoke` | Quick downstream-scaffold check after dependency or install-layout edits. | Configure + build only; runs the SDK-smoke export against a downstream scaffold. |
+| `smoke` | Quick downstream-scaffold check after dependency or install-layout edits. | Configure + governed build only (both `cmake --build` steps go through `tools/ci/governed-build.sh`); runs the SDK-smoke export against a downstream scaffold. |
 | `gates` | Version-bump / skill-sync gate scripts. | `tools/scripts/skill_sync_check.py` + `tools/scripts/version_bump_check.py` in report mode. |
 
 `shipyard config profiles` lists what is installed locally and which one is active.
@@ -301,6 +377,109 @@ broad validation.
 
 To opt out for an individual run, pass `--pipeline default` explicitly.
 
+## Routing contract (checked)
+
+Every `*_RUNS_ON_JSON` repo variable is a **lane**: it names the labels a class
+of jobs is dispatched to. The intended lane→label mapping lives in
+**`tools/scripts/runner_topology.json`**, and
+`tools/scripts/runner_topology_check.py` reconciles it against the live repo
+variables and the live registered runners.
+
+**The contract is the source of truth for lane→label.** Label values quoted
+inline elsewhere in this guide are illustrative and can lag; the contract plus
+its checker are authoritative, because they are the only pair that is verified.
+
+### The failure this prevents
+
+GitHub does not validate `runs-on`. **A job that asks for a label no runner
+carries is not an error — it is queued, forever.** There is no warning, no
+annotation, no failed check. The only symptom is jobs piling up while the pool
+looks saturated, which is indistinguishable from "we're just busy".
+
+That makes a mis-pointed routing variable *silent*. A relief valve routed into a
+black hole is worse than no relief valve: it reports healthy and relieves
+nothing, and the queue it was supposed to drain grows behind it.
+
+The same class of bug already bit the busy probe in `build.yml`: reading
+`actions/runners` needs `Administration: Read`, which the default
+`GITHUB_TOKEN` lacks, so the probe 403s and falls back to `BUSY=0` — silently
+disabling overflow. Nothing about either failure is visible without asking.
+
+### What the checker asserts
+
+| Check | Failure it catches |
+|-------|--------------------|
+| `drift` | A variable was edited without updating the contract (or vice versa). The variable is a reviewed artifact, not a blind edit. |
+| `black-hole` | The lane's labels are satisfiable by no runner. |
+| `degraded` | The only matching runners are offline — the host may just be asleep. A warning, not an error: a different failure from a label nobody owns. |
+| `undeclared` | A live routing variable with no lane in the contract. |
+| `hosted-unknown` | A `runs-on` value that is not self-hosted and not a known GitHub image — i.e. a typo, which queues forever. |
+| `must-unset` | A paid Namespace overflow variable is set (cost guard). |
+
+Label matching is **subset containment**: GitHub dispatches to a runner only if
+it carries *every* label in the array. A lane requesting
+`[self-hosted, macOS, ARM64, pulp-build, pulp-build-studio]` is not served by a
+runner carrying only `pulp-preamble`, however much the labels overlap.
+
+### Three runner states, not two
+
+`online` / `offline` is not the whole story. Tart runners register **JIT and
+ephemeral** (`tools/ci/tart-runner.sh`, `tart-runner-linux.sh`): they exist only
+while a job runs and vanish when idle. For those lanes an empty registry proves
+nothing — the provisioner may simply have nothing to do.
+
+So ephemeral lanes are judged on **service history** instead: has any job been
+dispatched to this exact label set inside the lookback window? A label set with
+no runner *and* no recent service has nothing provisioning it, and that is a
+black hole. This distinction is load-bearing — without it the release lanes,
+which are idle between releases, would be flagged as broken every sweep.
+
+Service history is gathered from the workflows that **consume the lane**, found
+by scanning `.github/workflows` for the variable. A repo-wide "last N runs"
+sweep is *not* a time window: on a busy repo the newest 100 runs were measured
+covering well under an hour, so any lane used less often than that — every
+release lane — would be condemned on every sweep. Scoping to the consuming
+workflow makes 20 runs reach back months for a handful of API calls. The scan is
+also **lazy**: a lane with a live runner costs zero API calls.
+
+**Honest limits.** This check proves a lane *can* be served; it does not prove
+jobs *are* being served well. It will not catch a runner that is online but
+wedged, a lane that is slow rather than dead, a capacity shortfall (labels
+resolve, queue still grows), or a black hole in a `runs-on` hard-coded in a
+workflow rather than driven by a variable. An ephemeral lane whose consuming
+workflow has not run inside the lookback window yields no evidence and is
+reported as a black hole — a false positive that is deliberately biased loud, on
+the grounds that a silent relief valve is what caused this in the first place.
+
+### Where it runs, and why
+
+- **`runner-topology-check.yml`** — hourly cron on `ubuntu-latest`, opening and
+  auto-closing a tracking issue. The invariant is about *live fleet state*, so
+  it can break with **no commit at all**: a runner is decommissioned, a host
+  renamed, a variable edited in the web UI. A PR gate would never see any of
+  that. It runs GitHub-hosted deliberately — a check that queues behind the
+  saturated pool it is auditing is no check.
+- **`runner-topology-selftest`** (ctest) — the diff-shaped half: contract
+  well-formedness and the reconciliation logic. No network, so it runs on every
+  PR for free and never adds an API call to the required macOS gate.
+
+The checker exits `2` when live state cannot be read, distinct from pass (`0`)
+and violation (`1`), so a missing token scope fails loudly instead of reporting
+a false green.
+
+### Changing a lane
+
+Edit the variable **and** its lane in `runner_topology.json` in the same change —
+the drift check exists to make that atomic. Then:
+
+```bash
+# Reconcile against the live fleet (uses ghapp locally — the App token bucket).
+python3 tools/scripts/runner_topology_check.py --mode=report
+
+# Advisory (never fails), useful while iterating.
+python3 tools/scripts/runner_topology_check.py --mode=hint
+```
+
 ## macOS overflow routing (Plan B)
 
 > **Namespace is OFF (cost).** We build macOS on **local Macs + GitHub-hosted**
@@ -323,7 +502,7 @@ reviewed by `/codex` 2026-05-13).
 
 1. **Operator override** — `gh workflow run build.yml --field macos_runner_selector_json='"<label>"'`. Always wins.
 2. **Overflow** — `BUSY >= PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` (default `2`) AND `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is set AND the trigger is `pull_request`. Routes to `namespace-profile-generouscorp-macos`.
-3. **Local default** — `PULP_LOCAL_MACOS_RUNS_ON_JSON` (currently `["self-hosted","sanitizer"]`).
+3. **Local default** — `PULP_LOCAL_MACOS_RUNS_ON_JSON`. For the current label set, read the lane in `tools/scripts/runner_topology.json` — that file is checked against the live fleet, so it cannot drift the way a value quoted here can.
 
 **Tuning knobs** (repo variables):
 
@@ -471,6 +650,130 @@ shipyard update --dry-run                 # plan only
 
 # Wait after handoff/rescue without depending solely on GraphQL
 shipyard wait pr <PR> --state green       # REST fallback as of v0.56.2
+```
+
+### Off-fleet queue-age watchdog (`runner-health-check.yml`)
+
+`.github/workflows/runner-health-check.yml` sweeps every 30 minutes and opens a
+tracking issue when a lane has stopped serving work. It runs on `ubuntu-latest`
+**on purpose**: a guard that lives on the fleet dies with the fleet, so the one
+outage it exists to report would be the outage that silences it. It is the
+symptom-level backstop under the recovery tooling above — `shipyard rescue` and
+`runner watch` fix a wedge you already know about; this tells you a wedge
+exists.
+
+**Why queue age, and not a runner-label check.** The macOS lanes are
+JIT/ephemeral: a runner registers with GitHub only while it serves a job. So
+"zero runners carry label `pulp-studio-01`" is *both* the healthy-idle state and
+the dead-lane state, and nothing on GitHub's side can tell them apart. A
+label-satisfiability probe therefore false-alarms every idle night and gets
+muted within a week. Queue age is the observable that separates alive from dead,
+and it is cause-agnostic — it catches causes nobody has enumerated yet, not just
+the one that happened last time.
+
+**Why it stays quiet on a busy afternoon.** A deep queue on a healthy pool is
+normal: the measured baseline on this repo under normal load is a median queue
+age of 5 min, an oldest of 31 min, and 3 runs past 30 min. A naive "queued > 30
+min" rule alarms on that. So an alarm requires **two independent conditions**:
+
+1. **Age** — the job has waited past `alarm_minutes` (default **45**, roughly
+   1.5x the observed healthy maximum).
+2. **Liveness** — its lane shows no sign of life: nothing with comparable labels
+   is `in_progress`, and nothing with comparable labels has *started* since the
+   job queued.
+
+The liveness condition carries the false-alarm load, which is what lets the age
+threshold stay tight enough to detect a dead lane within 45–75 minutes. A
+saturated pool keeps its runners visibly busy, so it stays quiet at any queue
+depth; one runner grinding on a 90-minute job is alive, not dead; an idle fleet
+has nothing queued and so says nothing. Only "work piling up with nothing
+serving it" alarms. Findings between 30 and 45 minutes appear in the run summary
+only, never on the issue.
+
+The issue is edited in place each sweep and closes automatically on recovery —
+the same open/update/auto-close contract as the release watchdogs (see
+[release-watchdog.md](release-watchdog.md)). The report names the labels the
+stalled jobs asked for, so a human sees *which* lane is sick.
+
+Thresholds and analysis live in `tools/scripts/queue_age_watchdog.py`, tested by
+`tools/scripts/test_queue_age_watchdog.py` — which pins the measured baseline
+above as a must-stay-quiet regression case, so a future threshold edit that
+would re-introduce afternoon false alarms fails at PR time.
+
+```bash
+# Tune or dry-run a sweep by hand
+gh workflow run runner-health-check.yml -f dry_run=true
+gh workflow run runner-health-check.yml -f alarm_minutes=60
+
+# Replay a recorded snapshot offline (no API calls, verdict pinned to capture time)
+python3 tools/scripts/queue_age_watchdog.py --snapshot snapshot.json
+```
+
+### Off-fleet merge-stall watchdog (`merge-stall-check.yml`)
+
+`.github/workflows/merge-stall-check.yml` sweeps every 30 minutes and opens a
+tracking issue when PRs are **merge-ready but not merging**. It runs on
+`ubuntu-latest` for the same reason as the queue-age watchdog: the wedge it
+catches lives in whatever presses the merge button (Shipyard's per-host
+queue-tick), so an on-fleet guard would die with the thing it watches.
+
+**The gap it closes — the opposite shape from the queue-age watchdog.** The
+queue-age guard alarms on a *dead runner lane*: jobs sitting **queued** because
+runners died. This one alarms on the inverse: every required check **green**,
+nothing queued, and still nothing merging — the signature of an auto-merger
+silently held in reap-only mode. No job-level signal sees "everything is green
+and nobody is merging"; the only observable is a population of merge-ready PRs
+that stays merge-ready and unmerged. (Motivating incident: the repo went ~4
+hours with 34 PRs open and nothing merging while every check was green.)
+
+**The alarm predicate.** A PR trips only when ALL hold:
+
+1. **Required checks green** — every check in the repo's REQUIRED set. That set
+   is read from branch protection at runtime, not hardcoded; if the token cannot
+   read protection rules it falls back to the documented `main` set (`macos`,
+   `Enforce version & skill sync`).
+2. **`mergeStateStatus` in `{CLEAN, BEHIND}`** — GitHub's own merge verdict.
+   `DIRTY` (conflicts), `BLOCKED` (a required check red/missing/review pending),
+   and `UNSTABLE` (a non-required check still moving) are excluded — those wait
+   on something real, not on the merger.
+3. **Auto-merge enabled** — the signal that a machine, not a human, owns pressing
+   merge. A green PR without it is waiting on a person and must not alarm.
+4. **Merge-ready longer than the threshold** (default **45 min**), measured from
+   the completion time of the last required check to go green — a real duration,
+   independent of the sweep cadence.
+
+**Why two consecutive sweeps.** A single snapshot can misread — a per-PR REST
+poll of merge state gets rate-limited and returns *false* CLEAN/BEHIND readings
+under load, which is exactly how the incident state looked wrong. Collection
+therefore uses **one GraphQL call** for every open PR's `mergeStateStatus`
+(`tools/scripts/merge_stall_watchdog.py`), and on top of that a PR must satisfy
+the full predicate on **two consecutive sweeps** before it is issue-worthy: the
+first qualifying sweep records it as *pending* (run-summary only), the second
+promotes it to *alarm*. A normal in-flight PR that merges within a tick never
+reaches the second observation, so it never trips. The cross-sweep memory is the
+set of stuck PR numbers, persisted as a workflow artifact — crash-safe, held by
+GitHub independently of this repo or any host.
+
+The issue is edited in place each sweep and closes automatically once no PR is
+stuck merge-ready — the same open/update/auto-close contract as the release
+watchdogs (see [release-watchdog.md](release-watchdog.md)).
+
+Analysis and the predicate live in `tools/scripts/merge_stall_watchdog.py`,
+tested by `tools/scripts/test_merge_stall_watchdog.py` — which pins the
+must-stay-quiet cases (young PR, DIRTY, BLOCKED, no auto-merge, single-sweep
+blip) as regressions so a future edit that would make the guard cry wolf fails
+at PR time. The script also carries an inert, clearly-marked stub for a **second
+condition to add once a GitHub merge queue is enabled** ("queue depth > 0 AND no
+`merge_group` check started in 30 min" — a wedged *queue*, distinct from a wedged
+auto-merger); it stays off until the queue is live.
+
+```bash
+# Dry-run a sweep by hand (log findings, do not touch the issue)
+gh workflow run merge-stall-check.yml -f dry_run=true
+gh workflow run merge-stall-check.yml -f threshold_minutes=60
+
+# Replay a recorded snapshot offline (no API calls, verdict pinned to capture time)
+python3 tools/scripts/merge_stall_watchdog.py --snapshot snapshot.json --prev-state state.json
 ```
 
 ### GraphQL quota fallback for PR sweeps

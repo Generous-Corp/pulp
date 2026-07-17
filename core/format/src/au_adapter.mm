@@ -56,6 +56,7 @@
 #import <mach/mach_time.h>
 #include <pulp/events/plugin_main_thread.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/parameter_text.hpp>
 #include <pulp/format/host_quirks.hpp>
@@ -65,6 +66,7 @@
 #include <pulp/signal/scoped_flush_denormals.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/midi/buffer.hpp>
+#include <pulp/midi/ump.hpp>
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
 #include <pulp/runtime/assert.hpp>
 #include <pulp/runtime/log.hpp>
@@ -120,6 +122,13 @@ struct AUBridge {
     // GPU engine drives its work synchronously instead of dropping it). Written
     // from the host's setRenderingOffline:, read on the render thread.
     std::atomic<bool> rendering_offline{false};
+
+    // Dry-delay line for the bypass pass-through. Sized to the processor's
+    // reported latency in allocateRenderResources; keeps the bypassed dry
+    // signal aligned with the host's plugin-delay-compensation instead of
+    // arriving `latency` samples early (a 0 latency leaves it a zero-copy
+    // passthrough).
+    boundary::LatencyCompensatedBypassT<kMaxChannels> bypass;
 
     // Pre-allocated — no heap allocation on audio thread
     float* output_ptrs[kMaxChannels] = {};
@@ -689,6 +698,13 @@ struct ScopedAuV3HostWriting {
         ctx.output_channels = _bridge.output_channels;
         ctx.input_channels = _bridge.input_channels;
         _bridge.processor->prepare(ctx);
+
+        // Size the bypass dry-delay line to the reported latency so a bypassed
+        // block emits `input[n - latency]`, matching the host's PDC on the wet
+        // path. Off the render thread; a 0 latency leaves it a zero-copy
+        // passthrough. Same policy the CLAP/VST3/AU v2 adapters apply.
+        _bridge.bypass.prepare(pulp::format::reported_latency_samples(
+            _bridge.processor->latency_samples(), _bridge.host_quirks));
     }
 
     pulp::runtime::log_info("AU: render resources at {} Hz, {} frames",
@@ -999,40 +1015,21 @@ struct ScopedAuV3HostWriting {
                         const MIDIEventPacket* pkt = &packets->packet[0];
 
                         for (UInt32 i = 0; i < packets->numPackets; ++i) {
-                            UInt32 w = 0;
-                            while (w < pkt->wordCount) {
-                                const uint32_t word0 = pkt->words[w];
-                                const uint8_t mt = (word0 >> 28) & 0x0F;
-
-                                // UMP message word length by type. Types
-                                // not listed default to 1 so we still
-                                // advance past unknown messages safely.
-                                // Each type-3 message is 2 UMP words; the cursor
-                                // advances by `ump_words`, not 1, so word1 cannot
-                                // masquerade as a fresh message header.
-                                UInt32 ump_words = 1;
-                                switch (mt) {
-                                    case 0x0: case 0x1: case 0x2:
-                                        ump_words = 1; break;
-                                    case 0x3: case 0x4:
-                                    case 0x8: case 0x9: case 0xA:
-                                        ump_words = 2; break;
-                                    case 0xB: case 0xC:
-                                        ump_words = 3; break;
-                                    case 0x5: case 0xD: case 0xE:
-                                        ump_words = 4; break;
-                                    default:
-                                        ump_words = 1; break;
-                                }
-                                if (w + ump_words > pkt->wordCount) break;
-
-                                if (mt == 0x3) {
-                                    const uint32_t word1 = pkt->words[w + 1];
-                                    reassembler.feed_packet(word0, word1, emit, &ctx);
-                                }
-
-                                w += ump_words;
-                            }
+                            // Walk this packet's UMP words with the shared
+                            // spec-complete cursor: it advances each message by
+                            // its true word length (type 0x3 is 2 words), so a
+                            // multi-word message's trailing words never
+                            // masquerade as a fresh header, and a truncated
+                            // packet stops the walk before an over-read. Only
+                            // type-0x3 (Data/SysEx7) feeds the reassembler.
+                            pulp::midi::walk_ump_packet(
+                                pkt->words, static_cast<uint32_t>(pkt->wordCount),
+                                [&](uint8_t mt, const uint32_t* mw, uint32_t) {
+                                    if (mt == 0x3) {
+                                        reassembler.feed_packet(mw[0], mw[1],
+                                                                emit, &ctx);
+                                    }
+                                });
                             pkt = reinterpret_cast<const MIDIEventPacket*>(
                                 reinterpret_cast<const uint8_t*>(pkt) +
                                 sizeof(MIDIEventPacket) +
@@ -1059,17 +1056,16 @@ struct ScopedAuV3HostWriting {
             ? (bridge->store.get_value(bridge->bypass_param_id) >= 0.5f)
             : bridge->bypass_flag.load(std::memory_order_acquire);
         if (bypassed) {
-            const UInt32 inCount = static_cast<UInt32>(bridge->input_channels);
-            for (UInt32 i = 0; i < outChans; ++i) {
-                if (i < inCount && bridge->input_ptrs[i]) {
-                    std::memcpy(bridge->output_ptrs[i],
-                                bridge->input_ptrs[i],
-                                frameCount * sizeof(float));
-                } else {
-                    std::memset(bridge->output_ptrs[i], 0,
-                                frameCount * sizeof(float));
-                }
-            }
+            // Copy input → output latency-compensated through the shared dry-
+            // delay line so the bypassed dry signal stays aligned with the
+            // host's PDC on the wet path (channels beyond the boundary ceiling
+            // fall back to an undelayed copy uniformly); zero any output channel
+            // with no matching input.
+            pulp::format::boundary::render_bypass_passthrough(
+                bridge->bypass, bridge->output_ptrs,
+                static_cast<int>(outChans), bridge->input_ptrs,
+                bridge->input_channels,
+                static_cast<std::uint32_t>(frameCount));
             // Trigger reset is a single-exit invariant: settle Reset/trigger
             // params even on the bypass short-circuit so a panic/reset raised
             // while bypassed clears this block. The parameter tree's

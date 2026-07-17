@@ -12,8 +12,8 @@
   "hotspots": [
     {
       "path": "core/view/src/widget_bridge.cpp",
-      "max_loc": 1141,
-      "note": "WidgetBridge shell after callback wiring + subtree cleanup extraction; keep widget callbacks in widget_bridge/widget_callbacks.cpp and cleanup in widget_bridge/subtree_cleanup.cpp"
+      "max_loc": 930,
+      "note": "WidgetBridge shell after callback wiring + subtree cleanup extraction; keep widget callbacks in widget_bridge/widget_callbacks.cpp, cleanup in widget_bridge/subtree_cleanup.cpp, JS event dispatch in widget_bridge/bridge_dispatch.cpp, and the CSS color parser in widget_bridge/css_color.cpp; registrar table + shared value-widget access in widget_bridge/value_widget_access.hpp"
     },
     {
       "path": "core/view/src/widget_bridge/canvas2d_api.cpp",
@@ -77,23 +77,23 @@
     },
     {
       "path": "core/render/src/renderer3d.cpp",
-      "max_loc": 3474,
-      "note": "Renderer3D implementation hotspot after CPU value-type extraction"
+      "max_loc": 3394,
+      "note": "Renderer3D implementation hotspot after CPU value-type extraction; frame device-acquisition + readback/PNG tail shared via acquire_dawn_frame/finish_frame_readback; render_scene_data phase split + grouped flag structs"
     },
     {
       "path": "tools/import-design/pulp_import_design.cpp",
-      "max_loc": 3540,
-      "note": "import-design CLI orchestration hotspot (+20 for the --fidelity-report arg/emit/help surface; ledger taxonomy + JSON live in design_fidelity_ledger.cpp; +24 for the --from fig lane arg/help surface, decode logic in fig_lane.cpp); grew with the recognition-resolver + installed-package custom-control wiring, plus the --validate faithful_svg honesty caveat"
+      "max_loc": 3610,
+      "note": "import-design CLI orchestration hotspot (+20 for the --fidelity-report arg/emit/help surface; ledger taxonomy + JSON live in design_fidelity_ledger.cpp; +24 for the --from fig lane arg/help surface, decode logic in fig_lane.cpp); grew with the recognition-resolver + installed-package custom-control wiring, the --validate faithful_svg honesty caveat, and the --fail-below similarity gate (arg parse + unit validation + help)"
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",
-      "max_loc": 2770,
-      "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing). Raised 2752->2770 for the two set_native_child_view_clip overrides (CPU + GPU WindowHost) that forward to the shared mac_geometry clip helper (R1 NativeViewHost)."
+      "max_loc": 2690,
+      "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing). Raised 2752->2770 for the two set_native_child_view_clip overrides (CPU + GPU WindowHost) that forward to the shared mac_geometry clip helper (R1 NativeViewHost). Lowered after the three hand-rolled CVDisplayLink drivers collapsed onto the shared MacDisplayLinkDriver."
     },
     {
       "path": "core/view/src/design_import.cpp",
-      "max_loc": 2506,
-      "note": "design-import orchestration hotspot; lowered after comment-hygiene cleanup"
+      "max_loc": 2189,
+      "note": "design-import orchestration hotspot; lowered after comment-hygiene cleanup; PNG codec + pixel passes live in design_import_png.cpp"
     },
     {
       "path": "core/view/src/design_ir_json.cpp",
@@ -102,13 +102,13 @@
     },
     {
       "path": "core/view/src/design_cpp_codegen.cpp",
-      "max_loc": 2197,
-      "note": "DesignIR C++ codegen contract hotspot; +12 for interactive-element param_key emit + host-param routing enable (parity with make_faithful_svg_frame)"
+      "max_loc": 1962,
+      "note": "DesignIR C++ codegen contract hotspot; +12 for interactive-element param_key emit + host-param routing enable (parity with make_faithful_svg_frame); hit-policy + image-sizing lowering now shared from design_import_native_common; shared IR helpers in design_ir_helpers.hpp"
     },
     {
       "path": "core/view/src/design_import_native_common.cpp",
-      "max_loc": 2079,
-      "note": "native materialization/import boundary hotspot; +12 for the interactive-element param_key mapping + host-param routing auto-enable"
+      "max_loc": 1991,
+      "note": "native materialization/import boundary hotspot; +12 for the interactive-element param_key mapping + host-param routing auto-enable; owns the shared hit-policy + image-sizing lowering for the runtime and baked-C++ lanes; shared IR helpers in design_ir_helpers.hpp"
     },
     {
       "path": "core/view/src/design_codegen.cpp",
@@ -118,7 +118,7 @@
     {
       "path": "core/view/include/pulp/view/view.hpp",
       "max_loc": 1742,
-      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions; +16 for the FrameClock reachability hook \u2014 on_frame_clock_changed + out-of-line set_frame_clock + notify_frame_clock_changed \u2014 powering paint-safe meter sources; +35 for the bounded sub-view invalidation public API \u2014 request_repaint(Rect) plus the has_filter_effect / applies_child_paint_offset escalation predicates; +7 for generalized virtual-list layout/input routing hooks)"
+      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions; +16 for the FrameClock reachability hook \u2014 on_frame_clock_changed + out-of-line set_frame_clock + notify_frame_clock_changed \u2014 powering paint-safe meter sources; +35 for the bounded sub-view invalidation public API \u2014 request_repaint(Rect) plus the has_filter_effect / applies_child_paint_offset escalation predicates; +7 for generalized virtual-list layout/input routing hooks; +63 for the live host\u2192view value-source seam \u2014 set_meter_source / meter_frame / set_scalar_source / scalar_value / on_meter_frame plus the binding-enrolment members, of which 35 lines are the per-declaration docs an SDK consumer reads at the call site)"
     },
     {
       "path": "core/canvas/include/pulp/canvas/canvas.hpp",
@@ -132,8 +132,8 @@
     },
     {
       "path": "tools/cli/kit_commands.cpp",
-      "max_loc": 3927,
-      "note": "kit/package trust-boundary monolith; split per tools/cli/KIT_COMMANDS_MODULE_MAP.md"
+      "max_loc": 3883,
+      "note": "kit/package trust-boundary monolith; split per tools/cli/KIT_COMMANDS_MODULE_MAP.md; JSON escaping shared from tools/cli/json_writer.hpp; archive-safety path checks shared from tools/cli/cli_fs_util.hpp"
     },
     {
       "path": "inspect/src/inspector_overlay.cpp",
@@ -169,6 +169,16 @@
       "path": "core/canvas/src/skia_canvas.cpp",
       "max_loc": 1136,
       "note": "Skia canvas split stabilization candidate"
+    },
+    {
+      "path": "core/view/src/widgets.cpp",
+      "max_loc": 2096,
+      "note": "Core widget implementations hotspot; split further before growing"
+    },
+    {
+      "path": "core/view/src/ui_components.cpp",
+      "max_loc": 1500,
+      "note": "Composite UI component hotspot; split further before growing"
     }
   ]
 }

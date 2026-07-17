@@ -59,7 +59,6 @@ BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
 AUTO_RELEASE = REPO_ROOT / ".github" / "workflows" / "auto-release.yml"
 WATCHDOG_REAPER = REPO_ROOT / ".github" / "workflows" / "watchdog-reaper.yml"
 VERSION_SKILL_CHECK = REPO_ROOT / ".github" / "workflows" / "version-skill-check.yml"
-INTENT_BUMP_ON_MERGE = REPO_ROOT / ".github" / "workflows" / "intent-bump-on-merge.yml"
 POST_TAG_SYNC = REPO_ROOT / ".github" / "workflows" / "post-tag-sync.yml"
 RELEASE_SIGNING_HELPER = REPO_ROOT / "tools" / "scripts" / "configure_release_bot_ssh_signing.sh"
 
@@ -859,7 +858,6 @@ class ReleaseBotSshSigning(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.auto_release = AUTO_RELEASE.read_text(encoding="utf-8")
-        cls.intent_bump = INTENT_BUMP_ON_MERGE.read_text(encoding="utf-8")
         cls.post_tag_sync = POST_TAG_SYNC.read_text(encoding="utf-8")
         cls.helper = RELEASE_SIGNING_HELPER.read_text(encoding="utf-8")
 
@@ -882,13 +880,6 @@ class ReleaseBotSshSigning(unittest.TestCase):
             self.auto_release.index("name: Configure release bot SSH signing"),
             self.auto_release.index("name: Create tags for moved surfaces"),
         )
-
-    def test_intent_bump_commits_are_signed(self) -> None:
-        self.assertIn("name: Configure release bot SSH signing", self.intent_bump)
-        self.assertIn("RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}", self.intent_bump)
-        self.assertIn("bash tools/scripts/configure_release_bot_ssh_signing.sh", self.intent_bump)
-        self.assertIn(f'git config user.email "{self.BOT_EMAIL}"', self.intent_bump)
-        self.assertIn('git commit -S -m "chore: bump versions"', self.intent_bump)
 
     def test_post_tag_sync_commits_use_signed_bot_identity(self) -> None:
         self.assertIn("name: Configure release bot SSH signing", self.post_tag_sync)

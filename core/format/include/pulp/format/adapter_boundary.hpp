@@ -1,38 +1,49 @@
 #pragma once
 
 /// @file adapter_boundary.hpp
-/// The shared adapter-boundary core (SF-1).
+/// The shared adapter-boundary core.
 ///
 /// Every per-format plugin adapter (CLAP, VST3, AU v2/v3, AAX, LV2, WAM/WCLAP,
 /// standalone) sits between a host ABI and one `Processor`. The *host-ABI glue*
 /// is genuinely format-specific — the event structs, the pointer layouts, the
 /// transport flag bits all differ. But the boundary *logic* those adapters
-/// wrap around the glue is identical, and until now it was copy-pasted at
-/// different fidelity per adapter, with nothing that noticed when a copy
-/// drifted (see the SF-1 audit finding). This header is the one place that
-/// logic lives:
+/// wrap around the glue is identical, and it was copy-pasted at different
+/// fidelity per adapter with nothing that noticed when a copy drifted. This
+/// header is where that logic is consolidated as adapters migrate onto it. The
+/// adoption is deliberately per-component and still partial:
 ///
 ///   1. **f64 (double) marshalling** — the `float`⇄`double` block copies a
-///      double-precision host hands the adapter, previously implemented
-///      byte-for-byte in `clap_adapter.cpp`, `vst3_adapter.cpp`, and
-///      `processor_f64.cpp`.
+///      double-precision host hands the adapter. Consumed by `clap_adapter.cpp`
+///      and `vst3_adapter.cpp`; the AU adapter still marshals f64 through its
+///      own path.
 ///   2. **transport → `ProcessContext`** — `HostTransport` is the neutral,
 ///      already-decoded transport an adapter fills from its host playhead; a
 ///      single mapper writes the `ProcessContext` transport fields, derives the
 ///      bar when the host did not supply one, and diffs the change-flags. The
 ///      per-format decode (CLAP fixed-point beattime, VST3 `barPositionMusic`,
-///      AU seconds, …) stays in the adapter; the mapping does not.
+///      AU seconds, …) stays in the adapter. Consumed by `clap_adapter.cpp`;
+///      VST3 and AU drive `detail::playhead_diff` directly.
 ///   3. **latency-compensated bypass** — `LatencyCompensatedBypass` is the
 ///      per-channel dry delay line that keeps a bypassed signal sample-aligned
-///      with the host's plugin-delay-compensation. CLAP/VST3 hand-rolled it;
-///      AU/AAX/LV2 did a plain memcpy that lied about latency. One class now.
+///      with the host's plugin-delay-compensation. CLAP and VST3 feed it inline
+///      (they also marshal f64 host buffers); AU v2, AU v3, and AAX route their
+///      float bypass pass-through through the shared `render_bypass_passthrough`
+///      helper. LV2 has no adapter-level bypass short-circuit (its `run()`
+///      always calls `process()`), so there is no dry copy to compensate.
 ///   4. **parameter dual-write** — `apply_param_value` enqueues an incoming
 ///      host param event for the sample-accurate DSP cursor *and* publishes it
 ///      to the RT-safe listener path, the pair every adapter must keep in sync.
+///      Consumed by `clap_adapter.cpp` and `vst3_adapter.cpp`; AU applies host
+///      params through its own store writes.
+///   5. **output-parameter publication** — the bookkeeping around reporting
+///      plugin-side parameter changes back to the host for automation
+///      recording: resolving a param id to its scratch-vector index, snapshotting
+///      values before `process()`, and the bitwise post-`process()` diff. The
+///      host-ABI emit stays in the adapter. Consumed by `clap_adapter.cpp` and
+///      `vst3_adapter.cpp`.
 ///
 /// **Real-time contract.** Everything here runs on the audio/render thread and
-/// is allocation-, lock-, and syscall-free after `prepare()`. This preserves
-/// the RT-safety guarantees #5911 (MF-8 + PF-3) established: the only place
+/// is allocation-, lock-, and syscall-free after `prepare()`: the only place
 /// that touches the heap is `LatencyCompensatedBypass::prepare()`, which the
 /// adapter calls at activate/setup time off the audio thread. The functions are
 /// pure and header-only so the parity-matrix test (`test_adapter_boundary_
@@ -49,10 +60,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <span>
+#include <vector>
 
 namespace pulp::format::boundary {
 
-/// Channel ceiling shared with the CLAP / LV2 adapters (`kMaxChannels = 8`).
+/// Channel ceiling shared with the CLAP / LV2 / VST3 adapters
+/// (CLAP and LV2 declare their own `kMaxChannels = 8` against this value).
 inline constexpr std::size_t kBoundaryMaxChannels = 8;
 
 // ---------------------------------------------------------------------------
@@ -182,9 +196,8 @@ inline void apply_host_transport(ProcessContext& ctx, const HostTransport& trans
 /// When the plugin is bypassed the adapter emits the dry input directly, but
 /// that input is now @e early relative to the host's compensation by exactly
 /// the reported latency — so a correct bypass delays the dry signal by the same
-/// amount. CLAP and VST3 each hand-rolled this; AU/AAX/LV2 memcpy'd the input
-/// straight through and were a `latency` samples early while bypassed. This is
-/// the one implementation.
+/// amount. CLAP and VST3 both drive this class; AU/AAX/LV2 still memcpy the
+/// input straight through and are a `latency` samples early while bypassed.
 ///
 /// `prepare()` (off the audio thread) sizes the lines. `process_channel()` is
 /// RT-safe. A reported latency of `<= 0` means no compensation, and
@@ -265,6 +278,52 @@ private:
 
 using LatencyCompensatedBypass = LatencyCompensatedBypassT<kBoundaryMaxChannels>;
 
+/// Render one bypassed block: copy main input → output per channel, latency-
+/// compensated through @p bypass so the dry signal stays sample-aligned with
+/// the host's plugin-delay-compensation, and zero any output channel without a
+/// matching input. This is the single implementation of the float-buffer
+/// bypass pass-through the AU v2/v3 and AAX adapters share; VST3 and CLAP keep
+/// their own inline loops because they additionally marshal f64 host buffers
+/// (see the per-format usage of `LatencyCompensatedBypass` above).
+///
+/// **All-or-nothing across the block.** Compensation is applied only when the
+/// boundary owns a dry-delay line for *every* output channel — a channel count
+/// above `bypass.channel_capacity()` falls back to a zero-delay copy for the
+/// whole block, degrading uniformly rather than mixing delayed and undelayed
+/// channels (matches the VST3/CLAP `delayed` gate). A zero reported latency
+/// collapses to a straight passthrough at no cost.
+///
+/// @p out_ptrs / @p in_ptrs are the per-channel float pointers (either may hold
+/// null entries — a null output channel is skipped, a null/absent input channel
+/// yields silence). @p count is the block frame count. RT-safe: no allocation,
+/// no lock (the delay lines were sized in `bypass.prepare()` off the audio
+/// thread).
+template <std::size_t MaxChannels>
+inline void render_bypass_passthrough(
+    LatencyCompensatedBypassT<MaxChannels>& bypass,
+    float* const* out_ptrs, int out_channels,
+    const float* const* in_ptrs, int in_channels,
+    std::uint32_t count) {
+    const bool delayed = bypass.is_latency_compensated() &&
+        out_channels <= static_cast<int>(bypass.channel_capacity());
+    for (int ch = 0; ch < out_channels; ++ch) {
+        float* dst = out_ptrs ? out_ptrs[ch] : nullptr;
+        if (dst == nullptr) continue;
+        const float* src =
+            (in_ptrs && ch < in_channels) ? in_ptrs[ch] : nullptr;
+        if (delayed) {
+            // process_channel emits `src[n - latency]`, or delayed silence when
+            // src is null — every channel takes the same delayed path.
+            bypass.process_channel(dst, src, count,
+                                   static_cast<std::size_t>(ch));
+        } else if (src != nullptr) {
+            std::memcpy(dst, src, sizeof(float) * count);
+        } else {
+            std::memset(dst, 0, sizeof(float) * count);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 4. parameter dual-write
 // ---------------------------------------------------------------------------
@@ -293,6 +352,69 @@ inline bool apply_param_value(state::ParameterEventQueue& queue,
     const bool queued = queue.push(state::ParameterEvent{id, sample_offset, value});
     store.set_value_rt(id, value);
     return queued;
+}
+
+// ---------------------------------------------------------------------------
+// 5. output-parameter publication
+//
+// The mirror of (4): values the *plugin* changed during process() have to reach
+// the host so it can record automation. The host-ABI emit differs per format
+// (VST3 `IParamValueQueue::addPoint`, CLAP `out_events->try_push`), but the
+// bookkeeping around it does not: snapshot every parameter before process(),
+// diff after, and skip any parameter that already reported sample-accurate
+// explicit events. These are the pieces of that bookkeeping which carry no
+// format currency. Consumed by `clap_adapter.cpp` and `vst3_adapter.cpp`.
+// ---------------------------------------------------------------------------
+
+/// Index returned by `find_param_index` when the id is not registered.
+inline constexpr std::size_t kParamIndexNotFound = static_cast<std::size_t>(-1);
+
+/// Position of @p id within @p all_params, or `kParamIndexNotFound`.
+///
+/// The position — not the id — is the key for every per-block scratch vector an
+/// adapter sizes off `all_params()` (the value snapshot, the skip-set, the
+/// per-parameter host queue cache), so a publication path holding an id has to
+/// resolve it back to an index.
+///
+/// First match wins. `StateStore` permits an id to be registered more than once
+/// and resolves reads/writes to the *latest* such slot (see the duplicate-
+/// ParamID contract in `StateStore::reset_triggers_rt`), so under a duplicate id
+/// this returns a slot the store itself no longer reads. Preserved as-is because
+/// it is what every adapter's publication path has always done. RT-safe.
+inline std::size_t find_param_index(std::span<const state::ParamInfo> all_params,
+                                    state::ParamID id) noexcept {
+    for (std::size_t i = 0; i < all_params.size(); ++i) {
+        if (all_params[i].id == id) return i;
+    }
+    return kParamIndexNotFound;
+}
+
+/// Capture every parameter's current value into @p snapshot, positionally
+/// aligned with @p all_params, so a post-process() diff can spot the values the
+/// processor changed.
+///
+/// @p snapshot is resized to match; the adapter must have reserved it to
+/// `all_params.size()` off the audio thread (at activate/setup) or the first
+/// block grow-and-allocates. RT-safe given that reservation.
+inline void snapshot_param_values(const state::StateStore& store,
+                                  std::span<const state::ParamInfo> all_params,
+                                  std::vector<float>& snapshot) {
+    snapshot.resize(all_params.size());
+    for (std::size_t i = 0; i < all_params.size(); ++i) {
+        snapshot[i] = store.get_value(all_params[i].id);
+    }
+}
+
+/// True when @p current differs from @p snapshotted, compared *bitwise*.
+///
+/// Deliberately not `current != snapshotted`. The question this answers is "did
+/// the stored bits move", not "are these numerically equal", and the two differ
+/// at the edges every parameter store hits eventually: a NaN parameter would
+/// compare unequal to itself under `!=` and be republished on every single block
+/// forever, while `+0.0`/`-0.0` compare equal under `!=` and would silently drop
+/// a real store write. RT-safe.
+inline bool changed_since_snapshot(float current, float snapshotted) noexcept {
+    return std::memcmp(&current, &snapshotted, sizeof(float)) != 0;
 }
 
 }  // namespace pulp::format::boundary

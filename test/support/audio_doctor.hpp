@@ -37,15 +37,46 @@ namespace pulp::test::audio {
 
 /// Drive `scenario` with a unit impulse and return the magnitude response,
 /// sampled at `checkpoints_hz` plus the full-resolution curve. The scenario's
-/// own input/duration are overridden: a single impulse of length
-/// `options.fft_length` is rendered so the captured segment is the impulse
-/// response. Parameter/MIDI scripts and `set_param` calls are preserved.
+/// own input/duration are overridden: a single impulse is rendered for
+/// `options.analysis_offset + options.fft_length` samples, so the captured
+/// segment beginning at `analysis_offset` is a full `fft_length` of impulse
+/// response rather than a zero-padded tail. Parameter/MIDI scripts and
+/// `set_param` calls are preserved.
 ///
 /// Delegates the spectral math to the buffer-level
 /// `response_relative_to_input(input, output, ...)` in audio_spectrum.hpp.
 ResponseCurve response_relative_to_input(const RenderScenario& scenario,
                                          std::span<const double> checkpoints_hz,
                                          const ResponseOptions& options = {});
+
+/// Drive `scenario` with a unit impulse and return the phase / group-delay
+/// curve, sampled at `checkpoints_hz` plus the full-resolution curve. As with
+/// the magnitude response, the scenario's own input/duration are overridden:
+/// the impulse is rendered for `options.analysis_offset + options.fft_length`
+/// samples, so the analysis segment beginning at `analysis_offset` is a full
+/// `fft_length` long. Parameter/MIDI scripts and `set_param` calls are
+/// preserved.
+///
+/// `options.analysis_offset` must be 0 here — the reference impulse sits at
+/// frame 0, so any nonzero offset leaves the reference window silent and
+/// throws. See `GroupDelayOptions::analysis_offset`.
+///
+/// Group delay is reported in samples at the scenario's sample rate, positive
+/// for a causal delay. Bins in a stopband are reported undefined rather than
+/// given a number read out of the noise floor — read `defined_at(hz)` first.
+/// Phase has a second, stricter gate: read `phase_defined_at(hz)` before
+/// `phase_radians_at(hz)`, because the unwrap cannot carry a branch across a
+/// stopband and so bins above one keep their group delay but lose their phase.
+/// This overload's reference is always a frame-0 impulse, whose spectrum is
+/// flat, so the gates can only ever diverge above a null the PROCESSOR
+/// produces — never because the reference had a gap.
+///
+/// Delegates the spectral math to the buffer-level
+/// `measure_group_delay(input, output, ...)` in audio_spectrum.hpp, which
+/// documents the estimator, the unwrapping method, and the stopband contract.
+PhaseCurve measure_group_delay(const RenderScenario& scenario,
+                               std::span<const double> checkpoints_hz,
+                               const GroupDelayOptions& options = {});
 
 /// Drive `scenario` with a steady sine at `fundamental_hz` and measure THD /
 /// THD+N from the rendered output. The scenario's input/duration are

@@ -15,6 +15,7 @@
 #include "design_import_internal.hpp"
 
 #include <choc/text/choc_JSON.h>
+#include <choc/text/choc_StringUtilities.h>
 
 #include <algorithm>
 #include <cctype>
@@ -436,11 +437,6 @@ static IRLayout parse_ir_layout(const choc::value::ValueView& obj) {
         return SizingMode::fixed;
     };
 
-    if (obj.hasObjectMember("widthMode"))
-        l.width_mode = parse_sizing(get_string(obj, "widthMode"));
-    if (obj.hasObjectMember("heightMode"))
-        l.height_mode = parse_sizing(get_string(obj, "heightMode"));
-
     // CSS Grid (camelCase + snake_case). Stored as raw CSS strings; the codegen
     // lowers them to createGrid/setGrid. Source-agnostic.
     auto first_str = [&](std::initializer_list<const char*> keys) -> std::optional<std::string> {
@@ -451,6 +447,24 @@ static IRLayout parse_ir_layout(const choc::value::ValueView& obj) {
             }
         return std::nullopt;
     };
+    // Sizing mode — snake_case FIRST, because that is what every producer emits.
+    // This read `widthMode`/`heightMode` only, while the grid keys immediately
+    // below already accepted both spellings via first_str. Every producer writes
+    // snake_case: the envelope SCHEMA declares `width_mode` with
+    // additionalProperties:false (figma-plugin-export-v1.json:311), the REST
+    // exporter emits `width_mode` (figma_rest_export.py:540), and the plugin's
+    // own model types it `width_mode` (extract-model.ts:129). So every `hug` and
+    // `fill` a designer set silently became `fixed` — for the plugin AND REST
+    // lanes, which is most of the Figma surface.
+    //
+    // It is scene.mjs's auto-layout bug exactly: a value emitted to a key nobody
+    // reads. The test that should have caught it (test_design_import_codegen.cpp
+    // :1150) feeds `widthMode` — the CONSUMER's spelling, which no producer
+    // emits — so it passed on a path no real file takes. A test that asserts the
+    // consumer's own spelling can only prove the consumer talks to itself.
+    if (auto m = first_str({"width_mode", "widthMode"}))  l.width_mode  = parse_sizing(*m);
+    if (auto m = first_str({"height_mode", "heightMode"})) l.height_mode = parse_sizing(*m);
+
     l.grid_template_columns = first_str({"gridTemplateColumns", "grid_template_columns"});
     l.grid_template_rows    = first_str({"gridTemplateRows", "grid_template_rows"});
     l.grid_auto_flow        = first_str({"gridAutoFlow", "grid_auto_flow"});
@@ -687,6 +701,40 @@ static void snap_absolute_siblings_under_shadow(IRNode& node) {
 // containing four knob frames) is a container. Skipped when the source already
 // set an explicit audio_widget.
 static void detect_node_audio_widget(IRNode& node, bool explicit_audio_widget) {
+    // A control-named node's childless children are its ART LAYERS, not more
+    // controls. A designer's knob is a frame named "sound / knob / small
+    // unipolar" holding "knob base" / "knob indicator" / "knob ring" — every one
+    // of those tokenizes to {knob, …} and matched the name heuristic, so ONE
+    // designer knob promoted to THREE stacked built-in knobs, each painting
+    // Pulp's stock 'silver' skin over the art it was supposed to be.
+    //
+    // The .fig decoder already refuses this for component instances
+    // (scene.mjs: `audio_widget = 'none'` when expanding), on the stated grounds
+    // that "a layer named 'knob base' IS the designer's knob art". That guard
+    // only reaches expanded instances; a DETACHED knob — a plain frame with the
+    // same art — walked straight past it. The rule belongs here instead, where
+    // every lane's detection converges: a design authored in Claude with a layer
+    // named "knob base" hit the same heuristic by the same route.
+    //
+    // Runs here because children are parsed before their parent, so by the time
+    // a parent is examined its children already carry their own detection.
+    //
+    // Childless is the test that separates a layer from a control: a real knob
+    // nested in a "KnobRow" brings art of its own, so it keeps its promotion.
+    // The cost is a bare, childless frame named "Knob" inside a control-named
+    // parent, which now renders as the empty frame it is instead of a stock
+    // knob. That is the trade this repo already makes for every instance in
+    // every design, and it is the safe direction: a missed promotion leaves the
+    // designer's art intact and is recoverable through the recognition manifest,
+    // while a wrong one paints over the design and is not.
+    if (const auto kind = detect_audio_widget(node.name); kind != AudioWidgetType::none) {
+        for (auto& child : node.children) {
+            if (!child.children.empty()) continue;
+            if (child.audio_widget != kind) continue;
+            child.audio_widget = AudioWidgetType::none;
+        }
+    }
+
     auto detected = explicit_audio_widget ? AudioWidgetType::none
                                           : detect_audio_widget(node.name);
     if (detected == AudioWidgetType::none && !node.type.empty() && !explicit_audio_widget)
@@ -773,15 +821,11 @@ static std::optional<std::string> normalize_v_constraint(std::string s) {
     return std::nullopt;
 }
 
-IRNode parse_ir_node(const choc::value::ValueView& obj) {
-    IRNode node;
-    node.type = get_string(obj, "type", "frame");
-    node.name = get_string(obj, "name");
-    node.text_content = get_string(obj, "content");
-    // Per-range text style runs (mixed bold/colored/sized text). Accept `runs`
-    // or `textRuns`: an array of {start,end, fontSize?, fontWeight?, italic? |
-    // fontStyle?, color?, letterSpacing?, textDecoration?}. Source-agnostic —
-    // any source expressing styled ranges feeds the same IR runs.
+// Per-range text style runs (mixed bold/colored/sized text). Accept `runs`
+// or `textRuns`: an array of {start,end, fontSize?, fontWeight?, italic? |
+// fontStyle?, color?, letterSpacing?, textDecoration?}. Source-agnostic —
+// any source expressing styled ranges feeds the same IR runs.
+static void parse_ir_text_runs(IRNode& node, const choc::value::ValueView& obj) {
     for (const char* runs_key : {"runs", "textRuns"}) {
         if (!obj.hasObjectMember(runs_key) || !obj[runs_key].isArray()) continue;
         const auto runs = obj[runs_key];
@@ -804,7 +848,11 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         }
         if (!node.text_runs.empty()) break;
     }
+}
 
+// Source-metadata identity + provenance fields (anchor id/strategy, source
+// adapter/version, provenance, confidence, raw source), snake_case or camelCase.
+static void parse_ir_identity_fields(IRNode& node, const choc::value::ValueView& obj) {
     // Capture the source-native ID so the `adapter` anchor strategy can use it
     // as its anchor. Figma + Pencil + Mitosis-style exports all carry an ID
     // under one of these field names; first non-empty wins. Sources without
@@ -864,6 +912,121 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     } else if (obj.hasObjectMember("rawSource") && obj["rawSource"].isString()) {
         node.raw_source = std::string(obj["rawSource"].toString());
     }
+}
+
+// One interactive overlay element (knob / dropdown / text_field / xy_pad / …).
+static IRInteractiveElement parse_ir_interactive_element(const choc::value::ValueView& e) {
+    IRInteractiveElement el;
+    const std::string kind_str = get_string(e, "kind", "knob");
+    bool kind_recognized = true;
+    el.kind = interactive_kind_from_id(kind_str, &kind_recognized);
+    if (!kind_recognized) {
+        // Don't silently materialize an unknown control as a working
+        // knob — surface it so the import isn't quietly wrong.
+        pulp::runtime::log_warn(
+            "design-import: unknown interactive_element kind '{}' "
+            "(node {}); falling back to knob render",
+            kind_str,
+            e.hasObjectMember("source_node_id") &&
+                    e["source_node_id"].isString()
+                ? std::string(e["source_node_id"].toString())
+                : std::string("?"));
+    }
+    el.cx = get_float(e, "cx");
+    el.cy = get_float(e, "cy");
+    el.hit_radius = get_float(e, "hit_radius");
+    el.svg_patch_d = get_string(e, "svg_patch_d");
+    el.default_value = get_float(e, "default_value", 0.5f);
+    el.flash = get_bool(e, "flash");  // toggle: press-flash vs sticky
+    // Overlay-control fields (dropdown / text_field / tab_group).
+    el.x = get_float(e, "x");
+    el.y = get_float(e, "y");
+    el.w = get_float(e, "w");
+    el.h = get_float(e, "h");
+    el.selected_index = static_cast<int>(get_float(e, "selected_index"));
+    el.placeholder = get_string(e, "placeholder");
+    el.bg_color = get_string(e, "bg_color");
+    el.label = get_string(e, "label");
+    // swap / action / xy_pad / value_label fields.
+    el.target_frame = static_cast<int>(get_float(e, "target_frame", -1.0f));
+    el.action = get_string(e, "action");
+    el.text = get_string(e, "text");
+    el.value_left_align = get_bool(e, "value_left_align");
+    el.default_value_y = get_float(e, "default_value_y", 0.5f);
+    // Import report (resolution provenance).
+    el.resolution_rung = static_cast<int>(get_float(e, "resolution_rung", 0.0f));
+    el.confidence_score = get_float(e, "confidence_score", 1.0f);
+    el.verification_pass = get_bool(e, "verification_pass", true);
+    // custom — registered native control.
+    el.factory_id = get_string(e, "factory_id");
+    el.custom_props = get_string(e, "custom_props");
+    if (e.hasObjectMember("conflict_signals") && e["conflict_signals"].isArray()) {
+        const auto cs = e["conflict_signals"];
+        for (uint32_t j = 0; j < cs.size(); ++j)
+            if (cs[static_cast<int>(j)].isString())
+                el.conflict_signals.push_back(
+                    std::string(cs[static_cast<int>(j)].toString()));
+    }
+    if (e.hasObjectMember("options") && e["options"].isArray()) {
+        const auto opts = e["options"];
+        for (uint32_t j = 0; j < opts.size(); ++j)
+            if (opts[static_cast<int>(j)].isString())
+                el.options.push_back(std::string(opts[static_cast<int>(j)].toString()));
+    }
+    if (e.hasObjectMember("source_node_id") && e["source_node_id"].isString())
+        el.source_node_id = get_string(e, "source_node_id");
+    // Host-param binding key for a geometry-detected control (e.g.
+    // "filter.cutoff"); DesignFrameView routes gestures on it to the
+    // framework-agnostic HostParamSurface. Absent for unbound knobs.
+    el.param_key = get_string(e, "param_key");
+    return el;
+}
+
+// Audio-widget type + label + range. Returns whether the node carried an
+// explicit audio widget, which gates the post-parse detection pass.
+//
+// An explicit `"none"` is a real statement, not an absence: the source is
+// saying "this node is component-internal art / already classified — do NOT
+// name-guess it". The offline .fig decoder stamps it on every node inside an
+// expanded component instance so a layer named "knob base" keeps the
+// designer's own art instead of being promoted to the built-in knob; the
+// recognition resolver still runs afterwards (it is keyed on component
+// identity, not names), so a matched library component becomes a widget
+// through the never-silent-knob path regardless. An unknown string still
+// falls through to detection — only a literal "none" opts out.
+static bool parse_ir_audio_widget(IRNode& node, const choc::value::ValueView& obj) {
+    bool explicit_audio_widget = false;
+    auto read_kind = [&](const char* key) {
+        const std::string raw = get_string(obj, key);
+        node.audio_widget = audio_widget_from_id(raw);
+        explicit_audio_widget = node.audio_widget != AudioWidgetType::none ||
+                                choc::text::toLowerCase(raw) == "none";
+    };
+    if (obj.hasObjectMember("audioWidget") && obj["audioWidget"].isString()) {
+        read_kind("audioWidget");
+    } else if (obj.hasObjectMember("audio_widget") && obj["audio_widget"].isString()) {
+        read_kind("audio_widget");
+    }
+    if (obj.hasObjectMember("label"))
+        node.audio_label = get_string(obj, "label");
+    if (obj.hasObjectMember("min"))
+        node.audio_min = get_float(obj, "min", 0.0f);
+    if (obj.hasObjectMember("max"))
+        node.audio_max = get_float(obj, "max", 1.0f);
+    if (obj.hasObjectMember("default"))
+        node.audio_default = get_float(obj, "default", 0.5f);
+    if (obj.hasObjectMember("min") && obj.hasObjectMember("max"))
+        node.has_audio_range = true;
+    return explicit_audio_widget;
+}
+
+IRNode parse_ir_node(const choc::value::ValueView& obj) {
+    IRNode node;
+    node.type = get_string(obj, "type", "frame");
+    node.name = get_string(obj, "name");
+    node.text_content = get_string(obj, "content");
+    parse_ir_text_runs(node, obj);
+    parse_ir_identity_fields(node, obj);
 
     // ── Faithful-vector import: render mode + SVG asset + overlays ──
     for (const char* k : {"render_mode", "renderMode"}) {
@@ -884,70 +1047,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         for (uint32_t i = 0; i < arr.size(); ++i) {
             const auto e = arr[static_cast<int>(i)];
             if (!e.isObject()) continue;
-            IRInteractiveElement el;
-            const std::string kind_str = get_string(e, "kind", "knob");
-            bool kind_recognized = true;
-            el.kind = interactive_kind_from_id(kind_str, &kind_recognized);
-            if (!kind_recognized) {
-                // Don't silently materialize an unknown control as a working
-                // knob — surface it so the import isn't quietly wrong.
-                pulp::runtime::log_warn(
-                    "design-import: unknown interactive_element kind '{}' "
-                    "(node {}); falling back to knob render",
-                    kind_str,
-                    e.hasObjectMember("source_node_id") &&
-                            e["source_node_id"].isString()
-                        ? std::string(e["source_node_id"].toString())
-                        : std::string("?"));
-            }
-            el.cx = get_float(e, "cx");
-            el.cy = get_float(e, "cy");
-            el.hit_radius = get_float(e, "hit_radius");
-            el.svg_patch_d = get_string(e, "svg_patch_d");
-            el.default_value = get_float(e, "default_value", 0.5f);
-            el.flash = get_bool(e, "flash");  // toggle: press-flash vs sticky
-            // Overlay-control fields (dropdown / text_field / tab_group).
-            el.x = get_float(e, "x");
-            el.y = get_float(e, "y");
-            el.w = get_float(e, "w");
-            el.h = get_float(e, "h");
-            el.selected_index = static_cast<int>(get_float(e, "selected_index"));
-            el.placeholder = get_string(e, "placeholder");
-            el.bg_color = get_string(e, "bg_color");
-            el.label = get_string(e, "label");
-            // swap / action / xy_pad / value_label fields.
-            el.target_frame = static_cast<int>(get_float(e, "target_frame", -1.0f));
-            el.action = get_string(e, "action");
-            el.text = get_string(e, "text");
-            el.value_left_align = get_bool(e, "value_left_align");
-            el.default_value_y = get_float(e, "default_value_y", 0.5f);
-            // Import report (resolution provenance).
-            el.resolution_rung = static_cast<int>(get_float(e, "resolution_rung", 0.0f));
-            el.confidence_score = get_float(e, "confidence_score", 1.0f);
-            el.verification_pass = get_bool(e, "verification_pass", true);
-            // custom — registered native control.
-            el.factory_id = get_string(e, "factory_id");
-            el.custom_props = get_string(e, "custom_props");
-            if (e.hasObjectMember("conflict_signals") && e["conflict_signals"].isArray()) {
-                const auto cs = e["conflict_signals"];
-                for (uint32_t j = 0; j < cs.size(); ++j)
-                    if (cs[static_cast<int>(j)].isString())
-                        el.conflict_signals.push_back(
-                            std::string(cs[static_cast<int>(j)].toString()));
-            }
-            if (e.hasObjectMember("options") && e["options"].isArray()) {
-                const auto opts = e["options"];
-                for (uint32_t j = 0; j < opts.size(); ++j)
-                    if (opts[static_cast<int>(j)].isString())
-                        el.options.push_back(std::string(opts[static_cast<int>(j)].toString()));
-            }
-            if (e.hasObjectMember("source_node_id") && e["source_node_id"].isString())
-                el.source_node_id = get_string(e, "source_node_id");
-            // Host-param binding key for a geometry-detected control (e.g.
-            // "filter.cutoff"); DesignFrameView routes gestures on it to the
-            // framework-agnostic HostParamSurface. Absent for unbound knobs.
-            el.param_key = get_string(e, "param_key");
-            node.interactive_elements.push_back(std::move(el));
+            node.interactive_elements.push_back(parse_ir_interactive_element(e));
         }
         if (!node.interactive_elements.empty()) break;
     }
@@ -1068,6 +1168,10 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             }
         };
         capture_color("fill", "svg_fill");
+        // A path's own gradient paint. Carried beside `fill` rather than
+        // instead of it: SvgPathWidget prefers the gradient and falls back to
+        // the solid only when the string won't parse.
+        capture_color("fillGradient", "svg_fill_gradient");
         capture_color("stroke", "svg_stroke");
         if (!node.attributes.count("svg_stroke_width")) {
             for (const char* k : {"strokeWidth", "stroke_width"}) {
@@ -1087,25 +1191,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
 
     // Audio widget detection is deferred until after children are parsed
     // (see below) — containers with child frames shouldn't be widgets
-
-    bool explicit_audio_widget = false;
-    if (obj.hasObjectMember("audioWidget") && obj["audioWidget"].isString()) {
-        node.audio_widget = audio_widget_from_id(get_string(obj, "audioWidget"));
-        explicit_audio_widget = node.audio_widget != AudioWidgetType::none;
-    } else if (obj.hasObjectMember("audio_widget") && obj["audio_widget"].isString()) {
-        node.audio_widget = audio_widget_from_id(get_string(obj, "audio_widget"));
-        explicit_audio_widget = node.audio_widget != AudioWidgetType::none;
-    }
-    if (obj.hasObjectMember("label"))
-        node.audio_label = get_string(obj, "label");
-    if (obj.hasObjectMember("min"))
-        node.audio_min = get_float(obj, "min", 0.0f);
-    if (obj.hasObjectMember("max"))
-        node.audio_max = get_float(obj, "max", 1.0f);
-    if (obj.hasObjectMember("default"))
-        node.audio_default = get_float(obj, "default", 0.5f);
-    if (obj.hasObjectMember("min") && obj.hasObjectMember("max"))
-        node.has_audio_range = true;
+    const bool explicit_audio_widget = parse_ir_audio_widget(node, obj);
 
     // Top-level properties (Pencil/Figma format puts these at node level, not in "style")
     // Override style values if they weren't set from the "style" sub-object
@@ -1279,6 +1365,19 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         auto children = obj["children"];
         for (uint32_t i = 0; i < children.size(); ++i)
             node.children.push_back(parse_ir_node(children[static_cast<int>(i)]));
+    }
+
+    // Alternate frames (multi-state capture). Array ORDER is the frame index a
+    // `swap` element's target_frame names, so it is preserved verbatim.
+    for (const char* arr_key : {"alternate_frames", "alternateFrames"}) {
+        if (!obj.hasObjectMember(arr_key) || !obj[arr_key].isArray()) continue;
+        const auto frames = obj[arr_key];
+        for (uint32_t i = 0; i < frames.size(); ++i) {
+            const auto f = frames[static_cast<int>(i)];
+            if (!f.isObject()) continue;
+            node.alternate_frames.push_back(parse_ir_node(f));
+        }
+        if (!node.alternate_frames.empty()) break;
     }
 
     // ── Inherit rounded corners from rounded parent ─────────────────────
@@ -1933,6 +2032,18 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
             if (!el.param_key.empty())
                 write_string_member(out, ef, "param_key", el.param_key);
             out << '}';
+        }
+        out << ']';
+    }
+
+    // Alternate frames — emitted only when captured, so a single-state design
+    // serializes exactly as it did before multi-state capture existed.
+    if (!node.alternate_frames.empty()) {
+        write_key(out, first, "alternate_frames");
+        out << '[';
+        for (size_t i = 0; i < node.alternate_frames.size(); ++i) {
+            if (i) out << ',';
+            write_ir_node_json(out, node.alternate_frames[i], include_source_metadata);
         }
         out << ']';
     }

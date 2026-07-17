@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <pulp/format/mpe_expression.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <vector>
@@ -318,4 +319,105 @@ TEST_CASE("MpeVoiceTracker reset and config changes clear active state",
 TEST_CASE("Processor::supports_mpe defaults to false", "[midi][mpe]") {
     pulp::format::PluginDescriptor desc;
     REQUIRE_FALSE(desc.supports_mpe);
+}
+
+// ---------------------------------------------------------------------------
+// Shared per-note-expression → MIDI 1.0 synthesis (mpe_expression.hpp).
+//
+// Each format adapter decodes its own host expression event and then
+// synthesizes the same three channel-wide messages through these helpers, so
+// the synthesis contract is pinned once here rather than once per format.
+// ---------------------------------------------------------------------------
+
+namespace {
+/// Recover the 14-bit value from a pitch-bend event's data bytes.
+int bend14_of(const MidiEvent& ev) {
+    return static_cast<int>(ev.data()[1] & 0x7F)
+         | (static_cast<int>(ev.data()[2] & 0x7F) << 7);
+}
+}  // namespace
+
+TEST_CASE("MPE expression to_7bit rounds and clamps the normalized axis",
+          "[midi][mpe][parity]") {
+    REQUIRE(pulp::format::mpe::to_7bit(0.0) == 0);
+    REQUIRE(pulp::format::mpe::to_7bit(1.0) == 127);
+    // Round-to-nearest, not truncation: 0.5 * 127 = 63.5 → 64.
+    REQUIRE(pulp::format::mpe::to_7bit(0.5) == 64);
+    // Out-of-range input must not produce a malformed data byte.
+    REQUIRE(pulp::format::mpe::to_7bit(-1.0) == 0);
+    REQUIRE(pulp::format::mpe::to_7bit(2.0) == 127);
+}
+
+TEST_CASE("MPE expression pitch maps semitones onto the member bend range",
+          "[midi][mpe][parity]") {
+    auto center = pulp::format::mpe::pitch_bend_from_semitones(3, 0.0);
+    REQUIRE(center.is_pitch_bend());
+    REQUIRE(center.channel() == 3);
+    REQUIRE(bend14_of(center) == 8192);
+    REQUIRE(center.sample_offset == 0);
+
+    // A full member-range detune reaches the 14-bit ends.
+    const double full = MpeVoiceTracker::kDefaultMemberBendSemitones;
+    REQUIRE(bend14_of(pulp::format::mpe::pitch_bend_from_semitones(0, full))
+            == 16383);
+    REQUIRE(bend14_of(pulp::format::mpe::pitch_bend_from_semitones(0, -full))
+            == 1);
+
+    // Beyond the member range saturates rather than wrapping.
+    REQUIRE(bend14_of(pulp::format::mpe::pitch_bend_from_semitones(0, full * 10.0))
+            == 16383);
+    REQUIRE(bend14_of(pulp::format::mpe::pitch_bend_from_semitones(0, -full * 10.0))
+            == 1);
+
+    // Half the member range lands halfway through the bend span.
+    REQUIRE(bend14_of(pulp::format::mpe::pitch_bend_from_semitones(0, full * 0.5))
+            == 12288);
+}
+
+TEST_CASE("MPE expression pressure emits channel pressure on the right channel",
+          "[midi][mpe][parity]") {
+    auto ev = pulp::format::mpe::channel_pressure(5, 1.0);
+    REQUIRE(ev.data()[0] == static_cast<uint8_t>(0xD0 | 5));
+    REQUIRE(ev.data()[1] == 127);
+    REQUIRE(ev.sample_offset == 0);
+    REQUIRE(pulp::format::mpe::channel_pressure(0, 0.0).data()[1] == 0);
+    // The channel is masked to the low nibble.
+    REQUIRE(pulp::format::mpe::channel_pressure(0x1F, 0.0).data()[0]
+            == static_cast<uint8_t>(0xD0 | 0x0F));
+}
+
+TEST_CASE("MPE expression timbre emits CC 74", "[midi][mpe][parity]") {
+    auto ev = pulp::format::mpe::timbre_cc(2, 1.0);
+    REQUIRE(ev.is_cc());
+    REQUIRE(ev.channel() == 2);
+    REQUIRE(pulp::format::mpe::kTimbreController == 74);
+    REQUIRE(ev.cc_number() == 74);
+    REQUIRE(ev.cc_value() == 127);
+    REQUIRE(ev.sample_offset == 0);
+}
+
+TEST_CASE("MPE expression pitch round-trips through the voice tracker",
+          "[midi][mpe][parity]") {
+    // The adapters synthesize a channel-wide bend from a semitone request and
+    // rely on the tracker's inverse expansion to recover it per note.
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    tracker.process(MidiEvent::note_on(1, 60, 100));
+    const double request = MpeVoiceTracker::kDefaultMemberBendSemitones * 0.5;
+    tracker.process(pulp::format::mpe::pitch_bend_from_semitones(1, request));
+    const auto* voice = tracker.find(1, 60);
+    REQUIRE(voice != nullptr);
+    REQUIRE(voice->pitch_bend_semitones
+            == Approx(static_cast<float>(request)).margin(0.01));
+}
+
+TEST_CASE("MPE expression pressure and timbre reach the tracked note",
+          "[midi][mpe][parity]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    tracker.process(MidiEvent::note_on(1, 60, 100));
+    tracker.process(pulp::format::mpe::channel_pressure(1, 1.0));
+    tracker.process(pulp::format::mpe::timbre_cc(1, 0.0));
+    const auto* voice = tracker.find(1, 60);
+    REQUIRE(voice != nullptr);
+    REQUIRE(voice->pressure == Approx(1.0f).margin(0.01));
+    REQUIRE(voice->timbre == Approx(0.0f).margin(0.01));
 }

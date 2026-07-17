@@ -185,9 +185,9 @@ std::string css_prop_to_camel_case(const std::string& prop) {
     return out;
 }
 
-// Strip CSS `/* ... */` comments from a block. Multi-line safe. We
-// don't need to be a full CSS tokenizer — Claude Design exports use
-// vanilla rules, not CSS-in-JS or nested at-rules.
+// Strip CSS `/* ... */` comments from a block. Multi-line safe. This
+// runs before the rule walker so brace counting there never has to
+// reason about braces that live inside a comment.
 std::string strip_css_comments(const std::string& css) {
     std::string out;
     out.reserve(css.size());
@@ -224,16 +224,61 @@ std::map<std::string, std::string> parse_css_declarations(const std::string& bod
     return out;
 }
 
+// Advance past a CSS string literal. `quote_at` indexes the opening
+// `'` or `"`; returns the index just past the closing quote, or
+// `css.size()` if the literal is unterminated. Backslash escapes are
+// honored so `content: "\""` doesn't end the literal early.
+size_t skip_css_string(const std::string& css, size_t quote_at) {
+    const char quote = css[quote_at];
+    for (size_t i = quote_at + 1; i < css.size(); ++i) {
+        if (css[i] == '\\') {
+            ++i;  // consume the escaped char
+            continue;
+        }
+        if (css[i] == quote) return i + 1;
+    }
+    return css.size();
+}
+
+// Find the `}` that closes the block opening at `open`, counting
+// nested braces so an at-rule body (`@media { .a {} .b {} }`) is
+// consumed whole rather than stopping at its first inner `}`. Braces
+// inside string literals don't count. Returns npos when unbalanced.
+size_t find_matching_brace(const std::string& css, size_t open) {
+    int depth = 0;
+    for (size_t i = open; i < css.size(); ++i) {
+        const char c = css[i];
+        if (c == '"' || c == '\'') {
+            i = skip_css_string(css, i) - 1;
+            continue;
+        }
+        if (c == '{') {
+            ++depth;
+        } else if (c == '}') {
+            if (--depth == 0) return i;
+        }
+    }
+    return std::string::npos;
+}
+
 // Walk a CSS source string (the inside of one `<style>` block) and
-// merge every `.classname { ... }` rule into `into`. Skips at-rules
-// (anything that begins with `@`), `:root` blocks, descendant /
-// pseudo-class selectors (anything with whitespace, `:`, `>` or `,`
+// merge every top-level `.classname { ... }` rule into `into`. Skips
+// at-rules (anything that begins with `@`), `:root` blocks, descendant
+// / pseudo-class selectors (anything with whitespace, `:`, `>` or `,`
 // between the dot and the `{`), and `.scheme-*` selectors (those are
 // already handled as theme-mode token overrides upstream).
 //
+// Rules nested inside an at-rule are deliberately NOT collected: a
+// `@media` / `@supports` body is conditional, so hoisting its rules
+// into the unconditional classname map would make a responsive or
+// dark-mode override apply always. Consuming each at-rule body whole
+// (balanced braces) is what keeps the walker in sync — stopping at the
+// first inner `}` would both leak the at-rule's later rules and
+// misparse the following top-level rule's selector.
+//
 // We hand-walk character-by-character rather than regex because:
-//   1. CSS values can contain `{` (e.g. `linear-gradient(...)`) — but
-//      not at the top level of a declaration block.
+//   1. Brace nesting is unbounded (`@media { @supports { … } }`), which
+//      a regex cannot match.
 //   2. The selector list can include commas, so we need to split on
 //      `,` and apply the same body to every classname in the list.
 void collect_classnames_from_css(const std::string& css_in,
@@ -245,21 +290,45 @@ void collect_classnames_from_css(const std::string& css_in,
         while (i < css.size() && std::isspace(static_cast<unsigned char>(css[i]))) ++i;
         if (i >= css.size()) break;
 
-        // Find the next `{` that opens a rule body. Anything between
-        // `i` and that brace is the selector list.
-        auto open = css.find('{', i);
+        // Scan the prelude for whichever comes first: the `{` that
+        // opens a body, or the `;` that terminates a body-less
+        // statement at-rule (`@import url(…);`, `@charset "utf-8";`).
+        // Quoted spans are stepped over so a `{` or `;` inside a string
+        // doesn't split the prelude.
+        size_t scan = i;
+        size_t open = std::string::npos;
+        bool statement_at_rule = false;
+        while (scan < css.size()) {
+            const char c = css[scan];
+            if (c == '"' || c == '\'') {
+                scan = skip_css_string(css, scan);
+                continue;
+            }
+            if (c == '{') { open = scan; break; }
+            if (c == ';') { statement_at_rule = true; break; }
+            ++scan;
+        }
+
+        // A body-less statement — consume it and move on. Without this
+        // the `;` would be swallowed into the *next* rule's selector
+        // list, disqualifying an otherwise plain classname rule.
+        if (statement_at_rule) {
+            i = scan + 1;
+            continue;
+        }
         if (open == std::string::npos) break;
         std::string selector_list = css.substr(i, open - i);
 
-        // Find the matching `}`. Top-level only — declaration values
-        // never embed `{...}` braces in well-formed CSS.
-        auto close = css.find('}', open + 1);
+        // Find the matching `}`, counting nested braces.
+        auto close = find_matching_brace(css, open);
         if (close == std::string::npos) break;
         std::string body = css.substr(open + 1, close - (open + 1));
         i = close + 1;
 
         // Skip at-rules (`@media`, `@font-face`, `@keyframes`, etc.).
-        // The first non-whitespace char of the selector tells us.
+        // The first non-whitespace char of the selector tells us. The
+        // whole balanced body is already consumed above, so nested
+        // at-rules are skipped along with it.
         auto first_non_ws = selector_list.find_first_not_of(" \t\r\n");
         if (first_non_ws == std::string::npos) continue;
         if (selector_list[first_non_ws] == '@') continue;
@@ -894,326 +963,10 @@ static std::vector<uint8_t> read_binary_file(const fs::path& path) {
     return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
 
-static uint32_t png_be32(const uint8_t* p) {
-    return (static_cast<uint32_t>(p[0]) << 24) |
-           (static_cast<uint32_t>(p[1]) << 16) |
-           (static_cast<uint32_t>(p[2]) << 8) |
-           static_cast<uint32_t>(p[3]);
-}
-
-static std::pair<int, int> png_dimensions_from_bytes(const std::vector<uint8_t>& bytes) {
-    static const uint8_t sig[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-    if (bytes.size() < 24 || std::memcmp(bytes.data(), sig, sizeof(sig)) != 0) return {0, 0};
-    const int w = static_cast<int>(png_be32(bytes.data() + 16));
-    const int h = static_cast<int>(png_be32(bytes.data() + 20));
-    if (w <= 0 || h <= 0) return {0, 0};
-    return {w, h};
-}
-
-struct ImportDecodedPng {
-    std::vector<uint8_t> rgba;
-    int width = 0;
-    int height = 0;
-    bool valid() const { return !rgba.empty() && width > 0 && height > 0; }
-};
-
-static std::optional<ImportDecodedPng> decode_png_rgba_for_import(const std::vector<uint8_t>& bytes) {
-    ImportDecodedPng out;
-    static const uint8_t sig[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-    if (bytes.size() < 33 || std::memcmp(bytes.data(), sig, sizeof(sig)) != 0) return std::nullopt;
-
-    const int width = static_cast<int>(png_be32(bytes.data() + 16));
-    const int height = static_cast<int>(png_be32(bytes.data() + 20));
-    const int bit_depth = bytes[24];
-    const int color_type = bytes[25];
-    const int interlace = bytes[28];
-    if (width <= 0 || height <= 0 || bit_depth != 8 || interlace != 0) return std::nullopt;
-    const auto pixels = static_cast<uint64_t>(width) * static_cast<uint64_t>(height);
-    if (pixels > 50'000'000ull) return std::nullopt;
-
-    int channels = 0;
-    switch (color_type) {
-        case 0: channels = 1; break;  // gray
-        case 2: channels = 3; break;  // RGB
-        case 4: channels = 2; break;  // gray + alpha
-        case 6: channels = 4; break;  // RGBA
-        default: return std::nullopt;
-    }
-
-    std::vector<uint8_t> idat;
-    size_t pos = 8;
-    while (pos + 8 <= bytes.size()) {
-        const uint32_t clen = png_be32(bytes.data() + pos);
-        const uint8_t* ctype = bytes.data() + pos + 4;
-        const size_t body = pos + 8;
-        if (body + clen + 4 > bytes.size()) break;
-        if (std::memcmp(ctype, "IDAT", 4) == 0) {
-            idat.insert(idat.end(), bytes.data() + body, bytes.data() + body + clen);
-        } else if (std::memcmp(ctype, "IEND", 4) == 0) {
-            break;
-        }
-        pos = body + clen + 4;
-    }
-    if (idat.empty()) return std::nullopt;
-
-    const size_t stride = static_cast<size_t>(width) * static_cast<size_t>(channels);
-    const size_t expected = static_cast<size_t>(height) * (stride + 1);
-    auto raw = pulp::runtime::gzip_decompress(idat.data(), idat.size());
-    if (!raw || raw->size() < expected) return std::nullopt;
-
-    std::vector<uint8_t> img(static_cast<size_t>(height) * stride);
-    auto paeth = [](int a, int b, int c) {
-        const int p = a + b - c;
-        const int pa = std::abs(p - a);
-        const int pb = std::abs(p - b);
-        const int pc = std::abs(p - c);
-        if (pa <= pb && pa <= pc) return a;
-        return pb <= pc ? b : c;
-    };
-    for (int y = 0; y < height; ++y) {
-        const uint8_t* src = raw->data() + static_cast<size_t>(y) * (stride + 1);
-        uint8_t* row = img.data() + static_cast<size_t>(y) * stride;
-        const uint8_t* prev = y > 0 ? img.data() + static_cast<size_t>(y - 1) * stride : nullptr;
-        const uint8_t filter = src[0];
-        for (size_t x = 0; x < stride; ++x) {
-            const int a = x >= static_cast<size_t>(channels) ? row[x - channels] : 0;
-            const int b = prev ? prev[x] : 0;
-            const int c = (prev && x >= static_cast<size_t>(channels)) ? prev[x - channels] : 0;
-            int v = src[1 + x];
-            switch (filter) {
-                case 0: break;
-                case 1: v += a; break;
-                case 2: v += b; break;
-                case 3: v += (a + b) / 2; break;
-                case 4: v += paeth(a, b, c); break;
-                default: return std::nullopt;
-            }
-            row[x] = static_cast<uint8_t>(v & 0xff);
-        }
-    }
-
-    out.rgba.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
-    for (int i = 0; i < width * height; ++i) {
-        const uint8_t* s = img.data() + static_cast<size_t>(i) * static_cast<size_t>(channels);
-        uint8_t* d = out.rgba.data() + static_cast<size_t>(i) * 4;
-        if (channels == 4) {
-            d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3];
-        } else if (channels == 3) {
-            d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = 255;
-        } else if (channels == 2) {
-            d[0] = d[1] = d[2] = s[0]; d[3] = s[1];
-        } else {
-            d[0] = d[1] = d[2] = s[0]; d[3] = 255;
-        }
-    }
-    out.width = width;
-    out.height = height;
-    return out;
-}
-
-struct ImportOpaqueCore {
-    int x = 0;
-    int y = 0;
-    int w = 0;
-    int h = 0;
-    int png_w = 0;
-    int png_h = 0;
-};
-
-// ── Minimal RGBA-PNG re-encoder (for cleaning captured knob art) ──────────
-// Re-encodes a decoded RGBA buffer to a valid 8-bit RGBA PNG using the runtime
-// zlib codec. The decode→encode round-trip is lossless (pixel values are
-// preserved), so editing a few pixels and re-encoding leaves the rest of the
-// image byte-for-byte identical after decode.
-uint32_t import_png_crc32(const uint8_t* data, size_t len) {
-    static uint32_t table[256];
-    static bool init = false;
-    if (!init) {
-        for (uint32_t n = 0; n < 256; ++n) {
-            uint32_t c = n;
-            for (int k = 0; k < 8; ++k)
-                c = (c & 1u) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
-            table[n] = c;
-        }
-        init = true;
-    }
-    uint32_t c = 0xFFFFFFFFu;
-    for (size_t i = 0; i < len; ++i) c = table[(c ^ data[i]) & 0xffu] ^ (c >> 8);
-    return c ^ 0xFFFFFFFFu;
-}
-
-void import_png_put_be32(std::vector<uint8_t>& v, uint32_t x) {
-    v.push_back(static_cast<uint8_t>((x >> 24) & 0xff));
-    v.push_back(static_cast<uint8_t>((x >> 16) & 0xff));
-    v.push_back(static_cast<uint8_t>((x >> 8) & 0xff));
-    v.push_back(static_cast<uint8_t>(x & 0xff));
-}
-
-void import_png_put_chunk(std::vector<uint8_t>& out, const char* type,
-                          const std::vector<uint8_t>& data) {
-    import_png_put_be32(out, static_cast<uint32_t>(data.size()));
-    const size_t crc_start = out.size();
-    out.insert(out.end(), type, type + 4);
-    out.insert(out.end(), data.begin(), data.end());
-    out.insert(out.end(), 4, 0);  // placeholder, overwritten below
-    const uint32_t crc = import_png_crc32(out.data() + crc_start, 4 + data.size());
-    out[out.size() - 4] = static_cast<uint8_t>((crc >> 24) & 0xff);
-    out[out.size() - 3] = static_cast<uint8_t>((crc >> 16) & 0xff);
-    out[out.size() - 2] = static_cast<uint8_t>((crc >> 8) & 0xff);
-    out[out.size() - 1] = static_cast<uint8_t>(crc & 0xff);
-}
-
-std::optional<std::vector<uint8_t>> encode_rgba_png_for_import(
-        const ImportDecodedPng& img) {
-    if (!img.valid()) return std::nullopt;
-    std::vector<uint8_t> raw;
-    raw.reserve(static_cast<size_t>(img.height) * (static_cast<size_t>(img.width) * 4 + 1));
-    for (int y = 0; y < img.height; ++y) {
-        raw.push_back(0);  // filter type: none
-        const uint8_t* row = img.rgba.data() + static_cast<size_t>(y) * img.width * 4;
-        raw.insert(raw.end(), row, row + static_cast<size_t>(img.width) * 4);
-    }
-    auto comp = pulp::runtime::zlib_compress(raw.data(), raw.size(), 6);
-    if (!comp) return std::nullopt;
-    std::vector<uint8_t> out = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-    std::vector<uint8_t> ihdr;
-    import_png_put_be32(ihdr, static_cast<uint32_t>(img.width));
-    import_png_put_be32(ihdr, static_cast<uint32_t>(img.height));
-    ihdr.push_back(8);  // bit depth
-    ihdr.push_back(6);  // color type RGBA
-    ihdr.push_back(0); ihdr.push_back(0); ihdr.push_back(0);  // compression/filter/interlace
-    import_png_put_chunk(out, "IHDR", ihdr);
-    import_png_put_chunk(out, "IDAT", *comp);
-    import_png_put_chunk(out, "IEND", {});
-    return out;
-}
-
-// Erase the indicator the design BAKED into a captured knob disc — ELYSIUM's is
-// a thin vertical ANTENNA standing straight up ABOVE the disc at 12 o'clock. We
-// draw our own rotating pointer, so the baked one is a stuck second line.
-//
-// The erase MUST be non-destructive to the disc: it ONLY clears the narrow
-// antenna column sitting above the disc body, and STOPS the instant a scan row
-// widens into the disc itself — so the ring outline and face are never touched
-// (an earlier copy-from-beside + alpha-punch version cut a notch into the ring's
-// top, which read as a gap). It never copies pixels and never modifies the disc.
-// Mutates `img`.
-// Pure pixel logic (declared in design_import_internal.hpp so it's unit-testable
-// without the internal Import* structs). Scans the disc bbox from the top down:
-// a NARROW opaque span is the antenna → cleared; the first WIDE span is the disc
-// body → stop. The antenna is located by its actual span per row, NOT assumed at
-// the bbox center (the min/max ticks skew the bbox).
-void clear_baked_knob_antenna(std::vector<uint8_t>& rgba, int img_w, int img_h,
-                              int core_x, int core_y, int core_w, int core_h) {
-    if (img_w <= 0 || img_h <= 0 || core_w <= 0 || core_h <= 0) return;
-    if (rgba.size() < static_cast<size_t>(img_w) * img_h * 4) return;
-    const int x_lo = std::max(0, core_x);
-    const int x_hi = std::min(img_w, core_x + core_w);
-    const int y_hi = std::min(img_h, core_y + core_h);
-    // Antenna width ceiling: the disc body's span is ~core_w; the antenna is a
-    // thin line. A row whose opaque span exceeds this is the disc, not antenna.
-    const int narrow = std::max(6, core_w * 18 / 100);
-    auto alpha = [&](int x, int y) -> uint8_t& {
-        return rgba[(static_cast<size_t>(y) * img_w + x) * 4 + 3];
-    };
-    for (int y = std::max(0, core_y); y < y_hi; ++y) {
-        int xmin = -1, xmax = -1;
-        for (int x = x_lo; x < x_hi; ++x)
-            if (alpha(x, y) >= 24) { if (xmin < 0) xmin = x; xmax = x; }
-        if (xmin < 0) continue;                       // empty row above the antenna
-        if (xmax - xmin + 1 > narrow) break;          // reached the disc — stop
-        for (int x = xmin; x <= xmax; ++x) alpha(x, y) = 0;  // clear the antenna
-    }
-}
-
-void clean_baked_knob_indicator(ImportDecodedPng& img, const ImportOpaqueCore& core) {
-    if (!img.valid()) return;
-    clear_baked_knob_antenna(img.rgba, img.width, img.height,
-                             core.x, core.y, core.w, core.h);
-}
-
-// Sample a shape illustration's OWN vertical color gradient from its art, so a
-// value-driven fill reproduces the shape's real colors (ELYSIUM: the cylinder's
-// purple, the prism's magenta, the cube's green, the tuning shape's amber) —
-// each shape filling with ITS gradient, not one generic color. Returns up to
-// `n` comma-joined "#rrggbb" stops bottom→top, or "" when the shape isn't
-// colorful enough to be a gradient fill (a near-grey logo/icon yields nothing,
-// which keeps the capability from latching onto things that shouldn't fill).
-std::string sample_shape_fill_gradient(const ImportDecodedPng& img,
-                                       const ImportOpaqueCore& core, int n = 5) {
-    if (!img.valid() || core.w <= 1 || core.h <= 1 || n < 2) return {};
-    auto at = [&](int x, int y) -> const uint8_t* {
-        return &img.rgba[(static_cast<size_t>(y) * img.width + x) * 4];
-    };
-    std::vector<std::array<int, 3>> stops;   // averaged RGB per band
-    float max_sat = 0.0f;
-    for (int k = 0; k < n; ++k) {
-        // Stop k: band centered up the shape — k=0 bottom, k=n-1 top.
-        const float fy = 1.0f - (static_cast<float>(k) + 0.5f) / static_cast<float>(n);
-        const int band_c = core.y + static_cast<int>(fy * core.h);
-        const int band_h = std::max(1, core.h / (n * 2));
-        long sr = 0, sg = 0, sb = 0, cnt = 0;
-        for (int y = band_c - band_h; y <= band_c + band_h; ++y) {
-            if (y < 0 || y >= img.height) continue;
-            for (int x = core.x; x < core.x + core.w && x < img.width; ++x) {
-                const uint8_t* p = at(x, y);
-                if (p[3] < 96) continue;          // skip transparent / soft edges
-                sr += p[0]; sg += p[1]; sb += p[2]; ++cnt;
-            }
-        }
-        if (cnt == 0) return {};                  // a gappy band ⇒ not a solid shape
-        const int r = static_cast<int>(sr / cnt);
-        const int g = static_cast<int>(sg / cnt);
-        const int bl = static_cast<int>(sb / cnt);
-        stops.push_back({r, g, bl});
-        const int mx = std::max({r, g, bl}), mn = std::min({r, g, bl});
-        if (mx > 0) max_sat = std::max(max_sat, static_cast<float>(mx - mn) / mx);
-    }
-    if (max_sat < 0.18f) return {};               // ~grey ⇒ logo/icon, not a fill
-    std::string out;
-    char buf[8];
-    for (size_t i = 0; i < stops.size(); ++i) {
-        std::snprintf(buf, sizeof(buf), "#%02x%02x%02x",
-                      stops[i][0], stops[i][1], stops[i][2]);
-        if (i) out += ',';
-        out += buf;
-    }
-    return out;
-}
-
-static std::optional<ImportOpaqueCore> compute_import_opaque_core(const std::vector<uint8_t>& bytes,
-                                                                  float min_alpha = 0.5f) {
-    auto img = decode_png_rgba_for_import(bytes);
-    if (!img || !img->valid()) return std::nullopt;
-    const uint8_t threshold = static_cast<uint8_t>(
-        std::clamp(min_alpha, 0.0f, 1.0f) * 255.0f + 0.5f);
-    int min_x = img->width;
-    int min_y = img->height;
-    int max_x = -1;
-    int max_y = -1;
-    for (int y = 0; y < img->height; ++y) {
-        const uint8_t* row = img->rgba.data() + static_cast<size_t>(y) * img->width * 4;
-        for (int x = 0; x < img->width; ++x) {
-            if (row[x * 4 + 3] < threshold) continue;
-            min_x = std::min(min_x, x);
-            min_y = std::min(min_y, y);
-            max_x = std::max(max_x, x);
-            max_y = std::max(max_y, y);
-        }
-    }
-    if (max_x < min_x || max_y < min_y) return std::nullopt;
-    return ImportOpaqueCore{
-        min_x,
-        min_y,
-        max_x - min_x + 1,
-        max_y - min_y + 1,
-        img->width,
-        img->height,
-    };
-}
 
 static bool write_binary_file(const fs::path& path,
                               const std::vector<uint8_t>& bytes);
+static fs::path default_asset_cache_directory();
 
 void enrich_imported_image_asset_metadata(DesignIR& ir,
                                           const IRAssetManifest& manifest,
@@ -1258,14 +1011,22 @@ void enrich_imported_image_asset_metadata(DesignIR& ir,
                                     if (auto img = decode_png_rgba_for_import(bytes)) {
                                         clean_baked_knob_indicator(*img, *core);
                                         if (auto enc = encode_rgba_png_for_import(*img)) {
-                                            fs::path dir = fs::temp_directory_path() /
-                                                           "pulp-import-assets";
+                                            // The cleaned disc lands in the durable
+                                            // asset cache, not the OS temp dir: this
+                                            // path is serialized into asset_path and
+                                            // reloaded at RUNTIME by a shipped baked
+                                            // UI, so a temp sweep would silently
+                                            // unskin the knob. Content-addressed by
+                                            // sha256 like the rest of the pipeline —
+                                            // std::hash is implementation-defined and
+                                            // unstable across runs and compilers.
+                                            fs::path dir = default_asset_cache_directory();
                                             std::error_code dec;
                                             fs::create_directories(dir, dec);
-                                            const auto key = std::hash<std::string>{}(
-                                                asset_ref->second + path.string());
+                                            const auto digest = pulp::runtime::sha256_hex(
+                                                enc->data(), enc->size());
                                             fs::path cleaned = dir /
-                                                ("knobclean_" + std::to_string(key) + ".png");
+                                                ("knobclean_" + digest.substr(0, 16) + ".png");
                                             if (write_binary_file(cleaned, *enc))
                                                 node.attributes["asset_path"] =
                                                     cleaned.string();
@@ -1989,6 +1750,55 @@ DesignIR parse_figma_plugin_json(const std::string& json) {
     ir.root.provenance = std::move(provenance);
     ir.root.confidence = IRConfidence::pass;
 
+    // The envelope's diagnostics are the whole point of emitting them: they are
+    // how a fidelity loss becomes a stated result instead of a silent one. This
+    // parser documented `diagnostics?: [...]` in its own shape comment above and
+    // then never read the field, so `ir.diagnostics` stayed empty and
+    // `print_import_diagnostics` had nothing to print.
+    //
+    // Nothing about that was visible. The decoder emitted the warnings correctly
+    // and wrote them to scene.pulp.json; the JS lane even printed "N warning(s)"
+    // from its own array. But `--from fig` rewrites its source to figma-plugin
+    // and lands HERE, so every gradient flattened to its mean, every dropped
+    // blend mode, every missing icon font and every unresolvable asset was
+    // announced to a file and to nobody. The skill promises the opposite
+    // (import-design SKILL.md: "reported as named warnings ... rather than
+    // silently dropped") — true of the JSON on disk, false of the CLI.
+    //
+    // A comment describing a field the code does not parse is the same failure
+    // this whole lane keeps producing: a chain that runs end to end with one end
+    // quietly unplugged, where nothing errors and the result is merely wrong.
+    if (parsed.hasObjectMember("diagnostics") && parsed["diagnostics"].isArray()) {
+        const auto diags = parsed["diagnostics"];
+        // Local to this parser and matching its house idiom (hasObjectMember +
+        // isString), rather than reaching for a helper this TU does not have.
+        auto str = [](const choc::value::ValueView& o, const char* k) -> std::string {
+            return (o.hasObjectMember(k) && o[k].isString())
+                       ? std::string(o[k].toString()) : std::string{};
+        };
+        for (uint32_t i = 0; i < diags.size(); ++i) {
+            const auto d = diags[i];
+            if (!d.isObject()) continue;
+            ImportDiagnostic out;
+            out.code = str(d, "code");
+            if (out.code.empty()) continue;  // a diagnostic with no code says nothing
+            // `detail` is the decoder's field name; accept `message` too so a
+            // different emitter of this envelope is not silently blanked.
+            out.message = str(d, "detail");
+            if (out.message.empty()) out.message = str(d, "message");
+            // Prefer the readable node name for `path`; fall back to the guid,
+            // which is at least resolvable.
+            out.path = str(d, "node_name");
+            if (out.path.empty()) out.path = str(d, "node_id");
+            const std::string sev = str(d, "severity");
+            out.severity = sev == "error" ? ImportDiagnosticSeverity::error
+                         : sev == "info"  ? ImportDiagnosticSeverity::info
+                                          : ImportDiagnosticSeverity::warning;
+            if (auto id = str(d, "node_id"); !id.empty()) out.anchor_id = id;
+            ir.diagnostics.push_back(std::move(out));
+        }
+    }
+
     promote_interactive_frames(ir.root);
     assign_anchors(ir.root, AnchorStrategy::adapter, "figma-plugin");
 
@@ -2270,7 +2080,29 @@ void synthesize_node(IRNode& n) {
     if (!n.children.empty()) return;
     if (n.audio_widget != AudioWidgetType::none) return;
     if (n.attributes.count("asset_path")) return;
-    if (node_has_visible_fill(n)) return;
+    // "Already renderable" holds for a rect or a line: a frame paints its own
+    // background box, so a filled rect needs no path. It does NOT hold for a
+    // round or many-sided primitive — codegen has no painter for those, so a
+    // filled ellipse emits nothing whatsoever and the shape vanishes. The
+    // design's red record dot rendered as an empty cell for exactly this reason
+    // while the play triangle beside it (a vector carrying a real path) was
+    // fine. Their fill is only expressible as a path, so synthesize one and
+    // carry the color across.
+    //
+    // A gradient rides the path too, via setSvgFillGradient. It used to bail
+    // here because a gradient could not move onto the path, and emitting one
+    // anyway painted a gradient SQUARE behind the circle — strictly worse than
+    // a flat disc. The path can carry it now, so the only rule left is the one
+    // that made the square: whatever moves onto the path must be cleared off
+    // the node's own background.
+    const bool fill_needs_path = n.type == "ellipse" || n.type == "circle" ||
+                                 n.type == "polygon" || n.type == "star";
+    const bool solid_filled =
+        n.style.background_color && !n.style.background_color->empty();
+    const bool gradient_filled =
+        n.style.background_gradient && !n.style.background_gradient->empty();
+    if (node_has_visible_fill(n) && !(fill_needs_path && (solid_filled || gradient_filled)))
+        return;
     const float w = n.style.width.value_or(0.0f);
     const float h = n.style.height.value_or(0.0f);
     const bool is_line = (n.type == "line" || n.type == "svg_line");
@@ -2297,10 +2129,26 @@ void synthesize_node(IRNode& n) {
 
     n.attributes["path_data"] = d;
     n.attributes["svg_viewbox"] = "0 0 " + svg_num(w) + " " + svg_num(h);
-    // We only reach here when the node has no visible fill, so force the
-    // SvgPathWidget's default opaque-black fill off — otherwise a stroke-only or
-    // empty shape would render as a solid black box.
-    n.attributes["svg_fill"] = "none";
+    // The synthesized path now IS this node's paint, so a solid fill moves onto
+    // it and the background is cleared. Leaving the background set would paint a
+    // square behind the circle — the stray box that shows up behind a knob.
+    if (gradient_filled) {
+        n.attributes["svg_fill_gradient"] = *n.style.background_gradient;
+        n.style.background_gradient.reset();
+        // The solid, when present, follows it onto the path as the widget's
+        // parse-failure fallback. Either way the node's own background is
+        // cleared: leaving it would paint the box behind the circle.
+        n.attributes["svg_fill"] =
+            solid_filled ? *n.style.background_color : std::string("none");
+        n.style.background_color.reset();
+    } else if (solid_filled) {
+        n.attributes["svg_fill"] = *n.style.background_color;
+        n.style.background_color.reset();
+    } else {
+        // No visible fill: force the SvgPathWidget's default opaque-black fill
+        // off — otherwise a stroke-only or empty shape renders as a black box.
+        n.attributes["svg_fill"] = "none";
+    }
     if (n.style.border_color && !n.style.border_color->empty()) {
         n.attributes["svg_stroke"] = *n.style.border_color;
         n.attributes["svg_stroke_width"] = svg_num(n.style.border_width.value_or(1.0f));
@@ -2446,6 +2294,93 @@ void hoist_captured_art_knobs(DesignIR& ir) {
         for (auto& c : n.children) visit(c);
     };
     visit(ir.root);
+}
+
+namespace {
+
+// Split a CSS `border` shorthand into its parts. Tokenized with paren-depth
+// tracking rather than a plain space split, because `rgba(255, 0, 0, 0.5)` is
+// ONE value containing spaces and commas — a naive split hands back "rgba(255,"
+// as the color and the border silently disappears again, one layer deeper.
+//
+// The color is carried across verbatim rather than parsed: border_color is a
+// string, and every downstream paint site already accepts hex / rgb() / rgba()
+// / hsl(). Parsing here would only add a second place to disagree about color.
+struct BorderShorthand {
+    std::optional<std::string> color;
+    std::optional<float> width;
+    std::optional<std::string> style;
+};
+
+BorderShorthand parse_border_shorthand(const std::string& value) {
+    BorderShorthand out;
+    static const std::unordered_set<std::string> kStyles = {
+        "none", "hidden", "solid", "dashed", "dotted",
+        "double", "groove", "ridge", "inset", "outset",
+    };
+
+    std::vector<std::string> tokens;
+    std::string cur;
+    int depth = 0;
+    for (char c : value) {
+        if (c == '(') ++depth;
+        if (c == ')') --depth;
+        if (std::isspace(static_cast<unsigned char>(c)) && depth == 0) {
+            if (!cur.empty()) { tokens.push_back(cur); cur.clear(); }
+            continue;
+        }
+        cur += c;
+    }
+    if (!cur.empty()) tokens.push_back(cur);
+
+    for (const auto& t : tokens) {
+        const std::string lower = choc::text::toLowerCase(t);
+        if (!out.style && kStyles.count(lower)) { out.style = lower; continue; }
+        // A width is a bare number with an optional unit. Only px is honoured as
+        // a real length; other units are left for the caller's default rather
+        // than converted with a guessed root font size.
+        if (!out.width && !t.empty() &&
+            (std::isdigit(static_cast<unsigned char>(t[0])) || t[0] == '.')) {
+            char* end = nullptr;
+            const float v = std::strtof(t.c_str(), &end);
+            if (end != t.c_str()) {
+                const std::string unit = choc::text::toLowerCase(std::string(end));
+                if (unit.empty() || unit == "px") { out.width = v; continue; }
+            }
+        }
+        if (!out.color) out.color = t;
+    }
+    return out;
+}
+
+}  // namespace
+
+void normalize_border_shorthand(IRNode& root) {
+    auto visit = [](auto&& self, IRNode& n) -> void {
+        if (n.style.border && !n.style.border->empty()) {
+            const auto parts = parse_border_shorthand(*n.style.border);
+            // `border: none` / a zero width is a positive statement that there
+            // is no edge. Recording color-less parts would leave border_width
+            // set with no color, which reads downstream as "no border" anyway —
+            // but say it explicitly so the intent survives a later refactor.
+            const bool suppressed =
+                (parts.style && *parts.style == "none") ||
+                (parts.style && *parts.style == "hidden") ||
+                (parts.width && *parts.width <= 0.0f);
+            if (!suppressed) {
+                // Fill gaps only: a producer that set the discrete fields said
+                // what it meant more precisely than the shorthand can.
+                if (!n.style.border_color && parts.color)
+                    n.style.border_color = *parts.color;
+                if (!n.style.border_width)
+                    n.style.border_width = parts.width.value_or(1.0f);
+                if (!n.style.border_style && parts.style)
+                    n.style.border_style = *parts.style;
+            }
+        }
+        for (auto& c : n.children) self(self, c);
+    };
+    visit(visit, root);
 }
 
 void synthesize_primitive_paths(IRNode& root) {

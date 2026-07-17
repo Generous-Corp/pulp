@@ -2,6 +2,7 @@
 
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
+#include "css_color.hpp"
 
 #include <functional>
 #include <string>
@@ -9,9 +10,8 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_tokens_api(std::function<canvas::Color(const std::string&)> parse_color) {
+void WidgetBridge::register_tokens_api() {
     BridgeApiContext api{engine_};
-    auto parseColor = std::move(parse_color);
 
     // setMotionToken(tokenName, value)
     register_bridge_function(api, "setMotionToken", [this](choc::javascript::ArgumentList args) {
@@ -60,12 +60,12 @@ void WidgetBridge::register_tokens_api(std::function<canvas::Color(const std::st
     });
 
     // setColorToken(name, color) - set a color token on the root theme
-    register_bridge_function(api, "setColorToken", [this, parseColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setColorToken", [this](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
         auto color_str = args.get<std::string>(1, "");
         if (name.empty()) return choc::value::Value();
         auto theme = root_.theme();
-        auto c = parseColor(color_str);
+        auto c = parse_bridge_css_color(color_str);
         theme.colors[name] = c;
         root_.set_theme(theme);
         return choc::value::Value();

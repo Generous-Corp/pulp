@@ -384,10 +384,12 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
           # pulp_add_wclap(Foo) declares the target as `Foo-wclap`, not `Foo` — the
           # bare names are a hard "No rule to make target", not a fallback.
-          cmake --build build-wclap -j"$(sysctl -n hw.ncpu)" --target SuperConvolverGpu-wclap SuperConvolver-wclap
+          # gpu-audio-macos runs on the shared self-hosted Studios (see runs-on),
+          # so build with a governed lease share, not every core.
+          tools/ci/governed-build.sh cmake --build build-wclap --target SuperConvolverGpu-wclap SuperConvolver-wclap
           emcmake cmake -S examples/web-demos/gpu-audio -B build-gpu-dsp \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-gpu-dsp -j"$(sysctl -n hw.ncpu)"
+          tools/ci/governed-build.sh cmake --build build-gpu-dsp
 
       - name: GPU-audio browser proof (WebGPU REQUIRED)
         env:
@@ -470,7 +472,7 @@ jobs:
           emcmake cmake -S examples/web-demos/super-convolver-ui -B build-webui \
             -DCMAKE_BUILD_TYPE=Release -DSKIA_DIR="$HOME/skia-wasm" \
             -DPULP_WEBUI_CHOC_INCLUDE="$PULP_WAM_CHOC_INCLUDE"
-          cmake --build build-webui -j"$(sysctl -n hw.ncpu)"
+          tools/ci/governed-build.sh cmake --build build-webui
 
           # Every gallery plugin, so the assembler can run at all (see the checkouts above).
           cmake -S examples/web-demos/wclap-build -B build-wclap \
@@ -478,7 +480,7 @@ jobs:
             -DPULP_EXAMPLE_PLUGINS_DIR="$GITHUB_WORKSPACE/_ext/pulp-example-plugins" \
             -DPULP_CLASSIC_EFFECTS_DIR="$GITHUB_WORKSPACE/_ext/pulp-classic-effects" \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-wclap -j"$(sysctl -n hw.ncpu)"
+          tools/ci/governed-build.sh cmake --build build-wclap
 
           node examples/web-demos/wclap-build/cloudflare/assemble-gallery.mjs \
             --build "$GITHUB_WORKSPACE/build-wclap" \
