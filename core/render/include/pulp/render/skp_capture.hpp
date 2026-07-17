@@ -147,8 +147,23 @@ SkpCaptureResult capture_skp_to_file(
     skgpu::graphite::Context* graphite_context = nullptr);
 
 /// `true` when this build can produce `.skp` captures (Skia compiled
-/// in). Lets callers (inspector / CLI) report an honest "unavailable"
+/// in). Lets a caller report an honest "unavailable" (e.g. the
+/// `maybe_capture_skp_from_env` trigger, which no-ops on a non-Skia build)
 /// instead of attempting a doomed capture.
 bool skp_capture_supported();
+
+/// Env-var-triggered one-shot `.skp` capture. This is the concrete trigger the
+/// capture machinery was missing — `SkpFrameCapture` / `capture_skp_to_file`
+/// had no production caller. The macOS GPU host calls this once per painted
+/// frame; when `PULP_SKP_CAPTURE_DIR` names a directory it captures the frame
+/// into `<dir>/pulp-frame-<n>.skp`, logs the path, and disarms — so setting the
+/// variable dumps exactly ONE `.skp` per arming, not one per frame. Re-arms
+/// only when the variable's value changes (point it at a new directory to
+/// capture again). Returns a failed result (with a reason) when the variable is
+/// unset, already fired for this value, or Skia is unavailable.
+SkpCaptureResult maybe_capture_skp_from_env(
+    int width, int height,
+    const std::function<void(canvas::Canvas&)>& paint,
+    skgpu::graphite::Context* graphite_context = nullptr);
 
 } // namespace pulp::render

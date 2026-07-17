@@ -8,6 +8,7 @@
 #include <pulp/canvas/canvas.hpp>  // FillRule + Canvas path API (pulp #3656)
 
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -495,6 +496,52 @@ TEST_CASE("SkpFrameCapture writes a loadable .skp file", "[render][skia][skp]") 
     REQUIRE(restored->cullRect() == SkRect::MakeWH(32.0f, 32.0f));
 
     std::filesystem::remove(path);
+}
+
+// The env-var trigger is the concrete production caller the capture machinery
+// was missing. Prove PULP_SKP_CAPTURE_DIR writes exactly one loadable .skp and
+// then disarms (one-shot per env value).
+TEST_CASE("maybe_capture_skp_from_env captures one .skp when PULP_SKP_CAPTURE_DIR is set",
+          "[render][skia][skp]") {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "pulp-skp-env-trigger-test";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+
+    auto paint = [](pulp::canvas::Canvas& c) {
+        c.set_fill_color(pulp::canvas::Color::rgba8(0, 128, 255));
+        c.fill_rect(0.0f, 0.0f, 32.0f, 32.0f);
+    };
+
+    // Unset → honest no-op with a reason.
+    ::unsetenv("PULP_SKP_CAPTURE_DIR");
+    auto none = pulp::render::maybe_capture_skp_from_env(32, 32, paint);
+    REQUIRE_FALSE(none.ok);
+    REQUIRE_FALSE(none.reason.empty());
+
+    // Armed → captures one nonempty, loadable .skp into the directory.
+    ::setenv("PULP_SKP_CAPTURE_DIR", dir.string().c_str(), 1);
+    auto first = pulp::render::maybe_capture_skp_from_env(32, 32, paint);
+    REQUIRE(first.ok);
+    REQUIRE(fs::exists(first.path));
+    REQUIRE(fs::file_size(first.path) > 0);
+    SkFILEStream in(first.path.c_str());
+    REQUIRE(in.isValid());
+    REQUIRE(SkPicture::MakeFromStream(&in) != nullptr);
+
+    // One-shot: a second call with the same env value does not re-capture.
+    auto second = pulp::render::maybe_capture_skp_from_env(32, 32, paint);
+    REQUIRE_FALSE(second.ok);
+
+    // Exactly one .skp landed in the directory.
+    std::size_t skp_count = 0;
+    for (const auto& entry : fs::directory_iterator(dir))
+        if (entry.path().extension() == ".skp") ++skp_count;
+    REQUIRE(skp_count == 1);
+
+    ::unsetenv("PULP_SKP_CAPTURE_DIR");
+    fs::remove_all(dir, ec);
 }
 
 TEST_CASE("SkpFrameCapture preserves embedded-image pixels via fImageProc",
@@ -1020,6 +1067,12 @@ TEST_CASE("SkpFrameCapture is unavailable without Skia", "[render][skia][skp]") 
         64, 48, "/tmp/unused.skp", [](pulp::canvas::Canvas&) {});
     REQUIRE_FALSE(file.ok);
     REQUIRE_FALSE(file.reason.empty());
+
+    // The env-var trigger links and degrades gracefully in a non-Skia build.
+    auto env = pulp::render::maybe_capture_skp_from_env(
+        64, 48, [](pulp::canvas::Canvas&) {});
+    REQUIRE_FALSE(env.ok);
+    REQUIRE_FALSE(env.reason.empty());
 }
 
 #endif  // PULP_HAS_SKIA

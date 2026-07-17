@@ -35,6 +35,7 @@
 #include <pulp/render/dirty_tracker.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
+#include <pulp/render/skp_capture.hpp>
 #import <QuartzCore/CAMetalLayer.h>
 #import <CoreVideo/CVDisplayLink.h>
 #import <Metal/Metal.h>
@@ -2536,6 +2537,16 @@ private:
         }
 
         paint_scene(*canvas);
+
+        // Env-var one-shot .skp capture: when PULP_SKP_CAPTURE_DIR is set, dump
+        // this frame's draw ops to a backend-independent .skp for offline
+        // inspection (Skia debugger / SVG). Re-runs paint_scene into the capture
+        // canvas so the artifact matches what was just presented; one-shot per
+        // env value, so a live loop writes one file, not one per frame.
+        pulp::render::maybe_capture_skp_from_env(
+            static_cast<int>(width_), static_cast<int>(height_),
+            [this](canvas::Canvas& c) { paint_scene(c); },
+            skia_surface_->graphite_context());
 
         continuous_frames_.store(
             pulp::view::needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
