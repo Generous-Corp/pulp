@@ -5,7 +5,7 @@
 // (`tools/figma-plugin/schema/figma-plugin-export-v1.json`), so a decoded frame
 // flows through the existing `--from figma-plugin` importer unchanged.
 
-import { geometryToPath } from './paths.mjs';
+import { geometryToPath, glyphsToPath, isIconFont } from './paths.mjs';
 
 const FRAME_LIKE = new Set(['FRAME', 'COMPONENT', 'INSTANCE', 'COMPONENT_SET']);
 
@@ -329,8 +329,18 @@ function applyOverrideEntry(clone, entry) {
   }
   // derivedTextData is layout output (glyph runs), not content; it only stands
   // in for textData when it actually carries the characters.
+  //
+  // It must also land on the clone AS derivedTextData, because the glyph runs
+  // are what an icon font renders from — and they are per-instance. Assigning it
+  // to textData alone left every instance holding its MASTER's glyphs, which was
+  // invisible while icons rendered as text and became obvious the moment they
+  // rendered as outlines: every icon in the toolbar drew the same smiley, the
+  // master's placeholder, instead of undo/redo/wrench/info.
   const dtd = entry.derivedTextData;
-  if (dtd && typeof dtd.characters === 'string') clone.textData = dtd;
+  if (dtd) {
+    clone.derivedTextData = dtd;
+    if (typeof dtd.characters === 'string') clone.textData = dtd;
+  }
 }
 
 function firstSolidFill(node) {
@@ -399,13 +409,54 @@ function cornerRadius(node) {
   return null;
 }
 
+const IDENTITY = { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 };
+
+/** Compose two Figma affine transforms (parent ∘ local), as a 2×3 matrix. */
+function composeTransform(p, l) {
+  return {
+    m00: p.m00 * l.m00 + p.m01 * l.m10,
+    m01: p.m00 * l.m01 + p.m01 * l.m11,
+    m02: p.m00 * l.m02 + p.m01 * l.m12 + p.m02,
+    m10: p.m10 * l.m00 + p.m11 * l.m10,
+    m11: p.m10 * l.m01 + p.m11 * l.m11,
+    m12: p.m10 * l.m02 + p.m11 * l.m12 + p.m12,
+  };
+}
+
+function localTransform(node) {
+  const t = node.transform;
+  if (!t || typeof t.m02 !== 'number' || typeof t.m12 !== 'number') return IDENTITY;
+  return {
+    m00: typeof t.m00 === 'number' ? t.m00 : 1,
+    m01: typeof t.m01 === 'number' ? t.m01 : 0,
+    m02: t.m02,
+    m10: typeof t.m10 === 'number' ? t.m10 : 0,
+    m11: typeof t.m11 === 'number' ? t.m11 : 1,
+    m12: t.m12,
+  };
+}
+
 /**
  * Materialize one frame subtree into the export envelope.
- * @returns {{ envelope: object, assetHashes: Set<string>, diagnostics: object[] }}
+ *
+ * `geometry` is a second, independent product of the same walk: Figma's OWN
+ * solved rect for every emitted node, in frame-relative design px. It is not
+ * derived from `style` — deliberately. `styleFor` DROPS an auto-layout child's
+ * coordinates (they flow; emitting them would fight the flex pass), which is
+ * correct for the importer and useless for validation. But the `.fig` carries
+ * Figma's already-solved layout for those children anyway (a Transport frame's
+ * children sit at m02 = 0, 38, 76, 166), so composing transforms down the tree
+ * recovers where Figma actually put each node. Comparing that against where
+ * Pulp's Yoga pass puts the same node id is a pixel-free parity check: no
+ * renderer, no thresholds fighting anti-aliasing, and a failure names a node and
+ * an exact delta instead of "the screenshot looks off".
+ *
+ * @returns {{ envelope: object, geometry: object, assetHashes: Set<string>, diagnostics: object[] }}
  */
 export function materializeFrame(scene, frame, ctx) {
   const diagnostics = [];
   const assetHashes = new Set();
+  const geometryNodes = [];
   const seenTokens = new Map();
   // Every font family the frame references. Reported at the end so a
   // missing font is a stated result, not a mystery in the pixels.
@@ -636,7 +687,7 @@ export function materializeFrame(scene, frame, ctx) {
   }
 
   const walked = new Set();
-  function walk(node, parent) {
+  function walk(node, parent, parentAbs, parentId) {
     // Hidden layers do not render in Figma; emitting them would paint hidden
     // variant parts and label slots over the visible design.
     if (node.visible === false) return null;
@@ -657,6 +708,30 @@ export function materializeFrame(scene, frame, ctx) {
     const { style, assetRef, layout } = styleFor(node, parent);
     const out = { type: envelopeType(type), name: node.name || '', style };
     if (layout) out.layout = layout;
+
+    // The node's identity, carried through to the IR (design_ir_json's
+    // parse_ir_identity_fields reads `node_id` into source_node_id, which the
+    // `adapter` anchor strategy turns into the view's anchor). Without it every
+    // node-keyed check downstream — fidelity_diff, layout parity — has nothing
+    // to join on and silently skips. `key` (not the raw guid) is what makes this
+    // unique: an expanded instance's children reuse their MASTER's guids, so two
+    // instances of one component would otherwise share every child's id.
+    out.node_id = key;
+
+    // Figma's solved rect for this node, in frame-relative design px. The frame
+    // under import anchors the space, so its own canvas transform is dropped and
+    // it sits at the origin — the same space `style.left`/`top` are expressed in.
+    const abs = parent ? composeTransform(parentAbs, localTransform(node)) : IDENTITY;
+    geometryNodes.push({
+      node_id: key,
+      parent_id: parentId || null,
+      name: node.name || '',
+      type,
+      x: round2(abs.m02),
+      y: round2(abs.m12),
+      width: node.size ? round2(node.size.x) : null,
+      height: node.size ? round2(node.size.y) : null,
+    });
 
     if (assetRef) out.asset_ref = assetRef;
 
@@ -780,6 +855,50 @@ export function materializeFrame(scene, frame, ctx) {
       if (node.textAlignHorizontal) out.style.text_align = node.textAlignHorizontal.toLowerCase();
       const solid = firstSolidFill(node);
       if (solid) out.style.color = colorToHex({ ...solid.color, a: (solid.color?.a ?? 1) * (solid.opacity ?? 1) });
+
+      // An icon font's "characters" are LIGATURE NAMES, not text: the designer
+      // types "lock" and Font Awesome substitutes a padlock. Emitting them as
+      // text is always wrong — it rendered a toolbar of icons as the word salad
+      // "lockquestion" and "und redo" — and no font we can ship fixes it, since
+      // the font is licensed and absent. But Figma bakes each glyph's outline
+      // into the file, so the icons are already here: lower them to the same
+      // vector path a VECTOR node uses and they render with no font at all.
+      if (isIconFont(node.fontName && node.fontName.family)) {
+        let glyphs = null;
+        try {
+          glyphs = glyphsToPath(node, scene.blobs || []);
+        } catch (err) {
+          pushDiag('vector-simplified', node, `glyph outline unreadable: ${err.message}`);
+        }
+        if (glyphs) {
+          // Same contract the VECTOR branch emits below — path_data + viewBox +
+          // fill is what design_ir_json already lowers to an SvgPathWidget.
+          out.type = 'vector';
+          out.path_data = glyphs.d;
+          out.viewBox = `0 0 ${round2(glyphs.box.width)} ${round2(glyphs.box.height)}`;
+          delete out.content;                 // a ligature name is not content
+          delete out.style.font_family;
+          delete out.style.font_size;
+          delete out.style.font_style;
+          delete out.style.text_align;
+          // The glyph paints in the text's own colour.
+          out.fill = out.style.color || 'none';
+          delete out.style.color;
+          // The outline is already baked into parent space, so its own bounds
+          // place it — and only when styleFor already chose absolute, or we
+          // would yank an icon out of the flex pass meant to position it.
+          if (out.style.position === 'absolute') {
+            out.style.left = round2(glyphs.box.minX);
+            out.style.top = round2(glyphs.box.minY);
+          }
+          out.style.width = round2(glyphs.box.width);
+          out.style.height = round2(glyphs.box.height);
+        } else {
+          // Say so rather than leave a mystery: the literal name will render.
+          pushDiag('icon-font-required', node,
+            `${node.fontName.family} glyph outlines missing; "${characters}" renders as text`);
+        }
+      }
     }
 
     const gradient = (node.fillPaints || []).find(
@@ -801,7 +920,7 @@ export function materializeFrame(scene, frame, ctx) {
     if (!vectorResolved) {
       if (node.__masterKey) expandStack.push(node.__masterKey);
       kids = (node.__children || scene.childrenOf.get(key) || [])
-        .map((c) => walk(c, node))
+        .map((c) => walk(c, node, abs, key))
         .filter(Boolean);
       if (node.__masterKey) expandStack.pop();
     }
@@ -849,7 +968,19 @@ export function materializeFrame(scene, frame, ctx) {
     diagnostics,
     root,
   };
-  return { envelope, assetHashes, diagnostics };
+  const geometry = {
+    $schema: 'https://pulp.dev/schemas/fig-geometry-v1.json',
+    source: source || 'figma://local/0:0',
+    units: 'design-px',
+    frame: {
+      node_id: guidKey(frame.guid),
+      name: frame.name || '',
+      width: frame.size ? round2(frame.size.x) : null,
+      height: frame.size ? round2(frame.size.y) : null,
+    },
+    nodes: geometryNodes,
+  };
+  return { envelope, geometry, assetHashes, diagnostics };
 }
 
 function firstSolidStroke(node) {
