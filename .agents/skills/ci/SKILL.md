@@ -549,25 +549,48 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   (`CMakeLists.txt`, `tools/cmake/PulpAndroid.cmake`,
   `tools/cmake/PulpDependencies.cmake`, `tools/deps/manifest.json`, plus Android
   Gradle files), and do not give `.cxx` a restore key that ignores those inputs.
-- **`intent-bump-on-merge.yml` is the merge-time half of the version-bump
-  intent-trailer model — and it ships DORMANT.** It exists to kill the
-  version-bump merge treadmill (PRs editing `CMakeLists` VERSION /
-  `plugin.json` / `marketplace.json` re-conflict every time main advances). The
-  endgame: a PR declares `Version-Bump: <surface>=<level>` and touches NO
-  version files, and this workflow assigns the exact number after merge from
-  main's current version via `tools/scripts/apply_intent_bump.py`. **Phase 1
-  (current): no-op.** Nothing emits intent trailers yet (Shipyard still file-
-  bumps on the PR side; `version-skill-check.yml` still runs WITHOUT
-  `--accept-intent-trailers`), so every run finds no trailer and exits clean.
-  Two things must be verified before the **phase-2** flip (a separate, reviewed
-  change): (1) `RELEASE_BOT_TOKEN` can push a *commit* to protected `main`
-  (it already pushes tags from `auto-release.yml`; a commit needs the bot on the
-  branch-protection bypass list), and (2) the `Version-Bump:` trailer survives
-  squash-merge into main's commit message. The workflow has a recursion guard
-  (skips its own `chore: bump versions` commit) and a `concurrency` group so
-  near-simultaneous merges bump the version line one at a time. The
-  `chore: bump versions` commit it pushes triggers `auto-release.yml` exactly
-  like a PR-side bump.
+- **`version-at-land.yml` + `version_at_land.py` are the single-writer,
+  post-merge half of the version-bump intent-trailer model — and the workflow
+  ships in DRY-RUN.** They exist to kill the version-bump merge treadmill (PRs
+  editing `CMakeLists` VERSION / `plugin.json` / `marketplace.json` re-conflict
+  every time main advances, and N parallel PRs endlessly re-bump the same
+  shared counter). The endgame: a PR declares `Version-Bump: <surface>=<level>`
+  and touches NO version files, and this bot assigns the exact number AFTER
+  merge from main's current version — so no two PRs ever contend for the same
+  number. **Today (dry-run): computes and logs what it WOULD assign; writes and
+  pushes nothing**, so it is safe to land while PRs still hand-bump. The
+  `--push` path (`apply_and_push`) is built and unit-tested but the workflow
+  does not call it yet.
+  - **Intent is read `--no-merges`-scoped.** `version_at_land.intent_trailers`
+    reads `Version-Bump:` trailers only from the range's NON-merge commits
+    (`git_range_trailers(..., no_merges=True)`). A "Merge origin/main into
+    <branch>" re-sync commit can carry a stale intent trailer that was never
+    meant to declare this range's release; honoring it would silently escalate
+    the version. A PR's real intent lives on its own commits (or the squash
+    commit, single-parent), so this keeps every genuine declaration while
+    dropping re-sync noise. Do NOT change `git_range_trailers`' default
+    (merge-walking) — the bypass-trailer gates depend on it; use the opt-in
+    `no_merges=` flag.
+  - **The `--push` transaction is race-safe by construction:** it recomputes
+    from a fresh `origin/main` each attempt, pushes with no `--force` (git's
+    default non-fast-forward rejection IS the `--ff-only` guarantee), and on
+    rejection re-syncs to the new tip — where the drain range now starts after
+    the winner's `Version-Bump-Applied` marker and collapses to empty, so the
+    loser no-ops instead of double-bumping. **This is why the older
+    `intent-bump-on-merge.yml` was DELETED:** it did a bare
+    `git push origin HEAD:main` with no `--ff-only` + retry, so a second merge
+    during its ~30s window silently discarded the bump (a SILENT RELEASE LOSS).
+    Never reintroduce a force/unguarded push on this path.
+  - **Before the `--push` flip** (a separate, reviewed change — see
+    `docs/guides/version-at-land-cutover.md`): verify the release bot can push a
+    *commit* to protected `main` (it already pushes tags from
+    `auto-release.yml`; a commit needs the bot on the branch-protection bypass
+    list, and the bot commit must be SSH-signed via
+    `configure_release_bot_ssh_signing.sh`), that the `Version-Bump:` trailer
+    survives squash-merge into main's message, and that the one-time in-flight
+    straggler rule (PRs already carrying `chore: bump versions` commits) is
+    applied. The `chore: bump versions` commit the bot pushes triggers
+    `auto-release.yml` exactly like a PR-side bump.
 - **`test/CMakeLists.txt` is now an include hub, not a registration
   manifest.** Add new `add_test`, `add_executable`, and
   `pulp_add_test_suite` blocks to the matching `test/cmake/*_tests.cmake`
@@ -757,8 +780,9 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   Keep it credential-free (notarize/sign stay in the real path) so it can run
   on a schedule without secrets.
 - **Release-bot source refs must be SSH-signed.** `auto-release.yml` creates
-  signed annotated `v*` tags with `git tag -s`, and the bot commit workflows
-  (`intent-bump-on-merge.yml`, `post-tag-sync.yml`) configure the same SSH
+  signed annotated `v*` tags with `git tag -s`, and the bot commit workflow
+  (`post-tag-sync.yml`, and `version-at-land.yml` once flipped to `--push`)
+  configures the same SSH
   signing helper before committing. The required Actions secret is
   `RELEASE_BOT_SSH_SIGNING_KEY`; it is a file-backed OpenSSH private key backed
   up outside the repo. The workflow uses `25807+danielraffel@users.noreply.github.com`
