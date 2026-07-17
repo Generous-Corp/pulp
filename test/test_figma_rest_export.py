@@ -1150,6 +1150,29 @@ class ShapePrimitiveTypingTest(unittest.TestCase):
                 self.assertEqual(out["asset_ref"], "3:1")
                 self.assertIn("3:1", ctx.asset_ids)
 
+    def test_per_corner_radii_from_rectangleCornerRadii(self):
+        # Figma REST returns rectangleCornerRadii [tl, tr, br, bl] when the
+        # corners differ. The producer only read the uniform cornerRadius, so an
+        # asymmetric card imported via REST lost its rounding.
+        s = frx.extract_style({"type": "RECTANGLE",
+                               "rectangleCornerRadii": [8, 8, 0, 0]})
+        self.assertEqual(s.get("border_top_left_radius"), 8)
+        self.assertEqual(s.get("border_top_right_radius"), 8)
+        self.assertEqual(s.get("border_bottom_right_radius"), 0)
+        self.assertEqual(s.get("border_bottom_left_radius"), 0)
+        # A uniform radius must NOT sit beside the per-corner ones (codegen's
+        # single 'All' call would square off the rounded pair).
+        self.assertNotIn("border_radius", s)
+
+    def test_uniform_corners_stay_on_the_single_radius_path(self):
+        # Four equal corners lower through the uniform border_radius, not four
+        # per-corner fields — one call, not four.
+        s = frx.extract_style({"type": "RECTANGLE",
+                               "cornerRadius": 6,
+                               "rectangleCornerRadii": [6, 6, 6, 6]})
+        self.assertEqual(s.get("border_radius"), 6)
+        self.assertNotIn("border_top_left_radius", s)
+
 
 if __name__ == "__main__":
     unittest.main()

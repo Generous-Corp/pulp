@@ -2956,3 +2956,31 @@ TEST_CASE("render_artifact_path places the render beside --output, not the CWD",
     // A relative --output with a directory still carries that directory.
     CHECK(render_artifact_path("sub/ui.js", "y-render.png") == "sub/y-render.png");
 }
+
+TEST_CASE("pulp-import-design --fail-below requires --reference to compare against",
+          "[import][validate][fail-below]") {
+    // --fail-below gates the --validate similarity score, which needs a
+    // --reference PNG to score against. Without one there is nothing to compare,
+    // so the CLI must refuse (exit 2) rather than silently pass — the
+    // silent-no-op class this whole effort is about. Feature landed via
+    // #6186/#6232; this is the shellout test deferred during that merge.
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-fail-below");
+    const auto input = tmp.path / "page.html";
+    // Minimal Claude-style page: a single styled div is enough to import; the
+    // point is the flag validation, which fires before any comparison.
+    write_text(input,
+        "<html><body><div style=\"background:#123456;width:40px;height:40px\">"
+        "</div></body></html>");
+    const auto output = tmp.path / "ui.js";
+
+    auto r = run_import_design({"--from", "claude",
+                               "--file", input.string(),
+                               "--output", output.string(),
+                               "--validate",
+                               "--fail-below", "85"});
+    REQUIRE_FALSE(r.timed_out);
+    CHECK(r.exit_code == 2);
+    CHECK(r.stderr_output.find("--fail-below requires --reference") != std::string::npos);
+}
