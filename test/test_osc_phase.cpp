@@ -238,19 +238,34 @@ TEST_CASE("PhaseAccumulator resolves the wrap boundary exactly", "[signal][osc]"
 }
 
 TEST_CASE("PhaseAccumulator absorbs a non-finite increment", "[signal][osc][rt-safety]") {
-    // A NaN increment is a caller bug, but it must not persist in the phase for
-    // the lifetime of the voice, and it must not reach a NaN-to-int conversion.
-    PhaseAccumulator phase;
-    phase.reset(0.4);
+    // A non-finite increment is a caller bug, but it must not persist in the
+    // phase for the lifetime of the voice, must not reach a NaN-to-int
+    // conversion, and must not report events.
+    //
+    // The event list is the load-bearing assertion, not the phase. A surviving
+    // phase says nothing: the phase snaps to 0 on its own here, so checking
+    // only `isfinite(phase())` passes while the accumulator hands a corrector a
+    // full budget of wraps at positions nothing crossed. Both infinities are
+    // covered because they fail differently from NaN — NaN loses every internal
+    // comparison and drops out unaided, while floor(inf) is inf, which reads as
+    // a wrap count past the budget.
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
 
-    phase.advance(std::numeric_limits<double>::quiet_NaN());
-    CHECK(std::isfinite(phase.phase()));
-    CHECK(phase.phase() == 0.0);
+    for (double bad : {nan, inf, -inf}) {
+        PhaseAccumulator phase;
+        phase.reset(0.4);
 
-    phase.advance(std::numeric_limits<double>::infinity());
-    CHECK(std::isfinite(phase.phase()));
+        CHECK(phase.advance(bad) == 0);
+        CHECK(phase.events().empty());
+        CHECK_FALSE(phase.truncated());
+        CHECK(phase.phase() == 0.0);
+    }
 
     // The accumulator recovers: the next real increment behaves normally.
+    PhaseAccumulator phase;
+    phase.reset(0.4);
+    phase.advance(nan);
     phase.reset(0.25);
     CHECK(phase.advance(0.5) == 0);
     CHECK(phase.phase() == 0.75);

@@ -106,9 +106,16 @@ struct PhaseEvent {
 /// rescue. **The phase itself stays exact when truncated** — only the event list
 /// is capped.
 ///
-/// A non-finite increment is absorbed rather than propagated: the phase resets
-/// to 0 and no events are reported. Without this a single NaN would poison the
-/// phase for the lifetime of the voice.
+/// A non-finite increment — NaN or either infinity — is absorbed rather than
+/// propagated: the phase resets to 0 and no events are reported. Without this a
+/// single NaN would poison the phase for the lifetime of the voice.
+///
+/// The two are absorbed by one explicit test rather than by the arithmetic,
+/// because they fail differently and only one fails safely. NaN loses every
+/// comparison below and falls out with no events on its own; an infinity does
+/// not, since `floor(inf)` is `inf`, which reads as a wrap count past the
+/// budget and would report a full event list at positions where nothing
+/// crossed.
 ///
 /// Every path allocates nothing, locks nothing, and performs no I/O.
 ///
@@ -186,13 +193,24 @@ private:
     /// of them, which is what makes the trip count bounded by the wrap count
     /// rather than by the increment.
     void scan(double delta, double t0, double span) {
+        // Absorb a non-finite increment here, where the phase is owned, so both
+        // advance() and advance_synced() get the same contract. Letting NaN fall
+        // through to the comparisons below works — every one fails, so no events
+        // are emitted — but an infinity does NOT: floor(inf) is inf, so the
+        // magnitude test below takes the truncation path and emits a full budget
+        // of wraps at a position no crossing occurred at. A caller that trusts
+        // the event list then corrects steps that never happened, and (0 * inf)
+        // in its own slope term hands it a NaN besides.
+        if (!std::isfinite(delta)) {
+            phase_ = 0.0;
+            return;
+        }
+
         const double p0 = phase_;
         const double raw = p0 + delta;
         const double n = std::floor(raw);
 
-        // Ordered so that a NaN `raw` (from a non-finite increment) fails every
-        // comparison and lands on 0 rather than converting NaN to int, which is
-        // undefined. The `>= 1.0` case is not defensive: for a raw of -1e-20,
+        // The `>= 1.0` case is not defensive: for a raw of -1e-20,
         // floor is -1 and `raw - n` rounds to exactly 1.0, which is outside the
         // half-open domain. Snapping to 0 is exact on the circle.
         double wrapped = raw - n;
