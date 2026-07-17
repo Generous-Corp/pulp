@@ -54,6 +54,21 @@ Unmatched ids are listed as dropped/extra — a completeness check no pixel
 heuristic can match. Reach for this FIRST when a layout looks wrong; the
 montage/heatmap tools tell you *that* something moved, this tells you *what*.
 
+`--gate-px 16` blocks only on displacement above 16px and reports the rest as
+advisory drift — a correct import of the reference design tops out at 12px,
+while a dropped auto-layout contract produces ten findings above 16px. The
+`import-layout-parity-gate` ctest runs the whole pipeline on
+`test/fixtures/imports/fig/synthetic.fig` and is strict (exact parity).
+
+**It validates BOXES, not the ink inside them.** A label whose glyphs are shoved
+to one side of a correctly-placed box, an icon drawn at the wrong scale inside
+right-sized bounds, a colour, a gradient — all invisible to it, by construction.
+This is not hypothetical: an icon-placement change that moved glyphs *within*
+their correct boxes made `fg-icon` findings disappear and layout_parity went
+greener while the render got worse. **Never read a clean layout_parity as "the
+render is right."** It means the boxes are right. `thumb_parity.py` is the
+colour/ink half, and a human looking at a montage is still the final say.
+
 **Free offline ground truth:** every `.fig` is a ZIP containing `thumbnail.png`
 (Figma's own raster of the design) and a `meta.json` whose `render_coordinates`
 + `thumbnail_size` give an EXACT canvas→thumbnail transform — no image

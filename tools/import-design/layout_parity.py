@@ -37,6 +37,15 @@ signature IS a dropped alignment/padding.
 Ids present in one side and not the other are reported as dropped/extra nodes: a
 structural completeness check no pixel heuristic can match.
 
+What it cannot see
+------------------
+BOXES, not the ink inside them. A label whose glyphs are shoved to one side of a
+correctly-placed box, an icon drawn at the wrong scale within right-sized
+bounds, a colour, a gradient — all invisible here, by construction. A clean
+layout_parity run means the boxes are where the design puts them; it is NOT a
+statement that the render is right. `thumb_parity.py` is the colour/ink half,
+and a human looking at a montage is still the final say.
+
 Usage
 -----
     pulp-import-design --from fig --file d.fig --frame F --output ui.js \
@@ -45,6 +54,13 @@ Usage
 
 ``--geometry`` defaults to the dump's ``<stem>.geometry.json`` sibling, which is
 where ``--dump-layout`` puts it. Exit 0 = parity, 1 = findings, 2 = bad usage.
+
+``--gate-px N`` separates what BLOCKS from what merely reports; see
+DEFAULT_GATE_PX. Measured on the reference design: a correct import tops out at
+12px (gap rounding, icon sizing), while a dropped auto-layout contract produces
+ten findings above 16px, four of them at 93px or worse. So ``--gate-px 16`` sits
+clear of the drift and catches the fault many times over — it does not hinge on
+the borderline cases.
 """
 
 from __future__ import annotations
@@ -60,6 +76,25 @@ from typing import Any
 # both roundings plus a half-px stroke overhang without hiding anything a human
 # would ever call misplaced.
 DEFAULT_TOLERANCE = 2.0
+
+# The floor above which a displacement GATES rather than merely reports.
+#
+# 0 means "everything above tolerance gates" — the strict default, right for a
+# human reading the report. CI wants a floor instead, because a real import
+# carries small honest drift (gap rounding, icon sizing) that is worth SEEING
+# and not worth blocking on.
+#
+# A number here is unavoidable, so it is stated rather than hidden inside a
+# heuristic. Gating on "is it a cluster?" was tried and rejected: it separates
+# nothing — a clean import has clusters (sibling knobs drifting a few px), and
+# the largest error on that same import was a lone node, which a cluster-only
+# gate would wave through. Kind and magnitude are different axes; magnitude is
+# the one that means "bug".
+#
+# A floor states an invariant ("a node more than N px from where the design puts
+# it is a bug, not drift") where a baseline of known findings encodes today's
+# bugs as tomorrow's expectations and rots on the next design change.
+DEFAULT_GATE_PX = 0.0
 
 EXIT_OK = 0
 EXIT_FINDINGS = 1
@@ -131,8 +166,19 @@ class Delta:
         self.own_dx, self.own_dy = dx, dy
 
     def offends(self, tol: float) -> bool:
-        return (abs(self.own_dx) > tol or abs(self.own_dy) > tol
-                or abs(self.dw) > tol or abs(self.dh) > tol)
+        return self.severity() > tol
+
+    def severity(self) -> float:
+        """The worst SINGLE axis this node is out by, in design px.
+
+        Deliberately the max and not the sum of the four. A sum double-counts a
+        node that both moved and resized — an icon 6px right and 12px narrow
+        scores 19, which reads like a worse fault than a panel a clean 15px out
+        of place, and it makes the gate floor mean nothing physical. The max
+        answers the question a floor is actually asking: how far off is this,
+        at worst?
+        """
+        return max(abs(self.own_dx), abs(self.own_dy), abs(self.dw), abs(self.dh))
 
 
 def compute_deltas(design: dict[str, Rect], pulp: dict[str, Rect],
@@ -193,8 +239,8 @@ def cluster_findings(deltas: dict[str, Delta], meta: dict[str, dict],
 
     findings: list[dict] = []
     for parent_id, members in groups.items():
-        members.sort(key=lambda d: -(abs(d.own_dx) + abs(d.own_dy) + abs(d.dw) + abs(d.dh)))
-        worst = max(abs(m.own_dx) + abs(m.own_dy) + abs(m.dw) + abs(m.dh) for m in members)
+        members.sort(key=lambda d: -d.severity())
+        worst = max(m.severity() for m in members)
         sibling_total = sum(
             1 for n, m in meta.items() if m.get("parent_id") == parent_id and n in deltas
         )
@@ -209,7 +255,7 @@ def cluster_findings(deltas: dict[str, Delta], meta: dict[str, dict],
                     "parent_id": parent_id,
                     "label": _label(m.node_id, meta),
                     "dx": m.own_dx, "dy": m.own_dy, "dw": m.dw, "dh": m.dh,
-                    "severity": abs(m.own_dx) + abs(m.own_dy) + abs(m.dw) + abs(m.dh),
+                    "severity": m.severity(),
                     "message": (f"{_label(m.node_id, meta)} misplaced: "
                                 f"dx={_fmt(m.own_dx)} dy={_fmt(m.own_dy)} "
                                 f"dw={_fmt(m.dw)} dh={_fmt(m.dh)}"),
@@ -253,7 +299,8 @@ def cluster_findings(deltas: dict[str, Delta], meta: dict[str, dict],
 
 
 def compare(geometry_path: pathlib.Path, layout_path: pathlib.Path,
-            tol: float = DEFAULT_TOLERANCE) -> dict:
+            tol: float = DEFAULT_TOLERANCE,
+            gate_px: float = DEFAULT_GATE_PX) -> dict:
     design, meta = load_geometry(geometry_path)
     pulp = load_layout(layout_path)
 
@@ -262,8 +309,16 @@ def compare(geometry_path: pathlib.Path, layout_path: pathlib.Path,
     deltas = compute_deltas(design, pulp, meta)
     findings = cluster_findings(deltas, meta, tol)
 
+    # A finding's severity is its worst displacement; the floor decides whether
+    # that blocks or merely informs. Structural completeness is deliberately not
+    # subject to it — a node the render never produced, or one it invented, is
+    # wrong at any magnitude, and there is no number to argue about.
+    for f in findings:
+        f["gating"] = f["severity"] > gate_px
+
     return {
         "tolerance_px": tol,
+        "gate_px": gate_px,
         "design_nodes": len(design),
         "pulp_nodes": len(pulp),
         "matched": len(deltas),
@@ -271,6 +326,14 @@ def compare(geometry_path: pathlib.Path, layout_path: pathlib.Path,
         "extra": extra,
         "findings": findings,
     }
+
+
+def gating_findings(report: dict) -> list[dict]:
+    return [f for f in report["findings"] if f["gating"]]
+
+
+def report_fails(report: dict) -> bool:
+    return bool(gating_findings(report) or report["dropped"] or report["extra"])
 
 
 def render_report(report: dict, max_findings: int) -> str:
@@ -297,11 +360,12 @@ def render_report(report: dict, max_findings: int) -> str:
         if len(report["extra"]) > max_findings:
             lines.append(f"  … and {len(report['extra']) - max_findings} more")
 
-    findings = report["findings"]
-    if findings:
+    def render_findings(heading: str, group: list[dict]) -> None:
+        if not group:
+            return
         lines.append("")
-        lines.append(f"MISPLACED — {len(findings)} finding(s), worst first:")
-        for f in findings[:max_findings]:
+        lines.append(f"{heading} — {len(group)} finding(s), worst first:")
+        for f in group[:max_findings]:
             lines.append(f"  {f['message']}")
             if f["kind"] == "cluster":
                 for child in f["children"][:4]:
@@ -310,12 +374,21 @@ def render_report(report: dict, max_findings: int) -> str:
                                  f"dh={_fmt(child['dh'])}")
                 if len(f["children"]) > 4:
                     lines.append(f"      … and {len(f['children']) - 4} more children")
-        if len(findings) > max_findings:
-            lines.append(f"  … and {len(findings) - max_findings} more finding(s)")
+        if len(group) > max_findings:
+            lines.append(f"  … and {len(group) - max_findings} more finding(s)")
 
-    if not findings and not report["dropped"] and not report["extra"]:
+    gating = gating_findings(report)
+    advisory = [f for f in report["findings"] if not f["gating"]]
+    render_findings("MISPLACED", gating)
+    # Printed, never hidden. The floor decides what BLOCKS, not what is worth
+    # knowing — drift that never surfaces is drift nobody ever fixes.
+    render_findings(f"ADVISORY (within the ±{report['gate_px']:.0f}px gate floor)", advisory)
+
+    if not report_fails(report):
         lines.append("")
-        lines.append("PASS — every node is where the design puts it.")
+        lines.append("PASS — every node is where the design puts it."
+                     if not advisory else
+                     "PASS — nothing above the gate floor; the advisories above are drift.")
     return "\n".join(lines)
 
 
@@ -329,6 +402,11 @@ def main(argv: list[str] | None = None) -> int:
                          "<stem>.geometry.json sibling, where --dump-layout writes it)")
     ap.add_argument("--tolerance", type=float, default=DEFAULT_TOLERANCE,
                     help=f"per-axis tolerance in design px (default: {DEFAULT_TOLERANCE:g})")
+    ap.add_argument("--gate-px", type=float, default=DEFAULT_GATE_PX,
+                    help="displacement (design px) above which a finding FAILS rather "
+                         f"than merely reports (default: {DEFAULT_GATE_PX:g} = everything "
+                         "above tolerance fails). CI uses a floor so honest sub-control "
+                         "drift informs without blocking; dropped/extra nodes always fail.")
     ap.add_argument("--max-findings", type=int, default=25,
                     help="cap on findings printed (default: 25); the JSON report is never capped")
     ap.add_argument("--json", type=pathlib.Path, default=None,
@@ -346,13 +424,12 @@ def main(argv: list[str] | None = None) -> int:
                       "(which writes this sidecar next to the dump).", file=sys.stderr)
             return EXIT_USAGE
 
-    report = compare(geometry, args.layout, args.tolerance)
+    report = compare(geometry, args.layout, args.tolerance, args.gate_px)
     print(render_report(report, args.max_findings))
     if args.json:
         args.json.write_text(json.dumps(report, indent=2) + "\n")
 
-    has_findings = bool(report["findings"] or report["dropped"] or report["extra"])
-    return EXIT_FINDINGS if has_findings else EXIT_OK
+    return EXIT_FINDINGS if report_fails(report) else EXIT_OK
 
 
 if __name__ == "__main__":

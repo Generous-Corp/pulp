@@ -62,13 +62,22 @@ def layout(*views: dict) -> dict:
 
 
 class ParityTestCase(unittest.TestCase):
+    def _paths(self, geom: dict, lay: dict) -> tuple[pathlib.Path, pathlib.Path]:
+        """Write a geometry/layout pair to disk and return their paths.
+
+        The temp dir is anchored to the TestCase so it outlives this call —
+        compare() reads the files itself.
+        """
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        gp = pathlib.Path(td.name) / "g.json"
+        lp = pathlib.Path(td.name) / "l.json"
+        gp.write_text(json.dumps(geom))
+        lp.write_text(json.dumps(lay))
+        return gp, lp
+
     def compare(self, geom: dict, lay: dict, tol: float = 2.0) -> dict:
-        with tempfile.TemporaryDirectory() as td:
-            gp = pathlib.Path(td) / "g.json"
-            lp = pathlib.Path(td) / "l.json"
-            gp.write_text(json.dumps(geom))
-            lp.write_text(json.dumps(lay))
-            return layout_parity.compare(gp, lp, tol)
+        return layout_parity.compare(*self._paths(geom, lay), tol)
 
 
 class TestPassControl(ParityTestCase):
@@ -208,6 +217,71 @@ class TestParentRelativeAttribution(ParityTestCase):
         self.assertEqual(len(report["findings"]), 1)
         self.assertEqual(report["findings"][0]["node_id"], "0:1")
         self.assertEqual(report["findings"][0]["dw"], -40)
+
+
+class TestGateFloor(ParityTestCase):
+    """`--gate-px`: what BLOCKS, as distinct from what is worth reporting.
+
+    The rejected alternative was gating on finding KIND — clusters block,
+    individuals advise. It separates nothing, and both failure directions are
+    pinned below so nobody re-proposes it: a clean import HAS clusters, and its
+    single worst error was a lone node. Kind and magnitude are different axes.
+    """
+
+    def test_drift_below_the_floor_reports_but_does_not_gate(self):
+        geom = geometry(node("0:1", None, 0, 0, 500, 100, name="Root"),
+                        node("0:2", "0:1", 10, 10, name="drifted"))
+        lay = layout(view("0:1", 0, 0, 500, 100), view("0:2", 17, 10))
+        report = self.compare(geom, lay)  # 7px
+        gated = layout_parity.compare(*self._paths(geom, lay), 2.0, 16.0)
+        self.assertEqual(len(report["findings"]), 1)
+        self.assertFalse(layout_parity.report_fails(gated))
+        self.assertEqual(len(gated["findings"]), 1, "still reported, just not gating")
+        self.assertIn("ADVISORY", layout_parity.render_report(gated, 25))
+
+    def test_displacement_above_the_floor_gates(self):
+        geom = geometry(node("0:1", None, 0, 0, 500, 100, name="Root"),
+                        node("0:2", "0:1", 10, 10, name="broken"))
+        lay = layout(view("0:1", 0, 0, 500, 100), view("0:2", 60, 10))
+        gated = layout_parity.compare(*self._paths(geom, lay), 2.0, 16.0)
+        self.assertTrue(layout_parity.report_fails(gated))
+
+    def test_a_lone_node_far_out_of_place_still_gates(self):
+        # The false NEGATIVE that sank kind-based gating: on the real design the
+        # single worst error was a lone node 112px out. "Clusters gate,
+        # individuals advise" waves a misplaced panel straight through.
+        geom = geometry(node("0:1", None, 0, 0, 800, 400, name="Root"),
+                        node("0:2", "0:1", 462, 0, name="Bg PAnel"))
+        lay = layout(view("0:1", 0, 0, 800, 400), view("0:2", 350, 0))
+        gated = layout_parity.compare(*self._paths(geom, lay), 2.0, 16.0)
+        self.assertEqual(gated["findings"][0]["kind"], "node")
+        self.assertTrue(layout_parity.report_fails(gated), "112px is a bug at any kind")
+
+    def test_a_cluster_of_small_drift_does_not_gate(self):
+        # The false POSITIVE: sibling knobs drifting a few px cluster by nature,
+        # so "has a cluster" would fail a clean import forever.
+        geom = geometry(node("0:1", None, 0, 0, 500, 100, name="Root"),
+                        node("0:2", "0:1", 0, 0, name="knob row"),
+                        node("0:3", "0:2", 10, 0), node("0:4", "0:2", 50, 0))
+        lay = layout(view("0:1", 0, 0, 500, 100), view("0:2", 0, 0),
+                     view("0:3", 6, 0), view("0:4", 43, 0))
+        gated = layout_parity.compare(*self._paths(geom, lay), 2.0, 16.0)
+        self.assertEqual(gated["findings"][0]["kind"], "cluster")
+        self.assertFalse(layout_parity.report_fails(gated), "7px drift is not a bug")
+
+    def test_dropped_nodes_gate_regardless_of_the_floor(self):
+        # Structural completeness has no magnitude to compare, so no floor
+        # applies: a node the render never produced is wrong at any setting.
+        geom = geometry(node("0:1", None, 0, 0, 100, 100), node("0:2", "0:1", 10, 10))
+        lay = layout(view("0:1", 0, 0, 100, 100))
+        gated = layout_parity.compare(*self._paths(geom, lay), 2.0, 10_000.0)
+        self.assertTrue(layout_parity.report_fails(gated))
+
+    def test_the_default_floor_gates_everything_above_tolerance(self):
+        # Interactive behaviour must not change: a bare run is still strict.
+        geom = geometry(node("0:1", None, 0, 0, 500, 100), node("0:2", "0:1", 10, 10))
+        lay = layout(view("0:1", 0, 0, 500, 100), view("0:2", 17, 10))
+        self.assertTrue(layout_parity.report_fails(self.compare(geom, lay)))
 
 
 class TestStructuralCompleteness(ParityTestCase):
