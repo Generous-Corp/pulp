@@ -114,6 +114,15 @@ public:
     /// `on_view_resized` and stores the new size.
     void resize(uint32_t width, uint32_t height);
 
+    /// The owning adapter MUST call this before the referenced `Processor` is
+    /// destroyed when the two have independent lifetimes (AU: the audio unit and
+    /// the view controller). After this, the bridge never dereferences
+    /// `processor_` again -- the idle pump and teardown become processor-free
+    /// no-ops -- so a display-link tick or `~ViewBridge` that races the
+    /// Processor's death cannot use-after-free it. Idempotent; safe on the main
+    /// thread only (same as the pump and teardown).
+    void notify_processor_destroyed() noexcept { processor_alive_ = false; }
+
     /// Live editor reload (live-swap 1.9). When the processor supports editor
     /// reload (`Processor::supports_editor_reload()`), the editor idle tick calls
     /// this each frame; it compares `Processor::editor_reload_generation()` to the
@@ -239,6 +248,12 @@ private:
     /// processor_, which may be freed by the host while the editor bridge is
     /// still alive (see poll_editor_reload()).
     bool supports_editor_reload_ = false;
+    /// False once the host has torn down the Processor this bridge references.
+    /// In AU the audio unit and the view controller have independent, host-
+    /// ordered lifetimes, so `processor_` can dangle while the bridge is alive.
+    /// Every `processor_` dereference is guarded by this; the owning adapter
+    /// MUST call `notify_processor_destroyed()` before the Processor is freed.
+    bool processor_alive_ = true;
 
     std::unique_ptr<view::View> view_;
     view::View* view_raw_ = nullptr;  ///< valid even after release_view()

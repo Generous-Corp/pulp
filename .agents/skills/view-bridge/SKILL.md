@@ -566,6 +566,24 @@ fresh lib instead of segfaulting at first paint.
    processor-outlives-bridge (AU does not). Any pump path that must read dynamic
    processor state on a reload-capable processor needs a processor-liveness token
    too, mirroring `alive_token()`.
+   **The fix is a `processor_alive_` guard, not just caching one call.** Writing
+   the regression test revealed the pump touches `processor_` in THREE places,
+   not one: `poll_editor_reload` (`supports_editor_reload`/`editor_reload_generation`),
+   `scripted_ui()` (`active_scripted_ui`), and teardown's `close()` /
+   `notify_attached` / `resize` (`on_view_closed`/`on_view_opened`/`on_view_resized`).
+   Guarding only the first still crashes in `scripted_ui()`. So `ViewBridge` has a
+   `processor_alive_` flag flipped by `notify_processor_destroyed()`, and EVERY
+   `processor_` dereference is guarded by it. The owning adapter MUST call
+   `notify_processor_destroyed()` before the Processor is freed when their
+   lifetimes are independent (AU). **Why the earlier `[idle-pump][crash]` test
+   missed it:** that test froze the BRIDGE and checked the pump no-ops — it never
+   modelled the Processor being freed while the bridge lived, because in most
+   hosts the Processor outlives the editor; AU's independent lifetimes are the
+   edge case. The lesson: lifecycle tests must cover the full teardown-order
+   matrix (bridge-first, processor-first, view-first), and run under ASan, since
+   that is what turns a latent UAF into a hard failure. Regression:
+   `[view_bridge][crash][lifecycle]` in `test_view_bridge.cpp` frees the Processor
+   under a live attached bridge, fires the pump, and destructs — ASan-clean.
 10. **In a multi-plugin bundle, editor/metadata callbacks must resolve
     PER-INSTANCE state — never a process global.** A CLAP/AU/VST3 bundle exposes
     N plugins from one binary, so a single shared descriptor global would hand

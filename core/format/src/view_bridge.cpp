@@ -116,7 +116,7 @@ bool ViewBridge::poll_editor_reload() {
     // host-ordered lifetimes) -- so the pump must never make a virtual call on
     // processor_ for the common non-reload case. This crashed the AU embedded in
     // Ableton Live: EXC_BAD_ACCESS in this call on a dangling processor_.
-    if (!view_raw_ || !supports_editor_reload_) return false;
+    if (!processor_alive_ || !view_raw_ || !supports_editor_reload_) return false;
     const uint64_t gen = processor_.editor_reload_generation();
     if (gen == last_reload_generation_) return false;
     // Consume the generation only on a SUCCESSFUL rebuild. If create_view()
@@ -175,6 +175,7 @@ bool ViewBridge::rebuild_primary_view() {
 
 view::ScriptedUiSession* ViewBridge::scripted_ui() {
     if (scripted_ui_) return scripted_ui_.get();
+    if (!processor_alive_) return nullptr;  // host freed the processor
     return safe_active_scripted_ui(processor_);
 }
 
@@ -187,8 +188,10 @@ const view::ScriptedUiSession* ViewBridge::scripted_ui() const {
 void ViewBridge::notify_attached() {
     if (!view_raw_ || attached_) return;
     attached_ = true;
-    PULP_TRY { processor_.on_view_opened(*view_raw_); }
-    PULP_CATCH_ALL {}
+    if (processor_alive_) {
+        PULP_TRY { processor_.on_view_opened(*view_raw_); }
+        PULP_CATCH_ALL {}
+    }
 }
 
 std::unique_ptr<view::View> ViewBridge::release_view() {
@@ -200,8 +203,10 @@ std::unique_ptr<view::View> ViewBridge::release_view() {
 void ViewBridge::close() {
     if (!view_raw_) return;
     if (attached_) {
-        PULP_TRY { processor_.on_view_closed(*view_raw_); }
-        PULP_CATCH_ALL {}
+        if (processor_alive_) {
+            PULP_TRY { processor_.on_view_closed(*view_raw_); }
+            PULP_CATCH_ALL {}
+        }
         attached_ = false;
     }
     // Detach the surfaces from the tree BEFORE dropping either. A released view
@@ -224,7 +229,7 @@ void ViewBridge::close() {
 void ViewBridge::resize(uint32_t width, uint32_t height) {
     width_ = width;
     height_ = height;
-    if (view_raw_ && attached_) {
+    if (view_raw_ && attached_ && processor_alive_) {
         PULP_TRY { processor_.on_view_resized(*view_raw_, width, height); }
         PULP_CATCH_ALL {}
     }
