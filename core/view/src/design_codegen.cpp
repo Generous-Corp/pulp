@@ -673,12 +673,22 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
             ss << ind << "setMaskSize('" << target_id << "', '"
                << js_single_quote_escape(*st.mask_size) << "');\n";
         // A shadow is a visual override like any other here, and it belongs on
-        // EVERY kind of node — not just frames. The frame branch carries its own
-        // copy of this emit (and does not call this lambda), so for a long time
-        // a shadow only painted on a frame: a design whose 44 knob bases are
-        // ellipses had 49 shadowed nodes in its scene and emitted exactly ONE
-        // setBoxShadow, leaving every knob flat. Nothing said so, because the
-        // boxes were the right size in the right place — they just had no depth.
+        // EVERY kind of node — not just frames. Before this lived here, a shadow
+        // painted only on frames: a design whose 44 knob bases are ellipses had
+        // 49 shadowed nodes in its scene and emitted exactly ONE setBoxShadow,
+        // leaving every knob flat. Nothing said so, because the boxes were the
+        // right size in the right place — they just had no depth.
+        //
+        // This comment used to add "(and the frame branch does not call this
+        // lambda)". It does — line ~1563, the container branch — so the claim
+        // was false the moment it was written, and it was the alibi for the
+        // duplicate emit it left behind: the container branch called the lambda
+        // AND kept its own setBoxShadow, writing the line twice. Harmless (same
+        // args, last wins) and still wrong to leave, because the next reader
+        // trusts the comment over the code. A comment asserting exactly the
+        // property the code lacks is this importer's signature bug — "locale-
+        // stable" over a locale-dependent %f, "implemented in SkiaCanvas" over a
+        // no-op — and the fix for the last one introduced another instance of it.
         if (!st.box_shadow.empty()) {
             // The bridge takes a single drop shadow; CSS paints the first layer
             // on top, so that is the one that reads.
@@ -1703,19 +1713,9 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
                << js_single_quote_escape(*node.style.border_color) << "', "
                << *node.style.border_width << ", " << br << ");\n";
         }
-        if (!node.style.box_shadow.empty()) {
-            // The IR carries parsed CSS box-shadow layers. The bridge's
-            // setBoxShadow(id, ox, oy, blur, spread, color, inset?) takes a
-            // single drop shadow; emit the first layer (CSS paints the first
-            // layer on top). An omitted color falls back to the bridge's
-            // default tint rather than letting setBoxShadow guess numerics.
-            const auto& sh = node.style.box_shadow.front();
-            const std::string color = sh.color.empty() ? "#00000050" : sh.color;
-            ss << ind << "setBoxShadow('" << id << "', "
-               << sh.offset_x << ", " << sh.offset_y << ", " << sh.blur << ", " << sh.spread
-               << ", '" << js_single_quote_escape(color) << "'"
-               << (sh.inset ? ", true" : "") << ");\n";
-        }
+        // NOTE: no setBoxShadow here. This branch calls
+        // emit_node_visual_overrides above, which emits it for every node kind.
+        // Keeping a copy here wrote the line TWICE for every container.
         if (node.style.opacity)
             ss << ind << "setOpacity('" << id << "', " << *node.style.opacity << ");\n";
 

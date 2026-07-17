@@ -955,7 +955,7 @@ test('a linear gradient lowers to a real CSS gradient, not its mean colour', () 
   const css = shape.style.background_gradient;
   assert.ok(css, 'a linear gradient must survive as a gradient');
   assert.match(css, /^linear-gradient\(/);
-  // The mean (#808080) is what flattening produced; it must no longer be the
+  // The flattened mean is what this used to produce; it must no longer be the
   // paint, and no stale solid may sit under the gradient to show through it.
   assert.equal(shape.style.background_color, undefined);
   // Nothing was approximated, so nothing may claim it was.
