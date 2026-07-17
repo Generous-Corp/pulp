@@ -135,9 +135,6 @@ pulp_add_test_suite(pulp-test-svg LIBRARIES pulp::canvas)
 # sub-tree only).
 pulp_add_test_suite(pulp-test-vector-scene LIBRARIES pulp::canvas)
 
-# Effects tests
-pulp_add_test_suite(pulp-test-effects LIBRARIES pulp::canvas)
-
 # Canvas image placement: affine transform, preserve-aspect fit, tiled fill.
 pulp_add_test_suite(pulp-test-canvas-image-fit LIBRARIES pulp::canvas)
 

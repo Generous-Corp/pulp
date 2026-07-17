@@ -23,7 +23,6 @@ target_sources(pulp-canvas PRIVATE
     # SkiaCanvas so custom-paint widgets and SVG imports can mutate one
     # child while repainting only that subtree's bounding box.
     src/scene.cpp
-    src/effects.cpp
     src/text_layout.cpp
     src/attributed_string.cpp
     src/text_shaper.cpp
