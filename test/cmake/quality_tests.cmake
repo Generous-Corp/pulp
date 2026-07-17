@@ -58,6 +58,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME planning-gitlink-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_planning_gitlink_guard.py")
 
+    # Runner-topology guard: pure reconciliation logic (label matching, the
+    # black-hole / offline / ephemeral-idle distinction, contract drift) plus a
+    # well-formedness check of the shipped routing contract. No network — the
+    # live-fleet half runs on a schedule in runner-topology-check.yml, since
+    # that invariant breaks with no commit involved.
+    add_test(NAME runner-topology-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_check.py")
+
     # PR-check triage: pure comparison logic that labels a red PR check as
     # pre-existing-on-main vs regressed-by-this-PR (the "also-red-on-main"
     # diagnostic). The CLI half is a thin gh-api wrapper (not unit-tested).

@@ -301,6 +301,109 @@ broad validation.
 
 To opt out for an individual run, pass `--pipeline default` explicitly.
 
+## Routing contract (checked)
+
+Every `*_RUNS_ON_JSON` repo variable is a **lane**: it names the labels a class
+of jobs is dispatched to. The intended lane→label mapping lives in
+**`tools/scripts/runner_topology.json`**, and
+`tools/scripts/runner_topology_check.py` reconciles it against the live repo
+variables and the live registered runners.
+
+**The contract is the source of truth for lane→label.** Label values quoted
+inline elsewhere in this guide are illustrative and can lag; the contract plus
+its checker are authoritative, because they are the only pair that is verified.
+
+### The failure this prevents
+
+GitHub does not validate `runs-on`. **A job that asks for a label no runner
+carries is not an error — it is queued, forever.** There is no warning, no
+annotation, no failed check. The only symptom is jobs piling up while the pool
+looks saturated, which is indistinguishable from "we're just busy".
+
+That makes a mis-pointed routing variable *silent*. A relief valve routed into a
+black hole is worse than no relief valve: it reports healthy and relieves
+nothing, and the queue it was supposed to drain grows behind it.
+
+The same class of bug already bit the busy probe in `build.yml`: reading
+`actions/runners` needs `Administration: Read`, which the default
+`GITHUB_TOKEN` lacks, so the probe 403s and falls back to `BUSY=0` — silently
+disabling overflow. Nothing about either failure is visible without asking.
+
+### What the checker asserts
+
+| Check | Failure it catches |
+|-------|--------------------|
+| `drift` | A variable was edited without updating the contract (or vice versa). The variable is a reviewed artifact, not a blind edit. |
+| `black-hole` | The lane's labels are satisfiable by no runner. |
+| `degraded` | The only matching runners are offline — the host may just be asleep. A warning, not an error: a different failure from a label nobody owns. |
+| `undeclared` | A live routing variable with no lane in the contract. |
+| `hosted-unknown` | A `runs-on` value that is not self-hosted and not a known GitHub image — i.e. a typo, which queues forever. |
+| `must-unset` | A paid Namespace overflow variable is set (cost guard). |
+
+Label matching is **subset containment**: GitHub dispatches to a runner only if
+it carries *every* label in the array. A lane requesting
+`[self-hosted, macOS, ARM64, pulp-build, pulp-build-studio]` is not served by a
+runner carrying only `pulp-preamble`, however much the labels overlap.
+
+### Three runner states, not two
+
+`online` / `offline` is not the whole story. Tart runners register **JIT and
+ephemeral** (`tools/ci/tart-runner.sh`, `tart-runner-linux.sh`): they exist only
+while a job runs and vanish when idle. For those lanes an empty registry proves
+nothing — the provisioner may simply have nothing to do.
+
+So ephemeral lanes are judged on **service history** instead: has any job been
+dispatched to this exact label set inside the lookback window? A label set with
+no runner *and* no recent service has nothing provisioning it, and that is a
+black hole. This distinction is load-bearing — without it the release lanes,
+which are idle between releases, would be flagged as broken every sweep.
+
+Service history is gathered from the workflows that **consume the lane**, found
+by scanning `.github/workflows` for the variable. A repo-wide "last N runs"
+sweep is *not* a time window: on a busy repo the newest 100 runs were measured
+covering well under an hour, so any lane used less often than that — every
+release lane — would be condemned on every sweep. Scoping to the consuming
+workflow makes 20 runs reach back months for a handful of API calls. The scan is
+also **lazy**: a lane with a live runner costs zero API calls.
+
+**Honest limits.** This check proves a lane *can* be served; it does not prove
+jobs *are* being served well. It will not catch a runner that is online but
+wedged, a lane that is slow rather than dead, a capacity shortfall (labels
+resolve, queue still grows), or a black hole in a `runs-on` hard-coded in a
+workflow rather than driven by a variable. An ephemeral lane whose consuming
+workflow has not run inside the lookback window yields no evidence and is
+reported as a black hole — a false positive that is deliberately biased loud, on
+the grounds that a silent relief valve is what caused this in the first place.
+
+### Where it runs, and why
+
+- **`runner-topology-check.yml`** — hourly cron on `ubuntu-latest`, opening and
+  auto-closing a tracking issue. The invariant is about *live fleet state*, so
+  it can break with **no commit at all**: a runner is decommissioned, a host
+  renamed, a variable edited in the web UI. A PR gate would never see any of
+  that. It runs GitHub-hosted deliberately — a check that queues behind the
+  saturated pool it is auditing is no check.
+- **`runner-topology-selftest`** (ctest) — the diff-shaped half: contract
+  well-formedness and the reconciliation logic. No network, so it runs on every
+  PR for free and never adds an API call to the required macOS gate.
+
+The checker exits `2` when live state cannot be read, distinct from pass (`0`)
+and violation (`1`), so a missing token scope fails loudly instead of reporting
+a false green.
+
+### Changing a lane
+
+Edit the variable **and** its lane in `runner_topology.json` in the same change —
+the drift check exists to make that atomic. Then:
+
+```bash
+# Reconcile against the live fleet (uses ghapp locally — the App token bucket).
+python3 tools/scripts/runner_topology_check.py --mode=report
+
+# Advisory (never fails), useful while iterating.
+python3 tools/scripts/runner_topology_check.py --mode=hint
+```
+
 ## macOS overflow routing (Plan B)
 
 > **Namespace is OFF (cost).** We build macOS on **local Macs + GitHub-hosted**
@@ -323,7 +426,7 @@ reviewed by `/codex` 2026-05-13).
 
 1. **Operator override** — `gh workflow run build.yml --field macos_runner_selector_json='"<label>"'`. Always wins.
 2. **Overflow** — `BUSY >= PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` (default `2`) AND `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is set AND the trigger is `pull_request`. Routes to `namespace-profile-generouscorp-macos`.
-3. **Local default** — `PULP_LOCAL_MACOS_RUNS_ON_JSON` (currently `["self-hosted","sanitizer"]`).
+3. **Local default** — `PULP_LOCAL_MACOS_RUNS_ON_JSON`. For the current label set, read the lane in `tools/scripts/runner_topology.json` — that file is checked against the live fleet, so it cannot drift the way a value quoted here can.
 
 **Tuning knobs** (repo variables):
 

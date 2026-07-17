@@ -1,0 +1,254 @@
+{
+  "$schema": "Declarative runner-routing contract. Each lane binds a GitHub repo variable (`*_RUNS_ON_JSON`) to the label set it is INTENDED to route to, and to the kind of runner expected to serve it. Consumed by tools/scripts/runner_topology_check.py, which reconciles this file against the LIVE repo variables and the LIVE registered runners. A lane whose labels no runner can satisfy is a routing black hole: jobs queue forever and GitHub reports no error. Editing a repo variable without editing its lane here is drift, and the checker fails on it. Docs: docs/guides/local-ci.md.",
+  "_note_expect": "`expect` records the label set the lane is CONTRACTED to route to. It is the reviewed artifact: changing a repo variable is only legitimate when this file changes with it. `expect` is not automatically correct \u2014 a lane can be contracted to labels nothing serves, which is exactly the failure this checker exists to surface.",
+  "github_hosted_labels": [
+    "ubuntu-latest",
+    "ubuntu-24.04",
+    "ubuntu-22.04",
+    "macos-15",
+    "macos-14",
+    "macos-13",
+    "windows-latest",
+    "windows-2025",
+    "windows-2022"
+  ],
+  "_note_github_hosted": "Allowlist, not a heuristic. A `runs-on` value is treated as GitHub-hosted ONLY if every element appears here, so a typo ('macos-15x') fails loudly instead of being waved through as 'probably hosted'. GitHub's own discriminator is the literal `self-hosted` label: an array carrying it is a self-hosted label set. Both the scalar form (`runs-on: macos-15`) and the single-element array form (`runs-on: [macos-15]`) are legal hosted values and both are accepted here.",
+  "sentinels": [
+    "local-only"
+  ],
+  "_note_sentinels": "Magic values that mean 'this lane is deliberately switched off', not a label to route to. `build.yml` documents `local-only` as the explicit off switch for macOS overflow \u2014 emptiness cannot disable it, because GitHub treats unset and empty identically and the workflow's `||` default re-fills it.",
+  "service_evidence": {
+    "lookback_hours": 720,
+    "runs_per_workflow": 20,
+    "_why": "Tart runners register JIT/ephemeral (tools/ci/tart-runner.sh, tart-runner-linux.sh): they exist only while a job runs and vanish when idle. So 'no runner carries this label' does NOT prove a black hole for an ephemeral lane \u2014 it may just be idle. Those lanes are judged on service history instead: has a job been dispatched to this exact label set recently? A label set with no runner AND no service has nothing provisioning it, which IS a black hole.",
+    "_why_per_workflow": "Evidence is gathered from the workflows that CONSUME the lane, not from a repo-wide run sweep. On a busy repo the newest 100 runs measured well under an hour of history, so a repo-wide scan would condemn any lane used less often than that \u2014 the release lanes fire per release, not per hour. Scoping to the consuming workflow makes 20 runs reach back months for a few API calls, and the scan is lazy: a lane with a live runner costs nothing.",
+    "_why_lookback": "720h (30d) covers a normal release cadence with margin. A lane whose consuming workflow has not run at all in the window yields no evidence, which is reported as a black hole \u2014 see the honest-limits note in docs/guides/local-ci.md."
+  },
+  "must_remain_unset": {
+    "variables": [
+      "PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON",
+      "PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON",
+      "PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON",
+      "PULP_NAMESPACE_DOCS_CHECK_RUNS_ON_JSON"
+    ],
+    "why": "Namespace cloud macOS/Linux/Windows runners are a PAID overflow deliberately kept off for cost (CLAUDE.md 'Runner priority'). Setting one silently starts billing; pointing one at self-hosted labels dumps the high-volume sanitizer/coverage lanes onto the Mac Studios that host the required macOS gate. Break-glass only, operator-dispatched, never automatic."
+  },
+  "lanes": [
+    {
+      "variable": "PULP_LOCAL_MACOS_RUNS_ON_JSON",
+      "purpose": "The REQUIRED macOS gate. Every PR merge depends on this lane resolving.",
+      "expect": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-build",
+        "pulp-build-studio"
+      ],
+      "provisioning": "persistent",
+      "severity": "required",
+      "hosts": [
+        "pulp-studio-01",
+        "pulp-studio-02",
+        "pulp-studio-03"
+      ]
+    },
+    {
+      "variable": "PULP_PREAMBLE_RUNS_ON_JSON",
+      "purpose": "Cheap preamble/probe legs that gate the heavier build jobs.",
+      "expect": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-preamble"
+      ],
+      "provisioning": "persistent",
+      "severity": "required",
+      "hosts": [
+        "pulp-studio-01",
+        "pulp-studio-02",
+        "pulp-studio-03",
+        "pulp-preamble-m5"
+      ]
+    },
+    {
+      "variable": "PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON",
+      "purpose": "macOS build overflow \u2014 the relief valve when the Studio pool is saturated (BUSY >= PULP_LOCAL_MAC_OVERFLOW_THRESHOLD). A black hole here is invisible: overflow reports healthy and relieves nothing.",
+      "expect": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-build",
+        "pulp-build-vm"
+      ],
+      "unset_fallback": [
+        "macos-15"
+      ],
+      "provisioning": "ephemeral",
+      "severity": "required",
+      "hosts": []
+    },
+    {
+      "variable": "PULP_RELEASE_MACOS_RUNS_ON_JSON",
+      "purpose": "release-cli arm64 macOS build lane. A black hole here blocks binary releases.",
+      "expect": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-build-vm-release"
+      ],
+      "provisioning": "ephemeral",
+      "severity": "required",
+      "hosts": []
+    },
+    {
+      "variable": "PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON",
+      "purpose": "release-cli Intel/universal macOS build lane.",
+      "expect": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-build-vm-release"
+      ],
+      "provisioning": "ephemeral",
+      "severity": "required",
+      "hosts": []
+    },
+    {
+      "variable": "PULP_SANITIZER_TSAN_RUNS_ON_JSON",
+      "purpose": "TSan sanitizer lane, routed to a dedicated VM to keep ODR-prone lanes off the warm Studio build dirs.",
+      "expect": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-sanitizer-vm-macos"
+      ],
+      "provisioning": "ephemeral",
+      "severity": "advisory",
+      "hosts": []
+    },
+    {
+      "variable": "PULP_SANITIZER_ASAN_RUNS_ON_JSON",
+      "purpose": "ASan lane \u2014 GitHub-hosted, clean per run.",
+      "expect": "macos-15",
+      "provisioning": "github-hosted",
+      "severity": "advisory"
+    },
+    {
+      "variable": "PULP_SANITIZER_UBSAN_RUNS_ON_JSON",
+      "purpose": "UBSan lane \u2014 GitHub-hosted, clean per run.",
+      "expect": "macos-15",
+      "provisioning": "github-hosted",
+      "severity": "advisory"
+    },
+    {
+      "variable": "PULP_SANITIZER_RTSAN_RUNS_ON_JSON",
+      "purpose": "RTSan lane \u2014 GitHub-hosted, clean per run.",
+      "expect": "macos-15",
+      "provisioning": "github-hosted",
+      "severity": "advisory"
+    },
+    {
+      "variable": "PULP_COVERAGE_MACOS_RUNS_ON_JSON",
+      "purpose": "Coverage lane \u2014 GitHub-hosted, clean per run (warm-dir ODR keeps it off self-hosted).",
+      "expect": "macos-15",
+      "provisioning": "github-hosted",
+      "severity": "advisory"
+    },
+    {
+      "variable": "PULP_LOCAL_LINUX_RUNS_ON_JSON",
+      "purpose": "Linux build lane (advisory check), served by ephemeral Tart Linux VMs on the Mac Studio host.",
+      "expect": [
+        "self-hosted",
+        "Linux",
+        "ARM64",
+        "pulp-build-linux",
+        "pulp-host-macstudio"
+      ],
+      "provisioning": "ephemeral",
+      "severity": "advisory",
+      "hosts": [
+        "macstudio"
+      ]
+    },
+    {
+      "variable": "PULP_LOCAL_LINUX_PRIMARY_RUNS_ON_JSON",
+      "purpose": "Linux primary target. Not referenced by any workflow today; kept for the reroute/overflow tooling.",
+      "expect": [
+        "self-hosted",
+        "Linux",
+        "ARM64",
+        "pulp-build-linux",
+        "pulp-host-macstudio"
+      ],
+      "provisioning": "ephemeral",
+      "severity": "advisory",
+      "hosts": [
+        "macstudio"
+      ]
+    },
+    {
+      "variable": "PULP_LOCAL_LINUX_OVERFLOW_RUNS_ON_JSON",
+      "purpose": "Linux overflow to the M5 host. Not referenced by any workflow today.",
+      "expect": [
+        "self-hosted",
+        "Linux",
+        "ARM64",
+        "pulp-build-linux",
+        "pulp-host-m5"
+      ],
+      "provisioning": "ephemeral",
+      "severity": "advisory",
+      "hosts": [
+        "m5"
+      ]
+    },
+    {
+      "variable": "PULP_LOCAL_WINDOWS_RUNS_ON_JSON",
+      "purpose": "Windows build lane via QEMU on the Mac Studio host. Not referenced by any workflow today.",
+      "expect": [
+        "self-hosted",
+        "Windows",
+        "ARM64",
+        "pulp-build-windows",
+        "pulp-host-macstudio"
+      ],
+      "provisioning": "ephemeral",
+      "severity": "advisory",
+      "hosts": [
+        "macstudio"
+      ]
+    },
+    {
+      "variable": "PULP_LOCAL_WINDOWS_PRIMARY_RUNS_ON_JSON",
+      "purpose": "Windows primary target. Not referenced by any workflow today.",
+      "expect": [
+        "self-hosted",
+        "Windows",
+        "ARM64",
+        "pulp-build-windows",
+        "pulp-host-macstudio"
+      ],
+      "provisioning": "ephemeral",
+      "severity": "advisory",
+      "hosts": [
+        "macstudio"
+      ]
+    },
+    {
+      "variable": "PULP_LOCAL_WINDOWS_OVERFLOW_RUNS_ON_JSON",
+      "purpose": "Windows overflow to the M5 host. Not referenced by any workflow today.",
+      "expect": [
+        "self-hosted",
+        "Windows",
+        "ARM64",
+        "pulp-build-windows",
+        "pulp-host-m5"
+      ],
+      "provisioning": "ephemeral",
+      "severity": "advisory",
+      "hosts": [
+        "m5"
+      ]
+    }
+  ]
+}
