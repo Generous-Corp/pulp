@@ -41,6 +41,7 @@ These were built deliberately for exactly this. Reaching for a hand-written
 | Fundamental-frequency check | `estimate_frequency()` / `assert_frequency_near()` | `audio_metrics.hpp` / `audio_assertions.hpp` |
 | Human-readable buffer report | `summarize(metrics)` | `audio_metrics.hpp` |
 | Glitch/artifact + "audio doctor" detection | `audio_artifacts.hpp`, `audio_doctor_artifacts.hpp` | `tools/audio/analysis/` |
+| Magnitude response / THD / phase + group delay from rendered buffers | `response_relative_to_input()`, `measure_thd()`, `measure_group_delay()` (gate on `defined_at(hz)` for delay, and the stricter `phase_defined_at(hz)` for phase — a stopband reports undefined, and the accessors return NaN) | `pulp/audio/analysis/audio_spectrum.hpp` |
 | Command-line: render/inspect/compare a WAV without writing C++ | **`pulp audio validate <summarize\|doctor\|compare\|assert>`** (assert checks: `no_nan_inf`, `not_silent`, `silent`, `peak_below`, `frequency_near`) | `tools/cli/cmd_audio_validate.cpp` |
 | Live per-callback metering / MIDI log / buffer-underrun capture | `pulp::inspect::AudioInspector` | `inspect/include/pulp/inspect/audio_inspector.hpp` |
 | Interactive inspection from an agent session | the **`pulp_inspect_audio`** MCP tool (the Audio Inspector) | MCP |

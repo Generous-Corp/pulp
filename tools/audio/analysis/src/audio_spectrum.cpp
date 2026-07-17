@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <limits>
 #include <numbers>
 #include <numeric>
 #include <stdexcept>
@@ -85,7 +86,7 @@ std::vector<double> raw_periodic_window(Window w, int n, double kaiser_beta) {
     return coeffs;
 }
 
-// Extract one channel segment [offset, offset+N) into a windowed float buffer
+// Extract one channel segment [offset, offset+N) into a windowed DOUBLE buffer
 // ready for forward_real(). `win` holds the N precomputed, coherent-gain-
 // normalized coefficients (see window_coefficients). DC is removed (segment
 // mean subtracted) when `remove_dc` is true — true for steady tones, but false
@@ -97,12 +98,15 @@ std::vector<double> raw_periodic_window(Window w, int n, double kaiser_beta) {
 // any other discontinuity: a clean coherent tone over 4096 samples analyzed
 // at fft_length 16384 reads THD −48.7 dB (true value −176.7) and a kaiser
 // spectrum's floor collapses from −135 dB to −14 dB — confidently wrong
-// numbers, while the result still claims coherence. Refusing is the only
-// honest answer; callers with a short capture must shrink fft_length instead
-// (the doctor CLI already does).
-std::vector<float> windowed_segment(std::span<const float> channel, int offset,
-                                    int N, std::span<const double> win,
-                                    bool remove_dc) {
+// numbers, while the result still claims coherence. The phase / group-delay
+// path is no different: reading past the capture would differentiate the
+// truncation edge, not the signal. Refusing is the only honest answer; callers
+// with a short capture must shrink fft_length instead (the doctor CLI already
+// does).
+std::vector<double> windowed_segment_f64(std::span<const float> channel,
+                                         int offset, int N,
+                                         std::span<const double> win,
+                                         bool remove_dc) {
     require(win.size() == static_cast<std::size_t>(N),
             "window coefficient count must match the segment length");
     require(offset >= 0 &&
@@ -119,12 +123,23 @@ std::vector<float> windowed_segment(std::span<const float> channel, int offset,
         mean /= N;
     }
 
-    std::vector<float> out(static_cast<std::size_t>(N));
+    std::vector<double> out(static_cast<std::size_t>(N), 0.0);
     for (int i = 0; i < N; ++i)
-        out[static_cast<std::size_t>(i)] = static_cast<float>(
+        out[static_cast<std::size_t>(i)] =
             (channel[static_cast<std::size_t>(offset + i)] - mean) *
-            win[static_cast<std::size_t>(i)]);
+            win[static_cast<std::size_t>(i)];
     return out;
+}
+
+// Float view of the same segment, for the float-FFT analyzers. The math is
+// identical — the double core already computed it and this only narrows the
+// result, exactly as the single-precision path always did (that path also
+// formed `(sample - mean) * win` in double before casting to float).
+std::vector<float> windowed_segment(std::span<const float> channel, int offset,
+                                    int N, std::span<const double> win,
+                                    bool remove_dc) {
+    const auto wide = windowed_segment_f64(channel, offset, N, win, remove_dc);
+    return {wide.begin(), wide.end()};
 }
 
 // Forward real FFT of a windowed segment → linear magnitudes for bins
@@ -332,6 +347,261 @@ ResponseCurve magnitude_spectrum_curve(
     curve.checkpoints.reserve(checkpoints_hz.size());
     for (double hz : checkpoints_hz)
         curve.checkpoints.push_back({hz, curve.magnitude_db_at(hz)});
+    return curve;
+}
+
+// ── Phase / group delay ───────────────────────────────────────────────────
+
+namespace {
+
+// Complex spectrum, bins [0, N/2], in double precision. Fft64 also pins the
+// portable radix-2 path (the vDSP specialization is float-only), so the phase
+// analyzer's numbers do not move with the FFT backend.
+std::vector<std::complex<double>> spectrum_complex(
+    const std::vector<double>& segment) {
+    const int N = static_cast<int>(segment.size());
+    pulp::signal::Fft64 fft(N);
+    std::vector<std::complex<double>> freq(static_cast<std::size_t>(N));
+    fft.forward_real(segment.data(), freq.data());
+    freq.resize(static_cast<std::size_t>(N / 2 + 1));
+    return freq;
+}
+
+// Per-bin group delay of one segment via the ramped-signal identity (see
+// measure_group_delay): tau(w) = Re{ X_r * conj(X) } / |X|^2, X_r = FFT(n*x[n]).
+// `spec` must be the spectrum of `segment`. Delay is in samples relative to the
+// segment's own n = 0; a common offset cancels when two of these are
+// subtracted, which is how the transfer group delay is formed.
+std::vector<double> segment_group_delay(
+    const std::vector<double>& segment,
+    const std::vector<std::complex<double>>& spec) {
+    std::vector<double> ramped(segment.size());
+    for (std::size_t n = 0; n < segment.size(); ++n)
+        ramped[n] = segment[n] * static_cast<double>(n);
+    const auto ramp_spec = spectrum_complex(ramped);
+
+    std::vector<double> tau(spec.size(), 0.0);
+    for (std::size_t k = 0; k < spec.size(); ++k) {
+        const double denom = std::norm(spec[k]);
+        // A bin with no energy has no phase to differentiate. Zero here is a
+        // placeholder only: such bins are gated to `defined = false` by the
+        // caller and never surface as a measurement. That holds only while the
+        // caller gates on THIS quantity and threshold — `std::norm(spec) >
+        // kLinearFloor` — on both the reference and the output spectrum. A
+        // caller that gates on some other measure of "quiet enough" (|H|, a
+        // dB floor relative to a peak) can admit a bin that landed here, and
+        // the placeholder then reads out as a measured zero delay.
+        tau[k] = denom > kLinearFloor
+                     ? (ramp_spec[k] * std::conj(spec[k])).real() / denom
+                     : 0.0;
+    }
+    return tau;
+}
+
+// Standard cumulative-offset unwrap: keep each successive raw-phase difference
+// inside (-pi, pi] by accumulating multiples of 2*pi. Exact only while the true
+// phase advances less than pi per bin; the aliasing limit that implies is
+// documented on measure_group_delay.
+std::vector<double> unwrap_phase(const std::vector<std::complex<double>>& h) {
+    std::vector<double> phase(h.size(), 0.0);
+    constexpr double kPi = std::numbers::pi;
+    double offset = 0.0;
+    double prev_raw = 0.0;
+    for (std::size_t k = 0; k < h.size(); ++k) {
+        const double raw = std::arg(h[k]);
+        if (k > 0) {
+            double delta = raw - prev_raw;
+            while (delta > kPi) {
+                offset -= 2.0 * kPi;
+                delta -= 2.0 * kPi;
+            }
+            while (delta < -kPi) {
+                offset += 2.0 * kPi;
+                delta += 2.0 * kPi;
+            }
+        }
+        phase[k] = raw + offset;
+        prev_raw = raw;
+    }
+    return phase;
+}
+
+const PhasePoint* nearest_phase_point(const std::vector<PhasePoint>& full,
+                                      double hz, double bin_hz) {
+    if (full.empty())
+        return nullptr;
+    return &full[static_cast<std::size_t>(
+        nearest_bin(hz, bin_hz, static_cast<int>(full.size())))];
+}
+
+} // namespace
+
+bool PhaseCurve::defined_at(double hz) const {
+    const auto* p = nearest_phase_point(full, hz, bin_hz);
+    return p != nullptr && p->defined;
+}
+
+bool PhaseCurve::phase_defined_at(double hz) const {
+    const auto* p = nearest_phase_point(full, hz, bin_hz);
+    return p != nullptr && p->phase_defined;
+}
+
+double PhaseCurve::group_delay_samples_at(double hz) const {
+    const auto* p = nearest_phase_point(full, hz, bin_hz);
+    return p != nullptr ? p->group_delay_samples
+                        : std::numeric_limits<double>::quiet_NaN();
+}
+
+double PhaseCurve::group_delay_seconds_at(double hz) const {
+    if (sample_rate <= 0.0)
+        return std::numeric_limits<double>::quiet_NaN();
+    return group_delay_samples_at(hz) / sample_rate;
+}
+
+double PhaseCurve::phase_radians_at(double hz) const {
+    const auto* p = nearest_phase_point(full, hz, bin_hz);
+    return p != nullptr ? p->phase_rad
+                        : std::numeric_limits<double>::quiet_NaN();
+}
+
+double PhaseCurve::magnitude_db_rel_peak_at(double hz) const {
+    const auto* p = nearest_phase_point(full, hz, bin_hz);
+    return p != nullptr ? p->magnitude_db_rel_peak : kSilenceFloorDb;
+}
+
+PhaseCurve measure_group_delay(
+    const pulp::audio::BufferView<const float>& input,
+    const pulp::audio::BufferView<const float>& output, double sample_rate,
+    std::span<const double> checkpoints_hz, const GroupDelayOptions& options) {
+    require(is_power_of_two(options.fft_length),
+            "group delay fft_length must be a power of two");
+    require(options.analysis_offset >= 0, "analysis_offset must be >= 0");
+    require(sample_rate > 0.0, "sample_rate must be > 0");
+    require(input.num_channels() > 0 && output.num_channels() > 0,
+            "group delay needs at least one input and output channel");
+    const int N = options.fft_length;
+
+    const int out_ch = std::clamp(options.channel, 0,
+                                  static_cast<int>(output.num_channels()) - 1);
+    const int in_ch = std::clamp(options.channel, 0,
+                                 static_cast<int>(input.num_channels()) - 1);
+
+    // No DC removal, for the same reason as the response analyzer: the impulse
+    // reference's flat spectrum IS the reference, and subtracting the segment
+    // mean would tilt the low bins. The same window is applied to both sides,
+    // so with the default rectangular window the transfer phase is exact.
+    // GroupDelayOptions carries no kaiser_beta (it is rectangular-only-exact);
+    // the default only matters if a caller deliberately picks Window::kaiser.
+    const auto win =
+        window_coefficients(options.window, N, kDefaultKaiserBeta);
+    const auto in_seg =
+        windowed_segment_f64(input.channel(static_cast<std::size_t>(in_ch)),
+                             options.analysis_offset, N, win,
+                             /*remove_dc=*/false);
+    const auto out_seg =
+        windowed_segment_f64(output.channel(static_cast<std::size_t>(out_ch)),
+                             options.analysis_offset, N, win,
+                             /*remove_dc=*/false);
+    const auto in_spec = spectrum_complex(in_seg);
+    const auto out_spec = spectrum_complex(out_seg);
+
+    // Same guard as the response analyzer: an impulse reference that has fallen
+    // outside the analysis window leaves nothing to divide by, and every bin
+    // would be noise-over-noise.
+    double in_energy = 0.0;
+    for (const auto& c : in_spec)
+        in_energy += std::norm(c);
+    require(in_energy > kLinearFloor,
+            "reference (input) analysis window is effectively silent — an "
+            "impulse reference requires analysis_offset == 0");
+
+    const auto in_tau = segment_group_delay(in_seg, in_spec);
+    const auto out_tau = segment_group_delay(out_seg, out_spec);
+
+    PhaseCurve curve;
+    curve.stimulus = "impulse";
+    curve.window = options.window;
+    curve.fft_length = N;
+    curve.analysis_offset = options.analysis_offset;
+    curve.sample_rate = sample_rate;
+    curve.bin_hz = sample_rate / N;
+    curve.magnitude_floor_db = options.magnitude_floor_db;
+
+    const int bins = static_cast<int>(out_spec.size());
+
+    // Transfer function H = output / input, bin by bin. A reference bin without
+    // energy makes H undefined there no matter how loud the output is.
+    std::vector<std::complex<double>> h(static_cast<std::size_t>(bins));
+    std::vector<bool> reference_present(static_cast<std::size_t>(bins), false);
+    for (int i = 0; i < bins; ++i) {
+        const auto idx = static_cast<std::size_t>(i);
+        const bool present = std::norm(in_spec[idx]) > kLinearFloor;
+        reference_present[idx] = present;
+        h[idx] = present ? out_spec[idx] / in_spec[idx]
+                         : std::complex<double>{0.0, 0.0};
+    }
+
+    const auto phase = unwrap_phase(h);
+
+    // The gate is relative to the curve's own peak transfer magnitude, so it
+    // tracks the passband whatever the processor's overall gain is.
+    double peak = kLinearFloor;
+    for (int i = 0; i < bins; ++i)
+        peak = std::max(peak, std::abs(h[static_cast<std::size_t>(i)]));
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    curve.full.reserve(static_cast<std::size_t>(bins));
+    // The unwrap walks bins low to high accumulating an offset, so a bin's
+    // phase is only as trustworthy as every bin below it. Latches false at the
+    // first undefined bin and never recovers: past that point the offset has
+    // walked through a bin with no phase to read — where `h` is the {0,0}
+    // substituted above, whose `std::arg` is a fabricated 0 — and no later bin
+    // can recover which 2π branch the true phase took. `defined` cannot carry
+    // this; it is a per-bin question and this is a question about the walk.
+    bool chain_intact = true;
+    for (int i = 0; i < bins; ++i) {
+        const auto idx = static_cast<std::size_t>(i);
+        const double mag_db_rel_peak =
+            20.0 * std::log10(std::max(std::abs(h[idx]), kLinearFloor) / peak);
+        // Three independent gates.
+        //
+        // The RELATIVE one (magnitude_floor_db) rejects a stopband.
+        //
+        // The ABSOLUTE transfer gate rejects a curve with no signal anywhere,
+        // which the relative gate cannot see — for a silent output the peak is
+        // itself the numerical floor, every bin sits at 0 dB relative to it,
+        // and the curve would otherwise claim a flat, fully-defined,
+        // zero-delay response for a processor that emitted nothing at all.
+        //
+        // The OUTPUT-ENERGY gate tests the same quantity and threshold that
+        // segment_group_delay uses to decide a bin has phase worth
+        // differentiating. Without it the two disagree: |H| > kLinearFloor
+        // admits a bin whose |X_out| is still far below the tau estimator's
+        // own floor, so the bin inherits tau's zero placeholder and reports a
+        // measured-looking group delay of exactly 0. The input side already
+        // pairs `reference_present` with in_tau's floor this way; this keeps
+        // the output side aligned.
+        const bool defined = reference_present[idx] &&
+                             std::norm(out_spec[idx]) > kLinearFloor &&
+                             std::abs(h[idx]) > kLinearFloor &&
+                             mag_db_rel_peak >= options.magnitude_floor_db;
+        // Folding this bin in first makes `chain_intact` exactly the phase
+        // gate: true only when bins 0..i are every one of them defined.
+        chain_intact = chain_intact && defined;
+        const bool phase_defined = chain_intact;
+        curve.full.push_back({i * curve.bin_hz, mag_db_rel_peak,
+                              phase_defined ? phase[idx] : nan,
+                              defined ? out_tau[idx] - in_tau[idx] : nan,
+                              defined, phase_defined});
+    }
+
+    curve.checkpoints.reserve(checkpoints_hz.size());
+    for (double hz : checkpoints_hz) {
+        const auto* p = nearest_phase_point(curve.full, hz, curve.bin_hz);
+        PhasePoint cp = p != nullptr ? *p : PhasePoint{};
+        cp.hz = hz; // report the requested frequency, not the bin center
+        curve.checkpoints.push_back(cp);
+    }
     return curve;
 }
 
