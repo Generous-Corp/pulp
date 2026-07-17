@@ -48,6 +48,9 @@ def _tool(**over) -> dict:
         "invocation": "python3 tools/import-design/montage.py --out c.png a.png:A",
         "availability": "always",
         "skill": "screenshot",
+        # visual-compare tools must state their blind spot (tools_registry_check
+        # `caveat` rule); a valid fixture carries one so `_check` returns clean.
+        "caveat": "Renders no verdict — a human has to read the montage.",
     }
     base.update(over)
     return base
@@ -273,7 +276,9 @@ class PlannedEntries(unittest.TestCase):
     def _planned(self, **over) -> dict:
         base = {"name": "layout-parity", "category": "visual-compare",
                 "use_when": "Report misplaced nodes by id.",
-                "availability": "planned", "pointer": "planning/plan.md — Phase 2."}
+                "availability": "planned", "pointer": "planning/plan.md — Phase 2.",
+                # visual-compare tools carry a caveat even when planned.
+                "caveat": "Compares box placement only; blind to glyph ink."}
         base.update(over)
         return base
 
@@ -413,6 +418,51 @@ class RealRegistry(unittest.TestCase):
 
     def test_registry_is_clean(self):
         self.assertEqual(MOD.main(["--check"]), 0)
+
+
+class PyYamlAbsent(unittest.TestCase):
+    """On a runner without PyYAML (e.g. a self-hosted macOS leg), the check must
+    SKIP loudly with exit 0 — never SystemExit-fail the build leg — while the
+    PyYAML-equipped lane keeps enforcing it. Regression guard for the #6199
+    wedge, where a hard `SystemExit("PyYAML is required")` turned the required
+    macOS gate red on every PR."""
+
+    class _BlockYaml:
+        def find_spec(self, name, path, target=None):
+            if name == "yaml" or name.startswith("yaml."):
+                raise ModuleNotFoundError("No module named 'yaml'")
+            return None
+
+    def _run_without_yaml(self, fn):
+        """Run `fn(mod)` with a freshly-loaded checker while `import yaml` is
+        blocked for the whole call — the lazy import in `_load_yaml` fires
+        during `fn`, not at module load, so the blocker has to stay installed."""
+        blocker = self._BlockYaml()
+        sys.meta_path.insert(0, blocker)
+        saved = {k: v for k, v in sys.modules.items()
+                 if k == "yaml" or k.startswith("yaml.")}
+        for k in saved:
+            del sys.modules[k]
+        try:
+            spec = importlib.util.spec_from_file_location("trc_noyaml", SCRIPT)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return fn(mod)
+        finally:
+            sys.meta_path.remove(blocker)
+            sys.modules.update(saved)
+
+    def test_check_skips_with_warning(self):
+        self.assertEqual(self._run_without_yaml(lambda m: m.main(["--check"])), 0)
+
+    def test_cli_names_degrade_to_empty(self):
+        self.assertEqual(
+            self._run_without_yaml(lambda m: m._cli_command_names()), {})
+
+    def test_write_still_errors(self):
+        # --write regenerates the digest from the registry, which genuinely
+        # needs it parsed; refuse rather than write a half-baked digest.
+        self.assertEqual(self._run_without_yaml(lambda m: m.main(["--write"])), 1)
 
 
 if __name__ == "__main__":

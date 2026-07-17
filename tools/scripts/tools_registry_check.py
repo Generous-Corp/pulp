@@ -75,15 +75,25 @@ CATEGORY_BLURB = {
 }
 
 
+class RegistryUnparseable(RuntimeError):
+    """The registry YAML could not be parsed — e.g. PyYAML is unavailable on
+    this runner. Raised (not ``SystemExit``) so a caller can choose to SKIP with
+    a warning instead of hard-failing: this is a config-lint gate, and it must
+    not fail an unrelated build-matrix leg just because one self-hosted runner
+    lacks an optional Python dependency the repo deliberately avoids elsewhere
+    (see the ``versioning.json`` JSON pivot). The Linux / GitHub-hosted lane
+    always carries PyYAML and enforces the full check, so a skip on a
+    PyYAML-less runner loses no coverage."""
+
+
 def _load_yaml(path: Path):
     # Imported lazily, same as the SDK-consumer tools: PyYAML is not guaranteed
-    # on a PEP-668 runner, and a clear message beats an ImportError traceback.
+    # on a PEP-668 runner, and a clear signal beats an ImportError traceback.
     try:
         import yaml
-    except ModuleNotFoundError:
-        raise SystemExit(
-            "PyYAML is required to parse the tool registry.\n"
-            "  pip install pyyaml")
+    except ModuleNotFoundError as exc:
+        raise RegistryUnparseable(
+            f"PyYAML is unavailable; cannot parse {path}") from exc
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
@@ -174,8 +184,16 @@ def sweep_entry_points(registry: dict) -> list[str]:
 # ── Invocation resolution ───────────────────────────────────────────────
 
 def _cli_command_names() -> dict[str, list[str]]:
-    """{command: [subcommand names]} from cli-commands.yaml."""
-    data = _load_yaml(CLI_MANIFEST) or {}
+    """{command: [subcommand names]} from cli-commands.yaml.
+
+    Degrades to an empty map when the manifest cannot be parsed (no PyYAML on
+    this runner): the `pulp <cmd>` invocation cross-check then can't run, but
+    the rest of `validate()` still does, and the PyYAML-equipped lane performs
+    the full cross-check."""
+    try:
+        data = _load_yaml(CLI_MANIFEST) or {}
+    except RegistryUnparseable:
+        return {}
     out: dict[str, list[str]] = {}
     for c in data.get("commands") or []:
         name = c.get("name")
@@ -504,7 +522,21 @@ def main(argv: list[str] | None = None) -> int:
     if not REGISTRY.is_file():
         print(f"ERROR: {REGISTRY.relative_to(ROOT)} is missing", file=sys.stderr)
         return 1
-    registry = _load_yaml(REGISTRY) or {}
+    try:
+        registry = _load_yaml(REGISTRY) or {}
+    except RegistryUnparseable as exc:
+        # A PyYAML-less runner (e.g. a self-hosted macOS leg) cannot parse the
+        # registry. Skip loudly rather than hard-fail the build leg — the
+        # PyYAML-equipped Linux / GitHub-hosted lane still enforces this check,
+        # so drift is never allowed to land unseen. `--write` still errors,
+        # since regenerating the digest needs the registry.
+        if args.write:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        print(f"::warning::tools-registry-check skipped: {exc}. The "
+              "PyYAML-equipped lane enforces this check; install PyYAML on this "
+              "runner to enforce it here too.")
+        return 0
 
     problems = validate(registry) + check_coverage(registry)
     # Only regenerate from a registry that is actually valid — writing a digest
