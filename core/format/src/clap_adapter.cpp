@@ -6,6 +6,7 @@
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/max_block_contract.hpp>
+#include <pulp/format/mpe_expression.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/ara.hpp>
 #include <pulp/format/detail/midi_out_offset.hpp>
@@ -40,6 +41,73 @@ void resize_f64_boundary_scratch(
 using pulp::format::boundary::copy_f32_to_f64;
 using pulp::format::boundary::copy_f64_to_f32;
 using pulp::format::boundary::zero_f64;
+
+// Decode CLAP's host transport into the format-neutral boundary struct. The
+// shared adapter-boundary core then writes the ProcessContext transport fields,
+// derives the bar when the host supplies none, and diffs the change flags —
+// identically for every format. The CLAP-specific work is the flag /
+// fixed-point decode here.
+//
+// A null @p tr (the host supplied no transport) yields a default `valid=false`
+// transport, which leaves every ProcessContext transport field at its default.
+// @p sample_rate converts CLAP's seconds timeline to a sample position.
+boundary::HostTransport decode_clap_transport(const clap_event_transport_t* tr,
+                                              double sample_rate) {
+    boundary::HostTransport transport;
+    if (!tr) return transport;
+
+    const uint32_t flags = tr->flags;
+
+    transport.valid = true;
+    transport.is_playing = (flags & CLAP_TRANSPORT_IS_PLAYING) != 0;
+    transport.is_recording = (flags & CLAP_TRANSPORT_IS_RECORDING) != 0;
+    if (flags & CLAP_TRANSPORT_HAS_TEMPO) {
+        transport.has_tempo = true;
+        transport.tempo_bpm = tr->tempo;
+    }
+    if (flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
+        transport.has_beats = true;
+        transport.position_beats =
+            static_cast<double>(tr->song_pos_beats) / CLAP_BEATTIME_FACTOR;
+    }
+    if (flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE) {
+        const double seconds =
+            static_cast<double>(tr->song_pos_seconds) / CLAP_SECTIME_FACTOR;
+        transport.has_samples = true;
+        transport.position_samples = static_cast<int64_t>(
+            std::llround(seconds * sample_rate));
+    }
+    if (flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE) {
+        transport.has_time_sig = true;
+        transport.time_sig_numerator = static_cast<int>(tr->tsig_num);
+        transport.time_sig_denominator = static_cast<int>(tr->tsig_denom);
+    }
+
+    // Cycle / loop range. CLAP gates this on CLAP_TRANSPORT_IS_LOOP_ACTIVE;
+    // loop_start_beats / loop_end_beats are CLAP fixed-point `clap_beattime` so
+    // they convert through the same factor as song_pos_beats. The mapper only
+    // writes them when is_looping.
+    transport.is_looping = (flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE) != 0;
+    if (transport.is_looping) {
+        transport.loop_start_beats =
+            static_cast<double>(tr->loop_start_beats) / CLAP_BEATTIME_FACTOR;
+        transport.loop_end_beats =
+            static_cast<double>(tr->loop_end_beats) / CLAP_BEATTIME_FACTOR;
+    }
+
+    // Bar index. CLAP exposes `bar_number` directly (bar at song pos 0 has bar
+    // 0) whenever it supplies a beats timeline, so prefer that over deriving
+    // from beats; otherwise the mapper derives it.
+    if (flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
+        transport.has_host_bar = true;
+        transport.host_bar = static_cast<int64_t>(tr->bar_number);
+    }
+
+    // Host clock / SMPTE frame rate stay at the documented "host did not
+    // provide" sentinels (host_time_ns = 0, frame_rate = unknown): CLAP 1.2.2's
+    // `clap_event_transport` carries neither field.
+    return transport;
+}
 }
 
 static PulpClapPlugin* get_self(const clap_plugin_t* plugin) {
@@ -756,38 +824,24 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                     switch (ev.expression_id) {
                         case CLAP_NOTE_EXPRESSION_PRESSURE: {
                             // 0..1 → channel aftertouch (7-bit).
-                            const double v = std::clamp(ev.value, 0.0, 1.0);
-                            const uint8_t v7 = static_cast<uint8_t>(v * 127.0 + 0.5);
-                            me = {choc::midi::ShortMessage(
-                                static_cast<uint8_t>(0xD0 | (channel & 0x0F)),
-                                v7, 0), t, 0.0};
+                            me = mpe::channel_pressure(channel, ev.value);
+                            me.sample_offset = t;
                             emitted = true;
                             break;
                         }
                         case CLAP_NOTE_EXPRESSION_TUNING: {
-                            // ±120 semitones → 14-bit pitch bend clamped
-                            // to ±2 semitones default MPE member range.
-                            // We normalize the raw value to the ±48st
-                            // member-bend default so the MpeVoiceTracker
-                            // expands it back correctly.
-                            const double norm = std::clamp(
-                                ev.value / static_cast<double>(
-                                    midi::MpeVoiceTracker::kDefaultMemberBendSemitones),
-                                -1.0, 1.0);
-                            const int bend14 = static_cast<int>(
-                                std::lround(8192.0 + norm * 8191.0));
-                            const auto pb = static_cast<uint16_t>(
-                                std::clamp(bend14, 0, 16383));
-                            me = midi::MidiEvent::pitch_bend(channel, pb);
+                            // CLAP tuning is already a signed semitone
+                            // offset; the shared mapping normalizes it to
+                            // the default MPE member-bend range so the
+                            // MpeVoiceTracker expands it back correctly.
+                            me = mpe::pitch_bend_from_semitones(channel, ev.value);
                             me.sample_offset = t;
                             emitted = true;
                             break;
                         }
                         case CLAP_NOTE_EXPRESSION_BRIGHTNESS: {
                             // Brightness / timbre → CC 74.
-                            const double v = std::clamp(ev.value, 0.0, 1.0);
-                            const auto v7 = static_cast<uint8_t>(v * 127.0 + 0.5);
-                            me = midi::MidiEvent::cc(channel, 74, v7);
+                            me = mpe::timbre_cc(channel, ev.value);
                             me.sample_offset = t;
                             emitted = true;
                             break;
@@ -878,65 +932,8 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     ctx.num_samples = static_cast<int>(num_samples);
     ctx.process_mode = pulp::format::ProcessMode::Realtime;
     ctx.render_speed_hint = pulp::format::RenderSpeedHint::Realtime;
-    // Decode CLAP's host transport into the format-neutral boundary struct;
-    // the shared adapter-boundary core (SF-1) then writes the ProcessContext
-    // transport fields, derives the bar when the host supplies none, and diffs
-    // the change-flags — identically for every format. The CLAP-specific work
-    // is only the flag/fixed-point decode below.
-    boundary::HostTransport transport;
-    if (process->transport) {
-        const auto* tr = process->transport;
-        const uint32_t flags = tr->flags;
-
-        transport.valid = true;
-        transport.is_playing = (flags & CLAP_TRANSPORT_IS_PLAYING) != 0;
-        transport.is_recording = (flags & CLAP_TRANSPORT_IS_RECORDING) != 0;
-        if (flags & CLAP_TRANSPORT_HAS_TEMPO) {
-            transport.has_tempo = true;
-            transport.tempo_bpm = tr->tempo;
-        }
-        if (flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
-            transport.has_beats = true;
-            transport.position_beats =
-                static_cast<double>(tr->song_pos_beats) / CLAP_BEATTIME_FACTOR;
-        }
-        if (flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE) {
-            const double seconds =
-                static_cast<double>(tr->song_pos_seconds) / CLAP_SECTIME_FACTOR;
-            transport.has_samples = true;
-            transport.position_samples = static_cast<int64_t>(
-                std::llround(seconds * ctx.sample_rate));
-        }
-        if (flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE) {
-            transport.has_time_sig = true;
-            transport.time_sig_numerator = static_cast<int>(tr->tsig_num);
-            transport.time_sig_denominator = static_cast<int>(tr->tsig_denom);
-        }
-
-        // Cycle / loop range. CLAP gates this on CLAP_TRANSPORT_IS_LOOP_ACTIVE;
-        // loop_start_beats / loop_end_beats are CLAP fixed-point
-        // `clap_beattime` so they convert through the same factor as
-        // song_pos_beats. The mapper only writes them when is_looping.
-        transport.is_looping = (flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE) != 0;
-        if (transport.is_looping) {
-            transport.loop_start_beats =
-                static_cast<double>(tr->loop_start_beats) / CLAP_BEATTIME_FACTOR;
-            transport.loop_end_beats =
-                static_cast<double>(tr->loop_end_beats) / CLAP_BEATTIME_FACTOR;
-        }
-
-        // Bar index. CLAP exposes `bar_number` directly (bar at song pos 0 has
-        // bar 0) whenever it supplies a beats timeline, so prefer that over
-        // deriving from beats; otherwise the mapper derives it.
-        if (flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
-            transport.has_host_bar = true;
-            transport.host_bar = static_cast<int64_t>(tr->bar_number);
-        }
-
-        // Host clock / SMPTE frame rate stay at the documented "host did not
-        // provide" sentinels (host_time_ns = 0, frame_rate = unknown): CLAP
-        // 1.2.2's `clap_event_transport` carries neither field.
-    }
+    const auto transport =
+        decode_clap_transport(process->transport, ctx.sample_rate);
 
     // Apply the neutral transport and diff against the previous block. Stateful;
     // updates `self->playhead_prev` in place.
@@ -949,11 +946,9 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // per-param scratch below requires a matching reserve there; the
     // `ClapSlot::process is allocation-free` rt-safety test guards this.
     auto all_params = self->store.all_params();
-    self->param_snapshot.resize(all_params.size());
+    boundary::snapshot_param_values(self->store, all_params,
+                                    self->param_snapshot);
     self->output_param_has_event.assign(all_params.size(), 0);
-    for (std::size_t i = 0; i < all_params.size(); ++i) {
-        self->param_snapshot[i] = self->store.get_value(all_params[i].id);
-    }
 
     // MPE sidecar: run inbound MIDI through the voice tracker and attach
     // the resulting expression buffer to the processor for the duration
@@ -1168,11 +1163,10 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         const int32_t out_last_frame = out_frames > 0 ? out_frames - 1 : 0;
         for (auto it = self->output_param_events.begin();
              it != self->output_param_events.end(); ++it) {
-            for (std::size_t i = 0; i < all_params.size(); ++i) {
-                if (all_params[i].id == it->param_id) {
-                    self->output_param_has_event[i] = 1;
-                    break;
-                }
+            const std::size_t idx =
+                boundary::find_param_index(all_params, it->param_id);
+            if (idx != boundary::kParamIndexNotFound) {
+                self->output_param_has_event[idx] = 1;
             }
         }
         // (1) Snapshot-diff fallback, at time 0, for params WITHOUT explicit
@@ -1182,7 +1176,8 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         for (std::size_t i = 0; i < all_params.size(); ++i) {
             if (self->output_param_has_event[i]) continue;
             float current = self->store.get_value(all_params[i].id);
-            if (std::memcmp(&current, &self->param_snapshot[i], sizeof(float)) != 0) {
+            if (boundary::changed_since_snapshot(current,
+                                                 self->param_snapshot[i])) {
                 clap_event_param_value_t ev{};
                 ev.header.size = sizeof(ev);
                 ev.header.type = CLAP_EVENT_PARAM_VALUE;

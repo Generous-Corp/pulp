@@ -192,6 +192,67 @@ TEST_CASE("audio validate doctor --response is a peak-normalized self-spectrum",
     REQUIRE(db5000 < -40.0);
 }
 
+TEST_CASE("audio validate doctor refuses cleanly when it cannot measure",
+          "[cli][shellout][audio-validate]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    // The analyzers throw std::invalid_argument for inputs they would
+    // otherwise misread as clean (silence, a fundamental past Nyquist, a
+    // capture shorter than the analysis window). The CLI must surface that as
+    // a REFUSAL — the analyzer's own message on stderr and exit code 2
+    // ("could not measure", the same convention `audio compare` uses) — so a
+    // script can tell "your audio is bad" (1) from "I could not measure your
+    // audio" (2). Exit code 2 exactly is the load-bearing assertion: an
+    // UNCAUGHT exception aborts the process, which ProcessResult reports as
+    // exit_code -1 with libc++abi's "terminating" banner on stderr — a naive
+    // "nonzero exit" check cannot tell that crash from a clean refusal.
+    const auto silent = write_sine_wav(temp_wav("silent.wav"), 440.0, 48000.0,
+                                       24000, 0.0f, /*clip=*/false);
+    const auto clean = write_sine_wav(temp_wav("refuse-clean.wav"), 440.0,
+                                      48000.0, 24000, 0.5f, /*clip=*/false);
+    const auto tiny = write_sine_wav(temp_wav("tiny.wav"), 440.0, 48000.0,
+                                     48, 0.5f, /*clip=*/false);
+
+    SECTION("silence: THD would read 0 and pass a gate — refuse instead") {
+        auto r = run_pulp({"audio", "validate", "doctor", silent.string(),
+                           "--thd", "--fundamental", "1000"});
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find("no energy at the fundamental") !=
+                std::string::npos);
+        REQUIRE(r.stderr_output.find("terminating") == std::string::npos);
+    }
+
+    SECTION("fundamental at/past Nyquist: nothing there to measure") {
+        auto r = run_pulp({"audio", "validate", "doctor", clean.string(),
+                           "--thd", "--fundamental", "30000"});
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find("below Nyquist") != std::string::npos);
+        REQUIRE(r.stderr_output.find("terminating") == std::string::npos);
+    }
+
+    SECTION("capture shorter than the smallest analysis window") {
+        // 48 frames: the doctor's fft_length floors at 64, which no longer
+        // fits, and zero-padding would measure the truncation edge.
+        auto r = run_pulp({"audio", "validate", "doctor", tiny.string(),
+                           "--response", "1000"});
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find("must lie within the signal") !=
+                std::string::npos);
+        REQUIRE(r.stderr_output.find("terminating") == std::string::npos);
+    }
+
+    SECTION("a fundamental that resolves to the DC bin") {
+        auto r = run_pulp({"audio", "validate", "doctor", clean.string(),
+                           "--thd", "--fundamental", "1"});
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find("non-DC bin") != std::string::npos);
+        REQUIRE(r.stderr_output.find("terminating") == std::string::npos);
+    }
+}
+
 TEST_CASE("audio validate reports errors and exits nonzero on bad input",
           "[cli][shellout][audio-validate]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }

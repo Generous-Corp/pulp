@@ -71,6 +71,15 @@ pulp_add_test_suite(pulp-test-signal-graph-live-swap-staging
 pulp_add_test_suite(pulp-test-signal-graph-executor-parity
     SOURCES test_signal_graph_executor_parity.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+# SignalGraph's multi-path routing renders an arithmetic oracle bit-exactly on
+# the legacy walk, the routed serial path, and the routed parallel path, and the
+# paths stay independent across block partitionings and an aborted swap edit.
+# audio_signal_generators.cpp is compiled directly rather than linking
+# pulp-audio-test-support: that library is defined in app_audio_host_tests.cmake,
+# which test/CMakeLists.txt includes AFTER this manifest.
+pulp_add_test_suite(pulp-test-signal-graph-audio-parity
+    SOURCES test_signal_graph_audio_parity.cpp support/audio_signal_generators.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::audio-analysis)
 # Offline-equals-online: OfflineSignalGraphHost renders a deterministic graph at
 # different block partitionings and the harness proves block-partitioning
 # invariance (with a declared-exemption path for block-size-dependent nodes).

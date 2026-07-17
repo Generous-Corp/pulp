@@ -1541,6 +1541,22 @@ pulp audio plugin-inspect --plugin <bundle> [--format clap|vst3|au|auv3|lv2]
 pulp audio render --plugin <bundle> --out <file.wav> (--duration-ms <n> | --duration-frames <n>) [options]
 ```
 
+**Exit codes** (`audio validate`, matching `audio compare`):
+
+| Code | Meaning |
+|------|---------|
+| `0` | The measurement ran and passed. |
+| `1` | An error, or a check that ran and failed. |
+| `2` | The analyzer refused: it could not measure this input, and stderr names why. |
+
+`2` is distinct from `1` on purpose. "Your audio is bad" and "I could not
+measure your audio" call for different responses from a script, and the
+analyzers refuse rather than answer whenever the input would make the number
+meaningless — silence has no fundamental to be relative to, a capture shorter
+than the FFT would measure its own truncation edge, and a fundamental at or
+above Nyquist has no harmonics below it. Reading a refusal as a failure is the
+same mistake as reading it as a pass.
+
 **Subcommands**:
 
 | Subcommand | What it does |

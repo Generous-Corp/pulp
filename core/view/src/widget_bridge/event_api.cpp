@@ -118,7 +118,7 @@ void WidgetBridge::register_pointer_event_api() {
         // Idempotency: re-renders re-issue registerPointer for the same id.
         // Without this gate each call wraps the previous on_pointer_event,
         // stacking N lambdas and multiplying dispatch cost by render count.
-        if (!pointer_registered_.insert(id).second) {
+        if (!claim_pointer_registration(id)) {
             return choc::value::Value();
         }
         if (const char* dbg = std::getenv("PULP_DEBUG_POINTER"); dbg && *dbg) {
@@ -260,8 +260,7 @@ void WidgetBridge::register_pointer_event_api() {
         auto it = widgets_.find(id);
         if (it == widgets_.end() || !it->second)
             return;
-        const std::string gate = id + ":" + key;
-        if (!gesture_recognizer_registered_.insert(gate).second)
+        if (!claim_gesture_registration(id, key))
             return;
         it->second->add_gesture_recognizer(std::move(recognizer));
     };
@@ -494,7 +493,7 @@ void WidgetBridge::register_wheel_event_api() {
         // Idempotency: re-renders re-issue registerWheel for the same id.
         // Without this gate each call wraps the previous on_pointer_event,
         // stacking N lambdas and multiplying dispatch cost by render count.
-        if (!wheel_registered_.insert(id).second) {
+        if (!claim_wheel_registration(id)) {
             return choc::value::Value();
         }
         auto it = widgets_.find(id);

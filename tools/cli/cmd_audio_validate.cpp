@@ -20,6 +20,7 @@
 #include <iostream>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,13 @@ namespace {
 
 namespace fs = std::filesystem;
 namespace audio = pulp::test::audio;
+
+// Exit code for "the analyzer refused to measure this input" — silence at the
+// requested fundamental, a fundamental past Nyquist, a capture shorter than
+// the analysis window. Distinct from 1 (error, or a check that ran and
+// FAILED) so a script can tell "your audio is bad" from "I could not measure
+// your audio" — the same could-not-measure convention `audio compare` uses.
+constexpr int kExitCannotMeasure = 2;
 
 void print_validate_usage() {
     std::cout << "pulp audio validate — offline analysis of captured audio\n\n";
@@ -37,6 +45,10 @@ void print_validate_usage() {
     std::cout << "  pulp audio validate compare <a.wav> <b.wav> "
                  "[--mode null|spectral] [--tolerance <dbfs>]\n";
     std::cout << "  pulp audio validate assert <dir-or-assertions.json>\n";
+    std::cout << "\nExit codes: 0 = success / pass; 1 = error or a check that "
+                 "ran and failed;\n"
+                 "  2 = could not measure (the message on stderr names the "
+                 "input problem)\n";
 }
 
 // Owning decoded audio plus a stable channel-pointer array, so we can hand a
@@ -228,7 +240,17 @@ int run_doctor(const std::vector<std::string>& args) {
         audio::ThdOptions opts;
         opts.fft_length = fft_length;
         opts.channel = channel;
-        const auto thd = audio::measure_thd(view, f0, decoded->sample_rate, opts);
+        // The analyzer throws std::invalid_argument for inputs it would
+        // otherwise misread as clean (silence, a fundamental at/past Nyquist,
+        // a segment the capture cannot cover). Its message names the problem
+        // and the fix — surface it verbatim and exit "could not measure".
+        audio::ThdResult thd;
+        try {
+            thd = audio::measure_thd(view, f0, decoded->sample_rate, opts);
+        } catch (const std::invalid_argument& e) {
+            std::cerr << "Error: cannot measure: " << e.what() << "\n";
+            return kExitCannotMeasure;
+        }
         const auto path = audio::write_thd_artifact(thd, file);
         std::cout << "THD @ " << thd.fundamental_hz << " Hz: "
                   << thd.thd_percent() << "% (" << thd.thd_db() << " dB), "
@@ -254,8 +276,14 @@ int run_doctor(const std::vector<std::string>& args) {
         opts.fft_length = fft_length;
         opts.channel = channel;
         opts.window = audio::Window::hann;
-        const auto curve = audio::magnitude_spectrum_curve(
-            view, decoded->sample_rate, response_hz, opts);
+        audio::ResponseCurve curve;
+        try {
+            curve = audio::magnitude_spectrum_curve(
+                view, decoded->sample_rate, response_hz, opts);
+        } catch (const std::invalid_argument& e) {
+            std::cerr << "Error: cannot measure: " << e.what() << "\n";
+            return kExitCannotMeasure;
+        }
         const auto path = audio::write_response_artifact(curve, file);
         std::cout << "Magnitude spectrum (dB relative to peak frequency):\n";
         for (const auto& cp : curve.checkpoints)

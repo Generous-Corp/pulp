@@ -12,6 +12,7 @@
 
 #include "design_binding_metadata.hpp"
 #include "design_import_native_common.hpp"
+#include "design_ir_helpers.hpp"
 
 #include <algorithm>
 #include <array>
@@ -109,14 +110,6 @@ std::string format_float(float value) {
     return text;
 }
 
-std::string lower_copy(std::string_view value) {
-    std::string out;
-    out.reserve(value.size());
-    for (unsigned char c : value)
-        out += static_cast<char>(std::tolower(c));
-    return out;
-}
-
 std::string sanitize_identifier(std::string_view input, std::string_view fallback = "node") {
     std::string out;
     out.reserve(input.size());
@@ -159,47 +152,8 @@ std::string pascal_identifier(std::string_view input, std::string_view fallback 
     return out;
 }
 
-int hex_digit(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
-std::optional<std::array<unsigned, 4>> parse_hex_color(std::string_view value) {
-    if (value.empty() || value.front() != '#')
-        return std::nullopt;
-    auto nibble = [](int v) -> unsigned { return static_cast<unsigned>((v << 4) | v); };
-    if (value.size() == 4 || value.size() == 5) {
-        const int r = hex_digit(value[1]);
-        const int g = hex_digit(value[2]);
-        const int b = hex_digit(value[3]);
-        const int a = value.size() == 5 ? hex_digit(value[4]) : 15;
-        if (r < 0 || g < 0 || b < 0 || a < 0)
-            return std::nullopt;
-        return std::array<unsigned, 4>{nibble(r), nibble(g), nibble(b), nibble(a)};
-    }
-    if (value.size() == 7 || value.size() == 9) {
-        auto pair = [&](std::size_t offset) -> std::optional<unsigned> {
-            const int hi = hex_digit(value[offset]);
-            const int lo = hex_digit(value[offset + 1]);
-            if (hi < 0 || lo < 0)
-                return std::nullopt;
-            return static_cast<unsigned>((hi << 4) | lo);
-        };
-        auto r = pair(1);
-        auto g = pair(3);
-        auto b = pair(5);
-        auto a = value.size() == 9 ? pair(7) : std::optional<unsigned>(255);
-        if (!r || !g || !b || !a)
-            return std::nullopt;
-        return std::array<unsigned, 4>{*r, *g, *b, *a};
-    }
-    return std::nullopt;
-}
-
 std::string color_literal_expr(std::string_view value) {
-    if (auto color = parse_hex_color(value)) {
+    if (auto color = parse_hex_color_rgba(value)) {
         std::ostringstream out;
         out << "pulp::view::Color::rgba8("
             << (*color)[0] << ", " << (*color)[1] << ", "
@@ -221,13 +175,6 @@ std::optional<float> parse_float(std::string_view value) {
     return out;
 }
 
-std::optional<std::string> attr(const IRNode& node, std::string_view key) {
-    auto it = node.attributes.find(std::string(key));
-    if (it == node.attributes.end())
-        return std::nullopt;
-    return it->second;
-}
-
 std::optional<float> attr_float(const IRNode& node, std::string_view key) {
     auto value = attr(node, key);
     if (!value)
@@ -235,47 +182,12 @@ std::optional<float> attr_float(const IRNode& node, std::string_view key) {
     return parse_float(*value);
 }
 
-bool attr_bool(const IRNode& node, std::string_view key) {
-    auto value = attr(node, key);
-    if (!value)
-        return false;
-    std::string lower;
-    lower.reserve(value->size());
-    for (unsigned char c : *value)
-        lower += static_cast<char>(std::tolower(c));
-    return lower == "true" || lower == "1" || lower == "yes" || lower == "on";
-}
-
-std::optional<std::string> first_asset_id(const IRNode& node) {
-    for (std::string_view key : {"srcAssetId", "backgroundImageAssetId", "hrefAssetId", "asset_ref"}) {
-        auto value = attr(node, key);
-        if (value && !value->empty())
-            return value;
-    }
-    std::vector<std::pair<std::string, std::string>> candidates;
-    for (const auto& [key, value] : node.attributes) {
-        if (key.size() >= 7 && key.rfind("AssetId") == key.size() - 7 && !value.empty())
-            candidates.emplace_back(key, value);
-    }
-    std::sort(candidates.begin(), candidates.end());
-    if (!candidates.empty())
-        return candidates.front().second;
-    return std::nullopt;
-}
-
+// The loadable URI for a manifest asset id; "" when the id does not resolve.
 std::string asset_uri(const IRAssetManifest& manifest, std::string_view asset_id) {
     const auto* asset = manifest.resolve(asset_id);
     if (asset == nullptr)
         return {};
-    if (asset->local_path && !asset->local_path->empty())
-        return "file://" + *asset->local_path;
-    if (!asset->original_uri.empty() &&
-        (asset->original_uri.rfind("data:", 0) == 0 ||
-         asset->original_uri.rfind("resource:", 0) == 0 ||
-         asset->original_uri.rfind("memory:", 0) == 0)) {
-        return asset->original_uri;
-    }
-    return {};
+    return pulp::view::asset_uri(*asset);
 }
 
 std::string flex_direction_expr(LayoutDirection direction) {
@@ -448,7 +360,7 @@ TokenSymbols build_token_symbols(const DesignIR& ir, EmitContext& ctx) {
     for (const auto& [name, value] : ir.tokens.colors) {
         const auto symbol = "tokens::" + unique_symbol(ctx.used_token_names, pascal_identifier(name, "Color"));
         symbols.color_by_name.emplace(name, symbol);
-        if (parse_hex_color(value))
+        if (parse_hex_color_rgba(value))
             symbols.color_by_value.emplace(value, symbol);
     }
     for (const auto& [name, value] : ir.tokens.dimensions) {

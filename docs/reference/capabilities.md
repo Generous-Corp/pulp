@@ -177,7 +177,12 @@ All signal processors live in the `signal` module. Each is a standalone, statele
 | Windowing functions | usable | [signal](modules.md#signal) | |
 | SmoothedValue | usable | [signal](modules.md#signal) | |
 
-Key headers: all under `pulp/signal/` -- e.g., `pulp/signal/compressor.hpp`, `pulp/signal/oscillator.hpp`
+Key headers: all under `pulp/signal/` -- e.g., `pulp/signal/compressor.hpp`, `pulp/signal/osc/va.hpp`
+
+Oscillators live in `pulp/signal/osc/`: a phase accumulator, the polyBLEP/BLAMP
+kernels, and the virtual-analog shapes built from them, with hard sync and
+through-zero FM. The older `pulp/signal/oscillator.hpp` is superseded and kept
+for existing callers.
 
 ---
 

@@ -1577,12 +1577,12 @@ in `design_import.cpp` beside the sibling importer passes `enrich_*` /
   and the erase predicate removes `__knob_pointer` nodes too. Test:
   `[knob][sprite]` "recognizes a stroke-demoted pointer frame".
 - **Import-time disc clean** (`clean_baked_knob_indicator` →
-  `clear_baked_knob_antenna`, `design_import.cpp`), NOT a render-time cover. Many
+  `clear_baked_knob_antenna`, `design_import_png.cpp`), NOT a render-time cover. Many
   captured discs (ELYSIUM's included) BAKE an indicator into the disc PNG — here
   it's a thin vertical ANTENNA standing straight up ABOVE the disc at 12 o'clock.
   Since we draw our own rotating pointer, the baked one is a stuck second line. So
   when a knob carries `knob_ind_*`, `enrich_imported_image_asset_metadata` decodes
-  the disc PNG and removes the antenna, re-encodes via a minimal in-file PNG
+  the disc PNG and removes the antenna, re-encodes via a minimal PNG
   encoder (`encode_rgba_png_for_import`, filter-0 scanlines + runtime
   `zlib_compress` + IHDR/IDAT/IEND with hand-rolled CRC32), writes
   `$TMPDIR/pulp-import-assets/knobclean_<hash>.png`, and repoints `asset_path`.
@@ -1717,7 +1717,7 @@ color.** ELYSIUM's shapes are uniquely colored (DEPTH purple, POSITION magenta,
 OFFSET green, SHIMMER amber). A single `set_fill_color` made all of them fill the
 same purple — visually wrong. So the importer SAMPLES each shape's own vertical
 gradient from its art and stamps `shape_fill_gradient` (`sample_shape_fill_gradient`
-in `design_import.cpp`: average the opaque pixels in N bands bottom→top, emit
+in `design_import_png.cpp`: average the opaque pixels in N bands bottom→top, emit
 `#rrggbb` stops). `ImageView::set_fill_gradient(stops)` then paints that gradient
 revealed to `fill_value` instead of the flat color, so the shape fills with its
 real colors — "mapped to the original", only adjustable. **This is independent of
@@ -3547,3 +3547,41 @@ the same IR. A Catch2 case now asserts the policy for every `NativeWidgetKind`, 
 drift fails a test instead of shipping. When you add a widget kind or change a lowering
 DECISION (as opposed to per-target emission syntax), it belongs in native_common — only the
 target-specific string emission stays per-lane.
+
+## Shared IR helpers — editing one is a cross-lane decision
+
+Under native_common sits a second, narrower shared home: `design_ir_helpers.hpp` holds the
+one definition of **how a lane reads the IR** (`attr`, `attr_bool`, `first_asset_id`,
+`asset_uri`) plus the pure parsers those reads need (`parse_hex_color_rgba`, `hex_digit`,
+`lower_copy`). Three lanes include it — the native materializer
+(`design_import_native_common.cpp`), the baked-C++ emitter (`design_cpp_codegen.cpp`), and
+the Swift emitter (`design_swift_codegen.cpp`). Each used to carry its own copy, so the same
+IR value could lower differently per target by accident rather than by decision.
+
+The consequence to internalize: **"fix `first_asset_id` for my lane" is no longer a local
+edit.** One change to that header moves what the runtime importer, a baked plugin, and a
+Swift export all resolve. That is the point of the header — but it means a genuinely
+lane-specific need is met by **adapting at the call site, not by forking the helper**.
+`parse_hex_color` in `design_import_native_common.cpp` is the pattern to copy: the shared
+parser returns the raw 0..255 quad, the native lane wraps it into a `Color`, and
+`design_cpp_codegen.cpp` turns the same quad into a `Color::rgba8(…)` source literal. The
+parse decision is shared; the representation is not. Per-target string escaping, indenting,
+and number formatting stay in their emitters for the same reason — a helper only belongs in
+the shared header when its contract is identical for every lane.
+
+Two things to watch:
+- **The JS lane is NOT a consumer.** `design_codegen.cpp` (`generate_pulp_js` — web-compat
+  and bridge-native JS) still reads `node.attributes` directly, so a helper fix does not
+  reach it. Same separate-lanes hazard as background gradients above.
+- **`parse_hex_color` still exists as a per-lane name.** In native_common it is now a thin
+  wrapper over the shared `parse_hex_color_rgba`. Grepping the old name finds the wrapper,
+  not the rules — those live in `design_ir_helpers.hpp`.
+
+Tests: `[design-ir-helpers]` in `pulp-test-design-import-native-common` pins the contracts a
+lane would otherwise re-guess — asset-key priority then a sorted fallback scan, both bool
+polarities plus the fallback for unrecognized spellings, local-file-over-remote asset URIs,
+and every accepted hex shape. Change a rule there and the failure lands in the lane-neutral
+place, rather than surfacing later as one target's fidelity drift.
+
+`design_ir_helpers.hpp` is private to `core/view/src/` and is not part of the installed SDK
+surface — do not reference it from a public header.

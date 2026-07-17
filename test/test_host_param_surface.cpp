@@ -17,11 +17,15 @@
 #include <unordered_map>
 #include <vector>
 
+#include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_param_surface.hpp>
+#include <pulp/view/plugin_view_host.hpp>
+
+#include "harness/rt_allocation_probe.hpp"
 
 using namespace pulp;
 using pulp::view::DesignFrameElement;
@@ -38,10 +42,19 @@ namespace {
 class FakeHostParamSurface : public HostParamSurface {
 public:
     std::unordered_map<std::string, double> values;
+    // Value cardinality per key. A key absent here reports 0 — the surface's
+    // "continuous / no index domain" signal — which is also the base class's
+    // default, so an existing test that never populates this is unaffected.
+    std::unordered_map<std::string, int> steps;
     std::vector<std::string> gesture_log;   // "begin:key" / "end:key"
     int set_calls = 0;
 
 protected:
+    int do_param_step_count(std::string_view key) override {
+        auto it = steps.find(std::string(key));
+        return it == steps.end() ? 0 : it->second;
+    }
+
     bool do_has_param(std::string_view key) override {
         return values.count(std::string(key)) > 0;
     }
@@ -810,8 +823,10 @@ TEST_CASE("element_option_count exposes a choice control's denominator",
     CHECK(dfv.element_option_count(99) == 0);
     CHECK_FALSE(dfv.element_is_discrete(-1));
 
-    // And the count really IS the denominator the element normalizes against:
-    // option i of 3 maps to i/2, not i/(some guess).
+    // With NO host surface installed, the count really is the denominator the
+    // element normalizes against: option i of 3 maps to i/2. This is the
+    // documented no-surface fallback, not the divisor in general — install a
+    // surface that reports a cardinality and the parameter's count wins instead.
     dfv.set_element_value(1, 1.0f);
     CHECK(dfv.element_value(1) == Catch::Approx(1.0f));
     dfv.set_element_value(1, 0.5f);
@@ -853,4 +868,1093 @@ TEST_CASE("routing on TOP of a writing binder double-writes — the documented h
     // user movement — which is exactly why you must not wire both.
     CHECK(params.set_calls == 1);      // the surface wrote once...
     CHECK(binder_writes == 1);         // ...and the binder wrote once MORE
+}
+
+// ── Host-authoritative choice scaling, typed commits, and the bind grid ──────
+
+namespace {
+
+// A 3-position tab group bound to `key`, on a 200x100 panel. The motivating
+// shape: a control that draws three positions for a parameter that may well
+// expose more values than that.
+DesignFrameView make_three_option_tabs(const std::string& key, int selected) {
+    const std::string svg =
+        R"(<svg width="200" height="100"><rect x="0" y="0" width="200" height="100"/></svg>)";
+    DesignFrameElement tabs;
+    tabs.kind = DesignFrameElement::Kind::tab_group;
+    tabs.x = 10; tabs.y = 10; tabs.w = 90; tabs.h = 20;
+    tabs.options = {"Sine", "Triangle", "Saw"};
+    tabs.selected_index = selected;
+    tabs.param_key = key;
+    return DesignFrameView(svg, {tabs}, 0, 0, 200, 100);
+}
+
+} // namespace
+
+TEST_CASE("a choice control scales against the HOST's value count, not its own options",
+          "[view][host-param][design-import][frame]") {
+    // The defect this fixes: a control drawn with 3 positions, bound to a 6-value
+    // parameter, normalizing against the 3 things it drew. Index 2 of 3 then
+    // emits 2/2 == 1.0 and slams the host to its LAST value (index 5), instead of
+    // 2/5 == 0.4 (index 2). The parameter owns its range; the view does not
+    // shrink it by drawing fewer positions.
+    DesignFrameView dfv = make_three_option_tabs("lfo_waveform", 2);
+    dfv.set_bounds({0, 0, 200, 100});
+
+    FakeHostParamSurface params;
+    params.values["lfo_waveform"] = 0.0;
+    params.steps["lfo_waveform"] = 6;          // SIX values; the UI draws three
+    dfv.set_host_params(&params);
+
+    // 2/5, not 2/2. This is the whole point.
+    CHECK(dfv.element_value(0) == Catch::Approx(2.0f / 5.0f));
+    CHECK(dfv.element_value(0) != Catch::Approx(1.0f));
+
+    // Every index against the host's divisor, not the option list's.
+    dfv.set_element_value(0, 0.0f);
+    CHECK(dfv.element_value(0) == Catch::Approx(0.0f));       // index 0 -> 0/5
+    dfv.set_element_value(0, 1.0f / 5.0f);
+    CHECK(dfv.element_value(0) == Catch::Approx(1.0f / 5.0f)); // index 1 -> 1/5
+}
+
+TEST_CASE("with no host surface a choice control falls back to its own option count",
+          "[view][host-param][design-import][frame]") {
+    // The documented fallback: preview / screenshot / any path with no host to
+    // ask. The control's own positions are then the only domain in existence, so
+    // 3 options span 0, 0.5, 1.0. This is NOT the bug above — there is no
+    // parameter here whose range could be misrepresented.
+    DesignFrameView dfv = make_three_option_tabs("lfo_waveform", 2);
+    dfv.set_bounds({0, 0, 200, 100});
+
+    CHECK(dfv.element_value(0) == Catch::Approx(1.0f));        // index 2 of 3 -> 2/2
+    CHECK(dfv.param_scale_mismatches().empty());               // nothing to disagree with
+}
+
+TEST_CASE("a key a LIVE host does not carry is reported, never quietly absorbed",
+          "[view][host-param][design-import][frame]") {
+    // The porting defect in its most likely disguise: one typo. A ported control
+    // table names "lfo_wavefrom"; the host carries "lfo_waveform" with 6 values.
+    //
+    // A live host is NOT the hostless preview case, and folding the two together
+    // is what made the reported bug survive its own fix: with a host installed,
+    // an unresolved key means the element is bound to NOTHING — it never syncs,
+    // its edits never route, and it scales by the 3 positions it draws. Index 2
+    // then emits 2/2 == 1.0, the exact value the fix exists to prevent.
+    //
+    // The options remain the only domain available, so 1.0 is still what comes
+    // out — the contract is that it is never SILENT.
+    FakeHostParamSurface params;
+    params.values["lfo_waveform"] = 0.0;   // the host's real key...
+    params.steps["lfo_waveform"] = 6;
+    DesignFrameView dfv = make_three_option_tabs("lfo_wavefrom", 2);  // ...and the typo
+    dfv.set_bounds({0, 0, 200, 100});
+    dfv.set_host_params(&params);
+
+    CHECK(dfv.element_value(0) == Catch::Approx(1.0f));  // the guess, unavoidable...
+
+    REQUIRE(dfv.param_scale_mismatches().size() == 1);   // ...but reported
+    const auto& m = dfv.param_scale_mismatches()[0];
+    CHECK(m.param_key == "lfo_wavefrom");
+    CHECK(m.ui_option_count == 3);
+    CHECK(m.host_step_count == 0);
+    // The field that names the diagnosis. false = "this host has never heard of
+    // the key" (check the spelling), which is a different repair from a surface
+    // that answered 0 because it cannot answer at all.
+    CHECK_FALSE(m.host_has_param);
+}
+
+TEST_CASE("an unresolved key on a live host reports distinctly from an unanswered one",
+          "[view][host-param][design-import][frame]") {
+    // Both report ui=3 / host=0 and both scale by the option list, so the counts
+    // alone cannot tell a consumer which repair to make. host_has_param is the
+    // whole difference: fix the key, or wire do_param_step_count.
+    FakeHostParamSurface params;
+    params.values["known_but_silent"] = 0.0;   // resolves; steps deliberately unset
+
+    DesignFrameView answered = make_three_option_tabs("known_but_silent", 2);
+    answered.set_bounds({0, 0, 200, 100});
+    answered.set_host_params(&params);
+    (void)answered.element_value(0);
+    REQUIRE(answered.param_scale_mismatches().size() == 1);
+    CHECK(answered.param_scale_mismatches()[0].host_has_param);      // key is real
+
+    DesignFrameView unresolved = make_three_option_tabs("no_such_key", 2);
+    unresolved.set_bounds({0, 0, 200, 100});
+    unresolved.set_host_params(&params);
+    (void)unresolved.element_value(0);
+    REQUIRE(unresolved.param_scale_mismatches().size() == 1);
+    CHECK_FALSE(unresolved.param_scale_mismatches()[0].host_has_param);  // key is not
+}
+
+TEST_CASE("a discrete control told '0' by its surface guesses, and says so",
+          "[view][host-param][design-import][frame]") {
+    // A resolved key whose surface reports 0 is NOT evidence of a continuous
+    // parameter. do_param_step_count is non-pure and defaults to 0, so a surface
+    // whose parameter system has not wired the accessor answers 0 for EVERY key,
+    // discrete ones included. A discrete element scaling by its own option count
+    // on that answer is the original bug wearing a fix's clothes — it looks
+    // right and is silently wrong.
+    //
+    // The options remain the only domain available, so they are still used; the
+    // point is that the guess is REPORTED rather than absorbed.
+    DesignFrameView dfv = make_three_option_tabs("lfo_waveform", 2);
+    dfv.set_bounds({0, 0, 200, 100});
+
+    FakeHostParamSurface params;
+    params.values["lfo_waveform"] = 0.0;
+    // Note what is NOT set: params.steps has no entry, so the surface reports 0 —
+    // exactly what a surface that never overrode do_param_step_count does.
+    dfv.set_host_params(&params);
+
+    std::vector<pulp::view::ParamScaleMismatch> seen;
+    dfv.set_on_param_scale_mismatch(
+        [&](const pulp::view::ParamScaleMismatch& m) { seen.push_back(m); });
+
+    CHECK(dfv.element_value(0) == Catch::Approx(1.0f));   // guessed by the 3 drawn
+    REQUIRE(seen.size() == 1);                            // ...and not silently
+    CHECK(seen[0].param_key == "lfo_waveform");
+    CHECK(seen[0].ui_option_count == 3);
+    CHECK(seen[0].host_step_count == 0);                  // "I cannot answer"
+
+    // A CONTINUOUS element told 0 has no index domain either way — nothing was
+    // guessed, so there is nothing to report and the channel stays quiet.
+    DesignFrameView knob_view = make_single_knob("gain");
+    knob_view.set_bounds({0, 0, 100, 100});
+    params.values["gain"] = 0.5;
+    knob_view.set_host_params(&params);
+    CHECK(knob_view.element_value(0) == Catch::Approx(0.0f));
+    CHECK(knob_view.param_scale_mismatches().empty());
+}
+
+TEST_CASE("a UI option count that disagrees with the host's value count is reported",
+          "[view][host-param][design-import][frame]") {
+    DesignFrameView dfv = make_three_option_tabs("lfo_waveform", 0);
+    dfv.set_bounds({0, 0, 200, 100});
+
+    FakeHostParamSurface params;
+    params.values["lfo_waveform"] = 0.0;
+    params.steps["lfo_waveform"] = 6;
+    dfv.set_host_params(&params);
+
+    std::vector<pulp::view::ParamScaleMismatch> seen;
+    dfv.set_on_param_scale_mismatch(
+        [&](const pulp::view::ParamScaleMismatch& m) { seen.push_back(m); });
+
+    (void)dfv.element_value(0);            // any normalize touches the resolution
+    REQUIRE(seen.size() == 1);
+    CHECK(seen[0].param_key == "lfo_waveform");
+    CHECK(seen[0].ui_option_count == 3);   // what the design drew
+    CHECK(seen[0].host_step_count == 6);   // what the parameter really has
+
+    // De-duplicated by key: a repaint-rate normalize does not spam the channel.
+    (void)dfv.element_value(0);
+    (void)dfv.element_value(0);
+    CHECK(seen.size() == 1);
+    CHECK(dfv.param_scale_mismatches().size() == 1);
+}
+
+TEST_CASE("a matching UI option count reports no mismatch",
+          "[view][host-param][design-import][frame]") {
+    // The signal must be quiet when the binding is right, or it is noise.
+    DesignFrameView dfv = make_three_option_tabs("lfo_waveform", 1);
+    dfv.set_bounds({0, 0, 200, 100});
+
+    FakeHostParamSurface params;
+    params.values["lfo_waveform"] = 0.0;
+    params.steps["lfo_waveform"] = 3;      // three values, three drawn positions
+    dfv.set_host_params(&params);
+
+    int reports = 0;
+    dfv.set_on_param_scale_mismatch([&](const pulp::view::ParamScaleMismatch&) { ++reports; });
+
+    CHECK(dfv.element_value(0) == Catch::Approx(0.5f));   // index 1 of 3 -> 1/2
+    CHECK(reports == 0);
+    CHECK(dfv.param_scale_mismatches().empty());
+}
+
+TEST_CASE("a mismatch callback attached late replays what was already seen",
+          "[view][host-param][design-import][frame]") {
+    DesignFrameView dfv = make_three_option_tabs("lfo_waveform", 0);
+    dfv.set_bounds({0, 0, 200, 100});
+
+    FakeHostParamSurface params;
+    params.values["lfo_waveform"] = 0.0;
+    params.steps["lfo_waveform"] = 6;
+    dfv.set_host_params(&params);
+
+    (void)dfv.element_value(0);            // mismatch observed with no callback set
+    REQUIRE(dfv.param_scale_mismatches().size() == 1);
+
+    std::vector<pulp::view::ParamScaleMismatch> seen;
+    dfv.set_on_param_scale_mismatch(
+        [&](const pulp::view::ParamScaleMismatch& m) { seen.push_back(m); });
+    REQUIRE(seen.size() == 1);             // replayed, not lost
+    CHECK(seen[0].host_step_count == 6);
+}
+
+TEST_CASE("commit_discrete derives the divisor from the host, not from the caller",
+          "[view][host-param][design-import][frame]") {
+    DesignFrameView dfv = make_three_option_tabs("lfo_waveform", 0);
+    dfv.set_bounds({0, 0, 200, 100});
+
+    FakeHostParamSurface params;
+    params.values["lfo_waveform"] = 0.0;
+    params.steps["lfo_waveform"] = 6;
+    dfv.set_host_params(&params);
+    dfv.route_changes_to_host_params(true);
+
+    dfv.commit_discrete("lfo_waveform", 2);
+    CHECK(params.values["lfo_waveform"] == Catch::Approx(2.0 / 5.0));
+
+    dfv.commit_discrete("lfo_waveform", 5);           // the top host value...
+    CHECK(params.values["lfo_waveform"] == Catch::Approx(1.0));
+
+    // ...and an index past the host's domain clamps into it rather than
+    // emitting past 1.0.
+    dfv.commit_discrete("lfo_waveform", 99);
+    CHECK(params.values["lfo_waveform"] == Catch::Approx(1.0));
+    dfv.commit_discrete("lfo_waveform", -3);
+    CHECK(params.values["lfo_waveform"] == Catch::Approx(0.0));
+}
+
+TEST_CASE("commit_discrete against a parameter with no index domain refuses to guess",
+          "[view][host-param][design-import][frame]") {
+    // A continuous parameter behind a bind-grid stand-in: no options drawn and no
+    // host cardinality, so there is no divisor. Emitting anything would be a
+    // guess, so the commit is refused AND reported.
+    DesignFrameView dfv = make_three_option_tabs("lfo_waveform", 0);
+    dfv.set_bounds({0, 0, 200, 100});
+
+    FakeHostParamSurface params;
+    params.values["cutoff"] = 0.25;
+    params.steps["cutoff"] = 0;                 // continuous
+    dfv.set_host_params(&params);
+    dfv.route_changes_to_host_params(true);
+    dfv.build_bind_grid({"cutoff"});
+
+    std::vector<pulp::view::ParamScaleMismatch> seen;
+    dfv.set_on_param_scale_mismatch(
+        [&](const pulp::view::ParamScaleMismatch& m) { seen.push_back(m); });
+
+    const int before = params.set_calls;
+    dfv.commit_discrete("cutoff", 1);
+    CHECK(params.set_calls == before);          // nothing guessed at the host
+    CHECK(params.values["cutoff"] == Catch::Approx(0.25));
+    REQUIRE(seen.size() == 1);                  // and it was not silent
+    CHECK(seen[0].param_key == "cutoff");
+}
+
+TEST_CASE("commit_value clamps and brackets exactly one gesture",
+          "[view][host-param][design-import][frame]") {
+    DesignFrameView dfv = make_single_knob("gain");
+    dfv.set_bounds({0, 0, 100, 100});
+
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.0;
+    dfv.set_host_params(&params);
+    dfv.route_changes_to_host_params(true);
+
+    std::vector<std::string> order;
+    dfv.on_gesture_begin   = [&](int i) { CHECK(i == 0); order.push_back("begin"); };
+    dfv.on_element_changed = [&](int i, float) { CHECK(i == 0); order.push_back("change"); };
+    dfv.on_gesture_end     = [&](int i) { CHECK(i == 0); order.push_back("end"); };
+
+    dfv.commit_value("gain", 0.75f);
+    CHECK(params.values["gain"] == Catch::Approx(0.75));
+    CHECK(dfv.element_value(0) == Catch::Approx(0.75f));
+    // One edit == one undo step: begin -> change -> end, in that order, once.
+    CHECK(order == std::vector<std::string>{"begin", "change", "end"});
+    CHECK(params.gesture_log == std::vector<std::string>{"begin:gain", "end:gain"});
+
+    // Out-of-range input is clamped, not emitted raw.
+    dfv.commit_value("gain", 4.2f);
+    CHECK(params.values["gain"] == Catch::Approx(1.0));
+    dfv.commit_value("gain", -4.2f);
+    CHECK(params.values["gain"] == Catch::Approx(0.0));
+}
+
+TEST_CASE("commit_bipolar round-trips -1..1 through normalized 0..1",
+          "[view][host-param][design-import][frame]") {
+    DesignFrameView dfv = make_single_knob("pan");
+    dfv.set_bounds({0, 0, 100, 100});
+
+    FakeHostParamSurface params;
+    params.values["pan"] = 0.0;
+    dfv.set_host_params(&params);
+    dfv.route_changes_to_host_params(true);
+
+    struct Case { float depth; double norm; };
+    const Case cases[] = {
+        {-1.0f, 0.0},    // hard left
+        {-0.5f, 0.25},
+        { 0.0f, 0.5},    // center — the value a bipolar control rests at
+        { 0.5f, 0.75},
+        { 1.0f, 1.0},    // hard right
+    };
+    for (const Case& c : cases) {
+        dfv.commit_bipolar("pan", c.depth);
+        CHECK(params.values["pan"] == Catch::Approx(c.norm));
+        // ...and back: normalized * 2 - 1 recovers the depth.
+        CHECK(params.values["pan"] * 2.0 - 1.0 == Catch::Approx(c.depth));
+    }
+
+    // Beyond the bipolar range is clamped, never wrapped past normalized 0..1.
+    dfv.commit_bipolar("pan", 9.0f);
+    CHECK(params.values["pan"] == Catch::Approx(1.0));
+    dfv.commit_bipolar("pan", -9.0f);
+    CHECK(params.values["pan"] == Catch::Approx(0.0));
+}
+
+TEST_CASE("committing to a key no element carries is reported, never silent",
+          "[view][host-param][design-import][frame]") {
+    DesignFrameView dfv = make_single_knob("gain");
+    dfv.set_bounds({0, 0, 100, 100});
+
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.0;
+    params.values["lfo_waveform"] = 0.0;
+    params.steps["lfo_waveform"] = 6;
+    dfv.set_host_params(&params);
+    dfv.route_changes_to_host_params(true);
+
+    std::vector<pulp::view::ParamScaleMismatch> seen;
+    dfv.set_on_param_scale_mismatch(
+        [&](const pulp::view::ParamScaleMismatch& m) { seen.push_back(m); });
+
+    int changes = 0;
+    dfv.on_element_changed = [&](int, float) { ++changes; };
+
+    // No control and no bind grid for this key: the view was never told about it.
+    dfv.commit_value("lfo_waveform", 0.4f);
+    CHECK(changes == 0);                       // no bogus index handed to a consumer
+    CHECK(params.values["lfo_waveform"] == Catch::Approx(0.0));
+    REQUIRE(seen.size() == 1);
+    CHECK(seen[0].param_key == "lfo_waveform");
+    CHECK(seen[0].ui_option_count == 0);       // 0 vs N reads as "unbound key"
+    CHECK(seen[0].host_step_count == 6);       // the host's real count, not a placeholder
+
+    // Building the grid gives the key an element, and the same commit lands.
+    dfv.build_bind_grid({"lfo_waveform"});
+    dfv.commit_value("lfo_waveform", 0.4f);
+    CHECK(params.values["lfo_waveform"] == Catch::Approx(0.4));
+}
+
+TEST_CASE("bind-grid stand-ins are invisible, off-screen, and take no hits",
+          "[view][host-param][design-import][frame]") {
+    DesignFrameView dfv = make_single_knob("gain");
+    dfv.set_bounds({0, 0, 100, 100});
+
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.0;
+    for (int i = 0; i < 32; ++i) params.values["p" + std::to_string(i)] = 0.0;
+    dfv.set_host_params(&params);
+
+    std::vector<std::string> keys;
+    for (int i = 0; i < 32; ++i) keys.push_back("p" + std::to_string(i));
+    dfv.build_bind_grid(keys);
+
+    REQUIRE(dfv.element_count() == 33);        // the design's knob + 32 stand-ins
+    CHECK_FALSE(dfv.element_is_bind_grid_stand_in(0));   // the real knob
+
+    for (int i = 1; i < dfv.element_count(); ++i) {
+        REQUIRE(dfv.element_is_bind_grid_stand_in(i));
+        CHECK_FALSE(dfv.element_enabled(i));             // not hit-testable
+        const auto r = dfv.element_rect(i);
+        CHECK(r.width == 0.0f);                          // no on-screen geometry
+        CHECK(r.height == 0.0f);
+        CHECK(r.x < -1000.0f);                           // parked far off-panel
+        CHECK(r.y < -1000.0f);
+    }
+
+    // Sweep the whole panel: no point anywhere hits a stand-in. Only the design's
+    // own knob (index 0) is ever hovered.
+    for (float y = 0; y <= 100; y += 5) {
+        for (float x = 0; x <= 100; x += 5) {
+            dfv.simulate_hover({x, y});
+            const int hit = dfv.element_hovered();
+            REQUIRE_FALSE(dfv.element_is_bind_grid_stand_in(hit));
+        }
+    }
+
+    // A stand-in still binds both directions — that is what it is for.
+    params.values["p7"] = 0.6;
+    dfv.sync_from_host_params();
+    const int i7 = dfv.element_for_param_key("p7");
+    REQUIRE(i7 >= 0);
+    CHECK(dfv.element_value(i7) == Catch::Approx(0.6f));   // host -> UI
+
+    dfv.route_changes_to_host_params(true);
+    dfv.commit_value("p7", 0.2f);
+    CHECK(params.values["p7"] == Catch::Approx(0.2));      // UI -> host
+}
+
+TEST_CASE("a design's own control wins over a bind-grid stand-in",
+          "[view][host-param][design-import][frame]") {
+    DesignFrameView dfv = make_single_knob("gain");
+    dfv.set_bounds({0, 0, 100, 100});
+
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.0;
+    params.values["mix"] = 0.0;
+    dfv.set_host_params(&params);
+
+    // "gain" already has a real control; only "mix" needs a stand-in.
+    dfv.build_bind_grid({"gain", "mix"});
+    CHECK(dfv.element_count() == 2);
+    CHECK(dfv.element_for_param_key("gain") == 0);          // the design's knob
+    CHECK_FALSE(dfv.element_is_bind_grid_stand_in(0));
+    CHECK(dfv.element_is_bind_grid_stand_in(1));            // the "mix" stand-in
+
+    // bind_grid_keys() reports what was asked for, including the skipped key.
+    CHECK(dfv.bind_grid_keys() == std::vector<std::string>{"gain", "mix"});
+
+    // Repeated calls REPLACE the grid rather than accumulating stand-ins.
+    dfv.build_bind_grid({"gain", "mix"});
+    CHECK(dfv.element_count() == 2);
+    dfv.build_bind_grid({});
+    CHECK(dfv.element_count() == 1);                        // grid gone, knob intact
+    CHECK(dfv.element_for_param_key("gain") == 0);
+}
+
+TEST_CASE("the bind grid survives a frame swap and re-fits the incoming frame",
+          "[view][host-param][design-import][frame]") {
+    // Frame A draws a real "mix" control; frame B does not. The same key must be
+    // bound on BOTH — via the control on A, via a stand-in on B — or a swap
+    // silently drops the binding.
+    const std::string svg =
+        R"(<svg width="100" height="100"><rect x="0" y="0" width="100" height="100"/></svg>)";
+    DesignFrameElement mix;
+    mix.kind = DesignFrameElement::Kind::knob;
+    mix.x = 10; mix.y = 10; mix.w = 20; mix.h = 20;
+    mix.cx = 20; mix.cy = 20; mix.hit_radius = 20.0f;
+    mix.param_key = "mix";
+
+    DesignFrameView dfv(svg, {mix}, 0, 0, 100, 100);   // frame A
+    dfv.set_bounds({0, 0, 100, 100});
+
+    DesignFrameElement other;                          // frame B: a DIFFERENT param
+    other.kind = DesignFrameElement::Kind::knob;
+    other.x = 10; other.y = 10; other.w = 20; other.h = 20;
+    other.cx = 20; other.cy = 20; other.hit_radius = 20.0f;
+    other.param_key = "tone";
+    const int frame_b = dfv.add_frame(svg, {other}, 0, 0, 100, 100);
+
+    FakeHostParamSurface params;
+    params.values["mix"] = 0.0;
+    params.values["tone"] = 0.0;
+    dfv.set_host_params(&params);
+    dfv.route_changes_to_host_params(true);
+    dfv.build_bind_grid({"mix", "tone"});
+
+    // Frame A: "mix" is the design's own control, "tone" is a stand-in.
+    REQUIRE(dfv.element_count() == 2);
+    CHECK_FALSE(dfv.element_is_bind_grid_stand_in(dfv.element_for_param_key("mix")));
+    CHECK(dfv.element_is_bind_grid_stand_in(dfv.element_for_param_key("tone")));
+
+    dfv.set_active_frame(frame_b);
+
+    // Frame B: the roles swap, and the design's own controls were NOT eaten by
+    // the grid's rebuild.
+    REQUIRE(dfv.element_count() == 2);
+    const int tone_i = dfv.element_for_param_key("tone");
+    const int mix_i  = dfv.element_for_param_key("mix");
+    REQUIRE(tone_i >= 0);
+    REQUIRE(mix_i >= 0);
+    CHECK_FALSE(dfv.element_is_bind_grid_stand_in(tone_i));   // now a real control
+    CHECK(dfv.element_is_bind_grid_stand_in(mix_i));          // now a stand-in
+
+    // Both keys still commit on frame B.
+    dfv.commit_value("mix", 0.3f);
+    dfv.commit_value("tone", 0.8f);
+    CHECK(params.values["mix"] == Catch::Approx(0.3));
+    CHECK(params.values["tone"] == Catch::Approx(0.8));
+}
+
+
+TEST_CASE("a real store scales a real view's choice control by the parameter",
+          "[view][host-param][state][design-import][frame]") {
+    // The PRODUCTION seam, joined end to end: a real StateStore, the real
+    // StateStoreHostParamSurface that core/format/src/view_bridge.cpp constructs
+    // and hands to set_host_params, and a real DesignFrameView. Every other test
+    // here proves one half — a view against a hand-populated fake, or the surface
+    // standalone against a store — and the halves passing does not prove the
+    // seam between them carries the count.
+    //
+    // This is the reported bug verbatim: a 3-position control on a 6-value
+    // parameter must emit idx/5, never idx/2, with no per-control override.
+    state::StateStore store;
+    state::ParamInfo waveform;
+    waveform.id = 1;
+    waveform.name = "lfo_waveform";
+    waveform.kind = state::ParamKind::Enum;
+    waveform.range = state::ParamRange::linear(0.0f, 5.0f, 0.0f, 1.0f);
+    waveform.value_labels = {"Sine", "Triangle", "Saw", "Ramp", "Square", "Random"};
+    store.add_parameter(waveform);
+
+    // The resolver view_bridge uses: a design param_key names a registered param.
+    StateStoreHostParamSurface surface(store);
+
+    // The store's count reaches the view's divisor with nothing in between:
+    // every drawn position is idx/5, never idx/2. A fresh view per index so each
+    // selection is the one the design authored, not a round-trip artifact.
+    const double expected[] = {0.0, 0.2, 0.4};
+    for (int idx = 0; idx < 3; ++idx) {
+        DesignFrameView dfv = make_three_option_tabs("lfo_waveform", idx);
+        dfv.set_bounds({0, 0, 200, 100});
+        dfv.set_host_params(&surface);
+        CHECK(dfv.element_value(0) == Catch::Approx(expected[idx]));
+    }
+
+    // The value the option list would have produced, proven distinct: index 2 of
+    // 3 drawn options is 2/2 == 1.0, which selects the parameter's SIXTH value
+    // instead of its third. 0.4 != 1.0 is the entire customer report.
+    DesignFrameView dfv = make_three_option_tabs("lfo_waveform", 2);
+    dfv.set_bounds({0, 0, 200, 100});
+    dfv.set_host_params(&surface);
+    CHECK(dfv.element_value(0) != Catch::Approx(1.0f));
+
+    // And the 3-of-6 binding is reported, since the design draws half the range.
+    REQUIRE(dfv.param_scale_mismatches().size() == 1);
+    const auto& m = dfv.param_scale_mismatches()[0];
+    CHECK(m.param_key == "lfo_waveform");
+    CHECK(m.ui_option_count == 3);
+    CHECK(m.host_step_count == 6);     // straight from the store's value_labels
+    CHECK(m.host_has_param);
+
+    // ...and the value the view emits lands on the parameter the author
+    // declared: index 2 of 6, not index 5. The customer's report, closed.
+    dfv.route_changes_to_host_params(true);
+    dfv.commit_discrete("lfo_waveform", 2);
+    CHECK(surface.get_param("lfo_waveform") == Catch::Approx(0.4));
+    CHECK(store.get_value(1) == Catch::Approx(2.0f));   // the THIRD label ("Saw")
+}
+
+TEST_CASE("a refused discrete commit reports the HOST's count, not the view's",
+          "[view][host-param][design-import][frame]") {
+    // host_step_count is documented as "values the host's parameter exposes". A
+    // refused commit must honor that even when the count it refused on came from
+    // somewhere else: a single-option control resolves count == 1 from its OWN
+    // option list (the UI fallback), and echoing that 1 into host_step_count
+    // would point the reader at the host for a number the view invented — a
+    // diagnostic misstating its own provenance, on the one path a reader consults
+    // BECAUSE something is already wrong.
+    const std::string svg =
+        R"(<svg width="200" height="100"><rect x="0" y="0" width="200" height="100"/></svg>)";
+    DesignFrameElement one;
+    one.kind = DesignFrameElement::Kind::tab_group;
+    one.x = 10; one.y = 10; one.w = 90; one.h = 20;
+    one.options = {"Only"};                 // ONE position: no index domain
+    one.param_key = "mode";
+    DesignFrameView dfv(svg, {one}, 0, 0, 200, 100);
+    dfv.set_bounds({0, 0, 200, 100});
+
+    FakeHostParamSurface params;
+    params.values["mode"] = 0.0;
+    params.steps["mode"] = 0;               // the host says "continuous"
+    dfv.set_host_params(&params);
+    dfv.route_changes_to_host_params(true);
+
+    const int before = params.set_calls;
+    dfv.commit_discrete("mode", 0);
+    CHECK(params.set_calls == before);      // refused: no divisor anywhere
+
+    REQUIRE(dfv.param_scale_mismatches().size() == 1);
+    const auto& m = dfv.param_scale_mismatches()[0];
+    CHECK(m.ui_option_count == 1);          // the view's own count, in the view's field
+    CHECK(m.host_step_count == 0);          // what the HOST actually said — never the 1
+    CHECK(m.host_has_param);                // the key is real; only the domain is absent
+}
+
+namespace {
+
+// Counts repaint() calls. The plugin-editor path is the one that matters here:
+// View::request_repaint calls plugin_view_host_->repaint() DIRECTLY, with none of
+// the mark_dirty() coalescing the window-host path has, so every request is a
+// real editor repaint.
+class CountingPluginViewHost : public pulp::view::PluginViewHost {
+public:
+    int repaints = 0;
+
+    void repaint() override { ++repaints; }
+
+    // Not exercised: this fake exists to observe repaint(), not to host a view.
+    pulp::view::NativeViewHandle native_handle() override { return nullptr; }
+    void attach_to_parent(pulp::view::NativeViewHandle) override {}
+    void detach() override {}
+    void set_size(uint32_t, uint32_t) override {}
+    Size get_size() const override { return {100, 100}; }
+};
+
+} // namespace
+
+TEST_CASE("an unchanged host push does not repaint the editor",
+          "[view][host-param][design-import][frame]") {
+    // sync_from_host_params pushes EVERY element every tick, bind-grid stand-ins
+    // included. set_element_value must therefore early-return on no change, the
+    // way set_element_text already does — otherwise a steady host (the common
+    // case: nothing is being automated) repaints the editor once per parameter
+    // per tick while nothing on screen has moved.
+    DesignFrameView dfv = make_single_knob("gain");
+    dfv.set_bounds({0, 0, 100, 100});
+
+    CountingPluginViewHost host;
+    dfv.set_plugin_view_host(&host);
+
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.5;
+    dfv.set_host_params(&params);
+
+    // Counts are measured as DELTAS around each action: attaching a host and
+    // wiring a surface legitimately repaint on their own, and this test is about
+    // what a per-tick SYNC costs, not about pinning unrelated setup.
+    int before = host.repaints;
+    dfv.sync_from_host_params();                       // first push: 0 -> 0.5
+    CHECK(dfv.element_value(0) == Catch::Approx(0.5f));
+    // Exactly ONE. A changed value is worth a repaint; it is not worth two, and
+    // this path used to ask twice — once inside the switch and once past it.
+    CHECK(host.repaints == before + 1);
+
+    // Steady state: the host keeps reporting 0.5, so nothing changes and nothing
+    // needs painting. Not ONE repaint across eight ticks — this is the assertion
+    // that fails without the equality check in set_element_value.
+    before = host.repaints;
+    for (int tick = 0; tick < 8; ++tick) dfv.sync_from_host_params();
+    CHECK(host.repaints == before);
+    CHECK(dfv.element_value(0) == Catch::Approx(0.5f));  // and the value holds
+
+    // A real change still lands — the early-return is an equality check, not a
+    // freeze.
+    before = host.repaints;
+    params.values["gain"] = 0.75;
+    dfv.sync_from_host_params();
+    CHECK(dfv.element_value(0) == Catch::Approx(0.75f));
+    CHECK(host.repaints == before + 1);
+}
+
+// ── Paint-safe host readout ──────────────────────────────────────────────────
+// element_display_text() is the read half of the host readout channel: the one
+// legal from paint(). These cover the contract it advertises — alloc-free reads,
+// verbatim (untruncated) text, honest unbound behavior, and tick-granular
+// staleness.
+
+namespace {
+
+// A DesignFrameView subclass that reads its bound parameter's formatted text
+// from paint() — the end-to-end shape a rack/chain UI needs for a per-slot
+// readout it draws itself. Holds its key as a member: element_for_param_key
+// takes a const std::string&, so passing a literal would build a temporary and
+// allocate right where paint must not.
+class ReadoutPaintView : public DesignFrameView {
+public:
+    using DesignFrameView::DesignFrameView;
+
+    std::string key = "gain";
+    std::string painted;        // what paint() saw
+    bool painted_bound = false;
+    int paints = 0;
+    std::size_t paint_allocations = 0;
+
+    void paint(canvas::Canvas& canvas) override {
+        DesignFrameView::paint(canvas);
+        // Measure only OUR read: the probe is scoped to the two calls under
+        // test, so the base class's own painting cannot mask or inflate it.
+        pulp::test::RtAllocationProbe probe;
+        const int i = element_for_param_key(key);
+        const std::string& text = element_display_text(i);
+        const bool bound = element_has_display_text(i);
+        paint_allocations = probe.allocation_count();
+        // Copy out AFTER the probe's scope — the copy is the test's, not the
+        // read path's.
+        painted = text;
+        painted_bound = bound;
+        ++paints;
+    }
+};
+
+// Paint a view through the real paint_all path, so the read happens inside the
+// genuine ScopedNoAlloc region rather than a test-simulated one. A
+// HostParamSurface call from here would trip its own call-context assert.
+void paint_once(ReadoutPaintView& v) {
+    canvas::RecordingCanvas canvas;   // headless: records draws, opens no window
+    v.set_bounds({0, 0, 200, 200});
+    v.paint_all(canvas);
+}
+
+ReadoutPaintView make_readout_view(const std::string& param_key) {
+    const std::string svg =
+        R"(<svg width="100" height="100"><rect x="0" y="0" width="100" height="100"/></svg>)";
+    DesignFrameElement knob;
+    knob.kind = DesignFrameElement::Kind::knob;
+    knob.x = 10; knob.y = 10; knob.w = 20; knob.h = 20;
+    knob.cx = 20; knob.cy = 20;
+    knob.hit_radius = 20.0f;
+    knob.param_key = param_key;
+    return ReadoutPaintView(svg, {knob}, 0, 0, 100, 100);
+}
+
+} // namespace
+
+TEST_CASE("a subclass reads a host param's formatted text from paint()",
+          "[view][host-param][paint-safe]") {
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.6;
+    dfv.set_host_params(&params);
+
+    // The tick is what reaches the host. Paint only ever reads the cache.
+    dfv.sync_from_host_params();
+    paint_once(dfv);
+
+    REQUIRE(dfv.paints == 1);
+    CHECK(dfv.painted == "disp:gain");     // the fake's formatter output
+    CHECK(dfv.painted_bound);
+}
+
+TEST_CASE("the paint-time display-text read allocates nothing",
+          "[view][host-param][paint-safe][rt-safety]") {
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;
+    // A value long enough to defeat the small-string optimization: were the read
+    // path to copy or format, THIS is the case that would heap-allocate. A short
+    // string could pass on SSO alone and prove nothing.
+    params.values["a_parameter_key_far_longer_than_any_small_string_buffer"] = 0.25;
+    dfv.key = "a_parameter_key_far_longer_than_any_small_string_buffer";
+    dfv.set_element_param_key(0, dfv.key);
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+    REQUIRE(dfv.element_display_text(0).size() > 32);   // beyond any SSO buffer
+
+    paint_once(dfv);
+
+    REQUIRE(dfv.paints == 1);
+    CHECK(dfv.paint_allocations == 0);
+}
+
+TEST_CASE("display text is cached verbatim, with no length cap or truncation",
+          "[view][host-param][paint-safe]") {
+    // The channel stores the host's string as-is: no fixed buffer, so no
+    // truncation and no partial readout. A host formatter returning something
+    // pathologically long is reported in full rather than silently cut.
+    class LongTextSurface : public FakeHostParamSurface {
+    protected:
+        std::string do_param_display_text(std::string_view key, double v) override {
+            (void)key; (void)v;
+            return std::string(4096, 'x') + "!";
+        }
+    };
+    ReadoutPaintView dfv = make_readout_view("gain");
+    LongTextSurface params;
+    params.values["gain"] = 0.5;
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+
+    REQUIRE(dfv.element_display_text(0).size() == 4097);
+    CHECK(dfv.element_display_text(0).back() == '!');   // the tail survives
+
+    // And the read of it is still alloc-free — capacity is a tick-side cost.
+    paint_once(dfv);
+    CHECK(dfv.paint_allocations == 0);
+    CHECK(dfv.painted.size() == 4097);
+}
+
+TEST_CASE("a key with no host param reads as unbound, not as a stale or absent value",
+          "[view][host-param][paint-safe]") {
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;   // deliberately empty: nothing resolves "gain"
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+    paint_once(dfv);
+
+    CHECK(dfv.painted.empty());
+    CHECK_FALSE(dfv.painted_bound);
+    CHECK_FALSE(dfv.element_has_display_text(0));
+
+    // An out-of-range index is the same answer, not a crash and not UB.
+    CHECK(dfv.element_display_text(-1).empty());
+    CHECK(dfv.element_display_text(99).empty());
+    CHECK_FALSE(dfv.element_has_display_text(-1));
+    CHECK_FALSE(dfv.element_has_display_text(99));
+
+    // An element carrying no param_key at all is unbound too.
+    dfv.set_element_param_key(0, "");
+    dfv.sync_from_host_params();
+    CHECK_FALSE(dfv.element_has_display_text(0));
+}
+
+TEST_CASE("a host that stops resolving a key clears the readout rather than lying",
+          "[view][host-param][paint-safe]") {
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.6;
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+    REQUIRE(dfv.element_has_display_text(0));
+    REQUIRE(dfv.element_display_text(0) == "disp:gain");
+
+    // The host drops the parameter (a rack slot emptied, a preset swapped out).
+    params.values.erase("gain");
+    dfv.sync_from_host_params();
+
+    // The last text must NOT survive — a readout for a parameter that no longer
+    // exists is a stale lie.
+    CHECK(dfv.element_display_text(0).empty());
+    CHECK_FALSE(dfv.element_has_display_text(0));
+}
+
+TEST_CASE("bound-but-empty display text is distinguishable from unbound",
+          "[view][host-param][paint-safe]") {
+    // A host may legitimately format a value AS an empty string, so empty text
+    // alone cannot mean "no parameter here". The bound flag carries that.
+    class EmptyTextSurface : public FakeHostParamSurface {
+    protected:
+        std::string do_param_display_text(std::string_view, double) override { return {}; }
+    };
+    ReadoutPaintView dfv = make_readout_view("gain");
+    EmptyTextSurface params;
+    params.values["gain"] = 0.5;
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+
+    CHECK(dfv.element_display_text(0).empty());
+    CHECK(dfv.element_has_display_text(0));   // bound — the host formats it empty
+}
+
+TEST_CASE("paint sees the last tick's text: the readout is tick-granular, never torn",
+          "[view][host-param][paint-safe]") {
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.1;
+    dfv.set_host_params(&params);
+
+    // Before the FIRST sync there is nothing to show — not the host's current
+    // value, because paint has never been allowed to ask.
+    paint_once(dfv);
+    CHECK(dfv.painted.empty());
+    CHECK_FALSE(dfv.painted_bound);
+
+    dfv.sync_from_host_params();
+    paint_once(dfv);
+    CHECK(dfv.painted == "disp:gain");
+
+    // The host's value moves BETWEEN ticks (automation running under a frame).
+    // Paint keeps reporting the last synced text: one tick, one consistent
+    // snapshot. Repainting does not re-reach the host and cannot re-derive it.
+    class CountingSurface : public FakeHostParamSurface {
+    public:
+        int text_calls = 0;
+    protected:
+        std::string do_param_display_text(std::string_view key, double v) override {
+            ++text_calls;
+            (void)v;
+            return "disp:" + std::string(key);
+        }
+    };
+    CountingSurface counting;
+    counting.values["gain"] = 0.1;
+    dfv.set_host_params(&counting);
+    dfv.sync_from_host_params();
+    const int after_tick = counting.text_calls;
+    REQUIRE(after_tick == 1);
+
+    paint_once(dfv);
+    paint_once(dfv);
+    paint_once(dfv);
+    // Three paints, zero extra host formatter calls: the host round-trip is
+    // per-tick, not per-frame.
+    CHECK(counting.text_calls == after_tick);
+    CHECK(dfv.painted == "disp:gain");
+}
+
+TEST_CASE("every host parameter has a readout once the bind grid is built",
+          "[view][host-param][paint-safe]") {
+    // The keyed readout the ask actually needs: text for a parameter the design
+    // draws no control for. build_bind_grid gives that key an element, and the
+    // element carries the cached text.
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.5;
+    params.values["undrawn_mix"] = 0.25;    // no control in the design
+    dfv.set_host_params(&params);
+
+    REQUIRE(dfv.element_for_param_key("undrawn_mix") == -1);   // no element yet
+    dfv.build_bind_grid({"gain", "undrawn_mix"});
+    const int i = dfv.element_for_param_key("undrawn_mix");
+    REQUIRE(i >= 0);
+    REQUIRE(dfv.element_is_bind_grid_stand_in(i));
+
+    dfv.sync_from_host_params();
+    CHECK(dfv.element_has_display_text(i));
+    CHECK(dfv.element_display_text(i) == "disp:undrawn_mix");
+
+    // And it paints, keyed, alloc-free: a host can ask for any parameter's
+    // formatted text by key and draw it, with no control behind it.
+    dfv.key = "undrawn_mix";
+    paint_once(dfv);
+    CHECK(dfv.painted == "disp:undrawn_mix");
+    CHECK(dfv.paint_allocations == 0);
+}
+
+TEST_CASE("a value_label keeps its own painted readout alongside the cache",
+          "[view][host-param][paint-safe]") {
+    // display_text must not clobber, or be clobbered by, the author-owned `text`
+    // channel: both are populated for a value_label, and set_element_text on a
+    // non-label element leaves the host cache intact.
+    const std::string svg = R"(<svg width="100" height="100"/>)";
+    DesignFrameElement label;
+    label.kind = DesignFrameElement::Kind::value_label;
+    label.x = 10; label.y = 10; label.w = 40; label.h = 10;
+    label.param_key = "gain";
+    DesignFrameView dfv(svg, {label}, 0, 0, 100, 100);
+
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.6;
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+
+    CHECK(dfv.element_text(0) == "disp:gain");           // the label still paints
+    CHECK(dfv.element_display_text(0) == "disp:gain");   // and the cache carries it
+    CHECK(dfv.element_has_display_text(0));
+}
+
+TEST_CASE("dropping the surface leaves the loaded elements' text standing",
+          "[view][host-param][paint-safe]") {
+    // Removing the surface is the preview/screenshot path, and sync_from_host_params
+    // early-returns on it — so the last text stands rather than being cleared.
+    // That is deliberately the SAME semantic the value channel already has ("no
+    // surface: degrade to local state"), not an oversight: a view rendered without
+    // a host keeps its last known readout instead of blanking. It is distinct from
+    // a LIVE surface that stops resolving a key, which does clear (above), because
+    // there the host is present and authoritative.
+    //
+    // Scoped to the elements CURRENTLY LOADED. A frame swap replaces them and the
+    // incoming set has no cached text to stand — see the frame-swap case below.
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.6;
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+    REQUIRE(dfv.element_display_text(0) == "disp:gain");
+
+    dfv.set_host_params(nullptr);
+    dfv.sync_from_host_params();   // no crash, no change
+    CHECK(dfv.element_display_text(0) == "disp:gain");
+    CHECK(dfv.element_has_display_text(0));
+
+    // And it is still paint-safe with no surface behind it at all.
+    paint_once(dfv);
+    CHECK(dfv.painted == "disp:gain");
+    CHECK(dfv.paint_allocations == 0);
+}
+
+TEST_CASE("a frame swap empties the readout cache rather than carrying it over",
+          "[view][host-param][paint-safe]") {
+    // display_text is a HOST CACHE with no authored counterpart, and a frame swap
+    // installs the incoming frame's pristine elements — which have never been
+    // synced. So the readout is empty afterwards even though the outgoing frame
+    // had one, and even with no surface to re-fill it. That is not the "degrade
+    // to local state" promise failing: there IS no local display text to degrade
+    // to (contrast `text`, which each frame authors and therefore restores).
+    //
+    // What matters is that it reads as UNBOUND, not as the previous frame's
+    // value: a painter gated on element_has_display_text draws nothing rather
+    // than a readout belonging to a frame the user already left.
+    ReadoutPaintView dfv = make_readout_view("mix");
+    FakeHostParamSurface params;
+    params.values["mix"] = 0.5;
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+    REQUIRE(dfv.element_display_text(0) == "disp:mix");
+
+    DesignFrameElement knob;
+    knob.kind = DesignFrameElement::Kind::knob;
+    knob.x = 10; knob.y = 10; knob.w = 20; knob.h = 20;
+    knob.cx = 20; knob.cy = 20;
+    knob.hit_radius = 20.0f;
+    knob.param_key = "mix";           // the SAME key the outgoing frame carried
+    const int second = dfv.add_frame(R"(<svg width="100" height="100"/>)", {knob},
+                                     0, 0, 100, 100);
+
+    // No surface: the preview/screenshot path, where nothing can re-fill the cache.
+    dfv.set_host_params(nullptr);
+    dfv.set_active_frame(second);
+
+    CHECK(dfv.element_display_text(0).empty());
+    CHECK_FALSE(dfv.element_has_display_text(0));   // unbound, not stale
+    dfv.sync_from_host_params();                    // no-op: no surface
+    CHECK(dfv.element_display_text(0).empty());
+
+    // And paint draws nothing rather than the frame the user left.
+    paint_once(dfv);
+    CHECK(dfv.painted.empty());
+    CHECK_FALSE(dfv.painted_bound);
+
+    // A live surface re-fills it, so the empty is a "not synced yet", not a wedge.
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();
+    CHECK(dfv.element_display_text(0) == "disp:mix");
+    CHECK(dfv.element_has_display_text(0));
+}
+
+TEST_CASE("an index cached across a bind-grid rebuild names a different parameter",
+          "[view][host-param][paint-safe]") {
+    // build_bind_grid erases and re-appends the stand-in tail, so an index
+    // resolved before it does not survive it. This is bounds-safe and therefore
+    // SILENT: the stale index reads another parameter's readout rather than
+    // crashing. Pinning it here is what keeps the docs' "re-resolve, never cache
+    // the index" guidance from being advice nobody can check.
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.5;
+    params.values["mix"] = 0.5;
+    params.values["pan"] = 0.5;
+    dfv.set_host_params(&params);
+
+    dfv.build_bind_grid({"mix"});
+    const int cached = dfv.element_for_param_key("mix");
+    REQUIRE(cached >= 0);
+    dfv.sync_from_host_params();
+    REQUIRE(dfv.element_display_text(cached) == "disp:mix");
+
+    // Re-grid with a key ordered ahead of "mix": the tail is rebuilt beneath the
+    // held index.
+    dfv.build_bind_grid({"pan", "mix"});
+    dfv.sync_from_host_params();
+
+    // The cached index still resolves and still reports "bound" — it just means
+    // something else now. Exactly the readout-for-the-wrong-parameter the
+    // unbound/stale rules elsewhere in this channel prevent.
+    CHECK(dfv.element_has_display_text(cached));
+    CHECK(dfv.element_display_text(cached) == "disp:pan");
+
+    // Re-resolving is the fix, and it is what a painter must do every paint.
+    CHECK(dfv.element_display_text(dfv.element_for_param_key("mix")) == "disp:mix");
+}
+
+TEST_CASE("the tick's main-thread guard passes when a backend reports the main thread",
+          "[view][host-param][paint-safe]") {
+    // sync_from_host_params writes the very strings paint() holds references
+    // into, so it asserts (debug builds) that it is on the host main thread.
+    // The guard keys off MainThreadDispatcher, which most headless tests never
+    // register — leaving it inert. Register one that reports "on main" and drive
+    // a real sync: the legitimate path must stay quiet rather than trip on the
+    // presence of a backend alone. Without this, the guard's inert-by-default
+    // shape means nothing would ever exercise it.
+    const auto token = events::MainThreadDispatcher::register_backend(
+        {/*post=*/[](events::Task t) { t(); return true; },
+         /*is_main_thread=*/[] { return true; },
+         /*post_after=*/{}});
+    REQUIRE(events::MainThreadDispatcher::has_backend());
+    REQUIRE(events::MainThreadDispatcher::is_main_thread());
+
+    ReadoutPaintView dfv = make_readout_view("gain");
+    FakeHostParamSurface params;
+    params.values["gain"] = 0.75;
+    dfv.set_host_params(&params);
+    dfv.sync_from_host_params();   // must not trip the assert
+
+    CHECK(dfv.element_display_text(0) == "disp:gain");
+    CHECK(dfv.element_has_display_text(0));
+
+    events::MainThreadDispatcher::unregister_backend(token);
+    CHECK_FALSE(events::MainThreadDispatcher::has_backend());
 }

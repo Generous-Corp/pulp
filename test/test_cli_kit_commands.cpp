@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "../tools/cli/cli_fs_util.hpp"
 #include "../tools/cli/kit_commands.hpp"
 
 #include <pulp/runtime/crypto.hpp>
@@ -2754,4 +2755,82 @@ TEST_CASE("pulp kit apply rejects non-project roots before writing files",
     REQUIRE_FALSE(fs::exists(not_project.path / ".pulp"));
     REQUIRE_FALSE(fs::exists(not_project.path / "cmake"));
     REQUIRE_FALSE(fs::exists(not_project.path / "pulp-kits"));
+}
+
+// ── cli_fs_util contract ────────────────────────────────────────────────────
+//
+// These pin the archive-safety helpers the kit commands guard extraction with.
+// The containment check is lexical and frame-of-reference sensitive, which is
+// exactly the part a caller can get wrong silently, so it is pinned here
+// rather than left implied by the call sites.
+
+TEST_CASE("path_is_within accepts paths at or below the root", "[cli][kit][fs-safety]") {
+    using pulp::cli::fsutil::path_is_within;
+
+    REQUIRE(path_is_within("/tmp/root/a/b.txt", "/tmp/root"));
+    REQUIRE(path_is_within("/tmp/root", "/tmp/root"));
+    // Interior traversal that stays inside resolves to a contained path.
+    REQUIRE(path_is_within("/tmp/root/a/../b.txt", "/tmp/root"));
+    // An empty root is a prefix of everything.
+    REQUIRE(path_is_within("/tmp/root/a", ""));
+}
+
+TEST_CASE("path_is_within rejects escapes and sibling prefixes", "[cli][kit][fs-safety]") {
+    using pulp::cli::fsutil::path_is_within;
+
+    REQUIRE_FALSE(path_is_within("/tmp/root/../escaped.txt", "/tmp/root"));
+    REQUIRE_FALSE(path_is_within("/tmp/other/a.txt", "/tmp/root"));
+    REQUIRE_FALSE(path_is_within("/tmp", "/tmp/root"));
+    // A component-wise compare, not a string-prefix compare: `/tmp/rooted` must
+    // not read as inside `/tmp/root`.
+    REQUIRE_FALSE(path_is_within("/tmp/rooted/a.txt", "/tmp/root"));
+}
+
+TEST_CASE("path_is_within compares lexically within one frame of reference",
+          "[cli][kit][fs-safety]") {
+    using pulp::cli::fsutil::path_is_within;
+
+    // Neither argument is made absolute, so a relative/absolute pair never
+    // shares a prefix regardless of the process CWD. Callers are responsible
+    // for normalizing both sides into the same frame before calling.
+    REQUIRE_FALSE(path_is_within("root/a.txt", "/tmp/root"));
+    REQUIRE_FALSE(path_is_within("/tmp/root/a.txt", "root"));
+    // Both relative against the same base compares as expected.
+    REQUIRE(path_is_within("root/a.txt", "root"));
+    REQUIRE_FALSE(path_is_within("root/../a.txt", "root"));
+}
+
+TEST_CASE("safe_archive_rel rejects unsafe archive entry names", "[cli][kit][fs-safety]") {
+    using pulp::cli::fsutil::safe_archive_rel;
+
+    REQUIRE(safe_archive_rel(fs::path("a/b/c.txt")));
+    REQUIRE(safe_archive_rel(fs::path("file.txt")));
+
+    REQUIRE_FALSE(safe_archive_rel(fs::path("")));
+    REQUIRE_FALSE(safe_archive_rel(fs::path("/abs/file.txt")));
+    REQUIRE_FALSE(safe_archive_rel(fs::path("../escape.txt")));
+    REQUIRE_FALSE(safe_archive_rel(fs::path("a/../../escape.txt")));
+    REQUIRE_FALSE(safe_archive_rel(fs::path("./a.txt")));
+    REQUIRE_FALSE(safe_archive_rel(fs::path("a/./b.txt")));
+}
+
+TEST_CASE("is_package_archive_path recognizes package containers", "[cli][kit][fs-safety]") {
+    using pulp::cli::fsutil::is_package_archive_path;
+
+    REQUIRE(is_package_archive_path(fs::path("bundle.pulpkit")));
+    REQUIRE(is_package_archive_path(fs::path("/tmp/pack.pulpcontent")));
+    REQUIRE_FALSE(is_package_archive_path(fs::path("bundle.zip")));
+    REQUIRE_FALSE(is_package_archive_path(fs::path("pulp.package.json")));
+    REQUIRE_FALSE(is_package_archive_path(fs::path("bundle")));
+}
+
+TEST_CASE("temporary_archive_root yields a fresh path per call", "[cli][kit][fs-safety]") {
+    using pulp::cli::fsutil::temporary_archive_root;
+
+    const auto a = temporary_archive_root();
+    const auto b = temporary_archive_root();
+
+    REQUIRE(a != b);
+    REQUIRE(a.is_absolute());
+    REQUIRE_FALSE(fs::exists(a));
 }

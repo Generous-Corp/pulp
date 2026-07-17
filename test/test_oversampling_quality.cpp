@@ -1,18 +1,22 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <pulp/audio/analysis/audio_spectrum.hpp>
 #include <pulp/signal/oversampling.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <span>
 #include <type_traits>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
 using pulp::signal::Oversampler;
 using pulp::signal::Oversampler64;
+using pulp::test::audio::tone_gain_db;
+using pulp::test::audio::tone_residual_db;
 
 namespace {
 
@@ -56,64 +60,16 @@ template <typename Sample> std::size_t peak_index(const std::vector<Sample>& sam
         })));
 }
 
-double tone_residual_db(const std::vector<double>& samples, std::size_t begin,
-                        double cycles_per_sample) {
-    double sin_projection = 0.0;
-    double cos_projection = 0.0;
-    double sin_energy = 0.0;
-    double cos_energy = 0.0;
-    double cross_energy = 0.0;
-    for (std::size_t i = begin; i < samples.size(); ++i) {
-        const double phase = 2.0 * kPi * cycles_per_sample * i;
-        const double s = std::sin(phase);
-        const double c = std::cos(phase);
-        sin_projection += samples[i] * s;
-        cos_projection += samples[i] * c;
-        sin_energy += s * s;
-        cos_energy += c * c;
-        cross_energy += s * c;
-    }
-    const double determinant = sin_energy * cos_energy - cross_energy * cross_energy;
-    const double sin_gain =
-        (sin_projection * cos_energy - cos_projection * cross_energy) / determinant;
-    const double cos_gain =
-        (cos_projection * sin_energy - sin_projection * cross_energy) / determinant;
-    double signal_energy = 0.0;
-    double residual_energy = 0.0;
-    for (std::size_t i = begin; i < samples.size(); ++i) {
-        const double phase = 2.0 * kPi * cycles_per_sample * i;
-        const double fitted = sin_gain * std::sin(phase) + cos_gain * std::cos(phase);
-        signal_energy += fitted * fitted;
-        const double residual = samples[i] - fitted;
-        residual_energy += residual * residual;
-    }
-    return 10.0 * std::log10(residual_energy / signal_energy);
-}
-
-double tone_gain_db(const std::vector<double>& samples, std::size_t begin, double cycles_per_sample,
-                    double input_amplitude) {
-    double sin_projection = 0.0;
-    double cos_projection = 0.0;
-    double sin_energy = 0.0;
-    double cos_energy = 0.0;
-    double cross_energy = 0.0;
-    for (std::size_t i = begin; i < samples.size(); ++i) {
-        const double phase = 2.0 * kPi * cycles_per_sample * i;
-        const double sine = std::sin(phase);
-        const double cosine = std::cos(phase);
-        sin_projection += samples[i] * sine;
-        cos_projection += samples[i] * cosine;
-        sin_energy += sine * sine;
-        cos_energy += cosine * cosine;
-        cross_energy += sine * cosine;
-    }
-    const double determinant = sin_energy * cos_energy - cross_energy * cross_energy;
-    const double sin_gain =
-        (sin_projection * cos_energy - cos_projection * cross_energy) / determinant;
-    const double cos_gain =
-        (cos_projection * sin_energy - sin_projection * cross_energy) / determinant;
-    const double amplitude = std::hypot(sin_gain, cos_gain);
-    return 20.0 * std::log10(amplitude / input_amplitude);
+// The settled tail of a render — the part after the filters have filled and the
+// measurement is of steady state rather than of the transient.
+//
+// The projection analyzers take the segment itself rather than a start offset,
+// and they fit both quadratures, so the tone's phase at the segment start is
+// solved for rather than assumed. Handing them a subspan is therefore exactly
+// equivalent to fitting from an absolute sample index: the sin/cos split
+// rotates, the amplitude and the residual do not move.
+std::span<const double> settled_tail(const std::vector<double>& samples, std::size_t begin) {
+    return std::span<const double>(samples).subspan(begin);
 }
 
 // Rejection of a pure tone injected *inside* the callback, i.e. content the
@@ -201,7 +157,7 @@ TEST_CASE("Every linear-phase factor preserves its advertised base-rate passband
         }
         const std::size_t settled =
             static_cast<std::size_t>(2 * oversampler.latency_samples() + 256);
-        const double gain_db = tone_gain_db(output, settled, frequency, amplitude);
+        const double gain_db = tone_gain_db(settled_tail(output, settled), frequency, amplitude);
         INFO("factor=" << static_cast<int>(config.factor) << " quality="
                        << static_cast<int>(config.quality) << " passband gain dB=" << gain_db);
         REQUIRE(std::abs(gain_db) < 0.01);
@@ -293,7 +249,7 @@ TEST_CASE("Pristine oversampling rejects smooth-saturation fold products near Ny
     }
 
     const std::size_t settled = static_cast<std::size_t>(2 * oversampler.latency_samples() + 512);
-    const double residual_db = tone_residual_db(output, settled, frequency);
+    const double residual_db = tone_residual_db(settled_tail(output, settled), frequency);
     INFO("near-Nyquist saturation residual dB=" << residual_db);
     REQUIRE(residual_db < -100.0);
 }
@@ -379,7 +335,7 @@ TEST_CASE("Biquad lane keeps one character at every factor",
             const double input = amplitude * std::sin(2.0 * kPi * frequency * i);
             output[i] = oversampler.process(input, [](double sample) { return sample; });
         }
-        return tone_gain_db(output, 2048, frequency, amplitude);
+        return tone_gain_db(settled_tail(output, 2048), frequency, amplitude);
     };
 
     // Anchor x2 absolutely first. Every other factor is pinned *relative* to it, so

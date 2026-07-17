@@ -12,6 +12,7 @@ target_sources(pulp-host PRIVATE
     src/scanner.cpp
     src/signal_graph.cpp
     src/signal_graph_reference_walk.cpp
+    src/signal_graph_live_swap.cpp
     src/offline_signal_graph_host.cpp
     src/plugin_slot.cpp
     src/graph_serializer.cpp
