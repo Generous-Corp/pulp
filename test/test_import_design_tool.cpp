@@ -2966,7 +2966,7 @@ bool read_png_size(const fs::path& p, uint32_t& w, uint32_t& h) {
     return w > 0 && h > 0;
 }
 
-// A solid-colour PNG, via the miniz writer this suite already links. White is
+// A solid-color PNG, via the miniz writer this suite already links. White is
 // deliberately nothing like the dark-themed render, so the similarity is far
 // below any sane threshold and the case does not sit near the bar.
 bool write_solid_png(const fs::path& p, uint32_t w, uint32_t h, uint8_t value) {
