@@ -1,5 +1,14 @@
 # Version-at-Land Cutover — flipping the single-writer bump bot to `--push`
 
+> **STATUS: FLIPPED LIVE — 2026-07-17.** `version-at-land.yml` runs `--push`;
+> `version-skill-check.yml` accepts intent trailers; `auto-release.yml`'s
+> stranded detector exports `PULP_ACCEPT_INTENT_TRAILERS=1`. The remaining
+> follow-up is switching `shipyard pr` to EMIT `Version-Bump:` trailers instead
+> of writing version files (until then a file-bump at the heuristic version
+> no-ops safely through the bot, so no double-bump — the treadmill just isn't
+> fully dead for brand-new PRs). Rollback = revert this trio to dry-run, but
+> recover any outstanding pending intent FIRST (see Rollback).
+
 This guide is the reviewed, sequenced procedure for turning off the
 per-PR version-bump treadmill and turning on **post-merge version
 assignment** ("option B"). It is release-critical: a wrong flip can drop

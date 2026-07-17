@@ -272,6 +272,16 @@ prediction, not a pre-created tag.
 
 ### Layer 3 backstop in `auto-release.yml`
 
+> **Intent-trailer model is LIVE (2026-07-17):** the `Stranded fix/feat
+> detector` step now exports `PULP_ACCEPT_INTENT_TRAILERS=1`, so a fix/feat that
+> merged intent-only (its number assigned moments later by the `version-at-land`
+> `--push` bot) reads as COVERED, not stranded — otherwise it would false-warn on
+> every intent-only merge. It stays `--no-merges`-scoped: a stray intent on a
+> re-sync merge commit, or a fix/feat with NO intent, still correctly strands.
+> The "intent present but the bot never applied it" case is covered by the
+> separate pending-intent liveness alarm (`pending-intent-liveness.yml`). See
+> `docs/guides/version-at-land-cutover.md`.
+
 If the PR-time gate is bypassed somehow (force-push race, admin merge,
 unknown-unknown), `auto-release.yml` has a final backstop step
 (`Stranded fix/feat detector`) that runs after the tag-or-not decision.

@@ -251,6 +251,22 @@ def extract_style(n, ctx=None):
             s["border_color"] = color; s["border_width"] = weight; s["border_style"] = "solid"
     if isinstance(n.get("cornerRadius"), (int, float)):
         s["border_radius"] = n["cornerRadius"]
+    # Per-corner radii: Figma's REST API returns `rectangleCornerRadii` as
+    # [topLeft, topRight, bottomRight, bottomLeft] when the corners differ. The
+    # producer only read the uniform `cornerRadius`, so an asymmetric card
+    # imported via REST lost its rounding — the shared per-corner codegen had
+    # nothing to emit. The C++ parse_ir_style already reads these four fields.
+    radii = n.get("rectangleCornerRadii")
+    if isinstance(radii, list) and len(radii) == 4 and any(
+        isinstance(r, (int, float)) for r in radii
+    ):
+        tl, tr, br, bl = radii
+        if not (tl == tr == br == bl):
+            s["border_top_left_radius"] = tl
+            s["border_top_right_radius"] = tr
+            s["border_bottom_right_radius"] = br
+            s["border_bottom_left_radius"] = bl
+            s.pop("border_radius", None)
     op = n.get("opacity")
     if isinstance(op, (int, float)) and op < 1: s["opacity"] = op
     effects = n.get("effects")
