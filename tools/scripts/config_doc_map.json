@@ -75,6 +75,15 @@
         "docs/guides/versioning.md"
       ],
       "why": "The authoritative version/skill/coverage gate workflows are described by the versioning guide; changing the enforced gates without a doc edit drifts the documented enforcement layer."
+    },
+    {
+      "paths": [
+        ".github/workflows/version-at-land.yml"
+      ],
+      "docs": [
+        "docs/guides/version-at-land-cutover.md"
+      ],
+      "why": "The single-writer post-merge version-assignment bot is documented by the cutover guide, including the dry-run→--push flip and the one-time straggler rule; changing the workflow (especially the flip off dry-run) without a doc edit drifts the release-critical cutover procedure."
     }
   ]
 }

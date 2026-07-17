@@ -601,8 +601,20 @@ def _range_unreleased_fix_feat_subjects(
     covered_surfaces: dict[str, bool],
     coverage_boundaries: dict[str, str] | None = None,
     source_range: tuple[str, str] | None = None,
+    accept_intent: bool = False,
 ) -> tuple[list[tuple[str, list[str]]], dict[str, str]]:
-    """Return live signals and surfaces not covered by a tag or skip boundary."""
+    """Return live signals and surfaces not covered by a tag or skip boundary.
+
+    ``accept_intent`` (the intent-trailer model is live) treats a surface that
+    carries a pending, authored ``Version-Bump: <surface>=<level>`` intent as
+    COVERED, not stranded: under that model a fix/feat merges with intent and no
+    file bump, and the post-merge ``version_at_land`` bot assigns the number
+    moments later. Without this, every such merge would false-warn "consumers
+    are stuck." Off by default so today's file-bump PRs are classified exactly
+    as before. The pending check is ``--no-merges``-scoped to match what
+    ``version_at_land`` actually honors — a stray intent on a re-sync merge
+    commit must NOT suppress a genuine strand.
+    """
     if _range_has_version_bump_skip_trailer(base, head):
         return [], {}
     if source_range and _range_has_version_bump_skip_trailer(*source_range):
@@ -645,6 +657,18 @@ def _range_unreleased_fix_feat_subjects(
             cfg.trailer_version_bump,
             surface.name,
         )
+        if accept_intent:
+            # Intent-trailer model: a pending authored intent means the
+            # version_at_land bot will assign the number post-merge — not
+            # stranded. Read no-merges so a stray intent on a re-sync merge
+            # commit can't wrongly suppress a real strand.
+            pending_level = surface_trailer_override(
+                git_range_trailers(analysis_base, analysis_head, no_merges=True),
+                cfg.trailer_version_bump,
+                surface.name,
+            )
+            if pending_level in ("patch", "minor", "major"):
+                continue
         boundary_changed = filter_generated(
             git_diff_names(analysis_base, analysis_head),
             cfg.generated_globs,
@@ -798,6 +822,11 @@ def main(argv: list[str]) -> int:
         source_base = argv[8] if len(argv) >= 9 and argv[8] != "-" else ""
         source_head = argv[9] if len(argv) >= 10 and argv[9] != "-" else ""
         cfg = load_config(config_path)
+        # Enabled by the stranded-fix detector ONLY once version_at_land is in
+        # --push mode (a pending intent is then genuinely on its way to a
+        # number). Inert while unset, so today's file-bump PRs classify
+        # unchanged.
+        accept_intent = os.environ.get("PULP_ACCEPT_INTENT_TRAILERS") == "1"
         signals, levels = _range_unreleased_fix_feat_subjects(
             argv[1],
             argv[2],
@@ -805,6 +834,7 @@ def main(argv: list[str]) -> int:
             {"sdk": argv[3] == "1", "plugin": argv[4] == "1"},
             {"sdk": sdk_boundary, "plugin": plugin_boundary},
             (source_base, source_head) if source_base and source_head else None,
+            accept_intent=accept_intent,
         )
         if not signals:
             return 1

@@ -82,6 +82,12 @@ if(Python3_Interpreter_FOUND)
     # Version-at-land (T1.1): single-writer version assignment from Version-Bump
     # intent trailers. Pure aggregate_intent / plan_assignments logic (the bot
     # is dry-run only at this stage).
+
+    # Version-at-land: single-writer version assignment from Version-Bump
+    # intent trailers. Covers the pure aggregate_intent / plan_assignments
+    # logic, the --no-merges intent scoping (a stray trailer on a re-sync merge
+    # commit must not escalate), and the apply_and_push transaction (two
+    # concurrent post-merge drains apply a version exactly once).
     add_test(NAME version-at-land-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_version_at_land.py")
 
