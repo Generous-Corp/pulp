@@ -25,6 +25,8 @@
 namespace {
 
 using pulp::examples::BassDrumVoice;
+using pulp::examples::kReferenceTuneTrim;
+using pulp::examples::reference_decay_taper;
 using pulp::signal::BridgedTComponents;
 using pulp::signal::Q43Leakage;
 
@@ -753,6 +755,60 @@ TEST_CASE("accent changes the strike, not just its level", "[va-drum][accent]") 
         for (std::size_t i = 1; i < pts.size(); ++i)
             REQUIRE(pts[i].tail_f0 > pts[i - 1].tail_f0);
         REQUIRE(pts.back().tail_f0 - pts.front().tail_f0 > 0.05);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reference calibration. The knob taper and Tune trim place the stock knob
+// positions on the measured TR-808 decay and pitch curve. The targets below are
+// measured constants from the reference instrument; no reference audio is
+// stored, and the voice still produces every sample from the circuit.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("the reference calibration lands the knobs on the measured curve",
+          "[va-drum][calibration]") {
+    struct Target { double knob01; double t60; double f0; };
+    // Decay knob 0/64/128/192/255 of 255, measured from the reference at 48 kHz.
+    const std::vector<Target> targets = {
+        {0.00, 0.296, 47.9}, {0.25, 0.437, 47.9}, {0.50, 0.907, 48.1},
+        {0.75, 1.535, 48.4}, {1.00, 2.286, 48.9},
+    };
+
+    for (const auto& t : targets) {
+        BassDrumVoice voice;
+        voice.prepare(kFs);
+        voice.set_decay(reference_decay_taper(t.knob01));
+        voice.set_tune(1.0 * kReferenceTuneTrim);
+        voice.set_tone(0.5);
+        voice.set_level(0.9);
+
+        // Six seconds so the longest reference tail (2.286 s) rings out fully
+        // rather than being clipped by the buffer.
+        std::vector<double> y(static_cast<std::size_t>(kFs * 6.0));
+        voice.trigger(12.0);
+        double pk = 0.0;
+        for (double& s : y) {
+            s = voice.process();
+            pk = std::max(pk, std::fabs(s));
+        }
+
+        const double thr = pk / 1000.0;
+        double measured_t60 = 0.0;
+        for (std::size_t i = y.size(); i-- > 0;) {
+            if (std::fabs(y[i]) > thr) {
+                measured_t60 = static_cast<double>(i) / kFs;
+                break;
+            }
+        }
+        const double measured_f0 = mean_frequency(y, 0.05, 0.3);
+
+        INFO("knob " << t.knob01 << " T60 " << measured_t60 << " vs " << t.t60
+                     << " ; f0 " << measured_f0 << " vs " << t.f0);
+        // Within a few percent of the reference on both axes -- a delivered
+        // match, not merely the right shape. If either the taper or the trim
+        // regresses, the stock sound walks off the reference and this fails.
+        REQUIRE(measured_t60 == Catch::Approx(t.t60).epsilon(0.07));
+        REQUIRE(measured_f0 == Catch::Approx(t.f0).epsilon(0.03));
     }
 }
 

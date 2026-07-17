@@ -377,4 +377,42 @@ private:
     int env_remaining_ = 0;
 };
 
+// ---------------------------------------------------------------------------
+// Reference calibration.
+//
+// The bridged-T core is circuit-faithful on its own terms: at nominal component
+// values its centre frequency is the schematic's 49.44 Hz. These two constants
+// do not touch that -- they place the *default knob positions* on the measured
+// pitch and decay curve of the TR-808 hardware, so the stock sound lands on the
+// reference rather than on the raw nominal. They are a calibration of the
+// control surface, not of the physics: every sample is still produced by the
+// resonator, and the values below are the measured mapping, not fitted audio.
+//
+// Reference targets (48 kHz, one hit): the Decay knob at 0/64/128/192/255 of
+// 255 gives T60 = {0.296, 0.437, 0.907, 1.535, 2.286} s and a tail pitch near
+// 48 Hz. These are measured constants from the reference instrument; no
+// reference audio is stored.
+// ---------------------------------------------------------------------------
+
+/// Scales the Tune ratio so the default knob (1.0) lands on the reference's
+/// tail pitch (~48 Hz) rather than the raw nominal 49.44 Hz.
+inline constexpr double kReferenceTuneTrim = 0.966;
+
+/// Maps the normalized Decay knob (0..1) to the resonator's internal feedback
+/// coefficient so the five reference knob positions land on the measured T60
+/// curve above. Piecewise-linear inverse of the voice's own T60(k) response,
+/// sampled at the reference Tune trim; monotonic, so the knob stays smooth.
+inline double reference_decay_taper(double knob01) noexcept {
+    static constexpr double kn[5] = {0.0, 0.25, 0.5, 0.75, 1.0};
+    static constexpr double kk[5] = {0.1532, 0.2498, 0.4826, 0.6827, 0.8368};
+    knob01 = std::clamp(knob01, 0.0, 1.0);
+    for (int i = 0; i < 4; ++i) {
+        if (knob01 <= kn[i + 1]) {
+            const double frac = (knob01 - kn[i]) / (kn[i + 1] - kn[i]);
+            return kk[i] + (kk[i + 1] - kk[i]) * frac;
+        }
+    }
+    return kk[4];
+}
+
 }  // namespace pulp::examples

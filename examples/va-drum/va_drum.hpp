@@ -103,8 +103,11 @@ public:
         // trigger, which must never clear it.
         if (ctx.should_reset_dsp_state()) voice_.reset();
 
-        voice_.set_tune(state().get_value(kVaDrumTune));
-        voice_.set_decay(state().get_value(kVaDrumDecay) / 100.0);
+        // The Tune and Decay knobs pass through the reference calibration so the
+        // stock positions land on the measured TR-808 curve; every other control
+        // is the raw component value.
+        voice_.set_tune(state().get_value(kVaDrumTune) * kReferenceTuneTrim);
+        voice_.set_decay(reference_decay_taper(state().get_value(kVaDrumDecay) / 100.0));
         voice_.set_tone(state().get_value(kVaDrumTone) / 100.0);
         voice_.set_level(state().get_value(kVaDrumLevel) / 100.0);
         voice_.set_pulse_width_s(state().get_value(kVaDrumPulseWidth) / 1000.0);
