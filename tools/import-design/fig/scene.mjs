@@ -6,6 +6,7 @@
 // flows through the existing `--from figma-plugin` importer unchanged.
 
 import { geometryToPath, glyphsToPath, isIconFont } from './paths.mjs';
+import { isFontAvailable } from './fonts.mjs';
 
 const FRAME_LIKE = new Set(['FRAME', 'COMPONENT', 'INSTANCE', 'COMPONENT_SET']);
 
@@ -514,10 +515,23 @@ export function materializeFrame(scene, frame, ctx) {
   //                    lands on top of the A. Outlines place it exactly.
   //   never          — no outlining at all, icon fonts included.
   const textMode = (ctx && ctx.textAsOutlines) || process.env.PULP_FIG_TEXT_AS_OUTLINES || 'auto';
+  const fontAvailable = (ctx && ctx.isFontAvailable) || isFontAvailable;
+  const outlinedFamilies = new Set();
   const shouldOutlineText = (family) => {
     if (textMode === 'never') return false;
     if (textMode === 'always') return true;
-    return isIconFont(family);
+    // auto: an icon font is never real text; and text whose font we do not have
+    // cannot be laid out correctly as live text, because the substitute face's
+    // advance widths are not the ones the design was measured with. The logo
+    // reads "TRI  Z" and those two spaces are the gap its A-mark occupies —
+    // set in a fallback the gap collapses and the Z lands on top of the mark.
+    // Outlines are exact and need no font.
+    if (isIconFont(family)) return true;
+    if (family && !fontAvailable(family)) {
+      outlinedFamilies.add(family);
+      return true;
+    }
+    return false;
   };
   // Every font family the frame references. Reported at the end so a
   // missing font is a stated result, not a mystery in the pixels.
@@ -950,15 +964,12 @@ export function materializeFrame(scene, frame, ctx) {
           // The glyph paints in the text's own colour.
           out.fill = out.style.color || 'none';
           delete out.style.color;
-          // The outline is already baked into parent space, so its own bounds
-          // place it — and only when styleFor already chose absolute, or we
-          // would yank an icon out of the flex pass meant to position it.
-          if (out.style.position === 'absolute') {
-            out.style.left = round2(glyphs.box.minX);
-            out.style.top = round2(glyphs.box.minY);
-          }
-          out.style.width = round2(glyphs.box.width);
-          out.style.height = round2(glyphs.box.height);
+          // Keep the box and position styleFor already derived from the node's
+          // size and transform: the glyph is drawn inside the designer's text
+          // box, and re-placing the node on the glyph's ink would strip the
+          // font's side bearings — the icon's padding — and shift it off-centre
+          // in its button. Only the viewBox is asserted, so the path maps into
+          // the box it was measured in.
         } else {
           // Say so rather than leave a mystery: the literal name will render.
           pushDiag('icon-font-required', node,

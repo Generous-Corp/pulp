@@ -211,14 +211,25 @@ export function glyphsToPath(node, blobs) {
     }));
   }
   if (!cmds.length) return null;
-  const placed = applyTransform(cmds, node.transform);
-  const box = boundsOf(placed);
-  if (!box || !(box.width > 0) || !(box.height > 0)) return null;
+  // Keep the text node's OWN box; do not shrink to the glyph's ink bounds, and
+  // do not bake node.transform (the caller already places the node from it).
+  //
+  // This is the opposite of geometryToPath, and deliberately so. Vector geometry
+  // is authored in a space whose only meaning is the transformed result, so its
+  // ink bounds ARE the shape. A glyph is different: it is drawn INSIDE a text
+  // box the designer sized and the layout centres, and the ink is smaller than
+  // that box by the font's own side bearings. Normalizing to ink threw the box
+  // away — an icon lost its padding, then got re-centred on its ink, and layout
+  // parity caught it exactly: `fg-icon misplaced: dx=+6.5 dw=-12`. A toolbar
+  // icon looked too big and sat off-centre in its button.
+  const w = (node.size && node.size.x) || 0;
+  const h = (node.size && node.size.y) || 0;
+  if (!(w > 0) || !(h > 0)) return null;
   return {
-    // Same (0,0)-origin normalization as geometryToPath: setSvgViewBox consumes
-    // only width/height, so the caller places the shape via box.minX/minY.
-    d: toPathData(translate(placed, -box.minX, -box.minY)),
-    box,
+    d: toPathData(cmds),
+    // The box the design gave this node, in node-local space. The caller keeps
+    // whatever position styleFor derived from the transform.
+    box: { minX: 0, minY: 0, width: w, height: h },
     paint: 'fill',
     droppedStroke: false,
   };

@@ -376,8 +376,12 @@ test('icon-font text lowers to a glyph outline; real text stays a live label', (
     mk('caption', 'Roboto', 4, 'b'),
   ];
   const scene = buildScene({ nodeChanges, blobs: [{ bytes: em }] });
-  const f = materializeFrame(scene, findFrame(scene, 'Root'), { images: new Map(), fileKey: 'K',
-    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
+  // Font availability is a property of the MACHINE, so inject it: a test that
+  // asks the real font book passes or fails depending on who runs it. Here
+  // Roboto is present, which is the case where live text is the right answer.
+  const ctx = { images: new Map(), fileKey: 'K', parserVersion: 't', compatSchemaVersion: '1',
+    exportedAt: '1970-01-01T00:00:00Z', isFontAvailable: () => true };
+  const f = materializeFrame(scene, findFrame(scene, 'Root'), ctx);
   const [icon, caption] = f.envelope.root.children;
 
   assert.equal(icon.type, 'vector', 'an icon font lowers to its outline');
@@ -389,10 +393,19 @@ test('icon-font text lowers to a glyph outline; real text stays a live label', (
   assert.equal(caption.content, 'lock');
 
   // `always` trades every label for pixel-faithful text — opt-in only.
-  const all = materializeFrame(scene, findFrame(scene, 'Root'), { images: new Map(), fileKey: 'K',
-    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z',
-    textAsOutlines: 'always' });
+  const all = materializeFrame(scene, findFrame(scene, 'Root'),
+    { ...ctx, textAsOutlines: 'always' });
   assert.equal(all.envelope.root.children[1].type, 'vector', "`always` outlines real text too");
+
+  // The rule that fixes the logo: a font this machine does NOT have cannot lay
+  // out live text correctly, because the substitute face's advance widths are
+  // not the ones the design was measured with. The logo's text is "TRI  Z" and
+  // those two spaces are the gap its A-mark occupies — under a fallback the gap
+  // collapses and the Z renders on top of the mark. Outlines are exact.
+  const missing = materializeFrame(scene, findFrame(scene, 'Root'),
+    { ...ctx, isFontAvailable: (fam) => fam !== 'Roboto' });
+  assert.equal(missing.envelope.root.children[1].type, 'vector',
+    'text whose font is missing is outlined rather than mis-measured');
 });
 
 test('a style-referenced fill resolves to the style, not the master default', () => {
