@@ -657,41 +657,51 @@ bool GraphRuntimeBufferPool::reset(std::uint32_t slot_count, std::uint32_t max_f
     return reset(slot_count, max_frames, {});
 }
 
+GraphRuntimeBufferPool::GraphRuntimeBufferPool(const GraphRuntimeBufferPool& other)
+    : storage_(other.storage_),
+      slot_count_(other.slot_count_),
+      max_frames_(other.max_frames_),
+      ring_(other.ring_.size()) {
+    for (std::size_t i = 0; i < other.ring_.size(); ++i) {
+        ring_[i].delay = other.ring_[i].delay;
+        if (other.ring_[i].state) {
+            ring_[i].state = std::make_shared<DelayRingState>(*other.ring_[i].state);
+        }
+    }
+}
+
+GraphRuntimeBufferPool& GraphRuntimeBufferPool::operator=(
+    const GraphRuntimeBufferPool& other) {
+    if (this == &other) return *this;
+    GraphRuntimeBufferPool copy(other);
+    *this = std::move(copy);
+    return *this;
+}
+
 bool GraphRuntimeBufferPool::reset(std::uint32_t slot_count, std::uint32_t max_frames,
                                    std::span<const std::uint32_t> connection_delay_samples) {
     if (slot_count > 0 && max_frames == 0) return false;
     try {
         storage_.assign(static_cast<std::size_t>(slot_count) * max_frames, 0.0f);
 
-        // Lay out one contiguous ring per delayed connection in ring_storage_.
-        // A delay of D needs D + max_frames floats (the legacy per-connection
-        // delay line), zero-filled so the leading D samples read silence.
+        // One independently shareable state object per delayed connection. A
+        // delay of D needs D + max_frames floats, zero-filled so the leading D
+        // samples read silence. The indirection lets a freshly compiled graph
+        // adopt the old graph's live state without reading/copying it.
         std::vector<RingSlot> rings;
-        std::size_t total_ring_floats = 0;
         if (!connection_delay_samples.empty()) {
             rings.assign(connection_delay_samples.size(), RingSlot{});
             for (std::size_t i = 0; i < connection_delay_samples.size(); ++i) {
                 const std::uint32_t delay = connection_delay_samples[i];
                 if (delay == 0) continue;
                 const std::uint32_t size = delay + max_frames;
-                // Fail closed rather than truncate the 32-bit ring offset: a
-                // truncated offset would index out of ring_storage_ on the RT
-                // gather. Off-RT, so the bound check is free.
-                if (total_ring_floats > 0xFFFFFFFFull - size) {
-                    clear();
-                    return false;
-                }
-                rings[i].offset = static_cast<std::uint32_t>(total_ring_floats);
-                rings[i].size = size;
                 rings[i].delay = delay;
-                rings[i].write_pos = 0;
-                total_ring_floats += size;
+                rings[i].state = std::make_shared<DelayRingState>();
+                rings[i].state->storage.assign(size, 0.0f);
             }
         }
-        std::vector<float> ring_storage(total_ring_floats, 0.0f);
 
         ring_ = std::move(rings);
-        ring_storage_ = std::move(ring_storage);
     } catch (...) {
         clear();
         return false;
@@ -705,8 +715,29 @@ void GraphRuntimeBufferPool::clear() noexcept {
     storage_.clear();
     slot_count_ = 0;
     max_frames_ = 0;
-    ring_storage_.clear();
     ring_.clear();
+}
+
+bool GraphRuntimeBufferPool::can_adopt_delay_ring_state(
+    std::uint32_t index,
+    const GraphRuntimeBufferPool& source,
+    std::uint32_t source_index) const noexcept {
+    if (index >= ring_.size() || source_index >= source.ring_.size()) return false;
+    const auto& dst = ring_[index];
+    const auto& src = source.ring_[source_index];
+    if (dst.delay == 0 || dst.delay != src.delay || !dst.state || !src.state) {
+        return false;
+    }
+    return dst.state->storage.size() == src.state->storage.size();
+}
+
+bool GraphRuntimeBufferPool::adopt_delay_ring_state(
+    std::uint32_t index,
+    const GraphRuntimeBufferPool& source,
+    std::uint32_t source_index) noexcept {
+    if (!can_adopt_delay_ring_state(index, source, source_index)) return false;
+    ring_[index].state = source.ring_[source_index].state;
+    return true;
 }
 
 bool GraphRuntimeSnapshot::reset(
