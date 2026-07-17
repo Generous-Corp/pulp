@@ -2124,6 +2124,12 @@ DesignIR ir_with_faded_node_of_every_kind() {
         n.style.opacity = 0.5f;
         n.style.box_shadow = parse_css_box_shadow("0 2px 8px #00000080");
         n.style.mix_blend_mode = "multiply";
+        // Asymmetric on purpose: a uniform radius lowers through the single
+        // 'All' call and would hide a missing per-corner emit.
+        n.style.border_top_left_radius = 8.0f;
+        n.style.border_top_right_radius = 8.0f;
+        n.style.border_bottom_right_radius = 0.0f;
+        n.style.border_bottom_left_radius = 0.0f;
     };
 
     IRNode text;
@@ -2195,6 +2201,30 @@ TEST_CASE("native codegen fades text, image, widget and container alike",
     REQUIRE(count_occurrences(js, "setOpacity(") == 4);
     REQUIRE(count_occurrences(js, "setBoxShadow(") == 4);
     REQUIRE(count_occurrences(js, "setMixBlendMode(") == 4);
+
+    // Four nodes with four distinct corners each. Codegen carried one
+    // setCornerRadius(id, 'All', r) and dropped asymmetric corners on the
+    // floor, under a comment claiming the IR could not hold them — it could.
+    REQUIRE(count_occurrences(js, "setCornerRadius(") == 16);
+    REQUIRE(count_occurrences(js, "'TopLeft', 8") == 4);
+    REQUIRE(count_occurrences(js, "'BottomRight', 0") == 4);
+    // The uniform path must not also fire, or 'All' squares the rounded pair.
+    REQUIRE(js.find("'All'") == std::string::npos);
+}
+
+TEST_CASE("native codegen keeps one call when every corner agrees",
+          "[view][import][visual-overrides]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 300.0f;
+    ir.root.style.border_radius = 6.0f;
+
+    const auto js = native_js(ir);
+    REQUIRE(count_occurrences(js, "setCornerRadius(") == 1);
+    REQUIRE(js.find("'All', 6") != std::string::npos);
 }
 
 TEST_CASE("native codegen fades a text node — the branch that had no setOpacity",

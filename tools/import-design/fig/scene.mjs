@@ -771,18 +771,32 @@ function cornerRadius(node) {
 }
 
 /**
- * Whether the node asked for ANY rounding — the question `cornerRadius()` cannot
- * answer, because it returns null both for "square" and for "rounded, but I
- * could not express it". Those two need telling apart: only the second is a drop.
+ * Figma's four per-corner radii, when they are NOT all equal.
+ *
+ * `cornerRadius()` above collapses to one number and returns null the moment the
+ * corners differ, which then raised `corner-radius-simplified` — an honest
+ * diagnostic for a loss that did not have to happen. The whole chain below can
+ * express this: IRStyle carries all four (`border_top_left_radius` …), the JSON
+ * reads them, and the bridge takes `setCornerRadius(id, "TopLeft", r)`
+ * (widget_bridge/border_box_api.cpp:54). Only codegen never emitted them, so a
+ * card rounded on two corners imported rounded on four — or, when the uniform
+ * value was absent, on none.
+ *
+ * Returns null when the corners ARE uniform, so the single-value path stays the
+ * one that runs; there is no reason to emit four calls where one is exact.
  */
-function hasCornerRadius(node) {
-  if (typeof node.cornerRadius === 'number' && node.cornerRadius > 0) return true;
-  return [
-    node.rectangleTopLeftCornerRadius,
-    node.rectangleTopRightCornerRadius,
-    node.rectangleBottomRightCornerRadius,
-    node.rectangleBottomLeftCornerRadius,
-  ].some((v) => typeof v === 'number' && v > 0);
+function perCornerRadii(node) {
+  if (typeof node.cornerRadius === 'number') return null;
+  const tl = node.rectangleTopLeftCornerRadius;
+  const tr = node.rectangleTopRightCornerRadius;
+  const br = node.rectangleBottomRightCornerRadius;
+  const bl = node.rectangleBottomLeftCornerRadius;
+  const all = [tl, tr, br, bl];
+  if (!all.some((v) => typeof v === 'number')) return null;
+  if (all.every((v) => typeof v === 'number') && all.every((v) => v === all[0])) return null;
+  // A corner Figma omits is square, not inherited.
+  const n = (v) => Math.round(typeof v === 'number' ? v : 0);
+  return { tl: n(tl), tr: n(tr), br: n(br), bl: n(bl) };
 }
 
 const IDENTITY = { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 };
@@ -986,17 +1000,26 @@ export function materializeFrame(scene, frame, ctx) {
     }
     const radius = cornerRadius(node);
     if (radius !== null) style.border_radius = radius;
-    else if (hasCornerRadius(node)) {
-      // Four corners that disagree collapse to nothing today: `cornerRadius()`
-      // returns null unless they all match, so an asymmetric card imports with
-      // SQUARE corners and says nothing. The bridge is not the limit — it takes
-      // per-corner radii already (setCornerRadius(id, 'TopLeft', r),
-      // border_box_api.cpp:47) and View has set_corner_radius_tl/tr/bl/br. What
-      // is missing is the carriage between: IRStyle holds ONE border_radius, so
-      // lowering this properly means widening the IR, its JSON, and codegen.
-      // Until that lands, say so rather than let the corners vanish quietly.
-      pushDiag('corner-radius-simplified', node,
-        'non-uniform corner radii have no IR representation; corners render square');
+    else {
+      // Four corners that disagree used to collapse to nothing and raise
+      // `corner-radius-simplified`, on the stated grounds that "IRStyle holds
+      // ONE border_radius, so lowering this properly means widening the IR, its
+      // JSON, and codegen".
+      //
+      // That was FALSE, and it is the third comment on this branch to assert
+      // exactly the property its code lacks. IRStyle carries all four
+      // (border_top_left_radius …, design_ir.hpp:95-98), parse_ir_style reads
+      // all four (borderTopLeftRadius …), and the bridge takes
+      // setCornerRadius(id, 'TopLeft', r). The only missing link was codegen —
+      // four lines — so an asymmetric card imported with square corners while a
+      // diagnostic explained that fixing it was a three-layer project.
+      const corners = perCornerRadii(node);
+      if (corners) {
+        style.border_top_left_radius = corners.tl;
+        style.border_top_right_radius = corners.tr;
+        style.border_bottom_right_radius = corners.br;
+        style.border_bottom_left_radius = corners.bl;
+      }
     }
     // A node's own opacity — EXCEPT the frame we are importing. A top-level
     // frame's opacity composites it against the Figma canvas; it is not part of
@@ -1748,7 +1771,6 @@ export const DIAGNOSTIC_SEVERITY = {
   'blend-unsupported': 'warning',
   'asset-missing': 'warning',
   'external-component': 'warning',
-  'corner-radius-simplified': 'warning',
   'effect-unsupported': 'warning',
   'fonts-required': 'warning',
   'icon-font-required': 'warning',

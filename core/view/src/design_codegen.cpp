@@ -702,6 +702,26 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
         // it. Every kind of node can be faded; only two kinds were honoring it.
         if (st.opacity)
             ss << ind << "setOpacity('" << target_id << "', " << *st.opacity << ");\n";
+
+        // Per-corner radii. The bridge takes setCornerRadius(id, "TopLeft", r)
+        // (widget_bridge/border_box_api.cpp) and IRStyle carries all four, but
+        // codegen only ever emitted the uniform 'All' — so an asymmetric card
+        // imported with square corners while a diagnostic explained that fixing
+        // it required "widening the IR, its JSON, and codegen". The IR and its
+        // JSON already had them; the gap was these four lines.
+        //
+        // Emitted only when the node has no uniform radius: the single 'All'
+        // call is exact when the corners agree, and one call beats four.
+        if (!st.border_radius) {
+            auto corner = [&](const char* name, const std::optional<float>& r) {
+                if (r) ss << ind << "setCornerRadius('" << target_id << "', '"
+                          << name << "', " << *r << ");\n";
+            };
+            corner("TopLeft", st.border_top_left_radius);
+            corner("TopRight", st.border_top_right_radius);
+            corner("BottomRight", st.border_bottom_right_radius);
+            corner("BottomLeft", st.border_bottom_left_radius);
+        }
     };
 
     // Emit the anchor trail in bridge-native-JS codegen too. Same

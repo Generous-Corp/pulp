@@ -1203,9 +1203,10 @@ test('an effect with no lowering is diagnosed, never dropped in silence', () => 
 
 test('non-uniform corner radii are diagnosed rather than silently squared', () => {
   // cornerRadius() returns null unless all four corners agree, so an asymmetric
-  // card imported with SQUARE corners and said nothing. The bridge takes
-  // per-corner radii already; the IR carries a single border_radius, so the
-  // honest interim is to say what is being lost rather than lose it quietly.
+  // card used to import with SQUARE corners. IRStyle carries all four radii and
+  // the bridge takes setCornerRadius(id, 'TopLeft', r), so the corners lower
+  // exactly — the earlier diagnostic that explained the loss now has nothing to
+  // report, and this asserts the values rather than the apology.
   const scene = buildScene({ nodeChanges: [
     { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
     { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
@@ -1225,11 +1226,27 @@ test('non-uniform corner radii are diagnosed rather than silently squared', () =
     { guid: { sessionID: 0, localID: 5 }, type: 'FRAME', name: 'Square',
       parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'c' }, size: { x: 50, y: 50 } },
   ]});
-  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
-  const simplified = diagnostics.filter((d) => d.code === 'corner-radius-simplified');
-  assert.equal(simplified.length, 1, 'only the asymmetric card is diagnosed');
-  assert.equal(simplified[0].node_id, '0:3');
-  assert.equal(findByName(envelope.root, 'Even').style.border_radius, 4);
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+
+  // The asymmetric card lowers per-corner, and carries NO uniform radius —
+  // emitting both would let codegen's single setCornerRadius(id, 'All', r)
+  // square off the two corners the design rounds.
+  const card = findByName(envelope.root, 'Card').style;
+  assert.equal(card.border_radius, undefined, 'no uniform radius beside per-corner ones');
+  assert.equal(card.border_top_left_radius, 8);
+  assert.equal(card.border_top_right_radius, 8);
+  assert.equal(card.border_bottom_right_radius, 0);
+  assert.equal(card.border_bottom_left_radius, 0);
+
+  // Corners that agree stay on the uniform path: one call, not four.
+  const even = findByName(envelope.root, 'Even').style;
+  assert.equal(even.border_radius, 4);
+  assert.equal(even.border_top_left_radius, undefined);
+
+  // A square node asked for nothing and must not acquire a radius of 0.
+  const square = findByName(envelope.root, 'Square').style;
+  assert.equal(square.border_radius, undefined);
+  assert.equal(square.border_top_left_radius, undefined);
 });
 
 test('the materials sidecar reports what the design declares, not what we read', () => {
