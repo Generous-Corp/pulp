@@ -8,6 +8,7 @@
 #include <pulp/midi/buffer.hpp>
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <span>
@@ -65,9 +66,16 @@ struct PluginRoutingScratch {
 // snapshot. Keep owned scratch heap-indirected so `scratch` survives moving this
 // context into `plugin_ctx`.
 struct PluginBindingContext {
+    NodeId node_id = 0;
     PluginSlot* slot = nullptr;
     PluginRoutingScratch* scratch = nullptr;
     std::unique_ptr<PluginRoutingScratch> owned_scratch;
+    using AppendParameterEventsFn =
+        std::uint64_t (*)(void*, state::ParameterEventQueue&) noexcept;
+    void* parameter_events_user_data = nullptr;
+    AppendParameterEventsFn append_parameter_events = nullptr;
+    std::atomic<std::uint64_t>* parameter_events_sequence_seen = nullptr;
+    std::uint64_t parameter_events_pending_sequence = 0;
     // Cached, prepare-stable copy of the node's transport-sensitivity capability
     // (GraphNode::transport_sensitive, resolved once at compile from
     // PluginSlot::wants_transport()). The binding reads THIS, never a live
@@ -75,6 +83,17 @@ struct PluginBindingContext {
     // anticipation partition resolve from the same value and can never disagree.
     bool wants_transport = false;
 };
+
+struct ParameterEventInjectionBinding {
+    void* user_data = nullptr;
+    PluginBindingContext::AppendParameterEventsFn append = nullptr;
+    std::atomic<std::uint64_t>* sequence_seen = nullptr;
+};
+
+void reset_plugin_parameter_event_sequences(
+    std::span<PluginBindingContext> contexts) noexcept;
+void commit_plugin_parameter_event_sequences(
+    std::span<PluginBindingContext> contexts) noexcept;
 
 // The custom-node process callback. Declared here (identical to the alias in
 // signal_graph.hpp) so this header carries no dependency on signal_graph.hpp,
@@ -196,6 +215,10 @@ struct ExecutorSnapshotBinders {
     // (baked / anticipation callers, which are not on the swap path).
     std::function<int(NodeId)> plugin_latency_for;
     std::function<const std::vector<HostParamInfo>*(NodeId)> plugin_params_for;
+    // Optional per-Plugin-node ingress binding for the control-to-audio
+    // parameter-event mailbox. Empty means this snapshot has no injected
+    // parameter events (for example baked/external routing callers).
+    std::function<ParameterEventInjectionBinding(NodeId)> parameter_events_for;
 };
 
 // Build the executor snapshot (plan + bindings) for an eligible topology,
@@ -256,7 +279,9 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                              // (baked / anticipation callers, not on the swap path).
                              const std::function<int(NodeId)>& plugin_latency_for = {},
                              const std::function<const std::vector<HostParamInfo>*(NodeId)>&
-                                 plugin_params_for = {});
+                                 plugin_params_for = {},
+                             const std::function<ParameterEventInjectionBinding(NodeId)>&
+                                 parameter_events_for = {});
 
 // Translate a prepared, eligible `graph` into `out` (snapshot + sized pool +
 // keepalive). Returns false (out.valid == false) when ineligible/unprepared. On

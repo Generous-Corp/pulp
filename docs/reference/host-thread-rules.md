@@ -48,12 +48,23 @@ live snapshot. **Never call them from the audio thread.**
   snapshot-owned lock-free mailboxes; safe to call concurrently with
   `process()`. In typical flow, the UI thread injects MIDI and reads
   extracted events.
+- `inject_parameter_events` — publishes one block of sample-offset parameter
+  events through a snapshot-owned lock-free mailbox. It is safe to call
+  concurrently with `process()` from one control-side writer. The latest
+  publication replaces any older unconsumed publication and is consumed once
+  by the next successful block. Injected events are appended after graph
+  automation, so graph automation keeps queue-capacity priority and an
+  injected event wins a stable-sort tie at the same sample offset. A `false`
+  return means the node is unavailable or the source queue already overflowed;
+  any retained source prefix is still published. If graph automation leaves
+  insufficient destination capacity, the fixed queue drops the injected tail.
 
 The TSan-oriented graph tests pin the combined contract: one thread may run
 `SignalGraph::process()` while a control thread calls `set_node_gain()`,
-`inject_midi()`, and `extract_midi()` against the prepared snapshot. See
+`inject_midi()`, `extract_midi()`, and `inject_parameter_events()` against the
+prepared snapshot. See
 `pulp-test-host-signal-graph` filter
-`"[host][graph][threading][race][tsan][midi]"`.
+`"[host][graph][threading][race][tsan]"`.
 
 ### Worker-thread producer APIs
 
@@ -85,8 +96,8 @@ called from the audio thread:
 - `set_node_parameter` / `get_node_parameter` forward to
   `PluginSlot::set_parameter` / `get_parameter`. These operate on the
   `nodes_` vector directly (via `node()`), so they are **UI-thread-only**.
-  Per-block automation goes through `ParameterEventQueue` (Phase 0C)
-  not through these.
+  Per-block automation goes through `ParameterEventQueue`, either from graph
+  automation connections or `inject_parameter_events()`, not through these.
 
 ## `PluginSlot`
 
