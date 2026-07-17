@@ -1,9 +1,10 @@
 #include <pulp/audio/loop_reader.hpp>
-
-#include <pulp/signal/interpolator.hpp>
+#include <pulp/audio/sample_interpolation.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <limits>
 
 namespace pulp::audio {
 
@@ -127,44 +128,76 @@ float LoopReader::read(BufferView<const float> source,
                        const LoopRegion& region,
                        std::uint32_t output_channel,
                        double position) noexcept {
+    return read(source, region, output_channel, position,
+                sample_interpolation_policy(region.interpolation));
+}
+
+float LoopReader::read(BufferView<const float> source,
+                       const LoopRegion& region,
+                       std::uint32_t output_channel,
+                       double position,
+                       SampleInterpolationPolicy interpolation) noexcept {
+    return read(source, region, output_channel, position,
+                PreparedSampleInterpolation{.policy = interpolation});
+}
+
+float LoopReader::read(
+    BufferView<const float> source,
+    const LoopRegion& region,
+    std::uint32_t output_channel,
+    double position,
+    const PreparedSampleInterpolation& interpolation) noexcept {
     if (source.num_channels() == 0 || source.num_samples() == 0 ||
-        !validate_loop_region(region, static_cast<std::uint64_t>(source.num_samples())).ok) {
+        !validate_loop_region(region, static_cast<std::uint64_t>(source.num_samples())).ok ||
+        !interpolation.valid() || !std::isfinite(position)) {
         return 0.0f;
     }
-    return read_validated(source, region, output_channel, position);
+    return read_validated(source, region, output_channel, position, interpolation);
 }
 
 float LoopReader::read_validated(BufferView<const float> source,
                                  const LoopRegion& region,
                                  std::uint32_t output_channel,
                                  double position) noexcept {
-    if (region.playback_mode == LoopPlaybackMode::OneShot &&
+    return read_validated(source, region, output_channel, position,
+                          sample_interpolation_policy(region.interpolation));
+}
+
+float LoopReader::read_validated(BufferView<const float> source,
+                                 const LoopRegion& region,
+                                 std::uint32_t output_channel,
+                                 double position,
+                                 SampleInterpolationPolicy interpolation) noexcept {
+    return read_validated(source, region, output_channel, position,
+                          PreparedSampleInterpolation{.policy = interpolation});
+}
+
+float LoopReader::read_validated(
+    BufferView<const float> source,
+    const LoopRegion& region,
+    std::uint32_t output_channel,
+    double position,
+    const PreparedSampleInterpolation& interpolation) noexcept {
+    if ((region.playback_mode == LoopPlaybackMode::OneShot ||
+         region.playback_mode == LoopPlaybackMode::ReverseOnce) &&
         (position < static_cast<double>(region.start_frame) ||
          position >= static_cast<double>(region.end_frame))) {
         return 0.0f;
     }
 
     const auto normalized = normalize_position(region, position);
-    const auto base = static_cast<std::int64_t>(std::floor(normalized));
-    const auto frac = static_cast<float>(normalized - static_cast<double>(base));
-
-    switch (region.interpolation) {
-        case LoopInterpolationMode::None:
-            return sample_at(source, region, output_channel, base);
-        case LoopInterpolationMode::Linear: {
-            const auto y0 = sample_at(source, region, output_channel, base);
-            const auto y1 = sample_at(source, region, output_channel, base + 1);
-            return pulp::signal::Interpolator::linear(frac, y0, y1);
-        }
-        case LoopInterpolationMode::Cubic: {
-            const auto ym1 = sample_at(source, region, output_channel, base - 1);
-            const auto y0 = sample_at(source, region, output_channel, base);
-            const auto y1 = sample_at(source, region, output_channel, base + 1);
-            const auto y2 = sample_at(source, region, output_channel, base + 2);
-            return pulp::signal::Interpolator::hermite(frac, ym1, y0, y1, y2);
-        }
+    const auto resolved = resolve_sample_interpolation_position(
+        normalized, interpolation);
+    if (!resolved.valid) return 0.0f;
+    std::array<float, kMaximumSampleInterpolationTaps> taps;
+    for (std::uint32_t tap = 0; tap < resolved.footprint.tap_count; ++tap) {
+        taps[tap] = sample_at(source, region, output_channel,
+                              resolved.base_frame +
+                                  resolved.footprint.first_offset + tap);
     }
-    return 0.0f;
+    return interpolation.evaluate(
+        resolved.fraction,
+        std::span<const float>(taps.data(), resolved.footprint.tap_count));
 }
 
 }  // namespace pulp::audio

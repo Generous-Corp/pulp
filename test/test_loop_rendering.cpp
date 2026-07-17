@@ -5,6 +5,7 @@
 #include <pulp/audio/loop_reader.hpp>
 #include <pulp/audio/loop_renderer.hpp>
 #include <pulp/audio/loop_types.hpp>
+#include <pulp/audio/sample_interpolation.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
 #include <algorithm>
@@ -23,6 +24,7 @@ using pulp::audio::LoopReader;
 using pulp::audio::LoopRenderResult;
 using pulp::audio::LoopRegion;
 using pulp::audio::LoopRenderer;
+using pulp::audio::SampleInterpolationPolicy;
 
 namespace {
 
@@ -48,6 +50,59 @@ LoopRegion region(std::uint64_t start, std::uint64_t end) {
 
 }  // namespace
 
+TEST_CASE("Sample interpolation policies keep hold and nearest distinct",
+          "[audio][sample][interpolation]") {
+    using pulp::audio::evaluate_sample_interpolation;
+    using pulp::audio::sample_interpolation_footprint;
+
+    const auto hold = sample_interpolation_footprint(
+        SampleInterpolationPolicy::Hold, 0.75f);
+    REQUIRE(hold.first_offset == 0);
+    REQUIRE(hold.tap_count == 1);
+
+    const auto nearest_below = sample_interpolation_footprint(
+        SampleInterpolationPolicy::Nearest, 0.499f);
+    REQUIRE(nearest_below.first_offset == 0);
+    REQUIRE(nearest_below.tap_count == 1);
+
+    const auto nearest_tie = sample_interpolation_footprint(
+        SampleInterpolationPolicy::Nearest, 0.5f);
+    REQUIRE(nearest_tie.first_offset == 1);
+    REQUIRE(nearest_tie.tap_count == 1);
+    REQUIRE(pulp::audio::PreparedSampleInterpolation{
+                .policy = SampleInterpolationPolicy::Nearest}.guard_frames() == 1);
+
+    const float selected[] = {12.0f};
+    REQUIRE(evaluate_sample_interpolation(
+                SampleInterpolationPolicy::Nearest, 0.5f, selected) == 12.0f);
+}
+
+TEST_CASE("Sample interpolation policies expose exact scalar footprints",
+          "[audio][sample][interpolation]") {
+    using pulp::audio::evaluate_sample_interpolation;
+    using pulp::audio::sample_interpolation_footprint;
+
+    const auto linear = sample_interpolation_footprint(
+        SampleInterpolationPolicy::Linear, 0.25f);
+    REQUIRE(linear.first_offset == 0);
+    REQUIRE(linear.tap_count == 2);
+    const float line[] = {2.0f, 6.0f};
+    REQUIRE(std::abs(evaluate_sample_interpolation(
+                         SampleInterpolationPolicy::Linear, 0.25f, line) -
+                     3.0f) < 1.0e-6f);
+
+    for (const auto policy : {SampleInterpolationPolicy::CubicHermite,
+                              SampleInterpolationPolicy::CubicLagrange}) {
+        const auto cubic = sample_interpolation_footprint(policy, 0.5f);
+        REQUIRE(cubic.first_offset == -1);
+        REQUIRE(cubic.tap_count == 4);
+        const float affine[] = {-1.0f, 0.0f, 1.0f, 2.0f};
+        REQUIRE(std::abs(evaluate_sample_interpolation(
+                             policy, 0.5f, affine) -
+                         0.5f) < 1.0e-6f);
+    }
+}
+
 TEST_CASE("LoopReader interpolates and maps mono sources to extra outputs",
           "[audio][loop][render]") {
     Buffer<float> source(1, 4);
@@ -61,6 +116,65 @@ TEST_CASE("LoopReader interpolates and maps mono sources to extra outputs",
     loop.interpolation = LoopInterpolationMode::Linear;
     const auto value = LoopReader::read(const_view(source, ptrs), loop, 1, 1.5);
     REQUIRE(std::abs(value - 15.0f) < 1.0e-6f);
+}
+
+TEST_CASE("LoopReader exposes nearest and cubic Lagrange independently of loops",
+          "[audio][sample][interpolation]") {
+    Buffer<float> source(1, 4);
+    source.channel(0)[0] = 0.0f;
+    source.channel(0)[1] = 1.0f;
+    source.channel(0)[2] = 4.0f;
+    source.channel(0)[3] = 9.0f;
+    std::vector<const float*> ptrs;
+    auto loop = region(0, 4);
+    const auto view = const_view(source, ptrs);
+
+    REQUIRE(LoopReader::read(view, loop, 0, 1.49,
+                             SampleInterpolationPolicy::Nearest) == 1.0f);
+    REQUIRE(LoopReader::read(view, loop, 0, 1.5,
+                             SampleInterpolationPolicy::Nearest) == 4.0f);
+    REQUIRE(std::abs(LoopReader::read(
+                         view, loop, 0, 1.5,
+                         SampleInterpolationPolicy::CubicLagrange) -
+                     2.25f) < 1.0e-6f);
+}
+
+TEST_CASE("LoopReader fails closed for nonrepresentable positions",
+          "[audio][sample][interpolation][contract]") {
+    Buffer<float> source(1, 4);
+    std::fill(source.channel(0).begin(), source.channel(0).end(), 1.0f);
+    std::vector<const float*> ptrs;
+    auto loop = region(0, 4);
+    const auto view = const_view(source, ptrs);
+
+    for (const auto position : {
+             std::numeric_limits<double>::quiet_NaN(),
+             std::numeric_limits<double>::infinity(),
+             -std::numeric_limits<double>::infinity(),
+         }) {
+        REQUIRE(LoopReader::read(view, loop, 0, position,
+                                 SampleInterpolationPolicy::CubicLagrange) ==
+                0.0f);
+    }
+    loop.playback_mode = LoopPlaybackMode::PingPong;
+    REQUIRE(LoopReader::read(
+                view, loop, 0,
+                static_cast<double>(std::numeric_limits<std::int64_t>::max()),
+                SampleInterpolationPolicy::CubicLagrange) == 0.0f);
+}
+
+TEST_CASE("LoopReader treats reverse one-shot positions as bounded",
+          "[audio][sample][interpolation][reverse]") {
+    Buffer<float> source(1, 4);
+    std::fill(source.channel(0).begin(), source.channel(0).end(), 1.0f);
+    std::vector<const float*> ptrs;
+    auto reverse = region(0, 4);
+    reverse.playback_mode = LoopPlaybackMode::ReverseOnce;
+    const auto view = const_view(source, ptrs);
+
+    REQUIRE(LoopReader::read(view, reverse, 0, -0.01) == 0.0f);
+    REQUIRE(LoopReader::read(view, reverse, 0, 4.0) == 0.0f);
+    REQUIRE(LoopReader::read(view, reverse, 0, 3.5) == 1.0f);
 }
 
 TEST_CASE("LoopReader resolves one-shot taps by clamping",

@@ -1,9 +1,10 @@
 #include <pulp/audio/sample_voice_renderer.hpp>
 
 #include <pulp/audio/loop_reader.hpp>
-#include <pulp/signal/interpolator.hpp>
+#include <pulp/audio/sample_interpolation.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -16,13 +17,7 @@ bool positive_finite(double value) noexcept {
 }
 
 bool valid_interpolation(LoopInterpolationMode mode) noexcept {
-    switch (mode) {
-        case LoopInterpolationMode::None:
-        case LoopInterpolationMode::Linear:
-        case LoopInterpolationMode::Cubic:
-            return true;
-    }
-    return false;
+    return valid_loop_interpolation(mode);
 }
 
 void clear_destination(BufferView<float> destination,
@@ -148,16 +143,10 @@ inline float interp_read(const float* source,
     const auto normalized = LoopReader::normalize_position(region, position);
     const auto base = static_cast<long long>(std::floor(normalized));
     const auto frac = static_cast<float>(normalized - static_cast<double>(base));
-
-    // Tap span for this interpolation mode (relative to base).
-    long long tap_lo = base;
-    long long tap_hi = base;
-    if constexpr (Mode == LoopInterpolationMode::Linear) {
-        tap_hi = base + 1;
-    } else if constexpr (Mode == LoopInterpolationMode::Cubic) {
-        tap_lo = base - 1;
-        tap_hi = base + 2;
-    }
+    constexpr auto policy = sample_interpolation_policy(Mode);
+    const auto footprint = sample_interpolation_footprint(policy, frac);
+    const auto tap_lo = base + footprint.first_offset;
+    const auto tap_hi = tap_lo + footprint.tap_count - 1;
 
     // Interior fast path: when every tap lies within [start, min(end-1,
     // src_last)] neither the OneShot clamp nor the loop wrap changes any index,
@@ -171,30 +160,24 @@ inline float interp_read(const float* source,
     const auto hi_bound =
         std::min(static_cast<long long>(region.end_frame) - 1, src_last);
     if (tap_lo >= start && tap_hi <= hi_bound) {
-        const float* p = source + static_cast<std::size_t>(base);
-        if constexpr (Mode == LoopInterpolationMode::None) {
-            return *p;
-        } else if constexpr (Mode == LoopInterpolationMode::Linear) {
-            return pulp::signal::Interpolator::linear(frac, p[0], p[1]);
-        } else {
-            return pulp::signal::Interpolator::hermite(frac, p[-1], p[0], p[1], p[2]);
+        std::array<float, 4> taps{};
+        for (std::uint32_t tap = 0; tap < footprint.tap_count; ++tap) {
+            taps[tap] = source[static_cast<std::size_t>(tap_lo + tap)];
         }
+        return evaluate_sample_interpolation(
+            policy, frac,
+            std::span<const float>(taps.data(), footprint.tap_count));
     }
 
     // Boundary path: exact per-tap clamp/wrap, identical to the original read.
-    if constexpr (Mode == LoopInterpolationMode::None) {
-        return sample_at_channel(source, source_frames, region, base);
-    } else if constexpr (Mode == LoopInterpolationMode::Linear) {
-        const auto y0 = sample_at_channel(source, source_frames, region, base);
-        const auto y1 = sample_at_channel(source, source_frames, region, base + 1);
-        return pulp::signal::Interpolator::linear(frac, y0, y1);
-    } else {
-        const auto ym1 = sample_at_channel(source, source_frames, region, base - 1);
-        const auto y0 = sample_at_channel(source, source_frames, region, base);
-        const auto y1 = sample_at_channel(source, source_frames, region, base + 1);
-        const auto y2 = sample_at_channel(source, source_frames, region, base + 2);
-        return pulp::signal::Interpolator::hermite(frac, ym1, y0, y1, y2);
+    std::array<float, 4> taps{};
+    for (std::uint32_t tap = 0; tap < footprint.tap_count; ++tap) {
+        taps[tap] = sample_at_channel(
+            source, source_frames, region, tap_lo + tap);
     }
+    return evaluate_sample_interpolation(
+        policy, frac,
+        std::span<const float>(taps.data(), footprint.tap_count));
 }
 
 float fade_out_gain(std::uint32_t position,

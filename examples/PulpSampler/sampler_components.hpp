@@ -68,9 +68,11 @@ struct SamplerVoice {
                float host_sample_rate,
                const audio::PublishedSampleView& sample_view,
                const audio::LoopRegion& region,
-               std::uint64_t source_frames) {
+               std::uint64_t source_frames,
+               const audio::PreparedSampleInterpolation& interpolation) {
         reset();
         if (!renderer.set_region(region, source_frames)) return false;
+        if (!renderer.set_interpolation(interpolation)) return false;
         note = n;
         velocity = vel;
         sample = sample_view;
@@ -88,11 +90,14 @@ struct SamplerVoice {
                         const audio::SampleAssetView& asset_view,
                         const audio::LoopRegion& region,
                         double playback_rate,
+                        const audio::PreparedSampleInterpolation& interpolation,
                         audio::SampleStreamRequesterToken requester_token,
                         std::uint64_t published_generation) {
         reset();
-        if (!stream_reader.prepare(asset_view, requester_token, region, playback_rate) ||
-            !lookahead_reader.prepare(asset_view, requester_token, region, playback_rate)) {
+        if (!stream_reader.prepare(asset_view, requester_token, region,
+                                   playback_rate, interpolation) ||
+            !lookahead_reader.prepare(asset_view, requester_token, region,
+                                      playback_rate, interpolation)) {
             reset();
             return false;
         }

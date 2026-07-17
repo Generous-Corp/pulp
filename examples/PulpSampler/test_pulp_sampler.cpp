@@ -20,6 +20,25 @@ using Catch::Matchers::WithinAbs;
 namespace pulp::examples {
 
 struct PulpSamplerTestAccess {
+    static audio::SampleInterpolationPolicy interpolation_policy(
+        const PulpSamplerProcessor& processor) {
+        return processor.current_params().interpolation;
+    }
+
+    static audio::SampleSincKernelBankView sinc_bank(
+        const PulpSamplerProcessor& processor) {
+        return processor.sinc_bank_.view();
+    }
+
+    static audio::SampleInterpolationPolicy active_resident_interpolation(
+        const PulpSamplerProcessor& processor) {
+        for (const auto& voice : processor.voices_) {
+            if (voice.active && !voice.streamed)
+                return voice.renderer.interpolation_policy();
+        }
+        return audio::SampleInterpolationPolicy::Hold;
+    }
+
     static void pause_stream_dispatch(PulpSamplerProcessor& processor, bool paused) {
         processor.streaming_.service_dispatch_paused_.store(
             paused, std::memory_order_release);
@@ -243,6 +262,15 @@ struct PulpSamplerTestAccess {
         return false;
     }
 
+    static audio::PreparedSampleInterpolation active_stream_interpolation(
+        const PulpSamplerProcessor& processor) {
+        for (const auto& voice : processor.voices_) {
+            if (voice.active && voice.streamed)
+                return voice.stream_reader.interpolation();
+        }
+        return {};
+    }
+
     static std::size_t stream_command_count(
         const PulpSamplerProcessor& processor) {
         return processor.streaming_.commands_.telemetry().pending;
@@ -368,9 +396,53 @@ TEST_CASE("PulpSampler descriptor", "[sampler]") {
     REQUIRE(d.output_buses.size() == 1);
 }
 
-TEST_CASE("PulpSampler has 8 parameters", "[sampler]") {
+TEST_CASE("PulpSampler has 9 parameters", "[sampler]") {
     SamplerFixture f;
-    REQUIRE(f.store.param_count() == 8);
+    REQUIRE(f.store.param_count() == 9);
+}
+
+TEST_CASE("PulpSampler exposes each scalar interpolation policy", "[sampler]") {
+    SamplerFixture f;
+    const audio::SampleInterpolationPolicy expected[] = {
+        audio::SampleInterpolationPolicy::Hold,
+        audio::SampleInterpolationPolicy::Nearest,
+        audio::SampleInterpolationPolicy::Linear,
+        audio::SampleInterpolationPolicy::CubicHermite,
+        audio::SampleInterpolationPolicy::CubicLagrange,
+        audio::SampleInterpolationPolicy::RatioTrackingSinc,
+    };
+    for (std::size_t index = 0; index < std::size(expected); ++index) {
+        f.store.set_value(kSamplerInterpolation, static_cast<float>(index));
+        REQUIRE(PulpSamplerTestAccess::interpolation_policy(*f.proc) ==
+                expected[index]);
+    }
+    const auto sinc = PulpSamplerTestAccess::sinc_bank(*f.proc);
+    REQUIRE(sinc.valid());
+    const auto maximum_consumption =
+        SamplerStreamingRuntime::maximum_pitch_ratio() *
+        SamplerStreamingRuntime::maximum_source_sample_rate() / 44100.0;
+    REQUIRE(sinc.select(maximum_consumption).valid());
+}
+
+TEST_CASE("PulpSampler keeps extreme resident notes audible when sinc coverage ends",
+          "[sampler][interpolation][sinc]") {
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerInterpolation, 5.0f);
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 127, 127));
+    block.run(*fixture.proc);
+
+    REQUIRE(PulpSamplerTestAccess::active_resident_interpolation(*fixture.proc) ==
+            audio::SampleInterpolationPolicy::CubicHermite);
+    const auto peak = *std::max_element(
+        block.left.begin(), block.left.end(),
+        [](float left, float right) {
+            return std::abs(left) < std::abs(right);
+        });
+    REQUIRE(std::abs(peak) > 0.01f);
 }
 
 TEST_CASE("PulpSampler loads sample", "[sampler]") {
@@ -1139,6 +1211,7 @@ TEST_CASE("PulpSampler streams continuously across the preload boundary",
     fixture.store.set_value(kSamplerAttack, 0.0f);
     fixture.store.set_value(kSamplerDecay, 0.0f);
     fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerInterpolation, 5.0f);
     REQUIRE(fixture.proc->load_sample_file(wav.path));
 
     const auto preload = fixture.proc->stream_stats().preload_frames;
@@ -1169,6 +1242,38 @@ TEST_CASE("PulpSampler streams continuously across the preload boundary",
     for (std::uint64_t frame = preload - 8; frame < preload + 8; ++frame) {
         REQUIRE_THAT(rendered[static_cast<std::size_t>(frame)], WithinAbs(0.5f, 1e-6));
     }
+}
+
+TEST_CASE("PulpSampler retunes streamed sinc across pitch modulation",
+          "[sampler][stream][interpolation][sinc][modulation]") {
+    TempSamplerWav wav("sinc_modulation", 24000, 0.5f);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerInterpolation, 5.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+
+    SamplerProcessBlock block(64);
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    block.run(*fixture.proc);
+    auto interpolation = PulpSamplerTestAccess::active_stream_interpolation(
+        *fixture.proc);
+    REQUIRE(interpolation.policy ==
+            audio::SampleInterpolationPolicy::RatioTrackingSinc);
+    REQUIRE(interpolation.sinc.wider.cutoff() == 1.0);
+
+    fixture.store.set_value(kSamplerPitch, 12.0f);
+    block.midi_in.clear();
+    block.run(*fixture.proc);
+    interpolation = PulpSamplerTestAccess::active_stream_interpolation(
+        *fixture.proc);
+    REQUIRE(interpolation.sinc.wider.cutoff() == 0.5);
+    REQUIRE(interpolation.sinc.narrower.cutoff() == 0.5);
+
+    fixture.store.set_value(kSamplerInterpolation, 1.0f);
+    block.run(*fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::active_stream_interpolation(*fixture.proc).policy ==
+            audio::SampleInterpolationPolicy::Nearest);
 }
 
 TEST_CASE("PulpSampler prewarms reverse entry before publishing a stream",
@@ -1241,6 +1346,7 @@ TEST_CASE("PulpSampler recovers lookahead after command queue backpressure",
     fixture.store.set_value(kSamplerAttack, 0.0f);
     fixture.store.set_value(kSamplerDecay, 0.0f);
     fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerInterpolation, 5.0f);
     REQUIRE(fixture.proc->load_sample_file(wav.path));
     REQUIRE(PulpSamplerTestAccess::pause_stream_command_drain(
         *fixture.proc, true));
@@ -1642,6 +1748,7 @@ TEST_CASE("PulpSampler streamed process stays allocation-free for 10000 callback
     fixture.store.set_value(kSamplerAttack, 0.0f);
     fixture.store.set_value(kSamplerDecay, 0.0f);
     fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerInterpolation, 5.0f);
     REQUIRE(fixture.proc->load_sample_file(wav.path));
 
     SamplerProcessBlock block(64);

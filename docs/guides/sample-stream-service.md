@@ -50,7 +50,7 @@ before the scratch lease is released. Release joins decode workers before cache
 windows are destroyed.
 
 `PulpSampler` is the first production-shaped integration: strict ranged WAV and
-uncompressed AIFF, pitched linear one-shots and forward/reverse crossfade loops,
+uncompressed AIFF, pitched one-shots and forward/reverse crossfade loops,
 two decode workers, and a bounded sixteen-page working set for each of eight
 independently positioned voices. Its
 service thread owns file/source/cache mutation; the callback owns only voice
@@ -76,16 +76,24 @@ from the live render cursor rather than only the offset inside one plan. That
 distance remains signed under command-queue backpressure, so lookahead catches
 up from a real lag instead of claiming a false zero lead. Partial queue retries
 refresh their accepted prefix at the current distance before adding the suffix.
-Reverse
-entry and loop policy are exposed by `PulpSampler`. Starvation gain shaping,
-interpolation quality selection beyond linear, and mip assets remain later gates.
+Reverse entry, loop policy, and interpolation quality are exposed by
+`PulpSampler`. Hold, true nearest, linear, cubic Hermite, cubic Lagrange, and a
+ratio-tracking windowed-sinc tier share one prepared footprint/evaluation
+policy across resident and paged playback. The sinc tier uses immutable,
+off-callback Kaiser tables whose cutoff narrows with source consumption and
+blends adjacent cutoff tables during modulation. If a resident playback ratio
+exceeds the prepared table range, `PulpSampler` falls back to cubic Hermite
+instead of dropping the voice. Each phase row is normalized for DC unity, and
+the streamed preload contract must cover the selected kernel's complete tap
+guard. Persisted octave mip assets and starvation gain shaping remain later
+gates.
 
 `SampleAsset` accepts streamed tails only through a service-issued registration
 proof whose source identity and page geometry match the prepared cache. The
 borrowed asset and source views remain valid only until their owners cross the
 documented audio-generation retirement watermark. `SampleStreamVoiceReader`
 provides the narrow linear forward path; `SampleStreamLoopVoiceReader` adds
-allocation-free cursor-driven one-shot, reverse, interpolation-tap, and
+allocation-free cursor-driven one-shot, reverse, prepared interpolation-tap, and
 wrap-crossfade page planning. Both return explicit ready/starved/end/stale
 results. Starvation gain policy remains a separate layer.
 
