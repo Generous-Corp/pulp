@@ -412,15 +412,22 @@ export function parseAnchors(js) {
 /**
  * jsId -> call name -> how many times it was called on that id.
  *
- * The COUNT is load-bearing, not decoration: every bridge call but one is
- * idempotent per node, and the exception is the one that was dropping material.
- * setBoxShadow takes a SINGLE layer (id, x, y, blur, spread, color), so a node
- * declaring two shadows needs two calls. Presence alone reads green on a node
- * that emitted one of two.
+ * The COUNT is load-bearing, not decoration: most bridge calls are idempotent
+ * per node, and the exception is the one that was dropping material. A box
+ * shadow carries ONE layer per call — `setBoxShadow` sets the first and
+ * `addBoxShadow` appends the rest — so a node declaring two shadows needs two
+ * calls. Presence alone reads green on a node that emitted one of two.
+ *
+ * Both spellings are matched, which is why this scans `set|add` rather than
+ * `set`. The `set`-only version scored a WORKING two-layer emit as a 19-layer
+ * drop: the audit could not see the very API added to fix what it found. A
+ * checker that hardcodes call names goes stale the moment the API grows, and
+ * a stale checker is worse than none — it sends someone to fix what is not
+ * broken.
  */
 export function parseCalls(js) {
   const byId = new Map();
-  const re = /\b(set[A-Za-z]+)\(\s*'((?:[^'\\]|\\.)*)'/g;
+  const re = /\b((?:set|add)[A-Za-z]+)\(\s*'((?:[^'\\]|\\.)*)'/g;
   let m;
   while ((m = re.exec(js))) {
     if (!byId.has(m[2])) byId.set(m[2], new Map());
@@ -524,14 +531,15 @@ export function auditCodegen(materials, envelope, js) {
           emitted: `none — no ${chk.calls.join('/')} call on this node`,
         });
       }
-      // Shadows are counted per LAYER, not per node: the bridge's setBoxShadow
-      // carries one layer, so two declared shadows need two calls. Codegen emits
-      // `st.box_shadow.front()` and stops, so the second layer dies here with
-      // nothing said — and the envelope carries both, so envelope mode reads
-      // green over it. This check is the reason --js exists.
+      // Shadows are counted per LAYER, not per node: one bridge call carries one
+      // layer, so two declared shadows need two calls. Codegen used to emit the
+      // FIRST layer and stop, which dropped the tight contact shadow off every
+      // knob and left them looking flat — while the envelope carried both, so
+      // envelope mode read green straight over it. This check is the reason
+      // --js exists, and it is what found that drop.
       if (style.box_shadow) {
         const want = splitShadowLayers(style.box_shadow).length;
-        const got = callCount(id, ['setBoxShadow']);
+        const got = callCount(id, ['setBoxShadow', 'addBoxShadow']);
         bump(declaredCounts, 'effects.shadow.layers', want);
         bump(emittedCounts, 'effects.shadow.layers', Math.min(got, want));
         if (got < want) {
@@ -539,7 +547,7 @@ export function auditCodegen(materials, envelope, js) {
             node_id: id, name: node.name, type: node.type, stage: 'codegen',
             property: 'effects.shadow.layers',
             declared: `${want} layer(s): ${style.box_shadow}`,
-            emitted: `${got} setBoxShadow call(s)`,
+            emitted: `${got} shadow call(s)`,
           });
         }
       }
