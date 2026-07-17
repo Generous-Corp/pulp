@@ -39,6 +39,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
 #include <pluginterfaces/gui/iplugview.h>
@@ -313,6 +314,51 @@ private:
     // True iff `id` was registered as a hidden controller parameter. O(1),
     // allocation-free — safe to call on the audio thread.
     bool is_registered_controller(state::ParamID id) const;
+
+    // ── process() phase helpers ──────────────────────────────────────────────
+    // process() runs these phases in a fixed order. Each reads adapter member
+    // state (midi_in_, param_events_, output_ptrs_, store_, processor_, …)
+    // directly; only per-block locals are threaded explicitly. This is pure
+    // code motion — the audio output is bit-identical to the previously
+    // monolithic process(). See vst3_adapter.cpp.
+
+    // Phase (a): clear the reused param/MIDI buffers, decode host input
+    // parameter changes into the StateStore boundary, and divert
+    // IMidiMapping-registered controller changes into midi_in_. Sorts
+    // param_events_ on exit.
+    void process_decode_input_parameters(Steinberg::Vst::ProcessData& data);
+
+    // Phase (d, f32 half): wire the host's main input, sidechain, and main
+    // output channel pointers (with f64 boundary marshalling) into the reused
+    // ptr vectors, pre-zero routed aux output buses, and report the resolved
+    // channel counts.
+    void process_wire_buffers(Steinberg::Vst::ProcessData& data, bool host_f64,
+                              bool native_f64, bool boundary_f64,
+                              int num_samples, int original_num_samples,
+                              int& in_channels, int& out_channels,
+                              int& sc_channels);
+
+    // Phase (c): VST3 processBlockBypassed pass-through. Returns true when the
+    // bypass parameter is engaged and the block was handled here (the caller
+    // returns kResultOk); false when the plugin should process normally.
+    bool process_maybe_bypass(Steinberg::Vst::ProcessData& data, bool host_f64,
+                              int in_channels, int out_channels,
+                              int original_num_samples);
+
+    // Phase (b): decode host input events (notes, per-note expression, SysEx)
+    // onto midi_in_, then sort the combined controller+note stream.
+    void process_decode_input_events(Steinberg::Vst::ProcessData& data);
+
+    // Phase (f): drain the processor's sample-accurate output parameter events
+    // and the snapshot-diff fallback into the host output parameter queues.
+    void process_publish_output_params(
+        Steinberg::Vst::ProcessData& data,
+        std::span<const state::ParamInfo> all_params);
+
+    // Phase (h): OR-accumulate the processor's pending latency/tail restart
+    // flags into restart_publisher_ (RT-safe; the host callback fires later on
+    // the main thread).
+    void process_publish_restart_flags();
 
     // Per-output-channel dry delay used during the bypass pass-through.
     // A plugin that reports latency gets host plugin-delay-compensation on
