@@ -7,6 +7,35 @@ description: Import designs from Figma, Stitch, v0, Pencil, React Native, or Cla
 
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
+## TOOLS THIS SKILL ALREADY SHIPS — reach for these before hand-rolling (read this first)
+
+Every one of these is documented further down this file. That was not enough:
+an agent verifying an import hand-rolled PIL crop scripts instead, because the
+guidance sat ~1,000 lines deep and a sibling skill told it to use PIL. If you
+are about to write a script that opens two PNGs and diffs them, stop — it
+exists:
+
+| Need | Tool |
+|---|---|
+| Labeled N-panel comparison montage | `python3 tools/import-design/montage.py --out cmp.png ...` |
+| Per-widget fidelity audit + JSON report | `python3 tools/import-design/fidelity_diff.py --render r.png --scene scene.pulp.json --assets-dir DIR --frame-reference src.png` |
+| Side-by-side + heatmap + top offending regions | `python3 tools/scripts/figma_import_diff.py` — use after EVERY codegen change |
+| Render an import at the design's own canvas size | `tools/scripts/render-figma-import.sh` |
+| Masked per-region diff vs a reference | `python3 tools/import-validation/diff_against_reference_regions.py` |
+| Re-import regression vs a golden | `python3 tools/import-validation/golden_regression.py` |
+| Rasterize Figma vector frames | `python3 tools/import-design/figma_rasterize_vector_frames.py` |
+
+**Free offline ground truth:** every `.fig` is a ZIP containing `thumbnail.png`
+(Figma's own raster of the design) and a `meta.json` whose `render_coordinates`
++ `thumbnail_size` give an EXACT canvas→thumbnail transform — no image
+alignment, no MCP, no REST, no rate limit. Note the thumbnail is ~0.4× (400 px
+wide for a 1004 px design), so it adjudicates layout, colour, and presence —
+NOT glyph-level detail. Do not draw fine conclusions from a 5× upscale of it.
+
+**`--validate` renders at the design's own canvas size** by default. Do not
+pass `--render-size` unless you specifically want a different size; a mismatched
+render and reference makes every similarity score meaningless.
+
 ## LOCAL-FIRST — never start with the REST script when Figma desktop is open (read this first)
 
 The headless REST exporter (`figma_rest_export.py`, used in the steps below) is
@@ -742,6 +771,44 @@ mind when touching this:
   overlay lane's `kindFromName` (`resolve-control.ts`, P7) shares the same
   whole-word convention for its own (InteractiveElementKind) vocabulary.
 
+### Component content is designer art — the `audio_widget: "none"` opt-out
+
+Name-token recognition must NEVER fire inside a component's own content: a
+layer literally named "knob base" / "knob ring" IS the designer's knob art, and
+promoting it paints Pulp's built-in silver knob over the design. The contract
+(same across lanes):
+
+- **The explicit opt-out**: an envelope node with `audio_widget: "none"` is a
+  real statement, not an absence — `parse_ir_audio_widget`
+  (`design_ir_json.cpp`) treats a literal `"none"` as *explicit* and skips
+  `detect_node_audio_widget` for that node. Only `"none"` opts out; unknown
+  strings still fall through to detection. The recognition resolver still runs
+  afterwards (it is keyed on component identity, not names), so a matched
+  library component becomes a real widget regardless.
+- **The `.fig` lane** (`tools/import-design/fig/scene.mjs`) expands INSTANCE
+  nodes into their master SYMBOL subtree (override guidPaths resolve by guid OR
+  `overrideKey`; multi-segment paths forward into nested instances), stamps the
+  instance + every expanded node `"none"`, and emits
+  `figma.component_key` / `main_component_name` from the master.
+- **The REST lane** (`figma_rest_export.py::walk`) stamps `"none"` on (1) any
+  INSTANCE / COMPONENT and its whole subtree — identity comes from the /nodes
+  `components` + `componentSets` maps, preferring the SET key (that is what the
+  resolver tables are keyed by); (2) any DETACHED copy — a widget-named frame
+  that directly owns raw shapes (`_owns_shape_art`) — one drawn widget whose
+  parts are art; and (3) any widget-named CONTAINER it declined to promote —
+  the pin matters because asset capture can collapse child containers into leaf
+  images, and the C++ heuristic re-run on that DEGRADED envelope would
+  re-promote the parent without it. Name promotion survives only for EMPTY /
+  text-only placeholder frames, where there is no art to destroy.
+- **Known asymmetry (follow-up)**: the TS plugin lane (`extract.ts`) and the
+  C++-side detect on `.fig` DETACHED copies do not stamp the opt-out yet, so a
+  detached knob's shape leaves can still be name-promoted there. Fix belongs in
+  the shared detect gate or per-lane stamping — mirror the REST rules.
+- Pinned by: `test_figma_rest_export.py` (instance/detached/pin cases),
+  `fig.test.mjs` (expansion + opt-out contract), and the
+  `explicit audio_widget 'none' suppresses name-based widget detection` case in
+  `test_design_import_sources.cpp` (with a promoted control sibling).
+
 ### KEY-based recognition + the recognition-resolver merge module
 
 NAME-token recognition (above) is a *fallback*. The AUTHORITATIVE recognition
@@ -786,12 +853,15 @@ SEPARATE mechanism from the 3-lane name-token vocabulary; do not conflate them.
   instance that matched but was not already recognized. This is the lane that
   turns a pixel-faithful-but-0-controls third-party design (the live Ink &
   Signal "NumberBox" case) into a wired one.
-- **The TS plugin (`extract.ts` → `widgetKindByLibraryKey`) and the Python REST
-  lane (`figma_rest_export.py`) bake recognition at CAPTURE time** for the
-  built-in library only. They are NOT yet wired to a user manifest (the TS lane
-  runs in the Figma sandbox; feeding it a user manifest needs plumbing through
-  the plugin UI). **Follow-up:** accept the user manifest in those two lanes too.
-  Until then, the C++ CLI lane is the single source for user-manifest recognition.
+- **The TS plugin (`extract.ts` → `widgetKindByLibraryKey`) bakes recognition
+  at CAPTURE time** for the built-in library only; it is NOT yet wired to a
+  user manifest (it runs in the Figma sandbox; feeding it a manifest needs
+  plumbing through the plugin UI). **The Python REST lane no longer bakes
+  widget kinds for components at all** — it emits each instance's
+  `figma.component_key` / `main_component_name` (from the /nodes `components` +
+  `componentSets` maps, SET key preferred) and lets the C++ resolver do all
+  key-based recognition, so `--recognition-manifest` works for URL imports.
+  **Follow-up:** accept the user manifest in the TS lane too.
 - **Never-silent-knob (P7) holds.** A component instance present in the design
   but matched by NO source is NEVER guessed into a kind — `apply_recognition_resolver`
   collects it into `UnmatchedComponent[]`, which the CLI surfaces as an
