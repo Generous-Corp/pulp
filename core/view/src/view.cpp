@@ -363,10 +363,10 @@ void View::paint_all(canvas::Canvas& canvas) {
     // widget's own opacity/filter layer so background, border, and children
     // composite over the frosted backdrop. Paired with the matching restore()
     // at the end of paint_all.
-    bool needs_backdrop_layer = (backdrop_blur_ > 0.0f);
+    bool needs_backdrop_layer = (backdrop_blur() > 0.0f);
     if (needs_backdrop_layer) {
         canvas.save_backdrop_filter(0, 0, bounds_.width, bounds_.height,
-                                    backdrop_blur_);
+                                    backdrop_blur());
     }
 
     // Compositing layer for opacity, blur, or post-effects.
@@ -382,7 +382,7 @@ void View::paint_all(canvas::Canvas& canvas) {
     // CSS mask-image opens a compositing layer so the masked subtree paints
     // into an offscreen buffer that the mask shader composites against via
     // kDstIn at restore time.
-    const bool needs_mask_layer = !mask_image_.empty() && mask_image_ != "none";
+    const bool needs_mask_layer = !mask_image().empty() && mask_image() != "none";
     bool needs_layer = (opacity_ < 1.0f) || (filter_blur_ > 0.0f)
                        || !filter_chain_.empty() || needs_layer_
                        || (effect_ && effect_->needs_layer())
@@ -411,7 +411,7 @@ void View::paint_all(canvas::Canvas& canvas) {
             // Module Level 1; nested filter/blend belongs inside the masked
             // content.
             canvas.save_layer_with_mask(0, 0, bounds_.width, bounds_.height,
-                                         opacity_, mask_image_, mask_size_);
+                                         opacity_, mask_image(), mask_size());
         } else if (!filter_chain_.empty()) {
             // Full CSS filter chain. Translate View::FilterOp into
             // canvas::FilterChainEntry and hand off to the canvas backend;
@@ -536,8 +536,8 @@ void View::paint_all(canvas::Canvas& canvas) {
     // without a path parser silently no-op. The clip is released by the
     // matching `canvas.restore()` at the end of paint_all; the outer
     // `canvas.save()` at function entry already covers it.
-    if (!clip_path_.empty())
-        canvas.clip_path_svg(clip_path_);
+    if (!clip_path().empty())
+        canvas.clip_path_svg(clip_path());
 
     // Per-corner border-radius: when any of the
     // setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight setters
