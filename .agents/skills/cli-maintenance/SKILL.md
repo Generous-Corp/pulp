@@ -2462,3 +2462,27 @@ Plain `exec()` is still correct for commands whose output *is* the whole result.
   back to a temp dir when HOME is unset). They were both once named `pulp_home` with
   different contracts — a silent two-sources-of-truth for a filesystem-layout invariant.
   Pick deliberately; do not "unify" them without deciding the Windows root + fallback.
+
+## Exit 2 means "could not measure" — keep it distinct from failure
+
+`audio compare` and `audio validate` both return **2** when an analyzer refuses:
+the input made the measurement meaningless, so it declined rather than answered.
+`1` stays "an error, or a check that ran and failed", `0` stays success. A script
+has to tell "your plugin is bad" from "I could not measure your plugin" — those
+call for different responses, and collapsing both into 1 destroys the
+distinction the analyzers went to some trouble to draw. New verbs that wrap a
+refusing analyzer should follow the same mapping.
+
+Catch the refusal narrowly. The spectral analyzers throw `std::invalid_argument`
+from `require()` and nothing else — no other exception type reaches the CLI from
+that layer. Catching every `std::exception` would relabel a genuine bug, or a
+`bad_alloc`, as a polite "cannot measure"; let the unexpected crash loudly.
+
+Surface the analyzer's own message verbatim. It already names the input problem
+and the fix ("use a shorter fft_length"); a vaguer wrapper is strictly worse.
+
+**A test for this must tell a refusal from a crash.** An uncaught exception dies
+with exit -1 while libc++abi prints the message on stderr anyway — so a test
+asserting only "nonzero exit and the message is present" passes on the crash and
+proves nothing. Assert the exact code, and that stderr carries no termination
+banner.
