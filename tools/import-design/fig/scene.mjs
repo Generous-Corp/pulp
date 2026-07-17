@@ -47,10 +47,57 @@ export function buildScene(message) {
     });
   }
   const pages = nodeChanges.filter((n) => n.type === 'CANVAS' && !n.internalOnly);
-  // Vector geometry lives in the root message's `blobs`, referenced by index
-  // from each node's fillGeometry/strokeGeometry, so the scene has to carry it
-  // for materializeFrame to resolve a shape.
-  return { byGuid, childrenOf, pages, blobs: nodeChanges.length ? message.blobs || [] : [] };
+  // Shared styles ARE the design's tokens: named colour/text/effect definitions
+  // that nodes point at instead of carrying a literal paint. A node referencing
+  // one stores `styleIdForFill.assetRef.key`, which matches the style node's own
+  // `key` exactly, so resolution is a plain lookup.
+  //
+  // These are load-bearing, not decorative. Figma caches the resolved colour on
+  // the referencing node only SOMETIMES: of the instrument tabs in one design,
+  // only FOLEY carried a literal fill, and FOLEY was the only tab that rendered
+  // its true colour — kick/SNARE/TOM/CRASH/RIDE each carried a style ref alone
+  // and fell back to their master's fuchsia, so a row of red/yellow/green tabs
+  // imported as an unbroken wall of pink.
+  const stylesByKey = new Map();
+  for (const node of nodeChanges) {
+    if (node.styleType && node.key) stylesByKey.set(node.key, node);
+  }
+  return {
+    byGuid, childrenOf, pages, stylesByKey,
+    blobs: nodeChanges.length ? message.blobs || [] : [],
+  };
+}
+
+/**
+ * The paints a node actually renders with, resolving a style reference against
+ * the file's style table. `which` is 'fill' or 'stroke'.
+ *
+ * Precedence follows PROVENANCE, not a blanket rule, and getting this backwards
+ * is worse than not resolving at all. A literal sitting next to a ref is usually
+ * Figma's cache of that style — but on an expanded instance the two can come
+ * from different places: the ref may be the MASTER's default while the literal
+ * is THIS instance's resolved colour. Letting the style win unconditionally
+ * repainted every instrument tab with the master's fuchsia, including the one
+ * tab that had been correct.
+ *
+ * So the style wins only when it is the sole source: the node carries no literal
+ * of its own, or an override re-pointed it at a style without supplying one
+ * (`__fillFromStyle`). Otherwise the literal is the more specific answer.
+ */
+export function resolvedPaints(scene, node, which = 'fill') {
+  const own = which === 'fill' ? node.fillPaints : node.strokePaints;
+  const ref = which === 'fill' ? node.styleIdForFill : node.styleIdForStrokeFill;
+  const key = ref && ref.assetRef && ref.assetRef.key;
+  if (!key || !scene || !scene.stylesByKey) return own;
+  const marker = which === 'fill' ? '__fillFromStyle' : '__strokeFromStyle';
+  const preferStyle = node[marker] === true || !(own && own.length);
+  if (!preferStyle) return own;
+  const style = scene.stylesByKey.get(key);
+  // An unresolvable ref means the style lives in a library this .fig does not
+  // embed. Keep the literal — a stale cached colour beats no colour at all.
+  if (!style) return own;
+  const paints = which === 'fill' ? style.fillPaints : style.strokePaints;
+  return (paints && paints.length) ? paints : own;
 }
 
 /**
@@ -218,9 +265,16 @@ const OVERRIDE_SKIP_KEYS = new Set([
   'symbolData', 'derivedSymbolData', 'derivedSymbolDataLayoutVersion',
   'overrideKey', 'overrideLevel', 'componentKey', 'componentPropAssignments',
   'variableConsumptionMap', 'parameterConsumptionMap', 'prototypeInteractions',
-  'styleIdForFill', 'styleIdForStrokeFill', 'styleIdForText', 'fontVersion',
+  'styleIdForText', 'fontVersion',
   'derivedTextData',
 ]);
+// NOTE: styleIdForFill / styleIdForStrokeFill are deliberately NOT skipped.
+// They were, back when nothing resolved styles and an unresolvable ref was just
+// noise. Now that a ref IS the colour, dropping it silently reverts an instance
+// to its master's default token: the instrument tabs each override the ref to
+// their own colour and carry no literal, so skipping it painted kick/SNARE/TOM/
+// CRASH/RIDE with the master's "instrument/02 Fuchsia 85%" and turned a
+// red/yellow/green tab row into a wall of pink.
 
 // Figma's stack alignment enums → the strings parse_align accepts
 // (design_ir_json.cpp:402). BASELINE has no Yoga equivalent and degrades to
@@ -260,6 +314,15 @@ function applyOverrideEntry(clone, entry) {
     const scale = Math.min(dsize.x / clone.size.x, dsize.y / clone.size.y);
     if (scale < 0.99) clone.strokeWeight = round2(clone.strokeWeight * scale);
   }
+  // Record where the paint came from BEFORE copying, because afterwards the
+  // clone cannot tell the master's cached literal from its own. An override
+  // that re-points a node at a style WITHOUT supplying a literal means the
+  // style is the answer and the inherited literal is the master's stale colour;
+  // an override that supplies a literal means the opposite.
+  if (entry.styleIdForFill && !entry.fillPaints) clone.__fillFromStyle = true;
+  if (entry.fillPaints) clone.__fillFromStyle = false;
+  if (entry.styleIdForStrokeFill && !entry.strokePaints) clone.__strokeFromStyle = true;
+  if (entry.strokePaints) clone.__strokeFromStyle = false;
   for (const [k, v] of Object.entries(entry)) {
     if (v === undefined || OVERRIDE_SKIP_KEYS.has(k)) continue;
     clone[k] = v;
@@ -356,6 +419,20 @@ export function materializeFrame(scene, frame, ctx) {
       detail: detail || null,
       severity: DIAGNOSTIC_SEVERITY[code] || 'info',
     });
+  }
+
+  // Swap a node's style-referenced paints for the style's real ones. Returns
+  // the node untouched when it references nothing, so the common path allocates
+  // nothing; otherwise a shallow copy keeps the shared master node — reused by
+  // every instance of it — free of per-walk mutation.
+  const styledNodes = new Set();
+  function withResolvedPaints(node) {
+    if (!node.styleIdForFill && !node.styleIdForStrokeFill) return node;
+    const fill = resolvedPaints(scene, node, 'fill');
+    const stroke = resolvedPaints(scene, node, 'stroke');
+    if (fill === node.fillPaints && stroke === node.strokePaints) return node;
+    styledNodes.add(guidKey(node.guid));
+    return { ...node, fillPaints: fill, strokePaints: stroke };
   }
 
   // `parent` decides whether this node's own coordinates matter. A Figma frame
@@ -567,6 +644,10 @@ export function materializeFrame(scene, frame, ctx) {
       const expanded = expandInstance(node);
       if (expanded) node = expanded;
     }
+    // Resolve style tokens ONCE, here, so every paint reader below sees the
+    // colour the design actually specifies. Doing it at each call site instead
+    // would mean a dozen chances to forget one.
+    node = withResolvedPaints(node);
     const key = node.__key || guidKey(node.guid);
     // Guard against a malformed graph whose parentIndex links form a cycle; a
     // node reached twice would otherwise recurse without bound.

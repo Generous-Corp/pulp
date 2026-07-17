@@ -307,6 +307,80 @@ test('absolute children keep their Figma coordinates; auto-layout children do no
   assert.ok(!('top' in row.style), 'auto-layout child carries no coordinates');
 });
 
+test('a style-referenced fill resolves to the style, not the master default', () => {
+  // Shared styles are the design's tokens, and Figma caches the resolved colour
+  // on the referencing node only sometimes. In one real design only the FOLEY
+  // tab carried a literal fill — and FOLEY was the only tab that imported in its
+  // true colour. kick/SNARE/TOM/CRASH/RIDE carried a style ref alone, so they
+  // fell back to their master's fuchsia and a row of red/yellow/green tabs
+  // arrived as a wall of pink. The style ref must be honoured on its own.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 40 } },
+    // The style definition. Its `key` is what a referencing node points at.
+    { guid: { sessionID: 0, localID: 9 }, type: 'FRAME', name: 'instrument/04 Yellow 85%',
+      styleType: 'FILL', key: 'STYLEKEY_YELLOW',
+      fillPaints: [{ type: 'SOLID', color: { r: 0.961, g: 0.757, b: 0.318, a: 1 } }] },
+    // A tab whose colour lives ONLY in the style — no literal to fall back on.
+    // Without resolution this node has no paint at all.
+    { guid: { sessionID: 0, localID: 3 }, type: 'RECTANGLE', name: 'SNARE tab',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 40, y: 20 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+      styleIdForFill: { assetRef: { key: 'STYLEKEY_YELLOW', version: '1:1' } } },
+    // An unresolvable ref (style lives in a library the .fig omits): the stale
+    // literal is better than nothing, so it must survive.
+    { guid: { sessionID: 0, localID: 4 }, type: 'RECTANGLE', name: 'Orphan tab',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 40, y: 20 },
+      transform: { m00: 1, m01: 0, m02: 50, m10: 0, m11: 1, m12: 0 },
+      fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 1, a: 1 } }],
+      styleIdForFill: { assetRef: { key: 'MISSING_FROM_FILE', version: '1:1' } } },
+  ]});
+  const f = materializeFrame(scene, findFrame(scene, 'Root'), { images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
+  const [snare, orphan] = f.envelope.root.children;
+  assert.equal(snare.style.background_color, '#f5c151', 'a ref with no literal resolves to the style');
+  assert.equal(orphan.style.background_color, '#0000ff', 'an unresolvable ref keeps its literal');
+});
+
+test('an instance override supplying a literal beats the master style ref', () => {
+  // The counterpart bound, and a regression I actually shipped: making the style
+  // win unconditionally repainted EVERY instrument tab with the master's
+  // fuchsia — including FOLEY, the one tab that had been correct, because its
+  // instance override carries the literal while the master's ref still points at
+  // the default. Precedence follows provenance: the override is more specific.
+  const master = { sessionID: 0, localID: 30 };
+  const child  = { sessionID: 0, localID: 31 };
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 40 } },
+    { guid: { sessionID: 0, localID: 9 }, type: 'FRAME', name: 'instrument/02 Fuchsia 85%',
+      styleType: 'FILL', key: 'STYLE_FUCHSIA',
+      fillPaints: [{ type: 'SOLID', color: { r: 0.965, g: 0.443, b: 0.557, a: 1 } }] },
+    // Master: swatch points at the fuchsia style by default.
+    { guid: master, type: 'SYMBOL', name: 'tab' },
+    { guid: child, type: 'RECTANGLE', name: 'swatch',
+      parentIndex: { guid: master, position: 'a' }, size: { x: 40, y: 20 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+      fillPaints: [{ type: 'SOLID', color: { r: 0.965, g: 0.443, b: 0.557, a: 1 } }],
+      styleIdForFill: { assetRef: { key: 'STYLE_FUCHSIA', version: '1:1' } } },
+    // Instance: override supplies its OWN literal (blue), like FOLEY.
+    { guid: { sessionID: 0, localID: 40 }, type: 'INSTANCE', name: 'FOLEY tab',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 40, y: 20 },
+      symbolData: { symbolID: master, symbolOverrides: [
+        { guidPath: { guids: [child] },
+          fillPaints: [{ type: 'SOLID', color: { r: 0.455, g: 0.604, b: 0.984, a: 1 } }] },
+      ] } },
+  ]});
+  const f = materializeFrame(scene, findFrame(scene, 'Root'), { images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
+  const swatch = f.envelope.root.children[0].children[0];
+  assert.equal(swatch.name, 'swatch');
+  assert.equal(swatch.style.background_color, '#749afb',
+    "the instance's own colour must not be repainted by the master's style");
+});
+
 test('auto-layout lands on the sibling `layout` object the IR actually reads', () => {
   // The counterpart to the test above, and the reason it was not enough: taking
   // a child's coordinates away is only safe if the parent's flex SURVIVES. It
