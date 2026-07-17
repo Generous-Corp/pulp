@@ -57,6 +57,18 @@ of it into version control.
 `--hits` takes `MS:VEL` pairs — **milliseconds**, not samples and not beats. The
 example above is a pair of velocity-100 hits 60 ms apart.
 
+By default, a final render whose peak does not exceed `1e-6` exits with status
+5 and prints `RESULT: SILENT render`. This is the normal validation behavior:
+an accidentally silent reference render must not look like a successful
+measurement. Use `--allow-silent` only when silence is the expected subject of
+the experiment, such as a zero-velocity or muted-control baseline. The tool
+will then write the silent WAV, exit successfully, and print
+`RESULT: SILENT (allowed)` so the exception remains visible in logs.
+
+`--allow-silent` does not make an undiscovered instrument or failed load pass,
+and it does not bypass the automatic note sweep. Supply `--note` when the
+experiment intentionally targets a silent note or trigger condition.
+
 `--list-params` dumps the loaded instrument's parameter IDs, which is how the
 IDs below were found. TR-808 bass drum:
 

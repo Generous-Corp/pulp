@@ -11,7 +11,7 @@
 //   au_instrument_probe --name "TR-808" [--out /tmp/tr808.wav]
 //                       [--note N] [--sweep-low 24] [--sweep-high 96]
 //                       [--seconds 2.0] [--list-params] [--set-param ID=VAL]
-//                       [--hits MS:VEL,MS:VEL,...]
+//                       [--hits MS:VEL,MS:VEL,...] [--allow-silent]
 
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/buffer.hpp>
@@ -176,6 +176,7 @@ int main(int argc, char** argv) {
     int sweep_low = 24, sweep_high = 96;
     double seconds = 2.0;
     bool list_params = false;
+    bool allow_silent = false;
     std::vector<std::pair<uint32_t, float>> param_sets;
     std::vector<Hit> hits;
 
@@ -214,6 +215,7 @@ int main(int argc, char** argv) {
             }
         }
         else if (arg == "--list-params") list_params = true;
+        else if (arg == "--allow-silent") allow_silent = true;
         else if (arg == "--set-param") {
             // ID=VALUE, in the parameter's plain (not normalized) domain.
             auto spec = next();
@@ -318,7 +320,7 @@ int main(int argc, char** argv) {
                 best_note, seconds, final_r.peak, final_r.rms,
                 final_r.peak > 0 ? 20.0 * std::log10(final_r.peak) : -999.0);
 
-    if (final_r.peak <= 1e-6f) {
+    if (final_r.peak <= 1e-6f && !allow_silent) {
         std::printf("RESULT: SILENT render\n");
         return 5;
     }
@@ -332,6 +334,7 @@ int main(int argc, char** argv) {
     }
     std::printf("wrote: %s (%llu frames, float32)\n", out_path.c_str(),
                 (unsigned long long)data.num_frames());
-    std::printf("RESULT: WORKING\n");
+    std::printf("RESULT: %s\n",
+                final_r.peak <= 1e-6f ? "SILENT (allowed)" : "WORKING");
     return 0;
 }
