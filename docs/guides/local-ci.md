@@ -234,10 +234,19 @@ It is tiered:
   (`-j$(nproc)` / `-j$(sysctl -n hw.ncpu)` / `--parallel $(getconf
   _NPROCESSORS_ONLN)`): it has a count, so it is not unbounded, but on a shared
   Mac it claims every core, so N concurrent builds request N × cores and starve
-  each other. On a GitHub-hosted ephemeral runner that same `-j$(nproc)` is
-  correct and is NOT flagged — the rule is a property of the host, not the
-  command. The steer is `pulp build` / `tools/ci/governed-build.sh`, which take
-  their `-j` from the governor.
+  each other. The rule is a property of the host, not the command — so the guard
+  fires only where a static scan can *prove* the surface is shared. It does NOT
+  scan `.github/workflows/**`, and **not** because a workflow leg never shares a
+  box: a workflow's `runs-on` is resolved dynamically (often
+  `${{ fromJSON(matrix.runs_on_json) }}` or a repo var) and can point at the
+  shared self-hosted Studios — Pulp's own macOS matrix leg resolves to
+  `PULP_LOCAL_MACOS_RUNS_ON_JSON`, the Studios that host the required `macos`
+  gate. A file scan cannot resolve that, so in a workflow the bound is the
+  **author's** responsibility: route a self-hosted macOS leg through
+  `tools/ci/governed-build.sh` (as `build.yml`'s intel-canary compile,
+  `examples-validation.yml`, `web-plugins.yml`'s `gpu-audio-macos` job, and
+  `format-baseline-diff.yml` now do). The steer everywhere is `pulp build` /
+  `tools/ci/governed-build.sh`, which take their `-j` from the governor.
 - **Tier 1 — tartci per-host lease governor.** On a host running a tartci lease
   store, builds and VM runners acquire a weighted core+memory lease before
   starting; admission is `min(core-budget, memory-budget)`, so a build that

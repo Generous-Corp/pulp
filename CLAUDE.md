@@ -119,11 +119,17 @@ more. Fairness under contention comes from the lease, not from this fallback.
 a bare `cmake --build … --parallel` (unbounded `make -j`) *everywhere*, and an
 explicit-but-whole-machine core-count expansion on the shared-host surfaces
 agents copy from (`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`). It
-does NOT flag `-j$(nproc)` on a GitHub-hosted ephemeral runner
-(`.github/workflows/**`), where nothing else shares the box and using every core
-is correct — the rule is a property of the host, not the command. When adding a
-build command anywhere, give `--parallel`/`-j` a bounded share (or route it
-through the governor), not the machine's core count.
+does NOT scan `.github/workflows/**` for whole-machine — **not** because those
+runners never share a box, but because a workflow's `runs-on` is resolved
+dynamically (e.g. `${{ fromJSON(matrix.runs_on_json) }}`) and a static scan
+cannot tell whether a leg is ephemeral or one of the shared self-hosted Studios
+(the macOS matrix leg resolves to `PULP_LOCAL_MACOS_RUNS_ON_JSON` — the shared
+Studios that host the required `macos` gate). In a workflow, bounding a
+whole-machine build is therefore the **author's** job: route a self-hosted leg
+through `tools/ci/governed-build.sh` (as `build.yml`, `examples-validation.yml`,
+`web-plugins.yml`, and `format-baseline-diff.yml` do for their macOS legs). When
+adding a build command anywhere, give `--parallel`/`-j` a bounded share (or route
+it through the governor), not the machine's core count.
 
 **External SDKs** (not committed, cloned at configure time or manually):
 - VST3 SDK → `external/vst3sdk` (MIT, `git clone --depth 1 --branch v3.8.0_build_66`)
@@ -1608,6 +1614,10 @@ the VM runners (Tier 1 leases). `pulp status` prints a `Build governance: Tier N
 `--parallel`/`-j` anywhere in the repo — and, on the shared-host surfaces agents
 copy from (`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`), an
 explicit-but-whole-machine core-count expansion (`-j$(nproc)` and friends) — is
-rejected by `tools/scripts/build_parallelism_guard.py`; the same expansion stays
-allowed on ephemeral CI (`.github/workflows/**`). Host-side tartci details (lease
-store, memory axis, role profiles) live in `docs/guides/local-ci.md`.
+rejected by `tools/scripts/build_parallelism_guard.py`. The guard does not scan
+`.github/workflows/**` for whole-machine, because a workflow's `runs-on` is
+dynamic and may itself resolve to a shared self-hosted runner — so bounding a
+whole-machine build there is the workflow author's job (route the self-hosted leg
+through the governor), not something the scan can enforce. Host-side tartci
+details (lease store, memory axis, role profiles) live in
+`docs/guides/local-ci.md`.

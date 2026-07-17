@@ -91,9 +91,12 @@ jobs:
           # target is missing because its SDK couldn't be fetched
           # (transient network failure), build the rest and let
           # format_baseline_diff.py skip the missing lane.
+          # This job resolves to PULP_LOCAL_MACOS_RUNS_ON_JSON — the shared
+          # self-hosted Studios — so each format build takes a governed share
+          # (a tartci lease) instead of `-j$(sysctl -n hw.ncpu)` (every core).
           available=()
           for fmt in AU VST3 CLAP; do
-            if cmake --build build --target PulpEffect_$fmt -j"$(sysctl -n hw.ncpu)" 2>/dev/null; then
+            if tools/ci/governed-build.sh cmake --build build --target PulpEffect_$fmt 2>/dev/null; then
               available+=("PulpEffect_$fmt")
               echo "Built PulpEffect_$fmt"
             else

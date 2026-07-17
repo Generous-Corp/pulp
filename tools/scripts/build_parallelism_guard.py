@@ -13,12 +13,25 @@ Two distinct failure classes:
   directly (``-j$(sysctl -n hw.ncpu)`` / ``-j$(nproc)`` /
   ``--parallel $(getconf _NPROCESSORS_ONLN)`` / ``%NUMBER_OF_PROCESSORS%``).
   It is bounded — it has a count — yet it claims *every* core, so N concurrent
-  builds request N × cores and starve each other. On a GitHub-hosted ephemeral
-  runner nothing else is on the box, so this is exactly right; on a SHARED host
-  (the local dev Macs, where several agents and a validation lane build at once)
-  it is the melt. The distinction is a property of the **host**, not the command
-  — so whole-machine is flagged only on the shared-host surfaces below, and left
-  alone on the ephemeral-CI surfaces.
+  builds request N × cores and starve each other. On a runner that is truly
+  ephemeral and unshared this is exactly right; on a SHARED host (the local dev
+  Macs, where several agents and a validation lane build at once) it is the melt.
+  The distinction is a property of the **host**, not the command — and a static
+  file scan cannot always tell which host a line runs on. So whole-machine is
+  flagged only on the surfaces this scan *can* classify as shared: the ones
+  agents copy from (CLAUDE.md, .shipyard/config.toml, .agents/skills/**).
+
+  ``.github/workflows/**`` is deliberately NOT scanned for whole-machine — but
+  **not** because "nothing shares the box" there. A workflow's ``runs-on`` is
+  resolved at dispatch, often dynamically (``${{ fromJSON(matrix.runs_on_json)
+  }}`` or a repo var), and can point at a self-hosted, shared runner: Pulp's own
+  macOS matrix leg resolves to ``PULP_LOCAL_MACOS_RUNS_ON_JSON`` — the shared
+  Studios that host the required ``macos`` gate. A file scan cannot know that
+  statically, so it does not pretend to. In a workflow, bounding a whole-machine
+  build is the **author's** responsibility: route a self-hosted leg through
+  ``tools/ci/governed-build.sh`` (a tartci lease share) or a derived slice, the
+  way ``build.yml`` / ``examples-validation.yml`` / ``web-plugins.yml`` /
+  ``format-baseline-diff.yml`` already do for their self-hosted macOS legs.
 
 A build should take a *share* of a shared host, not the whole thing: a governed
 path (``pulp build``, or ``tools/ci/governed-build.sh`` which acquires a tartci
@@ -66,11 +79,14 @@ SCAN_DIRS = {
     ".github/workflows": (".yml", ".yaml"),
 }
 
-# Surfaces whose build commands run on a SHARED host — the local dev Macs, where
-# several agents and a validation lane build at once. Here (and ONLY here) a
-# whole-machine job count is also a finding: on an ephemeral runner `-j$(nproc)`
-# is the correct way to use the box; on a shared Mac it is the melt. The
-# distinction is the host, not the command.
+# Surfaces this scan can classify with certainty as SHARED — the local dev Macs,
+# where several agents and a validation lane build at once. Here (and ONLY here)
+# a whole-machine job count is also a finding. This is NOT the complete set of
+# shared-host build strings in the repo: a `.github/workflows/**` leg can also
+# resolve to a shared self-hosted runner (see the module docstring), but its
+# `runs-on` is dynamic and unresolvable by a file scan, so those are bounded by
+# the workflow author, not flagged here. These paths are the ones a scan CAN
+# pin down: literal copy-from surfaces agents lift build commands out of.
 SHARED_HOST_FILES = [
     "CLAUDE.md",              # the command agents copy-paste onto the shared Mac
     ".shipyard/config.toml",  # validation lanes run on the local self-hosted Macs
@@ -237,8 +253,10 @@ def scan_file_kinds(path: Path, shared_host: bool | None = None) -> list[tuple[i
         for pattern in (PARALLEL, DASH_J):
             for m in pattern.finditer(code):
                 kind = _classify(code, m.end())
-                # A whole-machine count is only a finding on a shared host; on an
-                # ephemeral runner it is the correct way to use the box.
+                # A whole-machine count is only a finding on a surface this scan
+                # has classified as shared. A non-shared surface here includes
+                # `.github/workflows/**`, whose `runs-on` a file scan cannot
+                # resolve — the workflow author owns bounding those (docstring).
                 if kind == "whole-machine" and not shared_host:
                     continue
                 if kind:
@@ -318,9 +336,13 @@ def main(argv: list[str]) -> int:
               "macos gate validating in one of those checkouts starves with them). "
               "Prefer `pulp build` / `tools/ci/governed-build.sh`, which take their "
               "job count from the host governor. In a raw command, derive a share "
-              "($(( $(nproc) / 4 ))) or use a literal. This is a shared-host rule: "
-              "on a GitHub-hosted ephemeral runner `-j$(nproc)` is correct and is "
-              "NOT flagged.", file=sys.stderr)
+              "($(( $(nproc) / 4 ))) or use a literal. This flag fires only on the "
+              "surfaces the scan can classify as shared (CLAUDE.md, "
+              ".shipyard/config.toml, .agents/skills/**); it does NOT scan "
+              "`.github/workflows/**`, whose `runs-on` is dynamic and may itself be "
+              "a self-hosted shared runner — bounding a whole-machine build there is "
+              "the workflow author's job (route the self-hosted leg through the "
+              "governor).", file=sys.stderr)
 
     if bare or whole:
         return 1

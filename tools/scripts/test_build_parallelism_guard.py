@@ -93,8 +93,9 @@ class BareClassTest(unittest.TestCase):
 
 class WholeMachineClassTest(unittest.TestCase):
     """The `whole-machine` class — an explicit but undivided core-count read — is
-    the melt on a SHARED host, and exactly right on an ephemeral CI runner. The
-    finding is a property of the host, not the command."""
+    the melt on a SHARED host, and correct only on a runner that is genuinely
+    unshared. The finding is a property of the host, not the command — so the
+    guard flags it only where it can classify the surface as shared."""
 
     WHOLE_MACHINE = [
         "cmake --build build -j$(nproc)\n",
@@ -109,9 +110,11 @@ class WholeMachineClassTest(unittest.TestCase):
         for cmd in self.WHOLE_MACHINE:
             self.assertEqual(kinds(cmd, shared_host=True), ["whole-machine"], cmd)
 
-    def test_whole_machine_is_accepted_on_an_ephemeral_ci_surface(self):
-        # The refutation of the blanket rule: the SAME command on a
-        # GitHub-hosted ephemeral runner is correct and must NOT be flagged.
+    def test_whole_machine_is_not_flagged_on_an_unclassified_surface(self):
+        # The SAME command on a surface the scan does not classify as shared is
+        # not flagged. That is a limit of static classification, not a promise
+        # the surface is unshared: `.github/workflows/**` lands here, and one of
+        # its legs can be self-hosted (see the workflow-author-owns test below).
         for cmd in self.WHOLE_MACHINE:
             self.assertEqual(kinds(cmd, shared_host=False), [], cmd)
 
@@ -190,7 +193,12 @@ class SharedHostClassificationTest(unittest.TestCase):
         ):
             self.assertTrue(guard.is_shared_host_surface(self._p(rel)), rel)
 
-    def test_ephemeral_and_other_surfaces_are_not_shared_host(self):
+    def test_unclassifiable_and_other_surfaces_are_not_shared_host(self):
+        # A `.github/workflows` file is NOT a shared-host surface for this scan —
+        # not because such a leg is always unshared (it is not: build.yml's macOS
+        # leg resolves to the shared self-hosted Studios), but because its
+        # `runs-on` is dynamic and a static scan cannot resolve it. The other
+        # entries are genuinely not copy-from shared surfaces.
         for rel in (
             ".github/workflows/build.yml",
             "tools/scripts/local_diff_cover.sh",
@@ -198,6 +206,41 @@ class SharedHostClassificationTest(unittest.TestCase):
             "ci/some-lane.yml",
         ):
             self.assertFalse(guard.is_shared_host_surface(self._p(rel)), rel)
+
+
+class WorkflowAuthorOwnsWholeMachineTest(unittest.TestCase):
+    """`.github/workflows/**` is not scanned for whole-machine because a file
+    scan cannot resolve a dynamic `runs-on` to a specific host. The honest
+    contract: the workflow author bounds a self-hosted leg directly. These tests
+    pin both halves so the exemption cannot silently regress to a false premise."""
+
+    def test_workflow_whole_machine_is_not_flagged_by_the_scan(self):
+        # build.yml's intel-canary leg is macOS-only and resolves to the shared
+        # self-hosted Studios; the scan still cannot see that statically, so a
+        # whole-machine line in a workflow is not a guard finding.
+        step = "cmake --build build-intel-canary -j$(sysctl -n hw.ncpu) --target foo\n"
+        self.assertEqual(kinds(step, suffix=".yml", shared_host=False), [])
+
+    def test_the_known_self_hosted_legs_are_bounded_in_the_workflow_files(self):
+        # The guard cannot enforce this, so the author must: the self-hosted
+        # macOS legs route their build through the governor and carry no
+        # whole-machine -j. This asserts that hand-bounding actually landed.
+        import re
+        root = guard.REPO_ROOT
+        for rel in (
+            ".github/workflows/build.yml",
+            ".github/workflows/format-baseline-diff.yml",
+            ".github/workflows/web-plugins.yml",
+        ):
+            text = (root / rel).read_text(encoding="utf-8")
+            # No *executed* whole-machine build command survives (matches in
+            # prose/comments are allowed; a real command starts the line).
+            for line in text.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue
+                if re.search(r'cmake\s+--build.*-j"?\$\(sysctl -n hw\.ncpu\)', stripped):
+                    self.fail(f"{rel}: un-governed whole-machine build survives: {stripped}")
 
 
 class TreeIsCleanTest(unittest.TestCase):
