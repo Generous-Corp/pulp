@@ -32,6 +32,7 @@ struct SamplerVoice {
     std::uint32_t pending_demand_index = 0;
     std::uint32_t pending_refresh_index = 0;
     std::uint32_t stream_boundary_demand_index = 0;
+    std::uint32_t streamed_mip_octave = 0;
     double stream_playback_rate = 0.0;
     double lookahead_lead_source_frames = 0.0;
     bool streamed = false;
@@ -55,6 +56,7 @@ struct SamplerVoice {
         pending_demand_index = 0;
         pending_refresh_index = 0;
         stream_boundary_demand_index = 0;
+        streamed_mip_octave = 0;
         stream_playback_rate = 0.0;
         lookahead_lead_source_frames = 0.0;
         streamed = false;
@@ -98,7 +100,8 @@ struct SamplerVoice {
                         double playback_rate,
                         const audio::PreparedSampleInterpolation& interpolation,
                         audio::SampleStreamRequesterToken requester_token,
-                        std::uint64_t published_generation) {
+                        std::uint64_t published_generation,
+                        std::uint32_t mip_octave = 0) {
         reset();
         if (!stream_reader.prepare(asset_view, requester_token, region,
                                    playback_rate, interpolation) ||
@@ -113,6 +116,7 @@ struct SamplerVoice {
         requester = requester_token;
         stream_playback_rate = playback_rate;
         selection_generation = published_generation;
+        streamed_mip_octave = mip_octave;
         streamed = true;
         stream_attack_pending = region.reverse_entry ||
             region.playback_mode == audio::LoopPlaybackMode::ReverseOnce;
