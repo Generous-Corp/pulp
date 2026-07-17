@@ -186,6 +186,9 @@ pulp_add_test_suite(pulp-test-osc-blep LIBRARIES pulp::signal pulp::audio-analys
 pulp_add_test_suite(pulp-test-osc-va LIBRARIES pulp::signal pulp::audio-analysis)
 # Sync and through-zero FM are gated on measured alias rejection too.
 pulp_add_test_suite(pulp-test-osc-sync LIBRARIES pulp::signal pulp::audio-analysis)
+# The circuit-flavored VCO's core is gated on measured alias rejection, and its
+# deterministic character stages on level/DC/pitch correctness.
+pulp_add_test_suite(pulp-test-osc-vco LIBRARIES pulp::signal pulp::audio-analysis)
 # SF-2 crossfade unification: live_kernel structural-swap fade now matches the
 # native signal::TransitionMixer (EqualPower) law bit-for-bit — an intended,
 # documented behavior change (the fade previously used a linear theta).
