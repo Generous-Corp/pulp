@@ -167,7 +167,7 @@ TEST_CASE("Pitch estimator does not drop a pure tone to a subharmonic",
 TEST_CASE("f0(t) trajectory recovers a known linear glide", "[audio][pitch]") {
     // A 220 -> 440 Hz linear glide over ~1.37 s. The extracted trajectory must
     // follow it: every voiced frame lands within a few cents of the true
-    // instantaneous frequency at the frame's centre time.
+    // instantaneous frequency at the frame's center time.
     const double f0 = 220.0, f1 = 440.0;
     const int n = 1 << 16;
     std::vector<float> x(static_cast<std::size_t>(n));
@@ -202,15 +202,15 @@ TEST_CASE("f0(t) trajectory recovers a known linear glide", "[audio][pitch]") {
 TEST_CASE("f0(t) trajectory recovers a known sinusoidal vibrato",
           "[audio][pitch]") {
     // Vibrato: f(t) = 440 + 20·sin(2π·5·t). The trajectory must recover the
-    // centre pitch and the modulation depth (a windowed estimator slightly
+    // center pitch and the modulation depth (a windowed estimator slightly
     // under-reads the extremes, so the depth tolerance is one-sided-loose).
-    const double centre = 440.0, depth = 20.0, rate = 5.0;
+    const double center = 440.0, depth = 20.0, rate = 5.0;
     const int n = 1 << 16;
     std::vector<float> x(static_cast<std::size_t>(n));
     double phase = 0.0;
     for (int i = 0; i < n; ++i) {
         const double t = static_cast<double>(i) / kSampleRate;
-        const double f = centre + depth * std::sin(2.0 * kPi * rate * t);
+        const double f = center + depth * std::sin(2.0 * kPi * rate * t);
         phase += 2.0 * kPi * f / kSampleRate;
         x[static_cast<std::size_t>(i)] = static_cast<float>(0.5 * std::sin(phase));
     }
@@ -231,7 +231,7 @@ TEST_CASE("f0(t) trajectory recovers a known sinusoidal vibrato",
     const double mean = sum / static_cast<double>(voiced.size());
     const double recovered_depth = 0.5 * (hi - lo);
     INFO("mean = " << mean << " recovered depth = " << recovered_depth);
-    REQUIRE_THAT(mean, WithinAbs(centre, 4.0));
+    REQUIRE_THAT(mean, WithinAbs(center, 4.0));
     // Recovered depth sits below the true depth (window averaging) but must be
     // clearly present and not overshoot.
     REQUIRE(recovered_depth > 0.7 * depth);

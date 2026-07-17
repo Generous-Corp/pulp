@@ -187,7 +187,7 @@ PitchEstimate estimate_pitch(std::span<const float> samples, double sample_rate,
             fundamental_hz = candidate; // adopt the lowest qualifying subharmonic
     }
 
-    // ── Refine: maximise the single-tone fitted energy in a one-bin bracket. ──
+    // ── Refine: maximize the single-tone fitted energy in a one-bin bracket. ──
     const double lo = std::max(fundamental_hz - bin_hz, lo_band);
     const double hi = std::min(fundamental_hz + bin_hz, 0.499 * sample_rate);
     const double refined =
