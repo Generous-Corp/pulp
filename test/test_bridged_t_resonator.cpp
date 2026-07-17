@@ -644,15 +644,19 @@ TEST_CASE("a strike lands in the ring it finds, not a cleared one",
 // gain at its output.
 // ---------------------------------------------------------------------------
 
-TEST_CASE("accent is not output gain", "[va-drum][accent]") {
+TEST_CASE("accent gain null recovers a true gain and is blind to pitch",
+          "[va-drum][accent]") {
+    // The best-fit-gain null is a valid ruler for one question only: is the
+    // whole difference between two renders a single scalar gain? It answers
+    // that by least-squares over the raw waveform, which makes it exact for a
+    // real gain and useless for anything that shifts phase.
     RenderSpec ref_spec;
     ref_spec.accent = kAccentMax;
     const auto reference = render(ref_spec);
 
-    SECTION("the null succeeds when the difference really is a gain") {
-        // Control. The level pot is a linear divider, so the best-fit gain must
-        // recover it exactly and leave nothing behind. Without this, a test
-        // that only shows accent failing to null could just be a broken test.
+    SECTION("a true output gain nulls to nothing") {
+        // The level pot is a linear divider at the same accent, so pitch and
+        // phase are identical and the null must recover the ratio exactly.
         RenderSpec quiet = ref_spec;
         quiet.level = 0.5;
         const auto null = best_fit_gain_null(render(quiet), reference);
@@ -660,20 +664,71 @@ TEST_CASE("accent is not output gain", "[va-drum][accent]") {
         REQUIRE(null.residual < 1e-9);
     }
 
-    SECTION("the null fails across accent") {
-        // The pulse shaper's rising edge scales with the trigger amplitude
-        // while its falling edge is pinned at one diode drop, so accent changes
-        // the ratio of the two edges that kick the resonator -- and the ring
-        // amplitude then moves the sigh on top of that. No single gain can
-        // reconcile a soft hit with a hard one.
-        for (double accent : {4.0, 6.0, 8.0, 10.0}) {
-            RenderSpec spec = ref_spec;
-            spec.accent = accent;
-            const auto null = best_fit_gain_null(render(spec), reference);
-            INFO("accent " << accent << " optimal gain " << null.gain
-                           << " residual " << null.residual);
-            REQUIRE(null.residual > 0.25);
-        }
+    SECTION("a pure pitch shift is not a gain but the raw null cannot tell") {
+        // Two rings with identical envelope and amplitude differing only in
+        // frequency by the size of an accent pitch shift. They are emphatically
+        // not related by a gain, yet over a multi-cycle window they drift out of
+        // phase and decorrelate, so the raw-waveform null reports a large
+        // residual for a reason that has nothing to do with timbre. This is why
+        // a raw-null residual must never be read as "how un-gain-like": it
+        // conflates pitch with timbre. The artifact-free axes below replace it.
+        const double fs = kFs;
+        const int n = static_cast<int>(1.5 * fs);
+        auto decaying_sine = [&](double f0) {
+            std::vector<double> y(static_cast<std::size_t>(n));
+            const double sigma = 6.9077623 / 0.8;
+            for (int i = 0; i < n; ++i) {
+                const double t = i / fs;
+                y[static_cast<std::size_t>(i)] =
+                    std::exp(-sigma * t) * std::sin(2.0 * M_PI * f0 * t);
+            }
+            return y;
+        };
+        const auto null = best_fit_gain_null(decaying_sine(46.7), decaying_sine(50.0));
+        INFO("pure pitch shift raw-null residual " << null.residual);
+        REQUIRE(null.residual > 0.5);
+    }
+}
+
+TEST_CASE("accent changes the strike, not just its level", "[va-drum][accent]") {
+    // Accent is the trigger pulse amplitude at the input of a nonlinear system.
+    // Two independent, phase-free signatures separate it from a pure output
+    // gain, and neither can be faked by the pitch decorrelation that defeats a
+    // raw-waveform null. First: a louder strike rings louder, so amplitude
+    // tracks accent. Second: a louder ring leaks more through R161, which
+    // raises the centre frequency, so the tail pitch tracks accent upward --
+    // and no gain can move a frequency. Both must hold, and both are measured
+    // rather than asserted from the pulse-shaper story.
+    struct Point { double accent, peak_amp, tail_f0; };
+    std::vector<Point> pts;
+    for (double accent : {4.0, 6.0, 8.0, 10.0, 12.0, 14.0}) {
+        RenderSpec spec;
+        spec.accent = accent;
+        spec.duration_s = 2.0;
+        const auto y = render(spec);
+        // Late enough that the attack jump and pulse-shaper transient are gone
+        // and only the resonator's own ring remains; wide enough that the
+        // interpolated crossings resolve well under the 0.26% shift we expect.
+        pts.push_back({accent, peak(y), mean_frequency(y, 0.1, 0.4)});
+        INFO("accent " << accent << " peak " << pts.back().peak_amp
+                       << " tail_f0 " << pts.back().tail_f0);
+    }
+
+    SECTION("amplitude tracks accent") {
+        for (std::size_t i = 1; i < pts.size(); ++i)
+            REQUIRE(pts[i].peak_amp > pts[i - 1].peak_amp);
+    }
+
+    SECTION("tail pitch rises with accent, which a gain cannot do") {
+        // Monotone upward, and a real shift rather than estimator noise. The
+        // magnitude here is small -- the real TR-808 shifts several times
+        // further, which is a fidelity gap tracked against the bench reference,
+        // not a regression this gate guards. What this gate guards is that the
+        // R161 leakage coupling exists at all: break it and accent collapses to
+        // a pure gain, the tail pitch goes flat, and this fails.
+        for (std::size_t i = 1; i < pts.size(); ++i)
+            REQUIRE(pts[i].tail_f0 > pts[i - 1].tail_f0);
+        REQUIRE(pts.back().tail_f0 - pts.front().tail_f0 > 0.05);
     }
 }
 
