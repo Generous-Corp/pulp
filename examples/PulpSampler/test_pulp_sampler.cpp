@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "pulp_sampler.hpp"
+#include "sampler_stream_mip_sidecar.hpp"
 #include "rt_allocation_probe.hpp"
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
@@ -9,6 +10,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <thread>
 #include <vector>
@@ -200,6 +202,77 @@ struct PulpSamplerTestAccess {
             std::memory_order_acquire);
     }
 
+    static std::uint64_t unpublished_rollback_attempts(
+        const PulpSamplerProcessor& processor) {
+        return processor.streaming_.unpublished_rollback_attempts_for_test_.load(
+            std::memory_order_acquire);
+    }
+
+    static void fail_after_stream_member_count(
+        PulpSamplerProcessor& processor, int count) {
+        processor.streaming_.fail_after_stream_member_count_for_test_.store(
+            count, std::memory_order_release);
+    }
+
+    static void pause_before_bundle_publish(
+        PulpSamplerProcessor& processor, bool paused) {
+        processor.streaming_.pause_before_bundle_publish_for_test_.store(
+            paused, std::memory_order_release);
+        processor.streaming_.service_wake_.notify_all();
+    }
+
+    static bool bundle_publish_paused(
+        const PulpSamplerProcessor& processor) {
+        return processor.streaming_.bundle_publish_paused_ack_for_test_.load(
+            std::memory_order_acquire);
+    }
+
+    static std::uint64_t physical_stream_source_count(
+        const PulpSamplerProcessor& processor) {
+        return processor.streaming_.service_.cache_stats().source_count;
+    }
+
+    static bool service_contains_source(
+        const PulpSamplerProcessor& processor,
+        audio::SampleStreamSourceToken source) {
+        return processor.streaming_.service_.cache_service().contains_source(source);
+    }
+
+    static std::uint32_t published_stream_mip_count(
+        const PulpSamplerProcessor& processor) {
+        return processor.streaming_.published_source().streamed_mips.level_count;
+    }
+
+    static audio::SampleAssetView published_stream_asset(
+        const PulpSamplerProcessor& processor, std::uint32_t octave) {
+        const auto published = processor.streaming_.published_source();
+        if (octave == 0) return published.streamed;
+        const auto* level = published.streamed_mips.level(octave);
+        return level == nullptr ? audio::SampleAssetView{} : level->asset;
+    }
+
+    static std::uint64_t published_selection_generation(
+        const PulpSamplerProcessor& processor) {
+        return processor.streaming_.published_source().selection_generation;
+    }
+
+    static std::uint32_t active_streamed_mip_octave(
+        const PulpSamplerProcessor& processor) {
+        for (const auto& voice : processor.voices_) {
+            if (voice.active && voice.streamed)
+                return voice.streamed_mip_octave;
+        }
+        return 0;
+    }
+
+    static audio::SampleAssetView active_streamed_asset(
+        const PulpSamplerProcessor& processor) {
+        for (const auto& voice : processor.voices_) {
+            if (voice.active && voice.streamed) return voice.streamed_asset;
+        }
+        return {};
+    }
+
     static std::uint32_t worst_case_dual_region_page_demands(
         const PulpSamplerProcessor& processor) {
         const auto& streaming = processor.streaming_;
@@ -336,11 +409,102 @@ struct TempSamplerWav {
     }
 };
 
+struct TempSamplerMipSidecar {
+    std::string manifest_path;
+    std::vector<std::string> payload_paths;
+
+    explicit TempSamplerMipSidecar(const TempSamplerWav& source,
+                                   std::uint32_t level_count = 2) {
+        const auto base = audio::make_memory_mapped_frame_reader(
+            source.path, true, true);
+        REQUIRE(base.valid);
+        REQUIRE(base.has_content_identity);
+        REQUIRE(level_count > 0);
+        REQUIRE(level_count <= SamplerStreamMipSidecar::kMaximumLevels);
+
+        struct LevelIdentity {
+            audio::FileFrameReader reader;
+            std::uint32_t octave = 0;
+        };
+        std::vector<LevelIdentity> levels;
+        auto previous_frames = base.total_frames;
+        for (std::uint32_t octave = 1; octave <= level_count; ++octave) {
+            const auto decimation = std::uint32_t{1} << octave;
+            const auto frames = (previous_frames + 1) / 2;
+            const auto path = sampler_stream_mip_detail::payload_path(
+                source.path, base.content_sha256, octave);
+            audio::AudioFileData data;
+            data.sample_rate = static_cast<std::uint32_t>(std::llround(
+                static_cast<double>(base.sample_rate) / decimation));
+            data.channels.resize(base.channels);
+            for (auto& channel : data.channels)
+                channel.assign(static_cast<std::size_t>(frames),
+                               0.25f / static_cast<float>(octave));
+            REQUIRE(audio::write_wav_file(path, data,
+                                          audio::WavBitDepth::Float32));
+            payload_paths.push_back(path);
+            auto reader = audio::make_memory_mapped_frame_reader(path, true, true);
+            REQUIRE(reader.valid);
+            levels.push_back({std::move(reader), octave});
+            previous_frames = frames;
+        }
+
+        std::vector<std::uint8_t> bytes;
+        const auto append_bytes = [&](const auto* data, std::size_t count) {
+            bytes.insert(bytes.end(), data, data + count);
+        };
+        const auto append_le = [&](auto value) {
+            using Integer = decltype(value);
+            for (std::size_t byte = 0; byte < sizeof(Integer); ++byte)
+                bytes.push_back(static_cast<std::uint8_t>(value >> (byte * 8)));
+        };
+        append_bytes(sampler_stream_mip_detail::kMagic.data(),
+                     sampler_stream_mip_detail::kMagic.size());
+        append_le(sampler_stream_mip_detail::kVersion);
+        append_le(sampler_stream_mip_detail::kHeaderBytes);
+        append_le(level_count);
+        append_bytes(base.content_sha256.data(), base.content_sha256.size());
+        append_le(base.mapped_byte_size);
+        append_le(base.channels);
+        append_le(base.total_frames);
+        append_le(base.sample_rate);
+        append_le(sampler_stream_mip_detail::kBuilderRevision);
+        bytes.insert(bytes.end(), 16, 0);
+        previous_frames = base.total_frames;
+        for (const auto& level : levels) {
+            const auto decimation = std::uint32_t{1} << level.octave;
+            const auto frames = (previous_frames + 1) / 2;
+            append_le(level.octave);
+            append_le(decimation);
+            append_le(frames);
+            append_le(base.sample_rate);
+            append_le(decimation);
+            append_le(level.reader.mapped_byte_size);
+            append_bytes(level.reader.content_sha256.data(),
+                         level.reader.content_sha256.size());
+            bytes.insert(bytes.end(), 16, 0);
+            previous_frames = frames;
+        }
+        manifest_path = source.path + ".pulpmip";
+        std::ofstream output(manifest_path, std::ios::binary | std::ios::trunc);
+        REQUIRE(output.write(reinterpret_cast<const char*>(bytes.data()),
+                             static_cast<std::streamsize>(bytes.size())));
+    }
+
+    ~TempSamplerMipSidecar() {
+        std::error_code error;
+        std::filesystem::remove(manifest_path, error);
+        for (const auto& path : payload_paths)
+            std::filesystem::remove(path, error);
+    }
+};
+
 struct SamplerProcessBlock {
-    explicit SamplerProcessBlock(std::uint32_t frames = 512)
+    explicit SamplerProcessBlock(std::uint32_t frames = 512,
+                                 double sample_rate = 44100.0)
         : left(frames), right(frames), output_ptrs{left.data(), right.data()},
           output(output_ptrs, 2, frames), input(input_ptrs, 0, frames),
-          context{44100, static_cast<int>(frames)} {}
+          context{sample_rate, static_cast<int>(frames)} {}
 
     void run(PulpSamplerProcessor& processor) {
         processor.process(output, input, midi_in, midi_out, context);
@@ -370,13 +534,14 @@ struct SamplerFixture {
     state::StateStore store;
     std::unique_ptr<PulpSamplerProcessor> proc;
 
-    explicit SamplerFixture(std::uint32_t maximum_block_frames = 512) {
+    explicit SamplerFixture(std::uint32_t maximum_block_frames = 512,
+                            double host_sample_rate = 44100.0) {
         proc = std::make_unique<PulpSamplerProcessor>();
         proc->set_state_store(&store);
         proc->define_parameters(store);
 
         format::PrepareContext ctx;
-        ctx.sample_rate = 44100;
+        ctx.sample_rate = host_sample_rate;
         ctx.max_buffer_size = maximum_block_frames;
         ctx.input_channels = 0;
         ctx.output_channels = 2;
@@ -502,6 +667,275 @@ TEST_CASE("Sampler resident mip rejects first-octave aliases",
     const auto stopband_rms = render_tone(0.35);
     REQUIRE_THAT(passband_rms * std::sqrt(2.0), WithinAbs(1.0, 1e-3));
     REQUIRE(stopband_rms < 1e-6);
+}
+
+TEST_CASE("Streamed mip sidecar validates source and payload identity",
+          "[sampler][mip][stream][sidecar]") {
+    TempSamplerWav source("mip_sidecar_valid", 4096, 0.5f, 48000);
+    TempSamplerMipSidecar sidecar(source);
+    const auto base = audio::make_memory_mapped_frame_reader(
+        source.path, true, true);
+    REQUIRE(base.valid);
+
+    auto loaded = load_sampler_stream_mip_sidecar(source.path, base);
+    REQUIRE(loaded.status == SamplerStreamMipSidecarStatus::Valid);
+    REQUIRE(loaded.level_count == 2);
+    REQUIRE(loaded.levels[0].reader.total_frames == 2048);
+    REQUIRE(loaded.levels[0].sample_rate == 24000);
+    REQUIRE(loaded.levels[1].reader.total_frames == 1024);
+    REQUIRE(loaded.levels[1].sample_rate == 12000);
+    REQUIRE(loaded.levels[0].reader.content_sha256 !=
+            loaded.levels[1].reader.content_sha256);
+}
+
+TEST_CASE("Streamed mip sidecar preserves fractional logical sample rates",
+          "[sampler][mip][stream][sidecar]") {
+    TempSamplerWav source("mip_sidecar_fractional_rate", 4096, 0.5f, 22050);
+    TempSamplerMipSidecar sidecar(source);
+    const auto base = audio::make_memory_mapped_frame_reader(
+        source.path, true, true);
+    REQUIRE(base.valid);
+
+    auto loaded = load_sampler_stream_mip_sidecar(source.path, base);
+    REQUIRE(loaded.status == SamplerStreamMipSidecarStatus::Valid);
+    REQUIRE(loaded.levels[0].sample_rate == 11025.0);
+    REQUIRE(loaded.levels[0].reader.sample_rate == 11025);
+    REQUIRE(loaded.levels[1].sample_rate == 5512.5);
+    REQUIRE(loaded.levels[1].reader.sample_rate == 5513);
+}
+
+TEST_CASE("Streamed mip sidecar rejects stale and truncated manifests",
+          "[sampler][mip][stream][sidecar]") {
+    SECTION("stale source digest") {
+        TempSamplerWav source("mip_sidecar_stale", 4096, 0.5f, 48000);
+        TempSamplerMipSidecar sidecar(source);
+        std::fstream manifest(sidecar.manifest_path,
+                              std::ios::binary | std::ios::in | std::ios::out);
+        manifest.seekp(16);
+        const char corrupt = static_cast<char>(0xff);
+        REQUIRE(manifest.write(&corrupt, 1));
+        manifest.close();
+        const auto base = audio::make_memory_mapped_frame_reader(
+            source.path, true, true);
+        REQUIRE(load_sampler_stream_mip_sidecar(source.path, base).status ==
+                SamplerStreamMipSidecarStatus::Invalid);
+    }
+    SECTION("truncated record") {
+        TempSamplerWav source("mip_sidecar_truncated", 4096, 0.5f, 48000);
+        TempSamplerMipSidecar sidecar(source);
+        std::error_code error;
+        std::filesystem::resize_file(sidecar.manifest_path, 100, error);
+        REQUIRE_FALSE(error);
+        const auto base = audio::make_memory_mapped_frame_reader(
+            source.path, true, true);
+        REQUIRE(load_sampler_stream_mip_sidecar(source.path, base).status ==
+                SamplerStreamMipSidecarStatus::Invalid);
+    }
+}
+
+TEST_CASE("Streamed mip sidecar rejects payload replacement",
+          "[sampler][mip][stream][sidecar]") {
+    TempSamplerWav source("mip_sidecar_payload", 4096, 0.5f, 48000);
+    TempSamplerMipSidecar sidecar(source);
+    std::ofstream payload(sidecar.payload_paths[0],
+                          std::ios::binary | std::ios::app);
+    const char extra = 0;
+    REQUIRE(payload.write(&extra, 1));
+    payload.close();
+    const auto base = audio::make_memory_mapped_frame_reader(
+        source.path, true, true);
+    REQUIRE(load_sampler_stream_mip_sidecar(source.path, base).status ==
+            SamplerStreamMipSidecarStatus::Invalid);
+}
+
+TEST_CASE("PulpSampler atomically publishes authenticated streamed mip bundles",
+          "[sampler][mip][stream][integration]") {
+    TempSamplerWav source("mip_bundle_publish", 24000, 0.5f, 44100);
+    TempSamplerMipSidecar sidecar(source);
+    SamplerFixture fixture;
+    const auto resident_generation =
+        PulpSamplerTestAccess::published_selection_generation(*fixture.proc);
+    PulpSamplerTestAccess::pause_before_bundle_publish(*fixture.proc, true);
+
+    std::atomic<bool> loaded{false};
+    std::thread loader([&] {
+        loaded.store(fixture.proc->load_sample_file(source.path),
+                     std::memory_order_release);
+    });
+    const bool reached_publish_barrier = wait_for_condition([&] {
+        return PulpSamplerTestAccess::bundle_publish_paused(*fixture.proc);
+    });
+    const auto kind_while_paused =
+        PulpSamplerTestAccess::published_source_kind(*fixture.proc);
+    const auto generation_while_paused =
+        PulpSamplerTestAccess::published_selection_generation(*fixture.proc);
+    PulpSamplerTestAccess::pause_before_bundle_publish(*fixture.proc, false);
+    loader.join();
+
+    REQUIRE(reached_publish_barrier);
+    REQUIRE(kind_while_paused == SamplerPublishedSourceKind::Resident);
+    REQUIRE(generation_while_paused == resident_generation);
+    REQUIRE(loaded.load(std::memory_order_acquire));
+    REQUIRE(PulpSamplerTestAccess::published_stream_mip_count(*fixture.proc) == 2);
+    REQUIRE(PulpSamplerTestAccess::physical_stream_source_count(*fixture.proc) == 3);
+    REQUIRE(fixture.proc->stream_stats().active_sources == 1);
+    const auto base = PulpSamplerTestAccess::published_stream_asset(
+        *fixture.proc, 0);
+    const auto level_one = PulpSamplerTestAccess::published_stream_asset(
+        *fixture.proc, 1);
+    const auto level_two = PulpSamplerTestAccess::published_stream_asset(
+        *fixture.proc, 2);
+    REQUIRE(base.valid());
+    REQUIRE(level_one.valid());
+    REQUIRE(level_two.valid());
+    REQUIRE(base.source.source_id != level_one.source.source_id);
+    REQUIRE(level_one.source.source_id != level_two.source.source_id);
+    REQUIRE(level_one.sample_rate == 22050.0);
+    REQUIRE(level_two.sample_rate == 11025.0);
+}
+
+TEST_CASE("PulpSampler invalid streamed mip sidecars fall back to the base",
+          "[sampler][mip][stream][integration]") {
+    TempSamplerWav source("mip_bundle_invalid", 24000, 0.5f, 44100);
+    TempSamplerMipSidecar sidecar(source);
+    std::fstream manifest(sidecar.manifest_path,
+                          std::ios::binary | std::ios::in | std::ios::out);
+    manifest.seekp(16);
+    const char corrupt = static_cast<char>(0xff);
+    REQUIRE(manifest.write(&corrupt, 1));
+    manifest.close();
+    SamplerFixture fixture;
+
+    REQUIRE(fixture.proc->load_sample_file(source.path));
+    REQUIRE(PulpSamplerTestAccess::published_stream_mip_count(*fixture.proc) == 0);
+    REQUIRE(PulpSamplerTestAccess::physical_stream_source_count(*fixture.proc) == 1);
+    REQUIRE(PulpSamplerTestAccess::published_stream_asset(
+                *fixture.proc, 0).valid());
+}
+
+TEST_CASE("PulpSampler rolls back every partial streamed mip admission",
+          "[sampler][mip][stream][integration][rollback]") {
+    TempSamplerWav source("mip_bundle_rollback", 24000, 0.5f, 44100);
+    TempSamplerMipSidecar sidecar(source);
+    SamplerFixture fixture;
+    const auto resident_generation =
+        PulpSamplerTestAccess::published_selection_generation(*fixture.proc);
+
+    for (int admitted_members = 0; admitted_members <= 3; ++admitted_members) {
+        CAPTURE(admitted_members);
+        const auto attempts_before =
+            PulpSamplerTestAccess::unpublished_rollback_attempts(*fixture.proc);
+        PulpSamplerTestAccess::fail_after_stream_member_count(
+            *fixture.proc, admitted_members);
+        REQUIRE_FALSE(fixture.proc->load_sample_file(source.path));
+        PulpSamplerTestAccess::fail_after_stream_member_count(*fixture.proc, -1);
+        REQUIRE(PulpSamplerTestAccess::published_source_kind(*fixture.proc) ==
+                SamplerPublishedSourceKind::Resident);
+        REQUIRE(PulpSamplerTestAccess::published_selection_generation(
+                    *fixture.proc) == resident_generation);
+        REQUIRE(wait_for_condition([&] {
+            return PulpSamplerTestAccess::unpublished_rollback_count(
+                       *fixture.proc) == 0 &&
+                   PulpSamplerTestAccess::physical_stream_source_count(
+                       *fixture.proc) == 0;
+        }));
+        REQUIRE(PulpSamplerTestAccess::unpublished_rollback_attempts(
+                    *fixture.proc) - attempts_before ==
+                static_cast<std::uint64_t>(admitted_members));
+    }
+
+    REQUIRE(fixture.proc->load_sample_file(source.path));
+    REQUIRE(PulpSamplerTestAccess::physical_stream_source_count(*fixture.proc) == 3);
+}
+
+TEST_CASE("PulpSampler selects and latches exact streamed mip octaves",
+          "[sampler][mip][stream][integration][interpolation]") {
+    TempSamplerWav source("mip_bundle_select", 24000, 0.5f, 44100);
+    TempSamplerMipSidecar sidecar(source);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerInterpolation, 3.0f);
+    REQUIRE(fixture.proc->load_sample_file(source.path));
+    const auto level_one = PulpSamplerTestAccess::published_stream_asset(
+        *fixture.proc, 1);
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 72, 127));
+    block.run(*fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::active_streamed_mip_octave(*fixture.proc) == 1);
+    const auto active = PulpSamplerTestAccess::active_streamed_asset(*fixture.proc);
+    REQUIRE(active.source.source_id == level_one.source.source_id);
+    REQUIRE(PulpSamplerTestAccess::active_stream_interpolation(
+                *fixture.proc).policy ==
+            audio::SampleInterpolationPolicy::CubicHermite);
+    REQUIRE_THAT(block.left.front(), WithinAbs(0.25f, 1.0e-6f));
+
+    const auto token = active.source;
+    fixture.store.set_value(kSamplerPitch, 1.0f);
+    block.midi_in.clear();
+    block.run(*fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::active_streamed_mip_octave(*fixture.proc) == 1);
+    REQUIRE(PulpSamplerTestAccess::active_streamed_asset(
+                *fixture.proc).source.source_id == token.source_id);
+    REQUIRE(PulpSamplerTestAccess::active_stream_interpolation(
+                *fixture.proc).policy ==
+            audio::SampleInterpolationPolicy::RatioTrackingSinc);
+}
+
+TEST_CASE("PulpSampler preserves fractional streamed mip rates in playback",
+          "[sampler][mip][stream][integration][rate]") {
+    TempSamplerWav source("mip_bundle_fractional", 24000, 0.5f, 22050);
+    TempSamplerMipSidecar sidecar(source);
+    SamplerFixture fixture(512, 22050.0);
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerInterpolation, 3.0f);
+    REQUIRE(fixture.proc->load_sample_file(source.path));
+
+    SamplerProcessBlock block(64, 22050.0);
+    block.midi_in.add(midi::MidiEvent::note_on(0, 84, 127));
+    block.run(*fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::active_streamed_mip_octave(*fixture.proc) == 2);
+    REQUIRE(PulpSamplerTestAccess::active_streamed_asset(
+                *fixture.proc).sample_rate == 5512.5);
+    REQUIRE_THAT(PulpSamplerTestAccess::active_streamed_position(*fixture.proc),
+                 WithinAbs(64.0, 1.0e-9));
+}
+
+TEST_CASE("PulpSampler excludes streamed mips from loops reverse and fractional ratios",
+          "[sampler][mip][stream][integration][policy]") {
+    TempSamplerWav source("mip_bundle_policy", 24000, 0.5f, 44100);
+    TempSamplerMipSidecar sidecar(source);
+
+    for (const auto mode : {std::string_view{"loop"},
+                            std::string_view{"reverse"},
+                            std::string_view{"fractional"}}) {
+        CAPTURE(mode);
+        SamplerFixture fixture;
+        fixture.store.set_value(kSamplerAttack, 0.0f);
+        fixture.store.set_value(kSamplerDecay, 0.0f);
+        fixture.store.set_value(kSamplerSustain, 100.0f);
+        fixture.store.set_value(kSamplerInterpolation, 3.0f);
+        fixture.store.set_value(kSamplerLoop, mode == "loop" ? 1.0f : 0.0f);
+        fixture.store.set_value(kSamplerReverse,
+                                mode == "reverse" ? 1.0f : 0.0f);
+        REQUIRE(fixture.proc->load_sample_file(source.path));
+        const auto base = PulpSamplerTestAccess::published_stream_asset(
+            *fixture.proc, 0);
+
+        SamplerProcessBlock block;
+        block.midi_in.add(midi::MidiEvent::note_on(
+            0, mode == "fractional" ? 73 : 72, 127));
+        block.run(*fixture.proc);
+        REQUIRE(PulpSamplerTestAccess::active_streamed_mip_octave(
+                    *fixture.proc) == 0);
+        REQUIRE(PulpSamplerTestAccess::active_streamed_asset(
+                    *fixture.proc).source.source_id == base.source.source_id);
+        REQUIRE_THAT(block.left.front(), WithinAbs(0.5f, 1.0e-6f));
+    }
 }
 
 TEST_CASE("PulpSampler bounds mip construction without rejecting the base sample",
@@ -1913,6 +2347,89 @@ TEST_CASE("PulpSampler retains a replaced stream until its voice acknowledges",
     }));
 }
 
+TEST_CASE("PulpSampler retires replaced streamed mip bundles as one generation",
+          "[sampler][mip][stream][integration][lifetime]") {
+    TempSamplerWav first("mip_replacement_a", 24000, 0.75f, 44100);
+    TempSamplerMipSidecar first_sidecar(first);
+    TempSamplerWav second("mip_replacement_b", 24000, 0.5f, 44100);
+    TempSamplerMipSidecar second_sidecar(second);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerRelease, 0.0f);
+    fixture.store.set_value(kSamplerInterpolation, 3.0f);
+    REQUIRE(fixture.proc->load_sample_file(first.path));
+    const std::array first_tokens{
+        PulpSamplerTestAccess::published_stream_asset(*fixture.proc, 0).source,
+        PulpSamplerTestAccess::published_stream_asset(*fixture.proc, 1).source,
+        PulpSamplerTestAccess::published_stream_asset(*fixture.proc, 2).source,
+    };
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 72, 127));
+    block.run(*fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::active_streamed_mip_octave(*fixture.proc) == 1);
+    REQUIRE(fixture.proc->load_sample_file(second.path));
+    REQUIRE(fixture.proc->stream_stats().active_sources == 2);
+    REQUIRE(PulpSamplerTestAccess::physical_stream_source_count(*fixture.proc) == 6);
+    for (const auto token : first_tokens) {
+        REQUIRE(PulpSamplerTestAccess::service_contains_source(
+            *fixture.proc, token));
+    }
+
+    block.midi_in.clear();
+    block.midi_in.add(midi::MidiEvent::note_off(0, 72));
+    block.run(*fixture.proc);
+    REQUIRE(wait_for_condition([&] {
+        return fixture.proc->stream_stats().active_sources == 1 &&
+               fixture.proc->stream_stats().sources_retired == 1 &&
+               PulpSamplerTestAccess::physical_stream_source_count(
+                   *fixture.proc) == 3;
+    }));
+    for (const auto token : first_tokens) {
+        REQUIRE_FALSE(PulpSamplerTestAccess::service_contains_source(
+            *fixture.proc, token));
+    }
+}
+
+TEST_CASE("PulpSampler rejects a third streamed mip bundle until a slot retires",
+          "[sampler][mip][stream][integration][capacity]") {
+    TempSamplerWav first("mip_capacity_a", 24000, 0.75f, 44100);
+    TempSamplerMipSidecar first_sidecar(first);
+    TempSamplerWav second("mip_capacity_b", 24000, 0.5f, 44100);
+    TempSamplerMipSidecar second_sidecar(second);
+    TempSamplerWav third("mip_capacity_c", 24000, 0.25f, 44100);
+    TempSamplerMipSidecar third_sidecar(third);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerRelease, 0.0f);
+    fixture.store.set_value(kSamplerInterpolation, 3.0f);
+    REQUIRE(fixture.proc->load_sample_file(first.path));
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 72, 127));
+    block.run(*fixture.proc);
+    REQUIRE(fixture.proc->load_sample_file(second.path));
+    const auto second_generation =
+        PulpSamplerTestAccess::published_selection_generation(*fixture.proc);
+    REQUIRE_FALSE(fixture.proc->load_sample_file(third.path));
+    REQUIRE(PulpSamplerTestAccess::published_selection_generation(
+                *fixture.proc) == second_generation);
+    REQUIRE(PulpSamplerTestAccess::physical_stream_source_count(*fixture.proc) == 6);
+
+    block.midi_in.clear();
+    block.midi_in.add(midi::MidiEvent::note_off(0, 72));
+    block.run(*fixture.proc);
+    REQUIRE(wait_for_condition([&] {
+        return fixture.proc->stream_stats().active_sources == 1;
+    }));
+    REQUIRE(fixture.proc->load_sample_file(third.path));
+    REQUIRE(PulpSamplerTestAccess::physical_stream_source_count(*fixture.proc) == 6);
+}
+
 TEST_CASE("PulpSampler streamed process stays allocation-free for 10000 callbacks",
           "[sampler][stream][rt]") {
     TempSamplerWav wav("rt", 24000, 0.5f);
@@ -1933,6 +2450,30 @@ TEST_CASE("PulpSampler streamed process stays allocation-free for 10000 callback
     for (int callback = 0; callback < 10000; ++callback) {
         block.midi_in.clear();
         if ((callback % 512) == 0) block.midi_in.add(note_on);
+        block.run(*fixture.proc);
+    }
+    REQUIRE(probe.allocation_count() == 0);
+}
+
+TEST_CASE("PulpSampler streamed mip process stays allocation-free for 10000 callbacks",
+          "[sampler][mip][stream][integration][rt]") {
+    TempSamplerWav wav("mip_rt", 1400000, 0.5f, 44100);
+    TempSamplerMipSidecar sidecar(wav);
+    SamplerFixture fixture(64);
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerInterpolation, 3.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+
+    SamplerProcessBlock block(64);
+    block.midi_in.add(midi::MidiEvent::note_on(0, 72, 127));
+    block.run(*fixture.proc);
+    block.midi_in.clear();
+    REQUIRE(PulpSamplerTestAccess::active_streamed_mip_octave(*fixture.proc) == 1);
+
+    pulp::test::RtAllocationProbe probe;
+    for (int callback = 0; callback < 10000; ++callback) {
         block.run(*fixture.proc);
     }
     REQUIRE(probe.allocation_count() == 0);

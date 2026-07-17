@@ -14,6 +14,7 @@
 /// admitting a source under a strict streaming-memory policy.
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -24,6 +25,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/mmap_reader.hpp>
 #include <pulp/audio/streaming_sample_source.hpp>
+#include <pulp/runtime/crypto.hpp>
 
 namespace pulp::audio {
 
@@ -35,6 +37,9 @@ struct FileFrameReader {
     std::uint32_t channels = 0;
     std::uint64_t total_frames = 0;
     std::uint32_t sample_rate = 0;
+    std::array<std::uint8_t, 32> content_sha256{};
+    std::uint64_t mapped_byte_size = 0;
+    bool has_content_identity = false;
     bool supports_ranged_read = false;
     bool valid = false;
 };
@@ -45,7 +50,8 @@ struct FileFrameReader {
 /// a FileFrameReader with valid == false. Control thread only.
 inline FileFrameReader make_memory_mapped_frame_reader(
     std::string_view path,
-    bool require_ranged_read = false) {
+    bool require_ranged_read = false,
+    bool compute_content_identity = false) {
     FileFrameReader result;
 
     auto mapped = std::make_shared<MemoryMappedAudioReader>();
@@ -63,6 +69,13 @@ inline FileFrameReader make_memory_mapped_frame_reader(
     result.channels = channels;
     result.total_frames = total;
     result.sample_rate = info.sample_rate;
+    if (compute_content_identity) {
+        const auto digest = runtime::sha256(mapped->data(), mapped->size());
+        if (digest.size() != result.content_sha256.size()) return {};
+        std::copy(digest.begin(), digest.end(), result.content_sha256.begin());
+        result.mapped_byte_size = mapped->size();
+        result.has_content_identity = true;
+    }
     result.supports_ranged_read = mapped->supports_ranged_read();
     if (require_ranged_read && !result.supports_ranged_read) return result;
     result.binding.stop_mode = result.supports_ranged_read
