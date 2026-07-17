@@ -412,12 +412,12 @@ bool SignalGraph::remove_node(NodeId id) {
     auto it = std::find_if(nodes_.begin(), nodes_.end(),
         [id](const GraphNode& n) { return n.id == id; });
     if (it == nodes_.end()) return false;
-    connections_.erase(
-        std::remove_if(connections_.begin(), connections_.end(),
-            [id](const Connection& c) {
-                return c.source_node == id || c.dest_node == id;
-            }),
-        connections_.end());
+    for (std::size_t i = connections_.size(); i-- > 0;) {
+        const auto& c = connections_[i];
+        if (c.source_node == id || c.dest_node == id) {
+            erase_connection_at_locked_(i);
+        }
+    }
     nodes_.erase(it);
     invalidate_live_locked_();
     return true;
@@ -434,7 +434,7 @@ bool SignalGraph::connect(NodeId source, PortIndex source_port,
     if (would_create_cycle(source, dest)) return false;
     Connection conn{source, source_port, dest, dest_port};
     for (auto& c : connections_) if (c == conn) return false;
-    connections_.push_back(conn);
+    append_connection_locked_(conn);
     invalidate_live_locked_();
     return true;
 }
@@ -445,7 +445,7 @@ bool SignalGraph::connect_midi(NodeId source, NodeId dest) {
     if (would_create_cycle(source, dest)) return false;
     Connection conn{source, 0, dest, 0, false, true};
     for (auto& c : connections_) if (c == conn && c.midi == conn.midi) return false;
-    connections_.push_back(conn);
+    append_connection_locked_(conn);
     invalidate_live_locked_();
     return true;
 }
@@ -472,7 +472,7 @@ bool SignalGraph::connect_sidechain(NodeId source, PortIndex source_port,
     conn.dest_port = dest_sidechain_port;
     conn.sidechain = true;
     for (auto& c : connections_) if (c == conn) return false;
-    connections_.push_back(conn);
+    append_connection_locked_(conn);
     invalidate_live_locked_();
     return true;
 }
@@ -527,7 +527,7 @@ bool SignalGraph::connect_automation(NodeId src, PortIndex src_audio_port,
     conn.automation_range_hi      = range_hi;
     conn.automation_smoothing_ms  = std::max(0.0f, smoothing_ms);
     conn.automation_mix           = mix;
-    connections_.push_back(conn);
+    append_connection_locked_(conn);
     invalidate_live_locked_();
     return true;
 }
@@ -584,7 +584,7 @@ bool SignalGraph::connect_audio_rate_modulation(NodeId src, PortIndex src_audio_
     // Mutex already held: call the lock-free core directly (the public
     // audio_rate_modulation_lane would re-lock and self-deadlock).
     if (!audio_rate_modulation_lane_locked_(conn, lane)) return false;
-    connections_.push_back(conn);
+    append_connection_locked_(conn);
     invalidate_live_locked_();
     return true;
 }
@@ -740,7 +740,7 @@ bool SignalGraph::connect_feedback(NodeId source, PortIndex source_port,
     if (!has_input_port(*dst_n, dest_port)) return false;
     Connection conn{source, source_port, dest, dest_port, true};
     for (auto& c : connections_) if (c == conn) return false;
-    connections_.push_back(conn);
+    append_connection_locked_(conn);
     invalidate_live_locked_();
     return true;
 }
@@ -751,7 +751,8 @@ bool SignalGraph::disconnect(NodeId source, PortIndex source_port,
     Connection target{source, source_port, dest, dest_port};
     auto it = std::find(connections_.begin(), connections_.end(), target);
     if (it == connections_.end()) return false;
-    connections_.erase(it);
+    erase_connection_at_locked_(static_cast<std::size_t>(
+        std::distance(connections_.begin(), it)));
     invalidate_live_locked_();
     return true;
 }
@@ -768,6 +769,28 @@ const GraphNode* SignalGraph::node(NodeId id) const {
 GraphNode* SignalGraph::node_mut_locked_(NodeId id) {
     assert_graph_mutation_locked_();
     return const_cast<GraphNode*>(node(id));
+}
+
+void SignalGraph::append_connection_locked_(Connection connection) {
+    assert_graph_mutation_locked_();
+    const auto new_size = connections_.size() + 1;
+    // Reserve both arrays before changing either size. If allocation fails the
+    // graph remains unchanged instead of leaving identity metadata misaligned.
+    connections_.reserve(new_size);
+    connection_identities_.reserve(new_size);
+    connections_.push_back(std::move(connection));
+    connection_identities_.push_back(next_connection_identity_);
+    ++next_connection_identity_;
+    assert(connections_.size() == connection_identities_.size());
+}
+
+void SignalGraph::erase_connection_at_locked_(std::size_t index) {
+    assert_graph_mutation_locked_();
+    assert(index < connections_.size());
+    assert(connections_.size() == connection_identities_.size());
+    connections_.erase(connections_.begin() + static_cast<std::ptrdiff_t>(index));
+    connection_identities_.erase(
+        connection_identities_.begin() + static_cast<std::ptrdiff_t>(index));
 }
 
 bool SignalGraph::has_path_locked_(NodeId from, NodeId to) const {
@@ -1055,8 +1078,8 @@ void SignalGraph::publish_prepared_stats_locked_(const CompiledGraph& cg) {
 
     std::size_t delay_bytes = 0;
     for (const auto& delay : cg.connection_delays) {
-        delay_bytes += (delay.ring.size() + delay.feedback_prev.size())
-            * sizeof(float);
+        delay_bytes += delay.feedback_prev.size() * sizeof(float);
+        if (delay.state) delay_bytes += delay.state->ring.size() * sizeof(float);
     }
 
     const std::size_t total_buffer_bytes =
@@ -1139,9 +1162,10 @@ void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
         if (want < 0) want = 0;
         cg.connection_delays[i].delay_samples = (int)want;
         if (want > 0) {
-            cg.connection_delays[i].ring.assign(
+            auto state = std::make_shared<ConnectionDelay::State>();
+            state->ring.assign(
                 static_cast<size_t>((int64_t)cg.max_block_size + want), 0.0f);
-            cg.connection_delays[i].write_pos = 0;
+            cg.connection_delays[i].state = std::move(state);
         }
     }
 }
@@ -1231,10 +1255,16 @@ bool SignalGraph::build_routing_snapshot_locked_(
 
 std::shared_ptr<SignalGraph::CompiledGraph>
 SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) {
+    if (connections_.size() != connection_identities_.size()) {
+        runtime::log_error(
+            "SignalGraph: connection identity metadata is out of sync");
+        return nullptr;
+    }
     auto cg = std::make_shared<CompiledGraph>();
     cg->max_block_size = max_block_size;
     cg->sample_rate = sample_rate;
     cg->connections = connections_;
+    cg->connection_identities = connection_identities_;
     cg->custom_registry_generation = custom_registry_generation_;  // 2.2b predicate (M6)
 
 #ifndef NDEBUG
@@ -1597,6 +1627,22 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 }
             }
             cg->routed.parallel.valid = ok;
+        }
+
+        const bool has_pdc = std::any_of(
+            cg->connection_delays.begin(), cg->connection_delays.end(),
+            [](const ConnectionDelay& delay) { return delay.delay_samples > 0; });
+        if (has_pdc) {
+            if (cg->routed.parallel.valid &&
+                parallel_routing_enabled_.load(std::memory_order_relaxed)) {
+                cg->pdc_execution_domain = PdcExecutionDomain::RoutedParallel;
+            } else if (cg->routed.serial.valid &&
+                       canonical_executor_routing_enabled_.load(
+                           std::memory_order_relaxed)) {
+                cg->pdc_execution_domain = PdcExecutionDomain::RoutedSerial;
+            } else {
+                cg->pdc_execution_domain = PdcExecutionDomain::Legacy;
+            }
         }
 
         // Anticipative rendering: carve an eligible latent interior out of the
@@ -2347,7 +2393,16 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
             // NOT set this, so the counter isolates the should-have-routed case.
             bool routed_eligible_dispatch_failed = false;
 
-            if (parallel_routing_enabled_.load(std::memory_order_relaxed) &&
+            const bool use_parallel =
+                cg->pdc_execution_domain == PdcExecutionDomain::RoutedParallel ||
+                (cg->pdc_execution_domain == PdcExecutionDomain::Dynamic &&
+                 parallel_routing_enabled_.load(std::memory_order_relaxed));
+            const bool use_serial =
+                cg->pdc_execution_domain == PdcExecutionDomain::RoutedSerial ||
+                (cg->pdc_execution_domain == PdcExecutionDomain::Dynamic &&
+                 canonical_executor_routing_enabled_.load(std::memory_order_relaxed));
+
+            if (use_parallel &&
                 cg->routed.parallel.valid && worker_pool_.running() &&
                 cg->routed.parallel.pool.fits(cg->routed.parallel.snapshot, frames32)) {
                 if (dispatch_routed([&] {
@@ -2362,7 +2417,7 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                 routed_eligible_dispatch_failed = true;  // eligible but did not route
             }
 
-            if (canonical_executor_routing_enabled_.load(std::memory_order_relaxed) &&
+            if (use_serial &&
                 cg->routed.serial.valid &&
                 cg->routed.serial.pool.fits(cg->routed.serial.snapshot, frames32)) {
                 if (dispatch_routed([&] {
@@ -2407,6 +2462,7 @@ void SignalGraph::clear() {
     GraphMutationLock mutation_lock(*this);
     cancel_swap_edit_locked_();
     connections_.clear();
+    connection_identities_.clear();
     nodes_.clear();
     next_id_ = 1;
     invalidate_live_locked_();

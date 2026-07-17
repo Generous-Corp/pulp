@@ -918,13 +918,34 @@ public:
         Color color{0, 0, 0, 80};
         bool inset = false;
     };
+    /// Replaces the whole stack with one layer. CSS `box-shadow: A` semantics —
+    /// a declaration always supersedes the previous one rather than adding to
+    /// it, so every existing single-shadow caller keeps its exact behavior.
     void set_box_shadow(float ox, float oy, float blur, float spread, Color c,
                         bool inset = false) {
-        shadow_ = {ox, oy, blur, spread, c, inset}; has_shadow_ = true;
+        shadows_.assign(1, BoxShadow{ox, oy, blur, spread, c, inset});
     }
-    void clear_box_shadow() { has_shadow_ = false; }
-    bool has_box_shadow() const { return has_shadow_; }
-    const BoxShadow& box_shadow() const { return shadow_; }
+    /// Appends a layer, preserving CSS author order: `box-shadow: A, B` is
+    /// set_box_shadow(A) followed by add_box_shadow(B). A is the first layer
+    /// and therefore paints ON TOP of B — see the reverse iteration in
+    /// View::paint_all. Layered shadows are how a design expresses depth: a
+    /// wide soft halo plus a tight dark contact shadow. Keeping only the first
+    /// layer keeps the halo and drops the contact shadow, which reads as flat.
+    void add_box_shadow(float ox, float oy, float blur, float spread, Color c,
+                        bool inset = false) {
+        shadows_.push_back(BoxShadow{ox, oy, blur, spread, c, inset});
+    }
+    void clear_box_shadow() { shadows_.clear(); }
+    bool has_box_shadow() const { return !shadows_.empty(); }
+    /// The first (topmost) layer, or a default-constructed shadow when the
+    /// stack is empty — callers that only ever set one shadow can keep
+    /// treating this as "the" shadow.
+    const BoxShadow& box_shadow() const {
+        static const BoxShadow kEmpty{};
+        return shadows_.empty() ? kEmpty : shadows_.front();
+    }
+    /// Every layer, in CSS author order (first paints on top).
+    const std::vector<BoxShadow>& box_shadows() const { return shadows_; }
 
     /// RN iOS-legacy shadow* longhand setters. RN 0.71+ added `boxShadow` as
     /// the cross-platform path, but the four per-attribute setters still appear
@@ -933,21 +954,23 @@ public:
     /// one field of the shared BoxShadow struct so a JSX prop diff that touches
     /// one prop doesn't clobber the others.
     ///
-    /// Any of these turns has_shadow_ on (matches React Native's
-    /// behavior — setting any shadow prop activates the shadow paint).
+    /// Any of these activates the shadow paint (matches React Native's
+    /// behavior — setting any shadow prop activates it), creating a
+    /// default-valued first layer if the stack is empty. RN has no
+    /// multi-shadow longhand, so these address the first layer only.
     void set_box_shadow_color(Color c) {
-        shadow_.color = c; has_shadow_ = true;
+        first_box_shadow().color = c;
     }
     void set_box_shadow_offset(float ox, float oy) {
-        shadow_.offset_x = ox; shadow_.offset_y = oy; has_shadow_ = true;
+        auto& s = first_box_shadow(); s.offset_x = ox; s.offset_y = oy;
     }
     void set_box_shadow_opacity(float a) {
         // RN's shadowOpacity is 0..1; overwrite the shadow color's normalized
         // alpha channel while preserving the existing RGB channels.
-        shadow_.color.a = a; has_shadow_ = true;
+        first_box_shadow().color.a = a;
     }
     void set_box_shadow_radius(float r) {
-        shadow_.blur = r; has_shadow_ = true;
+        first_box_shadow().blur = r;
     }
 
     /// Generic click callback (fires on mouse-down, if set).
@@ -1842,8 +1865,14 @@ private:
     // intentionally need clipping must call set_overflow(Overflow::hidden)
     // explicitly — same opt-in as `overflow:hidden` in CSS.
     Overflow overflow_ = Overflow::visible;
-    BoxShadow shadow_{};
-    bool has_shadow_ = false;
+    /// CSS box-shadow layers in author order; empty means no shadow.
+    std::vector<BoxShadow> shadows_;
+    /// The first layer, materialized with default values when absent. Backs
+    /// the RN longhand setters, which mutate one field at a time.
+    BoxShadow& first_box_shadow() {
+        if (shadows_.empty()) shadows_.emplace_back();
+        return shadows_.front();
+    }
     float scale_ = 1.0f;
     float translate_x_ = 0, translate_y_ = 0;
     float rotation_deg_ = 0;

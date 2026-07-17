@@ -1147,8 +1147,8 @@ TEST_CASE("parse_figma_json covers layout style and audio shape metadata edges",
             "paddingLeft": 8,
             "justify": "space-around",
             "align": "center",
-            "widthMode": "fill",
-            "heightMode": "hug"
+            "width_mode": "fill",
+            "height_mode": "hug"
         },
         "style": {
             "backgroundGradient": "linear-gradient(#111,#222)",
@@ -2098,4 +2098,526 @@ TEST_CASE("generate_pulp_js web compat emits extended style and layout propertie
     REQUIRE(js.find("document.createElement('img')") != std::string::npos);
     REQUIRE(js.find("theme.strings[\"copy.cta\"] = 'Send'") != std::string::npos);
     REQUIRE(js.find("document.body.appendChild(panelRoot)") != std::string::npos);
+}
+
+// ─── Visual overrides reach EVERY node kind, not just the branch that had them ───
+//
+// These all guard one bug shape: a per-View property emitted from one lowering
+// branch, so the design looks wrong only for node kinds that take a different
+// branch. Nothing errors — the boxes are the right size in the right place, they
+// just aren't faded / shadowed / filled. Each case below renders a node kind
+// through generate_pulp_js and asserts the property survives the lowering.
+
+namespace {
+
+// A node of every kind that carries the same fade + shadow, so a branch that
+// drops one is visible as a missing setOpacity for that id.
+DesignIR ir_with_faded_node_of_every_kind() {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 300.0f;
+
+    auto fade = [](IRNode& n) {
+        n.style.opacity = 0.5f;
+        n.style.box_shadow = parse_css_box_shadow("0 2px 8px #00000080");
+        n.style.mix_blend_mode = "multiply";
+        // Asymmetric on purpose: a uniform radius lowers through the single
+        // 'All' call and would hide a missing per-corner emit.
+        n.style.border_top_left_radius = 8.0f;
+        n.style.border_top_right_radius = 8.0f;
+        n.style.border_bottom_right_radius = 0.0f;
+        n.style.border_bottom_left_radius = 0.0f;
+    };
+
+    IRNode text;
+    text.type = "text";
+    text.name = "Caption";
+    text.text_content = "Ghosted";
+    text.style.font_size = 12.0f;
+    fade(text);
+    ir.root.children.push_back(text);
+
+    IRNode image;
+    image.type = "image";
+    image.name = "Overlay";
+    image.attributes["asset_path"] = "/tmp/grain.png";
+    image.style.width = 64.0f;
+    image.style.height = 64.0f;
+    fade(image);
+    ir.root.children.push_back(image);
+
+    IRNode knob;
+    knob.type = "frame";
+    knob.name = "Cutoff";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.style.width = 48.0f;
+    knob.style.height = 48.0f;
+    fade(knob);
+    ir.root.children.push_back(knob);
+
+    IRNode container;
+    container.type = "frame";
+    container.name = "Group";
+    container.style.width = 100.0f;
+    container.style.height = 40.0f;
+    IRNode inner;
+    inner.type = "text";
+    inner.text_content = "x";
+    container.children.push_back(inner);
+    fade(container);
+    ir.root.children.push_back(container);
+
+    return ir;
+}
+
+std::string native_js(const DesignIR& ir) {
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    return generate_pulp_js(ir, opts);
+}
+
+// Count non-overlapping occurrences — a property emitted from BOTH a branch and
+// the shared lambda writes the line twice, which is how the setBoxShadow
+// duplicate survived review.
+size_t count_occurrences(const std::string& haystack, const std::string& needle) {
+    size_t n = 0;
+    for (size_t p = haystack.find(needle); p != std::string::npos;
+         p = haystack.find(needle, p + needle.size()))
+        ++n;
+    return n;
+}
+
+}  // namespace
+
+TEST_CASE("native codegen fades text, image, widget and container alike",
+          "[view][import][visual-overrides]") {
+    const auto js = native_js(ir_with_faded_node_of_every_kind());
+
+    // Four faded nodes in, four setOpacity calls out. A branch-local emit fails
+    // this by count, so it cannot be satisfied by fixing only one kind.
+    REQUIRE(count_occurrences(js, "setOpacity(") == 4);
+    REQUIRE(count_occurrences(js, "setBoxShadow(") == 4);
+    REQUIRE(count_occurrences(js, "setMixBlendMode(") == 4);
+
+    // Four nodes with four distinct corners each. Codegen carried one
+    // setCornerRadius(id, 'All', r) and dropped asymmetric corners on the
+    // floor, under a comment claiming the IR could not hold them — it could.
+    REQUIRE(count_occurrences(js, "setCornerRadius(") == 16);
+    REQUIRE(count_occurrences(js, "'TopLeft', 8") == 4);
+    REQUIRE(count_occurrences(js, "'BottomRight', 0") == 4);
+    // The uniform path must not also fire, or 'All' squares the rounded pair.
+    REQUIRE(js.find("'All'") == std::string::npos);
+}
+
+TEST_CASE("native codegen keeps one call when every corner agrees",
+          "[view][import][visual-overrides]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 300.0f;
+    ir.root.style.border_radius = 6.0f;
+
+    const auto js = native_js(ir);
+    REQUIRE(count_occurrences(js, "setCornerRadius(") == 1);
+    REQUIRE(js.find("'All', 6") != std::string::npos);
+}
+
+TEST_CASE("native codegen fades a text node — the branch that had no setOpacity",
+          "[view][import][visual-overrides]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.style.width = 200.0f;
+
+    IRNode text;
+    text.type = "text";
+    text.name = "Caption";
+    text.text_content = "Ghosted";
+    text.style.font_size = 12.0f;
+    text.style.opacity = 0.35f;
+    ir.root.children.push_back(text);
+
+    const auto js = native_js(ir);
+
+    // The label's own id must be the one faded — not its parent.
+    const auto create = js.find("createLabel('");
+    REQUIRE(create != std::string::npos);
+    const auto id_start = create + std::string("createLabel('").size();
+    const auto label_id = js.substr(id_start, js.find('\'', id_start) - id_start);
+    REQUIRE(js.find("setOpacity('" + label_id + "', 0.35)") != std::string::npos);
+}
+
+TEST_CASE("native codegen emits an audio widget's shadow, blend and opacity",
+          "[view][import][visual-overrides]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.style.width = 200.0f;
+
+    IRNode knob;
+    knob.type = "frame";
+    knob.name = "Cutoff";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.style.width = 48.0f;
+    knob.style.height = 48.0f;
+    knob.style.opacity = 0.3f;  // designer's "disabled" fade
+    knob.style.box_shadow = parse_css_box_shadow("0 2px 8px #00000080");
+    ir.root.children.push_back(knob);
+
+    const auto js = native_js(ir);
+
+    REQUIRE(js.find("createKnob('") != std::string::npos);
+    REQUIRE(js.find("setOpacity('") != std::string::npos);
+    REQUIRE(js.find("setBoxShadow('") != std::string::npos);
+}
+
+TEST_CASE("native codegen emits every box-shadow layer, in CSS author order",
+          "[view][import][visual-overrides]") {
+    // The exact declaration a Figma knob base carries: a soft 10%-black halo
+    // that spreads the glow, plus a tight 25%-black contact shadow that seats
+    // the knob on the panel. Codegen used to emit only the first layer, which
+    // kept the halo and dropped the depth.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.style.width = 200.0f;
+
+    IRNode knob;
+    knob.type = "frame";
+    knob.name = "Cutoff";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.style.width = 48.0f;
+    knob.style.height = 48.0f;
+    knob.style.box_shadow =
+        parse_css_box_shadow("0px 16px 6px 0px #0000001a, 0px 4px 4px 0px #00000040");
+    REQUIRE(knob.style.box_shadow.size() == 2);  // the parser already keeps both
+    ir.root.children.push_back(knob);
+
+    const auto js = native_js(ir);
+
+    // Two declared layers, two emitted calls: the first replaces, the rest append.
+    REQUIRE(count_occurrences(js, "setBoxShadow(") == 1);
+    REQUIRE(count_occurrences(js, "addBoxShadow(") == 1);
+
+    const auto set_at = js.find("setBoxShadow(");
+    const auto add_at = js.find("addBoxShadow(");
+    REQUIRE(set_at != std::string::npos);
+    REQUIRE(add_at != std::string::npos);
+    // CSS author order must survive: the halo is declared first, the contact
+    // shadow second. Swapping them paints the halo over the contact shadow.
+    REQUIRE(set_at < add_at);
+
+    const auto set_line = js.substr(set_at, js.find('\n', set_at) - set_at);
+    const auto add_line = js.substr(add_at, js.find('\n', add_at) - add_at);
+    REQUIRE(set_line.find("0, 16, 6, 0") != std::string::npos);
+    REQUIRE(set_line.find("#0000001a") != std::string::npos);
+    REQUIRE(add_line.find("0, 4, 4, 0") != std::string::npos);
+    REQUIRE(add_line.find("#00000040") != std::string::npos);
+}
+
+TEST_CASE("native codegen leaves a single-layer shadow as one replacing call",
+          "[view][import][visual-overrides]") {
+    // Guards the other half of the contract: one declared layer must not grow
+    // an addBoxShadow, or every existing single-shadow design gains a
+    // duplicate layer and doubles its darkness.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.style.width = 200.0f;
+    ir.root.style.box_shadow = parse_css_box_shadow("0 2px 8px #00000080");
+
+    const auto js = native_js(ir);
+    REQUIRE(count_occurrences(js, "setBoxShadow(") == 1);
+    REQUIRE(count_occurrences(js, "addBoxShadow(") == 0);
+}
+
+TEST_CASE("native codegen positions an unlabeled non-knob widget absolutely",
+          "[view][import][visual-overrides]") {
+    // Only the knob sub-branch emitted the position, so every other widget kind
+    // lost it. Fader is the canonical miss: a channel-strip fader pinned at an
+    // absolute offset drifted to wherever flex put it.
+    for (auto wtype : {AudioWidgetType::fader, AudioWidgetType::meter,
+                       AudioWidgetType::xy_pad, AudioWidgetType::waveform}) {
+        DesignIR ir;
+        ir.source = DesignSource::figma;
+        ir.root.type = "frame";
+        ir.root.style.width = 400.0f;
+
+        IRNode w;
+        w.type = "frame";
+        w.audio_widget = wtype;   // no label/value/range → no wrapper column
+        w.style.width = 40.0f;
+        w.style.height = 120.0f;
+        w.style.position = "absolute";
+        w.style.left = 72.0f;
+        w.style.top = 24.0f;
+        ir.root.children.push_back(w);
+
+        const auto js = native_js(ir);
+
+        INFO("widget kind index " << static_cast<int>(wtype) << " js:\n" << js);
+        REQUIRE(js.find("setPosition('") != std::string::npos);
+        REQUIRE(js.find("', 72)") != std::string::npos);   // setLeft
+        REQUIRE(js.find("', 24)") != std::string::npos);   // setTop
+    }
+}
+
+TEST_CASE("native codegen paints a childless non-frame node's gradient and fade",
+          "[view][import][visual-overrides]") {
+    // The fall-through branch. Reachable for real input: the v0 lane maps void
+    // tags (<input>, <canvas>, …) to childless non-frame nodes, and a
+    // gradient-filled <rect> lands here because synthesize_node declines to
+    // path-ify it — on the stated grounds that the frame paints its own box.
+    auto ir = parse_v0_tsx(R"tsx(
+        export default function P() {
+            return (
+                <div style={{ display: "flex" }}>
+                    <input style={{
+                        background: "linear-gradient(90deg, #0f0, #00f)",
+                        opacity: 0.25,
+                        borderRadius: 6,
+                        width: 80,
+                        height: 20
+                    }} />
+                </div>
+            );
+        }
+    )tsx");
+
+    const auto js = native_js(ir);
+    INFO(js);
+
+    REQUIRE(js.find("setBackgroundGradient('input0', 'linear-gradient(90deg, #0f0, #00f)')")
+            != std::string::npos);
+    REQUIRE(js.find("setOpacity('input0', 0.25)") != std::string::npos);
+    REQUIRE(js.find("setCornerRadius('input0', 'All', 6)") != std::string::npos);
+}
+
+TEST_CASE("native codegen paints a text node's background gradient",
+          "[view][import][visual-overrides]") {
+    // v0 maps `background: linear-gradient(...)` on any inline tag, and <span>
+    // lowers to a text node — the gradient plate behind a heading was dropped.
+    auto ir = parse_v0_tsx(R"tsx(
+        export default function P() {
+            return (
+                <div style={{ display: "flex" }}>
+                    <span style={{ background: "linear-gradient(90deg, #f00, #00f)" }}>Hi</span>
+                </div>
+            );
+        }
+    )tsx");
+
+    const auto js = native_js(ir);
+    INFO(js);
+
+    REQUIRE(js.find("setBackgroundGradient('span0', 'linear-gradient(90deg, #f00, #00f)')")
+            != std::string::npos);
+}
+
+TEST_CASE("native codegen never emits a gradient box behind an SVG path",
+          "[view][import][visual-overrides]") {
+    // The counter-example that keeps setBackgroundGradient OUT of the shared
+    // visual-override lambda: a gradient on a node that lowers to an
+    // SvgPathWidget would paint a gradient SQUARE behind the path — the stray
+    // box behind a knob that synthesize_node exists to prevent.
+    //
+    // The node must carry AUTHORED path_data. A bare primitive does not prove
+    // anything here: synthesize_node moves its gradient onto the synthesized
+    // path and RESETS style.background_gradient, so the lambda would find
+    // nothing to emit and this test would pass with the bug present — it did,
+    // until the fixture was fixed. An authored path takes synthesize_node's
+    // early return, so the style gradient survives to codegen and the branch is
+    // the only thing standing between it and the box.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.style.width = 200.0f;
+
+    IRNode glyph;
+    glyph.type = "path";
+    glyph.name = "Play";
+    glyph.attributes["path_data"] = "M0 0 L32 16 L0 32 Z";
+    glyph.attributes["svg_viewbox"] = "0 0 32 32";
+    glyph.attributes["svg_fill_gradient"] = "linear-gradient(90deg, #f00, #900)";
+    glyph.style.width = 32.0f;
+    glyph.style.height = 32.0f;
+    glyph.style.background_gradient = "linear-gradient(90deg, #f00, #900)";
+    glyph.style.opacity = 0.6f;
+    ir.root.children.push_back(glyph);
+
+    const auto js = native_js(ir);
+    INFO(js);
+
+    REQUIRE(js.find("createSvgPath('") != std::string::npos);
+    // The gradient rides the path, and ONLY the path.
+    REQUIRE(js.find("setSvgFillGradient('") != std::string::npos);
+    REQUIRE(js.find("setBackgroundGradient(") == std::string::npos);
+    // The fade still rides along — opacity is a View property, unlike the fill.
+    REQUIRE(js.find("setOpacity('") != std::string::npos);
+}
+
+TEST_CASE("native codegen keeps a synthesized primitive's gradient off its box",
+          "[view][import][visual-overrides]") {
+    // The other half of the same invariant, via the path synthesize_node DOES
+    // take: a filled ellipse gets its gradient moved onto the synthesized path,
+    // cleared off its own style, and must not paint a box either.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.style.width = 200.0f;
+
+    IRNode dot;
+    dot.type = "ellipse";
+    dot.name = "Record";
+    dot.style.width = 32.0f;
+    dot.style.height = 32.0f;
+    dot.style.background_gradient = "linear-gradient(90deg, #f00, #900)";
+    dot.style.opacity = 0.6f;
+    ir.root.children.push_back(dot);
+
+    const auto js = native_js(ir);
+    INFO(js);
+
+    REQUIRE(js.find("createSvgPath('") != std::string::npos);
+    REQUIRE(js.find("setSvgFillGradient('") != std::string::npos);
+    REQUIRE(js.find("setBackgroundGradient(") == std::string::npos);
+    REQUIRE(js.find("setOpacity('") != std::string::npos);
+}
+
+TEST_CASE("native codegen paints a gradient behind a transparent image",
+          "[view][import][visual-overrides]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 300.0f;
+
+    // The canonical case: a transparent PNG over a gradient plate. The image
+    // node owns BOTH, and the gradient paints the box behind the bitmap — so a
+    // codegen that emits the image and forgets the box loses the plate and the
+    // art lands on nothing.
+    IRNode image;
+    image.type = "image";
+    image.name = "Grain";
+    image.attributes["asset_path"] = "/tmp/grain.png";
+    image.style.width = 64.0f;
+    image.style.height = 64.0f;
+    image.style.background_gradient = "linear-gradient(180deg, #ffffff, #000000)";
+    ir.root.children.push_back(image);
+
+    const auto js = native_js(ir);
+    REQUIRE(js.find("setBackgroundGradient('") != std::string::npos);
+    REQUIRE(js.find("linear-gradient(180deg, #ffffff, #000000)") != std::string::npos);
+    // Both, not either: the plate is behind the bitmap, not instead of it.
+    REQUIRE(js.find("setImageSource(") != std::string::npos);
+}
+
+TEST_CASE("native codegen paints a stroke declared as the CSS border shorthand",
+          "[view][import][border]") {
+    // IRStyle carries `border` — "1px solid #333" — AND the discrete
+    // border_color / border_width. Every producer writes the shorthand — the
+    // .fig decoder, the Claude bundle reader, the v0 TSX reader — and every
+    // native consumer reads only the parts. So a stroke reached the IR and then
+    // went nowhere: a real 1115-node import declared six strokes and emitted
+    // zero setBorder and zero setSvgStroke calls.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 300.0f;
+
+    IRNode card;
+    card.type = "frame";
+    card.name = "Card";
+    card.style.width = 100.0f;
+    card.style.height = 40.0f;
+    card.style.border = "1px solid #f56161";
+    ir.root.children.push_back(card);
+
+    // A vector that arrives WITH its own path: synthesize_node returns early on
+    // path_data, so nothing moves the stroke onto the path. This is every `Oval`
+    // knob rim in a real design.
+    IRNode ring;
+    ring.type = "vector";
+    ring.name = "Ring";
+    ring.attributes["path_data"] = "M0 0 L10 0 L10 10 Z";
+    ring.style.width = 24.0f;
+    ring.style.height = 24.0f;
+    ring.style.border = "2px solid #ffffff8c";
+    ir.root.children.push_back(ring);
+
+    const auto js = native_js(ir);
+
+    REQUIRE(js.find("setBorder('") != std::string::npos);
+    REQUIRE(js.find("#f56161") != std::string::npos);
+
+    REQUIRE(js.find("setSvgStroke('") != std::string::npos);
+    REQUIRE(js.find("#ffffff8c") != std::string::npos);
+    // The weight travels with the color: a stroke emitted without it paints at
+    // the widget default, which is wrong in a way that looks deliberate.
+    REQUIRE(js.find("setSvgStrokeWidth('") != std::string::npos);
+}
+
+TEST_CASE("the border shorthand splits without losing a functional color",
+          "[view][import][border]") {
+    IRNode n;
+    n.type = "frame";
+    // rgba() is ONE value containing spaces and commas. A plain space split
+    // yields "rgba(255," as the color and the border vanishes again, one layer
+    // further down — so the tokenizer tracks paren depth.
+    n.style.border = "3px dashed rgba(255, 0, 0, 0.5)";
+    normalize_border_shorthand(n);
+    REQUIRE(n.style.border_color.has_value());
+    REQUIRE(*n.style.border_color == "rgba(255, 0, 0, 0.5)");
+    REQUIRE(n.style.border_width == 3.0f);
+    REQUIRE(n.style.border_style.has_value());
+    REQUIRE(*n.style.border_style == "dashed");
+}
+
+TEST_CASE("border shorthand normalization defers and declines",
+          "[view][import][border]") {
+    // A producer that set the discrete field said what it meant more precisely
+    // than the shorthand can, so the shorthand must not overwrite it.
+    IRNode explicit_color;
+    explicit_color.type = "frame";
+    explicit_color.style.border = "1px solid #000000";
+    explicit_color.style.border_color = "#abcdef";
+    normalize_border_shorthand(explicit_color);
+    REQUIRE(*explicit_color.style.border_color == "#abcdef");
+
+    // `border: none` is a positive statement that there is no edge. Inventing a
+    // color-less 1px width here would be a border where the design says none.
+    IRNode none;
+    none.type = "frame";
+    none.style.border = "none";
+    normalize_border_shorthand(none);
+    REQUIRE_FALSE(none.style.border_color.has_value());
+    REQUIRE_FALSE(none.style.border_width.has_value());
+
+    // A width-less shorthand still paints — CSS's initial border-width is
+    // medium, and a design that says "solid red" means a visible edge.
+    IRNode widthless;
+    widthless.type = "frame";
+    widthless.style.border = "solid #ff0000";
+    normalize_border_shorthand(widthless);
+    REQUIRE(*widthless.style.border_color == "#ff0000");
+    REQUIRE(widthless.style.border_width == 1.0f);
+
+    // Recurses: a stroke on a deep child is exactly the case that was lost.
+    IRNode root;
+    root.type = "frame";
+    IRNode mid; mid.type = "frame";
+    IRNode leaf; leaf.type = "frame";
+    leaf.style.border = "2px solid #123456";
+    mid.children.push_back(leaf);
+    root.children.push_back(mid);
+    normalize_border_shorthand(root);
+    REQUIRE(*root.children[0].children[0].style.border_color == "#123456");
 }

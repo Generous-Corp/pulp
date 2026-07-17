@@ -648,8 +648,11 @@ public:
     // independent reference oracle. Ineligible graphs always fall back to the
     // legacy walk regardless of this flag. The flag is a control-thread toggle read
     // relaxed on the audio thread. The two paths produce bit-identical output
-    // per block for eligible graphs, so toggling mid-stream is RT-safe and
-    // seamless for feedforward graphs. For graphs with FEEDBACK, the legacy walk
+    // per block for eligible zero-PDC graphs, so toggling mid-stream is RT-safe
+    // and seamless there. A prepared snapshot with active feed-forward PDC pins
+    // its execution domain until the next prepare: the legacy, serial, and
+    // parallel paths own independent delay history, so switching between them
+    // mid-stream would select a stale ring. For graphs with FEEDBACK, the legacy walk
     // and the executor keep INDEPENDENT one-block-delay state (the legacy
     // ConnectionDelay::feedback_prev vs the executor's per-edge prev slot), so a
     // mid-stream switch resets feedback history to whatever the destination path
@@ -967,10 +970,14 @@ private:
     // common alignment at input_latency samples.
     struct ConnectionDelay {
         int delay_samples = 0;
-        // Ring buffer: delay_samples + max_block_size_ frames per source
-        // channel. Empty when delay_samples == 0 (pass-through path).
-        std::vector<float> ring;
-        int write_pos = 0;
+        struct State {
+            // Ring buffer: delay_samples + max_block_size_ frames per source
+            // channel, plus the audio-thread-owned cursor. Shared only between
+            // identity-matched live snapshots with equal delay structure.
+            std::vector<float> ring;
+            int write_pos = 0;
+        };
+        std::shared_ptr<State> state;
         // Feedback edges hold the previous block's source-port audio so the
         // destination can read it before the source writes the current block.
         std::vector<float> feedback_prev;  // size = max_block_size_
@@ -999,9 +1006,17 @@ private:
     // node runtime AND holds shared_ptr<PluginSlot>, it's safe to read even
     // if GraphNode owners are mutated before the audio thread releases its
     // reference. The old snapshot is destroyed only when both threads let go.
+    enum class PdcExecutionDomain : std::uint8_t {
+        Dynamic,  // no PDC: runtime routing toggles remain live
+        Legacy,
+        RoutedSerial,
+        RoutedParallel,
+    };
+
     struct CompiledGraph {
         std::vector<NodeId> order;
         std::vector<Connection> connections;
+        std::vector<std::uint64_t> connection_identities;
         std::vector<NodeRuntime::EdgeRef> feedback_edges;
         std::vector<ConnectionDelay> connection_delays;  // parallel to connections
         // Runtime + plugin + node-info keyed by NodeId so we don't rely on
@@ -1036,6 +1051,10 @@ private:
         double sample_rate = 0.0;  // needed to convert automation_smoothing_ms
                                    // into samples.
         int64_t total_latency_samples = 0;
+        // Non-Dynamic when this snapshot owns feed-forward delay history. The
+        // selected path is captured at prepare time so a relaxed runtime toggle
+        // cannot jump to another domain's stale ring mid-stream.
+        PdcExecutionDomain pdc_execution_domain = PdcExecutionDomain::Dynamic;
         MidiBlockSnapshot midi_publish_scratch;
         // 2.2b reinit-free-swap predicate inputs (captured at compile so a
         // prepare_swap candidate can be compared against this live snapshot):
@@ -1152,6 +1171,11 @@ private:
 
     std::vector<GraphNode> nodes_;
     std::vector<Connection> connections_;
+    // Private authoring identity parallel to connections_. Public Connection
+    // stays a value-only routing description; disconnect+reconnect mints a new
+    // identity so stale PDC history can never attach to a logically new edge.
+    std::vector<std::uint64_t> connection_identities_;
+    std::uint64_t next_connection_identity_{1};
     std::unordered_map<std::string, CustomNodeType> custom_node_types_;
     // Bumped on every register_custom_node_type; captured into each CompiledGraph
     // so the 2.2b reinit-free-swap predicate can reject a candidate compiled after
@@ -1423,6 +1447,8 @@ private:
     // topology's constness is shed, so the mutators do not each hand-roll a
     // const_cast. Caller holds graph_mutation_mutex_ (same contract as node()).
     GraphNode* node_mut_locked_(NodeId id);
+    void append_connection_locked_(Connection connection);
+    void erase_connection_at_locked_(std::size_t index);
 
     bool has_path_locked_(NodeId from, NodeId to) const;
     std::size_t total_declared_ports_locked_() const;

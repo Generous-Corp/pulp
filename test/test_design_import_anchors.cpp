@@ -621,3 +621,114 @@ TEST_CASE("anchor vector divergence annotations agree with the recorded columns"
     // it spread further (a new field started hashing raw text).
     CHECK(divergent == 8);
 }
+
+// ── setAnchor() in bridge-native-JS codegen ─────────────────────────────
+//
+// The native lane emitted anchor COMMENTS and nothing else, with the gap
+// documented in-place as a known limitation ("Web-compat is the default mode,
+// so most imports are unaffected"). That claim did not survive contact with the
+// `.fig` lane, which generates native JS: every view came out anchorless, so
+// the inspector could not key tweaks against source and every node-keyed
+// validation had nothing to join on — skipping, and reporting success by
+// finding nothing. A test asserting only "an anchor appears somewhere in the
+// JS" stays green through all of that, because the comment is right there.
+// These assert on the CALL, and on the id the call is given.
+
+namespace {
+
+// The id codegen passed to setAnchor for `anchor`, or "" if it never did.
+std::string anchored_id_for(const std::string& js, const std::string& anchor) {
+    const std::string needle = ", '" + anchor + "');";
+    auto end = js.find(needle);
+    if (end == std::string::npos) return {};
+    auto call = js.rfind("setAnchor('", end);
+    if (call == std::string::npos) return {};
+    auto id_start = call + std::string("setAnchor('").size();
+    auto id_end = js.find('\'', id_start);
+    if (id_end == std::string::npos || id_end > end) return {};
+    return js.substr(id_start, id_end - id_start);
+}
+
+}  // namespace
+
+TEST_CASE("bridge-native codegen binds every node's anchor to its live widget",
+          "[view][import][anchors][setAnchor]") {
+    const std::string json = R"({
+        "type": "frame",
+        "id": "0:1",
+        "children": [{ "type": "text", "content": "X", "id": "0:42" }]
+    })";
+    auto ir = parse_figma_json(json);
+
+    CodeGenOptions opts;
+    opts.include_comments = true;
+    opts.mode = CodeGenMode::bridge_native_js;
+    auto js = generate_pulp_js(ir, opts);
+
+    // The container and the text node take DIFFERENT terminal branches of
+    // generate_native_node_impl, each with its own create call and its own
+    // early return — which is exactly why binding lives in the wrapper.
+    REQUIRE(anchored_id_for(js, "figma:0:1") != "");
+    REQUIRE(anchored_id_for(js, "figma:0:42") != "");
+}
+
+TEST_CASE("bridge-native setAnchor receives the id codegen actually created",
+          "[view][import][anchors][setAnchor]") {
+    // The bridge's setAnchor does `widget(id)` and silently no-ops on a miss,
+    // so an id that is merely plausible — a re-derived name, a stale counter —
+    // fails exactly like no call at all. It must be the id the create call used.
+    const std::string json = R"({
+        "type": "frame",
+        "id": "0:1",
+        "children": [
+            { "type": "text", "content": "A", "id": "0:2" },
+            { "type": "text", "content": "B", "id": "0:3" }
+        ]
+    })";
+    auto ir = parse_figma_json(json);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    auto js = generate_pulp_js(ir, opts);
+
+    for (const char* anchor : {"figma:0:2", "figma:0:3"}) {
+        auto id = anchored_id_for(js, anchor);
+        INFO("anchor " << anchor << " bound to id '" << id << "'");
+        REQUIRE(id != "");
+        // The id must appear in a create call — that is what makes widget(id)
+        // resolve. Siblings share a name and are disambiguated by a counter,
+        // so this also pins that setAnchor gets the RIGHT sibling's id.
+        REQUIRE(js.find("createLabel('" + id + "'") != std::string::npos);
+    }
+    REQUIRE(anchored_id_for(js, "figma:0:2") != anchored_id_for(js, "figma:0:3"));
+}
+
+TEST_CASE("bridge-native setAnchor survives include_comments=false",
+          "[view][import][anchors][setAnchor]") {
+    // The anchor trail is cosmetic; the binding is functional. Stripping
+    // comments must not take the binding with it — otherwise the one lane that
+    // needs anchors most (a minified import bundle) is the lane without them.
+    const std::string json = R"({ "type": "frame", "id": "0:1" })";
+    auto ir = parse_figma_json(json);
+
+    CodeGenOptions opts;
+    opts.include_comments = false;
+    opts.mode = CodeGenMode::bridge_native_js;
+    auto js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("@pulp-anchor") == std::string::npos);
+    REQUIRE(anchored_id_for(js, "figma:0:1") != "");
+}
+
+TEST_CASE("bridge-native codegen emits no setAnchor for an anchorless node",
+          "[view][import][anchors][setAnchor]") {
+    pulp::view::DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    auto js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("setAnchor(") == std::string::npos);
+}

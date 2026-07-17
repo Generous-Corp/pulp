@@ -1672,6 +1672,55 @@ DesignIR parse_figma_plugin_json(const std::string& json) {
     ir.root.provenance = std::move(provenance);
     ir.root.confidence = IRConfidence::pass;
 
+    // The envelope's diagnostics are the whole point of emitting them: they are
+    // how a fidelity loss becomes a stated result instead of a silent one. This
+    // parser documented `diagnostics?: [...]` in its own shape comment above and
+    // then never read the field, so `ir.diagnostics` stayed empty and
+    // `print_import_diagnostics` had nothing to print.
+    //
+    // Nothing about that was visible. The decoder emitted the warnings correctly
+    // and wrote them to scene.pulp.json; the JS lane even printed "N warning(s)"
+    // from its own array. But `--from fig` rewrites its source to figma-plugin
+    // and lands HERE, so every gradient flattened to its mean, every dropped
+    // blend mode, every missing icon font and every unresolvable asset was
+    // announced to a file and to nobody. The skill promises the opposite
+    // (import-design SKILL.md: "reported as named warnings ... rather than
+    // silently dropped") — true of the JSON on disk, false of the CLI.
+    //
+    // A comment describing a field the code does not parse is the same failure
+    // this whole lane keeps producing: a chain that runs end to end with one end
+    // quietly unplugged, where nothing errors and the result is merely wrong.
+    if (parsed.hasObjectMember("diagnostics") && parsed["diagnostics"].isArray()) {
+        const auto diags = parsed["diagnostics"];
+        // Local to this parser and matching its house idiom (hasObjectMember +
+        // isString), rather than reaching for a helper this TU does not have.
+        auto str = [](const choc::value::ValueView& o, const char* k) -> std::string {
+            return (o.hasObjectMember(k) && o[k].isString())
+                       ? std::string(o[k].toString()) : std::string{};
+        };
+        for (uint32_t i = 0; i < diags.size(); ++i) {
+            const auto d = diags[i];
+            if (!d.isObject()) continue;
+            ImportDiagnostic out;
+            out.code = str(d, "code");
+            if (out.code.empty()) continue;  // a diagnostic with no code says nothing
+            // `detail` is the decoder's field name; accept `message` too so a
+            // different emitter of this envelope is not silently blanked.
+            out.message = str(d, "detail");
+            if (out.message.empty()) out.message = str(d, "message");
+            // Prefer the readable node name for `path`; fall back to the guid,
+            // which is at least resolvable.
+            out.path = str(d, "node_name");
+            if (out.path.empty()) out.path = str(d, "node_id");
+            const std::string sev = str(d, "severity");
+            out.severity = sev == "error" ? ImportDiagnosticSeverity::error
+                         : sev == "info"  ? ImportDiagnosticSeverity::info
+                                          : ImportDiagnosticSeverity::warning;
+            if (auto id = str(d, "node_id"); !id.empty()) out.anchor_id = id;
+            ir.diagnostics.push_back(std::move(out));
+        }
+    }
+
     promote_interactive_frames(ir.root);
     assign_anchors(ir.root, AnchorStrategy::adapter, "figma-plugin");
 
@@ -1953,7 +2002,29 @@ void synthesize_node(IRNode& n) {
     if (!n.children.empty()) return;
     if (n.audio_widget != AudioWidgetType::none) return;
     if (n.attributes.count("asset_path")) return;
-    if (node_has_visible_fill(n)) return;
+    // "Already renderable" holds for a rect or a line: a frame paints its own
+    // background box, so a filled rect needs no path. It does NOT hold for a
+    // round or many-sided primitive — codegen has no painter for those, so a
+    // filled ellipse emits nothing whatsoever and the shape vanishes. The
+    // design's red record dot rendered as an empty cell for exactly this reason
+    // while the play triangle beside it (a vector carrying a real path) was
+    // fine. Their fill is only expressible as a path, so synthesize one and
+    // carry the color across.
+    //
+    // A gradient rides the path too, via setSvgFillGradient. It used to bail
+    // here because a gradient could not move onto the path, and emitting one
+    // anyway painted a gradient SQUARE behind the circle — strictly worse than
+    // a flat disc. The path can carry it now, so the only rule left is the one
+    // that made the square: whatever moves onto the path must be cleared off
+    // the node's own background.
+    const bool fill_needs_path = n.type == "ellipse" || n.type == "circle" ||
+                                 n.type == "polygon" || n.type == "star";
+    const bool solid_filled =
+        n.style.background_color && !n.style.background_color->empty();
+    const bool gradient_filled =
+        n.style.background_gradient && !n.style.background_gradient->empty();
+    if (node_has_visible_fill(n) && !(fill_needs_path && (solid_filled || gradient_filled)))
+        return;
     const float w = n.style.width.value_or(0.0f);
     const float h = n.style.height.value_or(0.0f);
     const bool is_line = (n.type == "line" || n.type == "svg_line");
@@ -1980,10 +2051,26 @@ void synthesize_node(IRNode& n) {
 
     n.attributes["path_data"] = d;
     n.attributes["svg_viewbox"] = "0 0 " + svg_num(w) + " " + svg_num(h);
-    // We only reach here when the node has no visible fill, so force the
-    // SvgPathWidget's default opaque-black fill off — otherwise a stroke-only or
-    // empty shape would render as a solid black box.
-    n.attributes["svg_fill"] = "none";
+    // The synthesized path now IS this node's paint, so a solid fill moves onto
+    // it and the background is cleared. Leaving the background set would paint a
+    // square behind the circle — the stray box that shows up behind a knob.
+    if (gradient_filled) {
+        n.attributes["svg_fill_gradient"] = *n.style.background_gradient;
+        n.style.background_gradient.reset();
+        // The solid, when present, follows it onto the path as the widget's
+        // parse-failure fallback. Either way the node's own background is
+        // cleared: leaving it would paint the box behind the circle.
+        n.attributes["svg_fill"] =
+            solid_filled ? *n.style.background_color : std::string("none");
+        n.style.background_color.reset();
+    } else if (solid_filled) {
+        n.attributes["svg_fill"] = *n.style.background_color;
+        n.style.background_color.reset();
+    } else {
+        // No visible fill: force the SvgPathWidget's default opaque-black fill
+        // off — otherwise a stroke-only or empty shape renders as a black box.
+        n.attributes["svg_fill"] = "none";
+    }
     if (n.style.border_color && !n.style.border_color->empty()) {
         n.attributes["svg_stroke"] = *n.style.border_color;
         n.attributes["svg_stroke_width"] = svg_num(n.style.border_width.value_or(1.0f));
@@ -2129,6 +2216,93 @@ void hoist_captured_art_knobs(DesignIR& ir) {
         for (auto& c : n.children) visit(c);
     };
     visit(ir.root);
+}
+
+namespace {
+
+// Split a CSS `border` shorthand into its parts. Tokenized with paren-depth
+// tracking rather than a plain space split, because `rgba(255, 0, 0, 0.5)` is
+// ONE value containing spaces and commas — a naive split hands back "rgba(255,"
+// as the color and the border silently disappears again, one layer deeper.
+//
+// The color is carried across verbatim rather than parsed: border_color is a
+// string, and every downstream paint site already accepts hex / rgb() / rgba()
+// / hsl(). Parsing here would only add a second place to disagree about color.
+struct BorderShorthand {
+    std::optional<std::string> color;
+    std::optional<float> width;
+    std::optional<std::string> style;
+};
+
+BorderShorthand parse_border_shorthand(const std::string& value) {
+    BorderShorthand out;
+    static const std::unordered_set<std::string> kStyles = {
+        "none", "hidden", "solid", "dashed", "dotted",
+        "double", "groove", "ridge", "inset", "outset",
+    };
+
+    std::vector<std::string> tokens;
+    std::string cur;
+    int depth = 0;
+    for (char c : value) {
+        if (c == '(') ++depth;
+        if (c == ')') --depth;
+        if (std::isspace(static_cast<unsigned char>(c)) && depth == 0) {
+            if (!cur.empty()) { tokens.push_back(cur); cur.clear(); }
+            continue;
+        }
+        cur += c;
+    }
+    if (!cur.empty()) tokens.push_back(cur);
+
+    for (const auto& t : tokens) {
+        const std::string lower = choc::text::toLowerCase(t);
+        if (!out.style && kStyles.count(lower)) { out.style = lower; continue; }
+        // A width is a bare number with an optional unit. Only px is honoured as
+        // a real length; other units are left for the caller's default rather
+        // than converted with a guessed root font size.
+        if (!out.width && !t.empty() &&
+            (std::isdigit(static_cast<unsigned char>(t[0])) || t[0] == '.')) {
+            char* end = nullptr;
+            const float v = std::strtof(t.c_str(), &end);
+            if (end != t.c_str()) {
+                const std::string unit = choc::text::toLowerCase(std::string(end));
+                if (unit.empty() || unit == "px") { out.width = v; continue; }
+            }
+        }
+        if (!out.color) out.color = t;
+    }
+    return out;
+}
+
+}  // namespace
+
+void normalize_border_shorthand(IRNode& root) {
+    auto visit = [](auto&& self, IRNode& n) -> void {
+        if (n.style.border && !n.style.border->empty()) {
+            const auto parts = parse_border_shorthand(*n.style.border);
+            // `border: none` / a zero width is a positive statement that there
+            // is no edge. Recording color-less parts would leave border_width
+            // set with no color, which reads downstream as "no border" anyway —
+            // but say it explicitly so the intent survives a later refactor.
+            const bool suppressed =
+                (parts.style && *parts.style == "none") ||
+                (parts.style && *parts.style == "hidden") ||
+                (parts.width && *parts.width <= 0.0f);
+            if (!suppressed) {
+                // Fill gaps only: a producer that set the discrete fields said
+                // what it meant more precisely than the shorthand can.
+                if (!n.style.border_color && parts.color)
+                    n.style.border_color = *parts.color;
+                if (!n.style.border_width)
+                    n.style.border_width = parts.width.value_or(1.0f);
+                if (!n.style.border_style && parts.style)
+                    n.style.border_style = *parts.style;
+            }
+        }
+        for (auto& c : n.children) self(self, c);
+    };
+    visit(visit, root);
 }
 
 void synthesize_primitive_paths(IRNode& root) {

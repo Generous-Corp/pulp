@@ -790,6 +790,77 @@ def check_fix_feat_requires_bump(
     )
 
 
+def verify_applied_bumps(
+    verdicts: list[Verdict],
+    base: str,
+    repo: Path,
+    accept_intent_trailers: bool = False,
+) -> str | None:
+    """Post-apply proof: every surface that owed a bump is now ahead of `base`.
+
+    `--mode=apply` computes verdicts, then asks `apply_bumps` to write. Every
+    step in between can decline to write while returning normally: the
+    already-bumped short-circuit, an unreadable `current_version`, or a
+    `write_version` whose pattern no longer matches a reformatted file. None of
+    those raise, so apply could print `✓ bumped` and exit 0 having written
+    nothing — the gate meant to enforce the bump silently not enforcing it.
+
+    So don't infer the write from the code path that requested it; re-read the
+    files and check. This is the apply-mode counterpart of the no-surface exit
+    below (issue #4679 acceptance (b)): apply must never report success on a
+    bump it did not actually land. Returns an actionable message, or None when
+    every owed bump is on disk.
+
+    `patch` matters most here — `render_report` scores an unbumped patch as an
+    advisory `?` and still exits 0, so a silently-dropped patch write is
+    invisible to the report alone.
+    """
+    stranded: list[str] = []
+    for v in verdicts:
+        if v.final_level == "none":
+            continue
+        # An accepted intent trailer defers the write to merge-time
+        # automation by design; the files are legitimately unmoved.
+        if (
+            accept_intent_trailers
+            and v.trailer_override in LEVELS
+            and v.trailer_override != "none"
+        ):
+            continue
+        for vf in v.surface.version_files:
+            if already_bumped(base, vf, repo):
+                continue
+            base_ver = version_at_base(base, vf)
+            if base_ver is None:
+                # No version at base — the file is new in this branch (a
+                # surface this PR adds), or the base ref doesn't resolve.
+                # Either way there's no ordering to compare, so absence of
+                # "ahead of base" is not evidence of a dropped write.
+                continue
+            stranded.append(
+                f"  [{v.surface.name}] {vf.path}: "
+                f"base={base_ver} head={read_version(repo, vf) or '?'} "
+                f"(wanted a {v.final_level} bump)"
+            )
+    if not stranded:
+        return None
+    return (
+        "version-bump apply: refusing to report success — apply ran but these "
+        "version files are NOT ahead of the base:\n"
+        + "\n".join(stranded)
+        + "\n\nThe bump was requested and never landed on disk, so the "
+        "`chore: bump versions` marker the caller is about to write would be "
+        "a lie and the CI fix/feat gate would fail downstream with no "
+        "explanation.\n"
+        "\nMost likely: this branch's base has moved on and the version line "
+        f"is stale. Rebase, then re-run:\n"
+        f"    git rebase {base}\n"
+        "    python3 tools/scripts/version_bump_check.py --mode=apply\n"
+        "If a rebase does not resolve it, the version file's pattern in "
+        "tools/scripts/versioning.json no longer matches the file's contents."
+    )
+
+
 # ── Main ────────────────────────────────────────────────────────────────
 
 
@@ -1079,6 +1150,15 @@ def main(argv: list[str]) -> int:
                 print(f"  {e}")
         if text:
             print(text)
+        # Prove the writes landed before anyone acts on this exit code.
+        stranded_msg = verify_applied_bumps(
+            verdicts_after, apply_base, root,
+            accept_intent_trailers=args.accept_intent_trailers,
+        )
+        if stranded_msg:
+            sys.stderr.write(stranded_msg + "\n")
+            if code == 0:
+                code = 1
         if forced_no_surface_msg:
             # No versioned surface was touched — print the actionable
             # reclassify/skip message so the caller (and shipyard pr) sees

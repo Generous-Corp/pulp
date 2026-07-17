@@ -7,8 +7,9 @@
 //       subtree weight). Use it to pick a frame before a full decode — large
 //       community files carry hundreds of frames across many pages.
 //   emit <file.fig> --frame <guid|name> --out <dir> [--page <name>]
-//       Decode one frame into <dir>/scene.pulp.json plus <dir>/assets/, a Pulp
-//       figma-plugin export envelope consumable by
+//       Decode one frame into <dir>/scene.pulp.json plus <dir>/assets/, with
+//       geometry.json + materials.json sidecars naming what the design declared.
+//       The envelope is a Pulp figma-plugin export consumable by
 //       `pulp import-design --from figma-plugin --file <dir>/scene.pulp.json`.
 //
 // No Figma account, MCP, or network access is used; everything comes from the
@@ -133,7 +134,7 @@ function cmdEmit(path, opts) {
     // real time can override provenance downstream.
     exportedAt: '1970-01-01T00:00:00Z',
   };
-  const { envelope, assetHashes, diagnostics } = materializeFrame(scene, frame, ctx);
+  const { envelope, geometry, materials, assetHashes, diagnostics } = materializeFrame(scene, frame, ctx);
 
   mkdirSync(opts.out, { recursive: true });
   if (assetHashes.size) mkdirSync(join(opts.out, 'assets'), { recursive: true });
@@ -142,6 +143,15 @@ function cmdEmit(path, opts) {
     if (bytes) writeFileSync(join(opts.out, asset.local_path), bytes);
   }
   writeFileSync(join(opts.out, 'scene.pulp.json'), JSON.stringify(envelope, bigintReplacer, 2));
+  // Figma's own solved rects, keyed by the same node_id the envelope carries.
+  // A sidecar rather than an envelope key: this is reference data for validating
+  // the import, not part of the design the importer consumes, and the
+  // figma-plugin envelope schema is a shared contract with the in-editor plugin.
+  writeFileSync(join(opts.out, 'geometry.json'), JSON.stringify(geometry, bigintReplacer, 2));
+  // What the design DECLARES about each node's material, for the same reason and
+  // on the same terms as geometry.json. material_audit.mjs counts it against
+  // what the envelope emitted.
+  writeFileSync(join(opts.out, 'materials.json'), JSON.stringify(materials, bigintReplacer, 2));
 
   const warn = diagnostics.filter((d) => d.severity === 'warning').length;
   process.stderr.write(

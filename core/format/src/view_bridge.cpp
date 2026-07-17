@@ -2,6 +2,7 @@
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/remote_view_session.hpp>
 #include <pulp/runtime/exceptions.hpp>
+#include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/host_param_surface.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/view.hpp>
@@ -22,6 +23,24 @@ view::ScriptedUiSession* safe_active_scripted_ui(Processor& processor) noexcept 
 ViewSize safe_view_size(Processor& processor) noexcept {
     PULP_TRY { return processor.view_size(); }
     PULP_CATCH_ALL { return {}; }
+}
+
+// Pull host values into every DesignFrameView at or below `v`. Walks the LIVE
+// tree rather than a cached pointer list: a cached list would dangle whenever a
+// view is removed (editor reload transplants children), and a dangling
+// DesignFrameView* here is a use-after-free inside a DAW's UI tick. The walk is
+// the cheap half of the pump — the per-frame cost is dominated by the sync
+// itself, and a design tree is tens of views, not thousands.
+std::size_t sync_design_frames(view::View* v) {
+    if (!v) return 0;
+    std::size_t synced = 0;
+    if (auto* frame = dynamic_cast<view::DesignFrameView*>(v)) {
+        frame->sync_from_host_params();
+        ++synced;
+    }
+    for (std::size_t i = 0; i < v->child_count(); ++i)
+        synced += sync_design_frames(v->child_at(i));
+    return synced;
 }
 
 } // namespace
@@ -187,6 +206,14 @@ std::unique_ptr<view::View> ViewBridge::release_view() {
     if (!view_ || released_) return nullptr;
     released_ = true;
     return std::move(view_);  // view_raw_ stays valid so lifecycle keeps dispatching
+}
+
+std::size_t ViewBridge::sync_design_frames_from_host() {
+    if (!view_raw_) return 0;   // not open: nothing to pull into
+    std::size_t synced = sync_design_frames(view_raw_);
+    for (auto& s : secondaries_)
+        synced += sync_design_frames(s.view.get());
+    return synced;
 }
 
 void ViewBridge::close() {

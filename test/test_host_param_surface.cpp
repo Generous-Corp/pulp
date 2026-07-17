@@ -1958,3 +1958,55 @@ TEST_CASE("the tick's main-thread guard passes when a backend reports the main t
     events::MainThreadDispatcher::unregister_backend(token);
     CHECK_FALSE(events::MainThreadDispatcher::has_backend());
 }
+TEST_CASE("sync_from_host_params writes nothing back to the surface",
+          "[view][host-param]") {
+    // The assertion with teeth. A "does it settle / does the value drift" check
+    // cannot catch a spurious write that happens to be convergent: a discrete
+    // parameter quantizes a small echo straight back onto the same option, so
+    // the value never moves and the drift check stays green while the pull
+    // silently touches the host every frame — a polluted automation lane and, on
+    // a host that brackets writes, a stream of undo steps.
+    //
+    // So assert the property directly and unconditionally: the pull performs
+    // ZERO writes. It is a read. Routing is auto-enabled for every bound
+    // imported design, which is exactly why this must hold for every kind, not
+    // just the one a happy-path test picks.
+    const std::string svg =
+        R"(<svg width="100" height="100"><rect width="100" height="100"/></svg>)";
+    std::vector<DesignFrameElement> els;
+    auto add = [&](DesignFrameElement::Kind k, const char* key) {
+        DesignFrameElement e;
+        e.kind = k;
+        e.x = 0; e.y = 0; e.w = 10; e.h = 10; e.cx = 5; e.cy = 5; e.hit_radius = 5.0f;
+        e.param_key = key;
+        if (k == DesignFrameElement::Kind::dropdown ||
+            k == DesignFrameElement::Kind::tab_group ||
+            k == DesignFrameElement::Kind::stepper)
+            e.options = {"a", "b", "c"};
+        els.push_back(e);
+    };
+    add(DesignFrameElement::Kind::knob, "k");
+    add(DesignFrameElement::Kind::fader, "f");
+    add(DesignFrameElement::Kind::toggle, "t");
+    add(DesignFrameElement::Kind::xy_pad, "x");
+    add(DesignFrameElement::Kind::dropdown, "d");
+    add(DesignFrameElement::Kind::tab_group, "g");
+    add(DesignFrameElement::Kind::stepper, "s");
+    add(DesignFrameElement::Kind::momentary, "m");
+    add(DesignFrameElement::Kind::value_label, "v");
+    add(DesignFrameElement::Kind::custom, "c");
+
+    DesignFrameView dfv(svg, els, 0, 0, 100, 100);
+    dfv.set_bounds({0, 0, 100, 100});
+    dfv.route_changes_to_host_params(true);   // what the importer emits
+
+    FakeHostParamSurface params;
+    for (const char* k : {"k", "f", "t", "x", "d", "g", "s", "m", "v", "c"})
+        params.values[k] = 0.375;             // off every quantization boundary
+    dfv.set_host_params(&params);
+
+    for (int i = 0; i < 20; ++i) dfv.sync_from_host_params();
+
+    CHECK(params.set_calls == 0);             // a pull is a read, not a write
+    CHECK(params.gesture_log.empty());        // and never a gesture bracket
+}

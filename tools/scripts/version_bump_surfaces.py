@@ -302,8 +302,30 @@ def version_at_base(base: str, vf: VersionFile) -> str | None:
     return _extract_version_from_text(base_text, vf)
 
 
+def _version_order_key(version: str) -> tuple[int, int, int] | None:
+    """(major, minor, patch) for ordering, or None when not semver-shaped."""
+    m = re.match(r"^(\d+)\.(\d+)\.(\d+)", version)
+    if not m:
+        return None
+    major, minor, patch = m.groups()
+    return (int(major), int(minor), int(patch))
+
+
 def already_bumped(base: str, vf: VersionFile, repo: Path) -> bool:
-    """True iff the version file's version at HEAD differs from at base."""
+    """True iff the version file's version at HEAD is AHEAD of the one at base.
+
+    Ordinal, deliberately not `base_ver != head_ver`. `version_at_base` reads
+    the TIP of `base` (usually `origin/main`), so on a busy main a branch is
+    BEHIND on every surface someone else bumped since it forked. Inequality
+    read "behind" as "bumped", which made `--mode=apply` skip the write and
+    still render `✓ bumped` — the gate reporting success while doing nothing,
+    then the fix/feat CI gate failing downstream with no marker to explain it.
+    Ordering also stops a stale branch from merging a version REGRESSION
+    (head 0.2.0 under base 0.3.0 is not a bump).
+
+    Unparseable versions fall back to inequality — the pre-ordinal behavior —
+    since a non-semver string has no order to compare.
+    """
     p = repo / vf.path
     if not p.exists():
         return False
@@ -313,4 +335,8 @@ def already_bumped(base: str, vf: VersionFile, repo: Path) -> bool:
     head_ver = _extract_version_from_text((repo / vf.path).read_text(), vf)
     if head_ver is None:
         return False
-    return base_ver != head_ver
+    base_key = _version_order_key(base_ver)
+    head_key = _version_order_key(head_ver)
+    if base_key is None or head_key is None:
+        return base_ver != head_ver
+    return head_key > base_key
