@@ -192,11 +192,11 @@ test('an unresolvable vector still reports vector-simplified exactly once', () =
   assert.equal(diagnostics.filter((d) => d.code === 'vector-simplified').length, 1);
 });
 
-test('a gradient-filled vector never renders as a black silhouette', () => {
-  // SvgPathWidget defaults fill_color_ to opaque black with has_fill_ on, so a
-  // vector whose paint we cannot express MUST say so explicitly. Staying silent
-  // paints a black blob — strictly worse than the plain box this lane used to
-  // emit, and the one way lowering vectors could regress a real file.
+// Figma's paint transform maps the node's box INTO gradient space, so this is
+// the inverse of the axis it describes: a plain top→bottom ramp.
+const TOP_TO_BOTTOM = { m00: 0, m01: 1, m02: 0, m10: -1, m11: 0, m12: 1 };
+
+function gradientVector(paintExtra = {}) {
   const node = strokeOnlyNode();
   node.fillGeometry = [{ commandsBlob: 1 }];
   node.strokeGeometry = null;
@@ -208,13 +208,41 @@ test('a gradient-filled vector never renders as a black silhouette', () => {
       { color: { r: 1, g: 0, b: 0, a: 1 }, position: 0 },
       { color: { r: 0, g: 0, b: 1, a: 1 }, position: 1 },
     ],
+    ...paintExtra,
   }];
   const { scene, frame } = sceneWith(node);
   const { envelope } = materializeFrame(scene, frame, CTX);
-  const v = firstVector(envelope.root);
+  return firstVector(envelope.root);
+}
+
+test('a gradient-filled vector paints its gradient, and never a black silhouette', () => {
+  // Two contracts in one, because they failed together. SvgPathWidget defaults
+  // fill_color_ to opaque black with has_fill_ on, so a vector whose paint we
+  // cannot express MUST say so explicitly — staying silent paints a black blob.
+  // And the paint we express has to be the gradient the designer drew: this
+  // used to flatten to the mean of the stops, which is what made the knob rim
+  // highlight a flat grey ring.
+  const v = gradientVector({ transform: TOP_TO_BOTTOM });
+  assert.ok(v.fillGradient, 'a lowerable gradient must survive AS a gradient');
+  assert.match(v.fillGradient, /^linear-gradient\(180deg,/);
+  // The solid rides along as the widget's parse-failure fallback, so the black
+  // default can never surface — but it must not be the mean pretending to be
+  // the paint.
   assert.ok(v.fill, 'a fill must always be emitted, never left to the black default');
   assert.notEqual(v.fill, '#000000');
+});
+
+test('a gradient we cannot express falls back to the mean rather than guessing', () => {
+  // No transform means no axis, and there is no honest default direction: a
+  // guessed `to bottom` is 180° wrong half the time and nothing would report
+  // it. The mean is the truthful answer here, so assert it ON PURPOSE — a
+  // flattened fill in THIS case is the contract, not the bug 6.7 deleted.
+  // (The same reasoning covers RADIAL, which parse_svg_linear_gradient cannot
+  // read at all.)
+  const v = gradientVector();
+  assert.equal(v.fillGradient, undefined, 'no axis ⇒ no gradient claim');
   assert.equal(v.fill, '#800080'); // mean of the stops
+  assert.notEqual(v.fill, '#000000');
 });
 
 test('a vector with no expressible paint clears the fill rather than defaulting to black', () => {
