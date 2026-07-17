@@ -8,6 +8,8 @@
 #include <pulp/audio/sample_stream_voice_reader.hpp>
 #include <pulp/signal/adsr.hpp>
 
+#include "sampler_mip_pyramid.hpp"
+
 #include <cstdint>
 
 namespace pulp::examples {
@@ -20,6 +22,7 @@ struct SamplerVoice {
     signal::Adsr adsr;
     audio::LoopRenderer renderer;
     audio::PublishedSampleView sample;
+    SamplerMipLevelView resident_mip;
     audio::SampleAssetView streamed_asset;
     audio::SampleStreamLoopVoiceReader stream_reader;
     audio::SampleStreamLoopVoiceReader lookahead_reader;
@@ -42,6 +45,7 @@ struct SamplerVoice {
         note = -1;
         velocity = 0.0f;
         sample = {};
+        resident_mip = {};
         streamed_asset = {};
         stream_reader.reset();
         lookahead_reader.reset();
@@ -67,6 +71,7 @@ struct SamplerVoice {
                double speed,
                float host_sample_rate,
                const audio::PublishedSampleView& sample_view,
+               const SamplerMipLevelView& mip_view,
                const audio::LoopRegion& region,
                std::uint64_t source_frames,
                const audio::PreparedSampleInterpolation& interpolation) {
@@ -76,6 +81,7 @@ struct SamplerVoice {
         note = n;
         velocity = vel;
         sample = sample_view;
+        resident_mip = mip_view;
         active = true;
         adsr.set_sample_rate(host_sample_rate);
         adsr.note_on();
