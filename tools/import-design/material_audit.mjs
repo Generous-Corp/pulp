@@ -153,12 +153,16 @@ function checkStroke(decl, emitted, diagKinds) {
   const border = emitted && emitted.style && emitted.style.border;
   const solid = decl.stroke.find((p) => p.type === 'SOLID');
   if (!solid) {
-    // A non-solid stroke was very nearly waved through here as "a separate gap".
-    // It is not: the file's 40 `Oval` GRADIENT_LINEAR strokes (white -> transparent,
-    // the lit rim on every knob) reach neither style.border nor the path, and carry
-    // no diagnostic. Skipping them would have made this tool blind to the single
-    // biggest material drop in the design — the exact shape of blind spot it was
-    // built to end.
+    // A GRADIENT stroke on a vector does not become a `style.border` (that is a
+    // solid CSS edge). It rides onto the PATH as a fill gradient — the file's 40
+    // `Oval` rim strokes (white -> transparent) are carried as `fillGradient`
+    // and emitted via setSvgFillGradient. That is the path the earlier version
+    // of this check could not see, so it counted 40 rendered rims as silent
+    // stroke drops — the tool's OWN stroke-blind spot, the class it exists to
+    // end, aimed at itself. A gradient stroke reaching the path is accounted
+    // for here; its FIDELITY (does the gradient flatten?) is the gradient
+    // audit's job, not this presence check.
+    if (emitted && emitted.fillGradient) return null;
     if (border) return null;
     if (diagKinds.includes('vector-simplified') || diagKinds.includes('gradient-approximated')) return null;
     return {
@@ -349,7 +353,14 @@ export function auditMaterials(materials, envelope, diagnostics) {
       }
     }
     if (d.stroke) {
-      tally('stroke', !!style.border,
+      // A stroke survives as a `style.border` (solid CSS edge) OR — for a
+      // GRADIENT stroke on a vector — as a `fillGradient` on the path, which is
+      // how the knob-rim strokes render (setSvgFillGradient). Counting only
+      // style.border made the summary read 40 rendered rims as dropped: the
+      // tally has to agree with checkStroke, which already recognizes both.
+      const strokeSurvived =
+        !!style.border || !!(emitted && emitted.fillGradient);
+      tally('stroke', strokeSurvived,
             diagKinds.includes('vector-simplified') || diagKinds.includes('gradient-approximated'));
       const f = checkStroke(d, emitted, diagKinds);
       if (f) found.push(f);
