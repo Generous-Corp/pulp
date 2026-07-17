@@ -227,8 +227,17 @@ It is tiered:
 - **Tier 0 — always, zero config.** The `pulp` CLI bounds build parallelism to
   `min(cores, RAM_budget / 1.5 GiB)` on every build it emits (`pulp
   build/dev/loop`, the local-SDK build). No lease store required; override the
-  RAM axis with `PULP_BUILD_MEM_BUDGET_MB`. A bare `--parallel`/`-j` anywhere in
-  the repo is rejected by `tools/scripts/build_parallelism_guard.py`.
+  RAM axis with `PULP_BUILD_MEM_BUDGET_MB`. `tools/scripts/build_parallelism_guard.py`
+  rejects a bare `--parallel`/`-j` (unbounded) anywhere in the repo, and — on the
+  shared-host surfaces agents copy from (`CLAUDE.md`, `.shipyard/config.toml`,
+  `.agents/skills/**`) — also rejects an *explicit but whole-machine* count
+  (`-j$(nproc)` / `-j$(sysctl -n hw.ncpu)` / `--parallel $(getconf
+  _NPROCESSORS_ONLN)`): it has a count, so it is not unbounded, but on a shared
+  Mac it claims every core, so N concurrent builds request N × cores and starve
+  each other. On a GitHub-hosted ephemeral runner that same `-j$(nproc)` is
+  correct and is NOT flagged — the rule is a property of the host, not the
+  command. The steer is `pulp build` / `tools/ci/governed-build.sh`, which take
+  their `-j` from the governor.
 - **Tier 1 — tartci per-host lease governor.** On a host running a tartci lease
   store, builds and VM runners acquire a weighted core+memory lease before
   starting; admission is `min(core-budget, memory-budget)`, so a build that
@@ -245,12 +254,19 @@ It is tiered:
 
 The **mac local lane** is the one that historically escaped the CLI: Shipyard's
 `local` backend runs the `.shipyard/config.toml` build string directly on the
-host and does not pass through the `pulp` CLI. That build is now wrapped by
+host and does not pass through the `pulp` CLI. Every build stage in that config
+— `default`, `parser`, **and** `smoke` — is therefore wrapped by
 `tools/ci/governed-build.sh`, which acquires a tartci build lease sized from the
 host profile, exports the granted `-j`, runs the build as a child process, and
 releases the lease on exit. When tartci is absent (a build VM or a plain
 checkout) or the lease is denied (host saturated), it falls back to the Tier-0
-bound — it never fails the build and never piles onto a saturated host.
+bound — it never fails the build and never piles onto a saturated host. (The
+`smoke` lane previously used a raw `--parallel $(getconf _NPROCESSORS_ONLN)` and
+so ran whole-machine on the shared Mac while the required gate validated
+alongside it; it now takes a governed share like the other lanes.) The
+version-controlled `overrides.windows` recipes keep a fixed `--parallel 4`
+instead: they run under PowerShell with no wrapper-path or `$(…)` assumptions,
+and unbounded MSBuild link parallelism trips LNK1104 on ARM64.
 
 `pulp status` reports the active tier with a `Build governance: Tier N (…)`
 line. Host-side setup and the deeper lease/role/memory-axis mechanics live in
@@ -266,7 +282,7 @@ Pulp's `.shipyard/config.toml` defines three:
 |---------|-------------|--------------|
 | `default` | Most PRs. The lane every cross-platform target gates on. | Full `setup → configure → build → test`. Examples ON. Excludes the `slow` ctest label. |
 | `parser` | PRs that only touch runtime-import parser code. | Same stages with `PULP_BUILD_EXAMPLES=OFF`; tests filter to `--label-include parser-import`. Skips plugin validators (auval / pluginval / clap-validator) and the broader format-adapter smoke surface. |
-| `smoke` | Quick downstream-scaffold check after dependency or install-layout edits. | Configure + build only; runs the SDK-smoke export against a downstream scaffold. |
+| `smoke` | Quick downstream-scaffold check after dependency or install-layout edits. | Configure + governed build only (both `cmake --build` steps go through `tools/ci/governed-build.sh`); runs the SDK-smoke export against a downstream scaffold. |
 | `gates` | Version-bump / skill-sync gate scripts. | `tools/scripts/skill_sync_check.py` + `tools/scripts/version_bump_check.py` in report mode. |
 
 `shipyard config profiles` lists what is installed locally and which one is active.
