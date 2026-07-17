@@ -3786,6 +3786,44 @@ drift; humans run `shipyard update` to apply.
   PR's macOS lane was cancelled by the wedge, even after `rescue` the
   PR may need a fresh push to retrigger the version-skill-sync check
   too.
+- **launchd agent exit 75 + "lease denied … rc=2" → check the plist PATH
+  for `/usr/sbin` FIRST.** Before suspecting tart, network, or auth. A
+  runner agent crash-looping under `KeepAlive` with last-exit **75**
+  (`EX_TEMPFAIL`) and `lease denied … rc=2` in its log, with no VM ever
+  booting and jobs queueing forever, is this: tartci's `host_profile.py`
+  shells bare `sysctl` (which lives at **`/usr/sbin/sysctl`**) to read
+  `hw.ncpu` / `hw.memsize`. launchd agents run a minimal PATH, and the
+  generated plist's PATH omits `/usr/sbin` — so `sysctl` raises
+  `FileNotFoundError`, `host_profile.py` exits 1, the lease governor
+  cannot compute a memory budget, and it denies every lease (failing
+  CLOSED, which is correct). The lane is silently dead. Diagnose and fix:
+
+  ```bash
+  launchctl list | grep tart-runner        # last-exit 75 = this bug
+  # inspect EnvironmentVariables:PATH in the plist; if /usr/sbin is absent:
+  # append ":/usr/sbin:/sbin", then reload the agent.
+  ```
+
+  After the fix the agent goes exit 75 → 0 and logs `lease acquired …
+  cores=6 mem_mb=8192`. Agents that already carry `/usr/sbin` are exit 0;
+  the failing set is exactly the `/usr/sbin`-missing set.
+- **Non-interactive `ssh host 'cmd'` does not source `.zprofile`,** so it
+  lacks `/opt/homebrew/bin` and reports Homebrew tools as missing — this
+  produces a FALSE "tart is not installed" census result. Use
+  `ssh host 'zsh -lc "…"'` for any host census.
+- **`TART_HOME` is per-host BY DESIGN — never default it.** Real VM homes
+  differ intentionally: m3 = `/Volumes/Workshop/VMs` (external SSD), m1 and
+  m5 = `~/VMs` (internal SSD). A default is an undeclared name wearing a
+  trench coat: on a VM host an unset `TART_HOME` must be a **loud hard
+  error naming the fix**, never a guess. The repo holds RULES; the host
+  holds VALUES — per-host truth belongs in the tartci host profile, not a
+  repo constant. `tools/ci/*.sh` currently carry contradictory hardcoded
+  defaults (`/Volumes/Workshop/VMs` in the tart-runner / run-job /
+  provision / runner-linux scripts, `$HOME/VMs` in `reap-stray-vms.sh` and
+  `setup-ci-host.sh`). The worst failure mode: on m3, `reap-stray-vms.sh`
+  defaults to `$HOME/VMs`, which is **empty** on that host — so the reaper
+  inspects the wrong universe, reaps nothing, and exits 0 reporting
+  success. A silent permanent no-op. Always pass `TART_HOME` explicitly.
 
 ### Anti-pattern (legacy)
 
@@ -3929,17 +3967,43 @@ Key facts:
 
 Companion plan: `planning/2026-05-19-ci-optimization-plan.md`.
 
-## macOS runner routing — local primary, GitHub-hosted overflow
+## macOS runner routing — local primary, local-VM overflow
+
+**A routing var describes REALITY; `build.yml`'s `||` default is only the
+fallback.** Read the live variable before reasoning about where a leg runs —
+the workflow's literal default is what happens when the var is *unset*, not
+what happens. Both are documented below, in that order.
+
+### Live routing state (verified 2026-07-16)
+
+| Variable | Value | Lane |
+|---|---|---|
+| `PULP_LOCAL_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build","pulp-build-studio"]` | bare-metal Studios (m3) — the required gate |
+| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]` | JIT VMs (m1 + m5) |
+| `PULP_RELEASE_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build-vm-release"]` | JIT VMs (m1 + m5) |
+| `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build-vm-release"]` | JIT VMs |
+| `PULP_COVERAGE_MACOS_RUNS_ON_JSON` | `"macos-15"` | GitHub-hosted |
+| `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | `3` | busy count that triggers overflow |
+| `PULP_LOCAL_LINUX_PRIMARY_RUNS_ON_JSON` | `[…,"pulp-build-linux","pulp-host-macstudio"]` | capacity 1 |
+| `PULP_LOCAL_LINUX_OVERFLOW_RUNS_ON_JSON` | `[…,"pulp-build-linux","pulp-host-m5"]` | capacity 1 |
+
+So macOS overflow lands on **local JIT VMs**, not the cloud. Namespace vars are
+deliberately UNSET for cost control — do not treat them as an available lane.
+
+If `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` is unset, `build.yml`'s default
+takes over and overflow goes to GitHub-hosted `["macos-15"]`. That default is
+the safety net, not the design.
 
 The `resolve-provider` job in `build.yml` decides per-run where each
 `Build and Test` macOS leg runs:
 
-- **Local first.** While the local self-hosted Mac has spare capacity
-  the macOS leg routes to it (`PULP_LOCAL_MACOS_RUNS_ON_JSON`).
-- **Overflow to free GitHub-hosted `macos-15`.** When the local Mac is
-  saturated the leg routes to `macos-15` instead. The repo is public, so
-  GitHub-hosted macOS is **free**; overflow costs nothing, it just runs
-  slower than the M1 Max.
+- **Local first.** While the local self-hosted Macs have spare capacity
+  the macOS leg routes to them (`PULP_LOCAL_MACOS_RUNS_ON_JSON`).
+- **Overflow.** When the primary pool is saturated the leg routes to
+  `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` — the local VM pool per the
+  table above.
+  GitHub-hosted `macos-15` is free (the repo is public), so falling back
+  to it costs nothing; it just runs slower.
 - **Capacity-aware (`#3299`).** "Saturated" is decided by real SUPPLY
   first, not just DEMAND. `_count_idle_local_runners()` queries
   `actions/runners` for self-hosted macOS runners that are `online` AND
@@ -3976,6 +4040,49 @@ fast no-op — but a `manifest.json` Skia pin bump changes the expected
 sha, the stamp no longer matches, and the asset is re-fetched. Never
 guard the fetch on "is `libskia.a` present?" alone: a stale local
 library would silently shadow a new pin (pulp #2458 follow-up).
+
+### A JIT lane's IDLE state is indistinguishable from DEAD
+
+**NEVER infer a dead lane from a runner census.** The macOS and Linux VM lanes
+are JIT: a runner registers with GitHub **only while serving one job**, then
+deregisters. So "zero runners carry `pulp-build-vm`" in `actions/runners` is
+**both** the healthy-idle state **and** the dead-lane state. The census cannot
+tell them apart.
+
+This has already caused a real misdiagnosis: a census showed 0 runners carrying
+`pulp-build-vm` / `pulp-build-vm-release`, that was read as "dead labels", and
+three lanes were rerouted onto GitHub-hosted `macos-15` — moving work **off
+healthy VMs**. The supervisors were alive and booting VMs the whole time. The
+reroute was reverted.
+
+- **A label-satisfiability check is the WRONG instrument for a JIT lane.** It
+  would false-alarm every idle night. Satisfiability checks are valid only for
+  **persistent** runners — e.g. the bare-metal `pulp-build-studio` Studios.
+- **The only signal that distinguishes alive from dead on a JIT lane is QUEUE
+  AGE.** If jobs are being served, the lane is alive regardless of the census.
+- **Queue DEPTH is not stall.** 40 queued runs with a 5-minute median age is
+  healthy churn from many concurrent agents.
+- **Do not set a naive age threshold.** Measured healthy baseline (2026-07-16):
+  median queue age 5 min, oldest 31 min, 3 runs >30 min under normal busy load.
+  A ">30 min = broken" alarm fires on a healthy pool.
+
+To check a JIT lane is alive, look host-side (supervisor running, VMs booting)
+rather than at the label:
+
+```bash
+ssh <host> 'zsh -lc "launchctl list | grep tart-runner"'   # last-exit 0 = healthy
+```
+
+### The unifying invariant — no name without a heartbeat
+
+> **A name is trustworthy iff an automated process dereferences it on a
+> schedule and alarms on failure.**
+
+A host registry entry, a test asserting a hostname, a runner label, a
+`TART_HOME` path — each is a name written where it is consumed and dereferenced
+by nothing. Every one of them rots silently and is discovered only during an
+outage. When you add a name to CI config, ask what dereferences it on a
+schedule; if the answer is "nothing", it is already suspect.
 
 The overflow target is `OVERFLOW_MACOS_RUNS_ON_JSON`, which defaults to
 `["macos-15"]`. The repo variable `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`
@@ -4025,6 +4132,10 @@ The recovery rules, learned the hard way:
    blackbook M5 are the usual idle ones; `pulp-m1-*` are often offline).
    If a leg failed on saturation while these sit idle, the
    `gh run rerun` will now claim them (capacity-aware routing, #3299).
+   **This census is meaningful for PERSISTENT runners only.** The JIT VM
+   labels (`pulp-build-vm`, `pulp-build-vm-release`) are absent from it
+   whenever they are idle — that is normal, not an outage. See "A JIT
+   lane's IDLE state is indistinguishable from DEAD" above.
 5. **Batch stuck PRs into one.** When several PRs are wedged on the gate,
    combining them into a single PR (cherry-pick onto one branch) cuts N
    macОС runs to 1 — landed `#3411` (four PRs) this way on one local run.

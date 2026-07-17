@@ -306,10 +306,34 @@ To opt out for an individual run, pass `--pipeline default` explicitly.
 > **Namespace is OFF (cost).** We build macOS on **local Macs + GitHub-hosted**
 > only. `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is kept **UNSET**, so the
 > Namespace overflow described here never fires — it's a documented break-glass
-> option, not the active path. The local overflow tier is the **M5 Mac**
-> (`PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON = pulp-build-m5`); the required gate is
-> the **Mac Studio** (`PULP_LOCAL_MACOS_RUNS_ON_JSON`). Do **not** repurpose the
-> Namespace var to point at self-hosted runners (see CLAUDE.md "Runner priority").
+> option, not the active path. The required gate is the **bare-metal Mac
+> Studios** on m3 (`PULP_LOCAL_MACOS_RUNS_ON_JSON`); the overflow tier is the
+> **local JIT VM pool** on m1 + m5 (`PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`).
+> Do **not** repurpose the Namespace var to point at self-hosted runners (see
+> CLAUDE.md "Runner priority").
+
+**Read the live variable, not this page's defaults.** A routing var describes
+reality; `build.yml`'s `||` fallback is only what happens when the var is unset.
+The two disagree: `build.yml` defaults macOS overflow to GitHub-hosted
+`["macos-15"]`, while the live variable sends it to the local VM pool. Confirm
+before reasoning about a route:
+
+```bash
+gh variable list -R danielraffel/pulp | grep RUNS_ON_JSON
+```
+
+### Live routing state (verified 2026-07-16)
+
+| Variable | Value | Lane |
+|---|---|---|
+| `PULP_LOCAL_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build","pulp-build-studio"]` | bare-metal Studios (m3) — required gate |
+| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]` | JIT VMs (m1 + m5) |
+| `PULP_RELEASE_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build-vm-release"]` | JIT VMs (m1 + m5) |
+| `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build-vm-release"]` | JIT VMs |
+| `PULP_COVERAGE_MACOS_RUNS_ON_JSON` | `"macos-15"` | GitHub-hosted |
+| `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | `3` | busy count that triggers overflow |
+| `PULP_LOCAL_LINUX_PRIMARY_RUNS_ON_JSON` | `[…,"pulp-build-linux","pulp-host-macstudio"]` | capacity 1 |
+| `PULP_LOCAL_LINUX_OVERFLOW_RUNS_ON_JSON` | `[…,"pulp-build-linux","pulp-host-m5"]` | capacity 1 |
 
 When the local self-hosted Mac runner is saturated, `build.yml`'s
 `resolve-provider` job *could* route new macOS legs to a Namespace cloud runner
@@ -323,7 +347,7 @@ reviewed by `/codex` 2026-05-13).
 
 1. **Operator override** — `gh workflow run build.yml --field macos_runner_selector_json='"<label>"'`. Always wins.
 2. **Overflow** — `BUSY >= PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` (default `2`) AND `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is set AND the trigger is `pull_request`. Routes to `namespace-profile-generouscorp-macos`.
-3. **Local default** — `PULP_LOCAL_MACOS_RUNS_ON_JSON` (currently `["self-hosted","sanitizer"]`).
+3. **Local default** — `PULP_LOCAL_MACOS_RUNS_ON_JSON` (see the live table above).
 
 **Tuning knobs** (repo variables):
 
@@ -529,6 +553,89 @@ gh workflow run runner-health-check.yml -f alarm_minutes=60
 # Replay a recorded snapshot offline (no API calls, verdict pinned to capture time)
 python3 tools/scripts/queue_age_watchdog.py --snapshot snapshot.json
 ```
+
+### Diagnosing a VM lane: idle looks exactly like dead
+
+The macOS and Linux VM lanes are **JIT** — a runner registers with GitHub only
+while serving one job, then deregisters. A runner census therefore cannot tell a
+healthy idle lane from a dead one: "zero runners carry `pulp-build-vm`" is both
+states at once. Do **not** conclude a lane is dead from `actions/runners`, and do
+not build a label-satisfiability alarm on a JIT label — it would fire every idle
+night. Satisfiability is a valid check only for the **persistent** bare-metal
+Studios.
+
+The signal that separates alive from dead on a JIT lane is **queue age** (not
+queue depth — 40 queued runs with a 5-minute median is healthy churn from many
+concurrent agents). Baseline measured on a healthy busy pool (2026-07-16):
+median queue age 5 min, oldest 31 min, 3 runs over 30 min. A naive
+">30 min = broken" threshold alarms on that healthy pool; calibrate above it.
+
+To check a lane host-side:
+
+```bash
+# Non-interactive ssh does NOT source .zprofile, so it lacks /opt/homebrew/bin
+# and will falsely report "tart is not installed". Always use a login shell:
+ssh <host> 'zsh -lc "launchctl list | grep -E \"tart-runner|qemu-runner\""'
+```
+
+Last-exit `0` means the supervisor is healthy and the lane is alive regardless of
+what the runner census says.
+
+### Runner agent crash-loops with exit 75 (the `/usr/sbin` PATH trap)
+
+**Symptom:** a runner LaunchAgent shows last-exit **75** (`EX_TEMPFAIL`) and
+crash-loops under `KeepAlive`; its log says `lease denied … rc=2`; no VM ever
+boots; jobs queue on that lane forever.
+
+**Cause:** tartci's `host_profile.py` shells bare `sysctl` — which lives at
+**`/usr/sbin/sysctl`** — to read `hw.ncpu` / `hw.memsize`. macOS launchd agents
+run with a minimal PATH, and the generated plist's PATH omits `/usr/sbin`:
+
+```
+/Users/<u>/.config/tartci/ghapp-shim:/opt/homebrew/bin:/usr/local/bin:/Users/<u>/.local/bin:/usr/bin:/bin
+```
+
+`sysctl` raises `FileNotFoundError` → `host_profile.py` exits 1 → the tartci
+lease governor cannot compute a memory budget → it denies every lease (failing
+**closed**, which is correct) → no VM ever starts.
+
+**Diagnose this FIRST** — before suspecting tart, the network, or auth:
+
+```bash
+launchctl list | grep -E 'tart-runner|qemu-runner'   # last-exit 75 = this bug
+# then inspect EnvironmentVariables:PATH in the agent's plist for /usr/sbin
+```
+
+**Fix:** append `:/usr/sbin:/sbin` to the plist's PATH and reload the agent. Exit
+goes 75 → 0, the log turns to `lease acquired … cores=6 mem_mb=8192`, a VM boots,
+and the queue drains. The failing set is exactly the `/usr/sbin`-missing set:
+agents that already carry it are exit 0.
+
+### `TART_HOME` is per-host by design
+
+VM homes differ intentionally per machine:
+
+| Host | `TART_HOME` | Storage |
+|---|---|---|
+| m3 (Studios) | `/Volumes/Workshop/VMs` | external SSD |
+| m1, m5 | `~/VMs` | internal SSD |
+
+**Always set `TART_HOME` explicitly when invoking `tools/ci/*.sh` on a VM host.**
+Those scripts carry contradictory hardcoded defaults — most assume
+`/Volumes/Workshop/VMs`, while `reap-stray-vms.sh` and `setup-ci-host.sh` assume
+`$HOME/VMs`. The worst failure mode is silent: on m3, `reap-stray-vms.sh`
+defaults to `$HOME/VMs`, which is empty on that host, so the stray-VM reaper
+inspects the wrong universe, reaps nothing, and exits 0 reporting success — a
+permanent no-op that looks like a pass.
+
+The principle: a default is an undeclared name wearing a trench coat. On a VM
+host an unset `TART_HOME` should be a loud hard error naming the fix, never a
+guess. The repo holds RULES; the host holds VALUES — per-host truth belongs in
+the tartci host profile, not a repo constant.
+
+These three traps share one shape, covered in the `ci` skill under "The unifying
+invariant — no name without a heartbeat": a name is trustworthy only if an
+automated process dereferences it on a schedule and alarms on failure.
 
 ### GraphQL quota fallback for PR sweeps
 
@@ -870,7 +977,8 @@ label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
 | `PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON` | Namespace | `gh variable set PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON --body '["namespace-profile-generouscorp"]'` |
 | `PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON` | Namespace | `gh variable set PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON --body '["namespace-profile-generouscorp-windows"]'` |
 | `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | Namespace (optional) | `gh variable set PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --body '"namespace-profile-generouscorp-macos"'` |
-| `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Local macOS ARM64 VM pool | `gh variable set PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]'` |
+| `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Local macOS ARM64 primary pool (bare-metal Studios; see the live table under "macOS overflow routing") | `gh variable set PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-studio"]'` |
+| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Local macOS ARM64 JIT VM overflow pool. Unset → `build.yml` falls back to GitHub-hosted `["macos-15"]`; `local-only` disables overflow. | `gh variable set PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]'` |
 | `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Local Linux ARM64 VM pool | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","ARM64","pulp-build-linux"]'` |
 | `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local Windows ARM64 QEMU pool | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","Windows","ARM64","pulp-build-windows"]'` |
 
