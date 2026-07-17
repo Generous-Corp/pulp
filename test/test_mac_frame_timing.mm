@@ -287,8 +287,8 @@ TEST_CASE("PulpView prepareForTeardown drops every pointer into the freed host",
         PulpView* view = [[[PulpView alloc]
             initWithFrame:NSMakeRect(0, 0, 100, 100)] autorelease];
 
-        pulp::view::View root;
         pulp::view::FrameClock clock;
+        pulp::view::View root;
         pulp::view::HostFramePump pump;
         view.rootView = &root;
         view.frameClock = &clock;
