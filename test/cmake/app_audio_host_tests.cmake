@@ -218,6 +218,20 @@ pulp_add_test_suite(pulp-test-bowed-string
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/bowed-string
     TIMEOUT 300)
 
+# Gong: renders the struck thin-plate voice and the polyphonic instrument that
+# wraps it, then measures the four claims that make it a gong — a dense
+# inharmonic cloud that rings for seconds, an amplitude-dependent nonlinear
+# bloom (hard strike blooms, soft strike does not — the FFT-test signature), a
+# bounded max-everything strike over 10 s, and a bloom-off render that matches
+# ModalBankT mode-for-mode — plus a CPU coupling-cost bench that settles the
+# GPU question with data. Needs the calibrated modal analyzer
+# (audio-test-support) and the example headers on the include path.
+pulp_add_test_suite(pulp-test-gong
+    SOURCES test_gong.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp-audio-test-support
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/gong
+    TIMEOUT 300)
+
 # PulpKit snare + rim/clave: two struck bridged-T bodies summed with a filtered-
 # noise snappy. Renders and measures tone/noise balance and body pitch with the
 # calibrated modal analyzer (audio-test-support), so it links that lib. Needs

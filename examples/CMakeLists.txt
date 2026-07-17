@@ -129,6 +129,11 @@ add_subdirectory(prepared-piano)
 # nonlinear feedback loop that sustains a bounded Helmholtz limit cycle.
 add_subdirectory(bowed-string)
 
+# Gong: a struck thin-plate modal cloud (hundreds of inharmonic modes ringing
+# for seconds) plus a bounded, energy-conserving three-wave coupling — the
+# amplitude-dependent spectral bloom of a tam-tam, computed on CPU.
+add_subdirectory(gong)
+
 # FAUST DSL examples: offline codegen to Processor
 add_subdirectory(faust-gain)
 add_subdirectory(faust-filter)
