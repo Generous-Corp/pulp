@@ -238,6 +238,19 @@ class FormatBaselineDiffTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 fbd.main([])
 
+    def test_workflow_refreshes_au_registry_after_install_and_cleanup(self) -> None:
+        workflow = (
+            SCRIPT.parents[2] / ".github" / "workflows" / "format-baseline-diff.yml"
+        ).read_text(encoding="utf-8")
+        install = workflow.split(
+            "- name: Install plugin bundles to system folders + ad-hoc codesign", 1
+        )[1].split("- name: Install clap-validator", 1)[0]
+        cleanup = workflow.split("- name: Clean up installed plugin bundles", 1)[1]
+
+        self.assertIn("killall -9 AudioComponentRegistrar", install)
+        self.assertIn("sleep 5", install)
+        self.assertIn("killall -9 AudioComponentRegistrar", cleanup)
+
     def test_script_entrypoint_success(self) -> None:
         with self._root() as td:
             root = pathlib.Path(td)

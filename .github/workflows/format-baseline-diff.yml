@@ -140,6 +140,15 @@ jobs:
             echo "::warning::build/CLAP/PulpEffect.clap missing — CLAP lane will skip"
           fi
 
+          # AudioComponentRegistrar caches AU metadata across jobs on the
+          # self-hosted Studios. A freshly copied component can otherwise be
+          # present on disk while auval still resolves the removed component
+          # from the preceding job and fails with error -50. This is the same
+          # refresh required by validate.yml, the DAW bench preflight, and
+          # `pulp doctor --au-cache`.
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          sleep 5
+
       - name: Install clap-validator
         # GHA macOS runners don't ship clap-validator. Download a
         # pinned prebuilt binary from the GitHub release. Pin is a
@@ -209,4 +218,5 @@ jobs:
           rm -rf ~/Library/Audio/Plug-Ins/Components/PulpEffect.component \
                  ~/Library/Audio/Plug-Ins/VST3/PulpEffect.vst3 \
                  ~/Library/Audio/Plug-Ins/CLAP/PulpEffect.clap
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
           echo "Removed PulpEffect plugin bundles from ~/Library/Audio/Plug-Ins/"
