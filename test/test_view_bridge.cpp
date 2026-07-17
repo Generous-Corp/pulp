@@ -812,6 +812,19 @@ public:
 
 }  // namespace
 
+// Friend accessor: reaches ViewBridge's private host-pull seam. The pull is not
+// public API — the editor idle pump is its only production caller — so a test
+// that wants the synced COUNT (rather than the observable effect the pump
+// tests assert) goes through here. Declared a friend in view_bridge.hpp;
+// mirrors the StandaloneRenderTestAccess precedent.
+namespace pulp::format {
+struct ViewBridgeTestAccess {
+    static std::size_t sync_design_frames_from_host(ViewBridge& bridge) {
+        return bridge.sync_design_frames_from_host();
+    }
+};
+}  // namespace pulp::format
+
 TEST_CASE("host automation moves an imported design's control",
           "[view-bridge][host-param]") {
     RoutedFrameProcessor proc;
@@ -848,7 +861,8 @@ TEST_CASE("the host pull reaches a design frame nested below the root",
     format::make_scripted_idle_pump(bridge)();
 
     CHECK(proc.last_frame->element_value(0) == Catch::Approx(0.5f));
-    CHECK(bridge.sync_design_frames_from_host() == 1);   // found the nested frame
+    // ...and reached exactly that one frame, not the containers above it.
+    CHECK(format::ViewBridgeTestAccess::sync_design_frames_from_host(bridge) == 1);
 }
 
 TEST_CASE("the host pull is silent: it never echoes back as a gesture",

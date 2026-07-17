@@ -217,10 +217,12 @@ With routing on, a user gesture on a key-tagged control drives the surface direc
 current values and display text back the other way.
 
 Both directions are wired for you in a plugin editor. `ViewBridge::open()` installs
-a `StateStore`-backed surface on the tree, and the editor idle pump calls
-`ViewBridge::sync_design_frames_from_host()` on every UI tick, so an imported
-design's controls **follow host automation and host-side edits** with no per-plugin
-wiring. (A `bind_parameter` widget gets this from a store listener that
+a `StateStore`-backed surface on the tree, and the editor idle pump pulls every
+`DesignFrameView` in the open tree on every UI tick, so an imported design's
+controls **follow host automation and host-side edits** with no per-plugin
+wiring. (That pull is internal to the bridge — how a frame receives its host
+value is not a contract to reach for; `sync_from_host_params()` on the view is.
+A `bind_parameter` widget gets this from a store listener that
 `pump_listeners()` drains; a `DesignFrameView` binds through the abstract surface
 and registers no listener, so it is pulled instead.)
 

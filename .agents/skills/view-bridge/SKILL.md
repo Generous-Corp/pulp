@@ -1515,10 +1515,15 @@ easy to miss:
   listener at all**. Nothing pushes to it. It has to be pulled with
   `sync_from_host_params()`.
 
-The editor idle pump (`make_scripted_idle_pump`) calls both — `pump_listeners()`
-and `ViewBridge::sync_design_frames_from_host()` — so every plugin editor gets
-both channels. Embedding Pulp views in your own host? Wiring only the pump's
-listener drain gives you a design whose knobs drive the host but never follow it.
+The editor idle pump (`make_scripted_idle_pump`) drives both — `pump_listeners()`
+and the bridge's private `sync_design_frames_from_host()`, which it reaches as a
+`friend` — so every plugin editor gets both channels. The pull is deliberately
+NOT public: the pump is its only production caller, and a view-side enrolment
+registry could retire the tree walk without an API deprecation. Reach it from a
+test via `ViewBridgeTestAccess`, not by widening the class. Embedding Pulp views
+in your own host? Wiring only the pump's listener drain gives you a design whose
+knobs drive the host but never follow it — call the view's public
+`sync_from_host_params()` from your own tick.
 
 The pull is **silent**: `set_element_value` writes the element directly and never
 re-emits `on_element_changed`, so it cannot echo back into the surface. That is
