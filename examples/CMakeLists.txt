@@ -124,6 +124,11 @@ add_subdirectory(modal-instrument)
 # (position-dependent detune), all continuous and per-note.
 add_subdirectory(prepared-piano)
 
+# BowedString: a McIntyre-Schumacher-Woodhouse digital-waveguide bowed string —
+# two fractional-delay segments meeting at a stick-slip friction junction, a
+# nonlinear feedback loop that sustains a bounded Helmholtz limit cycle.
+add_subdirectory(bowed-string)
+
 # FAUST DSL examples: offline codegen to Processor
 add_subdirectory(faust-gain)
 add_subdirectory(faust-filter)

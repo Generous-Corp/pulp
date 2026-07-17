@@ -204,6 +204,20 @@ pulp_add_test_suite(pulp-test-prepared-piano
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/prepared-piano
     TIMEOUT 300)
 
+# BowedString: renders the MSW digital-waveguide bowed-string voice and the
+# instrument that wraps it, then measures the four things that make it a bowed
+# string rather than a sample player — it sustains (does not decay like a
+# pluck), moves in Helmholtz motion (a full harmonic series, in tune to a few
+# cents), stays finite and bounded at the control extremes, and its bow
+# controls do the physically-right thing. Self-contained spectral helpers live
+# in the TU; links pulp-audio-test-support for the format/signal transitive
+# deps and needs the example headers on the include path.
+pulp_add_test_suite(pulp-test-bowed-string
+    SOURCES test_bowed_string.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp-audio-test-support
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/bowed-string
+    TIMEOUT 300)
+
 # PulpKit snare + rim/clave: two struck bridged-T bodies summed with a filtered-
 # noise snappy. Renders and measures tone/noise balance and body pitch with the
 # calibrated modal analyzer (audio-test-support), so it links that lib. Needs
