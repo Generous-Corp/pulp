@@ -197,6 +197,9 @@ pulp_add_test_suite(pulp-test-osc-vco LIBRARIES pulp::signal pulp::audio-analysi
 # integer N / rational period AND on the rendered pitch (hence the analysis lib),
 # with the fractional-N jitter and the shared-path alias rejection measured too.
 pulp_add_test_suite(pulp-test-osc-dco LIBRARIES pulp::signal pulp::audio-analysis)
+# The modern wavetable tier is gated on alias rejection swept to the top of every
+# band, a click-free band-switch seam, and a zipper-free scan.
+pulp_add_test_suite(pulp-test-osc-wt LIBRARIES pulp::signal pulp::audio-analysis)
 # SF-2 crossfade unification: live_kernel structural-swap fade now matches the
 # native signal::TransitionMixer (EqualPower) law bit-for-bit — an intended,
 # documented behavior change (the fade previously used a linear theta).
