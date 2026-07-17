@@ -17,7 +17,8 @@
 #   - planning-gitlink (no accidental `planning` submodule pointer bump)
 #   - deps-audit (catches DEPENDENCIES.md / NOTICE.md drift, and checks the
 #     attribution text against the license files actually on disk)
-#   - deps-audit self-tests (tools/deps/test_audit.py — no other gate ran them)
+#   - deps-audit self-tests (tools/deps/test_audit.py — the coverage lane runs
+#     them behind continue-on-error, so nothing enforced them)
 #   - codecov-config (codecov.yml flags/components mirror the live core/* tree
 #     with no double-counts, and its ignore list mirrors diff_cover_excludes)
 #   - framework-neutrality (Pulp's own source names no other framework, and
