@@ -50,26 +50,44 @@ before the scratch lease is released. Release joins decode workers before cache
 windows are destroyed.
 
 `PulpSampler` is the first production-shaped integration: strict ranged WAV and
-uncompressed AIFF, forward linear one-shots, two decode workers, and a bounded
-eight-page working set for each of eight independently positioned voices. Its
+uncompressed AIFF, pitched linear one-shots and forward/reverse crossfade loops,
+two decode workers, and a bounded sixteen-page working set for each of eight
+independently positioned voices. Its
 service thread owns file/source/cache mutation; the callback owns only voice
-state and the SPSC producer. File admission prepares the tail page before it
-publishes the asset, which gives reverse entry a ready attack neighborhood;
-timeout and shutdown paths cancel and reclaim unpublished registrations. The
+state and the SPSC producer. File admission prepares the certified tail horizon
+before it publishes the asset, which gives reverse entry a latency-safe attack
+neighborhood. Because those pages remain ordinary cache entries, a later
+reverse note rechecks the full horizon and holds its cursor and envelope at
+time zero until the first render plan owns valid snapshots for every attack
+page. Admission deadlines scale with the number of sequential page decodes in
+that horizon; timeout and shutdown paths cancel and reclaim unpublished
+registrations. The
 resident renderer now delegates traversal to the storage-independent
 `LoopPlaybackCursor`, whose plans are checked against an independent loop
-oracle. The Loop parameter remains resident-only until that cursor is wired to
-the paged reader and loop-aware lookahead. Starvation gain shaping,
-interpolation quality selection, and mip assets remain later gates.
+oracle. `SampleStreamLoopVoiceReader` snapshots every primary, blend, and
+interpolation page needed by a block, advances the musical cursor through an
+explicit miss, and supplies a cursor-based lookahead scheduler whose initial
+lead is derived from the certified service, block, interpolation, and loop
+guards. Forward notes demand their first nonresident boundary directly, so
+one-frame host blocks retain the full service interval without enumerating the
+resident horizon. Lookahead scanning has a fixed eight-plan work budget per
+callback, and page urgency includes the accumulated distance
+from the live render cursor rather than only the offset inside one plan. That
+distance remains signed under command-queue backpressure, so lookahead catches
+up from a real lag instead of claiming a false zero lead. Partial queue retries
+refresh their accepted prefix at the current distance before adding the suffix.
+Reverse
+entry and loop policy are exposed by `PulpSampler`. Starvation gain shaping,
+interpolation quality selection beyond linear, and mip assets remain later gates.
 
 `SampleAsset` accepts streamed tails only through a service-issued registration
 proof whose source identity and page geometry match the prepared cache. The
 borrowed asset and source views remain valid only until their owners cross the
 documented audio-generation retirement watermark. `SampleStreamVoiceReader`
-is the first callback-side consumer: it provides allocation-free linear forward
-one-shot reads, bounded coalesced demand, and explicit ready/starved/end/stale
-results. Looping, reverse playback, and starvation gain policy remain separate
-layers.
+provides the narrow linear forward path; `SampleStreamLoopVoiceReader` adds
+allocation-free cursor-driven one-shot, reverse, interpolation-tap, and
+wrap-crossfade page planning. Both return explicit ready/starved/end/stale
+results. Starvation gain policy remains a separate layer.
 
 `StreamingSampleSource` remains the simpler preload-plus-ring utility for
 sequential one-shot playback. It is not instantiated once per sampler voice.

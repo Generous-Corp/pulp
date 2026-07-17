@@ -42,17 +42,37 @@ Current branch evidence, without implying completion of later gates:
   completion lease release. `PulpSampler` now exercises this path for strict
   ranged WAV/AIFF forward one-shots with contract-derived preload/lookahead,
   a bounded eight-voice cache working set, explicit starvation, coherent source
-  replacement, and 10,000 allocation-probed callbacks. Streamed loop/reverse
-  policy remains open. The resident loop state machine has now been extracted
+  replacement, and 10,000 allocation-probed callbacks. The resident loop state
+  machine has now been extracted
   into a storage-independent, trivially copyable `LoopPlaybackCursor`; the
   existing renderer delegates to it without changing ordinary-step or
   crossfade output. Independent-oracle parity covers reverse entry, two-phase
   direction changes, high-rate fade-zone probes, multiple wraps/reflections,
-  and short-loop residual travel. Stream admission also prepares the tail page
-  before publication so reverse entry cannot begin on an uncached page;
-  shutdown and timed-out in-flight admission roll back without leaking either
-  source-registration slot. Wiring the shared cursor into the streamed voice
-  reader and its lookahead scheduler remains open.
+  and short-loop residual travel. Stream admission prepares the full certified
+  tail horizon before publication so reverse entry cannot outrun its cache;
+  each reverse note revalidates that horizon and holds its cursor and envelope
+  at time zero until its first render plan owns valid page snapshots, including
+  a forced retirement between the readiness scan and plan capture. Admission
+  deadlines scale with the sequential page count; shutdown and timed-out
+  in-flight admission roll back without leaking either source-registration
+  slot. The allocation-free paged reader now replays that
+  cursor for one-shots and forward/reverse crossfade loops, snapshots primary,
+  blend, and interpolation pages, advances deterministically through starvation,
+  and drives a contract-derived cursor-based lookahead scheduler in
+  `PulpSampler`; direct forward-boundary demand preserves the certified service
+  interval even for one-frame host blocks, while lookahead construction stays
+  capped at eight plans per callback. A 1 Hz pitched asset proves the
+  callback scan budget remains bounded, while scheduler-order coverage proves
+  accumulated cross-plan lead is included in page urgency. A saturated command
+  inbox regression holds lookahead until it falls behind the render cursor,
+  then proves signed-lag recovery resumes sustained output without new misses;
+  a one-slot partial enqueue proves accepted prefixes are refreshed before the
+  remaining page demands.
+  Production demand order is checked against an independent paged-loop oracle,
+  reverse rendering crosses the loop seam without starvation at more than 10x
+  realtime test pacing, and the new plan/enqueue/render path has a 10,000-block
+  allocation probe. Ping-pong example policy and starvation gain shaping remain
+  later gates.
 - The existing Release audio harness baseline and all 375 Audio Quality Lab
   self-tests pass. Quality Lab remains supplementary to exact transport,
   telemetry, lifetime, and allocation gates.
