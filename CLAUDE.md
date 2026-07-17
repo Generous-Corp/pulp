@@ -696,6 +696,80 @@ DEPENDENCIES.md and NOTICE.md entries are always sorted **alphabetically by name
 
 ---
 
+## Tool Registry
+
+Pulp ships tools for the jobs agents most often hand-roll — comparing a render
+against its design source, scoring an import, proving what a plugin emitted.
+They already existed the day an agent wrote its own PIL crop script to do one of
+them: the guidance wasn't missing, it was buried and contradicted. So the
+registry below is generated into this file, which is always in context, and
+`docs/status/tools.yaml` is its source of truth.
+
+The manifest is enforced by `tools/scripts/tools_registry_check.py` (run from
+`tools/check-docs.sh` and the `tools-registry-check` ctest): every entry's path
+and invocation must resolve, and every agent-invocable entry point under the
+swept directories must be registered or explicitly excluded — so a new tool
+can't go missing. **Adding a tool means adding its entry**, then
+`python3 tools/scripts/tools_registry_check.py --write`.
+
+<!-- generated:start id=tools-digest -->
+### Registered tools — check before hand-rolling
+
+**These already exist. Do not write a script that does one of these jobs.**
+Full detail (inputs, outputs, owning skill): `docs/status/tools.yaml`.
+Reach for the tool whose *use when* matches your need; open its `skill`
+for the real guidance. If nothing here fits, say so — then hand-roll.
+
+**visual-compare** — compare a render against its source / a baseline
+- Get one similarity score + verdict BEFORE showing the user any native screenshot. → `tools/import-validation/diff_against_reference.py`
+- A whole-image score is hiding a broken sub-region (empty canvas, broken chrome). → `tools/import-validation/diff_against_reference_regions.py`
+- Measure how close an imported+rendered design is to its Figma source, per node. → `tools/import-design/fidelity_diff.py`
+- See WHERE a Figma reference and a Pulp render disagree, without eyeballing Preview. → `tools/scripts/figma_import_diff.py`
+- Prove an importer change didn't silently regress a design that already imported correctly. → `tools/import-validation/golden_regression.py`
+- Stack reference vs render into ONE labeled image so a comparison is self-documenting. → `tools/import-design/montage.py`
+- Render an import at the design's OWN canvas size (a mismatched size voids every score). → `tools/scripts/render-figma-import.sh`
+
+**design-import** — get a design into Pulp
+- Decode a local .fig file offline — no Figma desktop, no REST quota. → `tools/import-design/fig_decode.mjs emit`
+- A vector ILLUSTRATION group imported as a flat stack of boxes instead of art. → `tools/import-design/figma_rasterize_vector_frames.py`
+- Pull a Figma frame headlessly (CI) — the LAST resort; local lanes have no rate limit. → `tools/import-design/figma_rest_export.py`
+- Audit the JSX runtime shim against the contract it promises importers. → `tools/import-design/jsx-runtime/jsx-contract-audit.mjs`
+- Transform JSX/React design output into the Pulp runtime-import lane. → `tools/import-design/jsx-runtime/jsx-transform.mjs`
+- Turn a Figma node into a 1:1 catalog component instead of hand-painting a C++ widget. → `tools/import-design/make_catalog_component.py`
+- Re-export/re-embed the Musical Typing Keyboard's two faithful Figma frames specifically. → `tools/import-design/reembed_mtk.py`
+
+**import-roundtrip** — validate an import lane end to end
+- Check the importer's IR actually captured the UI text the reference shows. → `tools/import-validation/check_label_coverage.sh`
+- Check the import source-contract registry for drift. → `tools/import-validation/check-source-contracts.py`
+- Confirm the live host really drives JS timers (setInterval/setTimeout not queuing forever). → `tools/import-validation/live-host-pump-smoke.sh`
+- Validate the DESIGN.md import lane end to end. → `tools/import-validation/designmd-roundtrip.sh`
+- Validate the Figma Make runtime-import lane end to end before pushing. → `tools/import-validation/figma-roundtrip.sh`
+- Validate the JSX/React import lane end to end. → `tools/import-validation/jsx-roundtrip.sh`
+- Validate the Pencil (.pen) import lane end to end. → `tools/import-validation/pencil-roundtrip.sh`
+- Validate the React Native import lane end to end. → `tools/import-validation/rn-roundtrip.sh`
+- Validate the Spectr import lane end to end. → `tools/import-validation/spectr-roundtrip.sh`
+- Validate the Stitch import lane end to end. → `tools/import-validation/stitch-roundtrip.sh`
+- Validate the v0 import lane end to end. → `tools/import-validation/v0-roundtrip.sh`
+- A render "looks right" but you need to know it actually mounted and settled. → `tools/import-validation/semantic_probes.sh`
+
+**harness** — coverage + deterministic visual harness
+- The visual-harness Dockerfile's Skia pin may have drifted from the manifest. → `tools/harness/visual/check_skia_pin.py`
+- Check web-compat coverage — and that a `supported` claim is backed by a real test. → `python3 -m tools.harness.verifier`
+- Build the visual-harness Docker image — use this, not a raw docker build. → `tools/harness/visual/docker-build.sh`
+- Run the deterministic visual layout snapshots. → `python3 -m tools.harness.visual.runner`
+
+**audio** — prove what the audio actually did
+- Decide whether a DSP change made a sound WORSE — and at which timestamp. *(needs install)* → `python -m quality_lab.cli compare`
+- Render a plugin bundle offline — no DAW, no audio device — to a WAV + metrics. → `pulp audio render`
+- Look at a sample window of a WAV — waveform/spectrum — as JSON or PNG. → `pulp audio scope`
+- Prove what a plugin actually emitted — summarize, diagnose, compare, or gate a WAV. → `pulp audio validate summarize`
+
+This digest is GENERATED from `docs/status/tools.yaml` by
+`tools/scripts/tools_registry_check.py --write`. Do not edit it by hand.
+<!-- generated:end id=tools-digest -->
+
+---
+
 ## Testing and Validation
 
 ### Philosophy

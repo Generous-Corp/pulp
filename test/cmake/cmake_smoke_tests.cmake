@@ -273,6 +273,15 @@ if(UNIX)
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_inject_claude_prefs_hook.sh)
     set_tests_properties(inject-claude-prefs-hook PROPERTIES TIMEOUT 15)
 
+    # tool-registry-reminder.sh — the PostToolUse hook that catches an agent
+    # hand-rolling a tool the registry already lists. Hermetic (synthetic tool
+    # payloads). Asserts it fires on the real incident's signature and, just as
+    # importantly, stays silent inside the registered tools themselves — a noisy
+    # hook gets ignored, and an ignored hook is worse than none.
+    add_test(NAME tool-registry-reminder-hook
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_tool_registry_reminder_hook.sh)
+    set_tests_properties(tool-registry-reminder-hook PROPERTIES TIMEOUT 15)
+
     # governed-build.sh — the shipyard local-backend build wrapper. Hermetic
     # (stub tartci): asserts bounded parallelism with no tartci, lease
     # acquire+release when granted, and a non-failing leaseless fallback when

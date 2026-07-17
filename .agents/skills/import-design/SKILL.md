@@ -25,6 +25,13 @@ exists:
 | Re-import regression vs a golden | `python3 tools/import-validation/golden_regression.py` |
 | Rasterize Figma vector frames | `python3 tools/import-design/figma_rasterize_vector_frames.py` |
 
+The full, machine-checked list is **`docs/status/tools.yaml`** (with inputs,
+outputs, and availability for each), and its digest is generated into CLAUDE.md
+so it is always in context. The table above is the fast path for this skill's
+own work; the registry is the source of truth, and a coverage sweep in
+`tools/scripts/tools_registry_check.py` fails CI if a tool lands here without
+an entry — so nothing can go quiet the way `fidelity_diff.py` did.
+
 **Free offline ground truth:** every `.fig` is a ZIP containing `thumbnail.png`
 (Figma's own raster of the design) and a `meta.json` whose `render_coordinates`
 + `thumbnail_size` give an EXACT canvas→thumbnail transform — no image

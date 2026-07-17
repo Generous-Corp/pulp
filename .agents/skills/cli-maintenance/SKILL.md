@@ -36,6 +36,20 @@ is user-facing even when there is no C++ table entry.
   - `args` with name, kind (positional/option/flag/passthrough), description
   - `subcommands` if applicable
 
+**Quote any `summary`/`description` containing `: ` — the manifest must stay
+valid YAML.** A bare `description: Manifest kind: source, ui-kit, or template`
+is a YAML syntax error (so is a `"`-opened scalar with no closing quote), and it
+will not be caught by review: for years the file was checked only by `grep`
+(`tools/check-docs.sh`) and by a C++ CLI that never reads it, so six such
+scalars accumulated and `yaml.safe_load` failed on the file outright — while
+every gate stayed green. `tools/scripts/tools_registry_check.py` now parses it
+to resolve `pulp ...` invocations in `docs/status/tools.yaml`, so a broken
+scalar fails that check. Verify with:
+
+```bash
+python3 -c "import yaml; yaml.safe_load(open('docs/status/cli-commands.yaml')); print('OK')"
+```
+
 ### 3. Decide: does this need a slash command?
 
 **Create a slash command** (`.claude/commands/<name>.md`) if:

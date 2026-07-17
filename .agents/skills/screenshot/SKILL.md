@@ -106,6 +106,12 @@ different skill. Guidance that tells you to build what already exists is worse
 than silence, so the invocation lives here rather than a pointer to go read
 another file.
 
+The full registry of these tools is **`docs/status/tools.yaml`**, whose digest
+is generated into CLAUDE.md so it is always in context, and a PostToolUse hook
+(`hooks/scripts/tool-registry-reminder.sh`) names the right tool if you start
+writing PIL anyway. Three deliveries for one lesson: burial is what caused the
+incident, so the fix is repetition at the moment of need.
+
 `compare_screenshots` / `compare_screenshot_files` decode PNGs with
 CoreGraphics on Apple and Skia on non-Apple builds when `PULP_HAS_SKIA=1`.
 In a non-Apple no-Skia build, comparisons remain unavailable (`valid=false`,

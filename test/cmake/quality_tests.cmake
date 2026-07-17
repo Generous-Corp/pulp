@@ -126,6 +126,15 @@ if(Python3_Interpreter_FOUND)
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(local-diff-cover-selftest PROPERTIES TIMEOUT 300)
     endif()
+    # Tool registry: docs/status/tools.yaml must stay valid (every path and
+    # invocation resolves) AND complete (every committed entry point under the
+    # swept dirs is registered or excluded), and the CLAUDE.md digest generated
+    # from it must be in sync. This is what keeps agents from hand-rolling a
+    # script for a job a shipped tool already does.
+    add_test(NAME tools-registry-check COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/tools_registry_check.py" --check)
+    add_test(NAME tools-registry-check-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_tools_registry_check.py")
 
     # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).

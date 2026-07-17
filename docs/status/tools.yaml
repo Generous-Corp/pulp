@@ -1,0 +1,449 @@
+# Pulp tool registry — the tools an agent or developer should REACH FOR
+# instead of hand-rolling one.
+#
+# Why this file exists: the tools below already existed and were already
+# documented, and an agent still hand-rolled PIL crop scripts to compare a
+# design render against its source. The docs weren't missing — they were
+# buried (line 1825 of a 2,699-line SKILL.md) and contradicted elsewhere.
+# So this manifest is the SOURCE OF TRUTH for "what tool already does this",
+# and the things generated FROM it are the delivery:
+#
+#   * the "Registered tools" digest in CLAUDE.md (always in context, read by
+#     both Claude Code and Codex via AGENTS.md) — generated, never hand-edited
+#   * the PostToolUse hand-roll interception hook
+#
+# Both are produced/validated by tools/scripts/tools_registry_check.py, which
+# also runs a COVERAGE SWEEP: every agent-invocable entry point under the swept
+# directories must appear here or in `exclude:` below. That invariant (the same
+# shape as skill_sync_check.py's "every skill dir MUST have an entry") is what
+# keeps the registry from quietly rotting into a lie.
+#
+# Field contract:
+#   name          stable id, kebab-case
+#   path          in-tree path that IS the tool (must exist)
+#   category      groups the digest
+#   use_when      ONE line, phrased as the need an agent will actually feel.
+#                 This is the matching surface — write the symptom, not the
+#                 implementation ("compare a render against its design source",
+#                 not "runs heuristics over a scene graph").
+#   invocation    canonical, copy-pasteable. Required unless availability=planned.
+#   inputs/outputs what it eats and what it leaves behind
+#   availability  always | optional-install | planned
+#   skill         owning .agents/skills/<name>/SKILL.md (authoritative guidance)
+#   docs          docs/ page (checked by tools/check-docs.sh)
+#   install       how to get it (optional-install only)
+#   pointer       where the design lives (planned only — NEVER an invocation:
+#                 the registry must never hand an agent a command for something
+#                 that isn't in the tree)
+
+schema_version: 1
+
+# Directories swept for unregistered entry points, plus an allowlisted subset of
+# tools/scripts (which holds 300+ files that are CI gates, not agent tools — so
+# it is opt-in by path rather than swept wholesale).
+sweep:
+  include_dirs:
+    - tools/import-design
+    - tools/import-validation
+    - tools/harness
+    - tools/audio
+  include_paths:
+    - tools/scripts/figma_import_diff.py
+    - tools/scripts/render-figma-import.sh
+
+tools:
+  # ── Visual comparison — the tools the hand-roll incident was about ────────
+  - name: fidelity-diff
+    path: tools/import-design/fidelity_diff.py
+    category: visual-compare
+    use_when: Measure how close an imported+rendered design is to its Figma source, per node.
+    invocation: python3 tools/import-design/fidelity_diff.py --render <render.png> --scene <scene.pulp.json> [--json report.json]
+    inputs: A rendered PNG + the scene export (scene.pulp.json), and any per-widget reference PNGs named by its asset_manifest.
+    outputs: Named per-check pass/fail lines; a JSON report with --json.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: montage
+    path: tools/import-design/montage.py
+    category: visual-compare
+    use_when: Stack reference vs render into ONE labeled image so a comparison is self-documenting.
+    invocation: 'python3 tools/import-design/montage.py --out compare.png ref.png:"Figma reference" render.png:"Pulp render"'
+    inputs: N images as path:Label pairs.
+    outputs: One montage PNG with a titled bar above each panel (labels ON by default — that is the point).
+    availability: always
+    skill: screenshot
+    docs: guides/importing-designs.md
+
+  - name: figma-import-diff
+    path: tools/scripts/figma_import_diff.py
+    category: visual-compare
+    use_when: See WHERE a Figma reference and a Pulp render disagree, without eyeballing Preview.
+    inputs: A reference PNG and a render PNG (positional).
+    invocation: python3 tools/scripts/figma_import_diff.py <reference.png> <render.png> [--out diff.png] [--threshold 16]
+    outputs: A 4-panel PNG (reference / render / pixel-diff / region-grid) + the worst regions ranked.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: diff-against-reference
+    path: tools/import-validation/diff_against_reference.py
+    category: visual-compare
+    use_when: Get one similarity score + verdict BEFORE showing the user any native screenshot.
+    invocation: python3 tools/import-validation/diff_against_reference.py <reference.png> <candidate.png> [--threshold 0.85]
+    inputs: Reference and candidate PNGs.
+    outputs: A 0.0..1.0 score and a verdict — below threshold means do NOT claim the import works.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: diff-against-reference-regions
+    path: tools/import-validation/diff_against_reference_regions.py
+    category: visual-compare
+    use_when: A whole-image score is hiding a broken sub-region (empty canvas, broken chrome).
+    invocation: python3 tools/import-validation/diff_against_reference_regions.py <reference.png> <candidate.png>
+    inputs: Reference and candidate PNGs; regions as percent-of-window rects.
+    outputs: Per-region scores, so the harness fails on the first broken region instead of averaging it away.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: golden-regression
+    path: tools/import-validation/golden_regression.py
+    category: visual-compare
+    use_when: Prove an importer change didn't silently regress a design that already imported correctly.
+    invocation: python3 tools/import-validation/golden_regression.py --from <source> --file <design> --baseline <baseline.png>
+    inputs: A design source + a committed baseline render.
+    outputs: Tolerant/structural pass/fail (diff fraction + dilated edge agreement), not exact-pixel — AA noise would false-positive.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: render-figma-import
+    path: tools/scripts/render-figma-import.sh
+    category: visual-compare
+    use_when: Render an import at the design's OWN canvas size (a mismatched size voids every score).
+    invocation: bash tools/scripts/render-figma-import.sh <ui.js> <out.png>
+    inputs: A pulp-import-design output plus its sibling <ui.js>.meta.json.
+    outputs: A PNG rendered at the source design's root-frame size — no need to remember canvas dimensions.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  # ── Design import — getting a design INTO Pulp ────────────────────────────
+  - name: fig-decode
+    path: tools/import-design/fig_decode.mjs
+    category: design-import
+    use_when: Decode a local .fig file offline — no Figma desktop, no REST quota.
+    invocation: node tools/import-design/fig_decode.mjs emit <file.fig> --frame <guid|name> --out <dir>
+    inputs: A local .fig file. `outline` first to pick a frame; `emit` to decode it.
+    outputs: <dir>/scene.pulp.json + <dir>/assets/ — a figma-plugin export envelope pulp import-design consumes.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: figma-rest-export
+    path: tools/import-design/figma_rest_export.py
+    category: design-import
+    use_when: Pull a Figma frame headlessly (CI) — the LAST resort; local lanes have no rate limit.
+    invocation: python3 tools/import-design/figma_rest_export.py --url <figma-url> --out <dir> [--token <tok>]
+    inputs: A Figma file key/node or URL + an API token.
+    outputs: A figma-plugin-export-v1 envelope. WILL 429 on dense files — prefer the Figma desktop MCP or the Pulp Figma plugin when desktop is open.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: figma-rasterize-vector-frames
+    path: tools/import-design/figma_rasterize_vector_frames.py
+    category: design-import
+    use_when: A vector ILLUSTRATION group imported as a flat stack of boxes instead of art.
+    invocation: python3 tools/import-design/figma_rasterize_vector_frames.py --scene <scene.pulp.json> --assets-dir <dir> --out <scene.out.json>
+    inputs: A scene export whose vector groups were walked as layout containers.
+    outputs: A rewritten scene with those frames flattened to single PNGs.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: make-catalog-component
+    path: tools/import-design/make_catalog_component.py
+    category: design-import
+    use_when: Turn a Figma node into a 1:1 catalog component instead of hand-painting a C++ widget.
+    invocation: python3 tools/import-design/make_catalog_component.py --help
+    inputs: A Figma node (faithful-vector lane).
+    outputs: A DesignFrameView subclass rendering the embedded SVG 1:1 via SkSVGDOM, plus the CMake/catalog lines to paste.
+    availability: always
+    skill: import-design
+    docs: reference/design-import.md
+
+  - name: reembed-mtk
+    path: tools/import-design/reembed_mtk.py
+    category: design-import
+    use_when: Re-export/re-embed the Musical Typing Keyboard's two faithful Figma frames specifically.
+    invocation: python3 tools/import-design/reembed_mtk.py --help
+    inputs: The MTK Figma nodes (187:15 typing, 187:349 piano).
+    outputs: Re-embedded SVG with the baked demo chord neutralized (the live overlay owns pressed-state lighting).
+    availability: always
+    skill: import-design
+    docs: reference/design-import.md
+
+  - name: jsx-transform
+    path: tools/import-design/jsx-runtime/jsx-transform.mjs
+    category: design-import
+    use_when: Transform JSX/React design output into the Pulp runtime-import lane.
+    invocation: node tools/import-design/jsx-runtime/jsx-transform.mjs --help
+    inputs: JSX source from a design export.
+    outputs: Pulp-consumable JS.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: jsx-contract-audit
+    path: tools/import-design/jsx-runtime/jsx-contract-audit.mjs
+    category: design-import
+    use_when: Audit the JSX runtime shim against the contract it promises importers.
+    invocation: node tools/import-design/jsx-runtime/jsx-contract-audit.mjs --help
+    inputs: The jsx-runtime shim surface.
+    outputs: Contract drift report.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  # ── Import roundtrip lanes — end-to-end per source ────────────────────────
+  - name: roundtrip-figma
+    path: tools/import-validation/figma-roundtrip.sh
+    category: import-roundtrip
+    use_when: Validate the Figma Make runtime-import lane end to end before pushing.
+    invocation: bash tools/import-validation/figma-roundtrip.sh
+    inputs: The in-tree Figma Make fixtures.
+    outputs: Parser/dispatch tests + a parser-emitted runtime render; screenshot comparison when a reference is available.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: roundtrip-designmd
+    path: tools/import-validation/designmd-roundtrip.sh
+    category: import-roundtrip
+    use_when: Validate the DESIGN.md import lane end to end.
+    invocation: bash tools/import-validation/designmd-roundtrip.sh
+    inputs: The in-tree DESIGN.md fixtures.
+    outputs: Parser + render validation for the lane.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: roundtrip-jsx
+    path: tools/import-validation/jsx-roundtrip.sh
+    category: import-roundtrip
+    use_when: Validate the JSX/React import lane end to end.
+    invocation: bash tools/import-validation/jsx-roundtrip.sh
+    inputs: The in-tree JSX fixtures.
+    outputs: Parser + render validation for the lane.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: roundtrip-pencil
+    path: tools/import-validation/pencil-roundtrip.sh
+    category: import-roundtrip
+    use_when: Validate the Pencil (.pen) import lane end to end.
+    invocation: bash tools/import-validation/pencil-roundtrip.sh
+    inputs: The in-tree Pencil fixtures.
+    outputs: Parser + render validation for the lane.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: roundtrip-rn
+    path: tools/import-validation/rn-roundtrip.sh
+    category: import-roundtrip
+    use_when: Validate the React Native import lane end to end.
+    invocation: bash tools/import-validation/rn-roundtrip.sh
+    inputs: The in-tree RN fixtures.
+    outputs: Parser + render validation for the lane.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: roundtrip-spectr
+    path: tools/import-validation/spectr-roundtrip.sh
+    category: import-roundtrip
+    use_when: Validate the Spectr import lane end to end.
+    invocation: bash tools/import-validation/spectr-roundtrip.sh
+    inputs: The in-tree Spectr fixtures.
+    outputs: Parser + render validation for the lane.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: roundtrip-stitch
+    path: tools/import-validation/stitch-roundtrip.sh
+    category: import-roundtrip
+    use_when: Validate the Stitch import lane end to end.
+    invocation: bash tools/import-validation/stitch-roundtrip.sh
+    inputs: The in-tree Stitch fixtures.
+    outputs: Parser + render validation for the lane.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: roundtrip-v0
+    path: tools/import-validation/v0-roundtrip.sh
+    category: import-roundtrip
+    use_when: Validate the v0 import lane end to end.
+    invocation: bash tools/import-validation/v0-roundtrip.sh
+    inputs: The in-tree v0 fixtures.
+    outputs: Parser + render validation for the lane.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: semantic-probes
+    path: tools/import-validation/semantic_probes.sh
+    category: import-roundtrip
+    use_when: A render "looks right" but you need to know it actually mounted and settled.
+    invocation: bash tools/import-validation/semantic_probes.sh
+    inputs: A running Spectr import.
+    outputs: Semantic probes that catch silent runtime-import failures a pixel diff cannot see.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: check-label-coverage
+    path: tools/import-validation/check_label_coverage.sh
+    category: import-roundtrip
+    use_when: Check the importer's IR actually captured the UI text the reference shows.
+    invocation: bash tools/import-validation/check_label_coverage.sh <generated-ui.js> <reference-labels.txt> [--min-coverage 0.70]
+    inputs: Generated UI JS + one expected label per line.
+    outputs: Structural label-coverage assertion.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: live-host-pump-smoke
+    path: tools/import-validation/live-host-pump-smoke.sh
+    category: import-roundtrip
+    use_when: Confirm the live host really drives JS timers (setInterval/setTimeout not queuing forever).
+    invocation: bash tools/import-validation/live-host-pump-smoke.sh
+    inputs: A live host build.
+    outputs: Smoke assertion that the idle pump calls service_frame_callbacks().
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: check-source-contracts
+    path: tools/import-validation/check-source-contracts.py
+    category: import-roundtrip
+    use_when: Check the import source-contract registry for drift.
+    invocation: python3 tools/import-validation/check-source-contracts.py [--strict]
+    inputs: tools/import-validation/source-contracts.json.
+    outputs: Warn-only drift report (fails only with --strict).
+    availability: always
+    skill: import-design
+    docs: reference/design-import.md
+
+  # ── Web-compat + visual harness ──────────────────────────────────────────
+  - name: compat-verifier
+    path: tools/harness/verifier.py
+    category: harness
+    use_when: Check web-compat coverage — and that a `supported` claim is backed by a real test.
+    invocation: python3 -m tools.harness.verifier --help
+    inputs: compat.json + the per-surface adapters.
+    outputs: A coverage matrix; the evidence check fails an unbacked `supported` claim.
+    availability: always
+    skill: import-design
+    docs: guides/testing-advanced.md
+
+  - name: visual-harness-runner
+    path: tools/harness/visual/runner.py
+    category: harness
+    use_when: Run the deterministic visual layout snapshots.
+    invocation: python3 -m tools.harness.visual.runner --help
+    inputs: A visual spec.
+    outputs: Deterministic raster snapshots + diffs.
+    availability: always
+    skill: screenshot
+    docs: guides/testing-advanced.md
+
+  - name: visual-harness-docker-build
+    path: tools/harness/visual/docker-build.sh
+    category: harness
+    use_when: Build the visual-harness Docker image — use this, not a raw docker build.
+    invocation: bash tools/harness/visual/docker-build.sh
+    inputs: ci/visual-harness.Dockerfile.
+    outputs: The pinned linux/amd64 image, reusing the machine-local buildx cache.
+    availability: always
+    skill: screenshot
+    docs: guides/testing-advanced.md
+
+  - name: check-skia-pin
+    path: tools/harness/visual/check_skia_pin.py
+    category: harness
+    use_when: The visual-harness Dockerfile's Skia pin may have drifted from the manifest.
+    invocation: python3 tools/harness/visual/check_skia_pin.py
+    inputs: ci/visual-harness.Dockerfile + tools/deps/manifest.json.
+    outputs: Non-zero with a clear diff when the baked Skia tag/URL/SHA drifts from the canonical pin.
+    availability: always
+    skill: screenshot
+    docs: guides/testing-advanced.md
+
+  # ── Audio measurement ─────────────────────────────────────────────────────
+  - name: audio-validate
+    path: tools/cli/cmd_audio.cpp
+    category: audio
+    use_when: Prove what a plugin actually emitted — summarize, diagnose, compare, or gate a WAV.
+    invocation: pulp audio validate summarize <out.wav> [--json]
+    inputs: A rendered WAV (see `pulp run --audio-capture-rolling` for steady-state capture) or an artifact bundle.
+    outputs: "summarize: metrics; doctor: response/THD; compare: deterministic pass/fail null/spectral gate; assert: assertions.json verdicts."
+    availability: always
+    skill: audio-harness
+    docs: guides/audio-inspector.md
+
+  - name: audio-scope
+    path: tools/cli/cmd_audio.cpp
+    category: audio
+    use_when: Look at a sample window of a WAV — waveform/spectrum — as JSON or PNG.
+    invocation: pulp audio scope --input-wav <out.wav> --json scope.json --png scope.png
+    inputs: A WAV.
+    outputs: Scope JSON and/or a PNG.
+    availability: always
+    skill: audio-harness
+    docs: guides/audio-inspector.md
+
+  - name: audio-render
+    path: tools/cli/cmd_audio.cpp
+    category: audio
+    use_when: Render a plugin bundle offline — no DAW, no audio device — to a WAV + metrics.
+    invocation: pulp audio render --help
+    inputs: A plugin bundle + declarative scenario flags (--param values are PLAIN domain, not normalized).
+    outputs: An int16/int24/float32 WAV + metrics JSON matching `validate summarize --json`.
+    availability: always
+    skill: audio-harness
+    docs: guides/audio-inspector.md
+
+  - name: audio-quality-lab
+    path: tools/audio/quality-lab
+    category: audio
+    use_when: Decide whether a DSP change made a sound WORSE — and at which timestamp.
+    invocation: python -m quality_lab.cli compare --reference <ref.wav> --candidate <cand.wav>
+    inputs: A reference WAV + a candidate WAV (or a synthetic case/degradation).
+    outputs: Per-artifact verdicts (transient smear, dulling, metallic HF, graininess) localized to a timestamp, with coverage/confidence.
+    availability: optional-install
+    install: pulp tool install audio-quality-lab   # python_pip via uv; also reachable as `pulp audio validate assert`
+    skill: audio-harness
+    docs: guides/audio-quality-lab.md
+
+# ── On `availability: planned` ──────────────────────────────────────────────
+# There are deliberately NO planned entries right now. The schema supports them
+# (pointer required, invocation forbidden) and the tests cover those rules, but
+# a planned entry is only honest while the tool is genuinely absent — and on a
+# branch this active that window is short: both tools this registry was going to
+# list as planned (layout_parity.py, thumb_parity.py) were built while it was
+# being written. Add a planned entry when a tool is real work someone would
+# otherwise re-derive, and delete it the moment the tool lands. The coverage
+# sweep will force the registration either way.
+
+# Entry points under the swept directories that are deliberately NOT registry
+# tools. Every exclusion needs a reason — "it's noise" is not one.
+exclude:
+  - path: tools/import-design/fig/testdata/make_synthetic_fig.mjs
+    reason: Test-fixture generator for the fig decoder's own unit tests, not a tool an agent reaches for.
