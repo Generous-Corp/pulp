@@ -1147,8 +1147,8 @@ TEST_CASE("parse_figma_json covers layout style and audio shape metadata edges",
             "paddingLeft": 8,
             "justify": "space-around",
             "align": "center",
-            "widthMode": "fill",
-            "heightMode": "hug"
+            "width_mode": "fill",
+            "height_mode": "hug"
         },
         "style": {
             "backgroundGradient": "linear-gradient(#111,#222)",

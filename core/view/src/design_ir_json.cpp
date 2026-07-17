@@ -437,11 +437,6 @@ static IRLayout parse_ir_layout(const choc::value::ValueView& obj) {
         return SizingMode::fixed;
     };
 
-    if (obj.hasObjectMember("widthMode"))
-        l.width_mode = parse_sizing(get_string(obj, "widthMode"));
-    if (obj.hasObjectMember("heightMode"))
-        l.height_mode = parse_sizing(get_string(obj, "heightMode"));
-
     // CSS Grid (camelCase + snake_case). Stored as raw CSS strings; the codegen
     // lowers them to createGrid/setGrid. Source-agnostic.
     auto first_str = [&](std::initializer_list<const char*> keys) -> std::optional<std::string> {
@@ -452,6 +447,24 @@ static IRLayout parse_ir_layout(const choc::value::ValueView& obj) {
             }
         return std::nullopt;
     };
+    // Sizing mode — snake_case FIRST, because that is what every producer emits.
+    // This read `widthMode`/`heightMode` only, while the grid keys immediately
+    // below already accepted both spellings via first_str. Every producer writes
+    // snake_case: the envelope SCHEMA declares `width_mode` with
+    // additionalProperties:false (figma-plugin-export-v1.json:311), the REST
+    // exporter emits `width_mode` (figma_rest_export.py:540), and the plugin's
+    // own model types it `width_mode` (extract-model.ts:129). So every `hug` and
+    // `fill` a designer set silently became `fixed` — for the plugin AND REST
+    // lanes, which is most of the Figma surface.
+    //
+    // It is scene.mjs's auto-layout bug exactly: a value emitted to a key nobody
+    // reads. The test that should have caught it (test_design_import_codegen.cpp
+    // :1150) feeds `widthMode` — the CONSUMER's spelling, which no producer
+    // emits — so it passed on a path no real file takes. A test that asserts the
+    // consumer's own spelling can only prove the consumer talks to itself.
+    if (auto m = first_str({"width_mode", "widthMode"}))  l.width_mode  = parse_sizing(*m);
+    if (auto m = first_str({"height_mode", "heightMode"})) l.height_mode = parse_sizing(*m);
+
     l.grid_template_columns = first_str({"gridTemplateColumns", "grid_template_columns"});
     l.grid_template_rows    = first_str({"gridTemplateRows", "grid_template_rows"});
     l.grid_auto_flow        = first_str({"gridAutoFlow", "grid_auto_flow"});
