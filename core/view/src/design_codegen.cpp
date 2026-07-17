@@ -677,7 +677,18 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         // Synthesize a generic "VALUE" label so the silver path stays
         // visually parity with sprite. Only fires when both label slots
         // are empty (we'd never overwrite a real Figma label).
-        if (opts.use_silver_knobs && label_text.empty() && value_text.empty()) {
+        //
+        // ...but ONLY when the design gave us nothing to draw. Once .fig
+        // instances expand, a knob carries the designer's own art (frames +
+        // vectors), and the caption they wrote is a SIBLING text node — so both
+        // label slots on the knob itself read empty and this guard fires,
+        // stamping an invented "VALUE" across artwork we were asked to import.
+        // That is the overwrite the comment above promises never to do: the
+        // check was written when an empty slot really did mean "no label
+        // anywhere", which stopped being true.
+        const bool design_supplied_art = !node.children.empty();
+        if (opts.use_silver_knobs && label_text.empty() && value_text.empty() &&
+            !design_supplied_art) {
             label_text = "VALUE";
         }
 
@@ -1229,6 +1240,14 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         ss << ind << "createImage('" << id << "', " << pid << ");\n";
         emit_position_if_absolute(id);
         emit_node_visual_overrides(id);
+        // Opacity. The frame path emits this further down, but an image node
+        // returns before reaching it and emit_node_visual_overrides covers only
+        // blend/clip/mask — so an image's opacity was dropped entirely. A design
+        // that dims an overlay to 10% (a grain/noise texture over the whole UI
+        // is the canonical case) rendered it at FULL strength, burying the
+        // interface under it.
+        if (node.style.opacity)
+            ss << ind << "setOpacity('" << id << "', " << *node.style.opacity << ");\n";
         auto it = node.attributes.find("asset_path");
         if (it != node.attributes.end() && !it->second.empty()) {
             ss << ind << "setImageSource('" << id << "', '"

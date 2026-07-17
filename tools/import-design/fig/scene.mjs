@@ -403,7 +403,17 @@ export function materializeFrame(scene, frame, ctx) {
     }
     const radius = cornerRadius(node);
     if (radius !== null) style.border_radius = radius;
-    if (typeof node.opacity === 'number' && node.opacity < 1) style.opacity = round2(node.opacity);
+    // A node's own opacity — EXCEPT the frame we are importing. A top-level
+    // frame's opacity composites it against the Figma canvas; it is not part of
+    // the UI, and Figma itself ignores it when rendering/exporting that frame
+    // (which is why the .fig's own thumbnail shows this design at full strength
+    // while its root frame is set to 0.5). Applying it dimmed the ENTIRE import
+    // by half — every panel, knob and label washed out — for a value the
+    // designer set to see through the frame while working. `parent` is null only
+    // for the frame being imported, so this is exactly the root.
+    if (typeof node.opacity === 'number' && node.opacity < 1 && parent) {
+      style.opacity = round2(node.opacity);
+    }
 
     // Auto-layout → flex.
     if (node.stackMode === 'HORIZONTAL' || node.stackMode === 'VERTICAL') {
@@ -692,6 +702,13 @@ function firstSolidStroke(node) {
 function envelopeType(figmaType) {
   if (figmaType === 'TEXT') return 'text';
   if (figmaType === 'CANVAS') return 'frame';
+  // An ELLIPSE is a circle, not a box. Collapsing it to `frame` made every
+  // round thing in a design square: a knob's `knob base` became the mystery
+  // square behind the knob, a toggle's handle became a square nub in its pill,
+  // and a slider's thumb became a square block. The IR already has `ellipse`
+  // (is_synthesizable_primitive), and synthesize_primitive_paths gives it a real
+  // path — the decoder just never said what the node was.
+  if (figmaType === 'ELLIPSE') return 'ellipse';
   return 'frame';
 }
 
