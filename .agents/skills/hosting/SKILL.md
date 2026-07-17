@@ -224,14 +224,19 @@ does not contain crashes in deeper plug-in code.
   `GraphRuntimeBufferPool`), so fan-in paths of differing latency time-align
   identically. MIDI edges route through per-node MIDI scratch buffers owned by
   the executor (`GraphRuntimeMidiScratch`); SignalGraph bridges its MIDI
-  mailboxes (inject_midi / extract_midi) around the routed call. Parameter
-  automation routes through a `GraphRuntimeAutomationScratch` (per-node parameter
-  event queue + per-connection slew state + per-node dense buffers): sparse edges
-  sample the source at the block edges, map/slew/mix per the connection's
-  resolved bounds, and emit two control points; dense audio-rate edges map every
-  sample (through the same per-connection PDC delay ring as audio), mix into a
-  per-node buffer, and emit one event per sample — both bit-identical to the walk
-  and built into the same per-node event queue. A node exceeding
+  mailboxes (inject_midi / extract_midi) around the routed call. External
+  per-block parameter events cross the same boundary through a per-node
+  `inject_parameter_events` mailbox. The routed call appends that publication
+  after executor-generated automation and commits its sequence only after the
+  whole dispatch succeeds, matching serial fallback and anticipation behavior.
+  Parameter automation routes through a `GraphRuntimeAutomationScratch`
+  (per-node parameter event queue + per-connection slew state + per-node dense
+  buffers): sparse edges sample the source at the block edges, map/slew/mix per
+  the connection's resolved bounds, and emit two control points; dense
+  audio-rate edges map every sample (through the same per-connection PDC delay
+  ring as audio), mix into a per-node buffer, and emit one event per sample —
+  both bit-identical to the walk and built into the same per-node event queue.
+  A node exceeding
   `kMaxParamsPerNode` (64) distinct sparse OR dense params is kept on the legacy
   walk.
   - **Where the walk lives.** The legacy serial reference walk is no longer
@@ -538,6 +543,14 @@ does not contain crashes in deeper plug-in code.
   audio-thread scratch directly. Keep mailbox snapshots and writer scratch
   preallocated by `prepare()`; constructing a fresh MIDI snapshot in
   `inject_midi()` reintroduces realtime-path allocation.
+- `SignalGraph::inject_parameter_events()` uses a separate prepared per-node
+  mailbox with one control-side writer. Publications are latest-wins and
+  one-shot: the next successful serial, routed, parallel, or anticipation
+  block consumes the newest sequence once. Append injected events after graph
+  automation before the stable sample-offset sort; this preserves graph
+  automation when the fixed queue is full and lets injected events win a
+  same-offset tie. Reuse the mailbox across gap-free snapshots for the same
+  plugin node so an edit cannot discard a publication made before the swap.
 - Keep plugin automation scratch preallocated by `SignalGraph::prepare()`.
   The audio-thread `process()` path must not create per-block containers for
   input pointer casts, sparse automation accumulation, or dense audio-rate
@@ -829,6 +842,13 @@ rules:
   `core/host`. Current loaders consume it for per-block automation where
   the format supports sample offsets. Use it — not `set_parameter` — for
   per-block automation.
+- **External parameter-event mailbox.** Hosts publish per-block events with
+  `SignalGraph::inject_parameter_events()` before `process()`. The API is
+  additive on `SignalGraph`; do not add a `Processor` or `PluginSlot` virtual.
+  Sample offsets are block-relative. A `false` return reports an invalid or
+  unavailable node, or a source queue that already overflowed; a retained
+  source prefix can still be published and consumed. Destination overflow is
+  observed later when the audio-thread merge fills the fixed queue.
 - **Node ABI surface.** `PluginSlot` includes
   `pulp/runtime/node_abi.hpp` and participates in the node ABI
   virtual-order gate. Existing virtual methods may not be inserted,

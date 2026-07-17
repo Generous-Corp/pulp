@@ -475,6 +475,17 @@ public:
     // process(); the events become that node's MIDI output this block.
     bool inject_midi(NodeId midi_input_node, const midi::MidiBuffer& events);
 
+    // Inject sample-accurate parameter events into a Plugin node. Call before
+    // process(); the latest published batch is consumed exactly once by that
+    // node on the next block it processes. Events use block-relative sample
+    // offsets and are delivered after graph-generated automation, so an
+    // injected event wins an equal-offset tie while existing automation keeps
+    // capacity priority. Returns false for an unprepared/non-Plugin/unresolved
+    // node or when `events` already reports source-side overflow; the retained
+    // prefix is still published in the overflow case.
+    bool inject_parameter_events(NodeId plugin_node,
+                                 const state::ParameterEventQueue& events);
+
     // Drain the MIDI events that arrived at a MidiOutput sink node during
     // the last process() call. Appends to `out`.
     bool extract_midi(NodeId midi_output_node, midi::MidiBuffer& out) const;
@@ -846,6 +857,25 @@ private:
         std::atomic<uint64_t> next_sequence{0};
     };
 
+    struct ParameterBlockSnapshot {
+        std::array<state::ParameterEvent,
+                   state::ParameterEventQueue::kCapacity> events{};
+        std::size_t size = 0;
+        std::uint64_t sequence = 0;
+        bool source_incomplete = false;
+
+        bool set_from_queue(const state::ParameterEventQueue& src,
+                            std::uint64_t new_sequence) noexcept;
+        bool append_to(state::ParameterEventQueue& dst) const noexcept;
+    };
+
+    struct ParameterInputMailbox {
+        runtime::TripleBuffer<ParameterBlockSnapshot> published;
+        ParameterBlockSnapshot writer_scratch;
+        std::atomic<std::uint64_t> next_sequence{0};
+        std::atomic<std::uint64_t> sequence_seen{0};
+    };
+
     struct NodeRuntime {
         // Per-node output-port channel storage (interleaved per-port, flat).
         // data_ has size num_output_ports * max_block_size_; channel_ptrs_[p]
@@ -912,6 +942,11 @@ private:
         std::unique_ptr<MidiInputMailbox> midi_input_mailbox;
         std::unique_ptr<runtime::TripleBuffer<MidiBlockSnapshot>> midi_output_mailbox;
         uint64_t midi_input_sequence_seen = 0;
+
+        // Control/audio-thread parameter-event ingress for Plugin nodes. The
+        // mailbox is single-writer/latest-wins like MIDI ingress; the sequence
+        // is committed only after the selected processing path succeeds.
+        std::shared_ptr<ParameterInputMailbox> parameter_input_mailbox;
 
         // Audio-rate modulation scratch. Each listed param gets one
         // max-block-sized region in audio_rate_param_data, filled immediately
@@ -1405,6 +1440,9 @@ private:
                       const audio::BufferView<const float>& input,
                       int num_samples,
                       const format::ProcessContext* transport);
+    static std::uint64_t append_parameter_mailbox_events_(
+        void* runtime,
+        state::ParameterEventQueue& destination) noexcept;
     // Legacy serial reference walk — the hand-maintained, bit-exact inter-node
     // DSP oracle and fallback for process_impl(). Lives in its own translation
     // unit (signal_graph_reference_walk.cpp) but stays a member so it can name

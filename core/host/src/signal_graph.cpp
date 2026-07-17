@@ -159,6 +159,31 @@ bool SignalGraph::MidiBlockSnapshot::copy_to_midi(
     return copied_all && !incomplete;
 }
 
+bool SignalGraph::ParameterBlockSnapshot::set_from_queue(
+    const state::ParameterEventQueue& src,
+    std::uint64_t new_sequence) noexcept {
+    size = 0;
+    sequence = new_sequence;
+    source_incomplete = src.overflowed();
+    for (const auto& event : src) {
+        if (size == events.size()) {
+            source_incomplete = true;
+            break;
+        }
+        events[size++] = event;
+    }
+    return !source_incomplete;
+}
+
+bool SignalGraph::ParameterBlockSnapshot::append_to(
+    state::ParameterEventQueue& dst) const noexcept {
+    bool copied_all = !source_incomplete;
+    for (std::size_t i = 0; i < size; ++i) {
+        copied_all = dst.push(events[i]) && copied_all;
+    }
+    return copied_all;
+}
+
 // All add_*/connect/remove mutators below take graph_mutation_mutex_ for the
 // duration of the nodes_/connections_ mutation + invalidate_live_locked_(). The lock is
 // safe to hold across invalidate_live_locked_() because that drives only the
@@ -637,6 +662,53 @@ bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) {
     const bool copied_all = mailbox.writer_scratch.set_from_midi(events, sequence);
     mailbox.published.write(mailbox.writer_scratch);
     return copied_all;
+}
+
+bool SignalGraph::inject_parameter_events(
+    NodeId id,
+    const state::ParameterEventQueue& events) {
+    // Same reader-pinned, single-writer publication discipline as inject_midi.
+    // The fixed-capacity writer scratch and TripleBuffer were prepared with the
+    // snapshot, so this path performs no allocation.
+    auto read_guard = live_slot_.read();
+    auto* cg = read_guard.get();
+    if (!cg) return false;
+    auto runtime_it = cg->runtime.find(id);
+    if (runtime_it == cg->runtime.end()) return false;
+    const auto shape_it = cg->shapes.find(id);
+    if (shape_it == cg->shapes.end()
+        || shape_it->second.type != NodeType::Plugin
+        || cg->plugins.find(id) == cg->plugins.end()
+        || !runtime_it->second.parameter_input_mailbox) {
+        return false;
+    }
+
+    auto& mailbox = *runtime_it->second.parameter_input_mailbox;
+    const std::uint64_t sequence =
+        mailbox.next_sequence.fetch_add(1, std::memory_order_relaxed) + 1;
+    const bool copied_all =
+        mailbox.writer_scratch.set_from_queue(events, sequence);
+    mailbox.published.write(mailbox.writer_scratch);
+    return copied_all;
+}
+
+std::uint64_t SignalGraph::append_parameter_mailbox_events_(
+    void* runtime,
+    state::ParameterEventQueue& destination) noexcept {
+    auto* rt = static_cast<NodeRuntime*>(runtime);
+    if (rt == nullptr || !rt->parameter_input_mailbox) return 0;
+    const auto& injected = rt->parameter_input_mailbox->published.read();
+    const std::uint64_t sequence_seen =
+        rt->parameter_input_mailbox->sequence_seen.load(std::memory_order_relaxed);
+    if (injected.sequence == 0
+        || injected.sequence == sequence_seen) {
+        return 0;
+    }
+    // Existing graph automation is already in `destination`; append injection
+    // afterward so it wins stable-sort ties without displacing existing events
+    // when the fixed queue is already near capacity.
+    (void)injected.append_to(destination);
+    return injected.sequence;
 }
 
 bool SignalGraph::extract_midi(NodeId id, midi::MidiBuffer& out) const {
@@ -1137,6 +1209,20 @@ bool SignalGraph::build_routing_snapshot_locked_(
                 return it == prepared_plugin_meta_.end() ? nullptr
                                                          : &it->second.parameters;
             },
+        .parameter_events_for =
+            [&cg](NodeId id) -> ParameterEventInjectionBinding {
+                auto it = cg.runtime.find(id);
+                if (it == cg.runtime.end() ||
+                    !it->second.parameter_input_mailbox) {
+                    return {};
+                }
+                return {
+                    .user_data = &it->second,
+                    .append = &SignalGraph::append_parameter_mailbox_events_,
+                    .sequence_seen =
+                        &it->second.parameter_input_mailbox->sequence_seen,
+                };
+            },
     };
     return build_executor_snapshot(nodes_, connections_, binders, plugin_ctx,
                                    cg.routed.plugin_scratch, out, parallel_safe,
@@ -1220,6 +1306,23 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         if (n.type == NodeType::MidiOutput) {
             runtime_it->second.midi_output_mailbox =
                 std::make_unique<runtime::TripleBuffer<MidiBlockSnapshot>>();
+        }
+        if (n.type == NodeType::Plugin && n.plugin) {
+            // Keep mailbox identity across a live snapshot recompile so a
+            // batch published while prepare_swap() is building cannot fall
+            // between the old and new snapshots. Normal eager prepare has no
+            // live snapshot here and allocates a fresh mailbox.
+            if (const auto live = live_slot_.live()) {
+                auto old_it = live->runtime.find(n.id);
+                if (old_it != live->runtime.end()) {
+                    runtime_it->second.parameter_input_mailbox =
+                        old_it->second.parameter_input_mailbox;
+                }
+            }
+            if (!runtime_it->second.parameter_input_mailbox) {
+                runtime_it->second.parameter_input_mailbox =
+                    std::make_shared<ParameterInputMailbox>();
+            }
         }
 
         CompiledGraph::NodeShape shape{n.type, n.num_input_ports, n.num_output_ports};
@@ -1540,7 +1643,20 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                         auto it = cgr.plugins.find(id);
                         return it == cgr.plugins.end() ? nullptr : it->second.get();
                     },
-                    sample_rate, max_block_size, kLeadBlocks);
+                    sample_rate, max_block_size, kLeadBlocks,
+                    [&cgr](NodeId id) -> ParameterEventInjectionBinding {
+                        auto it = cgr.runtime.find(id);
+                        if (it == cgr.runtime.end()
+                            || !it->second.parameter_input_mailbox) {
+                            return {};
+                        }
+                        return {
+                            .user_data = &it->second,
+                            .append = &SignalGraph::append_parameter_mailbox_events_,
+                            .sequence_seen =
+                                &it->second.parameter_input_mailbox->sequence_seen,
+                        };
+                    });
                 if (prepared) {
                     // Map each interior node id -> its dense index in the ROUTED
                     // plan, to build the skip mask and resolve boundary output slots.
@@ -2096,6 +2212,9 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
             // are NOT committed, so a fallback path re-consumes the same block.
             auto dispatch_routed = [&](auto&& run) -> bool {
                 if (!block.validate()) return false;
+                reset_plugin_parameter_event_sequences(cg->routed.serial.plugin_ctx);
+                reset_plugin_parameter_event_sequences(
+                    cg->routed.parallel.plugin_ctx);
                 if (has_midi) {
                     for (auto& mi : cg->routed.midi_inputs) {
                         mi.pending_seq = 0;
@@ -2119,6 +2238,9 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                     }
                 }
                 if (!run().ok()) return false;
+                commit_plugin_parameter_event_sequences(cg->routed.serial.plugin_ctx);
+                commit_plugin_parameter_event_sequences(
+                    cg->routed.parallel.plugin_ctx);
                 if (has_midi) {
                     for (const auto& mi : cg->routed.midi_inputs) {
                         if (mi.pending_seq == 0) continue;
