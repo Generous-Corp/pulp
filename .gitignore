@@ -141,3 +141,6 @@ examples/web-demos/wclap-build/build
 
 # Stray Figma export that keeps reappearing at the repo root.
 ui-figma plugin export-render.png
+examples/web-demos/super-convolver-ui/browser-test/node_modules
+examples/web-demos/super-convolver-ui/browser-test/trace.mjs
+examples/web-demos/super-convolver-ui/browser-test/livepage.mjs

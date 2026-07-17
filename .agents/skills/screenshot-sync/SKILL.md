@@ -201,6 +201,35 @@ Steps:
    `twitter:image` → the colocated og.png (the `og_meta` consume). Edit the
    shared page template once, not each page by hand.
 
+### Landmine: on a PREVIEW deploy the `og:image` URL points at PRODUCTION, so the unfurl is stale
+
+`assemble-gallery.mjs` stamps `og:image` / `og:url` from `SITE_BASE`, which DEFAULTS to the
+production origin (`https://pulp-wclap-demos.pages.dev`). Deploy to a preview alias
+(`wrangler pages deploy --branch <name>` → `<name>.pulp-wclap-demos.pages.dev`) and the
+page's `og:image` still points at PRODUCTION — so a crawler unfurling the PREVIEW link
+fetches the production og.png (the OLD image; your fresh capture sits on the preview alias
+and is never seen). Symptom: you regenerate og.png, confirm it live at
+`<preview>/…/og.png`, and the link preview STILL shows the old art — because the meta URL
+and the image are on different origins. Fix: rebuild the preview with the alias as base —
+`SITE_BASE=https://<name>.pulp-wclap-demos.pages.dev node assemble-gallery.mjs` — then
+redeploy; verify with `curl -s <preview>/…/ | grep og:image`. Production needs no override
+(default base is correct once merged). Separately, social caches (iMessage, Slack) hold the
+OLD unfurl until they re-crawl — changing the og:image URL forces a re-fetch, but a client
+may still show its cached card until the link is re-sent or its preview cache clears.
+
+### Landmine: `assemble-gallery.mjs` + `wrangler deploy` does NOT refresh `og.png`
+
+`og.png` is content-hash cached — `gen-og-images.mjs` writes an `og.png.key` beside each
+image and SKIPS a page whose inputs (its own HTML + the assets it loads: wasm module,
+player, `pulp-ui.js`) are unchanged, re-shooting only pages whose hash moved. The trap:
+the normal deploy loop is `assemble-gallery.mjs` → `wrangler pages deploy`, and **neither
+runs `gen-og-images.mjs`.** So after you change an editor and redeploy, the share card
+keeps showing the OLD capture — a full-canvas editor shipped for a while with an og.png of
+the pre-editor knob grid. To refresh: run `gen-og-images.mjs` (or delete the page's
+`og.png` + `og.png.key` to force a re-shoot) BEFORE deploying. A full-canvas Skia editor
+only renders under the ANGLE/GPU Chrome flags, and the shot is a DEFAULT-state capture — it
+will not reflect interactive states (a knob moved, an engine toggled).
+
 ## 4. Consistency + backfill
 
 - Both galleries mirror the SAME example-plugin repos, so keep the OG head block
