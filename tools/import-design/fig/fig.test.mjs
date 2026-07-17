@@ -1347,3 +1347,37 @@ test('every diagnostic code this module emits is registered with a severity', ()
   assert.deepEqual(unemitted, [],
     'registered but never emitted — the table promises a warning that cannot happen');
 });
+
+test('a paint-level blend mode is recorded even though nothing lowers it', () => {
+  // Figma composites an INDIVIDUAL paint with its own mode. We have no per-paint
+  // primitive, and the node-level mix_blend_mode is not a substitute — lifting a
+  // paint's mode there is only sound when the node has exactly one visible fill
+  // and nothing else.
+  //
+  // The point of this test is the SIDECAR, not the lowering. The property was
+  // triple-silent: unread by the decoder, unnamed by any diagnostic, unrecorded
+  // by the inventory. The last is the one that mattered — a property the audit
+  // cannot see is a hole in the audit's own thesis, and it would have reported
+  // "everything survived" over a design that dropped this.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'RECTANGLE', name: 'Blended',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 50, y: 50 },
+      fillPaints: [{ type: 'SOLID', visible: true, opacity: 1, blendMode: 'LIGHTEN',
+                     color: { r: 1, g: 0, b: 0, a: 1 } }] },
+    // Control: NORMAL is "just composite it" and must not be recorded, or every
+    // paint in every design shows up as a declaration and the count is noise.
+    { guid: { sessionID: 0, localID: 4 }, type: 'RECTANGLE', name: 'Plain',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 50, y: 50 },
+      fillPaints: [{ type: 'SOLID', visible: true, opacity: 1, blendMode: 'NORMAL',
+                     color: { r: 0, g: 1, b: 0, a: 1 } }] },
+  ]});
+  const { materials } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const blended = materials.nodes.find((n) => n.node_id === '0:3');
+  assert.equal(blended.declared.fill[0].blend_mode, 'LIGHTEN',
+    'a paint-level blend is inventoried even with no lowering for it');
+  const plain = materials.nodes.find((n) => n.node_id === '0:4');
+  assert.equal(plain.declared.fill[0].blend_mode, null, 'NORMAL is not a declaration');
+});

@@ -185,3 +185,24 @@ test('a fill stack emitted as its bottom paint alone is a silent drop', () => {
     ] } },
   ]), envelope([{ node_id: '0:1', name: 'Ghost', style: { background_color: '#4b4d51' } }]), []).findings, []);
 });
+
+test('a paint-level blend mode with no lowering is reported, not waved through', () => {
+  // The check must be able to FIRE. The reference design cannot prove it: its
+  // only paint-level blend sits on a `visible: false` node, so a green run there
+  // is silence, not evidence — exactly the "positive-only green" that makes a
+  // checker worthless.
+  const m = materials([
+    { node_id: '0:1', name: 'Waveform', type: 'VECTOR', declared: {
+      fill: [{ type: 'SOLID', opacity: 1, color_alpha: 1, rgb: '#ff0000', blend_mode: 'LIGHTEN' }] } },
+  ]);
+  const r = auditMaterials(m, envelope([{ node_id: '0:1', name: 'Waveform', style: {} }]), []);
+  assert.equal(r.findings.length, 1);
+  assert.equal(r.findings[0].property, 'fill.paint_blend');
+  assert.equal(r.declaredCounts['fill.paint_blend'], 1);
+
+  // Negative control: a paint with no mode of its own declares nothing.
+  assert.deepEqual(auditMaterials(materials([
+    { node_id: '0:1', name: 'Plain', type: 'FRAME', declared: {
+      fill: [{ type: 'SOLID', opacity: 1, color_alpha: 1, rgb: '#ff0000', blend_mode: null }] } },
+  ]), envelope([{ node_id: '0:1', name: 'Plain', style: {} }]), []).findings, []);
+});
