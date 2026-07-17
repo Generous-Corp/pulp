@@ -68,6 +68,23 @@ class AcceptIntentTrailersGateTests(GateFixtureTestCase):
         rc, out = self._run_report(["--accept-intent-trailers"])
         self.assertEqual(rc, 1, out)
 
+    def test_combined_flags_fail_closed(self) -> None:
+        # The naive `--push` flip — ADD `--accept-intent-trailers` while keeping
+        # the existing `--require-bump-for-fix-feat` — rejects the very PR shape
+        # the intent model produces (fix/feat, positive intent, no file bump).
+        # The fix/feat-needs-bump guard only accepts a `chore: bump versions`
+        # commit or a `Version-Bump: skip` trailer, never a positive intent, so
+        # the two flags are mutually exclusive on an intent-only change.
+        # version-skill-check.yml must therefore SWAP the flag at flip time, not
+        # run both. (Empirically confirmed against this tree 2026-07-17.)
+        _feat_core_commit_with_intent(
+            self.f, "feat(core): new API\n\nVersion-Bump: sdk=minor\n")
+        rc_accept, _ = self._run_report(["--accept-intent-trailers"])
+        self.assertEqual(rc_accept, 0)  # intent alone: accepted
+        rc_both, out_both = self._run_report(
+            ["--accept-intent-trailers", "--require-bump-for-fix-feat"])
+        self.assertEqual(rc_both, 1, out_both)  # both together: fail closed
+
 
 class StrandedDetectorIntentPendingTests(GateFixtureTestCase):
     """The post-merge stranded-fix detector: pending intent is not stranded."""
