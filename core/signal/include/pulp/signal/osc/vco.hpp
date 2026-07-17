@@ -70,6 +70,7 @@
 #include "va.hpp"
 
 #include <pulp/signal/dc_blocker.hpp>
+#include <algorithm>
 
 #include <array>
 #include <cmath>
@@ -171,7 +172,13 @@ public:
 
     // ── Per-shape waveshaper ───────────────────────────────────────────────
     void set_waveshaper(VaShape shape, const WaveshaperParams& params) noexcept {
-        shapers_[static_cast<std::size_t>(shape)] = params;
+        // `amount` is a blend, so it is clamped to [0, 1] like every other
+        // unit-range control here: outside that range it extrapolates the blend
+        // (amount 2 reaches 3.0 on a full-scale shape) and breaks the [-1, 1]
+        // output contract the boundedness gate relies on.
+        WaveshaperParams p = params;
+        p.amount = std::clamp(p.amount, 0.0, 1.0);
+        shapers_[static_cast<std::size_t>(shape)] = p;
     }
     WaveshaperParams waveshaper(VaShape shape) const noexcept {
         return shapers_[static_cast<std::size_t>(shape)];
@@ -399,9 +406,16 @@ private:
     /// `b^2 / (1 - a^2)`, so `b = sqrt(1 - a^2)` gives variance 1. `drift_depth`
     /// then scales that unit wander straight to cents RMS.
     void update_drift_coeffs() noexcept {
+        // Lower rate is a slower wander, so the pole rises toward 1 as the rate
+        // falls; the limit as rate -> 0 is a frozen walk (pole 1), which the
+        // unit-variance gain below turns into no wander at all. A non-positive
+        // rate takes that limit rather than the opposite extreme: mapping it to
+        // pole 0 would make drift full-depth per-sample white noise -- the
+        // FASTEST wander -- so a caller passing 0 to mean "off" or "very slow"
+        // would get audible hiss-like FM instead.
         drift_pole_ = drift_rate_hz_ > 0.0
                           ? std::exp(-2.0 * std::numbers::pi * drift_rate_hz_ / sample_rate_)
-                          : 0.0;
+                          : 1.0;
         drift_norm_ = std::sqrt(1.0 - drift_pole_ * drift_pole_);
     }
 

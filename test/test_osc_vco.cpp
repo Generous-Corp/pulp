@@ -648,6 +648,33 @@ TEST_CASE("the VCO applies the DC blocker's own LTI response", "[signal][osc][vc
                              << dc_block_mag_db(50.0, pole) << " dB)");
     CHECK_THAT(curve.magnitude_db_at(50.0), WithinAbs(-3.0, 0.6));
     CHECK(curve.magnitude_db_at(500.0) > -0.5);
+
+    // The above ties the corner to a reference filter seeded with the REPORTED
+    // pole. Also prove the pole is actually APPLIED to the VCO's own output: a
+    // wiring bug that computed ac_pole_ but never called dc_blocker_.set_pole
+    // would pass everything above. Render the VCO's own sine at a frequency
+    // below the corner through two different corners; the higher corner is a
+    // steeper highpass there, so it must attenuate that tone MORE. This can only
+    // be true if the corner reaches the output path.
+    auto out_rms = [](VcoOscillator& o, double f0, double corner) {
+        o.prepare(kSampleRate);
+        o.set_shape(VaShape::sine);
+        o.set_ac_coupling(corner);
+        o.reset();
+        constexpr int len = 48000;
+        double sum = 0.0;
+        for (int i = 0; i < len; ++i) {
+            const double v = o.next(f0 / kSampleRate);
+            if (i > 4096) sum += v * v; // skip the highpass settling transient.
+        }
+        return std::sqrt(sum / (len - 4096));
+    };
+    VcoOscillator a, b;
+    const double rms_low_corner = out_rms(a, 40.0, 50.0);
+    const double rms_high_corner = out_rms(b, 40.0, 400.0);
+    INFO("40 Hz tone RMS through the VCO: 50 Hz corner " << rms_low_corner
+         << ", 400 Hz corner " << rms_high_corner);
+    CHECK(rms_high_corner < rms_low_corner * 0.9); // higher corner cuts it more.
 }
 
 TEST_CASE("AC coupling off is an exact bypass", "[signal][osc][vco][ac]") {
@@ -909,6 +936,22 @@ TEST_CASE("drift wanders the pitch slowly at ~the commanded RMS",
         CHECK(ratio > 1.5);
         CHECK(ratio < 2.5);
     }
+
+    SECTION("a non-positive drift rate is off, not the fastest wander") {
+        // Lower rate is slower, so the limit as rate -> 0 is a frozen walk with
+        // no wander. A rate of 0 or below must take that limit, NOT invert to
+        // full-depth per-sample white noise. With drift depth engaged but the
+        // rate at 0 and below, the f0(t) RMS must stay near the clean floor, not
+        // near the commanded 20 cents.
+        constexpr int kWin = 4096, kHop = 1024, kLen = 96000;
+        for (double rate : {0.0, -1.0}) {
+            const auto sig = render_noise_sine(f0, 20.0, rate, 0.0, 1, kLen);
+            const PitchStats st = pitch_stats(sig, kWin, kHop);
+            INFO("drift rate " << rate << ": f0(t) RMS " << st.rms_cents << " cents");
+            REQUIRE_FALSE(st.any_nonfinite);
+            CHECK(st.rms_cents < 1.0); // frozen ~= no wander, far below 20 cents.
+        }
+    }
 }
 
 TEST_CASE("jitter adds fast, white cycle-to-cycle pitch noise",
@@ -947,9 +990,18 @@ TEST_CASE("jitter adds fast, white cycle-to-cycle pitch noise",
         constexpr double depth = 60.0; // cents RMS per sample.
         const auto [rms, ac, voiced_min] = averaged(depth, 300);
         REQUIRE(voiced_min > 50);
+        // A white per-sample deviation of `depth` cents RMS averages, over a
+        // window of kWin samples, to depth/sqrt(kWin) of frame-to-frame RMS.
+        // Assert BOTH sides of that expectation: a lower bound alone passes a
+        // source that is calibrated too STRONG, and the scaling section below
+        // cannot catch a global gain error (it cancels in the 40:80 ratio). The
+        // band mirrors the drift test's 0.6-1.4x.
+        const double expected = depth / std::sqrt(static_cast<double>(kWin));
         INFO("jitter depth " << depth << " cents/sample: frame RMS " << rms
-                             << " cents, lag-1 autocorr " << ac);
-        CHECK(rms > 0.8);            // clearly above the flat floor.
+                             << " cents (expected ~" << expected
+                             << "), lag-1 autocorr " << ac);
+        CHECK(rms > expected * 0.6);
+        CHECK(rms < expected * 1.4);
         CHECK(std::fabs(ac) < 0.25); // white: independent non-overlapping frames.
     }
 
