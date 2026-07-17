@@ -773,7 +773,12 @@ jobs:
             -DCMAKE_OSX_ARCHITECTURES=x86_64
           # pulp-signal is an INTERFACE (header-only) library, so its SIMD/DSP
           # TUs compile through pulp-signal-fft-backend (the real STATIC target).
-          cmake --build build-intel-canary -j"$(sysctl -n hw.ncpu)" \
+          # This macOS leg resolves to PULP_LOCAL_MACOS_RUNS_ON_JSON — the shared
+          # self-hosted Studios that host the required `macos` gate — so it must
+          # take a governed *share*, not `-j$(sysctl -n hw.ncpu)` (every core).
+          # The governor acquires a tartci lease on the Studio and falls back to
+          # the tier-0 bound on a GitHub-hosted macos runner; it carries no -j.
+          tools/ci/governed-build.sh cmake --build build-intel-canary \
             --target pulp-runtime pulp-signal-fft-backend pulp-platform pulp-state pulp-format
 
       - name: Ccache effective config (proof of override)

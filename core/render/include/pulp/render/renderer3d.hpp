@@ -25,7 +25,9 @@ struct HardcodedCubeRenderConfig {
         Renderer3DAdapterBackendPreference::default_backend;
 };
 
-struct HardcodedCubeRenderResult {
+// What one offscreen Renderer3D render produced: the stage flags every entry
+// point records, the adapter it ran on, the frame census, and the frame itself.
+struct Scene3DRenderResult {
     bool success = false;
     bool gpu_available = false;
     bool scene_data_consumed = false;
@@ -122,6 +124,10 @@ struct HardcodedCubeRenderResult {
     std::string error;
 };
 
+// Both entry points report through the same result type. The two original
+// per-entry-point names stay as aliases for source compatibility.
+using HardcodedCubeRenderResult = Scene3DRenderResult;
+
 struct SceneDataRenderConfig {
     uint32_t width = 256;
     uint32_t height = 256;
@@ -130,17 +136,17 @@ struct SceneDataRenderConfig {
         Renderer3DAdapterBackendPreference::default_backend;
 };
 
-using SceneDataRenderResult = HardcodedCubeRenderResult;
+using SceneDataRenderResult = Scene3DRenderResult;
 
 class Renderer3D {
 public:
     // Spike B proof: native Dawn render path, no JS, no Three.js, no glTF.
-    static HardcodedCubeRenderResult render_hardcoded_textured_cube(
+    static Scene3DRenderResult render_hardcoded_textured_cube(
         const HardcodedCubeRenderConfig& config = {});
 
     // Join proof: render already-normalized CPU SceneData with no JS or glTF
     // types crossing the renderer boundary.
-    static SceneDataRenderResult render_scene_data(
+    static Scene3DRenderResult render_scene_data(
         const scene::SceneData& scene,
         const SceneDataRenderConfig& config = {});
 };

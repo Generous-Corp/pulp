@@ -42,9 +42,12 @@ Rules of thumb:
 - **A struct-layout change must compile EVERYWHERE before shipping**: when a
   change alters the field layout of a struct that is brace-initialized
   positionally (adding/removing a field, swapping a `bool` for an `enum`), run a
-  FULL `cmake --build build -j$(sysctl -n hw.ncpu)` over ALL targets — not just
-  the named feature/parity targets — and run it in the background (a full build
-  exceeds a short foreground budget). Stray positional inits in unrelated test
+  FULL `pulp build` over ALL targets — not just the named feature/parity
+  targets — and run it in the background (a full build exceeds a short foreground
+  budget). This is the longest build anyone runs, so it is the one that most
+  needs to take a governed *share* of the machine rather than every core; `pulp
+  build` (or `tools/ci/governed-build.sh cmake --build build`) does that, a raw
+  `cmake --build … -j$(sysctl -n hw.ncpu)` does not. Stray positional inits in unrelated test
   files fail *closed* at compile time, so they are safe, but only a full build
   surfaces them; building a subset and shipping pushes the discovery to CI. A
   uniform build failure across macOS/Linux/Windows is the tell for a real
@@ -58,8 +61,8 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 # Or preferred for repo + example builds:
 ./build/pulp build
 
-# Build everything
-cmake --build build -j$(sysctl -n hw.ncpu)
+# Build everything (takes its job count from the host build governor)
+./build/pulp build
 
 # Run all tests
 ctest --test-dir build --output-on-failure
@@ -89,16 +92,44 @@ cmake --build build --target pulp-test-state
 cmake -S . -B build -DPULP_SANITIZER=address
 ```
 
-**Builds are always bounded.** Every build command Pulp emits or ships carries
-an explicit job count — a literal, a `$(getconf _NPROCESSORS_ONLN)` expansion,
-or a value from the tartci host lease. `pulp build/dev/loop` and the local-SDK
-build fall back to a host default of `min(cores, RAM_budget / 1.5 GiB)` when no
-lease store is present (override with `PULP_BUILD_MEM_BUDGET_MB`), so a build can
-never fan out unbounded and oversubscribe a shared machine. A bare
-`cmake --build … --parallel` (which maps to unbounded `make -j`) is rejected
-repo-wide by `tools/scripts/build_parallelism_guard.py` (a ctest and a Shipyard
-gate). When adding a build command anywhere — CLI, script, `.shipyard/config.toml`,
-CI workflow — give `--parallel`/`-j` an explicit count.
+**Builds take a share of a shared host, not the whole machine.** "Bounded" does
+NOT mean "not infinite" — a `-j$(sysctl -n hw.ncpu)` / `-j$(nproc)` /
+`--parallel $(getconf _NPROCESSORS_ONLN)` carries an explicit count and is still
+the melt: it claims *every* core, so four concurrent agent builds on one shared
+Mac request 4 × cores and starve each other — and the required `macos` gate
+validating in one of those checkouts starves with them. The bound that matters
+on a shared host is a *share*, and a share comes from the governor, never from
+the hardware. **Prefer `pulp build`** (and `pulp dev` / `pulp loop`): they take
+their `-j` from the tartci host lease when one is present, acquiring it before
+building, so concurrent builds divide the host. Shipyard's `local` mac lane —
+which does not go through the CLI — routes its raw `cmake --build` through
+`tools/ci/governed-build.sh` for the same reason. Reach for a raw `cmake --build`
+only for a one-off target, and give it a literal (`-j8`) or a derived share
+(`-j$(( $(sysctl -n hw.ncpu) / 4 ))`), never an undivided core count.
+
+Without a lease store — the ordinary single-machine / external-cloner case —
+`pulp build/dev/loop` and the local-SDK build still bound themselves to
+`min(cores, RAM_budget / 1.5 GiB)` (override with `PULP_BUILD_MEM_BUDGET_MB`), so
+a build cannot fan out unbounded. That floor is a *memory* guard, not a fairness
+one: on a big-RAM host the memory axis never binds and it resolves to the full
+core count — fine for a solo builder, which is why the public repo needs nothing
+more. Fairness under contention comes from the lease, not from this fallback.
+
+`tools/scripts/build_parallelism_guard.py` (a ctest and a Shipyard gate) rejects
+a bare `cmake --build … --parallel` (unbounded `make -j`) *everywhere*, and an
+explicit-but-whole-machine core-count expansion on the shared-host surfaces
+agents copy from (`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`). It
+does NOT scan `.github/workflows/**` for whole-machine — **not** because those
+runners never share a box, but because a workflow's `runs-on` is resolved
+dynamically (e.g. `${{ fromJSON(matrix.runs_on_json) }}`) and a static scan
+cannot tell whether a leg is ephemeral or one of the shared self-hosted Studios
+(the macOS matrix leg resolves to `PULP_LOCAL_MACOS_RUNS_ON_JSON` — the shared
+Studios that host the required `macos` gate). In a workflow, bounding a
+whole-machine build is therefore the **author's** job: route a self-hosted leg
+through `tools/ci/governed-build.sh` (as `build.yml`, `examples-validation.yml`,
+`web-plugins.yml`, and `format-baseline-diff.yml` do for their macOS legs). When
+adding a build command anywhere, give `--parallel`/`-j` a bounded share (or route
+it through the governor), not the machine's core count.
 
 **External SDKs** (not committed, cloned at configure time or manually):
 - VST3 SDK → `external/vst3sdk` (MIT, `git clone --depth 1 --branch v3.8.0_build_66`)
@@ -1667,6 +1698,13 @@ live on m3/m5/m1, layered in tiers:
 Every build path is bounded — the CLI (Tier 0), the shipyard-local wrapper, and
 the VM runners (Tier 1 leases). `pulp status` prints a `Build governance: Tier N
 (…)` line reporting which layer bounds the current host. A bare
-`--parallel`/`-j` anywhere in the repo is rejected by
-`tools/scripts/build_parallelism_guard.py`. Host-side tartci details (lease
-store, memory axis, role profiles) live in `docs/guides/local-ci.md`.
+`--parallel`/`-j` anywhere in the repo — and, on the shared-host surfaces agents
+copy from (`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`), an
+explicit-but-whole-machine core-count expansion (`-j$(nproc)` and friends) — is
+rejected by `tools/scripts/build_parallelism_guard.py`. The guard does not scan
+`.github/workflows/**` for whole-machine, because a workflow's `runs-on` is
+dynamic and may itself resolve to a shared self-hosted runner — so bounding a
+whole-machine build there is the workflow author's job (route the self-hosted leg
+through the governor), not something the scan can enforce. Host-side tartci
+details (lease store, memory axis, role profiles) live in
+`docs/guides/local-ci.md`.

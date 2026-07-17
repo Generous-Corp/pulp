@@ -139,6 +139,18 @@ bool plugin_binding(fmt::ProcessBlock& block,
     state::ParameterEventQueue& param_events =
         ctx.node_param_events != nullptr ? *ctx.node_param_events
                                          : pctx->scratch->param_events;
+    if (ctx.node_param_events == nullptr) {
+        // Audio-only and anticipation snapshots use the binding-owned fallback
+        // queue. It persists across blocks, so clear it before one-shot mailbox
+        // delivery just as the executor clears its per-node queue in gather.
+        param_events.clear();
+    }
+    pctx->parameter_events_pending_sequence = 0;
+    if (pctx->append_parameter_events != nullptr) {
+        pctx->parameter_events_pending_sequence = pctx->append_parameter_events(
+            pctx->parameter_events_user_data, param_events);
+        param_events.sort();
+    }
     // A transport-sensitive plugin (wants_transport cached once at compile from
     // PluginSlot::wants_transport(), never re-polled here) gets the live host
     // transport when the block carries one; otherwise — and for every
@@ -287,7 +299,41 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                                  custom_transport_for,
                              const std::function<int(NodeId)>& plugin_latency_for,
                              const std::function<const std::vector<HostParamInfo>*(NodeId)>&
-                                 plugin_params_for) {
+                                 plugin_params_for,
+                             const std::function<ParameterEventInjectionBinding(NodeId)>&
+                                 parameter_events_for) {
+    return build_executor_snapshot(nodes, connections,
+                                   ExecutorSnapshotBinders{
+                                       .gain_for = gain_for,
+                                       .plugin_for = plugin_for,
+                                       .load_for = load_for,
+                                       .custom_for = custom_for,
+                                       .custom_transport_for = custom_transport_for,
+                                       .plugin_latency_for = plugin_latency_for,
+                                       .plugin_params_for = plugin_params_for,
+                                       .parameter_events_for = parameter_events_for,
+                                   },
+                                   plugin_ctx, scratch, out, parallel_safe,
+                                   custom_ctx);
+}
+
+bool build_executor_snapshot(std::span<const GraphNode> nodes,
+                             std::span<const Connection> connections,
+                             const ExecutorSnapshotBinders& binders,
+                             std::vector<PluginBindingContext>& plugin_ctx,
+                             PluginRoutingScratch& scratch,
+                             fmt::GraphRuntimeSnapshot& out,
+                             bool parallel_safe,
+                             std::vector<CustomBindingContext>* custom_ctx) {
+    const auto& gain_for = binders.gain_for;
+    const auto& plugin_for = binders.plugin_for;
+    const auto& load_for = binders.load_for;
+    const auto& custom_for = binders.custom_for;
+    const auto& custom_transport_for = binders.custom_transport_for;
+    const auto& plugin_latency_for = binders.plugin_latency_for;
+    const auto& plugin_params_for = binders.plugin_params_for;
+    const auto& parameter_events_for = binders.parameter_events_for;
+
     out.clear();
     plugin_ctx.clear();
     if (custom_ctx != nullptr) custom_ctx->clear();
@@ -460,12 +506,19 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                     id, custom_binding, nullptr, /*required=*/false});
             } else {
                 PluginBindingContext ctx;
+                ctx.node_id = id;
                 ctx.slot = slot;
                 // Cache the node's transport-sensitivity from the SAME compile-time
                 // GraphNode::transport_sensitive the anticipation analysis reads, so
                 // the routed forwarding and the partition never disagree. Never
                 // re-poll slot->wants_transport() per block on the audio thread.
                 ctx.wants_transport = src->transport_sensitive;
+                if (parameter_events_for) {
+                    const auto injection = parameter_events_for(id);
+                    ctx.parameter_events_user_data = injection.user_data;
+                    ctx.append_parameter_events = injection.append;
+                    ctx.parameter_events_sequence_seen = injection.sequence_seen;
+                }
                 if (parallel_safe) {
                     try {
                         ctx.owned_scratch = std::make_unique<PluginRoutingScratch>();
@@ -520,6 +573,26 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
     return out.reset(std::move(plan.plan), bindings, parallel_safe);
 }
 
+void reset_plugin_parameter_event_sequences(
+    std::span<PluginBindingContext> contexts) noexcept {
+    for (auto& context : contexts) {
+        context.parameter_events_pending_sequence = 0;
+    }
+}
+
+void commit_plugin_parameter_event_sequences(
+    std::span<PluginBindingContext> contexts) noexcept {
+    for (auto& context : contexts) {
+        if (context.parameter_events_pending_sequence != 0
+            && context.parameter_events_sequence_seen != nullptr) {
+            context.parameter_events_sequence_seen->store(
+                context.parameter_events_pending_sequence,
+                std::memory_order_relaxed);
+        }
+        context.parameter_events_pending_sequence = 0;
+    }
+}
+
 bool build_signal_graph_executor_routing(const SignalGraph& graph,
                                           SignalGraphExecutorRouting& out) {
     // Reset the consumable state directly — SignalGraphExecutorRouting is not
@@ -530,14 +603,16 @@ bool build_signal_graph_executor_routing(const SignalGraph& graph,
     out.snapshot_keepalive.reset();
     if (!graph.is_prepared()) return false;
 
-    if (!build_executor_snapshot(
-            graph.nodes(), graph.connections(),
-            [&graph](NodeId id) { return graph.live_gain_atomic(id); },
-            [&graph](NodeId id) { return graph.live_plugin_slot(id); },
-            out.plugin_ctx, out.plugin_scratch, out.snapshot, /*parallel_safe=*/false,
-            /*load_for=*/{}, &out.custom_ctx,
-            [&graph](NodeId id) { return graph.live_custom_processor(id); },
-            [&graph](NodeId id) { return graph.live_custom_transport_processor(id); })) {
+    const ExecutorSnapshotBinders binders{
+        .gain_for = [&graph](NodeId id) { return graph.live_gain_atomic(id); },
+        .plugin_for = [&graph](NodeId id) { return graph.live_plugin_slot(id); },
+        .custom_for = [&graph](NodeId id) { return graph.live_custom_processor(id); },
+        .custom_transport_for =
+            [&graph](NodeId id) { return graph.live_custom_transport_processor(id); },
+    };
+    if (!build_executor_snapshot(graph.nodes(), graph.connections(), binders,
+                                 out.plugin_ctx, out.plugin_scratch, out.snapshot,
+                                 /*parallel_safe=*/false, &out.custom_ctx)) {
         return false;
     }
 

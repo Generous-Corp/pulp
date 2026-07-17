@@ -120,6 +120,103 @@ TEST_CASE("DesignFrameView hit-test agrees with the render at a non-panel aspect
     CHECK(v.element_value(0) == 0.5f);
 }
 
+TEST_CASE("DesignFrameView reports the view-space point that hits an element",
+          "[view][design-import][frame]") {
+    // element_hit_point() is the inverse of hit_element(). Pin it against a
+    // HAND-COMPUTED position rather than against the transform it uses, so a bug
+    // in the fit can't satisfy both sides of the assertion.
+    DesignFrameView v(make_design_svg(), {make_knob()});  // panel 80x80 at (10,10)
+    Point p{-1, -1};
+
+    // Not laid out yet: no fit exists, so there is no point to report. Honest
+    // false beats a plausible (0,0) that would silently miss.
+    CHECK_FALSE(v.element_hit_point(0, p));
+
+    // Same 1:2 letterbox as the hit-test-agrees case above: scale 1, ox 0, oy 40,
+    // so the knob (SVG 50,50; panel origin 10,10) sits at view (40, 80).
+    v.set_bounds({0, 0, 80, 160});
+    REQUIRE(v.element_hit_point(0, p));
+    CHECK(p.x == Catch::Approx(40.0f));
+    CHECK(p.y == Catch::Approx(80.0f));
+
+    // Round-trip through the REAL pointer path: pressing at the reported point
+    // must actually grab the knob and turn it. This is what makes the accessor
+    // load-bearing — if it drifts from hit_element(), the drag does nothing.
+    v.on_mouse_down(p);
+    v.on_mouse_drag({p.x, p.y - 30});
+    CHECK(v.element_value(0) > 0.6f);
+
+    // Out-of-range indices report false and leave the out-param untouched.
+    Point keep{7, 9};
+    CHECK_FALSE(v.element_hit_point(-1, keep));
+    CHECK_FALSE(v.element_hit_point(99, keep));
+    CHECK(keep.x == Catch::Approx(7.0f));
+    CHECK(keep.y == Catch::Approx(9.0f));
+}
+
+TEST_CASE("DesignFrameView reports no hit point for an unclickable element",
+          "[view][design-import][frame]") {
+    // The accessor promises a point that HITS. Where hit_element() provably
+    // matches nothing, the honest answer is false — a plausible-looking coordinate
+    // would miss silently and read as a dead control.
+
+    SECTION("a disabled element has no hit point") {
+        DesignFrameView v(make_design_svg(), {make_knob()});
+        v.set_bounds({0, 0, 80, 160});
+        Point keep{7, 9};
+        REQUIRE(v.element_hit_point(0, keep));   // clickable while enabled
+
+        v.set_element_enabled(0, false);
+        keep = {7, 9};
+        CHECK_FALSE(v.element_hit_point(0, keep));
+        CHECK(keep.x == Catch::Approx(7.0f));    // out-param untouched
+        CHECK(keep.y == Catch::Approx(9.0f));
+    }
+
+    SECTION("a knob with a degenerate hit radius has no hit point") {
+        // hit_element() matches a knob on `d < hit_radius`; at radius 0 even the
+        // pivot itself misses, so no point on the knob is clickable.
+        auto k = make_knob();
+        k.hit_radius = 0.0f;
+        DesignFrameView v(make_design_svg(), {k});
+        v.set_bounds({0, 0, 80, 160});
+        Point p{-1, -1};
+        CHECK_FALSE(v.element_hit_point(0, p));
+    }
+
+    SECTION("a value_label readout has no hit point") {
+        // Not interactive and not an overlay: hit_element() never tests it.
+        DesignFrameElement label;
+        label.kind = DesignFrameElement::Kind::value_label;
+        label.x = 20; label.y = 20; label.w = 30; label.h = 10;
+        DesignFrameView v(make_design_svg(), {label});
+        v.set_bounds({0, 0, 80, 160});
+        Point p{-1, -1};
+        CHECK_FALSE(v.element_hit_point(0, p));
+    }
+
+    SECTION("an occluded knob has no hit point at its pivot") {
+        // A rect-tested kind is matched BEFORE knobs, so a toggle laid over the
+        // knob's pivot takes the press: the pivot no longer reaches the knob.
+        auto k = make_knob();
+        DesignFrameElement lid;
+        lid.kind = DesignFrameElement::Kind::toggle;
+        lid.x = 40; lid.y = 40; lid.w = 20; lid.h = 20;  // covers the (50,50) pivot
+        DesignFrameView v(make_design_svg(), {k, lid});
+        v.set_bounds({0, 0, 80, 160});
+
+        Point p{-1, -1};
+        CHECK_FALSE(v.element_hit_point(0, p));   // the knob is masked
+        REQUIRE(v.element_hit_point(1, p));       // the toggle on top still reports
+
+        // Drive the REAL pointer path: the press lands on the toggle (flipping it
+        // off its 0.5 rest state), and leaves the knob underneath alone.
+        v.on_mouse_down(p);
+        CHECK(v.element_value(1) == 0.0f);
+        CHECK(v.element_value(0) == Catch::Approx(0.5f));
+    }
+}
+
 TEST_CASE("DesignFrameView intrinsic size is the panel (so hosts size the window)",
           "[view][design-import][frame]") {
     DesignFrameView v(make_design_svg(), {make_knob()});

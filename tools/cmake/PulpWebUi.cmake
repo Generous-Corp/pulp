@@ -186,6 +186,7 @@ set(_PULP_WEBUI_CANVAS_SOURCES
 # authoring, NO window hosts other than the browser one below.
 set(_PULP_WEBUI_VIEW_SOURCES
     ${_PULP_WEBUI_ROOT}/core/view/src/view.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/value_source_binding.cpp
     # The text editor was split into several TUs; the wasm build needs the same set the
     # native build compiles (core/view/CMakeLists.txt), because a Label can open the editor's
     # default context menu (label.cpp → TextEditor::show_default_context_menu) and that pulls
@@ -198,6 +199,7 @@ set(_PULP_WEBUI_VIEW_SOURCES
     ${_PULP_WEBUI_ROOT}/core/view/src/slider_core.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/context_menu.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/yoga_layout.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/grid_layout.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/layout_snapshot.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/pointer_dispatch.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/gesture.cpp

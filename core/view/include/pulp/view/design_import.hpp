@@ -89,6 +89,33 @@ std::string import_report_to_text(const ImportReport& report);
 // geometry-level check, not a pixel diff.
 int apply_placement_verification(IRNode& root, float frame_w = 0.0f, float frame_h = 0.0f);
 
+// Swap-target verification. Walks the IR and flags every `swap` element whose
+// target_frame does not name a frame that was actually captured on its own node
+// — an unset target (-1), a negative index, an index past the captured frame
+// count (1 + alternate_frames.size()), or a self-target that would make the
+// button a no-op. Such a swap would render as a button that silently does
+// nothing, so each one gets verification_pass=false plus a conflict signal,
+// which makes collect_import_report count it as `conflicted` and
+// --fail-on-unresolved exit nonzero. Mutates `root` in place; returns the number
+// of swaps newly flagged. A design with no swap elements is untouched.
+int apply_swap_target_verification(IRNode& root);
+
+// One node that captured alternate frames nobody can render.
+struct UnrenderableFrameSet {
+    std::string node_name;      ///< the node's name, or "<unnamed>"
+    std::size_t alternates;     ///< how many captured states would be dropped
+    std::string reason;         ///< why they cannot render
+};
+
+// Alternate frames are consumed by exactly one lowering — the faithful_svg one
+// (DesignFrameView::add_frame in both the C++ codegen and the native
+// materializer). A node that carries alternate_frames but is NOT a renderable
+// faithful node (wrong render_mode, or no svg_asset_id) therefore has its extra
+// states silently dropped: the import "succeeds" and emits a single frame. This
+// walk reports every such node so a caller can fail instead of dropping states
+// without a word. An empty result means every captured state will render.
+std::vector<UnrenderableFrameSet> find_unrenderable_alternate_frames(const IRNode& root);
+
 struct NativeMaterializeOptions {
     bool apply_token_theme = true;
     bool preview_mode = false;

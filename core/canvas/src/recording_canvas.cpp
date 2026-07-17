@@ -1,4 +1,4 @@
-#include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/recording_canvas.hpp>
 
 #include <algorithm>
 #include <cctype>

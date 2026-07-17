@@ -546,6 +546,29 @@ host needs opt-in declaration of which fields Pulp reads, we will add
 `IProcessContextRequirements`. Today every supported host delivers all
 required fields by default.
 
+### `process()` phase order is the contract
+
+`process()` reads as a sequence of named phases — `build_process_context`,
+`write_midi_output`, and the inline blocks between them. Named phases look like
+independent steps that would be safe to reorder or reuse. They are not: the
+order carries contracts nothing checks for you.
+
+- **`midi_in_.sort()` must precede the MPE tracker loop.** `MpeVoiceTracker` is
+  a state machine over a sample-ordered stream — controllers and note events are
+  appended from two independent sources, so an unsorted stream attributes
+  expression to the wrong notes.
+- **`build_process_context()` is stateful, not a pure decode.** It advances
+  `playhead_prev_` in place, so it must run exactly once per block and on every
+  block. Its name and signature suggest otherwise: call it twice, or skip it on
+  an early-return path, and the *next* block's `transport_changed` /
+  `transport_jump` flags are wrong. That surfaces far away, as a DSP reset that
+  never fires.
+- **`snapshot_param_values()` runs after host input events, before `process()`**
+  (see "`param_snapshot_` is post-input-events, pre-process").
+- **The explicit output-event pass must precede the snapshot-diff pass** — the
+  diff reads the skip-set the first pass fills, and without it a param that
+  already reported sample-accurate points gets a stale offset-0 duplicate.
+
 ### State save / restore
 
 `getState(stream)` serialises `store_.serialize()` bytes directly.
@@ -972,13 +995,27 @@ overrides both (`vst3_adapter.cpp`):
 ## The VST3 adapter consumes the shared adapter-boundary core
 
 `core/format/include/pulp/format/adapter_boundary.hpp` is the shared home for f64 param
-marshalling, latency-compensated bypass, and param dual-write. VST3 now consumes it
-(`boundary::LatencyCompensatedBypass`, `boundary::apply_param_value`, the f64 helpers,
-`kBoundaryMaxChannels`) instead of carrying local copies. Fix marshalling/bypass semantics
-in `adapter_boundary.hpp`, not in the adapter. The header's prose states actual per-adapter
-adoption — trust it over an assumption that all adapters are migrated (AU/LV2 still carry
-local bypass, and AU/AAX/LV2 still pass the dry signal through UNDELAYED while bypassed,
-a real PDC-misalignment bug tracked as its own follow-up).
+marshalling, latency-compensated bypass, param dual-write, and output-parameter
+publication. VST3 consumes it (`boundary::LatencyCompensatedBypass`,
+`boundary::apply_param_value`, `boundary::find_param_index`,
+`boundary::snapshot_param_values`, `boundary::changed_since_snapshot`, the f64 helpers,
+`kBoundaryMaxChannels`) instead of carrying local copies. Fix marshalling/bypass/
+publication semantics in `adapter_boundary.hpp`, not in the adapter. The header's prose
+states actual per-adapter adoption — trust it over an assumption that all adapters are
+migrated (AU/LV2 still carry local bypass, and AU/AAX/LV2 still pass the dry signal
+through UNDELAYED while bypassed, a real PDC-misalignment bug tracked as its own
+follow-up). VST3 also does **not** use `boundary::apply_host_transport`: it drives
+`detail::playhead_diff` directly from `build_process_context`.
+
+**Shared with CLAP — that is the point, and the trap.** The publication bookkeeping is one
+body of code behind two host ABIs. Editing it for VST3 changes CLAP in the same commit,
+and "fixing" VST3 by re-inlining a local variant silently re-opens the divergence these
+two paths already drifted into once as copies. A change that is genuinely VST3-only
+belongs in the adapter's host-ABI emit (the `IParamValueQueue` points, the
+`setParamNormalized` sync), never in the shared bookkeeping. `find_param_index` is a
+**linear scan on purpose** — param counts are small and it is what both adapters already
+did. If it ever becomes hot, index it in `adapter_boundary.hpp` for *both* adapters; do
+not add a VST3-local map.
 
 ## The adapter has an end-to-end null — extend it rather than trusting a diff
 

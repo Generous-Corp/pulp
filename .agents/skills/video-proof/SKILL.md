@@ -148,7 +148,7 @@ cmake -S . -B build-video-proof-cli \
   -DCMAKE_BUILD_TYPE=Release \
   -DPULP_BUILD_TESTS=ON \
   -DPULP_BUILD_EXAMPLES=OFF
-cmake --build build-video-proof-cli --target pulp-cli pulp-test-cli-tool-registry -j$(sysctl -n hw.ncpu)
+tools/ci/governed-build.sh cmake --build build-video-proof-cli --target pulp-cli pulp-test-cli-tool-registry
 ./build-video-proof-cli/test/pulp-test-cli-tool-registry '~[slow]'
 
 tmp_home=$(mktemp -d /tmp/pulp-video-proof-tool-home.XXXXXX)
@@ -441,7 +441,7 @@ python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe standalone-interaction \
   --source-mode exact-sha \
   --command ./build-desktop-automation/examples/ui-preview/pulp-ui-preview \
-  --prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF && cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' \
+  --prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF && tools/ci/governed-build.sh cmake --build build-desktop-automation --target pulp-ui-preview' \
   --pulp-app-automation \
   --click 120,80 \
   --duration 8
@@ -460,7 +460,7 @@ python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe inspector-workflow \
   --source-mode exact-sha \
   --command ./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo \
-  --prepare-command 'cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF && cmake --build build-video-nogpu --target pulp-audio-inspector-demo -j$(sysctl -n hw.ncpu)' \
+  --prepare-command 'cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF && tools/ci/governed-build.sh cmake --build build-video-nogpu --target pulp-audio-inspector-demo' \
   --duration 8
 ```
 
@@ -469,7 +469,7 @@ python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe component-zoom \
   --source-mode exact-sha \
   --command ./build-desktop-automation/examples/ui-preview/pulp-ui-preview \
-  --prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF && cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' \
+  --prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF && tools/ci/governed-build.sh cmake --build build-desktop-automation --target pulp-ui-preview' \
   --pulp-app-automation \
   --component-id bypass-toggle \
   --duration 8
@@ -508,7 +508,7 @@ recording. The recipe checks that
 fails early if the bundle is only a partial package:
 
 ```bash
-cmake --build build-video-nogpu --target PulpSynth_CLAP -j$(sysctl -n hw.ncpu)
+tools/ci/governed-build.sh cmake --build build-video-nogpu --target PulpSynth_CLAP
 mkdir -p "$HOME/Library/Audio/Plug-Ins/CLAP"
 ln -sfn "$(pwd)/build-video-nogpu/CLAP/PulpSynth.clap" \
   "$HOME/Library/Audio/Plug-Ins/CLAP/PulpSynth.clap"
@@ -580,9 +580,8 @@ For the Audio Inspector demo, prefer the paired HeadlessHost renderer over an
 external sine generator:
 
 ```bash
-cmake --build build-video-nogpu \
-  --target pulp-audio-inspector-demo pulp-audio-inspector-demo-render \
-  -j$(sysctl -n hw.ncpu)
+tools/ci/governed-build.sh cmake --build build-video-nogpu \
+  --target pulp-audio-inspector-demo pulp-audio-inspector-demo-render
 ./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo-render \
   --output /tmp/pulp-audio-inspector-headless-proof.wav \
   --metadata-json /tmp/pulp-audio-inspector-headless-proof.json \

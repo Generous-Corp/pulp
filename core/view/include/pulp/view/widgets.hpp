@@ -14,8 +14,7 @@
 #include <pulp/view/sprite_strip.hpp>
 #include <pulp/view/widget_painter.hpp>
 #include <pulp/view/value_source.hpp>
-#include <pulp/signal/spectrogram.hpp>
-#include <pulp/signal/multi_channel_meter.hpp>
+#include <pulp/view/visualizers.hpp>  // SpectrogramView/MultiMeter/CorrelationMeter — include directly in new code
 #include <string>
 #include <string_view>
 #include <cstddef>
@@ -1475,28 +1474,15 @@ public:
 
     // ── Live host→view source ────────────────────────────────────────────────
     // Bind a lock-free MeterSource whose `channel` this meter reads once per
-    // frame (through the ballistic `update()` path) while attached to a
-    // FrameClock. The host publishes on the audio/host thread; the meter reads
-    // paint-safe. A bound-and-attached meter is a FrameClock subscriber, so it
-    // also keeps an editor's frames alive (see needs_continuous_frames) while a
-    // source is present. Pass nullptr to unbind. Safe to call before or after
-    // the view is hosted — the subscription attaches whenever a clock becomes
-    // reachable. UI thread.
-    //
-    // Lifetime: the bound FrameClock must outlive the meter, OR the host must
-    // clear it (`root->set_frame_clock(nullptr)`) / detach the meter before
-    // destroying the clock — both drop the subscription first. Pulp's GPU hosts
-    // clear the root clock during teardown, so this holds for them; a custom
-    // host that owns a clock must observe the same order.
-    void set_source(std::shared_ptr<MeterSource> source, int channel = 0);
-    bool has_source() const { return static_cast<bool>(source_); }
-    int source_channel() const { return source_channel_; }
-
-    ~Meter() override { stop_source_subscription(); }
-
-    void on_attached() override { try_source_subscription(); }
-    void on_detached() override { stop_source_subscription(); }
-    void on_frame_clock_changed() override { try_source_subscription(); }
+    // frame, driving the ballistic `update()` path from `on_meter_frame`. The
+    // subscription lifecycle (attach, re-point on a clock change, self-healing
+    // teardown) and the lifetime contract live on View::set_meter_source; these
+    // are the meter-shaped spelling of that seam.
+    void set_source(std::shared_ptr<MeterSource> source, int channel = 0) {
+        set_meter_source(std::move(source), channel);
+    }
+    bool has_source() const { return has_meter_source(); }
+    int source_channel() const { return meter_source_channel(); }
 
     void paint(canvas::Canvas& canvas) override;
 
@@ -1544,18 +1530,8 @@ public:
     canvas::Color gradient_color_at(float t) const;
 
 private:
-    // (Re)subscribe to the reachable FrameClock if a source is bound and we
-    // aren't already subscribed. Idempotent; a no-op when no clock is reachable
-    // yet (a preview, or a tree built before hosting — the subscription attaches
-    // later via on_attached / on_frame_clock_changed).
-    void try_source_subscription();
-    // Unsubscribe from the cached clock, if subscribed. Safe to call repeatedly.
-    void stop_source_subscription();
-    // FrameClock callback: pull the latest frame and drive the ballistic path.
-    // Returns false (auto-unsubscribing) once the source is gone or the reachable
-    // clock no longer matches the one we subscribed to — the robust teardown for
-    // a detach that does not fire on_detached on every descendant.
-    bool on_source_frame(float dt);
+    // Drive the ballistic path from the frame the View base snapshotted for us.
+    void on_meter_frame(const MeterFrame& frame, float dt) override;
 
     Orientation orientation_ = Orientation::vertical;
     MeterBallistics ballistics_;
@@ -1566,11 +1542,6 @@ private:
     canvas::Color background_color_{};
     bool has_skin_background_ = false;
     float bar_fill_ratio_ = 1.0f;
-
-    std::shared_ptr<MeterSource> source_;
-    int source_channel_ = 0;
-    int source_sub_id_ = -1;               // FrameClock subscription id, -1 = none
-    FrameClock* subscribed_clock_ = nullptr; // cached for unsubscribe + detach detection
 };
 
 // ── XYPad ────────────────────────────────────────────────────────────────────
@@ -1913,93 +1884,6 @@ private:
     FrameClock* caret_blink_clock_ = nullptr;  ///< cached: frame_clock() returns
                                                ///< null once detached, which would
                                                ///< leak the sub with a dangling `this`
-};
-
-// ── SpectrogramView ──────────────────────────────────────────────────────────
-// Scrolling time-frequency display. Each STFT frame becomes a column of
-// colored pixels, scrolling left as new frames arrive.
-
-class SpectrogramView : public View {
-public:
-    SpectrogramView() = default;
-
-    /// Push a new STFT frame (dB magnitudes) for display.
-    void push_spectrum(const float* magnitudes_db, int num_bins);
-
-    /// Configure display dimensions and color mapping.
-    void configure(int history_columns, int freq_rows,
-                   signal::ColorRamp ramp = signal::ColorRamp::inferno,
-                   float min_db = -80.0f, float max_db = 0.0f);
-
-    void set_color_ramp(signal::ColorRamp ramp) { mapper_.set_ramp(ramp); }
-    void set_range(float min_db, float max_db) { min_db_ = min_db; max_db_ = max_db; }
-
-    int history_columns() const { return buffer_.width(); }
-    int freq_rows() const { return buffer_.height(); }
-
-    void paint(canvas::Canvas& canvas) override;
-
-private:
-    signal::SpectrogramBuffer buffer_;
-    signal::ColorMapper mapper_{signal::ColorRamp::inferno};
-    float min_db_ = -80.0f;
-    float max_db_ = 0.0f;
-    bool configured_ = false;
-};
-
-// ── MultiMeter ──────────────────────────────────────────────────────────────
-// Multi-channel level meter with configurable layout. Supports arbitrary
-// channel counts (mono through ambisonic). Uses MultiChannelBallistics
-// for smooth display.
-
-class MultiMeter : public View {
-public:
-    enum class Layout { vertical, horizontal };
-    enum class DisplayStyle { continuous, segmented };
-
-    MultiMeter() { set_access_role(AccessRole::meter); }
-
-    /// Update from multi-channel meter data. Call once per UI frame.
-    void update(const signal::MultiChannelMeterData& data, float dt);
-
-    void set_layout(Layout l) { layout_ = l; }
-    Layout layout() const { return layout_; }
-
-    void set_display_style(DisplayStyle s) { display_style_ = s; }
-    DisplayStyle display_style() const { return display_style_; }
-
-    void set_channel_count(int count);
-    int channel_count() const { return ballistics_.num_channels; }
-
-    /// Access ballistics for testing.
-    const signal::MultiChannelBallistics& ballistics() const { return ballistics_; }
-
-    void paint(canvas::Canvas& canvas) override;
-
-private:
-    Layout layout_ = Layout::vertical;
-    DisplayStyle display_style_ = DisplayStyle::continuous;
-    signal::MultiChannelBallistics ballistics_;
-};
-
-// ── CorrelationMeter ────────────────────────────────────────────────────────
-// Stereo correlation display (-1 to +1). Shows phase relationship between
-// left and right channels.
-
-class CorrelationMeter : public View {
-public:
-    CorrelationMeter() { set_access_role(AccessRole::meter); }
-
-    /// Update with new correlation value (-1 to +1). Call once per UI frame.
-    void update(float correlation, float dt);
-
-    float display_correlation() const { return display_correlation_; }
-
-    void paint(canvas::Canvas& canvas) override;
-
-private:
-    float display_correlation_ = 0.0f;
-    float smoothing_coeff_ = 0.1f; // Exponential smoothing
 };
 
 // ── WaveformRecorder ─────────────────────────────────────────────────────────

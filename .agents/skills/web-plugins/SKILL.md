@@ -411,10 +411,15 @@ build (which lists or globs them) keeps working, and this hand-list silently goe
 failure is a wall of `undefined symbol:` at wasm-ld link time, and it lands far from the PR that
 caused it.
 
-It merges green because the web-build lanes (`web-plugins.yml`, `wclap-cloudflare.yml`) are
-**path-filtered and advisory** — a PR touching only `core/canvas/**` or `core/view/**` never
-triggers them. So a core-only refactor breaks the wasm UI build with nothing red. (Making the
-WebCLAP lane a required check is the durable fix; until then, assume this can be broken on main.)
+The web build ("Build + prove + (owner-gated) deploy") is now a **required** status check.
+That is the durable fix the older advice asked for — but it has a sharp consequence: when a core
+change adds a TU this hand-list misses, the stale list no longer breaks *silently* on main, it
+**reds the required gate for every open PR**, including ones that never touched view/canvas. A
+new file is the same failure mode as a split file: `value_source_binding.cpp` (defining
+`FrameClockBinding::~FrameClockBinding` / `refresh`) was added to `core/view/CMakeLists.txt` but
+not to `PulpWebUi.cmake`, and `view.cpp` — already in the wasm list — referenced it, so every web
+UI module link-failed and blocked the queue. Whoever adds a `core/view/**` or `core/canvas/**`
+`.cpp` must mirror it into `PulpWebUi.cmake` in the same change, or the whole PR queue wedges.
 
 When you hit it: don't chase symbols one build at a time. Read the symbol's namespace, find the
 defining TU (`git grep -l 'Thing::method' -- core/.../src`), and **mirror what the native build

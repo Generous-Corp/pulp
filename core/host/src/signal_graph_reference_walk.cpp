@@ -424,50 +424,56 @@ void SignalGraph::run_reference_walk_(
                             }
                         }
                     }
+                    const std::uint64_t pending_parameter_sequence =
+                        append_parameter_mailbox_events_(&rt, param_events);
                     param_events.sort();
+
+                    std::array<format::ProcessBusBufferView<const float>, 1> input_buses{{
+                        {
+                            .info = {
+                                .name = "Plugin Node In",
+                                .index = 0,
+                                .direction = format::BusDirection::Input,
+                                // bus label for a plugin node's main I/O inside a SignalGraph
+                                .role = format::BusRole::Main,
+                                .declared_channels =
+                                    static_cast<int>(in_c.num_channels()),
+                                .optional = in_c.num_channels() == 0,
+                                .active = in_c.num_channels() > 0,
+                            },
+                            .buffer = in_c,
+                        },
+                    }};
+                    std::array<format::ProcessBusBufferView<float>, 1> output_buses{{
+                        {
+                            .info = {
+                                .name = "Plugin Node Out",
+                                .index = 0,
+                                .direction = format::BusDirection::Output,
+                                .role = format::BusRole::Main,
+                                .declared_channels =
+                                    static_cast<int>(out_view.num_channels()),
+                                .optional = false,
+                                .active = out_view.num_channels() > 0,
+                            },
+                            .buffer = out_view,
+                        },
+                    }};
+                    format::ProcessBuffers process_buffers{
+                        format::ProcessBusBufferSet<const float>{std::span(input_buses)},
+                        format::ProcessBusBufferSet<float>{std::span(output_buses)},
+                    };
+
+                    pit->second->process(process_buffers, rt.midi_in, rt.midi_out,
+                                         param_events, num_samples);
+                    if (pending_parameter_sequence != 0) {
+                        rt.parameter_input_mailbox->sequence_seen.store(
+                            pending_parameter_sequence, std::memory_order_relaxed);
+                    }
+                    rt.midi_out_incomplete =
+                        rt.midi_in_incomplete || midi_block_has_drops(rt.midi_out);
+                    break;
                 }
-
-                std::array<format::ProcessBusBufferView<const float>, 1> input_buses{{
-                    {
-                        .info = {
-                            .name = "Plugin Node In",
-                            .index = 0,
-                            .direction = format::BusDirection::Input,
-                            // bus label for a plugin node's main I/O inside a SignalGraph
-                            .role = format::BusRole::Main,
-                            .declared_channels =
-                                static_cast<int>(in_c.num_channels()),
-                            .optional = in_c.num_channels() == 0,
-                            .active = in_c.num_channels() > 0,
-                        },
-                        .buffer = in_c,
-                    },
-                }};
-                std::array<format::ProcessBusBufferView<float>, 1> output_buses{{
-                    {
-                        .info = {
-                            .name = "Plugin Node Out",
-                            .index = 0,
-                            .direction = format::BusDirection::Output,
-                            .role = format::BusRole::Main,
-                            .declared_channels =
-                                static_cast<int>(out_view.num_channels()),
-                            .optional = false,
-                            .active = out_view.num_channels() > 0,
-                        },
-                        .buffer = out_view,
-                    },
-                }};
-                format::ProcessBuffers process_buffers{
-                    format::ProcessBusBufferSet<const float>{std::span(input_buses)},
-                    format::ProcessBusBufferSet<float>{std::span(output_buses)},
-                };
-
-                pit->second->process(process_buffers, rt.midi_in, rt.midi_out,
-                                     param_events, num_samples);
-                rt.midi_out_incomplete =
-                    rt.midi_in_incomplete || midi_block_has_drops(rt.midi_out);
-                break;
             }
             case NodeType::Gain: {
                 const float g = rt.gain

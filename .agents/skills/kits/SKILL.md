@@ -31,6 +31,20 @@ Trust rules:
 - remove uses `.pulp/kits.lock.json` ownership records and is constrained to `pulp-kits/<kit-id>/...` plus known generated lock/CMake files; because a kit removal spans a set of files, the OK line names the count it deleted — `Removed kit <id> (removed N files)` — rather than a single path, for parity with `tool uninstall`;
 - packing and publish dry-run never execute package code.
 
+The checks that stand between an untrusted archive entry and the filesystem live once in `tools/cli/cli_fs_util.hpp` (`pulp::cli::fsutil`) — `path_is_within`, `safe_archive_rel`, `is_package_archive_path`, `temporary_archive_root` — and are pinned by the `[fs-safety]` cases in `test/test_cli_kit_commands.cpp`. They are shared deliberately: while the kit family carried a private copy, that copy drifted away from the CLI's other one. Change them for every caller or not at all.
+
+Two functions named `path_is_within` exist, and they are not interchangeable:
+
+- `pulp::cli::fsutil::path_is_within` (`cli_fs_util.hpp`) is purely lexical. It `lexically_normal`-s both arguments and compares them component by component, and it never makes either one absolute.
+- `pulp::cli::path_is_within` (`cli_common.hpp`) calls `fs::absolute` on both arguments first, resolving them against the process CWD.
+
+`kit_commands.cpp` binds the `fsutil` one through a using-declaration at the top of its anonymous namespace. Because that file sits inside `namespace pulp::cli::kit`, deleting or moving the using-declaration silently re-binds every unqualified `path_is_within` call to the `pulp::cli` version: it still compiles, and the containment semantics change underneath the extraction guard. Qualify the call or keep the using-declaration.
+
+The lexical choice makes two caller obligations load-bearing rather than implied:
+
+- Both arguments must be in the same frame of reference. A relative path and an absolute path never share a prefix, so a mixed pair always returns false — a forgotten `fs::weakly_canonical` / `fs::absolute` on one side reads as "escape rejected" instead of failing loudly. Every kit call site resolves both sides itself before calling. Keep new call sites doing that rather than absolutizing inside the helper, which would hide the mistake instead of exposing it.
+- Lexical normalization does not follow symlinks, so a link inside the root that points outside it still reads as within. Containment is not a symlink guard; `collect_pack_files` rejects symlinks in a package tree as its own separate check.
+
 ## Commands
 
 ```bash

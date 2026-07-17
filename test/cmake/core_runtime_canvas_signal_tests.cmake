@@ -147,6 +147,10 @@ pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
 # analyzers, hence the analysis lib alongside the DSP under test.
 pulp_add_test_suite(pulp-test-oversampling-quality
     LIBRARIES pulp::signal pulp::audio-analysis)
+# Fundamental-frequency estimator for harmonically-dense oscillator output plus
+# the f0(t) trajectory extractor — proven accurate to well under a cent, and
+# proven to beat the shipped zero-crossing detector on dense material.
+pulp_add_test_suite(pulp-test-pitch-track LIBRARIES pulp::audio-analysis)
 pulp_add_test_suite(pulp-test-transition-mixer LIBRARIES pulp::signal)
 # Signal filter tests extracted from test_signal.cpp.
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
@@ -186,6 +190,9 @@ pulp_add_test_suite(pulp-test-osc-blep LIBRARIES pulp::signal pulp::audio-analys
 pulp_add_test_suite(pulp-test-osc-va LIBRARIES pulp::signal pulp::audio-analysis)
 # Sync and through-zero FM are gated on measured alias rejection too.
 pulp_add_test_suite(pulp-test-osc-sync LIBRARIES pulp::signal pulp::audio-analysis)
+# The circuit-flavored VCO's core is gated on measured alias rejection, and its
+# deterministic character stages on level/DC/pitch correctness.
+pulp_add_test_suite(pulp-test-osc-vco LIBRARIES pulp::signal pulp::audio-analysis)
 # SF-2 crossfade unification: live_kernel structural-swap fade now matches the
 # native signal::TransitionMixer (EqualPower) law bit-for-bit — an intended,
 # documented behavior change (the fade previously used a linear theta).

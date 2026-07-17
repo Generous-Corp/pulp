@@ -1475,6 +1475,46 @@ private:
     /// Updates atlas_row_count_ with the number of rows laid out.
     void paint_atlas_tab(Canvas& canvas, float x, float y, float w, float h);
 
+    // ── Mouse-event precedence chain ─────────────────────────────────
+    //
+    // handle_mouse_event() resolves the event's gesture phase ONCE, then
+    // offers it to the handlers below in a fixed order. Modality
+    // precedence — text tool over eyedropper, an in-flight gesture over a
+    // fresh press, the panel over the canvas — IS that order.
+    //
+    // A handler returns a value to CONSUME the event (the bool is what
+    // handle_mouse_event returns) or std::nullopt to decline and let the
+    // next one look. Declining is not the same as not acting: a handler
+    // may update state and still fall through, which is how a resize
+    // release commits and then lets the same click re-select.
+
+    /// One mouse event, normalized for the whole chain. `event` is the
+    /// live event — it outlives the chain, which runs inside
+    /// handle_mouse_event's frame.
+    struct MouseGesture {
+        const MouseEvent& event;
+        Point pos;
+        bool is_press;
+        bool is_drag_tick;
+        bool is_release;
+    };
+
+    /// Resolve `event`'s phase against the in-flight gesture state. The
+    /// only place either is_down convention is interpreted.
+    MouseGesture resolve_mouse_gesture(const MouseEvent& event) const;
+
+    std::optional<bool> mouse_text_tool(const MouseGesture& g);
+    /// Passive: re-centers the loupe on the cursor, never consumes.
+    void mouse_zoom_loupe(const MouseGesture& g);
+    std::optional<bool> mouse_eyedropper(const MouseGesture& g);
+    std::optional<bool> mouse_active_resize(const MouseGesture& g);
+    std::optional<bool> mouse_begin_resize(const MouseGesture& g);
+    std::optional<bool> mouse_active_move(const MouseGesture& g);
+    std::optional<bool> mouse_begin_move(const MouseGesture& g);
+    std::optional<bool> mouse_panel(const MouseGesture& g);
+    /// Canvas fallback: hover tracking, click-to-select, drag containment.
+    std::optional<bool> mouse_select(const MouseGesture& g);
+
     // ── Panel hit testing ───────────────────────────────────────────
     bool point_in_panel(Point p) const;
     const TreeItem* tree_item_at_y(float panel_y) const;

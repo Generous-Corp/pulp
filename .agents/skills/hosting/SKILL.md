@@ -224,14 +224,19 @@ does not contain crashes in deeper plug-in code.
   `GraphRuntimeBufferPool`), so fan-in paths of differing latency time-align
   identically. MIDI edges route through per-node MIDI scratch buffers owned by
   the executor (`GraphRuntimeMidiScratch`); SignalGraph bridges its MIDI
-  mailboxes (inject_midi / extract_midi) around the routed call. Parameter
-  automation routes through a `GraphRuntimeAutomationScratch` (per-node parameter
-  event queue + per-connection slew state + per-node dense buffers): sparse edges
-  sample the source at the block edges, map/slew/mix per the connection's
-  resolved bounds, and emit two control points; dense audio-rate edges map every
-  sample (through the same per-connection PDC delay ring as audio), mix into a
-  per-node buffer, and emit one event per sample — both bit-identical to the walk
-  and built into the same per-node event queue. A node exceeding
+  mailboxes (inject_midi / extract_midi) around the routed call. External
+  per-block parameter events cross the same boundary through a per-node
+  `inject_parameter_events` mailbox. The routed call appends that publication
+  after executor-generated automation and commits its sequence only after the
+  whole dispatch succeeds, matching serial fallback and anticipation behavior.
+  Parameter automation routes through a `GraphRuntimeAutomationScratch`
+  (per-node parameter event queue + per-connection slew state + per-node dense
+  buffers): sparse edges sample the source at the block edges, map/slew/mix per
+  the connection's resolved bounds, and emit two control points; dense
+  audio-rate edges map every sample (through the same per-connection PDC delay
+  ring as audio), mix into a per-node buffer, and emit one event per sample —
+  both bit-identical to the walk and built into the same per-node event queue.
+  A node exceeding
   `kMaxParamsPerNode` (64) distinct sparse OR dense params is kept on the legacy
   walk.
   - **Where the walk lives.** The legacy serial reference walk is no longer
@@ -247,6 +252,70 @@ does not contain crashes in deeper plug-in code.
     applies: any audio-output-affecting edit to the walk must be mirrored in the
     executor (and vice versa), guarded by `test_graph_routing_differential_parity`,
     `test_signal_graph_executor_parity`, and `test_signal_graph_offline_parity`.
+  - **Where the live-swap engine lives.** The no-silence topology-edit machinery —
+    the swap policy and scanned-plugin catalog, the staged-replacement pipeline,
+    the `begin_swap_edit` / `prepare_swap` / `abort_swap_edit` transaction with its
+    crossfade publish and rollback, `snapshot_is_plugin_reinit_free_locked_`, and
+    the load-admission gate — lives in `core/host/src/signal_graph_live_swap.cpp`,
+    so `signal_graph.cpp` keeps the topology/compile/process spine. The file
+    arrangement mirrors `signal_graph_reference_walk.cpp`, but the *reason* does
+    NOT: these are still ordinary `SignalGraph` members that name its private
+    nested types, only their definitions moved. **The reference walk's
+    independence rule does not transfer here** — there is no second
+    implementation to stay bit-exact against, and factoring shared code out of
+    live-swap into `signal_graph.cpp` (or `signal_graph_internal.hpp`, where
+    `prepare_midi_block_storage` already single-sources every graph MIDI block's
+    real-time capacities for both the compile path and the swap warm-up probe) is
+    a fix, not a violation. Everything in the live-swap TU runs on the CONTROL
+    thread.
+  - **`_locked_` is a contract, and it is now asserted.** A `SignalGraph` helper
+    suffixed `_locked_` requires the caller to already hold
+    `graph_mutation_mutex_`; the convention now spans `signal_graph.cpp` and
+    `signal_graph_live_swap.cpp`, so it is easier to violate from the far side than
+    it was when one TU held every caller. Helpers whose call graph is entirely
+    internal open with `assert_graph_mutation_locked_()`, which reads a debug-only
+    owner record — so **take the mutex through `GraphMutationLock`, never a bare
+    `std::lock_guard`/`unique_lock`**. A bare guard locks correctly but leaves the
+    owner record empty, and the next `_locked_` helper you call asserts as though
+    you forgot the lock entirely (a debug-only false failure that reads like a real
+    one). Only `prepare_swap` calls `GraphMutationLock::unlock()` early, to drop
+    the lock before invoking user callbacks. Two `_locked_` helpers cannot assert —
+    `has_path_locked_` (reached via `would_create_cycle`) and
+    `total_declared_ports_locked_` (via `validate_generated_graph` /
+    `estimate_generated_graph_work_units`) — because those public entry points do
+    not lock; their suffix documents the internal contract only. (`node_load_mu_`
+    is a different mutex and is correctly taken with a plain `lock_guard`.)
+  - **`CompiledGraph::routed` groups what is only ever valid together.** Each
+    `RoutedPath` (`routed.serial`, `routed.parallel`) owns its own `snapshot`,
+    `pool`, `plugin_ctx`, `custom_ctx`, and `valid` flag — driving one path's
+    snapshot against the other path's pool is the bug the grouping exists to make
+    hard, since the parallel path's assignment is reuse-free and the serial path's
+    is compact. The MIDI scratch, automation scratch, and MidiInput/MidiOutput node
+    lists sit on `routed` itself and are **deliberately SHARED** by both paths: the
+    plans are identical and only ONE path runs per block. That sharing is load-
+    bearing — anything that makes those structs carry per-path state (or that runs
+    both paths in a block) breaks it silently, because the MIDI mailbox bridge and
+    the automation queues would then interleave across paths.
+  - **`build_executor_snapshot` prefers the `ExecutorSnapshotBinders` struct.** The
+    positional overload still exists as a forwarder for unmigrated call sites, and
+    it is exactly where a resolver can go wrong quietly: several of its resolvers
+    are same-shaped `std::function<T*(NodeId)>`, so swapping two by argument
+    position compiles and mis-binds. Every binder field is optional and has a
+    documented fallback (`plugin_latency_for` / `plugin_params_for` empty means
+    "fall back to the live slot", which is fine for baked/anticipation callers but
+    NOT on the swap path, where the point of the cached accessors is that a
+    swap-time build makes no live `PluginSlot` metadata call).
+  - **Multi-path routing has an arithmetic guard.**
+    `test/test_signal_graph_audio_parity.cpp` (target
+    `pulp-test-signal-graph-audio-parity`) renders a fan-out/fan-in topology whose
+    paths carry distinct non-commutative transfer functions, and checks the output
+    bit-exactly against expectations derived by hand from the stimulus — on the
+    walk, the routed serial path, and the routed parallel path. Nothing in it is
+    captured from a build, so a routing change cannot move the bar with it: a
+    dropped, swapped, or reordered path fails. It also asserts
+    `routed_walk_fallbacks()` / `routing_executor_stats()`, since a routed case
+    that quietly degraded into the walk would otherwise pass vacuously (the walk is
+    both oracle and fallback).
   - **Connection lane CLASSIFICATION is single-sourced** (distinct from the
     execution-independence rule above). Which lane a host `Connection` carries —
     audio / event(MIDI) / automation, plus the orthogonal feedback flag and the
@@ -474,6 +543,14 @@ does not contain crashes in deeper plug-in code.
   audio-thread scratch directly. Keep mailbox snapshots and writer scratch
   preallocated by `prepare()`; constructing a fresh MIDI snapshot in
   `inject_midi()` reintroduces realtime-path allocation.
+- `SignalGraph::inject_parameter_events()` uses a separate prepared per-node
+  mailbox with one control-side writer. Publications are latest-wins and
+  one-shot: the next successful serial, routed, parallel, or anticipation
+  block consumes the newest sequence once. Append injected events after graph
+  automation before the stable sample-offset sort; this preserves graph
+  automation when the fixed queue is full and lets injected events win a
+  same-offset tie. Reuse the mailbox across gap-free snapshots for the same
+  plugin node so an edit cannot discard a publication made before the swap.
 - Keep plugin automation scratch preallocated by `SignalGraph::prepare()`.
   The audio-thread `process()` path must not create per-block containers for
   input pointer casts, sparse automation accumulation, or dense audio-rate
@@ -765,6 +842,13 @@ rules:
   `core/host`. Current loaders consume it for per-block automation where
   the format supports sample offsets. Use it — not `set_parameter` — for
   per-block automation.
+- **External parameter-event mailbox.** Hosts publish per-block events with
+  `SignalGraph::inject_parameter_events()` before `process()`. The API is
+  additive on `SignalGraph`; do not add a `Processor` or `PluginSlot` virtual.
+  Sample offsets are block-relative. A `false` return reports an invalid or
+  unavailable node, or a source queue that already overflowed; a retained
+  source prefix can still be published and consumed. Destination overflow is
+  observed later when the audio-thread merge fills the fixed queue.
 - **Node ABI surface.** `PluginSlot` includes
   `pulp/runtime/node_abi.hpp` and participates in the node ABI
   virtual-order gate. Existing virtual methods may not be inserted,

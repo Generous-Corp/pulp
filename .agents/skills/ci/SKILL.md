@@ -332,6 +332,57 @@ re-introduces afternoon false alarms. Rationale + operator surface:
 [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) (the `config-doc`
 gate maps the workflow and the script to that guide).
 
+### Gotcha: a lane pointed at a label NO runner carries is silent — and looks exactly like saturation
+
+The trap behind step 3. Before concluding "the pool is saturated", check that the
+lane can be served **at all**. GitHub does not validate `runs-on`: a job asking
+for a label no runner carries is **not rejected, it is queued — forever**. No
+error, no annotation, no failed check. The only symptom is jobs piling up while
+the pool looks busy, which is indistinguishable from a genuine burst. So "18 runs
+queued + every runner busy" is *not* evidence of saturation; it is equally
+consistent with a lane routed into a black hole.
+
+Found live 2026-07-16: `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` targeted
+`["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]`, and **zero
+runners carried `pulp-build-vm`** — the intended Tart-VM topology had drifted to
+bare-metal (`pulp-build-studio`) and the variable was never reconciled. The
+relief valve had been routing into nothing for an unknown period, so the queue it
+existed to drain simply grew behind it. A relief valve routed into a black hole
+is worse than none: it reports healthy and relieves nothing.
+
+Check it directly — a runner must carry **every** label in the array (subset
+containment, not "any label overlaps"):
+
+```bash
+# Authoritative: reconciles every lane against the live fleet.
+python3 tools/scripts/runner_topology_check.py --mode=report
+```
+
+Watch for three traps when reading this by hand:
+
+- **Zero runners ≠ broken.** Tart runners register JIT/ephemeral and exist only
+  while a job runs. An idle ephemeral lane has no registered runner and is
+  perfectly healthy — the release lanes look "dead" between releases. Judge those
+  on *service history* (did a job recently run with that exact label set?), not
+  on the registry.
+- **Offline ≠ absent.** A registered-but-offline runner may just be asleep (m1 is
+  intermittent). A label *nothing owns* is always a black hole. Different
+  failures; don't conflate them.
+- **The fleet mutates while you look.** Runner count changed between two API
+  calls during this investigation. Re-read before concluding.
+
+Related instance of the same class: `build.yml`'s busy probe needs
+`Administration: Read` to call `actions/runners`; the default `GITHUB_TOKEN`
+lacks it, so the probe 403s and falls back to `BUSY=0` — **silently disabling
+overflow**. Whenever routing "does nothing", suspect a silent read failure before
+suspecting load.
+
+The standing guard is `runner-topology-check.yml` (hourly, opens a tracking
+issue) plus the `runner-topology-selftest` ctest. Lane→label intent lives in
+`tools/scripts/runner_topology.json` — edit a routing variable and its lane
+together, or the drift check fails. Full rationale:
+`docs/guides/local-ci.md` → "Routing contract (checked)".
+
 ## Host-vitals preflight — back off before a saturating CI host reboots
 
 The self-hosted Mac Studio that runs the required `macos` gate ALSO hosts the
@@ -1413,6 +1464,56 @@ skill; examples/config-only diffs still need a `Version-Bump: skip` trailer unde
 a `feat:`/`fix:` title) — expect to add those trailers too.
 
 ### Shipyard pin and behaviour notes
+
+#### `shipyard update` is an updater, not a converger — it will not go backwards
+
+`shipyard update --to vX.Y.Z` silently does **nothing** when `X.Y.Z` is older
+than the installed version: it reports `update_available: false` and exits 0.
+Verified against v0.70.0 — asked for `--to v0.60.0` with 0.70.0 installed it
+reports no update available, exactly as it does for an already-current
+machine. The two outcomes are indistinguishable from the exit code.
+
+Two consequences:
+
+- **A bare `shipyard update` tracks `latest`, not the pin.** Run it on a fleet
+  machine and that machine leaves the pin permanently — `latest` ran 7 minors
+  ahead of the pin on 2026-07-16 (pin v0.70.0, latest v0.77.1). It is then
+  running a Shipyard that was never validated against Pulp's CI matrix and
+  that disagrees with every workflow's `SHIPYARD_VERSION` (the exact drift
+  `check_shipyard_pin.py` exists to prevent). Always `--to` the pin.
+- **Coming back to the pin needs `tools/install-shipyard.sh`**, which installs
+  the pinned version unconditionally (via the upstream, checksum-verifying
+  `install.sh`). Routing a downgrade through `shipyard update` is a silent
+  no-op, so an ahead-of-pin machine would never converge.
+
+Never trust either path's exit code alone — re-read `shipyard --version` and
+compare it to the pin. `tools/scripts/shipyard_autoupdate.py` encodes all of
+this (direction dispatch + outcome verification); `--check --json` reports
+pin-vs-installed without touching anything.
+
+#### Optional: keep a fleet Mac on the pin automatically
+
+`tools/scripts/install_shipyard_autoupdate.sh` installs an hourly launchd agent
+that converges this machine onto the pin when it is idle. Opt-in per machine
+and irrelevant to public Pulp (which just runs `install-shipyard.sh` once).
+Kill switch, no uninstall needed:
+
+```bash
+echo off > ~/.config/pulp/shipyard-autoupdate   # stop; `on` resumes
+tools/scripts/install_shipyard_autoupdate.sh --status
+```
+
+Two gotchas worth knowing if you touch it:
+
+- **The pin it obeys is `origin/main`'s, not the working tree's.** A dev
+  checkout is routinely parked on a feature branch, and a branch may carry an
+  experimental pin; converging the machine onto that would be a bug. Override
+  with `PULP_SHIPYARD_AUTOUPDATE_PIN_REF=worktree`.
+- **The idle probe must parse the `shipyard` command line, not substring-match
+  it.** The persistent daemon runs as `shipyard --mode shipyard daemon run` —
+  a substring match on `run` reads it as a live ship and the machine then never
+  updates at all, while `--mode shipyard` puts the literal token `shipyard`
+  where a subcommand would be.
 
 Pin bumps must go through `shipyard pin bump --to vX.Y.Z`, not a hand edit.
 Shipyard v0.50.0+ is Rust-backed and macOS ships as an Apple-Silicon-only
@@ -4113,29 +4214,45 @@ but no published release", check both legs' runs AND the coordinator. A manual
 release-cli workflow_dispatch backfill still publishes directly (draft only on
 `push`).
 
-## Build strings must be bounded
+## Build strings must take a share, not the machine
 
-Every build command in `.shipyard/config.toml` and the CI workflows must pass an
-explicit `--parallel`/`-j` count — a literal, or `$(getconf _NPROCESSORS_ONLN
-2>/dev/null || echo N)` on POSIX backends. A bare `--parallel` maps to unbounded
-`make -j` and can exhaust memory / oversubscribe a shared runner (the mac
-`local` backend runs these strings directly on the host). The Windows
-(ssh-windows / PowerShell) overrides use a fixed literal — `$(…)` doesn't parse
-there, and unbounded MSBuild link parallelism trips LNK1104 on ARM64.
+A `.shipyard/config.toml` POSIX `build` string runs on the shared self-hosted
+Mac, so it must take a *share* of the host — route it through
+`tools/ci/governed-build.sh` and carry NO `--parallel`/`-j` (the wrapper injects
+a leased/bounded `-j`). "Bounded" is not enough: `--parallel $(getconf
+_NPROCESSORS_ONLN)` has a count yet claims every core, so it starves concurrent
+builds and the required `macos` gate — the guard rejects that whole-machine shape
+on shared-host surfaces (see below). A bare `--parallel` is worse (unbounded
+`make -j`) and is rejected everywhere. The CI *workflows* (`.github/workflows/**`)
+run on ephemeral GitHub-hosted runners where `-j$(nproc)` is correct and allowed.
+The Windows (ssh-windows / PowerShell) overrides use a fixed literal `--parallel 4`
+— `$(…)` doesn't parse there, and unbounded MSBuild link parallelism trips
+LNK1104 on ARM64.
 `tools/scripts/build_parallelism_guard.py` enforces this in the `validation.gates`
-setup chain and as a ctest; a bare `--parallel`/`-j` fails the gate.
+setup chain and as a ctest. It rejects two shapes: a **bare** `--parallel`/`-j`
+(unbounded) anywhere, and — on the shared-host surfaces agents copy from
+(`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`) — an explicit but
+**whole-machine** core-count expansion (`-j$(nproc)` / `-j$(sysctl -n hw.ncpu)` /
+`--parallel $(getconf _NPROCESSORS_ONLN)`): it has a count, so it is not
+unbounded, but on a shared Mac it claims every core, so concurrent builds starve
+each other and the required `macos` gate validating alongside them. The same
+expansion stays allowed on `.github/workflows/**` (ephemeral runners, nothing
+else on the box) — the rule is a property of the host, not the command.
 
-The mac `local` and ssh-linux `build` strings run through
-`tools/ci/governed-build.sh`, NOT a bare `cmake --build`. Shipyard's `local`
-backend executes the config string directly on the host (bypassing the pulp
-CLI's lease integration), so the wrapper is what puts a host-native validation
-build under a tartci host lease: it sizes `-j` from `tartci host-profile`,
-holds a `build`-priority lease for the build's duration (released via an EXIT
-trap — it runs the build as a child, never `exec`, so the trap fires), and
-falls back to a bounded local `-j` when tartci is absent (build VM / plain
-checkout) or the lease is denied (it never fails the build and never piles onto
-a saturated host). Keep new POSIX build strings routed through it; don't add a
-bare `cmake --build … --parallel` back to the `local`/ssh-linux lanes.
+Every POSIX `build` stage in `.shipyard/config.toml` — `default`, `parser`, AND
+`smoke` — runs through `tools/ci/governed-build.sh`, NOT a bare/whole-machine
+`cmake --build`. (The `smoke` lane used to run `--parallel $(getconf
+_NPROCESSORS_ONLN)` whole-machine on the shared Mac; it is now governed like the
+others.) Shipyard's `local` backend executes the config string directly on the
+host (bypassing the pulp CLI's lease integration), so the wrapper is what puts a
+host-native validation build under a tartci host lease: it sizes `-j` from
+`tartci host-profile`, holds a `build`-priority lease for the build's duration
+(released via an EXIT trap — it runs the build as a child, never `exec`, so the
+trap fires), and falls back to a bounded local `-j` when tartci is absent (build
+VM / plain checkout) or the lease is denied (it never fails the build and never
+piles onto a saturated host). Keep new POSIX build strings routed through it;
+don't add a bare or `$(nproc)`-style `cmake --build … --parallel` back to the
+`local`/ssh-linux lanes.
 
 ## macOS Intel (x86_64) CI tiering
 

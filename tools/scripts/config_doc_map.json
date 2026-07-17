@@ -37,6 +37,16 @@
     },
     {
       "paths": [
+        "tools/scripts/runner_topology.json",
+        ".github/workflows/runner-topology-check.yml"
+      ],
+      "docs": [
+        "docs/guides/local-ci.md"
+      ],
+      "why": "The routing contract IS the documented lane->label topology; local-ci.md was already drifted from the live variables (it described the macOS overflow lane as pointing at a label the variable had not named for months) precisely because the two could move independently. Changing a lane without updating the guide re-opens that gap."
+    },
+    {
+      "paths": [
         ".github/workflows/auto-release.yml",
         ".github/workflows/auto-release-watchdog.yml",
         ".github/workflows/release-cadence-check.yml"

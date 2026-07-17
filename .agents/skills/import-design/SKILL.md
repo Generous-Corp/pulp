@@ -193,7 +193,71 @@ pulp import-design --from fig --file design.fig --outline          # or --outlin
 pulp import-design --from fig --file design.fig --frame '102:1624' --output ui.js
 ```
 Frame selection accepts a guid (`102:1624`, unambiguous) or an exact
-case-insensitive name. The decoder is purely structural — geometry, style, text,
+case-insensitive name.
+
+**The `.fig` lane cannot capture multi-state designs.** Alternate frames are
+lowered ONLY by the faithful_svg path, and the `.fig` decoder emits a
+widget-recognition tree — no `render_mode`, no `svg_asset_id` (grep
+`tools/import-design/fig/*.mjs`: zero hits). Repeated `--frame` here is refused
+with exit 2. The lane's merge plumbing is written and tested and will start
+working the day the decoder learns faithful export; until then, do NOT wire a
+multi-state surface onto it.
+
+**Multi-state capture is `--file` repeated, on a faithful lane.** Export one
+envelope per state with a lane that emits faithful frames — the REST
+faithful-vector export (`figma_rest_export.py --faithful-vector`) or the Figma
+plugin — then merge them at import:
+
+```bash
+python3 tools/import-design/figma_rest_export.py \
+  --file-key <KEY> --node 187:15 --out typing.pulp.json --faithful-vector
+python3 tools/import-design/figma_rest_export.py \
+  --file-key <KEY> --node 187:349 --out piano.pulp.json --faithful-vector
+pulp import-design --from figma-plugin \
+  --file typing.pulp.json --file piano.pulp.json \
+  --emit cpp --mode baked --output kbd.cpp
+```
+
+The first `--file` is frame 0, the second frame 1, … — that index is what a
+design's `swap <n>` layer targets, so **reordering the flags re-points every
+swap**. The merge (`envelope_merge.cpp`, shared with the fig lane) folds each
+later envelope's root into the first's `alternate_frames`; the C++ codegen and
+the native materializer each emit one `add_frame` per entry, in order. A single
+`--file` skips the merge entirely and behaves exactly as it always has — keep
+it that way when touching this lane.
+
+**Captured states nobody can render are exit 2, not a diagnostic.**
+`find_unrenderable_alternate_frames` reports every node carrying
+`alternate_frames` that is not a renderable faithful node; the CLI refuses the
+import. Without it, the states are dropped and the import "succeeds" with one
+frame — the user asks for N states and silently gets one. That silent no-op is
+what this surface shipped as before the guard existed; keep the guard.
+
+**Swap elements come from the plugin lane only.** `faithful-vector.ts` reads a
+layer named `swap <n>` into a swap element; the REST exporter does not detect
+swaps. A REST-captured multi-state component holds all its frames but is driven
+by `set_active_frame(i)` from consumer code.
+
+**A swap whose target frame was never captured is reported, never silently
+dead.** `apply_swap_target_verification` flags an unset (`-1`), negative,
+out-of-range, or self-targeting swap with a conflict signal, so it rides the
+SAME channel as any other unresolved control: `--import-report <json>` shows it and
+`--fail-on-unresolved` exits 2. Do NOT add a parallel diagnostic channel for
+frame problems — route through the import report. This fires on single-frame
+imports too (a design whose swap was always dead now says so).
+
+**Gotcha — an alternate frame is a SIBLING axis to `children`, not a
+descendant.** Any pass that walks the IR and must see every control has to
+descend `alternate_frames` as well (`collect_import_report` and
+`apply_placement_verification` both do). A walk that only follows `children`
+silently ignores every control on frame 1+. Each alternate is also its own
+render region: verify its overlays against ITS width/height, not frame 0's — a
+mode toggle routinely swaps to a differently sized frame.
+
+**Gotcha — never skip an alternate frame whose SVG fails to resolve.** Frame
+indices are positional, so dropping frame k renumbers every later frame and
+silently re-points the swaps that target them. Both generators add the frame
+blank (overlays intact) and diagnose it instead. The decoder is purely structural — geometry, style, text,
 and bundled raster assets; **widget recognition stays the importer's job** (a
 node's name flows through untouched for the resolver to classify). Fidelity
 losses are reported as named warnings in the emitted envelope's `diagnostics`
@@ -201,6 +265,19 @@ losses are reported as named warnings in the emitted envelope's `diagnostics`
 silently dropped. External-library instances and cross-file variables that a
 local file can't resolve surface the same way — treat them as data, not failures,
 and fill in the critical ones by hand.
+
+**Gotcha — a hand-written envelope fixture using `data:` URI SVG assets loses
+its faithful node under `--mode baked`.** The baked lanes run
+`refresh_design_ir_asset_manifest`, which resolves assets against the filesystem
+and drops inline `data:` entries ("0 assets"); the faithful node then can't
+resolve its SVG and falls back to plain widgets, so `render_mode`,
+`svg_asset_id`, and `interactive_elements` all vanish from the output and the
+import report goes empty. This looks exactly like a codegen bug and is not one.
+Write real `.svg` files and reference them by relative `local_path` (what a real
+`.fig` decode emits). Note also that `--emit cpp` requires `--mode baked`, and
+`looks_like_figma_plugin_export` keys off `figma-plugin-v1` /
+`"adapter": "figma-plugin"` — a fixture missing those but containing `"version"`
++ `"root"` is parsed as a serialized DesignIR instead of an envelope.
 
 **Gotcha — the `.fig` fixture-determinism test compares decoded content, not raw
 bytes.** `fig.test.mjs`'s "generator output is deterministic" test regenerates
@@ -1709,12 +1786,12 @@ in `design_import.cpp` beside the sibling importer passes `enrich_*` /
   and the erase predicate removes `__knob_pointer` nodes too. Test:
   `[knob][sprite]` "recognizes a stroke-demoted pointer frame".
 - **Import-time disc clean** (`clean_baked_knob_indicator` →
-  `clear_baked_knob_antenna`, `design_import.cpp`), NOT a render-time cover. Many
+  `clear_baked_knob_antenna`, `design_import_png.cpp`), NOT a render-time cover. Many
   captured discs (ELYSIUM's included) BAKE an indicator into the disc PNG — here
   it's a thin vertical ANTENNA standing straight up ABOVE the disc at 12 o'clock.
   Since we draw our own rotating pointer, the baked one is a stuck second line. So
   when a knob carries `knob_ind_*`, `enrich_imported_image_asset_metadata` decodes
-  the disc PNG and removes the antenna, re-encodes via a minimal in-file PNG
+  the disc PNG and removes the antenna, re-encodes via a minimal PNG
   encoder (`encode_rgba_png_for_import`, filter-0 scanlines + runtime
   `zlib_compress` + IHDR/IDAT/IEND with hand-rolled CRC32), writes
   `$TMPDIR/pulp-import-assets/knobclean_<hash>.png`, and repoints `asset_path`.
@@ -1849,7 +1926,7 @@ color.** ELYSIUM's shapes are uniquely colored (DEPTH purple, POSITION magenta,
 OFFSET green, SHIMMER amber). A single `set_fill_color` made all of them fill the
 same purple — visually wrong. So the importer SAMPLES each shape's own vertical
 gradient from its art and stamps `shape_fill_gradient` (`sample_shape_fill_gradient`
-in `design_import.cpp`: average the opaque pixels in N bands bottom→top, emit
+in `design_import_png.cpp`: average the opaque pixels in N bands bottom→top, emit
 `#rrggbb` stops). `ImageView::set_fill_gradient(stops)` then paints that gradient
 revealed to `fill_value` instead of the flat color, so the shape fills with its
 real colors — "mapped to the original", only adjustable. **This is independent of
@@ -3718,3 +3795,41 @@ the same IR. A Catch2 case now asserts the policy for every `NativeWidgetKind`, 
 drift fails a test instead of shipping. When you add a widget kind or change a lowering
 DECISION (as opposed to per-target emission syntax), it belongs in native_common — only the
 target-specific string emission stays per-lane.
+
+## Shared IR helpers — editing one is a cross-lane decision
+
+Under native_common sits a second, narrower shared home: `design_ir_helpers.hpp` holds the
+one definition of **how a lane reads the IR** (`attr`, `attr_bool`, `first_asset_id`,
+`asset_uri`) plus the pure parsers those reads need (`parse_hex_color_rgba`, `hex_digit`,
+`lower_copy`). Three lanes include it — the native materializer
+(`design_import_native_common.cpp`), the baked-C++ emitter (`design_cpp_codegen.cpp`), and
+the Swift emitter (`design_swift_codegen.cpp`). Each used to carry its own copy, so the same
+IR value could lower differently per target by accident rather than by decision.
+
+The consequence to internalize: **"fix `first_asset_id` for my lane" is no longer a local
+edit.** One change to that header moves what the runtime importer, a baked plugin, and a
+Swift export all resolve. That is the point of the header — but it means a genuinely
+lane-specific need is met by **adapting at the call site, not by forking the helper**.
+`parse_hex_color` in `design_import_native_common.cpp` is the pattern to copy: the shared
+parser returns the raw 0..255 quad, the native lane wraps it into a `Color`, and
+`design_cpp_codegen.cpp` turns the same quad into a `Color::rgba8(…)` source literal. The
+parse decision is shared; the representation is not. Per-target string escaping, indenting,
+and number formatting stay in their emitters for the same reason — a helper only belongs in
+the shared header when its contract is identical for every lane.
+
+Two things to watch:
+- **The JS lane is NOT a consumer.** `design_codegen.cpp` (`generate_pulp_js` — web-compat
+  and bridge-native JS) still reads `node.attributes` directly, so a helper fix does not
+  reach it. Same separate-lanes hazard as background gradients above.
+- **`parse_hex_color` still exists as a per-lane name.** In native_common it is now a thin
+  wrapper over the shared `parse_hex_color_rgba`. Grepping the old name finds the wrapper,
+  not the rules — those live in `design_ir_helpers.hpp`.
+
+Tests: `[design-ir-helpers]` in `pulp-test-design-import-native-common` pins the contracts a
+lane would otherwise re-guess — asset-key priority then a sorted fallback scan, both bool
+polarities plus the fallback for unrecognized spellings, local-file-over-remote asset URIs,
+and every accepted hex shape. Change a rule there and the failure lands in the lane-neutral
+place, rather than surfacing later as one target's fidelity drift.
+
+`design_ir_helpers.hpp` is private to `core/view/src/` and is not part of the installed SDK
+surface — do not reference it from a public header.

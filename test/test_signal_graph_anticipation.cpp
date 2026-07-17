@@ -46,7 +46,12 @@ public:
     void process(pulp::audio::BufferView<float>& out,
                  const pulp::audio::BufferView<const float>&,
                  const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
-                 const pulp::host::ParameterEventQueue&, int n) override {
+                 const pulp::host::ParameterEventQueue& params, int n) override {
+        last_parameter_count.store(params.size(), std::memory_order_relaxed);
+        if (!params.empty()) {
+            last_parameter_value.store(params.begin()->value,
+                                       std::memory_order_relaxed);
+        }
         for (std::size_t c = 0; c < out.num_channels(); ++c) {
             float* o = out.channel_ptr(c);
             const float v = static_cast<float>((c + 1) * 10) + static_cast<float>(block_);
@@ -69,6 +74,8 @@ public:
     void destroy_editor_view() override {}
 
     std::atomic<int> calls{0};
+    std::atomic<std::size_t> last_parameter_count{0};
+    std::atomic<float> last_parameter_value{0.0f};
 
 private:
     PluginInfo info_;
@@ -195,6 +202,29 @@ TEST_CASE("SignalGraph anticipation off leaves the canonical render unchanged",
     CHECK(gen->calls.load() == 1);  // interior ran live
     CHECK(blk[0][0] == (10.0f + 0.0f) * 0.5f);
     CHECK(blk[1][0] == (20.0f + 0.0f) * 0.5f);
+}
+
+TEST_CASE("SignalGraph anticipation consumes parameter mailbox events once") {
+    SignalGraph graph;
+    auto gen = std::make_unique<CountingGen>();
+    auto* probe = gen.get();
+    const auto plugin = graph.add_plugin_node(std::move(gen), 0, 2, "Gen");
+    const auto output = graph.add_output_node(2, "Out");
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE(graph.connect(plugin, 1, output, 1));
+    graph.set_canonical_executor_routing_enabled(true);
+    graph.set_anticipation_enabled(true);
+    REQUIRE(graph.prepare(kSr, kFrames));
+
+    pulp::host::ParameterEventQueue injected;
+    REQUIRE(injected.push({17, 12, 0.75f, 0}));
+    REQUIRE(graph.inject_parameter_events(plugin, injected));
+    REQUIRE(graph.pump_anticipation(1) == 1);
+    CHECK(probe->last_parameter_count.load(std::memory_order_relaxed) == 1);
+    CHECK(probe->last_parameter_value.load(std::memory_order_relaxed) == 0.75f);
+
+    REQUIRE(graph.pump_anticipation(1) == 1);
+    CHECK(probe->last_parameter_count.load(std::memory_order_relaxed) == 0);
 }
 
 namespace {

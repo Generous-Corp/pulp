@@ -8,6 +8,25 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06870"></a>
+## [0.687.0] - 2026-07-17
+
+- feature/timeline engine ([#6201](https://github.com/danielraffel/pulp/pull/6201))
+
+<a id="v06850"></a>
+## [0.685.0] - 2026-07-17
+
+- ci(wclap): run the WebCLAP lane on every PR ([#6202](https://github.com/danielraffel/pulp/pull/6202))
+- build(guard): bound the self-hosted workflow melts; drop the false CI premise ([#6200](https://github.com/danielraffel/pulp/pull/6200))
+- build(ci): converge fleet Macs onto the Shipyard pin when idle ([#6178](https://github.com/danielraffel/pulp/pull/6178))
+- build(ci): reconcile runner routing lanes against the live fleet ([#6177](https://github.com/danielraffel/pulp/pull/6177))
+- build(ci): let a VM supervisor survive a transient failure ([#6175](https://github.com/danielraffel/pulp/pull/6175))
+
+<a id="v06810"></a>
+## [0.681.0] - 2026-07-17
+
+- fix(webui): add grid_layout.cpp to the wasm UI build ([#6194](https://github.com/danielraffel/pulp/pull/6194))
+
 <a id="v06780"></a>
 ## [0.678.0] - 2026-07-16
 
@@ -6460,6 +6479,9 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.687.0]: https://github.com/danielraffel/pulp/releases/tag/v0.687.0
+[0.685.0]: https://github.com/danielraffel/pulp/releases/tag/v0.685.0
+[0.681.0]: https://github.com/danielraffel/pulp/releases/tag/v0.681.0
 [0.678.0]: https://github.com/danielraffel/pulp/releases/tag/v0.678.0
 [0.676.1]: https://github.com/danielraffel/pulp/releases/tag/v0.676.1
 [0.676.0]: https://github.com/danielraffel/pulp/releases/tag/v0.676.0

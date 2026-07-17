@@ -64,11 +64,10 @@ consume `pulp/canvas/sdf_text.hpp`.
 ## Build + test loop
 
 ```bash
-cmake --build build --target \
+tools/ci/governed-build.sh cmake --build build --target \
   pulp-test-sdf-atlas pulp-test-msdf-atlas pulp-test-psdf-atlas \
   pulp-test-sdf-text pulp-test-sdf-effects \
-  pulp-sdf-text-demo pulp-sdf-vs-msdf-demo pulp-sdf-effects-demo \
-  -j$(sysctl -n hw.ncpu)
+  pulp-sdf-text-demo pulp-sdf-vs-msdf-demo pulp-sdf-effects-demo
 
 ./build/test/pulp-test-sdf-atlas
 ./build/test/pulp-test-msdf-atlas

@@ -285,7 +285,7 @@ cmake -S . -B build-android \
   -DCMAKE_BUILD_TYPE=Release
 
 # Build
-cmake --build build-android -j$(sysctl -n hw.ncpu)
+tools/ci/governed-build.sh cmake --build build-android
 ```
 
 **Android Skia must be built from source — there is NO prebuilt slice.** The
@@ -319,7 +319,7 @@ cd android
 ```bash
 # Regular host build still works in the android worktree
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build -j$(sysctl -n hw.ncpu)
+tools/ci/governed-build.sh cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
