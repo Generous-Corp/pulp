@@ -144,9 +144,9 @@ export function toPathData(commands) {
  * hands every stroke-only shape its stroke.
  *
  * A stroke-only vector resolves to its stroke outline, which is a *fillable*
- * shape: it must be painted with the stroke colour as a FILL, never re-stroked,
- * or the outline would itself be outlined. `paint` names which colour applies —
- * and that colour may be a GRADIENT, which is how the knob rim highlights render.
+ * shape: it must be painted with the stroke color as a FILL, never re-stroked,
+ * or the outline would itself be outlined. `paint` names which color applies —
+ * and that color may be a GRADIENT, which is how the knob rim highlights render.
  *
  * @returns {{ d: string, box: object, paint: 'fill'|'stroke', droppedStroke: boolean }|null}
  */
@@ -197,7 +197,7 @@ export function geometryToPath(node, blobs) {
  * address their glyphs by LIGATURE: the designer types "lock" and Font Awesome
  * substitutes a padlock. Without the font the characters render literally, so a
  * toolbar of icons imports as the word salad "lockquestion" / "und redo" — not a
- * parser bug, and not fixable by shipping a font we have no licence to. Figma
+ * parser bug, and not fixable by shipping a font we have no license to. Figma
  * bakes each glyph's outline into `derivedTextData.glyphs[].commandsBlob`, in the
  * very format the vector lane already decodes, so the icons are already in the
  * file. Every icon-font text node in the reference design carries one.
@@ -229,11 +229,11 @@ export function glyphsToPath(node, blobs) {
   // This is the opposite of geometryToPath, and deliberately so. Vector geometry
   // is authored in a space whose only meaning is the transformed result, so its
   // ink bounds ARE the shape. A glyph is different: it is drawn INSIDE a text
-  // box the designer sized and the layout centres, and the ink is smaller than
+  // box the designer sized and the layout centers, and the ink is smaller than
   // that box by the font's own side bearings. Normalizing to ink threw the box
-  // away — an icon lost its padding, then got re-centred on its ink, and layout
+  // away — an icon lost its padding, then got re-centered on its ink, and layout
   // parity caught it exactly: `fg-icon misplaced: dx=+6.5 dw=-12`. A toolbar
-  // icon looked too big and sat off-centre in its button.
+  // icon looked too big and sat off-center in its button.
   const w = (node.size && node.size.x) || 0;
   const h = (node.size && node.size.y) || 0;
   if (!(w > 0) || !(h > 0)) return null;

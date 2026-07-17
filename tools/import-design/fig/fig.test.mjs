@@ -426,7 +426,7 @@ test('icon-font text lowers to a glyph outline; real text stays a live label', (
   assert.equal(icon.type, 'vector', 'an icon font lowers to its outline');
   assert.ok(icon.path_data, 'and carries path data');
   assert.ok(!('content' in icon), 'the ligature name is not content');
-  assert.equal(icon.fill, '#ffffff', 'the glyph paints in the text colour');
+  assert.equal(icon.fill, '#ffffff', 'the glyph paints in the text color');
 
   assert.equal(caption.type, 'text', 'real text stays live');
   assert.equal(caption.content, 'lock');
@@ -448,10 +448,10 @@ test('icon-font text lowers to a glyph outline; real text stays a live label', (
 });
 
 test('a style-referenced fill resolves to the style, not the master default', () => {
-  // Shared styles are the design's tokens, and Figma caches the resolved colour
+  // Shared styles are the design's tokens, and Figma caches the resolved color
   // on the referencing node only sometimes. In one real design only the FOLEY
   // tab carried a literal fill — and FOLEY was the only tab that imported in its
-  // true colour. kick/SNARE/TOM/CRASH/RIDE carried a style ref alone, so they
+  // true color. kick/SNARE/TOM/CRASH/RIDE carried a style ref alone, so they
   // fell back to their master's fuchsia and a row of red/yellow/green tabs
   // arrived as a wall of pink. The style ref must be honoured on its own.
   const scene = buildScene({ nodeChanges: [
@@ -462,7 +462,7 @@ test('a style-referenced fill resolves to the style, not the master default', ()
     { guid: { sessionID: 0, localID: 9 }, type: 'FRAME', name: 'instrument/04 Yellow 85%',
       styleType: 'FILL', key: 'STYLEKEY_YELLOW',
       fillPaints: [{ type: 'SOLID', color: { r: 0.961, g: 0.757, b: 0.318, a: 1 } }] },
-    // A tab whose colour lives ONLY in the style — no literal to fall back on.
+    // A tab whose color lives ONLY in the style — no literal to fall back on.
     // Without resolution this node has no paint at all.
     { guid: { sessionID: 0, localID: 3 }, type: 'RECTANGLE', name: 'SNARE tab',
       parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 40, y: 20 },
@@ -499,8 +499,8 @@ test('an instance override does not get repainted by the master style ref', () =
   // not an instance recolour, and treating it as one painted the switch dot
   // white over the design's #333537 (verified against the file's thumbnail).
   //
-  // So both real shapes are modelled here, and the guard is unchanged: the
-  // instance's own colour must survive, and must never become the master's
+  // So both real shapes are modeled here, and the guard is unchanged: the
+  // instance's own color must survive, and must never become the master's
   // fuchsia.
   const master = { sessionID: 0, localID: 30 };
   const child  = { sessionID: 0, localID: 31 };
@@ -948,7 +948,7 @@ const WHITE_TO_BLACK = [
   { color: { r: 0, g: 0, b: 0, a: 1 }, position: 1 },
 ];
 
-test('a linear gradient lowers to a real CSS gradient, not its mean colour', () => {
+test('a linear gradient lowers to a real CSS gradient, not its mean color', () => {
   const scene = gradientScene(linearPaint(WHITE_TO_BLACK));
   const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
   const shape = findByName(envelope.root, 'Shape');
@@ -988,7 +988,7 @@ test('a left→right ramp reads as 90deg', () => {
   assert.match(css, /^linear-gradient\(90deg,/, `dx=1,dy=0 is 90deg, got: ${css}`);
 });
 
-test('stop alpha and paint opacity both fold into the emitted colour', () => {
+test('stop alpha and paint opacity both fold into the emitted color', () => {
   // The rim highlight is white at alpha 0.24 fading to transparent. Dropping
   // either factor turns it into a hard white ring.
   const scene = gradientScene(linearPaint([
@@ -1042,7 +1042,7 @@ test('a radial gradient paints on the BOX branch, and still flattens on the vect
 });
 
 test('a single-stop gradient falls back rather than emitting a broken ramp', () => {
-  // parse_svg_linear_gradient requires >= 2 colours and returns nullopt below
+  // parse_svg_linear_gradient requires >= 2 colors and returns nullopt below
   // that, which would drop the widget back to its solid fill anyway.
   const scene = gradientScene(linearPaint([{ color: { r: 1, g: 0, b: 0, a: 1 }, position: 0 }]));
   const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
@@ -1080,7 +1080,7 @@ function provenanceScene() {
       name: 'instrument / 02 Fuchsia', fillPaints: solid(0.96, 0.44, 0.56) },
 
     // Master: a dot that REFERENCES the dark style, and a tab label that
-    // references the fuchsia one. Both cache their style's colour as a literal.
+    // references the fuchsia one. Both cache their style's color as a literal.
     { guid: g(10), type: 'SYMBOL', name: 'switch off', size: { x: 18, y: 10 } },
     { guid: g(11), type: 'ELLIPSE', name: 'dot', overrideKey: g(500),
       parentIndex: { guid: g(10), position: 'a' }, size: { x: 6, y: 6 },
@@ -1122,7 +1122,7 @@ test('an override literal does not beat the style ref it left attached', () => {
     provenanceScene(), findFrame(provenanceScene(), 'Root'), CTX_MIN);
 
   // The override set the dot white but said nothing about its style, so the
-  // style is still attached and IS the colour. Rendering the white literal is
+  // style is still attached and IS the color. Rendering the white literal is
   // the FILTER-switch bug: a pure-white dot where the design has #333537.
   const dot = findByName(envelope.root, 'dot');
   assert.ok(dot, 'dot must survive expansion');
@@ -1149,7 +1149,7 @@ test('an override that DETACHES a style keeps its own literal, at every level', 
 // green — because none of them counts what the file declares. material_audit.mjs
 // is the counterpart that does; these are the fixes it exists to prove.
 
-test('a stroke paint carries its own opacity, not just its colour alpha', () => {
+test('a stroke paint carries its own opacity, not just its color alpha', () => {
   // Figma multiplies paint.opacity by color.a. Reading only color.a rendered a
   // stroke the designer set to 20% at FULL strength — and that does not read as
   // a dropped property, it reads as a design with harder edges than expected, so
@@ -1282,14 +1282,14 @@ test('the materials sidecar reports what the design declares, not what we read',
     'a node declaring no material is not inventoried');
 });
 
-test('a stacked fill list composites; taking only the first paints the wrong colour', () => {
+test('a stacked fill list composites; taking only the first paints the wrong color', () => {
   // Figma's fillPaints is a STACK painted in array order, index 0 at the bottom.
   // Reading `.find(SOLID)` took the bottom paint and threw the rest away, so the
   // slider thumb — a #4b4d51 base with white at 55% OVER it — rendered as the
   // bare dark base instead of the light thumb the design shows.
   //
   // The failure mode is what makes this worth a test: a dropped paint does not
-  // look dropped, it looks like the WRONG COLOUR, which sends you hunting through
+  // look dropped, it looks like the WRONG COLOR, which sends you hunting through
   // style refs and override precedence for a bug that is in neither.
   //
   // These are the thumb's real declared paints, and #aeafb1 is not a guess: it is

@@ -1416,7 +1416,7 @@ TEST_CASE("figma-plugin envelope diagnostics land on the IR",
         "diagnostics": [
             {
                 "code": "gradient_flattened",
-                "detail": "3-stop linear gradient flattened to its mean colour",
+                "detail": "3-stop linear gradient flattened to its mean color",
                 "node_name": "Panel / Backdrop",
                 "node_id": "12:34",
                 "severity": "warning"
@@ -1447,7 +1447,7 @@ TEST_CASE("figma-plugin envelope diagnostics land on the IR",
 
     // 1 — code, detail and node_name all survive onto the diagnostic.
     REQUIRE(ir.diagnostics[0].code == "gradient_flattened");
-    REQUIRE(ir.diagnostics[0].message == "3-stop linear gradient flattened to its mean colour");
+    REQUIRE(ir.diagnostics[0].message == "3-stop linear gradient flattened to its mean color");
     REQUIRE(ir.diagnostics[0].path == "Panel / Backdrop");
 
     // 2 — severity maps by name; anything unrecognized degrades to a warning

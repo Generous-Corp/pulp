@@ -147,7 +147,7 @@ function checkStroke(decl, emitted, diagKinds) {
     if (diagKinds.includes('vector-simplified')) return null;   // dropped out loud
     return { property: 'stroke', declared: `${decl.stroke.length} paint(s)`, emitted: 'none' };
   }
-  // Figma multiplies paint.opacity by the colour's own alpha. A border emitted
+  // Figma multiplies paint.opacity by the color's own alpha. A border emitted
   // at full strength for a paint declared at 24% is a drop of the opacity, even
   // though the stroke itself "survived" — so the count has to look past presence
   // to the one channel that silently disappears.
@@ -169,7 +169,7 @@ function checkFill(decl, emitted, diagKinds) {
   // A stack of visible SOLID paints must composite. We cannot check the
   // composite ARITHMETIC from here — that is correctness, and out of remit (see
   // the caveat at the top). What we CAN catch is the drop that actually bit: the
-  // emitted colour being verbatim the BOTTOM paint while paints sit above it,
+  // emitted color being verbatim the BOTTOM paint while paints sit above it,
   // which is exactly what `.find(SOLID)` off a stack produces.
   //
   // Compare RGB, not alpha. The first cut of this compared only the alpha
@@ -188,7 +188,7 @@ function checkFill(decl, emitted, diagKinds) {
   const bottomHex = b.rgb.toLowerCase();
   if (got.slice(0, 7).toLowerCase() !== bottomHex) return null;   // composited: not the bare bottom
 
-  // The emitted colour IS the bottom paint. That is only correct if everything
+  // The emitted color IS the bottom paint. That is only correct if everything
   // above it is invisible or fully transparent — otherwise the stack was dropped.
   const above = solids.slice(1);
   const anythingAbove = above.some((p) => p.opacity * p.color_alpha > 0.004);

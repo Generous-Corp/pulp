@@ -2500,17 +2500,17 @@ TEST_CASE("native codegen paints a stroke declared as the CSS border shorthand",
 
     REQUIRE(js.find("setSvgStroke('") != std::string::npos);
     REQUIRE(js.find("#ffffff8c") != std::string::npos);
-    // The weight travels with the colour: a stroke emitted without it paints at
+    // The weight travels with the color: a stroke emitted without it paints at
     // the widget default, which is wrong in a way that looks deliberate.
     REQUIRE(js.find("setSvgStrokeWidth('") != std::string::npos);
 }
 
-TEST_CASE("the border shorthand splits without losing a functional colour",
+TEST_CASE("the border shorthand splits without losing a functional color",
           "[view][import][border]") {
     IRNode n;
     n.type = "frame";
     // rgba() is ONE value containing spaces and commas. A plain space split
-    // yields "rgba(255," as the colour and the border vanishes again, one layer
+    // yields "rgba(255," as the color and the border vanishes again, one layer
     // further down — so the tokenizer tracks paren depth.
     n.style.border = "3px dashed rgba(255, 0, 0, 0.5)";
     normalize_border_shorthand(n);
@@ -2533,7 +2533,7 @@ TEST_CASE("border shorthand normalization defers and declines",
     REQUIRE(*explicit_color.style.border_color == "#abcdef");
 
     // `border: none` is a positive statement that there is no edge. Inventing a
-    // colour-less 1px width here would be a border where the design says none.
+    // color-less 1px width here would be a border where the design says none.
     IRNode none;
     none.type = "frame";
     none.style.border = "none";

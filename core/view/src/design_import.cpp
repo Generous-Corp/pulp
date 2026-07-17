@@ -2326,7 +2326,7 @@ void synthesize_node(IRNode& n) {
     // design's red record dot rendered as an empty cell for exactly this reason
     // while the play triangle beside it (a vector carrying a real path) was
     // fine. Their fill is only expressible as a path, so synthesize one and
-    // carry the colour across.
+    // carry the color across.
     //
     // A gradient rides the path too, via setSvgFillGradient. It used to bail
     // here because a gradient could not move onto the path, and emitting one
@@ -2540,11 +2540,11 @@ namespace {
 // Split a CSS `border` shorthand into its parts. Tokenized with paren-depth
 // tracking rather than a plain space split, because `rgba(255, 0, 0, 0.5)` is
 // ONE value containing spaces and commas — a naive split hands back "rgba(255,"
-// as the colour and the border silently disappears again, one layer deeper.
+// as the color and the border silently disappears again, one layer deeper.
 //
-// The colour is carried across verbatim rather than parsed: border_color is a
+// The color is carried across verbatim rather than parsed: border_color is a
 // string, and every downstream paint site already accepts hex / rgb() / rgba()
-// / hsl(). Parsing here would only add a second place to disagree about colour.
+// / hsl(). Parsing here would only add a second place to disagree about color.
 struct BorderShorthand {
     std::optional<std::string> color;
     std::optional<float> width;
@@ -2599,8 +2599,8 @@ void normalize_border_shorthand(IRNode& root) {
         if (n.style.border && !n.style.border->empty()) {
             const auto parts = parse_border_shorthand(*n.style.border);
             // `border: none` / a zero width is a positive statement that there
-            // is no edge. Recording colour-less parts would leave border_width
-            // set with no colour, which reads downstream as "no border" anyway —
+            // is no edge. Recording color-less parts would leave border_width
+            // set with no color, which reads downstream as "no border" anyway —
             // but say it explicitly so the intent survives a later refactor.
             const bool suppressed =
                 (parts.style && *parts.style == "none") ||

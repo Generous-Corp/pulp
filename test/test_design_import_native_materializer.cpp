@@ -581,9 +581,9 @@ TEST_CASE("baked native materializer matches live React layout parity for a plug
 
 TEST_CASE("baked native materializer accepts rgb()/rgba() on EVERY paint, not just background",
           "[view][import][native-materializer][color]") {
-    // The CSS colour fallback lived at ONE call site. `apply_visual_style` calls
-    // the colour parser at seven paint sites — background, text `color`,
-    // `border_color`, and the four per-side border colours — and only background
+    // The CSS color fallback lived at ONE call site. `apply_visual_style` calls
+    // the color parser at seven paint sites — background, text `color`,
+    // `border_color`, and the four per-side border colors — and only background
     // fell back from the hex fast path to the CSS parser. So a design writing
     // `color: rgba(...)` rendered its background correctly and SILENTLY DROPPED
     // its text and every border. Figma emits exactly that: it demotes a hairline
@@ -611,7 +611,7 @@ TEST_CASE("baked native materializer accepts rgb()/rgba() on EVERY paint, not ju
     // here reads as "the parser broke" rather than "the fallback is missing".
     REQUIRE(root->background_color().a > 0.0f);
 
-    // Text: dropped before this fix — the label rendered in the inherited colour.
+    // Text: dropped before this fix — the label rendered in the inherited color.
     const auto text = root->inheritable_text_color();
     REQUIRE(text.has_value());
     CHECK(text->a == Catch::Approx(0.5f).margin(0.01f));

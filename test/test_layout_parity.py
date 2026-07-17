@@ -3,7 +3,7 @@
 
 The tool's value is not "it computes a subtraction" — it is that a real layout
 bug produces ONE readable finding that names the node to look at. So the tests
-concentrate on the two behaviours that deliver that, and which a naive
+concentrate on the two behaviors that deliver that, and which a naive
 per-node diff gets wrong:
 
 * **parent-relative attribution** — a misplaced container drags every descendant
@@ -278,7 +278,7 @@ class TestGateFloor(ParityTestCase):
         self.assertTrue(layout_parity.report_fails(gated))
 
     def test_the_default_floor_gates_everything_above_tolerance(self):
-        # Interactive behaviour must not change: a bare run is still strict.
+        # Interactive behavior must not change: a bare run is still strict.
         geom = geometry(node("0:1", None, 0, 0, 500, 100), node("0:2", "0:1", 10, 10))
         lay = layout(view("0:1", 0, 0, 500, 100), view("0:2", 17, 10))
         self.assertTrue(layout_parity.report_fails(self.compare(geom, lay)))

@@ -48,15 +48,15 @@ export function buildScene(message) {
     });
   }
   const pages = nodeChanges.filter((n) => n.type === 'CANVAS' && !n.internalOnly);
-  // Shared styles ARE the design's tokens: named colour/text/effect definitions
+  // Shared styles ARE the design's tokens: named color/text/effect definitions
   // that nodes point at instead of carrying a literal paint. A node referencing
   // one stores `styleIdForFill.assetRef.key`, which matches the style node's own
   // `key` exactly, so resolution is a plain lookup.
   //
-  // These are load-bearing, not decorative. Figma caches the resolved colour on
+  // These are load-bearing, not decorative. Figma caches the resolved color on
   // the referencing node only SOMETIMES: of the instrument tabs in one design,
   // only FOLEY carried a literal fill, and FOLEY was the only tab that rendered
-  // its true colour — kick/SNARE/TOM/CRASH/RIDE each carried a style ref alone
+  // its true color — kick/SNARE/TOM/CRASH/RIDE each carried a style ref alone
   // and fell back to their master's fuchsia, so a row of red/yellow/green tabs
   // imported as an unbroken wall of pink.
   const stylesByKey = new Map();
@@ -77,7 +77,7 @@ export function buildScene(message) {
  * is worse than not resolving at all. A literal sitting next to a ref is usually
  * Figma's cache of that style — but on an expanded instance the two can come
  * from different places: the ref may be the MASTER's default while the literal
- * is THIS instance's resolved colour. Letting the style win unconditionally
+ * is THIS instance's resolved color. Letting the style win unconditionally
  * repainted every instrument tab with the master's fuchsia, including the one
  * tab that had been correct.
  *
@@ -95,7 +95,7 @@ export function resolvedPaints(scene, node, which = 'fill') {
   if (!preferStyle) return own;
   const style = scene.stylesByKey.get(key);
   // An unresolvable ref means the style lives in a library this .fig does not
-  // embed. Keep the literal — a stale cached colour beats no colour at all.
+  // embed. Keep the literal — a stale cached color beats no color at all.
   if (!style) return own;
   const paints = which === 'fill' ? style.fillPaints : style.strokePaints;
   return (paints && paints.length) ? paints : own;
@@ -228,13 +228,13 @@ function channel(v) {
  * Shadows are what make a control look like an object rather than a decal. The
  * design gives its knobs two stacked drop shadows (y=16 blur=6 at 10% black,
  * y=4 blur=4) and an occasional inner shadow; dropping them rendered every knob
- * flat — the single most-noticed difference after colour, and one no geometry
+ * flat — the single most-noticed difference after color, and one no geometry
  * check can see, because the box is exactly the right size and in exactly the
  * right place. It just has no depth.
  *
  * The IR reads standard CSS syntax via parse_css_box_shadow (design_ir_json),
  * layers comma-separated and `inset` for an inner shadow, so the mapping is
- * direct: offset x/y, radius → blur, spread, colour. Figma's blur/inner-glow
+ * direct: offset x/y, radius → blur, spread, color. Figma's blur/inner-glow
  * effects have no box-shadow equivalent and are skipped rather than
  * approximated into something the design never asked for.
  */
@@ -302,7 +302,7 @@ function colorToHex(color) {
 // ── component-instance expansion ─────────────────────────────────────────────
 //
 // An INSTANCE node has no children in the scene graph. Its content is its
-// master SYMBOL's subtree, customised by two per-instance override lists:
+// master SYMBOL's subtree, customized by two per-instance override lists:
 //
 //   symbolData.symbolOverrides — designer-authored property overrides
 //     (visible, fillPaints, textData.characters, fontSize, effects, …)
@@ -331,9 +331,9 @@ const OVERRIDE_SKIP_KEYS = new Set([
 ]);
 // NOTE: styleIdForFill / styleIdForStrokeFill are deliberately NOT skipped.
 // They were, back when nothing resolved styles and an unresolvable ref was just
-// noise. Now that a ref IS the colour, dropping it silently reverts an instance
+// noise. Now that a ref IS the color, dropping it silently reverts an instance
 // to its master's default token: the instrument tabs each override the ref to
-// their own colour and carry no literal, so skipping it painted kick/SNARE/TOM/
+// their own color and carry no literal, so skipping it painted kick/SNARE/TOM/
 // CRASH/RIDE with the master's "instrument/02 Fuchsia 85%" and turned a
 // red/yellow/green tab row into a wall of pink.
 
@@ -402,7 +402,7 @@ function hasAttachedStyleRef(ref) {
  *     recolour painted the FILTER switch's dot pure white where the design has
  *     #333537, and the Sync radio's inner dot at 20% opacity where the design
  *     has 65% — invisible enough to be reported as a MISSING dot rather than a
- *     mis-coloured one. Verified against the file's own thumbnail: both dots
+ *     mis-colored one. Verified against the file's own thumbnail: both dots
  *     match the style, not the literal.
  *
  * Case 3 is safe precisely because case 2 runs first for a genuinely detached
@@ -465,7 +465,7 @@ function firstSolidFill(node) {
 /**
  * Composite a stack of SOLID paints the way Figma paints them: array order,
  * index 0 at the bottom, each one source-over the result so far. A paint's own
- * `opacity` multiplies its colour's alpha, as everywhere else.
+ * `opacity` multiplies its color's alpha, as everywhere else.
  *
  * The order is not a guess. The file's slider thumb declares #4b4d51 then
  * white@0.55; bottom-to-top composites to #aeafb1 and top-to-bottom leaves the
@@ -514,7 +514,7 @@ function applyPaintTransform(t, x, y) {
 }
 
 // Sample a stop list at parameter `t`, with Figma's clamp-at-the-ends
-// behaviour (the first/last stop's colour extends past it).
+// behavior (the first/last stop's color extends past it).
 function sampleStops(stops, t) {
   if (t <= stops[0].position) return stops[0].color;
   const last = stops[stops.length - 1];
@@ -576,7 +576,7 @@ function sampleStops(stops, t) {
  * the CSS gradient-line length, and Figma's axis is free to start and end
  * outside the box (the rim highlight runs y=-0.26→0.67). Neither matches CSS
  * `<angle>` semantics, so the stops are RESAMPLED onto the widget's own axis:
- * the emitted 0% / 100% carry the colour the source ramp actually has where
+ * the emitted 0% / 100% carry the color the source ramp actually has where
  * the widget's line enters and leaves. That keeps the paint faithful without
  * depending on the widget and CSS agreeing about extent.
  */
@@ -590,7 +590,7 @@ function sampleStops(stops, t) {
  * radial string to the wrong consumer would silently render nothing.
  *
  * Figma's radial paint transform maps the unit circle onto an ellipse in the
- * node's normalized box; the ramp runs from the centre out to radius 1. The
+ * node's normalized box; the ramp runs from the center out to radius 1. The
  * consumer's radial is a CIRCLE with its radius a fraction of max(w,h), so an
  * elliptical or rotated paint is APPROXIMATED — which is why the caller keeps a
  * downgraded diagnostic instead of dropping it. Far closer than a flat wash: the
@@ -608,7 +608,7 @@ function radialPaintToCss(paint, w, h) {
 
   const inv = invertPaintTransform(paint.transform);
   if (!inv) return null;
-  // Centre of the ramp, and the two radius vectors, in normalized box space.
+  // Center of the ramp, and the two radius vectors, in normalized box space.
   const c = applyPaintTransform(inv, 0.5, 0.5);
   const rx = applyPaintTransform(inv, 1.0, 0.5);
   const ry = applyPaintTransform(inv, 0.5, 1.0);
@@ -621,7 +621,7 @@ function radialPaintToCss(paint, w, h) {
   const radiusFrac = ((r1 + r2) / 2) / Math.max(w, h);
   if (!Number.isFinite(radiusFrac) || radiusFrac <= 0) return null;
 
-  // Stop alpha and the paint's own opacity both fold into the emitted colour,
+  // Stop alpha and the paint's own opacity both fold into the emitted color,
   // exactly as the linear and solid paths do. This vignette is black at alpha
   // 0..0.24 with paint opacity 0.24 — drop either and it becomes an opaque
   // black disc instead of a shadow at the edges.
@@ -674,7 +674,7 @@ function gradientPaintToCss(paint, w, h) {
   if (seLen2 < 1e-9) return null;
 
   // Widget-axis parameter → source-ramp parameter, so each emitted stop
-  // carries the colour the source actually has at that point on the line.
+  // carries the color the source actually has at that point on the line.
   const sourceParamAt = (nt) => {
     const qx = s.x + sedx * nt - p0.x;
     const qy = s.y + sedy * nt - p0.y;
@@ -697,7 +697,7 @@ function gradientPaintToCss(paint, w, h) {
   const opacity = paint.opacity ?? 1;
   const parts = out.map((st) => {
     // Stop alpha and the paint's own opacity both fold into the emitted
-    // colour, exactly as the solid paths do — the rim highlight is white at
+    // color, exactly as the solid paths do — the rim highlight is white at
     // alpha 0.24, and dropping either makes it a hard white ring.
     const hex = colorToHex({ ...st.color, a: (st.color.a ?? 1) * opacity });
     return `${hex} ${round2(st.pos * 100)}%`;
@@ -706,14 +706,14 @@ function gradientPaintToCss(paint, w, h) {
 }
 
 /**
- * A single representative colour for a paint list, for consumers that can only
+ * A single representative color for a paint list, for consumers that can only
  * express a solid fill.
  *
  * A gradient collapses to the mean of its stops. That is a real approximation,
  * not a fidelity claim — but it is the difference between a shape reading as
- * roughly the right colour and reading as a black hole, because SvgPathWidget
+ * roughly the right color and reading as a black hole, because SvgPathWidget
  * defaults `fill_color_` to opaque black with `has_fill_` on. Returns null when
- * no colour can be derived, which the caller must lower to an explicit
+ * no color can be derived, which the caller must lower to an explicit
  * `fill: 'none'` rather than leaving the widget on its black default.
  */
 function approximatePaintColor(paints) {
@@ -722,7 +722,7 @@ function approximatePaintColor(paints) {
   // away. The slider thumb declares two: a #4b4d51 base with white at 55% over
   // it. Figma composites those to #aeafb1 — a light thumb — and we painted the
   // bare base, so it came out dark. That does not present as a dropped property;
-  // it presents as a wrong COLOUR, which sends you hunting through style refs and
+  // it presents as a wrong COLOR, which sends you hunting through style refs and
   // override precedence for a bug that is neither.
   //
   // Verified against the file's own thumbnail: Figma's raster samples #aeafb1
@@ -983,7 +983,7 @@ export function materializeFrame(scene, frame, ctx) {
         if (hex) style.background_color = hex;
         if (!firstSolidFill(node) && grad) {
           pushDiag('gradient-approximated', node,
-                   `${node.type} ${grad.type} flattened to its mean stop colour`);
+                   `${node.type} ${grad.type} flattened to its mean stop color`);
         }
       }
     }
@@ -1113,7 +1113,7 @@ export function materializeFrame(scene, frame, ctx) {
     // Figma auto-layout has no flex-shrink: a child is FIXED, HUG, or FILL, and
     // none of those let it render narrower than the size Figma solved for it. It
     // overflows its parent instead — the file's own toolbar buttons declare
-    // width 20 with 11+10 padding and Figma still draws the 12px icon, centred
+    // width 20 with 11+10 padding and Figma still draws the 12px icon, centered
     // on the resulting negative content box (x=4.5). Yoga defaults flex-shrink
     // to 1, so that same child collapsed to width 0 and its absolutely-placed
     // glyph then painted from the empty box's origin — the icon appeared shoved
@@ -1225,7 +1225,7 @@ export function materializeFrame(scene, frame, ctx) {
       if (expanded) node = expanded;
     }
     // Resolve style tokens ONCE, here, so every paint reader below sees the
-    // colour the design actually specifies. Doing it at each call site instead
+    // color the design actually specifies. Doing it at each call site instead
     // would mean a dozen chances to forget one.
     node = withResolvedPaints(node);
     const key = node.__key || guidKey(node.guid);
@@ -1345,7 +1345,7 @@ export function materializeFrame(scene, frame, ctx) {
         style.width = round2(resolved.box.width);
         style.height = round2(resolved.box.height);
         // A stroke outline is a fillable region, so it is painted as a fill in
-        // the stroke's colour. Re-stroking it would outline the outline.
+        // the stroke's color. Re-stroking it would outline the outline.
         const paints = resolved.paint === 'fill' ? node.fillPaints : node.strokePaints;
         const hex = approximatePaintColor(paints);
         // Always emit a fill, including the explicit 'none'. SvgPathWidget
@@ -1369,7 +1369,7 @@ export function materializeFrame(scene, frame, ctx) {
         } else if (!hex && grad) {
           pushDiag('gradient-approximated', node, `${type} ${grad.type} has no stops; fill cleared`);
         } else if (hex && grad) {
-          pushDiag('gradient-approximated', node, `${type} ${grad.type} flattened to its mean stop colour`);
+          pushDiag('gradient-approximated', node, `${type} ${grad.type} flattened to its mean stop color`);
         }
         delete style.background_color;
         if (resolved.droppedStroke) {
@@ -1459,13 +1459,13 @@ export function materializeFrame(scene, frame, ctx) {
           delete out.style.font_size;
           delete out.style.font_style;
           delete out.style.text_align;
-          // The glyph paints in the text's own colour.
+          // The glyph paints in the text's own color.
           out.fill = out.style.color || 'none';
           delete out.style.color;
           // Keep the box and position styleFor already derived from the node's
           // size and transform: the glyph is drawn inside the designer's text
           // box, and re-placing the node on the glyph's ink would strip the
-          // font's side bearings — the icon's padding — and shift it off-centre
+          // font's side bearings — the icon's padding — and shift it off-center
           // in its button. Only the viewBox is asserted, so the path maps into
           // the box it was measured in.
         } else {
@@ -1489,7 +1489,7 @@ export function materializeFrame(scene, frame, ctx) {
 
     if ((node.strokePaints || []).length && typeof node.strokeWeight === 'number' && node.strokeWeight > 0) {
       const s = firstSolidStroke(node);
-      // Figma multiplies a paint's own `opacity` by its colour's alpha — the
+      // Figma multiplies a paint's own `opacity` by its color's alpha — the
       // same product the fill and text paths already take. Reading only
       // `color.a` here rendered a stroke the designer set to 20% at FULL
       // strength, which does not look like a dropped property; it looks like the
@@ -1606,7 +1606,7 @@ function declaredMaterials(node) {
   const d = {};
 
   // The fill STACK, not just its first paint. Figma composites the whole list;
-  // a reader that takes one of them renders a colour that is wrong rather than
+  // a reader that takes one of them renders a color that is wrong rather than
   // missing, which is the hardest kind to attribute — the slider thumb read as a
   // precedence bug and then as a dropped node before anyone counted the paints.
   const fills = (node.fillPaints || []).filter((p) => p.visible !== false);
@@ -1632,7 +1632,7 @@ function declaredMaterials(node) {
   }
 
   // Visible stroke paints, with each paint's own opacity kept SEPARATE from its
-  // colour's alpha. Figma multiplies the two; a reader that takes only
+  // color's alpha. Figma multiplies the two; a reader that takes only
   // `color.a` silently renders a 20%-opacity stroke at full strength.
   const strokes = (node.strokePaints || []).filter((p) => p.visible !== false);
   if (strokes.length && typeof node.strokeWeight === 'number' && node.strokeWeight > 0) {

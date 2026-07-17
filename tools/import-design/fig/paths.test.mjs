@@ -103,7 +103,7 @@ const blobs = [
 
 test('a stroke-only vector resolves to its stroke outline, painted as a fill', () => {
   // The stroke outline is already an expanded, fillable region. Re-stroking it
-  // would outline the outline; painting it with the stroke colour is correct.
+  // would outline the outline; painting it with the stroke color is correct.
   const r = geometryToPath(strokeOnlyNode(), blobs);
   assert.equal(r.paint, 'stroke');
   assert.equal(r.box.width, 2);
@@ -273,11 +273,11 @@ test("a stroke-only vector's GRADIENT stroke reaches the path as a gradient", ()
   const { envelope } = materializeFrame(scene, frame, CTX);
   const v = firstVector(envelope.root);
   // The stroke paint must be the one that lands, not the empty fill: an empty
-  // fillPaints resolves to no colour, so reading the wrong paint list here emits
+  // fillPaints resolves to no color, so reading the wrong paint list here emits
   // `fill: 'none'` and the rim disappears silently.
   assert.ok(v.fillGradient, "a stroke gradient must survive AS a gradient, not flatten");
   assert.match(v.fillGradient, /^linear-gradient\(180deg,/);
-  // The ramp's own colours, alpha included — a rim emitted opaque is a rim that
+  // The ramp's own colors, alpha included — a rim emitted opaque is a rim that
   // reads as a hard ring instead of a highlight.
   assert.match(v.fillGradient, /#ffffff3d/, 'the white@0.24 stop must keep its alpha');
   assert.match(v.fillGradient, /#00000000/, 'the transparent stop must stay transparent');

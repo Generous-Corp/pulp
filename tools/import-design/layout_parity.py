@@ -41,9 +41,9 @@ What it cannot see
 ------------------
 BOXES, not the ink inside them. A label whose glyphs are shoved to one side of a
 correctly-placed box, an icon drawn at the wrong scale within right-sized
-bounds, a colour, a gradient — all invisible here, by construction. A clean
+bounds, a color, a gradient — all invisible here, by construction. A clean
 layout_parity run means the boxes are where the design puts them; it is NOT a
-statement that the render is right. `thumb_parity.py` is the colour/ink half,
+statement that the render is right. `thumb_parity.py` is the color/ink half,
 and a human looking at a montage is still the final say.
 
 Usage

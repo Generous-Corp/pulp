@@ -49,10 +49,10 @@ std::string resolved_snapshot(const ResolvedNativeNode& node, int depth = 0) {
     return out.str();
 }
 
-// Channel-wise colour check. CSS 8-bit channels round-trip through floats, so
+// Channel-wise color check. CSS 8-bit channels round-trip through floats, so
 // exact equality is unavailable; naming every expected channel (rather than
 // asserting "not the default") is what makes a dropped alpha or a
-// wrong-parser result fail instead of passing on a plausible-looking colour.
+// wrong-parser result fail instead of passing on a plausible-looking color.
 void check_color(const pulp::canvas::Color& actual,
                  float r, float g, float b, float a) {
     CHECK(actual.r == Catch::Approx(r).margin(0.01f));
@@ -375,13 +375,13 @@ TEST_CASE("native hit-ownership contract is exhaustive across widget kinds",
     }
 }
 
-TEST_CASE("every per-side border colour accepts non-hex CSS",
+TEST_CASE("every per-side border color accepts non-hex CSS",
           "[view][import][native-common][css-color]") {
-    // The four per-side border colours are the paint sites furthest from the one
+    // The four per-side border colors are the paint sites furthest from the one
     // branch that historically owned the rgb()/rgba() fallback, so they are where
-    // a call-site-local fix silently stops. Each side carries a DIFFERENT colour
+    // a call-site-local fix silently stops. Each side carries a DIFFERENT color
     // syntax: a per-side assertion fails loudly if a side reverts to hex-only,
-    // where a single shared colour would let a copy-paste slip through.
+    // where a single shared color would let a copy-paste slip through.
     DesignIR ir;
     ir.root.type = "frame";
     ir.root.stable_anchor_id = "grid";
@@ -393,7 +393,7 @@ TEST_CASE("every per-side border colour accepts non-hex CSS",
     ir.root.style.border_left_width = 1.0f;
     // The real Figma shape: a hairline stroke demoted to a 1px frame whose fill
     // carries the alpha. Dropping the alpha renders the grid at full opacity;
-    // dropping the colour renders it not at all. Assert the alpha, not just a>0.
+    // dropping the color renders it not at all. Assert the alpha, not just a>0.
     ir.root.style.border_top_color = "rgba(171, 171, 171, 0.1)";
     ir.root.style.border_right_color = "rgb(137, 180, 250)";
     ir.root.style.border_bottom_color = "#89b4fa";
@@ -413,13 +413,13 @@ TEST_CASE("every per-side border colour accepts non-hex CSS",
     check_color(root->border_left_color(), 0.0f, 0.0f, 0.0f, 0.0f);
 }
 
-TEST_CASE("an unparseable CSS colour leaves the paint site untouched",
+TEST_CASE("an unparseable CSS color leaves the paint site untouched",
           "[view][import][native-common][css-color]") {
-    // A colour the helper recognizes neither as hex nor as a functional syntax
+    // A color the helper recognizes neither as hex nor as a functional syntax
     // must yield nullopt so the paint site keeps its default. This matters
     // because the shared CSS parser returns opaque WHITE for anything it fails
     // to understand: routing an unknown token into it would repaint the border
-    // white rather than leave it alone — a wrong colour is worse than no colour,
+    // white rather than leave it alone — a wrong color is worse than no color,
     // since it can't be told apart from a deliberate one downstream.
     DesignIR ir;
     ir.root.type = "frame";
@@ -436,13 +436,13 @@ TEST_CASE("an unparseable CSS colour leaves the paint site untouched",
     check_color(root->border_color(), 0.0f, 0.0f, 0.0f, 1.0f);
 }
 
-TEST_CASE("hsl() paints the colour it names",
+TEST_CASE("hsl() paints the color it names",
           "[view][import][native-common][css-color]") {
     // This case was first written to characterize a gap: the helper admitted an
     // `hsl(` prefix and handed it to a parser that implemented only #hex, rgb(),
     // rgba() and `transparent`, so hsl() fell off the end and took that parser's
     // opaque-WHITE default. That is worse than refusing it — an unparseable
-    // token leaves a paint site untouched, but a wrong colour is
+    // token leaves a paint site untouched, but a wrong color is
     // indistinguishable downstream from a deliberate one, so an hsl() design
     // painted white and looked like someone had chosen white.
     DesignIR ir;

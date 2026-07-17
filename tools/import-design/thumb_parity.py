@@ -11,7 +11,7 @@ screenshots and reporting them one at a time: a wall of pink tabs, an inverted
 toggle, a missing record dot. Each was obvious in the pixels and invisible to
 every gate we had.
 
-This is GROSS-COLOUR TRIAGE and nothing more: scale-match the two images and rank
+This is GROSS-COLOR TRIAGE and nothing more: scale-match the two images and rank
 the blocks that disagree. Advisory only — never a gate.
 
 WHAT IT CANNOT SEE (read this before trusting a pass)
@@ -24,15 +24,15 @@ preserves a region's mean:
     grey once downscaled
   * a soft shadow on a dark panel — it vanishes into the mean
 
-Those were three REAL bugs on 2026-07-16, and this tool reported "colour is
+Those were three REAL bugs on 2026-07-16, and this tool reported "color is
 close" through every one of them. They were found instead by a human zooming
 into Figma. At ~0.4x it also cannot resolve anything under ~3 design px, so a
 2px arc or a glyph is beyond it — chasing its last few percent is reading noise.
 
-This docstring used to end "it finds colour faults a geometry check cannot see by
+This docstring used to end "it finds color faults a geometry check cannot see by
 construction", which is true and badly misleading: the sentence names what it
 beats rather than what it misses, and I wrote it while believing a 400px
-thumbnail was a sufficient reference. It is sufficient for gross colour, presence
+thumbnail was a sufficient reference. It is sufficient for gross color, presence
 and gross placement. It is USELESS for material — opacity, gradients, shadows,
 glyph weight — which is exactly where "close but a bit off" lives.
 
@@ -43,16 +43,16 @@ three bugs shipped. A human on a montage is the final say.
 
 What it can and cannot say
 --------------------------
-The thumbnail is ~0.4x (400x268 for a 1004x672 design). It adjudicates colour,
+The thumbnail is ~0.4x (400x268 for a 1004x672 design). It adjudicates color,
 presence and gross placement. It CANNOT adjudicate a 2px arc or a glyph, and
 conclusions drawn from upscaling it are unsound — so we downscale OUR render to
 the thumbnail's size rather than upscaling the thumbnail to ours. That also
 equalizes anti-aliasing: two different rasterizers converge under a box
 downscale, which is what makes a cross-renderer comparison meaningful at all.
 
-Colour distance is CIEDE2000, so a threshold means something perceptual: ~1 is
+Color distance is CIEDE2000, so a threshold means something perceptual: ~1 is
 a just-noticeable difference, ~3 is "a person would call that a different
-colour". Naive RGB distance would rank a dark-on-dark shift far below a bright
+color". Naive RGB distance would rank a dark-on-dark shift far below a bright
 one that nobody can see.
 """
 
@@ -72,7 +72,7 @@ except ImportError:  # pragma: no cover - environment guard
 
 
 # --- CIEDE2000 ---------------------------------------------------------------
-# sRGB -> Lab -> dE2000. Written out rather than pulled from a colour library so
+# sRGB -> Lab -> dE2000. Written out rather than pulled from a color library so
 # this stays runnable anywhere the rest of the import tooling runs.
 
 def _srgb_to_linear(c: float) -> float:
@@ -221,9 +221,9 @@ def main() -> int:
     # The scope banner prints on every run, because the docstring only reaches
     # someone who opens the file and the output reaches everyone. A tool whose
     # limits are documented where its readers are not is how this one reported
-    # "colour is close" through a flat gradient, an opaque-instead-of-20% icon,
+    # "color is close" through a flat gradient, an opaque-instead-of-20% icon,
     # and a missing shadow — all on the same evening.
-    print("thumb_parity: GROSS-COLOUR TRIAGE, advisory only — never a gate.")
+    print("thumb_parity: GROSS-COLOR TRIAGE, advisory only — never a gate.")
     print("  Blind to anything preserving a region's mean: flattened gradients,")
     print("  thin-stroke opacity, shadows on dark panels. Cannot resolve <~3 design px.")
     print("  Geometry → layout_parity.py. Material survival → the material audit.")
@@ -257,11 +257,11 @@ def main() -> int:
             if not n:
                 continue
             # dE between the two block MEANS — not the mean of per-pixel dE.
-            # The latter measures edge alignment, not colour: two rasterizers put
+            # The latter measures edge alignment, not color: two rasterizers put
             # a glyph edge a fraction of a pixel apart and every block holding
-            # text scores enormous, which flagged 85% of a frame whose colours
+            # text scores enormous, which flagged 85% of a frame whose colors
             # were fine. Comparing means asks the question actually being asked —
-            # "is this region the right colour" — and is blind to sub-pixel
+            # "is this region the right color" — and is blind to sub-pixel
             # placement by construction. Geometry is layout_parity.py's job.
             mean = delta_e2000(lab((tr // n, tg // n, tb // n)), lab((sr // n, sg // n, sb // n)))
             if mean <= args.threshold:

@@ -145,7 +145,7 @@ test('declared shadows are counted, so 16-declared-against-1-emitted cannot hide
 test('a fill stack emitted as its bottom paint alone is a silent drop', () => {
   // The slider-thumb bug, as a count. The design declares #4b4d51 with white@0.55
   // over it; Figma composites that to #aeafb1. Emitting the bare base is not a
-  // missing property — it is a WRONG COLOUR, which got attributed to style
+  // missing property — it is a WRONG COLOR, which got attributed to style
   // precedence and then to a dropped node before anyone counted the paints.
   const thumb = (rgb) => [
     { type: 'SOLID', opacity: 1, color_alpha: 1, rgb: '#4b4d51' },
@@ -167,7 +167,7 @@ test('a fill stack emitted as its bottom paint alone is a silent drop', () => {
   const fixed = auditMaterials(m, envelope([
     { node_id: '0:1', name: 'Fader Position 3', style: { background_color: '#aeafb1' } },
   ]), []);
-  assert.deepEqual(fixed.findings, [], 'the composited colour is not flagged');
+  assert.deepEqual(fixed.findings, [], 'the composited color is not flagged');
   assert.equal(fixed.emittedCounts['fill.stack'], 1);
 
   // Negative control: a lone paint is not a stack and is never checked.

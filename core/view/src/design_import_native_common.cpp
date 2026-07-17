@@ -1187,17 +1187,17 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
         flex.dim_height = {0.0f, DimensionUnit::auto_};
 }
 
-// Every CSS colour a design can write, from ONE place.
+// Every CSS color a design can write, from ONE place.
 //
 // This exists because the fallback used to live at a single call site. Prefer
 // the hex fast path, then the shared CSS parser for rgb()/rgba()/transparent:
 // Figma demotes a hairline stroke (the FILTER & EQ grid `Line`s) to a 1px frame
-// whose fill is the stroke colour — often rgba(171,171,171,0.1) — which
+// whose fill is the stroke color — often rgba(171,171,171,0.1) — which
 // parse_hex_color drops, leaving the grid invisible.
 //
 // That fallback was attached to `background_color` alone, while SEVEN paint
 // sites here call parse_hex_color: background, text `color`, `border_color`, and
-// the four per-side border colours. So a design saying `color: rgba(...)` got
+// the four per-side border colors. So a design saying `color: rgba(...)` got
 // its background right and silently lost its TEXT and every BORDER. One branch
 // learned the lesson; its six siblings never heard it — the same shape as
 // setBoxShadow being emitted from the frame branch alone, so that 16 declared

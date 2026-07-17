@@ -63,7 +63,7 @@ canvas::Color parse_css_color(const std::string& str) {
     if (str.compare(0, 4, "hsl(") == 0 || str.compare(0, 5, "hsla(") == 0) {
         // hsl() used to fall off the end of this function and return the opaque
         // WHITE default above. That is worse than refusing it: an unparseable
-        // token leaves a paint site untouched, but a wrong colour is
+        // token leaves a paint site untouched, but a wrong color is
         // indistinguishable downstream from a deliberate one, so an hsl() design
         // painted white and looked like a design decision.
         auto inner = str.substr(str.find('(') + 1);

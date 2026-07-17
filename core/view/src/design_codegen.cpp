@@ -1322,7 +1322,7 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
                 ss << ind << "setSvgStrokeWidth('" << id << "', " << sw->second << ");\n";
             else if (node.style.border_color && !node.style.border_color->empty() &&
                      node.style.border_width && *node.style.border_width > 0.0f)
-                // Paired with the stroke colour above: a stroke emitted without
+                // Paired with the stroke color above: a stroke emitted without
                 // its weight paints at the widget's default, so a 1px rim
                 // arrives at the wrong thickness — visible, but wrong, which is
                 // harder to spot than missing.
