@@ -473,6 +473,43 @@ TEST_CASE("parse_figma_plugin_json handles a Pulp / Knob without optional units"
     REQUIRE(ir.root.attributes.count("units") == 0);
 }
 
+// An explicit `audio_widget: "none"` is an opt-out, not an absence: the
+// offline .fig decoder stamps it on every node inside an expanded component
+// instance so a layer literally named "knob base" keeps the designer's own
+// art instead of being name-promoted to the built-in silver knob. Before this
+// fix "none" parsed to AudioWidgetType::none but did NOT count as explicit,
+// so the name heuristic ran anyway and painted Pulp's stock knob over every
+// expanded component whose internals mention "knob"/"fader"/etc.
+TEST_CASE("explicit audio_widget 'none' suppresses name-based widget detection",
+          "[view][import][figma-plugin][audio-widget]") {
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "provenance": { "adapter": "figma-plugin", "version": "0.1.0",
+                        "source_uri": "figma://local/0:0" },
+        "root": {
+            "type": "frame",
+            "name": "Root",
+            "style": { "width": 100, "height": 100 },
+            "children": [
+                { "type": "frame", "name": "knob base", "audio_widget": "none",
+                  "style": { "width": 28, "height": 28 } },
+                { "type": "frame", "name": "knob ring",
+                  "style": { "width": 28, "height": 28 } }
+            ]
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.children.size() == 2);
+    // Opted out: stays a plain container despite the knob-token name.
+    REQUIRE(ir.root.children[0].audio_widget == AudioWidgetType::none);
+    // Control: the same shape WITHOUT the opt-out is still name-promoted, so
+    // this test cannot pass by the heuristic being broken altogether.
+    REQUIRE(ir.root.children[1].audio_widget == AudioWidgetType::knob);
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // figma-plugin audio-widget binding wire-up.
 //

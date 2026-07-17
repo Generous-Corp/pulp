@@ -15,6 +15,7 @@
 #include "design_import_internal.hpp"
 
 #include <choc/text/choc_JSON.h>
+#include <choc/text/choc_StringUtilities.h>
 
 #include <algorithm>
 #include <cctype>
@@ -936,14 +937,28 @@ static IRInteractiveElement parse_ir_interactive_element(const choc::value::Valu
 
 // Audio-widget type + label + range. Returns whether the node carried an
 // explicit audio widget, which gates the post-parse detection pass.
+//
+// An explicit `"none"` is a real statement, not an absence: the source is
+// saying "this node is component-internal art / already classified — do NOT
+// name-guess it". The offline .fig decoder stamps it on every node inside an
+// expanded component instance so a layer named "knob base" keeps the
+// designer's own art instead of being promoted to the built-in knob; the
+// recognition resolver still runs afterwards (it is keyed on component
+// identity, not names), so a matched library component becomes a widget
+// through the never-silent-knob path regardless. An unknown string still
+// falls through to detection — only a literal "none" opts out.
 static bool parse_ir_audio_widget(IRNode& node, const choc::value::ValueView& obj) {
     bool explicit_audio_widget = false;
+    auto read_kind = [&](const char* key) {
+        const std::string raw = get_string(obj, key);
+        node.audio_widget = audio_widget_from_id(raw);
+        explicit_audio_widget = node.audio_widget != AudioWidgetType::none ||
+                                choc::text::toLowerCase(raw) == "none";
+    };
     if (obj.hasObjectMember("audioWidget") && obj["audioWidget"].isString()) {
-        node.audio_widget = audio_widget_from_id(get_string(obj, "audioWidget"));
-        explicit_audio_widget = node.audio_widget != AudioWidgetType::none;
+        read_kind("audioWidget");
     } else if (obj.hasObjectMember("audio_widget") && obj["audio_widget"].isString()) {
-        node.audio_widget = audio_widget_from_id(get_string(obj, "audio_widget"));
-        explicit_audio_widget = node.audio_widget != AudioWidgetType::none;
+        read_kind("audio_widget");
     }
     if (obj.hasObjectMember("label"))
         node.audio_label = get_string(obj, "label");
