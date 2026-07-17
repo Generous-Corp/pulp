@@ -51,9 +51,9 @@ struct GpuBloomEffect : ViewEffect {
     float radius = 8.0f;
 
     void configure_layer(Canvas& canvas, float x, float y, float w, float h) override {
-        // Bloom uses the canvas bloom API (which is implemented in SkiaCanvas)
-        canvas.set_bloom(intensity, threshold);
-        canvas.save_layer(x, y, w, h, 1.0f, radius * intensity);
+        // Real bloom: SkiaCanvas thresholds + blurs + additively composites the
+        // glow; other backends degrade to a plain blurred layer (base default).
+        canvas.save_layer_with_bloom(x, y, w, h, intensity, threshold, radius);
     }
 };
 

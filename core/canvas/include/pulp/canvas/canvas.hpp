@@ -551,10 +551,25 @@ public:
     virtual void stroke_current_path() {}
 
     // ── Bloom / Glow post-effect ────────────────────────────────────────
-    /// Apply bloom/glow effect to the current layer.
-    /// intensity: glow strength (0=none, 1=full), threshold: brightness cutoff (0-1).
-    virtual void set_bloom(float intensity, float threshold = 0.7f) {
-        (void)intensity; (void)threshold;
+    /// Save a compositing layer that applies a real bloom/glow post-effect to
+    /// the subtree painted into it. The layer content is thresholded (only
+    /// pixels brighter than `threshold` contribute), blurred by `radius`, and
+    /// additively composited (kPlus) back over the original — so bright regions
+    /// bleed a glow beyond their edges. Restored by the matching `restore()`.
+    ///
+    /// @param intensity  glow gain applied to the thresholded highlights
+    /// @param threshold  brightness cutoff in [0,1]; pixels below it don't glow
+    /// @param radius     blur radius (px) of the glow
+    ///
+    /// The base implementation has no offscreen post-processing, so it degrades
+    /// to a plain blurred layer (`save_layer` with `radius * intensity` blur) —
+    /// the de-facto behavior effects had before a real bloom existed. Only the
+    /// GPU backend (SkiaCanvas) implements the true threshold+blur+additive
+    /// graph; RecordingCanvas records the bloom intent for headless assertions.
+    virtual void save_layer_with_bloom(float x, float y, float w, float h,
+                                       float intensity, float threshold,
+                                       float radius) {
+        save_layer(x, y, w, h, 1.0f, radius * intensity);
     }
 
     // ── Shapes ───────────────────────────────────────────────────────────

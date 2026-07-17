@@ -30,13 +30,26 @@ TEST_CASE("GpuBlurEffect configures layer with blur", "[render][effect]") {
     REQUIRE(rc.command_count() > 0);  // save_layer recorded
 }
 
-TEST_CASE("GpuBloomEffect configures with intensity", "[render][effect]") {
+// GpuBloomEffect must route through the real bloom layer API, not a plain
+// save_layer. RecordingCanvas records save_layer_with_bloom as its own command
+// carrying intensity / threshold / radius, so a headless test can prove the
+// effect asked for a bloom (not just "some command was emitted").
+TEST_CASE("GpuBloomEffect emits a bloom layer with its parameters",
+          "[render][effect]") {
     canvas::RecordingCanvas rc;
     canvas::GpuBloomEffect bloom;
     bloom.intensity = 0.7f;
     bloom.threshold = 0.9f;
+    bloom.radius = 12.0f;
     bloom.configure_layer(rc, 0, 0, 200, 200);
-    REQUIRE(rc.command_count() > 0);
+
+    REQUIRE(rc.count(canvas::DrawCommand::Type::save_layer_bloom) == 1);
+    REQUIRE(rc.count(canvas::DrawCommand::Type::save_layer) == 0);  // not a plain layer
+    const auto& cmd = rc.commands().back();
+    REQUIRE(cmd.f[4] == Catch::Approx(0.7f));   // intensity
+    REQUIRE(cmd.f[5] == Catch::Approx(0.9f));   // threshold
+    REQUIRE(cmd.floats.size() == 1);
+    REQUIRE(cmd.floats[0] == Catch::Approx(12.0f));  // radius
 }
 
 TEST_CASE("VignetteEffect has meaningful intensity", "[render][effect]") {

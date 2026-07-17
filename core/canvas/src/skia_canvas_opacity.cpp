@@ -121,6 +121,55 @@ void SkiaCanvas::save_layer_with_blend(float x, float y, float w, float h,
 }
 
 
+// Real bloom / glow post-effect.
+//
+// Threshold the layer content (keep only pixels brighter than `threshold`,
+// gained by `intensity`), blur the result, and additively composite (kPlus)
+// that glow back over the original layer content — so bright regions bleed a
+// halo beyond their edges. Restored by the matching restore() like any layer.
+//
+//   out_rgb   = clamp((in_rgb   - threshold) * g)      // thresholded highlight
+//   out_alpha = clamp((luma(in) - threshold) * g)      // luma-gated so that
+//                                                        // below-threshold
+//                                                        // regions glow nothing
+//   layer     = source + blur(out)                     // additive bloom
+//
+// Gating alpha by luminance (rather than leaving it identity) matters: a plain
+// identity-alpha threshold matrix would spread a faint alpha halo from
+// below-threshold regions even though their color is zero. SkColorFilters::
+// Matrix operates on UNPREMUL color, and — verified by pixel readback in
+// test_canvas.cpp — the translation column is in NORMALIZED [0,1] space in this
+// Skia build, so the bias is -threshold*g (no 255 scale).
+void SkiaCanvas::save_layer_with_bloom(float x, float y, float w, float h,
+                                       float intensity, float threshold,
+                                       float radius) {
+    if (!canvas_) { save(); return; }
+
+    SkRect bounds = SkRect::MakeXYWH(x, y, w, h);
+
+    const float denom = std::max(1.0f - threshold, 0.05f);
+    const float g = intensity / denom;
+    const float bias = -threshold * g;
+    // Rec.709 luma weights for the alpha (glow) gate.
+    const float lr = 0.2126f * g, lg = 0.7152f * g, lb = 0.0722f * g;
+    float m[20] = {
+        g,  0,  0,  0, bias,
+        0,  g,  0,  0, bias,
+        0,  0,  g,  0, bias,
+        lr, lg, lb, 0, bias,
+    };
+    sk_sp<SkImageFilter> thresholded =
+        SkImageFilters::ColorFilter(SkColorFilters::Matrix(m), nullptr);
+    sk_sp<SkImageFilter> glow = SkImageFilters::Blur(
+        radius, radius, SkTileMode::kClamp, std::move(thresholded));
+    sk_sp<SkImageFilter> bloom = SkImageFilters::Blend(
+        SkBlendMode::kPlus, /*background=*/nullptr, /*foreground=*/std::move(glow));
+
+    SkPaint layer_paint;
+    layer_paint.setImageFilter(std::move(bloom));
+    canvas_->saveLayer(&bounds, &layer_paint);
+}
+
 // Full CSS filter chain composition.
 //
 // Builds an SkImageFilter chain from the structured FilterChainEntry

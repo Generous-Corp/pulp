@@ -1482,6 +1482,62 @@ TEST_CASE("LottieAnimation composites skottie frames onto a SkiaCanvas",
     REQUIRE(painted > static_cast<std::size_t>(px) * px / 2);
 }
 
+// Real bloom must bleed a glow beyond a bright region's edge, and must NOT bleed
+// from a region below the brightness threshold. This is a pixel-readback proof
+// of SkiaCanvas::save_layer_with_bloom — the fake `set_bloom` it replaced was a
+// no-op, so a bloom "test" could only ever assert that some command ran.
+TEST_CASE("SkiaCanvas save_layer_with_bloom bleeds bright highlights past their edge",
+          "[canvas][skia][bloom][save-layer]") {
+    auto make_surface = []() {
+        SkImageInfo info = SkImageInfo::Make(64, 64, kN32_SkColorType,
+                                             kPremul_SkAlphaType,
+                                             SkColorSpace::MakeSRGB());
+        return SkSurfaces::Raster(info);
+    };
+    // The rect spans x:28..36; sample x=38 (2px right of the edge), y=32 —
+    // close enough that the Gaussian glow is well above the 8-bit floor, but
+    // still strictly outside the painted rect.
+    constexpr int kProbeX = 38, kProbeY = 32;
+
+    // (a) A bright (white) rect above threshold bleeds a glow OUTSIDE its edge.
+    {
+        auto surface = make_surface();
+        surface->getCanvas()->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(surface->getCanvas());
+        canvas.save_layer_with_bloom(0, 0, 64, 64, /*intensity=*/0.8f,
+                                     /*threshold=*/0.5f, /*radius=*/8.0f);
+        canvas.set_fill_color(Color::rgba8(255, 255, 255, 255));
+        canvas.fill_rect(28, 28, 8, 8);
+        canvas.restore();
+
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        SkColor out = pm.getColor(kProbeX, kProbeY);
+        unsigned lum = SkColorGetR(out) + SkColorGetG(out) + SkColorGetB(out);
+        INFO("bright-rect outside luminance = " << lum);
+        REQUIRE(lum > 0u);  // the glow bled past the rect edge
+    }
+
+    // (b) A dim (0.2 grey) rect below threshold produces NO glow — outside stays
+    //     at the background. Same geometry, same probe.
+    {
+        auto surface = make_surface();
+        surface->getCanvas()->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(surface->getCanvas());
+        canvas.save_layer_with_bloom(0, 0, 64, 64, 0.8f, 0.5f, 8.0f);
+        canvas.set_fill_color(Color::rgba8(51, 51, 51, 255));  // 0.2 grey < 0.5
+        canvas.fill_rect(28, 28, 8, 8);
+        canvas.restore();
+
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        SkColor out = pm.getColor(kProbeX, kProbeY);
+        unsigned lum = SkColorGetR(out) + SkColorGetG(out) + SkColorGetB(out);
+        INFO("dim-rect outside luminance = " << lum);
+        REQUIRE(lum == 0u);  // below threshold: no bleed
+    }
+}
+
 #endif  // PULP_HAS_SKIA
 
 

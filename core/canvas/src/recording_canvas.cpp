@@ -465,6 +465,18 @@ void RecordingCanvas::save_layer_with_mask(float x, float y, float w, float h,
     ctm_stack_.push_back(ctm_);
 }
 
+void RecordingCanvas::save_layer_with_bloom(float x, float y, float w, float h,
+                                            float intensity, float threshold,
+                                            float radius) {
+    DrawCommand cmd{DrawCommand::Type::save_layer_bloom};
+    cmd.f[0] = x; cmd.f[1] = y; cmd.f[2] = w; cmd.f[3] = h;
+    cmd.f[4] = intensity; cmd.f[5] = threshold;
+    cmd.floats.push_back(radius);
+    commands_.push_back(std::move(cmd));
+    ++save_depth_;
+    ctm_stack_.push_back(ctm_);
+}
+
 bool RecordingCanvas::draw_with_sksl(const std::string& sksl, float x, float y,
                                      float w, float h,
                                      const ShaderUniforms& uniforms) {

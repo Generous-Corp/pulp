@@ -383,6 +383,9 @@ public:
                                float opacity,
                                const std::string& mask_image,
                                const std::string& mask_size) override;
+    void save_layer_with_bloom(float x, float y, float w, float h,
+                               float intensity, float threshold,
+                               float radius) override;
 
 private:
     // Build the active fill paint, honoring `gradient_shader_` when set

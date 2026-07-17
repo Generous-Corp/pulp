@@ -163,6 +163,7 @@ struct DrawCommand {
         save_layer_blend,     ///< bounds f[0..3]; opacity f[4]; blur f[5]; blend mode (int) in floats[0]
         save_layer_filters,   ///< bounds f[0..3]; effective opacity f[4]; summed blur f[5]; filter count in floats[0]
         save_layer_mask,      ///< bounds f[0..3]; opacity f[4]; mask-image CSS value in `text` (mask-size not captured)
+        save_layer_bloom,     ///< bounds f[0..3]; intensity f[4]; threshold f[5]; blur radius in floats[0]
         // Custom SkSL draw recorded as intent. The base draw_with_sksl
         // fills a CPU placeholder rect and returns false; RecordingCanvas
         // instead captures the shader source + rect and returns false
@@ -291,6 +292,9 @@ public:
                               float opacity,
                               const std::string& mask_image,
                               const std::string& mask_size) override;
+    void save_layer_with_bloom(float x, float y, float w, float h,
+                               float intensity, float threshold,
+                               float radius) override;
 
     // Record a custom SkSL draw as intent and return false — a recorder
     // cannot compile or execute SkSL, so it makes no claim of success. This
