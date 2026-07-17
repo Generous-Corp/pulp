@@ -4192,29 +4192,45 @@ but no published release", check both legs' runs AND the coordinator. A manual
 release-cli workflow_dispatch backfill still publishes directly (draft only on
 `push`).
 
-## Build strings must be bounded
+## Build strings must take a share, not the machine
 
-Every build command in `.shipyard/config.toml` and the CI workflows must pass an
-explicit `--parallel`/`-j` count — a literal, or `$(getconf _NPROCESSORS_ONLN
-2>/dev/null || echo N)` on POSIX backends. A bare `--parallel` maps to unbounded
-`make -j` and can exhaust memory / oversubscribe a shared runner (the mac
-`local` backend runs these strings directly on the host). The Windows
-(ssh-windows / PowerShell) overrides use a fixed literal — `$(…)` doesn't parse
-there, and unbounded MSBuild link parallelism trips LNK1104 on ARM64.
+A `.shipyard/config.toml` POSIX `build` string runs on the shared self-hosted
+Mac, so it must take a *share* of the host — route it through
+`tools/ci/governed-build.sh` and carry NO `--parallel`/`-j` (the wrapper injects
+a leased/bounded `-j`). "Bounded" is not enough: `--parallel $(getconf
+_NPROCESSORS_ONLN)` has a count yet claims every core, so it starves concurrent
+builds and the required `macos` gate — the guard rejects that whole-machine shape
+on shared-host surfaces (see below). A bare `--parallel` is worse (unbounded
+`make -j`) and is rejected everywhere. The CI *workflows* (`.github/workflows/**`)
+run on ephemeral GitHub-hosted runners where `-j$(nproc)` is correct and allowed.
+The Windows (ssh-windows / PowerShell) overrides use a fixed literal `--parallel 4`
+— `$(…)` doesn't parse there, and unbounded MSBuild link parallelism trips
+LNK1104 on ARM64.
 `tools/scripts/build_parallelism_guard.py` enforces this in the `validation.gates`
-setup chain and as a ctest; a bare `--parallel`/`-j` fails the gate.
+setup chain and as a ctest. It rejects two shapes: a **bare** `--parallel`/`-j`
+(unbounded) anywhere, and — on the shared-host surfaces agents copy from
+(`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`) — an explicit but
+**whole-machine** core-count expansion (`-j$(nproc)` / `-j$(sysctl -n hw.ncpu)` /
+`--parallel $(getconf _NPROCESSORS_ONLN)`): it has a count, so it is not
+unbounded, but on a shared Mac it claims every core, so concurrent builds starve
+each other and the required `macos` gate validating alongside them. The same
+expansion stays allowed on `.github/workflows/**` (ephemeral runners, nothing
+else on the box) — the rule is a property of the host, not the command.
 
-The mac `local` and ssh-linux `build` strings run through
-`tools/ci/governed-build.sh`, NOT a bare `cmake --build`. Shipyard's `local`
-backend executes the config string directly on the host (bypassing the pulp
-CLI's lease integration), so the wrapper is what puts a host-native validation
-build under a tartci host lease: it sizes `-j` from `tartci host-profile`,
-holds a `build`-priority lease for the build's duration (released via an EXIT
-trap — it runs the build as a child, never `exec`, so the trap fires), and
-falls back to a bounded local `-j` when tartci is absent (build VM / plain
-checkout) or the lease is denied (it never fails the build and never piles onto
-a saturated host). Keep new POSIX build strings routed through it; don't add a
-bare `cmake --build … --parallel` back to the `local`/ssh-linux lanes.
+Every POSIX `build` stage in `.shipyard/config.toml` — `default`, `parser`, AND
+`smoke` — runs through `tools/ci/governed-build.sh`, NOT a bare/whole-machine
+`cmake --build`. (The `smoke` lane used to run `--parallel $(getconf
+_NPROCESSORS_ONLN)` whole-machine on the shared Mac; it is now governed like the
+others.) Shipyard's `local` backend executes the config string directly on the
+host (bypassing the pulp CLI's lease integration), so the wrapper is what puts a
+host-native validation build under a tartci host lease: it sizes `-j` from
+`tartci host-profile`, holds a `build`-priority lease for the build's duration
+(released via an EXIT trap — it runs the build as a child, never `exec`, so the
+trap fires), and falls back to a bounded local `-j` when tartci is absent (build
+VM / plain checkout) or the lease is denied (it never fails the build and never
+piles onto a saturated host). Keep new POSIX build strings routed through it;
+don't add a bare or `$(nproc)`-style `cmake --build … --parallel` back to the
+`local`/ssh-linux lanes.
 
 ## macOS Intel (x86_64) CI tiering
 

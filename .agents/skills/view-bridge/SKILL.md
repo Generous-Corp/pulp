@@ -458,7 +458,7 @@ cp core/view/include/pulp/view/widget_bridge.hpp \
 rm -rf "$CONSUMER/build/CMakeFiles/<your-target>.dir"
 
 # Rebuild the consumer from clean
-cmake --build "$CONSUMER/build" --target <your-target> -j
+tools/ci/governed-build.sh cmake --build "$CONSUMER/build" --target <your-target>
 ```
 
 When you `pulp upgrade --install` this is automatic because the SDK

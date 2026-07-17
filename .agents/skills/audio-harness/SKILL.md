@@ -83,7 +83,7 @@ Read `test/support/README.md` for the authoritative layering contract.
 ```bash
 # Build + run the whole harness (Release — Debug is meaningless for DSP timing/levels)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(sysctl -n hw.ncpu) --target \
+tools/ci/governed-build.sh cmake --build build --target \
   pulp-test-audio-support pulp-test-render-scenario pulp-test-audio-contracts \
   pulp-test-audio-doctor pulp-test-adapter-audio-parity pulp-test-golden \
   pulp-test-audio-matrix pulp-test-audio-tone-regression pulp-test-latency-contract

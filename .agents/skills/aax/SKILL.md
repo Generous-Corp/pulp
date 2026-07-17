@@ -97,7 +97,7 @@ cmake -S . -B build \
   -DCMAKE_BUILD_TYPE=Debug \
   -DPULP_ENABLE_AAX=ON \
   -DPULP_AAX_SDK_DIR="$PULP_AAX_SDK_DIR"
-cmake --build build --target MyPlugin_AAX -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)
+tools/ci/governed-build.sh cmake --build build --target MyPlugin_AAX
 ```
 
 Validate built plugins:
