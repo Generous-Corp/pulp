@@ -261,3 +261,38 @@ They refuse rather than guess: silence, an output that is not a delayed copy of
 the input, an integer-sample-periodic stimulus, and a report that moved
 mid-render all come back `inconclusive`. See the `audio-harness` skill for the
 full list and the stimulus each policy needs.
+
+## The spectral analyzers throw — and the throw is the feature
+
+`measure_aliasing` and `measure_thd` reject inputs they would otherwise report a
+confident number for. Catch the exception or size the arguments correctly; do not
+read the refusal as a tooling bug.
+
+The one that surprises people is the bass wall. `measure_aliasing` only models an
+alias site where a *requested* harmonic crosses Nyquist, so with the default
+`num_harmonics = 64` at 48 kHz, a fundamental below ~375 Hz models no alias site
+at all. It used to answer "clean" — a naive, maximally aliased saw read −200 dB
+and passed a −100 dBc gate, because "no aliases among the zero places I looked"
+is technically true. **Size `num_harmonics` from the sample rate**, not from a
+default: it needs `fundamental_hz * num_harmonics >= nyquist`.
+
+`measure_thd` refuses silence (a dead processor otherwise reads THD 0 and passes
+`thd < 1%`), a buffer shorter than `fft_length` (the old zero-pad made a clean
+sine read −48.7 dB against a truth of −176.7, and recorded `coherent = true`),
+and a fundamental at or above Nyquist.
+
+## Never gate on `detection_floor_db`
+
+It is a ~2σ bound that assumes a **white** residual. Aliases are discrete tones,
+so the assumption fails exactly where the number is most tempting, and asserting
+it is the analyzer grading its own homework. Its one legitimate use is deciding
+whether a reading is conclusive at all — a gate is trustworthy only while the
+measured value clears the floor.
+
+**Prove a floor with a negative control instead**: a fixture whose alias content
+is zero by construction must read collapsed, and injected impurities of known
+level must come back at that level. That is evidence; the derived number is an
+assumption. `tone_residual_db` is the projection path and sidesteps window
+leakage entirely — prefer it to reading a windowed spectrum near a loud tone, and
+note that kaiser's deep floor holds near the tone but not at bins 1–3, where the
+DC-removal pedestal dominates regardless of window.
