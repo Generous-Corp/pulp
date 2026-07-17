@@ -1674,6 +1674,78 @@ TEST_CASE("SkiaCanvas save_layer_with_sksl_post_effect post-processes layer cont
     }
 }
 
+// A real shader-effect API accepts ARBITRARY named uniforms, not just the fixed
+// widget vocabulary — the difference between a user-facing effect API and a toy.
+TEST_CASE("SkiaCanvas sksl post-effect binds arbitrary named uniforms",
+          "[canvas][skia][sksl-post-effect][save-layer]") {
+    SkImageInfo info = SkImageInfo::Make(32, 32, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+    SkiaCanvas canvas(surface->getCanvas());
+
+    Canvas::ShaderUniforms u;
+    std::vector<Canvas::NamedUniform> extra;
+    Canvas::NamedUniform boost;
+    boost.name = "boost"; boost.count = 1; boost.v[0] = 2.0f;  // custom uniform
+    extra.push_back(boost);
+
+    REQUIRE(canvas.save_layer_with_sksl_post_effect(
+        0, 0, 32, 32,
+        "uniform shader content; uniform float boost;"
+        "half4 main(float2 xy) { half4 c = content.eval(xy); "
+        "return half4(c.rgb * boost, c.a); }",
+        u, /*sample_radius=*/0.0f, extra));
+    canvas.set_fill_color(Color::rgba8(100, 100, 100, 255));  // grey 100
+    canvas.fill_rect(0, 0, 32, 32);
+    canvas.restore();
+
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    SkColor c = pm.getColor(16, 16);
+    INFO("boosted grey r=" << SkColorGetR(c));
+    // grey 100 * boost 2 = ~200. An unbound `boost` would default to 0 (black),
+    // so a bright pixel proves the arbitrary uniform was actually bound.
+    REQUIRE(SkColorGetR(c) > 180);
+    REQUIRE(SkColorGetR(c) < 230);
+}
+
+// The post-effect layer must support a composite blend mode — the additive glow
+// (`lighter`/kPlus) is the audio-UI pattern — not source-over only.
+TEST_CASE("SkiaCanvas sksl post-effect composites with an additive blend mode",
+          "[canvas][skia][sksl-post-effect][save-layer]") {
+    SkImageInfo info = SkImageInfo::Make(32, 32, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+    SkiaCanvas canvas(surface->getCanvas());
+
+    // Input A: a grey-100 background painted before the layer.
+    canvas.set_fill_color(Color::rgba8(100, 100, 100, 255));
+    canvas.fill_rect(0, 0, 32, 32);
+
+    // Input B: the post-effect layer's own grey-100 content, passed through and
+    // composited additively (BlendMode::lighter). 100 + 100 = 200 — brighter
+    // than EITHER input; source-over would leave it at 100.
+    Canvas::ShaderUniforms u;
+    REQUIRE(canvas.save_layer_with_sksl_post_effect(
+        0, 0, 32, 32,
+        "uniform shader content; half4 main(float2 xy) { return content.eval(xy); }",
+        u, /*sample_radius=*/0.0f, /*extra_uniforms=*/{},
+        Canvas::BlendMode::lighter));
+    canvas.set_fill_color(Color::rgba8(100, 100, 100, 255));
+    canvas.fill_rect(0, 0, 32, 32);
+    canvas.restore();
+
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    SkColor c = pm.getColor(16, 16);
+    INFO("additive result r=" << SkColorGetR(c));
+    REQUIRE(SkColorGetR(c) > 150);  // brighter than either 100 input
+}
+
 // Real chromatic aberration: the ChromaticAberrationEffect must fringe a white
 // edge red on one side and blue on the other via the per-channel offset shader
 // (the effect it replaced only pushed a subtle uniform blur — no color split).

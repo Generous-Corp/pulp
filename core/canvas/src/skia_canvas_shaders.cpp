@@ -329,11 +329,12 @@ bool SkiaCanvas::draw_with_sksl(const std::string& sksl,
     return true;
 }
 
-bool SkiaCanvas::save_layer_with_sksl_post_effect(float x, float y,
-                                                  float w, float h,
-                                                  const std::string& sksl,
-                                                  const ShaderUniforms& uniforms,
-                                                  float sample_radius) {
+bool SkiaCanvas::save_layer_with_sksl_post_effect(
+        float x, float y, float w, float h,
+        const std::string& sksl, const ShaderUniforms& uniforms,
+        float sample_radius,
+        const std::vector<NamedUniform>& extra_uniforms,
+        Canvas::BlendMode blend_mode) {
     // On any failure (no canvas, empty/invalid SkSL, or a shader that does not
     // declare the `content` child) fall back to a plain unfiltered layer so the
     // subtree still renders, and return false so the caller can log once.
@@ -351,6 +352,7 @@ bool SkiaCanvas::save_layer_with_sksl_post_effect(float x, float y,
     if (!effect->findChild("content")) return plain_fallback();
 
     SkRuntimeShaderBuilder builder(effect);
+    // Fixed widget vocabulary (bound when declared).
     if (effect->findUniform("resolution"))
         builder.uniform("resolution") = SkV2{w, h};
     if (effect->findUniform("value"))
@@ -369,17 +371,30 @@ bool SkiaCanvas::save_layer_with_sksl_post_effect(float x, float y,
     if (effect->findUniform("thumbColor"))
         builder.uniform("thumbColor") = toSkV4(uniforms.thumb_color);
 
+    // Arbitrary caller-named uniforms — the real user-facing surface. Each is
+    // bound only if the shader actually declares it (findUniform guard), so an
+    // unused name is silently ignored rather than a compile/bind error.
+    for (const auto& nu : extra_uniforms) {
+        if (!effect->findUniform(nu.name.c_str())) continue;
+        switch (nu.count) {
+            case 1: builder.uniform(nu.name.c_str()) = nu.v[0]; break;
+            case 2: builder.uniform(nu.name.c_str()) = SkV2{nu.v[0], nu.v[1]}; break;
+            case 3: builder.uniform(nu.name.c_str()) = SkV3{nu.v[0], nu.v[1], nu.v[2]}; break;
+            case 4: builder.uniform(nu.name.c_str()) = SkV4{nu.v[0], nu.v[1], nu.v[2], nu.v[3]}; break;
+            default: break;
+        }
+    }
+
     // Bind the layer's rendered content as the "content" child (input=nullptr =
-    // implicit source image) and hang the runtime shader off the layer paint so
-    // it runs when the layer composites back at restore().
+    // implicit source image) and hang the runtime shader off the layer paint via
+    // push_layer, which also applies the composite blend mode (e.g.
+    // BlendMode::lighter for an additive glow) when the layer restores.
     sk_sp<SkImageFilter> filter = SkImageFilters::RuntimeShader(
         builder, std::max(sample_radius, 0.0f), "content", nullptr);
     if (!filter) return plain_fallback();
 
-    SkRect bounds = SkRect::MakeXYWH(x, y, w, h);
-    SkPaint layer_paint;
-    layer_paint.setImageFilter(std::move(filter));
-    canvas_->saveLayer(&bounds, &layer_paint);
+    push_layer(x, y, w, h, /*opacity=*/1.0f, /*blur=*/0.0f, blend_mode,
+               std::move(filter));
     return true;
 }
 

@@ -335,10 +335,12 @@ public:
 
     // Child-shader compositor: post-process an already-painted layer with a
     // custom SkSL shader (declares `uniform shader content`).
-    bool save_layer_with_sksl_post_effect(float x, float y, float w, float h,
-                                          const std::string& sksl,
-                                          const ShaderUniforms& uniforms,
-                                          float sample_radius = 0.0f) override;
+    bool save_layer_with_sksl_post_effect(
+        float x, float y, float w, float h,
+        const std::string& sksl, const ShaderUniforms& uniforms,
+        float sample_radius = 0.0f,
+        const std::vector<NamedUniform>& extra_uniforms = {},
+        BlendMode blend_mode = BlendMode::normal) override;
 
     // Draw a Dawn-backed texture into the current Skia canvas when Graphite is active.
     bool draw_native_dawn_texture(void* texture_handle,

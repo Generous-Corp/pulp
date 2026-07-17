@@ -8,6 +8,7 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <algorithm>
 #include <cctype>
 #include <functional>
 #include <memory>
@@ -17,6 +18,11 @@
 
 namespace pulp::view {
 namespace {
+
+// Forward declarations (defined below, used by build_view_effect's sksl case).
+canvas::Canvas::BlendMode parse_blend_keyword(const std::string& kw);
+void parse_named_uniforms(const choc::value::ValueView& obj,
+                          std::vector<canvas::Canvas::NamedUniform>& out);
 
 // Numeric member with a fallback (non-numeric or missing → fallback).
 float effect_num(const choc::value::ValueView& obj, const char* key, float fallback) {
@@ -79,10 +85,58 @@ std::shared_ptr<canvas::ViewEffect> build_view_effect(
         e->sksl = std::move(src);
         e->value = effect_num(spec, "value", 0.0f);
         e->time = effect_num(spec, "time", 0.0f);
+        e->sample_radius = effect_num(spec, "sampleRadius", 0.0f);
+        if (spec.hasObjectMember("blend")) {
+            e->blend_mode = parse_blend_keyword(
+                std::string(spec["blend"].getWithDefault<std::string_view>("")));
+        }
+        if (spec.hasObjectMember("uniforms"))
+            parse_named_uniforms(spec["uniforms"], e->uniforms);
         return e;
     }
     error = "unknown effect type '" + type + "'";
     return nullptr;
+}
+
+// CSS / W3C blend keyword → canvas BlendMode (subset relevant to post-effects;
+// `lighter`/`additive`/`plus-*` all map to the additive kPlus glow).
+canvas::Canvas::BlendMode parse_blend_keyword(const std::string& kw) {
+    using BM = canvas::Canvas::BlendMode;
+    if (kw == "multiply")    return BM::multiply;
+    if (kw == "screen")      return BM::screen;
+    if (kw == "overlay")     return BM::overlay;
+    if (kw == "darken")      return BM::darken;
+    if (kw == "lighten")     return BM::lighten;
+    if (kw == "color-dodge") return BM::color_dodge;
+    if (kw == "color-burn")  return BM::color_burn;
+    if (kw == "hard-light")  return BM::hard_light;
+    if (kw == "soft-light")  return BM::soft_light;
+    if (kw == "difference")  return BM::difference;
+    if (kw == "exclusion")   return BM::exclusion;
+    if (kw == "lighter" || kw == "additive" ||
+        kw == "plus-lighter" || kw == "plus-darker") return BM::lighter;
+    return BM::normal;
+}
+
+// Parse an `{name: number | [x,y,z,w]}` object into arbitrary shader uniforms.
+void parse_named_uniforms(const choc::value::ValueView& obj,
+                          std::vector<canvas::Canvas::NamedUniform>& out) {
+    if (!obj.isObject()) return;
+    for (uint32_t i = 0; i < obj.size(); ++i) {
+        canvas::Canvas::NamedUniform nu;
+        nu.name = std::string(obj.getObjectMemberAt(i).name);
+        const auto& val = obj[nu.name.c_str()];
+        if (val.isArray()) {
+            nu.count = std::min<int>(4, static_cast<int>(val.size()));
+            for (int k = 0; k < nu.count; ++k)
+                nu.v[k] = static_cast<float>(val[static_cast<uint32_t>(k)]
+                                                 .getWithDefault<double>(0.0));
+        } else {
+            nu.count = 1;
+            nu.v[0] = static_cast<float>(val.getWithDefault<double>(0.0));
+        }
+        out.push_back(std::move(nu));
+    }
 }
 
 choc::value::Value effect_result(bool success, const std::string& error) {

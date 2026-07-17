@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/view_effect.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/modal.hpp>
@@ -315,6 +316,18 @@ TEST_CASE("WidgetBridge setViewEffect installs, clears, and rejects bad shaders"
         R"(setViewEffect('', '{"type":"sksl","source":"uniform shader content; half4 main(float2 xy){ return content.eval(xy); }"}'))");
     REQUIRE(rsksl_ok["success"].getWithDefault<bool>(false));
     REQUIRE(root.effect() != nullptr);
+
+    // The sksl descriptor's ARBITRARY named uniforms and composite blend mode
+    // must reach the installed effect (not just the fixed vocabulary).
+    auto rsksl_full = engine.evaluate(
+        R"(setViewEffect('', '{"type":"sksl","source":"uniform shader content; uniform float boost; half4 main(float2 xy){ return content.eval(xy) * boost; }","uniforms":{"boost":2.0},"blend":"lighter"}'))");
+    REQUIRE(rsksl_full["success"].getWithDefault<bool>(false));
+    auto eff = std::dynamic_pointer_cast<pulp::canvas::SkslPostEffect>(root.effect());
+    REQUIRE(eff != nullptr);
+    REQUIRE(eff->blend_mode == pulp::canvas::Canvas::BlendMode::lighter);
+    REQUIRE(eff->uniforms.size() == 1);
+    REQUIRE(eff->uniforms[0].name == "boost");
+    REQUIRE(eff->uniforms[0].v[0] == 2.0f);
 #endif
 }
 

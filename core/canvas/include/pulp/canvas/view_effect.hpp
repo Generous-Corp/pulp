@@ -143,12 +143,21 @@ struct SkslPostEffect : ViewEffect {
     std::string sksl;
     float value = 0.0f;   ///< bound to the shader's `value` uniform when present
     float time = 0.0f;    ///< bound to the shader's `time` uniform when present
+    /// Arbitrary named uniforms (name → float/vec) the shader declares — the
+    /// real user-facing surface. Bound guarded by findUniform.
+    std::vector<Canvas::NamedUniform> uniforms;
+    /// How the finished post-effect layer composites onto its parent.
+    /// `BlendMode::lighter` = additive glow. Default source-over.
+    Canvas::BlendMode blend_mode = Canvas::BlendMode::normal;
+    /// Max neighbour-sampling distance (px) for content.eval offsets.
+    float sample_radius = 0.0f;
 
     void configure_layer(Canvas& canvas, float x, float y, float w, float h) override {
         Canvas::ShaderUniforms u;
         u.value = value;
         u.time = time;
-        canvas.save_layer_with_sksl_post_effect(x, y, w, h, sksl, u);
+        canvas.save_layer_with_sksl_post_effect(x, y, w, h, sksl, u,
+                                                sample_radius, uniforms, blend_mode);
     }
 };
 

@@ -1420,6 +1420,19 @@ public:
         Color thumb_color{};
     };
 
+    /// An arbitrary named shader uniform (name → float / vec2 / vec3 / vec4).
+    /// Lets a custom post-effect (`save_layer_with_sksl_post_effect`) accept any
+    /// uniform its shader declares, not just the fixed widget vocabulary above —
+    /// the difference between a real user-facing shader-effect API and a toy.
+    /// `count` selects the arity (1..4); only that many of `v` are read. Bound
+    /// via `SkRuntimeEffectBuilder::uniform(name)` guarded by `findUniform`, so
+    /// names the shader doesn't declare are ignored.
+    struct NamedUniform {
+        std::string name;
+        int count = 1;             ///< 1=float, 2=vec2, 3=vec3, 4=vec4
+        float v[4] = {0, 0, 0, 0};
+    };
+
     /// Validate and compile an SkSL shader without drawing. Returns error string (empty = success).
     /// Static so it can be called without a Canvas instance.
     static std::string compile_sksl(const std::string& sksl);
@@ -1457,7 +1470,13 @@ public:
     ///   half4 main(float2 xy) { return content.eval(xy).bgra; }  // channel swap
     /// The same fixed uniform vocabulary as `draw_with_sksl`
     /// (resolution / value / time / accentColor / bgColor / trackColor /
-    /// fillColor / thumbColor) is bound when declared.
+    /// fillColor / thumbColor) is bound when declared, PLUS any arbitrary
+    /// `extra_uniforms` (name → float/vec) the shader declares — guarded by
+    /// `findUniform`, so unknown names are ignored.
+    ///
+    /// `blend_mode` is how the finished post-effect layer composites back onto
+    /// its parent (default source-over). `BlendMode::lighter` gives the additive
+    /// audio-UI glow pattern.
     ///
     /// `sample_radius` is the maximum distance (px) the shader may sample
     /// `content.eval()` away from the pixel being shaded — Skia needs this so a
@@ -1469,12 +1488,14 @@ public:
     /// backend (SkiaCanvas) implements it; the base falls back to a plain
     /// `save_layer` (still balanced — the subtree renders unfiltered) and
     /// returns false so callers can log the unsupported path once.
-    virtual bool save_layer_with_sksl_post_effect(float x, float y,
-                                                  float w, float h,
-                                                  const std::string& sksl,
-                                                  const ShaderUniforms& uniforms,
-                                                  float sample_radius = 0.0f) {
+    virtual bool save_layer_with_sksl_post_effect(
+            float x, float y, float w, float h,
+            const std::string& sksl, const ShaderUniforms& uniforms,
+            float sample_radius = 0.0f,
+            const std::vector<NamedUniform>& extra_uniforms = {},
+            BlendMode blend_mode = BlendMode::normal) {
         (void)sksl; (void)uniforms; (void)sample_radius;
+        (void)extra_uniforms; (void)blend_mode;
         save_layer(x, y, w, h, 1.0f, 0.0f);
         return false;
     }
