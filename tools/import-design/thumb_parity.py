@@ -11,10 +11,35 @@ screenshots and reporting them one at a time: a wall of pink tabs, an inverted
 toggle, a missing record dot. Each was obvious in the pixels and invisible to
 every gate we had.
 
-This is the cheap half of appearance parity: scale-match the two images and rank
-the blocks that disagree. It does not know what a node is — `layout_parity.py`
-does that — but it needs nothing but the .fig and a render, and it finds colour
-faults a geometry check cannot see by construction.
+This is GROSS-COLOUR TRIAGE and nothing more: scale-match the two images and rank
+the blocks that disagree. Advisory only — never a gate.
+
+WHAT IT CANNOT SEE (read this before trusting a pass)
+-----------------------------------------------------
+It compares block MEANS, so it is blind BY CONSTRUCTION to any error that
+preserves a region's mean:
+
+  * a flattened gradient — it matches its own mean BY DEFINITION
+  * thin-stroke opacity — 20%-vs-100% white strokes average to nearly the same
+    grey once downscaled
+  * a soft shadow on a dark panel — it vanishes into the mean
+
+Those were three REAL bugs on 2026-07-16, and this tool reported "colour is
+close" through every one of them. They were found instead by a human zooming
+into Figma. At ~0.4x it also cannot resolve anything under ~3 design px, so a
+2px arc or a glyph is beyond it — chasing its last few percent is reading noise.
+
+This docstring used to end "it finds colour faults a geometry check cannot see by
+construction", which is true and badly misleading: the sentence names what it
+beats rather than what it misses, and I wrote it while believing a 400px
+thumbnail was a sufficient reference. It is sufficient for gross colour, presence
+and gross placement. It is USELESS for material — opacity, gradients, shadows,
+glyph weight — which is exactly where "close but a bit off" lives.
+
+Use `layout_parity.py` for geometry (it sees boxes, not the ink inside them) and
+a material audit for property survival. A green from any single instrument is not
+"the render is right"; two blind instruments both reporting green is how those
+three bugs shipped. A human on a montage is the final say.
 
 What it can and cannot say
 --------------------------
@@ -193,6 +218,15 @@ def main() -> int:
 
     # Per-axis scale: each thumbnail axis rounds to an integer independently, so
     # one uniform factor is subtly wrong.
+    # The scope banner prints on every run, because the docstring only reaches
+    # someone who opens the file and the output reaches everyone. A tool whose
+    # limits are documented where its readers are not is how this one reported
+    # "colour is close" through a flat gradient, an opaque-instead-of-20% icon,
+    # and a missing shadow — all on the same evening.
+    print("thumb_parity: GROSS-COLOUR TRIAGE, advisory only — never a gate.")
+    print("  Blind to anything preserving a region's mean: flattened gradients,")
+    print("  thin-stroke opacity, shadows on dark panels. Cannot resolve <~3 design px.")
+    print("  Geometry → layout_parity.py. Material survival → the material audit.")
     print(f"registration: canvas {reg.canvas_w:.0f}x{reg.canvas_h:.0f} -> thumb {thumb.width}x{thumb.height} "
           f"(scale x={reg.scale_x:.6f} y={reg.scale_y:.6f})")
     if render.width / render.height - reg.canvas_w / reg.canvas_h > 0.01:
