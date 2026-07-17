@@ -651,10 +651,17 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
 
     // Emit a node's per-View visual overrides that the native engine applies
     // at compositing/paint time: mix-blend-mode (View::set_mix_blend_mode), the
-    // clip-path, and the mask shorthand / image / size (View::set_clip_path /
-    // set_mask / set_mask_image / set_mask_size). mix-blend-mode is
-    // parse-normalized (normal / pass-through dropped); the clip/mask values
-    // are raw CSS the bridge parses.
+    // clip-path, the mask shorthand / image / size (View::set_clip_path /
+    // set_mask / set_mask_image / set_mask_size), the drop shadow, and opacity.
+    // mix-blend-mode is parse-normalized (normal / pass-through dropped); the
+    // clip/mask values are raw CSS the bridge parses.
+    //
+    // Everything here is a property of a View, not of a node KIND, so it is
+    // emitted for every kind — that is the whole point of the lambda. What does
+    // NOT belong here is anything whose meaning depends on how the node paints:
+    // setBackgroundGradient is the counter-example (see the container branch),
+    // because on a node that lowers to an SvgPathWidget it would paint a
+    // gradient SQUARE behind the path.
     auto emit_node_visual_overrides = [&](const std::string& target_id) {
         const auto& st = node.style;
         if (st.mix_blend_mode && !st.mix_blend_mode->empty())
@@ -678,17 +685,6 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
         // 49 shadowed nodes in its scene and emitted exactly ONE setBoxShadow,
         // leaving every knob flat. Nothing said so, because the boxes were the
         // right size in the right place — they just had no depth.
-        //
-        // This comment used to add "(and the frame branch does not call this
-        // lambda)". It does — line ~1563, the container branch — so the claim
-        // was false the moment it was written, and it was the alibi for the
-        // duplicate emit it left behind: the container branch called the lambda
-        // AND kept its own setBoxShadow, writing the line twice. Harmless (same
-        // args, last wins) and still wrong to leave, because the next reader
-        // trusts the comment over the code. A comment asserting exactly the
-        // property the code lacks is this importer's signature bug — "locale-
-        // stable" over a locale-dependent %f, "implemented in SkiaCanvas" over a
-        // no-op — and the fix for the last one introduced another instance of it.
         if (!st.box_shadow.empty()) {
             // The bridge takes a single drop shadow; CSS paints the first layer
             // on top, so that is the one that reads.
@@ -699,6 +695,13 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
                << ", '" << js_single_quote_escape(color) << "'"
                << (sh.inset ? ", true" : "") << ");\n";
         }
+        // Opacity, same story as the shadow one branch up. It was emitted from
+        // the image branch and the container branch only, so a faded TEXT node
+        // rendered at full strength in every lane — a 50%-dimmed caption or a
+        // ghosted placeholder label came out as solid as the live text beside
+        // it. Every kind of node can be faded; only two kinds were honoring it.
+        if (st.opacity)
+            ss << ind << "setOpacity('" << target_id << "', " << *st.opacity << ");\n";
     };
 
     // Emit the anchor trail in bridge-native-JS codegen too. Same
@@ -858,11 +861,14 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
             emit_position_if_absolute(col_id);
             ss << ind << "setFlex('" << col_id << "', 'align_items', 'center');\n";
             ss << ind << "setFlex('" << col_id << "', 'gap', 4);\n";
-        } else {
-            // No wrapper. Emit any absolute position on the widget itself.
-            // (emit_position_if_absolute is called below at the createKnob site
-            // by using id directly — we don't need to repeat here.)
         }
+        // No wrapper → the widget itself carries the node's absolute position.
+        // That is emitted once below, after the create<Widget> chain, because
+        // every sub-branch has created `id` by then. It used to be emitted at
+        // the createKnob site instead, with a comment here promising it covered
+        // the branch — it only ever covered KNOBS, so an unlabeled fader, meter,
+        // XY pad, waveform or spectrum silently lost its absolute position and
+        // landed wherever flex put it.
 
         if (wtype == AudioWidgetType::knob) {
             // Knob sizing priority:
@@ -888,7 +894,6 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
             }
             fid_w = shape_w; fid_h = shape_h;  // emitted widget dims (fidelity)
             ss << ind << "createKnob('" << id << "', '" << col_id << "');\n";
-            if (!needs_label_wrapper) emit_position_if_absolute(id);
             ss << ind << "setFlex('" << id << "', 'width', " << shape_w << ");\n";
             ss << ind << "setFlex('" << id << "', 'height', " << shape_h << ");\n";
             // Clear built-in label — use separate Yoga-positioned labels for exact placement
@@ -1217,6 +1222,13 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
             ss << ind << "setFlex('" << id << "', 'height', " << h << ");\n";
         }
 
+        // Every sub-branch above has created `id`, so this is the one place that
+        // covers all six widget kinds. Without it a widget got no shadow, blend
+        // mode, clip/mask or opacity at all: a knob the designer faded to 30% to
+        // read as disabled came out indistinguishable from a live one.
+        if (!needs_label_wrapper) emit_position_if_absolute(id);
+        emit_node_visual_overrides(id);
+
         // Reference-free fidelity self-checks for this widget (see design_fidelity).
         if (opts.fidelity_report)
             run_fidelity_checks({node, id, fid_w, fid_h, FidelityElement::widget},
@@ -1315,14 +1327,12 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
         ss << ind << "createImage('" << id << "', " << pid << ");\n";
         emit_position_if_absolute(id);
         emit_node_visual_overrides(id);
-        // Opacity. The frame path emits this further down, but an image node
-        // returns before reaching it and emit_node_visual_overrides covers only
-        // blend/clip/mask — so an image's opacity was dropped entirely. A design
-        // that dims an overlay to 10% (a grain/noise texture over the whole UI
-        // is the canonical case) rendered it at FULL strength, burying the
-        // interface under it.
-        if (node.style.opacity)
-            ss << ind << "setOpacity('" << id << "', " << *node.style.opacity << ");\n";
+        // A background gradient paints the box BEHIND the image — the canonical
+        // case is a transparent PNG over a gradient plate. Not in the shared
+        // lambda: see the note there.
+        if (node.style.background_gradient)
+            ss << ind << "setBackgroundGradient('" << id << "', '"
+               << js_single_quote_escape(*node.style.background_gradient) << "');\n";
         auto it = node.attributes.find("asset_path");
         if (it != node.attributes.end() && !it->second.empty()) {
             ss << ind << "setImageSource('" << id << "', '"
@@ -1445,6 +1455,14 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
         ss << ind << "createLabel('" << id << "', '" << js_single_quote_escape(node.text_content) << "', " << pid << ");\n";
         emit_position_if_absolute(id);
         emit_node_visual_overrides(id);
+        // A label's own box paints its background, exactly like a container's.
+        // The v0 lane maps `background: linear-gradient(...)` on any inline tag
+        // (<span>, <h1>, …) onto style.background_gradient, and those tags lower
+        // to text nodes — so the gradient plate behind a heading was dropped.
+        // Not in the shared lambda: see the note there.
+        if (node.style.background_gradient)
+            ss << ind << "setBackgroundGradient('" << id << "', '"
+               << js_single_quote_escape(*node.style.background_gradient) << "');\n";
 
         // Honor the IR-declared height when present; absolute-positioned labels
         // that are centered in a slot rely on the emitted height matching that
@@ -1697,6 +1715,14 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
         // Visual styles
         if (node.style.background_color)
             ss << ind << "setBackground('" << id << "', '" << *node.style.background_color << "');\n";
+        // Emitted per-branch rather than from emit_node_visual_overrides, and
+        // deliberately so: this paints the node's own BOX, so it is only correct
+        // for kinds that lower to a plain View (container, text, image, and the
+        // childless fall-through). The path branch must never get it — a node
+        // that lowers to an SvgPathWidget already carries its gradient as
+        // setSvgFillGradient, and painting the box too puts a gradient SQUARE
+        // behind the circle. See synthesize_node(), which clears the style
+        // gradient off the node precisely to stop that.
         if (node.style.background_gradient)
             ss << ind << "setBackgroundGradient('" << id << "', '" << js_single_quote_escape(*node.style.background_gradient) << "');\n";
         if (node.style.border_radius)
@@ -1713,11 +1739,9 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
                << js_single_quote_escape(*node.style.border_color) << "', "
                << *node.style.border_width << ", " << br << ");\n";
         }
-        // NOTE: no setBoxShadow here. This branch calls
-        // emit_node_visual_overrides above, which emits it for every node kind.
-        // Keeping a copy here wrote the line TWICE for every container.
-        if (node.style.opacity)
-            ss << ind << "setOpacity('" << id << "', " << *node.style.opacity << ");\n";
+        // NOTE: no setBoxShadow and no setOpacity here. This branch calls
+        // emit_node_visual_overrides above, which emits both for every node
+        // kind. Keeping a copy here wrote the line TWICE for every container.
 
         ss << "\n";
 
@@ -1806,15 +1830,34 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
         return;
     }
 
-    // Generic frame without children (divider, spacer, etc.)
+    // Last resort: a childless node of a kind no branch above claimed.
+    //
+    // This is NOT "a generic frame without children", as it read for a long
+    // time — a childless frame has type == "frame", so is_container is true and
+    // the container branch takes it. Nothing with type "frame" ever reaches
+    // here, and believing otherwise is what made this branch look like dead code
+    // worth leaving alone. What actually lands here is a childless node of some
+    // other kind: the v0 lane's void tags (<input>, <textarea>, <select>,
+    // <canvas>), and any vector primitive whose path synthesis declined —
+    // notably a gradient-filled <rect>, which synthesize_node deliberately
+    // leaves alone on the grounds that "a frame paints its own background box".
+    // That is a promise about THIS code, so it has to keep it: emit the same
+    // box paint the container branch does, or the shape it declined to path-ify
+    // renders as nothing at all.
     ss << ind << "createRow('" << id << "', " << pid << ");\n";
-    emit_layout_constraints(id);
+    emit_position_if_absolute(id);
+    emit_node_visual_overrides(id);
     if (node.style.height)
         ss << ind << "setFlex('" << id << "', 'height', " << *node.style.height << ");\n";
     else
         ss << ind << "setFlex('" << id << "', 'height', 1);\n";
     if (node.style.background_color)
         ss << ind << "setBackground('" << id << "', '" << *node.style.background_color << "');\n";
+    if (node.style.background_gradient)
+        ss << ind << "setBackgroundGradient('" << id << "', '"
+           << js_single_quote_escape(*node.style.background_gradient) << "');\n";
+    if (node.style.border_radius)
+        ss << ind << "setCornerRadius('" << id << "', 'All', " << *node.style.border_radius << ");\n";
     ss << "\n";
 }
 
