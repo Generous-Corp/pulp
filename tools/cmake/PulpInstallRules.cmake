@@ -397,6 +397,7 @@ endif()
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_runtime.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_midi_node.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_effect_gui.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_adapter.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_audio_unit.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_entry.mm"

@@ -17,8 +17,153 @@ want to build and validate AAX plugins locally.
 
 - Supported hosts: macOS and Windows
 - Unsupported: Linux and Ubuntu
-- Current scope: AAX Native
-- Out of scope: bundling Avid assets, DSP/AudioSuite support, PACE release automation
+- Current scope: AAX Native, including the custom editor (`AAX_CEffectGUI`) and
+  parameter gestures
+- Out of scope: bundling Avid assets, DSP support, PACE release automation
+- Out of scope, with a caveat worth knowing: **AudioSuite**. The descriptor
+  declares `AAX_ePlugInRole_InsertOrAudioSuite`, so the role is advertised, but
+  Pulp registers no `AAX_IHostProcessor` — the dedicated offline-render path is
+  not implemented. Say "the role is declared; the offline path is not
+  implemented", not "AudioSuite works" and not "the role is absent".
+
+## The custom editor
+
+`core/format/src/aax_effect_gui.cpp` embeds a Pulp editor in the Pro Tools
+plugin window through the shared, format-agnostic `view::PluginViewHost` — the
+same seam VST3 / AU v2 / AU v3 / CLAP use, so there is no AAX-specific render
+path to maintain.
+
+**The editor is opt-in, and defaulting it off is deliberate — do not "fix" it.**
+`PULP_AAX_PLUGIN` registers no editor, so a plugin gets Pro Tools'
+auto-generated parameter strip; `PULP_AAX_PLUGIN_WITH_GUI` registers the custom
+editor. The strip is plain but it works, and it is the only AAX UI any Pulp
+plugin has shipped with. The custom editor has not been validated in Pro Tools
+itself, so a plugin that merely rebuilds must not trade a working strip for an
+unproven editor — an author has to ask for it. `pulp-test-aax-entry-registration`
+asserts both directions; if you flip the default, that suite fails, and that is
+the point. Reach for `PULP_AAX_PLUGIN_WITH_GUI` in an example or template only
+once the editor has actually been driven in Pro Tools.
+
+Gotchas that are specific to AAX and cost time if you rediscover them:
+
+- **The proc pointer is the whole game.** A custom UI appears only because
+  `get_effect_descriptions()` registers `kAAX_ProcPtrID_Create_EffectGUI`
+  alongside `kAAX_ProcPtrID_Create_EffectParameters`. Drop that one
+  `AddProcPtr` and Pro Tools silently shows its auto-generated parameter strip
+  no matter how good `create_view()` is. The validator's "does not contain
+  EffectGUI" warning is the tell. That fallback is exactly why registering the
+  proc conditionally is a safe default rather than a broken plugin.
+- **The editor has its own `Processor`, deliberately.** AAX splits the
+  host-side data model from the real-time algorithm; the algorithm's
+  `Processor` lives in its private data block and the model cannot reach it. So
+  `EffectParameters` builds a *second* model-side `Processor` for
+  `create_view()`. This is the exact opposite of AU v2, where a second
+  `Processor` was a real bug (parameters drifted). The reason it is safe here:
+  the AAX parameter manager — not either `Processor` — is the value authority,
+  and the model mirrors it into the editor store both ways
+  (`UpdateParameterNormalizedValue` in, `AAX_IParameter::SetValueWithFloat`
+  out), via `ParameterMirror` in `aax_editor.hpp`.
+- **The mirror stops the echo by comparing values, not with a re-entrancy
+  flag.** `ParameterMirror` writes back only when a write would actually change
+  something. A transient "I am syncing" bool around the inbound write looks
+  equivalent and is not: it encodes *when* the listener runs, and that is not
+  guaranteed. `StateStore` runs a `ListenerThread::Main` listener inline only
+  while no `EventLoop` is installed (`set_main_loop()` is never called on this
+  store today) — install one and the flag is long cleared before the deferred
+  listener fires. The rule is a statement about the two values, so it holds
+  wherever the callback lands. It is load-bearing, not an optimization:
+  `StateStore::set_value()` notifies unconditionally, even when nothing changed,
+  so the echo has no fixed point of its own and would re-enter the host at its
+  dispatch rate forever.
+- **Never compare the store's value against the parameter's raw real value.**
+  They are not in the same coordinate system, and `==` between them does not
+  terminate. Two lossy transforms sit on the two sides: AAX's value has been
+  through the taper (`NormalizedToReal` of whatever the host sent, snapping to
+  `ParamRange::step` only when a step is set), while the store's has been
+  through `constrain_stored_value`, which applies an **implicit step of 1 to any
+  non-`Continuous` `ParamKind` even when the range declares no step**. For a
+  discrete parameter with no explicit step the two are therefore *structurally
+  different values*, `==` is never true, and — because `SetValueWithFloat` does
+  not store what it is handed — the corrective write never reproduces them
+  either. That is an unbounded automation write stream reaching Pro Tools.
+  `ParameterMirror` instead asks two questions, both required:
+  *do the two sides normalize to the same value* (`taper_real_to_normalized` —
+  the normalized token is the only thing that actually travels to the host), and
+  *would the write land AAX where it already is* (`aax_value_after_write`, for
+  ranges whose real and normalized grids do not line up — a discrete kind over a
+  wide skewed range is the case that bites). A per-parameter fuse
+  (`kCorrectionFuseLimit`) bounds any remaining host quirk and logs it rather
+  than wedging the host. Covered by `pulp-test-aax-editor` (SDK-free), whose
+  sweep drives 21 ranges × 4 kinds × 201 start points through the real taper and
+  requires every case to settle in one write with the fuse never firing.
+- **`AAX_IParameter::SetValueWithFloat` does not store the value.** It posts a
+  request through the automation delegate (`AAX_CParameter::SetValue` does
+  `Touch(); PostSetValueRequest(Identifier(), RealToNormalized(newValue));
+  Release();`), so `GetValueAsFloat` keeps returning the old value until the host
+  answers with `UpdateParameterNormalizedValue` — the same path a fader or
+  control surface takes. Code that assumes a synchronous write will misread the
+  parameter. What comes back is a *normalized* value, stored as
+  `NormalizedToReal` of it, so AAX ends up holding
+  `denormalize(normalize(constrained))` and **not** the value that was written.
+- **`AAX_IParameter::GetValueAsFloat` can fail without writing its out-param.**
+  It answers `false` and leaves the float untouched for any parameter whose value
+  type is not `float` (`SetValueWithFloat` refuses the same way). Pulp registers
+  only `AAX_CParameter<float>` today, so it always succeeds — but ignoring the
+  return means the day that changes, a caller reports success with a fabricated
+  zero. Propagate the bool.
+- **A test double for the parameter manager must round-trip the taper.** The
+  manager's asynchrony is the *easy* half to model; the value transform is the
+  half that hides bugs. A fake that echoes the real value back verbatim, or that
+  pushes it with `set_value` where the adapter uses `set_normalized`, drops both
+  lossy transforms and can only ever confirm whatever rule the mirror already
+  implements — it cannot fail on a mirror-convergence bug by construction.
+- **Update values only through `AAX_IParameter::SetValue*`.** Avid's own header
+  is explicit that a GUI must never call `UpdateParameterNormalizedValue`
+  directly; `SetValue*` manages the automation locks and posts coefficients.
+- **Gestures are not optional.** Without `TouchParameter` / `ReleaseParameter`
+  a custom UI records every edit as an isolated automation point instead of a
+  stroke — worse than shipping no UI. `state::Binding` gestures route through
+  `GestureRouter` (`aax_editor.hpp`), which enforces AAX's balance invariant.
+- **`AAX_Point`'s constructor is `(vert, horz)` — vertical first.** Passing
+  width first silently transposes the editor.
+- **Sizing is plugin-driven.** AAX reads a size from `GetViewSize()`; the
+  plugin pushes later changes through `AAX_IViewContainer::SetViewSize`. Follow
+  the AU v2 model (forward native size changes), not VST3's.
+- **Never defer to `AAX_CEffectGUI::GetViewSize()` / `GetMinimumViewSize()`.**
+  Both base implementations `return AAX_SUCCESS` *without writing the point*, so
+  the host reads back whatever it passed in and the plug-in appears to have
+  agreed to it. There is no "let the base class answer" fallback here. AAX may
+  ask for a size before any window exists, but the plug-in's hints are always
+  reachable: `GetEffectParameters()` yields the data model, and
+  `EditorHost::editor_view_size()` returns `Processor::view_size()`, which needs
+  no view tree. Answer from that, and report `AAX_ERROR_NULL_OBJECT` when the
+  plug-in genuinely has no editor.
+- **The editor model's member declaration order is load-bearing.**
+  `EditorModel` in `aax_runtime.cpp` declares `store` before `processor` because
+  members die in reverse declaration order and `Processor::state()` dereferences
+  a pointer to that store — a Processor may touch it from its destructor or from
+  a worker thread that destructor joins. The router is declared before the
+  Processor too: a parameter write from `~Processor` routes through the store's
+  gesture callbacks. `static_assert(offsetof(...))` guards both, so a reorder
+  fails the build rather than the teardown. Every other adapter
+  (`vst3_adapter.hpp`, `standalone.hpp`, `au_v2_instrument.hpp`, `headless.hpp`)
+  carries the same store-before-Processor convention.
+- **The editor needs Skia.** Without `PULP_HAS_SKIA` the Windows
+  `PluginViewHost` falls back to the no-op stub factory, `create()` returns
+  null, and the plugin loads with no editor.
+
+The SDK-free logic (gesture routing, sizing) lives in
+`core/format/include/pulp/format/aax_editor.hpp` on purpose, so it is testable
+with no Avid SDK: `pulp-test-aax-editor` runs everywhere.
+
+**"SDK-gated" currently means "never built," not "built elsewhere."** No Avid
+SDK is present in Pulp's CI or on any Pulp development machine, so
+`pulp-test-aax-effect-gui`, `pulp-test-aax-midi-node`, and
+`pulp-test-aax-entry-registration` are configured out of every lane that runs.
+Do not cite them as coverage for a claim: the AAX behavior actually verified on
+every push is the SDK-free part. If you have an Avid SDK locally, building these
+suites is the only way they have ever run — and worth doing before you assert
+anything about the SDK glue.
 
 
 - Never commit the AAX SDK, DigiShell, validator binaries, or Avid example code.
@@ -157,8 +302,8 @@ and delegate, so the tested code is the shipping code. When you change either
 path, change `aax_midi_packets.hpp` (and its tests in `test/test_aax_midi.cpp`,
 which run in default CI), not a copy inside the runtime.
 
-The thin SDK glue itself is covered by `test/test_aax_midi_node.cpp` — an
-SDK-gated runtime test (built only when `PULP_HAS_AAX`) that drives
+The thin SDK glue itself has a test but no lane that builds it:
+`test/test_aax_midi_node.cpp` is SDK-gated (built only when `PULP_HAS_AAX`) and drives
 `decode_midi_node` / `encode_midi_node` through real `AAX_IMIDINode` /
 `AAX_CMidiStream` / `AAX_CMidiPacket` fakes. Run it on an AAX-SDK machine
 (`ctest -R aax-midi-node` after an `-DPULP_ENABLE_AAX=ON` build) to verify the
