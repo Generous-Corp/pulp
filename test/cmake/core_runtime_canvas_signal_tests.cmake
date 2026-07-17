@@ -200,6 +200,11 @@ pulp_add_test_suite(pulp-test-osc-dco LIBRARIES pulp::signal pulp::audio-analysi
 # The modern wavetable tier is gated on alias rejection swept to the top of every
 # band, a click-free band-switch seam, and a zipper-free scan.
 pulp_add_test_suite(pulp-test-osc-wt LIBRARIES pulp::signal pulp::audio-analysis)
+# The lo-fi wavetable tier is a dedicated variable-clock ZOH engine, gated on the
+# pitch-tracking n·L·f0 image ladder matching the analytic sinc model, odd-
+# harmonic 8-bit grit, a reconstruction stage that kills the naive in-band fold,
+# and a faithful stepped wave-scan.
+pulp_add_test_suite(pulp-test-osc-wt-lofi LIBRARIES pulp::signal pulp::audio-analysis)
 # SF-2 crossfade unification: live_kernel structural-swap fade now matches the
 # native signal::TransitionMixer (EqualPower) law bit-for-bit — an intended,
 # documented behavior change (the fade previously used a linear theta).
