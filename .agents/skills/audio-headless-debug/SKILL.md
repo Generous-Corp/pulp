@@ -281,6 +281,15 @@ default: it needs `fundamental_hz * num_harmonics >= nyquist`.
 sine read −48.7 dB against a truth of −176.7, and recorded `coherent = true`),
 and a fundamental at or above Nyquist.
 
+## Measuring pitch of a dense signal — `estimate_pitch`, not `estimate_frequency`
+
+Debugging a pitch or tuning bug (VCO drift, DCO quantization, a detuned voice)?
+`estimate_frequency` is zero-crossing and locks to a harmonic on any real
+oscillator — it will send you chasing a phantom octave error. Use
+`estimate_pitch` / `track_pitch` (`pitch_track.hpp`): projection-refined,
+sub-cent, and it refuses noise/silence rather than reporting a wrong pitch.
+`track_pitch` gives the `f0(t)` trajectory for drift/jitter analysis.
+
 ## Never gate on `detection_floor_db`
 
 It is a ~2σ bound that assumes a **white** residual. Aliases are discrete tones,

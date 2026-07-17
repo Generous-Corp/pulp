@@ -754,6 +754,23 @@ true. Through the CLI a refusal is exit 2, distinct from a failed check.
 Every one of those paths previously returned a confident number that passed a
 gate. If a refusal surprises you, the input is usually wrong — not the tool.
 
+## Measuring an oscillator's pitch — `estimate_pitch`, not `estimate_frequency`
+
+`estimate_frequency` (audio_metrics.hpp) is a zero-crossing detector and its own
+doc disclaims harmonically-dense material. A real oscillator IS dense: on a
+bright tone it locks to a harmonic (measured ~1900 cents high on a formant
+waveform), so it cannot measure a VCO's drift or a DCO's few-cent quantization
+error. Reach for **`estimate_pitch` / `track_pitch`** (`pitch_track.hpp`)
+instead: a coarse `magnitude_spectrum_curve` peak seeds a golden-section refine
+over the shipped `fit_tone` projection, so it is leakage-free and sub-cent
+(<0.002 cent on a clean tone, coherent or not) and FFT-backend-stable. It
+**refuses** silence, noise, and a missing fundamental rather than octave-guessing
+— honor the confidence gate. `track_pitch` gives the `f0(t)` trajectory; the
+drift/jitter statistics over it (Allan deviation, Theil-Sen slope) stay in the
+Quality Lab per the C++/Python split. A steep glide needs the window short
+relative to the sweep, and a fully flat missing-fundamental comb is refused, not
+solved — both fail closed.
+
 ## Never gate on `detection_floor_db`
 
 It is a ~2σ bound that assumes a **white** residual. Aliases are discrete tones,
