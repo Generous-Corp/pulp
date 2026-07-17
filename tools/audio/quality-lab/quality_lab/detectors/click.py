@@ -123,6 +123,19 @@ SUBTRACTS the edge rather than thresholding around it, so the edge does not mask
 anything), and a hard-sync reset does not need special-casing — fitting the period
 finds the master period on its own.
 
+* **The edge-smear REFUSAL band is render-length dependent for seams close to the smear
+  floor.** `edge_concentration` is a global statistic, so the recurring smear dominates
+  it more as the period count grows: a seam only a few dB above a real BLEP oscillator's
+  smear floor can read localized (and FIRE) on a short clip yet smeared (and be REFUSED)
+  on a multi-second one. It is never a silent pass — a refusal is always `low_coverage`,
+  "not proven clean" — and a seam well clear of the smear floor fires at any length; only
+  the near-floor band moves. When gating a real oscillator at length, prefer the honest
+  frozen-reference `dsp.null_residual_db` (render the same patch without the defect) over
+  the comb self-reference, or analyze a shorter window. Making the refusal fully
+  length-independent needs a background-only, per-period-robust concentration that still
+  fires the near-floor seam the current tests pin — a discriminator redesign, tracked
+  separately, not a threshold tweak.
+
 ## Which detector to reach for
 
 **Steady pitch — including hard sync — use this module.** Sync is steady-pitch despite
