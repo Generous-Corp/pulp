@@ -144,6 +144,20 @@ but the ordering above governs *which lane to start in*. `figma_rest_export.py`
 mirrors the desktop plugin field-for-field, so a scene from lane (2) or (3) is
 interchangeable downstream.
 
+**There is no lane (4): `pulp import-design --url` cannot import from Figma.**
+Do not reach for `--from figma --url 'https://figma.com/design/…'` — the CLI
+help and docs advertised it for a long time, but it never worked. `--url` is a
+bare unauthenticated `curl -fsSL` (`fetch_url_to_file`) and the CLI has no
+credential flag at all, so figma.com returns **403** for a private file and the
+web app's **HTML shell** for a public one; the shell then dies deep inside
+`choc::json::parse` with an error that looks like a parser bug rather than an
+auth problem. The CLI now rejects figma.com `design/`/`file/`/`proto/` URLs up
+front (`tools/import-design/figma_url.hpp`) and names the lanes above. Note the
+two `--url` flags are **different**: `figma_rest_export.py --url` is real — it
+parses `file-key` + `node-id` out of the link and fetches with a token. The only
+authenticated Figma REST client in the repo is that script; nothing in the C++
+CLI can talk to Figma.
+
 ## Figma → Pulp, faithful (1:1) — THE WORKING LANE (read first)
 
 When the goal is a **visually faithful (1:1)** import of a component that lives in
@@ -1729,6 +1743,21 @@ Gotchas:
   to skin, and it falls through to the default/standard knob. To get a
   captured-art sprite knob you need the **figma-plugin "Export to Pulp"**
   envelope (e.g. the ELYSIUM `.pulp.zip`), which captures the disc PNG.
+- The knob's `asset_path` is a **RUNTIME** path, not build scratch. When the
+  disc carries a baked-in indicator (`knob_ind_r_out`), `enrich_imported_image_
+  asset_metadata` re-encodes a *cleaned* disc and repoints `asset_path` at it —
+  and that path is serialized into DesignIR JSON and baked verbatim into
+  codegen (`setKnobSpriteStrip('<abs path>')`), then loaded when the SHIPPED
+  plugin's editor opens. So it must outlive the import process: write derived
+  assets to `default_asset_cache_directory()` (`PULP_IMPORT_ASSET_CACHE`, then
+  a per-user cache dir), NEVER `fs::temp_directory_path()`. A temp-hosted
+  cleaned disc survives local testing and then silently unskins the knob after
+  a temp sweep or reboot, with zero diagnostics — the failure surfaces on a
+  customer's machine, far from the import. Key derived filenames by **sha256**
+  of the content (`pulp::runtime::sha256_hex`), like `asset_id_for()` and
+  `IRAssetRef::content_hash`; `std::hash` is implementation-defined and
+  unstable across runs and compilers. Note `--asset-cache` currently steers
+  only the manifest lane; the cleaned-disc write follows the env var / default.
 - Validate turning headlessly: render the imported knob at value 0.0 / 0.5 /
   1.0 with `pulp-screenshot` and confirm the white notch sweeps
   lower-left → up → lower-right. The engine unit tests
@@ -2132,7 +2161,7 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
 - Detection is strict (all-of fingerprint, 95% min-confidence): filename `DESIGN.md` + `---` frontmatter fence + `name:` key + at least one of `colors`/`typography`/`rounded`/`spacing`/`components`. Generic Jekyll/Hugo blog posts will not match.
 - Diagnostics: structured `[severity] code at path (line:col): message` on stderr. Exit codes — 0 OK, 1 usage/write, 2 detect-only no match, 3 parse error (malformed YAML, duplicate `##` section heading), 4 unsupported.
 - **Format spec pin: tag `0.3.0`** (`paws-and-paths` fixture is byte-identical across 0.1.1→0.3.0, so only the pin strings move — provenance/NOTICE/licensing/compat.json). Frontmatter format coverage tracking 0.3.0: (1) `colors.*` values are **any valid CSS color**, not just hex — `looks_like_css_color()` accepts hex (3/4/6/8-digit), named keywords, and functional `rgb()/hsl()/hwb()/oklch()/oklab()/lch()/lab()/color-mix()`; a real non-color value still emits `color-shape`. (2) `colors`/`rounded`/`spacing` nest to **arbitrary depth** — `walk_color_node`/`walk_dimension_node` recurse and key on the **dot-joined** path (`background.light`, not dashed), matching the `{colors.background.light}` reference syntax that `lookup_color`/`lookup_dimension` already resolve. (3) `spacing` accepts a **bare number** (`base: 8` → 8px) because `parse_dimension`'s unit is optional. (4) **Unknown top-level keys warn** (`unknown-key`, warning-not-error) — catches typo'd keys like `color:`/`typgrphy:`. Numeric/boolean component scalars (`fontWeight: 600`, `enabled: true`) already flow through as strings via yaml-cpp coercion.
-- **Frontmatter-less bodies** (Stitch / Brand-Kit exports authored as prose): when a file has no `---` frontmatter, `parse_designmd` falls back to scanning Markdown body sections so it doesn't import an empty token set. It reads `name: value` list items and `| name | value |` table rows under `## Colors` (color tokens), `## Spacing` (`spacing-*` dims), `## Border Radius`/`## Rounded` (`rounded-*` dims), and `## Shadows`/`## Elevation` (`shadow-*` strings). Table header/separator rows are skipped by requiring the value cell to be a real color/dimension/shadow. A `### Light Mode`/`### Dark Mode` subsection under `## Colors` routes to the bare name (light/default) or a `<name>.dark` suffix (dark) — the **same multi-mode convention the Figma plugin uses** (`tools/figma-plugin/src/tokens.ts`), so dark themes survive into the flat token maps. Emits a `body-tokens` info diagnostic when it recovers any.
+- **Markdown body sections are ALWAYS scanned** — with or without frontmatter. `parse_designmd` reads `name: value` list items and `| name | value |` table rows under `## Colors` (color tokens), `## Spacing` (`spacing-*` dims), `## Border Radius`/`## Rounded` (`rounded-*` dims), and `## Shadows`/`## Elevation` (`shadow-*` strings). **Frontmatter wins on conflict** (compared by normalized name, since frontmatter keys are dot-joined and case-preserving while body keys are lowercased and dash-joined); the body only fills gaps. This used to run **only** when a doc had no `---` frontmatter, which meant adding frontmatter to a prose-authored DESIGN.md silently dropped every body token — total and invisible for `## Shadows`, whose frontmatter key did not exist. `shadows:` is now a real frontmatter group. Table header/separator rows are skipped by requiring the value cell to be a real color/dimension/shadow. A `### Light Mode`/`### Dark Mode` subsection under `## Colors` routes to the bare name (light/default) or a `<name>.dark` suffix (dark) — the **same multi-mode convention the Figma plugin uses** (`tools/figma-plugin/src/tokens.ts`), so dark themes survive into the flat token maps. Emits a `body-tokens` info diagnostic when it recovers any.
 - See `docs/reference/imports/designmd.md` for the full reference (supported subset, reference-resolution rules, attribution).
 
 **v0.dev runtime-import parser (Phase 6.6.2)**:
@@ -2835,14 +2864,24 @@ After generating Pulp code, ALWAYS validate by comparing with the source design:
    ```bash
    python3 tools/import-design/fidelity_diff.py --render render.png --scene scene.pulp.json --frame-reference source.png
    ```
-   > **Do not treat `--validate`'s exit code as a gate.** It prints `PASS` or
-   > `NEEDS REVIEW` but **exits 0 either way**, at any similarity — a 0%-similar
-   > render still exits 0. Read the printed similarity (and the diff image); never
-   > infer success from `$?`.
+   > **`--validate` alone is advisory.** It prints `PASS` or `NEEDS REVIEW` but
+   > **exits 0 either way**, at any similarity — a 0%-similar render still exits
+   > 0. Read the printed similarity (and the diff image); never infer success
+   > from `$?` unless you asked for a gate.
+   >
+   > **To gate on it, add `--fail-below <pct>`** — the run then exits 5 when the
+   > similarity is under `<pct>`. The value is a percentage 0-100 (`85`, not
+   > `0.85`; a fraction is rejected rather than silently treated as 0.85%, which
+   > would never fire). It requires `--reference`, since there is otherwise
+   > nothing to compare against:
+   > ```bash
+   > pulp import-design --from X --file input \
+   >     --validate --reference source.png --fail-below 85
+   > ```
 
 4. **Review the diff image** — red highlights show differences
 
-5. **Iterate if needed** — adjust the generated code and re-render until similarity is acceptable (>85%)
+5. **Iterate if needed** — adjust the generated code and re-render until similarity is acceptable (>=85%, the shared default in `pulp::view::kDefaultSimilarityThreshold`)
 
 **Always show comparisons as a LABELED montage** — `tools/import-design/montage.py` stacks N renders into one image with a titled bar above each panel (labels ON by default), so a reference-vs-render(s) comparison is self-documenting (you can tell which panel is which without an external caption — a bare montage gets misread):
 ```bash

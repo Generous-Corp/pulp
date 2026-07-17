@@ -185,9 +185,9 @@ std::string css_prop_to_camel_case(const std::string& prop) {
     return out;
 }
 
-// Strip CSS `/* ... */` comments from a block. Multi-line safe. We
-// don't need to be a full CSS tokenizer — Claude Design exports use
-// vanilla rules, not CSS-in-JS or nested at-rules.
+// Strip CSS `/* ... */` comments from a block. Multi-line safe. This
+// runs before the rule walker so brace counting there never has to
+// reason about braces that live inside a comment.
 std::string strip_css_comments(const std::string& css) {
     std::string out;
     out.reserve(css.size());
@@ -224,16 +224,61 @@ std::map<std::string, std::string> parse_css_declarations(const std::string& bod
     return out;
 }
 
+// Advance past a CSS string literal. `quote_at` indexes the opening
+// `'` or `"`; returns the index just past the closing quote, or
+// `css.size()` if the literal is unterminated. Backslash escapes are
+// honored so `content: "\""` doesn't end the literal early.
+size_t skip_css_string(const std::string& css, size_t quote_at) {
+    const char quote = css[quote_at];
+    for (size_t i = quote_at + 1; i < css.size(); ++i) {
+        if (css[i] == '\\') {
+            ++i;  // consume the escaped char
+            continue;
+        }
+        if (css[i] == quote) return i + 1;
+    }
+    return css.size();
+}
+
+// Find the `}` that closes the block opening at `open`, counting
+// nested braces so an at-rule body (`@media { .a {} .b {} }`) is
+// consumed whole rather than stopping at its first inner `}`. Braces
+// inside string literals don't count. Returns npos when unbalanced.
+size_t find_matching_brace(const std::string& css, size_t open) {
+    int depth = 0;
+    for (size_t i = open; i < css.size(); ++i) {
+        const char c = css[i];
+        if (c == '"' || c == '\'') {
+            i = skip_css_string(css, i) - 1;
+            continue;
+        }
+        if (c == '{') {
+            ++depth;
+        } else if (c == '}') {
+            if (--depth == 0) return i;
+        }
+    }
+    return std::string::npos;
+}
+
 // Walk a CSS source string (the inside of one `<style>` block) and
-// merge every `.classname { ... }` rule into `into`. Skips at-rules
-// (anything that begins with `@`), `:root` blocks, descendant /
-// pseudo-class selectors (anything with whitespace, `:`, `>` or `,`
+// merge every top-level `.classname { ... }` rule into `into`. Skips
+// at-rules (anything that begins with `@`), `:root` blocks, descendant
+// / pseudo-class selectors (anything with whitespace, `:`, `>` or `,`
 // between the dot and the `{`), and `.scheme-*` selectors (those are
 // already handled as theme-mode token overrides upstream).
 //
+// Rules nested inside an at-rule are deliberately NOT collected: a
+// `@media` / `@supports` body is conditional, so hoisting its rules
+// into the unconditional classname map would make a responsive or
+// dark-mode override apply always. Consuming each at-rule body whole
+// (balanced braces) is what keeps the walker in sync — stopping at the
+// first inner `}` would both leak the at-rule's later rules and
+// misparse the following top-level rule's selector.
+//
 // We hand-walk character-by-character rather than regex because:
-//   1. CSS values can contain `{` (e.g. `linear-gradient(...)`) — but
-//      not at the top level of a declaration block.
+//   1. Brace nesting is unbounded (`@media { @supports { … } }`), which
+//      a regex cannot match.
 //   2. The selector list can include commas, so we need to split on
 //      `,` and apply the same body to every classname in the list.
 void collect_classnames_from_css(const std::string& css_in,
@@ -245,21 +290,45 @@ void collect_classnames_from_css(const std::string& css_in,
         while (i < css.size() && std::isspace(static_cast<unsigned char>(css[i]))) ++i;
         if (i >= css.size()) break;
 
-        // Find the next `{` that opens a rule body. Anything between
-        // `i` and that brace is the selector list.
-        auto open = css.find('{', i);
+        // Scan the prelude for whichever comes first: the `{` that
+        // opens a body, or the `;` that terminates a body-less
+        // statement at-rule (`@import url(…);`, `@charset "utf-8";`).
+        // Quoted spans are stepped over so a `{` or `;` inside a string
+        // doesn't split the prelude.
+        size_t scan = i;
+        size_t open = std::string::npos;
+        bool statement_at_rule = false;
+        while (scan < css.size()) {
+            const char c = css[scan];
+            if (c == '"' || c == '\'') {
+                scan = skip_css_string(css, scan);
+                continue;
+            }
+            if (c == '{') { open = scan; break; }
+            if (c == ';') { statement_at_rule = true; break; }
+            ++scan;
+        }
+
+        // A body-less statement — consume it and move on. Without this
+        // the `;` would be swallowed into the *next* rule's selector
+        // list, disqualifying an otherwise plain classname rule.
+        if (statement_at_rule) {
+            i = scan + 1;
+            continue;
+        }
         if (open == std::string::npos) break;
         std::string selector_list = css.substr(i, open - i);
 
-        // Find the matching `}`. Top-level only — declaration values
-        // never embed `{...}` braces in well-formed CSS.
-        auto close = css.find('}', open + 1);
+        // Find the matching `}`, counting nested braces.
+        auto close = find_matching_brace(css, open);
         if (close == std::string::npos) break;
         std::string body = css.substr(open + 1, close - (open + 1));
         i = close + 1;
 
         // Skip at-rules (`@media`, `@font-face`, `@keyframes`, etc.).
-        // The first non-whitespace char of the selector tells us.
+        // The first non-whitespace char of the selector tells us. The
+        // whole balanced body is already consumed above, so nested
+        // at-rules are skipped along with it.
         auto first_non_ws = selector_list.find_first_not_of(" \t\r\n");
         if (first_non_ws == std::string::npos) continue;
         if (selector_list[first_non_ws] == '@') continue;
@@ -897,6 +966,7 @@ static std::vector<uint8_t> read_binary_file(const fs::path& path) {
 
 static bool write_binary_file(const fs::path& path,
                               const std::vector<uint8_t>& bytes);
+static fs::path default_asset_cache_directory();
 
 void enrich_imported_image_asset_metadata(DesignIR& ir,
                                           const IRAssetManifest& manifest,
@@ -941,14 +1011,22 @@ void enrich_imported_image_asset_metadata(DesignIR& ir,
                                     if (auto img = decode_png_rgba_for_import(bytes)) {
                                         clean_baked_knob_indicator(*img, *core);
                                         if (auto enc = encode_rgba_png_for_import(*img)) {
-                                            fs::path dir = fs::temp_directory_path() /
-                                                           "pulp-import-assets";
+                                            // The cleaned disc lands in the durable
+                                            // asset cache, not the OS temp dir: this
+                                            // path is serialized into asset_path and
+                                            // reloaded at RUNTIME by a shipped baked
+                                            // UI, so a temp sweep would silently
+                                            // unskin the knob. Content-addressed by
+                                            // sha256 like the rest of the pipeline —
+                                            // std::hash is implementation-defined and
+                                            // unstable across runs and compilers.
+                                            fs::path dir = default_asset_cache_directory();
                                             std::error_code dec;
                                             fs::create_directories(dir, dec);
-                                            const auto key = std::hash<std::string>{}(
-                                                asset_ref->second + path.string());
+                                            const auto digest = pulp::runtime::sha256_hex(
+                                                enc->data(), enc->size());
                                             fs::path cleaned = dir /
-                                                ("knobclean_" + std::to_string(key) + ".png");
+                                                ("knobclean_" + digest.substr(0, 16) + ".png");
                                             if (write_binary_file(cleaned, *enc))
                                                 node.attributes["asset_path"] =
                                                     cleaned.string();

@@ -14,6 +14,7 @@
 #include "import_detect.hpp"
 #include "fig_lane.hpp"
 #include "envelope_merge.hpp"
+#include "figma_url.hpp"
 #include "render_artifact_path.hpp"
 #include <miniz.h>
 // getpid() is POSIX-only via <unistd.h>; MSVC ships an equivalent
@@ -611,6 +612,13 @@ bool fetch_url_to_file(const std::string& url, const fs::path& output_path) {
         std::cerr << "Error: --url must start with http:// or https://\n";
         return false;
     }
+    // A figma.com scene URL can never import through the unauthenticated fetch
+    // below, so fail fast naming the lanes that work rather than surfacing a
+    // bare curl exit code. Rule + message live in figma_url.hpp.
+    if (pulp::import_design::is_figma_app_url(url)) {
+        std::cerr << pulp::import_design::figma_app_url_error();
+        return false;
+    }
     if (has_disallowed_url_char(url)) {
         std::cerr << "Error: --url contains characters that are not accepted by the import fetcher\n";
         return false;
@@ -906,7 +914,9 @@ static void print_usage() {
     std::cout << "                    multi-state design into one view. Order sets the frame\n";
     std::cout << "                    index a \"swap <n>\" button targets (the first --file is\n";
     std::cout << "                    frame 0).\n";
-    std::cout << "  --url <url>       Design URL (Figma file URL or v0 share link)\n";
+    std::cout << "  --url <url>       URL that serves design JSON/HTML directly (e.g. a v0 share\n";
+    std::cout << "                    link). Fetched unauthenticated; a figma.com file URL does\n";
+    std::cout << "                    NOT work — see 'Importing from Figma' below.\n";
     std::cout << "  --frame <name>    Frame/artboard to import (Figma; guid or name for --from fig).\n";
     std::cout << "                    Repeatable: give it once per state to capture a multi-state\n";
     std::cout << "                    design into one view. Order sets the frame index a \"swap <n>\"\n";
@@ -964,6 +974,10 @@ static void print_usage() {
     std::cout << "  --import-report <path>  Write the per-control resolution report (JSON) — rung,\n";
     std::cout << "                    confidence, conflicts, verification — for review or a CI gate\n";
     std::cout << "  --fail-on-unresolved    Exit nonzero (2) when a control is conflicted or inert\n";
+    std::cout << "  --fail-below <pct>      Exit nonzero (5) when --reference similarity is below\n";
+    std::cout << "                    <pct>, given as a percentage 0-100 (e.g. 85, not 0.85).\n";
+    std::cout << "                    Without this flag the similarity is advisory and the exit\n";
+    std::cout << "                    code is unchanged, at any similarity.\n";
     std::cout << "  --recognition-manifest <path>\n";
     std::cout << "                    User recognition manifest (flat library-manifest shape) mapping\n";
     std::cout << "                    your OWN Figma component-set keys / name prefixes to Pulp control\n";
@@ -1008,9 +1022,18 @@ static void print_usage() {
     std::cout << "  Environment overrides: PULP_IMPORT_DESIGN_DEFAULT_MODE, PULP_IMPORT_DESIGN_DEFAULT_EMIT\n";
     std::cout << "  Each CLI flag overrides its matching preference. If only default_mode=baked is set, default_emit\n";
     std::cout << "  becomes ir-json unless explicitly configured.\n\n";
+    std::cout << "Importing from Figma:\n";
+    std::cout << "  There is no authenticated Figma fetch in this CLI, so a figma.com file URL\n";
+    std::cout << "  cannot be imported with --url. Use one of these lanes instead (local first):\n";
+    std::cout << "    1. Figma desktop MCP — get_design_context/get_metadata for inspection.\n";
+    std::cout << "    2. 'Design for Pulp' Figma desktop plugin — exports a .pulp.zip envelope;\n";
+    std::cout << "       import it with --from figma-plugin --file <export>.pulp.zip\n";
+    std::cout << "    3. --from fig --file design.fig — decodes a local .fig save file offline.\n";
+    std::cout << "    4. tools/import-design/figma_rest_export.py --token <pat> — headless/CI\n";
+    std::cout << "       fallback; hits the Figma REST API and emits the same envelope.\n\n";
     std::cout << "Examples:\n";
     std::cout << "  pulp import-design --from figma --file design.json\n";
-    std::cout << "  pulp import-design --from figma --url 'https://figma.com/design/...' --frame 'Plugin UI'\n";
+    std::cout << "  pulp import-design --from figma-plugin --file design.pulp.zip --frame 'Plugin UI'\n";
     std::cout << "  pulp import-design --from stitch --file screen.html --screen 'Main'\n";
     std::cout << "  pulp import-design --from v0 --url 'https://v0.dev/t/abc123' --output my-ui.js\n";
     std::cout << "  pulp import-design --from pencil --file design.json --dry-run\n";
@@ -1790,6 +1813,11 @@ int main(int argc, char* argv[]) {
     std::string diff_output;         // --diff: output path for visual diff image
     std::string import_report_path;  // --import-report: write the P7 resolution report JSON here
     bool fail_on_unresolved = false; // --fail-on-unresolved: nonzero exit if a control is conflicted/inert
+    // --fail-below <pct>: opt-in gate turning a low --reference similarity into
+    // a nonzero exit. Negative means "not requested" — absent the flag the
+    // similarity stays advisory and the exit code is unchanged, so existing
+    // callers that only read the printed number keep working.
+    float fail_below_pct = -1.0f;
     bool dry_run = false;
     bool include_tokens = true;
     bool include_comments = true;
@@ -1798,6 +1826,7 @@ int main(int argc, char* argv[]) {
     std::string dump_layout_path;    // --dump-layout <file>: write the laid-out view tree as JSON
     bool strict_fidelity = false;    // --strict-fidelity: fail on a fidelity self-check finding
     bool fidelity_failed = false;    // set when strict_fidelity + at least one finding
+    bool similarity_failed = false;  // set when --fail-below + reference similarity under the bar
     std::string fidelity_report_path; // --fidelity-report <file>: write the JSON fidelity ledger
     bool use_web_compat = false;     // --web-compat: use DOM API instead of native
     bool preview_mode = false;       // --preview: minimal widget style for design comparison
@@ -1920,6 +1949,44 @@ int main(int argc, char* argv[]) {
             param_binding_manifest_path = argv[++i];
         } else if (std::strcmp(argv[i], "--fail-on-unresolved") == 0) {
             fail_on_unresolved = true;
+        } else if (std::strcmp(argv[i], "--fail-below") == 0) {
+            // Unit is PERCENT (0-100), matching the "Similarity: NN%" line this
+            // gates on. A fraction like 0.85 is rejected rather than silently
+            // read as 0.85% — a threshold that parses too low never fires, which
+            // is precisely the silent-pass failure this flag exists to end.
+            //
+            // The missing-value case is checked BEFORE consuming argv: gating on
+            // `&& i + 1 < argc` would drop a valueless `--fail-below` through to
+            // the arg loop's silent fallthrough, disabling the gate while still
+            // reading as enforcement. `--fail-below $UNSET_VAR` in CI must be a
+            // hard error, not a pass.
+            if (i + 1 >= argc) {
+                std::cerr << "Error: --fail-below requires a value (percent, 0-100)\n";
+                return 2;
+            }
+            const std::string raw = argv[++i];
+            std::size_t consumed = 0;
+            float pct = 0.0f;
+            try {
+                pct = std::stof(raw, &consumed);
+            } catch (const std::exception&) {
+                consumed = 0;
+            }
+            if (consumed != raw.size()) {
+                std::cerr << "Error: --fail-below expects a number, got '" << raw << "'\n";
+                return 2;
+            }
+            if (pct > 0.0f && pct < 1.0f) {
+                std::cerr << "Error: --fail-below takes a percentage (0-100), not a fraction; "
+                          << "'" << raw << "' is ambiguous. Did you mean "
+                          << static_cast<int>(pct * 100.0f) << "?\n";
+                return 2;
+            }
+            if (pct < 0.0f || pct > 100.0f) {
+                std::cerr << "Error: --fail-below must be between 0 and 100, got '" << raw << "'\n";
+                return 2;
+            }
+            fail_below_pct = pct;
         } else if (std::strcmp(argv[i], "--render-size") == 0 && i + 1 < argc) {
             // Parse WxH
             std::string sz = argv[++i];
@@ -2073,6 +2140,14 @@ int main(int argc, char* argv[]) {
             print_usage();
             return 0;
         }
+    }
+
+    // --fail-below gates the --reference similarity, so without a reference it
+    // could never fire. Rejecting that up front keeps a CI gate from reading as
+    // enforced while silently passing everything.
+    if (fail_below_pct >= 0.0f && reference_image.empty()) {
+        std::cerr << "Error: --fail-below requires --reference <png> (nothing to compare against)\n";
+        return 2;
     }
 
     DefaultSelection default_selection;
@@ -3709,10 +3784,19 @@ int main(int argc, char* argv[]) {
                       << result.diff_pixels << "/" << result.total_pixels << " pixels differ, "
                       << "mean error: " << result.mean_error << ")\n";
 
-            if (result.passes(0.70f)) {
+            // The advisory label uses the shared default; --fail-below, when
+            // given, sets both the label's bar and the exit gate so one number
+            // drives what is printed and what is enforced.
+            const float gate = fail_below_pct >= 0.0f
+                ? fail_below_pct / 100.0f : pulp::view::kDefaultSimilarityThreshold;
+            if (result.passes(gate)) {
                 std::cout << "Validation: PASS\n";
             } else {
-                std::cout << "Validation: NEEDS REVIEW (similarity below 70%)\n";
+                std::cout << "Validation: NEEDS REVIEW (similarity below "
+                          << static_cast<int>(gate * 100.0f) << "%)\n";
+                // Only --fail-below turns this into a failure. Absent the flag
+                // the exit code stays whatever the rest of the run decided.
+                if (fail_below_pct >= 0.0f) similarity_failed = true;
             }
 
             // Always generate diff image when reference is provided
@@ -3778,7 +3862,13 @@ int main(int argc, char* argv[]) {
             dbg << "    \"diff_pixels\": " << result.diff_pixels << ",\n";
             dbg << "    \"total_pixels\": " << result.total_pixels << ",\n";
             dbg << "    \"mean_error\": " << result.mean_error << ",\n";
-            dbg << "    \"pass\": " << (result.passes(0.70f) ? "true" : "false") << "\n";
+            // Same bar as the printed verdict: --fail-below when given, else the
+            // shared default. A hardcoded 0.70 here meant the debug JSON could
+            // report "pass": true for a render the very same run printed as
+            // NEEDS REVIEW — one tool, one run, two answers.
+            const float dbg_gate = fail_below_pct >= 0.0f
+                ? fail_below_pct / 100.0f : pulp::view::kDefaultSimilarityThreshold;
+            dbg << "    \"pass\": " << (result.passes(dbg_gate) ? "true" : "false") << "\n";
             dbg << "  },\n";
         }
 
@@ -3816,5 +3906,9 @@ int main(int argc, char* argv[]) {
     // code so callers/harness can tell it apart from a parse/IO error).
     if (pulp_zip_keepalive) finalize_pulp_zip_sidecar(*pulp_zip_keepalive);
     if (fidelity_failed) return 4;
+    // --fail-below: the render missed the reference bar. Distinct from 4
+    // (import-time self-check) because this is a render-vs-reference verdict a
+    // caller may want to triage differently.
+    if (similarity_failed) return 5;
     return report_exit;  // 0, or 2 under --fail-on-unresolved with a conflicted/inert control
 }

@@ -1280,7 +1280,7 @@ commands:
         description: Input file path (required if --url not given)
       - name: --url
         kind: option
-        description: Design URL (Figma file URL or v0 share link); fetched with argv-safe curl into a unique temporary file when --file is not given
+        description: 'URL serving design JSON directly (e.g. a v0 share link, or any host returning the expected JSON); fetched with an unauthenticated argv-safe curl into a unique temporary file when --file is not given. NOT for figma.com links — those need auth and return HTML, so use the Figma plugin/MCP lane, --from fig, or figma_rest_export.py.'
       - name: --frame
         kind: option
         description: Frame/artboard name to import (Figma)

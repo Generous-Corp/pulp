@@ -152,8 +152,105 @@ std::string pascal_identifier(std::string_view input, std::string_view fallback 
     return out;
 }
 
+int hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+std::optional<std::array<unsigned, 4>> parse_hex_color(std::string_view value) {
+    if (value.empty() || value.front() != '#')
+        return std::nullopt;
+    auto nibble = [](int v) -> unsigned { return static_cast<unsigned>((v << 4) | v); };
+    if (value.size() == 4 || value.size() == 5) {
+        const int r = hex_digit(value[1]);
+        const int g = hex_digit(value[2]);
+        const int b = hex_digit(value[3]);
+        const int a = value.size() == 5 ? hex_digit(value[4]) : 15;
+        if (r < 0 || g < 0 || b < 0 || a < 0)
+            return std::nullopt;
+        return std::array<unsigned, 4>{nibble(r), nibble(g), nibble(b), nibble(a)};
+    }
+    if (value.size() == 7 || value.size() == 9) {
+        auto pair = [&](std::size_t offset) -> std::optional<unsigned> {
+            const int hi = hex_digit(value[offset]);
+            const int lo = hex_digit(value[offset + 1]);
+            if (hi < 0 || lo < 0)
+                return std::nullopt;
+            return static_cast<unsigned>((hi << 4) | lo);
+        };
+        auto r = pair(1);
+        auto g = pair(3);
+        auto b = pair(5);
+        auto a = value.size() == 9 ? pair(7) : std::optional<unsigned>(255);
+        if (!r || !g || !b || !a)
+            return std::nullopt;
+        return std::array<unsigned, 4>{*r, *g, *b, *a};
+    }
+    return std::nullopt;
+}
+
+// Parse `rgb()` / `rgba()` to an 0..255 quad. Mirrors the Swift emitter's
+// parser (design_swift_codegen.cpp) deliberately: the two lanes must agree on
+// a color or the same design renders differently depending on which backend
+// materialized it. Percentages and the modern space-separated `rgb(R G B / A)`
+// form stay unhandled here, exactly as they are there — an unrecognized value
+// returns nullopt and the caller falls back, rather than guessing.
+//
+// The duplication is real and known: parse_hex_color / this / the materializer's
+// parse_any_css_color / the Swift pair are four spellings of one concept, which is
+// why they drifted in the first place. Consolidating them into a shared lowering
+// helper is tracked separately; matching behavior now beats leaving the C++ lane
+// silently dropping colors until that lands.
+std::optional<std::array<unsigned, 4>> parse_rgb_color(std::string_view value) {
+    std::string s;
+    s.reserve(value.size());
+    for (char c : value)
+        if (!std::isspace(static_cast<unsigned char>(c))) s += static_cast<char>(std::tolower(c));
+    const bool has_alpha = s.rfind("rgba(", 0) == 0;
+    const bool plain = s.rfind("rgb(", 0) == 0;
+    if (!has_alpha && !plain) return std::nullopt;
+    const std::size_t open = s.find('(');
+    const std::size_t close = s.find(')', open);
+    if (close == std::string::npos) return std::nullopt;
+    std::vector<std::string> parts;
+    std::string cur;
+    for (std::size_t i = open + 1; i < close; ++i) {
+        if (s[i] == ',') { parts.push_back(cur); cur.clear(); }
+        else cur += s[i];
+    }
+    parts.push_back(cur);
+    if (parts.size() < 3) return std::nullopt;
+    auto to_u8 = [](const std::string& t, bool* ok) -> unsigned {
+        try { std::size_t idx = 0; double d = std::stod(t, &idx);
+              if (idx != t.size()) { *ok = false; return 0; }
+              *ok = true;
+              return static_cast<unsigned>(std::clamp<long>(std::lround(d), 0, 255)); }
+        catch (...) { *ok = false; return 0; }
+    };
+    bool ok = true;
+    unsigned r = to_u8(parts[0], &ok); if (!ok) return std::nullopt;
+    unsigned g = to_u8(parts[1], &ok); if (!ok) return std::nullopt;
+    unsigned b = to_u8(parts[2], &ok); if (!ok) return std::nullopt;
+    unsigned a = 255;
+    if (parts.size() >= 4) {
+        try { std::size_t idx = 0; double af = std::stod(parts[3], &idx);
+              if (idx != parts[3].size()) return std::nullopt;
+              a = static_cast<unsigned>(std::clamp(af, 0.0, 1.0) * 255.0 + 0.5); }
+        catch (...) { return std::nullopt; }
+    }
+    return std::array<unsigned, 4>{r, g, b, a};
+}
+
 std::string color_literal_expr(std::string_view value) {
-    if (auto color = parse_hex_color_rgba(value)) {
+    // Hex first (the common case), then rgb()/rgba(). Before the rgb() arm this
+    // returned an empty expression for every rgba() value, so the baked-C++ lane
+    // silently dropped colors the live-JS materializer renders — the same design,
+    // two different pictures, depending on which lane you took.
+    auto color = parse_hex_color(value);
+    if (!color) color = parse_rgb_color(value);
+    if (color) {
         std::ostringstream out;
         out << "pulp::view::Color::rgba8("
             << (*color)[0] << ", " << (*color)[1] << ", "
@@ -360,7 +457,7 @@ TokenSymbols build_token_symbols(const DesignIR& ir, EmitContext& ctx) {
     for (const auto& [name, value] : ir.tokens.colors) {
         const auto symbol = "tokens::" + unique_symbol(ctx.used_token_names, pascal_identifier(name, "Color"));
         symbols.color_by_name.emplace(name, symbol);
-        if (parse_hex_color_rgba(value))
+        if (parse_hex_color(value))
             symbols.color_by_value.emplace(value, symbol);
     }
     for (const auto& [name, value] : ir.tokens.dimensions) {

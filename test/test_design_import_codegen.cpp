@@ -2621,3 +2621,37 @@ TEST_CASE("border shorthand normalization defers and declines",
     normalize_border_shorthand(root);
     REQUIRE(*root.children[0].children[0].style.border_color == "#123456");
 }
+// ── rgba() must survive the baked-C++ lane, not just the live-JS one ─────
+// color_literal_expr() parsed hex only and returned an empty expression for
+// rgb()/rgba(), so the baked-C++ emitter silently dropped colors the live
+// materializer renders. Once the materializer learned rgba(), that gap became
+// a LANE DIVERGENCE — the same design, two different pictures, depending on
+// which backend materialized it — which the import-design skill's
+// screenshot-parity invariant forbids. This pins both halves.
+TEST_CASE("generated C++ carries rgba() colors like the materializer does",
+          "[view][import][codegen][cpp][color]") {
+    pulp::view::DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.style.background_color = "rgba(255, 0, 0, 0.5)";
+    ir.root.style.border_color = "rgba(255,255,255,0.2)";
+    ir.root.style.color = "rgb(200, 60, 60)";
+
+    pulp::view::IRAssetManifest manifest;
+    const auto gen = pulp::view::generate_pulp_cpp(ir, manifest);
+
+    // 0.5 alpha -> 128 (round-half-up), 0.2 -> 51. If the rgb() arm regressed,
+    // these emit NOTHING rather than a wrong value -- the failure mode is a
+    // missing setter -- so assert on the literal we expect to see.
+    CHECK(gen.source.find("rgba8(255, 0, 0, 128)") != std::string::npos);
+    CHECK(gen.source.find("rgba8(255, 255, 255, 51)") != std::string::npos);
+    CHECK(gen.source.find("rgba8(200, 60, 60, 255)") != std::string::npos);
+
+    // Control: hex still works, so the rgb() arm didn't displace the hex path.
+    pulp::view::DesignIR hex_ir;
+    hex_ir.root.type = "frame";
+    hex_ir.root.name = "HexPanel";
+    hex_ir.root.style.background_color = "#1a1a2e";
+    const auto hex_gen = pulp::view::generate_pulp_cpp(hex_ir, manifest);
+    CHECK(hex_gen.source.find("rgba8(26, 26, 46, 255)") != std::string::npos);
+}

@@ -82,8 +82,8 @@
     },
     {
       "path": "tools/import-design/pulp_import_design.cpp",
-      "max_loc": 3540,
-      "note": "import-design CLI orchestration hotspot (+20 for the --fidelity-report arg/emit/help surface; ledger taxonomy + JSON live in design_fidelity_ledger.cpp; +24 for the --from fig lane arg/help surface, decode logic in fig_lane.cpp); grew with the recognition-resolver + installed-package custom-control wiring, plus the --validate faithful_svg honesty caveat"
+      "max_loc": 3610,
+      "note": "import-design CLI orchestration hotspot (+20 for the --fidelity-report arg/emit/help surface; ledger taxonomy + JSON live in design_fidelity_ledger.cpp; +24 for the --from fig lane arg/help surface, decode logic in fig_lane.cpp); grew with the recognition-resolver + installed-package custom-control wiring, the --validate faithful_svg honesty caveat, and the --fail-below similarity gate (arg parse + unit validation + help)"
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",
