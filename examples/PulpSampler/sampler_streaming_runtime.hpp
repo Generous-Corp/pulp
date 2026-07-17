@@ -80,6 +80,12 @@ public:
         reverse_decode_entered_for_test_.store(false, std::memory_order_relaxed);
         release_reverse_decode_for_test_.store(true, std::memory_order_relaxed);
         unpublished_rollback_count_for_test_.store(0, std::memory_order_relaxed);
+        service_command_drain_paused_for_test_.store(false,
+                                                     std::memory_order_relaxed);
+        service_command_drain_paused_ack_for_test_.store(
+            false, std::memory_order_relaxed);
+        reverse_prewarm_timeout_override_for_test_ = false;
+        reverse_prewarm_timeout_for_test_ = std::chrono::milliseconds{0};
 #endif
         unpublished_rollbacks_.fill({});
         published_source_.write({});
@@ -97,6 +103,8 @@ public:
             .decoder_latency_seconds = kDecoderLatencySeconds,
             .maximum_host_block_frames = maximum_host_block_frames_,
             .interpolation_guard_frames = 2,
+            .loop_prefetch_guard_frames =
+                static_cast<std::uint64_t>(maximum_source_frames_per_block),
         });
         const auto cache_working_set_page_frames = maximum_preload.valid()
             ? std::ceil((static_cast<double>(maximum_preload.required_preload_frames) +
@@ -106,7 +114,7 @@ public:
         page_frames_ = std::max<std::uint64_t>(
             {kDefaultPageFrames,
              static_cast<std::uint64_t>(maximum_source_frames_per_block /
-                                        (audio::kSampleStreamVoiceMaxPageDemands - 2)) + 1,
+                                        kSourceAdvancePageDemandsPerRegion) + 1,
              static_cast<std::uint64_t>(cache_working_set_page_frames)});
 
         service_ready_ = service_.prepare({
@@ -252,7 +260,16 @@ private:
     static constexpr std::uint32_t kWorkerCount = 2;
     static constexpr std::uint32_t kSourceCapacity = 2;
     static constexpr std::uint32_t kMaximumVoices = 8;
-    static constexpr std::uint32_t kPagesPerVoiceWorkingSet = 8;
+    static constexpr std::uint32_t kPagesPerVoiceWorkingSet =
+        audio::kSampleStreamVoiceMaxPageDemands;
+    // A full-sample wrap crossfade reads two distant contiguous regions. Each
+    // region can touch one partial page at either edge in addition to the pages
+    // spanned by the block's source advance.
+    static constexpr std::uint32_t kCrossfadeReadRegionCount = 2;
+    static constexpr std::uint32_t kBoundaryPageDemandsPerRegion = 2;
+    static constexpr std::uint32_t kSourceAdvancePageDemandsPerRegion =
+        audio::kSampleStreamVoiceMaxPageDemands / kCrossfadeReadRegionCount -
+        kBoundaryPageDemandsPerRegion;
     static constexpr std::uint32_t kCachePagesPerSource =
         kMaximumVoices * kPagesPerVoiceWorkingSet;
     static constexpr std::uint32_t kMaximumChannels = 2;
@@ -264,6 +281,10 @@ private:
     static constexpr double kDecoderLatencySeconds = 0.005;
     static constexpr std::uint64_t kAdmissionRequesterId =
         std::numeric_limits<std::uint64_t>::max();
+
+    static_assert(audio::kSampleStreamVoiceMaxPageDemands %
+                      kCrossfadeReadRegionCount == 0);
+    static_assert(kSourceAdvancePageDemandsPerRegion > 0);
 
     struct StreamedSlot {
         audio::SampleAsset asset;
@@ -297,6 +318,10 @@ private:
     std::atomic<bool> reverse_decode_entered_for_test_{false};
     std::atomic<bool> release_reverse_decode_for_test_{true};
     std::atomic<std::uint32_t> unpublished_rollback_count_for_test_{0};
+    std::atomic<bool> service_command_drain_paused_for_test_{false};
+    std::atomic<bool> service_command_drain_paused_ack_for_test_{false};
+    bool reverse_prewarm_timeout_override_for_test_ = false;
+    std::chrono::milliseconds reverse_prewarm_timeout_for_test_{0};
 #endif
     bool service_ready_ = false;
     float host_sample_rate_ = 44100.0f;
@@ -305,7 +330,6 @@ private:
     std::uint64_t selection_generation_ = 0;
     std::uint64_t next_source_id_ = 1;
     std::uint64_t next_asset_id_ = 1;
-    std::chrono::milliseconds reverse_prewarm_timeout_{250};
     std::mutex source_load_mutex_;
     std::mutex file_request_mutex_;
     std::condition_variable file_request_changed_;
@@ -322,7 +346,17 @@ private:
                 audio_active_generation_.load(std::memory_order_acquire),
                 audio_completed_generation_.load(std::memory_order_acquire));
             process_file_request();
-            service_.drain_commands(commands_);
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+            const auto command_drain_paused =
+                service_command_drain_paused_for_test_.load(
+                    std::memory_order_acquire);
+            service_command_drain_paused_ack_for_test_.store(
+                command_drain_paused, std::memory_order_release);
+            if (!command_drain_paused)
+#endif
+            {
+                service_.drain_commands(commands_);
+            }
             service_.drain_completions();
             collect_unpublished_rollbacks();
             if (!service_dispatch_paused_.load(std::memory_order_acquire)) {
@@ -405,6 +439,16 @@ private:
             .maximum_host_block_frames = maximum_host_block_frames_,
             .interpolation_guard_frames = 2,
         };
+        const auto block_source_frames = std::ceil(
+            static_cast<double>(maximum_host_block_frames_) * file.sample_rate /
+            static_cast<double>(host_sample_rate_) * kMaximumPitchRatio);
+        if (!std::isfinite(block_source_frames) ||
+            block_source_frames >= static_cast<double>(
+                std::numeric_limits<std::uint64_t>::max())) {
+            return false;
+        }
+        contract.loop_prefetch_guard_frames =
+            static_cast<std::uint64_t>(block_source_frames);
         const auto required = audio::evaluate_sample_preload_contract(contract);
         if (!required.valid() || required.required_preload_frames == 0) return false;
         const auto preload_frames =
@@ -462,10 +506,11 @@ private:
         if (!added.added()) return false;
 
         if (preload_frames < file.total_frames &&
-            !prewarm_reverse_entry_page(source,
-                                        added.view,
-                                        file.total_frames,
-                                        file.sample_rate)) {
+            !prewarm_reverse_entry_pages(source,
+                                         added.view,
+                                         file.total_frames,
+                                         preload_frames,
+                                         file.sample_rate)) {
             rollback_unpublished_source(source);
             return false;
         }
@@ -507,40 +552,67 @@ private:
         return false;
     }
 
-    bool prewarm_reverse_entry_page(
+    bool prewarm_reverse_entry_pages(
         audio::SampleStreamSourceToken source,
         const audio::SampleStreamCacheSourceView& view,
         std::uint64_t total_frames,
+        std::uint64_t preload_frames,
         std::uint32_t sample_rate) noexcept {
         const auto tail_frame = total_frames - 1;
+        const auto first_frame = total_frames > preload_frames
+            ? total_frames - preload_frames
+            : 0;
+        const auto first_page = first_frame / page_frames_;
+        const auto last_page = tail_frame / page_frames_;
+        const auto horizon_page_count = last_page - first_page + 1;
+        if (horizon_page_count > kCachePagesPerSource) return false;
         const audio::SampleStreamRequesterToken requester{
             kAdmissionRequesterId, source.source_id};
-        const auto scheduled = service_.request_page({
-            .source = source,
-            .requester = requester,
-            .page_index = tail_frame / page_frames_,
-            .resident_source_frames = 0,
-            .consumption_frames_per_second =
-                static_cast<double>(sample_rate) * kMaximumPitchRatio,
-            .demand_class = audio::SampleStreamDemandClass::Attack,
-        });
-        if (scheduled != audio::SampleStreamScheduleStatus::Inserted &&
-            scheduled != audio::SampleStreamScheduleStatus::Refreshed) {
-            (void) service_.cancel_requester(requester);
-            return false;
+        for (auto page = first_page; page <= last_page; ++page) {
+            const auto page_end = page == last_page
+                ? total_frames
+                : (page + 1) * page_frames_;
+            const auto scheduled = service_.request_page({
+                .source = source,
+                .requester = requester,
+                .page_index = page,
+                .resident_source_frames = tail_frame - (page_end - 1),
+                .consumption_frames_per_second =
+                    static_cast<double>(sample_rate) * kMaximumPitchRatio,
+                .demand_class = audio::SampleStreamDemandClass::Attack,
+            });
+            if (scheduled != audio::SampleStreamScheduleStatus::Inserted &&
+                scheduled != audio::SampleStreamScheduleStatus::Refreshed) {
+                (void) service_.cancel_requester(requester);
+                return false;
+            }
         }
 #if defined(PULP_SAMPLER_TEST_HOOKS)
         reverse_prewarm_pending_for_test_.store(true, std::memory_order_release);
 #endif
 
-        const auto deadline =
-            std::chrono::steady_clock::now() + reverse_prewarm_timeout_;
+        auto prewarm_timeout = reverse_prewarm_timeout_for_pages(
+            static_cast<std::uint32_t>(horizon_page_count));
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        if (reverse_prewarm_timeout_override_for_test_)
+            prewarm_timeout = reverse_prewarm_timeout_for_test_;
+#endif
+        const auto deadline = std::chrono::steady_clock::now() + prewarm_timeout;
+        const auto reverse_horizon_ready = [&] {
+            for (auto page = first_page; page <= last_page; ++page) {
+                const auto frame = std::min(tail_frame, page * page_frames_);
+                if (!view.window->ready_page_for_frame(
+                        source.source_generation, frame).valid) {
+                    return false;
+                }
+            }
+            return true;
+        };
         while (service_running_.load(std::memory_order_acquire) &&
                std::chrono::steady_clock::now() < deadline) {
             service_.drain_commands(commands_);
             service_.drain_completions();
-            if (view.window->ready_page_for_frame(
-                    source.source_generation, tail_frame).valid) {
+            if (reverse_horizon_ready()) {
                 (void) service_.cancel_requester(requester);
 #if defined(PULP_SAMPLER_TEST_HOOKS)
                 reverse_prewarm_pending_for_test_.store(
@@ -561,13 +633,23 @@ private:
             std::this_thread::yield();
         }
         service_.drain_completions();
-        const bool ready = view.window->ready_page_for_frame(
-            source.source_generation, tail_frame).valid;
+        const bool ready = reverse_horizon_ready();
         (void) service_.cancel_requester(requester);
 #if defined(PULP_SAMPLER_TEST_HOOKS)
         reverse_prewarm_pending_for_test_.store(false, std::memory_order_release);
 #endif
         return ready && service_running_.load(std::memory_order_acquire);
+    }
+
+    static std::chrono::milliseconds reverse_prewarm_timeout_for_pages(
+        std::uint32_t page_count) noexcept {
+        constexpr auto kMinimumTimeout = std::chrono::milliseconds{250};
+        const auto per_page_milliseconds = std::ceil(1000.0 *
+            (kCertifiedIoLatencySeconds + kSchedulerMarginSeconds +
+             kDecoderLatencySeconds));
+        const auto derived = std::chrono::milliseconds{
+            static_cast<std::int64_t>(per_page_milliseconds * page_count)};
+        return std::max(kMinimumTimeout, derived);
     }
 
     void rollback_unpublished_source(

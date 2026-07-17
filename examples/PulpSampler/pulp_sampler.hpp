@@ -35,6 +35,7 @@ enum SamplerParams : state::ParamID {
     kSamplerRelease  = 5,
     kSamplerPitch    = 6,  // semitones offset
     kSamplerLoop     = 7,  // 0 = one-shot, 1 = loop
+    kSamplerReverse  = 8,  // 0 = forward entry, 1 = reverse entry
 };
 
 class PulpSamplerProcessor : public format::Processor {
@@ -75,6 +76,8 @@ public:
         store.add_parameter({.id = kSamplerPitch, .name = "Pitch",
             .unit = "st", .range = {-24, 24, 0, 1}});
         store.add_parameter({.id = kSamplerLoop, .name = "Loop",
+            .unit = "", .range = {0, 1, 0, 1}});
+        store.add_parameter({.id = kSamplerReverse, .name = "Reverse",
             .unit = "", .range = {0, 1, 0, 1}});
     }
 
@@ -142,6 +145,9 @@ public:
         for (auto& voice : voices_) voice.reset();
         for (auto& generation : requester_generations_) generation = 0;
         for (auto& cancellation : pending_cancellations_) cancellation = {};
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        retire_reverse_attack_after_horizon_for_test_ = false;
+#endif
         streaming_.prepare(host_sample_rate_, max_block_frames_);
         publish_audio_acknowledgement(sample_store_.read_published_view());
     }
@@ -210,6 +216,7 @@ private:
         signal::Adsr::Params adsr;
         float pitch_semitones = 0.0f;
         bool loop = false;
+        bool reverse = false;
     };
 
     struct PendingCancellation {
@@ -229,6 +236,10 @@ private:
     SamplerVoice voices_[kMaxVoices]{};
     std::array<std::uint64_t, kMaxVoices> requester_generations_{};
     std::array<PendingCancellation, kMaxVoices> pending_cancellations_{};
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+    bool retire_reverse_attack_after_horizon_for_test_ = false;
+    std::uint64_t lookahead_plans_last_callback_for_test_ = 0;
+#endif
 
     std::uint64_t audio_safe_generation(const audio::PublishedSampleView& published) const noexcept {
         std::array<audio::PublishedSampleView, kMaxVoices> active_views{};
@@ -278,6 +289,7 @@ private:
         params.adsr.release = state().get_value(kSamplerRelease) / 1000.0f;
         params.pitch_semitones = state().get_value(kSamplerPitch);
         params.loop = state().get_value(kSamplerLoop) >= 0.5f;
+        params.reverse = state().get_value(kSamplerReverse) >= 0.5f;
         return params;
     }
 
@@ -287,21 +299,33 @@ private:
         }
     }
 
-    audio::LoopRegion make_region(const audio::PublishedSampleView& sample,
-                                  bool loop) const noexcept {
+    audio::LoopRegion make_region(std::uint64_t frames,
+                                  double sample_rate,
+                                  bool loop,
+                                  bool reverse) const noexcept {
         audio::LoopRegion region;
         region.start_frame = 0;
-        region.end_frame = sample.num_frames;
-        region.source_sample_rate = sample.sample_rate;
-        region.playback_mode = loop ? audio::LoopPlaybackMode::Forward
-                                    : audio::LoopPlaybackMode::OneShot;
+        region.end_frame = frames;
+        region.source_sample_rate = sample_rate;
+        region.playback_mode = loop
+            ? (reverse ? audio::LoopPlaybackMode::Reverse
+                       : audio::LoopPlaybackMode::Forward)
+            : (reverse ? audio::LoopPlaybackMode::ReverseOnce
+                       : audio::LoopPlaybackMode::OneShot);
+        region.reverse_entry = reverse;
         region.interpolation = audio::LoopInterpolationMode::Linear;
         region.crossfade_curve = audio::LoopCrossfadeCurve::Linear;
-        if (loop && sample.num_frames >= 32) {
+        if (loop && frames >= 32) {
             region.crossfade_frames =
-                std::min<std::uint64_t>({64, sample.num_frames / 8, sample.num_frames / 2});
+                std::min<std::uint64_t>({64, frames / 8, frames / 2});
         }
         return region;
+    }
+
+    audio::LoopRegion make_region(const audio::PublishedSampleView& sample,
+                                  const RenderParams& params) const noexcept {
+        return make_region(sample.num_frames, sample.sample_rate,
+                           params.loop, params.reverse);
     }
 
     double playback_speed(int note,
@@ -410,16 +434,52 @@ private:
             pitch_ratio * static_cast<double>(voice.streamed_asset.sample_rate) /
             static_cast<double>(host_sample_rate_);
 
+        if (voice.stream_playback_rate != source_frames_per_output) {
+            if (!voice.stream_reader.set_playback_rate(source_frames_per_output) ||
+                !voice.lookahead_reader.synchronize_cursor(
+                    voice.streamed_asset, voice.stream_reader.cursor())) {
+                queue_voice_cancellation(voice_index, voice.requester);
+                voice.reset();
+                return;
+            }
+            voice.stream_playback_rate = source_frames_per_output;
+            voice.lookahead_lead_source_frames = 0.0;
+            voice.pending_lookahead = {};
+            voice.pending_demand_index = 0;
+            voice.pending_refresh_index = 0;
+            voice.pending_lookahead_valid = false;
+        }
+
+        enqueue_forward_stream_boundary(voice, source_frames_per_output);
+
+        const bool holding_stream_attack = voice.stream_attack_pending;
+        if (holding_stream_attack) {
+            if (!prepare_reverse_attack_horizon(
+                    voice, source_frames_per_output)) {
+                streaming_.add_starved_frames(frames);
+                return;
+            }
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+            retire_reverse_attack_page_after_horizon_for_test(voice);
+#endif
+        }
+
         enqueue_stream_lookahead(voice, frames, source_frames_per_output);
         auto plan = voice.stream_reader.plan_block(voice.streamed_asset,
                                                    frames,
-                                                   source_frames_per_output,
                                                    host_sample_rate_);
+        if (holding_stream_attack && !stream_plan_pages_ready(plan)) {
+            streaming_.add_starved_frames(frames);
+            return;
+        }
+        if (holding_stream_attack) voice.stream_attack_pending = false;
         audio::BufferView<float> source_scratch(voice_scratch_ptrs_.data(),
                                                 voice.streamed_asset.channels,
                                                 frames);
         const auto rendered =
             voice.stream_reader.render_block(voice.streamed_asset, plan, source_scratch);
+        voice.lookahead_lead_source_frames -=
+            static_cast<double>(frames) * source_frames_per_output;
         if (rendered.supply == audio::SampleStreamVoiceSupply::Starved) {
             streaming_.add_starved_frames(frames - rendered.ready_output_frames);
         }
@@ -446,47 +506,251 @@ private:
 
         if (voice_finished ||
             rendered.supply == audio::SampleStreamVoiceSupply::EndOfSource ||
-            voice.stream_reader.source_position() >=
-                static_cast<double>(voice.streamed_asset.total_frames)) {
+            !voice.stream_reader.active()) {
             queue_voice_cancellation(voice_index, voice.requester);
             voice.reset();
         }
     }
 
+    bool prepare_reverse_attack_horizon(
+        SamplerVoice& voice,
+        double source_frames_per_output) noexcept {
+        const auto& asset = voice.streamed_asset;
+        if (asset.fully_resident()) return true;
+        if (!asset.valid() || !asset.has_stream_source ||
+            asset.stream_source.window == nullptr ||
+            asset.stream_source.page_frames == 0 ||
+            asset.preload_frames == 0) {
+            return false;
+        }
+
+        const auto page_frames = asset.stream_source.page_frames;
+        const auto tail_frame = asset.total_frames - 1;
+        const auto first_frame = asset.total_frames > asset.preload_frames
+            ? asset.total_frames - asset.preload_frames
+            : 0;
+        const auto first_page = first_frame / page_frames;
+        const auto last_page = tail_frame / page_frames;
+        bool ready = true;
+        for (auto page = first_page; page <= last_page; ++page) {
+            const auto page_start = page * page_frames;
+            const auto probe_frame = std::max(first_frame, page_start);
+            if (asset.stream_source.window->ready_page_for_frame(
+                    asset.source.source_generation, probe_frame).valid) {
+                continue;
+            }
+            ready = false;
+            const auto page_end = page == last_page
+                ? asset.total_frames
+                : (page + 1) * page_frames;
+            (void) streaming_.command_inbox().demand_page({
+                .source = asset.source,
+                .requester = voice.requester,
+                .page_index = page,
+                .resident_source_frames = tail_frame - (page_end - 1),
+                .consumption_frames_per_second =
+                    source_frames_per_output * host_sample_rate_,
+                .demand_class = audio::SampleStreamDemandClass::Attack,
+            });
+        }
+        return ready;
+    }
+
+    static bool stream_plan_pages_ready(
+        const audio::SampleStreamLoopBlockPlan& plan) noexcept {
+        if (plan.supply != audio::SampleStreamVoiceSupply::Ready ||
+            plan.demand_count > plan.ready_pages.size()) {
+            return false;
+        }
+        for (std::uint32_t index = 0; index < plan.demand_count; ++index) {
+            if (!plan.ready_pages[index].valid) return false;
+        }
+        return true;
+    }
+
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+    void retire_reverse_attack_page_after_horizon_for_test(
+        const SamplerVoice& voice) noexcept {
+        if (!retire_reverse_attack_after_horizon_for_test_) return;
+        retire_reverse_attack_after_horizon_for_test_ = false;
+        const auto& asset = voice.streamed_asset;
+        if (!asset.valid() || asset.stream_source.window == nullptr ||
+            asset.total_frames == 0) {
+            return;
+        }
+        const auto tail = asset.stream_source.window->ready_page_for_frame(
+            asset.source.source_generation, asset.total_frames - 1);
+        if (tail.valid) {
+            (void) asset.stream_source.window->retire_page(tail.page_index, 1);
+        }
+    }
+#endif
+
     void enqueue_stream_lookahead(SamplerVoice& voice,
                                   std::uint32_t frames,
                                   double source_frames_per_output) noexcept {
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        lookahead_plans_last_callback_for_test_ = 0;
+#endif
         if (voice.pending_lookahead_valid) {
+            const auto lead =
+                stream_lead_source_frames(voice.lookahead_lead_source_frames);
+            const auto refreshed = voice.lookahead_reader.enqueue_demands(
+                voice.pending_lookahead,
+                streaming_.command_inbox(),
+                voice.pending_refresh_index,
+                lead,
+                voice.pending_demand_index);
+            voice.pending_refresh_index = refreshed.next_demand_index;
+            if (!refreshed.complete) return;
             const auto retry = voice.lookahead_reader.enqueue_demands(
                 voice.pending_lookahead,
                 streaming_.command_inbox(),
-                voice.pending_demand_index);
+                voice.pending_demand_index,
+                lead);
             voice.pending_demand_index = retry.next_demand_index;
-            if (!retry.complete) return;
+            if (!retry.complete) {
+                voice.pending_refresh_index = 0;
+                return;
+            }
+            if (!voice.lookahead_reader.commit_planned_timeline(
+                    voice.streamed_asset, voice.pending_lookahead)) {
+                voice.pending_lookahead_valid = false;
+                voice.pending_demand_index = 0;
+                return;
+            }
+            voice.lookahead_lead_source_frames +=
+                static_cast<double>(voice.pending_lookahead.output_frames) *
+                source_frames_per_output;
             voice.pending_lookahead_valid = false;
             voice.pending_demand_index = 0;
+            voice.pending_refresh_index = 0;
         }
 
-        const auto future = std::min(
-            voice.stream_reader.source_position() +
-                static_cast<double>(voice.streamed_asset.preload_frames - 1),
-            static_cast<double>(voice.streamed_asset.total_frames));
-        if (!voice.lookahead_reader.seek(voice.streamed_asset, future)) return;
-        auto plan = voice.lookahead_reader.plan_block(voice.streamed_asset,
-                                                      frames,
-                                                      source_frames_per_output,
-                                                      host_sample_rate_);
-        if (plan.supply != audio::SampleStreamVoiceSupply::Ready ||
-            plan.demand_count == 0) {
+        if (voice.streamed_asset.fully_resident() ||
+            !voice.streamed_asset.has_preload_contract) {
             return;
         }
-        const auto queued = voice.lookahead_reader.enqueue_demands(
-            plan, streaming_.command_inbox());
-        if (!queued.complete) {
-            voice.pending_lookahead = plan;
-            voice.pending_demand_index = queued.next_demand_index;
-            voice.pending_lookahead_valid = true;
+        const auto planning_frames = std::max(frames, max_block_frames_);
+        const auto& contract = voice.streamed_asset.preload_contract;
+        const auto latency_seconds = contract.certified_io_latency_seconds +
+            contract.scheduler_margin_seconds + contract.decoder_latency_seconds;
+        const auto plan_advance =
+            static_cast<double>(planning_frames) * source_frames_per_output;
+        const auto contract_lead =
+            latency_seconds * source_frames_per_output * host_sample_rate_ +
+            plan_advance + source_frames_per_output;
+        const auto resident_horizon = voice.streamed_asset.preload_frames > 0
+            ? static_cast<double>(voice.streamed_asset.preload_frames - 1)
+            : 0.0;
+        const auto bounded_preload_lead = std::min(
+            resident_horizon,
+            resident_horizon * source_frames_per_output) + plan_advance;
+        const auto target_lead = std::max(contract_lead, bounded_preload_lead);
+        if (!(plan_advance > 0.0) || !std::isfinite(plan_advance) ||
+            !std::isfinite(target_lead)) {
+            return;
         }
+        if (voice.lookahead_lead_source_frames >= target_lead) return;
+        const auto required_plans_value = std::ceil(
+            (target_lead - voice.lookahead_lead_source_frames) / plan_advance);
+        if (!(required_plans_value > 0.0) ||
+            !std::isfinite(required_plans_value) ||
+            required_plans_value >
+                static_cast<double>(std::numeric_limits<std::uint64_t>::max())) {
+            return;
+        }
+        const auto required_plans =
+            static_cast<std::uint64_t>(required_plans_value);
+        constexpr std::uint64_t kPlanBudgetPerCallback = 8;
+        const auto plans_this_callback =
+            std::min(required_plans, kPlanBudgetPerCallback);
+        for (std::uint64_t iteration = 0;
+             iteration < plans_this_callback;
+             ++iteration) {
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+            ++lookahead_plans_last_callback_for_test_;
+#endif
+            auto plan = voice.lookahead_reader.plan_block(
+                voice.streamed_asset,
+                planning_frames,
+                host_sample_rate_,
+                audio::SampleStreamDemandClass::Sustain);
+            if (plan.supply != audio::SampleStreamVoiceSupply::Ready) return;
+            const auto queued = voice.lookahead_reader.enqueue_demands(
+                plan,
+                streaming_.command_inbox(),
+                0,
+                stream_lead_source_frames(voice.lookahead_lead_source_frames));
+            if (!queued.complete) {
+                voice.pending_lookahead = plan;
+                voice.pending_demand_index = queued.next_demand_index;
+                voice.pending_refresh_index = 0;
+                voice.pending_lookahead_valid = true;
+                return;
+            }
+            if (!voice.lookahead_reader.commit_planned_timeline(
+                    voice.streamed_asset, plan)) return;
+            voice.lookahead_lead_source_frames += plan_advance;
+        }
+    }
+
+    static std::uint64_t stream_lead_source_frames(double lead) noexcept {
+        if (!(lead > 0.0)) return 0;
+        if (!std::isfinite(lead) ||
+            lead >= static_cast<double>(
+                std::numeric_limits<std::uint64_t>::max())) {
+            return std::numeric_limits<std::uint64_t>::max();
+        }
+        return static_cast<std::uint64_t>(std::floor(lead));
+    }
+
+    void enqueue_forward_stream_boundary(
+        SamplerVoice& voice,
+        double source_frames_per_output) noexcept {
+        if (!voice.stream_boundary_pending) return;
+        const auto& asset = voice.streamed_asset;
+        if (!asset.valid() || !asset.has_stream_source ||
+            asset.stream_source.page_frames == 0 ||
+            asset.preload_frames >= asset.total_frames) {
+            voice.stream_boundary_pending = false;
+            voice.stream_boundary_demand_index = 0;
+            return;
+        }
+
+        const auto page_frames = asset.stream_source.page_frames;
+        const auto first_page = asset.preload_frames / page_frames;
+        const auto guarded_frame = std::min(
+            asset.total_frames - 1,
+            asset.preload_frames +
+                asset.preload_contract.interpolation_guard_frames);
+        const auto last_page = guarded_frame / page_frames;
+        const auto demand_count =
+            static_cast<std::uint32_t>(last_page - first_page + 1);
+        while (voice.stream_boundary_demand_index < demand_count) {
+            const auto page = first_page + voice.stream_boundary_demand_index;
+            const auto page_start = page * page_frames;
+            const auto first_use = std::max(asset.preload_frames, page_start);
+            const auto distance = std::max(
+                0.0,
+                static_cast<double>(first_use) -
+                    voice.stream_reader.cursor().position());
+            if (streaming_.command_inbox().demand_page({
+                    .source = asset.source,
+                    .requester = voice.requester,
+                    .page_index = page,
+                    .resident_source_frames =
+                        stream_lead_source_frames(distance),
+                    .consumption_frames_per_second =
+                        source_frames_per_output * host_sample_rate_,
+                    .demand_class = audio::SampleStreamDemandClass::Attack,
+                }) != audio::SampleStreamCommandPushStatus::Enqueued) {
+                return;
+            }
+            ++voice.stream_boundary_demand_index;
+        }
+        voice.stream_boundary_pending = false;
+        voice.stream_boundary_demand_index = 0;
     }
 
     void trigger_note(int note,
@@ -525,18 +789,27 @@ private:
                 return;
             auto& requester_generation = requester_generations_[target_index];
             if (++requester_generation == 0) ++requester_generation;
+            const auto source_frames_per_output =
+                pitch_ratio * static_cast<double>(source.streamed.sample_rate) /
+                static_cast<double>(host_sample_rate_);
+            const auto region = make_region(source.streamed.total_frames,
+                                            source.streamed.sample_rate,
+                                            params.loop,
+                                            params.reverse);
             target->start_streamed(
                 note,
                 velocity,
                 host_sample_rate_,
                 source.streamed,
+                region,
+                source_frames_per_output,
                 {target_index + 1, requester_generation},
                 source.selection_generation);
             return;
         }
 
         const auto& sample = source.resident;
-        const auto region = make_region(sample, params.loop);
+        const auto region = make_region(sample, params);
         const auto speed = playback_speed(note, sample, params);
         if (speed == 0.0) return;
         target->start(note, velocity, speed, host_sample_rate_, sample, region, sample.num_frames);

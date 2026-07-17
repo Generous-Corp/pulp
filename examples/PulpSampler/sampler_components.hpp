@@ -4,6 +4,7 @@
 #include <pulp/audio/loop_types.hpp>
 #include <pulp/audio/published_sample_store.hpp>
 #include <pulp/audio/sample_asset.hpp>
+#include <pulp/audio/sample_stream_loop_voice_reader.hpp>
 #include <pulp/audio/sample_stream_voice_reader.hpp>
 #include <pulp/signal/adsr.hpp>
 
@@ -20,13 +21,19 @@ struct SamplerVoice {
     audio::LoopRenderer renderer;
     audio::PublishedSampleView sample;
     audio::SampleAssetView streamed_asset;
-    audio::SampleStreamVoiceReader stream_reader;
-    audio::SampleStreamVoiceReader lookahead_reader;
-    audio::SampleStreamVoiceBlockPlan pending_lookahead{};
+    audio::SampleStreamLoopVoiceReader stream_reader;
+    audio::SampleStreamLoopVoiceReader lookahead_reader;
+    audio::SampleStreamLoopBlockPlan pending_lookahead{};
     audio::SampleStreamRequesterToken requester{};
     std::uint64_t selection_generation = 0;
     std::uint32_t pending_demand_index = 0;
+    std::uint32_t pending_refresh_index = 0;
+    std::uint32_t stream_boundary_demand_index = 0;
+    double stream_playback_rate = 0.0;
+    double lookahead_lead_source_frames = 0.0;
     bool streamed = false;
+    bool stream_attack_pending = false;
+    bool stream_boundary_pending = false;
     bool pending_lookahead_valid = false;
     bool released = false;
 
@@ -42,7 +49,13 @@ struct SamplerVoice {
         requester = {};
         selection_generation = 0;
         pending_demand_index = 0;
+        pending_refresh_index = 0;
+        stream_boundary_demand_index = 0;
+        stream_playback_rate = 0.0;
+        lookahead_lead_source_frames = 0.0;
         streamed = false;
+        stream_attack_pending = false;
+        stream_boundary_pending = false;
         pending_lookahead_valid = false;
         released = false;
         adsr.reset();
@@ -73,11 +86,13 @@ struct SamplerVoice {
                         float vel,
                         float host_sample_rate,
                         const audio::SampleAssetView& asset_view,
+                        const audio::LoopRegion& region,
+                        double playback_rate,
                         audio::SampleStreamRequesterToken requester_token,
                         std::uint64_t published_generation) {
         reset();
-        if (!stream_reader.prepare(asset_view, requester_token) ||
-            !lookahead_reader.prepare(asset_view, requester_token)) {
+        if (!stream_reader.prepare(asset_view, requester_token, region, playback_rate) ||
+            !lookahead_reader.prepare(asset_view, requester_token, region, playback_rate)) {
             reset();
             return false;
         }
@@ -85,8 +100,13 @@ struct SamplerVoice {
         velocity = vel;
         streamed_asset = asset_view;
         requester = requester_token;
+        stream_playback_rate = playback_rate;
         selection_generation = published_generation;
         streamed = true;
+        stream_attack_pending = region.reverse_entry ||
+            region.playback_mode == audio::LoopPlaybackMode::ReverseOnce;
+        stream_boundary_pending = !stream_attack_pending &&
+            !asset_view.fully_resident();
         active = true;
         adsr.set_sample_rate(host_sample_rate);
         adsr.note_on();
