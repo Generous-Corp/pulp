@@ -23,6 +23,19 @@
 // the slot has no editor or the WindowHost has no factory for native child
 // embedding on this platform, create() returns nullptr and the host can fall
 // back to a separate top-level window.
+//
+// Lifetime:
+//   - Slot: EditorAttachment co-owns the PluginSlot via shared_ptr. The signal
+//     graph stores nodes as shared_ptr<PluginSlot>, and a plugin editor
+//     routinely outlives the graph node that opened it (the node is removed
+//     while its window is still on screen). Sharing ownership means release()
+//     can safely call destroy_hosted_editor() even after the graph has dropped
+//     its own reference — the slot stays alive until the attachment is gone.
+//   - WindowHost: held as a NON-owning pointer. WindowHosts are unique_ptr
+//     owned by whatever opened the window and expose no destruction hook, so
+//     the caller MUST keep the WindowHost alive until the EditorAttachment is
+//     released or destroyed. Destroying the WindowHost first is a use-after-
+//     free; release the attachment before tearing its host down.
 
 // iOS skip: pulp::host (and therefore plugin_slot.hpp) is not on the include
 // path on iOS — iOS bundles never host third-party plugins. Use
@@ -46,13 +59,13 @@ public:
     EditorAttachment& operator=(const EditorAttachment&) = delete;
 
     EditorAttachment(EditorAttachment&& other) noexcept
-        : slot_(other.slot_),
+        : slot_(std::move(other.slot_)),
           host_(other.host_),
           editor_(std::move(other.editor_)),
           width_(other.width_),
           height_(other.height_),
           attached_(other.attached_) {
-        other.slot_ = nullptr;
+        // slot_ was moved-from, so other.slot_ is already empty.
         other.host_ = nullptr;
         other.attached_ = false;
     }
@@ -60,13 +73,13 @@ public:
     EditorAttachment& operator=(EditorAttachment&& other) noexcept {
         if (this != &other) {
             release();
-            slot_ = other.slot_;
+            slot_ = std::move(other.slot_);
             host_ = other.host_;
             editor_ = std::move(other.editor_);
             width_ = other.width_;
             height_ = other.height_;
             attached_ = other.attached_;
-            other.slot_ = nullptr;
+            // slot_ was moved-from, so other.slot_ is already empty.
             other.host_ = nullptr;
             other.attached_ = false;
         }
@@ -80,7 +93,7 @@ public:
     /// has no editor, the editor's native_handle is null, the WindowHost has
     /// no native-window seam on this platform (attach returns false), or the
     /// slot is null.
-    static std::unique_ptr<EditorAttachment> create(host::PluginSlot* slot,
+    static std::unique_ptr<EditorAttachment> create(std::shared_ptr<host::PluginSlot> slot,
                                                     WindowHost* host,
                                                     float x = 0.0f,
                                                     float y = 0.0f) {
@@ -100,7 +113,7 @@ public:
         }
         // The constructor is private; std::make_unique can't see it. Use new.
         return std::unique_ptr<EditorAttachment>(
-            new EditorAttachment(slot, host, std::move(editor)));
+            new EditorAttachment(std::move(slot), host, std::move(editor)));
     }
 
     /// Underlying typed editor. Never null while the attachment is live.
@@ -150,17 +163,17 @@ public:
     float height() const { return height_; }
 
 private:
-    EditorAttachment(host::PluginSlot* slot,
+    EditorAttachment(std::shared_ptr<host::PluginSlot> slot,
                      WindowHost* host,
                      std::unique_ptr<host::PluginSlot::HostedEditor> editor)
-        : slot_(slot),
+        : slot_(std::move(slot)),
           host_(host),
           editor_(std::move(editor)),
           width_(static_cast<float>(editor_ ? editor_->width : 0)),
           height_(static_cast<float>(editor_ ? editor_->height : 0)),
           attached_(true) {}
 
-    host::PluginSlot* slot_ = nullptr;
+    std::shared_ptr<host::PluginSlot> slot_;
     WindowHost* host_ = nullptr;
     std::unique_ptr<host::PluginSlot::HostedEditor> editor_;
     float width_ = 0.0f;
