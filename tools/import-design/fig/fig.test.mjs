@@ -181,7 +181,14 @@ test('materializeFrame builds a valid figma-plugin envelope', () => {
 
   const label = envelope.root.children.find((c) => c.name === 'Label');
   assert.equal(label.type, 'text');
-  assert.equal(label.text, 'CUTOFF');
+  // `content`, NOT `text`. This asserted `label.text` and stayed green while the
+  // C++ consumer read `content` (design_ir_json.cpp parse_ir_node) and got an
+  // empty string — so every string in every .fig import was silently discarded,
+  // labels rendered blank, and Yoga measured width=nan. A decoder test that
+  // checks the producer's own key against itself proves nothing about the
+  // contract; assert the key the consumer actually reads.
+  assert.equal(label.content, 'CUTOFF');
+  assert.ok(!('text' in label), 'must not emit the unread `text` key');
   assert.equal(label.style.color, '#ffffff');
   assert.ok(!('background_color' in label.style), 'text has no background');
 
@@ -260,4 +267,246 @@ test('generator output is deterministic (committed fixture is fresh)', () => {
   assert.deepEqual([...a.images.keys()].sort(), [...b.images.keys()].sort(), stale);
   for (const key of a.images.keys())
     assert.deepEqual(a.images.get(key), b.images.get(key), `${stale} (image ${key})`);
+});
+
+test('absolute children keep their Figma coordinates; auto-layout children do not', () => {
+  // The bug this pins: styleFor() read node.size but never node.transform, so
+  // every child of a plain (non-auto-layout) frame lost its x/y and collapsed to
+  // the parent's content origin. A real 230-node frame rendered as a corner pile
+  // while the importer reported "231 elements" and exit 0.
+  const plain = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Plain',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    // A footer pinned to the bottom: y=76 in a 100-tall frame.
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Footer',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 100, y: 24 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 76 } },
+  ]});
+  const pf = materializeFrame(plain, findFrame(plain, 'Plain'), { images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
+  const footer = pf.envelope.root.children[0];
+  assert.equal(footer.style.position, 'absolute', 'child of a plain frame is absolute');
+  assert.equal(footer.style.left, 0);
+  assert.equal(footer.style.top, 76, 'the transform translation IS the y coordinate');
+
+  // Control: inside an auto-layout parent the child FLOWS — its transform is
+  // layout output, not input, so emitting it would fight the flex pass.
+  const auto = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Auto', stackMode: 'VERTICAL',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Row',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 100, y: 24 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 76 } },
+  ]});
+  const af = materializeFrame(auto, findFrame(auto, 'Auto'), { images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
+  const row = af.envelope.root.children[0];
+  assert.ok(!('position' in row.style), 'auto-layout child stays in flow');
+  assert.ok(!('top' in row.style), 'auto-layout child carries no coordinates');
+});
+
+test('auto-layout lands on the sibling `layout` object the IR actually reads', () => {
+  // The counterpart to the test above, and the reason it was not enough: taking
+  // a child's coordinates away is only safe if the parent's flex SURVIVES. It
+  // did not. parse_ir_layout reads node["layout"] (design_ir_json.cpp:1042) and
+  // parse_ir_style has no flex fields, so flex written into `style` matched
+  // nothing and every auto-layout frame in every .fig lowered to a bare box —
+  // children position-less AND unflowed, i.e. piled on the parent's origin.
+  // Asserting on `layout` rather than `style` is the whole point: a test that
+  // only checks "we emitted flex somewhere" stays green through this bug.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Row',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 300, y: 80 },
+      stackMode: 'HORIZONTAL', stackSpacing: 12,
+      stackPrimaryAlignItems: 'SPACE_BETWEEN', stackCounterAlignItems: 'CENTER',
+      stackVerticalPadding: 4, stackHorizontalPadding: 8, stackPaddingBottom: 20, stackPaddingRight: 30 },
+  ]});
+  const f = materializeFrame(scene, findFrame(scene, 'Row'), { images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
+  const l = f.envelope.root.layout;
+  assert.ok(l, 'auto-layout frame carries a `layout` object');
+  assert.equal(l.direction, 'row');
+  assert.equal(l.gap, 12);
+  assert.equal(l.justify, 'space-between', 'primary align is justify, not dropped');
+  assert.equal(l.align, 'center', 'counter align is align, not dropped');
+  // Figma's *Vertical*/*Horizontal* padding fields are top and left; bottom and
+  // right ride separately. Mirroring the first pair renders uneven insets wrong.
+  assert.deepEqual(l.padding, { top: 4, right: 30, bottom: 20, left: 8 });
+  assert.ok(!('flex_direction' in f.envelope.root.style),
+    'flex must not be left in `style`, where nothing reads it');
+});
+
+// ── component-instance expansion ─────────────────────────────────────────────
+//
+// An INSTANCE has no children in the scene graph; its content is its master
+// SYMBOL's subtree with per-instance overrides applied. Override guidPaths do
+// NOT name subtree guids directly — they resolve through each node's
+// `overrideKey` (the guid the overrides were written against before the symbol
+// was duplicated/synced). These tests assert the CONSUMER's contract on the
+// envelope: expanded `children`, text under `content`, the `audio_widget:
+// "none"` opt-out the C++ name-heuristic gate reads, and the `figma`
+// component identity the recognition resolver reads.
+
+function instanceScene() {
+  const g = (l, s = 0) => ({ sessionID: s, localID: l });
+  return buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page' },
+    // Master A: a label component whose TEXT child carries an overrideKey.
+    { guid: g(10), type: 'SYMBOL', name: 'knob label', size: { x: 40, y: 12 } },
+    { guid: g(11), type: 'TEXT', name: 'caption', overrideKey: g(109, 241),
+      parentIndex: { guid: g(10), position: 'a' }, size: { x: 40, y: 12 },
+      textData: { characters: 'Volume' } },
+    // Master B: the knob art — a label-slot INSTANCE of A, a body, and a
+    // variant part that is hidden in the master.
+    { guid: g(14), type: 'SYMBOL', name: 'knob master', componentKey: 'cafef00d',
+      size: { x: 40, y: 52 } },
+    { guid: g(15), type: 'INSTANCE', name: 'label slot', overrideKey: g(1, 90),
+      parentIndex: { guid: g(14), position: 'a' }, size: { x: 40, y: 12 },
+      symbolData: { symbolID: g(10) } },
+    { guid: g(16), type: 'ROUNDED_RECTANGLE', name: 'knob base',
+      parentIndex: { guid: g(14), position: 'b' }, size: { x: 28, y: 28 },
+      fillPaints: [{ type: 'SOLID', visible: true, color: { r: 1, g: 0, b: 0, a: 1 } }] },
+    { guid: g(17), type: 'ROUNDED_RECTANGLE', name: 'bipolar ring', visible: false,
+      parentIndex: { guid: g(14), position: 'c' }, size: { x: 2, y: 2 } },
+    // The frame under import, holding two instances of B and one external.
+    { guid: g(2), type: 'FRAME', name: 'Root',
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 200, y: 100 } },
+    { guid: g(20), type: 'INSTANCE', name: 'sound / knob / big',
+      parentIndex: { guid: g(2), position: 'a' }, size: { x: 40, y: 52 },
+      transform: { m00: 1, m01: 0, m02: 10, m10: 0, m11: 1, m12: 20 },
+      symbolData: {
+        symbolID: g(14),
+        symbolOverrides: [
+          // Two-level path: through the label slot (overrideKey 90:1) into the
+          // TEXT (overrideKey 241:109) — the caption THIS instance renders.
+          { guidPath: { guids: [g(1, 90), g(109, 241)] },
+            textData: { characters: 'Attack' } },
+          // Direct-guid paths: recolor the body, unhide the variant part.
+          { guidPath: { guids: [g(16)] },
+            fillPaints: [{ type: 'SOLID', visible: true, color: { r: 0, g: 0, b: 1, a: 1 } }] },
+          { guidPath: { guids: [g(17)] }, visible: true },
+        ],
+      },
+      derivedSymbolData: [
+        // Figma-computed layout for the body in THIS instance.
+        { guidPath: { guids: [g(16)] }, size: { x: 50, y: 50 },
+          transform: { m00: 1, m01: 0, m02: 5, m10: 0, m11: 1, m12: 7 } },
+      ] },
+    { guid: g(21), type: 'INSTANCE', name: 'sound / knob / big',
+      parentIndex: { guid: g(2), position: 'b' }, size: { x: 40, y: 52 },
+      symbolData: {
+        symbolID: g(14),
+        symbolOverrides: [
+          { guidPath: { guids: [g(1, 90), g(109, 241)] },
+            textData: { characters: 'Release' } },
+        ],
+      } },
+    { guid: g(22), type: 'INSTANCE', name: 'missing / component',
+      parentIndex: { guid: g(2), position: 'c' }, size: { x: 10, y: 10 },
+      symbolData: { symbolID: g(99, 9) } },
+  ]});
+}
+
+function materializeRoot(scene) {
+  return materializeFrame(scene, findFrame(scene, 'Root'), {
+    images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z',
+  });
+}
+
+test('an INSTANCE expands to its master SYMBOL subtree with overrides applied', () => {
+  const { envelope } = materializeRoot(instanceScene());
+  const [inst] = envelope.root.children;
+  assert.equal(inst.name, 'sound / knob / big');
+  assert.ok(Array.isArray(inst.children) && inst.children.length === 3,
+    `instance must materialize master children, got ${(inst.children || []).length}`);
+
+  const [slot, base, ring] = inst.children;
+
+  // Nested instance expanded too, with the outer instance's text override
+  // resolved through BOTH overrideKey hops. `content` is the key the C++
+  // consumer reads (design_ir_json.cpp parse_ir_node).
+  assert.equal(slot.name, 'label slot');
+  assert.equal(slot.children.length, 1);
+  assert.equal(slot.children[0].type, 'text');
+  assert.equal(slot.children[0].content, 'Attack');
+
+  // Direct-guid fill override replaced the master's red with blue.
+  assert.equal(base.name, 'knob base');
+  assert.equal(base.style.background_color, '#0000ff');
+  // Derived per-instance layout: size and transform-translation applied.
+  assert.equal(base.style.width, 50);
+  assert.equal(base.style.left, 5);
+  assert.equal(base.style.top, 7);
+
+  // Master-hidden variant part turned on by the instance override.
+  assert.equal(ring.name, 'bipolar ring');
+});
+
+test('two instances of one master expand independently', () => {
+  const { envelope } = materializeRoot(instanceScene());
+  const texts = envelope.root.children
+    .filter((c) => c.name === 'sound / knob / big')
+    .map((c) => c.children[0].children[0].content);
+  assert.deepEqual(texts, ['Attack', 'Release'],
+    'each instance renders its own caption, not a shared clone');
+});
+
+test('expanded component content is opted out of name-based widget promotion', () => {
+  const { envelope } = materializeRoot(instanceScene());
+  const [inst] = envelope.root.children;
+  // The exact contract the C++ gate reads: audio_widget === "none" suppresses
+  // detect_audio_widget, so "knob base" keeps the designer's art instead of
+  // being painted over by the built-in silver knob.
+  assert.equal(inst.audio_widget, 'none');
+  for (const child of inst.children) assert.equal(child.audio_widget, 'none');
+  // Component identity for the recognition resolver (never-silent-knob):
+  // a matched library component still becomes a real widget through keys.
+  assert.equal(inst.figma.component_key, 'cafef00d');
+  assert.equal(inst.figma.main_component_name, 'knob master');
+});
+
+test('hidden nodes do not render; instance-hidden content is dropped', () => {
+  const scene = instanceScene();
+  const { envelope } = materializeRoot(scene);
+  const [first, second] = envelope.root.children;
+  // Master hides "bipolar ring"; only the first instance unhides it.
+  assert.ok(first.children.some((c) => c.name === 'bipolar ring'));
+  assert.ok(!second.children.some((c) => c.name === 'bipolar ring'),
+    'master-hidden node stays hidden without an override');
+});
+
+test('an instance whose master is not in the file stays a plain box and is surfaced', () => {
+  const { envelope, diagnostics } = materializeRoot(instanceScene());
+  const missing = envelope.root.children.find((c) => c.name === 'missing / component');
+  assert.ok(missing, 'unexpandable instance still materializes');
+  assert.ok(!('children' in missing), 'no fabricated content');
+  assert.ok(!('audio_widget' in missing),
+    'no opt-out stamp — existing recognition behavior is preserved');
+  assert.ok(diagnostics.some((d) => d.code === 'external-component' && d.node_id === '0:22'),
+    'missing master is surfaced as a diagnostic');
+});
+
+test('a self-recursive symbol terminates instead of expanding forever', () => {
+  const g = (l) => ({ sessionID: 0, localID: l });
+  const scene = buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page' },
+    { guid: g(30), type: 'SYMBOL', name: 'ouroboros', size: { x: 10, y: 10 } },
+    { guid: g(31), type: 'INSTANCE', name: 'self',
+      parentIndex: { guid: g(30), position: 'a' }, size: { x: 10, y: 10 },
+      symbolData: { symbolID: g(30) } },
+    { guid: g(2), type: 'FRAME', name: 'Root',
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: g(32), type: 'INSTANCE', name: 'top',
+      parentIndex: { guid: g(2), position: 'a' }, size: { x: 10, y: 10 },
+      symbolData: { symbolID: g(30) } },
+  ]});
+  const { envelope } = materializeRoot(scene);
+  const top = envelope.root.children[0];
+  assert.equal(top.name, 'top');
+  assert.equal(top.children.length, 1, 'first level expands');
+  assert.ok(!('children' in top.children[0]), 'the cycle is cut, not recursed');
 });

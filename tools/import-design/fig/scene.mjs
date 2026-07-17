@@ -222,6 +222,19 @@ const OVERRIDE_SKIP_KEYS = new Set([
   'derivedTextData',
 ]);
 
+// Figma's stack alignment enums → the strings parse_align accepts
+// (design_ir_json.cpp:402). BASELINE has no Yoga equivalent and degrades to
+// flex-start; MIN is Figma's default and is emitted explicitly rather than left
+// implicit, so a round-trip says what the design says.
+const FIGMA_STACK_ALIGN = {
+  MIN: 'flex-start',
+  CENTER: 'center',
+  MAX: 'flex-end',
+  SPACE_BETWEEN: 'space-between',
+  STRETCH: 'stretch',
+  BASELINE: 'flex-start',
+};
+
 // Props an instance inherits from its master when it doesn't set them itself —
 // the auto-layout contract its expanded children flow under, plus the visuals
 // Figma stores only on the master.
@@ -418,17 +431,45 @@ export function materializeFrame(scene, frame, ctx) {
       style.opacity = round2(node.opacity);
     }
 
-    // Auto-layout → flex.
+    // Auto-layout → flex. This MUST land on a sibling `layout` object, not in
+    // `style`: parse_ir_layout reads node["layout"] (design_ir_json.cpp:1042)
+    // and parse_ir_style has no flex fields at all, so a `style.flex_direction`
+    // matches nothing and is dropped without a word. Auto-layout children are
+    // deliberately position-less (they are meant to flow), so discarding the
+    // flex left them stacked on the parent's origin — that is why a Tone/EQ row
+    // crammed six knobs into the far left with its labels overlapping.
+    let layout;
     if (node.stackMode === 'HORIZONTAL' || node.stackMode === 'VERTICAL') {
-      style.display = 'flex';
-      style.flex_direction = node.stackMode === 'HORIZONTAL' ? 'row' : 'column';
-      if (typeof node.stackSpacing === 'number') style.gap = Math.round(node.stackSpacing);
-      const pads = [node.stackVerticalPadding, node.stackHorizontalPadding];
-      if (pads.some((p) => typeof p === 'number')) {
-        style.padding = pads.map((p) => Math.round(p || 0)).join('px ') + 'px';
-      }
+      layout = {
+        display: 'flex',
+        direction: node.stackMode === 'HORIZONTAL' ? 'row' : 'column',
+      };
+      if (typeof node.stackSpacing === 'number') layout.gap = Math.round(node.stackSpacing);
+      // Figma's padding model is asymmetric and oddly named: the *Vertical* /
+      // *Horizontal* fields are the TOP and LEFT edges, with bottom and right
+      // carried separately and only when they differ. Reading just the first
+      // two and mirroring them renders every uneven inset wrong.
+      const pad = {
+        top: Math.round(node.stackVerticalPadding || 0),
+        right: Math.round(node.stackPaddingRight ?? node.stackHorizontalPadding ?? 0),
+        bottom: Math.round(node.stackPaddingBottom ?? node.stackVerticalPadding ?? 0),
+        left: Math.round(node.stackHorizontalPadding || 0),
+      };
+      if (Object.values(pad).some((v) => v)) layout.padding = pad;
+      // Alignment is half of what auto-layout means. Dropping it pins every row
+      // to flex-start regardless of what the designer chose.
+      const justify = FIGMA_STACK_ALIGN[node.stackPrimaryAlignItems];
+      if (justify) layout.justify = justify;
+      const align = FIGMA_STACK_ALIGN[node.stackCounterAlignItems];
+      if (align) layout.align = align;
     }
-    return { style, assetRef };
+    // align-self is a property of the CHILD, and only means anything inside an
+    // auto-layout parent.
+    if (parentIsAutoLayout && FIGMA_STACK_ALIGN[node.stackChildAlignSelf]) {
+      layout = layout || {};
+      layout.alignSelf = FIGMA_STACK_ALIGN[node.stackChildAlignSelf];
+    }
+    return { style, assetRef, layout };
   }
 
   function fontToken(node) {
@@ -532,8 +573,9 @@ export function materializeFrame(scene, frame, ctx) {
     if (walked.has(key)) return null;
     walked.add(key);
     const type = node.type;
-    const { style, assetRef } = styleFor(node, parent);
+    const { style, assetRef, layout } = styleFor(node, parent);
     const out = { type: envelopeType(type), name: node.name || '', style };
+    if (layout) out.layout = layout;
 
     if (assetRef) out.asset_ref = assetRef;
 

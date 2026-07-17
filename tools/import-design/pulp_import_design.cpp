@@ -957,7 +957,7 @@ static void print_usage() {
     std::cout << "                    geometry controls (a knob layer named \"Cutoff\", not a\n";
     std::cout << "                    param: sigil) by their stamped source_node_id. A layer-name\n";
     std::cout << "                    sigil still wins; the manifest never overwrites one.\n";
-    std::cout << "  --render-size WxH Render dimensions (default: 340x280)\n";
+    std::cout << "  --render-size WxH Render dimensions (default: the design's canvas size)\n";
     std::cout << "  --bridge-output <path>  Path to write bridge handler scaffold (default: bridge_handlers.cpp,\n";
     std::cout << "                          only emitted for --from claude)\n";
     std::cout << "  --no-bridge-scaffold    Skip bridge handler scaffold (claude only)\n";
@@ -1718,15 +1718,28 @@ int main(int argc, char* argv[]) {
     std::string fidelity_report_path; // --fidelity-report <file>: write the JSON fidelity ledger
     bool use_web_compat = false;     // --web-compat: use DOM API instead of native
     bool preview_mode = false;       // --preview: minimal widget style for design comparison
-    // figma-plugin lane only: native knobs default on; @sprite/@silver node
-    // suffixes override the global flag per knob.
-    bool use_silver_knobs = true;    // figma-plugin default; sprite via --knob-style=sprite
+    // figma-plugin lane only: @sprite/@silver node suffixes override per knob.
+    //
+    // `use_silver_knobs` no longer means "always paint Pulp's knob". It is the
+    // FALLBACK for a knob the design gives us nothing to draw. A knob the
+    // designer actually drew — captured art or vector geometry — keeps their
+    // art; substituting our own would overwrite the design we were asked to
+    // import. `--knob-style silver` is the explicit opt-out for anyone who
+    // wants our widget regardless.
+    bool use_silver_knobs = true;    // fallback only; sprite via --knob-style=sprite
     bool skin_faders = true;         // plain via --fader-style=default
     bool skin_meters = true;         // plain via --meter-style=default
     bool debug_json = false;         // --debug: output JSON report with all metrics
     std::string debug_output;        // --debug-output: path for JSON report
+    // Fallback only. --validate defaults to the DESIGN's own canvas size (set
+    // below once the IR is parsed); these apply solely when the root declares no
+    // size. A fixed 340x280 default silently rendered a 1004x672 design into a
+    // third of its area, so every --validate screenshot and every similarity
+    // score compared a squeezed render against a full-size reference. A
+    // verification default that reshapes what it verifies is worse than none.
     int render_width = 340;
     int render_height = 280;
+    bool render_size_explicit = false;  // --render-size overrides the canvas
     // --validate backend: Skia is faithful for file-backed images; CoreGraphics
     // renders filename placeholders and is an explicit escape hatch.
     pulp::view::ScreenshotBackend screenshot_backend =
@@ -1825,6 +1838,7 @@ int main(int argc, char* argv[]) {
             if (x != std::string::npos) {
                 render_width = std::stoi(sz.substr(0, x));
                 render_height = std::stoi(sz.substr(x + 1));
+                render_size_explicit = true;
             }
         } else if (std::strcmp(argv[i], "--screenshot-backend") == 0 && i + 1 < argc) {
             std::string b = argv[++i];
@@ -3382,6 +3396,17 @@ int main(int argc, char* argv[]) {
                 "  below is native-materialize fidelity and will UNDERSTATE the true faithful\n"
                 "  render. Verify the faithful render with pulp-svg-probe on the embedded SVG\n"
                 "  (extract the data:image/svg+xml payload from the scene JSON first).\n";
+        }
+
+        // Render at the design's own size unless the caller asked otherwise, so
+        // the render and its reference are the same shape by default.
+        if (!render_size_explicit) {
+            const int design_w = static_cast<int>(ir.root.style.width.value_or(0.0f));
+            const int design_h = static_cast<int>(ir.root.style.height.value_or(0.0f));
+            if (design_w > 0 && design_h > 0) {
+                render_width = design_w;
+                render_height = design_h;
+            }
         }
 
         // Render the generated JS headlessly
