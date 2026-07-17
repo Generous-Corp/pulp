@@ -930,31 +930,69 @@ std::unique_ptr<View> make_faithful_svg_frame(const IRNode& node,
     // A custom control whose factory isn't registered renders inert (the baked
     // SVG underneath still shows). Diagnose it so the gap is SEEN and never
     // becomes a silent knob.
-    for (const auto& ie : node.interactive_elements) {
-        if (ie.kind != InteractiveElementKind::custom) continue;
-        if (ie.factory_id.empty() || !has_design_control_factory(ie.factory_id)) {
-            diagnostics.push_back(diagnostic(
-                ImportDiagnosticSeverity::warning,
-                ImportDiagnosticKind::unsupported_property,
-                "native-materialize-custom-factory-unregistered",
-                std::string(path),
-                ie.factory_id.empty()
-                    ? "custom interactive element has no factory_id (renders inert)"
-                    : "custom interactive element factory '" + ie.factory_id +
-                          "' is not registered (renders inert)",
-                node,
-                std::nullopt));
+    auto diagnose_custom_controls = [&](const IRNode& n) {
+        for (const auto& ie : n.interactive_elements) {
+            if (ie.kind != InteractiveElementKind::custom) continue;
+            if (ie.factory_id.empty() || !has_design_control_factory(ie.factory_id)) {
+                diagnostics.push_back(diagnostic(
+                    ImportDiagnosticSeverity::warning,
+                    ImportDiagnosticKind::unsupported_property,
+                    "native-materialize-custom-factory-unregistered",
+                    std::string(path),
+                    ie.factory_id.empty()
+                        ? "custom interactive element has no factory_id (renders inert)"
+                        : "custom interactive element factory '" + ie.factory_id +
+                              "' is not registered (renders inert)",
+                    n,
+                    std::nullopt));
+            }
         }
-    }
+    };
+    diagnose_custom_controls(node);
+
     auto frame = std::make_unique<DesignFrameView>(std::move(svg),
                                                    to_frame_elements(node.interactive_elements));
+
+    // Frames 1..N: the node's alternate states, in capture order. A `swap`
+    // element addresses frames POSITIONALLY, so every alternate must produce
+    // exactly one add_frame call in order — an alternate whose SVG failed to
+    // resolve is added blank (with its overlays) and diagnosed, never skipped,
+    // because skipping would silently re-point every later swap target.
+    for (std::size_t i = 0; i < node.alternate_frames.size(); ++i) {
+        const IRNode& alt = node.alternate_frames[i];
+        const std::string alt_id = alt.svg_asset_id.value_or("");
+        const IRAssetRef* alt_asset = alt_id.empty() ? nullptr : manifest.resolve(alt_id);
+        std::string alt_svg = alt_asset ? resolve_svg_document(*alt_asset) : std::string{};
+        if (alt_svg.empty()) {
+            diagnostics.push_back(diagnostic(
+                ImportDiagnosticSeverity::warning,
+                ImportDiagnosticKind::unresolved_asset,
+                "native-materialize-faithful-svg-frame-unresolved",
+                std::string(path),
+                "frame " + std::to_string(i + 1) + ": " +
+                    (alt_id.empty()
+                         ? "alternate frame has no svg_asset_id"
+                         : "alternate frame asset '" + alt_id +
+                               "' could not be resolved to an SVG document") +
+                    " (added blank to keep swap target indices stable)",
+                alt,
+                alt_id.empty() ? std::optional<std::string>("svg_asset_id") : std::nullopt));
+        }
+        diagnose_custom_controls(alt);
+        frame->add_frame(std::move(alt_svg), to_frame_elements(alt.interactive_elements));
+    }
+
     // If any control carries a host-param binding key, self-wire gestures to the
     // framework-agnostic HostParamSurface so an imported design with bound
     // controls drives host parameters directly. Controls with an empty key still
     // fall back to on_value_changed, so an all-unbound frame stays inert here.
-    const bool any_bound = std::any_of(
-        node.interactive_elements.begin(), node.interactive_elements.end(),
-        [](const IRInteractiveElement& e) { return !e.param_key.empty(); });
+    auto bound = [](const IRNode& n) {
+        return std::any_of(n.interactive_elements.begin(), n.interactive_elements.end(),
+                           [](const IRInteractiveElement& e) { return !e.param_key.empty(); });
+    };
+    const bool any_bound =
+        bound(node) || std::any_of(node.alternate_frames.begin(),
+                                   node.alternate_frames.end(), bound);
     if (any_bound) frame->route_changes_to_host_params(true);
     return frame;
 }

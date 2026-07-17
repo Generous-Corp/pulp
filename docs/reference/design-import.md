@@ -24,7 +24,7 @@ pulp import-design --from <source> [options]
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--from <source>` | Design source (required) | — |
-| `--file <path>` | Input file path | — |
+| `--file <path>` | Input file path. **Repeatable with `--from figma-plugin`** — pass one faithful-vector envelope per state to capture a multi-state design into one `DesignFrameView`; the order given is the frame index a `swap <n>` layer targets (the first `--file` is frame 0). | — |
 | `--url <url>` | Design URL (Figma file URL, v0 share link) | — |
 | `--frame <name>` | Frame/artboard to import. For `--from fig`, pass a frame guid or name; required unless using `--outline`. | first frame for `figma` |
 | `--page <name>` | Restrict local `.fig` frame lookup to one page | — |
