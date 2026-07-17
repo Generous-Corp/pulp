@@ -4101,6 +4101,14 @@ distinguish the two. Do not start from the workflow log's summary line:
   `clap-validator` exit non-zero both when they run and report findings and
   when they cannot load the plugin at all. A fast fail (well under a second)
   points at the latter — a real `auval` pass takes seconds.
+- **Refresh `AudioComponentRegistrar` after installing and after removing the
+  AU bundle on self-hosted runners.** The registrar caches component metadata
+  across jobs. Without `killall -9 AudioComponentRegistrar` plus a short wait
+  after the copy, `auval` can see the path but fail immediately with `Cannot
+  get Component's Name strings` / error `-50`; without the cleanup refresh, a
+  later job can retain the removed component's metadata. This is the same
+  discipline used by `validate.yml`, the DAW-bench preflight, and
+  `pulp doctor --au-cache`.
 - Nothing outside `--diag-dir` survives: the capture writes into a temp dir the
   diff script deletes on every return path. A run invoked without `--diag-dir`
   leaves no evidence at all.
