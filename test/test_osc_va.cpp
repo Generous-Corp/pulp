@@ -639,6 +639,106 @@ TEST_CASE("every shape stays bounded across the audible range", "[signal][osc][v
     }
 }
 
+TEST_CASE("every shape stays bounded running backward", "[signal][osc][va]") {
+    // A negative increment runs the phase backward through zero. It is not an
+    // exotic input — it is what through-zero FM does every time the modulator
+    // drives the instantaneous frequency below zero, and it is the reason the
+    // phase accumulator wraps in both directions at all.
+    //
+    // A backward wrap is a real discontinuity with the OPPOSITE sign of a forward
+    // one, so a corrector can be perfectly right running forward and inverted
+    // running backward — producing output outside the waveform's own range while
+    // every forward test stays green. Sweeping forward only cannot see that, and
+    // for a while these tests did exactly that.
+    for (const VaShape shape : {VaShape::sine, VaShape::saw, VaShape::square,
+                                VaShape::triangle}) {
+        for (const double f0 : {-20.0, -55.0, -440.0, -4100.0, -11000.0, -20000.0}) {
+            // Start phases include 0 deliberately: a phase sitting exactly on the
+            // period boundary wraps out from under the very first sample, which
+            // is the one position where a backward wrap lands ON a sample rather
+            // than between two.
+            for (const double start : {0.0, 0.13, 0.5, 0.87}) {
+                const auto rendered = render_va(shape, f0, 0.5, start);
+                INFO(shape_name(shape) << " at f0 " << f0 << " Hz from start phase " << start
+                                       << ": peak " << peak(rendered));
+                for (const double x : rendered) REQUIRE(std::isfinite(x));
+                CHECK(peak(rendered) <= 1.0 + 1e-9);
+            }
+        }
+    }
+}
+
+TEST_CASE("a backward wrap landing on a sample lands on the step's midpoint",
+          "[signal][osc][va]") {
+    // The exact case the bounded sweep above catches, stated as the physics so a
+    // failure names its cause rather than just its symptom.
+    //
+    // Starting at phase 0 and running backward, the phase wraps out from under
+    // the first sample: the discontinuity sits exactly ON it. The sample was
+    // taken before the step, so a bandlimited render puts it at the MIDPOINT of
+    // the jump — not at the trivial pre-step value, and emphatically not a full
+    // step the wrong way, which is where reading the residual off the after-side
+    // would land it.
+    SECTION("saw") {
+        // The saw jumps -1 -> +1 going backward through zero; the midpoint is 0.
+        VaOscillator osc;
+        osc.set_shape(VaShape::saw);
+        osc.reset(0.0);
+        const double first = osc.next(-0.01);
+        INFO("saw from phase 0 running backward: first sample " << first
+                                                                << ", midpoint of a -1 -> +1 jump is 0");
+        CHECK_THAT(first, WithinAbs(0.0, 1e-12));
+    }
+
+    SECTION("square") {
+        // Same boundary, opposite sign: +1 -> -1, midpoint 0.
+        VaOscillator osc;
+        osc.set_shape(VaShape::square);
+        osc.reset(0.0);
+        const double first = osc.next(-0.01);
+        INFO("square from phase 0 running backward: first sample " << first);
+        CHECK_THAT(first, WithinAbs(0.0, 1e-12));
+    }
+
+    SECTION("a sustained backward saw stays inside the waveform's own range") {
+        // The tell for the inverted-sign failure is periodic: one spike per
+        // wrap, every 1/increment samples, each landing outside [-1, 1] while
+        // the samples between them look perfectly reasonable.
+        VaOscillator osc;
+        osc.set_shape(VaShape::saw);
+        osc.reset(0.0);
+        for (int i = 0; i < 64; ++i) {
+            const double v = osc.next(-0.25);
+            INFO("backward saw sample " << i << " = " << v);
+            REQUIRE(std::isfinite(v));
+            CHECK(std::abs(v) <= 1.0 + 1e-9);
+        }
+    }
+}
+
+TEST_CASE("running backward mirrors running forward", "[signal][osc][va]") {
+    // A saw played backward is the same waveform in reverse, so its level and its
+    // symmetry about zero are unchanged by the direction of travel. This is a
+    // cheap way to state that the backward path is not merely bounded but
+    // actually right — boundedness alone would still pass on a correction that
+    // was systematically too small.
+    for (const VaShape shape : {VaShape::saw, VaShape::triangle, VaShape::sine}) {
+        for (const int cycles : {188, 700}) {
+            const double f0 = coherent_f0(cycles);
+            const double forward = rms(render_va(shape, f0));
+            const double backward = rms(render_va(shape, -f0));
+            INFO(shape_name(shape) << " at " << f0 << " Hz: RMS " << forward
+                                   << " forward, " << backward << " backward");
+            CHECK_THAT(20.0 * std::log10(backward / forward), WithinAbs(0.0, 0.1));
+
+            // And no DC appears from running the other way.
+            const double dc = mean(render_va(shape, -f0));
+            INFO(shape_name(shape) << " backward DC " << dc);
+            CHECK_THAT(dc, WithinAbs(0.0, 1e-9));
+        }
+    }
+}
+
 TEST_CASE("oscillator output is deterministic", "[signal][osc][va]") {
     SECTION("identical settings reproduce bit-exactly") {
         for (const VaShape shape : {VaShape::sine, VaShape::saw, VaShape::square,

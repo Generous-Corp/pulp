@@ -71,6 +71,14 @@
 
 namespace pulp::signal::osc {
 
+/// A sub-sample position that means "no discontinuity here".
+///
+/// It sits outside [0, 1], which `poly_blep` and `poly_blamp` reject outright, so
+/// it produces exactly zero from both. No in-range value could serve: 0 and 1 are
+/// the two ENDS of the window, not spare sentinels, and each is a real operating
+/// point carrying a half-height correction.
+inline constexpr double kNoDiscontinuity = -1.0;
+
 /// A discontinuity's correction, split across the two samples it touches.
 ///
 /// A two-point kernel spans the sample before the discontinuity and the sample
@@ -96,6 +104,13 @@ struct Correction {
 ///
 /// `x = 0` belongs to the *after* branch, matching `u(0) = 1` — the sample that
 /// lands exactly on a discontinuity is the first one that has taken the step.
+///
+/// That single choice is why `poly_blep` does NOT evaluate both of its taps
+/// through this function: a `before` tap landing exactly on the discontinuity
+/// has *not* taken the step and needs the other limit. This is the mathematical
+/// residual, and at its one discontinuity it can only answer for one side; a
+/// caller that knows which side its sample is on should say so rather than ask
+/// here and hope.
 inline double blep_residual(double x) noexcept {
     if (x < -1.0 || x >= 1.0) return 0.0;
     if (x < 0.0) return 0.5 * x * x + x + 0.5;
@@ -121,15 +136,53 @@ inline double blamp_residual(double x) noexcept {
 ///
 /// `d` is the discontinuity's sub-sample position: it occurs `d` samples after
 /// the `before` sample, equivalently `1 - d` samples before the `after` sample.
-/// The useful range is [0, 1]; outside it the residual's own support clamps the
-/// result to zero rather than misbehaving, so a caller that computes a position
-/// from a degenerate increment gets no correction instead of a blow-up.
+/// Outside [0, 1] there is no correction and both terms are zero — a
+/// discontinuity always lands inside the sample it was found in, so a position
+/// outside that window is a caller error, and none is the only answer that
+/// cannot make the output worse than leaving it alone. `kNoDiscontinuity` is
+/// outside the window by construction and so is guaranteed, not merely likely,
+/// to produce nothing. A non-finite `d` lands here too.
 ///
 /// `height` is the size of the jump measured **after minus before** — negative
 /// for a saw wrapping down, positive for a square's rising edge. Both returned
 /// terms are ADDED to the trivial signal (see the file-level sign convention).
+///
+/// ── Why this does not route both taps through `blep_residual` ─────────────
+///
+/// The taps sit on OPPOSITE sides of the discontinuity — that is what `before`
+/// and `after` mean — and the residual STEPS across it, so each tap has to read
+/// its own side. The distinction is invisible in the interior and decisive at
+/// the two boundaries, which are ordinary operating points rather than corner
+/// cases:
+///
+///   * `d = 0` puts the discontinuity exactly on the `before` sample, which
+///     still carries its pre-step value — a phase sitting at 0 and driven
+///     backward wraps out from under it, and the sample was taken before it
+///     left. That tap needs the residual's LEFT limit, +1/2.
+///   * `d = 1` puts it on the `after` sample, which carries its post-step value.
+///     That tap needs the RIGHT limit, -1/2.
+///
+/// `blep_residual` resolves `x = 0` to the right limit — correct for the `after`
+/// tap, and exactly backwards for the `before` one. Reading both through it
+/// gives the `d = 0` tap a correction of the wrong SIGN, which does not merely
+/// under-correct: it moves the sample a full `height` the wrong way, landing it
+/// outside the waveform's own range and leaving the boundary wrap worse
+/// corrected than if it had been ignored. Selecting the side per tap is what
+/// makes both boundaries land on the step's midpoint, which is what a
+/// bandlimited step does there.
+///
+/// With `d` confined to [0, 1] each tap's side is known outright, so both are
+/// branch-free evaluations of their own branch rather than a lookup that has to
+/// re-decide which side it is on.
 inline Correction poly_blep(double d, double height) noexcept {
-    return {height * blep_residual(-d), height * blep_residual(1.0 - d)};
+    if (!(d >= 0.0 && d <= 1.0)) return {0.0, 0.0};
+    // Before tap at x = -d, always in [-1, 0]: the pre-step branch, which is
+    // `0.5x^2 + x + 0.5` rewritten in d.
+    const double before = 0.5 * d * d - d + 0.5;
+    // After tap at x = 1 - d, always in [0, 1]: the post-step branch.
+    const double x = 1.0 - d;
+    const double after = x - 0.5 * x * x - 0.5;
+    return {height * before, height * after};
 }
 
 /// polyBLAMP correction for a break in the SLOPE.
@@ -142,7 +195,16 @@ inline Correction poly_blep(double d, double height) noexcept {
 /// units is where the caller's increment enters, and it is the caller's job.
 ///
 /// Both returned terms are ADDED to the trivial signal.
+///
+/// Out-of-window positions return nothing, exactly as in `poly_blep`. What this
+/// does NOT need is that function's per-tap side selection: BLAMP is continuous
+/// at the origin — it corrects a break in the slope and leaves the value alone —
+/// so both sides agree there (at 1/6) and reading either is the same answer.
+/// That continuity is also why the boundary bug `poly_blep` guards against never
+/// showed up on a triangle: only a kernel that steps can be read off the wrong
+/// side of its own step.
 inline Correction poly_blamp(double d, double slope_change) noexcept {
+    if (!(d >= 0.0 && d <= 1.0)) return {0.0, 0.0};
     return {slope_change * blamp_residual(-d), slope_change * blamp_residual(1.0 - d)};
 }
 
@@ -162,12 +224,20 @@ inline Correction poly_blamp(double d, double slope_change) noexcept {
 /// through-zero-FM direction change is not derivable from the increment, and
 /// those callers compute `d` from the event that caused the discontinuity.
 ///
-/// Returns 0 for a non-positive `increment` — a phase that is not advancing has
-/// no wrap to place, and 0 keeps the caller on the no-correction path rather
-/// than dividing by zero.
+/// Returns `kNoDiscontinuity` when `increment` is not positive or not finite: a
+/// phase that is not advancing has no wrap to place, so the correction must be
+/// exactly zero.
+///
+/// The guard is not decoration. A frozen phase makes this `0.0 / 0.0`, and NaN
+/// survives both kernels' range checks to land in the output buffer. Nor can the
+/// guard simply return 0: `d = 0` is a legitimate operating point meaning "the
+/// discontinuity sits on the `before` sample", and it yields a half-step
+/// correction — so returning it would inject a step on every sample of a stopped
+/// oscillator, which is the opposite of the intent.
 inline double wrap_position(double phase_after, double increment) noexcept {
-    if (!(increment > 0.0)) return 0.0;
-    return 1.0 - phase_after / increment;
+    if (!(increment > 0.0)) return kNoDiscontinuity;
+    const double d = 1.0 - phase_after / increment;
+    return std::isfinite(d) ? d : kNoDiscontinuity;
 }
 
 } // namespace pulp::signal::osc
