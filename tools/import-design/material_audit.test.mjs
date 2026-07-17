@@ -10,10 +10,14 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { auditMaterials } from './material_audit.mjs';
+import { auditMaterials, auditCodegen, parseAnchors, parseCalls } from './material_audit.mjs';
 
 const materials = (nodes) => ({ nodes });
 const envelope = (children) => ({ root: { node_id: 'root', name: 'Root', children } });
+
+// A stand-in for `pulp-import-design --emit js` output. Only the two shapes the
+// join depends on matter: the anchor line and the material calls keyed by js id.
+const anchor = (jsId, nodeId) => `setAnchor('${jsId}', 'figma-plugin:${nodeId}');`;
 
 test('a declared stroke opacity that did not survive is a silent drop', () => {
   const m = materials([
@@ -205,4 +209,172 @@ test('a paint-level blend mode with no lowering is reported, not waved through',
     { node_id: '0:1', name: 'Plain', type: 'FRAME', declared: {
       fill: [{ type: 'SOLID', opacity: 1, color_alpha: 1, rgb: '#ff0000', blend_mode: null }] } },
   ]), envelope([{ node_id: '0:1', name: 'Plain', style: {} }]), []).findings, []);
+});
+
+// ── the codegen stage ────────────────────────────────────────────────────────
+//
+// The stage the envelope tests above cannot see. Every case here pairs a real
+// drop with the fixed output, because "green" from a checker that cannot go red
+// is the thing this file exists to disprove.
+
+test('a property the envelope carries but the JS never emits is a codegen drop', () => {
+  // The measured bug: nodes declared a stroke, it reached style.border, and the
+  // generated JS carried no stroke call at all. Envelope mode reads green here —
+  // correctly, from where it stands — which is the whole reason --js exists.
+  const m = materials([{ node_id: '0:1', name: 'Vector', type: 'VECTOR', declared: { stroke: [] } }]);
+  const env = envelope([{ node_id: '0:1', name: 'Vector', style: { border: '1px solid #ffffff33' } }]);
+
+  const dropped = auditCodegen(m, env, anchor('Vector_10013', '0:1'));
+  assert.equal(dropped.findings.length, 1);
+  assert.equal(dropped.findings[0].property, 'stroke');
+  assert.equal(dropped.findings[0].stage, 'codegen');
+  assert.equal(dropped.emittedCounts.stroke ?? 0, 0);
+
+  // Negative control: the same envelope, lowered. Both call names satisfy it —
+  // a VECTOR strokes via setSvgStroke, a frame via setBorder.
+  for (const call of ["setSvgStroke('Vector_10013', '#ffffff33');",
+                      "setBorder('Vector_10013', '#ffffff33', 1, 0);"]) {
+    const kept = auditCodegen(m, env, `${anchor('Vector_10013', '0:1')}\n${call}`);
+    assert.deepEqual(kept.findings, [], `${call} lowers the stroke`);
+    assert.equal(kept.emittedCounts.stroke, 1);
+  }
+});
+
+test('a node declaring two shadows and emitting one is a drop — presence is not enough', () => {
+  // Measured on the reference frame: 19 knob bases carry
+  // "0px 16px 6px 0px #0000001a, 0px 4px 4px 0px #00000040" in the envelope and
+  // emit a single setBoxShadow, because codegen takes box_shadow.front() and
+  // stops. The bridge call carries ONE layer, so the second shadow dies with
+  // nothing said. Counting nodes instead of layers reads 49-of-49 and green.
+  const m = materials([{ node_id: '0:1', name: 'knob base', type: 'ELLIPSE',
+                         declared: { effects: ['DROP_SHADOW', 'DROP_SHADOW'] } }]);
+  const env = envelope([{ node_id: '0:1', name: 'knob base', style: {
+    box_shadow: '0px 16px 6px 0px #0000001a, 0px 4px 4px 0px #00000040' } }]);
+
+  const bug = auditCodegen(m, env,
+    `${anchor('knob_base23', '0:1')}\nsetBoxShadow('knob_base23', 0, 16, 6, 0, '#0000001a');`);
+  assert.equal(bug.findings.length, 1);
+  assert.equal(bug.findings[0].property, 'effects.shadow.layers');
+  assert.equal(bug.declaredCounts['effects.shadow.layers'], 2);
+  assert.equal(bug.emittedCounts['effects.shadow.layers'], 1);
+
+  // Negative control: both layers emitted is silent.
+  const fixed = auditCodegen(m, env,
+    `${anchor('knob_base23', '0:1')}\n`
+    + "setBoxShadow('knob_base23', 0, 16, 6, 0, '#0000001a');\n"
+    + "setBoxShadow('knob_base23', 0, 4, 4, 0, '#00000040');");
+  assert.deepEqual(fixed.findings, []);
+  assert.equal(fixed.emittedCounts['effects.shadow.layers'], 2);
+
+  // Negative control: a single-layer shadow, emitted once, is the common case
+  // and must never be flagged — otherwise the check fires on 49 healthy nodes.
+  assert.deepEqual(auditCodegen(
+    materials([{ node_id: '0:1', name: 'Card', type: 'FRAME', declared: { effects: ['DROP_SHADOW'] } }]),
+    envelope([{ node_id: '0:1', name: 'Card', style: { box_shadow: '0px 2px 4px 0px #00000040' } }]),
+    `${anchor('Card1', '0:1')}\nsetBoxShadow('Card1', 0, 2, 4, 0, '#00000040');`).findings, []);
+});
+
+test('an rgba() shadow is one layer — the layer split must not count its commas', () => {
+  // rgba(0, 0, 0, 0.25) carries three commas of its own. Splitting the list on
+  // every comma turns one honest shadow into four demanded calls and reports a
+  // drop on correct output — the cry-wolf failure that gets a checker ignored.
+  const m = materials([{ node_id: '0:1', name: 'Card', type: 'FRAME', declared: { effects: ['DROP_SHADOW'] } }]);
+  const env = envelope([{ node_id: '0:1', name: 'Card', style: {
+    box_shadow: '0px 2px 4px 0px rgba(0, 0, 0, 0.25)' } }]);
+  const r = auditCodegen(m, env,
+    `${anchor('Card1', '0:1')}\nsetBoxShadow('Card1', 0, 2, 4, 0, 'rgba(0, 0, 0, 0.25)');`);
+  assert.equal(r.declaredCounts['effects.shadow.layers'], 1, 'one shadow, not four');
+  assert.deepEqual(r.findings, []);
+});
+
+test('a rounded VECTOR carries its radius in the path, so setSvgPath satisfies it', () => {
+  // 78 of the reference frame's 106 rounded nodes are vectors: the arc IS the
+  // rounding, so codegen emits no setCornerRadius and the corner still renders.
+  // Demanding one would report 78 drops a screenshot disproves.
+  const m = materials([{ node_id: '0:1', name: 'knob base', type: 'VECTOR',
+                         declared: { corner_radius: [14, 14, 14, 14] } }]);
+  const env = envelope([{ node_id: '0:1', name: 'knob base', style: { border_radius: 14 } }]);
+  assert.deepEqual(auditCodegen(m, env,
+    `${anchor('knob_base23', '0:1')}\nsetSvgPath('knob_base23', 'M0 14 A14 14 0 1 0 28 14 Z');`).findings,
+    [], 'the path geometry is the rounding');
+
+  // Positive control: a node with NEITHER call dropped the radius for real.
+  const bare = auditCodegen(m, env, anchor('knob_base23', '0:1'));
+  assert.equal(bare.findings.length, 1);
+  assert.equal(bare.findings[0].property, 'corner_radius');
+});
+
+test('a declaring node with no anchor is reported, never silently skipped', () => {
+  // The join is the tool's own weakest link: the web-compat lane emits
+  // setAnchor(v3._id, ...) — a variable this cannot resolve — so fed that JS the
+  // map comes back empty. Auditing whatever subset happens to join and printing
+  // a clean bill is the exact bug this file exists to end, so an unjoinable node
+  // is a finding and the coverage number is printed either way.
+  const m = materials([
+    { node_id: '0:1', name: 'Seen', type: 'FRAME', declared: { effects: ['DROP_SHADOW'] } },
+    { node_id: '0:2', name: 'Unseen', type: 'FRAME', declared: { effects: ['DROP_SHADOW'] } },
+  ]);
+  const env = envelope([
+    { node_id: '0:1', name: 'Seen', style: { box_shadow: '0px 2px 4px 0px #00000040' } },
+    { node_id: '0:2', name: 'Unseen', style: { box_shadow: '0px 2px 4px 0px #00000040' } },
+  ]);
+  const r = auditCodegen(m, env,
+    `${anchor('Seen1', '0:1')}\nsetBoxShadow('Seen1', 0, 2, 4, 0, '#00000040');`);
+  assert.equal(r.coverage.declaring, 2);
+  assert.equal(r.coverage.anchored, 1, 'coverage is reported, not assumed');
+  const anchorFindings = r.findings.filter((f) => f.property === 'anchor');
+  assert.equal(anchorFindings.length, 1);
+  assert.equal(anchorFindings[0].node_id, '0:2');
+
+  // And the unanchored node is NOT counted as a survival: a tool that scores an
+  // un-audited node green is worse than one that never looked.
+  assert.equal(r.emittedCounts['effects.shadow.layers'] ?? 0, 1);
+
+  // Negative control: everything anchored means no anchor finding and 100%.
+  const full = auditCodegen(m, env,
+    `${anchor('Seen1', '0:1')}\nsetBoxShadow('Seen1', 0, 2, 4, 0, '#00000040');\n`
+    + `${anchor('Unseen2', '0:2')}\nsetBoxShadow('Unseen2', 0, 2, 4, 0, '#00000040');`);
+  assert.deepEqual(full.findings, []);
+  assert.equal(full.coverage.anchored, 2);
+});
+
+test('one fig node lowering to several JS elements survives if ANY of them carries it', () => {
+  // An instance can lower to more than one element. Keying the check to the
+  // first-seen id alone would invent drops on nodes that render correctly.
+  const m = materials([{ node_id: '0:1', name: 'Panel', type: 'INSTANCE', declared: { stroke: [] } }]);
+  const env = envelope([{ node_id: '0:1', name: 'Panel', style: { border: '1px solid #ffffff33' } }]);
+  const js = `${anchor('Panel_wrap', '0:1')}\n${anchor('Panel_inner', '0:1')}\n`
+    + "setSvgStroke('Panel_inner', '#ffffff33');";
+  assert.deepEqual(auditCodegen(m, env, js).findings, [], 'the second element carries the stroke');
+});
+
+test('codegen mode is scoped to its own hop and does not re-report a decode drop', () => {
+  // The 40 gradient-stroke Ovals never reach the envelope, so they are envelope
+  // mode's finding. Reporting them again here would double every decode drop and
+  // bury the codegen ones underneath — the noise that killed fidelity_diff.
+  const m = materials([{ node_id: '0:1', name: 'Oval', type: 'VECTOR',
+                         declared: { stroke: [{ type: 'GRADIENT_LINEAR', opacity: 1, color_alpha: 1 }] } }]);
+  const env = envelope([{ node_id: '0:1', name: 'Oval', style: {} }]);   // decoder dropped it
+  assert.deepEqual(auditCodegen(m, env, anchor('Oval_1', '0:1')).findings, [],
+    'nothing in the envelope to lower, so codegen dropped nothing');
+  // ... and envelope mode still catches it, so the pair loses nothing.
+  assert.equal(auditMaterials(m, env, []).findings.length, 1);
+});
+
+test('the anchor and call parsers read the shapes codegen actually emits', () => {
+  // Asserted rather than assumed: the join is silent when it is wrong, and a
+  // wrong join reports confident nonsense in either direction.
+  const anchors = parseAnchors("setAnchor('knob_base23', 'figma-plugin:0:786/0:83/0:16');");
+  assert.deepEqual(anchors.get('0:786/0:83/0:16'), ['knob_base23'],
+    'instance-path node ids are the common case, not bare guids');
+
+  // The web-compat lane's variable form is NOT resolvable, and must not be
+  // silently read as if it were.
+  assert.equal(parseAnchors("setAnchor(v3._id, 'figma-plugin:0:1');").size, 0);
+
+  const calls = parseCalls("setBoxShadow('knob_base23', 0, 16, 6, 0, '#0000001a');\n"
+    + "setBoxShadow('knob_base23', 0, 4, 4, 0, '#00000040');\n"
+    + "setSvgFill('knob_base23', 'none');");
+  assert.equal(calls.get('knob_base23').get('setBoxShadow'), 2, 'repeat calls are counted, not deduped');
+  assert.equal(calls.get('knob_base23').get('setSvgFill'), 1);
 });

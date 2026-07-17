@@ -4,9 +4,9 @@
 // Every other checker we own has a blind spot it has to declare, and each one
 // has been green through a real bug: layout_parity compares boxes, so it cannot
 // see the ink inside them; thumb_parity cannot resolve a 2px arc; fidelity_diff
-// was once blind to our own opt-out sentinel. This one has no equivalent excuse,
-// because it compares COUNTS: 16 declared drop shadows against 1 emitted is a
-// number, and it sat in a file all evening with nothing to say it.
+// was once blind to our own opt-out sentinel. This one compares COUNTS: 16
+// declared drop shadows against 1 emitted is a number, and it sat in a file all
+// evening with nothing to say it.
 //
 // The invariant, per declared material property:
 //
@@ -16,7 +16,28 @@
 // dropped it, and nobody was told. That is the failure class this exists for,
 // and it exits 1.
 //
-// What it CANNOT see (and this is not a small caveat): it proves a property
+// TWO STAGES, AND EACH MODE WATCHES EXACTLY ONE. The import is a chain:
+//
+//     .fig  --decode-->  envelope (scene.pulp.json)  --codegen-->  JS  --> render
+//
+// * ENVELOPE mode (--dir / --fig) watches decode. It reads the sidecar against
+//   scene.pulp.json, so it catches a property the decoder never carried.
+//   It CANNOT see a codegen drop: the envelope is a waypoint, not the render,
+//   and a property that reaches it can still die before the JS. This blind spot
+//   is not hypothetical — it shipped. On the reference 1004x672 frame, nodes
+//   declared strokes that reached style.border and emitted no stroke call at
+//   all; envelope mode scored that route green, correctly, from where it stood.
+//   A tool that watches one stage cannot see a chain that breaks at the next.
+//
+// * CODEGEN mode (--js) watches codegen. It joins the emitted JS back to fig
+//   nodes through the `setAnchor('<jsId>', 'figma-plugin:<nodeId>')` lines and
+//   asks whether each property the envelope CARRIES reached a real call. It is
+//   scoped to that hop on purpose: a property the decoder already dropped is
+//   envelope mode's finding, and reporting it twice would bury the new one.
+//   It cannot see a decode drop. Run both — they are complements, not
+//   alternatives, and neither alone can say "the design survived".
+//
+// What NEITHER can see (and this is not a small caveat): they prove a property
 // SURVIVED, never that it renders CORRECTLY. A gradient emitted with the wrong
 // axis passes. A shadow emitted at the wrong offset passes. A blend mode mapped
 // to the wrong CSS name passes. Presence is the floor, not fidelity — for
@@ -25,10 +46,12 @@
 // Usage:
 //   node tools/import-design/material_audit.mjs --dir <decode-out-dir>
 //   node tools/import-design/material_audit.mjs --fig <file.fig> --frame <name|guid>
-//   ... [--json report.json]
+//   ... [--js <emitted.js>] [--json report.json]
 //
 // --dir reads the materials.json + scene.pulp.json that `fig_decode.mjs emit`
-// already wrote. --fig decodes in-process, so no temp dir is needed.
+// already wrote. --fig decodes in-process, so no temp dir is needed. --js adds
+// the codegen stage on top of either, against JS from `pulp-import-design
+// --emit js`.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -62,6 +85,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === '--dir') o.dir = argv[++i];
     else if (a === '--fig') o.fig = argv[++i];
+    else if (a === '--js') o.js = argv[++i];
     else if (a === '--frame') o.frame = argv[++i];
     else if (a === '--page') o.page = argv[++i];
     else if (a === '--json') o.json = argv[++i];
@@ -359,6 +383,201 @@ export function auditMaterials(materials, envelope, diagnostics) {
   return { findings, declaredCounts, emittedCounts, diagnosedCounts };
 }
 
+// ── the codegen stage ────────────────────────────────────────────────────────
+//
+// Everything below watches envelope -> JS. See the two-stages note at the top.
+
+/**
+ * jsId -> fig node_id, parsed from the anchor lines codegen emits.
+ *
+ * The native lane writes a literal id: `setAnchor('knob_base23', 'figma-plugin:0:786/0:83/0:16')`.
+ * The web-compat lane instead writes `setAnchor(v3._id, '...')` — a VARIABLE,
+ * because web-compat.js auto-generates the bridge id — which this cannot resolve
+ * without evaluating the script. That is why the coverage number below is
+ * reported rather than assumed: fed web-compat JS, this map comes back empty,
+ * and a tool that then audited zero nodes and printed "no drops" would be lying
+ * in the most confident way available to it.
+ */
+export function parseAnchors(js) {
+  const bySource = new Map();
+  const re = /\bsetAnchor\(\s*'((?:[^'\\]|\\.)*)'\s*,\s*'figma-plugin:((?:[^'\\]|\\.)*)'\s*\)/g;
+  let m;
+  while ((m = re.exec(js))) {
+    if (!bySource.has(m[2])) bySource.set(m[2], []);
+    bySource.get(m[2]).push(m[1]);
+  }
+  return bySource;
+}
+
+/**
+ * jsId -> call name -> how many times it was called on that id.
+ *
+ * The COUNT is load-bearing, not decoration: every bridge call but one is
+ * idempotent per node, and the exception is the one that was dropping material.
+ * setBoxShadow takes a SINGLE layer (id, x, y, blur, spread, color), so a node
+ * declaring two shadows needs two calls. Presence alone reads green on a node
+ * that emitted one of two.
+ */
+export function parseCalls(js) {
+  const byId = new Map();
+  const re = /\b(set[A-Za-z]+)\(\s*'((?:[^'\\]|\\.)*)'/g;
+  let m;
+  while ((m = re.exec(js))) {
+    if (!byId.has(m[2])) byId.set(m[2], new Map());
+    const bag = byId.get(m[2]);
+    bag.set(m[1], (bag.get(m[1]) || 0) + 1);
+  }
+  return byId;
+}
+
+/** Split a CSS shadow list on top-level commas — rgba(...) has commas of its own. */
+function splitShadowLayers(s) {
+  const out = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (c === ',' && depth === 0) { out.push(s.slice(start, i)); start = i + 1; }
+  }
+  out.push(s.slice(start));
+  return out.map((x) => x.trim()).filter(Boolean);
+}
+
+// One envelope style field -> the calls that count as having lowered it.
+//
+// `corner_radius` accepting setSvgPath is the entry to read twice, because it
+// looks like a hole and is not. A rounded VECTOR carries its radius in the path
+// geometry — `M0 14 A14 14 0 1 0 28 14 ...` IS the rounding — so codegen emits
+// no setCornerRadius and the corner is still there. On the reference frame 78 of
+// 106 rounded nodes are exactly this. Demanding setCornerRadius from them would
+// report 78 drops that a screenshot disproves, and a checker that cries wolf at
+// that volume gets switched off, which is how fidelity_diff's 832 died.
+const CODEGEN_CHECKS = [
+  { property: 'stroke', field: 'border', calls: ['setBorder', 'setSvgStroke'] },
+  { property: 'fill', field: 'background_color',
+    calls: ['setBackground', 'setSvgFill', 'setTextColor', 'setImageSource', 'setLabel'] },
+  { property: 'fill.gradient', field: 'background_gradient',
+    calls: ['setBackgroundGradient', 'setSvgFillGradient'] },
+  { property: 'blend_mode', field: 'mix_blend_mode', calls: ['setMixBlendMode'] },
+  { property: 'corner_radius', field: 'border_radius', calls: ['setCornerRadius', 'setSvgPath'] },
+  { property: 'opacity', field: 'opacity', calls: ['setOpacity'] },
+];
+
+/**
+ * Audit envelope -> JS. Returns findings scoped to the codegen hop, plus the
+ * anchor coverage that says how much of the tree the join could even reach.
+ */
+export function auditCodegen(materials, envelope, js) {
+  const anchors = parseAnchors(js);
+  const calls = parseCalls(js);
+  const findings = [];
+  const declaredCounts = {};
+  const emittedCounts = {};
+  const bump = (bag, k, n = 1) => { bag[k] = (bag[k] || 0) + n; };
+
+  // How many times `name` was called across every JS element anchored to this
+  // fig node. An instance can lower to more than one element, so the property
+  // survived if ANY of them carries it.
+  const callCount = (nodeId, names) => (anchors.get(nodeId) || []).reduce((total, jsId) => {
+    const bag = calls.get(jsId);
+    if (!bag) return total;
+    return total + names.reduce((t, n) => t + (bag.get(n) || 0), 0);
+  }, 0);
+
+  // Coverage is measured against the nodes that DECLARE material, since those
+  // are the only ones this tool has an opinion about.
+  const declaring = materials.nodes.map((n) => n.node_id);
+  const anchored = declaring.filter((id) => anchors.has(id));
+  const coverage = {
+    declaring: declaring.length,
+    anchored: anchored.length,
+    anchor_lines: [...anchors.values()].reduce((a, v) => a + v.length, 0),
+  };
+
+  // A node that declares material and carries no anchor cannot be audited at
+  // all, and that is a finding rather than a skip. Silently auditing the subset
+  // we happen to be able to join would let the tool report a clean bill over a
+  // tree it never looked at — the exact failure it exists to end.
+  for (const entry of materials.nodes) {
+    if (anchors.has(entry.node_id)) continue;
+    findings.push({
+      node_id: entry.node_id, name: entry.name, type: entry.type, stage: 'codegen',
+      property: 'anchor',
+      declared: 'material, and an anchor to audit it by',
+      emitted: 'no setAnchor line — this node was NOT audited',
+    });
+  }
+
+  (function walk(node) {
+    const style = node.style || {};
+    const id = node.node_id;
+    if (id && anchors.has(id)) {
+      for (const chk of CODEGEN_CHECKS) {
+        if (style[chk.field] == null) continue;
+        bump(declaredCounts, chk.property);
+        if (callCount(id, chk.calls) > 0) { bump(emittedCounts, chk.property); continue; }
+        findings.push({
+          node_id: id, name: node.name, type: node.type, stage: 'codegen',
+          property: chk.property,
+          declared: `envelope style.${chk.field} = ${JSON.stringify(style[chk.field])}`,
+          emitted: `none — no ${chk.calls.join('/')} call on this node`,
+        });
+      }
+      // Shadows are counted per LAYER, not per node: the bridge's setBoxShadow
+      // carries one layer, so two declared shadows need two calls. Codegen emits
+      // `st.box_shadow.front()` and stops, so the second layer dies here with
+      // nothing said — and the envelope carries both, so envelope mode reads
+      // green over it. This check is the reason --js exists.
+      if (style.box_shadow) {
+        const want = splitShadowLayers(style.box_shadow).length;
+        const got = callCount(id, ['setBoxShadow']);
+        bump(declaredCounts, 'effects.shadow.layers', want);
+        bump(emittedCounts, 'effects.shadow.layers', Math.min(got, want));
+        if (got < want) {
+          findings.push({
+            node_id: id, name: node.name, type: node.type, stage: 'codegen',
+            property: 'effects.shadow.layers',
+            declared: `${want} layer(s): ${style.box_shadow}`,
+            emitted: `${got} setBoxShadow call(s)`,
+          });
+        }
+      }
+    }
+    for (const c of node.children || []) walk(c);
+  })(envelope.root || envelope);
+
+  return { findings, declaredCounts, emittedCounts, coverage };
+}
+
+function printTable(title, declaredCounts, emittedCounts, diagnosedCounts) {
+  const keys = Object.keys(declaredCounts).sort();
+  process.stdout.write(`${title}\n\n`);
+  process.stdout.write(`  ${'PROPERTY'.padEnd(28)} ${'DECLARED'.padStart(8)} ${'EMITTED'.padStart(8)} ${'DIAGNOSED'.padStart(9)}\n`);
+  for (const k of keys) {
+    const dc = declaredCounts[k];
+    const ec = emittedCounts[k] || 0;
+    const gc = (diagnosedCounts || {})[k] || 0;
+    const unaccounted = dc - ec - gc;
+    const flag = unaccounted > 0 ? `  <-- ${unaccounted} unaccounted` : '';
+    process.stdout.write(`  ${k.padEnd(28)} ${String(dc).padStart(8)} ${String(ec).padStart(8)} ${String(gc).padStart(9)}${flag}\n`);
+  }
+  process.stdout.write('\n');
+}
+
+function printFindings(findings) {
+  if (!findings.length) {
+    process.stdout.write('No silent drops: every declared property survived, '
+      + 'was diagnosed as degraded, or is known-unsupported.\n');
+    return;
+  }
+  process.stdout.write(`SILENT DROPS — ${findings.length} finding(s):\n`);
+  for (const f of findings) {
+    process.stdout.write(`  [${f.stage || 'envelope'}] ${f.name} [${f.node_id}] ${f.property}: `
+      + `declared ${f.declared}, emitted ${f.emitted}\n`);
+  }
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   let envelope, materials, diagnostics;
@@ -374,39 +593,39 @@ function main() {
   }
 
   const { findings, declaredCounts, emittedCounts, diagnosedCounts } = auditMaterials(materials, envelope, diagnostics);
+  const envFindings = findings.map((f) => ({ stage: 'envelope', ...f }));
+
+  let cg = null;
+  if (opts.js) cg = auditCodegen(materials, envelope, readFileSync(opts.js, 'utf8'));
+  const allFindings = [...envFindings, ...(cg ? cg.findings : [])];
 
   if (!opts.quiet) {
-    const keys = Object.keys(declaredCounts).sort();
-    process.stdout.write(`Material audit — ${materials.nodes.length} node(s) declaring material\n\n`);
-    process.stdout.write(`  ${'PROPERTY'.padEnd(28)} ${'DECLARED'.padStart(8)} ${'EMITTED'.padStart(8)} ${'DIAGNOSED'.padStart(9)}\n`);
-    for (const k of keys) {
-      const dc = declaredCounts[k];
-      const ec = emittedCounts[k] || 0;
-      const gc = diagnosedCounts[k] || 0;
-      const unaccounted = dc - ec - gc;
-      const flag = unaccounted > 0 ? `  <-- ${unaccounted} unaccounted` : '';
-      process.stdout.write(`  ${k.padEnd(28)} ${String(dc).padStart(8)} ${String(ec).padStart(8)} ${String(gc).padStart(9)}${flag}\n`);
-    }
-    process.stdout.write('\n');
-    if (findings.length) {
-      process.stdout.write(`SILENT DROPS — ${findings.length} finding(s):\n`);
-      for (const f of findings) {
-        process.stdout.write(`  ${f.name} [${f.node_id}] ${f.property}: `
-          + `declared ${f.declared}, emitted ${f.emitted}\n`);
+    printTable(`Material audit — DECODE stage (.fig -> envelope) — `
+      + `${materials.nodes.length} node(s) declaring material`,
+      declaredCounts, emittedCounts, diagnosedCounts);
+    if (cg) {
+      const { declaring, anchored } = cg.coverage;
+      const pct = declaring ? ((anchored / declaring) * 100).toFixed(1) : '0.0';
+      printTable(`Material audit — CODEGEN stage (envelope -> JS) — `
+        + `${anchored}/${declaring} declaring node(s) anchored (${pct}%)`,
+        cg.declaredCounts, cg.emittedCounts, null);
+      if (anchored < declaring) {
+        process.stdout.write(`  NOTE: ${declaring - anchored} declaring node(s) carry no anchor and `
+          + 'were NOT audited at this stage; they are listed as `anchor` findings.\n\n');
       }
-    } else {
-      process.stdout.write('No silent drops: every declared property survived, '
-        + 'was diagnosed as degraded, or is known-unsupported.\n');
     }
+    printFindings(allFindings);
   }
 
   if (opts.json) {
     writeFileSync(opts.json, JSON.stringify({
-      declared: declaredCounts, emitted: emittedCounts, diagnosed: diagnosedCounts, findings,
+      declared: declaredCounts, emitted: emittedCounts, diagnosed: diagnosedCounts,
+      findings: allFindings,
+      codegen: cg ? { declared: cg.declaredCounts, emitted: cg.emittedCounts, coverage: cg.coverage } : null,
       known_unsupported: KNOWN_UNSUPPORTED,
     }, null, 2));
   }
-  process.exit(findings.length ? 1 : 0);
+  process.exit(allFindings.length ? 1 : 0);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main();
