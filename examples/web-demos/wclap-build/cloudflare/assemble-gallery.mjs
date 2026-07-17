@@ -1104,6 +1104,7 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
                 put("es-gpumath", (gpuMathUs >= 10 ? Math.round(gpuMathUs)
                                                    : gpuMathUs.toFixed(1)).toLocaleString());
           }
+          stats.appliedLatency = lane ? lane.latencyBlocks : 0;   // adaptive depth in effect
           window.__gpuStats = stats;
         }, 100);
       }, () => {});
