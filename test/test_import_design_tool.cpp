@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <miniz.h>
+#include "envelope_merge.hpp"
 #include "fig_lane.hpp"
 
 #include <iostream>
@@ -2849,4 +2850,90 @@ TEST_CASE("repeated --frame on a source that resolves one frame is rejected",
     CHECK(r.stderr_output.find("--frame is repeatable only with --from fig") != std::string::npos);
     // It points at the surface that DOES capture states from this source.
     CHECK(r.stderr_output.find("--file a.pulp.json --file b.pulp.json") != std::string::npos);
+}
+
+// ── Merging N per-state envelopes: asset id collisions ───────────────────────
+//
+// Flattening every state's assets into one directory rests on an asset_id
+// naming its content. That holds for the hash-keyed producers and NOT for the
+// REST export, which keys by Figma node id — so re-exporting a node whose
+// content changed between captures produces two entries with one id and two
+// pictures. Dedupe would keep the first and render it in both states.
+
+namespace {
+
+// A minimal per-state envelope in the shape merge_frame_envelopes consumes.
+// `content_hash` is emitted only when non-empty, so the hash-keyed lane (which
+// carries no such field) can be modeled exactly.
+std::string state_envelope(const std::string& frame_name,
+                           const std::string& asset_id,
+                           const std::string& content_hash) {
+    std::string asset = "{\"asset_id\":\"" + asset_id + "\"";
+    if (!content_hash.empty()) asset += ",\"content_hash\":\"" + content_hash + "\"";
+    asset += ",\"mime\":\"image/svg+xml\"}";
+    return "{\"provenance\":{\"source\":\"figma-rest\"},"
+           "\"asset_manifest\":{\"assets\":[" + asset + "]},"
+           "\"root\":{\"name\":\"" + frame_name + "\",\"type\":\"frame\"}}";
+}
+
+}  // namespace
+
+TEST_CASE("merging states rejects one asset id naming two different pictures",
+          "[import-design][envelope-merge]") {
+    TempDir tmp("pulp-envelope-merge-collision");
+    const auto a = tmp.path / "a" / "design.pulp.json";
+    const auto b = tmp.path / "b" / "design.pulp.json";
+    // The REST shape: asset_id is the NODE id, so it survives a content edit
+    // that moves content_hash. This is exactly what re-exporting node 1:1
+    // after a design change produces.
+    write_text(a, state_envelope("state-a", "frame-svg-1:1", std::string(64, 'a')));
+    write_text(b, state_envelope("state-b", "frame-svg-1:1", std::string(64, 'b')));
+
+    const auto rc = pulp::import_design::merge_frame_envelopes(
+        {a, b}, tmp.path / "scratch", tmp.path / "merged.pulp.json");
+
+    REQUIRE(rc.has_value());          // refused, rather than silently dedupe-ing
+    CHECK(*rc == 3);
+    // ...and refused BEFORE writing a merged envelope that renders state-a's
+    // artwork in state-b's frame.
+    CHECK_FALSE(fs::exists(tmp.path / "merged.pulp.json"));
+}
+
+TEST_CASE("merging states dedupes one asset id naming the same picture",
+          "[import-design][envelope-merge]") {
+    TempDir tmp("pulp-envelope-merge-same");
+    const auto a = tmp.path / "a" / "design.pulp.json";
+    const auto b = tmp.path / "b" / "design.pulp.json";
+    // Same id, same content: the ordinary case — an unchanged shared asset
+    // reused across states. Must still collapse to one entry.
+    write_text(a, state_envelope("state-a", "frame-svg-1:1", std::string(64, 'a')));
+    write_text(b, state_envelope("state-b", "frame-svg-1:1", std::string(64, 'a')));
+
+    const auto rc = pulp::import_design::merge_frame_envelopes(
+        {a, b}, tmp.path / "scratch", tmp.path / "merged.pulp.json");
+
+    REQUIRE_FALSE(rc.has_value());
+    const auto merged = read_text(tmp.path / "merged.pulp.json");
+    // One asset entry survives, and both states are present.
+    CHECK(count_occurrences(merged, "frame-svg-1:1") == 1);
+    CHECK(merged.find("alternate_frames") != std::string::npos);
+}
+
+TEST_CASE("merging states does not fail a hash-keyed lane that omits content_hash",
+          "[import-design][envelope-merge]") {
+    TempDir tmp("pulp-envelope-merge-hashkeyed");
+    const auto a = tmp.path / "a" / "design.pulp.json";
+    const auto b = tmp.path / "b" / "design.pulp.json";
+    // The .fig / Figma-plugin shape: asset_id IS the content hash and there is
+    // no separate content_hash field. A repeated id is provably the same bytes,
+    // so the guard must stay quiet rather than reject a valid multi-state fig
+    // capture — the false-positive that would make this guard unshippable.
+    write_text(a, state_envelope("state-a", std::string(64, 'c'), ""));
+    write_text(b, state_envelope("state-b", std::string(64, 'c'), ""));
+
+    const auto rc = pulp::import_design::merge_frame_envelopes(
+        {a, b}, tmp.path / "scratch", tmp.path / "merged.pulp.json");
+
+    REQUIRE_FALSE(rc.has_value());
+    CHECK(fs::exists(tmp.path / "merged.pulp.json"));
 }
