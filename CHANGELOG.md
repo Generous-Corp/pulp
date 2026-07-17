@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06920"></a>
+## [0.692.0] - 2026-07-17
+
+- fix(fig): design-import visual parity + self-policing material audit ([#6199](https://github.com/danielraffel/pulp/pull/6199))
+
 <a id="v06900"></a>
 ## [0.690.0] - 2026-07-17
 
@@ -6494,6 +6499,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.692.0]: https://github.com/danielraffel/pulp/releases/tag/v0.692.0
 [0.690.0]: https://github.com/danielraffel/pulp/releases/tag/v0.690.0
 [0.688.0]: https://github.com/danielraffel/pulp/releases/tag/v0.688.0
 [0.687.0]: https://github.com/danielraffel/pulp/releases/tag/v0.687.0
