@@ -1,16 +1,97 @@
 // widget_bridge/style_effects_api.cpp - CSS filter, clip-path, backdrop, and blend style registrations.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/canvas/view_effect.hpp>
 #include "api_registry.hpp"
 #include "css_color.hpp"
 
+#include <choc/text/choc_JSON.h>
+
 #include <cctype>
 #include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace pulp::view {
+namespace {
+
+// Numeric member with a fallback (non-numeric or missing → fallback).
+float effect_num(const choc::value::ValueView& obj, const char* key, float fallback) {
+    if (obj.isObject() && obj.hasObjectMember(key))
+        return static_cast<float>(obj[key].getWithDefault<double>(fallback));
+    return fallback;
+}
+
+// CSS-color member with a fallback.
+canvas::Color effect_color(const choc::value::ValueView& obj, const char* key,
+                           canvas::Color fallback) {
+    if (obj.isObject() && obj.hasObjectMember(key)) {
+        std::string s(obj[key].getWithDefault<std::string_view>(""));
+        if (!s.empty()) return parse_bridge_css_color(s);
+    }
+    return fallback;
+}
+
+// Build one ViewEffect from a `{type, ...params}` spec. Returns nullptr and
+// sets `error` for an unknown type or an sksl shader that fails to compile.
+std::shared_ptr<canvas::ViewEffect> build_view_effect(
+        const choc::value::ValueView& spec, std::string& error) {
+    if (!spec.isObject()) { error = "effect spec must be an object"; return nullptr; }
+    std::string type(spec.hasObjectMember("type")
+                         ? spec["type"].getWithDefault<std::string_view>("") : "");
+    if (type == "blur") {
+        auto e = std::make_shared<canvas::GpuBlurEffect>();
+        e->radius_x = effect_num(spec, "radiusX", effect_num(spec, "radius", e->radius_x));
+        e->radius_y = effect_num(spec, "radiusY", effect_num(spec, "radius", e->radius_y));
+        return e;
+    }
+    if (type == "bloom") {
+        auto e = std::make_shared<canvas::GpuBloomEffect>();
+        e->intensity = effect_num(spec, "intensity", e->intensity);
+        e->threshold = effect_num(spec, "threshold", e->threshold);
+        e->radius = effect_num(spec, "radius", e->radius);
+        return e;
+    }
+    if (type == "vignette") {
+        auto e = std::make_shared<canvas::VignetteEffect>();
+        e->intensity = effect_num(spec, "intensity", e->intensity);
+        e->radius = effect_num(spec, "radius", e->radius);
+        e->edge_color = effect_color(spec, "color", e->edge_color);
+        return e;
+    }
+    if (type == "chromatic") {
+        auto e = std::make_shared<canvas::ChromaticAberrationEffect>();
+        e->offset = effect_num(spec, "offset", e->offset);
+        return e;
+    }
+    if (type == "sksl") {
+        std::string src(spec.hasObjectMember("source")
+                            ? spec["source"].getWithDefault<std::string_view>("") : "");
+        if (src.empty()) { error = "sksl effect requires a non-empty 'source'"; return nullptr; }
+        // Validate at install time like setWidgetShader — reject with the
+        // compile error rather than installing a shader that paints nothing.
+        auto compile_error = canvas::Canvas::compile_sksl(src);
+        if (!compile_error.empty()) { error = compile_error; return nullptr; }
+        auto e = std::make_shared<canvas::SkslPostEffect>();
+        e->sksl = std::move(src);
+        e->value = effect_num(spec, "value", 0.0f);
+        e->time = effect_num(spec, "time", 0.0f);
+        return e;
+    }
+    error = "unknown effect type '" + type + "'";
+    return nullptr;
+}
+
+choc::value::Value effect_result(bool success, const std::string& error) {
+    auto result = choc::value::createObject("");
+    result.addMember("success", choc::value::createBool(success));
+    result.addMember("error", choc::value::createString(error));
+    return result;
+}
+
+} // namespace
 
 void WidgetBridge::register_widget_style_filter_clip_api() {
     BridgeApiContext api{engine_};
@@ -197,6 +278,64 @@ void WidgetBridge::register_widget_style_filter_clip_api() {
                 }
             }
             return choc::value::Value();
+        });
+
+    // setViewEffect(id, specJson) -> {success, error}
+    //
+    // Attach a per-view GPU post-effect — the ViewEffect system that
+    // View::paint_all already consumes, but which was previously unreachable
+    // from JS (no bridge entry, so app authors could not use bloom / vignette /
+    // chromatic aberration / a custom SkSL post-effect at all).
+    //
+    // `specJson` is either a single object
+    //   {type:'blur'|'bloom'|'vignette'|'chromatic'|'sksl', ...params}
+    // or an array of them (composed into an EffectChain, one layer per effect).
+    // JSON `null` / "" / "none" clears the effect. An `sksl` effect is compiled
+    // at install time and rejected with its error (mirrors setWidgetShader)
+    // rather than installing a shader that would paint nothing.
+    register_bridge_function(api, "setViewEffect",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto spec_json = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (!v) return effect_result(false, "No widget with id '" + id + "'");
+
+            if (spec_json.empty() || spec_json == "none" || spec_json == "null") {
+                v->set_effect(nullptr);
+                request_repaint();
+                return effect_result(true, "");
+            }
+
+            choc::value::Value parsed;
+            try {
+                parsed = choc::json::parse(spec_json);
+            } catch (...) {
+                return effect_result(false, "invalid effect spec JSON");
+            }
+            if (parsed.isVoid()) {  // JSON null parses to a void value
+                v->set_effect(nullptr);
+                request_repaint();
+                return effect_result(true, "");
+            }
+
+            std::string error;
+            std::shared_ptr<canvas::ViewEffect> effect;
+            if (parsed.isArray()) {
+                auto chain = std::make_shared<canvas::EffectChain>();
+                for (uint32_t i = 0; i < parsed.size(); ++i) {
+                    auto child = build_view_effect(parsed[i], error);
+                    if (!child) return effect_result(false, error);
+                    chain->add(std::move(child));
+                }
+                effect = std::move(chain);
+            } else {
+                effect = build_view_effect(parsed, error);
+                if (!effect) return effect_result(false, error);
+            }
+
+            v->set_effect(std::move(effect));
+            request_repaint();
+            return effect_result(true, "");
         });
 }
 

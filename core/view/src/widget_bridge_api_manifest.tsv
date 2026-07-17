@@ -249,6 +249,7 @@ setDirection	css_style	function	core/view/src/widget_bridge/style_cursor_api.cpp
 setFilter	css_style	function	core/view/src/widget_bridge/style_effects_api.cpp
 setBackdropFilter	css_style	function	core/view/src/widget_bridge/style_effects_api.cpp
 setClipPath	css_style	function	core/view/src/widget_bridge/style_effects_api.cpp
+setViewEffect	css_style	function	core/view/src/widget_bridge/style_effects_api.cpp
 setMaskImage	css_style	function	core/view/src/widget_bridge/style_storage_api.cpp
 setMask	css_style	function	core/view/src/widget_bridge/style_storage_api.cpp
 setMaskSize	css_style	function	core/view/src/widget_bridge/style_storage_api.cpp

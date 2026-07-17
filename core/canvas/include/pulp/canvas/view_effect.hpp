@@ -133,6 +133,25 @@ struct VignetteEffect : ViewEffect {
     }
 };
 
+/// Arbitrary-SkSL view post-effect. Runs a child-shader over the finished
+/// subtree via `Canvas::save_layer_with_sksl_post_effect`; the SkSL must
+/// declare `uniform shader content` (sampled with `content.eval(xy)`). The JS
+/// bridge (`setViewEffect`) compiles/validates the source at install time and
+/// rejects a bad shader with its error, so a broken shader never installs
+/// silently. On non-Skia backends the compositor falls back to a plain layer.
+struct SkslPostEffect : ViewEffect {
+    std::string sksl;
+    float value = 0.0f;   ///< bound to the shader's `value` uniform when present
+    float time = 0.0f;    ///< bound to the shader's `time` uniform when present
+
+    void configure_layer(Canvas& canvas, float x, float y, float w, float h) override {
+        Canvas::ShaderUniforms u;
+        u.value = value;
+        u.time = time;
+        canvas.save_layer_with_sksl_post_effect(x, y, w, h, sksl, u);
+    }
+};
+
 // A `CustomShaderEffect` (arbitrary SkSL as a view post-effect) used to live
 // here. It stored `sksl`, `value`, and `time` and then ignored all three —
 // `configure_layer()` pushed a plain layer, so setting one had no visual effect
