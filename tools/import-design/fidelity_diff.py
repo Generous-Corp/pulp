@@ -415,7 +415,14 @@ def parse_widgets(scene: dict, assets_dir: str) -> list[WidgetSpec]:
         if not isinstance(node, dict):
             return
         kind = node.get("audio_widget")
-        if kind:
+        # "none" is an explicit OPT-OUT, not a widget kind. A .fig import stamps
+        # it on every instance-expanded node so the name heuristic can't paint
+        # Pulp's stock knob over the designer's own art. As a plain truthiness
+        # test this read the sentinel as a kind and then hunted the render for a
+        # pixel signature named "none", which no signature can ever match — so a
+        # near-perfect import reported 832 failures, one per opted-out node, and
+        # the tool was blind precisely in the mode it most needs to audit.
+        if kind and kind != "none":
             style = node.get("style") or {}
             attrs = node.get("attributes") or {}
             ref = node.get("asset_ref")

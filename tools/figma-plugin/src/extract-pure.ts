@@ -75,8 +75,20 @@ export function mapNodeType(n: SceneNode): string {
       return "frame"; // ditto
     case "TEXT":
       return "text";
-    case "RECTANGLE":
+    // An ELLIPSE is a circle, not a box. "Has a fill means renderable" holds for
+    // a RECTANGLE (a frame paints its own background box) and is FALSE for a
+    // circle: codegen has no painter for one, so a filled ellipse typed `frame`
+    // paints a SQUARE. The IR already has `ellipse` (is_synthesizable_primitive)
+    // and synthesize_node gives it a real path — this extractor just never said
+    // what the node was. Mirrors the .fig lane's envelopeType (fig/scene.mjs)
+    // and the REST lane's map_node_type (figma_rest_export.py).
+    //
+    // STAR / POLYGON need no equivalent case: extract.ts's isVectorLike captures
+    // them as PNG assets (type `image`) before their frame typing can matter.
+    // They reach this mapping only when that export fails, which diagnoses itself.
     case "ELLIPSE":
+      return "ellipse";
+    case "RECTANGLE":
     case "POLYGON":
     case "STAR":
     case "LINE":

@@ -351,6 +351,13 @@ window is visible and the host has GPU capture (`WindowHost::capture_png()`).
 
 ## CLI: `pulp audio validate <verb>` (offline, over WAVs / artifact bundles)
 
+> **Do not hand-roll WAV analysis.** If you are about to `soundfile.read()` two
+> WAVs and compare them, these verbs already do it. They are registered in
+> **`docs/status/tools.yaml`**, whose digest is generated into CLAUDE.md, and a
+> PostToolUse hook names them if you start writing the script anyway. The design
+> tools learned this the hard way: guidance that exists but never fires at the
+> moment of need is the same as no guidance.
+
 The harness analyzers are also reachable from the shipped CLI, nested under the
 existing `pulp audio` command (the `model`/`excerpt-find`/`read-bundle` verbs are
 untouched). The CLI is **not** tied to a plugin, so it analyzes captured audio

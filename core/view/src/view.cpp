@@ -463,12 +463,21 @@ void View::paint_all(canvas::Canvas& canvas) {
     // overflow is hidden, the clip below limits the halo to the bounds
     // — same behavior browsers exhibit for clipped boxes. Inset shadows
     // paint later, on top of the content, see below.
-    if (has_shadow_ && !shadow_.inset) {
-        canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
-                               shadow_.offset_x, shadow_.offset_y,
-                               shadow_.blur, shadow_.spread,
-                               shadow_.color, /*inset=*/false,
-                               effective_corner_radius(bounds_.width, bounds_.height));
+    //
+    // CSS paints a shadow list back-to-front: the FIRST layer in the
+    // declaration ends up nearest the viewer, so the list is walked in
+    // reverse and each layer paints over the one behind it. Order is
+    // load-bearing whenever layers overlap — a soft wide halo declared
+    // first must not bury the tight dark contact shadow declared after it.
+    if (!shadows_.empty()) {
+        const float eff_r = effective_corner_radius(bounds_.width, bounds_.height);
+        for (auto it = shadows_.rbegin(); it != shadows_.rend(); ++it) {
+            if (it->inset) continue;
+            canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
+                                   it->offset_x, it->offset_y,
+                                   it->blur, it->spread,
+                                   it->color, /*inset=*/false, eff_r);
+        }
     }
 
     // Clip only when overflow:hidden / overflow:scroll is explicitly
@@ -689,11 +698,13 @@ void View::paint_all(canvas::Canvas& canvas) {
     // shows through children (CSS spec: inset shadows are above the
     // background but below the border-image, here approximated as above
     // children too).
-    if (has_shadow_ && shadow_.inset) {
+    // Reverse order for the same reason as the outset pass above.
+    for (auto it = shadows_.rbegin(); it != shadows_.rend(); ++it) {
+        if (!it->inset) continue;
         canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
-                               shadow_.offset_x, shadow_.offset_y,
-                               shadow_.blur, shadow_.spread,
-                               shadow_.color, /*inset=*/true,
+                               it->offset_x, it->offset_y,
+                               it->blur, it->spread,
+                               it->color, /*inset=*/true,
                                eff_r);
     }
 
