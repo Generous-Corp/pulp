@@ -132,8 +132,9 @@ private:
     float total_time_ms_ = 0;
     bool over_budget_ = false;
     uint64_t frame_count_ = 0;
-    // Frame-level (whole-recording) GPU render time, distinct from the
-    // per-pass PassStats::gpu_time_ms. See set_gpu_render_time_ms().
+    // Frame-level (whole-recording) GPU render time. This is the ONLY GPU-clock
+    // granularity Pulp exposes — per-pass GPU timing is structurally unavailable
+    // under Skia Graphite (see PassStats + set_gpu_render_time_ms()).
     float gpu_render_time_ms_ = 0.0f;
     bool gpu_render_time_valid_ = false;
 };

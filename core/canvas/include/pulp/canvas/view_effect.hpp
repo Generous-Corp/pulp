@@ -40,6 +40,12 @@ public:
     /// tints the finished content — a vignette drawing a radial gradient — is
     /// implemented, instead of the wrong "reduce the whole layer's opacity"
     /// approximation. Default: nothing.
+    ///
+    /// Limitation: the overlay draws into the innermost still-open layer. That
+    /// is correct for a single effect (the only non-chain path today), but in a
+    /// multi-effect `EffectChain` (e.g. [vignette, blur]) an earlier effect's
+    /// overlay lands in a later effect's layer and is filtered by it. See the
+    /// `View::paint_all` call site — revisit if overlays-in-chains are needed.
     virtual void paint_overlay(Canvas& canvas, float x, float y,
                                float w, float h) {
         (void)canvas; (void)x; (void)y; (void)w; (void)h;

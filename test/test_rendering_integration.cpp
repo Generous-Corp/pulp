@@ -21,13 +21,19 @@ using namespace pulp;
 
 // ── ViewEffect tests ────────────────────────────────────────────────────
 
-TEST_CASE("GpuBlurEffect configures layer with blur", "[render][effect]") {
+TEST_CASE("GpuBlurEffect configures a blur layer with its radius", "[render][effect]") {
     canvas::RecordingCanvas rc;
     canvas::GpuBlurEffect blur;
-    blur.radius_x = 8.0f;
+    blur.radius_x = 8.0f;  // radius_y stays 4 → the layer blur is max(8,4)=8
     REQUIRE(blur.needs_layer());
     blur.configure_layer(rc, 0, 0, 100, 100);
-    REQUIRE(rc.command_count() > 0);  // save_layer recorded
+    // Exactly one compositing layer, carrying the blur radius — not just "some
+    // command was emitted" (the tautology this wave is removing).
+    REQUIRE(rc.count(canvas::DrawCommand::Type::save_layer) == 1);
+    const auto& cmd = rc.commands().back();
+    REQUIRE(cmd.type == canvas::DrawCommand::Type::save_layer);
+    REQUIRE(cmd.f[4] == Catch::Approx(1.0f));  // opacity
+    REQUIRE(cmd.f[5] == Catch::Approx(8.0f));  // blur radius
 }
 
 // GpuBloomEffect must route through the real bloom layer API, not a plain
