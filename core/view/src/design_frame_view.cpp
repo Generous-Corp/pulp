@@ -125,6 +125,44 @@ void wrap_thumb_translation(std::string& svg, const std::string& marker,
 
 constexpr float kSweepDeg = 270.0f;  // value 0->-135, 0.5->0 (up), 1->+135
 
+// The restyle overlay (hover brighten / disabled desaturate) redraws the SAME
+// needle/thumb/dot fragment the frame already painted, on top of it — so it
+// must carry the SAME live transform paint() applied, not the identity. This
+// mirrors the per-kind math in paint() exactly (angle/translation formulas
+// duplicated on purpose: paint() mutates the SVG string in place, this builds
+// a standalone FragmentTransform for the fragment mini-document instead).
+FragmentTransform element_marker_transform(const DesignFrameElement& e) {
+    FragmentTransform t;
+    switch (e.kind) {
+        case DesignFrameElement::Kind::knob:
+            t.rotate_deg = (e.value - 0.5f) * kSweepDeg;
+            t.pivot_x = e.cx;
+            t.pivot_y = e.cy;
+            break;
+        case DesignFrameElement::Kind::fader:
+            if (e.w > e.h) {
+                const float target_x = e.x + e.value * e.w;
+                t.dx = target_x - e.cx;
+            } else {
+                const float target_y = e.y + (1.0f - e.value) * e.h;
+                t.dy = target_y - e.cy;
+            }
+            break;
+        case DesignFrameElement::Kind::xy_pad:
+            t.dx = (e.x + e.value * e.w) - e.cx;
+            t.dy = (e.y + e.value_y * e.h) - e.cy;
+            break;
+        case DesignFrameElement::Kind::toggle: {
+            const float dx_on = 2.0f * e.x + e.w - 2.0f * e.cx;
+            t.dx = e.value * dx_on;
+            break;
+        }
+        default:
+            break;
+    }
+    return t;
+}
+
 }  // namespace
 
 bool suppress_svg_rect(std::string& svg, float x, float y, float w, float h,
@@ -1225,10 +1263,11 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
     for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
         const auto& e = elements_[i];
         if (e.needle_d.empty()) continue;
+        const auto xform = element_marker_transform(e);
         if (!e.enabled) {
-            draw_fragment_marker(canvas, e.needle_d, {}, 0.45f, "#6b7280");
+            draw_fragment_marker(canvas, e.needle_d, xform, 0.45f, "#6b7280");
         } else if (i == hovered_element_) {
-            draw_fragment_marker(canvas, e.needle_d, {}, 0.18f, "#ffffff");
+            draw_fragment_marker(canvas, e.needle_d, xform, 0.18f, "#ffffff");
         }
     }
 
