@@ -52,8 +52,8 @@ def test_clean_bandlimited_oscillator_does_not_fire(sr, f0, wave):
 # Slave:master ratios spanning the easy and the hard case. 661/220 = 3.005 and
 # 392/130.81 = 2.997 are NEAR-INTEGER: the reset lands almost where the slave already
 # was, so the signal very nearly repeats at the SLAVE period and a period search is
-# strongly attracted to it. Those are the configurations that broke earlier drafts, so
-# they belong in the grid rather than in a footnote.
+# strongly attracted to it — a period search that lands there reads the leftover sync
+# discontinuity as a click, so these ratios belong in the grid, not in a footnote.
 SYNC_PAIRS = [(110.0, 277.0), (110.0, 440.0), (220.0, 661.0),
               (146.83, 523.25), (130.81, 392.0), (98.0, 294.5)]
 
@@ -131,13 +131,31 @@ def test_voice_steal_pop_fires(sr, f0):
     assert click.detect(pop, sr, f0_hint=f0).fired
 
 
-@pytest.mark.parametrize("block", [16, 64, 256])
+@pytest.mark.parametrize("block", [16, 256])
 def test_param_zipper_fires(block):
     """A zipper is PERIODIC — at the block rate. It must still fire, which is what
-    proves the rule keys on the OSCILLATOR's period rather than on periodicity itself."""
+    proves the rule keys on the OSCILLATOR's period rather than on periodicity itself.
+
+    Block 64 is excluded here and covered by the drift-guard trade test instead: at
+    48 kHz it lands at 375 Hz, close enough to a 440 Hz fundamental to perturb the
+    period fit, so the drift guard refuses it rather than diagnosing it.
+    """
     sr, f0 = 48000, 440.0
     y, peak = _square(sr, f0)
     assert click.detect(fx.zipper(y, peak * 10 ** (-30 / 20.0), block), sr, f0_hint=f0).fired
+
+
+@pytest.mark.parametrize("block", [16, 64, 256])
+@pytest.mark.parametrize("db", [-20, -30])
+def test_a_param_zipper_never_reads_clean(block, db):
+    """The gate-relevant invariant, weaker than `fired` but true for every zipper: a
+    zipper is either diagnosed or refused, never passed. Which one depends on whether
+    its block rate disturbs the period fit — a refusal loses the diagnosis but not the
+    gate."""
+    sr, f0 = 48000, 440.0
+    y, peak = _square(sr, f0)
+    r = click.detect(fx.zipper(y, peak * 10 ** (db / 20.0), block), sr, f0_hint=f0)
+    assert r.fired or r.low_coverage, f"a {db} dB zipper at block {block} read CLEAN"
 
 
 def test_defect_is_localized_to_where_it_was_injected():
@@ -152,10 +170,10 @@ def test_defect_is_localized_to_where_it_was_injected():
 # ── The negative control: the reading must COLLAPSE when the defect is removed ──────
 
 def test_negative_control_reading_collapses_when_the_defect_is_removed():
-    """Per the plan's §2.8: the only construction that proves the analyzer SEES what it
-    claims is running the IDENTICAL measurement with the defect removed and showing the
-    reading collapse. Asserting a computed floor would be the analyzer grading its own
-    homework."""
+    """The only construction that proves the analyzer SEES what it claims: run the
+    IDENTICAL measurement with the defect removed and show the reading collapse.
+    Asserting a computed floor instead would be the analyzer grading its own homework —
+    it would pass just as happily if the measurement were blind."""
     sr, f0 = 48000, 440.0
     y, peak = _square(sr, f0)
     with_defect = click.analyze(fx.inject_step(y, int(0.15 * sr), peak * 0.01), sr, f0_hint=f0)
@@ -163,6 +181,20 @@ def test_negative_control_reading_collapses_when_the_defect_is_removed():
     assert with_defect.click_db >= FIRE_DB
     assert without.click_db < MEASURED_CLEAN_FLOOR_DB
     assert with_defect.click_db - without.click_db > 30.0
+
+
+@pytest.mark.parametrize("dc", [0.0, 0.5, 2.0, -1.0])
+def test_a_dc_offset_does_not_move_the_scale(dc):
+    """The reading is "the step's height relative to the waveform", so a DC offset must
+    not touch it. Scaling by max|y| instead of max|y - mean(y)| let DC quietly shrink
+    every reading: at +2.0 DC a -40 dB seam read -50.0 and did NOT fire, because the
+    rail counted as signal."""
+    sr, f0 = 48000, 440.0
+    y, peak = _square(sr, f0)
+    seam = fx.inject_step(y, int(0.15 * sr), peak * 10 ** (-40 / 20.0))
+    got = click.analyze(seam + dc, sr, f0_hint=f0).click_db
+    assert got == pytest.approx(-40.0, abs=1.5), f"DC {dc:+} moved the reading to {got:.1f} dB"
+    assert click.detect(seam + dc, sr, f0_hint=f0).fired
 
 
 def test_reading_matches_the_injected_step_from_independent_math():
@@ -235,66 +267,178 @@ def test_a_glitch_one_sample_off_period_is_seen():
     assert click.analyze(unlocked, sr, f0_hint=f0).click_db >= FIRE_DB
 
 
-def test_blind_spot_b_a_drifting_pitch_is_refused_not_reported():
-    """A clean oscillator gliding by 1 cent reads -28 dB — a confident false positive —
-    and `period_confidence` stays ~1.000, so confidence alone does NOT protect against
-    it. The drift guard must turn that into a refusal: low_coverage, not fired."""
-    sr = 48000
-    y = _glide(sr, 5.0)
-    a = click.analyze(y, sr, f0_hint=440.0)
-    assert a.period_confidence > 0.9, "premise of this test: confidence does NOT see the glide"
-    assert a.click_db > FIRE_DB, "premise of this test: the raw reading IS a false positive"
+def test_blind_spot_b_a_subharmonic_locked_defect_needs_the_hint_to_be_seen():
+    """Period doubling: alternate cycles differ — an audible f0/2 subharmonic, and a real
+    oscillator defect class.
 
-    r = click.detect(y, sr, f0_hint=440.0)
-    assert not r.fired, "a glide must not be reported as a click"
-    assert r.low_coverage, "a refused reading must surface as low_coverage, never as clean"
-    assert "drift" in r.notes
+    Unaided this is not merely hard, it is genuinely ambiguous: "a 440 Hz oscillator
+    whose cycles alternate" and "a 220 Hz oscillator" are the same signal, and no rule
+    can call one of them broken. So the unaided path reads it clean, and that is the
+    honest answer rather than a bug.
+
+    With `f0_hint` the caller has named the commanded period, so the ambiguity is gone
+    and the defect must be caught. It was NOT: searching multiples of the hint let the
+    resolver adopt 4x the commanded period and null the defect away, reading -236.7 dB —
+    a clean PASS on a -20 dB defect, with a correct hint supplied.
+    """
+    sr, f0 = 48000, 500.0  # period = 96 samples exactly
+    period = int(sr / f0)
+    y, peak = _square(sr, f0)
+    delta = peak * 10 ** (-20 / 20.0)
+
+    for every in (2, 3, 4):
+        cycle = np.arange(len(y)) // period
+        doubled = y + delta * (((cycle % every) == 0) & ((np.arange(len(y)) % period) < period // 2))
+        a = click.analyze(doubled, sr, f0_hint=f0)
+        assert a.period_samples == pytest.approx(period, abs=0.5), (
+            f"every-{every} defect: fit ran away to {a.period_samples:.1f} instead of the "
+            f"commanded {period} — the defect gets nulled away"
+        )
+        assert click.detect(doubled, sr, f0_hint=f0).fired, f"missed a -20 dB every-{every} defect"
 
 
-def _glide(sr, cents, f0=440.0, dur=DUR):
+def test_a_hint_is_fitted_directly_and_never_searched_for_multiples():
+    """The mechanism behind the test above. The multiple search exists only to escape the
+    unaided slave-period trap; applied to a hint it is actively harmful, because a
+    periodic defect makes the commanded period score badly and the search then prefers a
+    multiple that explains the defect away."""
+    sr, f0 = 48000, 500.0
+    y, _ = _square(sr, f0)
+    assert click.analyze(y, sr, f0_hint=f0).period_samples == pytest.approx(sr / f0, abs=0.01)
+    assert click.analyze(y, sr, f0_hint=f0 / 2).period_samples == pytest.approx(2 * sr / f0, abs=0.01), (
+        "a hint must be taken at face value, not silently re-derived"
+    )
+
+
+def _modulated(sr, cents, rate=None, f0=440.0, dur=DUR):
+    """A CLEAN bandlimited square whose pitch moves: a linear glide over `cents` when
+    `rate` is None, otherwise vibrato of +/-`cents` at `rate` Hz. Nothing is injected —
+    every discontinuity in here is a legitimate square edge."""
     n = int(dur * sr)
     t = np.arange(n) / sr
-    phase = 2 * np.pi * np.cumsum(f0 * 2 ** ((cents * t / t[-1]) / 1200.0)) / sr
+    depth = cents * (t / t[-1] if rate is None else np.sin(2 * np.pi * rate * t))
+    phase = 2 * np.pi * np.cumsum(f0 * 2 ** (depth / 1200.0)) / sr
     y = np.zeros(n)
     for k in range(1, int((sr / 2) / f0), 2):
         y += np.sin(k * phase) / k
     return y * 0.7 * 4 / np.pi
 
 
-def test_the_drift_guard_window_is_narrow_and_both_of_its_edges_are_pinned():
-    """The most fragile number in the detector, so both walls are asserted.
+def test_slow_vibrato_is_refused_not_reported():
+    """Symmetric modulation is the case a two-point drift check cannot see.
 
-    The drift guard cannot tell a drifting pitch from a strong aperiodic component —
-    both make the halves fit different periods — so its threshold is squeezed between
-    two measured facts:
+    Fitting the period on the first and second half measures NET drift, and vibrato has
+    almost none — it returns where it started. Measured that way, +/-0.5 cents at
+    6.67 Hz scores 2.8e-09 (i.e. rock steady) while reading -27.4 dB and firing: a
+    confident false positive on a CLEAN oscillator, which is the worst failure this
+    detector can have. Only a guard that samples the period at several points sees it.
+    """
+    sr = 48000
+    y = _modulated(sr, 0.5, rate=6.6667)
+    a = click.analyze(y, sr, f0_hint=440.0)
+    assert a.period_confidence > 0.9, "premise: confidence does NOT see the vibrato"
+    assert a.click_db >= FIRE_DB, "premise: the raw reading IS a false positive"
 
-      * ceiling: a 0.15-cent glide (drift 4.3e-5) reads -44 dB and WOULD false-fire, so
-        the guard must refuse at or below that drift;
-      * floor: a -20 dB block-rate zipper (drift 1.9e-5) is a real defect that must
-        still be reported, so the guard must NOT refuse at that drift.
+    r = click.detect(y, sr, f0_hint=440.0)
+    assert not r.fired, "vibrato reported as a click on a clean oscillator"
+    assert r.low_coverage, "a refused reading must surface as low_coverage, never as clean"
 
-    The default 3e-5 sits between with ~1.5x either side. If a future change moves
-    either wall, this fails rather than silently trading a false positive for a false
-    negative.
+
+@pytest.mark.parametrize("cents,rate", [(1.0, 5.0), (2.0, 5.0), (3.0, 4.0), (0.5, 13.333), (1.0, 3.0)])
+def test_vibrato_across_rates_and_depths_is_refused(cents, rate):
+    """Swept rather than spot-checked, because the two-half guard's blind spot depended
+    on the modulation's cycle count landing a particular way across the render — a hole
+    a single fixture would have walked straight past."""
+    r = click.detect(_modulated(48000, cents, rate=rate), 48000, f0_hint=440.0)
+    assert not r.fired and r.low_coverage
+
+
+def test_a_segment_count_alone_would_be_blind_to_its_own_multiple():
+    """Why `_DRIFT_SEGMENT_COUNTS` has more than one entry, asserted at the mechanism.
+
+    A segmentation cannot see a modulation whose cycle count across the render is an
+    exact multiple of the segment count: every segment then averages the same value.
+    Four segments over exactly 4 vibrato cycles is that case — and alone it collapses to
+    near-steady. The 7-segment view of the same signal must not.
+    """
+    sr = 48000
+    cycles_matching_four_segments = 4 / DUR  # 13.33 Hz: exactly 4 cycles across the render
+    y = _modulated(sr, 0.5, rate=cycles_matching_four_segments)
+    seed = sr / 440.0
+    blind = click._segment_spread(y, seed, 4)
+    seeing = click._segment_spread(y, seed, 7)
+    assert blind is not None and seeing is not None
+    assert seeing > blind, "the second segment count must see what the first is blind to"
+    assert click.measure_period_drift(y, seed, 0) >= seeing
+
+
+def test_glide_is_refused_not_reported():
+    sr = 48000
+    y = _modulated(sr, 5.0)
+    a = click.analyze(y, sr, f0_hint=440.0)
+    assert a.click_db >= FIRE_DB, "premise: the raw reading IS a false positive"
+    r = click.detect(y, sr, f0_hint=440.0)
+    assert not r.fired and r.low_coverage and "drift" in r.notes
+
+
+def test_fast_modulation_is_an_admitted_hole_not_a_closed_one():
+    """The blind spot the module docstring claims, pinned so the claim stays true.
+
+    Past roughly one modulation cycle per segment, each segment averages over the whole
+    cycle and the drift score COLLAPSES toward clean while the reading stays a false
+    positive. This asserts the hole is exactly where the docs say it is: a fast, shallow
+    vibrato reads above the fire threshold AND scores a drift no guard could act on,
+    because it is below what the clean fixtures themselves measure.
+
+    If a future change closes this, this test fails — and the docstring's blind-spot
+    section must then be corrected in the honest direction.
+    """
+    sr = 48000
+    fast = _modulated(sr, 0.08, rate=40.0)
+    a = click.analyze(fast, sr, f0_hint=440.0)
+    assert a.click_db >= FIRE_DB, "premise: a clean fast vibrato still reads as a click"
+    clean_worst = max(
+        click.analyze(fx.bandlimited_square(s, f, DUR), s, f0_hint=f).period_drift
+        for s, f in ((44100, 220.0), (48000, 440.0), (48000, 880.0))
+    )
+    assert a.period_drift < clean_worst * 2, (
+        "fast vibrato now scores clear of the clean fixtures — the hole may be closable; "
+        "re-derive the guard window and update the blind-spot docs"
+    )
+
+
+def test_the_drift_guard_prices_no_false_positives_over_diagnosing_a_loud_zipper():
+    """The trade the guard makes, pinned in both directions.
+
+    There is no threshold that both refuses false-firing modulation and reports a loud
+    block-rate zipper: the guard cannot tell a moving pitch from an interfering
+    component, since both make a segment fit a different period. Measured, the mildest
+    false-firing modulation always scores BELOW the loudest zipper, at every segment
+    count tried — the window is empty.
+
+    So the guard is placed to avoid false positives, and a loud zipper is REFUSED rather
+    than diagnosed. That is not a silent pass: the gate still does not pass it. This
+    asserts both halves so the trade cannot be quietly reversed.
     """
     sr, f0 = 48000, 440.0
     y, peak = _square(sr, f0)
 
-    loud_zipper = fx.zipper(y, peak * 10 ** (-20 / 20.0), 64)
-    assert click.analyze(loud_zipper, sr, f0_hint=f0).period_drift < 3e-5
-    assert click.detect(loud_zipper, sr, f0_hint=f0).fired, "guard too tight: a loud zipper became a refusal"
+    loud = fx.zipper(y, peak * 10 ** (-20 / 20.0), 64)
+    r_loud = click.detect(loud, sr, f0_hint=f0)
+    assert not r_loud.fired, "if this now fires, the window opened — re-derive the guard"
+    assert r_loud.low_coverage, "a refused loud zipper must NOT read as clean"
+    assert click.analyze(loud, sr, f0_hint=f0).click_db >= FIRE_DB, (
+        "the measurement still SEES it; only the refusal withholds the diagnosis"
+    )
 
-    mild_glide = _glide(sr, 0.15)
-    a = click.analyze(mild_glide, sr, f0_hint=f0)
-    assert a.click_db >= FIRE_DB, "premise: this glide WOULD false-fire unguarded"
-    assert a.period_drift > 3e-5
-    assert not click.detect(mild_glide, sr, f0_hint=f0).fired, "guard too loose: a glide false-fired"
+    quiet = fx.zipper(y, peak * 10 ** (-40 / 20.0), 64)
+    assert click.detect(quiet, sr, f0_hint=f0).fired, "a quiet zipper must still be diagnosed"
 
 
 def test_a_glide_too_small_to_false_fire_is_not_refused():
     """The guard must not refuse everything that moves at all — a glide below the
     false-positive boundary reads clean and should be reported as such."""
-    r = click.detect(_glide(48000, 0.05), 48000, f0_hint=440.0)
+    r = click.detect(_modulated(48000, 0.02), 48000, f0_hint=440.0)
     assert not r.fired and not r.low_coverage
 
 
@@ -362,8 +506,8 @@ def test_result_is_advisory_until_validated():
 
 
 def _flux_outlier_margin_db(y, n_fft=1024, hop=48):
-    """The plan's §2.4 alternative: per-hop (1 ms) spectral flux, flag hops exceeding
-    median + 12 dB. Returns the worst hop's margin over the median."""
+    """The spectral-flux alternative: per-hop (1 ms) flux, flag hops exceeding median +
+    12 dB. Returns the worst hop's margin over the median."""
     win = np.hanning(n_fft)
     frames = np.lib.stride_tricks.sliding_window_view(y, n_fft)[::hop] * win
     flux = np.sum(np.abs(np.diff(np.abs(np.fft.rfft(frames, axis=-1)), axis=0)), axis=-1)
@@ -374,16 +518,16 @@ def _flux_outlier_margin_db(y, n_fft=1024, hop=48):
 def test_the_flux_outlier_alternative_misses_a_zipper_and_the_residual_rule_does_not():
     """Why this detector is not built on spectral flux, measured rather than asserted.
 
-    §2.4 offers "or a spectral-flux outlier detector" as an equivalent route, and it is
-    better than it sounds: a steady oscillator's magnitude spectrum does not change at
-    its own edges, so flux does NOT false-fire on a square (measured +2.9 dB against a
-    +12 dB rule), and it catches a one-shot seam down to about -40 dB.
+    A spectral-flux outlier rule is a real contender, not a straw man: a steady
+    oscillator's magnitude spectrum does not change at its own edges, so flux does NOT
+    false-fire on a square (measured +2.9 dB against a +12 dB rule), and it catches a
+    one-shot seam down to about -40 dB.
 
     But it has a structural hole exactly where an oscillator gate needs coverage: a
     block-rate parameter zipper is STATIONARY churn, so it lifts the median along with
     every hop and produces no outlier at any magnitude. A LOUD -20 dB zipper reads
     +2.6 dB — indistinguishable from a clean square. The two routes are complementary,
-    not equivalent, and §2.4's "or" is doing more work than it appears to.
+    not interchangeable.
     """
     sr, f0 = 48000, 440.0
     y, peak = _square(sr, f0)
@@ -394,7 +538,11 @@ def test_the_flux_outlier_alternative_misses_a_zipper_and_the_residual_rule_does
     seam = fx.inject_step(y, int(0.15 * sr), loud)
     assert _flux_outlier_margin_db(seam) > 12.0, "premise: flux does catch a one-shot seam"
 
-    zipped = fx.zipper(y, loud, 64)
+    # Block 256, not 64: at 48 kHz a 64-sample block lands at 375 Hz, close enough to a
+    # 440 Hz fundamental that the residual route's own drift guard refuses it. Block 256
+    # is 94 Hz, far from the fundamental, so the two routes are compared on a signal the
+    # residual route genuinely diagnoses.
+    zipped = fx.zipper(y, loud, 256)
     assert _flux_outlier_margin_db(zipped) < 12.0, "the flux route's hole: a zipper is invisible to it"
     assert click.detect(zipped, sr, f0_hint=f0).fired, "the residual route must cover that hole"
 
