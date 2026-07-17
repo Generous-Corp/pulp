@@ -119,11 +119,15 @@ export async function startGpuLane(opts) {
     return { ok: false, reason: result.reason };
   }
 
-  return {
+  const lane = {
     ok: true,
     sab: ring.sab,
     ring,
     latencyBlocks,
+    // Adaptive depth can grow latencyBlocks up to slots-1 without re-allocating the
+    // SAB, because the ring is pre-sized to `slots` up front — the page picks slots
+    // to cover the deepest depth it will ever request.
+    maxLatencyBlocks: (opts.slots || 4) - 1,
     latencySamples: latencyBlocks * blockSize,
     adapterInfo: result.adapterInfo,
     features: result.features,
@@ -150,6 +154,17 @@ export async function startGpuLane(opts) {
       catch { return false; }
     },
 
+    // Adaptive depth: retarget the pipeline latency live. Writes CTRL_LATENCY — read
+    // live by the worklet's pop() and the worker's deadline budget — and the worklet
+    // moves the plugin's L to match on its next non-RT tick (pollDepth). Clamped to
+    // < slots. Returns the applied value.
+    setLatency(L) {
+      const applied = ring.setLatency(L);
+      lane.latencyBlocks = applied;
+      lane.latencySamples = applied * blockSize;
+      return applied;
+    },
+
     // Poll at ~10 Hz with setInterval, NOT requestAnimationFrame: rAF is throttled
     // in a background tab, so the readout would freeze exactly when misses are
     // most interesting (a backgrounded tab keeps rendering audio but throttles the
@@ -171,6 +186,7 @@ export async function startGpuLane(opts) {
       setTimeout(() => { try { worker.terminate(); } catch { /* already gone */ } }, 250);
     },
   };
+  return lane;
 }
 
 export default startGpuLane;

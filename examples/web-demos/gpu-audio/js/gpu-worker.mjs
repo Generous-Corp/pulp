@@ -43,6 +43,7 @@ import {
   FLAG_WORKER_READY, FLAG_DEVICE_LOST, FLAG_SHUTDOWN, FLAG_ENGINE_GPU,
   STATE_READY, STATE_DEVICE_LOST, STATE_FAILED,
 } from "./gpu-ring.mjs";
+import { recommendLatencyBlocks } from "./adaptive-depth.mjs";
 
 const IDLE_WAIT_MS = 4;      // idle: nothing queued — still well under a block period
 const BUSY_WAIT_MS = 1;      // work outstanding: ~10 polls per 512-frame block
@@ -368,7 +369,10 @@ async function runLoop(blockPeriodMs, latencyBlocks) {
       // absolute timestamp — handing it performance.now()+x would give the module
       // an effectively infinite deadline (hours) and leave all expiry to the loop
       // below, so a wedged map would pin a staging buffer instead of expiring.
-      const budgetMs = latencyBlocks * blockPeriodMs;
+      // Live latency: adaptive depth can retarget it from the page mid-stream, so the
+      // budget must follow (JS L and the plugin's L move together). Falls back to the
+      // captured value if the ring is somehow unattached.
+      const budgetMs = (ring ? ring.liveLatency() : latencyBlocks) * blockPeriodMs;
       const deadline = t0 + budgetMs;   // absolute, for THIS loop's bookkeeping
       // A refused submit (module queue full) is an abandoned block, not an error:
       // it becomes a miss the plugin's CPU path covers.
@@ -400,6 +404,13 @@ async function runLoop(blockPeriodMs, latencyBlocks) {
       // device quantized a small dispatch to 0). Render 0 as "no timing", never as a
       // stall. Never synthesize one from the callback.
       state.gpuNsLast = gpu.api.stat(4);
+      // Adaptive-depth recommendation: how many block-periods the MEASURED round trip
+      // (avgBlockUs) needs, with headroom. The page's DepthController debounces this
+      // and, on a sustained change, retargets the ring + the plugin's L together. The
+      // worker only SUGGESTS; it never moves its own latency (that would desync the
+      // plugin). blockPeriodMs → µs to match recommendLatencyBlocks' units.
+      state.recommendedDepth =
+        recommendLatencyBlocks(state.avgBlockUs || 0, blockPeriodMs * 1000);
       ring.publishStats(state);
     }
 

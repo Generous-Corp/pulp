@@ -675,7 +675,7 @@ const GPU_SRC = resolve(REPO, "examples/web-demos/gpu-audio/js");
 // navigator.gpu nor spawn a Worker, so the worker is not optional — and
 // gpu-ring.mjs is the SharedArrayBuffer both of them (and the worklet) map. All
 // three must be same-origin, hence the copy into the page dir.
-const GPU_BRIDGE_FILES = ["gpu-bridge.mjs", "gpu-worker.mjs", "gpu-ring.mjs"];
+const GPU_BRIDGE_FILES = ["gpu-bridge.mjs", "gpu-worker.mjs", "gpu-ring.mjs", "adaptive-depth.mjs"];
 // The Skia-free WebGPU DSP module the worker instantiates (examples/web-demos/
 // gpu-audio, target pulp-gpu-dsp). Built with emcmake into its own tree.
 const GPU_DSP_BUILD = resolve(HERE, arg("--gpu-build", "../../gpu-audio/build-gpu-dsp"));
@@ -777,6 +777,7 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
   import { createWclapAdapter } from "../vendor-player/adapters/wclap.js?v=${v}";
   import { mountPulpUi } from "./pulp-ui.js?v=${v}";
   import { probe, startGpuLane } from "./gpu-bridge.mjs";
+  import { DepthController } from "./adaptive-depth.mjs";
   import { irFileUpload } from "./ir-source.js?v=${v}";
   // The plugin-state container is how the editor's own IR loader (the "SOURCE" chip) writes a
   // chosen impulse response WITHOUT resetting the knobs: it swaps only the plugin-owned IR blob
@@ -790,6 +791,11 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
   // a mismatch is a latency bug, not a rounding error.
   const INTERNAL_BLOCK = 512;
   const GPU_LATENCY_BLOCKS = 2;
+  // Adaptive depth grows the pipeline latency up to this many blocks on a jittery
+  // device; the ring's slots are pre-sized past it so a deeper depth never re-allocs
+  // the SAB. MUST NOT exceed the plugin's kMaxWebGpuLatencyBlocks (super_convolver.hpp).
+  const GPU_MAX_LATENCY_BLOCKS = 12;
+  const GPU_RING_SLOTS = GPU_MAX_LATENCY_BLOCKS + 4;   // latencyBlocks < slots, always
 
   // ── The handshake, BEFORE the adapter is created. ───────────────────────
   // Cheap main-thread preconditions first (SAB + cross-origin isolation), then
@@ -819,6 +825,7 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
       sampleRate: 48000,
       blockSize: INTERNAL_BLOCK,
       latencyBlocks: GPU_LATENCY_BLOCKS,
+      slots: GPU_RING_SLOTS,   // pre-sized so adaptive depth never re-allocs the SAB
       onDeviceLost: (info) => {
         // Normal behavior, not a fatal error: the worklet misses from here on
         // and the plugin's CPU convolver covers every block.
@@ -1004,6 +1011,11 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
       let lastProduced = 0;
       let gpuStall = 0;          // consecutive 100ms polls with no new GPU block
       let gpuCarrying = false;   // debounced "GPU is the emitting engine" state
+      // Adaptive pipeline depth: the worker measures the round trip and recommends a
+      // depth; this debounces it (hold=4 polls ≈ 400ms) and, on a sustained change,
+      // retargets the ring + the plugin's L together. Starts at the shallow default —
+      // a fast device stays here; a jittery one deepens toward GPU_MAX_LATENCY_BLOCKS.
+      const depthCtl = new DepthController(GPU_LATENCY_BLOCKS, { hold: 4 });
       pending.then((ui) => {
         if (!ui) return;
         timer = setInterval(() => {
@@ -1069,6 +1081,15 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
           show("es-cpu", !gpuIsCarrying);
           show("es-gpu", gpuIsCarrying);
           if (gpuIsCarrying) {
+            // Adaptive depth runs only while the GPU is the emitting engine — that is
+            // when avgBlockUs is a real round trip. Feed the worker's recommendation
+            // through the debounce; a sustained change moves the ring latency (read
+            // live by pop + worker) and the plugin's L (via the worklet) together, so
+            // the CPU-net wet stays sample-aligned with the GPU wet through the settle.
+            if (lane && lane.setLatency && stats.recommendedDepth > 0) {
+              const target = depthCtl.update(stats.recommendedDepth | 0);
+              if (target !== lane.latencyBlocks) lane.setLatency(target);
+            }
             put("es-blocks", (stats.produced || 0).toLocaleString());
             put("es-covered", (stats.miss || 0).toLocaleString());
             put("es-us", Math.round(avg_us).toLocaleString());
