@@ -278,6 +278,224 @@ TEST_CASE("EqCurveView tracks the hovered band", "[view][eq_curve]") {
     REQUIRE(eq.hovered_band() == -1);
 }
 
+TEST_CASE("EqCurveView pinch gesture adjusts the target band Q", "[view][eq_curve]") {
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 800, 400});
+    eq.set_sample_rate(48000.0f);
+    eq.set_bands({{1000.0f, 6.0f, 2.0f, EqCurveView::FilterType::peak, true}});
+
+    auto fs = eq.frequency_scale();
+    auto gs = eq.gain_scale();
+    eq.on_hover_move({fs.to_x(1000.0f), gs.to_y(6.0f)});  // hover the handle
+    REQUIRE(eq.hovered_band() == 0);
+
+    // began / ended are boundaries — no scale delta is applied.
+    GestureEvent begin{};
+    begin.phase = GesturePhase::began;
+    begin.delta_scale = -0.2f;
+    eq.on_gesture_event(begin);
+    REQUIRE_THAT(eq.bands()[0].q, WithinAbs(2.0, 1e-4));
+
+    // pinch-IN (negative magnification) narrows → higher Q.
+    GestureEvent pinch_in{};
+    pinch_in.phase = GesturePhase::changed;
+    pinch_in.delta_scale = -0.2f;
+    eq.on_gesture_event(pinch_in);
+    REQUIRE(eq.bands()[0].q > 2.0f);
+
+    // pinch-OUT (positive) widens → lower Q, clamped at the 0.1 floor no matter
+    // how far it is pushed.
+    for (int i = 0; i < 60; ++i) {
+        GestureEvent pinch_out{};
+        pinch_out.phase = GesturePhase::changed;
+        pinch_out.delta_scale = 0.3f;
+        eq.on_gesture_event(pinch_out);
+    }
+    REQUIRE(eq.bands()[0].q >= 0.1f);
+    REQUIRE(eq.bands()[0].q < 2.0f);
+}
+
+TEST_CASE("EqCurveView pinch with no target band is a safe no-op", "[view][eq_curve]") {
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 800, 400});
+    // Nothing hovered or selected, no bands: the gesture returns without
+    // indexing an empty band vector.
+    GestureEvent pinch{};
+    pinch.phase = GesturePhase::changed;
+    pinch.delta_scale = -0.3f;
+    eq.on_gesture_event(pinch);
+    REQUIRE(eq.band_count() == 0);
+}
+
+TEST_CASE("EqCurveView dragging a shelf moves gain at twice the handle rate",
+          "[view][eq_curve]") {
+    // A shelf handle rides its curve at gain/2, so to keep the dot under the
+    // pointer the stored gain must move at twice the handle's dB.
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 800, 400});
+    eq.set_sample_rate(48000.0f);
+    eq.set_gain_range(-24.0f, 24.0f);
+    eq.set_bands({{300.0f, 0.0f, 1.0f, EqCurveView::FilterType::low_shelf, true}});
+
+    auto fs = eq.frequency_scale();
+    auto gs = eq.gain_scale();
+    const float hx = fs.to_x(300.0f);
+    eq.on_mouse_down({hx, gs.to_y(0.0f)});   // grab the flat shelf's handle (0 dB line)
+    REQUIRE(eq.selected_band() == 0);
+
+    // Drag to where +6 dB plots; the shelf gain lands near +12 dB.
+    eq.on_mouse_drag({hx, gs.to_y(6.0f)});
+    REQUIRE(eq.bands()[0].gain_db > 9.0f);
+    REQUIRE_THAT(eq.bands()[0].gain_db, WithinAbs(12.0, 2.0));
+}
+
+TEST_CASE("EqCurveView paint covers readout, per-band fills, and disabled handles",
+          "[view][eq_curve]") {
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 480, 240});
+    eq.set_sample_rate(48000.0f);
+    eq.set_gain_range(-24.0f, 24.0f);
+
+    // Flip each display flag through its setter and read it back (also exercises
+    // the header inline accessors that the diff added).
+    eq.set_show_band_curves(true);      REQUIRE(eq.show_band_curves());
+    eq.set_show_labels(true);           REQUIRE(eq.show_labels());
+    eq.set_show_readout(true);          REQUIRE(eq.show_readout());
+    eq.set_show_disabled_handles(true); REQUIRE(eq.show_disabled_handles());
+
+    // A peaking band (gain readout + sub-kHz label), a shelf, a gain-less
+    // low-pass (0 dB handle), and a bypassed band drawn dimmed.
+    eq.set_bands({
+        {440.0f,   8.0f, 2.0f, EqCurveView::FilterType::peak,      true},
+        {180.0f,   6.0f, 0.7f, EqCurveView::FilterType::low_shelf, true},
+        {8000.0f,  0.0f, 0.7f, EqCurveView::FilterType::low_pass,  true},
+        {2000.0f, -6.0f, 3.0f, EqCurveView::FilterType::peak,      false},  // bypassed
+    });
+
+    // Two set_spectrum calls at the same bin count exercise the temporal
+    // smoothing loop (first assigns, second eases each bin — attack path since
+    // it gets louder).
+    std::vector<float> mags(64, 0.0f);
+    for (size_t i = 0; i < mags.size(); ++i)
+        mags[i] = -30.0f + static_cast<float>(i);
+    eq.set_spectrum(mags.data(), mags.size());
+    for (auto& m : mags) m += 6.0f;
+    eq.set_spectrum(mags.data(), mags.size());
+
+    auto fs = eq.frequency_scale();
+    auto gs = eq.gain_scale();
+
+    auto any_text_contains = [](const RecordingCanvas& c, std::string_view needle) {
+        return std::any_of(c.commands().begin(), c.commands().end(),
+                           [&](const DrawCommand& cmd) {
+                               return cmd.type == DrawCommand::Type::fill_text &&
+                                      cmd.text.find(needle) != std::string::npos;
+                           });
+    };
+
+    // Hover the peaking band → readout draws its gain field and a sub-kHz "Hz"
+    // frequency; all four handles paint (the bypassed one dimmed).
+    eq.on_hover_move({fs.to_x(440.0f), gs.to_y(8.0f)});
+    REQUIRE(eq.hovered_band() == 0);
+    RecordingCanvas c1;
+    eq.paint(c1);
+    REQUIRE(c1.count(DrawCommand::Type::fill_circle) == 4);
+    REQUIRE(c1.count(DrawCommand::Type::set_fill_gradient_linear) >= 1);
+    REQUIRE(any_text_contains(c1, "dB"));   // gain readout field
+    REQUIRE(any_text_contains(c1, "Hz"));   // sub-kHz frequency field
+
+    // Hover the gain-less low-pass → the readout reserves the gain cell (no dB
+    // value) and formats a kHz frequency.
+    eq.on_hover_move({fs.to_x(8000.0f), gs.to_y(0.0f)});
+    REQUIRE(eq.hovered_band() == 2);
+    RecordingCanvas c2;
+    eq.paint(c2);
+    REQUIRE(any_text_contains(c2, "kHz"));
+}
+
+TEST_CASE("EqCurveView hover animation eases the handle radius then settles",
+          "[view][eq_curve]") {
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 480, 240});
+    eq.set_sample_rate(48000.0f);
+    eq.set_bands({{1000.0f, 6.0f, 2.0f, EqCurveView::FilterType::peak, true}});
+    eq.set_hover_animation(true);
+    REQUIRE(eq.hover_animation());
+
+    // First frame snaps the radius to its resting target — not animating yet.
+    RecordingCanvas f0;
+    eq.paint(f0);
+    REQUIRE_FALSE(eq.hover_animating());
+
+    // Hovering raises the target radius; the next frame is mid-ease.
+    auto fs = eq.frequency_scale();
+    auto gs = eq.gain_scale();
+    eq.on_hover_move({fs.to_x(1000.0f), gs.to_y(6.0f)});
+    RecordingCanvas f1;
+    eq.paint(f1);
+    REQUIRE(eq.hover_animating());
+
+    // It settles within a bounded number of frames and the flag clears.
+    bool settled = false;
+    for (int i = 0; i < 60 && !settled; ++i) {
+        RecordingCanvas f;
+        eq.paint(f);
+        settled = !eq.hover_animating();
+    }
+    REQUIRE(settled);
+}
+
+TEST_CASE("EqCurveView content top padding shifts the plot and clamps handles",
+          "[view][eq_curve]") {
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 480, 240});
+    eq.set_sample_rate(48000.0f);
+    eq.set_gain_range(-24.0f, 24.0f);
+
+    eq.set_content_top_padding(40.0f);
+    REQUIRE_THAT(eq.content_top_padding(), WithinAbs(40.0, 1e-4));
+    eq.set_content_top_padding(-5.0f);   // negatives floor to 0
+    REQUIRE_THAT(eq.content_top_padding(), WithinAbs(0.0, 1e-4));
+    eq.set_content_top_padding(40.0f);
+
+    // A band pinned at max gain would plot above the reserved top; its handle
+    // clamps into the plot and stays grabbable via the exposed hit_test_handle.
+    eq.set_bands({{1000.0f, 24.0f, 2.0f, EqCurveView::FilterType::peak, true}});
+    auto fs = eq.frequency_scale();
+    auto gs = eq.gain_scale();   // padded scale: +24 dB maps to the padded top
+    REQUIRE(eq.hit_test_handle({fs.to_x(1000.0f), gs.to_y(24.0f)}) == 0);
+
+    RecordingCanvas c;
+    eq.paint(c);
+    REQUIRE(c.count(DrawCommand::Type::fill_circle) == 1);
+}
+
+TEST_CASE("EqCurveView exposes a distinct wrapping band palette", "[view][eq_curve]") {
+    const Color c0 = EqCurveView::band_palette_color(0);
+    const Color c1 = EqCurveView::band_palette_color(1);
+    REQUIRE_FALSE(c0 == c1);                             // adjacent bands differ
+    REQUIRE(EqCurveView::band_palette_color(8) == c0);   // wraps modulo the palette
+    REQUIRE(c0.a > 0.0f);                                // opaque — usable as a fill
+}
+
+TEST_CASE("EqCurveView clear_spectrum removes the analyzer overlay", "[view][eq_curve]") {
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 240, 120});
+    std::vector<float> mags(32, -12.0f);
+    eq.set_spectrum(mags.data(), mags.size());
+
+    RecordingCanvas with_spec;
+    eq.paint(with_spec);
+    const int with = with_spec.count(DrawCommand::Type::set_fill_gradient_linear);
+    REQUIRE(with >= 1);   // the analyzer draws a gradient envelope
+
+    eq.clear_spectrum();
+    RecordingCanvas without_spec;
+    eq.paint(without_spec);
+    // No bands and no spectrum → the gradient envelope is gone.
+    REQUIRE(without_spec.count(DrawCommand::Type::set_fill_gradient_linear) < with);
+}
+
 // ── EqCurveView ─────────────────────────────────────────────────────────────
 
 TEST_CASE("EqCurveView band management", "[view][eq_curve]") {

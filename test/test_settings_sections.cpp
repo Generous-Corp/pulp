@@ -7,6 +7,8 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/format/standalone.hpp>
+#include <pulp/format/test_signal.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/screenshot.hpp>
 
@@ -19,6 +21,16 @@ using pulp::format::Processor;
 using pulp::format::SettingsPanel;
 
 namespace {
+
+// Depth-first collect every descendant widget of type T (the panel keeps its
+// combos/toggles private, so tests reach them through the public view tree).
+template <typename T>
+void collect_widgets(pulp::view::View* view, std::vector<T*>& out) {
+    if (auto* typed = dynamic_cast<T*>(view)) out.push_back(typed);
+    for (size_t i = 0; i < view->child_count(); ++i)
+        collect_widgets<T>(view->child_at(i), out);
+}
+
 
 // Minimal concrete Processor whose contributed sections are configurable per test.
 struct TestProcessor : Processor {
@@ -67,6 +79,53 @@ TEST_CASE("A plugin contributes named settings sections with views", "[format][s
     REQUIRE(secs[0].view != nullptr);
     REQUIRE(secs[1].title == "About");
     REQUIRE(secs[1].view != nullptr);
+}
+
+TEST_CASE("SettingsPanel signal-type combo maps Sine/Noise to the test-signal config",
+          "[format][settings][signal_type]") {
+    using pulp::format::SettingsPanelCallbacks;
+    using pulp::format::TestSignalConfig;
+    using pulp::format::TestSignalType;
+
+    SettingsPanel panel;
+    TestSignalConfig last{};
+    int calls = 0;
+    SettingsPanelCallbacks cb;
+    cb.on_test_signal_changed = [&](const TestSignalConfig& cfg) { last = cfg; ++calls; };
+    panel.set_callbacks(std::move(cb));
+
+    // Locate the host-owned Sine/Noise combo in the built Audio tab.
+    std::vector<pulp::view::ComboBox*> combos;
+    collect_widgets(&panel, combos);
+    pulp::view::ComboBox* type_combo = nullptr;
+    for (auto* combo : combos)
+        if (combo->items() == std::vector<std::string>{"Sine", "Noise"}) type_combo = combo;
+    REQUIRE(type_combo != nullptr);
+    REQUIRE(type_combo->selected() == 0);   // defaults to Sine
+
+    // Find the test-tone toggle by effect: the toggle whose on_toggle drives the
+    // test-signal callback. Enabling it with the type at Sine emits a sine config.
+    std::vector<pulp::view::Toggle*> toggles;
+    collect_widgets(&panel, toggles);
+    pulp::view::Toggle* tone = nullptr;
+    for (auto* toggle : toggles) {
+        if (!toggle->on_toggle) continue;
+        const int before = calls;
+        toggle->on_toggle(true);
+        if (calls > before) { tone = toggle; break; }
+    }
+    REQUIRE(tone != nullptr);
+    REQUIRE(last.type == TestSignalType::sine);
+
+    // Selecting Noise while the tone is on re-emits with the noise type; the
+    // combo's on_change re-fires the toggle so the host picks up the new source.
+    tone->set_on(true, false);        // is_on() → true, without notifying
+    type_combo->set_selected(1);      // fires on_change → re-emit
+    REQUIRE(last.type == TestSignalType::noise);
+
+    // Back to Sine re-emits a sine config.
+    type_combo->set_selected(0);
+    REQUIRE(last.type == TestSignalType::sine);
 }
 
 TEST_CASE("SettingsPanel starts with host-owned Audio + MIDI tabs", "[format][settings]") {

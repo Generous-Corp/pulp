@@ -6,7 +6,9 @@
 
 #include <pulp/view/continuous_frames.hpp>
 
+#include <pulp/canvas/canvas.hpp>
 #include <pulp/view/css_animation.hpp>
+#include <pulp/view/eq_curve_view.hpp>
 #include <pulp/view/ui_components.hpp>  // ScrollView
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
@@ -39,6 +41,38 @@ TEST_CASE("an opted-in continuous-repaint view is detected", "[view][continuous-
 
     v.set_continuous_repaint(false);
     REQUIRE_FALSE(needs_continuous_frames(&v));
+}
+
+TEST_CASE("an EqCurveView mid hover-settle needs continuous frames",
+          "[view][continuous-frames][eq_curve]") {
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 320, 160});
+    eq.set_sample_rate(48000.0f);
+    eq.set_bands({{1000.0f, 6.0f, 2.0f, EqCurveView::FilterType::peak, true}});
+    eq.set_hover_animation(true);
+
+    pulp::canvas::RecordingCanvas snap;
+    eq.paint(snap);                         // first frame snaps — settled
+    REQUIRE_FALSE(eq.hover_animating());
+    REQUIRE_FALSE(needs_continuous_frames(&eq));
+
+    // Hovering raises the handle's target radius; the next frame is mid-ease, so
+    // the shared predicate must keep the render loop alive.
+    auto fs = eq.frequency_scale();
+    auto gs = eq.gain_scale();
+    eq.on_hover_move({fs.to_x(1000.0f), gs.to_y(6.0f)});
+    pulp::canvas::RecordingCanvas easing;
+    eq.paint(easing);
+    REQUIRE(eq.hover_animating());
+    REQUIRE(needs_continuous_frames(&eq));
+
+    // Once it settles the flag clears and the loop is allowed to idle again.
+    for (int i = 0; i < 60 && eq.hover_animating(); ++i) {
+        pulp::canvas::RecordingCanvas f;
+        eq.paint(f);
+    }
+    REQUIRE_FALSE(eq.hover_animating());
+    REQUIRE_FALSE(needs_continuous_frames(&eq));
 }
 
 TEST_CASE("the predicate walks descendants", "[view][continuous-frames]") {
