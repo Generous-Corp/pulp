@@ -5,6 +5,11 @@
 /// composing `PhaseAccumulator` (the clock) with the BLEP/BLAMP kernels (the
 /// correction).
 ///
+/// This supersedes `signal::OscillatorT` (../oscillator.hpp), which is also a
+/// polyBLEP oscillator with the same four shape names — extend this one. That
+/// one keeps float phase, wraps only at the top, and derives its triangle by
+/// integration; the differences are spelled out in its header.
+///
 /// ── What this is ──────────────────────────────────────────────────────────
 ///
 /// Four shapes — sine, saw, square (with pulse width), triangle — generated
