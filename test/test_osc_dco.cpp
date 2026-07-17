@@ -291,7 +291,7 @@ TEST_CASE("the quantization bound holds on the round-DOWN side too, where the "
           "[signal][osc][dco][quantization]") {
     // The half-LSB rounding error is ASYMMETRIC in cents. `worst_case_note`
     // (clock/(k+0.5)) always rounds the divider UP — realized pitch a hair LOW —
-    // the favourable side, where the old linear bound 865.617·f_note/f_clk held.
+    // the favorable side, where the old linear bound 865.617·f_note/f_clk held.
     // A note whose ideal divider rounds DOWN (realized pitch HIGHER) detunes MORE
     // for the same half LSB, because log2(x/(x−½)) > log2((x+½)/x). The old linear
     // bound understated exactly this side; a note that rounds down slipped past it.
@@ -487,7 +487,7 @@ TEST_CASE("fractional-N cuts the average detuning but injects bounded jitter",
         // ...around the correct average period. The residue starts at 0 and lands
         // in [0, Δ) after M resets, so the mean interval is exact to within 1/M
         // clocks — asserting that, not a whole clock (a ~256x-slack tolerance that
-        // would wave through a mis-scaled tuning word half a clock off centre).
+        // would wave through a mis-scaled tuning word half a clock off center).
         const double kMeanTol = 1.0 / static_cast<double>(intervals.size());
         CHECK_THAT(measured_avg, WithinAbs(n_avg, kMeanTol));
 
