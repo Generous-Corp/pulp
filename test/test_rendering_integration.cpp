@@ -59,10 +59,22 @@ TEST_CASE("VignetteEffect has meaningful intensity", "[render][effect]") {
     REQUIRE(vignette.needs_layer());
 }
 
-TEST_CASE("ChromaticAberrationEffect has offset", "[render][effect]") {
+// ChromaticAberrationEffect must route its subtree through exactly one
+// compositing layer (the SkSL post-effect on GPU, a plain layer fallback on a
+// recorder). Its pixel behavior is proven on a raster surface in test_canvas.cpp
+// ("ChromaticAberrationEffect splits color channels at an edge"); here we only
+// assert the layer routing so paint_all's pop count stays correct.
+TEST_CASE("ChromaticAberrationEffect pushes exactly one compositing layer",
+          "[render][effect]") {
     canvas::ChromaticAberrationEffect ca;
     ca.offset = 3.0f;
-    REQUIRE(ca.offset == Catch::Approx(3.0f));
+    REQUIRE(ca.needs_layer());
+    REQUIRE(ca.layer_count() == 1);
+
+    canvas::RecordingCanvas rc;
+    const int depth_before = rc.save_count();
+    ca.configure_layer(rc, 0, 0, 100, 100);
+    REQUIRE(rc.save_count() == depth_before + 1);  // exactly one layer pushed
 }
 
 TEST_CASE("EffectChain composes multiple effects", "[render][effect]") {

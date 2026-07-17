@@ -1459,6 +1459,12 @@ public:
     /// (resolution / value / time / accentColor / bgColor / trackColor /
     /// fillColor / thumbColor) is bound when declared.
     ///
+    /// `sample_radius` is the maximum distance (px) the shader may sample
+    /// `content.eval()` away from the pixel being shaded — Skia needs this so a
+    /// shader that reads neighbouring texels (e.g. chromatic aberration's
+    /// per-channel offset) gets valid samples near the layer edge instead of
+    /// transparent black. Leave 0 for shaders that only read the current pixel.
+    ///
     /// Returns true when the shader was installed on the layer. Only the GPU
     /// backend (SkiaCanvas) implements it; the base falls back to a plain
     /// `save_layer` (still balanced — the subtree renders unfiltered) and
@@ -1466,8 +1472,9 @@ public:
     virtual bool save_layer_with_sksl_post_effect(float x, float y,
                                                   float w, float h,
                                                   const std::string& sksl,
-                                                  const ShaderUniforms& uniforms) {
-        (void)sksl; (void)uniforms;
+                                                  const ShaderUniforms& uniforms,
+                                                  float sample_radius = 0.0f) {
+        (void)sksl; (void)uniforms; (void)sample_radius;
         save_layer(x, y, w, h, 1.0f, 0.0f);
         return false;
     }

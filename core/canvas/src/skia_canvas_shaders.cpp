@@ -332,7 +332,8 @@ bool SkiaCanvas::draw_with_sksl(const std::string& sksl,
 bool SkiaCanvas::save_layer_with_sksl_post_effect(float x, float y,
                                                   float w, float h,
                                                   const std::string& sksl,
-                                                  const ShaderUniforms& uniforms) {
+                                                  const ShaderUniforms& uniforms,
+                                                  float sample_radius) {
     // On any failure (no canvas, empty/invalid SkSL, or a shader that does not
     // declare the `content` child) fall back to a plain unfiltered layer so the
     // subtree still renders, and return false so the caller can log once.
@@ -371,8 +372,8 @@ bool SkiaCanvas::save_layer_with_sksl_post_effect(float x, float y,
     // Bind the layer's rendered content as the "content" child (input=nullptr =
     // implicit source image) and hang the runtime shader off the layer paint so
     // it runs when the layer composites back at restore().
-    sk_sp<SkImageFilter> filter =
-        SkImageFilters::RuntimeShader(builder, "content", nullptr);
+    sk_sp<SkImageFilter> filter = SkImageFilters::RuntimeShader(
+        builder, std::max(sample_radius, 0.0f), "content", nullptr);
     if (!filter) return plain_fallback();
 
     SkRect bounds = SkRect::MakeXYWH(x, y, w, h);

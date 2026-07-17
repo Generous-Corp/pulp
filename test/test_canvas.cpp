@@ -3,6 +3,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/sdf_atlas.hpp>
+#include <pulp/canvas/view_effect.hpp>
 #include <array>
 #include <functional>
 #include <vector>
@@ -1613,6 +1614,42 @@ TEST_CASE("SkiaCanvas save_layer_with_sksl_post_effect post-processes layer cont
         REQUIRE(SkColorGetR(c) > 200);  // subtree preserved, not replaced by green
         REQUIRE(SkColorGetG(c) < 60);
     }
+}
+
+// Real chromatic aberration: the ChromaticAberrationEffect must fringe a white
+// edge red on one side and blue on the other via the per-channel offset shader
+// (the effect it replaced only pushed a subtle uniform blur — no color split).
+TEST_CASE("ChromaticAberrationEffect splits color channels at an edge",
+          "[canvas][skia][chromatic][effect]") {
+    SkImageInfo info = SkImageInfo::Make(32, 32, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+    SkiaCanvas canvas(surface->getCanvas());
+
+    ChromaticAberrationEffect ca;
+    ca.offset = 4.0f;
+    ca.configure_layer(canvas, 0, 0, 32, 32);
+    // White rect spanning x:[12,20), full height.
+    canvas.set_fill_color(Color::rgba8(255, 255, 255, 255));
+    canvas.fill_rect(12, 0, 8, 32);
+    canvas.restore();
+
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    // 2px left of the left edge (x=10): red-dominant fringe.
+    SkColor left = pm.getColor(10, 16);
+    INFO("left fringe rgb=(" << SkColorGetR(left) << "," << SkColorGetG(left)
+         << "," << SkColorGetB(left) << ")");
+    REQUIRE(SkColorGetR(left) > 150);
+    REQUIRE(SkColorGetR(left) > SkColorGetB(left) + 60);
+    // 2px right of the right edge (x=22): blue-dominant fringe.
+    SkColor right = pm.getColor(22, 16);
+    INFO("right fringe rgb=(" << SkColorGetR(right) << "," << SkColorGetG(right)
+         << "," << SkColorGetB(right) << ")");
+    REQUIRE(SkColorGetB(right) > 150);
+    REQUIRE(SkColorGetB(right) > SkColorGetR(right) + 60);
 }
 
 #endif  // PULP_HAS_SKIA

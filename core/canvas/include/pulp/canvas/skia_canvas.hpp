@@ -337,7 +337,8 @@ public:
     // custom SkSL shader (declares `uniform shader content`).
     bool save_layer_with_sksl_post_effect(float x, float y, float w, float h,
                                           const std::string& sksl,
-                                          const ShaderUniforms& uniforms) override;
+                                          const ShaderUniforms& uniforms,
+                                          float sample_radius = 0.0f) override;
 
     // Draw a Dawn-backed texture into the current Skia canvas when Graphite is active.
     bool draw_native_dawn_texture(void* texture_handle,

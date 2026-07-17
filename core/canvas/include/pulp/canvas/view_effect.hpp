@@ -57,19 +57,28 @@ struct GpuBloomEffect : ViewEffect {
     }
 };
 
-/// Chromatic aberration — RGB channel offset for a glitch/lens effect.
-/// Chromatic aberration — RGB channel offset for glitch/lens effect.
-/// Requires the full GPU post-effect pipeline (render to texture, apply
-/// SkSL shader, composite back). Currently applies a subtle color-shift
-/// approximation via layer opacity. Full per-channel offset requires
-/// SkImageFilter::MakeColorFilter with channel matrices.
+/// Chromatic aberration — real per-channel RGB offset for a glitch/lens effect.
+/// Post-processes the painted subtree via the SkSL child-shader compositor:
+/// the red channel samples `offset` px to one side and blue `offset` px to the
+/// other, so edges fringe red on one side and blue on the other. On non-Skia
+/// backends the compositor falls back to a plain (unfiltered) layer.
 struct ChromaticAberrationEffect : ViewEffect {
     float offset = 2.0f;  ///< Pixel offset between channels
 
     void configure_layer(Canvas& canvas, float x, float y, float w, float h) override {
-        // The full implementation needs per-channel offset rendering.
-        // Approximation: subtle blur simulates the softness of chromatic aberration.
-        canvas.save_layer(x, y, w, h, 1.0f, offset * 0.5f);
+        Canvas::ShaderUniforms u;
+        u.value = offset;  // per-channel offset (px), passed via `value`
+        canvas.save_layer_with_sksl_post_effect(
+            x, y, w, h,
+            "uniform shader content;"
+            "uniform float value;"
+            "half4 main(float2 xy) {"
+            "  return half4(content.eval(xy + float2(value, 0.0)).r,"
+            "               content.eval(xy).g,"
+            "               content.eval(xy - float2(value, 0.0)).b,"
+            "               content.eval(xy).a);"
+            "}",
+            u, /*sample_radius=*/offset);
     }
 };
 
