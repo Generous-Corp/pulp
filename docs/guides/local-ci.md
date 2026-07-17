@@ -709,6 +709,73 @@ gh workflow run runner-health-check.yml -f alarm_minutes=60
 python3 tools/scripts/queue_age_watchdog.py --snapshot snapshot.json
 ```
 
+### Off-fleet merge-stall watchdog (`merge-stall-check.yml`)
+
+`.github/workflows/merge-stall-check.yml` sweeps every 30 minutes and opens a
+tracking issue when PRs are **merge-ready but not merging**. It runs on
+`ubuntu-latest` for the same reason as the queue-age watchdog: the wedge it
+catches lives in whatever presses the merge button (Shipyard's per-host
+queue-tick), so an on-fleet guard would die with the thing it watches.
+
+**The gap it closes — the opposite shape from the queue-age watchdog.** The
+queue-age guard alarms on a *dead runner lane*: jobs sitting **queued** because
+runners died. This one alarms on the inverse: every required check **green**,
+nothing queued, and still nothing merging — the signature of an auto-merger
+silently held in reap-only mode. No job-level signal sees "everything is green
+and nobody is merging"; the only observable is a population of merge-ready PRs
+that stays merge-ready and unmerged. (Motivating incident: the repo went ~4
+hours with 34 PRs open and nothing merging while every check was green.)
+
+**The alarm predicate.** A PR trips only when ALL hold:
+
+1. **Required checks green** — every check in the repo's REQUIRED set. That set
+   is read from branch protection at runtime, not hardcoded; if the token cannot
+   read protection rules it falls back to the documented `main` set (`macos`,
+   `Enforce version & skill sync`).
+2. **`mergeStateStatus` in `{CLEAN, BEHIND}`** — GitHub's own merge verdict.
+   `DIRTY` (conflicts), `BLOCKED` (a required check red/missing/review pending),
+   and `UNSTABLE` (a non-required check still moving) are excluded — those wait
+   on something real, not on the merger.
+3. **Auto-merge enabled** — the signal that a machine, not a human, owns pressing
+   merge. A green PR without it is waiting on a person and must not alarm.
+4. **Merge-ready longer than the threshold** (default **45 min**), measured from
+   the completion time of the last required check to go green — a real duration,
+   independent of the sweep cadence.
+
+**Why two consecutive sweeps.** A single snapshot can misread — a per-PR REST
+poll of merge state gets rate-limited and returns *false* CLEAN/BEHIND readings
+under load, which is exactly how the incident state looked wrong. Collection
+therefore uses **one GraphQL call** for every open PR's `mergeStateStatus`
+(`tools/scripts/merge_stall_watchdog.py`), and on top of that a PR must satisfy
+the full predicate on **two consecutive sweeps** before it is issue-worthy: the
+first qualifying sweep records it as *pending* (run-summary only), the second
+promotes it to *alarm*. A normal in-flight PR that merges within a tick never
+reaches the second observation, so it never trips. The cross-sweep memory is the
+set of stuck PR numbers, persisted as a workflow artifact — crash-safe, held by
+GitHub independently of this repo or any host.
+
+The issue is edited in place each sweep and closes automatically once no PR is
+stuck merge-ready — the same open/update/auto-close contract as the release
+watchdogs (see [release-watchdog.md](release-watchdog.md)).
+
+Analysis and the predicate live in `tools/scripts/merge_stall_watchdog.py`,
+tested by `tools/scripts/test_merge_stall_watchdog.py` — which pins the
+must-stay-quiet cases (young PR, DIRTY, BLOCKED, no auto-merge, single-sweep
+blip) as regressions so a future edit that would make the guard cry wolf fails
+at PR time. The script also carries an inert, clearly-marked stub for a **second
+condition to add once a GitHub merge queue is enabled** ("queue depth > 0 AND no
+`merge_group` check started in 30 min" — a wedged *queue*, distinct from a wedged
+auto-merger); it stays off until the queue is live.
+
+```bash
+# Dry-run a sweep by hand (log findings, do not touch the issue)
+gh workflow run merge-stall-check.yml -f dry_run=true
+gh workflow run merge-stall-check.yml -f threshold_minutes=60
+
+# Replay a recorded snapshot offline (no API calls, verdict pinned to capture time)
+python3 tools/scripts/merge_stall_watchdog.py --snapshot snapshot.json --prev-state state.json
+```
+
 ### GraphQL quota fallback for PR sweeps
 
 The `gh pr ... --json` and `gh pr merge` paths can consume or require GitHub's
