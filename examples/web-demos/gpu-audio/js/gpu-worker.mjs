@@ -425,7 +425,7 @@ async function bringUp(msg) {
     // Opt INTO timestamp-query when the adapter offers it: WebGPU grants optional
     // features only if named in requiredFeatures. Without this the device never has
     // timestamp-query even where the adapter lists it (measured on Safari 2026-07-16),
-    // so the honest GPU-compute-time readout (#12) could never light up. Harmless where
+    // so the honest GPU-compute-time readout could never light up. Harmless where
     // unsupported — the feature is simply absent and the timing path stays 0.
     const wantTs = adapter.features && adapter.features.has("timestamp-query");
     device = await adapter.requestDevice(wantTs ? { requiredFeatures: ["timestamp-query"] } : {});
