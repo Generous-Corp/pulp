@@ -48,7 +48,7 @@ namespace pulp::test::audio {
 
 /// Musical interval between two frequencies in cents: `1200·log2(hz / reference)`.
 /// Positive when `hz` is above `reference`. Returns `kSilenceFloorDb`-style
-/// sentinel behaviour is NOT used here — both arguments must be > 0 (throws
+/// sentinel behavior is NOT used here — both arguments must be > 0 (throws
 /// otherwise), because a cents value is only meaningful between two real pitches.
 double cents_between(double hz, double reference_hz);
 
@@ -56,7 +56,7 @@ double cents_between(double hz, double reference_hz);
 struct PitchEstimate {
     /// Estimated fundamental in Hz. 0.0 when `voiced` is false.
     double hz = 0.0;
-    /// Fraction of the analysed segment's energy explained by the fundamental
+    /// Fraction of the analyzed segment's energy explained by the fundamental
     /// and its harmonics, clamped to [0, 1]. ~1 for a clean tone or saw, low for
     /// noise. This is the number gated against `PitchOptions::min_confidence`.
     double confidence = 0.0;
@@ -101,7 +101,7 @@ struct PitchOptions {
     /// RMS below this (linear, ~−80 dBFS) is treated as silence and refused
     /// before any spectral work — a dead processor must not measure a pitch.
     double silence_rms = 1.0e-4;
-    /// Channel analysed, and an offset/length window into it. `analysis_length =
+    /// Channel analyzed, and an offset/length window into it. `analysis_length =
     /// 0` means "from `analysis_offset` to the end of the buffer".
     int channel = 0;
     int analysis_offset = 0;
@@ -119,13 +119,13 @@ PitchEstimate estimate_pitch(const pulp::audio::BufferView<const float>& signal,
                              double sample_rate,
                              const PitchOptions& options = {});
 
-/// Span overload — analyses a single already-extracted channel.
+/// Span overload — analyzes a single already-extracted channel.
 PitchEstimate estimate_pitch(std::span<const float> samples, double sample_rate,
                              const PitchOptions& options = {});
 
-/// One point on an f0(t) trajectory: the frame's centre time and its estimate.
+/// One point on an f0(t) trajectory: the frame's center time and its estimate.
 struct PitchTrackPoint {
-    double time_s = 0.0;      ///< Centre of the analysis window, in seconds.
+    double time_s = 0.0;      ///< Center of the analysis window, in seconds.
     double hz = 0.0;          ///< Fundamental (0 when unvoiced).
     double confidence = 0.0;  ///< Per-frame confidence (see PitchEstimate).
     bool voiced = false;      ///< False = this frame was refused.
@@ -153,7 +153,7 @@ struct PitchTrack {
     int hop_length = 0;
     std::vector<PitchTrackPoint> points;
 
-    /// Centre times of the voiced frames only, in order.
+    /// Center times of the voiced frames only, in order.
     std::vector<double> voiced_times_s() const;
     /// Fundamentals of the voiced frames only, index-aligned to
     /// `voiced_times_s()`. This is the f0(t) series handed to the Quality Lab
