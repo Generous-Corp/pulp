@@ -79,9 +79,10 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME format-baseline-diff-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_format_baseline_diff.py")
 
-    # Version-at-land (T1.1): single-writer version assignment from Version-Bump
-    # intent trailers. Pure aggregate_intent / plan_assignments logic (the bot
-    # is dry-run only at this stage).
+    # Version-at-land: single-writer version assignment on main. Drives
+    # plan_assignments over throwaway git ranges, asserting it reproduces the
+    # same path + conventional-commit heuristic the hand-bump model uses (needs
+    # a working `git`).
     add_test(NAME version-at-land-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_version_at_land.py")
 

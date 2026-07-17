@@ -1,97 +1,176 @@
 #!/usr/bin/env python3
-"""Unit tests for version_at_land.py pure logic (aggregate_intent, plan_assignments)."""
+"""Unit tests for version_at_land.py.
+
+The bot must reproduce what a hand-bump wrote, so it derives the level from the
+SAME path + conventional-commit heuristic (`assess_surfaces`) the version-bump
+gate and the `--mode=apply` writer use — NOT from positive `Version-Bump:`
+intent trailers, which the hand-bump model uses only as `skip`/override escapes.
+
+These tests build a real one-PR git range against the production
+`versioning.json` surfaces and assert the assignment for each signal class:
+feat -> minor, fix -> patch, public-API path -> minor, `skip` -> no bump,
+positive override trailer -> that exact level. Against the previous
+positive-trailer-only implementation every source-driven case here yields NO
+assignment (the release-stranding defect), so they are RED before the fix.
+"""
 
 from __future__ import annotations
 
-import importlib.util
+import os
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+import version_at_land as val  # noqa: E402
+from version_bump_surfaces import load_config  # noqa: E402
+from gate_common import git_diff_names  # noqa: E402
+from version_bump_heuristics import filter_generated  # noqa: E402
+
+CONFIG = load_config(HERE / "versioning.json")
 
 
-def _load(name):
-    spec = importlib.util.spec_from_file_location(name, HERE / f"{name}.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+def _git(repo: Path, *args: str, env=None) -> str:
+    return subprocess.run(["git", "-C", str(repo), *args], check=True,
+                          capture_output=True, text=True, env=env).stdout.strip()
 
 
-val = _load("version_at_land")
-surfaces = _load("version_bump_surfaces")
+class RangeRepo:
+    """A throwaway git repo seeded with the two versioned surfaces, plus helpers
+    to add commits and produce a (base, head) range like a single rebased PR."""
 
-Surface = surfaces.Surface
-VersionFile = surfaces.VersionFile
+    def __init__(self, tmp: Path):
+        self.repo = tmp
+        env = os.environ.copy()
+        env.update(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e",
+                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@e")
+        self.env = env
+        _git(tmp, "init", "-q", "-b", "main", env=env)
+        self.write("CMakeLists.txt",
+                   "cmake_minimum_required(VERSION 3.20)\n"
+                   "project(Pulp VERSION 1.2.3 LANGUAGES CXX)\n")
+        self.write(".claude-plugin/plugin.json", '{\n  "version": "0.5.0"\n}\n')
+        self.write(".claude-plugin/marketplace.json",
+                   '{\n  "version": "0.5.0",\n'
+                   '  "plugins": [\n    { "version": "0.5.0" }\n  ]\n}\n')
+        self.commit("seed base state")
+        self.base = self.head()
+
+    def write(self, rel: str, content: str) -> None:
+        p = self.repo / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content)
+
+    def commit(self, subject: str, body: str = "") -> str:
+        _git(self.repo, "add", "-A", env=self.env)
+        msg = subject if not body else f"{subject}\n\n{body}"
+        _git(self.repo, "commit", "-q", "-m", msg, env=self.env)
+        return self.head()
+
+    def head(self) -> str:
+        return _git(self.repo, "rev-parse", "HEAD", env=self.env)
+
+    def plan(self):
+        head = self.head()
+        changed = filter_generated(git_diff_names(self.base, head),
+                                   CONFIG.generated_globs)
+        return val.plan_assignments(CONFIG, changed, self.base, head, self.repo)
+
+    def assigned(self):
+        return {a.surface: a.assigned for a in self.plan()}
 
 
-def trailers(*values):
-    return {"version-bump": list(values)}
-
-
-def surface(name):
-    return Surface(name=name, label=name,
-                   version_files=[VersionFile(path=f"{name}.txt", kind="raw")],
-                   trigger_paths=[])
-
-
-class AggregateIntentTest(unittest.TestCase):
-    def test_absent_is_none(self):
-        self.assertIsNone(val.aggregate_intent(trailers(), "sdk"))
-
-    def test_single_level(self):
-        self.assertEqual(val.aggregate_intent(trailers('sdk=minor reason="x"'), "sdk"), "minor")
-
-    def test_highest_wins_across_range(self):
-        t = trailers('sdk=patch reason="a"', 'sdk=major reason="b"', 'sdk=minor reason="c"')
-        self.assertEqual(val.aggregate_intent(t, "sdk"), "major")
-
-    def test_skip_is_ignored(self):
-        self.assertIsNone(val.aggregate_intent(trailers('sdk=skip reason="x"'), "sdk"))
-
-    def test_skip_does_not_beat_real_level(self):
-        t = trailers('sdk=skip reason="x"', 'sdk=patch reason="y"')
-        self.assertEqual(val.aggregate_intent(t, "sdk"), "patch")
-
-    def test_other_surface_not_picked_up(self):
-        self.assertIsNone(val.aggregate_intent(trailers('plugin=minor reason="x"'), "sdk"))
-
-    def test_unknown_level_ignored(self):
-        self.assertIsNone(val.aggregate_intent(trailers('sdk=bogus reason="x"'), "sdk"))
-
-
-class PlanAssignmentsTest(unittest.TestCase):
+class VersionAtLandTest(unittest.TestCase):
     def setUp(self):
-        self.config = surfaces.Config(
-            surfaces=[surface("sdk"), surface("plugin")],
-            generated_globs=[], trailer_version_bump="Version-Bump")
-        self.versions = {"sdk": "0.599.0", "plugin": "0.308.1"}
+        self._tmp = tempfile.TemporaryDirectory()
+        # Resolve symlinks (macOS /var -> /private/var) so git range refs and
+        # `git -C` agree with cwd-relative helpers.
+        self.repo = Path(self._tmp.name).resolve()
+        self._cwd = os.getcwd()
+        self.r = RangeRepo(self.repo)
+        os.chdir(self.repo)  # assess_surfaces' git helpers run in cwd
 
-    def plan(self, t):
-        return val.plan_assignments(self.config, t, lambda s: self.versions[s.name])
+    def tearDown(self):
+        os.chdir(self._cwd)
+        self._tmp.cleanup()
 
-    def test_single_surface_intent(self):
-        p = self.plan(trailers('sdk=minor reason="x"'))
-        self.assertEqual(len(p), 1)
-        self.assertEqual((p[0].surface, p[0].current, p[0].assigned), ("sdk", "0.599.0", "0.600.0"))
+    # ── source-driven signal classes (RED before the fix) ─────────────────
+    def test_feat_touching_src_is_minor(self):
+        self.r.write("core/audio/src/mixer.cpp", "int mix() { return 1; }\n")
+        self.r.commit("feat(audio): add a mixer")
+        self.assertEqual(self.r.assigned(), {"sdk": "1.3.0"})
+
+    def test_fix_touching_src_is_patch(self):
+        self.r.write("core/audio/src/mixer.cpp", "int mix() { return 2; }\n")
+        self.r.commit("fix(audio): correct the mixer")
+        self.assertEqual(self.r.assigned(), {"sdk": "1.2.4"})
+
+    def test_public_api_header_is_minor(self):
+        self.r.write("core/audio/include/pulp/audio/mixer.hpp",
+                     "#pragma once\nint mix();\n")
+        self.r.commit("chore(audio): expose mixer header")  # no feat/fix subject
+        self.assertEqual(self.r.assigned(), {"sdk": "1.3.0"})
+
+    def test_plugin_command_public_api_is_minor(self):
+        self.r.write(".claude/commands/newcmd.md",
+                     "Run the new command and report status.\n")
+        self.r.commit("docs(plugin): add a command")
+        self.assertEqual(self.r.assigned(), {"plugin": "0.6.0"})
+
+    def test_plugin_skill_internal_is_patch(self):
+        self.r.write(".agents/skills/demo/SKILL.md", "# demo skill\nbody\n")
+        self.r.commit("docs(skill): tweak demo skill")
+        self.assertEqual(self.r.assigned(), {"plugin": "0.5.1"})
+
+    # ── trailer overrides (skip suppresses, explicit level is authoritative) ─
+    def test_skip_trailer_suppresses_bump(self):
+        self.r.write("core/audio/src/mixer.cpp", "int mix() { return 3; }\n")
+        self.r.commit("feat(audio): mixer with skip",
+                      'Version-Bump: sdk=skip reason="generated artifact identical"')
+        self.assertEqual(self.r.assigned(), {})
+
+    def test_positive_override_wins(self):
+        # Heuristic would be patch (internal src) but the author declared major.
+        self.r.write("core/audio/src/mixer.cpp", "int mix() { return 4; }\n")
+        self.r.commit("fix(audio): mixer",
+                      'Version-Bump: sdk=major reason="breaks ABI"')
+        self.assertEqual(self.r.assigned(), {"sdk": "2.0.0"})
+
+    def test_override_can_lower_below_heuristic(self):
+        # Public-API header heuristic is minor; author judges it patch.
+        self.r.write("core/audio/include/pulp/audio/mixer.hpp",
+                     "#pragma once\nint mix(int);\n")
+        self.r.commit("feat(audio): mixer header",
+                      'Version-Bump: sdk=patch reason="additive, still patch"')
+        self.assertEqual(self.r.assigned(), {"sdk": "1.2.4"})
+
+    # ── no-op / independence ──────────────────────────────────────────────
+    def test_non_trigger_change_is_noop(self):
+        self.r.write("docs/guide.md", "just docs\n")
+        self.r.commit("docs: unrelated")
+        self.assertEqual(self.r.assigned(), {})
 
     def test_both_surfaces_independent(self):
-        p = {a.surface: a for a in self.plan(
-            trailers('sdk=patch reason="x"', 'plugin=major reason="y"'))}
-        self.assertEqual(p["sdk"].assigned, "0.599.1")
-        self.assertEqual(p["plugin"].assigned, "1.0.0")
+        self.r.write("core/audio/src/mixer.cpp", "int mix() { return 5; }\n")
+        self.r.write(".claude/commands/newcmd.md", "Run the command.\n")
+        self.r.commit("feat: sdk + plugin",
+                      body="feat(audio): mixer\n\nfeat(plugin): command")
+        self.assertEqual(self.r.assigned(), {"sdk": "1.3.0", "plugin": "0.6.0"})
 
-    def test_no_intent_no_assignment(self):
-        self.assertEqual(self.plan(trailers()), [])
-
-    def test_skip_only_surface_gets_no_assignment(self):
-        self.assertEqual(self.plan(trailers('sdk=skip reason="x"')), [])
-
-    def test_unreadable_version_is_skipped(self):
-        p = val.plan_assignments(self.config, trailers('sdk=minor reason="x"'),
-                                 lambda s: None)
-        self.assertEqual(p, [])
+    def test_bumps_from_base_not_head(self):
+        # A hand-bump already sitting in the range must NOT be re-bumped off the
+        # HEAD value: the floor is read at base (1.2.3), never the mid-range 9.9.9.
+        self.r.write("core/audio/src/mixer.cpp", "int mix() { return 6; }\n")
+        self.r.commit("feat(audio): mixer")
+        self.r.write("CMakeLists.txt",
+                     "cmake_minimum_required(VERSION 3.20)\n"
+                     "project(Pulp VERSION 9.9.9 LANGUAGES CXX)\n")
+        self.r.commit("chore: bump versions")
+        self.assertEqual(self.r.assigned()["sdk"], "1.3.0")
 
 
 if __name__ == "__main__":
