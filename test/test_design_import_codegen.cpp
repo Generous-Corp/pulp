@@ -2276,6 +2276,66 @@ TEST_CASE("native codegen emits an audio widget's shadow, blend and opacity",
     REQUIRE(js.find("setBoxShadow('") != std::string::npos);
 }
 
+TEST_CASE("native codegen emits every box-shadow layer, in CSS author order",
+          "[view][import][visual-overrides]") {
+    // The exact declaration a Figma knob base carries: a soft 10%-black halo
+    // that spreads the glow, plus a tight 25%-black contact shadow that seats
+    // the knob on the panel. Codegen used to emit only the first layer, which
+    // kept the halo and dropped the depth.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.style.width = 200.0f;
+
+    IRNode knob;
+    knob.type = "frame";
+    knob.name = "Cutoff";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.style.width = 48.0f;
+    knob.style.height = 48.0f;
+    knob.style.box_shadow =
+        parse_css_box_shadow("0px 16px 6px 0px #0000001a, 0px 4px 4px 0px #00000040");
+    REQUIRE(knob.style.box_shadow.size() == 2);  // the parser already keeps both
+    ir.root.children.push_back(knob);
+
+    const auto js = native_js(ir);
+
+    // Two declared layers, two emitted calls: the first replaces, the rest append.
+    REQUIRE(count_occurrences(js, "setBoxShadow(") == 1);
+    REQUIRE(count_occurrences(js, "addBoxShadow(") == 1);
+
+    const auto set_at = js.find("setBoxShadow(");
+    const auto add_at = js.find("addBoxShadow(");
+    REQUIRE(set_at != std::string::npos);
+    REQUIRE(add_at != std::string::npos);
+    // CSS author order must survive: the halo is declared first, the contact
+    // shadow second. Swapping them paints the halo over the contact shadow.
+    REQUIRE(set_at < add_at);
+
+    const auto set_line = js.substr(set_at, js.find('\n', set_at) - set_at);
+    const auto add_line = js.substr(add_at, js.find('\n', add_at) - add_at);
+    REQUIRE(set_line.find("0, 16, 6, 0") != std::string::npos);
+    REQUIRE(set_line.find("#0000001a") != std::string::npos);
+    REQUIRE(add_line.find("0, 4, 4, 0") != std::string::npos);
+    REQUIRE(add_line.find("#00000040") != std::string::npos);
+}
+
+TEST_CASE("native codegen leaves a single-layer shadow as one replacing call",
+          "[view][import][visual-overrides]") {
+    // Guards the other half of the contract: one declared layer must not grow
+    // an addBoxShadow, or every existing single-shadow design gains a
+    // duplicate layer and doubles its darkness.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.style.width = 200.0f;
+    ir.root.style.box_shadow = parse_css_box_shadow("0 2px 8px #00000080");
+
+    const auto js = native_js(ir);
+    REQUIRE(count_occurrences(js, "setBoxShadow(") == 1);
+    REQUIRE(count_occurrences(js, "addBoxShadow(") == 0);
+}
+
 TEST_CASE("native codegen positions an unlabeled non-knob widget absolutely",
           "[view][import][visual-overrides]") {
     // Only the knob sub-branch emitted the position, so every other widget kind

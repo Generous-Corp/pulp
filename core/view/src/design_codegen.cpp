@@ -685,12 +685,17 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
         // 49 shadowed nodes in its scene and emitted exactly ONE setBoxShadow,
         // leaving every knob flat. Nothing said so, because the boxes were the
         // right size in the right place — they just had no depth.
-        if (!st.box_shadow.empty()) {
-            // The bridge takes a single drop shadow; CSS paints the first layer
-            // on top, so that is the one that reads.
-            const auto& sh = st.box_shadow.front();
+        //
+        // Every layer is emitted, in CSS author order: the first as
+        // setBoxShadow (replacing whatever was there) and the rest as
+        // addBoxShadow. Emitting only the first layer here is what left the
+        // knobs flat — a Figma knob declares a soft 10% halo AND a tight 25%
+        // contact shadow that seats it on the panel, and dropping the second
+        // silently removed exactly the layer that reads as depth.
+        for (size_t i = 0; i < st.box_shadow.size(); ++i) {
+            const auto& sh = st.box_shadow[i];
             const std::string color = sh.color.empty() ? "#00000050" : sh.color;
-            ss << ind << "setBoxShadow('" << target_id << "', "
+            ss << ind << (i == 0 ? "setBoxShadow('" : "addBoxShadow('") << target_id << "', "
                << sh.offset_x << ", " << sh.offset_y << ", " << sh.blur << ", " << sh.spread
                << ", '" << js_single_quote_escape(color) << "'"
                << (sh.inset ? ", true" : "") << ");\n";

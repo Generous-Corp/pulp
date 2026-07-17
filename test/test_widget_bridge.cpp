@@ -2852,6 +2852,138 @@ TEST_CASE("WidgetBridge clearBoxShadow removes the shadow",
     REQUIRE(bridge.widget("panel")->has_box_shadow() == false);
 }
 
+// ── Layered box shadows: addBoxShadow appends, setBoxShadow replaces ───────
+TEST_CASE("WidgetBridge addBoxShadow stacks layers in CSS author order",
+          "[view][bridge][layered-shadow]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('gain', 10, 10, 48, 48)");
+    // A Figma knob's two layers: soft halo first, tight contact shadow second.
+    bridge.load_script("setBoxShadow('gain', 0, 16, 6, 0, '#0000001a')");
+    bridge.load_script("addBoxShadow('gain', 0, 4, 4, 0, '#00000040')");
+
+    auto* w = bridge.widget("gain");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->has_box_shadow());
+    const auto& layers = w->box_shadows();
+    REQUIRE(layers.size() == 2);
+    REQUIRE_THAT(layers[0].offset_y, WithinAbs(16.0f, 0.001f));
+    REQUIRE_THAT(layers[0].blur, WithinAbs(6.0f, 0.001f));
+    REQUIRE_THAT(layers[0].color.a, WithinAbs(26.0f / 255.0f, 0.01f));
+    REQUIRE_THAT(layers[1].offset_y, WithinAbs(4.0f, 0.001f));
+    REQUIRE_THAT(layers[1].blur, WithinAbs(4.0f, 0.001f));
+    REQUIRE_THAT(layers[1].color.a, WithinAbs(64.0f / 255.0f, 0.01f));
+
+    // box_shadow() keeps meaning "the first layer" for every single-shadow caller.
+    REQUIRE_THAT(w->box_shadow().blur, WithinAbs(6.0f, 0.001f));
+}
+
+TEST_CASE("WidgetBridge setBoxShadow replaces the whole stack",
+          "[view][bridge][layered-shadow]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('gain', 10, 10, 48, 48)");
+    bridge.load_script("setBoxShadow('gain', 0, 16, 6, 0, '#0000001a')");
+    bridge.load_script("addBoxShadow('gain', 0, 4, 4, 0, '#00000040')");
+    // CSS `box-shadow: X` supersedes the previous declaration rather than
+    // adding to it — a later setBoxShadow must not leave the old layers behind.
+    bridge.load_script("setBoxShadow('gain', 0, 1, 2, 0, '#000000ff')");
+
+    auto* w = bridge.widget("gain");
+    REQUIRE(w->box_shadows().size() == 1);
+    REQUIRE_THAT(w->box_shadow().blur, WithinAbs(2.0f, 0.001f));
+
+    bridge.load_script("clearBoxShadow('gain')");
+    REQUIRE(w->box_shadows().empty());
+    REQUIRE_FALSE(w->has_box_shadow());
+}
+
+TEST_CASE("View::paint_all paints shadow layers back-to-front",
+          "[view][canvas][layered-shadow]") {
+    using namespace pulp::canvas;
+
+    SECTION("outset layers paint in reverse so the first lands on top") {
+        View v;
+        v.set_bounds({0, 0, 100, 50});
+        // Layer order as declared: soft halo, then tight contact shadow.
+        v.set_box_shadow(0, 16, 6, 0, Color::rgba8(0, 0, 0, 26), /*inset=*/false);
+        v.add_box_shadow(0, 4, 4, 0, Color::rgba8(0, 0, 0, 64), /*inset=*/false);
+
+        RecordingCanvas rc;
+        v.paint_all(rc);
+
+        std::vector<const DrawCommand*> shadows;
+        for (const auto& c : rc.commands())
+            if (c.type == DrawCommand::Type::draw_box_shadow) shadows.push_back(&c);
+
+        // Both layers reach the canvas...
+        REQUIRE(shadows.size() == 2);
+        // ...and the LAST declared layer paints FIRST, so the first declared
+        // layer composites over it — CSS paint order. Reversing this is a
+        // plausible-looking wrong render: the tight contact shadow gets buried
+        // under the soft halo and the depth reads as flat.
+        REQUIRE_THAT(shadows[0]->floats[2], WithinAbs(4.0f, 0.001f));   // contact, declared 2nd
+        REQUIRE_THAT(shadows[1]->floats[2], WithinAbs(6.0f, 0.001f));   // halo, declared 1st
+    }
+
+    SECTION("inset layers stack too, and stay after the children") {
+        View v;
+        v.set_bounds({0, 0, 100, 50});
+        v.set_box_shadow(0, 2, 9, 0, Color::rgba8(0, 0, 0, 40), /*inset=*/true);
+        v.add_box_shadow(0, 1, 3, 0, Color::rgba8(0, 0, 0, 90), /*inset=*/true);
+
+        RecordingCanvas rc;
+        v.paint_all(rc);
+
+        std::vector<const DrawCommand*> shadows;
+        for (const auto& c : rc.commands())
+            if (c.type == DrawCommand::Type::draw_box_shadow) shadows.push_back(&c);
+
+        REQUIRE(shadows.size() == 2);
+        REQUIRE_THAT(shadows[0]->floats[2], WithinAbs(3.0f, 0.001f));
+        REQUIRE_THAT(shadows[1]->floats[2], WithinAbs(9.0f, 0.001f));
+        // Inset flag survives on both layers.
+        REQUIRE_THAT(shadows[0]->f[4], WithinAbs(1.0f, 0.001f));
+        REQUIRE_THAT(shadows[1]->f[4], WithinAbs(1.0f, 0.001f));
+    }
+
+    SECTION("a mixed stack routes each layer to its own pass") {
+        // Outset layers paint before the clip; inset layers paint after the
+        // children. A stack holding both must not send either to the wrong pass.
+        View v;
+        v.set_bounds({0, 0, 100, 50});
+        v.set_overflow(View::Overflow::hidden);
+        v.set_box_shadow(0, 8, 12, 0, Color::rgba8(0, 0, 0, 40), /*inset=*/false);
+        v.add_box_shadow(0, 1, 3, 0, Color::rgba8(0, 0, 0, 90), /*inset=*/true);
+
+        RecordingCanvas rc;
+        v.paint_all(rc);
+
+        const auto& cmds = rc.commands();
+        size_t clip_idx = SIZE_MAX;
+        std::vector<size_t> shadow_idx;
+        for (size_t i = 0; i < cmds.size(); ++i) {
+            if (cmds[i].type == DrawCommand::Type::clip_rect && clip_idx == SIZE_MAX)
+                clip_idx = i;
+            if (cmds[i].type == DrawCommand::Type::draw_box_shadow) shadow_idx.push_back(i);
+        }
+        REQUIRE(clip_idx != SIZE_MAX);
+        REQUIRE(shadow_idx.size() == 2);
+        REQUIRE(shadow_idx[0] < clip_idx);   // outset, before the clip
+        REQUIRE_THAT(cmds[shadow_idx[0]].f[4], WithinAbs(0.0f, 0.001f));
+        REQUIRE(shadow_idx[1] > clip_idx);   // inset, after the children
+        REQUIRE_THAT(cmds[shadow_idx[1]].f[4], WithinAbs(1.0f, 0.001f));
+    }
+}
+
 TEST_CASE("View::paint_all dispatches outset shadow before clip, "
           "inset shadow after children",
           "[view][canvas][issue-925]") {
