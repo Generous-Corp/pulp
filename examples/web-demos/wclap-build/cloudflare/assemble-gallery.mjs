@@ -758,7 +758,7 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
        everything inside (the editor canvas fills its width) to a wide, padded band. */
     #panel.pulp{max-width:min(1200px, 94vw) !important}
     /* The live readout sits in a FIXED slot between the editor and the scope.
-       It ALWAYS reserves two lines' worth of height and centres its content, so
+       It ALWAYS reserves two lines' worth of height and centers its content, so
        nothing bumps: not when the metrics wrap to a second line on a narrow phone,
        and not when the engine flips CPU<->GPU (short CPU line vs. long GPU line).
        The text WRAPS — never truncates — so a phone that can't fit the sentence on

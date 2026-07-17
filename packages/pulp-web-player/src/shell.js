@@ -55,10 +55,10 @@ const noteName = (n) => NOTE_NAMES[((n % 12) + 12) % 12] + (Math.floor(n / 12) -
 // The source path's bbox spans x 8..18.83 (center 13.42), so centring the <svg>
 // leaves the triangle ~1.4u right of center. OPTICAL, not bbox, centering: a
 // right-pointing triangle's visual mass is its base (left) — its centroid sits at
-// base + width/3 ≈ 11.1, ~0.9u LEFT of the circle centre — so a purely bbox-centered
-// glyph (translate −1.42, bbox centre at 12) reads noticeably left in the circle.
+// base + width/3 ≈ 11.1, ~0.9u LEFT of the circle center — so a purely bbox-centered
+// glyph (translate −1.42, bbox center at 12) reads noticeably left in the circle.
 // Split the difference toward the centroid: translate −0.6 nudges it ~0.8u right so
-// it looks centered to the eye (a hair right of bbox-centre, as play buttons want).
+// it looks centered to the eye (a hair right of bbox-center, as play buttons want).
 const PLAY_SVG = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false"><g transform="translate(-0.6 0)"><path d="M8 6.1v11.8a1 1 0 0 0 1.53.85l9.3-5.9a1 1 0 0 0 0-1.7L9.53 5.25A1 1 0 0 0 8 6.1Z" fill="currentColor"/></g></svg>`;
 
 // ————————————————————————————————————————————————————————————— shared styles
