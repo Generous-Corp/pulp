@@ -39,6 +39,29 @@ struct PulpSamplerTestAccess {
         return audio::SampleInterpolationPolicy::Hold;
     }
 
+    static SamplerMipPyramidView resident_mips(
+        const PulpSamplerProcessor& processor) {
+        return processor.streaming_.published_source().resident_mips;
+    }
+
+    static std::uint32_t active_resident_mip_octave(
+        const PulpSamplerProcessor& processor) {
+        for (const auto& voice : processor.voices_) {
+            if (voice.active && !voice.streamed)
+                return voice.resident_mip.octave;
+        }
+        return 0;
+    }
+
+    static double active_resident_position(
+        const PulpSamplerProcessor& processor) {
+        for (const auto& voice : processor.voices_) {
+            if (voice.active && !voice.streamed)
+                return voice.renderer.position();
+        }
+        return 0.0;
+    }
+
     static void pause_stream_dispatch(PulpSamplerProcessor& processor, bool paused) {
         processor.streaming_.service_dispatch_paused_.store(
             paused, std::memory_order_release);
@@ -422,6 +445,155 @@ TEST_CASE("PulpSampler exposes each scalar interpolation policy", "[sampler]") {
         SamplerStreamingRuntime::maximum_pitch_ratio() *
         SamplerStreamingRuntime::maximum_source_sample_rate() / 44100.0;
     REQUIRE(sinc.select(maximum_consumption).valid());
+}
+
+TEST_CASE("Sampler resident mip pyramid preserves DC and octave coordinates",
+          "[sampler][mip]") {
+    SamplerResidentMipStore store;
+    REQUIRE(store.prepare());
+    std::vector<float> source(4097, 1.0f);
+    REQUIRE(store.stage_mono(source.data(), source.size(), 48000.0, 0));
+
+    const auto view = store.staged_view();
+    REQUIRE(view.level_count > 1);
+    const auto* level_one = view.level(1);
+    REQUIRE(level_one != nullptr);
+    REQUIRE(level_one->frames == 2049);
+    REQUIRE_THAT(level_one->sample_rate, WithinAbs(24000.0, 1e-9));
+    for (std::uint64_t frame = 0; frame < level_one->frames; ++frame) {
+        REQUIRE_THAT(level_one->channels[0][frame], WithinAbs(1.0, 2e-6));
+    }
+
+    REQUIRE(sampler_exact_mip_octave(1.0) == 0);
+    REQUIRE(sampler_exact_mip_octave(1.0001) == 0);
+    REQUIRE(sampler_exact_mip_octave(2.0) == 1);
+    REQUIRE(sampler_exact_mip_octave(2.0001) == 0);
+}
+
+TEST_CASE("Sampler resident mip rejects first-octave aliases",
+          "[sampler][mip][quality]") {
+    constexpr std::size_t frames = 32768;
+    constexpr double pi = 3.14159265358979323846;
+    auto render_tone = [&](double cycles_per_frame) {
+        std::vector<float> source(frames);
+        for (std::size_t frame = 0; frame < frames; ++frame) {
+            source[frame] = static_cast<float>(std::sin(
+                2.0 * pi * cycles_per_frame * static_cast<double>(frame)));
+        }
+        SamplerResidentMipStore store;
+        REQUIRE(store.prepare());
+        REQUIRE(store.stage_mono(source.data(), source.size(), 48000.0, 0));
+        const auto view = store.staged_view();
+        const auto* level = view.level(1);
+        REQUIRE(level != nullptr);
+        double energy = 0.0;
+        std::size_t count = 0;
+        for (std::size_t frame = 512;
+             frame + 512 < level->frames;
+             ++frame) {
+            const auto sample = static_cast<double>(level->channels[0][frame]);
+            energy += sample * sample;
+            ++count;
+        }
+        return std::sqrt(energy / static_cast<double>(count));
+    };
+
+    const auto passband_rms = render_tone(0.10);
+    const auto stopband_rms = render_tone(0.35);
+    REQUIRE_THAT(passband_rms * std::sqrt(2.0), WithinAbs(1.0, 1e-3));
+    REQUIRE(stopband_rms < 1e-6);
+}
+
+TEST_CASE("PulpSampler bounds mip construction without rejecting the base sample",
+          "[sampler][mip]") {
+    SamplerFixture fixture;
+    std::vector<float> source(
+        SamplerResidentMipStore::kMaximumBuildSamples + 1, 0.25f);
+    REQUIRE(fixture.proc->load_sample(
+        source.data(), static_cast<int>(source.size()), 48000.0f));
+    REQUIRE(PulpSamplerTestAccess::resident_mips(*fixture.proc).level_count == 0);
+    REQUIRE(fixture.proc->sample_length() == static_cast<int>(source.size()));
+}
+
+TEST_CASE("PulpSampler latches resident mips for up-pitched polynomial reads",
+          "[sampler][mip][interpolation]") {
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerInterpolation, 3.0f);
+
+    const auto mips = PulpSamplerTestAccess::resident_mips(*fixture.proc);
+    REQUIRE(mips.level_count > 0);
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 72, 127));
+    block.run(*fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::active_resident_mip_octave(*fixture.proc) == 1);
+    const auto peak = *std::max_element(
+        block.left.begin(), block.left.end(),
+        [](float a, float b) { return std::abs(a) < std::abs(b); });
+    REQUIRE(std::abs(peak) > 0.01f);
+
+    const auto position_before_automation =
+        PulpSamplerTestAccess::active_resident_position(*fixture.proc);
+    fixture.store.set_value(kSamplerPitch, 1.0f);
+    fixture.store.set_value(kSamplerInterpolation, 2.0f);
+    block.midi_in.clear();
+    block.run(*fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::active_resident_mip_octave(*fixture.proc) == 1);
+    REQUIRE(PulpSamplerTestAccess::active_resident_interpolation(*fixture.proc) ==
+            audio::SampleInterpolationPolicy::Linear);
+    const auto automated_advance =
+        PulpSamplerTestAccess::active_resident_position(*fixture.proc) -
+        position_before_automation;
+    REQUIRE_THAT(automated_advance,
+                 WithinAbs(512.0 * std::pow(2.0, 1.0 / 12.0), 1e-6));
+}
+
+TEST_CASE("PulpSampler uses ratio sinc between resident mip octaves",
+          "[sampler][mip][interpolation]") {
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerInterpolation, 3.0f);
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 73, 127));
+    block.run(*fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::active_resident_mip_octave(*fixture.proc) == 0);
+    REQUIRE(PulpSamplerTestAccess::active_resident_interpolation(*fixture.proc) ==
+            audio::SampleInterpolationPolicy::RatioTrackingSinc);
+}
+
+TEST_CASE("PulpSampler keeps loop boundaries on the base resident asset",
+          "[sampler][mip][loop]") {
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerInterpolation, 3.0f);
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 72, 127));
+    block.run(*fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::active_resident_mip_octave(*fixture.proc) == 0);
+    REQUIRE(PulpSamplerTestAccess::active_resident_interpolation(*fixture.proc) ==
+            audio::SampleInterpolationPolicy::RatioTrackingSinc);
+}
+
+TEST_CASE("PulpSampler keeps reverse one-shots on the phase-correct base asset",
+          "[sampler][mip][reverse]") {
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerInterpolation, 3.0f);
+    fixture.store.set_value(kSamplerReverse, 1.0f);
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 72, 127));
+    block.run(*fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::active_resident_mip_octave(*fixture.proc) == 0);
+    REQUIRE(PulpSamplerTestAccess::active_resident_interpolation(*fixture.proc) ==
+            audio::SampleInterpolationPolicy::RatioTrackingSinc);
 }
 
 TEST_CASE("PulpSampler keeps extreme resident notes audible when sinc coverage ends",
