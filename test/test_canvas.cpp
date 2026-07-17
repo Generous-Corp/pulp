@@ -1542,6 +1542,61 @@ TEST_CASE("SkiaCanvas save_layer_with_bloom bleeds bright highlights past their 
     }
 }
 
+// Bloom must scale ONLY the additive bleed: the opaque center of a bright
+// region stays undimmed and independent of intensity (source + glow, clamped),
+// and a large radius stays stable (no NaN / garbage / black-out).
+TEST_CASE("SkiaCanvas save_layer_with_bloom preserves the source and is stable at large radius",
+          "[canvas][skia][bloom][save-layer]") {
+    auto make_surface = []() {
+        SkImageInfo info = SkImageInfo::Make(64, 64, kN32_SkColorType,
+                                             kPremul_SkAlphaType,
+                                             SkColorSpace::MakeSRGB());
+        return SkSurfaces::Raster(info);
+    };
+
+    // Center luminance of a white rect, optionally through bloom at `intensity`.
+    auto center_lum = [&](bool bloom, float intensity) -> unsigned {
+        auto surface = make_surface();
+        surface->getCanvas()->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(surface->getCanvas());
+        if (bloom) canvas.save_layer_with_bloom(0, 0, 64, 64, intensity, 0.5f, 8.0f);
+        else       canvas.save_layer(0, 0, 64, 64, 1.0f, 0.0f);
+        canvas.set_fill_color(Color::rgba8(255, 255, 255, 255));
+        canvas.fill_rect(16, 16, 32, 32);
+        canvas.restore();
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        SkColor c = pm.getColor(32, 32);
+        return static_cast<unsigned>(SkColorGetR(c) + SkColorGetG(c) + SkColorGetB(c));
+    };
+
+    // (a) Center undimmed vs no-bloom, and identical across intensities — the
+    // original content is preserved; intensity scales only the bleed.
+    const unsigned baseline = center_lum(false, 0.0f);
+    REQUIRE(baseline > 740u);                     // ~765 (opaque white)
+    REQUIRE(center_lum(true, 0.8f) == baseline);  // undimmed by bloom
+    REQUIRE(center_lum(true, 0.2f) == baseline);  // and independent of intensity
+
+    // (b) Large radius is stable: center still fully bright, and an outside
+    // pixel is a finite, in-range value (never NaN/garbage).
+    {
+        auto surface = make_surface();
+        surface->getCanvas()->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(surface->getCanvas());
+        canvas.save_layer_with_bloom(0, 0, 64, 64, 0.8f, 0.5f, /*radius=*/32.0f);
+        canvas.set_fill_color(Color::rgba8(255, 255, 255, 255));
+        canvas.fill_rect(24, 24, 16, 16);
+        canvas.restore();
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        SkColor center = pm.getColor(32, 32);
+        REQUIRE(SkColorGetR(center) > 200);  // not blacked out
+        SkColor out = pm.getColor(52, 32);
+        unsigned lum = SkColorGetR(out) + SkColorGetG(out) + SkColorGetB(out);
+        REQUIRE(lum <= 765u);  // in range (readback can't be NaN; guards garbage)
+    }
+}
+
 // The child-shader compositor must post-process ALREADY-PAINTED layer content
 // (unlike draw_with_sksl, which fills a fresh rect). Prove it with a channel
 // swap, and prove the failure paths fall back to a plain unfiltered layer so
@@ -2205,5 +2260,69 @@ TEST_CASE("SkiaCanvas text inside opacity layer uses greyscale AA "
     // Core assertion — inside the opacity layer, the renderer used
     // greyscale AA, so glyph-edge pixels carry uniform R / G / B.
     REQUIRE(unequal_channel_pixels == 0);
+}
+
+// CSS `filter: opacity(0.5)` reduces coverage via a color matrix INSIDE the
+// filter chain — the layer's own opacity parameter stays 1 — so before WI-23
+// the non-opaque-layer tracking never fired and text rendered LCD-fringed,
+// unlike plain `opacity: 0.5`. The layer must be tracked non-opaque.
+TEST_CASE("SkiaCanvas text inside filter:opacity layer uses greyscale AA "
+          "(pulp #1899 gap #3, WI-23)", "[canvas][skia][filter-opacity][issue-1899]") {
+    // Direct: the mechanism that drives greyscale AA flips true for a filter
+    // chain whose opacity() entry reduces coverage, even at layer opacity == 1.
+    {
+        SkImageInfo info = SkImageInfo::Make(32, 32, kN32_SkColorType,
+                                             kPremul_SkAlphaType,
+                                             SkColorSpace::MakeSRGB());
+        auto surface = SkSurfaces::Raster(info);
+        REQUIRE(surface != nullptr);
+        SkiaCanvas canvas(surface->getCanvas());
+        Canvas::FilterChainEntry chain[1];
+        chain[0].kind = Canvas::FilterChainEntry::Kind::opacity;
+        chain[0].amount = 0.5f;
+        REQUIRE_FALSE(canvas.inside_non_opaque_layer());
+        canvas.save_layer_with_filters(0, 0, 32, 32, /*opacity=*/1.0f, chain, 1);
+        REQUIRE(canvas.inside_non_opaque_layer());
+        canvas.restore();
+        REQUIRE_FALSE(canvas.inside_non_opaque_layer());
+    }
+
+    // Pixel: glyph edges inside filter:opacity(0.5) carry uniform R/G/B
+    // (greyscale AA), matching the plain opacity:0.5 case above.
+    {
+        SkImageInfo info = SkImageInfo::Make(96, 32, kN32_SkColorType,
+                                             kPremul_SkAlphaType,
+                                             SkColorSpace::MakeSRGB());
+        auto layer_surface = SkSurfaces::Raster(info);
+        REQUIRE(layer_surface != nullptr);
+        auto* sc = layer_surface->getCanvas();
+        sc->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(sc);
+        Canvas::FilterChainEntry chain[1];
+        chain[0].kind = Canvas::FilterChainEntry::Kind::opacity;
+        chain[0].amount = 0.5f;
+        canvas.save_layer_with_filters(0, 0, 96, 32, /*opacity=*/1.0f, chain, 1);
+        canvas.set_font("Inter", 18.0f);
+        canvas.set_fill_color(Color::rgba8(255, 255, 255, 255));
+        canvas.fill_text("Hg", 4.0f, 24.0f);
+        canvas.restore();
+
+        SkImageInfo rinfo = SkImageInfo::Make(96, 32, kRGBA_8888_SkColorType,
+                                              kUnpremul_SkAlphaType,
+                                              SkColorSpace::MakeSRGB());
+        std::vector<uint8_t> pixels(96 * 32 * 4, 0);
+        REQUIRE(layer_surface->readPixels(rinfo, pixels.data(), 96 * 4, 0, 0));
+        int unequal = 0, edges = 0;
+        for (int i = 0; i < 96 * 32; ++i) {
+            const uint8_t r = pixels[i * 4 + 0];
+            const uint8_t g = pixels[i * 4 + 1];
+            const uint8_t b = pixels[i * 4 + 2];
+            const int maxc = std::max({r, g, b});
+            const int minc = std::min({r, g, b});
+            if (maxc > 4 && maxc < 250) { ++edges; if (maxc - minc > 1) ++unequal; }
+        }
+        REQUIRE(edges > 0);
+        REQUIRE(unequal == 0);
+    }
 }
 #endif // PULP_HAS_SKIA

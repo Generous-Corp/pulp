@@ -395,6 +395,19 @@ public:
                                float radius) override;
 
 private:
+    // Shared saveLayer for every compositing-layer entry point (opacity, blur,
+    // blend, bloom, CSS filter chain, SkSL post-effect). Builds the layer paint
+    // from the given properties — `opacity < 1` sets the layer alpha; a non-null
+    // `image_filter` is used as the layer's image filter, else `blur_radius > 0`
+    // adds a Gaussian blur; `mode != normal` sets the composite blend — pushes
+    // the layer, and tracks it on the non-opaque-layer stack when the layer is
+    // not fully opaque (opacity < 1 OR `force_non_opaque`, e.g. a filter chain
+    // that reduces coverage). Consolidates what were four near-identical bodies.
+    void push_layer(float x, float y, float w, float h,
+                    float opacity, float blur_radius, Canvas::BlendMode mode,
+                    sk_sp<SkImageFilter> image_filter,
+                    bool force_non_opaque = false);
+
     // Build the active fill paint, honoring `gradient_shader_` when set
     // so shape fills (rect / rrect / circle / arc / oval / polygon) render
     // gradients consistently with `fill_current_path()`.
