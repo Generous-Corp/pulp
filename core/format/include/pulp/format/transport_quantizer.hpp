@@ -103,8 +103,6 @@ private:
         int num_samples = 0;
     };
 
-    static constexpr double kBoundaryEpsilonBeats = 1.0e-9;
-
     static bool valid_sample_rate(double sample_rate) noexcept;
     static bool valid_tempo(double tempo_bpm) noexcept;
     static bool valid_grid(double grid_beats) noexcept;
