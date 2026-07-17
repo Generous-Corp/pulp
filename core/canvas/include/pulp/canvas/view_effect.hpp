@@ -93,9 +93,12 @@ struct VignetteEffect : ViewEffect {
 // here. It stored `sksl`, `value`, and `time` and then ignored all three —
 // `configure_layer()` pushed a plain layer, so setting one had no visual effect
 // whatsoever. Applying SkSL to already-rendered subtree content needs a
-// child-shader compositor (Skia's runtime-shader image filter) that Pulp does
-// not have yet; `draw_with_sksl()` fills a fresh rect and cannot post-process.
-// Widget body shaders — which do work — are `CustomShaderHost`.
+// child-shader compositor (Skia's runtime-shader image filter), which now
+// exists as `Canvas::save_layer_with_sksl_post_effect` (the SkSL declares
+// `uniform shader content`). A view post-effect can be built on it; note that
+// this is distinct from `draw_with_sksl()`, which fills a fresh rect from a
+// generative shader and cannot post-process. Widget body shaders — which do
+// work — are `CustomShaderHost`.
 
 /// Chains multiple effects in sequence.
 class EffectChain : public ViewEffect {

@@ -329,6 +329,59 @@ bool SkiaCanvas::draw_with_sksl(const std::string& sksl,
     return true;
 }
 
+bool SkiaCanvas::save_layer_with_sksl_post_effect(float x, float y,
+                                                  float w, float h,
+                                                  const std::string& sksl,
+                                                  const ShaderUniforms& uniforms) {
+    // On any failure (no canvas, empty/invalid SkSL, or a shader that does not
+    // declare the `content` child) fall back to a plain unfiltered layer so the
+    // subtree still renders, and return false so the caller can log once.
+    auto plain_fallback = [&]() -> bool {
+        save_layer(x, y, w, h, 1.0f, 0.0f);
+        return false;
+    };
+    if (!canvas_ || sksl.empty()) return plain_fallback();
+
+    auto& cache = RuntimeEffectCache::instance();
+    auto effect = cache.get_or_compile(sksl);
+    if (!effect) return plain_fallback();
+    // The compositor binds the layer content to a child shader named "content".
+    // A generative shader without that child cannot post-process anything.
+    if (!effect->findChild("content")) return plain_fallback();
+
+    SkRuntimeShaderBuilder builder(effect);
+    if (effect->findUniform("resolution"))
+        builder.uniform("resolution") = SkV2{w, h};
+    if (effect->findUniform("value"))
+        builder.uniform("value") = uniforms.value;
+    if (effect->findUniform("time"))
+        builder.uniform("time") = uniforms.time;
+    auto toSkV4 = [](Color c) -> SkV4 { return {c.r, c.g, c.b, c.a}; };
+    if (effect->findUniform("accentColor"))
+        builder.uniform("accentColor") = toSkV4(uniforms.accent_color);
+    if (effect->findUniform("bgColor"))
+        builder.uniform("bgColor") = toSkV4(uniforms.bg_color);
+    if (effect->findUniform("trackColor"))
+        builder.uniform("trackColor") = toSkV4(uniforms.track_color);
+    if (effect->findUniform("fillColor"))
+        builder.uniform("fillColor") = toSkV4(uniforms.fill_color);
+    if (effect->findUniform("thumbColor"))
+        builder.uniform("thumbColor") = toSkV4(uniforms.thumb_color);
+
+    // Bind the layer's rendered content as the "content" child (input=nullptr =
+    // implicit source image) and hang the runtime shader off the layer paint so
+    // it runs when the layer composites back at restore().
+    sk_sp<SkImageFilter> filter =
+        SkImageFilters::RuntimeShader(builder, "content", nullptr);
+    if (!filter) return plain_fallback();
+
+    SkRect bounds = SkRect::MakeXYWH(x, y, w, h);
+    SkPaint layer_paint;
+    layer_paint.setImageFilter(std::move(filter));
+    canvas_->saveLayer(&bounds, &layer_paint);
+    return true;
+}
+
 bool SkiaCanvas::draw_native_dawn_texture(void* texture_handle,
                                           uint32_t width,
                                           uint32_t height,

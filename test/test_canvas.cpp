@@ -1538,6 +1538,83 @@ TEST_CASE("SkiaCanvas save_layer_with_bloom bleeds bright highlights past their 
     }
 }
 
+// The child-shader compositor must post-process ALREADY-PAINTED layer content
+// (unlike draw_with_sksl, which fills a fresh rect). Prove it with a channel
+// swap, and prove the failure paths fall back to a plain unfiltered layer so
+// the subtree is never lost.
+TEST_CASE("SkiaCanvas save_layer_with_sksl_post_effect post-processes layer content",
+          "[canvas][skia][sksl-post-effect][save-layer]") {
+    auto make_surface = []() {
+        SkImageInfo info = SkImageInfo::Make(32, 32, kN32_SkColorType,
+                                             kPremul_SkAlphaType,
+                                             SkColorSpace::MakeSRGB());
+        return SkSurfaces::Raster(info);
+    };
+
+    // (a) A channel-swap post-effect (content.bgra) turns a red subtree blue.
+    {
+        auto surface = make_surface();
+        surface->getCanvas()->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(surface->getCanvas());
+        Canvas::ShaderUniforms u;
+        REQUIRE(canvas.save_layer_with_sksl_post_effect(
+            0, 0, 32, 32,
+            "uniform shader content;"
+            "half4 main(float2 xy) { return content.eval(xy).bgra; }", u));
+        canvas.set_fill_color(Color::rgba8(255, 0, 0, 255));  // red subtree
+        canvas.fill_rect(0, 0, 32, 32);
+        canvas.restore();
+
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        SkColor c = pm.getColor(16, 16);
+        INFO("swapped pixel rgb=(" << SkColorGetR(c) << ","
+             << SkColorGetG(c) << "," << SkColorGetB(c) << ")");
+        REQUIRE(SkColorGetB(c) > 200);  // red became blue
+        REQUIRE(SkColorGetR(c) < 60);
+    }
+
+    // (b) Invalid SkSL: returns false and the subtree still renders unfiltered.
+    {
+        auto surface = make_surface();
+        surface->getCanvas()->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(surface->getCanvas());
+        Canvas::ShaderUniforms u;
+        REQUIRE_FALSE(canvas.save_layer_with_sksl_post_effect(
+            0, 0, 32, 32, "this is not valid sksl {{{", u));
+        canvas.set_fill_color(Color::rgba8(255, 0, 0, 255));
+        canvas.fill_rect(0, 0, 32, 32);
+        canvas.restore();
+
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        SkColor c = pm.getColor(16, 16);
+        REQUIRE(SkColorGetR(c) > 200);  // unfiltered: still red
+        REQUIRE(SkColorGetB(c) < 60);
+    }
+
+    // (c) A valid but generative shader (no `content` child) also falls back:
+    //     it cannot post-process, so return false and render the subtree plain.
+    {
+        auto surface = make_surface();
+        surface->getCanvas()->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(surface->getCanvas());
+        Canvas::ShaderUniforms u;
+        REQUIRE_FALSE(canvas.save_layer_with_sksl_post_effect(
+            0, 0, 32, 32,
+            "half4 main(float2 xy) { return half4(0, 1, 0, 1); }", u));
+        canvas.set_fill_color(Color::rgba8(255, 0, 0, 255));
+        canvas.fill_rect(0, 0, 32, 32);
+        canvas.restore();
+
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        SkColor c = pm.getColor(16, 16);
+        REQUIRE(SkColorGetR(c) > 200);  // subtree preserved, not replaced by green
+        REQUIRE(SkColorGetG(c) < 60);
+    }
+}
+
 #endif  // PULP_HAS_SKIA
 
 

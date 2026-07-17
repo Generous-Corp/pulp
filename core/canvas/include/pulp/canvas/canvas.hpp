@@ -1447,6 +1447,31 @@ public:
         return false; // shader not rendered
     }
 
+    /// Save a compositing layer whose ALREADY-PAINTED content is post-processed
+    /// by a custom SkSL shader. Unlike `draw_with_sksl` (which fills a fresh
+    /// rect from a generative shader), this is a child-shader compositor: the
+    /// subtree paints into the layer, then on `restore()` the shader runs over
+    /// that content. The SkSL MUST declare `uniform shader content;` as its
+    /// child — `content.eval(xy)` samples the subtree's rendered pixels — e.g.
+    ///   uniform shader content;
+    ///   half4 main(float2 xy) { return content.eval(xy).bgra; }  // channel swap
+    /// The same fixed uniform vocabulary as `draw_with_sksl`
+    /// (resolution / value / time / accentColor / bgColor / trackColor /
+    /// fillColor / thumbColor) is bound when declared.
+    ///
+    /// Returns true when the shader was installed on the layer. Only the GPU
+    /// backend (SkiaCanvas) implements it; the base falls back to a plain
+    /// `save_layer` (still balanced — the subtree renders unfiltered) and
+    /// returns false so callers can log the unsupported path once.
+    virtual bool save_layer_with_sksl_post_effect(float x, float y,
+                                                  float w, float h,
+                                                  const std::string& sksl,
+                                                  const ShaderUniforms& uniforms) {
+        (void)sksl; (void)uniforms;
+        save_layer(x, y, w, h, 1.0f, 0.0f);
+        return false;
+    }
+
     // ── Image transforms, fitting, and tiling ───────────────────────────
     //
     // These extend the opaque-handle image-draw path (`draw_image`) with the
