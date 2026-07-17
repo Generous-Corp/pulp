@@ -68,6 +68,16 @@
     },
     {
       "paths": [
+        ".github/workflows/merge-stall-check.yml",
+        "tools/scripts/merge_stall_watchdog.py"
+      ],
+      "docs": [
+        "docs/guides/local-ci.md"
+      ],
+      "why": "The off-fleet merge-stall watchdog's alarm predicate (required-green + CLEAN/BEHIND + auto-merge + age, sustained two sweeps) and its threshold are documented in local-ci.md as the operator-facing account of when CI pages on 'green PRs are not merging'. Retuning the guard without a doc edit drifts that account, and a monitor whose documented behavior is wrong gets muted."
+    },
+    {
+      "paths": [
         ".github/workflows/version-skill-check.yml",
         ".github/workflows/coverage.yml"
       ],
