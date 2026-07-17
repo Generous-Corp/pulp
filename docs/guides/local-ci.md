@@ -473,6 +473,63 @@ shipyard update --dry-run                 # plan only
 shipyard wait pr <PR> --state green       # REST fallback as of v0.56.2
 ```
 
+### Off-fleet queue-age watchdog (`runner-health-check.yml`)
+
+`.github/workflows/runner-health-check.yml` sweeps every 30 minutes and opens a
+tracking issue when a lane has stopped serving work. It runs on `ubuntu-latest`
+**on purpose**: a guard that lives on the fleet dies with the fleet, so the one
+outage it exists to report would be the outage that silences it. It is the
+symptom-level backstop under the recovery tooling above — `shipyard rescue` and
+`runner watch` fix a wedge you already know about; this tells you a wedge
+exists.
+
+**Why queue age, and not a runner-label check.** The macOS lanes are
+JIT/ephemeral: a runner registers with GitHub only while it serves a job. So
+"zero runners carry label `pulp-studio-01`" is *both* the healthy-idle state and
+the dead-lane state, and nothing on GitHub's side can tell them apart. A
+label-satisfiability probe therefore false-alarms every idle night and gets
+muted within a week. Queue age is the observable that separates alive from dead,
+and it is cause-agnostic — it catches causes nobody has enumerated yet, not just
+the one that happened last time.
+
+**Why it stays quiet on a busy afternoon.** A deep queue on a healthy pool is
+normal: the measured baseline on this repo under normal load is a median queue
+age of 5 min, an oldest of 31 min, and 3 runs past 30 min. A naive "queued > 30
+min" rule alarms on that. So an alarm requires **two independent conditions**:
+
+1. **Age** — the job has waited past `alarm_minutes` (default **45**, roughly
+   1.5x the observed healthy maximum).
+2. **Liveness** — its lane shows no sign of life: nothing with comparable labels
+   is `in_progress`, and nothing with comparable labels has *started* since the
+   job queued.
+
+The liveness condition carries the false-alarm load, which is what lets the age
+threshold stay tight enough to detect a dead lane within 45–75 minutes. A
+saturated pool keeps its runners visibly busy, so it stays quiet at any queue
+depth; one runner grinding on a 90-minute job is alive, not dead; an idle fleet
+has nothing queued and so says nothing. Only "work piling up with nothing
+serving it" alarms. Findings between 30 and 45 minutes appear in the run summary
+only, never on the issue.
+
+The issue is edited in place each sweep and closes automatically on recovery —
+the same open/update/auto-close contract as the release watchdogs (see
+[release-watchdog.md](release-watchdog.md)). The report names the labels the
+stalled jobs asked for, so a human sees *which* lane is sick.
+
+Thresholds and analysis live in `tools/scripts/queue_age_watchdog.py`, tested by
+`tools/scripts/test_queue_age_watchdog.py` — which pins the measured baseline
+above as a must-stay-quiet regression case, so a future threshold edit that
+would re-introduce afternoon false alarms fails at PR time.
+
+```bash
+# Tune or dry-run a sweep by hand
+gh workflow run runner-health-check.yml -f dry_run=true
+gh workflow run runner-health-check.yml -f alarm_minutes=60
+
+# Replay a recorded snapshot offline (no API calls, verdict pinned to capture time)
+python3 tools/scripts/queue_age_watchdog.py --snapshot snapshot.json
+```
+
 ### GraphQL quota fallback for PR sweeps
 
 The `gh pr ... --json` and `gh pr merge` paths can consume or require GitHub's
