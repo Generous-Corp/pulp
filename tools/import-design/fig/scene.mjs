@@ -258,10 +258,19 @@ function effectsToBoxShadow(effects) {
 const BLEND_IS_DEFAULT = new Set(['NORMAL', 'PASS_THROUGH']);
 
 // Figma blend mode → the CSS name `normalize_blend_mode` (design_ir_json.cpp:227)
-// accepts. Every mode listed is a real CSS mix-blend-mode value; LINEAR_BURN and
-// LINEAR_DODGE are deliberately absent because CSS has no equivalent, and naming
-// the nearest one would paint confidently wrong pixels instead of reporting the
-// gap.
+// accepts. Every mode listed is a real CSS mix-blend-mode value.
+//
+// LINEAR_BURN and LINEAR_DODGE are absent, for DIFFERENT reasons — worth stating
+// separately, because "CSS has no equivalent" is true of only one of them:
+//
+//   LINEAR_DODGE is additive, and our stack CAN express it: `plus-lighter` maps
+//     to BlendMode::lighter / Skia kPlus (style_effects_api.cpp:240-245). We
+//     simply have not wired or verified it — no file in hand uses it. That is a
+//     choice, not a limit, and it should be recorded as one.
+//   LINEAR_BURN must stay refused. Its natural spelling `plus-darker` ALSO maps
+//     to the additive kPlus in Skia/Chromium (same comment), so emitting it
+//     would LIGHTEN a layer the designer asked to darken. A blend that composites
+//     backwards is worse than one that composites normally and says so.
 const FIGMA_BLEND_CSS = new Set([
   'DARKEN', 'MULTIPLY', 'COLOR_BURN', 'LIGHTEN', 'SCREEN', 'COLOR_DODGE',
   'OVERLAY', 'SOFT_LIGHT', 'HARD_LIGHT', 'DIFFERENCE', 'EXCLUSION',
@@ -824,7 +833,7 @@ export function materializeFrame(scene, frame, ctx) {
     else if (node.blendMode && !BLEND_IS_DEFAULT.has(node.blendMode)) {
       // Figma has modes CSS does not (LINEAR_BURN / LINEAR_DODGE). Say so rather
       // than approximate: a wrong blend paints confidently wrong pixels.
-      pushDiag('blend-unsupported', node, `${node.blendMode} has no CSS equivalent; composited normally`);
+      pushDiag('blend-unsupported', node, `${node.blendMode} is not lowered; composited normally`);
     }
 
 
