@@ -639,6 +639,38 @@ size, partition scheme, lookahead window, oversampling ratio — because that is
 the number a refactor silently changes. User-facing rationale, including when
 NOT to use it: `docs/guides/latency-proof.md`.
 
+## The spectral analyzers fail closed — a refusal is the answer, not a bug
+
+`measure_thd`, `measure_aliasing`, and `magnitude_spectrum_curve` throw rather
+than return a number they cannot stand behind: silence (no fundamental to be
+relative to), a capture shorter than `fft_length` (zero-padding would measure
+the truncation edge), a fundamental at or above Nyquist, and — the one that
+surprises people — an alias series that never reaches Nyquist. **Size
+`num_harmonics` from the sample rate**: the default 64 models no alias site at
+all below ~375 Hz at 48 kHz, and that used to read as *clean* on a maximally
+aliased saw, because "no aliases among the zero places I looked" is technically
+true. Through the CLI a refusal is exit 2, distinct from a failed check.
+
+Every one of those paths previously returned a confident number that passed a
+gate. If a refusal surprises you, the input is usually wrong — not the tool.
+
+## Never gate on `detection_floor_db`
+
+It is a ~2σ bound that assumes a **white** residual. Aliases are discrete tones,
+so it is wrong exactly where it is most tempting, and asserting it is the
+analyzer grading its own homework. Its one legitimate use is deciding whether a
+reading is conclusive at all — a gate means something only while the measured
+value clears the floor.
+
+**Prove a floor with a negative control**: a fixture whose alias content is zero
+by construction must read collapsed, and injected impurities of known level must
+come back at that level. Prefer `tone_residual_db` (least-squares projection) to
+reading a windowed spectrum near a loud tone — it sidesteps leakage entirely.
+Window floors are measured, not assumed: `flat_top` is amplitude-accurate at
+about −93 dB with a flat skirt and **cannot** gate −100 dBc; only `kaiser` at
+β=14 resolves it, and even then not at bins 1–3, where the DC-removal pedestal
+dominates regardless of window.
+
 The schema and both evaluators live in `pulp::audio-analysis`
 (`latency_evidence.hpp`) as pure functions over buffers, so the test harness, the
 `pulp` CLI, and MCP all produce the same verdict. Add a policy there, never in
