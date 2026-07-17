@@ -483,12 +483,25 @@ test('a style-referenced fill resolves to the style, not the master default', ()
   assert.equal(orphan.style.background_color, '#0000ff', 'an unresolvable ref keeps its literal');
 });
 
-test('an instance override supplying a literal beats the master style ref', () => {
-  // The counterpart bound, and a regression I actually shipped: making the style
+test('an instance override does not get repainted by the master style ref', () => {
+  // The counterpart bound, and a regression actually shipped: making the style
   // win unconditionally repainted EVERY instrument tab with the master's
-  // fuchsia — including FOLEY, the one tab that had been correct, because its
-  // instance override carries the literal while the master's ref still points at
-  // the default. Precedence follows provenance: the override is more specific.
+  // fuchsia — including FOLEY, the one tab that had been correct.
+  //
+  // This test used to model FOLEY as a BARE literal over the master's still-
+  // attached ref, and assert the literal won. That fixture did not match the
+  // file: it was written in the same commit that took styleIdForFill OUT of
+  // OVERRIDE_SKIP_KEYS, and the fuchsia regression it recalls was observed
+  // WHILE that skip was still in force — i.e. FOLEY's own token ref was being
+  // dropped, leaving only the master's default for a blanket rule to paint
+  // with. Once an instance's ref survives, the real FOLEY re-points at its own
+  // token; a bare literal over an attached ref is Figma's CACHE of that ref,
+  // not an instance recolour, and treating it as one painted the switch dot
+  // white over the design's #333537 (verified against the file's thumbnail).
+  //
+  // So both real shapes are modelled here, and the guard is unchanged: the
+  // instance's own colour must survive, and must never become the master's
+  // fuchsia.
   const master = { sessionID: 0, localID: 30 };
   const child  = { sessionID: 0, localID: 31 };
   const scene = buildScene({ nodeChanges: [
@@ -505,20 +518,37 @@ test('an instance override supplying a literal beats the master style ref', () =
       transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
       fillPaints: [{ type: 'SOLID', color: { r: 0.965, g: 0.443, b: 0.557, a: 1 } }],
       styleIdForFill: { assetRef: { key: 'STYLE_FUCHSIA', version: '1:1' } } },
-    // Instance: override supplies its OWN literal (blue), like FOLEY.
+    { guid: { sessionID: 0, localID: 10 }, type: 'FRAME', name: 'instrument/08 Blue 85%',
+      styleType: 'FILL', key: 'STYLE_BLUE',
+      fillPaints: [{ type: 'SOLID', color: { r: 0.455, g: 0.604, b: 0.984, a: 1 } }] },
+    // Shape 1 — the real FOLEY: the instance re-points at its OWN token. The
+    // cached literal riding along is Figma's, and is deliberately STALE here
+    // (fuchsia) to prove the ref, not the cache, is what renders.
     { guid: { sessionID: 0, localID: 40 }, type: 'INSTANCE', name: 'FOLEY tab',
       parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 40, y: 20 },
       symbolData: { symbolID: master, symbolOverrides: [
         { guidPath: { guids: [child] },
+          styleIdForFill: { assetRef: { key: 'STYLE_BLUE', version: '1:1' } },
+          fillPaints: [{ type: 'SOLID', color: { r: 0.965, g: 0.443, b: 0.557, a: 1 } }] },
+      ] } },
+    // Shape 2 — a designer recolouring the instance outright: Figma DETACHES
+    // the style (null-guid sentinel) and the literal becomes authoritative.
+    { guid: { sessionID: 0, localID: 41 }, type: 'INSTANCE', name: 'CUSTOM tab',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 40, y: 20 },
+      symbolData: { symbolID: master, symbolOverrides: [
+        { guidPath: { guids: [child] },
+          styleIdForFill: { guid: { sessionID: 0xFFFFFFFF, localID: 0xFFFFFFFF } },
           fillPaints: [{ type: 'SOLID', color: { r: 0.455, g: 0.604, b: 0.984, a: 1 } }] },
       ] } },
   ]});
   const f = materializeFrame(scene, findFrame(scene, 'Root'), { images: new Map(), fileKey: 'K',
     parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
-  const swatch = f.envelope.root.children[0].children[0];
-  assert.equal(swatch.name, 'swatch');
-  assert.equal(swatch.style.background_color, '#749afb',
-    "the instance's own colour must not be repainted by the master's style");
+  const [foley, custom] = f.envelope.root.children;
+  assert.equal(foley.children[0].name, 'swatch');
+  assert.equal(foley.children[0].style.background_color, '#749afb',
+    "an instance's own token must not be repainted by the master's style");
+  assert.equal(custom.children[0].style.background_color, '#749afb',
+    "a detached style leaves the instance's literal authoritative");
 });
 
 test('auto-layout lands on the sibling `layout` object the IR actually reads', () => {
@@ -953,4 +983,95 @@ test('a single-stop gradient falls back rather than emitting a broken ramp', () 
   const shape = findByName(envelope.root, 'Shape');
   assert.equal(shape.style.background_gradient, undefined);
   assert.equal(shape.style.background_color, '#ff0000');
+});
+
+// ── override paint provenance: style ref vs the literal beside it ────────────
+//
+// An instance override that sets fillPaints and says nothing about the style
+// leaves the style ATTACHED, and Figma renders the attached style — the literal
+// is only Figma's (lossy) cache of it. Only an explicit DETACH (the null-guid
+// sentinel) makes the instance's literal authoritative.
+//
+// The shape is taken from SmallTriaz2.fig, where getting it backwards painted
+// `sound / button / switch`'s dot white over the design's #333537 and dropped
+// the Sync radio's dot to 20% opacity (reported as a MISSING dot). Both cases
+// live here because a rule that fixes one by fiat breaks the other: preferring
+// the style unconditionally repaints the detached OFF tabs with the master's
+// fuchsia.
+function provenanceScene() {
+  const g = (l, s = 0) => ({ sessionID: s, localID: l });
+  const NULL_REF = { guid: { sessionID: 0xFFFFFFFF, localID: 0xFFFFFFFF } };
+  const solid = (r, gr, b, opacity = 1) => [
+    { type: 'SOLID', visible: true, color: { r, g: gr, b, a: 1 }, opacity },
+  ];
+  return buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page' },
+    // Style table: the dark token the dot's ref names, and the fuchsia one the
+    // tab's ref names.
+    { guid: g(5), type: 'STYLE', styleType: 'FILL', key: 'darkkey',
+      name: 'button / icon on', fillPaints: solid(0.2, 0.208, 0.216) },
+    { guid: g(6), type: 'STYLE', styleType: 'FILL', key: 'fuchsiakey',
+      name: 'instrument / 02 Fuchsia', fillPaints: solid(0.96, 0.44, 0.56) },
+
+    // Master: a dot that REFERENCES the dark style, and a tab label that
+    // references the fuchsia one. Both cache their style's colour as a literal.
+    { guid: g(10), type: 'SYMBOL', name: 'switch off', size: { x: 18, y: 10 } },
+    { guid: g(11), type: 'ELLIPSE', name: 'dot', overrideKey: g(500),
+      parentIndex: { guid: g(10), position: 'a' }, size: { x: 6, y: 6 },
+      styleIdForFill: { assetRef: { key: 'darkkey', version: '1' } },
+      fillPaints: solid(0.2, 0.208, 0.216) },
+    { guid: g(12), type: 'TEXT', name: 'tab', overrideKey: g(501),
+      parentIndex: { guid: g(10), position: 'b' }, size: { x: 6, y: 6 },
+      styleIdForFill: { assetRef: { key: 'fuchsiakey', version: '1' } },
+      fillPaints: solid(0.96, 0.44, 0.56), textData: { characters: 'OFF' } },
+
+    // Wrapper master: an INSTANCE of the above that (a) recolours the dot with
+    // a literal but leaves its ref ALONE, and (b) DETACHES the tab's ref and
+    // paints it white. This is the `switch / on` + `inst selection / off left`
+    // shape.
+    { guid: g(20), type: 'SYMBOL', name: 'switch on', size: { x: 18, y: 10 } },
+    { guid: g(21), type: 'INSTANCE', name: 'inner', overrideKey: g(600),
+      parentIndex: { guid: g(20), position: 'a' }, size: { x: 18, y: 10 },
+      symbolData: { symbolID: g(10), symbolOverrides: [
+        { guidPath: { guids: [g(500)] }, fillPaints: solid(1, 1, 1) },
+        { guidPath: { guids: [g(501)] },
+          styleIdForFill: NULL_REF, fillPaints: solid(1, 1, 1) },
+      ] } },
+
+    { guid: g(2), type: 'FRAME', name: 'Root',
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 200, y: 100 } },
+    // The design's instance. Its forwarded entry re-states a literal on the
+    // ALREADY-DETACHED tab at a new opacity — the outer-instance case that must
+    // still keep its literal rather than snapping back to fuchsia.
+    { guid: g(30), type: 'INSTANCE', name: 'switch on',
+      parentIndex: { guid: g(2), position: 'a' }, size: { x: 18, y: 10 },
+      symbolData: { symbolID: g(20), symbolOverrides: [
+        { guidPath: { guids: [g(600), g(501)] }, fillPaints: solid(1, 1, 1, 0.35) },
+      ] } },
+  ]});
+}
+
+test('an override literal does not beat the style ref it left attached', () => {
+  const { envelope } = materializeFrame(
+    provenanceScene(), findFrame(provenanceScene(), 'Root'), CTX_MIN);
+
+  // The override set the dot white but said nothing about its style, so the
+  // style is still attached and IS the colour. Rendering the white literal is
+  // the FILTER-switch bug: a pure-white dot where the design has #333537.
+  const dot = findByName(envelope.root, 'dot');
+  assert.ok(dot, 'dot must survive expansion');
+  assert.equal(dot.style.background_color, '#333537');
+});
+
+test('an override that DETACHES a style keeps its own literal, at every level', () => {
+  const { envelope } = materializeFrame(
+    provenanceScene(), findFrame(provenanceScene(), 'Root'), CTX_MIN);
+
+  // The inner instance cut the fuchsia style loose, so the tab is white — and
+  // the outer instance's forwarded literal (white at 35%) still applies on top
+  // rather than the ref reasserting itself. Snapping back to #f6718e here is
+  // the "wall of pink" regression.
+  const tab = findByName(envelope.root, 'tab');
+  assert.ok(tab, 'tab must survive expansion');
+  assert.equal(tab.style.color ?? tab.style.background_color, '#ffffff59');
 });

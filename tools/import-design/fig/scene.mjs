@@ -365,6 +365,64 @@ const SYMBOL_INHERITED_KEYS = [
   'rectangleBottomLeftCornerRadius', 'rectangleBottomRightCornerRadius',
 ];
 
+// Figma's "no style" sentinel: an all-1s guid (0xFFFFFFFF:0xFFFFFFFF). An
+// override carrying it is not naming a style — it is DETACHING one.
+const NULL_GUID_PART = 0xFFFFFFFF;
+function isDetachedStyleRef(ref) {
+  const g = ref && ref.guid;
+  return !!g && g.sessionID === NULL_GUID_PART && g.localID === NULL_GUID_PART;
+}
+
+// Whether a ref still names a resolvable style. This asks for the same key
+// resolvedPaints extracts, so provenance and resolution cannot disagree about
+// what "attached" means.
+function hasAttachedStyleRef(ref) {
+  return !!(ref && ref.assetRef && ref.assetRef.key);
+}
+
+/**
+ * Decide, for ONE override entry, whether the node's paint comes from its style
+ * ref or from the literal beside it. Provenance decides; a blanket precedence
+ * in either direction is wrong, and this file has a counter-example to each.
+ *
+ * Three cases, and the third is the one that is easy to get backwards:
+ *
+ *  1. The entry re-points at a style (`assetRef`) → the style is the answer,
+ *     even when a cached literal rides along. That cache is LOSSY: "button /
+ *     icon off" is white at 20% paint opacity and the literal beside it is
+ *     white at 100% — the transparency simply is not in it. Preferring it
+ *     rendered every toolbar icon as hard opaque white over soft grey ones.
+ *  2. The entry DETACHES the style (the null-guid sentinel) → the instance cut
+ *     the style loose, so its literal is authoritative. This is what keeps
+ *     `global / sub navigation`'s OFF tabs white instead of repainting them
+ *     with the master's fuchsia.
+ *  3. The entry sets a literal and says NOTHING about the style → the style
+ *     stays ATTACHED, and an attached style is what Figma renders; the literal
+ *     is only Figma's cache of it. Treating that literal as an instance
+ *     recolour painted the FILTER switch's dot pure white where the design has
+ *     #333537, and the Sync radio's inner dot at 20% opacity where the design
+ *     has 65% — invisible enough to be reported as a MISSING dot rather than a
+ *     mis-coloured one. Verified against the file's own thumbnail: both dots
+ *     match the style, not the literal.
+ *
+ * Case 3 is safe precisely because case 2 runs first for a genuinely detached
+ * node: once the ref is gone, `hasAttachedStyleRef` is false and the literal
+ * speaks. An outer instance re-setting a literal on an already-detached node
+ * therefore keeps its literal.
+ */
+function applyPaintProvenance(clone, entry, which) {
+  const refKey = which === 'fill' ? 'styleIdForFill' : 'styleIdForStrokeFill';
+  const paintKey = which === 'fill' ? 'fillPaints' : 'strokePaints';
+  const marker = which === 'fill' ? '__fillFromStyle' : '__strokeFromStyle';
+  const ref = entry[refKey];
+  if (ref) {
+    clone[marker] = !isDetachedStyleRef(ref);
+    return;
+  }
+  if (!entry[paintKey]) return;
+  clone[marker] = hasAttachedStyleRef(clone[refKey]);
+}
+
 function applyOverrideEntry(clone, entry) {
   // A derived size that shrinks the node scales its stroke weight with it —
   // Figma renders a scaled-down nested instance with proportionally thinner
@@ -376,23 +434,9 @@ function applyOverrideEntry(clone, entry) {
     if (scale < 0.99) clone.strokeWeight = round2(clone.strokeWeight * scale);
   }
   // Record where the paint came from BEFORE copying, because afterwards the
-  // clone cannot tell the master's cached literal from its own. An override
-  // that re-points a node at a style WITHOUT supplying a literal means the
-  // style is the answer and the inherited literal is the master's stale colour;
-  // an override that supplies a literal means the opposite.
-  // A ref wins even when a literal rides along with it, because that literal is
-  // Figma's CACHE of the style and the cache is LOSSY: "button / icon off" is
-  // white at 20% paint opacity, and the cached paint beside it is white at 100%
-  // — the transparency simply is not in it. Preferring the cache rendered every
-  // toolbar icon as hard opaque white over a design of soft grey ones.
-  //
-  // The literal only wins when an override sets fillPaints and NO ref: that is
-  // an instance recolouring the node outright, and the master's ref left behind
-  // is the stale thing.
-  if (entry.styleIdForFill) clone.__fillFromStyle = true;
-  else if (entry.fillPaints) clone.__fillFromStyle = false;
-  if (entry.styleIdForStrokeFill) clone.__strokeFromStyle = true;
-  else if (entry.strokePaints) clone.__strokeFromStyle = false;
+  // clone cannot tell the master's cached literal from its own.
+  applyPaintProvenance(clone, entry, 'fill');
+  applyPaintProvenance(clone, entry, 'stroke');
   for (const [k, v] of Object.entries(entry)) {
     if (v === undefined || OVERRIDE_SKIP_KEYS.has(k)) continue;
     clone[k] = v;
