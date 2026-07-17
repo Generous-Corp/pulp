@@ -111,6 +111,11 @@ add_subdirectory(pulp-pluck)
 # VaDrum: TR-808 bass drum as a persistent struck resonator (no voice allocation)
 add_subdirectory(va-drum)
 
+# PulpKit: a full circuit-modelled analog drum machine — one polyphonic
+# Processor owning eleven struck/gated voice circuits (no samples). Reuses the
+# va-drum bridged-T voice, so it must be registered after va-drum.
+add_subdirectory(pulp-kit)
+
 # ModalInstrument: one spec-driven modal Processor plays any ModalSpec instrument
 add_subdirectory(modal-instrument)
 

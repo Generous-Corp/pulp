@@ -192,6 +192,16 @@ pulp_add_test_suite(pulp-test-modal-instrument
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/modal-instrument
     TIMEOUT 300)
 
+# PulpKit snare + rim/clave: two struck bridged-T bodies summed with a filtered-
+# noise snappy. Renders and measures tone/noise balance and body pitch with the
+# calibrated modal analyzer (audio-test-support), so it links that lib. Needs
+# the kit voices dir on the include path.
+pulp_add_test_suite(pulp-test-kit-snare
+    SOURCES test_kit_snare.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp-audio-test-support
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/pulp-kit/voices
+    TIMEOUT 300)
+
 # Mallet instruments as data: each ModalSpec is rendered and measured against
 # its own declared tolerances by the blind modal analyzer. Loads the example
 # specs from disk (PULP_SOURCE_DIR) and parses them (pulp::signal-modal-spec).
