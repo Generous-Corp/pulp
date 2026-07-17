@@ -4,8 +4,7 @@
 /// Demonstrates: controller-thread sample-slot publication, primitive loop
 /// rendering, ADSR, pitch shifting, and processor parameter serialization.
 
-#include "sampler_components.hpp"
-#include "sampler_streaming_runtime.hpp"
+#include "sampler_source_publication.hpp"
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/loop_renderer.hpp>
@@ -86,28 +85,14 @@ public:
 
     /// Load a mono sample buffer. Call off the audio thread after prepare().
     bool load_sample(const float* data, int num_samples, float sample_rate) {
-        return streaming_.load_and_publish_resident(
-            [&] {
-                return sample_store_.load_mono(
-                    data,
-                    num_samples,
-                    sample_rate,
-                    audio_ack_generation_.load(std::memory_order_acquire));
-            },
-            [&] { return sample_store_.read_published_view(); });
+        return source_publication_.load_mono(
+            streaming_, data, num_samples, sample_rate);
     }
 
     /// Load a sample from interleaved stereo. Call off the audio thread after prepare().
     bool load_sample_stereo(const float* interleaved, int num_frames, float sample_rate) {
-        return streaming_.load_and_publish_resident(
-            [&] {
-                return sample_store_.load_interleaved_stereo(
-                    interleaved,
-                    num_frames,
-                    sample_rate,
-                    audio_ack_generation_.load(std::memory_order_acquire));
-            },
-            [&] { return sample_store_.read_published_view(); });
+        return source_publication_.load_stereo(
+            streaming_, interleaved, num_frames, sample_rate);
     }
 
     /// Load a true ranged WAV or uncompressed AIFF asset. The call may perform
@@ -144,7 +129,7 @@ public:
         for (std::uint32_t ch = 0; ch < kMaxOutputChannels; ++ch) {
             voice_scratch_[ch].assign(max_block_frames_, 0.0f);
         }
-        sample_store_.prepare();
+        source_publication_.prepare();
         const auto maximum_source_frames_per_output =
             SamplerStreamingRuntime::maximum_pitch_ratio() *
             SamplerStreamingRuntime::maximum_source_sample_rate() /
@@ -158,14 +143,15 @@ public:
         retire_reverse_attack_after_horizon_for_test_ = false;
 #endif
         streaming_.prepare(host_sample_rate_, max_block_frames_);
-        publish_audio_acknowledgement(sample_store_.read_published_view());
+        source_publication_.acknowledge_audio(
+            streaming_.published_source(), voices_, streaming_);
     }
 
     void release() override {
         for (auto& voice : voices_) voice.reset();
         for (auto& cancellation : pending_cancellations_) cancellation = {};
         streaming_.release();
-        sample_store_.release();
+        source_publication_.release();
         sinc_bank_.release();
     }
 
@@ -212,8 +198,7 @@ public:
             render_active_voices(output, cursor, block_frames - cursor, params);
         }
 
-        publish_audio_acknowledgement(sample_store_.read_published_view());
-        publish_stream_audio_acknowledgement(published);
+        source_publication_.acknowledge_audio(published, voices_, streaming_);
         flush_pending_cancellations();
         streaming_.complete_audio_callback(audio_generation);
     }
@@ -236,13 +221,12 @@ private:
         bool valid = false;
     };
 
-    SamplerSampleStore sample_store_;
+    SamplerSourcePublicationOwner source_publication_;
     SamplerStreamingRuntime streaming_;
     audio::SampleSincKernelBank sinc_bank_;
     audio::SampleKeyMap key_map_;
     std::array<std::vector<float>, kMaxOutputChannels> voice_scratch_{};
     std::array<float*, kMaxOutputChannels> voice_scratch_ptrs_{};
-    std::atomic<std::uint64_t> audio_ack_generation_{0};
     float host_sample_rate_ = 44100.0f;
     std::uint32_t max_block_frames_ = 512;
     std::uint32_t prepared_output_channels_ = 2;
@@ -254,40 +238,9 @@ private:
     std::uint64_t lookahead_plans_last_callback_for_test_ = 0;
 #endif
 
-    std::uint64_t audio_safe_generation(const audio::PublishedSampleView& published) const noexcept {
-        std::array<audio::PublishedSampleView, kMaxVoices> active_views{};
-        std::size_t active_count = 0;
-        for (const auto& voice : voices_) {
-            if (!voice.active || !voice.sample.valid) continue;
-            active_views[active_count++] = voice.sample;
-        }
-        return audio::SampleSlotBank::oldest_active_generation(
-            published, active_views.data(), active_count);
-    }
-
-    void publish_audio_acknowledgement(
-        const audio::PublishedSampleView& published) noexcept {
-        const auto generation = audio_safe_generation(published);
-        audio_ack_generation_.store(generation, std::memory_order_release);
-    }
-
-    void publish_stream_audio_acknowledgement(
-        const SamplerPublishedSource& published) noexcept {
-        std::uint64_t generation = published.selection_generation;
-        bool have_generation = published.kind != SamplerPublishedSourceKind::None;
-        for (const auto& voice : voices_) {
-            if (!voice.active || voice.selection_generation == 0) continue;
-            generation = have_generation
-                ? std::min(generation, voice.selection_generation)
-                : voice.selection_generation;
-            have_generation = true;
-        }
-        streaming_.acknowledge_selection(have_generation ? generation : 0);
-    }
-
     bool published_source_valid(const SamplerPublishedSource& source) const noexcept {
         if (source.kind == SamplerPublishedSourceKind::Resident)
-            return sample_store_.slot_view_valid(source.resident);
+            return source_publication_.sample_store().slot_view_valid(source.resident);
         return source.kind == SamplerPublishedSourceKind::Streamed &&
                source.streamed.valid();
     }
@@ -355,6 +308,37 @@ private:
                                                params.pitch_semitones);
     }
 
+    double playback_speed(int note,
+                          double sample_rate,
+                          const RenderParams& params) const noexcept {
+        return key_map_.playback_rate_for_note(note,
+                                               sample_rate,
+                                               static_cast<double>(host_sample_rate_),
+                                               params.pitch_semitones);
+    }
+
+    static bool polynomial_mip_policy(
+        audio::SampleInterpolationPolicy policy) noexcept {
+        return policy == audio::SampleInterpolationPolicy::CubicHermite ||
+               policy == audio::SampleInterpolationPolicy::CubicLagrange;
+    }
+
+    static SamplerMipLevelView select_resident_mip(
+        const SamplerPublishedSource& source,
+        audio::SampleInterpolationPolicy policy,
+        double base_source_frames_per_output,
+        bool loop,
+        bool reverse) noexcept {
+        // Stored forward one-shot mips use clamped FIR boundaries. Loops and
+        // reverse entries stay on the base asset so wrapped edges and the final
+        // source-frame phase remain exact.
+        if (!polynomial_mip_policy(policy) || loop || reverse) return {};
+        const auto octave = sampler_exact_mip_octave(
+            base_source_frames_per_output);
+        const auto* level = source.resident_mips.level(octave);
+        return level == nullptr ? SamplerMipLevelView{} : *level;
+    }
+
     audio::PreparedSampleInterpolation prepared_interpolation(
         audio::SampleInterpolationPolicy policy,
         double source_frames_per_output) const noexcept {
@@ -368,6 +352,15 @@ private:
             }
         }
         return interpolation;
+    }
+
+    audio::PreparedSampleInterpolation prepared_resident_interpolation(
+        audio::SampleInterpolationPolicy policy,
+        double source_frames_per_output) const noexcept {
+        if (polynomial_mip_policy(policy) && source_frames_per_output > 1.0) {
+            policy = audio::SampleInterpolationPolicy::RatioTrackingSinc;
+        }
+        return prepared_interpolation(policy, source_frames_per_output);
     }
 
     void render_active_voices(audio::BufferView<float>& output,
@@ -408,21 +401,29 @@ private:
                 }
 
                 std::array<const float*, kMaxSampleChannels> sample_ptrs{};
-                if (!sample_store_.populate_channel_ptrs(voice.sample,
-                                                         sample_ptrs.data(),
-                                                         sample_ptrs.size())) {
-                    voice.reset();
-                    continue;
+                std::uint64_t source_frames = voice.sample.num_frames;
+                double source_sample_rate = voice.sample.sample_rate;
+                if (voice.resident_mip.valid()) {
+                    sample_ptrs = voice.resident_mip.channels;
+                    source_frames = voice.resident_mip.frames;
+                    source_sample_rate = voice.resident_mip.sample_rate;
+                } else {
+                    if (!source_publication_.sample_store().populate_channel_ptrs(voice.sample,
+                                                             sample_ptrs.data(),
+                                                             sample_ptrs.size())) {
+                        voice.reset();
+                        continue;
+                    }
                 }
                 audio::BufferView<const float> source(
                     sample_ptrs.data(),
                     voice.sample.num_channels,
-                    static_cast<std::size_t>(voice.sample.num_frames));
+                    static_cast<std::size_t>(source_frames));
 
                 voice.adsr.set_params(params.adsr);
                 const auto source_frames_per_output =
-                    playback_speed(voice.note, voice.sample, params);
-                const auto interpolation = prepared_interpolation(
+                    playback_speed(voice.note, source_sample_rate, params);
+                const auto interpolation = prepared_resident_interpolation(
                     params.interpolation, source_frames_per_output);
                 if (!(source_frames_per_output > 0.0) ||
                     !interpolation.valid() ||
@@ -883,14 +884,21 @@ private:
         }
 
         const auto& sample = source.resident;
-        const auto region = make_region(sample, params);
-        const auto speed = playback_speed(note, sample, params);
-        if (speed == 0.0) return;
-        const auto interpolation = prepared_interpolation(
+        const auto base_speed = playback_speed(note, sample, params);
+        if (!(base_speed > 0.0)) return;
+        const auto mip = select_resident_mip(source, params.interpolation,
+                                             base_speed, params.loop,
+                                             params.reverse);
+        const auto selected_frames = mip.valid() ? mip.frames : sample.num_frames;
+        const auto selected_rate = mip.valid() ? mip.sample_rate : sample.sample_rate;
+        const auto region = make_region(selected_frames, selected_rate,
+                                        params.loop, params.reverse);
+        const auto speed = playback_speed(note, selected_rate, params);
+        const auto interpolation = prepared_resident_interpolation(
             params.interpolation, speed);
         if (!interpolation.valid()) return;
-        target->start(note, velocity, speed, host_sample_rate_, sample, region,
-                      sample.num_frames, interpolation);
+        target->start(note, velocity, speed, host_sample_rate_, sample, mip, region,
+                      selected_frames, interpolation);
         target->selection_generation = source.selection_generation;
     }
 

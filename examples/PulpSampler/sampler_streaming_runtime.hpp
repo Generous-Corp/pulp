@@ -8,6 +8,8 @@
 #include <pulp/audio/streaming_sample_source_file.hpp>
 #include <pulp/runtime/seqlock.hpp>
 
+#include "sampler_mip_pyramid.hpp"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -37,6 +39,7 @@ struct SamplerPublishedSource {
     std::uint64_t selection_generation = 0;
     audio::PublishedSampleView resident{};
     audio::SampleAssetView streamed{};
+    SamplerMipPyramidView resident_mips{};
 };
 
 static_assert(std::is_trivially_copyable_v<SamplerPublishedSource>);
@@ -178,16 +181,23 @@ public:
         }
     }
 
-    template<typename Loader, typename ViewReader>
-    bool load_and_publish_resident(Loader&& loader, ViewReader&& read_view) {
+    template<typename Loader, typename ViewReader, typename Publisher>
+    bool load_and_publish_resident(
+        Loader&& loader,
+        ViewReader&& read_view,
+        const SamplerMipPyramidView& resident_mips,
+        Publisher&& on_published) {
         std::lock_guard lock(source_load_mutex_);
         if (!loader()) return false;
         const auto resident = read_view();
         if (!resident.valid) return false;
+        const auto generation = ++selection_generation_;
+        on_published(generation);
         published_source_.write({
             .kind = SamplerPublishedSourceKind::Resident,
-            .selection_generation = ++selection_generation_,
+            .selection_generation = generation,
             .resident = resident,
+            .resident_mips = resident_mips,
         });
         service_wake_.notify_all();
         return true;
