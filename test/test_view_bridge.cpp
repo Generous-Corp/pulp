@@ -508,6 +508,41 @@ TEST_CASE("ViewBridge destructor closes view", "[view_bridge]") {
     REQUIRE(p.closed_count == 1);
 }
 
+TEST_CASE("ViewBridge tolerates the host freeing the Processor before the bridge",
+          "[view_bridge][crash][lifecycle]") {
+    // AU gives the audio unit (the Processor) and the view controller (which
+    // owns this bridge) independent, host-ordered lifetimes. Ableton Live 12
+    // freed the Processor while the editor bridge was still alive and its
+    // display-link idle pump was firing -> EXC_BAD_ACCESS inside the pump. Every
+    // processor_ dereference reachable from the pump or teardown must become a
+    // no-op once the adapter reports the Processor gone. Under a sanitizer build
+    // this is a heap-use-after-free if any deref is left unguarded -- which is
+    // how this class of bug is caught, and why the earlier idle-pump test (which
+    // only freed the BRIDGE) missed it.
+    state::StateStore store;
+    auto proc = std::make_unique<StubProcessor>();
+    proc->set_state_store(&store);
+    proc->define_parameters(store);
+
+    format::ViewBridge bridge(*proc, store);
+    REQUIRE(bridge.open());
+    bridge.notify_attached();  // editor open + attached, as in a host
+
+    auto pump = format::make_scripted_idle_pump(bridge);
+
+    // The adapter's contract: signal death BEFORE freeing the Processor.
+    bridge.notify_processor_destroyed();
+    proc.reset();  // Processor gone; bridge + store still alive
+
+    // A display-link idle tick fires after the Processor is gone. Every path the
+    // pump touches -- poll_editor_reload, scripted_ui -- must be a no-op.
+    pump();
+    REQUIRE_FALSE(bridge.poll_editor_reload());
+    REQUIRE(bridge.scripted_ui() == nullptr);
+    // ~ViewBridge runs at scope exit: close() must not call on_view_closed on the
+    // freed Processor either.
+}
+
 // item 1.3: in-DAW editors enable scripted-UI hot reload only when the developer
 // opts in via PULP_DEV_HOT_RELOAD; default (unset) is OFF so a shipping plugin
 // never watches + reloads from disk inside a host.
