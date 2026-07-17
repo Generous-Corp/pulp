@@ -200,6 +200,31 @@ function checkFill(decl, emitted, diagKinds) {
   };
 }
 
+function checkPaintBlend(decl, emitted, diagKinds) {
+  // A PAINT-level blendMode. Figma composites an individual paint with its own
+  // mode; we have no per-paint primitive, and the node-level mix_blend_mode is
+  // NOT a substitute (lifting one there is only sound when the node has exactly
+  // one visible fill and nothing else — plan row 6.8).
+  //
+  // This was triple-silent: unread by the decoder, unnamed by any diagnostic,
+  // unrecorded by the sidecar. The last of those is the one that mattered — a
+  // property the audit cannot SEE is a hole in the audit's own thesis, and it
+  // would have reported "everything survived" over a design that dropped this.
+  //
+  // Only visible paints count; the walk never reaches an invisible node, so
+  // node-visibility is already handled upstream. The reference file's only
+  // paint-level blend sits on `Waveform B`, which is visible:false — so it
+  // renders in neither Figma nor here, and this correctly stays quiet.
+  const blended = decl.fill.filter((p) => p.blend_mode);
+  if (!blended.length) return null;
+  if (diagKinds.includes('paint-blend-unsupported')) return null;
+  return {
+    property: 'fill.paint_blend',
+    declared: blended.map((p) => p.blend_mode).join('+'),
+    emitted: 'none — no per-paint blend primitive; the paint composites NORMAL',
+  };
+}
+
 function checkEffects(decl, emitted, diagKinds) {
   const out = [];
   const shadowKinds = new Set(['DROP_SHADOW', 'INNER_SHADOW']);
@@ -286,6 +311,11 @@ export function auditMaterials(materials, envelope, diagnostics) {
       if (solids.length > 1) {
         const f = checkFill(d, emitted, diagKinds);
         tally('fill.stack', !f, false);
+        if (f) found.push(f);
+      }
+      if (d.fill.some((p) => p.blend_mode)) {
+        const f = checkPaintBlend(d, emitted, diagKinds);
+        tally('fill.paint_blend', !f, !!f && false);
         if (f) found.push(f);
       }
     }

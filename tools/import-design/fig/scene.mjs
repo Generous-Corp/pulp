@@ -1584,6 +1584,15 @@ function declaredMaterials(node) {
       // bare bottom paint. Alpha alone cannot: the correct composite and the bug
       // are both opaque.
       rgb: p.color ? colorToHex({ ...p.color, a: 1 }).slice(0, 7) : null,
+      // A PAINT-level blend mode. The node-level one is recorded below, and
+      // recording only that left this triple-silent: the decoder does not read
+      // it, no diagnostic mentions it, and the sidecar did not record it — so
+      // the one tool whose entire thesis is "a declared property must survive or
+      // be named" could not see this property at all. A hole in the audit is
+      // worse than a hole in the decoder, because it is the thing that is
+      // supposed to find the holes.
+      blend_mode: typeof p.blendMode === 'string' && !BLEND_IS_DEFAULT.has(p.blendMode)
+        ? p.blendMode : null,
     }));
   }
 
