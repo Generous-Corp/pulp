@@ -2950,7 +2950,7 @@ TEST_CASE("render_artifact_path places the render beside --output, not the CWD",
           == "/a/b/c/x-render.png");
     // A bare --output (no directory) keeps the artifact in the CWD — the
     // intended default for that invocation, and the ONLY case the old bare-name
-    // behaviour was ever correct for.
+    // behavior was ever correct for.
     CHECK(render_artifact_path("ui.js", "design-fig-render.png")
           == "design-fig-render.png");
     // A relative --output with a directory still carries that directory.
