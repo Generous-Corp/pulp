@@ -606,6 +606,75 @@ TEST_CASE("codegen synthesizes SVG paths for bare vector shape primitives",
     }
 }
 
+TEST_CASE("a solid-filled ellipse renders as a filled circle, not a dropped node",
+          "[view][import][codegen][vector]") {
+    // The synthesis guard treated "has a fill" as "already renderable". True for
+    // a rect — a frame paints its own background box — but codegen has no
+    // painter for a round primitive, so a filled ellipse emitted NOTHING and the
+    // shape vanished: a design's red record dot rendered as an empty cell right
+    // beside a play triangle that rendered fine (that one carried a real path).
+    //
+    // Both halves matter. The fill has to move ONTO the path, and the node's own
+    // background has to be cleared with it — otherwise the frame paints a square
+    // behind the circle, which is the stray box that shows up behind a knob.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 400.0f;
+
+    IRNode dot;
+    dot.type = "ellipse";
+    dot.name = "RecDot";
+    dot.style.width = 10.0f;
+    dot.style.height = 10.0f;
+    dot.style.background_color = "#dd5151";
+    ir.root.children.push_back(dot);
+
+    std::vector<pulp::view::FidelityIssue> report;
+    CodeGenOptions opts;
+    opts.fidelity_report = &report;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO("js=\n" << js);
+
+    CHECK(js.find("createSvgPath('RecDot") != std::string::npos);
+    CHECK(js.find("A5 5") != std::string::npos);          // the circle's arcs
+    CHECK(js.find("setSvgFill('RecDot") != std::string::npos);
+    CHECK(js.find("'#dd5151')") != std::string::npos);    // fill moved onto the path
+    // The background must NOT also paint: no square behind the dot.
+    CHECK(js.find("setBackgroundColor('RecDot") == std::string::npos);
+
+    bool dropped = false;
+    for (const auto& iss : report)
+        if (iss.kind == "dropped-vector" && iss.node_name == "RecDot") dropped = true;
+    CHECK_FALSE(dropped);
+}
+
+TEST_CASE("a gradient-filled ellipse keeps its box paint rather than going blank",
+          "[view][import][codegen][vector]") {
+    // The counterpart bound: a gradient cannot move onto a path, so synthesizing
+    // one would yield svg_fill:none — an invisible circle, strictly worse than
+    // the filled box we render today. The guard must still bail here.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 400.0f;
+
+    IRNode blob;
+    blob.type = "ellipse";
+    blob.name = "GradDot";
+    blob.style.width = 10.0f;
+    blob.style.height = 10.0f;
+    blob.style.background_gradient = "linear-gradient(#111, #222)";
+    ir.root.children.push_back(blob);
+
+    CodeGenOptions opts;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO("js=\n" << js);
+    CHECK(js.find("setSvgFill('GradDot") == std::string::npos);
+}
+
 TEST_CASE("synthesized rect honors border-radius and stroke-only borders",
           "[view][import][codegen][vector]") {
     // A rounded rect emits arc commands; a stroke-only shape carries its border

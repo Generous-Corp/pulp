@@ -2270,7 +2270,22 @@ void synthesize_node(IRNode& n) {
     if (!n.children.empty()) return;
     if (n.audio_widget != AudioWidgetType::none) return;
     if (n.attributes.count("asset_path")) return;
-    if (node_has_visible_fill(n)) return;
+    // "Already renderable" holds for a rect or a line: a frame paints its own
+    // background box, so a filled rect needs no path. It does NOT hold for a
+    // round or many-sided primitive — codegen has no painter for those, so a
+    // filled ellipse emits nothing whatsoever and the shape vanishes. The
+    // design's red record dot rendered as an empty cell for exactly this reason
+    // while the play triangle beside it (a vector carrying a real path) was
+    // fine. Their fill is only expressible as a path, so synthesize one and
+    // carry the colour across.
+    //
+    // A gradient still bails: it cannot be moved onto the path, and an
+    // svg_fill:none circle would be strictly worse than the box we render today.
+    const bool fill_needs_path = n.type == "ellipse" || n.type == "circle" ||
+                                 n.type == "polygon" || n.type == "star";
+    const bool solid_filled =
+        n.style.background_color && !n.style.background_color->empty();
+    if (node_has_visible_fill(n) && !(fill_needs_path && solid_filled)) return;
     const float w = n.style.width.value_or(0.0f);
     const float h = n.style.height.value_or(0.0f);
     const bool is_line = (n.type == "line" || n.type == "svg_line");
@@ -2297,10 +2312,17 @@ void synthesize_node(IRNode& n) {
 
     n.attributes["path_data"] = d;
     n.attributes["svg_viewbox"] = "0 0 " + svg_num(w) + " " + svg_num(h);
-    // We only reach here when the node has no visible fill, so force the
-    // SvgPathWidget's default opaque-black fill off — otherwise a stroke-only or
-    // empty shape would render as a solid black box.
-    n.attributes["svg_fill"] = "none";
+    // The synthesized path now IS this node's paint, so a solid fill moves onto
+    // it and the background is cleared. Leaving the background set would paint a
+    // square behind the circle — the stray box that shows up behind a knob.
+    if (solid_filled) {
+        n.attributes["svg_fill"] = *n.style.background_color;
+        n.style.background_color.reset();
+    } else {
+        // No visible fill: force the SvgPathWidget's default opaque-black fill
+        // off — otherwise a stroke-only or empty shape renders as a black box.
+        n.attributes["svg_fill"] = "none";
+    }
     if (n.style.border_color && !n.style.border_color->empty()) {
         n.attributes["svg_stroke"] = *n.style.border_color;
         n.attributes["svg_stroke_width"] = svg_num(n.style.border_width.value_or(1.0f));
