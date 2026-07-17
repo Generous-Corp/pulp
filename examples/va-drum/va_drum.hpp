@@ -136,7 +136,8 @@ public:
                 ++next_event;
             }
 
-            const auto sample = static_cast<float>(voice_.process() * kVoltsToSample);
+            const auto sample =
+                static_cast<float>(voice_.process() * kVoltsToSample * kReferenceLevelTrim);
             left[static_cast<std::size_t>(i)] = sample;
             if (output.num_channels() > 1) right[static_cast<std::size_t>(i)] = sample;
         }
@@ -163,6 +164,13 @@ private:
     /// is set by whatever it drives, so this is a unit conversion against the
     /// supply rails rather than anything derived from the schematic.
     static constexpr double kVoltsToSample = 1.0 / 15.0;
+
+    /// Loudness match to the reference instrument: at the stock knob positions
+    /// the raw circuit output peaks about 3.5 dB above the reference render, so
+    /// the default sound sits on it rather than running hot. This is a level
+    /// calibration, not a change to the circuit; the Level knob still scales
+    /// around it.
+    static constexpr double kReferenceLevelTrim = 0.667;
 
     BassDrumVoice voice_{};
 };
