@@ -729,6 +729,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - An import "looks off" and you need the NODE and the exact pixel delta, not a score. → `tools/import-design/layout_parity.py`
 - Stack reference vs render into ONE labeled image so a comparison is self-documenting. → `tools/import-design/montage.py`
 - Render an import at the design's OWN canvas size (a mismatched size voids every score). → `tools/scripts/render-figma-import.sh`
+- Triage an import's GROSS colour against Figma's own raster, offline, with no API call. Advisory only — never a gate. → `tools/import-design/thumb_parity.py`
 
 **design-import** — get a design into Pulp
 - Decode a local .fig file offline — no Figma desktop, no REST quota. → `tools/import-design/fig_decode.mjs emit`

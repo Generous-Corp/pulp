@@ -130,6 +130,18 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
+  - name: thumb-parity
+    path: tools/import-design/thumb_parity.py
+    category: visual-compare
+    use_when: Triage an import's GROSS colour against Figma's own raster, offline, with no API call. Advisory only — never a gate.
+    invocation: python3 tools/import-design/thumb_parity.py --fig <design.fig> --render <render.png> [--out-dir DIR] [--json report.json]
+    inputs: The source .fig (its embedded thumbnail.png plus meta.json's client_meta.render_coordinates ARE the reference and the exact transform) and our render PNG.
+    outputs: Worst-disagreeing blocks ranked by CIEDE2000, optional heatmap. Downscales OUR render to the thumbnail rather than upscaling the thumbnail, so two rasterizers converge instead of comparing anti-aliasing noise.
+    caveat: MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under ~3 design px. For geometry use layout-parity; for material survival use the material audit.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
   - name: render-figma-import
     path: tools/scripts/render-figma-import.sh
     category: visual-compare
