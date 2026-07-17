@@ -24,7 +24,7 @@
 //   quits Safari (closing the window) on exit. See CLAUDE.md local-dev audio etiquette.
 //
 // Usage: node measure-safari-gpu.mjs --url <demo-url> [--secs 20]
-import { Builder, By, until, Origin } from "selenium-webdriver";
+import { Builder, By, until, Key } from "selenium-webdriver";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
 const url = arg("--url", null);
@@ -34,26 +34,39 @@ const secs = parseInt(arg("--secs", "20"), 10);
 const driver = await new Builder().forBrowser("safari").build();
 try {
   await driver.get(url);
-  await driver.wait(until.elementLocated(By.id("ov-start")), 25000);
-  await driver.findElement(By.id("ov-start")).click();   // real gesture → AudioContext resumes
-  await driver.wait(until.elementLocated(By.id("pulp-ui-canvas")), 25000);
-  await driver.sleep(6000);
-  const rect = await driver.executeScript(() => {
-    const c = document.getElementById("pulp-ui-canvas"); const r = c.getBoundingClientRect();
-    return { x: r.left, y: r.top, w: r.width, h: r.height };
+  // START: a WebDriver .click() on #ov-start (or #overlay, where start() is bound) does
+  // NOT fire start() in safaridriver — the overlay never hides. A trusted KEYPRESS does:
+  // focus the play button and send Enter, which its keydown handler routes to start()
+  // (and a WebDriver keypress is a user gesture, so AudioContext.resume() is allowed).
+  const ov = await driver.wait(until.elementLocated(By.id("ov-start")), 25000);
+  await ov.click().catch(() => {});
+  await ov.sendKeys(Key.RETURN).catch(async () => { await ov.sendKeys(" ").catch(() => {}); });
+  // Cold mount: DSP + WCLAP + WebGPU bring-up + a multi-MB UI wasm. Allow generous time.
+  await driver.wait(until.elementLocated(By.id("pulp-ui-canvas")), 45000);
+  await driver.sleep(5000);
+  // ENGAGE THE GPU ENGINE by setting the param directly — NOT by clicking the canvas
+  // chip. The editor uses a design-viewport transform (pinned/letterboxed), so canvas
+  // CSS coords do not map to the chip's rect and the click misses. window.__player.setParam
+  // wraps the adapter's setParameterValue; the Engine param id comes from window.__demo.params.
+  const set = await driver.executeScript(() => {
+    const ps = (window.__demo && window.__demo.params) || [];
+    const eng = ps.find((p) => /engine/i.test(p.name || p.label || ""));
+    if (!eng || !window.__player) return { ok: false };
+    window.__player.setParam(eng.id, eng.max != null ? eng.max : 1);
+    return { ok: true, id: eng.id };
   });
-  // Engage the GPU engine: real click on the top-right engine chip.
-  const chipX = Math.round(rect.x + rect.w - 100), chipY = Math.round(rect.y + 30);
-  await driver.actions({ async: true }).move({ x: chipX, y: chipY, origin: Origin.VIEWPORT }).click().perform();
+  if (!set.ok) console.log(`${url}\n  could not set Engine=GPU (no param / no __player)`);
   await driver.sleep(4000);
   const s0 = await driver.executeScript(() => window.__gpuStats || null);
   await driver.sleep(secs * 1000);
   const s1 = await driver.executeScript(() => window.__gpuStats || null);
-  if (!s0 || !s1) { console.log(`${url}\n  window.__gpuStats null — GPU lane not producing (chip miss? blocked?)`); }
+  if (!s0 || !s1) { console.log(`${url}\n  window.__gpuStats null — GPU lane not producing (engine not set? blocked?)`); }
   else {
     const dP = (s1.produced || 0) - (s0.produced || 0), dM = (s1.miss || 0) - (s0.miss || 0), t = dP + dM;
+    // appliedLatency / recommendedDepth exist on the adaptive-depth build; harmless when absent.
+    const adaptive = s1.appliedLatency != null ? `  appliedDepth=${s1.appliedLatency}  recommended=${s1.recommendedDepth}` : "";
     console.log(`${url}`);
-    console.log(`  produced=${dP}  missed=${dM}  missRate=${t ? (dM / t * 100).toFixed(1) : "0.0"}%  roundTrip=${Math.round(s1.avgBlockUs || 0)}µs  gpuNsLast=${s1.gpuNsLast || 0}`);
+    console.log(`  produced=${dP}  missed=${dM}  missRate=${t ? (dM / t * 100).toFixed(1) : "0.0"}%  roundTrip=${Math.round(s1.avgBlockUs || 0)}µs  gpuNsLast=${s1.gpuNsLast || 0}${adaptive}`);
   }
 } finally {
   await driver.quit();
