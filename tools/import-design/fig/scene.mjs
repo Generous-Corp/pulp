@@ -5,7 +5,16 @@
 // (`tools/figma-plugin/schema/figma-plugin-export-v1.json`), so a decoded frame
 // flows through the existing `--from figma-plugin` importer unchanged.
 
+import { geometryToPath } from './paths.mjs';
+
 const FRAME_LIKE = new Set(['FRAME', 'COMPONENT', 'INSTANCE', 'COMPONENT_SET']);
+
+// Node types whose shape lives in `fillGeometry`/`strokeGeometry` rather than in
+// a box model. Rectangles and ellipses are deliberately NOT here: they already
+// round-trip as styled boxes (background + border-radius), which stays crisp at
+// any scale and remains themeable, so lowering them to baked paths would be a
+// regression rather than a fix.
+const VECTOR_LIKE = new Set(['VECTOR', 'STAR', 'REGULAR_POLYGON', 'BOOLEAN_OPERATION', 'LINE']);
 
 function guidKey(g) {
   return g ? `${g.sessionID}:${g.localID}` : null;
@@ -38,7 +47,10 @@ export function buildScene(message) {
     });
   }
   const pages = nodeChanges.filter((n) => n.type === 'CANVAS' && !n.internalOnly);
-  return { byGuid, childrenOf, pages };
+  // Vector geometry lives in the root message's `blobs`, referenced by index
+  // from each node's fillGeometry/strokeGeometry, so the scene has to carry it
+  // for materializeFrame to resolve a shape.
+  return { byGuid, childrenOf, pages, blobs: nodeChanges.length ? message.blobs || [] : [] };
 }
 
 /**
@@ -179,9 +191,119 @@ function colorToHex(color) {
 // job is purely structural — geometry, style, text, and assets — so a node's
 // name flows through untouched for the importer to classify.
 
+// ── component-instance expansion ─────────────────────────────────────────────
+//
+// An INSTANCE node has no children in the scene graph. Its content is its
+// master SYMBOL's subtree, customised by two per-instance override lists:
+//
+//   symbolData.symbolOverrides — designer-authored property overrides
+//     (visible, fillPaints, textData.characters, fontSize, effects, …)
+//   derivedSymbolData          — Figma-computed per-node layout for THIS
+//     instance (size, transform, fillGeometry/strokeGeometry, derivedTextData)
+//
+// Both lists key each entry by `guidPath.guids`. A path element does NOT name
+// the subtree node's own guid directly: when a symbol is duplicated or synced
+// from a library, its children get fresh guids but keep an `overrideKey` field
+// pointing at the guid the overrides were written against. So an element
+// resolves to the subtree node whose guid OR overrideKey matches. A multi-
+// element path scopes through nested instances: the first element names a
+// nested INSTANCE inside the master, and the rest applies within THAT
+// instance's own expansion — so those entries are forwarded down, with outer
+// (user-set) entries applied after the nested instance's authored ones.
+
+// Keys an entry must never copy onto a node: identity/topology, the override
+// machinery itself, and style-id refs the decoder does not resolve.
+const OVERRIDE_SKIP_KEYS = new Set([
+  'guidPath', 'guid', 'parentIndex', 'type', 'phase',
+  'symbolData', 'derivedSymbolData', 'derivedSymbolDataLayoutVersion',
+  'overrideKey', 'overrideLevel', 'componentKey', 'componentPropAssignments',
+  'variableConsumptionMap', 'parameterConsumptionMap', 'prototypeInteractions',
+  'styleIdForFill', 'styleIdForStrokeFill', 'styleIdForText', 'fontVersion',
+  'derivedTextData',
+]);
+
+// Props an instance inherits from its master when it doesn't set them itself —
+// the auto-layout contract its expanded children flow under, plus the visuals
+// Figma stores only on the master.
+const SYMBOL_INHERITED_KEYS = [
+  'stackMode', 'stackSpacing', 'stackPadding',
+  'stackHorizontalPadding', 'stackVerticalPadding',
+  'stackPaddingRight', 'stackPaddingBottom',
+  'stackPrimaryAlignItems', 'stackCounterAlignItems',
+  'stackPrimarySizing', 'stackCounterSizing',
+  'fillPaints', 'strokePaints', 'strokeWeight', 'strokeAlign',
+  'cornerRadius', 'rectangleCornerRadiiIndependent',
+  'rectangleTopLeftCornerRadius', 'rectangleTopRightCornerRadius',
+  'rectangleBottomLeftCornerRadius', 'rectangleBottomRightCornerRadius',
+];
+
+function applyOverrideEntry(clone, entry) {
+  // A derived size that shrinks the node scales its stroke weight with it —
+  // Figma renders a scaled-down nested instance with proportionally thinner
+  // strokes, so keeping the master's weight would fatten every outline.
+  const dsize = entry.size;
+  if (dsize && clone.size && typeof clone.strokeWeight === 'number'
+      && clone.size.x && clone.size.y) {
+    const scale = Math.min(dsize.x / clone.size.x, dsize.y / clone.size.y);
+    if (scale < 0.99) clone.strokeWeight = round2(clone.strokeWeight * scale);
+  }
+  for (const [k, v] of Object.entries(entry)) {
+    if (v === undefined || OVERRIDE_SKIP_KEYS.has(k)) continue;
+    clone[k] = v;
+  }
+  // derivedTextData is layout output (glyph runs), not content; it only stands
+  // in for textData when it actually carries the characters.
+  const dtd = entry.derivedTextData;
+  if (dtd && typeof dtd.characters === 'string') clone.textData = dtd;
+}
+
 function firstSolidFill(node) {
   const paints = node.fillPaints || [];
   return paints.find((p) => p.type === 'SOLID' && p.visible !== false) || null;
+}
+
+function firstGradient(paints) {
+  return (paints || []).find(
+    (p) => typeof p.type === 'string' && p.type.startsWith('GRADIENT') && p.visible !== false,
+  ) || null;
+}
+
+/**
+ * A single representative colour for a paint list, for consumers that can only
+ * express a solid fill.
+ *
+ * A gradient collapses to the mean of its stops. That is a real approximation,
+ * not a fidelity claim — but it is the difference between a shape reading as
+ * roughly the right colour and reading as a black hole, because SvgPathWidget
+ * defaults `fill_color_` to opaque black with `has_fill_` on. Returns null when
+ * no colour can be derived, which the caller must lower to an explicit
+ * `fill: 'none'` rather than leaving the widget on its black default.
+ */
+function approximatePaintColor(paints) {
+  const solid = (paints || []).find((p) => p.type === 'SOLID' && p.visible !== false);
+  if (solid) {
+    return colorToHex({ ...solid.color, a: (solid.color?.a ?? 1) * (solid.opacity ?? 1) });
+  }
+  const grad = firstGradient(paints);
+  if (grad && Array.isArray(grad.stops) && grad.stops.length) {
+    const n = grad.stops.length;
+    const sum = grad.stops.reduce(
+      (acc, s) => ({
+        r: acc.r + (s.color?.r ?? 0),
+        g: acc.g + (s.color?.g ?? 0),
+        b: acc.b + (s.color?.b ?? 0),
+        a: acc.a + (s.color?.a ?? 1),
+      }),
+      { r: 0, g: 0, b: 0, a: 0 },
+    );
+    return colorToHex({
+      r: sum.r / n,
+      g: sum.g / n,
+      b: sum.b / n,
+      a: (sum.a / n) * (grad.opacity ?? 1),
+    });
+  }
+  return null;
 }
 
 function firstImageFill(node) {
@@ -220,18 +342,53 @@ export function materializeFrame(scene, frame, ctx) {
     });
   }
 
-  function styleFor(node) {
+  // `parent` decides whether this node's own coordinates matter. A Figma frame
+  // with `stackMode` is auto-layout: its children FLOW, so their transforms are
+  // layout output, not input, and emitting them would fight the flex pass. A
+  // plain frame positions every child absolutely — that is the common case for
+  // hand-designed plugin UIs, and dropping those coordinates collapses the whole
+  // design into the parent's content origin.
+  function styleFor(node, parent) {
     const style = {};
     if (node.size) {
       style.width = Math.round(node.size.x);
       style.height = Math.round(node.size.y);
     }
+
+    // Absolute placement from the node's affine transform. m02/m12 are the
+    // translation column — frame-relative x/y, exactly what left/top want.
+    // `stackPositioning === 'ABSOLUTE'` opts a child out of its parent's
+    // auto-layout, so it is absolute even inside a flex parent.
+    const parentIsAutoLayout =
+      parent && (parent.stackMode === 'HORIZONTAL' || parent.stackMode === 'VERTICAL');
+    const optedOut = node.stackPositioning === 'ABSOLUTE';
+    if (parent && node.transform && (!parentIsAutoLayout || optedOut)) {
+      const x = node.transform.m02;
+      const y = node.transform.m12;
+      if (typeof x === 'number' && typeof y === 'number') {
+        style.position = 'absolute';
+        style.left = Math.round(x);
+        style.top = Math.round(y);
+      }
+    }
     // On a TEXT node the solid fill is the glyph color, applied as `color` in the
     // text branch — not a background.
-    const solid = node.type === 'TEXT' ? null : firstSolidFill(node);
-    if (solid) {
-      const hex = colorToHex({ ...solid.color, a: (solid.color?.a ?? 1) * (solid.opacity ?? 1) });
+    //
+    // A GRADIENT fill counts. Reading only the solid fill dropped every
+    // gradient-filled box on the floor: Figma's `knob base` is an ELLIPSE with a
+    // GRADIENT_LINEAR body, so it arrived with no fill at all and fell back to an
+    // empty frame — the mystery square behind every knob. The same drop is why a
+    // near-white gradient panel imported as a dark hole. `background_color` can
+    // only carry one colour, so a gradient collapses to the mean of its stops:
+    // an honest approximation (diagnosed below), and far closer than nothing.
+    // Real multi-stop gradients need a paint-server lowering — tracked separately.
+    if (node.type !== 'TEXT') {
+      const hex = approximatePaintColor(node.fillPaints);
       if (hex) style.background_color = hex;
+      if (!firstSolidFill(node) && firstGradient(node.fillPaints)) {
+        pushDiag('gradient-approximated', node,
+                 `${node.type} gradient fill flattened to its mean stop colour`);
+      }
     }
     const image = firstImageFill(node);
     let assetRef = null;
@@ -268,21 +425,194 @@ export function materializeFrame(scene, frame, ctx) {
     return {};
   }
 
+  // Clone the master subtree for one instance, applying every override entry
+  // whose (resolved) guidPath lands on a node, and forwarding deeper-scoped
+  // entries into nested INSTANCE clones via `__overrides`. Clones carry a
+  // synthetic `__key` (instance-path–prefixed) so two instances of the same
+  // master never collide in the walk's cycle guard, and `__children` so the
+  // walk descends the clone tree instead of the (empty) scene graph.
+  function cloneSymbolChildren(origParentKey, prefix, entries) {
+    const out = [];
+    for (const orig of scene.childrenOf.get(origParentKey) || []) {
+      const clone = { ...orig };
+      clone.__key = `${prefix}/${guidKey(orig.guid)}`;
+      const own = guidKey(orig.guid);
+      const alias = guidKey(orig.overrideKey);
+      const forwarded = [];
+      for (const e of entries) {
+        const guids = e.guidPath?.guids || [];
+        if (!guids.length) continue;
+        const head = guidKey(guids[0]);
+        if (head !== own && head !== alias) continue;
+        if (guids.length === 1) applyOverrideEntry(clone, e);
+        else forwarded.push({ ...e, guidPath: { guids: guids.slice(1) } });
+      }
+      // Overrides first, visibility second: a master may hide a variant part
+      // that the instance turns on (or vice versa), so only the post-override
+      // state decides whether the node exists in this instance.
+      if (clone.visible === false) continue;
+      if (forwarded.length) clone.__overrides = [...(clone.__overrides || []), ...forwarded];
+      clone.__children = cloneSymbolChildren(own, clone.__key, entries);
+      out.push(clone);
+    }
+    return out;
+  }
+
+  // Symbols currently being expanded, so a symbol that (via nesting) contains
+  // an instance of itself cannot recurse without bound.
+  const expandStack = [];
+
+  function expandInstance(inst) {
+    const masterKey = guidKey(inst.symbolData?.symbolID);
+    const master = masterKey ? scene.byGuid.get(masterKey) : null;
+    if (!master) {
+      if (masterKey) {
+        pushDiag('external-component', inst,
+          `master ${masterKey} not in file; instance kept as a plain box`);
+      }
+      return null;
+    }
+    if (expandStack.includes(masterKey)) return null;
+    const instKey = inst.__key || guidKey(inst.guid);
+    // Outer-scoped entries (from an enclosing instance) go LAST: a value the
+    // user set on the outermost instance beats the nested component's own
+    // authored default for the same node — that is the value Figma renders.
+    const entries = [
+      ...(inst.symbolData?.symbolOverrides || []),
+      ...(inst.derivedSymbolData || []),
+      ...(inst.__overrides || []),
+    ];
+    const merged = { ...inst, __key: instKey, __masterKey: masterKey };
+    for (const k of SYMBOL_INHERITED_KEYS) {
+      if (merged[k] === undefined && master[k] !== undefined) merged[k] = master[k];
+    }
+    merged.__children = cloneSymbolChildren(masterKey, instKey, entries);
+    return merged;
+  }
+
   const walked = new Set();
-  function walk(node) {
-    const key = guidKey(node.guid);
+  function walk(node, parent) {
+    // Hidden layers do not render in Figma; emitting them would paint hidden
+    // variant parts and label slots over the visible design.
+    if (node.visible === false) return null;
+    if (node.type === 'INSTANCE') {
+      const expanded = expandInstance(node);
+      if (expanded) node = expanded;
+    }
+    const key = node.__key || guidKey(node.guid);
     // Guard against a malformed graph whose parentIndex links form a cycle; a
     // node reached twice would otherwise recurse without bound.
     if (walked.has(key)) return null;
     walked.add(key);
     const type = node.type;
-    if (type === 'VECTOR' || type === 'STAR' || type === 'REGULAR_POLYGON' || type === 'BOOLEAN_OPERATION') {
-      pushDiag('vector-simplified', node, `${type} emitted as a plain box`);
-    }
-    const { style, assetRef } = styleFor(node);
+    const { style, assetRef } = styleFor(node, parent);
     const out = { type: envelopeType(type), name: node.name || '', style };
 
     if (assetRef) out.asset_ref = assetRef;
+
+    // Expanded component content must never be name-guessed into a built-in
+    // widget — a layer named "knob base" IS the designer's knob art, and
+    // promoting it would paint Pulp's stock knob over the design. An explicit
+    // audio_widget "none" opts the node out of the importer's name heuristic
+    // while leaving the component-identity resolver in charge: the instance
+    // carries its master's key below, so a matched library component still
+    // becomes a real widget through that path.
+    if (node.__masterKey || expandStack.length) out.audio_widget = 'none';
+    if (node.__masterKey) {
+      const master = scene.byGuid.get(node.__masterKey);
+      const figma = {};
+      if (typeof master.componentKey === 'string' && master.componentKey) {
+        figma.component_key = master.componentKey;
+      }
+      if (master.name) figma.main_component_name = master.name;
+      if (Object.keys(figma).length) out.figma = figma;
+    }
+
+    // Vector geometry → SVG path data. `path_data` + `viewBox` + fill/stroke is
+    // the contract design_ir_json already reads (it lowers any vector-kind node
+    // carrying path-data to a native SvgPathWidget), so resolving the shape here
+    // is the whole fix — nothing downstream needs to change.
+    let vectorResolved = false;
+    if (VECTOR_LIKE.has(type)) {
+      let resolved = null;
+      let failure = null;
+      try {
+        resolved = geometryToPath(node, scene.blobs || []);
+        if (!resolved) failure = 'no resolvable geometry';
+      } catch (err) {
+        // A blob we cannot parse is worth surfacing loudly: it means this file
+        // uses a command encoding the decoder does not know, and every shape
+        // sharing that blob will be missing rather than merely approximated.
+        failure = `geometry unreadable: ${err.message}`;
+      }
+      if (failure) pushDiag('vector-simplified', node, `${type} ${failure}; emitted as a plain box`);
+      if (resolved) {
+        vectorResolved = true;
+        out.type = 'vector';
+        out.path_data = resolved.d;
+        out.viewBox = `0 0 ${round2(resolved.box.width)} ${round2(resolved.box.height)}`;
+        // The path is already baked into parent space (transform included), so
+        // an absolutely-placed vector is positioned by its own bounds, which
+        // supersede the left/top styleFor derived from the transform: a mirrored
+        // or rotated shape's bounds are not its translation column, and a stroke
+        // outline overhangs the node box by half the stroke weight.
+        //
+        // Only when styleFor already chose absolute. A vector flowing inside an
+        // auto-layout parent must keep flowing — pinning it here would yank it
+        // out of the flex pass that is supposed to place it.
+        if (style.position === 'absolute') {
+          style.left = round2(resolved.box.minX);
+          style.top = round2(resolved.box.minY);
+        }
+        style.width = round2(resolved.box.width);
+        style.height = round2(resolved.box.height);
+        // A stroke outline is a fillable region, so it is painted as a fill in
+        // the stroke's colour. Re-stroking it would outline the outline.
+        const paints = resolved.paint === 'fill' ? node.fillPaints : node.strokePaints;
+        const hex = approximatePaintColor(paints);
+        // Always emit a fill, including the explicit 'none'. SvgPathWidget
+        // defaults to opaque black, so staying silent about an unknown paint
+        // renders a black silhouette — strictly worse than the plain box this
+        // lane used to emit, and the one way this change could regress a file.
+        out.fill = hex || 'none';
+        if (!hex && firstGradient(paints)) {
+          pushDiag('gradient-approximated', node, `${type} gradient has no stops; fill cleared`);
+        } else if (hex && firstGradient(paints)) {
+          pushDiag('gradient-approximated', node, `${type} gradient flattened to its mean stop colour`);
+        }
+        delete style.background_color;
+        if (resolved.droppedStroke) {
+          pushDiag('vector-simplified', node, `${type} stroke dropped: fill and stroke cannot both render on one path`);
+        }
+      }
+    }
+
+    // PROTOTYPE: an INSTANCE has no children in the scene graph — its content
+    // lives in the SYMBOL master, and the per-instance text is carried as a
+    // `symbolOverrides[].textData.characters` entry keyed by guidPath. A knob
+    // component's caption is exactly one such override, so lifting it onto
+    // `label` feeds the existing audio_label path (design_ir_json.cpp:949 →
+    // design_codegen.cpp:655 / text_for_node in design_import_native_common).
+    // A component can nest a label slot inside another label slot (the fx knob
+    // wraps a plain knob, and BOTH carry a caption). Figma keys each override by
+    // guidPath, whose LENGTH is the slot's depth in the expanded symbol tree.
+    // The shallow slot is the hidden one (`0:82 visible=false`); the deep slot is
+    // the rendered caption. So the deepest override wins — taking the first would
+    // caption 12 of 45 knobs "threshold" instead of Attack/Ratio/Release.
+    if (type === 'INSTANCE') {
+      let best = null;
+      let bestDepth = -1;
+      for (const ov of node.symbolData?.symbolOverrides || []) {
+        const chars = ov.textData && ov.textData.characters;
+        if (typeof chars !== 'string' || !chars.length) continue;
+        const depth = (ov.guidPath?.guids || []).length;
+        if (depth > bestDepth) {
+          bestDepth = depth;
+          best = chars;
+        }
+      }
+      if (best !== null) out.label = best;
+    }
 
     if (type === 'TEXT') {
       out.type = 'text';
@@ -291,7 +621,11 @@ export function materializeFrame(scene, frame, ctx) {
         : typeof node.characters === 'string'
           ? node.characters
           : '';
-      out.text = characters;
+      // `content` is the canonical key: parse_ir_node reads `content`
+      // (design_ir_json.cpp) and the IR writer emits `content`. Emitting
+      // `text` here meant every string in every .fig import was silently
+      // discarded — labels arrived empty and Yoga measured width=nan.
+      out.content = characters;
       Object.assign(out.style, fontToken(node));
       if (node.textAlignHorizontal) out.style.text_align = node.textAlignHorizontal.toLowerCase();
       const solid = firstSolidFill(node);
@@ -308,7 +642,19 @@ export function materializeFrame(scene, frame, ctx) {
       if (s) out.style.border = `${Math.round(node.strokeWeight)}px solid ${colorToHex(s.color)}`;
     }
 
-    const kids = (scene.childrenOf.get(key) || []).map(walk).filter(Boolean);
+    // A resolved vector is terminal. Figma already flattened the operands into
+    // the geometry we just emitted, so a BOOLEAN_OPERATION's children are the
+    // pre-union inputs — emitting them too would draw the shape twice, once
+    // unioned and once as its raw parts. Codegen's path branch is likewise
+    // terminal, so not descending keeps the two lanes agreeing.
+    let kids = [];
+    if (!vectorResolved) {
+      if (node.__masterKey) expandStack.push(node.__masterKey);
+      kids = (node.__children || scene.childrenOf.get(key) || [])
+        .map((c) => walk(c, node))
+        .filter(Boolean);
+      if (node.__masterKey) expandStack.pop();
+    }
     if (kids.length) out.children = kids;
     return out;
   }
