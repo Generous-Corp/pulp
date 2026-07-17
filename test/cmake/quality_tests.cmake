@@ -72,6 +72,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME pr-check-triage-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_pr_check_triage.py")
 
+    # Format-baseline diff: exit-code routing (skip vs fail vs diff) and the
+    # --diag-dir contract that copies captured validator output out of the temp
+    # dir before it is deleted. Runs the validators nowhere — the capture
+    # subprocess is mocked — so it needs no plugin bundles or macOS validators.
+    add_test(NAME format-baseline-diff-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_format_baseline_diff.py")
+
     # Version-at-land (T1.1): single-writer version assignment from Version-Bump
     # intent trailers. Pure aggregate_intent / plan_assignments logic (the bot
     # is dry-run only at this stage).
