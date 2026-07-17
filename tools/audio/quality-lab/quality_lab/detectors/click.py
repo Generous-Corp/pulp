@@ -20,9 +20,9 @@ not. So:
 > discontinuity at the same phase. The oscillator's own previous period is the frozen
 > reference.**
 
-That last sentence is the whole design. The plan's rewrite of this gate asks for the
-residual against "a reference render with the morph parameter frozen"; for a
-reference-free analyzer the preceding period *is* that frozen render, and it comes
+That last sentence is the whole design. The textbook way to find a click is to diff
+against a reference render with the offending parameter held frozen; for a
+reference-free analyzer the preceding period *is* that frozen render, and it arrives
 free with the signal.
 
 Concretely:
@@ -50,7 +50,7 @@ coupling worth stating: **this detector's floor on a given oscillator is bounded
 that oscillator's own alias level.** It measures clicks on top of a bandlimited
 oscillator; on an aliasing one, the alias analyzer is the gate that applies.
 
-### Why the residual is band-limited (§2.1's band-qualification, applied here)
+### Why the residual is band-limited
 
 Measured, not assumed: with the full band the floor sits at **-30 dB** — useless. The
 cause is the interpolator's error on harmonics within a few percent of Nyquist, where
@@ -61,8 +61,9 @@ drops to about **-60 dB or better**. A step is broadband with a 1/f tail, so
 discarding the top of the band costs the detector almost none of its signal.
 
 The gate this feeds must therefore be stated as: *unexpected discontinuity energy
-below 0.8 x Nyquist*. Naming the band is the point — an unqualified "no clicks" claim
-read through this measurement would be exactly the silent pass §2.8 warns about.
+below 0.8 x Nyquist*. Naming the band is the point: a gate that passes because the
+measurement could not see the failure is the worst kind, since it is silent, and an
+unqualified "no clicks" claim read through a band-limited measurement is exactly that.
 
 ## What this rule cannot see
 
@@ -74,11 +75,24 @@ than no gate. Each of these is measured by a test in `tests/test_click.py`:
   enough to hear plainly — reads -229 dB, i.e. perfectly invisible. The same glitch one
   sample off-period reads -22 dB. This is not a tuning problem; it is what the rule
   means, and it is the price of not firing on square edges.
-* **A pitch that moves during the render** — glide, vibrato, portamento, FM — breaks
-  the periodicity premise outright. 1 cent of glide reads -28 dB on a clean
-  oscillator. This is REFUSED rather than reported, via `period_drift` (see `detect`),
-  because `period_confidence` does not catch it: a glide correlates at ~1.000 one
-  period on. The detector is for steady-pitch renders and says so instead of guessing.
+* **A defect locked to a MULTIPLE of the period, when no `f0_hint` is given.** Period
+  doubling — alternate cycles differing, an audible f0/2 subharmonic — is a real
+  oscillator defect, but unaided it is not even ill-posed, it is genuinely the same
+  signal as "an oscillator whose period is 2P". Nothing in the waveform distinguishes
+  them, so the unaided path reads it clean. With `f0_hint` the caller has named the
+  commanded period and the ambiguity disappears, so the hint path DOES catch it
+  (`analyze` fits the hint directly and never searches multiples). Pass `f0_hint` when
+  gating; the unaided path is a convenience.
+* **A pitch that moves FAST — vibrato above a few Hz, audio-rate FM — is NOT caught,
+  and produces a confident false positive.** Slow movement (glide, slow vibrato) is
+  refused via `period_drift`; fast movement defeats it, because the guard fits the
+  period on segments and a segment averages over any modulation cycle it contains.
+  Vibrato of 0.08 cents at 40 Hz reads -43.7 dB — a false positive on a CLEAN
+  oscillator — while scoring a drift of 8.6e-6, below the clean fixtures' own worst.
+  No threshold separates that; see `detect` for the measured sweep. **This detector
+  gates steady-pitch renders. It cannot gate a modulated one, and it cannot reliably
+  detect that it is being handed one.** A caller measuring VCO drift or TZFM needs a
+  different instrument.
 * **Content above 0.8 x Nyquist**, per the band qualification above.
 
 Two things that might be expected to be blind spots, but measure otherwise: a defect
@@ -87,18 +101,26 @@ SUBTRACTS the edge rather than thresholding around it, so the edge does not mask
 anything), and a hard-sync reset does not need special-casing — fitting the period
 finds the master period on its own.
 
-## Why not spectral flux
+## Why not spectral flux, and what is still missing
 
-§2.4 offers "or a spectral-flux outlier detector" as an equivalent route. It is a real
-contender — a steady oscillator's magnitude spectrum does not change at its own edges,
-so flux does not false-fire on a square (+2.9 dB against a +12 dB rule), it catches a
-one-shot seam to about -40 dB, and it is immune to the drift case above. But it has a
-structural hole: a block-rate parameter zipper is STATIONARY churn, so it lifts the
-median along with every hop and produces no outlier at any magnitude — a -20 dB zipper
-reads +2.6 dB, indistinguishable from a clean square. The residual route covers all
-four defect classes and reads in physical units (the step's height), so it is the
-primary; flux remains a genuine complement precisely where this rule refuses.
+A spectral-flux outlier rule (per-hop flux, flag hops exceeding median + 12 dB) is a
+real contender, not a straw man. A steady oscillator's magnitude spectrum does not
+change at its own edges, so flux does not false-fire on a square (+2.9 dB against a
++12 dB rule); it catches a one-shot seam to about -40 dB; and it is immune to the
+moving-pitch problem that defeats this detector. But it has a structural hole of its
+own: a block-rate parameter zipper is STATIONARY churn, so it lifts the median along
+with every hop and produces no outlier at any magnitude — a -20 dB zipper reads
++2.6 dB, indistinguishable from a clean square. The residual route covers all four
+defect classes and reads in physical units (the step's height), so it is the primary.
 `tests/test_click.py` pins both halves of that comparison.
+
+**The gap that leaves is real and NOT covered by anything shipped here.** Flux would
+complement this detector exactly where it is weakest — moving pitch — but no
+reference-free flux-outlier detector exists in this package; the registry's
+`spectral_flux` is a pairwise reference/candidate detector and does not apply. So a
+defect on a modulated render is caught by nothing: this rule false-fires or refuses,
+and there is no second opinion. Moving-pitch coverage is future work, and until it
+lands the honest scope of this module is steady-pitch renders only.
 """
 from __future__ import annotations
 
@@ -124,6 +146,12 @@ _DELAY_BETA = 13.0
 
 # YIN dip threshold for the no-hint period seed.
 _YIN_THRESHOLD = 0.15
+
+# Segment counts the drift guard fits the period on. Sharing no common factor is the
+# point: a segmentation cannot see a modulation whose cycle count across the render is
+# an exact multiple of its segment count, so two counts must alias simultaneously to
+# hide one. See `measure_period_drift`.
+_DRIFT_SEGMENT_COUNTS = (4, 7)
 
 # How much worse than the best a shorter candidate period may score and still win in
 # `_resolve_period`. Chosen from the measured gap, not derived: across the fixtures a
@@ -300,11 +328,15 @@ def fit_period(y: np.ndarray, seed: float, guard: int, span: float = 0.75, tol: 
 def _resolve_period(y: np.ndarray, seed: float, guard: int, max_multiple: int = 4) -> float:
     """The shortest period that actually EXPLAINS the signal, searching seed multiples.
 
-    A seed can land on a period the signal only *nearly* repeats at, and the failure is
-    silent: under hard sync with a near-integer slave:master ratio (661/220 = 3.005) the
-    reset is almost a no-op, so YIN dips at the SLAVE period. Fitting there nulls
-    nothing, and the leftover sync discontinuity reads as a -10 dB click — at a
-    confidence of 0.992. A confident false positive on a clean oscillator.
+    ONLY for an unaided seed. A caller who supplies `f0_hint` has stated the commanded
+    period, and searching multiples of it is not just unnecessary but actively wrong —
+    see `analyze`.
+
+    An unaided seed can land on a period the signal only *nearly* repeats at, and the
+    failure is silent: under hard sync with a near-integer slave:master ratio
+    (661/220 = 3.005) the reset is almost a no-op, so YIN dips at the SLAVE period.
+    Fitting there nulls nothing, and the leftover sync discontinuity reads as a -10 dB
+    click — at a confidence of 0.992. A confident false positive on a clean oscillator.
 
     So: fit at each multiple of the seed and keep the SHORTEST whose residual is within
     `_MULTIPLE_MARGIN` of the best. Shortest-within-margin, not simply best, because a
@@ -333,45 +365,75 @@ def _resolve_period(y: np.ndarray, seed: float, guard: int, max_multiple: int = 
     return fits[int(np.argmin(scores))]
 
 
-def measure_period_drift(y: np.ndarray, seed: float, guard: int) -> float:
-    """Relative period difference between the first and second half of `y`.
+def _segment_spread(y: np.ndarray, seed: float, count: int) -> float | None:
+    """Max-minus-min of the period fitted independently on `count` equal segments,
+    relative to their mean. `None` when the segments are too short to fit."""
+    length = len(y) // count
+    # A period ESTIMATE only needs the comb to have data to chew on (one period plus the
+    # interpolation kernel); it does not need the 2-period run-up the FLOOR measurement
+    # guards with. Using the smaller guard here is what lets a low-frequency render be
+    # segmented at all.
+    guard = int(np.ceil(seed)) + _DELAY_TAPS
+    if length <= 2 * guard + 16:
+        return None
+    fits = [fit_period(y[i * length : (i + 1) * length], seed, guard) for i in range(count)]
+    mean = float(np.mean(fits))
+    return (max(fits) - min(fits)) / mean if mean > 1e-12 else 0.0
 
-    The premise of the whole rule is a STEADY period, and `period_confidence` does not
+
+def measure_period_drift(y: np.ndarray, seed: float, guard: int) -> float:
+    """How much the fitted period MOVES across the render, relative to its mean.
+
+    The premise of the whole rule is a steady period, and `period_confidence` does not
     police it: a 1-cent glide still correlates at ~1.000 one period on, yet reads as a
     -28 dB click. Confidence answers "is this periodic at all", which is the wrong
-    question — a glide is locally periodic and globally not.
+    question — modulated pitch is locally periodic and globally not.
 
-    Fitting the period on each half and comparing answers the right one. On the clean
-    fixtures this is exactly 0.0; a 0.5-cent glide reads 1.4e-4. That gap is what lets
-    a drifting render be REFUSED rather than silently reported as clicky.
+    Fitting on several segments and taking the max PAIRWISE spread answers the right
+    one. Two halves is not enough, and the failure is silent: two halves measure NET
+    drift, so any symmetric modulation — vibrato, FM — averages to nearly zero and sails
+    through: vibrato of +/-0.5 cents at 6.67 Hz measures a NET drift of 2.8e-09 while
+    reading -27.4 dB — a confident false positive on a clean oscillator, which is the
+    worst failure this detector can have.
+
+    Why more than one segment COUNT: a segmentation is blind to a modulation whose cycle
+    count across the render is an exact multiple of the segment count, because then every
+    segment averages the same value. That is precisely what happened above — 2 vibrato
+    cycles over 2 halves. Using counts that share no factor pushes the blind case to
+    modulation rates that need to alias against BOTH, which for a 0.3 s render lands near
+    93 Hz — far above vibrato, though NOT above audio-rate FM. See the module docstring.
+
+    Returns NaN when no segmentation fits (a render too short to measure steadiness).
+    Returning 0.0 there would assert steadiness that was never measured.
     """
-    half = len(y) // 2
-    if half <= 2 * guard + 16:
-        # Too short to fit each half independently. Returning 0.0 would assert
-        # steadiness that was never measured — the silent pass this guard exists to
-        # prevent. NaN fails the caller's comparison and refuses the reading instead.
-        return float("nan")
-    first = fit_period(y[:half], seed, guard)
-    second = fit_period(y[half:], seed, guard)
-    mean = (first + second) / 2.0
-    return abs(second - first) / mean if mean > 1e-12 else 0.0
+    spreads = [s for s in (_segment_spread(y, seed, c) for c in _DRIFT_SEGMENT_COUNTS) if s is not None]
+    return max(spreads) if spreads else float("nan")
 
 
 def analyze(y: np.ndarray, sr: int, f0_hint: float | None = None) -> ClickAnalysis:
     """Measure the largest period-unexpected discontinuity in `y`."""
     y = np.asarray(y, dtype=np.float64)
-    peak = float(np.max(np.abs(y))) if len(y) else 0.0
+    # Peak of the AC content: a DC offset raises max|y| without raising any
+    # discontinuity, so including it silently shrinks every reading. At +2.0 DC a -40 dB
+    # seam read -50.0 and did not fire. The scale must be the waveform's, not the rail's.
+    peak = float(np.max(np.abs(y - np.mean(y)))) if len(y) else 0.0
     seed, confidence = seed_period_samples(y, sr, f0_hint)
     guard = int(np.ceil(2 * seed)) + _DELAY_TAPS
     if peak <= 1e-12 or seed < 2.0 or len(y) < 2 * guard + 16:
         return ClickAnalysis(-np.inf, 0.0, seed, confidence, 0.0, np.zeros(len(y)))
 
-    period = _resolve_period(y, seed, guard)
+    # A hint is the COMMANDED period, so it is fitted directly. Searching its multiples
+    # would be worse than pointless: a period-doubling defect (alternate cycles
+    # differing — an audible f0/2 subharmonic) makes the true period score badly, so the
+    # search adopts 2P/3P/4P and nulls the defect away. A -20 dB glitch on every second
+    # period read -236.7 dB and PASSED CLEAN. A signal that only repeats at a multiple of
+    # the commanded period deserves to read dirty, and only the hint can say so.
+    period = fit_period(y, seed, guard) if f0_hint else _resolve_period(y, seed, guard)
     # The guard must follow the period actually used, not the seed. When the seed is the
     # slave period and the resolved period is a multiple of it, a seed-sized guard is
     # too small: the comb's first valid output moves out with the period, and reading
-    # inside that leaves start-up transient in the measurement. It read as an -8 dB
-    # worse floor on hard sync — a false positive's worth, from an off-by-one guard.
+    # inside that leaves start-up transient in the measurement — worth ~8 dB of floor on
+    # hard sync, which is a false positive's worth.
     guard = int(np.ceil(2 * period)) + _DELAY_TAPS
     if len(y) < 2 * guard + 16:
         return ClickAnalysis(-np.inf, 0.0, period, confidence, float("nan"), np.zeros(len(y)))
@@ -413,19 +475,33 @@ def detect(
     * `period_confidence` below `min_period_confidence` — no period at all, so the rule
       has no premise.
     * `period_drift` above `max_period_drift` — the pitch moves during the render.
-      This one is not fussiness: an oscillator gliding by as little as 1 cent reads
-      -28 dB, well above any useful threshold, and `period_confidence` stays at 1.000
-      throughout. Without this guard the detector reports a confident false positive on
-      a perfectly clean oscillator. The clean fixtures measure exactly 0.0 drift.
+      Not fussiness: an oscillator gliding by as little as 1 cent reads -28 dB, and
+      `period_confidence` stays at 1.000 throughout. Without this guard the detector
+      reports a confident false positive on a perfectly clean oscillator. The clean
+      fixtures measure below 7e-6.
 
-    `max_period_drift=3e-5` is measured, and the window it sits in is NARROW — worth
-    knowing before retuning it. The guard cannot distinguish a drifting pitch from a
-    strong aperiodic component, because both make the two halves fit different periods.
-    So the ceiling is set by the mildest glide that would false-fire (0.15 cents, drift
-    4.3e-5) and the floor by the loudest defect that must still be reported (a -20 dB
-    block-rate zipper, drift 1.9e-5). 3e-5 is geometrically centred between them, about
-    1.5x clear on each side. Loosening it past 4.3e-5 lets glide false-fire; tightening
-    it below 1.9e-5 turns a loud zipper into a refusal.
+    `max_period_drift=3e-5` is a measured trade with no clean answer, and the shape of
+    the trade matters more than the number. The guard cannot distinguish a moving pitch
+    from an interfering component: both make a segment fit a different period. So every
+    real defect strong enough to disturb the fit competes with every modulation mild
+    enough to be worth refusing, and tightening the guard buys fewer false positives at
+    the cost of refusing real defects. Sweeping the guard over the fixtures:
+
+        guard    false positives through    real defects refused
+        1.0e-5           1/41                      6/21
+        1.5e-5           1/41                      5/21
+        3.0e-5           3/41                      2/21
+        5.0e-5           5/41                      1/21
+        1.5e-4          16/41                      0/21
+
+    Chasing the false-positive count to zero is not on the menu at ANY setting — see the
+    fast-modulation blind spot in the module docstring — so the tightest settings pay
+    real coverage for almost nothing. 3e-5 is where the curve turns: it sits 4.5x above
+    the worst steady-clean fixture (6.6e-6), and the three false positives that leak are
+    all vibrato of 0.15 cents or less at 25 Hz or faster, reading 1-3 dB over threshold.
+    Its cost is precise: a -20 dBFS block-rate zipper (drift 8.9e-5) is REFUSED rather
+    than diagnosed. The gate still does not pass it, and quieter zippers — nearer the
+    detector's actual sensitivity — score proportionally lower and ARE reported.
 
     A refusal is not a pass. `low_coverage` means "not proven clean", and a caller that
     reads it as clean has reintroduced the silent pass this all exists to prevent.
