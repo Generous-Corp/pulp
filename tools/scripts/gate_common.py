@@ -76,18 +76,39 @@ def _parse_trailer_block(body: str) -> dict[str, list[str]]:
     return result
 
 
-def git_range_trailers(base: str, head: str) -> dict[str, list[str]]:
+def git_range_trailers(
+    base: str, head: str, *, no_merges: bool = False, cwd: "str | Path | None" = None
+) -> dict[str, list[str]]:
     """Collect trailers from every commit in ``base..head``, merged.
 
     CI checks out a synthetic merge commit as HEAD, so a bypass trailer
     on the branch's tip commit wouldn't be seen if we only looked at
     HEAD. Walk the whole range — any commit in the range carries the
     bypass.
+
+    ``no_merges`` (opt-in, default off to preserve every existing caller
+    verbatim) drops merge commits from the walk. A caller that treats a
+    ``Version-Bump: <surface>=<level>`` value as an AUTHORED release
+    *intent* must use it: a "Merge origin/main into <branch>" re-sync
+    commit (2+ parents) can carry a stale intent trailer that was never
+    meant to declare this range's release, and honoring it would silently
+    escalate the version. A PR's real intent lives on its own non-merge
+    commits (or the squash commit, which has a single parent), so
+    ``--no-merges`` keeps every genuine declaration while excluding the
+    re-sync noise.
+
+    ``cwd`` runs the walk in that directory (default: the process cwd), so a
+    caller operating on a repo other than its own working directory reads the
+    right history.
     """
+    cmd = ["git", "log", "--format=%B%x00"]
+    if no_merges:
+        cmd.append("--no-merges")
+    cmd.append(f"{base}..{head}")
     try:
         body = subprocess.run(
-            ["git", "log", "--format=%B%x00", f"{base}..{head}"],
-            check=True, capture_output=True, text=True,
+            cmd, check=True, capture_output=True, text=True,
+            cwd=str(cwd) if cwd is not None else None,
         ).stdout
     except subprocess.CalledProcessError:
         return {}

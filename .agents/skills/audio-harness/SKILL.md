@@ -873,17 +873,28 @@ segment (harmonic-comb energy within a margin of the best) AND carries real ener
 at its OWN fundamental tooth. That own-tooth test is load-bearing — explained
 energy alone cannot tell f0 from f0/N (a near-pure tone lets any subharmonic refine
 one of its harmonics onto the tone), and only the TRUE root has a partial sitting
-at the root itself (`kFundamentalFloor` separates a genuine faint fundamental,
-~0.6% of the loudest partial for an 8%-amplitude f0, from the noise/leakage floor
-< 0.1%). Do NOT "fix" a wrong octave by lowering that floor — it re-opens the
-octave trap. **One honest residual, NOT a refusal:** a genuine missing-fundamental
-comb (energy only at 2·f0/3·f0, nothing at f0) has no tooth at f0 to lock, so the
-estimate stays on the loudest PRESENT partial (2·f0) — the frequency actually
-there, never a fabricated virtual f0. It reports voiced at the real partial; it
-does not fail closed. (Regression fixed 2026-07: a 5th-harmonic-dominant signal
-read +2786 cents at conf 0.775 and an 8%-fundamental locked an octave up at conf
-0.994 because the old guard stopped at coarse/4 and gated on an unproven fixed 10%
-amplitude cliff.)
+at the root itself. **The tooth floor is LEAKAGE-AWARE, and it has to be:** a fixed
+floor is defeated by rectangular-window LSQ leakage from the loud coarse peak into
+the f0/2 fit, and that leakage GROWS as the analysis window shortens (energy ~
+`(1/(π·Δf·T))²`). With a fixed floor a plain bass saw over the DEFAULT window holds
+only a handful of periods and reads a confident octave (or two) DOWN — the ordinary
+case, worse than the octave-up it was meant to fix. So a candidate's tooth must
+clear `max(absolute-noise-floor, expected coarse-peak leakage at its Δf over this
+window)`; a genuine fundamental far below a loud harmonic (Δf large) or over a long
+window (T large) still clears it, a leaky saw subharmonic over a few-period window
+does not. Corollary: **a genuinely faint fundamental is not resolvable below the
+leakage floor at a short window — use a longer analysis window** (the DCO/VCO
+quantization/drift fixtures already do, n≈2^15) rather than trusting a low bass note
+over a 4096-sample frame. Do NOT "fix" a wrong octave by lowering the floor — it
+re-opens the octave trap. **One honest residual, NOT a refusal:** a genuine
+missing-fundamental comb (energy only at 2·f0/3·f0, nothing at f0) has no tooth at
+f0 to lock, so the estimate stays on the loudest PRESENT partial (2·f0) — the
+frequency actually there, never a fabricated virtual f0; likewise the descent stops
+at coarse/8, so a 9th-harmonic-dominant signal (rare) reports a lower harmonic.
+Both return a real present frequency, never fail closed. (Regressions fixed
+2026-07: octave-UP on harmonic-dominant material — old guard stopped at coarse/4 on
+a fixed 10% cliff; then octave-DOWN on a plain short-window saw — fixed-floor
+leakage, closed with the leakage-aware floor above.)
 
 ## Never gate on `detection_floor_db`
 

@@ -186,8 +186,10 @@ public:
 
     // ── Level vs pitch ─────────────────────────────────────────────────────
     /// Output level tilt, in dB per octave relative to `kLevelReferenceHz`.
-    /// 0 is flat (exact bypass); negative rolls the top off, as an analog VCO's
-    /// output buffer does. Independent of the core-reset sag below.
+    /// 0 is flat (exact bypass); POSITIVE rolls the top off (gain
+    /// `10^(-tilt·octaves/20)`, so a note an octave above the reference loses
+    /// `tilt` dB), as an analog VCO's output buffer does; negative lifts it.
+    /// Independent of the core-reset sag below.
     void set_level_tilt(double db_per_octave) noexcept { level_tilt_db_per_octave_ = db_per_octave; }
     double level_tilt() const noexcept { return level_tilt_db_per_octave_; }
 

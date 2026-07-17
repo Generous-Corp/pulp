@@ -365,6 +365,49 @@ TEST_CASE("OSC-WT note-on starts on the correct band — no aliased onset",
     CHECK(alias_bound_db(report) < -90.0);
 }
 
+TEST_CASE("OSC-WT set_wavetable_set re-arms the band snap — no aliased onset on a "
+          "live swap",
+          "[signal][osc][wt]") {
+    // Same aliased-onset failure as a fresh note, but reached by swapping the
+    // wavetable set mid-note (a UI bank change): the new bank starts on its default
+    // 440 Hz low band with nothing audible to fade FROM, so without re-arming the
+    // band snap the next sample crossfades UP from that dense low band at the live
+    // high pitch — an aliased onset. `set_wavetable_set` must snap like `reset()`.
+    WtOscillator osc = make_saw_osc();
+    const double f0 = 2600.0;
+    const double inc = f0 / kSampleRate;
+
+    osc.reset();
+    // Play long enough to consume the reset() snap and settle on the real band.
+    for (int i = 0; i < 2000; ++i) (void)osc.next(inc);
+
+    // Swap in a fresh (default-band) set mid-note.
+    std::vector<Wavetable64> fresh;
+    fresh.push_back(Wavetable64::make_saw(10, 2048, kSampleRate));
+    osc.set_wavetable_set(std::move(fresh));
+
+    std::vector<double> out(static_cast<std::size_t>(kAliasRenderLength));
+    for (int i = 0; i < kAliasRenderLength; ++i)
+        out[static_cast<std::size_t>(i)] = osc.next(inc);
+
+    pulp::audio::Buffer<float> buffer(1, kAliasRenderLength);
+    for (int i = 0; i < kAliasRenderLength; ++i)
+        buffer.channel(0)[i] = static_cast<float>(out[static_cast<std::size_t>(i)]);
+    AliasOptions options;
+    options.num_harmonics = harmonics_for(f0);
+    options.analysis_offset = 0; // include the swap onset — that is the point.
+    options.analysis_length = kAliasRenderLength;
+    options.max_alias_frequency_hz = kBandHz;
+    const auto report =
+        measure_aliasing(std::as_const(buffer).view(), f0, kSampleRate, options);
+
+    require_trustworthy(report);
+    INFO("live-swap onset worst in-band alias " << alias_bound_db(report) << " dBc");
+    // Without the re-arm this reads the aliased default-band crossfade (~-70 dBc);
+    // the snap keeps it far below audibility.
+    CHECK(alias_bound_db(report) < -90.0);
+}
+
 // ── The band-switch seam is click-free ─────────────────────────────────────
 
 TEST_CASE("OSC-WT band switch is click-free", "[signal][osc][wt]") {
