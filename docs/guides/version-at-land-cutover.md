@@ -113,18 +113,41 @@ tag instead of main HEAD.
 3. **Apply the one-time straggler rule** (below) to any PR that is already
    in flight and still carries a bump commit.
 
-4. **Flip the gate to accept intent.** In
-   `.github/workflows/version-skill-check.yml`, add `--accept-intent-trailers`
-   to the `version_bump_check.py` invocation, and switch Shipyard / `pulp pr`
+4. **Flip the gate to accept intent — SWAP the flag, do not add it.** In
+   `.github/workflows/version-skill-check.yml`, replace the conditional
+   `--require-bump-for-fix-feat` (lines ~117-120) with `--accept-intent-trailers`
+   on the `version_bump_check.py` invocation, and switch Shipyard / `pulp pr`
    to emit `Version-Bump: <surface>=<level>` trailers instead of applying
-   file bumps. (Surface bump levels are already derived by
-   `version_bump_check`'s heuristic; the change is "declare, don't write".)
+   file bumps. **Do not pass both flags:** `--require-bump-for-fix-feat` runs a
+   separate `check_fix_feat_requires_bump()` that accepts only a `chore: bump
+   versions` commit or a `Version-Bump: skip` trailer — never a positive intent
+   — so the two flags FAIL CLOSED on exactly the intent-only PR shape this model
+   produces. `--accept-intent-trailers` alone loses no coverage (a touched
+   surface with no bump/intent/skip still hard-fails). Locked in by
+   `test_version_bump_intent.py::test_combined_flags_fail_closed`. (Surface bump
+   levels are already derived by `version_bump_check`'s heuristic; the change is
+   "declare, don't write".)
 
 5. **Flip `version-at-land.yml` to `--push`** — the one-line diff in the
    GO/NO-GO section. Give the job `contents: write`, add the SSH-signing
    step (as `post-tag-sync.yml` does), and add a recursion guard is NOT
    needed (the `Version-Bump-Applied` marker makes the bot's own commit a
-   no-op drain).
+   no-op drain). **The workflow has NO `paths:` filter** — it runs on every
+   push to `main`. A filter is a silent-loss hole: a fix/feat touching only a
+   surface path the filter omits (e.g. `experimental/pulp-rs/**`) would declare
+   intent, merge, never trigger the bot, and — since the stranded detector
+   treats pending intent as covered — never alarm. An empty-range push is a
+   cheap no-op, so correctness wins. The **pending-intent liveness alarm**
+   (`.github/workflows/pending-intent-liveness.yml` +
+   `tools/scripts/pending_intent_liveness.py`) is the time-based backstop: it
+   pages if a positive intent stays unapplied past a grace window, catching a
+   disabled/failed bot, a bot-permission failure, or an exhausted `--ff-only`
+   retry — the whole "X exists, Y never arrives, detector quiet" class.
+
+   **Coalescing (accepted behavior):** two merges landing in the same drain
+   window are assigned together in ONE `chore: bump versions` commit and ONE
+   tag covering both. That delivers every change but is not one-tag-per-merge;
+   it is safe and intended.
 
 6. **Teach the stranded detector.** In the `Stranded fix/feat detector` step
    of `.github/workflows/auto-release.yml`, export
@@ -170,6 +193,15 @@ remove `--accept-intent-trailers` from `version-skill-check.yml`; remove the
 Shipyard to file-bump. Reverting leaves the bot in dry-run — safe. Any PR
 already merged intent-only during the live window keeps its bot-assigned bump;
 no data is lost by rolling back.
+
+**One caveat — do not declare rollback complete with a pending intent
+outstanding.** If a fix/feat merged intent-only (commit X) but the bot never
+assigned its number (commit Y never landed — a mid-flight failure is the reason
+you are rolling back), simply reverting the workflows to dry-run STRANDS X: no
+bump, no tag, and the dry-run bot will not retry. Before reverting, drain the
+outstanding range with one `version_at_land.py --push` (or hand-apply the bump
+per the stranded-fix recovery recipe in `auto-release.yml`). The pending-intent
+liveness alarm names exactly which surfaces are outstanding.
 
 ## GO / NO-GO checklist for the `--push` flip
 
