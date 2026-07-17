@@ -1290,3 +1290,93 @@ TEST_CASE("parse_param_binding_manifest_json reads a node-id → key object",
     auto arr = parse_param_binding_manifest_json(R"(["10:1"])", &err);
     REQUIRE_FALSE(arr.has_value());
 }
+
+// ── interactive_element `kind`: the wire contract ────────────────────────────
+
+TEST_CASE("every interactive kind survives the wire round-trip",
+          "[view][import][ir-v1]") {
+    // The IR reader maps an UNRECOGNIZED kind to `knob`. That makes a kind
+    // dropped from (or misspelled in) interactive_kind_from_id indistinguishable
+    // from a working import at the type level: a real control quietly becomes a
+    // knob. The existing round-trip case pins three kinds; the coercion applies
+    // to all of them, so pin the whole enum. Extend this list when the enum
+    // grows — a new kind that serializes but does not parse lands here.
+    // The wire id is spelled out rather than read back from the writer, so a
+    // rename that changes BOTH sides in step still fails here — the string is
+    // the cross-tool contract (the Figma plugin's schema and the REST exporter
+    // emit it), not an internal detail.
+    const struct { InteractiveElementKind kind; const char* wire; } kAll[] = {
+        {InteractiveElementKind::knob, "knob"},
+        {InteractiveElementKind::fader, "fader"},
+        {InteractiveElementKind::toggle, "toggle"},
+        {InteractiveElementKind::dropdown, "dropdown"},
+        {InteractiveElementKind::text_field, "text_field"},
+        {InteractiveElementKind::tab_group, "tab_group"},
+        {InteractiveElementKind::stepper, "stepper"},
+        {InteractiveElementKind::swap, "swap"},
+        {InteractiveElementKind::action, "action"},
+        {InteractiveElementKind::xy_pad, "xy_pad"},
+        {InteractiveElementKind::value_label, "value_label"},
+        {InteractiveElementKind::custom, "custom"},
+    };
+
+    for (const auto& [kind, wire] : kAll) {
+        DesignIR ir;
+        ir.source = DesignSource::figma;
+        ir.root.type = "frame";
+        ir.root.render_mode = NodeRenderMode::faithful_svg;
+        ir.root.svg_asset_id = "asset-svg";
+
+        IRInteractiveElement el;
+        el.kind = kind;
+        el.x = 10; el.y = 20; el.w = 30; el.h = 40;
+        el.source_node_id = "1:1";
+        ir.root.interactive_elements.push_back(el);
+
+        // Named in the failure message, since `kind` is an opaque int here.
+        INFO("kind wire id: " << wire);
+        const auto canonical = serialize_design_ir(ir);
+        // The kind reached the wire under its documented id...
+        CHECK(canonical.find(std::string("\"kind\":\"") + wire + "\"") != std::string::npos);
+        // ...and came back as itself, not as a coerced knob.
+        const auto parsed = parse_design_ir_json(canonical);
+        REQUIRE(parsed.root.interactive_elements.size() == 1);
+        CHECK(parsed.root.interactive_elements[0].kind == kind);
+    }
+}
+
+TEST_CASE("an unrecognized interactive kind degrades to knob rather than failing the load",
+          "[view][import][ir-v1]") {
+    // Deliberate, and deliberately NOT symmetric with the annotated-capture
+    // tool, which hard-errors on an unknown kind. The tool AUTHORS the IR, so
+    // refusing bad input costs one re-run. This is the RUNTIME reader, which
+    // may be handed a file written by a newer importer: hard-failing here would
+    // drop a whole design because one element used a kind this build predates.
+    // The element is not accepted silently — parse_ir_interactive_element logs
+    // the unknown kind and its source node — but the load survives.
+    // Built from the serializer and then retagged, so the envelope is exactly
+    // the shape the reader expects and `kind` is the only unusual thing in it.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "asset-svg";
+    IRInteractiveElement el;
+    el.kind = InteractiveElementKind::fader;   // a real kind, retagged below
+    el.x = 10; el.y = 20; el.w = 30; el.h = 40;
+    el.source_node_id = "1:1";
+    ir.root.interactive_elements.push_back(el);
+
+    std::string json = serialize_design_ir(ir);
+    const auto at = json.find("\"kind\":\"fader\"");
+    REQUIRE(at != std::string::npos);
+    json.replace(at, std::string("\"kind\":\"fader\"").size(),
+                 "\"kind\":\"holographic_slider\"");
+
+    const auto parsed = parse_design_ir_json(json);
+    REQUIRE(parsed.root.interactive_elements.size() == 1);
+    CHECK(parsed.root.interactive_elements[0].kind == InteractiveElementKind::knob);
+    // The geometry still lands, so the fallback renders where the design put it.
+    CHECK(parsed.root.interactive_elements[0].x == 10);
+    CHECK(parsed.root.interactive_elements[0].w == 30);
+}
