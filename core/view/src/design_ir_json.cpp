@@ -701,6 +701,40 @@ static void snap_absolute_siblings_under_shadow(IRNode& node) {
 // containing four knob frames) is a container. Skipped when the source already
 // set an explicit audio_widget.
 static void detect_node_audio_widget(IRNode& node, bool explicit_audio_widget) {
+    // A control-named node's childless children are its ART LAYERS, not more
+    // controls. A designer's knob is a frame named "sound / knob / small
+    // unipolar" holding "knob base" / "knob indicator" / "knob ring" — every one
+    // of those tokenizes to {knob, …} and matched the name heuristic, so ONE
+    // designer knob promoted to THREE stacked built-in knobs, each painting
+    // Pulp's stock 'silver' skin over the art it was supposed to be.
+    //
+    // The .fig decoder already refuses this for component instances
+    // (scene.mjs: `audio_widget = 'none'` when expanding), on the stated grounds
+    // that "a layer named 'knob base' IS the designer's knob art". That guard
+    // only reaches expanded instances; a DETACHED knob — a plain frame with the
+    // same art — walked straight past it. The rule belongs here instead, where
+    // every lane's detection converges: a design authored in Claude with a layer
+    // named "knob base" hit the same heuristic by the same route.
+    //
+    // Runs here because children are parsed before their parent, so by the time
+    // a parent is examined its children already carry their own detection.
+    //
+    // Childless is the test that separates a layer from a control: a real knob
+    // nested in a "KnobRow" brings art of its own, so it keeps its promotion.
+    // The cost is a bare, childless frame named "Knob" inside a control-named
+    // parent, which now renders as the empty frame it is instead of a stock
+    // knob. That is the trade this repo already makes for every instance in
+    // every design, and it is the safe direction: a missed promotion leaves the
+    // designer's art intact and is recoverable through the recognition manifest,
+    // while a wrong one paints over the design and is not.
+    if (const auto kind = detect_audio_widget(node.name); kind != AudioWidgetType::none) {
+        for (auto& child : node.children) {
+            if (!child.children.empty()) continue;
+            if (child.audio_widget != kind) continue;
+            child.audio_widget = AudioWidgetType::none;
+        }
+    }
+
     auto detected = explicit_audio_widget ? AudioWidgetType::none
                                           : detect_audio_widget(node.name);
     if (detected == AudioWidgetType::none && !node.type.empty() && !explicit_audio_widget)
