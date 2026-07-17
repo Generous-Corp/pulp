@@ -1002,20 +1002,43 @@ test('stop alpha and paint opacity both fold into the emitted colour', () => {
   assert.match(css, /#ffffff00/, `the transparent end must stay transparent, got: ${css}`);
 });
 
-test('a radial gradient keeps flattening, and keeps saying so', () => {
-  // parse_svg_linear_gradient matches on the literal `linear-gradient(`, so a
-  // radial paint has no lowering. Emitting one anyway would silently paint the
-  // wrong gradient; the honest mean + warning is the correct behaviour.
-  const scene = gradientScene({
+test('a radial gradient paints on the BOX branch, and still flattens on the vector one', () => {
+  // Which gradient kinds are expressible depends on the CONSUMER, and this test
+  // used to assert "radial must not claim a gradient" for both. That was true of
+  // parse_svg_linear_gradient (svg_path_widget.cpp:157, literal `linear-gradient(`
+  // only) and FALSE of setBackgroundGradient, which parses radial end to end
+  // (css_gradient.cpp:192 → View::set_background_gradient_radial → all three
+  // canvases). The test encoded a deferral as a requirement, so it passed
+  // happily while the design's 167x119 xy-pad vignette flattened to a uniform
+  // wash — a visible loss, on a capability we already had.
+  const paint = {
     type: 'GRADIENT_RADIAL', visible: true, opacity: 1,
     transform: TOP_TO_BOTTOM, stops: WHITE_TO_BLACK,
-  });
-  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
-  const shape = findByName(envelope.root, 'Shape');
-  assert.equal(shape.style.background_gradient, undefined, 'radial must not claim a gradient');
-  assert.equal(shape.style.background_color, '#808080', 'radial falls back to the mean');
-  assert.ok(diagnostics.some((d) => d.code === 'gradient-approximated'),
-            'an approximation must be diagnosed');
+  };
+
+  // Box branch: an ELLIPSE/rect lowers to a background, which CAN paint radial.
+  const box = gradientScene(paint);
+  const boxOut = materializeFrame(box, findFrame(box, 'Root'), CTX_MIN);
+  const shape = findByName(boxOut.envelope.root, 'Shape');
+  assert.match(shape.style.background_gradient ?? '', /^radial-gradient\(circle at /,
+               'a box paints the radial rather than flattening it');
+  assert.equal(shape.style.background_color, undefined,
+               'and must not ALSO carry a solid, or the box paints under the ramp');
+  // Still a loss: the consumer's radial is a circle, Figma's may be an ellipse.
+  // A quieter approximation is still an approximation.
+  assert.ok(boxOut.diagnostics.some((d) => d.code === 'gradient-approximated'
+                                        && /circle/.test(d.detail || '')),
+            'the circle approximation must still be diagnosed');
+
+  // Vector branch: the SvgPath fill consumer parses linear ONLY, so a radial
+  // there must keep flattening — emitting one would paint nothing at all.
+  const vec = gradientScene(paint, { type: 'VECTOR' });
+  const vecOut = materializeFrame(vec, findFrame(vec, 'Root'), CTX_MIN);
+  const v = findByName(vecOut.envelope.root, 'Shape');
+  assert.equal(v.style?.background_gradient, undefined,
+               'a vector must not claim a radial its consumer cannot parse');
+  assert.ok(vecOut.diagnostics.some((d) => d.code === 'gradient-approximated'),
+            'and must say it flattened');
 });
 
 test('a single-stop gradient falls back rather than emitting a broken ramp', () => {

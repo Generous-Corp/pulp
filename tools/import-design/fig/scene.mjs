@@ -541,11 +541,26 @@ function sampleStops(stops, t) {
  * SvgPathWidget / setBackgroundGradient can paint, or null when the paint
  * cannot be expressed and the caller must fall back to the flattened mean.
  *
- * Only LINEAR is expressible: `parse_svg_linear_gradient`
- * (svg_path_widget.cpp) matches on the literal `linear-gradient(`, so a
- * RADIAL / ANGULAR / DIAMOND paint has no lowering and keeps its honest
- * `gradient-approximated` diagnostic rather than silently rendering as the
- * wrong gradient.
+ * WHICH KINDS ARE EXPRESSIBLE DEPENDS ON THE CONSUMER, and this comment used to
+ * get that wrong. It said "Only LINEAR is expressible" while naming
+ * setBackgroundGradient one line above as a consumer — and that consumer parses
+ * radial AND conic end to end: `apply_css_background_gradient` matches
+ * `radial-gradient(` (css_gradient.cpp:192) and `conic-gradient(` (:221), View
+ * paints them corner-radius-aware (view.cpp:563-568), and all three canvases
+ * implement the primitive. The claim was true only of the OTHER consumer
+ * (`parse_svg_linear_gradient`, svg_path_widget.cpp:157, which matches the
+ * literal `linear-gradient(` and nothing else).
+ *
+ * The cost of that sentence: the design's xy pad carries a 167x119 GRADIENT_RADIAL
+ * vignette that flattened to a uniform 12%-black wash instead of darkening at the
+ * edges — a visible loss, deferred on a capability we already had. Same error as
+ * concluding setSvgFillGradient did not exist from a grep that could not reach
+ * its subdirectory: the survey missed a consumer, not the code.
+ *
+ * So: LINEAR everywhere; RADIAL only where the box branch will paint it (a
+ * `background_gradient` on a frame/rect). DIAMOND and ANGULAR keep flattening —
+ * conic exists in the canvas but Figma's ANGULAR sweep origin needs verifying
+ * against a real file before claiming it, and no file in hand has one.
  *
  * Two corrections the obvious implementation gets wrong, both verified
  * against Figma's own export of this file rather than reasoned about:
@@ -565,6 +580,61 @@ function sampleStops(stops, t) {
  * the widget's line enters and leaves. That keeps the paint faithful without
  * depending on the widget and CSS agreeing about extent.
  */
+/**
+ * A Figma GRADIENT_RADIAL paint → a CSS `radial-gradient(...)` string.
+ *
+ * ONLY for the box branch (`style.background_gradient`): that consumer parses
+ * radial (css_gradient.cpp:192) and paints it corner-radius-aware. The SvgPath
+ * fill branch does NOT — `parse_svg_linear_gradient` matches the literal
+ * `linear-gradient(` — so callers on that path must keep flattening. Passing a
+ * radial string to the wrong consumer would silently render nothing.
+ *
+ * Figma's radial paint transform maps the unit circle onto an ellipse in the
+ * node's normalized box; the ramp runs from the centre out to radius 1. The
+ * consumer's radial is a CIRCLE with its radius a fraction of max(w,h), so an
+ * elliptical or rotated paint is APPROXIMATED — which is why the caller keeps a
+ * downgraded diagnostic instead of dropping it. Far closer than a flat wash: the
+ * design's xy-pad vignette darkens at the edges either way, which a uniform mean
+ * cannot do at all.
+ */
+function radialPaintToCss(paint, w, h) {
+  if (!paint || paint.type !== 'GRADIENT_RADIAL') return null;
+  const stops = (paint.stops || [])
+    .filter((s) => s && s.color && typeof s.position === 'number')
+    .slice()
+    .sort((a, b) => a.position - b.position);
+  if (stops.length < 2) return null;
+  if (!(w > 0) || !(h > 0)) return null;
+
+  const inv = invertPaintTransform(paint.transform);
+  if (!inv) return null;
+  // Centre of the ramp, and the two radius vectors, in normalized box space.
+  const c = applyPaintTransform(inv, 0.5, 0.5);
+  const rx = applyPaintTransform(inv, 1.0, 0.5);
+  const ry = applyPaintTransform(inv, 0.5, 1.0);
+  // Radii in PIXELS — a normalized radius is wrong on any non-square box.
+  const r1 = Math.hypot((rx.x - c.x) * w, (rx.y - c.y) * h);
+  const r2 = Math.hypot((ry.x - c.x) * w, (ry.y - c.y) * h);
+  if (!(r1 > 0) && !(r2 > 0)) return null;
+  // The consumer takes ONE radius as a fraction of max(w,h). Average the two
+  // ellipse radii: it is the closest single circle to the designer's ellipse.
+  const radiusFrac = ((r1 + r2) / 2) / Math.max(w, h);
+  if (!Number.isFinite(radiusFrac) || radiusFrac <= 0) return null;
+
+  // Stop alpha and the paint's own opacity both fold into the emitted colour,
+  // exactly as the linear and solid paths do. This vignette is black at alpha
+  // 0..0.24 with paint opacity 0.24 — drop either and it becomes an opaque
+  // black disc instead of a shadow at the edges.
+  const opacity = paint.opacity ?? 1;
+  const parts = stops.map((s) => {
+    const hex = colorToHex({ ...s.color, a: (s.color.a ?? 1) * opacity });
+    return `${hex} ${round2(s.position * 100)}%`;
+  });
+  // `circle at X% Y%` — the shape keyword is what makes the parser read the
+  // position segment at all (css_gradient.cpp:199).
+  return `radial-gradient(circle at ${round2(c.x * 100)}% ${round2(c.y * 100)}%, ${parts.join(', ')})`;
+}
+
 function gradientPaintToCss(paint, w, h) {
   if (!paint || paint.type !== 'GRADIENT_LINEAR') return null;
   const stops = (paint.stops || [])
@@ -870,11 +940,30 @@ export function materializeFrame(scene, frame, ctx) {
     // approximation, and far closer than nothing.
     if (node.type !== 'TEXT') {
       const grad = firstGradient(node.fillPaints);
+      // The BOX branch, which paints via setBackgroundGradient — a consumer that
+      // parses radial as well as linear (css_gradient.cpp:192). Radial was
+      // deferred here on the claim that "only LINEAR is expressible", which was
+      // true of the SvgPath fill branch and false of this one; the design's
+      // 167x119 xy-pad vignette flattened to a uniform wash because of it.
+      // A radial may ONLY go to a node that will actually take the box branch.
+      // A VECTOR_LIKE node is re-lowered below to path_data + setSvgFill, whose
+      // consumer parses `linear-gradient(` and nothing else — handing it a
+      // radial paints NOTHING. A test caught exactly that leak here, which is
+      // the whole point of asserting per-consumer rather than per-kind.
+      const boxPainted = !VECTOR_LIKE.has(node.type);
       const css = firstSolidFill(node)
         ? null
-        : gradientPaintToCss(grad, style.width, style.height);
+        : (gradientPaintToCss(grad, style.width, style.height)
+           || (boxPainted ? radialPaintToCss(grad, style.width, style.height) : null));
       if (css) {
         style.background_gradient = css;
+        // A radial still loses something: the consumer's radial is a CIRCLE,
+        // and Figma's paint may be an ellipse or rotated. Say so — a quieter
+        // loss is still a loss, and this is the diagnostic that survives the fix.
+        if (grad && grad.type === 'GRADIENT_RADIAL') {
+          pushDiag('gradient-approximated', node,
+                   `${node.type} GRADIENT_RADIAL painted as a circle; an elliptical or rotated ramp is approximated`);
+        }
       } else {
         const hex = approximatePaintColor(node.fillPaints);
         if (hex) style.background_color = hex;
