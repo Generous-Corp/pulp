@@ -33,6 +33,7 @@ ViewBridge::ViewBridge(Processor& processor, state::StateStore& store, Options o
     : processor_(processor),
       store_(store),
       options_(options),
+      supports_editor_reload_(processor.supports_editor_reload()),
       size_hints_(safe_view_size(processor)) {
     width_ = size_hints_.preferred_width;
     height_ = size_hints_.preferred_height;
@@ -108,7 +109,14 @@ bool ViewBridge::open(std::string* error) {
 }
 
 bool ViewBridge::poll_editor_reload() {
-    if (!view_raw_ || !processor_.supports_editor_reload()) return false;
+    // supports_editor_reload() is a static property of the processor, cached at
+    // construction. The idle pump that calls this runs from the display link and
+    // can fire after the host has freed the Processor while the editor bridge is
+    // still alive (in AU the audio unit and the view controller have independent,
+    // host-ordered lifetimes) -- so the pump must never make a virtual call on
+    // processor_ for the common non-reload case. This crashed the AU embedded in
+    // Ableton Live: EXC_BAD_ACCESS in this call on a dangling processor_.
+    if (!view_raw_ || !supports_editor_reload_) return false;
     const uint64_t gen = processor_.editor_reload_generation();
     if (gen == last_reload_generation_) return false;
     // Consume the generation only on a SUCCESSFUL rebuild. If create_view()
