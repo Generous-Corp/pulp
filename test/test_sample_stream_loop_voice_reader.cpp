@@ -1,0 +1,249 @@
+#include <catch2/catch_test_macros.hpp>
+
+#include <pulp/audio/loop_renderer.hpp>
+#include <pulp/audio/sample_stream_loop_voice_reader.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
+
+#include "harness/rt_allocation_probe.hpp"
+
+#include <array>
+#include <cstdint>
+
+using namespace pulp::audio;
+
+namespace {
+
+struct LoopStreamFixture {
+    SampleStreamCacheService service;
+    Buffer<float> preload{1, 36};
+    Buffer<float> resident{1, 64};
+    SampleAsset asset;
+
+    LoopStreamFixture() {
+        REQUIRE(service.prepare({
+            .scheduler_capacity = 32,
+            .page_memory_budget_bytes = 7 * 4 * sizeof(float),
+        }));
+        const auto added = service.add_source(
+            {
+                .token = {200, 1},
+                .channels = 1,
+                .total_frames = 64,
+                .page_frames = 4,
+                .cache_page_count = 7,
+            },
+            [](std::uint64_t start, BufferView<float> destination,
+               std::uint64_t frames) {
+                for (std::uint64_t frame = 0; frame < frames; ++frame) {
+                    destination.channel_ptr(0)[frame] =
+                        static_cast<float>(((start + frame) * 37 + 11) % 101) / 53.0f - 1.0f;
+                }
+                return frames;
+            });
+        REQUIRE(added.added());
+        for (std::uint64_t frame = 0; frame < 64; ++frame) {
+            resident.channel(0)[frame] =
+                static_cast<float>((frame * 37 + 11) % 101) / 53.0f - 1.0f;
+            if (frame < 36) preload.channel(0)[frame] = resident.channel(0)[frame];
+        }
+        const SampleAssetConfig config{
+            .asset = {100, 1},
+            .source = {200, 1},
+            .channels = 1,
+            .total_frames = 64,
+            .sample_rate = 48000,
+            .preload_frames = 36,
+            .preload_contract = SamplePreloadContract{
+                .source_sample_rate = 48000.0,
+                .host_sample_rate = 48000.0,
+                .maximum_playback_ratio = 4.0,
+                .maximum_host_block_frames = 8,
+                .interpolation_guard_frames = 2,
+                .loop_prefetch_guard_frames = 0,
+                .configured_preload_frames = 36,
+            },
+            .stream_source = added.view,
+        };
+        REQUIRE(asset.prepare(config, preload.view()));
+    }
+
+    void publish_pages() {
+        for (std::uint64_t page = 9; page < 16; ++page) {
+            REQUIRE(service.request_page({
+                .source = {200, 1},
+                .requester = {900, 1},
+                .page_index = page,
+                .consumption_frames_per_second = 192000.0,
+            }) == SampleStreamScheduleStatus::Inserted);
+            REQUIRE(service.service_once() == SampleStreamServiceStatus::Published);
+        }
+    }
+};
+
+LoopRegion region(LoopPlaybackMode mode, bool reverse_entry = false) {
+    LoopRegion loop;
+    loop.start_frame = 0;
+    loop.end_frame = 64;
+    loop.crossfade_frames = mode == LoopPlaybackMode::Forward ||
+                                    mode == LoopPlaybackMode::Reverse
+        ? 8
+        : 0;
+    loop.source_sample_rate = 48000.0;
+    loop.playback_mode = mode;
+    loop.crossfade_curve = LoopCrossfadeCurve::EqualPower;
+    loop.interpolation = LoopInterpolationMode::Linear;
+    loop.reverse_entry = reverse_entry;
+    return loop;
+}
+
+void require_matches_resident(LoopPlaybackMode mode, bool reverse_entry) {
+    LoopStreamFixture fixture;
+    fixture.publish_pages();
+    const auto asset = fixture.asset.view();
+    const auto loop = region(mode, reverse_entry);
+
+    SampleStreamLoopVoiceReader streamed;
+    REQUIRE(streamed.prepare(asset, {1, 1}, loop, 4.0));
+    LoopRenderer resident;
+    REQUIRE(resident.set_region(loop, 64));
+    resident.set_playback_rate(4.0);
+    resident.start();
+
+    const std::array<const float*, 1> input_ptrs{fixture.resident.channel(0).data()};
+    BufferView<const float> input(input_ptrs.data(), 1, 64);
+    for (int block = 0; block < 5; ++block) {
+        Buffer<float> actual(1, 8);
+        Buffer<float> expected(1, 8);
+        const auto plan = streamed.plan_block(asset, 8, 48000.0);
+        REQUIRE(plan.supply == SampleStreamVoiceSupply::Ready);
+        const auto result = streamed.render_block(asset, plan, actual.view());
+        const auto reference = resident.render(input, expected.view(), 8);
+        REQUIRE(result.ready_output_frames == 8);
+        REQUIRE(result.supply == (reference.active
+            ? SampleStreamVoiceSupply::Ready
+            : SampleStreamVoiceSupply::EndOfSource));
+        for (std::size_t frame = 0; frame < 8; ++frame)
+            REQUIRE(actual.channel(0)[frame] == expected.channel(0)[frame]);
+        if (!reference.active) break;
+    }
+}
+
+}  // namespace
+
+TEST_CASE("Paged loop reader matches resident forward crossfade traversal",
+          "[audio][sampler][stream-loop]") {
+    require_matches_resident(LoopPlaybackMode::Forward, false);
+}
+
+TEST_CASE("Paged loop reader matches resident reverse crossfade traversal",
+          "[audio][sampler][stream-loop]") {
+    require_matches_resident(LoopPlaybackMode::Reverse, true);
+}
+
+TEST_CASE("Paged loop reader matches resident reverse one-shot traversal",
+          "[audio][sampler][stream-loop]") {
+    require_matches_resident(LoopPlaybackMode::ReverseOnce, true);
+}
+
+TEST_CASE("Paged loop reader snapshots missing crossfade pages and advances time",
+          "[audio][sampler][stream-loop][starvation]") {
+    LoopStreamFixture fixture;
+    const auto asset = fixture.asset.view();
+    const auto loop = region(LoopPlaybackMode::Reverse, true);
+    SampleStreamLoopVoiceReader reader;
+    REQUIRE(reader.prepare(asset, {1, 1}, loop, 4.0));
+
+    Buffer<float> output(1, 8);
+    const auto first = reader.plan_block(asset, 8, 48000.0);
+    REQUIRE(first.demand_count > 0);
+    const auto rendered = reader.render_block(asset, first, output.view());
+    REQUIRE(rendered.supply == SampleStreamVoiceSupply::Starved);
+    REQUIRE(rendered.ready_output_frames == 0);
+    REQUIRE(reader.cursor().position() == first.end_cursor.position());
+    for (std::size_t frame = 0; frame < output.num_samples(); ++frame)
+        REQUIRE(output.channel(0)[frame] == 0.0f);
+}
+
+TEST_CASE("Paged loop reader reports stale asset generations",
+          "[audio][sampler][stream-loop]") {
+    LoopStreamFixture fixture;
+    const auto asset = fixture.asset.view();
+    SampleStreamLoopVoiceReader reader;
+    REQUIRE(reader.prepare(asset, {1, 1}, region(LoopPlaybackMode::Forward), 1.0));
+
+    SampleAsset replacement;
+    REQUIRE(replacement.prepare(
+        SampleAssetConfig{
+            .asset = {101, 2},
+            .source = {200, 1},
+            .channels = 1,
+            .total_frames = 64,
+            .sample_rate = 48000,
+            .preload_frames = 36,
+            .preload_contract = SamplePreloadContract{
+                .source_sample_rate = 48000.0,
+                .host_sample_rate = 48000.0,
+                .maximum_playback_ratio = 4.0,
+                .maximum_host_block_frames = 8,
+                .interpolation_guard_frames = 2,
+                .configured_preload_frames = 36,
+            },
+            .stream_source = asset.stream_source,
+        },
+        fixture.preload.view()));
+    const auto stale = replacement.view();
+    const auto stale_plan = reader.plan_block(stale, 8, 48000.0);
+    REQUIRE(stale_plan.supply == SampleStreamVoiceSupply::StaleGeneration);
+
+    const auto plan = reader.plan_block(asset, 8, 48000.0);
+    Buffer<float> output(1, 8);
+    REQUIRE(reader.render_block(stale, plan, output.view()).supply ==
+            SampleStreamVoiceSupply::StaleGeneration);
+}
+
+TEST_CASE("Paged loop demand urgency includes accumulated lookahead lead",
+          "[audio][sampler][stream-loop]") {
+    LoopStreamFixture fixture;
+    const auto asset = fixture.asset.view();
+    SampleStreamLoopVoiceReader reader;
+    REQUIRE(reader.prepare(
+        asset, {1, 1}, region(LoopPlaybackMode::ReverseOnce, true), 1.0));
+    const auto far_plan = reader.plan_block(asset, 8, 48000.0);
+    REQUIRE(far_plan.demand_count > 0);
+
+    SampleStreamCommandInbox<32> inbox;
+    REQUIRE(reader.enqueue_demands(far_plan, inbox, 0, 100).complete);
+    REQUIRE(inbox.demand_page({
+                .source = asset.source,
+                .requester = {2, 1},
+                .page_index = 9,
+                .resident_source_frames = 1,
+                .consumption_frames_per_second = 48000.0,
+                .demand_class = SampleStreamDemandClass::Sustain,
+            }) == SampleStreamCommandPushStatus::Enqueued);
+    REQUIRE(fixture.service.drain_commands(inbox).commands_drained ==
+            far_plan.demand_count + 1);
+    REQUIRE(fixture.service.service_once() == SampleStreamServiceStatus::Published);
+    REQUIRE(asset.stream_source.window->ready_page_for_frame(
+                asset.source.source_generation, 36).valid);
+}
+
+TEST_CASE("Paged loop planning and rendering stay allocation-free for 10000 blocks",
+          "[audio][sampler][stream-loop][rt]") {
+    LoopStreamFixture fixture;
+    fixture.publish_pages();
+    const auto asset = fixture.asset.view();
+    SampleStreamLoopVoiceReader reader;
+    REQUIRE(reader.prepare(asset, {1, 1}, region(LoopPlaybackMode::Forward), 1.25));
+    SampleStreamCommandInbox<32> inbox;
+    Buffer<float> output(1, 8);
+
+    pulp::test::RtAllocationProbe allocation_probe;
+    pulp::runtime::ScopedNoAlloc no_alloc;
+    for (int block = 0; block < 10000; ++block) {
+        const auto plan = reader.plan_block(asset, 8, 48000.0);
+        (void) reader.enqueue_demands(plan, inbox);
+        (void) reader.render_block(asset, plan, output.view());
+    }
+    REQUIRE(allocation_probe.allocation_count() == 0);
+}

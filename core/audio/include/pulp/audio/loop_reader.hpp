@@ -9,6 +9,12 @@ namespace pulp::audio {
 
 class LoopReader {
 public:
+    /// Resolves an interpolation tap according to the traversal boundary:
+    /// bounded modes clamp, ping-pong reflects, and steady loops wrap.
+    static std::uint64_t source_frame_for_tap(const LoopRegion& region,
+                                              std::uint64_t source_frames,
+                                              std::int64_t signed_frame) noexcept;
+
     static double normalize_position(const LoopRegion& region,
                                      double position) noexcept;
 

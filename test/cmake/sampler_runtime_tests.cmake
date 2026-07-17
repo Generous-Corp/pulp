@@ -53,6 +53,11 @@ pulp_add_test_suite(pulp-test-sampler-loop-cursor-parity
     SOURCES test_sampler_loop_cursor_parity.cpp
             support/sampler_loop_parity.cpp
     LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sampler-paged-loop-oracle
+    SOURCES test_sampler_paged_loop_oracle.cpp
+            support/sampler_paged_loop_parity.cpp
+            support/sampler_loop_parity.cpp
+    LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-stream-service
     SOURCES test_sample_stream_service.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
@@ -64,6 +69,9 @@ pulp_add_test_suite(pulp-test-sample-stream-decode-pool
     LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-stream-voice-reader
     SOURCES test_sample_stream_voice_reader.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-stream-loop-voice-reader
+    SOURCES test_sample_stream_loop_voice_reader.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-asset LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-starvation-envelope

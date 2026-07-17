@@ -8,9 +8,10 @@ and call `pump_background()` explicitly.
 
 This is a narrow transport primitive, not Pulp's complete polyphonic sampler
 backend. It supports sequential one-shot playback and fully resident loops.
-Streamed loops, fractional/pitched reads, crossfade prefetch, multi-voice
-scheduling, a global memory governor, and starvation fades require the shared
-page-cache sampler service described in the sampler hardening plan.
+Fractional/pitched one-shots and forward/reverse crossfade loops use the shared
+page-cache sampler service described in the sampler hardening plan. Starvation
+gain shaping, sampler-owned mip assets, and broader product policy remain above
+this narrow sequential transport primitive.
 
 ## File-backed playback
 

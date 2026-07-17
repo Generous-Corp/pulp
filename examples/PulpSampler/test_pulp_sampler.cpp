@@ -26,10 +26,56 @@ struct PulpSamplerTestAccess {
         processor.streaming_.service_wake_.notify_all();
     }
 
+    static bool pause_stream_command_drain(
+        PulpSamplerProcessor& processor, bool paused) {
+        processor.streaming_.service_command_drain_paused_for_test_.store(
+            paused, std::memory_order_release);
+        processor.streaming_.service_wake_.notify_all();
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (processor.streaming_.service_command_drain_paused_ack_for_test_.load(
+                   std::memory_order_acquire) != paused &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::yield();
+        }
+        return processor.streaming_.service_command_drain_paused_ack_for_test_.load(
+                   std::memory_order_acquire) == paused;
+    }
+
+    static std::size_t fill_stream_command_inbox(
+        PulpSamplerProcessor& processor,
+        std::size_t remaining_capacity = 0) {
+        const auto published = processor.streaming_.published_source();
+        if (published.kind != SamplerPublishedSourceKind::Streamed ||
+            !published.streamed.valid()) {
+            return 0;
+        }
+        const auto& asset = published.streamed;
+        const auto capacity = processor.streaming_.commands_.telemetry().capacity;
+        const auto target = remaining_capacity < capacity
+            ? capacity - remaining_capacity
+            : 0;
+        std::size_t enqueued = 0;
+        while (processor.streaming_.commands_.telemetry().pending < target &&
+               processor.streaming_.commands_.demand_page({
+                   .source = asset.source,
+                   .requester = {0x7175657565, 1},
+                   .page_index = 0,
+                   .resident_source_frames = 0,
+                   .consumption_frames_per_second =
+                       static_cast<double>(asset.sample_rate),
+                   .demand_class = audio::SampleStreamDemandClass::Sustain,
+               }) == audio::SampleStreamCommandPushStatus::Enqueued) {
+            ++enqueued;
+        }
+        return enqueued;
+    }
+
     static void set_reverse_prewarm_timeout(
         PulpSamplerProcessor& processor,
         std::chrono::milliseconds timeout) {
-        processor.streaming_.reverse_prewarm_timeout_ = timeout;
+        processor.streaming_.reverse_prewarm_timeout_for_test_ = timeout;
+        processor.streaming_.reverse_prewarm_timeout_override_for_test_ = true;
     }
 
     static bool streamed_tail_page_ready(
@@ -43,6 +89,36 @@ struct PulpSamplerTestAccess {
         return stream.window->ready_page_for_frame(
             published.streamed.source.source_generation,
             published.streamed.total_frames - 1).valid;
+    }
+
+    static bool streamed_reverse_horizon_ready(
+        const PulpSamplerProcessor& processor) {
+        const auto published = processor.streaming_.published_source();
+        if (published.kind != SamplerPublishedSourceKind::Streamed ||
+            !published.streamed.valid() || published.streamed.total_frames == 0 ||
+            published.streamed.preload_frames == 0) {
+            return false;
+        }
+        const auto& asset = published.streamed;
+        const auto page_frames = asset.stream_source.page_frames;
+        const auto first_frame = asset.total_frames > asset.preload_frames
+            ? asset.total_frames - asset.preload_frames
+            : 0;
+        const auto first_page = first_frame / page_frames;
+        const auto last_page = (asset.total_frames - 1) / page_frames;
+        for (auto page = first_page; page <= last_page; ++page) {
+            const auto probe_frame = std::max(first_frame, page * page_frames);
+            if (!asset.stream_source.window->ready_page_for_frame(
+                    asset.source.source_generation, probe_frame).valid) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static void retire_reverse_attack_after_horizon(
+        PulpSamplerProcessor& processor) {
+        processor.retire_reverse_attack_after_horizon_for_test_ = true;
     }
 
     static SamplerPublishedSourceKind published_source_kind(
@@ -81,6 +157,96 @@ struct PulpSamplerTestAccess {
         return processor.streaming_.unpublished_rollback_count_for_test_.load(
             std::memory_order_acquire);
     }
+
+    static std::uint32_t worst_case_dual_region_page_demands(
+        const PulpSamplerProcessor& processor) {
+        const auto& streaming = processor.streaming_;
+        const auto source_frames = static_cast<std::uint64_t>(std::ceil(
+            static_cast<double>(streaming.maximum_host_block_frames_) *
+            SamplerStreamingRuntime::kMaximumPitchRatio *
+            SamplerStreamingRuntime::kMaximumSourceRate /
+            static_cast<double>(streaming.host_sample_rate_)));
+        const auto advance_pages =
+            (source_frames + streaming.page_frames_ - 1) /
+            streaming.page_frames_;
+        return SamplerStreamingRuntime::kCrossfadeReadRegionCount *
+               (static_cast<std::uint32_t>(advance_pages) +
+                SamplerStreamingRuntime::kBoundaryPageDemandsPerRegion);
+    }
+
+    static constexpr std::uint32_t fixed_voice_demand_capacity() {
+        return audio::kSampleStreamVoiceMaxPageDemands;
+    }
+
+    static constexpr std::uint32_t cache_pages_per_voice() {
+        return SamplerStreamingRuntime::kPagesPerVoiceWorkingSet;
+    }
+
+    static std::chrono::milliseconds reverse_prewarm_timeout_for_pages(
+        std::uint32_t page_count) {
+        return SamplerStreamingRuntime::reverse_prewarm_timeout_for_pages(
+            page_count);
+    }
+
+    static audio::SamplePreloadContract published_preload_contract(
+        const PulpSamplerProcessor& processor) {
+        return processor.streaming_.published_source().streamed.preload_contract;
+    }
+
+    static double active_streamed_position(
+        const PulpSamplerProcessor& processor) {
+        for (const auto& voice : processor.voices_) {
+            if (voice.active && voice.streamed)
+                return voice.stream_reader.cursor().position();
+        }
+        return -1.0;
+    }
+
+    static std::uint64_t lookahead_plans_last_callback(
+        const PulpSamplerProcessor& processor) {
+        return processor.lookahead_plans_last_callback_for_test_;
+    }
+
+    static double active_streamed_lookahead_lead(
+        const PulpSamplerProcessor& processor) {
+        for (const auto& voice : processor.voices_) {
+            if (voice.active && voice.streamed)
+                return voice.lookahead_lead_source_frames;
+        }
+        return 0.0;
+    }
+
+    static bool active_streamed_lookahead_pending(
+        const PulpSamplerProcessor& processor) {
+        for (const auto& voice : processor.voices_) {
+            if (voice.active && voice.streamed)
+                return voice.pending_lookahead_valid;
+        }
+        return false;
+    }
+
+    static std::uint32_t active_pending_demand_index(
+        const PulpSamplerProcessor& processor) {
+        for (const auto& voice : processor.voices_) {
+            if (voice.active && voice.streamed)
+                return voice.pending_demand_index;
+        }
+        return 0;
+    }
+
+    static bool active_stream_boundary_pending(
+        const PulpSamplerProcessor& processor) {
+        for (const auto& voice : processor.voices_) {
+            if (voice.active && voice.streamed)
+                return voice.stream_boundary_pending;
+        }
+        return false;
+    }
+
+    static std::size_t stream_command_count(
+        const PulpSamplerProcessor& processor) {
+        return processor.streaming_.commands_.telemetry().pending;
+    }
 };
 
 }  // namespace pulp::examples
@@ -88,14 +254,28 @@ struct PulpSamplerTestAccess {
 struct TempSamplerWav {
     std::string path;
 
-    TempSamplerWav(const char* label, std::uint64_t frames, float value) {
+    TempSamplerWav(const char* label,
+                   std::uint64_t frames,
+                   float value,
+                   std::uint32_t sample_rate = 44100) {
+        static std::atomic<std::uint64_t> sequence{0};
+        path = (std::filesystem::temp_directory_path() /
+                (std::string("pulp_sampler_stream_") + label + "_" +
+                 std::to_string(sequence.fetch_add(1)) + ".wav")).string();
+        audio::AudioFileData data;
+        data.sample_rate = sample_rate;
+        data.channels = {std::vector<float>(static_cast<std::size_t>(frames), value)};
+        REQUIRE(audio::write_wav_file(path, data, audio::WavBitDepth::Float32));
+    }
+
+    TempSamplerWav(const char* label, const std::vector<float>& samples) {
         static std::atomic<std::uint64_t> sequence{0};
         path = (std::filesystem::temp_directory_path() /
                 (std::string("pulp_sampler_stream_") + label + "_" +
                  std::to_string(sequence.fetch_add(1)) + ".wav")).string();
         audio::AudioFileData data;
         data.sample_rate = 44100;
-        data.channels = {std::vector<float>(static_cast<std::size_t>(frames), value)};
+        data.channels = {samples};
         REQUIRE(audio::write_wav_file(path, data, audio::WavBitDepth::Float32));
     }
 
@@ -139,14 +319,14 @@ struct SamplerFixture {
     state::StateStore store;
     std::unique_ptr<PulpSamplerProcessor> proc;
 
-    SamplerFixture() {
+    explicit SamplerFixture(std::uint32_t maximum_block_frames = 512) {
         proc = std::make_unique<PulpSamplerProcessor>();
         proc->set_state_store(&store);
         proc->define_parameters(store);
 
         format::PrepareContext ctx;
         ctx.sample_rate = 44100;
-        ctx.max_buffer_size = 512;
+        ctx.max_buffer_size = maximum_block_frames;
         ctx.input_channels = 0;
         ctx.output_channels = 2;
         proc->prepare(ctx);
@@ -188,9 +368,9 @@ TEST_CASE("PulpSampler descriptor", "[sampler]") {
     REQUIRE(d.output_buses.size() == 1);
 }
 
-TEST_CASE("PulpSampler has 7 parameters", "[sampler]") {
+TEST_CASE("PulpSampler has 8 parameters", "[sampler]") {
     SamplerFixture f;
-    REQUIRE(f.store.param_count() == 7);
+    REQUIRE(f.store.param_count() == 8);
 }
 
 TEST_CASE("PulpSampler loads sample", "[sampler]") {
@@ -970,12 +1150,16 @@ TEST_CASE("PulpSampler streams continuously across the preload boundary",
         fixture.proc->stream_stats().pages_published;
     block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
     block.run(*fixture.proc);
+    std::vector<float> rendered = block.left;
+    block.midi_in.clear();
+    block.run(*fixture.proc);
+    rendered.insert(rendered.end(), block.left.begin(), block.left.end());
+    block.run(*fixture.proc);
+    rendered.insert(rendered.end(), block.left.begin(), block.left.end());
     REQUIRE(wait_for_condition([&] {
         return fixture.proc->stream_stats().pages_published > pages_before_note;
     }));
 
-    std::vector<float> rendered = block.left;
-    block.midi_in.clear();
     while (rendered.size() < preload + 32) {
         block.run(*fixture.proc);
         rendered.insert(rendered.end(), block.left.begin(), block.left.end());
@@ -995,6 +1179,281 @@ TEST_CASE("PulpSampler prewarms reverse entry before publishing a stream",
     REQUIRE(fixture.proc->load_sample_file(wav.path));
     REQUIRE(fixture.proc->stream_stats().preload_frames < 24000);
     REQUIRE(PulpSamplerTestAccess::streamed_tail_page_ready(*fixture.proc));
+    const auto contract =
+        PulpSamplerTestAccess::published_preload_contract(*fixture.proc);
+    const auto evaluated = audio::evaluate_sample_preload_contract(contract);
+    REQUIRE(evaluated.valid());
+    REQUIRE(contract.loop_prefetch_guard_frames == evaluated.block_guard_frames);
+}
+
+TEST_CASE("PulpSampler establishes the certified lookahead for small blocks",
+          "[sampler][stream]") {
+    TempSamplerWav wav("small_block_lookahead", 24000, 0.5f);
+    SamplerFixture fixture(1);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+    const auto preload = fixture.proc->stream_stats().preload_frames;
+    REQUIRE(preload > 0);
+    REQUIRE(preload < 24000);
+
+    REQUIRE(PulpSamplerTestAccess::pause_stream_command_drain(
+        *fixture.proc, true));
+    SamplerProcessBlock block(1);
+    block.midi_in.add(midi::MidiEvent::note_on(0, 84, 127));
+    {
+        runtime::ScopedNoAlloc no_alloc;
+        block.run(*fixture.proc);
+    }
+
+    REQUIRE_FALSE(PulpSamplerTestAccess::active_stream_boundary_pending(
+        *fixture.proc));
+    REQUIRE(PulpSamplerTestAccess::stream_command_count(*fixture.proc) > 0);
+    REQUIRE(PulpSamplerTestAccess::lookahead_plans_last_callback(
+                *fixture.proc) <= 8);
+    REQUIRE(fixture.proc->stream_stats().starved_output_frames == 0);
+    REQUIRE(PulpSamplerTestAccess::pause_stream_command_drain(
+        *fixture.proc, false));
+}
+
+TEST_CASE("PulpSampler bounds lookahead work for a low-rate pitched asset",
+          "[sampler][stream][rt]") {
+    TempSamplerWav wav("low_rate_lookahead", 64, 0.5f, 1);
+    SamplerFixture fixture;
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+    REQUIRE(fixture.proc->stream_stats().preload_frames < 64);
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 0, 127));
+    {
+        runtime::ScopedNoAlloc no_alloc;
+        block.run(*fixture.proc);
+    }
+
+    REQUIRE(PulpSamplerTestAccess::lookahead_plans_last_callback(
+                *fixture.proc) > 0);
+    REQUIRE(PulpSamplerTestAccess::lookahead_plans_last_callback(
+                *fixture.proc) <= 16);
+}
+
+TEST_CASE("PulpSampler recovers lookahead after command queue backpressure",
+          "[sampler][stream][recovery]") {
+    TempSamplerWav wav("lookahead_backpressure", 100000, 0.5f);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+    REQUIRE(PulpSamplerTestAccess::pause_stream_command_drain(
+        *fixture.proc, true));
+    REQUIRE(PulpSamplerTestAccess::fill_stream_command_inbox(*fixture.proc) > 0);
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    block.run(*fixture.proc);
+    block.midi_in.clear();
+    for (std::uint32_t callback = 0;
+         callback < 8 &&
+         !PulpSamplerTestAccess::active_streamed_lookahead_pending(*fixture.proc);
+         ++callback) {
+        block.run(*fixture.proc);
+    }
+    REQUIRE(PulpSamplerTestAccess::active_streamed_lookahead_pending(
+        *fixture.proc));
+    for (std::uint32_t callback = 0;
+         callback < 32 &&
+         PulpSamplerTestAccess::active_streamed_lookahead_lead(*fixture.proc) >= 0.0;
+         ++callback) {
+        block.run(*fixture.proc);
+    }
+    REQUIRE(PulpSamplerTestAccess::active_streamed_lookahead_lead(
+                *fixture.proc) < 0.0);
+
+    REQUIRE(PulpSamplerTestAccess::pause_stream_command_drain(
+        *fixture.proc, false));
+    REQUIRE(wait_for_condition([&] {
+        block.run(*fixture.proc);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        return !PulpSamplerTestAccess::active_streamed_lookahead_pending(
+                   *fixture.proc) &&
+               PulpSamplerTestAccess::active_streamed_lookahead_lead(
+                   *fixture.proc) > 0.0 &&
+               block.left.front() > 0.45f;
+    }, std::chrono::seconds(5)));
+
+    const auto recovered_starvation =
+        fixture.proc->stream_stats().starved_output_frames;
+    for (std::uint32_t callback = 0; callback < 10; ++callback) {
+        block.run(*fixture.proc);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE(fixture.proc->stream_stats().starved_output_frames ==
+            recovered_starvation);
+    REQUIRE(block.left.front() > 0.45f);
+}
+
+TEST_CASE("PulpSampler refreshes a partially queued lookahead prefix",
+          "[sampler][stream][recovery]") {
+    TempSamplerWav wav("lookahead_partial_prefix", 100000, 0.5f);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+    fixture.store.set_value(kSamplerReverse, 1.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+    REQUIRE(PulpSamplerTestAccess::pause_stream_command_drain(
+        *fixture.proc, true));
+    REQUIRE(PulpSamplerTestAccess::fill_stream_command_inbox(
+                *fixture.proc, 1) > 0);
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 84, 127));
+    block.run(*fixture.proc);
+    block.midi_in.clear();
+    REQUIRE(PulpSamplerTestAccess::active_streamed_lookahead_pending(
+        *fixture.proc));
+    REQUIRE(PulpSamplerTestAccess::active_pending_demand_index(
+                *fixture.proc) > 0);
+
+    REQUIRE(PulpSamplerTestAccess::pause_stream_command_drain(
+        *fixture.proc, false));
+    REQUIRE(wait_for_condition([&] {
+        block.run(*fixture.proc);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        return !PulpSamplerTestAccess::active_streamed_lookahead_pending(
+                   *fixture.proc) &&
+               block.left.front() > 0.45f;
+    }, std::chrono::seconds(5)));
+}
+
+TEST_CASE("PulpSampler emits streamed reverse one-shots from the tail",
+          "[sampler][stream][reverse]") {
+    std::vector<float> ramp(24000);
+    for (std::size_t frame = 0; frame < ramp.size(); ++frame) {
+        ramp[frame] = 0.1f + 0.8f * static_cast<float>(frame) /
+                                static_cast<float>(ramp.size() - 1);
+    }
+    TempSamplerWav wav("reverse_render", ramp);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerReverse, 1.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    block.run(*fixture.proc);
+
+    REQUIRE(block.left.front() > 0.85f);
+    REQUIRE(block.left[400] < block.left.front());
+    REQUIRE(fixture.proc->stream_stats().starved_output_frames == 0);
+}
+
+TEST_CASE("PulpSampler holds a reverse attack while its tail is refilled",
+          "[sampler][stream][reverse]") {
+    constexpr std::uint64_t kFrames = 24000;
+    std::vector<float> ramp(kFrames);
+    for (std::size_t frame = 0; frame < ramp.size(); ++frame) {
+        ramp[frame] = 0.1f + 0.8f * static_cast<float>(frame) /
+                                static_cast<float>(ramp.size() - 1);
+    }
+    TempSamplerWav wav("reverse_evicted_attack", ramp);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerReverse, 1.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+    REQUIRE(PulpSamplerTestAccess::streamed_reverse_horizon_ready(*fixture.proc));
+
+    SamplerProcessBlock block;
+    PulpSamplerTestAccess::pause_stream_dispatch(*fixture.proc, true);
+    PulpSamplerTestAccess::retire_reverse_attack_after_horizon(*fixture.proc);
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    block.run(*fixture.proc);
+    REQUIRE_FALSE(PulpSamplerTestAccess::streamed_reverse_horizon_ready(
+        *fixture.proc));
+    REQUIRE(std::all_of(block.left.begin(), block.left.end(), [](float sample) {
+        return sample == 0.0f;
+    }));
+    REQUIRE(fixture.proc->stream_stats().starved_output_frames ==
+            block.left.size());
+    REQUIRE(PulpSamplerTestAccess::active_streamed_position(*fixture.proc) ==
+            static_cast<double>(kFrames - 1));
+
+    block.midi_in.clear();
+    PulpSamplerTestAccess::pause_stream_dispatch(*fixture.proc, false);
+    REQUIRE(wait_for_condition([&] {
+        if (PulpSamplerTestAccess::streamed_reverse_horizon_ready(
+                *fixture.proc)) {
+            return true;
+        }
+        block.run(*fixture.proc);
+        return false;
+    }, std::chrono::milliseconds(5000)));
+    block.run(*fixture.proc);
+    REQUIRE(block.left.front() > 0.85f);
+    REQUIRE(block.left[400] < block.left.front());
+}
+
+TEST_CASE("PulpSampler keeps streamed reverse loops supplied across the seam",
+          "[sampler][stream][reverse][loop]") {
+    TempSamplerWav wav("reverse_loop", 24000, 0.5f);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+    fixture.store.set_value(kSamplerReverse, 1.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    block.run(*fixture.proc);
+    block.midi_in.clear();
+    const auto blocks = static_cast<std::uint32_t>(24000 / block.left.size()) + 4;
+    std::uint32_t first_starved_block = 0;
+    for (std::uint32_t index = 1; index < blocks; ++index) {
+        block.run(*fixture.proc);
+        if (first_starved_block == 0 &&
+            fixture.proc->stream_stats().starved_output_frames != 0) {
+            first_starved_block = index;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    CAPTURE(first_starved_block);
+    REQUIRE(fixture.proc->stream_stats().starved_output_frames == 0);
+    REQUIRE(block.left.back() > 0.45f);
+    REQUIRE(block.right.back() > 0.45f);
+}
+
+TEST_CASE("PulpSampler page geometry bounds dual-region crossfade demands",
+          "[sampler][stream]") {
+    state::StateStore store;
+    PulpSamplerProcessor processor;
+    processor.set_state_store(&store);
+    processor.define_parameters(store);
+    format::PrepareContext context;
+    context.sample_rate = 44100;
+    context.max_buffer_size = 8192;
+    context.input_channels = 0;
+    context.output_channels = 2;
+    processor.prepare(context);
+
+    const auto page_demands =
+        PulpSamplerTestAccess::worst_case_dual_region_page_demands(processor);
+    REQUIRE(page_demands <=
+            PulpSamplerTestAccess::fixed_voice_demand_capacity());
+    REQUIRE(page_demands <= PulpSamplerTestAccess::cache_pages_per_voice());
+}
+
+TEST_CASE("PulpSampler reverse prewarm deadline scales with its page horizon",
+          "[sampler][stream][reverse]") {
+    REQUIRE(PulpSamplerTestAccess::reverse_prewarm_timeout_for_pages(1) ==
+            std::chrono::milliseconds(250));
+    REQUIRE(PulpSamplerTestAccess::reverse_prewarm_timeout_for_pages(14) >=
+            std::chrono::milliseconds(420));
 }
 
 TEST_CASE("PulpSampler does not publish a stream when reverse prewarm fails",

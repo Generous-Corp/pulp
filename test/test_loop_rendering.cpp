@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <type_traits>
 #include <vector>
@@ -60,6 +61,132 @@ TEST_CASE("LoopReader interpolates and maps mono sources to extra outputs",
     loop.interpolation = LoopInterpolationMode::Linear;
     const auto value = LoopReader::read(const_view(source, ptrs), loop, 1, 1.5);
     REQUIRE(std::abs(value - 15.0f) < 1.0e-6f);
+}
+
+TEST_CASE("LoopReader resolves one-shot taps by clamping",
+          "[audio][loop][render]") {
+    auto loop = region(1, 4);
+    loop.playback_mode = LoopPlaybackMode::OneShot;
+
+    const std::int64_t taps[] = {-1, 0, 1, 3, 4, 5};
+    const std::uint64_t expected[] = {1, 1, 1, 3, 3, 3};
+    for (std::size_t index = 0; index < std::size(taps); ++index) {
+        REQUIRE(LoopReader::source_frame_for_tap(loop, 5, taps[index]) ==
+                expected[index]);
+    }
+    REQUIRE(LoopReader::source_frame_for_tap(
+                loop, 5, std::numeric_limits<std::int64_t>::min()) == 1);
+    REQUIRE(LoopReader::source_frame_for_tap(
+                loop, 5, std::numeric_limits<std::int64_t>::max()) == 3);
+}
+
+TEST_CASE("LoopReader resolves bounded reverse one-shot taps by clamping",
+          "[audio][loop][render]") {
+    auto loop = region(1, 4);
+    loop.playback_mode = LoopPlaybackMode::ReverseOnce;
+    const std::int64_t taps[] = {-1, 0, 1, 3, 4, 5};
+    const std::uint64_t expected[] = {1, 1, 1, 3, 3, 3};
+    for (std::size_t index = 0; index < std::size(taps); ++index) {
+        REQUIRE(LoopReader::source_frame_for_tap(loop, 5, taps[index]) ==
+                expected[index]);
+    }
+    REQUIRE(LoopReader::source_frame_for_tap(
+                loop, 5, std::numeric_limits<std::int64_t>::min()) == 1);
+    REQUIRE(LoopReader::source_frame_for_tap(
+                loop, 5, std::numeric_limits<std::int64_t>::max()) == 3);
+}
+
+TEST_CASE("LoopReader resolves steady-loop guard taps by wrapping",
+          "[audio][loop][render]") {
+    const LoopPlaybackMode modes[] = {
+        LoopPlaybackMode::Forward,
+        LoopPlaybackMode::Reverse,
+    };
+    const std::int64_t taps[] = {-1, 0, 1, 3, 4, 5};
+    const std::uint64_t expected[] = {2, 3, 1, 3, 1, 2};
+
+    for (const auto mode : modes) {
+        auto loop = region(1, 4);
+        loop.playback_mode = mode;
+        for (std::size_t index = 0; index < std::size(taps); ++index) {
+            REQUIRE(LoopReader::source_frame_for_tap(loop, 5, taps[index]) ==
+                    expected[index]);
+        }
+        REQUIRE(LoopReader::source_frame_for_tap(
+                    loop, 5, std::numeric_limits<std::int64_t>::min()) == 1);
+        REQUIRE(LoopReader::source_frame_for_tap(
+                    loop, 5, std::numeric_limits<std::int64_t>::max()) == 1);
+    }
+}
+
+TEST_CASE("LoopReader resolves ping-pong guard taps by reflection",
+          "[audio][loop][render]") {
+    auto loop = region(1, 4);
+    loop.playback_mode = LoopPlaybackMode::PingPong;
+    const std::int64_t taps[] = {-1, 0, 1, 3, 4, 5};
+    const std::uint64_t expected[] = {3, 2, 1, 3, 2, 1};
+    for (std::size_t index = 0; index < std::size(taps); ++index) {
+        REQUIRE(LoopReader::source_frame_for_tap(loop, 5, taps[index]) ==
+                expected[index]);
+    }
+    REQUIRE(LoopReader::source_frame_for_tap(
+                loop, 5, std::numeric_limits<std::int64_t>::min()) == 2);
+    REQUIRE(LoopReader::source_frame_for_tap(
+                loop, 5, std::numeric_limits<std::int64_t>::max()) == 3);
+}
+
+TEST_CASE("LoopReader interpolation uses resolved boundary taps",
+          "[audio][loop][render]") {
+    Buffer<float> source(1, 5);
+    for (std::size_t frame = 0; frame < source.num_samples(); ++frame) {
+        source.channel(0)[frame] = static_cast<float>(frame * 10);
+    }
+    std::vector<const float*> ptrs;
+    const auto input = const_view(source, ptrs);
+    const LoopPlaybackMode modes[] = {
+        LoopPlaybackMode::OneShot,
+        LoopPlaybackMode::ReverseOnce,
+        LoopPlaybackMode::Forward,
+        LoopPlaybackMode::Reverse,
+        LoopPlaybackMode::PingPong,
+    };
+
+    for (const auto mode : modes) {
+        auto loop = region(1, 4);
+        loop.playback_mode = mode;
+
+        loop.interpolation = LoopInterpolationMode::None;
+        REQUIRE(LoopReader::read_validated(input, loop, 0, 1.75) == 10.0f);
+        REQUIRE(LoopReader::read_validated(input, loop, 0, 3.75) == 30.0f);
+
+        loop.interpolation = LoopInterpolationMode::Linear;
+        const auto linear_start =
+            LoopReader::read_validated(input, loop, 0, 1.5);
+        const auto linear_end =
+            LoopReader::read_validated(input, loop, 0, 3.5);
+        REQUIRE(linear_start == 15.0f);
+        const auto bounded = mode == LoopPlaybackMode::OneShot ||
+                             mode == LoopPlaybackMode::ReverseOnce;
+        REQUIRE(linear_end == (bounded ? 30.0f
+                            : mode == LoopPlaybackMode::PingPong ? 25.0f
+                            : 20.0f));
+
+        loop.interpolation = LoopInterpolationMode::Cubic;
+        const auto cubic_start =
+            LoopReader::read_validated(input, loop, 0, 1.5);
+        const auto cubic_end =
+            LoopReader::read_validated(input, loop, 0, 3.5);
+        if (bounded) {
+            REQUIRE(cubic_start == 14.375f);
+            REQUIRE(cubic_end == 30.625f);
+        } else if (mode == LoopPlaybackMode::PingPong) {
+            REQUIRE(cubic_start == 13.75f);
+            REQUIRE(cubic_end == 26.25f);
+        } else {
+            REQUIRE(cubic_start == 13.125f);
+            REQUIRE(cubic_end == 20.0f);
+        }
+    }
 }
 
 TEST_CASE("LoopRenderer renders forward and reverse loops",
