@@ -261,6 +261,26 @@ EM_JS(void, pulp_web_install_listeners, (const char* selector), {
         state.observer.observe(canvas);
     }
 
+    // devicePixelRatio can change WITHOUT the CSS size changing — dragging the window
+    // to a monitor with a different scale factor, an OS display-scale change, some
+    // pinch-zoom paths. None of those fire 'resize' or the ResizeObserver, so the
+    // backing store would keep its stale resolution and the canvas renders blurry or
+    // mis-scaled. A `(resolution: Ndppx)` media query fires exactly when the ratio
+    // leaves N; re-arm it at the new ratio each time. state.resize() re-reads dpr in
+    // handle_resize and rebuilds the backing store. (Browser text-zoom already DOES
+    // change the CSS size, so it is covered by the ResizeObserver above.)
+    state.onDpr = function() { if (state.resize) state.resize(); state.armDpr(); };
+    state.armDpr = function() {
+        if (state.dprMq && state.dprMq.removeEventListener) {
+            state.dprMq.removeEventListener('change', state.onDpr);
+        }
+        if (window.matchMedia) {
+            state.dprMq = window.matchMedia('(resolution: ' + (window.devicePixelRatio || 1) + 'dppx)');
+            if (state.dprMq.addEventListener) state.dprMq.addEventListener('change', state.onDpr);
+        }
+    };
+    state.armDpr();
+
     Module.__pulpWebListeners[sel] = state;
 });
 
@@ -284,6 +304,9 @@ EM_JS(void, pulp_web_remove_listeners, (const char* selector), {
     window.removeEventListener('keyup', state.keyup);
     window.removeEventListener('resize', state.resize);
     if (state.observer) state.observer.disconnect();
+    if (state.dprMq && state.dprMq.removeEventListener) {
+        state.dprMq.removeEventListener('change', state.onDpr);
+    }
     delete all[sel];
 });
 

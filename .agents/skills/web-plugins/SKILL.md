@@ -551,6 +551,12 @@ Every full-canvas editor MUST handle these, all learned the hard way on SuperCon
   as label-over-value-over-track. Keep desktop untouched.
 - **The info/help overlay must reflow too** — a fixed two-column card overflows a phone;
   give it a full-width, stacked, clipped variant.
+- **devicePixelRatio can change with NO CSS resize** (window dragged to a different-scale
+  monitor, OS display-scale change, some pinch-zoom) — none of those fire `resize` or the
+  `ResizeObserver`, so the backing store stays stale and the canvas goes blurry/mis-scaled.
+  The shared web layer (`web_input.cpp`) arms a re-arming `matchMedia("(resolution: Ndppx)")`
+  listener that re-runs the resize (which re-reads dpr) on each DPR change. Browser text-zoom
+  DOES change the CSS size, so it is already covered by the ResizeObserver.
 - **iOS file picker:** the page's `<input type=file>` must NOT be `display:none`/`hidden`
   (iOS Safari drops `.click()` on it) — hide it visually instead. See its own landmine above.
 - **Page scroll over the canvas:** opt into `touch-action: pan-y` after mount so a vertical

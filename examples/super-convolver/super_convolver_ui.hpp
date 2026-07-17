@@ -195,6 +195,28 @@ public:
 
         const auto g = proc_.gpu_status();
 
+        // "The switch can't happen, and here's why" — the popover a native plugin
+        // shows. On the web the GPU lane can be unavailable (no adapter, or no
+        // worklet lane): tapping to GPU then lights a GPU badge over audio the GPU
+        // never touches (the CPU net silently carries it). Detect it honestly: watch
+        // for the engine transitioning to GPU (from the chip, a Rooms auto-switch, or
+        // a preset), and if after a grace period the GPU has produced ZERO blocks,
+        // say so once. blocks is cumulative, so "still zero" means it never carried —
+        // not merely idle now — so this never fires for a GPU that worked then paused.
+        {
+            const bool engine_gpu_now = has(kEngine) && store_.get_value(kEngine) >= 0.5f;
+            if (engine_gpu_now && !engine_gpu_prev_) {
+                gpu_switch_time_ = field_time_;
+                gpu_unavail_toasted_ = false;
+            }
+            engine_gpu_prev_ = engine_gpu_now;
+            if (engine_gpu_now && !gpu_unavail_toasted_ && gpu_switch_time_ > 0.0
+                && (field_time_ - gpu_switch_time_) > 2.5 && g.blocks == 0) {
+                show_toast("GPU engine unavailable here — the CPU is carrying the audio");
+                gpu_unavail_toasted_ = true;
+            }
+        }
+
         // Engine chip — top-right, tap to toggle CPU/GPU (concept tokens). Dot is
         // cyan for GPU / amber for CPU; the emitter cap is 128 (GPU) / 20 (CPU).
         {
@@ -999,6 +1021,10 @@ private:
     bool pointer_down_ = false;
     bool layout_dirty_ = true;
     bool narrow_ = false;       // phone-width layout (set in layout())
+    // "GPU unavailable" popover state (see paint): watch a switch to GPU produce blocks.
+    bool engine_gpu_prev_ = false;
+    bool gpu_unavail_toasted_ = false;
+    double gpu_switch_time_ = -1.0;
     double field_time_ = 0.0;   // advances per repaint → the field's animation clock
     int viz_mode_ = 0;          // 0 Tracers · 1 Currents · 2 Field
     vw::Rect tabs_[3]{};        // mode-tab hit rects
