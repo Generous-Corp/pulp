@@ -2535,6 +2535,93 @@ void hoist_captured_art_knobs(DesignIR& ir) {
     visit(ir.root);
 }
 
+namespace {
+
+// Split a CSS `border` shorthand into its parts. Tokenized with paren-depth
+// tracking rather than a plain space split, because `rgba(255, 0, 0, 0.5)` is
+// ONE value containing spaces and commas — a naive split hands back "rgba(255,"
+// as the colour and the border silently disappears again, one layer deeper.
+//
+// The colour is carried across verbatim rather than parsed: border_color is a
+// string, and every downstream paint site already accepts hex / rgb() / rgba()
+// / hsl(). Parsing here would only add a second place to disagree about colour.
+struct BorderShorthand {
+    std::optional<std::string> color;
+    std::optional<float> width;
+    std::optional<std::string> style;
+};
+
+BorderShorthand parse_border_shorthand(const std::string& value) {
+    BorderShorthand out;
+    static const std::unordered_set<std::string> kStyles = {
+        "none", "hidden", "solid", "dashed", "dotted",
+        "double", "groove", "ridge", "inset", "outset",
+    };
+
+    std::vector<std::string> tokens;
+    std::string cur;
+    int depth = 0;
+    for (char c : value) {
+        if (c == '(') ++depth;
+        if (c == ')') --depth;
+        if (std::isspace(static_cast<unsigned char>(c)) && depth == 0) {
+            if (!cur.empty()) { tokens.push_back(cur); cur.clear(); }
+            continue;
+        }
+        cur += c;
+    }
+    if (!cur.empty()) tokens.push_back(cur);
+
+    for (const auto& t : tokens) {
+        const std::string lower = choc::text::toLowerCase(t);
+        if (!out.style && kStyles.count(lower)) { out.style = lower; continue; }
+        // A width is a bare number with an optional unit. Only px is honoured as
+        // a real length; other units are left for the caller's default rather
+        // than converted with a guessed root font size.
+        if (!out.width && !t.empty() &&
+            (std::isdigit(static_cast<unsigned char>(t[0])) || t[0] == '.')) {
+            char* end = nullptr;
+            const float v = std::strtof(t.c_str(), &end);
+            if (end != t.c_str()) {
+                const std::string unit = choc::text::toLowerCase(std::string(end));
+                if (unit.empty() || unit == "px") { out.width = v; continue; }
+            }
+        }
+        if (!out.color) out.color = t;
+    }
+    return out;
+}
+
+}  // namespace
+
+void normalize_border_shorthand(IRNode& root) {
+    auto visit = [](auto&& self, IRNode& n) -> void {
+        if (n.style.border && !n.style.border->empty()) {
+            const auto parts = parse_border_shorthand(*n.style.border);
+            // `border: none` / a zero width is a positive statement that there
+            // is no edge. Recording colour-less parts would leave border_width
+            // set with no colour, which reads downstream as "no border" anyway —
+            // but say it explicitly so the intent survives a later refactor.
+            const bool suppressed =
+                (parts.style && *parts.style == "none") ||
+                (parts.style && *parts.style == "hidden") ||
+                (parts.width && *parts.width <= 0.0f);
+            if (!suppressed) {
+                // Fill gaps only: a producer that set the discrete fields said
+                // what it meant more precisely than the shorthand can.
+                if (!n.style.border_color && parts.color)
+                    n.style.border_color = *parts.color;
+                if (!n.style.border_width)
+                    n.style.border_width = parts.width.value_or(1.0f);
+                if (!n.style.border_style && parts.style)
+                    n.style.border_style = *parts.style;
+            }
+        }
+        for (auto& c : n.children) self(self, c);
+    };
+    visit(visit, root);
+}
+
 void synthesize_primitive_paths(IRNode& root) {
     synthesize_node(root);
     for (auto& child : root.children)

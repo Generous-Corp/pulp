@@ -1309,9 +1309,25 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
             if (auto s = node.attributes.find("svg_stroke"); s != node.attributes.end())
                 ss << ind << "setSvgStroke('" << id << "', '"
                    << js_single_quote_escape(s->second) << "');\n";
+            else if (node.style.border_color && !node.style.border_color->empty())
+                // A vector that arrived WITH its own path never passes through
+                // synthesize_node — it returns early on `path_data` — so nothing
+                // moved the node's stroke onto the path, and this branch is the
+                // only place left that could paint it. That is why every `Oval`
+                // rim in a real design lowered to no stroke at all.
+                ss << ind << "setSvgStroke('" << id << "', '"
+                   << js_single_quote_escape(*node.style.border_color) << "');\n";
             if (auto sw = node.attributes.find("svg_stroke_width");
                 sw != node.attributes.end())
                 ss << ind << "setSvgStrokeWidth('" << id << "', " << sw->second << ");\n";
+            else if (node.style.border_color && !node.style.border_color->empty() &&
+                     node.style.border_width && *node.style.border_width > 0.0f)
+                // Paired with the stroke colour above: a stroke emitted without
+                // its weight paints at the widget's default, so a 1px rim
+                // arrives at the wrong thickness — visible, but wrong, which is
+                // harder to spot than missing.
+                ss << ind << "setSvgStrokeWidth('" << id << "', "
+                   << *node.style.border_width << ");\n";
             const float vw = node.style.width.value_or(0.0f);
             const float vh = node.style.height.value_or(0.0f);
             if (vw > 0.0f) ss << ind << "setFlex('" << id << "', 'width', " << vw << ");\n";
@@ -2073,6 +2089,11 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         // IR untouched; the web-compat arm (which does not own the dropped-shape
         // fall-through) is intentionally not affected.
         IRNode native_root = ir.root;
+        // Before synthesis: synthesize_node moves border_color onto the path it
+        // builds, and it only ever sees the discrete field — so the shorthand
+        // has to be split first or a stroked primitive synthesizes a path with
+        // no stroke on it.
+        normalize_border_shorthand(native_root);
         synthesize_primitive_paths(native_root);
 
         int var_counter = 0;

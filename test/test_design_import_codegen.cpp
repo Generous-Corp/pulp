@@ -2457,3 +2457,107 @@ TEST_CASE("native codegen paints a gradient behind a transparent image",
     // Both, not either: the plate is behind the bitmap, not instead of it.
     REQUIRE(js.find("setImageSource(") != std::string::npos);
 }
+
+TEST_CASE("native codegen paints a stroke declared as the CSS border shorthand",
+          "[view][import][border]") {
+    // IRStyle carries `border` ("1px solid #333") AND the discrete
+    // border_color / border_width. Every producer writes the shorthand — the
+    // .fig decoder, the Claude bundle reader, the v0 TSX reader — and every
+    // native consumer reads only the parts. So a stroke reached the IR and then
+    // went nowhere: a real 1115-node import declared six strokes and emitted
+    // zero setBorder and zero setSvgStroke calls.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 300.0f;
+
+    IRNode card;
+    card.type = "frame";
+    card.name = "Card";
+    card.style.width = 100.0f;
+    card.style.height = 40.0f;
+    card.style.border = "1px solid #f56161";
+    ir.root.children.push_back(card);
+
+    // A vector that arrives WITH its own path: synthesize_node returns early on
+    // path_data, so nothing moves the stroke onto the path. This is every `Oval`
+    // knob rim in a real design.
+    IRNode ring;
+    ring.type = "vector";
+    ring.name = "Ring";
+    ring.attributes["path_data"] = "M0 0 L10 0 L10 10 Z";
+    ring.style.width = 24.0f;
+    ring.style.height = 24.0f;
+    ring.style.border = "2px solid #ffffff8c";
+    ir.root.children.push_back(ring);
+
+    const auto js = native_js(ir);
+
+    REQUIRE(js.find("setBorder('") != std::string::npos);
+    REQUIRE(js.find("#f56161") != std::string::npos);
+
+    REQUIRE(js.find("setSvgStroke('") != std::string::npos);
+    REQUIRE(js.find("#ffffff8c") != std::string::npos);
+    // The weight travels with the colour: a stroke emitted without it paints at
+    // the widget default, which is wrong in a way that looks deliberate.
+    REQUIRE(js.find("setSvgStrokeWidth('") != std::string::npos);
+}
+
+TEST_CASE("the border shorthand splits without losing a functional colour",
+          "[view][import][border]") {
+    IRNode n;
+    n.type = "frame";
+    // rgba() is ONE value containing spaces and commas. A plain space split
+    // yields "rgba(255," as the colour and the border vanishes again, one layer
+    // further down — so the tokenizer tracks paren depth.
+    n.style.border = "3px dashed rgba(255, 0, 0, 0.5)";
+    normalize_border_shorthand(n);
+    REQUIRE(n.style.border_color.has_value());
+    REQUIRE(*n.style.border_color == "rgba(255, 0, 0, 0.5)");
+    REQUIRE(n.style.border_width == 3.0f);
+    REQUIRE(n.style.border_style.has_value());
+    REQUIRE(*n.style.border_style == "dashed");
+}
+
+TEST_CASE("border shorthand normalization defers and declines",
+          "[view][import][border]") {
+    // A producer that set the discrete field said what it meant more precisely
+    // than the shorthand can, so the shorthand must not overwrite it.
+    IRNode explicit_color;
+    explicit_color.type = "frame";
+    explicit_color.style.border = "1px solid #000000";
+    explicit_color.style.border_color = "#abcdef";
+    normalize_border_shorthand(explicit_color);
+    REQUIRE(*explicit_color.style.border_color == "#abcdef");
+
+    // `border: none` is a positive statement that there is no edge. Inventing a
+    // colour-less 1px width here would be a border where the design says none.
+    IRNode none;
+    none.type = "frame";
+    none.style.border = "none";
+    normalize_border_shorthand(none);
+    REQUIRE_FALSE(none.style.border_color.has_value());
+    REQUIRE_FALSE(none.style.border_width.has_value());
+
+    // A width-less shorthand still paints — CSS's initial border-width is
+    // medium, and a design that says "solid red" means a visible edge.
+    IRNode widthless;
+    widthless.type = "frame";
+    widthless.style.border = "solid #ff0000";
+    normalize_border_shorthand(widthless);
+    REQUIRE(*widthless.style.border_color == "#ff0000");
+    REQUIRE(widthless.style.border_width == 1.0f);
+
+    // Recurses: a stroke on a deep child is exactly the case that was lost.
+    IRNode root;
+    root.type = "frame";
+    IRNode mid; mid.type = "frame";
+    IRNode leaf; leaf.type = "frame";
+    leaf.style.border = "2px solid #123456";
+    mid.children.push_back(leaf);
+    root.children.push_back(mid);
+    normalize_border_shorthand(root);
+    REQUIRE(*root.children[0].children[0].style.border_color == "#123456");
+}
