@@ -80,6 +80,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -103,23 +104,26 @@ public:
     /// Reconstruction-filter stopband depth (dB) handed to the Kaiser design.
     static constexpr double kReconstructionStopbandDb = 96.0;
 
-    /// Install the raw single-cycle table set (off the audio thread). Every
-    /// table must share one length `L` (the shortest common length is used and
-    /// longer tables are rejected, so a mismatched set does not silently truncate
-    /// pitch); an empty set leaves the oscillator silent. Each table is copied
-    /// and, when `bit_depth` is not `kFullPrecision`, quantized about zero to
-    /// `bit_depth` bits — on the stored table data, which is where the lo-fi grit
-    /// lives.
-    void set_tables(std::vector<std::vector<double>> tables,
+    /// Install the raw single-cycle table set (off the audio thread), returning
+    /// whether the set was accepted. Every table must share one length `L`: a
+    /// mismatched set (tables of differing length) is REJECTED — the call is a
+    /// no-op that leaves the previous set intact and returns false — rather than
+    /// truncated to the shortest common length, because truncating a table plays a
+    /// fraction of its cycle as a full cycle (a corrupted, off-pitch waveform). An
+    /// empty set is accepted and leaves the oscillator silent. Each accepted table
+    /// is copied and, when `bit_depth` is not `kFullPrecision`, quantized about
+    /// zero to `bit_depth` bits — on the stored table data, which is where the
+    /// lo-fi grit lives.
+    bool set_tables(std::vector<std::vector<double>> tables,
                     int bit_depth = kDefaultBitDepth) {
+        std::size_t length = tables.empty() ? 0 : tables.front().size();
+        for (const auto& t : tables) {
+            if (t.size() != length) return false; // Mismatched: reject atomically.
+        }
+
         bit_depth_ = bit_depth;
         tables_.clear();
-        table_length_ = 0;
-        if (!tables.empty()) {
-            std::size_t common = tables.front().size();
-            for (const auto& t : tables) common = std::min(common, t.size());
-            table_length_ = common;
-        }
+        table_length_ = length;
         if (table_length_ > 0) {
             tables_.reserve(tables.size());
             for (auto& src : tables) {
@@ -132,6 +136,7 @@ public:
         current_table_ = std::min<int>(current_table_,
                                        tables_.empty() ? 0
                                        : static_cast<int>(tables_.size()) - 1);
+        return true;
     }
 
     /// Set the sample rate. Safe to call again on a rate change.
@@ -210,6 +215,15 @@ public:
     std::size_t table_count() const { return tables_.size(); }
     int current_table() const { return current_table_; }
     int bit_depth() const { return bit_depth_; }
+    /// Read-only view of a stored table — the actual (post-quantization) sample
+    /// data the reader plays. Exposed so a test can grade the engine's own
+    /// quantization directly rather than re-deriving it from a private copy of the
+    /// quantizer (which would pass even if the engine's quantizer drifted). Empty
+    /// span for an out-of-range index.
+    std::span<const double> stored_table(std::size_t i) const {
+        return i < tables_.size() ? std::span<const double>(tables_[i])
+                                  : std::span<const double>();
+    }
     /// The configured sample rate. The reader itself is rate-agnostic — it works
     /// in per-sample increment terms and designs the reconstruction filter in
     /// frequency normalized to the oversample rate — so this is retained only for
