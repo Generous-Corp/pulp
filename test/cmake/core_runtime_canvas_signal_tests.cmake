@@ -147,6 +147,10 @@ pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
 # analyzers, hence the analysis lib alongside the DSP under test.
 pulp_add_test_suite(pulp-test-oversampling-quality
     LIBRARIES pulp::signal pulp::audio-analysis)
+# Fundamental-frequency estimator for harmonically-dense oscillator output plus
+# the f0(t) trajectory extractor — proven accurate to well under a cent, and
+# proven to beat the shipped zero-crossing detector on dense material.
+pulp_add_test_suite(pulp-test-pitch-track LIBRARIES pulp::audio-analysis)
 pulp_add_test_suite(pulp-test-transition-mixer LIBRARIES pulp::signal)
 # Signal filter tests extracted from test_signal.cpp.
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
