@@ -202,7 +202,8 @@ format_limitations:
     - "Atom sysex is ignored — the run() loop only promotes 1–3-byte short MIDI messages out of the input atom sequence; sysex sidecar wiring remains part of format-adapter production-readiness work."
   aax:
     - "Custom editor and parameter gestures run through the shared PluginViewHost on macOS and Windows, but the editor needs a Skia-enabled build: without Skia the Windows host falls back to the no-op factory and the plugin loads with no editor."
-    - "The custom editor has not been validated in Pro Tools itself — no Avid SDK is present in Pulp's CI, so the AAX editor path is covered by unit tests only."
+    - "The custom editor has not been validated in Pro Tools itself, and is opt-in for that reason: PULP_AAX_PLUGIN registers no editor, so a plugin gets Pro Tools' auto-generated parameter strip unless it is declared with PULP_AAX_PLUGIN_WITH_GUI. The strip is the only AAX UI any Pulp plugin has shipped with."
+    - "The SDK-gated AAX suites (pulp-test-aax-effect-gui, pulp-test-aax-midi-node, pulp-test-aax-entry-registration) have never been built by Pulp's own build system: no Avid SDK is present in Pulp's CI or on any Pulp development machine, and the format's per-plugin sources are not compiled into pulp::format. The AAX logic that is genuinely covered on every lane is the SDK-free part — parameter/model mapping, gesture routing, editor sizing, MIDI reassembly. Treat the SDK-gated suites as unbuilt until an Avid SDK is wired into a lane."
     - "The InsertOrAudioSuite role is declared, but no AAX_IHostProcessor is registered, so the dedicated AudioSuite offline-render path is not implemented. Implementing it is out of scope."
   auv3:
     - "Bus 0 and descriptor-declared input bus 1 are routed through ProcessBuffers; additional input buses and secondary output buses are not exposed through the AUv3 adapter surface yet (workstream 01)."

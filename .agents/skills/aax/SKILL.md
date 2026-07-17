@@ -33,6 +33,17 @@ plugin window through the shared, format-agnostic `view::PluginViewHost` — the
 same seam VST3 / AU v2 / AU v3 / CLAP use, so there is no AAX-specific render
 path to maintain.
 
+**The editor is opt-in, and defaulting it off is deliberate — do not "fix" it.**
+`PULP_AAX_PLUGIN` registers no editor, so a plugin gets Pro Tools'
+auto-generated parameter strip; `PULP_AAX_PLUGIN_WITH_GUI` registers the custom
+editor. The strip is plain but it works, and it is the only AAX UI any Pulp
+plugin has shipped with. The custom editor has not been validated in Pro Tools
+itself, so a plugin that merely rebuilds must not trade a working strip for an
+unproven editor — an author has to ask for it. `pulp-test-aax-entry-registration`
+asserts both directions; if you flip the default, that suite fails, and that is
+the point. Reach for `PULP_AAX_PLUGIN_WITH_GUI` in an example or template only
+once the editor has actually been driven in Pro Tools.
+
 Gotchas that are specific to AAX and cost time if you rediscover them:
 
 - **The proc pointer is the whole game.** A custom UI appears only because
@@ -40,7 +51,8 @@ Gotchas that are specific to AAX and cost time if you rediscover them:
   alongside `kAAX_ProcPtrID_Create_EffectParameters`. Drop that one
   `AddProcPtr` and Pro Tools silently shows its auto-generated parameter strip
   no matter how good `create_view()` is. The validator's "does not contain
-  EffectGUI" warning is the tell.
+  EffectGUI" warning is the tell. That fallback is exactly why registering the
+  proc conditionally is a safe default rather than a broken plugin.
 - **The editor has its own `Processor`, deliberately.** AAX splits the
   host-side data model from the real-time algorithm; the algorithm's
   `Processor` lives in its private data block and the model cannot reach it. So
@@ -142,8 +154,16 @@ Gotchas that are specific to AAX and cost time if you rediscover them:
 
 The SDK-free logic (gesture routing, sizing) lives in
 `core/format/include/pulp/format/aax_editor.hpp` on purpose, so it is testable
-with no Avid SDK: `pulp-test-aax-editor` runs everywhere, while
-`pulp-test-aax-effect-gui` is SDK-gated.
+with no Avid SDK: `pulp-test-aax-editor` runs everywhere.
+
+**"SDK-gated" currently means "never built," not "built elsewhere."** No Avid
+SDK is present in Pulp's CI or on any Pulp development machine, so
+`pulp-test-aax-effect-gui`, `pulp-test-aax-midi-node`, and
+`pulp-test-aax-entry-registration` are configured out of every lane that runs.
+Do not cite them as coverage for a claim: the AAX behavior actually verified on
+every push is the SDK-free part. If you have an Avid SDK locally, building these
+suites is the only way they have ever run — and worth doing before you assert
+anything about the SDK glue.
 
 
 - Never commit the AAX SDK, DigiShell, validator binaries, or Avid example code.
@@ -282,8 +302,8 @@ and delegate, so the tested code is the shipping code. When you change either
 path, change `aax_midi_packets.hpp` (and its tests in `test/test_aax_midi.cpp`,
 which run in default CI), not a copy inside the runtime.
 
-The thin SDK glue itself is covered by `test/test_aax_midi_node.cpp` — an
-SDK-gated runtime test (built only when `PULP_HAS_AAX`) that drives
+The thin SDK glue itself has a test but no lane that builds it:
+`test/test_aax_midi_node.cpp` is SDK-gated (built only when `PULP_HAS_AAX`) and drives
 `decode_midi_node` / `encode_midi_node` through real `AAX_IMIDINode` /
 `AAX_CMidiStream` / `AAX_CMidiPacket` fakes. Run it on an AAX-SDK machine
 (`ctest -R aax-midi-node` after an `-DPULP_ENABLE_AAX=ON` build) to verify the

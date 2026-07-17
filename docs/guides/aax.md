@@ -140,6 +140,33 @@ boundary: default macOS/Windows plugin scaffolds include `AAX` and
 auto-discovered in a standard user-local SDK path; otherwise the generated
 project omits AAX and can opt in later.
 
+## Choosing The Editor
+
+Pro Tools decides what UI to draw from what the plugin registers. Register no
+editor and the host builds its own parameter strip from the plugin's parameters;
+register one and the host instantiates the plugin's `create_view()` UI instead.
+The entry-point macro in `aax_entry.cpp` picks between the two:
+
+```cpp
+// The host's auto-generated parameter strip. This is the default.
+PULP_AAX_PLUGIN(my_namespace::create_my_processor)
+
+// Pulp's custom editor.
+PULP_AAX_PLUGIN_WITH_GUI(my_namespace::create_my_processor)
+```
+
+`PULP_AAX_PLUGIN` is the default, and scaffolds from `pulp create` use it. The
+parameter strip is plain, but it works and it is the only AAX UI any Pulp plugin
+has shipped with, so rebuilding never trades it away on its own.
+
+`PULP_AAX_PLUGIN_WITH_GUI` is a deliberate opt-in. The custom editor has not
+been validated in Pro Tools itself — no Avid SDK runs in Pulp's CI, and no Pulp
+plugin has been loaded into Pro Tools with the editor registered — so choosing
+it means choosing an unproven path over a working one. It also needs a
+Skia-enabled build: without Skia the Windows host falls back to the no-op
+factory and the plugin loads with no editor at all. If you opt in, validate in
+Pro Tools yourself before shipping.
+
 ## Validation Workflow
 
 When DigiShell + AAX Validator are installed:

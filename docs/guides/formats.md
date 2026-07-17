@@ -580,6 +580,11 @@ PULP_AAX_PLUGIN(my_namespace::create_my_processor)
 - metadata generation from `Processor::descriptor()`
 - Parameter, state, latency, transport, and MIDI registration through the AAX runtime
 
+It registers no editor, so Pro Tools draws its auto-generated parameter strip.
+`PULP_AAX_PLUGIN_WITH_GUI(factory_fn)` is identical except that it also
+registers Pulp's custom editor, which has not been validated in Pro Tools
+itself — see [the AAX guide](aax.md#choosing-the-editor) before opting in.
+
 ### Status
 
 `experimental` on macOS and Windows, `unsupported` on Linux per

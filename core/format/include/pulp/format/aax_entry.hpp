@@ -58,7 +58,10 @@ AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
 #error "PULP_AAX_NATIVE_CODE must be defined for AAX targets"
 #endif
 
-#define PULP_AAX_PLUGIN(factory_fn) \
+// Shared body of the AAX entry-point macros. @p gui_proc_expr is the value
+// handed to `get_effect_descriptions` as the editor's create proc: null selects
+// the host's parameter strip, a proc address selects the custom editor.
+#define PULP_AAX_PLUGIN_IMPL_(factory_fn, gui_proc_expr) \
     namespace { \
         static const ::pulp::format::aax::EntryConfig& _pulp_aax_entry_config() { \
             static const auto config = ::pulp::format::aax::make_entry_config( \
@@ -71,7 +74,7 @@ AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
         static IACFUnknown* AAX_CALLBACK _pulp_aax_create_effect_parameters() { \
             return ::pulp::format::aax::create_effect_parameters(_pulp_aax_entry_config()); \
         } \
-        static IACFUnknown* AAX_CALLBACK _pulp_aax_create_effect_gui() { \
+        [[maybe_unused]] static IACFUnknown* AAX_CALLBACK _pulp_aax_create_effect_gui() { \
             return ::pulp::format::aax::create_effect_gui(); \
         } \
     } \
@@ -80,5 +83,25 @@ AAX_Result get_effect_descriptions(AAX_ICollection* out_collection,
             outCollection, \
             _pulp_aax_entry_config(), \
             &_pulp_aax_create_effect_parameters, \
-            &_pulp_aax_create_effect_gui); \
+            (gui_proc_expr)); \
     }
+
+// Generate an AAX entry point that leaves the host on its auto-generated
+// parameter strip. This is the default because the strip is what Pro Tools
+// draws with no editor registered, and it is the behavior every plugin had
+// before the custom editor existed: rebuilding must never silently trade it
+// for a different UI. Pair with PULP_AAX_PLUGIN_WITH_GUI to opt in.
+//
+// The unused editor thunk below is discarded, so this macro links without the
+// editor shell (and its view stack) at all.
+#define PULP_AAX_PLUGIN(factory_fn) \
+    PULP_AAX_PLUGIN_IMPL_(factory_fn, nullptr)
+
+// Generate an AAX entry point that registers Pulp's custom editor, so the host
+// instantiates the plugin's own `create_view()` UI instead of the parameter
+// strip. Opt in deliberately: the editor has not been validated in Pro Tools
+// itself, so a plugin choosing it is choosing an unproven path over a working
+// one. The only difference from PULP_AAX_PLUGIN is the editor create proc —
+// the data model, codes, and descriptor are identical.
+#define PULP_AAX_PLUGIN_WITH_GUI(factory_fn) \
+    PULP_AAX_PLUGIN_IMPL_(factory_fn, &_pulp_aax_create_effect_gui)
