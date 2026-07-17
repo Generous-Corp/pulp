@@ -263,6 +263,11 @@ private:
     Processor& processor_;
     state::StateStore& store_;
     Options options_;
+    /// Cached at construction: whether the processor supports live editor
+    /// reload. The idle pump reads this instead of calling back into
+    /// processor_, which may be freed by the host while the editor bridge is
+    /// still alive (see poll_editor_reload()).
+    bool supports_editor_reload_ = false;
 
     std::unique_ptr<view::View> view_;
     view::View* view_raw_ = nullptr;  ///< valid even after release_view()

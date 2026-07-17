@@ -574,6 +574,24 @@ fresh lib instead of segfaulting at first paint.
    on THAT object, not just its host. Test: `[idle-pump][crash]` in
    `test_view_bridge.cpp` builds the pump, destroys the bridge, calls the pump →
    no-op instead of use-after-free.
+9b. **The bridge's `alive_` token guards the BRIDGE, not the `Processor&` it
+   holds.** A second Live crash (EXC_BAD_ACCESS in `ViewBridge::poll_editor_reload`,
+   AU embedded in Ableton Live 12, 2026-07-17) got PAST the `alive_` check —
+   `store().pump_listeners()` succeeded — then faulted on
+   `processor_.supports_editor_reload()`. In AU the audio unit (the `Processor`)
+   and the view controller (which owns the `ViewBridge`) have INDEPENDENT,
+   host-ordered lifetimes: Live can free the `Processor` while the editor bridge
+   is still alive and its display-link pump is still firing, so `processor_`
+   dangles even though `alive_` is true. Fix: **the idle pump must never make a
+   virtual call on `processor_`.** `supports_editor_reload()` is a STATIC property
+   — cache it at construction (`supports_editor_reload_`) and read the cached
+   bool, so the pump early-returns for the common non-reload case without
+   touching the (possibly freed) processor. General rule: a display-link/idle
+   callback may dereference only objects it can prove alive; a `Processor&`
+   reached through the bridge is NOT one of them unless the adapter guarantees
+   processor-outlives-bridge (AU does not). Any pump path that must read dynamic
+   processor state on a reload-capable processor needs a processor-liveness token
+   too, mirroring `alive_token()`.
 10. **In a multi-plugin bundle, editor/metadata callbacks must resolve
     PER-INSTANCE state — never a process global.** A CLAP/AU/VST3 bundle exposes
     N plugins from one binary, so a single shared descriptor global would hand
