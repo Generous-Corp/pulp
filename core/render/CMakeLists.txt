@@ -10,7 +10,6 @@ target_include_directories(pulp-render
 target_sources(pulp-render PRIVATE
     src/gpu_surface_dawn.cpp
     src/gpu_compute.cpp
-    src/gpu_timestamps.cpp
     src/headless_surface.cpp
     src/skia_surface.cpp
     src/skp_capture.cpp

@@ -296,23 +296,6 @@ target_include_directories(pulp-test-partial-rendering-poc PRIVATE
 target_link_libraries(pulp-test-partial-rendering-poc PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-partial-rendering-poc)
 
-# Dawn GPU timestamp queries. The pure tick->ms resolution
-# math plus the CPU-only GpuTimestamps stub compile without a GPU link,
-# so this builds the gpu_timestamps.cpp translation unit directly (it
-# falls back to the no-op stub when PULP_HAS_SKIA is undefined). Live-
-# device QuerySet resolution is covered by CI's GPU matrix.
-add_executable(pulp-test-gpu-timestamps
-    test_gpu_timestamps.cpp
-    ${CMAKE_SOURCE_DIR}/core/render/src/gpu_timestamps.cpp)
-target_include_directories(pulp-test-gpu-timestamps PRIVATE
-    ${CMAKE_SOURCE_DIR}/core/render/include)
-target_link_libraries(pulp-test-gpu-timestamps PRIVATE
-    pulp::runtime
-    Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-gpu-timestamps
-    PROPERTIES
-        LABELS coverage)
-
 add_executable(pulp-test-gpu-render-time
     test_gpu_render_time.cpp)
 target_include_directories(pulp-test-gpu-render-time PRIVATE
