@@ -60,6 +60,7 @@ tools:
     invocation: python3 tools/import-design/fidelity_diff.py --render <render.png> --scene <scene.pulp.json> [--json report.json]
     inputs: A rendered PNG + the scene export (scene.pulp.json), and any per-widget reference PNGs named by its asset_manifest.
     outputs: Named per-check pass/fail lines; a JSON report with --json.
+    caveat: Only nodes lowered to RECOGNIZED Pulp widgets. A design imported as the designer's own art (audio_widget "none") is invisible to its widget heuristics — it once read that opt-out sentinel as a kind and reported a near-perfect import as 832 failures. A high skip count means it checked little, not that little was wrong.
     availability: always
     skill: import-design
     docs: guides/importing-designs.md
@@ -71,6 +72,7 @@ tools:
     invocation: 'python3 tools/import-design/montage.py --out compare.png ref.png:"Figma reference" render.png:"Pulp render"'
     inputs: N images as path:Label pairs.
     outputs: One montage PNG with a titled bar above each panel (labels ON by default — that is the point).
+    caveat: Nothing — it renders no verdict at all. Building a montage is not verifying one; a montage nobody looked at is decoration. It is the instrument of last resort precisely because a human is the only thing that reads it.
     availability: always
     skill: screenshot
     docs: guides/importing-designs.md
@@ -82,6 +84,7 @@ tools:
     inputs: A reference PNG and a render PNG (positional).
     invocation: python3 tools/scripts/figma_import_diff.py <reference.png> <render.png> [--out diff.png] [--threshold 16]
     outputs: A 4-panel PNG (reference / render / pixel-diff / region-grid) + the worst regions ranked.
+    caveat: Exact-pixel differencing across two DIFFERENT rasterizers, so anti-aliasing and sub-pixel placement register as real differences. Its ranking finds where to LOOK; it does not adjudicate right vs wrong. A busy diff can be a faithful import.
     availability: always
     skill: import-design
     docs: guides/importing-designs.md
@@ -93,6 +96,7 @@ tools:
     invocation: python3 tools/import-validation/diff_against_reference.py <reference.png> <candidate.png> [--threshold 0.85]
     inputs: Reference and candidate PNGs.
     outputs: A 0.0..1.0 score and a verdict — below threshold means do NOT claim the import works.
+    caveat: POSITION-BLIND. The score is histogram cosine similarity (gross colour distribution), so a design with every element in the wrong place scores identically to a correct one — same pixels, different arrangement. It catches obviously-broken only. Never read a high score as 'laid out right'; that is layout-parity's job.
     availability: always
     skill: import-design
     docs: guides/importing-designs.md
@@ -104,6 +108,7 @@ tools:
     invocation: python3 tools/import-validation/diff_against_reference_regions.py <reference.png> <candidate.png>
     inputs: Reference and candidate PNGs; regions as percent-of-window rects.
     outputs: Per-region scores, so the harness fails on the first broken region instead of averaging it away.
+    caveat: Only the regions you hand it. Anything outside a declared rect is UNCHECKED, and the built-in defaults are hand-authored percent rects for one specific design (Spectr) — pointing it at another design silently scores the wrong boxes. Each region still scores by the position-blind metric above.
     availability: always
     skill: import-design
     docs: guides/importing-designs.md
@@ -115,6 +120,7 @@ tools:
     invocation: python3 tools/import-validation/golden_regression.py --from <source> --file <design> --baseline <baseline.png>
     inputs: A design source + a committed baseline render.
     outputs: Tolerant/structural pass/fail (diff fraction + dilated edge agreement), not exact-pixel — AA noise would false-positive.
+    caveat: Compares against OUR OWN prior render, never the design. It is change-detection, not fidelity — a baseline captured while the import was wrong stays green forever, and every bug found on 2026-07-16 would have passed it. Use it to prove you changed nothing you did not mean to; never to prove the import is right.
     availability: always
     skill: import-design
     docs: guides/importing-designs.md
@@ -125,7 +131,8 @@ tools:
     use_when: An import "looks off" and you need the NODE and the exact pixel delta, not a score.
     invocation: python3 tools/import-design/layout_parity.py <layout.json> [--gate-px 16] [--json report.json]
     inputs: The --dump-layout JSON from pulp-import-design, plus the design's own solved rects (its <stem>.geometry.json sibling, which --dump-layout writes for you).
-    outputs: Per-node dx/dy/dw/dh in design px, clustered by parent so one dropped alignment reports ONCE naming the parent; unmatched ids listed as dropped/extra. Exit 1 on findings; --gate-px N blocks only above N px and reports the rest as advisory. Sees BOXES, not the ink in them — a clean run is not a claim that the render is right.
+    outputs: Per-node dx/dy/dw/dh in design px, clustered by parent so one dropped alignment reports ONCE naming the parent; unmatched ids listed as dropped/extra. Exit 1 on findings; --gate-px N blocks only above N px and reports the rest as advisory.
+    caveat: BOXES only, never the ink inside them. It went GREEN on a change that displaced glyph ink within correct boxes — a clean run means the boxes are right, never that the render is. For material (colour/opacity/gradients/shadows) nothing here helps; look at pixels.
     availability: always
     skill: import-design
     docs: guides/importing-designs.md
@@ -149,6 +156,7 @@ tools:
     invocation: bash tools/scripts/render-figma-import.sh <ui.js> <out.png>
     inputs: A pulp-import-design output plus its sibling <ui.js>.meta.json.
     outputs: A PNG rendered at the source design's root-frame size — no need to remember canvas dimensions.
+    caveat: It renders; it judges nothing. Producing a render is not evidence about it — the render is the INPUT every checker above reads, and each of those has its own blind spot. Its one real guarantee is size fidelity; render at any other size and every score downstream is measuring a reshaped design.
     availability: always
     skill: import-design
     docs: guides/importing-designs.md

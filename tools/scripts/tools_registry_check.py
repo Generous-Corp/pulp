@@ -271,6 +271,22 @@ def validate(registry: dict) -> list[str]:
         if not t.get("category"):
             problems.append(f"{name}: `category` is required")
 
+        # Every CHECKER must state its blind spot. A checker is the one kind of
+        # tool whose silence gets read as a verdict, so an unstated limit is not
+        # a documentation gap — it is a wrong answer waiting to be believed.
+        # On 2026-07-16 three of these reported green while a design rendered
+        # visibly wrong: layout_parity compares boxes and approved a change that
+        # displaced glyph ink inside them; thumb_parity compares block means and
+        # is blind to a flattened gradient by construction; fidelity_diff read
+        # our own opt-out sentinel as a widget kind and cried 832 phantom
+        # failures. Each limit was knowable. None of them travelled with the
+        # tool, so each was learned the expensive way.
+        if t.get("category") == "visual-compare" and not (t.get("caveat") or "").strip():
+            problems.append(
+                f"{name}: `caveat` is required for a visual-compare tool — state "
+                f"what it CANNOT see. Its green is read as 'the render is right'; "
+                f"if that is not what a pass means, the digest has to say so.")
+
         # Owning skill must exist.
         skill = t.get("skill")
         if skill and not (SKILLS_DIR / skill / "SKILL.md").is_file():
@@ -417,6 +433,19 @@ def render_digest(registry: dict) -> str:
         for t in sorted(by_cat[cat], key=lambda x: x["name"]):
             mark = " *(needs install)*" if t["availability"] == "optional-install" else ""
             lines.append(f"- {t['use_when']}{mark} → `{digest_handle(t['invocation'])}`")
+            # A tool's BLIND SPOT travels with it, or it does not travel at all.
+            # These caveats existed in tools.yaml and never reached an agent's
+            # context, which is the same failure the registry was built to fix:
+            # documented, and nowhere anyone reads at the moment of use. On
+            # 2026-07-16 three checkers each reported green while a design
+            # rendered visibly wrong — layout_parity compares boxes and went
+            # green on a change that displaced glyph ink INSIDE those boxes;
+            # thumb_parity compares block means and cannot see a flattened
+            # gradient by construction. Whoever reads "an import looks off, use
+            # this" must read what it cannot see in the same breath.
+            caveat = (t.get("caveat") or "").strip()
+            if caveat:
+                lines.append(f"  - ⚠ **Cannot see:** {caveat}")
         lines.append("")
     lines += [
         "This digest is GENERATED from `docs/status/tools.yaml` by",

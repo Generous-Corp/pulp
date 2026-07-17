@@ -722,14 +722,23 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 
 **visual-compare** — compare a render against its source / a baseline
 - Get one similarity score + verdict BEFORE showing the user any native screenshot. → `tools/import-validation/diff_against_reference.py`
+  - ⚠ **Cannot see:** POSITION-BLIND. The score is histogram cosine similarity (gross colour distribution), so a design with every element in the wrong place scores identically to a correct one — same pixels, different arrangement. It catches obviously-broken only. Never read a high score as 'laid out right'; that is layout-parity's job.
 - A whole-image score is hiding a broken sub-region (empty canvas, broken chrome). → `tools/import-validation/diff_against_reference_regions.py`
+  - ⚠ **Cannot see:** Only the regions you hand it. Anything outside a declared rect is UNCHECKED, and the built-in defaults are hand-authored percent rects for one specific design (Spectr) — pointing it at another design silently scores the wrong boxes. Each region still scores by the position-blind metric above.
 - Measure how close an imported+rendered design is to its Figma source, per node. → `tools/import-design/fidelity_diff.py`
+  - ⚠ **Cannot see:** Only nodes lowered to RECOGNIZED Pulp widgets. A design imported as the designer's own art (audio_widget "none") is invisible to its widget heuristics — it once read that opt-out sentinel as a kind and reported a near-perfect import as 832 failures. A high skip count means it checked little, not that little was wrong.
 - See WHERE a Figma reference and a Pulp render disagree, without eyeballing Preview. → `tools/scripts/figma_import_diff.py`
+  - ⚠ **Cannot see:** Exact-pixel differencing across two DIFFERENT rasterizers, so anti-aliasing and sub-pixel placement register as real differences. Its ranking finds where to LOOK; it does not adjudicate right vs wrong. A busy diff can be a faithful import.
 - Prove an importer change didn't silently regress a design that already imported correctly. → `tools/import-validation/golden_regression.py`
+  - ⚠ **Cannot see:** Compares against OUR OWN prior render, never the design. It is change-detection, not fidelity — a baseline captured while the import was wrong stays green forever, and every bug found on 2026-07-16 would have passed it. Use it to prove you changed nothing you did not mean to; never to prove the import is right.
 - An import "looks off" and you need the NODE and the exact pixel delta, not a score. → `tools/import-design/layout_parity.py`
+  - ⚠ **Cannot see:** BOXES only, never the ink inside them. It went GREEN on a change that displaced glyph ink within correct boxes — a clean run means the boxes are right, never that the render is. For material (colour/opacity/gradients/shadows) nothing here helps; look at pixels.
 - Stack reference vs render into ONE labeled image so a comparison is self-documenting. → `tools/import-design/montage.py`
+  - ⚠ **Cannot see:** Nothing — it renders no verdict at all. Building a montage is not verifying one; a montage nobody looked at is decoration. It is the instrument of last resort precisely because a human is the only thing that reads it.
 - Render an import at the design's OWN canvas size (a mismatched size voids every score). → `tools/scripts/render-figma-import.sh`
+  - ⚠ **Cannot see:** It renders; it judges nothing. Producing a render is not evidence about it — the render is the INPUT every checker above reads, and each of those has its own blind spot. Its one real guarantee is size fidelity; render at any other size and every score downstream is measuring a reshaped design.
 - Triage an import's GROSS colour against Figma's own raster, offline, with no API call. Advisory only — never a gate. → `tools/import-design/thumb_parity.py`
+  - ⚠ **Cannot see:** MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under ~3 design px. For geometry use layout-parity; for material survival use the material audit.
 
 **design-import** — get a design into Pulp
 - Decode a local .fig file offline — no Figma desktop, no REST quota. → `tools/import-design/fig_decode.mjs emit`
