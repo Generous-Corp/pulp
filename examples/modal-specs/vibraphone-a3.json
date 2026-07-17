@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "name": "vibraphone-a3",
+  "description": "Tuned aluminium vibraphone bar, A3. Like a marimba bar the deep undercut arch tunes the transverse overtones to near-integer ratios, but the vibe is tuned one step further than the marimba's 1 : 3.9 : 9.2: the first overtone is pulled to a clean 4:1 (two octaves) and the second to 10:1, so the modes are 220 Hz * {1, 4, 10}. The audible difference from the marimba is the material, not the tuning: aluminium's internal damping is far lower than rosewood's, so the fundamental rings for several seconds where a marimba bar is gone in under two, and the upper partials — while still decaying faster than the fundamental, as they do on any struck bar — sit louder in the balance, which is the bright metallic sheen. No shape maps: strike and pickup position have no effect here, so every mode's authored gain is the amplitude a measurement of the impulse response reads back. (The vibe's real resonator tubes and motorised dampers are performance elements layered on top of this bare-bar model, not part of the bar's own modal identity.)",
+  "modes": [
+    { "freq_hz": 220.0, "t60_s": 5.0, "gain": 1.0 },
+    { "freq_hz": 880.0, "t60_s": 2.0, "gain": 0.5 },
+    { "freq_hz": 2200.0, "t60_s": 0.9, "gain": 0.18 }
+  ],
+  "excitation": {
+    "contact_s": 0.0012,
+    "velocity": 1.0
+  },
+  "tolerances": {
+    "freq_cents": 5.0,
+    "t60_rel": 0.06,
+    "gain_rel": 0.05,
+    "verify_seconds": 4.0
+  }
+}

@@ -111,6 +111,9 @@ add_subdirectory(pulp-pluck)
 # VaDrum: TR-808 bass drum as a persistent struck resonator (no voice allocation)
 add_subdirectory(va-drum)
 
+# ModalInstrument: one spec-driven modal Processor plays any ModalSpec instrument
+add_subdirectory(modal-instrument)
+
 # FAUST DSL examples: offline codegen to Processor
 add_subdirectory(faust-gain)
 add_subdirectory(faust-filter)

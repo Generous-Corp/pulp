@@ -180,6 +180,35 @@ catch_discover_tests(pulp-test-audio-doctor)
 add_executable(pulp-test-modal-analysis test_modal_analysis.cpp)
 target_link_libraries(pulp-test-modal-analysis PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-modal-analysis PROPERTIES TIMEOUT 300)
+
+# ModalInstrument: drives the spec-driven modal Processor through its MIDI +
+# parameter surface and measures the rendered output (pitch, polyphony, strike
+# position, RT-safety). Needs the calibrated modal analyzer (audio-test-support)
+# and the example header on the include path. Builds specs in code, so no
+# PULP_SOURCE_DIR / on-disk spec files.
+pulp_add_test_suite(pulp-test-modal-instrument
+    SOURCES test_modal_instrument.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp-audio-test-support
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/modal-instrument
+    TIMEOUT 300)
+
+# Mallet instruments as data: each ModalSpec is rendered and measured against
+# its own declared tolerances by the blind modal analyzer. Loads the example
+# specs from disk (PULP_SOURCE_DIR) and parses them (pulp::signal-modal-spec).
+pulp_add_test_suite(pulp-test-marimba-vibraphone
+    SOURCES test_marimba_vibraphone.cpp
+    LIBRARIES pulp-audio-test-support pulp::signal-modal-spec
+    COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    TIMEOUT 300)
+
+# Plucked steel string as data: stiffness inharmonicity and pickup-position
+# comb filtering measured from renders. Loads + parses the example spec.
+pulp_add_test_suite(pulp-test-plucked-string
+    SOURCES test_plucked_string.cpp
+    LIBRARIES pulp-audio-test-support pulp::signal-modal-spec
+    COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    TIMEOUT 300)
+
 # Measured-versus-reported latency. Its fixture is a source-owned delay line, so
 # it needs no example plugin.
 add_executable(pulp-test-latency-contract test_latency_contract.cpp)
