@@ -70,8 +70,21 @@ std::vector<uint8_t> Bundle::serialize() const {
     return buf;
 }
 
-std::optional<Bundle> Bundle::deserialize(const uint8_t* data, size_t size) {
+namespace {
+
+// OSC bundles nest: a bundle element may itself be a bundle. A single
+// datagram can encode deep nesting (the UDP receiver accepts packets up to
+// 64 KB, enough for thousands of levels), and unbounded recursion would
+// overflow the receiver thread's stack — a remotely reachable crash from one
+// hostile packet. Bound the nesting depth. Real OSC bundles nest only a
+// handful of levels; 64 is far beyond any legitimate use while staying safe
+// on the small secondary-thread stacks that run the receiver.
+constexpr int kMaxBundleDepth = 64;
+
+std::optional<Bundle> deserialize_bundle(const uint8_t* data, size_t size,
+                                         int depth) {
     if (data == nullptr) return std::nullopt;
+    if (depth > kMaxBundleDepth) return std::nullopt;
     if (size < 16) return std::nullopt;  // minimum: header(8) + timetag(8)
 
     // Verify "#bundle\0" header
@@ -98,7 +111,7 @@ std::optional<Bundle> Bundle::deserialize(const uint8_t* data, size_t size) {
 
         // Nested bundle or message?
         if (elem_size >= 8 && std::memcmp(data + offset, "#bundle", 8) == 0) {
-            auto nested = Bundle::deserialize(data + offset, elem_size);
+            auto nested = deserialize_bundle(data + offset, elem_size, depth + 1);
             if (!nested) return std::nullopt;
             bundle.add(std::move(*nested));
         } else {
@@ -113,6 +126,12 @@ std::optional<Bundle> Bundle::deserialize(const uint8_t* data, size_t size) {
     if (offset != size) return std::nullopt;
 
     return bundle;
+}
+
+}  // namespace
+
+std::optional<Bundle> Bundle::deserialize(const uint8_t* data, size_t size) {
+    return deserialize_bundle(data, size, 0);
 }
 
 // ── Address pattern matching ────────────────────────────────────────────────
