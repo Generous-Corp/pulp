@@ -1,6 +1,7 @@
 #include <pulp/view/css_gradient.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cctype>
 #include <optional>
 #include <sstream>
@@ -56,6 +57,55 @@ canvas::Color parse_css_color(const std::string& str) {
         c.g = std::clamp(vals[1] / 255.0f, 0.0f, 1.0f);
         c.b = std::clamp(vals[2] / 255.0f, 0.0f, 1.0f);
         c.a = std::clamp(vals[3], 0.0f, 1.0f);  // alpha is already 0-1 in CSS
+        return c;
+    }
+
+    if (str.compare(0, 4, "hsl(") == 0 || str.compare(0, 5, "hsla(") == 0) {
+        // hsl() used to fall off the end of this function and return the opaque
+        // WHITE default above. That is worse than refusing it: an unparseable
+        // token leaves a paint site untouched, but a wrong colour is
+        // indistinguishable downstream from a deliberate one, so an hsl() design
+        // painted white and looked like a design decision.
+        auto inner = str.substr(str.find('(') + 1);
+        inner = inner.substr(0, inner.find(')'));
+        // h is degrees (bare or `deg`), s/l are percentages, a is 0-1. Commas
+        // and the modern space-separated form both appear in the wild; treat
+        // both separators the same rather than parse CSS grammar properly.
+        for (auto& ch : inner)
+            if (ch == ',' || ch == '/') ch = ' ';
+        float vals[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        int n = 0;
+        std::istringstream ss(inner);
+        std::string tok;
+        while (ss >> tok && n < 4) {
+            const auto pct = tok.find('%');
+            if (pct != std::string::npos) tok.erase(pct);
+            if (tok.size() > 3 && tok.compare(tok.size() - 3, 3, "deg") == 0)
+                tok.erase(tok.size() - 3);
+            try { vals[n] = std::stof(tok); } catch (...) { vals[n] = 0.0f; }
+            ++n;
+        }
+        // Hue wraps rather than clamps — hsl(370) is hsl(10), and clamping it to
+        // 360 would silently turn a red into a red-ish wrong.
+        float h = std::fmod(vals[0], 360.0f);
+        if (h < 0.0f) h += 360.0f;
+        const float sat = std::clamp(vals[1] / 100.0f, 0.0f, 1.0f);
+        const float light = std::clamp(vals[2] / 100.0f, 0.0f, 1.0f);
+        const float chroma = (1.0f - std::fabs(2.0f * light - 1.0f)) * sat;
+        const float hp = h / 60.0f;
+        const float x = chroma * (1.0f - std::fabs(std::fmod(hp, 2.0f) - 1.0f));
+        float r = 0.0f, g = 0.0f, b = 0.0f;
+        if      (hp < 1.0f) { r = chroma; g = x;      b = 0.0f;   }
+        else if (hp < 2.0f) { r = x;      g = chroma; b = 0.0f;   }
+        else if (hp < 3.0f) { r = 0.0f;   g = chroma; b = x;      }
+        else if (hp < 4.0f) { r = 0.0f;   g = x;      b = chroma; }
+        else if (hp < 5.0f) { r = x;      g = 0.0f;   b = chroma; }
+        else                { r = chroma; g = 0.0f;   b = x;      }
+        const float m = light - chroma / 2.0f;
+        c.r = std::clamp(r + m, 0.0f, 1.0f);
+        c.g = std::clamp(g + m, 0.0f, 1.0f);
+        c.b = std::clamp(b + m, 0.0f, 1.0f);
+        c.a = std::clamp(vals[3], 0.0f, 1.0f);
         return c;
     }
     return c;

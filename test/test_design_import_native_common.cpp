@@ -436,20 +436,15 @@ TEST_CASE("an unparseable CSS colour leaves the paint site untouched",
     check_color(root->border_color(), 0.0f, 0.0f, 0.0f, 1.0f);
 }
 
-TEST_CASE("hsl() is admitted by the colour helper but not implemented downstream",
+TEST_CASE("hsl() paints the colour it names",
           "[view][import][native-common][css-color]") {
-    // KNOWN GAP, characterized deliberately — this is NOT the desired behavior.
-    //
-    // The helper admits an `hsl(` prefix and hands it to the shared CSS parser,
-    // but that parser implements only #hex, rgb(), rgba(), and `transparent`.
-    // Anything else falls off its end and returns its opaque-WHITE default. So an
-    // hsl() design does not fall back to the untouched default the way an unknown
-    // token does — it paints white, which is worse: a wrong colour is
-    // indistinguishable downstream from a deliberate one.
-    //
-    // Asserted rather than left silent so the gap is visible at head, and so
-    // whichever change closes it (teaching the parser hsl, or dropping `hsl` from
-    // the helper's guard so it returns nullopt) must come here and say so.
+    // This case was first written to characterize a gap: the helper admitted an
+    // `hsl(` prefix and handed it to a parser that implemented only #hex, rgb(),
+    // rgba() and `transparent`, so hsl() fell off the end and took that parser's
+    // opaque-WHITE default. That is worse than refusing it — an unparseable
+    // token leaves a paint site untouched, but a wrong colour is
+    // indistinguishable downstream from a deliberate one, so an hsl() design
+    // painted white and looked like someone had chosen white.
     DesignIR ir;
     ir.root.type = "frame";
     ir.root.stable_anchor_id = "panel";
@@ -460,9 +455,37 @@ TEST_CASE("hsl() is admitted by the colour helper but not implemented downstream
 
     auto root = build_native_view_tree(ir, {}, {});
     REQUIRE(root != nullptr);
+    // rgb(61, 153, 245), checked against a reference implementation rather than
+    // taken on trust — the value this replaced said 138 and was simply wrong.
+    check_color(root->border_color(), 61.0f / 255.0f, 153.0f / 255.0f, 245.0f / 255.0f, 1.0f);
+}
 
-    // A correct hsl() parse would be ~rgb(61, 138, 245).
-    check_color(root->border_color(), 1.0f, 1.0f, 1.0f, 1.0f);
+TEST_CASE("hsl() handles the forms designs actually ship",
+          "[view][import][native-common][css-color]") {
+    auto border_of = [](const char* css) {
+        DesignIR ir;
+        ir.root.type = "frame";
+        ir.root.stable_anchor_id = "panel";
+        ir.root.style.width = 100.0f;
+        ir.root.style.height = 40.0f;
+        ir.root.style.border_width = 1.0f;
+        ir.root.style.border_color = css;
+        return build_native_view_tree(ir, {}, {})->border_color();
+    };
+
+    // Saturation 0 is grey at every hue — the cheapest check that the maths is
+    // not accidentally hue-driven.
+    check_color(border_of("hsl(0, 0%, 50%)"), 0.5f, 0.5f, 0.5f, 1.0f);
+    // Alpha must survive: a dropped alpha is the silent flattening this branch
+    // has hit over and over.
+    check_color(border_of("hsla(120, 100%, 50%, 0.5)"), 0.0f, 1.0f, 0.0f, 0.5f);
+    // Hue wraps rather than clamps: hsl(370) is hsl(10), and clamping to 360
+    // would turn a red into a wrong red rather than an obviously broken one.
+    check_color(border_of("hsl(370, 100%, 50%)"), border_of("hsl(10, 100%, 50%)").r,
+                border_of("hsl(10, 100%, 50%)").g, border_of("hsl(10, 100%, 50%)").b, 1.0f);
+    // The modern space-separated spelling is the one Figma and most token
+    // pipelines emit today.
+    check_color(border_of("hsl(120 100% 50%)"), 0.0f, 1.0f, 0.0f, 1.0f);
 }
 
 TEST_CASE("SVG fill and stroke accept non-hex CSS across every shape widget",
