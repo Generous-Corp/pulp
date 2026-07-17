@@ -175,8 +175,8 @@ TEST_CASE("a running CSS animation keeps frames alive; paused does not",
 
 TEST_CASE("begin_host_frame wakes from idle via an activity probe",
           "[view][continuous-frames][frame-pump]") {
-    View root;
     FrameClock clock;
+    View root;
     HostFramePump pump;
     double t = 0.0;
     // Every vsync reaches the pump here (has_idle-style host): the frames the
@@ -208,8 +208,8 @@ TEST_CASE("begin_host_frame wakes from idle via an activity probe",
 
 TEST_CASE("begin_host_frame honors the host's own needs_repaint flag",
           "[view][continuous-frames][frame-pump]") {
-    View root;
     FrameClock clock;
+    View root;
     HostFramePump pump;
     // No probes, static tree: needs_repaint short-circuits to a render.
     REQUIRE(begin_host_frame(&root, clock, pump, 0.016, /*needs_repaint=*/true).should_render);

@@ -269,6 +269,9 @@ TEST_CASE("View dimensions frame clock and repaint helpers resolve inherited sta
     resized.set_bounds({0, 0, 64, 24});
     REQUIRE(resized.resized_count == 2);
 
+    // Declared before the tree so it outlives every view that binds to it below.
+    FrameClock clock;
+
     View root;
     Theme theme;
     theme.dimensions["spacing.tight"] = 7.0f;
@@ -283,7 +286,6 @@ TEST_CASE("View dimensions frame clock and repaint helpers resolve inherited sta
     REQUIRE_THAT(child_ptr->resolve_dimension("spacing.missing", 3.0f),
                  WithinAbs(3.0f, 0.001));
 
-    FrameClock clock;
     root.set_frame_clock(&clock);
     REQUIRE(root.frame_clock() == &clock);
     REQUIRE(child_ptr->frame_clock() == &clock);
