@@ -1350,9 +1350,21 @@ void InspectorOverlay::paint_atlas_tab(Canvas& canvas, float x, float y,
     canvas.set_fill_color(kHighlightStroke);
     canvas.fill_text("Texture Atlases (A)", x, y + 11);
 
-    // No inventory wired — graceful empty state. This is the headless /
-    // GPU-off path; the tab must never crash here.
-    if (!atlas_inventory_ || atlas_inventory_->empty()) {
+    // No inventory pointer at all: set_atlas_inventory() has no production
+    // caller yet — no painter is atlas-backed (the SDF/text atlas lane is the
+    // planned first consumer). Say that explicitly instead of "GPU atlas
+    // unavailable", which implies a GPU fault and made an always-empty tab
+    // indistinguishable from a real degradation.
+    if (!atlas_inventory_) {
+        atlas_row_count_ = 0;
+        canvas.set_fill_color(kPanelDim);
+        canvas.fill_text("atlas inventory not wired — no atlas-backed painters yet",
+                         x, y + 11 + kRowHeight);
+        return;
+    }
+    // Inventory attached but holds no atlases — a genuine GPU-off / headless
+    // empty state. The tab must never crash here.
+    if (atlas_inventory_->empty()) {
         atlas_row_count_ = 0;
         canvas.set_fill_color(kPanelDim);
         canvas.fill_text("GPU atlas unavailable", x, y + 11 + kRowHeight);

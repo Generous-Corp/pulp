@@ -117,18 +117,21 @@ TEST_CASE("InspectorOverlay atlas viewer: viewer renders a row per atlas",
     REQUIRE(overlay.atlas_row_count() == 2);
 }
 
-TEST_CASE("InspectorOverlay atlas viewer: viewer degrades gracefully with no inventory",
+TEST_CASE("InspectorOverlay atlas viewer: no inventory shows the not-wired state",
           "[inspect][overlay][atlas][atlas-viewer]") {
     View root;
     root.set_bounds({0, 0, 500, 320});
     InspectorOverlay overlay(root);
     overlay.set_active(true);
     overlay.set_atlas_viewer_visible(true);
-    // No AtlasInventory attached — the GPU-off / headless path.
+    // No AtlasInventory attached — set_atlas_inventory() has no production
+    // caller yet, so the tab is ALWAYS in this state. It must say so honestly
+    // ("not wired") rather than imply a GPU fault ("GPU atlas unavailable").
 
     pulp::canvas::RecordingCanvas canvas;
     overlay.paint(canvas);  // must not crash.
-    REQUIRE(count_text_containing(canvas, "GPU atlas unavailable") >= 1);
+    REQUIRE(count_text_containing(canvas, "not wired") >= 1);
+    REQUIRE(count_text_containing(canvas, "GPU atlas unavailable") == 0);
     REQUIRE(overlay.atlas_row_count() == 0);
 }
 
