@@ -1300,8 +1300,12 @@ TEST_CASE("Audio widget schemas reject malformed dimension tokens without error 
     REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 0);
 }
 
-TEST_CASE("Audio widgets custom shader paths fall back on recording canvas",
+TEST_CASE("Audio widgets custom shader paths record a shader draw on recording canvas",
           "[view][widget][shader][issue-493]") {
+    // A custom-shader widget routes its body through Canvas::draw_with_sksl.
+    // RecordingCanvas now records that as a distinct `draw_sksl` command (rather
+    // than the base CPU placeholder fill_rect it used to inherit), so the shader
+    // draw is visible to headless tests; the label text still paints normally.
     Knob knob;
     knob.set_bounds({0, 0, 80, 80});
     knob.set_value(0.5f);
@@ -1313,7 +1317,8 @@ TEST_CASE("Audio widgets custom shader paths fall back on recording canvas",
 
     RecordingCanvas knob_canvas;
     knob.paint(knob_canvas);
-    REQUIRE(knob_canvas.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::draw_sksl) == 1);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::fill_rect) == 0);
     REQUIRE(knob_canvas.count(DrawCommand::Type::fill_text) >= 2);
 
     Fader fader;
@@ -1325,7 +1330,8 @@ TEST_CASE("Audio widgets custom shader paths fall back on recording canvas",
 
     RecordingCanvas fader_canvas;
     fader.paint(fader_canvas);
-    REQUIRE(fader_canvas.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(fader_canvas.count(DrawCommand::Type::draw_sksl) == 1);
+    REQUIRE(fader_canvas.count(DrawCommand::Type::fill_rect) == 0);
     REQUIRE(fader_canvas.count(DrawCommand::Type::fill_text) == 1);
 
     Toggle toggle;
@@ -1338,7 +1344,8 @@ TEST_CASE("Audio widgets custom shader paths fall back on recording canvas",
 
     RecordingCanvas toggle_canvas;
     toggle.paint(toggle_canvas);
-    REQUIRE(toggle_canvas.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(toggle_canvas.count(DrawCommand::Type::draw_sksl) == 1);
+    REQUIRE(toggle_canvas.count(DrawCommand::Type::fill_rect) == 0);
     REQUIRE(toggle_canvas.count(DrawCommand::Type::fill_text) == 1);
 }
 

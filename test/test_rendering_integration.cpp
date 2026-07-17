@@ -140,9 +140,11 @@ TEST_CASE("An empty EffectChain does not swallow the opacity layer",
     const int depth_before = canvas.save_count();
     root.paint_all(canvas);
 
-    // Balanced, and the opacity layer was actually pushed.
+    // Balanced, and the opacity layer was actually pushed. RecordingCanvas now
+    // records the opacity compositing layer as a distinct save_layer command
+    // rather than a bare save(), so assert on that.
     REQUIRE(canvas.save_count() == depth_before);
-    REQUIRE(canvas.count(canvas::DrawCommand::Type::save) >= 1);
+    REQUIRE(canvas.count(canvas::DrawCommand::Type::save_layer) >= 1);
 }
 
 // ── Dimension tests ─────────────────────────────────────────────────────

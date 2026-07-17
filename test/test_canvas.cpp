@@ -329,13 +329,24 @@ TEST_CASE("Canvas fallback helpers record CPU-safe commands", "[canvas]") {
     REQUIRE(metrics.descent == Catch::Approx(5.0f));
     REQUIRE(metrics.line_height == Catch::Approx(24.0f));
 
+    // RecordingCanvas now records the layer intent as its own command instead
+    // of collapsing to a bare save(); the bounds/opacity/blur are captured.
     canvas.save_layer(1, 2, 3, 4, 0.5f, 6.0f);
-    REQUIRE(canvas.count(DrawCommand::Type::save) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::save_layer) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::save) == 0);
+    const auto& layer = canvas.commands().back();
+    REQUIRE(layer.type == DrawCommand::Type::save_layer);
+    REQUIRE(layer.f[0] == Catch::Approx(1.0f));
+    REQUIRE(layer.f[4] == Catch::Approx(0.5f));  // opacity
+    REQUIRE(layer.f[5] == Catch::Approx(6.0f));  // blur
 
+    // The CPU-safe placeholder fill lives on the base Canvas::draw_with_sksl.
+    // RecordingCanvas overrides draw_with_sksl to record intent (see the
+    // dedicated recording test), so exercise the base fallback explicitly here.
     Canvas::ShaderUniforms uniforms;
     uniforms.fill_color = Color::rgba8(10, 20, 30, 40);
-    REQUIRE_FALSE(canvas.draw_with_sksl("half4 main(float2 p) { return half4(1); }",
-                                       4, 5, 6, 7, uniforms));
+    REQUIRE_FALSE(canvas.Canvas::draw_with_sksl(
+        "half4 main(float2 p) { return half4(1); }", 4, 5, 6, 7, uniforms));
 
     REQUIRE(canvas.count(DrawCommand::Type::fill_rect) == 1);
     const auto& fill_rect = canvas.commands().back();
@@ -344,6 +355,73 @@ TEST_CASE("Canvas fallback helpers record CPU-safe commands", "[canvas]") {
     REQUIRE(fill_rect.f[1] == Catch::Approx(5.0f));
     REQUIRE(fill_rect.f[2] == Catch::Approx(6.0f));
     REQUIRE(fill_rect.f[3] == Catch::Approx(7.0f));
+}
+
+// The recorder must SEE the save_layer family and sksl draws — before this,
+// every save_layer* collapsed to a bare save() and draw_with_sksl recorded
+// nothing, so a command-stream test could not tell an opacity/filter/blend/mask
+// compositing layer from a plain save(). That blind spot is exactly why the
+// effect facades (bloom/vignette/chromatic aberration) went undetected.
+TEST_CASE("RecordingCanvas records the save_layer family and sksl draws",
+          "[canvas][recording][save-layer]") {
+    RecordingCanvas rc;
+
+    const int depth_before = rc.save_count();
+
+    // save_layer_with_filters: a 2-entry blur chain (5px + 3px). The recorder
+    // captures the command, the raw filter count, and the effective (summed)
+    // blur — none of which a bare save() could carry.
+    Canvas::FilterChainEntry chain[2];
+    chain[0].kind = Canvas::FilterChainEntry::Kind::blur; chain[0].amount = 5.0f;
+    chain[1].kind = Canvas::FilterChainEntry::Kind::blur; chain[1].amount = 3.0f;
+    rc.save_layer_with_filters(0, 0, 100, 100, 1.0f, chain, 2);
+
+    REQUIRE(rc.count(DrawCommand::Type::save_layer_filters) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::save) == 0);  // NOT a bare save()
+    const auto& filt = rc.commands().back();
+    REQUIRE(filt.type == DrawCommand::Type::save_layer_filters);
+    REQUIRE(filt.f[5] == Catch::Approx(8.0f));       // summed blur
+    REQUIRE(filt.floats.size() == 1);
+    REQUIRE(filt.floats[0] == Catch::Approx(2.0f));  // filter count reached the canvas
+
+    // draw_with_sksl records a draw_sksl command, returns false, and does NOT
+    // run the base CPU placeholder fill on the recorder.
+    Canvas::ShaderUniforms u;
+    u.value = 0.25f;
+    REQUIRE_FALSE(rc.draw_with_sksl("half4 main(float2 p){return half4(1);}",
+                                    1, 2, 3, 4, u));
+    REQUIRE(rc.count(DrawCommand::Type::draw_sksl) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::fill_rect) == 0);
+    const auto& sk = rc.commands().back();
+    REQUIRE(sk.text == "half4 main(float2 p){return half4(1);}");
+    REQUIRE(sk.f[0] == Catch::Approx(1.0f));
+    REQUIRE(sk.f[4] == Catch::Approx(0.25f));  // uniforms.value captured
+
+    // Each save_layer* increments the save stack by exactly one; restore pops it.
+    REQUIRE(rc.save_count() == depth_before + 1);
+    rc.restore();
+    REQUIRE(rc.save_count() == depth_before);
+
+    // The other three family members each record a distinct command; the blend
+    // mode and mask-image intent are captured.
+    rc.clear();
+    rc.save_layer(0, 0, 10, 10, 0.5f, 0.0f);
+    rc.save_layer_with_blend(0, 0, 10, 10, 1.0f, 0.0f, Canvas::BlendMode::multiply);
+    rc.save_layer_with_mask(0, 0, 10, 10, 1.0f, "linear-gradient(black,white)", "cover");
+    REQUIRE(rc.count(DrawCommand::Type::save_layer) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::save_layer_blend) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::save_layer_mask) == 1);
+
+    for (const auto& c : rc.commands()) {
+        if (c.type == DrawCommand::Type::save_layer_blend) {
+            REQUIRE(c.floats.size() == 1);
+            REQUIRE(static_cast<int>(c.floats[0]) ==
+                    static_cast<int>(Canvas::BlendMode::multiply));
+        }
+        if (c.type == DrawCommand::Type::save_layer_mask) {
+            REQUIRE(c.text == "linear-gradient(black,white)");
+        }
+    }
 }
 
 namespace {
@@ -867,8 +945,11 @@ TEST_CASE("Canvas fallbacks cover shader, clear, and shadow no-op paths",
           "[canvas][fallback]") {
     RecordingCanvas rc;
 
+    // Exercise the BASE Canvas::draw_with_sksl CPU fallback (fills a placeholder
+    // rect) — RecordingCanvas's own override records intent instead, so this
+    // test qualifies the call to reach the base contract it is asserting.
     Canvas::ShaderUniforms uniforms;
-    REQUIRE_FALSE(rc.draw_with_sksl("ignored", 1, 2, 3, 4, uniforms));
+    REQUIRE_FALSE(rc.Canvas::draw_with_sksl("ignored", 1, 2, 3, 4, uniforms));
     REQUIRE(rc.count(DrawCommand::Type::set_fill_color) == 1);
     REQUIRE(rc.count(DrawCommand::Type::fill_rect) == 1);
     REQUIRE(rc.commands()[1].f[0] == Catch::Approx(1.0f));
@@ -878,7 +959,7 @@ TEST_CASE("Canvas fallbacks cover shader, clear, and shadow no-op paths",
 
     rc.clear();
     uniforms.fill_color = Color::rgba8(11, 22, 33, 128);
-    REQUIRE_FALSE(rc.draw_with_sksl("ignored", 5, 6, 7, 8, uniforms));
+    REQUIRE_FALSE(rc.Canvas::draw_with_sksl("ignored", 5, 6, 7, 8, uniforms));
     REQUIRE(rc.commands()[0].color.r8() == 11);
     REQUIRE(rc.commands()[0].color.g8() == 22);
     REQUIRE(rc.commands()[0].color.b8() == 33);

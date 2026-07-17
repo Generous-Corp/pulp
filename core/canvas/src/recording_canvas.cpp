@@ -394,6 +394,89 @@ void RecordingCanvas::save_backdrop_filter(float x, float y, float w, float h,
     commands_.push_back(cmd);
 }
 
+// ── Compositing layer saves (save_layer family) ──────────────────────────────
+// The base Canvas::save_layer* methods fall through to a bare save(). Here we
+// record the layer intent as its own command so a headless test can see that
+// an opacity / filter / blend / mask layer was pushed — but we must still model
+// the save stack exactly as save() does (increment depth + push the CTM), or
+// the matching restore() would underflow and every save_count() balance test
+// would fail. Each override below records its command and then replicates the
+// save() bookkeeping (increment depth + push the CTM) without emitting a bare
+// `save` command.
+
+void RecordingCanvas::save_layer(float x, float y, float w, float h,
+                                 float opacity, float blur_radius) {
+    DrawCommand cmd{DrawCommand::Type::save_layer};
+    cmd.f[0] = x; cmd.f[1] = y; cmd.f[2] = w; cmd.f[3] = h;
+    cmd.f[4] = opacity; cmd.f[5] = blur_radius;
+    commands_.push_back(cmd);
+    ++save_depth_;
+    ctm_stack_.push_back(ctm_);
+}
+
+void RecordingCanvas::save_layer_with_blend(float x, float y, float w, float h,
+                                            float opacity, float blur_radius,
+                                            BlendMode mode) {
+    DrawCommand cmd{DrawCommand::Type::save_layer_blend};
+    cmd.f[0] = x; cmd.f[1] = y; cmd.f[2] = w; cmd.f[3] = h;
+    cmd.f[4] = opacity; cmd.f[5] = blur_radius;
+    cmd.floats.push_back(static_cast<float>(mode));
+    commands_.push_back(std::move(cmd));
+    ++save_depth_;
+    ctm_stack_.push_back(ctm_);
+}
+
+void RecordingCanvas::save_layer_with_filters(float x, float y, float w, float h,
+                                              float opacity,
+                                              const FilterChainEntry* chain,
+                                              int count) {
+    // Mirror the base fallback's blur+opacity collapse so the recorded blur is
+    // the effective blur the real backends would apply, then expose the raw
+    // filter count so a test can assert the whole chain reached the canvas.
+    float blur = 0.0f;
+    float effective_opacity = opacity;
+    for (int i = 0; i < count; ++i) {
+        if (chain[i].kind == FilterChainEntry::Kind::blur) {
+            blur += chain[i].amount;
+        } else if (chain[i].kind == FilterChainEntry::Kind::opacity) {
+            effective_opacity *= chain[i].amount;
+        }
+    }
+    DrawCommand cmd{DrawCommand::Type::save_layer_filters};
+    cmd.f[0] = x; cmd.f[1] = y; cmd.f[2] = w; cmd.f[3] = h;
+    cmd.f[4] = effective_opacity; cmd.f[5] = blur;
+    cmd.floats.push_back(static_cast<float>(count));
+    commands_.push_back(std::move(cmd));
+    ++save_depth_;
+    ctm_stack_.push_back(ctm_);
+}
+
+void RecordingCanvas::save_layer_with_mask(float x, float y, float w, float h,
+                                           float opacity,
+                                           const std::string& mask_image,
+                                           const std::string& mask_size) {
+    (void)mask_size;  // captured intent is the mask-image; size is not recorded
+    DrawCommand cmd{DrawCommand::Type::save_layer_mask};
+    cmd.f[0] = x; cmd.f[1] = y; cmd.f[2] = w; cmd.f[3] = h;
+    cmd.f[4] = opacity;
+    cmd.text = mask_image;
+    commands_.push_back(std::move(cmd));
+    ++save_depth_;
+    ctm_stack_.push_back(ctm_);
+}
+
+bool RecordingCanvas::draw_with_sksl(const std::string& sksl, float x, float y,
+                                     float w, float h,
+                                     const ShaderUniforms& uniforms) {
+    DrawCommand cmd{DrawCommand::Type::draw_sksl};
+    cmd.f[0] = x; cmd.f[1] = y; cmd.f[2] = w; cmd.f[3] = h;
+    cmd.f[4] = uniforms.value; cmd.f[5] = uniforms.time;
+    cmd.color = uniforms.fill_color;
+    cmd.text = sksl;
+    commands_.push_back(std::move(cmd));
+    return false;  // a recorder never actually renders the shader
+}
+
 // ── Box-shadow primitive ────────────────────────────────────────────────────
 
 void Canvas::draw_box_shadow(float x, float y, float w, float h,
