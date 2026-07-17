@@ -307,6 +307,43 @@ test('absolute children keep their Figma coordinates; auto-layout children do no
   assert.ok(!('top' in row.style), 'auto-layout child carries no coordinates');
 });
 
+test('drop shadows survive as box_shadow; unsupported effects are skipped', () => {
+  // Shadows are what make a control read as an object instead of a decal. The
+  // design stacks two drop shadows under every knob; dropping them rendered
+  // them flat — a difference no geometry check can catch, because the box is
+  // exactly the right size in exactly the right place, it just has no depth.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'RECTANGLE', name: 'knob base',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 28, y: 28 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+      fillPaints: [{ type: 'SOLID', color: { r: 0.35, g: 0.36, b: 0.38, a: 1 } }],
+      effects: [
+        { type: 'DROP_SHADOW', offset: { x: 0, y: 16 }, radius: 6, spread: 0, visible: true,
+          color: { r: 0, g: 0, b: 0, a: 0.1026 } },
+        { type: 'INNER_SHADOW', offset: { x: 0, y: 1 }, radius: 2, spread: 0, visible: true,
+          color: { r: 1, g: 1, b: 1, a: 0.25 } },
+        // Hidden: the designer turned it off, so it must not paint.
+        { type: 'DROP_SHADOW', offset: { x: 0, y: 99 }, radius: 9, visible: false,
+          color: { r: 1, g: 0, b: 0, a: 1 } },
+        // No box-shadow equivalent — skipped rather than approximated into
+        // something the design never asked for.
+        { type: 'LAYER_BLUR', radius: 4, visible: true },
+      ] },
+  ]});
+  const f = materializeFrame(scene, findFrame(scene, 'Root'), { images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
+  const bs = f.envelope.root.children[0].style.box_shadow;
+  assert.ok(bs, 'the knob carries a shadow');
+  const layers = bs.split(', ');
+  assert.equal(layers.length, 2, 'two visible shadows; the hidden and the blur are not layers');
+  assert.equal(layers[0], '0px 16px 6px 0px #0000001a');
+  assert.ok(layers[1].startsWith('inset '), 'an inner shadow is inset');
+  assert.ok(!bs.includes('99px'), 'a hidden effect never paints');
+});
+
 test('icon-font text lowers to a glyph outline; real text stays a live label', () => {
   // An icon font's characters are LIGATURE NAMES — "lock" means a padlock — so
   // emitting them as text is always wrong and no font we can ship fixes it.
@@ -634,4 +671,111 @@ test('a self-recursive symbol terminates instead of expanding forever', () => {
   assert.equal(top.name, 'top');
   assert.equal(top.children.length, 1, 'first level expands');
   assert.ok(!('children' in top.children[0]), 'the cycle is cut, not recursed');
+});
+
+// ── geometry sidecar (layout-parity ground truth) ────────────────────────────
+//
+// The envelope deliberately DROPS an auto-layout child's coordinates — they
+// flow, and emitting them would fight the flex pass. That is right for the
+// importer and useless for validation, which is exactly how a dropped flex hid:
+// the one place that knew where the children belonged had thrown it away. The
+// `.fig` still carries Figma's solved rect for those children, so the sidecar
+// recovers it INDEPENDENTLY of `style` — that independence is the whole point,
+// and a test that read the answer back out of `style` would prove nothing.
+
+test('the geometry sidecar recovers solved rects for auto-layout children', () => {
+  const g = (l) => ({ sessionID: 0, localID: l });
+  const T = (x, y) => ({ m00: 1, m01: 0, m02: x, m10: 0, m11: 1, m12: y });
+  const scene = buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page' },
+    // The frame under import sits somewhere on the Figma canvas; that offset is
+    // not part of the UI, so the sidecar must anchor the frame at the origin —
+    // the same space `style.left`/`top` are expressed in.
+    { guid: g(2), type: 'FRAME', name: 'Root', parentIndex: { guid: g(1), position: 'a' },
+      size: { x: 400, y: 200 }, transform: T(1234, 5678) },
+    { guid: g(3), type: 'FRAME', name: 'Transport', parentIndex: { guid: g(2), position: 'a' },
+      size: { x: 300, y: 40 }, transform: T(50, 100), stackMode: 'HORIZONTAL' },
+    // Figma's post-layout transforms for the flowed children (m02 = 0, 38, 76).
+    { guid: g(4), type: 'RECTANGLE', name: 'Play', parentIndex: { guid: g(3), position: 'a' },
+      size: { x: 24, y: 24 }, transform: T(0, 8) },
+    { guid: g(5), type: 'RECTANGLE', name: 'Stop', parentIndex: { guid: g(3), position: 'b' },
+      size: { x: 24, y: 24 }, transform: T(38, 8) },
+    { guid: g(6), type: 'RECTANGLE', name: 'Rec', parentIndex: { guid: g(3), position: 'c' },
+      size: { x: 24, y: 24 }, transform: T(76, 8) },
+  ]});
+  const { envelope, geometry } = materializeFrame(scene, findFrame(scene, 'Root'), {
+    images: new Map(), fileKey: 'K', parserVersion: 't', compatSchemaVersion: '1',
+    exportedAt: '1970-01-01T00:00:00Z' });
+
+  const by = Object.fromEntries(geometry.nodes.map((n) => [n.node_id, n]));
+  assert.equal(geometry.nodes.length, 5, 'every emitted node carries a rect');
+  assert.deepEqual([by['0:2'].x, by['0:2'].y], [0, 0],
+    "the imported frame anchors the space; its canvas position is not the UI's");
+  assert.deepEqual([by['0:3'].x, by['0:3'].y], [50, 100]);
+  // Absolute = the child's solved transform composed with its ancestors'.
+  assert.deepEqual([by['0:4'].x, by['0:4'].y], [50, 108]);
+  assert.deepEqual([by['0:5'].x, by['0:5'].y], [88, 108]);
+  assert.deepEqual([by['0:6'].x, by['0:6'].y], [126, 108]);
+  assert.deepEqual([by['0:6'].width, by['0:6'].height], [24, 24]);
+  assert.equal(by['0:4'].parent_id, '0:3', 'parentage is what lets findings cluster');
+  assert.equal(by['0:3'].parent_id, '0:2');
+  assert.equal(by['0:2'].parent_id, null);
+
+  // The control that makes the above meaningful: `style` genuinely has no
+  // coordinates for these children, so the sidecar is not echoing it back.
+  const transport = envelope.root.children[0];
+  for (const child of transport.children)
+    assert.ok(!('left' in child.style), 'auto-layout children stay position-less');
+});
+
+test('every emitted node carries a node_id, unique across instances of one master', () => {
+  // Without an id there is nothing to join on and every node-keyed check —
+  // fidelity_diff, layout parity — silently skips, reporting success by finding
+  // nothing. The raw guid is not enough: an expanded instance's children reuse
+  // their MASTER's guids, so two instances of one component would collide and a
+  // parity run would compare one instance's rect against the other's.
+  const { envelope, geometry } = materializeRoot(instanceScene());
+  const ids = [];
+  (function collect(node) {
+    ids.push(node.node_id);
+    for (const c of node.children || []) collect(c);
+  })(envelope.root);
+
+  assert.ok(ids.every((id) => typeof id === 'string' && id.length),
+    'every node in the envelope has a node_id');
+  assert.equal(new Set(ids).size, ids.length, 'node_ids are unique');
+  assert.deepEqual(ids.slice().sort(), geometry.nodes.map((n) => n.node_id).sort(),
+    'the sidecar covers exactly the nodes the envelope emits — no id joins to nothing');
+
+  // The collision this guards: both instances expand the same master child.
+  const captions = ids.filter((id) => id.endsWith('/0:11'));
+  assert.equal(captions.length, 2, 'both instances expand the master caption');
+  assert.notEqual(captions[0], captions[1],
+    "two instances of one master must not share their children's ids");
+});
+
+test('a nested rotated transform composes rather than accumulating translations', () => {
+  // m02/m12 are only the translation COLUMN. Adding them down the tree is right
+  // for the common unrotated case and wrong the moment an ancestor rotates or
+  // scales, because a child's offset is expressed in the PARENT's rotated basis.
+  const g = (l) => ({ sessionID: 0, localID: l });
+  const scene = buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page' },
+    { guid: g(2), type: 'FRAME', name: 'Root', parentIndex: { guid: g(1), position: 'a' },
+      size: { x: 200, y: 200 } },
+    // Rotated 90° CCW about the frame origin, then moved to (100, 20).
+    { guid: g(3), type: 'FRAME', name: 'Rotated', parentIndex: { guid: g(2), position: 'a' },
+      size: { x: 80, y: 40 },
+      transform: { m00: 0, m01: -1, m02: 100, m10: 1, m11: 0, m12: 20 } },
+    { guid: g(4), type: 'RECTANGLE', name: 'Pip', parentIndex: { guid: g(3), position: 'a' },
+      size: { x: 10, y: 10 },
+      transform: { m00: 1, m01: 0, m02: 30, m10: 0, m11: 1, m12: 0 } },
+  ]});
+  const { geometry } = materializeFrame(scene, findFrame(scene, 'Root'), {
+    images: new Map(), fileKey: 'K', parserVersion: 't', compatSchemaVersion: '1',
+    exportedAt: '1970-01-01T00:00:00Z' });
+  const pip = geometry.nodes.find((n) => n.node_id === '0:4');
+  // Naive addition would say (130, 20). The parent's basis turns the child's
+  // +30 on ITS x into +30 on the frame's y.
+  assert.deepEqual([pip.x, pip.y], [100, 50]);
 });

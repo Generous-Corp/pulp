@@ -477,10 +477,46 @@ static float compute_node_height(const IRNode& node) {
     return kMinRowHeight;
 }
 
+static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node,
+                                  const CodeGenOptions& opts, int depth,
+                                  int& var_counter, const std::string& parent_id,
+                                  std::unordered_map<const IRNode*, std::string>* id_map);
+
+/// Emit one node's bridge-native JS, then bind its anchor to the live widget.
+///
+/// The anchor binding lives HERE, in a wrapper, rather than in the body: the
+/// body has a terminal branch per node kind (widget, vector, image, text,
+/// container, bare frame), each with its own create call and its own `return`,
+/// so binding inside it would mean six call sites and a seventh kind silently
+/// unanchored. The body already funnels the one fact the binding needs — the
+/// exact bridge id it emitted — into `id_map` at its single entry point, so the
+/// wrapper reads it back and binds afterwards. setAnchor only needs the widget
+/// to exist by the time the script finishes, so trailing the subtree is fine.
+///
+/// Without this the native lane produced anchor COMMENTS and nothing else: the
+/// views carried no anchor, so the inspector could not key tweaks against
+/// source, and every node-keyed validation (fidelity_diff, --dump-layout parity)
+/// had nothing to join on and skipped — reporting success by finding nothing.
 static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                                   const CodeGenOptions& opts, int depth,
                                   int& var_counter, const std::string& parent_id,
                                   std::unordered_map<const IRNode*, std::string>* id_map = nullptr) {
+    // The caller's map when it wants the ids, a local one otherwise — the
+    // binding must not depend on whether someone else asked for the mapping.
+    std::unordered_map<const IRNode*, std::string> local_ids;
+    auto* ids = id_map ? id_map : &local_ids;
+    generate_native_node_impl(ss, node, opts, depth, var_counter, parent_id, ids);
+    if (!node.stable_anchor_id || node.stable_anchor_id->empty()) return;
+    auto it = ids->find(&node);
+    if (it == ids->end()) return;
+    ss << indent(depth, opts.indent_spaces) << "setAnchor('" << it->second << "', '"
+       << js_single_quote_escape(*node.stable_anchor_id) << "');\n";
+}
+
+static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node,
+                                  const CodeGenOptions& opts, int depth,
+                                  int& var_counter, const std::string& parent_id,
+                                  std::unordered_map<const IRNode*, std::string>* id_map) {
     std::string id = sanitize_var(node.name.empty() ? node.type : node.name);
     if (depth > 0) id += std::to_string(var_counter++);
     else id = opts.root_variable;
@@ -630,6 +666,23 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         if (st.mask_size && !st.mask_size->empty())
             ss << ind << "setMaskSize('" << target_id << "', '"
                << js_single_quote_escape(*st.mask_size) << "');\n";
+        // A shadow is a visual override like any other here, and it belongs on
+        // EVERY kind of node — not just frames. The frame branch carries its own
+        // copy of this emit (and does not call this lambda), so for a long time
+        // a shadow only painted on a frame: a design whose 44 knob bases are
+        // ellipses had 49 shadowed nodes in its scene and emitted exactly ONE
+        // setBoxShadow, leaving every knob flat. Nothing said so, because the
+        // boxes were the right size in the right place — they just had no depth.
+        if (!st.box_shadow.empty()) {
+            // The bridge takes a single drop shadow; CSS paints the first layer
+            // on top, so that is the one that reads.
+            const auto& sh = st.box_shadow.front();
+            const std::string color = sh.color.empty() ? "#00000050" : sh.color;
+            ss << ind << "setBoxShadow('" << target_id << "', "
+               << sh.offset_x << ", " << sh.offset_y << ", " << sh.blur << ", " << sh.spread
+               << ", '" << js_single_quote_escape(color) << "'"
+               << (sh.inset ? ", true" : "") << ");\n";
+        }
     };
 
     // Emit the anchor trail in bridge-native-JS codegen too. Same
@@ -640,11 +693,9 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         !node.stable_anchor_id->empty()) {
         ss << ind << "// @pulp-anchor " << *node.stable_anchor_id << "\n";
     }
-    // Bridge-native-JS currently does not emit setAnchor(id, anchor) calls.
-    // The web-compat path (generate_node) is wired; bridge-native-JS has many
-    // early returns and several create call sites. Imports that opt into native
-    // codegen do not bind anchors to live widgets for inspector tweaks.
-    // Web-compat is the default mode, so most imports are unaffected.
+    // The matching setAnchor(id, anchor) call is emitted by the
+    // generate_native_node wrapper once this body has created the widget and
+    // recorded its bridge id — see the rationale there.
 
     // Audio widgets use native widget API
     if (node.audio_widget != AudioWidgetType::none) {

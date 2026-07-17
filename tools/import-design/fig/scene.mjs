@@ -221,6 +221,38 @@ function channel(v) {
   return Math.max(0, Math.min(255, Math.round((v || 0) * 255)));
 }
 
+/**
+ * Figma effects → a CSS `box-shadow` string.
+ *
+ * Shadows are what make a control look like an object rather than a decal. The
+ * design gives its knobs two stacked drop shadows (y=16 blur=6 at 10% black,
+ * y=4 blur=4) and an occasional inner shadow; dropping them rendered every knob
+ * flat — the single most-noticed difference after colour, and one no geometry
+ * check can see, because the box is exactly the right size and in exactly the
+ * right place. It just has no depth.
+ *
+ * The IR reads standard CSS syntax via parse_css_box_shadow (design_ir_json),
+ * layers comma-separated and `inset` for an inner shadow, so the mapping is
+ * direct: offset x/y, radius → blur, spread, colour. Figma's blur/inner-glow
+ * effects have no box-shadow equivalent and are skipped rather than
+ * approximated into something the design never asked for.
+ */
+function effectsToBoxShadow(effects) {
+  const layers = [];
+  for (const e of effects || []) {
+    if (e.visible === false) continue;
+    if (e.type !== 'DROP_SHADOW' && e.type !== 'INNER_SHADOW') continue;
+    const x = Math.round((e.offset && e.offset.x) || 0);
+    const y = Math.round((e.offset && e.offset.y) || 0);
+    const blur = Math.round(e.radius || 0);
+    const spread = Math.round(e.spread || 0);
+    const col = colorToHex(e.color) || '#00000040';
+    const inset = e.type === 'INNER_SHADOW' ? 'inset ' : '';
+    layers.push(`${inset}${x}px ${y}px ${blur}px ${spread}px ${col}`);
+  }
+  return layers.length ? layers.join(', ') : null;
+}
+
 function colorToHex(color) {
   if (!color) return null;
   const r = channel(color.r);
@@ -578,6 +610,11 @@ export function materializeFrame(scene, frame, ctx) {
     if (typeof node.opacity === 'number' && node.opacity < 1 && parent) {
       style.opacity = round2(node.opacity);
     }
+
+    // Shadows. `box_shadow` is what parse_ir_style reads (design_ir_json.cpp:312
+    // resolves boxShadow -> box_shadow), and it takes CSS syntax directly.
+    const shadow = effectsToBoxShadow(node.effects);
+    if (shadow) style.box_shadow = shadow;
 
     // Auto-layout → flex. This MUST land on a sibling `layout` object, not in
     // `style`: parse_ir_layout reads node["layout"] (design_ir_json.cpp:1042)
