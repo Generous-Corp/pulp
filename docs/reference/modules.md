@@ -680,6 +680,45 @@ app.save();
 
 ---
 
+## timebase
+
+Musical and media time primitives for scheduling without accumulated floating-point
+drift. `CompiledTempoMap` maps strong integer tick and sample positions across
+constant tempos and BPM-linear-in-tick ramps. Tempo-point boundaries use exact
+integer sample anchors; `samples_to_ticks()` returns a canonical tick so
+sample-to-tick-to-sample conversion is exact while the tick grid is at least as
+dense as the sample grid. Arbitrary ticks map monotonically to the integer sample
+grid and may canonicalize to a neighboring tick. On a sparser grid,
+`resolve_sample()` returns the nearest representable tick plus its exact sample
+error; for example, at 48 kHz and 1 BPM, ticks 0 and 1 map to samples 0 and 4, so
+sample 2 cannot have an exact integer-tick inverse.
+
+The module has no Pulp module dependencies. Tick and sample positions use their
+full signed 64-bit ranges; tick-position, duration, and `MonotonicBeat`
+arithmetic saturates at the nearest endpoint rather than overflowing.
+`ticks_to_samples()` likewise saturates when its mathematical result exceeds the
+sample domain. When a requested sample lies outside the image of the tick
+domain, `resolve_sample()` reports `exact == false`, a nearest canonical edge
+representation, and the actual sample error.
+
+**Link:** `pulp::timebase` · **Include prefix:** `<pulp/timebase/...>`
+
+```cpp
+#include <pulp/timebase/compiled_tempo_map.hpp>
+
+using namespace pulp::timebase;
+const TempoPoint points[] = {
+    {{0}, 120.0, TempoCurve::LinearInTicks},
+    {{8 * kTicksPerQuarter}, 160.0, TempoCurve::Constant},
+};
+const CompiledTempoMap tempo(points, {48'000, 1});
+const auto sample = tempo.ticks_to_samples({4 * kTicksPerQuarter});
+```
+
+`MonotonicBeat` is the strong type for the transport's non-looping musical
+clock; the transport owns advancement while timeline positions may seek or
+wrap. `MeterMap` is intentionally deferred to the timeline engine.
+
 ## format
 
 Plugin format adapters — write your plugin once, deploy to 9 formats.

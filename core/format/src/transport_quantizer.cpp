@@ -1,4 +1,5 @@
 #include <pulp/format/transport_quantizer.hpp>
+#include <pulp/timebase/quantize.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -118,20 +119,19 @@ TransportQuantizeResult TransportQuantizer::resolve(
 }
 
 double TransportQuantizer::beats_per_bar(int numerator, int denominator) noexcept {
-    if (numerator <= 0 || denominator <= 0) return 0.0;
-    return static_cast<double>(numerator) * (4.0 / static_cast<double>(denominator));
+    return timebase::beats_per_bar(numerator, denominator);
 }
 
 bool TransportQuantizer::valid_sample_rate(double sample_rate) noexcept {
-    return sample_rate > 0.0 && std::isfinite(sample_rate);
+    return timebase::valid_sample_rate(sample_rate);
 }
 
 bool TransportQuantizer::valid_tempo(double tempo_bpm) noexcept {
-    return tempo_bpm > 0.0 && std::isfinite(tempo_bpm);
+    return timebase::valid_tempo(tempo_bpm);
 }
 
 bool TransportQuantizer::valid_grid(double grid_beats) noexcept {
-    return grid_beats > 0.0 && std::isfinite(grid_beats);
+    return timebase::valid_grid(grid_beats);
 }
 
 bool TransportQuantizer::valid_timeline(const ProcessContext& context) noexcept {
@@ -153,30 +153,28 @@ bool TransportQuantizer::valid_loop(const ProcessContext& context) noexcept {
 double TransportQuantizer::frames_to_beats(double frames,
                                            double sample_rate,
                                            double tempo_bpm) noexcept {
-    return (frames / sample_rate) * (tempo_bpm / 60.0);
+    return timebase::frames_to_beats(frames, sample_rate, tempo_bpm);
 }
 
 double TransportQuantizer::beats_to_frames(double beats,
                                            double sample_rate,
                                            double tempo_bpm) noexcept {
-    return (beats * 60.0 / tempo_bpm) * sample_rate;
+    return timebase::beats_to_frames(beats, sample_rate, tempo_bpm);
 }
 
 double TransportQuantizer::next_grid_boundary(double position_beats,
                                               double grid_beats) noexcept {
-    const auto index = std::ceil((position_beats - kBoundaryEpsilonBeats) /
-                                 grid_beats);
-    return index * grid_beats;
+    return timebase::next_grid_boundary(position_beats, grid_beats);
 }
 
 double TransportQuantizer::next_host_loop_start_boundary(
     const ProcessContext& context) noexcept {
     if (context.position_beats <=
-        context.loop_start_beats + kBoundaryEpsilonBeats) {
+        context.loop_start_beats + timebase::kBoundaryEpsilonBeats) {
         return context.loop_start_beats;
     }
     if (context.position_beats <
-        context.loop_end_beats - kBoundaryEpsilonBeats) {
+        context.loop_end_beats - timebase::kBoundaryEpsilonBeats) {
         return context.loop_end_beats;
     }
     return std::nan("");
@@ -195,8 +193,8 @@ double TransportQuantizer::wrap_loop_position(double position_beats,
 
 double TransportQuantizer::timeline_tolerance_beats(
     const ProcessContext& context) noexcept {
-    if (!valid_timeline(context)) return kBoundaryEpsilonBeats;
-    return std::max(kBoundaryEpsilonBeats,
+    if (!valid_timeline(context)) return timebase::kBoundaryEpsilonBeats;
+    return std::max(timebase::kBoundaryEpsilonBeats,
                     frames_to_beats(2.0, context.sample_rate, context.tempo_bpm));
 }
 
@@ -209,7 +207,7 @@ TransportQuantizeResult TransportQuantizer::offset_for_target(
     result.target_beats = target_beats;
 
     const auto delta_beats = target_beats - context.position_beats;
-    if (delta_beats < -kBoundaryEpsilonBeats) {
+    if (delta_beats < -timebase::kBoundaryEpsilonBeats) {
         result.status = TransportQuantizeStatus::OutsideBlock;
         return result;
     }
@@ -248,9 +246,9 @@ bool TransportQuantizer::detect_transport_jump(const ProcessContext& context,
         valid_loop_range(last_.loop_start_beats, last_.loop_end_beats) &&
         valid_loop_range(context.loop_start_beats, context.loop_end_beats) &&
         std::abs(last_.loop_start_beats - context.loop_start_beats) <=
-            kBoundaryEpsilonBeats &&
+            timebase::kBoundaryEpsilonBeats &&
         std::abs(last_.loop_end_beats - context.loop_end_beats) <=
-            kBoundaryEpsilonBeats) {
+            timebase::kBoundaryEpsilonBeats) {
         expected = wrap_loop_position(expected,
                                       context.loop_start_beats,
                                       context.loop_end_beats);
