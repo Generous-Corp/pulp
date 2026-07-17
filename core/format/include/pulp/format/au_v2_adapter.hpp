@@ -19,6 +19,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
+#include <pulp/runtime/alive_token.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 
 #include <array>
@@ -39,8 +40,9 @@ namespace pulp::format::au {
 static constexpr AudioUnitPropertyID kPulpEditorContextProperty = 0x50754564; // 'PuEd'
 
 struct PulpEditorContext {
-    pulp::format::Processor* processor;
-    pulp::state::StateStore* store;
+    pulp::format::Processor* processor = nullptr;
+    pulp::state::StateStore* store = nullptr;
+    pulp::runtime::AliveToken::Handle owner_alive;
 };
 
 /// Cross-TU Cocoa-view hook. The AU adapter classes (`PulpAUEffect`,
@@ -528,6 +530,9 @@ private:
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
+    // Declared after processor_ so reverse member destruction retires retained
+    // editor handles before either referenced object is released.
+    runtime::AliveToken owner_alive_;
 
     // Immutable plugin metadata, cached once in the constructor so the render
     // path can view its bus-name strings without copying the descriptor per

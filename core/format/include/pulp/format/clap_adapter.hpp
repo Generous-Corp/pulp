@@ -10,6 +10,7 @@
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/events/plugin_main_thread.hpp>
+#include <pulp/runtime/alive_token.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/modulation_lane.hpp>
 #include <pulp/state/preset_manager.hpp>
@@ -54,6 +55,9 @@ struct PulpClapPlugin {
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
     std::unique_ptr<Processor> processor;
+    // Declared after processor so reverse member destruction retires retained
+    // editor handles before either referenced object is released.
+    runtime::AliveToken owner_alive;
     ProcessorFactory factory;
 
     // Descriptor snapshot cached at create_plugin() from this instance's plugin

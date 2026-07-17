@@ -304,11 +304,13 @@ void InterprocessConnection::start_read_thread() {
 }
 
 void InterprocessConnection::read_loop() {
+    const auto alive = alive_.capture();
     std::vector<uint8_t> buffer;
-    auto notify_lost = [this]() {
+    auto notify_lost = [this, alive]() {
         running_.store(false);
         if (state_.exchange(IpcState::Disconnected) == IpcState::Connected) {
             connection_lost();
+            if (!runtime::AliveToken::is_alive(alive)) return;
             std::function<void()> disconnected_callback;
             {
                 std::lock_guard lock(callback_mutex_);
@@ -378,11 +380,15 @@ void InterprocessConnection::read_loop() {
 
         // Dispatch message
         message_received(buffer.data(), msg_len);
+        if (!runtime::AliveToken::is_alive(alive)) return;
         if (message_callback) message_callback(buffer.data(), msg_len);
+        if (!runtime::AliveToken::is_alive(alive)) return;
 
         std::string_view text_view(reinterpret_cast<const char*>(buffer.data()), msg_len);
         message_received(text_view);
+        if (!runtime::AliveToken::is_alive(alive)) return;
         if (text_callback) text_callback(text_view);
+        if (!runtime::AliveToken::is_alive(alive)) return;
     }
 }
 

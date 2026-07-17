@@ -659,6 +659,14 @@ private:
 
 } // namespace
 
+namespace pulp::format::vst3 {
+struct PulpPlugViewTestAccess {
+    static bool owner_is_alive(const PulpPlugView& view) {
+        return view.bridge_.owner_is_alive();
+    }
+};
+} // namespace pulp::format::vst3
+
 TEST_CASE("VST3 adapter exposes parameter metadata and lifecycle values",
           "[vst3][issue-493]") {
     TestVst3Config config;
@@ -710,6 +718,78 @@ TEST_CASE("VST3 adapter exposes parameter metadata and lifecycle values",
     REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
     REQUIRE(test_processor->release_count == 1);
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 retained editor observes processor-owner teardown",
+          "[vst3][editor][crash][owner-lifetime][lifecycle]") {
+    ScopedEnv disable_editor("PULP_DISABLE_PLUGIN_EDITOR");
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+    disable_editor.unset();
+    headless.unset();
+    test_mode.unset();
+    ci.unset();
+
+    reset_test_processor();
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* raw_view = processor.createView(Steinberg::Vst::ViewType::kEditor);
+    REQUIRE(raw_view != nullptr);
+    auto* view = static_cast<pulp::format::vst3::PulpPlugView*>(raw_view);
+    REQUIRE(pulp::format::vst3::PulpPlugViewTestAccess::owner_is_alive(*view));
+
+    // Hosts own IPlugView independently from the processor component. The
+    // adapter must retire the token before processor_/store_ die even when the
+    // host retains the editor until later.
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    REQUIRE_FALSE(pulp::format::vst3::PulpPlugViewTestAccess::owner_is_alive(*view));
+    view->release();
+}
+
+TEST_CASE("VST3 survives repeated initialize activate process deactivate terminate cycles",
+          "[vst3][lifecycle][churn]") {
+    constexpr int kFrames = 64;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* inputs[2] = {in_l.data(), in_r.data()};
+    float* outputs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers input_bus{};
+    input_bus.numChannels = 2;
+    input_bus.channelBuffers32 = inputs;
+    Steinberg::Vst::AudioBusBuffers output_bus{};
+    output_bus.numChannels = 2;
+    output_bus.channelBuffers32 = outputs;
+
+    for (int cycle = 0; cycle < 200; ++cycle) {
+        reset_test_processor();
+        HostApp host_app;
+        pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+        Steinberg::Vst::ProcessSetup setup{};
+        setup.processMode = Steinberg::Vst::kRealtime;
+        setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+        setup.maxSamplesPerBlock = kFrames;
+        setup.sampleRate = cycle % 2 == 0 ? 44100.0 : 96000.0;
+        REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+        REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+        Steinberg::Vst::ProcessData data{};
+        data.symbolicSampleSize = Steinberg::Vst::kSample32;
+        data.numSamples = cycle % 2 == 0 ? 32 : kFrames;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = &input_bus;
+        data.outputs = &output_bus;
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+        REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+        REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    }
 }
 
 TEST_CASE("VST3 processes kSample64 buffers through the f32 boundary path",

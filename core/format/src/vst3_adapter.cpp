@@ -484,6 +484,8 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
         }
     }
 
+    owner_alive_.reset();
+
     // Create the Pulp processor
     processor_ = factory_();
     if (!processor_) return kInternalError;
@@ -681,6 +683,7 @@ tresult PLUGIN_API PulpVst3Processor::terminate() {
     // callbacks to drain, but the flag is the authoritative guard.
     if (poll_active_) poll_active_->store(false, std::memory_order_release);
     if (drain_alive_) drain_alive_->store(false, std::memory_order_release);
+    owner_alive_.retire();
 
     // Symmetric teardown of the MainThreadDispatcher backend installed in
     // initialize().
@@ -701,7 +704,8 @@ IPlugView* PLUGIN_API PulpVst3Processor::createView(FIDString name) {
             return nullptr;
         }
         if (processor_ && processor_->has_editor()) {
-            auto* view = new PulpPlugView(*processor_, store_);
+            auto* view = new PulpPlugView(
+                *processor_, store_, owner_alive_.capture());
             return view;
         }
 #endif

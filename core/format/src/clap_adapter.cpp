@@ -142,6 +142,7 @@ static T load_event(const clap_event_header_t* hdr) {
 
 bool clap_init(const clap_plugin_t* plugin) {
     auto* self = get_self(plugin);
+    self->owner_alive.reset();
     self->processor = self->factory();
     if (!self->processor) return false;
     self->processor->set_state_store(&self->store);
@@ -203,6 +204,7 @@ bool clap_init(const clap_plugin_t* plugin) {
 
 void clap_destroy(const clap_plugin_t* plugin) {
     auto* self = get_self(plugin);
+    self->owner_alive.retire();
     // Symmetric teardown of the MainThreadDispatcher backend installed in
     // clap_init().
     if (self->main_thread_token != 0) {

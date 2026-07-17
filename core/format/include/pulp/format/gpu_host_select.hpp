@@ -112,18 +112,13 @@ inline std::function<void()> make_scripted_idle_pump(ViewBridge& bridge) {
     auto alive = bridge.alive_token();
     return [bridge_ptr, alive]() {
         if (!alive->load(std::memory_order_acquire)) return;  // bridge gone
+        if (!bridge_ptr->owner_is_alive()) return;            // adapter gone
         // Drain queued host-automation parameter changes to Main-thread
         // listeners on the UI thread, so parameter-bound widgets
         // (bind_parameter) follow automation playback / host edits: the
         // adapter writes the store from the audio thread, this propagates it
         // to the editor. Cheap when the queue is empty.
-        bridge_ptr->store().pump_listeners();
-        // The sibling channel, for imported designs. A DesignFrameView resolves
-        // its param_keys against the abstract HostParamSurface and registers no
-        // store listener, so pump_listeners() above cannot reach it: it must be
-        // pulled. Without this an imported design routes gestures TO the host
-        // but never follows it back — a knob sits still under automation.
-        bridge_ptr->sync_design_frames_from_host();
+        bridge_ptr->pump_store_listeners();
         // Live editor reload (1.9): when the processor's logic hot-swaps
         // (ReloadableShell), rebuild the OPEN editor in place and request a
         // repaint, so the DAW shows the new UI live without re-instantiating the

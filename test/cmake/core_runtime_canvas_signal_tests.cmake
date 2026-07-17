@@ -46,6 +46,10 @@ endif()
 add_dependencies(pulp-test-ipc pulp-connected-child-process-fixture)
 target_compile_definitions(pulp-test-ipc PRIVATE
     "PULP_TEST_CONNECTED_CHILD_FIXTURE=\"$<TARGET_FILE:pulp-connected-child-process-fixture>\"")
+catch_discover_tests(pulp-test-ipc
+    TEST_SPEC "[lifecycle]"
+    TEST_PREFIX "lifecycle::"
+    PROPERTIES LABELS lifecycle)
 
 pulp_add_test_suite(pulp-test-ipc-endpoints LIBRARIES pulp::events pulp::runtime)
 

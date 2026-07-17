@@ -1182,7 +1182,10 @@ TEST_CASE("CLAP lifecycle forwards prepare/release and handles no-op callbacks",
     raw->factory = make_capturing;
     raw->plugin.plugin_data = raw;
     REQUIRE(clap_adapter::clap_init(&raw->plugin));
+    auto owner_alive = raw->owner_alive.capture();
+    REQUIRE(runtime::AliveToken::is_alive(owner_alive));
     clap_adapter::clap_destroy(&raw->plugin);
+    REQUIRE_FALSE(runtime::AliveToken::is_alive(owner_alive));
     g_capturing = nullptr;
 }
 
@@ -1215,6 +1218,47 @@ TEST_CASE("CLAP init and process fail cleanly without a processor",
     clap_process_t proc{};
     proc.frames_count = Harness::kFrames;
     REQUIRE(clap_adapter::clap_process(&process_plugin.plugin, &proc) == CLAP_PROCESS_ERROR);
+}
+
+TEST_CASE("CLAP survives repeated init activate process deactivate destroy cycles",
+          "[clap][lifecycle][churn]") {
+    constexpr uint32_t kFrames = 64;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* inputs[2] = {in_l.data(), in_r.data()};
+    float* outputs[2] = {out_l.data(), out_r.data()};
+    clap_audio_buffer_t input{};
+    input.data32 = inputs;
+    input.channel_count = 2;
+    clap_audio_buffer_t output{};
+    output.data32 = outputs;
+    output.channel_count = 2;
+
+    for (int cycle = 0; cycle < 200; ++cycle) {
+        auto* raw = new clap_adapter::PulpClapPlugin;
+        raw->factory = make_capturing;
+        raw->plugin.plugin_data = raw;
+        REQUIRE(clap_adapter::clap_init(&raw->plugin));
+        auto alive = raw->owner_alive.capture();
+        REQUIRE(clap_adapter::clap_activate(
+            &raw->plugin, cycle % 2 == 0 ? 44100.0 : 96000.0, 16, kFrames));
+        REQUIRE(clap_adapter::clap_start_processing(&raw->plugin));
+
+        clap_process_t process{};
+        process.frames_count = cycle % 2 == 0 ? 32 : kFrames;
+        process.audio_inputs = &input;
+        process.audio_inputs_count = 1;
+        process.audio_outputs = &output;
+        process.audio_outputs_count = 1;
+        REQUIRE(clap_adapter::clap_process(&raw->plugin, &process) != CLAP_PROCESS_ERROR);
+
+        clap_adapter::clap_stop_processing(&raw->plugin);
+        clap_adapter::clap_deactivate(&raw->plugin);
+        clap_adapter::clap_destroy(&raw->plugin);
+        REQUIRE_FALSE(runtime::AliveToken::is_alive(alive));
+    }
 }
 
 TEST_CASE("CLAP zero-frame process block returns without touching processor state",

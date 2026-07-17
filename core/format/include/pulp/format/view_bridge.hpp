@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/format/processor.hpp>
+#include <pulp/runtime/alive_token.hpp>
 #include <pulp/view/view.hpp>
 #include <atomic>
 #include <cstdlib>
@@ -68,6 +69,10 @@ public:
 
     ViewBridge(Processor& processor, state::StateStore& store);
     ViewBridge(Processor& processor, state::StateStore& store, Options options);
+    ViewBridge(Processor& processor, state::StateStore& store,
+               runtime::AliveToken::Handle owner_alive);
+    ViewBridge(Processor& processor, state::StateStore& store,
+               runtime::AliveToken::Handle owner_alive, Options options);
     ~ViewBridge();
 
     ViewBridge(const ViewBridge&) = delete;
@@ -122,7 +127,16 @@ public:
     /// no-ops -- so a display-link tick or `~ViewBridge` that races the
     /// Processor's death cannot use-after-free it. Idempotent; safe on the main
     /// thread only (same as the pump and teardown).
-    void notify_processor_destroyed() noexcept { processor_alive_ = false; }
+    void notify_processor_destroyed() noexcept {
+        if (owner_alive_) owner_alive_->store(false, std::memory_order_release);
+    }
+
+    /// Whether the adapter instance that owns both Processor and StateStore is
+    /// still alive. Unlike alive_token(), this fails closed as soon as the
+    /// adapter begins teardown, even if the host keeps the editor bridge alive.
+    bool owner_is_alive() const noexcept {
+        return runtime::AliveToken::is_alive(owner_alive_);
+    }
 
     /// Live editor reload (live-swap 1.9). When the processor supports editor
     /// reload (`Processor::supports_editor_reload()`), the editor idle tick calls
@@ -151,10 +165,6 @@ public:
     view::View* view() { return view_raw_; }
     const view::View* view() const { return view_raw_; }
 
-    /// The processor's parameter store, used (e.g.) by the editor idle pump
-    /// to drain queued host-automation changes to Main-thread listeners so
-    /// parameter-bound widgets follow automation playback.
-    state::StateStore& store() { return store_; }
     bool uses_script_ui() const { return uses_script_ui_; }
 
     /// The runtime host-parameter surface installed on the open view tree.
@@ -241,6 +251,11 @@ public:
     ViewRole role_at(size_t index) const;
 
 private:
+    /// Pump every owner-backed host-to-UI path while the adapter owner is
+    /// alive. This guards both the StateStore and the routed design surface;
+    /// either may otherwise retain references past Processor teardown.
+    void pump_store_listeners();
+
     /// Pull host parameter values into every `DesignFrameView` in the open tree
     /// (`sync_from_host_params()` on each), and return how many were synced.
     ///
@@ -253,7 +268,7 @@ private:
     /// stays put under automation playback or a host-side edit.
     ///
     /// UI thread only — it mutates view state and requests repaints. The editor
-    /// idle pump (`make_scripted_idle_pump`) calls it beside `pump_listeners()`.
+    /// The guarded owner-backed pump calls it after `pump_listeners()`.
     /// The push is silent (`set_element_value` writes the element directly and
     /// does not re-emit), so it cannot echo back into the surface.
     ///
@@ -268,7 +283,6 @@ private:
     friend std::function<void()> make_scripted_idle_pump(ViewBridge&);
     /// Test-only reach-in, mirroring `StandaloneRenderTestAccess`.
     friend struct ViewBridgeTestAccess;
-
     Processor& processor_;
     state::StateStore& store_;
     Options options_;
@@ -277,12 +291,12 @@ private:
     /// processor_, which may be freed by the host while the editor bridge is
     /// still alive (see poll_editor_reload()).
     bool supports_editor_reload_ = false;
-    /// False once the host has torn down the Processor this bridge references.
-    /// In AU the audio unit and the view controller have independent, host-
-    /// ordered lifetimes, so `processor_` can dangle while the bridge is alive.
-    /// Every `processor_` dereference is guarded by this; the owning adapter
-    /// MUST call `notify_processor_destroyed()` before the Processor is freed.
-    bool processor_alive_ = true;
+    /// Shared owner lifetime. In AU the audio unit and view controller have
+    /// independent host-ordered lifetimes, so both processor_ and store_ can
+    /// dangle while the bridge remains alive. Adapter-backed bridges receive
+    /// the adapter's token; standalone/test bridges use the local token.
+    runtime::AliveToken local_owner_alive_;
+    runtime::AliveToken::Handle owner_alive_;
 
     std::unique_ptr<view::View> view_;
     view::View* view_raw_ = nullptr;  ///< valid even after release_view()

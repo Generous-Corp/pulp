@@ -6,6 +6,7 @@
 // multi-process architectures, and standalone↔plugin communication.
 
 #include <pulp/runtime/socket.hpp>
+#include <pulp/runtime/alive_token.hpp>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -109,6 +110,7 @@ private:
     std::atomic<bool> defer_first_dispatch_until_callback_{false};
     std::shared_ptr<std::atomic<bool>> first_dispatch_gate_;
     mutable std::mutex callback_mutex_;
+    runtime::AliveToken alive_;
 
     void release_first_dispatch_gate();
     void start_read_thread();
