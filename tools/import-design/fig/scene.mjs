@@ -331,6 +331,9 @@ export function materializeFrame(scene, frame, ctx) {
   const diagnostics = [];
   const assetHashes = new Set();
   const seenTokens = new Map();
+  // Every font family the frame references. Reported at the end so a
+  // missing font is a stated result, not a mystery in the pixels.
+  const fontsSeen = new Set();
 
   function pushDiag(code, node, detail) {
     diagnostics.push({
@@ -429,10 +432,24 @@ export function materializeFrame(scene, frame, ctx) {
   }
 
   function fontToken(node) {
-    // Text nodes carry a fontName struct and fontSize.
+    // Text nodes carry a fontName struct and fontSize. Both matter: dropping the
+    // family did not just lose typography, it made a whole class of failure
+    // unexplainable. Icon fonts render glyphs from LIGATURES — the designer
+    // types "lock" and Font Awesome substitutes a padlock — so without the font
+    // the text renders literally. That is why an import showed "lockquestion"
+    // where the design has two icons: not a parser bug, a missing font. Carrying
+    // the family lets the importer SAY so instead of leaving mystery text.
+    const out = {};
     const fs = node.fontSize;
-    if (typeof fs === 'number') return { font_size: Math.round(fs) };
-    return {};
+    if (typeof fs === 'number') out.font_size = Math.round(fs);
+    const family = node.fontName && node.fontName.family;
+    if (typeof family === 'string' && family) {
+      out.font_family = family;
+      const style = node.fontName.style;
+      if (typeof style === 'string' && style && style !== 'Regular') out.font_style = style;
+      fontsSeen.add(style && style !== 'Regular' ? `${family} ${style}` : family);
+    }
+    return out;
   }
 
   // Clone the master subtree for one instance, applying every override entry
@@ -670,6 +687,23 @@ export function materializeFrame(scene, frame, ctx) {
   }
 
   const root = walk(frame);
+  // Report the fonts this frame needs. An importer cannot know what is
+  // installed on the machine that will RENDER the result, so this states the
+  // requirement rather than guessing at availability — and calls out icon fonts
+  // specifically, because their failure mode is silent and confusing: the
+  // ligature does not resolve, so "lock" renders as the word "lock" instead of
+  // a padlock, and the import looks like it mangled the text.
+  if (fontsSeen.size) {
+    const fonts = [...fontsSeen].sort();
+    const iconish = fonts.filter((f) => /awesome|icon|material symbols|material icons|glyph/i.test(f));
+    pushDiag('fonts-required', { name: '<frame>' },
+             `text uses ${fonts.length} font(s): ${fonts.join(', ')} — each must be installed where this UI renders, or text falls back`);
+    for (const f of iconish) {
+      pushDiag('icon-font-required', { name: '<frame>' },
+               `"${f}" is an ICON font: glyphs come from LIGATURES, so without it every icon renders as its literal name (e.g. "lock" instead of a padlock). Install it, or the icons will read as words.`);
+    }
+  }
+
   const tokens = collectVariableTokens(scene, seenTokens, pushDiag);
 
   const source = ctx.fileKey ? `figma://${ctx.fileKey}/${guidKey(frame.guid)}` : null;
