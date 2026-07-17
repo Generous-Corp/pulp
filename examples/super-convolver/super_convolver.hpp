@@ -352,6 +352,16 @@ public:
     // it is one contract, expressed in two languages.
     static constexpr std::size_t kWebGpuLatencyBlocks = 2;
 
+    // Ceiling for the adaptive/live pipeline depth (set_web_gpu_latency_blocks).
+    // The web delay rings are physically sized to THIS depth once, in prepare(), so
+    // a live depth change only moves the read tap WITHIN the pre-sized buffer — no
+    // reallocation, so nothing the audio thread is reading is ever resized out from
+    // under it. The worklet serializes process() with the non-RT export tick that
+    // sets the depth, so no atomics are needed; the fixed max buffer is what keeps
+    // every access in-bounds through the change. 12 blocks ≈ 128 ms at 48 kHz — well
+    // past any depth the round-trip telemetry would pick.
+    static constexpr std::size_t kMaxWebGpuLatencyBlocks = 12;
+
     // Hard cap on a loaded IR's length (at the session rate). A multi-minute
     // file would otherwise drive an unbounded decode + resample + GPU FFT; we
     // truncate to this so the worst case stays bounded. 10 s is far longer than
@@ -623,14 +633,24 @@ public:
 
     /// The browser GPU round-trip pipeline depth, in internal blocks — how many
     /// blocks of latency the plugin budgets for the GPU worker's async submit →
-    /// readback round trip. It sets gpu_extra_ (and the equal CPU-net delay) at
-    /// prepare(), so it MUST be called before prepare() and MUST match the JS side's
-    /// `latencyBlocks` (deadline budget + ring). Defaulting to kWebGpuLatencyBlocks;
-    /// a deeper value trades latency for fewer misses on a jittery device. This is
-    /// the runtime knob the adaptive/per-device depth logic drives (was a hardcoded
-    /// compile-time constant — see planning/2026-07-16-adaptive-gpu-pipeline-depth.md).
+    /// readback round trip. It sets the CPU-net delay (gpu_extra_) and the dry delay
+    /// so a missed GPU block is covered sample-for-sample, and MUST match the JS
+    /// side's `latencyBlocks` (deadline budget + ring) — the two move together or the
+    /// CPU net stops being interchangeable with the GPU wet.
+    ///
+    /// It can be called LIVE (after prepare()), on the worklet's non-RT tick like the
+    /// pulp_ir_* exports: the rings are physically sized to kMaxWebGpuLatencyBlocks
+    /// once in prepare(), so a change only moves the read tap within them — no
+    /// reallocation. Clamped to [1, kMaxWebGpuLatencyBlocks]. A live change re-syncs
+    /// against the transport over a few blocks (a one-time settle, self-healing via
+    /// the ring's per-block index), so the controller debounces before calling this.
+    /// This is the runtime knob the adaptive/per-device depth logic drives — see
+    /// planning/2026-07-16-adaptive-gpu-pipeline-depth.md.
     void set_web_gpu_latency_blocks(std::size_t blocks) {
-        web_gpu_latency_blocks_ = blocks == 0 ? 1 : blocks;
+        if (blocks == 0) blocks = 1;
+        if (blocks > kMaxWebGpuLatencyBlocks) blocks = kMaxWebGpuLatencyBlocks;
+        web_gpu_latency_blocks_ = blocks;
+        apply_web_gpu_latency();
     }
     std::size_t web_gpu_latency_blocks() const { return web_gpu_latency_blocks_; }
 
@@ -901,11 +921,23 @@ public:
         // engine can switch live without the reported latency moving. When no GPU
         // device exists gpu_extra_ == 0 and the latency is just kInternalBlock.
         latency_samples_ = static_cast<int>(kInternalBlock + gpu_extra_);
-        const std::size_t dry_delay = static_cast<std::size_t>(latency_samples_);
+        dry_delay_ = static_cast<std::size_t>(latency_samples_);
+#if defined(PULP_SC_WEB_GPU)
+        // Physically size the web delay rings to the MAX pipeline depth, ONCE. A live
+        // set_web_gpu_latency_blocks() then only moves the effective tap (dry_delay_ /
+        // gpu_extra_ stay <= physical), so the audio thread never has a buffer resized
+        // out from under it — the whole reason adaptive depth is glitch-free here.
+        const std::size_t dry_phys =
+            kInternalBlock + kMaxWebGpuLatencyBlocks * kInternalBlock;
+        const std::size_t cpu_phys = kMaxWebGpuLatencyBlocks * kInternalBlock;
+#else
+        const std::size_t dry_phys = dry_delay_;
+        const std::size_t cpu_phys = gpu_extra_;
+#endif
         for (std::size_t ch = 0; ch < kChannels; ++ch) {
-            dry_ring_[ch].assign(dry_delay, 0.0f);
+            dry_ring_[ch].assign(dry_phys, 0.0f);
             dry_pos_[ch] = 0;
-            cpu_extra_ring_[ch].assign(gpu_extra_, 0.0f);
+            cpu_extra_ring_[ch].assign(cpu_phys, 0.0f);
             cpu_extra_pos_[ch] = 0;
         }
 
@@ -1364,7 +1396,9 @@ public:
                 ch < input.num_channels() ? input.channel(ch).data() : nullptr;
             float* out = output.channel(ch).data();
             const std::size_t avail = out_len_[ch];
-            const std::size_t delay = dry_ring_[ch].size();
+            // Effective delay (<= the physical ring, which is pre-sized to the max
+            // depth on web); the swap-loop below only touches slots [0, delay).
+            const std::size_t delay = dry_delay_;
             // Every channel walks the SAME ramp, so it starts from the block-entry value
             // rather than from wherever the previous channel left off.
             float mix = mix_z_, gain = gain_z_;
@@ -1491,6 +1525,25 @@ private:
                 out_len_[ch] += kInternalBlock;
             }
         }
+    }
+
+    // Retarget the web CPU-net + dry delays to the current web_gpu_latency_blocks_
+    // without reallocating: the rings are physically sized to kMaxWebGpuLatencyBlocks
+    // in prepare(), so this only moves the effective tap. A no-op until prepared (the
+    // rings are still empty) — prepare() will pick up the stored block count. Positions
+    // are wrapped into the new active window so the swap-loops stay in [0, delay). Runs
+    // on the worklet's non-RT tick, serialized with process(), so no atomics needed.
+    void apply_web_gpu_latency() {
+#if defined(PULP_SC_WEB_GPU)
+        if (dry_ring_[0].empty()) return;  // not prepared yet
+        gpu_extra_ = web_gpu_latency_blocks_ * kInternalBlock;
+        dry_delay_ = kInternalBlock + gpu_extra_;
+        latency_samples_ = static_cast<int>(dry_delay_);
+        for (std::size_t ch = 0; ch < kChannels; ++ch) {
+            dry_pos_[ch] = dry_delay_ ? dry_pos_[ch] % dry_delay_ : 0;
+            cpu_extra_pos_[ch] = gpu_extra_ ? cpu_extra_pos_[ch] % gpu_extra_ : 0;
+        }
+#endif
     }
 
     // Push one internal block of CPU wet through the per-channel extra-delay ring
@@ -2199,6 +2252,10 @@ private:
     std::array<std::size_t, kChannels> out_len_{};
     std::array<std::vector<float>, kChannels> dry_ring_{};   // dry delay (total latency)
     std::array<std::size_t, kChannels> dry_pos_{};
+    // Effective dry delay in samples (kInternalBlock + gpu_extra_). On web the ring
+    // above is physically sized to the max depth and this is the live tap; on native
+    // it equals the ring size. Read every process() block.
+    std::size_t dry_delay_ = 0;
     // Per-channel extra delay applied to the CPU wet so it lines up with the GPU
     // wet at the same fixed reported latency (length gpu_extra_; empty when no GPU
     // device exists). Audio thread only.

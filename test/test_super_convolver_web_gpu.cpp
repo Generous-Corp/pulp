@@ -75,6 +75,11 @@ namespace {
 
 constexpr std::size_t kLat = SuperConvolverProcessor::kWebGpuLatencyBlocks;  // 2
 constexpr std::size_t kSlots = 4;          // the page's default (gpu-bridge.mjs)
+// Physical ring capacity. The live latency/slot counts (lat_/slots_) are runtime
+// members so a test can deepen the pipeline mid-stream (adaptive depth); the arrays
+// are sized to this max so growing the effective depth never reallocates — the same
+// pre-size-to-max discipline the plugin's web delay rings use.
+constexpr std::size_t kMaxSlots = 16;
 constexpr std::size_t kChan = 2;
 constexpr std::size_t kBlockFloats = kChan * kBlock;
 
@@ -96,10 +101,23 @@ float stimulus(std::size_t i) {
 // exactly one MISS instead of permanently shifting the wet stream.
 class RingModel {
 public:
+    // lat = transport latency in blocks (must move with the plugin's L); slots = the
+    // live ring depth (latencyBlocks < slots). Both default to the page's values and
+    // can be deepened mid-stream via set_latency() to model adaptive depth.
+    explicit RingModel(std::size_t lat = kLat, std::size_t slots = kSlots)
+        : lat_(lat), slots_(slots) {
+        for (auto& b : in_) b.assign(kBlockFloats, 0.0f);
+        for (auto& b : out_) b.assign(kBlockFloats, 0.0f);
+    }
+
+    // Deepen/shallow the transport latency live. Like the plugin's runtime depth, the
+    // block-index stamping self-heals the transition (a mismatched want costs a miss).
+    void set_latency(std::size_t lat) { lat_ = lat; }
+
     // ── worklet (audio thread) ──
     bool push(const float* src) {
-        if (in_w_ - in_r_ >= kSlots) { ++dropped; return false; }
-        const std::size_t slot = in_w_ % kSlots;
+        if (in_w_ - in_r_ >= slots_) { ++dropped; return false; }
+        const std::size_t slot = in_w_ % slots_;
         std::memcpy(in_[slot].data(), src, kBlockFloats * sizeof(float));
         in_seq_[slot] = block_index_;
         ++in_w_;
@@ -107,11 +125,11 @@ public:
     }
 
     bool pop(float* dst) {
-        const std::int64_t want = block_index_ - static_cast<std::int64_t>(kLat);
+        const std::int64_t want = block_index_ - static_cast<std::int64_t>(lat_);
         ++block_index_;
         bool hit = false;
         while (out_w_ > out_r_) {
-            const std::size_t slot = out_r_ % kSlots;
+            const std::size_t slot = out_r_ % slots_;
             const std::int64_t age = out_seq_[slot] - want;
             if (age > 0) break;                       // never produced → miss
             ++out_r_;
@@ -127,7 +145,7 @@ public:
     // ── worker ──
     bool take(float* dst, std::int64_t& seq) {
         if (in_w_ == in_r_) return false;
-        const std::size_t slot = in_r_ % kSlots;
+        const std::size_t slot = in_r_ % slots_;
         std::memcpy(dst, in_[slot].data(), kBlockFloats * sizeof(float));
         seq = in_seq_[slot];
         ++in_r_;
@@ -135,29 +153,24 @@ public:
     }
 
     bool publish(const float* src, std::int64_t seq) {
-        if (out_w_ - out_r_ >= kSlots) return false;
-        const std::size_t slot = out_w_ % kSlots;
+        if (out_w_ - out_r_ >= slots_) return false;
+        const std::size_t slot = out_w_ % slots_;
         std::memcpy(out_[slot].data(), src, kBlockFloats * sizeof(float));
         out_seq_[slot] = seq;
         ++out_w_;
         return true;
     }
 
-    bool output_full() const { return out_w_ - out_r_ >= kSlots; }
+    bool output_full() const { return out_w_ - out_r_ >= slots_; }
 
     std::uint64_t dropped = 0, missed = 0, resynced = 0;
 
 private:
-    std::array<std::vector<float>, kSlots> in_{}, out_{};
-    std::array<std::int64_t, kSlots> in_seq_{}, out_seq_{};
+    std::array<std::vector<float>, kMaxSlots> in_{}, out_{};
+    std::array<std::int64_t, kMaxSlots> in_seq_{}, out_seq_{};
+    std::size_t lat_, slots_;
     std::size_t in_w_ = 0, in_r_ = 0, out_w_ = 0, out_r_ = 0;
     std::int64_t block_index_ = 0;
-
-public:
-    RingModel() {
-        for (auto& b : in_) b.assign(kBlockFloats, 0.0f);
-        for (auto& b : out_) b.assign(kBlockFloats, 0.0f);
-    }
 };
 
 // The stand-in for the WebGPU worker. It convolves with the same IR the plugin's
@@ -455,6 +468,59 @@ TEST_CASE("set_web_gpu_latency_blocks makes the pipeline depth a runtime knob",
         proc.set_web_gpu_latency_blocks(0);
         REQUIRE(proc.web_gpu_latency_blocks() == 1);
     }
+    // And clamped above at the max the delay rings are physically sized for.
+    {
+        SuperConvolverProcessor proc;
+        proc.set_web_gpu_latency_blocks(SuperConvolverProcessor::kMaxWebGpuLatencyBlocks + 5);
+        REQUIRE(proc.web_gpu_latency_blocks() ==
+                SuperConvolverProcessor::kMaxWebGpuLatencyBlocks);
+    }
+}
+
+// Adaptive depth calls set_web_gpu_latency_blocks() LIVE, mid-stream. The web delay
+// rings are pre-sized to kMaxWebGpuLatencyBlocks in prepare(), so the change only
+// moves the read tap — no reallocation on the audio thread. THE INVARIANT MUST SURVIVE
+// IT: with the GPU missing every block, the safety net must STILL reproduce the CPU
+// engine's output sample-for-sample, through and after the depth change. A live
+// retarget that mis-sized the dry/wet delay, or walked off the ring, diverges here.
+TEST_CASE("a live pipeline-depth change keeps the missed-block == CPU invariant",
+          "[super-convolver][web-gpu]") {
+    constexpr int kBlocks = 60;
+    constexpr int kSwitchAt = 30;
+    constexpr std::size_t kDeepDepth = 6;   // 2 → 6, within kMaxWebGpuLatencyBlocks
+
+    // CPU engine with the SAME live depth trajectory: set_web_gpu_latency_blocks moves
+    // the CPU-net AND dry delays under BOTH engines, so the reference must switch too,
+    // or the two stop being the same delayed convolution.
+    g_seam.reset();
+    SuperConvolverProcessor cpu_proc;
+    pulp::state::StateStore cpu_store;
+    const Output cpu = render(
+        cpu_proc, cpu_store, {.engine = 0}, kBlocks, kBlock,
+        [&](pulp::state::StateStore&, int b) {
+            if (b == kSwitchAt) cpu_proc.set_web_gpu_latency_blocks(kDeepDepth);
+        });
+
+    // GPU engine, worker never runs → every block misses → output is the CPU net. The
+    // transport L moves with the plugin's L (one contract); with no delivery the ring
+    // latency is moot, but move it anyway to model the whole system deepening.
+    RingModel ring(kLat, /*slots=*/kMaxSlots);
+    g_seam.reset();
+    g_seam.ring = &ring;
+    SuperConvolverProcessor gpu_proc;
+    pulp::state::StateStore gpu_store;
+    const Output gpu = render(
+        gpu_proc, gpu_store, {.engine = 1, .gpu_only = 0}, kBlocks, kBlock,
+        [&](pulp::state::StateStore&, int b) {
+            if (b == kSwitchAt) {
+                gpu_proc.set_web_gpu_latency_blocks(kDeepDepth);
+                ring.set_latency(kDeepDepth);
+            }
+        });
+
+    REQUIRE(g_seam.hits == 0);          // the GPU really did miss every block
+    REQUIRE(gpu_proc.web_gpu_latency_blocks() == kDeepDepth);
+    require_no_seam(gpu, cpu);          // identical through AND after the depth change
 }
 
 TEST_CASE("reported latency is the reblock plus the GPU round-trip, for BOTH engines",
