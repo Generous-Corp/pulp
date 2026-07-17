@@ -15,6 +15,7 @@
 #include "fig_lane.hpp"
 #include "envelope_merge.hpp"
 #include "figma_url.hpp"
+#include "render_artifact_path.hpp"
 #include <miniz.h>
 // getpid() is POSIX-only via <unistd.h>; MSVC ships an equivalent
 // `_getpid` declaration in <process.h>. Wrap both to keep the
@@ -3707,7 +3708,7 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        auto rendered_path = design_name + "-" + source_lower + "-render.png";
+        auto rendered_path = pulp::import_design::render_artifact_path(output_file, design_name + "-" + source_lower + "-render.png");
         {
             std::ofstream f(rendered_path, std::ios::binary);
             f.write(reinterpret_cast<const char*>(rendered_png.data()),
@@ -3801,7 +3802,7 @@ int main(int argc, char* argv[]) {
             // Always generate diff image when reference is provided
             // Use --diff path if given, otherwise auto-generate alongside render
             auto actual_diff_path = diff_output.empty()
-                ? (design_name + "-" + source_lower + "-diff.png") : diff_output;
+                ? pulp::import_design::render_artifact_path(output_file, design_name + "-" + source_lower + "-diff.png") : diff_output;
             {
                 auto ref_bytes = [&]() -> std::vector<uint8_t> {
                     std::ifstream f(reference_image, std::ios::binary);
@@ -3854,7 +3855,7 @@ int main(int argc, char* argv[]) {
 
         // Validation results if available
         if (validate && !reference_image.empty()) {
-            auto result = compare_screenshot_files(reference_image, design_name + "-" + source_lower + "-render.png");
+            auto result = compare_screenshot_files(reference_image, pulp::import_design::render_artifact_path(output_file, design_name + "-" + source_lower + "-render.png"));
             dbg << "  \"validation\": {\n";
             dbg << "    \"reference\": \"" << reference_image << "\",\n";
             dbg << "    \"similarity_pct\": " << static_cast<int>(result.similarity * 100) << ",\n";

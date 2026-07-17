@@ -278,3 +278,77 @@ TEST_CASE("parse_claude_html_with_runtime against the real Spectr fixture "
     // the error_out via INFO above so the diagnostic is captured.
     REQUIRE(nodes > 9);
 }
+
+TEST_CASE("claude lane carries a CSS gradient background through to the IR",
+          "[view][import][claude][gradient]") {
+    // The claude producer read `backgroundColor`, `border` and `boxShadow` but
+    // never `background`/`backgroundImage`, so a gradient panel in a Claude
+    // Design page imported FLAT while the .fig lane rendered it. This is the
+    // cross-lane coverage gap the shared setBackgroundGradient codegen could not
+    // fix on its own — the field was never populated. A gradient must reach
+    // style.background_gradient so the shared codegen emits it.
+    const std::string app_js = R"JS(
+        var root = document.getElementById('root');
+        var plate = make_el('div', { id: 'plate',
+            style: { background: 'linear-gradient(180deg, #ffffff 0%, #000000 100%)',
+                     width: '200px', height: '80px' } });
+        root.appendChild(plate);
+        var img = make_el('div', { id: 'bgimg',
+            style: { backgroundImage: 'radial-gradient(circle, #ff0000, #0000ff)',
+                     width: '64px', height: '64px' } });
+        root.appendChild(img);
+        var solid = make_el('div', { id: 'solid',
+            style: { background: '#123456', width: '10px', height: '10px' } });
+        root.appendChild(solid);
+        // Pad past the runtime walker's 9-node floor so it does not fall back to
+        // the static parser (which is a different path than the gradient fix).
+        for (var i = 0; i < 12; i++) {
+            root.appendChild(make_el('div', { id: 'pad' + i,
+                style: { width: '4px', height: '4px' } }));
+        }
+        function make_el(tag, props) {
+            var el = document.createElement(tag);
+            if (props.id) el.id = props.id;
+            if (props.style) for (var s in props.style) el.style[s] = props.style[s];
+            return el;
+        }
+    )JS";
+
+    std::ostringstream manifest;
+    manifest << "{" << manifest_entry("u-app", "text/javascript", app_js, true) << "}";
+    const std::string body =
+        R"(<div id="root"></div><script src="u-app"></script>)";
+
+    std::string err;
+    ClaudeRuntimeOptions opts; opts.error_out = &err;
+    auto ir = parse_claude_html_with_runtime(build_envelope(manifest.str(), body), opts);
+    INFO("runtime error_out: " << err);
+    REQUIRE(err.empty());
+
+    const IRNode* plate = nullptr;
+    const IRNode* bgimg = nullptr;
+    const IRNode* solid = nullptr;
+    std::function<void(const IRNode&)> walk = [&](const IRNode& n) {
+        if (n.name == "plate") plate = &n;
+        else if (n.name == "bgimg") bgimg = &n;
+        else if (n.name == "solid") solid = &n;
+        for (const auto& c : n.children) walk(c);
+    };
+    walk(ir.root);
+
+    REQUIRE(plate);
+    REQUIRE(plate->style.background_gradient.has_value());
+    REQUIRE(plate->style.background_gradient->find("linear-gradient") != std::string::npos);
+
+    // backgroundImage gradients count too, and win over `background`.
+    REQUIRE(bgimg);
+    REQUIRE(bgimg->style.background_gradient.has_value());
+    REQUIRE(bgimg->style.background_gradient->find("radial-gradient") != std::string::npos);
+
+    // A `background` shorthand carrying a solid color still paints as a color,
+    // not a dropped gradient.
+    REQUIRE(solid);
+    REQUIRE_FALSE(solid->style.background_gradient.has_value());
+    REQUIRE(solid->style.background_color.has_value());
+    REQUIRE(*solid->style.background_color == "#123456");
+}

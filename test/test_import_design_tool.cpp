@@ -3,6 +3,7 @@
 #include <miniz.h>
 #include "envelope_merge.hpp"
 #include "fig_lane.hpp"
+#include "render_artifact_path.hpp"
 
 #include <iostream>
 
@@ -3105,4 +3106,21 @@ TEST_CASE("pulp-import-design --fail-below gates the --validate similarity",
         CHECK(r.exit_code == 2);
         CHECK(r.stderr_output.find("--fail-below requires --reference") != std::string::npos);
     }
+
+
+TEST_CASE("render_artifact_path places the render beside --output, not the CWD",
+          "[import][validate][artifact-path]") {
+    using pulp::import_design::render_artifact_path;
+    // --output in a directory -> the render lands in that directory.
+    CHECK(render_artifact_path("/tmp/out/ui.js", "design-fig-render.png")
+          == "/tmp/out/design-fig-render.png");
+    CHECK(render_artifact_path("/a/b/c/panel.js", "x-render.png")
+          == "/a/b/c/x-render.png");
+    // A bare --output (no directory) keeps the artifact in the CWD — the
+    // intended default for that invocation, and the ONLY case the old bare-name
+    // behavior was ever correct for.
+    CHECK(render_artifact_path("ui.js", "design-fig-render.png")
+          == "design-fig-render.png");
+    // A relative --output with a directory still carries that directory.
+    CHECK(render_artifact_path("sub/ui.js", "y-render.png") == "sub/y-render.png");
 }

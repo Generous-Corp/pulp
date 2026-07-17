@@ -796,6 +796,25 @@ Durable "why / watch-out-for" notes so this isn't re-litigated (rationale, not w
   env-path license fence.
 - **`audio_io.load_wav` mono-downmixes** — fine for tonal balance; a future stereo-image axis must
   NOT use that loader.
+- **`detectors/click.py` refuses a REAL BLEP/BLIT oscillator at a fractional period — do not
+  read that refusal as a click.** The detector's comb self-reference (delay one period, subtract)
+  nulls a bandlimited oscillator to the interpolator floor ONLY when successive periods are
+  identical up to the fractional delay. That holds for an exact additive fixture (sinc-periodic),
+  which is exactly why a click floor measured on a synthetic fixture does NOT transfer to a real
+  oscillator: on a polyBLEP saw/square, `sr/f0` is fractional, so the discontinuity lands at a
+  different sub-sample phase every period and the comb leaves a per-edge *approximation* residual
+  that reads a false −20 to −30 dB "click" even when the render's alias floor is −55 dB or lower.
+  `detect()` now discriminates that regime with two measurements — `localization_db` (worst
+  excursion over the MEDIAN per-period peak: a one-off seam towers over the background, smear
+  recurs so it barely exceeds the median) AND `edge_concentration` (cosine similarity of
+  `|residual|` to `|diff(y)|`: smear rides the waveform's own edges, a block-rate zipper does
+  not) — and REFUSES (`low_coverage`, `fired=False`, a *third* refusal precondition alongside
+  low period-confidence and pitch drift) rather than false-firing. A refusal is NOT a pass:
+  the honest gate for a discontinuous real oscillator is a **frozen-reference null**
+  (`dsp.null_residual_db` — render the same patch with the offending parameter held frozen), not
+  the comb self-reference. When you add a click fixture for a new oscillator, grow a REAL polyBLEP
+  render (`osc_fixtures.py`), not just a synthetic sum — the synthetic-only fixture is precisely
+  the blind spot that let the false-fire ship.
 
 ## Proving reported latency
 
@@ -840,12 +859,42 @@ error. Reach for **`estimate_pitch` / `track_pitch`** (`pitch_track.hpp`)
 instead: a coarse `magnitude_spectrum_curve` peak seeds a golden-section refine
 over the shipped `fit_tone` projection, so it is leakage-free and sub-cent
 (<0.002 cent on a clean tone, coherent or not) and FFT-backend-stable. It
-**refuses** silence, noise, and a missing fundamental rather than octave-guessing
-— honor the confidence gate. `track_pitch` gives the `f0(t)` trajectory; the
-drift/jitter statistics over it (Allan deviation, Theil-Sen slope) stay in the
-Quality Lab per the C++/Python split. A steep glide needs the window short
-relative to the sweep, and a fully flat missing-fundamental comb is refused, not
-solved — both fail closed.
+**refuses** silence and noise rather than octave-guessing — honor the confidence
+gate. `track_pitch` gives the `f0(t)` trajectory; the drift/jitter statistics over
+it (Allan deviation, Theil-Sen slope) stay in the Quality Lab per the C++/Python
+split. A steep glide needs the window short relative to the sweep.
+
+**Harmonic-dominant material — don't assume the loudest bin is f0.** A rolled-off
+or resonant oscillator can carry MORE energy in an upper partial than in the
+fundamental, so the loudest FFT bin lands an octave/twelfth/higher above the true
+pitch. `estimate_pitch` recovers f0: it ranks the coarse peak against its
+subharmonics (to coarse/8) and adopts the lowest root that BOTH explains the
+segment (harmonic-comb energy within a margin of the best) AND carries real energy
+at its OWN fundamental tooth. That own-tooth test is load-bearing — explained
+energy alone cannot tell f0 from f0/N (a near-pure tone lets any subharmonic refine
+one of its harmonics onto the tone), and only the TRUE root has a partial sitting
+at the root itself. **The tooth floor is LEAKAGE-AWARE, and it has to be:** a fixed
+floor is defeated by rectangular-window LSQ leakage from the loud coarse peak into
+the f0/2 fit, and that leakage GROWS as the analysis window shortens (energy ~
+`(1/(π·Δf·T))²`). With a fixed floor a plain bass saw over the DEFAULT window holds
+only a handful of periods and reads a confident octave (or two) DOWN — the ordinary
+case, worse than the octave-up it was meant to fix. So a candidate's tooth must
+clear `max(absolute-noise-floor, expected coarse-peak leakage at its Δf over this
+window)`; a genuine fundamental far below a loud harmonic (Δf large) or over a long
+window (T large) still clears it, a leaky saw subharmonic over a few-period window
+does not. Corollary: **a genuinely faint fundamental is not resolvable below the
+leakage floor at a short window — use a longer analysis window** (the DCO/VCO
+quantization/drift fixtures already do, n≈2^15) rather than trusting a low bass note
+over a 4096-sample frame. Do NOT "fix" a wrong octave by lowering the floor — it
+re-opens the octave trap. **One honest residual, NOT a refusal:** a genuine
+missing-fundamental comb (energy only at 2·f0/3·f0, nothing at f0) has no tooth at
+f0 to lock, so the estimate stays on the loudest PRESENT partial (2·f0) — the
+frequency actually there, never a fabricated virtual f0; likewise the descent stops
+at coarse/8, so a 9th-harmonic-dominant signal (rare) reports a lower harmonic.
+Both return a real present frequency, never fail closed. (Regressions fixed
+2026-07: octave-UP on harmonic-dominant material — old guard stopped at coarse/4 on
+a fixed 10% cliff; then octave-DOWN on a plain short-window saw — fixed-floor
+leakage, closed with the leakage-aware floor above.)
 
 ## Never gate on `detection_floor_db`
 

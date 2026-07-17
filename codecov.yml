@@ -145,6 +145,7 @@ ignore:
   - "**/scanner_clap.cpp"
   - "**/plugin_slot_au.mm"
   - "**/au_v2_adapter.cpp"
+  - "**/au_adapter.mm"
   - "**/au_v2_instrument.cpp"
   - "**/reload_probe.cpp"
   - "**/aax_midi_node.cpp"

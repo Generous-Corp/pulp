@@ -12,6 +12,7 @@
 #include <mach/mach_time.h>
 
 #include <pulp/format/processor.hpp>
+#include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/midi_out_offset.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
@@ -564,6 +565,11 @@ private:
     // synthesized by host-quirk policy). 0 when none is available, so
     // ProcessBufferLists never short-circuits to pass-through.
     state::ParamID bypass_param_id_ = 0;
+    // Dry-delay line for the bypass pass-through. Sized to the processor's
+    // reported latency in Initialize(); keeps the bypassed dry signal aligned
+    // with the host's plugin-delay-compensation instead of arriving `latency`
+    // samples early (a zero latency leaves it a no-op zero-copy passthrough).
+    boundary::LatencyCompensatedBypass bypass_;
     std::vector<const float*> input_ptrs_;
     std::vector<float*> output_ptrs_;
 

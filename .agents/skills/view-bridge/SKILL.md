@@ -6,7 +6,7 @@ description: Editor lifecycle and multi-view attach for Pulp plugins — when to
 # ViewBridge skill
 
 **TL;DR.** Every Pulp plugin format adapter (VST3, AU v2, AU v3, CLAP,
-Standalone) opens its editor through
+AAX, Standalone) opens its editor through
 `pulp::format::ViewBridge`. You only touch the bridge when you override
 `Processor::create_view()` or write a new adapter. This skill captures
 the invariants the API enforces and the pitfalls that bit us enough
@@ -62,7 +62,16 @@ protocol** (`open()` then `notify_attached()`).
 | CLAP | `gui_create` | Inside `gui_set_parent` on the matched window API |
 | AU v2 | `uiViewForAudioUnit` — after fetching context via `kPulpEditorContextProperty` | After `PluginViewHost::create` succeeds |
 | AU v3 | `viewDidLoad` | After `PluginViewHost::attach_to_parent` in `viewDidLoad` |
+| AAX | `AAX_CEffectGUI::CreateViewContainer()` — not `CreateViewContents()`, which runs before any window exists | After `try_attach_to_parent` succeeds |
 | Standalone | Before `WindowHost::create` | After `WindowHost::create` succeeds |
+
+AAX is the one adapter whose editor runs on its **own** `Processor`. AAX keeps
+the host-side data model and the real-time algorithm apart, and the algorithm's
+`Processor` lives in a private data block the model cannot reach, so
+`EffectParameters` builds a second one for `create_view()` and mirrors its store
+against the AAX parameter manager (the value authority). Do not "fix" that into
+a shared instance by analogy with AU v2 — there, a second `Processor` was a real
+bug; here it is the format's structure. See the `aax` skill.
 
 ## `release_view()` — for containers that own the view
 

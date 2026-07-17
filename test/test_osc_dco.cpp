@@ -25,6 +25,7 @@
 #include <pulp/signal/osc/dco.hpp>
 #include <pulp/signal/osc/va.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -181,6 +182,31 @@ double peak(const std::vector<double>& v) {
     return m;
 }
 
+// Recover the per-cycle reset intervals, in samples, from a rendered saw by
+// locating each divider reset. The saw ramps −1 → +1 (crossing zero UPWARD once,
+// mid-cycle) then wraps +1 → −1 at the reset — the only DOWNWARD zero crossing in
+// the cycle. Detecting that crossing is robust to the BLEP edge's exact slope /
+// amplitude (unlike a raw sample-diff threshold). A refractory gap shorter than a
+// cycle rejects any BLEP ringing near the edge. The first and last (partial)
+// cycles fall out of the interval list. Used to prove the reset SCHEDULE actually
+// reaches the audio, not just the integer-domain `reset_intervals` view.
+std::vector<int> reset_intervals_from_audio(const std::vector<double>& y,
+                                            int refractory = 32) {
+    std::vector<int> resets;
+    int last = -1 << 20;
+    for (std::size_t i = 1; i < y.size(); ++i) {
+        const bool downward = y[i - 1] > 0.0 && y[i] <= 0.0;
+        if (downward && static_cast<int>(i) - last > refractory) {
+            resets.push_back(static_cast<int>(i));
+            last = static_cast<int>(i);
+        }
+    }
+    std::vector<int> intervals;
+    for (std::size_t j = 1; j < resets.size(); ++j)
+        intervals.push_back(resets[j] - resets[j - 1]);
+    return intervals;
+}
+
 // The realised pitch a long held sine settles to, in Hz, via the shipped
 // estimator (sub-cent on a clean tone).
 double measured_pitch_hz(const DcoProfile& profile, double note, int length) {
@@ -260,12 +286,90 @@ TEST_CASE("integer-N pitch is quantized to f_clk/N, on the integer/rational doma
     }
 }
 
+TEST_CASE("the quantization bound holds on the round-DOWN side too, where the "
+          "linear form was violated",
+          "[signal][osc][dco][quantization]") {
+    // The half-LSB rounding error is ASYMMETRIC in cents. `worst_case_note`
+    // (clock/(k+0.5)) always rounds the divider UP — realized pitch a hair LOW —
+    // the favorable side, where the old linear bound 865.617·f_note/f_clk held.
+    // A note whose ideal divider rounds DOWN (realized pitch HIGHER) detunes MORE
+    // for the same half LSB, because log2(x/(x−½)) > log2((x+½)/x). The old linear
+    // bound understated exactly this side; a note that rounds down slipped past it.
+    // The exact bound must cover it, and we prove the old linear form did not.
+    //
+    // High notes (small N* = few clocks per cycle) are used because that is where
+    // the ½-LSB error is a large fraction of the divider and the second-order gap
+    // between the exact log bound and its linear tangent is resolvable — the exact
+    // regime the finding is about (a DCO's tuning is imperfect up top, exact at the
+    // bottom). At a low note N* is huge and the gap is sub-micro-cent, below double
+    // precision, so a per-note violation is not observable there (nor audible).
+    const DcoProfile profile = integer_profile();
+    for (const long k : {8L, 16L, 24L, 32L, 48L}) {
+        // Ideal divider N* = k + 0.4999 → rounds DOWN to k (δ ≈ −0.5, essentially
+        // the worst case), realized f_clk/k above the note. Just inside the tie
+        // (which rounds away, to k+1) so the rounding is unambiguous.
+        const double note = kClockHz / (static_cast<double>(k) + 0.4999);
+        DcoOscillator osc;
+        osc.prepare(kSampleRate);
+        osc.set_profile(profile);
+        osc.set_note_hz(note);
+
+        REQUIRE(osc.divider_n() == k);          // rounded down, as constructed.
+        REQUIRE(osc.detune_cents() > 0.0);       // realized pitch is HIGHER.
+
+        const double detune = std::fabs(osc.detune_cents());
+        const double exact_bound = osc.quantization_bound_cents();
+        const double linear_bound =
+            865.617 * osc.effective_note_hz() / kClockHz; // the old, false bound.
+        INFO("k=" << k << " note " << note << " Hz: N=" << osc.divider_n()
+                  << ", detune " << detune << " cents, exact bound " << exact_bound
+                  << ", old linear bound " << linear_bound);
+
+        // The exact bound is a true upper bound on this side.
+        CHECK(detune <= exact_bound + 1e-12);
+        // The exact bound is strictly larger than the old linear form everywhere...
+        CHECK(exact_bound > linear_bound);
+        // ...and here the ACTUAL round-down error exceeds the old bound — a note
+        // the old "upper bound" failed to bound, which is the bug the fix closes.
+        CHECK(detune > linear_bound);
+    }
+}
+
+TEST_CASE("the quantization bound reports no bound in a divider-clamp regime, "
+          "never a false one",
+          "[signal][osc][dco][quantization]") {
+    // The ½-LSB envelope is only a valid bound while the divider is NOT clamped.
+    // Fractional-N clamps the tuning word at the TOP (Δ ≤ 2^B − 1) as the note
+    // approaches the clock: there the clamp, not rounding, governs, and the true
+    // detune can far exceed the envelope. The bound must report 0 (no bound) there
+    // rather than a tiny false one — a downstream `|detune| <= bound` invariant
+    // check must not be handed a value the reality blows past.
+    const double f_clk = 10000.0; // a deliberately low clock so a note can reach it.
+    DcoProfile frac = fractional_profile(24, f_clk);
+    DcoOscillator osc;
+    osc.prepare(kSampleRate);
+    osc.set_profile(frac);
+
+    // A note above the clock drives Δ past the 2^B−1 clamp.
+    osc.set_note_hz(15000.0);
+    INFO("note 15 kHz / clk 10 kHz: detune " << osc.detune_cents() << " cents, bound "
+                                             << osc.quantization_bound_cents());
+    CHECK(osc.quantization_bound_cents() == 0.0); // no false bound in the clamp regime.
+
+    // Well below the clock the bound is real and the invariant holds.
+    osc.set_note_hz(440.0);
+    const double bound = osc.quantization_bound_cents();
+    CHECK(bound > 0.0);
+    CHECK(std::fabs(osc.detune_cents()) <= bound + 1e-12);
+}
+
 TEST_CASE("the quantization error is larger at high notes than low ones",
           "[signal][osc][dco][quantization]") {
-    // |e|_max = 865.617 · f_note / f_clk — it DOUBLES per octave up. A model
-    // that plays every note on-pitch has idealized the DCO away. Both the bound and
-    // the realised worst-case error scale with the note, so the top octave is where
-    // a DCO's tuning is audibly imperfect and the bottom octaves are effectively
+    // |e|_max ≈ 1200·log2(N*/(N*−½)) with N* = f_clk/f_note — it roughly DOUBLES
+    // per octave up (the ½-LSB envelope scales with the note). A model that plays
+    // every note on-pitch has idealized the DCO away. Both the bound and the
+    // realised worst-case error scale with the note, so the top octave is where a
+    // DCO's tuning is audibly imperfect and the bottom octaves are effectively
     // exact.
     const DcoProfile profile = integer_profile();
 
@@ -381,10 +485,10 @@ TEST_CASE("fractional-N cuts the average detuning but injects bounded jitter",
 
     SECTION("the average detuning is far smaller than integer-N") {
         CHECK(std::fabs(fractional.detune_cents()) < 0.1 * std::fabs(integer.detune_cents()));
+        // Bounded by the scheme's own exact quantization bound (not a hand-rolled
+        // linearization that the asymmetric error can slip past).
         CHECK(std::fabs(fractional.detune_cents()) <=
-              865.617 * kClockHz /
-                  (static_cast<double>(std::uint64_t{1} << 24) * fractional.effective_note_hz()) +
-              1e-9);
+              fractional.quantization_bound_cents() + 1e-12);
     }
 
     SECTION("the reset interval alternates floor/ceil — a ±1-clock jitter, deterministic") {
@@ -408,8 +512,12 @@ TEST_CASE("fractional-N cuts the average detuning but injects bounded jitter",
         CHECK(hi > lo);
         // ...and bounded to exactly one clock.
         CHECK(hi - lo == 1);
-        // ...around the correct average period.
-        CHECK_THAT(measured_avg, WithinAbs(n_avg, 1.0));
+        // ...around the correct average period. The residue starts at 0 and lands
+        // in [0, Δ) after M resets, so the mean interval is exact to within 1/M
+        // clocks — asserting that, not a whole clock (a ~256x-slack tolerance that
+        // would wave through a mis-scaled tuning word half a clock off center).
+        const double kMeanTol = 1.0 / static_cast<double>(intervals.size());
+        CHECK_THAT(measured_avg, WithinAbs(n_avg, kMeanTol));
 
         // Deterministic: the same schedule twice is identical.
         std::array<long long, 256> again{};
@@ -427,6 +535,75 @@ TEST_CASE("fractional-N cuts the average detuning but injects bounded jitter",
                                   << cents_between(f_frac, eff) << " cents)");
         CHECK(std::fabs(cents_between(f_frac, eff)) < std::fabs(cents_between(f_int, eff)));
     }
+}
+
+TEST_CASE("the fractional-N jitter is carried into the rendered audio, not just "
+          "the schedule",
+          "[signal][osc][dco][fractional]") {
+    // The schedule test above asserts the ±1-clock jitter on `reset_intervals`, a
+    // pure integer-domain view. This proves the RENDER path (`next()`) actually
+    // applies it: the reset intervals recovered from the rendered saw match the
+    // schedule, and integer-N renders dead-periodic by contrast.
+    //
+    // At the realistic 1 MHz clock one clock is sr/f_clk = 0.048 sample — the
+    // jitter is real but sub-sample, so it cannot be read off the sample grid. This
+    // test therefore uses a clock EQUAL to the sample rate, where one clock is one
+    // sample and each reset lands on an integer sample, making the scheduled
+    // jitter directly observable in the audio without changing the model. f0 is
+    // chosen so the ideal divider is distinctly non-integer (jitter guaranteed).
+    const double f_clk = kSampleRate;             // one clock == one sample.
+    const double note = 370.0;                    // ideal divider ~129.73 (non-integer).
+    constexpr int kLen = 8192;                    // ~60 cycles.
+
+    const auto frac_audio = render_dco(fractional_profile(24, f_clk), VaShape::saw, note, kLen);
+    const auto int_audio = render_dco(integer_profile(f_clk), VaShape::saw, note, kLen);
+
+    const auto frac_iv = reset_intervals_from_audio(frac_audio);
+    const auto int_iv = reset_intervals_from_audio(int_audio);
+    REQUIRE(frac_iv.size() > 20);
+    REQUIRE(int_iv.size() > 20);
+
+    // Integer-N renders dead-periodic: every recovered cycle is the same length.
+    const int int_lo = *std::min_element(int_iv.begin(), int_iv.end());
+    const int int_hi = *std::max_element(int_iv.begin(), int_iv.end());
+    INFO("integer-N audio intervals in [" << int_lo << ", " << int_hi << "]");
+    CHECK(int_lo == int_hi);
+
+    // Fractional-N renders the jitter: exactly two cycle lengths, one clock (== one
+    // sample here) apart, both present.
+    const int frac_lo = *std::min_element(frac_iv.begin(), frac_iv.end());
+    const int frac_hi = *std::max_element(frac_iv.begin(), frac_iv.end());
+    INFO("fractional-N audio intervals in [" << frac_lo << ", " << frac_hi << "]");
+    CHECK(frac_hi - frac_lo == 1);
+
+    // The intervals recovered FROM THE AUDIO match the divider's own schedule,
+    // clock-for-clock (one clock == one sample), aligned on the shared floor/ceil
+    // pair — the render carries exactly the scheduled reset pattern.
+    DcoOscillator sched;
+    sched.prepare(kSampleRate);
+    sched.set_profile(fractional_profile(24, f_clk));
+    sched.set_note_hz(note);
+    std::array<long long, 512> schedule{};
+    const int got = sched.reset_intervals(std::span<long long>(schedule));
+    REQUIRE(got == static_cast<int>(schedule.size()));
+
+    // Find where the audio's interval stream first appears in the schedule (the
+    // audio drops a partial lead-in cycle, so it may start a phase into the pattern)
+    // and confirm a long run matches exactly.
+    const int probe = frac_iv[0];
+    std::size_t offset = 0;
+    bool found = false;
+    for (std::size_t s = 0; s + frac_iv.size() < schedule.size(); ++s) {
+        if (static_cast<int>(schedule[s]) != probe) continue;
+        bool all = true;
+        for (std::size_t j = 0; j < frac_iv.size(); ++j) {
+            if (static_cast<int>(schedule[s + j]) != frac_iv[j]) { all = false; break; }
+        }
+        if (all) { offset = s; found = true; break; }
+    }
+    INFO("matched audio intervals against schedule at offset " << offset
+         << " over " << frac_iv.size() << " cycles");
+    CHECK(found);
 }
 
 TEST_CASE("fractional-N output stays bounded and finite through the jittered resets",

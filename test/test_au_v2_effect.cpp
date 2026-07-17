@@ -959,3 +959,150 @@ TEST_CASE("AU v2 effect clears OutputIsSilence when the processor generates outp
 
     effect.DoCleanup();
 }
+
+// ===========================================================================
+// #6190 — the real AU v2 adapter's bypass is latency-compensated.
+//
+// A bypassed effect that reports a non-zero latency must delay its dry copy by
+// exactly that latency, so the pass-through stays sample-aligned with the
+// host's plugin-delay-compensation on the wet path. Before the fix the adapter
+// memcpy'd input→output undelayed, so the bypassed audio arrived `latency`
+// samples early (comb-filtering on parallel busses). This drives the actual
+// PulpAUEffect::ProcessBufferLists bypass short-circuit — the wiring guard for
+// the shared boundary::render_bypass_passthrough helper — so a regression that
+// unwires the delay line (back to a raw memcpy) fails here, not at auval time.
+// ===========================================================================
+namespace {
+
+class LatencyBypassEffect : public pulp::format::Processor {
+public:
+    static constexpr int kLatency = 16;
+    static constexpr pulp::state::ParamID kBypassId = 1;
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "AUBypassLatency",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.au-bypass-latency",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Main In", 2}},
+            .output_buses = {{"Main Out", 2}},
+        };
+    }
+
+    int latency_samples() const override { return kLatency; }
+
+    void define_parameters(pulp::state::StateStore& store) override {
+        pulp::state::ParamInfo bypass{};
+        bypass.id = kBypassId;
+        bypass.name = "Bypass";
+        bypass.range = {0.0f, 1.0f, 0.0f, 1.0f};
+        bypass.designation = pulp::state::ParamDesignation::Bypass;
+        store.add_parameter(bypass);
+    }
+
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    // Would negate the signal — deliberately distinct from a pass-through so a
+    // bypass that mistakenly ran the processor would be caught too. In bypass
+    // this never runs (the adapter short-circuits).
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        for (std::size_t c = 0; c < output.num_channels(); ++c) {
+            float* dst = output.channel_ptr(c);
+            const float* src = c < input.num_channels() ? input.channel_ptr(c) : nullptr;
+            for (std::size_t n = 0; n < output.num_samples(); ++n)
+                dst[n] = src ? -src[n] : 0.0f;
+        }
+    }
+
+    void process(pulp::format::ProcessBuffers& audio,
+                 pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext& context) override {
+        auto* out = audio.main_output();
+        auto* in = audio.main_input();
+        if (out && in) process(*out, *in, midi_in, midi_out, context);
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> create_latency_bypass_effect() {
+    return std::make_unique<LatencyBypassEffect>();
+}
+
+struct ScopedLatencyBypassFactory {
+    ScopedLatencyBypassFactory() : previous(pulp::format::registered_factory()) {
+        pulp::format::register_plugin(create_latency_bypass_effect);
+    }
+    ~ScopedLatencyBypassFactory() { pulp::format::register_plugin(previous); }
+    pulp::format::ProcessorFactory previous;
+};
+
+}  // namespace
+
+TEST_CASE("AU v2 effect: bypass delays the dry signal by the reported latency",
+          "[au][au-v2][effect][bypass][issue-6190]")
+{
+    ScopedLatencyBypassFactory factory;
+
+    constexpr double kSampleRate = 48000.0;
+    constexpr UInt32 kChannels = 2;
+    constexpr UInt32 kFrames = 64;
+    static_assert(LatencyBypassEffect::kLatency < static_cast<int>(kFrames),
+                  "impulse must reappear within the rendered block");
+
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    effect.CreateElements();
+    REQUIRE(effect.GetInput(0)->SetStreamFormat(
+                silence_test_format(kSampleRate, kChannels)) == noErr);
+    REQUIRE(effect.GetOutput(0)->SetStreamFormat(
+                silence_test_format(kSampleRate, kChannels)) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+
+    // Engage bypass through the host-facing parameter surface.
+    REQUIRE(effect.SetParameter(LatencyBypassEffect::kBypassId,
+                                kAudioUnitScope_Global, 0, 1.0f, 0) == noErr);
+
+    // Impulse at frame 0 on both input channels.
+    std::array<float, kFrames> in_l{}; in_l[0] = 1.0f;
+    std::array<float, kFrames> in_r{}; in_r[0] = 1.0f;
+    std::array<float, kFrames> out_l{}; out_l.fill(-1.0f);
+    std::array<float, kFrames> out_r{}; out_r.fill(-1.0f);
+
+    struct TwoBufferList {
+        AudioBufferList bl;
+        AudioBuffer second;
+    };
+    auto make_bufferlist = [](float* a, float* b, TwoBufferList& list) {
+        list.bl.mNumberBuffers = 2;
+        list.bl.mBuffers[0] = {1, static_cast<UInt32>(kFrames * sizeof(float)), a};
+        list.bl.mBuffers[1] = {1, static_cast<UInt32>(kFrames * sizeof(float)), b};
+    };
+    TwoBufferList input{}, output{};
+    make_bufferlist(in_l.data(), in_r.data(), input);
+    make_bufferlist(out_l.data(), out_r.data(), output);
+
+    AudioUnitRenderActionFlags flags = 0;
+    REQUIRE(effect.ProcessBufferLists(flags, input.bl, output.bl, kFrames) == noErr);
+
+    // The impulse must reappear at exactly frame `latency`, delayed — not at
+    // frame 0 (undelayed passthrough, the bug) and not negated (the processor,
+    // which bypass must skip).
+    for (UInt32 n = 0; n < kFrames; ++n) {
+        const float expected =
+            (n == static_cast<UInt32>(LatencyBypassEffect::kLatency)) ? 1.0f : 0.0f;
+        INFO("frame " << n);
+        REQUIRE(out_l[n] == expected);
+        REQUIRE(out_r[n] == expected);
+    }
+
+    effect.DoCleanup();
+}

@@ -64,6 +64,33 @@ test('a diagnosed degradation is not a silent drop — silence is what is audite
   assert.equal(spoken.emittedCounts.stroke ?? 0, 0);
 });
 
+test('a gradient stroke carried onto the path as fillGradient is emitted, not dropped', () => {
+  // The tool's own stroke-blind spot, aimed at itself. A GRADIENT stroke on a
+  // vector never becomes a `style.border`; it rides onto the PATH as a fill
+  // gradient (the knob-rim strokes render via setSvgFillGradient). The decode
+  // stage counted only style.border, so it flagged 40 rendered rims as silent
+  // stroke drops — the exact class this tool exists to end, turned inward.
+  const m = materials([
+    { node_id: '0:1', name: 'Oval', type: 'VECTOR',
+      declared: { stroke: [{ type: 'GRADIENT_LINEAR', opacity: 1, color_alpha: 1 }] } },
+  ]);
+  // Same node, but its stroke gradient reached the path as fillGradient.
+  const env = envelope([{ node_id: '0:1', name: 'Oval', style: {},
+                          fillGradient: 'linear-gradient(0deg, #ffffff3d, #00000000)' }]);
+
+  const out = auditMaterials(m, env, []);
+  assert.deepEqual(out.findings, [], 'a stroke gradient on the path is not a silent drop');
+  assert.equal(out.emittedCounts.stroke, 1, 'and it counts as emitted');
+  assert.equal(out.declaredCounts.stroke, 1);
+
+  // Guard against over-silencing: the SAME declaration with NO path gradient is
+  // still a finding (this is the existing invariant, restated so a future edit
+  // that widens the escape hatch trips here).
+  const envNoGrad = envelope([{ node_id: '0:1', name: 'Oval', style: {} }]);
+  const strict = auditMaterials(m, envNoGrad, []);
+  assert.equal(strict.findings.length, 1, 'a gradient stroke that reached neither border nor path IS a drop');
+});
+
 test('a non-uniform corner radius collapsed to one number is a partial drop', () => {
   const m = materials([
     { node_id: '0:1', name: 'Card', type: 'ROUNDED_RECTANGLE',

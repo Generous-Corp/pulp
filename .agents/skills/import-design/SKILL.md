@@ -46,6 +46,11 @@ pulp-import-design --from fig --file d.fig --frame 'Main' --output ui.js \
 python3 tools/import-design/layout_parity.py /tmp/layout.json   # exit 1 = findings
 ```
 
+`--validate` writes its render PNG **beside `--output`** (e.g. `ui.js` →
+`<name>-<source>-render.png` in the same directory), not into the CWD — so it no
+longer litters whatever directory you ran it from. Pass `--output` into a temp
+dir to keep artifacts together.
+
 This is pixel-free — no thresholds, no anti-aliasing noise — and it answers the
 question a screenshot cannot: *which* node, off by *how much*, and under which
 parent. Deltas are parent-relative and clustered by parent, so a shifted panel
