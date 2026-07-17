@@ -110,6 +110,19 @@ std::uint32_t pulp_ir_snapshot() {
 __attribute__((export_name("pulp_ir_data")))
 const float* pulp_ir_data() { return g_ir_snapshot.data(); }
 
+/// Set the GPU pipeline depth (round-trip latency, in internal blocks). This is the
+/// JS side of per-device adaptive depth (adaptive-depth.mjs picks it from the measured
+/// round trip): the page sets it so the plugin's L matches the ring's latencyBlocks.
+/// It sets the latency the delay lines are sized to at prepare(), so to CHANGE it live
+/// the caller must trigger a re-prepare (the thread-safe apply is the remaining step —
+/// see planning/2026-07-16-adaptive-gpu-pipeline-depth.md inc 3). Opt-in wasm export,
+/// invisible to any host that is not this page (same rationale as the pulp_ir_* exports).
+__attribute__((export_name("pulp_sc_set_pipeline_depth")))
+void pulp_sc_set_pipeline_depth(std::uint32_t blocks) {
+    auto* p = SuperConvolverGpuProcessor::live();
+    if (p) p->set_web_gpu_latency_blocks(static_cast<std::size_t>(blocks));
+}
+
 }  // extern "C"
 
 PULP_WCLAP_PLUGIN(create_super_convolver_gpu)
