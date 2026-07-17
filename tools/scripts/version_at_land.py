@@ -7,10 +7,21 @@ shared counter — only one PR can own `main+1` — so N parallel PRs endlessly
 re-bump and re-conflict on the VERSION line (the biggest single source of
 merge-land thrash; see planning/2026-07-07-parallel-merge-land-coordination.md).
 
-The fix: PRs only DECLARE intent via `Version-Bump: <surface>=<level>` trailers.
-This bot — the single writer, running post-merge on `main` — assigns the
-explicit semver once, in commit order, when it is the sole writer. No two PRs
-ever contend for the same number.
+The fix: PRs stop hand-bumping. This bot — the single writer, running post-merge
+on `main` — assigns the explicit semver once, in commit order, when it is the
+sole writer. No two PRs ever contend for the same number.
+
+To assign the RIGHT number the bot must reproduce exactly what the hand-bump
+model wrote. That model does NOT read positive `Version-Bump:` trailers as its
+signal — those are `skip`/override escapes used only a handful of times. It
+derives the level from a PATH + CONVENTIONAL-COMMIT heuristic
+(`version_bump_heuristics.assess_surfaces`: public-API paths → minor, other
+touched source → patch, `feat:` → minor, `fix:`/`perf:` → patch, `BREAKING`/`!`
+→ major), honoring `Version-Bump: <surface>=skip` and explicit
+`<surface>=<level>` trailers as overrides. So this bot calls the SAME
+`assess_surfaces` the gate and the `--mode=apply` writer call — there is one
+heuristic, imported, never duplicated — and bumps each surface's base version by
+the level it returns.
 
 Rollout is staged and this script is safe at every stage:
   --mode dry-run (default): compute and print what it WOULD assign; write
@@ -24,29 +35,31 @@ Rollout is staged and this script is safe at every stage:
     new origin tip) so two near-simultaneous drains never lose or duplicate a
     version. This is what the workflow uses once flipped off dry-run.
 
-It reuses the existing version machinery (versioning.json surfaces, read_version,
-write_version, bump_version) so there is ONE source of truth for what a version
-file is and how a level maps to a number.
+It reuses the existing version machinery (versioning.json surfaces, the
+`assess_surfaces` heuristic, version_at_base, write_version, bump_version) so
+there is ONE source of truth for what a version file is, how a level is derived,
+and how a level maps to a number.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
-import re
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
-from gate_common import git_range_trailers
-from version_bump_surfaces import Config, Surface, load_config, read_version, write_version
+from gate_common import git_diff_names
+from version_bump_surfaces import Config, Surface, load_config, version_at_base, write_version
+from version_bump_heuristics import assess_surfaces, filter_generated
 from version_bump_apply import bump_version
 
-# Highest-wins ordering. `skip` and absent mean "no assignment for this surface".
-_RANK = {"patch": 1, "minor": 2, "major": 3}
-TRAILER = "Version-Bump"
+# The next drain starts after the commit carrying this marker, so an applied
+# bump is never re-assigned.
 APPLIED_MARKER = "Version-Bump-Applied"
 BUMP_SUBJECT = "chore: bump versions"
 
@@ -59,43 +72,49 @@ class Assignment:
     assigned: str
 
 
-def aggregate_intent(trailers: dict[str, list[str]], surface_name: str) -> str | None:
-    """Highest declared bump level for `surface_name` across the range.
+def _current_at_base(base: str, surface: Surface) -> str | None:
+    """The surface's version at `base` — the value the assignment bumps FROM.
 
-    Scans every `Version-Bump: <surface>=<level>` value and returns the
-    max-rank level (major > minor > patch). `skip` and unknown levels are
-    ignored — a surface with only `skip` (or no) intent gets no assignment.
+    Reads the drain-window base (the last processed commit), NOT HEAD. Reading
+    HEAD would be self-referential: any version-file edit already inside the
+    range (a hand-bump during the transition, or the bot's own prior partial
+    apply) would be read back as the "current" value and bumped a second time.
+    The base is the last state the bot already accounted for, so bumping from it
+    is idempotent. Mirrors `version_bump_apply.apply_bumps`, which computes its
+    target from `version_at_base` for the same reason.
     """
-    best: str | None = None
-    for value in trailers.get(TRAILER.lower(), []):
-        m = re.search(rf"{re.escape(surface_name)}\s*=\s*([A-Za-z]+)", value)
-        if not m:
-            continue
-        level = m.group(1).lower()
-        if level not in _RANK:
-            continue  # skip / unknown → not an assignment
-        if best is None or _RANK[level] > _RANK[best]:
-            best = level
-    return best
+    for vf in surface.version_files:
+        cur = version_at_base(base, vf)
+        if cur:
+            return cur
+    return None
 
 
-def plan_assignments(config: Config, trailers: dict[str, list[str]],
-                     current_version) -> list[Assignment]:
-    """Pure: for each surface with a declared intent, what version to assign.
+def plan_assignments(config: Config, changed: list[str], base: str, head: str,
+                     repo: Path) -> list[Assignment]:
+    """For each surface the heuristic says needs a bump, what version to assign.
 
-    `current_version(surface) -> str | None` reads the surface's current
-    version (injected so this is testable without a repo).
+    Delegates the level decision to `assess_surfaces` — the identical pipeline
+    the version-bump gate and the `--mode=apply` writer use — so the bot's
+    assignment cannot drift from what a hand-bump would have written. A surface
+    whose `final_level` is `none` (no meaningful touched source, or an explicit
+    `Version-Bump: <surface>=skip`) gets no assignment.
     """
+    verdicts = assess_surfaces(config, changed, base, head, repo)
     out: list[Assignment] = []
-    for surface in config.surfaces:
-        level = aggregate_intent(trailers, surface.name)
-        if level is None:
+    for v in verdicts:
+        if v.final_level == "none":
             continue
-        current = current_version(surface)
+        # Bump FROM the base version, not the HEAD read that assess_surfaces
+        # stored on the verdict (see _current_at_base). Fall back to the HEAD
+        # read only when the file did not exist at base.
+        current = _current_at_base(base, v.surface)
+        if current is None:
+            current = v.current_version
         if not current:
             continue
-        out.append(Assignment(surface.name, level, current,
-                              bump_version(current, level)))
+        out.append(Assignment(v.surface.name, v.final_level, current,
+                              bump_version(current, v.final_level)))
     return out
 
 
@@ -110,6 +129,22 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
 
 def _rev_parse(repo: Path, ref: str) -> str:
     return _git(repo, "rev-parse", ref).stdout.strip()
+
+
+@contextlib.contextmanager
+def _in_repo(repo: Path) -> Iterator[None]:
+    """Run the block with the process cwd set to `repo`, restoring it after.
+
+    The level derivation (`git_diff_names`, `assess_surfaces`, `version_at_base`)
+    runs git in the process cwd — correct for the CLI, whose cwd is the repo,
+    but `apply_and_push` drives an arbitrary clone dir, so the plan must be
+    computed there. Scoped narrowly around plan computation only."""
+    prev = os.getcwd()
+    os.chdir(repo)
+    try:
+        yield
+    finally:
+        os.chdir(prev)
 
 
 def last_applied_marker(repo: Path, ref: str) -> str | None:
@@ -139,22 +174,17 @@ def drain_base(repo: Path, head: str, fallback: str | None = None) -> str:
     return f"{head}~1"
 
 
-def intent_trailers(repo: Path, base: str, head: str) -> dict[str, list[str]]:
-    """Intent trailers over `base..head`, EXCLUDING merge commits.
-
-    A "Merge origin/main into <branch>" re-sync commit can carry a stale
-    `Version-Bump:` intent that was never meant to declare this range's
-    release; honoring it silently escalates the assigned version. Read intent
-    only from the PRs' own (non-merge) commits and squash commits."""
-    return git_range_trailers(base, head, no_merges=True, cwd=repo)
-
-
 def plan_for_range(repo: Path, config: Config, base: str, head: str) -> list[Assignment]:
-    """Concrete plan: intent over `base..head` (non-merge) × current versions
-    read from the working tree (which the caller has synced to `head`)."""
-    trailers = intent_trailers(repo, base, head)
-    return plan_assignments(config, trailers,
-                            lambda s: read_version(repo, s.version_files[0]))
+    """Concrete plan over a drain window: the changed-file set across
+    `base..head` (three-dot, generated files filtered) fed to the live
+    `assess_surfaces` heuristic, bumping each surface FROM its version at
+    `base` (see `plan_assignments` / `_current_at_base`).
+
+    The drain range's `base` is supplied by `drain_base` (the last
+    `Version-Bump-Applied` marker, or the caller's fallback), so the window is
+    exactly what this bot has not yet accounted for."""
+    changed = filter_generated(git_diff_names(base, head), config.generated_globs)
+    return plan_assignments(config, changed, base, head, repo)
 
 
 def _write_plan(repo: Path, config: Config, plan: list[Assignment]) -> list[str]:
@@ -208,7 +238,10 @@ def apply_and_push(
         _git(repo, "reset", "--hard", head)
 
         base = drain_base(repo, head, fallback_base)
-        plan = plan_for_range(repo, config, base, head)
+        # plan_for_range's level derivation runs git in the process cwd; drive
+        # it in the clone dir this transaction owns.
+        with _in_repo(repo):
+            plan = plan_for_range(repo, config, base, head)
         if not plan:
             return "noop", []
 
@@ -311,8 +344,9 @@ def main(argv: list[str]) -> int:
     if not args.base:
         ap.error("--base is required unless --push is given")
 
-    # Read intent only from the PRs' own commits (non-merge) so a stray trailer
-    # on a re-sync merge commit cannot escalate the assigned version.
+    # Derive the level from the live path + conventional-commit heuristic over
+    # the drain range (not positive intent trailers), bumping FROM each
+    # surface's version at `base`.
     plan = plan_for_range(repo, config, args.base, args.head)
 
     if args.mode == "apply":
