@@ -3,6 +3,7 @@
 #include <miniz.h>
 #include "envelope_merge.hpp"
 #include "fig_lane.hpp"
+#include "render_artifact_path.hpp"
 
 #include <iostream>
 
@@ -2936,4 +2937,22 @@ TEST_CASE("merging states does not fail a hash-keyed lane that omits content_has
 
     REQUIRE_FALSE(rc.has_value());
     CHECK(fs::exists(tmp.path / "merged.pulp.json"));
+}
+
+
+TEST_CASE("render_artifact_path places the render beside --output, not the CWD",
+          "[import][validate][artifact-path]") {
+    using pulp::import_design::render_artifact_path;
+    // --output in a directory -> the render lands in that directory.
+    CHECK(render_artifact_path("/tmp/out/ui.js", "design-fig-render.png")
+          == "/tmp/out/design-fig-render.png");
+    CHECK(render_artifact_path("/a/b/c/panel.js", "x-render.png")
+          == "/a/b/c/x-render.png");
+    // A bare --output (no directory) keeps the artifact in the CWD — the
+    // intended default for that invocation, and the ONLY case the old bare-name
+    // behaviour was ever correct for.
+    CHECK(render_artifact_path("ui.js", "design-fig-render.png")
+          == "design-fig-render.png");
+    // A relative --output with a directory still carries that directory.
+    CHECK(render_artifact_path("sub/ui.js", "y-render.png") == "sub/y-render.png");
 }
