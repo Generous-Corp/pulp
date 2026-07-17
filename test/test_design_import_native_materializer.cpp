@@ -579,6 +579,50 @@ TEST_CASE("baked native materializer matches live React layout parity for a plug
     REQUIRE_FALSE(diagnostics_contain(diagnostics, "native-materialize-failed"));
 }
 
+TEST_CASE("baked native materializer accepts rgb()/rgba() on EVERY paint, not just background",
+          "[view][import][native-materializer][color]") {
+    // The CSS colour fallback lived at ONE call site. `apply_visual_style` calls
+    // the colour parser at seven paint sites — background, text `color`,
+    // `border_color`, and the four per-side border colours — and only background
+    // fell back from the hex fast path to the CSS parser. So a design writing
+    // `color: rgba(...)` rendered its background correctly and SILENTLY DROPPED
+    // its text and every border. Figma emits exactly that: it demotes a hairline
+    // stroke to a 1px frame whose fill is `rgba(171,171,171,0.1)`.
+    //
+    // Same shape as this branch's shadow bug (setBoxShadow emitted from the frame
+    // branch alone → 16 declared shadows became 1): one branch learned the
+    // lesson, its siblings never heard it. So this asserts the SIBLINGS — a test
+    // that only checked background would have passed throughout the bug.
+    DesignIR ir;
+    ir.root.type = "text";
+    ir.root.text_content = "Attack";
+    ir.root.stable_anchor_id = "label";
+    ir.root.style.width = 80.0f;
+    ir.root.style.height = 20.0f;
+    ir.root.style.background_color = "rgba(30, 30, 46, 1)";
+    ir.root.style.color = "rgba(171, 171, 171, 0.5)";
+    ir.root.style.border_width = 1.0f;
+    ir.root.style.border_color = "rgb(137, 180, 250)";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+
+    // Background: the one site that always worked — a control, so a regression
+    // here reads as "the parser broke" rather than "the fallback is missing".
+    REQUIRE(root->background_color().a > 0.0f);
+
+    // Text: dropped before this fix — the label rendered in the inherited colour.
+    const auto text = root->inheritable_text_color();
+    REQUIRE(text.has_value());
+    CHECK(text->a == Catch::Approx(0.5f).margin(0.01f));
+    CHECK(text->r == Catch::Approx(171.0f / 255.0f).margin(0.01f));
+
+    // Border: dropped before this fix — Figma's hairline grid rendered invisible.
+    const auto border = root->border_color();
+    CHECK(border.b == Catch::Approx(250.0f / 255.0f).margin(0.01f));
+    CHECK(border.a > 0.0f);
+}
+
 TEST_CASE("baked native materializer resolves image sources through the asset manifest",
           "[view][import][native-materializer][phase-4]") {
     DesignIR ir;
