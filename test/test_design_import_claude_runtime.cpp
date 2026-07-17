@@ -345,7 +345,7 @@ TEST_CASE("claude lane carries a CSS gradient background through to the IR",
     REQUIRE(bgimg->style.background_gradient.has_value());
     REQUIRE(bgimg->style.background_gradient->find("radial-gradient") != std::string::npos);
 
-    // A `background` shorthand carrying a solid colour still paints as a color,
+    // A `background` shorthand carrying a solid color still paints as a color,
     // not a dropped gradient.
     REQUIRE(solid);
     REQUIRE_FALSE(solid->style.background_gradient.has_value());
