@@ -219,7 +219,7 @@ the right order.
 ```cpp
 #include <pulp/view/hosted_editor_attachment.hpp>
 
-auto attachment = pulp::view::EditorAttachment::create(slot.get(), window);
+auto attachment = pulp::view::EditorAttachment::create(slot, window);
 if (!attachment) {
     // No editor for this format/platform, or the plugin refused. Fall back to
     // your own parameter UI — this is a normal answer, not an error.
@@ -235,9 +235,12 @@ Two things to design around:
   embedded editor. Use `set_native_child_view_clip` (which `NativeViewHost` does
   for you) to keep a child inside a scroll viewport.
 - **Editor calls are main-thread only.** Create, resize, and destroy on the main
-  thread; never from `process()`. Destroy the attachment before dropping the
-  slot — the CLAP slot logs an error and force-tears-down if you don't, but that
-  is a diagnostic for a contract violation, not a supported path.
+  thread; never from `process()`.
+- **Ownership.** `create()` takes a `shared_ptr<PluginSlot>` and the attachment
+  co-owns it, so removing the graph node that opened the editor does not tear the
+  slot out from under an open window — the slot lives until the attachment is
+  released. The `WindowHost`, by contrast, is borrowed: keep it alive until the
+  attachment is released or destroyed, or you dangle it.
 
 Resize negotiates in both directions. A plugin asking to resize itself reaches
 the handler you install; refusing is legal and the plugin must cope:

@@ -152,13 +152,13 @@ public:
 
 TEST_CASE("EditorAttachment attaches via the native-windows seam",
           "[host][hosted-editor][migration][item-4-4]") {
-    FakeSlot slot;
+    auto slot = std::make_shared<FakeSlot>();
     FakeWindowHost host;
-    auto att = pulp::view::EditorAttachment::create(&slot, &host, 12.0f, 34.0f);
+    auto att = pulp::view::EditorAttachment::create(slot, &host, 12.0f, 34.0f);
     REQUIRE(att);
-    REQUIRE(slot.created);
+    REQUIRE(slot->created);
     REQUIRE(host.attach_calls == 1);
-    REQUIRE(host.attached_handle == &slot.fake_view);
+    REQUIRE(host.attached_handle == &slot->fake_view);
     REQUIRE(host.attached_x == 12.0f);
     REQUIRE(host.attached_y == 34.0f);
     REQUIRE(host.attached_w == 800.0f);
@@ -169,22 +169,22 @@ TEST_CASE("EditorAttachment attaches via the native-windows seam",
 
 TEST_CASE("EditorAttachment destructor detaches and destroys",
           "[host][hosted-editor][migration][item-4-4]") {
-    FakeSlot slot;
+    auto slot = std::make_shared<FakeSlot>();
     FakeWindowHost host;
     {
-        auto att = pulp::view::EditorAttachment::create(&slot, &host);
+        auto att = pulp::view::EditorAttachment::create(slot, &host);
         REQUIRE(att);
     }
     REQUIRE(host.detach_calls == 1);
-    REQUIRE(host.detached_handle == &slot.fake_view);
-    REQUIRE(slot.destroyed);
+    REQUIRE(host.detached_handle == &slot->fake_view);
+    REQUIRE(slot->destroyed);
 }
 
 TEST_CASE("EditorAttachment release() is idempotent",
           "[host][hosted-editor][migration][item-4-4]") {
-    FakeSlot slot;
+    auto slot = std::make_shared<FakeSlot>();
     FakeWindowHost host;
-    auto att = pulp::view::EditorAttachment::create(&slot, &host);
+    auto att = pulp::view::EditorAttachment::create(slot, &host);
     REQUIRE(att);
     att->release();
     REQUIRE(host.detach_calls == 1);
@@ -196,13 +196,13 @@ TEST_CASE("EditorAttachment release() is idempotent",
 
 TEST_CASE("EditorAttachment set_bounds forwards to the host",
           "[host][hosted-editor][migration][item-4-4]") {
-    FakeSlot slot;
+    auto slot = std::make_shared<FakeSlot>();
     FakeWindowHost host;
-    auto att = pulp::view::EditorAttachment::create(&slot, &host);
+    auto att = pulp::view::EditorAttachment::create(slot, &host);
     REQUIRE(att);
     REQUIRE(att->set_bounds(5.0f, 6.0f, 200.0f, 150.0f));
     REQUIRE(host.bounds_calls == 1);
-    REQUIRE(host.bounds_handle == &slot.fake_view);
+    REQUIRE(host.bounds_handle == &slot->fake_view);
     REQUIRE(host.bounds_w == 200.0f);
     REQUIRE(host.bounds_h == 150.0f);
     REQUIRE(att->width() == 200.0f);
@@ -213,42 +213,42 @@ TEST_CASE("EditorAttachment set_bounds forwards to the host",
 
 TEST_CASE("EditorAttachment::create returns null when attach fails",
           "[host][hosted-editor][migration][item-4-4]") {
-    FakeSlot slot;
+    auto slot = std::make_shared<FakeSlot>();
     FakeWindowHost host;
     host.attach_should_succeed = false;
-    auto att = pulp::view::EditorAttachment::create(&slot, &host);
+    auto att = pulp::view::EditorAttachment::create(slot, &host);
     REQUIRE_FALSE(att);
     // The slot still gets destroy_hosted_editor() so it doesn't leak.
-    REQUIRE(slot.destroyed);
+    REQUIRE(slot->destroyed);
     REQUIRE(host.attach_calls == 1);
     REQUIRE(host.detach_calls == 0);
 }
 
 TEST_CASE("EditorAttachment::create returns null on null handles",
           "[host][hosted-editor][migration][item-4-4]") {
-    NullHandleSlot slot;
+    auto slot = std::make_shared<NullHandleSlot>();
     FakeWindowHost host;
-    auto att = pulp::view::EditorAttachment::create(&slot, &host);
+    auto att = pulp::view::EditorAttachment::create(slot, &host);
     REQUIRE_FALSE(att);
     // The typed destroy is the path that ran (handle was null so we never
     // touched the legacy entry points).
-    REQUIRE(slot.destroy_typed_calls == 1);
+    REQUIRE(slot->destroy_typed_calls == 1);
     REQUIRE(host.attach_calls == 0);
 }
 
 TEST_CASE("EditorAttachment::create rejects null inputs",
           "[host][hosted-editor][migration][item-4-4]") {
-    FakeSlot slot;
+    auto slot = std::make_shared<FakeSlot>();
     FakeWindowHost host;
     REQUIRE_FALSE(pulp::view::EditorAttachment::create(nullptr, &host));
-    REQUIRE_FALSE(pulp::view::EditorAttachment::create(&slot, nullptr));
+    REQUIRE_FALSE(pulp::view::EditorAttachment::create(slot, nullptr));
 }
 
 TEST_CASE("EditorAttachment is move-constructible without re-detaching",
           "[host][hosted-editor][migration][item-4-4]") {
-    FakeSlot slot;
+    auto slot = std::make_shared<FakeSlot>();
     FakeWindowHost host;
-    auto first = pulp::view::EditorAttachment::create(&slot, &host);
+    auto first = pulp::view::EditorAttachment::create(slot, &host);
     REQUIRE(first);
     pulp::view::EditorAttachment moved(std::move(*first));
     REQUIRE(moved.is_attached());
@@ -258,4 +258,39 @@ TEST_CASE("EditorAttachment is move-constructible without re-detaching",
     // Letting moved go out of scope does the single real detach.
     moved.release();
     REQUIRE(host.detach_calls == 1);
+}
+
+TEST_CASE("EditorAttachment keeps its slot alive after the graph drops it",
+          "[host][hosted-editor][migration][item-4-4]") {
+    // The signal graph owns nodes as shared_ptr<PluginSlot> and can remove a
+    // node while its editor window is still open. When EditorAttachment held a
+    // raw slot pointer, release() (run from the destructor) then dereferenced a
+    // freed slot — a use-after-free. Co-owning the slot via shared_ptr fixes it:
+    // the slot outlives the attachment, never the other way around.
+    auto slot = std::make_shared<FakeSlot>();
+    FakeWindowHost host;
+    std::weak_ptr<FakeSlot> weak = slot;
+
+    auto att = pulp::view::EditorAttachment::create(slot, &host);
+    REQUIRE(att);
+    REQUIRE(slot->created);
+
+    // A test-only observer so we can inspect the slot after release() without
+    // reading a freed object.
+    std::shared_ptr<FakeSlot> observer = slot;
+
+    // "Graph removes the node": drop the graph's reference while still attached.
+    slot.reset();
+    REQUIRE(weak.lock());  // the attachment (+observer) still own it — not freed.
+
+    // release() must reach through the co-owned slot to destroy the editor.
+    // With a raw slot_ this line was the use-after-free.
+    att->release();
+    REQUIRE(host.detach_calls == 1);
+    REQUIRE(observer->destroyed);  // the editor really was destroyed.
+
+    // The attachment already dropped its slot ownership inside release(); once
+    // the test observer goes too, the slot is freed cleanly (no leak).
+    observer.reset();
+    REQUIRE_FALSE(weak.lock());
 }
