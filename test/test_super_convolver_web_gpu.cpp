@@ -410,15 +410,51 @@ TEST_CASE("web GPU module declares Engine and GPU only, both defaulting to off",
     pulp::state::StateStore store;
     proc.define_parameters(store);
 
-    REQUIRE(store.param_count() == 6);
+    // Mix/Size/Gain/Bypass (the four the CPU-only web module ships) PLUS the GPU
+    // lane's Engine/GPU-only and the field controls Rooms/Flow = eight.
+    REQUIRE(store.param_count() == 8);
     REQUIRE(store.info(kEngine) != nullptr);
     REQUIRE(store.info(kGpuOnly) != nullptr);
     // CPU is the default engine and the safety net is on: the GPU is opt-in.
     REQUIRE(store.get_default(kEngine) == 0.0f);
     REQUIRE(store.get_default(kGpuOnly) == 0.0f);
-    // Rooms/Flow are NOT on the web GPU lane (see define_parameters).
-    REQUIRE(store.info(kRooms) == nullptr);
-    REQUIRE(store.info(kFlow) == nullptr);
+    // Rooms and Flow ARE on the web GPU lane: they drive the field's density and
+    // motion (the multi-room moving-pan AUDIO stays native-only, but the editor
+    // needs the same five sliders it shows natively). See define_parameters.
+    REQUIRE(store.info(kRooms) != nullptr);
+    REQUIRE(store.info(kFlow) != nullptr);
+}
+
+TEST_CASE("set_web_gpu_latency_blocks makes the pipeline depth a runtime knob",
+          "[super-convolver][web-gpu]") {
+    // The depth was a compile-time constant (kWebGpuLatencyBlocks); it is now a
+    // runtime member so the per-device adaptive logic can deepen the pipeline. A
+    // deeper depth must flow straight into gpu_extra_ → the reported latency, and
+    // stay fixed for BOTH engines (flipping Engine never moves the host's PDC).
+    for (const std::size_t depth : {std::size_t{2}, std::size_t{4}, std::size_t{6}}) {
+        g_seam.reset();
+        SuperConvolverProcessor proc;
+        pulp::state::StateStore store;
+        proc.set_state_store(&store);
+        proc.set_web_gpu_latency_blocks(depth);
+        proc.define_parameters(store);
+        store.set_value(kSize, kIrSeconds);
+        proc.prepare(prep_ctx(kBlock));
+
+        REQUIRE(proc.web_gpu_latency_blocks() == depth);
+        const int expect = static_cast<int>(kBlock + depth * kBlock);
+        REQUIRE(proc.latency_samples() == expect);
+        store.set_value(kEngine, 1.0f);
+        REQUIRE(proc.latency_samples() == expect);   // live flip does not move it
+        store.set_value(kEngine, 0.0f);
+        REQUIRE(proc.latency_samples() == expect);
+    }
+    // 0 is clamped to 1 (a zero-block pipeline would be no pipeline at all).
+    {
+        SuperConvolverProcessor proc;
+        proc.set_web_gpu_latency_blocks(0);
+        REQUIRE(proc.web_gpu_latency_blocks() == 1);
+    }
 }
 
 TEST_CASE("reported latency is the reblock plus the GPU round-trip, for BOTH engines",

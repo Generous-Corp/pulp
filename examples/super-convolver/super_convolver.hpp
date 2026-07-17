@@ -621,6 +621,19 @@ public:
     /// the only mode.
     void set_background_worker_enabled(bool enabled) { worker_enabled_ = enabled; }
 
+    /// The browser GPU round-trip pipeline depth, in internal blocks — how many
+    /// blocks of latency the plugin budgets for the GPU worker's async submit →
+    /// readback round trip. It sets gpu_extra_ (and the equal CPU-net delay) at
+    /// prepare(), so it MUST be called before prepare() and MUST match the JS side's
+    /// `latencyBlocks` (deadline budget + ring). Defaulting to kWebGpuLatencyBlocks;
+    /// a deeper value trades latency for fewer misses on a jittery device. This is
+    /// the runtime knob the adaptive/per-device depth logic drives (was a hardcoded
+    /// compile-time constant — see planning/2026-07-16-adaptive-gpu-pipeline-depth.md).
+    void set_web_gpu_latency_blocks(std::size_t blocks) {
+        web_gpu_latency_blocks_ = blocks == 0 ? 1 : blocks;
+    }
+    std::size_t web_gpu_latency_blocks() const { return web_gpu_latency_blocks_; }
+
     /// One pass of the off-audio-thread IR/engine reconciliation: rebuild the base
     /// IR when its source or Size changed, stage it for the audio thread through
     /// the lock-free swapper, (native) reconcile the GPU stack, and reclaim what
@@ -872,7 +885,7 @@ public:
         // and the module cannot ask it. It is applied to BOTH engines through the
         // existing cpu_extra_ring_, so flipping Engine never moves the reported
         // latency (which would jump the host's PDC mid-stream).
-        gpu_extra_ = kWebGpuLatencyBlocks * kInternalBlock;
+        gpu_extra_ = web_gpu_latency_blocks_ * kInternalBlock;
         for (std::size_t ch = 0; ch < kChannels; ++ch)
             cpu_wet_[ch].assign(kInternalBlock, 0.0f);
         xfer_in_.assign(kChannels * kInternalBlock, 0.0f);
@@ -2232,6 +2245,9 @@ private:
     std::atomic<std::uint64_t> web_gpu_misses_{0};   // blocks the worker missed
 #endif
     std::size_t gpu_extra_ = 0;                     // GPU transport latency, samples (fixed)
+    // Runtime pipeline depth (blocks) → gpu_extra_ at prepare(). Default is the
+    // historical compile-time constant; the adaptive depth logic sets it per device.
+    std::size_t web_gpu_latency_blocks_ = kWebGpuLatencyBlocks;
     int latency_samples_ = static_cast<int>(kInternalBlock);
 
     // Off-audio-thread rebuild + live-engine state. The worker exists only where a
