@@ -157,6 +157,15 @@ public:
     int current_band() const { return target_band_; }
     bool is_crossfading() const { return crossfade_samples_remaining_ > 0; }
 
+    /// Upper alias-free playback frequency of band `i` — its `max_frequency_hz`,
+    /// the ceiling `select_band_for` compares against. Exposed read-only so a
+    /// caller can place a stress tone just under a band ceiling (where the band's
+    /// top harmonic sits nearest Nyquist) without duplicating the factory's
+    /// ceiling formula. Returns 0 for an out-of-range index.
+    SampleType band_max_frequency_hz(std::size_t i) const {
+        return i < bands_.size() ? bands_[i].max_frequency_hz : SampleType{0.0f};
+    }
+
     /// Compose a stack of harmonic-based bands for one of the four
     /// classical shapes (sine, saw, square, triangle). The result is
     /// fully bandlimited across the audible range: each band carries

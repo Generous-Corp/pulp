@@ -53,11 +53,13 @@ const noteName = (n) => NOTE_NAMES[((n % 12) + 12) % 12] + (Math.floor(n / 12) -
 // NOTICE.md / DEPENDENCIES.md). Original hardcodes fill="#16DAC2"; swapped to
 // currentColor so the glyph follows --accent-primary like everything else.
 // The source path's bbox spans x 8..18.83 (center 13.42), so centring the <svg>
-// leaves the triangle ~1.4u right of center. We translate the path by
-// (12 − 13.42) = −1.42 so the geometry itself is centered (no CSS margin nudge).
-// Right-pointing triangles can read a hair left once bbox-centered, but measured
-// centers agree to <0.5px here, so we keep the exact −1.42.
-const PLAY_SVG = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false"><g transform="translate(-1.42 0)"><path d="M8 6.1v11.8a1 1 0 0 0 1.53.85l9.3-5.9a1 1 0 0 0 0-1.7L9.53 5.25A1 1 0 0 0 8 6.1Z" fill="currentColor"/></g></svg>`;
+// leaves the triangle ~1.4u right of center. OPTICAL, not bbox, centering: a
+// right-pointing triangle's visual mass is its base (left) — its centroid sits at
+// base + width/3 ≈ 11.1, ~0.9u LEFT of the circle centre — so a purely bbox-centered
+// glyph (translate −1.42, bbox centre at 12) reads noticeably left in the circle.
+// Split the difference toward the centroid: translate −0.6 nudges it ~0.8u right so
+// it looks centered to the eye (a hair right of bbox-centre, as play buttons want).
+const PLAY_SVG = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false"><g transform="translate(-0.6 0)"><path d="M8 6.1v11.8a1 1 0 0 0 1.53.85l9.3-5.9a1 1 0 0 0 0-1.7L9.53 5.25A1 1 0 0 0 8 6.1Z" fill="currentColor"/></g></svg>`;
 
 // ————————————————————————————————————————————————————————————— shared styles
 // Skinnable: the consumer supplies their own design-token stylesheet + font face

@@ -512,7 +512,7 @@ function superConvolverPage(abi, pageUrl, hasOgImage, v, withUi) {
       // under the knobs on a desktop and collapsed to ~100px on a phone (where the view
       // then sheared its own labels through each other). Neither was a tuning problem; the
       // measurement was simply of the wrong thing.
-      canvas.style.cssText = "width:100%;height:210px;display:block";
+      canvas.style.cssText = "width:100%;height:clamp(420px,60vh,680px);display:block";
       container.appendChild(canvas);
       const pending = mountPulpUi(canvas, adapter, { moduleUrl: "./${UI_MODULE}.js" });
       // The shell handles the rejection (it restores the grid); this keeps the
@@ -675,7 +675,7 @@ const GPU_SRC = resolve(REPO, "examples/web-demos/gpu-audio/js");
 // navigator.gpu nor spawn a Worker, so the worker is not optional — and
 // gpu-ring.mjs is the SharedArrayBuffer both of them (and the worklet) map. All
 // three must be same-origin, hence the copy into the page dir.
-const GPU_BRIDGE_FILES = ["gpu-bridge.mjs", "gpu-worker.mjs", "gpu-ring.mjs"];
+const GPU_BRIDGE_FILES = ["gpu-bridge.mjs", "gpu-worker.mjs", "gpu-ring.mjs", "adaptive-depth.mjs"];
 // The Skia-free WebGPU DSP module the worker instantiates (examples/web-demos/
 // gpu-audio, target pulp-gpu-dsp). Built with emcmake into its own tree.
 const GPU_DSP_BUILD = resolve(HERE, arg("--gpu-build", "../../gpu-audio/build-gpu-dsp"));
@@ -748,7 +748,26 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
     .engine-stats .es-pct{min-width:5ch}
     .engine-stats .es-eng{display:inline-block;min-width:3.5ch;color:#2bd4be;font-weight:600}
     .engine-stats .es-sep{opacity:.55}
-    .engine-off{max-width:640px;margin:0 auto 14px;font:13px/1.6 system-ui;color:#e0b070}
+    .engine-off{max-width:960px;margin:0 auto 14px;font:13px/1.6 system-ui;color:#e0b070}
+    /* ── Hero layout ──────────────────────────────────────────────────────────────────
+       The editor is a beautiful thing and demands the room; the default 640px player panel
+       boxes it in. Widen the player's whole column (and the stats that sit under the editor)
+       to a wide, centered, padded band, and give the editor canvas a tall aspect. Everything
+       stays centered with breathing room — full-bleed would touch the window edges. */
+    /* #panel.pulp is the player's centered column, capped at 640px by default. Widen it and
+       everything inside (the editor canvas fills its width) to a wide, padded band. */
+    #panel.pulp{max-width:min(1200px, 94vw) !important}
+    /* The live readout sits in a FIXED slot between the editor and the scope.
+       It ALWAYS reserves two lines' worth of height and centres its content, so
+       nothing bumps: not when the metrics wrap to a second line on a narrow phone,
+       and not when the engine flips CPU<->GPU (short CPU line vs. long GPU line).
+       The text WRAPS — never truncates — so a phone that can't fit the sentence on
+       one line shows all of it across two, inside the already-reserved box. */
+    .engine-stats{max-width:min(1200px, 94vw) !important; margin:12px auto 2px;
+                  font-size:13px; line-height:1.5; text-align:center;
+                  min-height:3.2em; display:grid; place-items:center}
+    .engine-stats #es-cpu{color:#8b96a3}
+    #pulp-ui-canvas{height:clamp(420px, 60vh, 680px) !important}
   </style>
 </head>
 <body>
@@ -758,7 +777,13 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
   import { createWclapAdapter } from "../vendor-player/adapters/wclap.js?v=${v}";
   import { mountPulpUi } from "./pulp-ui.js?v=${v}";
   import { probe, startGpuLane } from "./gpu-bridge.mjs";
+  import { DepthController } from "./adaptive-depth.mjs";
   import { irFileUpload } from "./ir-source.js?v=${v}";
+  // The plugin-state container is how the editor's own IR loader (the "SOURCE" chip) writes a
+  // chosen impulse response WITHOUT resetting the knobs: it swaps only the plugin-owned IR blob
+  // inside the state, leaving the parameter bytes intact. Passing it to mountPulpUi is what
+  // wires the chip's file dialog at all — without it Module.onRequestIr is never set.
+  import * as pluginState from "../vendor-player/state/plugin-state.js?v=${v}";
 
   // Both constants are the plugin's, restated here because the ring is allocated
   // on this side: kInternalBlock and kWebGpuLatencyBlocks in
@@ -766,6 +791,11 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
   // a mismatch is a latency bug, not a rounding error.
   const INTERNAL_BLOCK = 512;
   const GPU_LATENCY_BLOCKS = 2;
+  // Adaptive depth grows the pipeline latency up to this many blocks on a jittery
+  // device; the ring's slots are pre-sized past it so a deeper depth never re-allocs
+  // the SAB. MUST NOT exceed the plugin's kMaxWebGpuLatencyBlocks (super_convolver.hpp).
+  const GPU_MAX_LATENCY_BLOCKS = 12;
+  const GPU_RING_SLOTS = GPU_MAX_LATENCY_BLOCKS + 4;   // latencyBlocks < slots, always
 
   // ── The handshake, BEFORE the adapter is created. ───────────────────────
   // Cheap main-thread preconditions first (SAB + cross-origin isolation), then
@@ -795,6 +825,7 @@ ${ogUrlAndImage(pageUrl, hasOgImage)}
       sampleRate: 48000,
       blockSize: INTERNAL_BLOCK,
       latencyBlocks: GPU_LATENCY_BLOCKS,
+      slots: GPU_RING_SLOTS,   // pre-sized so adaptive depth never re-allocs the SAB
       onDeviceLost: (info) => {
         // Normal behavior, not a fatal error: the worklet misses from here on
         // and the plugin's CPU convolver covers every block.
@@ -866,68 +897,23 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
       const mountEngineToggle = () => {
         if (laneAttached) return;      // already up
         laneAttached = true;
-        offNote.remove();
-        const row = document.createElement("div");
-        row.className = "engine-row";
-        row.innerHTML =
-          '<label for="engine">Engine</label>' +
-          '<select id="engine"><option value="0">CPU</option>' +
-          '<option value="1">GPU (WebGPU compute)</option></select>';
-
-        // THE LIVE METRICS, as separate elements with FIXED-WIDTH numeric slots.
-        //
-        // Built as spans, not a concatenated sentence. A sentence re-flows every time a
-        // number gains a digit — the labels and separators shuffle, and on a narrow screen
-        // the whole line rewraps several times a second. Each number gets its own slot,
-        // sized for its widest plausible value, with tabular figures so the digits are all
-        // the same width. It reads as one sentence and nothing moves but the digits.
-        const stats = document.createElement("div");
-        stats.className = "engine-stats";
-        stats.innerHTML =
-          '<span id="es-cpu">Convolving on the CPU — a real-FFT partitioned convolver.</span>' +
-          '<span id="es-gpu" hidden>' +
-            '<span class="es-num" id="es-blocks">—</span><span class="es-lab"> blocks on the GPU</span>' +
-            '<span class="es-sep"> · </span>' +
-            '<span class="es-num" id="es-covered">—</span><span class="es-lab"> covered by the CPU</span>' +
-            '<span class="es-sep"> · </span>' +
-            '<span class="es-num" id="es-us">—</span><span class="es-lab"> µs/block</span>' +
-            '<span class="es-sep"> · </span>' +
-            '<span class="es-num es-pct" id="es-pct">—</span><span class="es-lab"> of the real-time budget</span>' +
-          '</span>';
-
-        const note = document.createElement("p");
-        note.className = "engine-note";
-        note.textContent =
-          "CPU is the default and always the fallback — a GPU block that misses its " +
-          "deadline is covered, so you never hear a gap.";
-        container.appendChild(row);
-        container.appendChild(stats);
-        container.appendChild(note);
-
-        const select = row.querySelector("select");
-        select.addEventListener("change", async () => {
-          const params = (await adapter.getParameterInfo()) || [];
-          const engine = params.find((p) => /^engine$/i.test(p.label || ""));
-          if (engine) adapter.setParameterValue(engine.id, Number(select.value));
-        });
-        window.__engineSelect = select;
-
-        // Which engine is actually EMITTING. Kept in sync from both directions: this
-        // control, and the plugin itself (a preset or a host can move the parameter).
-        setEngineGpu(Number(select.value) >= 1);
-        select.addEventListener("change", () => setEngineGpu(Number(select.value) >= 1));
+        // The GPU lane is live. Swap the transient "starting…" line for the steady CPU
+        // note; the poll loop replaces it with the GPU metrics whenever the shader is the
+        // emitting engine. NOTHING is added or removed here — the stats slot was reserved
+        // at mount below — so the scope below the editor never jumps on the flip.
+        const cpu = document.getElementById("es-cpu");
+        if (cpu) cpu.textContent = "Convolving on the CPU.";
       };
 
-      // What the page says while there is no working GPU lane — and what it keeps saying
-      // if one never arrives. Named reason, never a generic "unavailable".
-      const offNote = document.createElement("p");
-      offNote.className = "engine-off";
-      offNote.textContent = !gpuOk
-        ? "GPU engine unavailable (" + handshake.reason + ") — running the CPU convolver."
+      // The CPU-side status text (rendered into the reserved #es-cpu slot below the
+      // editor). If the GPU lane never arrives this is what the line keeps saying — a
+      // named reason, never a generic "unavailable". Once the lane attaches,
+      // mountEngineToggle() swaps it for the steady CPU note.
+      const cpuStatusText = !gpuOk
+        ? "GPU unavailable (" + handshake.reason + ") — convolving on the CPU."
         : !ringAttached
-          ? "GPU engine unavailable (no-gpu-lane-in-worklet) — running the CPU convolver."
-          : "GPU engine starting — waiting for the plugin's impulse response. Running the CPU convolver.";
-      container.appendChild(offNote);
+          ? "GPU unavailable (no-gpu-lane-in-worklet) — convolving on the CPU."
+          : "Starting the GPU engine — convolving on the CPU meanwhile.";
 
       // The plugin can move Engine without going through the control above (a preset, a
       // host automation lane). Follow it, or the status line and the audio disagree — which
@@ -944,8 +930,6 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
           const i = list.findIndex((x) => /^engine$/i.test(x.label || ""));
           if (i >= 0 && values && typeof values[i] === "number") {
             setEngineGpu(values[i] >= 0.5);
-            const sel = document.querySelector("#engine");
-            if (sel) sel.value = engineIsGpu ? "1" : "0";
           }
         } catch (err) { /* a readout must never take the audio down */ }
         if (prevParamsChanged) prevParamsChanged(values, infos);
@@ -976,8 +960,38 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
       // under the knobs on a desktop and collapsed to ~100px on a phone (where the view
       // then sheared its own labels through each other). Neither was a tuning problem; the
       // measurement was simply of the wrong thing.
-      canvas.style.cssText = "width:100%;height:210px;display:block";
+      canvas.style.cssText = "width:100%;height:clamp(420px,60vh,680px);display:block";
       container.appendChild(canvas);
+
+      // The live readout, in its OWN fixed-height slot directly below the editor and
+      // above the shell's waveform scope. Built once and ALWAYS present, so flipping
+      // CPU<->GPU only swaps which child span is visible — the slot's height never
+      // changes and the scope below never moves. Spans, not a sentence: each number
+      // has a fixed-width tabular slot, so only the digits change (a concatenated
+      // sentence re-flows every tick and, at phone width, rewraps several times a
+      // second). It proves the GPU is really carrying the audio — the one thing the
+      // editor's own chrome cannot show.
+      const stats = document.createElement("div");
+      stats.className = "engine-stats";
+      stats.innerHTML =
+        '<span id="es-cpu"></span>' +
+        '<span id="es-gpu" hidden>' +
+          '<span class="es-num" id="es-blocks">—</span><span class="es-lab"> blocks on the GPU</span>' +
+          '<span class="es-sep"> · </span>' +
+          '<span class="es-num" id="es-covered">—</span><span class="es-lab"> covered by the CPU</span>' +
+          '<span class="es-sep"> · </span>' +
+          '<span class="es-num" id="es-us">—</span><span class="es-lab"> µs/block</span>' +
+          '<span class="es-sep"> · </span>' +
+          '<span class="es-num es-pct" id="es-pct">—</span><span class="es-lab"> of the real-time budget</span>' +
+          // The honest GPU-compute cost — the shader's own execution time, read from a WebGPU
+          // timestamp query, distinct from the µs/block above (which includes cross-thread
+          // transport). Stays hidden until the async timestamp readback populates it, so a
+          // build without that core simply omits it rather than showing a placeholder.
+          '<span id="es-gpumath-wrap" hidden><span class="es-sep"> · </span>' +
+            '<span class="es-num" id="es-gpumath">—</span><span class="es-lab"> µs GPU math</span></span>' +
+        '</span>';
+      container.appendChild(stats);
+      document.getElementById("es-cpu").textContent = cpuStatusText;
 
       // Engine and "GPU only" are rendered BELOW as a <select> and a checkbox — real
       // controls with words on them. Drawing them again as knobs would be two controls for
@@ -985,6 +999,8 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
       const pending = mountPulpUi(canvas, adapter, {
         moduleUrl: "./${UI_MODULE}.js",
         hideParams: ["Engine", "GPU only"],
+        // Wire the editor's own "SOURCE" chip as the IR loader (its file dialog).
+        pluginState,
       });
       pending.catch((err) => { console.warn("Pulp UI failed to mount:", err); });
 
@@ -993,6 +1009,13 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
       // readout must not freeze at the moment it gets interesting.
       let timer = 0;
       let lastProduced = 0;
+      let gpuStall = 0;          // consecutive 100ms polls with no new GPU block
+      let gpuCarrying = false;   // debounced "GPU is the emitting engine" state
+      // Adaptive pipeline depth: the worker measures the round trip and recommends a
+      // depth; this debounces it (hold=4 polls ≈ 400ms) and, on a sustained change,
+      // retargets the ring + the plugin's L together. Starts at the shallow default —
+      // a fast device stays here; a jittery one deepens toward GPU_MAX_LATENCY_BLOCKS.
+      const depthCtl = new DepthController(GPU_LATENCY_BLOCKS, { hold: 4 });
       pending.then((ui) => {
         if (!ui) return;
         timer = setInterval(() => {
@@ -1010,6 +1033,15 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
           // 100 % of what you hear.
           const producedNow = (stats.produced || 0) > lastProduced;
           lastProduced = stats.produced || 0;
+          // HYSTERESIS. producedNow is a single 100ms window, and on mobile Safari the
+          // worker's block cadence and this timer drift out of phase — so an isolated
+          // poll lands with no NEW block even while the GPU is steadily carrying. Taken
+          // raw, that strobed the readout back to "Convolving on the CPU" for one tick.
+          // So: flip to GPU the instant a block lands, but require ~0.8s of continuous
+          // silence (8 polls) before conceding back to CPU. A real engine switch stalls
+          // the counter forever and still crosses that threshold; a phase blip never does.
+          if (producedNow) { gpuStall = 0; gpuCarrying = true; }
+          else if (++gpuStall >= 8) { gpuCarrying = false; }
 
           // AND the engine must actually BE the GPU. The worker keeps turning under
           // Engine=CPU — deliberately: the plugin drives the ring on every block so the
@@ -1022,7 +1054,13 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
           // you were hearing came from the shader. The readout must describe the audio
           // that is being EMITTED, not the work that is being thrown away — a status line
           // that overstates the GPU is the exact failure this whole demo exists to avoid.
-          const gpuIsCarrying = engineIsGpu && producedNow;
+          // producedNow ALONE is the honest signal now. The worklet's engine gate keeps the
+          // GPU worker fully IDLE while Engine=CPU (it submits nothing), so the worker produces
+          // blocks ONLY when GPU is the emitting engine. The old engineIsGpu-AND-producedNow
+          // test relied on a page-side engineIsGpu flag that the removed dropdown used to set;
+          // the editor's own CPU/GPU chip is the switcher now, and the GPU's own produced
+          // counter is a truer "is the shader carrying the audio" than any page param mirror.
+          const gpuIsCarrying = gpuCarrying;
           // budget_us and rt_percent are derived HERE, by the same arithmetic
           // native gpu_status() uses (super_convolver.hpp), so the browser and
           // the native build print the same numbers computed the same way.
@@ -1043,11 +1081,30 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
           show("es-cpu", !gpuIsCarrying);
           show("es-gpu", gpuIsCarrying);
           if (gpuIsCarrying) {
+            // Adaptive depth runs only while the GPU is the emitting engine — that is
+            // when avgBlockUs is a real round trip. Feed the worker's recommendation
+            // through the debounce; a sustained change moves the ring latency (read
+            // live by pop + worker) and the plugin's L (via the worklet) together, so
+            // the CPU-net wet stays sample-aligned with the GPU wet through the settle.
+            if (lane && lane.setLatency && stats.recommendedDepth > 0) {
+              const target = depthCtl.update(stats.recommendedDepth | 0);
+              if (target !== lane.latencyBlocks) lane.setLatency(target);
+            }
             put("es-blocks", (stats.produced || 0).toLocaleString());
             put("es-covered", (stats.miss || 0).toLocaleString());
             put("es-us", Math.round(avg_us).toLocaleString());
             put("es-pct", pct.toFixed(1) + "%");
+            // Only present when the async timestamp path reported a non-zero shader
+            // time (Metal/Chrome can quantize a fast pass to 0 ns). gpuNsLast is the
+            // GPU-busy span in ns from pulp_gpu_stat(4); show it in µs beside the
+            // round-trip so the two costs are honestly distinct.
+            const gpuMathUs = (stats.gpuNsLast || 0) / 1000;
+            show("es-gpumath-wrap", gpuMathUs > 0);
+            if (gpuMathUs > 0)
+                put("es-gpumath", (gpuMathUs >= 10 ? Math.round(gpuMathUs)
+                                                   : gpuMathUs.toFixed(1)).toLocaleString());
           }
+          stats.appliedLatency = lane ? lane.latencyBlocks : 0;   // adaptive depth in effect
           window.__gpuStats = stats;
         }, 100);
       }, () => {});
@@ -1069,13 +1126,10 @@ ${Object.entries(SC_CFG).map(([k, val]) => `    ${k}: ${JSON.stringify(val)},`).
         ? { gpuSab: lane.sab, gpuLatencyBlocks: lane.latencyBlocks }
         : {});
     },
-    // The same uploader the CPU pages get. It is the same plugin and it takes the same
-    // impulse response — and on THIS page it does more than on the others: the plugin
-    // republishes its rebuilt IR (pulp_ir_*), the page forwards it with lane.setIr(), and
-    // the GPU worker re-prepares. So dropping a file here changes the kernel the compute
-    // shader is convolving with, live. Withholding the control on the one page where it is
-    // most interesting would have been an odd place to stop.
-    fileUpload: irFileUpload(),
+    // NO separate upload area on the GPU page: the fancy editor's own "SOURCE" chip opens the
+    // file dialog (see the pluginState wiring above), and it does the full live thing — the
+    // plugin republishes its rebuilt IR (pulp_ir_*), the page forwards it with lane.setIr(),
+    // the GPU worker re-prepares — so a second page-level loader would just duplicate the chip.
   });
 </script>
 <p style="max-width:640px;margin:0 auto;padding:0 20px 40px;

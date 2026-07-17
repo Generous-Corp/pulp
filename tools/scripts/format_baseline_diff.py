@@ -32,10 +32,49 @@ from __future__ import annotations
 import argparse
 import difflib
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+
+def _persist_capture(tmpdir: Path, diag_dir: Path | None) -> None:
+    """Copy the captured validator output out of the temp dir.
+
+    The capture lives in a TemporaryDirectory that is removed as soon as the
+    caller's `with` block exits, so anything not copied here is unrecoverable
+    once the run ends.
+    """
+    if diag_dir is None:
+        return
+    captured = diag_dir / "captured"
+    captured.mkdir(parents=True, exist_ok=True)
+    for src in sorted(tmpdir.iterdir()):
+        if src.is_file():
+            shutil.copy2(src, captured / src.name)
+
+
+def _report_diag(diag_dir: Path | None) -> None:
+    """Point a reader at the diagnostics, or explain why there are none."""
+    if diag_dir is None:
+        sys.stderr.write(
+            "[format-baseline-diff] No --diag-dir was passed, so the "
+            "validator output was discarded with the temp dir. Re-run with "
+            "--diag-dir to keep it.\n"
+        )
+        return
+    files = sorted(p.name for p in diag_dir.rglob("*") if p.is_file())
+    if not files:
+        sys.stderr.write(
+            f"[format-baseline-diff] {diag_dir} is empty — the capture "
+            "produced no output at all.\n"
+        )
+        return
+    sys.stderr.write(
+        f"[format-baseline-diff] Validator diagnostics written to "
+        f"{diag_dir} ({len(files)} file(s)): {', '.join(files)}\n"
+    )
 
 
 def main(argv: list[str]) -> int:
@@ -45,6 +84,10 @@ def main(argv: list[str]) -> int:
     p.add_argument("--baseline-dir", default="test/fixtures/format-baseline")
     p.add_argument("--max-diff-lines", type=int, default=40,
                    help="show at most N diff lines per validator")
+    p.add_argument("--diag-dir", default=None,
+                   help="persist captured output + per-validator raw output "
+                        "and exit codes here, so a failure can be diagnosed "
+                        "after the run (CI uploads this as an artifact)")
     args = p.parse_args(argv)
 
     root = Path(subprocess.check_output(
@@ -66,12 +109,22 @@ def main(argv: list[str]) -> int:
         )
         return 1
 
+    diag_dir = Path(args.diag_dir).resolve() if args.diag_dir else None
+    if diag_dir is not None:
+        diag_dir.mkdir(parents=True, exist_ok=True)
+
     with tempfile.TemporaryDirectory(prefix="pulp-baseline-diff-") as tmpdir:
-        rc = subprocess.run(
-            [str(capture_script), "--plugin", args.plugin,
-             "--output", tmpdir],
-            cwd=root,
-        ).returncode
+        cmd = [str(capture_script), "--plugin", args.plugin,
+               "--output", tmpdir]
+        if diag_dir is not None:
+            cmd += ["--diag-dir", str(diag_dir)]
+        rc = subprocess.run(cmd, cwd=root).returncode
+
+        # The captured output only exists inside tmpdir, which is deleted the
+        # moment this block exits — including on the early returns below. Copy
+        # it out first or the evidence for any failure here is gone.
+        _persist_capture(Path(tmpdir), diag_dir)
+
         if rc == 2:
             sys.stderr.write(
                 "[format-baseline-diff] No validators available on this "
@@ -84,6 +137,7 @@ def main(argv: list[str]) -> int:
                 f"[format-baseline-diff] Capture script exited {rc}. "
                 "Cannot perform diff.\n"
             )
+            _report_diag(diag_dir)
             return rc
 
         new_files = sorted(Path(tmpdir).iterdir())

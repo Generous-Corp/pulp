@@ -181,9 +181,19 @@ EM_JS(void, pulp_web_install_listeners, (const char* selector), {
 
     var state = {};
     state.pointerdown = function(e) {
+        // Panning opt-in. A control surface keeps the default touch-action:none and
+        // captures every gesture. But an editor embedded in a scrollable page (only
+        // horizontal controls, no vertical drags) can set touch-action:pan-y so a
+        // VERTICAL touch-drag scrolls the page. Capturing the pointer or
+        // preventDefault-ing here would cancel that scroll, so for a touch on a
+        // pannable canvas we let the browser arbitrate: vertical → page scroll,
+        // horizontal drag or tap → stays with the canvas (pan-y claims only the
+        // vertical axis, so the pointer stream still drives a horizontal slider).
+        var pannable = e.pointerType === 'touch' &&
+                       canvas.style.touchAction && canvas.style.touchAction !== 'none';
         // Pointer capture keeps drag ticks and the release coming to the canvas
         // once the pointer leaves it mid-gesture (knob drags routinely do).
-        if (canvas.setPointerCapture) {
+        if (!pannable && canvas.setPointerCapture) {
             try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
         }
         // preventScroll is load-bearing: focus() otherwise scrolls the canvas
@@ -193,7 +203,7 @@ EM_JS(void, pulp_web_install_listeners, (const char* selector), {
             try { canvas.focus({ preventScroll: true }); } catch (err) { canvas.focus(); }
         }
         pointer(e, 0);
-        e.preventDefault();
+        if (!pannable) e.preventDefault();
     };
     state.pointermove = function(e) { pointer(e, 1); };
     state.pointerup = function(e) { pointer(e, 2); e.preventDefault(); };
@@ -205,9 +215,15 @@ EM_JS(void, pulp_web_install_listeners, (const char* selector), {
     state.selectstart = function(e) { e.preventDefault(); };
     state.dblclick = function(e) { e.preventDefault(); };
     state.wheel = function(e) {
+        // On a pannable canvas (an editor embedded in a scrollable page — it opted in
+        // with a non-'none' touch-action), let the wheel/trackpad scroll the PAGE: still
+        // forward it to the view (a wheel-zoom curve can react) but do NOT preventDefault,
+        // so the host page scrolls when the view does nothing with it. A control surface
+        // keeps touch-action:none and eats the wheel so wheel-over-knob adjusts the knob.
+        var pannable = canvas.style.touchAction && canvas.style.touchAction !== 'none';
         var p = pos(e);
         _pulp_web_on_wheel(p[0], p[1], e.deltaX, e.deltaY, e.deltaMode | 0, mods(e));
-        e.preventDefault();
+        if (!pannable) e.preventDefault();
     };
     state.keydown = function(e) {
         var p = stringToNewUTF8(e.key);
@@ -245,6 +261,26 @@ EM_JS(void, pulp_web_install_listeners, (const char* selector), {
         state.observer.observe(canvas);
     }
 
+    // devicePixelRatio can change WITHOUT the CSS size changing — dragging the window
+    // to a monitor with a different scale factor, an OS display-scale change, some
+    // pinch-zoom paths. None of those fire 'resize' or the ResizeObserver, so the
+    // backing store would keep its stale resolution and the canvas renders blurry or
+    // mis-scaled. A `(resolution: Ndppx)` media query fires exactly when the ratio
+    // leaves N; re-arm it at the new ratio each time. state.resize() re-reads dpr in
+    // handle_resize and rebuilds the backing store. (Browser text-zoom already DOES
+    // change the CSS size, so it is covered by the ResizeObserver above.)
+    state.onDpr = function() { if (state.resize) state.resize(); state.armDpr(); };
+    state.armDpr = function() {
+        if (state.dprMq && state.dprMq.removeEventListener) {
+            state.dprMq.removeEventListener('change', state.onDpr);
+        }
+        if (window.matchMedia) {
+            state.dprMq = window.matchMedia('(resolution: ' + (window.devicePixelRatio || 1) + 'dppx)');
+            if (state.dprMq.addEventListener) state.dprMq.addEventListener('change', state.onDpr);
+        }
+    };
+    state.armDpr();
+
     Module.__pulpWebListeners[sel] = state;
 });
 
@@ -268,6 +304,9 @@ EM_JS(void, pulp_web_remove_listeners, (const char* selector), {
     window.removeEventListener('keyup', state.keyup);
     window.removeEventListener('resize', state.resize);
     if (state.observer) state.observer.disconnect();
+    if (state.dprMq && state.dprMq.removeEventListener) {
+        state.dprMq.removeEventListener('change', state.onDpr);
+    }
     delete all[sel];
 });
 

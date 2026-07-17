@@ -229,6 +229,61 @@ python3 -m http.server 8080
 # Open http://localhost:8080
 ```
 
+## Native Editors on the Web (custom UI modules)
+
+A Pulp plugin's **actual native editor** — the same C++ view tree, drawn by Skia — can run in
+the browser, compiled to WebAssembly and painted into a `<canvas>` by Skia Ganesh on WebGL2.
+SuperConvolver ships this: its hero impulse-response field, log-frequency spectrum, source
+chip, and Mix/Size/Gain sliders are the real editor, animating in real time on the web. No
+re-implementation in HTML/JS — one editor source, native and web.
+
+### Pay-for-what-you-use: three tiers
+
+The shared player stays small; the heavy pieces load on demand, so a plugin with no custom
+editor never downloads a byte of them.
+
+| Tier | What | Loaded by |
+|------|------|-----------|
+| **0 — the player** | `@danielraffel/web-player`, the main-thread shell (overlay, adapters, scope/meter, state, theming). Small. | every demo page |
+| **1 — the DSP module** | the plugin compiled to wasm (WAM or WebCLAP). | pages that mount that plugin |
+| **2 — a custom UI module** | the plugin's own editor (Skia + view). ~8.5 MB, **~3.5 MB brotli on the wire** (Cloudflare compresses `application/wasm`). | **only** pages that declare a custom editor |
+
+A page with no custom editor renders the player's generated parameter grid and ships zero Skia.
+See [`docs/reference/web-plugin-support.md`](../reference/web-plugin-support.md) for the format
+support matrix and [`docs/reference/layout-model.md`](../reference/layout-model.md) for the
+flex+grid layout the editor uses.
+
+### The contract: author the editor DECOUPLED from the DSP
+
+The one rule that makes a native editor web-portable: **the editor talks to a small host
+interface, never the `Processor` directly.** SuperConvolver's is `SuperConvolverUiHost` — four
+calls (`gpu_status`, `ir_path`, `load_ir_path`, `impulse_response_snapshot`) plus the shared
+`StateStore` and a data bus (its spectrum). The editor `#include`s the host header, never the
+DSP header.
+
+- **Natively**, the host IS the processor: it implements the interface (its four members
+  already existed), and `create_view()` passes `*this`. Zero cost.
+- **On the web**, the host is a browser shim (`SuperConvolverWebHost`) that answers the same
+  four calls against the page — file dialogs, the DSP's `pulp_ir_*` exports over the worklet
+  boundary, GPU status from the SharedArrayBuffer.
+
+Because both worlds share ONE editor source, a change to the editor ships to native and web at
+once. Authoring the editor decoupled from day one turns "port to web" into a 3-line
+`processor& → host&` swap instead of a large reconciliation later.
+
+### How a page mounts it
+
+The `pulp-web-demo` generator (the `pulp-web-demo` skill) wires the mount: it forwards pointer
+input, handles DPR/resize sizing, bridges the file dialog, and swaps the custom editor in over
+the generated grid — falling back to the grid if the module fails to load or the device has no
+WebGL2 (honest degradation, never a blank panel). The core requirement that makes a
+continuously-animating editor work on the web (a view that calls `request_repaint()` during
+paint) is `PULP_VIEW_HAS_RENDER_LOOP` plus the `render_frame()` re-entrancy guard in the
+browser `WindowHost` — without them, paint re-enters paint and the JS stack overflows.
+
+Full design, size budget, and the plan to generalize this for other plugin authors:
+`planning/2026-07-15-web-editor-architecture-and-size.md` (private submodule).
+
 ## Architecture Summary
 
 | Format | Build Tool | Runtime | Native DAWs | Browsers | GUI |

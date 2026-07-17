@@ -389,6 +389,24 @@ audio validate` verbs read, then exits. Pick the mode by which window you need:
 WAV writing is `pulp::audio::write_wav_file(path, data, WavBitDepth)` —
 `Int16` (default overload), `Int24`, or `Float32`.
 
+### In-tree render → WAV bridge (no plugin bundle)
+
+`pulp audio render` and `pulp run --audio-capture-*` both need a built plugin
+bundle / standalone. To get an **in-tree** `Processor` (or a raw oscillator
+wrapped in one) onto disk for the Python lane WITHOUT a bundle, use the
+scenario-side bridge in `"support/wav_bridge.hpp"`:
+`write_scenario_wav(result, path, WavBitDepth::Float32)` (or the
+`write_buffer_wav(buffer, sample_rate, …)` overload) deinterleaves a
+`ScenarioResult` / `Buffer<float>` and calls `write_wav_file`. Float32 is the
+default so the file carries the exact rendered samples; the deterministic
+harness makes the bytes reproducible. The `pulp-osc-render-wav` test tool
+(`test/osc_render_wav.cpp`) is the argv surface: it renders the in-tree
+`VcoOscillator` (via `"support/osc_wav_scenario.hpp"`) to a WAV
+(`--shape/--freq/--sr/--dur-ms/--channels/--drift-cents/--jitter-cents/--bits`),
+so an offline Quality-Lab script can analyze in-tree oscillator output with no
+bundle in the loop. The pytest `tools/audio/quality-lab/tests/test_osc_wav_bridge.py`
+is the end-to-end readability proof (soundfile loads it, fundamental matches).
+
 ## Roadmap
 
 The Phase-7 offline-render and live-capture slices have all landed: `pulp audio

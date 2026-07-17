@@ -272,6 +272,42 @@ per-ABI entry point for it.** Go through the plugin's own state:
   AudioContext. `customUi` is the wrong hook for this: it *replaces* the parameter
   grid and falls back to it on failure.
 
+## Landmine: iOS Safari ignores `.click()` on a `display:none` file input
+
+The page's IR/sample picker is a `<input type=file>` the plugin's Source affordance
+triggers (editor → `load_ir_path({})` → `Module.onRequestIr` → `filePicker.click()`).
+Hiding that input with `hidden` / `display:none` works on **desktop** Safari and
+Chrome but **iOS Safari silently drops the `.click()`** — the tap does nothing and it
+reads as a broken control. Keep the input in the render tree and hide it visually
+instead (`position:fixed; width:1px; height:1px; opacity:0; pointer-events:none`).
+The click must also still be **synchronous inside the user gesture** — the whole
+canvas-pointer → wasm → `EM_JS` → `click()` path is synchronous, so that holds; do not
+defer it behind a promise/`setTimeout`.
+
+## Landmine: a control-surface canvas eats page scroll — opt into `pan-y`, and it's TWO paths
+
+`web_input.cpp` sets `canvas.style.touchAction = 'none'` and `preventDefault`s BOTH
+pointerdown AND wheel so a knob drag / wheel-over-knob never pans the page — correct for a
+standalone plugin. But an editor **embedded in a scrollable page** (only horizontal
+sliders, no vertical drags) then swallows every gesture and the page cannot be scrolled
+from on top of the plugin. Opt in by setting `canvas.style.touchAction = 'pan-y'` after
+mount (see `pulp-ui.js`); the input layer checks the live `touch-action` and, on a
+pannable canvas:
+
+- **touch** (mobile): skips pointer capture + `preventDefault` on pointerdown, so a
+  VERTICAL drag scrolls the page while a HORIZONTAL drag or tap still drives a slider
+  (`pan-y` claims only the vertical axis).
+- **wheel** (DESKTOP trackpad/mouse — a SEPARATE path, easy to forget): still forwards the
+  wheel to the view but does NOT `preventDefault`, so the page scrolls. **The touch fix
+  alone leaves desktop broken** — the "big screen, can't scroll over the plugin" bug is the
+  wheel handler, not touch-action.
+
+Do NOT flip the default to `pan-y` — a knob-heavy plugin needs both axes for its own
+drags. VERIFY IN WEBKIT, not just Chromium: `playwright-core`'s `webkit` IS Safari's
+engine (`Version/…Safari/605`), and `page.mouse.wheel(0, 600)` over the canvas must move
+`window.scrollY` (measured 0→209 on the SuperConvolver editor). Chromium-only "it scrolls"
+is not proof for the browser the user is actually on.
+
 ## Landmine: a WebCLAP host must READ parameters back, not mirror them
 
 A host that remembers what it last *sent* (`values.set(id, v)`) goes stale the
@@ -429,3 +465,159 @@ editor's model + clipboard + context-menu TUs, and finally into `pulp::platform:
 which had no web impl at all). Build locally against `origin/main` before trusting it — the
 cascade is real, and your local linker matches CI (verify the first layer agrees before chasing
 the next).
+
+## Landmine: an animating web editor recurses paint→repaint unless the render loop is armed
+
+A view that calls `request_repaint()` from inside `paint()` — any continuously animating editor
+(SuperConvolver's living field) — routes through `WindowHost::mark_dirty()` →
+`schedule_repaint()`. That method only requests an async rAF frame when `PULP_VIEW_HAS_RENDER_LOOP`
+is defined; otherwise it falls back to a SYNCHRONOUS `repaint()`, which re-enters `paint()` from
+within `paint()` and recurses until the JS stack overflows. Two traps compound it:
+
+1. **The macro is native-only by default.** `PULP_VIEW_HAS_RENDER_LOOP=1` is set on the native
+   `pulp-view-core` target. The wasm UI build (`PulpWebUi.cmake`) hand-lists its sources and does
+   NOT inherit it — even though it DOES compile and arm the rAF `RenderLoop`. Define it in
+   `PulpWebUi.cmake` or every animating editor deadlocks on first paint.
+2. **`run_event_loop()` marks dirty before the loop exists.** It calls `show()` → `mark_dirty()`
+   BEFORE creating the render loop, so the first paint is synchronous even with the macro. The
+   browser `WindowHost::render_frame()` carries a re-entrancy guard (`rendering_` flag): a repaint
+   requested during paint is deferred to the next frame, never nested.
+
+The crash is a red herring generator: the stack overflows in whatever draw is executing when it
+tips (a gradient FP, a texture upload), so the symbolized top frames point AWAY from the cause.
+Count the repeating frame — it was 662× `View::paint_all` — to find the real cycle. The static
+generated grid never animates, so this stays hidden until a real animating editor mounts. **A
+new custom editor must be exercised by the browser fixture (it mounts and must not overflow).**
+
+## The full-canvas editor pattern (a plugin's REAL Skia UI on the web)
+
+**Two modes, a per-plugin choice — full-canvas is ADDITIVE, not a replacement.** A demo
+page runs in one of two modes, selected by the `customUi` seam:
+
+- **Default (grid) mode** — the shared player renders the plugin's parameters as a knob
+  grid, generated declaratively. Zero bespoke UI code. This is the norm and the right
+  choice for a simple utility (a gain, a basic filter).
+- **Full-canvas mode** — the page supplies a `customUi` (a compiled Skia UI module) that
+  paints the plugin's whole bespoke editor onto ONE canvas filling the panel. Opt-in, more
+  work, native-quality. Pick it when the plugin's identity is a custom visual (an EQ's
+  frequency-response curve + draggable bands, a convolver's IR/field, a synth's scope).
+
+No `customUi` → grid; `customUi` present → full-canvas — **and the full-canvas mode FALLS
+BACK to the grid if the module fails to mount**, so adding it never risks the baseline.
+Everything below is the full-canvas path.
+
+A **full-canvas editor** paints the plugin's whole bespoke UI onto ONE Skia canvas that
+fills the panel edge to edge — the same native editor the DAW shows, running in the
+browser. `super-convolver-gpu` is the reference implementation; **copy it, do not reinvent
+it.** Where to look:
+
+- `examples/super-convolver/super_convolver_ui.hpp` — the editor itself (a `vw::View`
+  drawn with the canvas API). This compiles into BOTH the native plugin and the wasm UI
+  module — **one source, two builds.**
+- `examples/web-demos/super-convolver-ui/` — the web mount: `ui_entry.cpp` (the
+  `EMSCRIPTEN_KEEPALIVE` seam), `super_convolver_web_host.hpp` (a browser shim
+  implementing the editor's host interface), `pulp-ui.js` (`mountPulpUi`), `CMakeLists.txt`.
+- `tools/cmake/PulpWebUi.cmake` — builds the editor + Pulp's view/canvas/Skia stack to wasm.
+- The GPU page in `examples/web-demos/wclap-build/cloudflare/assemble-gallery.mjs`
+  (`customUi` + the CSS that widens `#panel.pulp` and pins the canvas height).
+- Docs: `docs/guides/web-plugins.md` ("Native Editors on the Web"), and the size/tier
+  design in `planning/2026-07-15-web-editor-architecture-and-size.md`.
+
+**The decoupling contract (what lets one editor serve native + web).** The editor talks
+ONLY to a small host interface (`SuperConvolverUiHost`: gpu_status / ir_path /
+load_ir_path / impulse_response_snapshot) + `StateStore` + a data bus — NEVER the DSP
+header. Native host = the processor; web host = the browser shim. A new plugin defines
+its own `<Plugin>UiHost` interface and two implementors.
+
+**Params cross the DSP, not the editor.** The editor reads its parameter list from the
+DSP descriptor (adapter → `pulp-ui.js` → `g_store`). So a param the editor draws must be
+DECLARED BY THE DSP — declare the SAME set the native build declares (the web build once
+dropped `Rooms` and the editor showed four sliders where native shows five). Rebuild BOTH
+the UI module (`build-webui`) AND the DSP wasm when params change; the UI module alone is
+not enough.
+
+**Full-width layout.** Strip the page chrome the editor already draws (engine dropdown,
+CPU/GPU blurbs, a separate load-file area) — it duplicates what the canvas paints. Widen
+`#panel.pulp` (`max-width: min(1200px,94vw)`) and give the canvas a FIXED height
+(`clamp(420px,60vh,680px)`), not an aspect ratio (aspect makes the box a function of width
+and collapses on a phone).
+
+### Responsive + iOS is NOT optional — the layout is DRAWN, so CSS won't save you
+
+A full-canvas editor lays itself out in code, so a phone-width bug (overlapping header,
+sheared slider labels) never surfaces in a unit test — only in a browser, at that width.
+Every full-canvas editor MUST handle these, all learned the hard way on SuperConvolver:
+
+- **Narrow breakpoint.** The UI `scale()` keys off HEIGHT, so a tall skinny phone canvas
+  has a LARGE scale and a SMALL width — a centered header (mode tabs) then collides with
+  the wordmark on the left and the status chip on the right, and a quarter-width slider
+  cell cannot fit "MIX" and "35 %" on one line. Add a `narrow_` mode (`W < ~680*scale`):
+  drop the tabs to their own row, give secondary chrome its own row, and STACK each slider
+  as label-over-value-over-track. Keep desktop untouched.
+- **The info/help overlay must reflow too** — a fixed two-column card overflows a phone;
+  give it a full-width, stacked, clipped variant.
+- **devicePixelRatio can change with NO CSS resize** (window dragged to a different-scale
+  monitor, OS display-scale change, some pinch-zoom) — none of those fire `resize` or the
+  `ResizeObserver`, so the backing store stays stale and the canvas goes blurry/mis-scaled.
+  The shared web layer (`web_input.cpp`) arms a re-arming `matchMedia("(resolution: Ndppx)")`
+  listener that re-runs the resize (which re-reads dpr) on each DPR change. Browser text-zoom
+  DOES change the CSS size, so it is already covered by the ResizeObserver.
+- **iOS file picker:** the page's `<input type=file>` must NOT be `display:none`/`hidden`
+  (iOS Safari drops `.click()` on it) — hide it visually instead. See its own landmine above.
+- **Page scroll over the canvas:** opt into `touch-action: pan-y` after mount so a vertical
+  drag scrolls the page while a horizontal drag/tap still works the controls. See its landmine.
+- **Live readouts:** reserve their height (two lines if they can wrap) and WRAP rather than
+  truncate, so flipping state never bumps the page; debounce fast-toggling values (~0.8s
+  hysteresis) so a single dropped poll doesn't strobe the text.
+
+### Verifying the GPU-AUDIO path on macOS: use REAL Safari, not Playwright WebKit
+
+This one wastes hours if you don't know it. To verify a WebGPU-audio demo (the GPU
+engine actually producing blocks) on macOS:
+
+- **Playwright's bundled "WebKit" has NO WebGPU** — `navigator.gpu` is `undefined`, so it
+  can never exercise the GPU lane. It is NOT real Safari. Do not conclude "Safari can't"
+  from it.
+- **Drive REAL `Safari.app` via `safaridriver`** (W3C WebDriver) — it has WebGPU on the
+  system GPU. One-time: `sudo safaridriver --enable` + Safari → Develop → "Allow Remote
+  Automation". Client: `selenium-webdriver` (`forBrowser("safari")`). Reusable runner:
+  `examples/web-demos/tools/measure-safari-gpu.mjs --url <demo>`.
+- **The GPU-wedge asymmetry:** repeated HEADLESS-Chrome (Dawn) WebGPU runs wedge that
+  context's GPU for the session — it silently produces 0 blocks and stays dark, and even
+  the baseline that worked earlier reads zero (that's the tell it's the environment, not
+  your change). REAL Safari runs in its own process on the system GPU and is NOT wedged by
+  that, so it keeps working when headless Chrome goes dark. (Memory:
+  verify-gpu-ui-via-skia-raster.)
+- **A fast Mac may be too fast to reproduce a slow device's MISS RATE** (0% here vs 37% on
+  a user's phone). So real Safari verifies CORRECTNESS (does the lane produce? does a change
+  keep audio right? does a stat appear?); verify miss-rate LOGIC deterministically in the
+  native stub-GPU harness `test/test_super_convolver_web_gpu.cpp`, whose fake worker can be
+  made to fall behind and drop/expire blocks with no browser and no GPU.
+- **Audio etiquette:** safaridriver opens a real window and the demo plays the synth loop
+  out the speakers — announce before, cap the run, `driver.quit()` after (CLAUDE.md).
+- For Safari/WebGPU specifics (timestamp-query support, small-dispatch quantization, feature
+  gating) search the web or Apple docs via the **`sosumi`** CLI (`sosumi search "WebGPU"`,
+  `sosumi fetch <developer.apple.com URL>`) — Safari's WebGPU lags Dawn's, so never assume a
+  Chrome capability is present. BETTER: query the REAL device via safaridriver
+  (`requestAdapter().features`), because Safari advertises optional features on the ADAPTER but
+  only grants them on a DEVICE created with `requiredFeatures:[...]`. Measured 2026-07-16:
+  Safari's adapter lists `timestamp-query`, but `requestDevice()` without it returns a device
+  WITHOUT it — so a WebGPU-timing path must opt the feature in explicitly or it silently gets 0.
+
+### Verifying it: a browser pass at three sizes is PART OF THE JOB, not a favor to ask for
+
+Do NOT ship a full-canvas editor and let the user discover overlapping text. Before calling
+it done, run the bundled audit and LOOK at every size — this is the workflow, not an extra:
+
+```sh
+node examples/web-demos/tools/responsive-audit.mjs \
+  --url https://<preview>/<plugin>/ --out /tmp/audit
+# then READ /tmp/audit/{desktop,tablet,phone}-editor.png with your own eyes
+```
+
+It screenshots the page + editor at desktop (1440w), tablet (834w), and phone (390w),
+prints the editor's CSS size and computed `touch-action`, and lists what to check
+(header collisions, slider label/value overlap, the info card, even fill, and — on phone —
+the two-line readout, the file picker, and scroll). Drive real interactions with CDP
+`Input.dispatchTouchEvent` (a REAL touch), not synthetic `new TouchEvent` (which does not
+drive scrolling and gives a false negative). Fix what the screenshots show, redeploy, re-run.

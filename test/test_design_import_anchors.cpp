@@ -1,11 +1,21 @@
 // Tests for stable_anchor_id assignment on IRNode trees.
 // Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md
-// Mirrors the TS-side tests in packages/pulp-import-ir/tests/anchors.test.ts.
+// Mirrors the TS-side tests in packages/pulp-import-ir/test/anchors.test.ts.
+//
+// The cross-language conformance cases at the bottom of this file read the
+// shared vector table in test/fixtures/anchor_vectors.json, which the TS
+// suite reads too. That table is the contract that keeps anchor_strategy.cpp
+// and @pulp/import-ir/src/anchors.ts honest about where they agree — and,
+// today, where they provably do not.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/anchor_strategy.hpp>
 #include <pulp/view/design_import.hpp>
 
+#include <choc/text/choc_JSON.h>
+
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <unordered_set>
 
@@ -486,6 +496,130 @@ TEST_CASE("nodes without stable_anchor_id emit no setAnchor call",
     auto js = generate_pulp_js(ir, opts);
 
     REQUIRE(js.find("setAnchor(") == std::string::npos);
+}
+
+// ── Cross-language conformance ──────────────────────────────────────────
+//
+// Both anchor_strategy.cpp and @pulp/import-ir/src/anchors.ts carry comments
+// asserting they mirror each other exactly. Until these cases existed nothing
+// checked that: the C++ suite pinned no literal hash values at all, the TS
+// suite only checked itself, and the two could drift without a red build.
+//
+// The shared vector table records BOTH implementations' output per vector.
+// These cases pin the C++ column. The TS suite pins the TS column against the
+// same file. Where the columns differ the vector carries `known_divergence`,
+// so the split is recorded as data rather than left to a comment that is not
+// true. See the fixture's own `$comment` for why the divergence is documented
+// here instead of fixed.
+
+namespace {
+
+std::string read_file_or_fail(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    REQUIRE(in.good());
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+choc::value::Value load_anchor_vectors() {
+    return choc::json::parse(
+        read_file_or_fail(std::string(PULP_REPO_ROOT) + "/test/fixtures/anchor_vectors.json"));
+}
+
+// Rebuild the IRNode + call arguments a vector describes, then run the real
+// compute_anchor_id() over them.
+std::string anchor_for_vector(const choc::value::ValueView& v) {
+    const auto in = v["input"];
+
+    IRNode node;
+    node.type = in["tag"].toString();
+    node.text_content = in["text"].toString();
+    const std::string role = in["role"].toString();
+    if (!role.empty()) node.attributes["role"] = role;
+    if (in.hasObjectMember("source_node_id"))
+        node.source_node_id = in["source_node_id"].toString();
+
+    const std::string strategy_name = v["strategy"].toString();
+    AnchorStrategy strategy = AnchorStrategy::content_hash;
+    if (strategy_name == "path") strategy = AnchorStrategy::path;
+    else if (strategy_name == "adapter") strategy = AnchorStrategy::adapter;
+
+    std::string parent_anchor;
+    if (in.hasObjectMember("parent_anchor")) parent_anchor = in["parent_anchor"].toString();
+    std::string adapter;
+    if (in.hasObjectMember("adapter")) adapter = in["adapter"].toString();
+
+    const auto sibling_tag_index = static_cast<std::size_t>(
+        in.hasObjectMember("sibling_tag_index")
+            ? in["sibling_tag_index"].getWithDefault<int64_t>(0)
+            : 0);
+    const auto depth = static_cast<std::size_t>(in["depth"].getWithDefault<int64_t>(0));
+    const auto sig_index = static_cast<std::size_t>(in["sig_index"].getWithDefault<int64_t>(0));
+
+    return compute_anchor_id(node, parent_anchor, sibling_tag_index, depth, sig_index,
+                             strategy, adapter);
+}
+
+}  // namespace
+
+// Pins the C++ column of the shared table. Fails if anchor_strategy.cpp ever
+// changes its output — including a well-meaning switch to UTF-16 folding,
+// which would re-key every existing pulp-tweaks.json holding non-ASCII text
+// and so must be a deliberate, migration-bearing change rather than a quiet one.
+TEST_CASE("anchor vectors match the C++ implementation", "[view][import][anchors][conformance]") {
+    const auto doc = load_anchor_vectors();
+    const auto vectors = doc["vectors"];
+    REQUIRE(vectors.size() > 0);
+
+    for (uint32_t i = 0; i < vectors.size(); ++i) {
+        const auto v = vectors[i];
+        INFO("vector: " << v["name"].toString());
+        CHECK(anchor_for_vector(v) == v["cpp_anchor"].toString());
+    }
+}
+
+// Guards the table's own bookkeeping: a vector claiming agreement must record
+// two equal columns, and a vector claiming `known_divergence` must record two
+// different ones. Without this, a stale annotation could outlive the drift it
+// describes (or hide drift it stopped describing) and nothing would notice.
+TEST_CASE("anchor vector divergence annotations agree with the recorded columns",
+          "[view][import][anchors][conformance]") {
+    const auto doc = load_anchor_vectors();
+    const auto vectors = doc["vectors"];
+
+    std::size_t divergent = 0;
+    for (uint32_t i = 0; i < vectors.size(); ++i) {
+        const auto v = vectors[i];
+        INFO("vector: " << v["name"].toString());
+        const bool columns_differ = v["cpp_anchor"].toString() != v["ts_anchor"].toString();
+        const bool annotated = !v["known_divergence"].isVoid();
+        CHECK(columns_differ == annotated);
+        if (annotated) {
+            ++divergent;
+            // Every recorded divergence is rooted in the hash-input encoding;
+            // some vectors stack a second axis on top (see $divergence_axes).
+            CHECK(v["known_divergence"].toString() == "utf8-vs-utf16");
+            CHECK(v["divergence_axes"].size() > 0);
+            // Among the RECORDED vectors, only the hashing strategy diverges:
+            // path and adapter are pure string concatenation on both sides, so
+            // long as the adapter inputs are present.
+            //
+            // Scope this carefully — "adapter never diverges" would be false.
+            // With an EMPTY source_node_id/adapter, C++ soft-falls back to
+            // content-hash and returns an anchor while TS throws
+            // (anchor_strategy.cpp:204-224 vs anchors.ts:101-109). That is a
+            // deliberate, documented design split, but it means the two lanes
+            // disagree on whether a malformed adapter node is an error at all.
+            // These vectors cover only the adapter happy path; see the
+            // `adapter-missing-id-softfail-vs-throw` axis in the fixture.
+            CHECK(v["strategy"].toString() == "content-hash");
+        }
+    }
+    // The drift is real and currently unfixed. If this number changes, either
+    // the drift was fixed (regenerate the table and record the migration) or
+    // it spread further (a new field started hashing raw text).
+    CHECK(divergent == 8);
 }
 
 // ── setAnchor() in bridge-native-JS codegen ─────────────────────────────

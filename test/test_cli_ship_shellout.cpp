@@ -177,6 +177,26 @@ void write_ship_config(const fs::path& home, std::string_view text) {
 // `read_user_config_value()` finds no `config.toml`) and clears the env
 // vars `cmd_ship` consults directly. `ScopedEnvVar`'s destructor
 // restores prior values, leaving the developer's environment untouched.
+//
+// `HOME` is redirected at the same empty directory, which isolates the
+// shell-outs from two pieces of host state they never mean to exercise:
+//
+//   1. The user keychain. `ship sign` runs the real `codesign` once per
+//      discovered bundle, and a bare `codesign --sign NAME` resolves the
+//      name against the *user* codesigning-identity search list. That
+//      lookup is serialized machine-wide through securityd, so its cost
+//      grows linearly with the number of identity searches running
+//      anywhere on the host — on a shared machine running several jobs at
+//      once, three lookups can take longer than a shell-out's whole
+//      timeout budget. An empty `HOME` yields an empty search list, so
+//      codesign reaches the same "no identity found" verdict without
+//      querying securityd at all. The sign attempt, its failure, and the
+//      CLI's `FAILED` report are all still exercised for real — only the
+//      dependence on the host's keychain contents goes away, which also
+//      stops these tests from silently depending on the machine *not*
+//      owning an identity whose name matches a fixture string.
+//   2. `~/.config/pulp/secrets/notary.env`, which `ship notarize` layers
+//      under env/CLI values on a configured signing machine.
 fs::path make_isolated_pulp_home() {
     auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
     auto dir = fs::temp_directory_path()
@@ -189,6 +209,7 @@ fs::path make_isolated_pulp_home() {
 struct ShipShelloutFixture {
     fs::path home_dir;
     ScopedEnvVar pulp_home;
+    ScopedEnvVar user_home;
     ScopedEnvVar android_store_pass;
     ScopedEnvVar android_key_pass;
     ScopedEnvVar pulp_sign_identity;
@@ -202,6 +223,7 @@ struct ShipShelloutFixture {
     ShipShelloutFixture()
         : home_dir(make_isolated_pulp_home()),
           pulp_home("PULP_HOME", home_dir.string()),
+          user_home("HOME", home_dir.string()),
           android_store_pass("ANDROID_STORE_PASS"),
           android_key_pass("ANDROID_KEY_PASS"),
           pulp_sign_identity("PULP_SIGN_IDENTITY"),
