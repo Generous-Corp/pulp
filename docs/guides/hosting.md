@@ -204,6 +204,10 @@ rearranges plugins already installed and scanned on the machine — so it
 carries no signing or trust surface. See
 [Live plugin swap](../reference/signal-graph.md#live-plugin-swap) for the
 full workflow and the fail-closed checks that protect the stream.
+Feed-forward PDC does not by itself force the fallback: unchanged delay rings
+are carried across the publication by private connection identity. Latency
+changes, feedback graphs, and any change to the delayed-edge identity set still
+return `NeedsEagerPrepare`.
 
 ## Showing a hosted plugin's editor
 

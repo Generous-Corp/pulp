@@ -219,6 +219,20 @@ from a lower-latency branch than the destination plugin's audio input, the
 graph delays the dense parameter-event stream by the same amount as an audio
 connection.
 
+Gap-free snapshot edits preserve active feed-forward PDC rings when the graph's
+total latency and delayed-connection structure stay unchanged. Each connection
+has a private monotonic identity, so delay history follows the same logical edge
+even if other connections are inserted or removed. Disconnecting and recreating
+an equal-looking edge deliberately mints a new identity and falls back to eager
+prepare instead of attaching stale samples. Feedback graphs and edits that add,
+remove, or resize a delay ring also use the eager path. The legacy walk and the
+routed serial and parallel executors carry independent ring histories; a live
+swap adopts each execution domain's matching state without copying audio-thread
+data. A PDC-active snapshot therefore pins the routing domain selected during
+`prepare()`; runtime routing toggles take effect for zero-PDC graphs, but cannot
+switch an active delay line to another domain's stale history. A later
+`prepare_swap()` that would change the pinned domain fails closed.
+
 ## Live plugin swap
 
 A *node* here is one box in the audio chain — for a `Plugin` node, the box
@@ -289,8 +303,8 @@ takes a risk with the live stream to push a swap through:
 - **Not a scanned plugin** — the replacement token isn't in the host's scan
   catalog. This is the guarantee that no unknown code is introduced: only an
   already-installed, already-scanned plugin can be swapped in.
-- **Feedback edge** — the node is part of a feedback loop, whose one-block
-  delay carries state a fresh instance would corrupt.
+- **Feedback graph** — any feedback loop carries one-block state that this swap
+  path does not adopt.
 - **Editor open** — the plugin's editor window is open; swapping the
   instance out from under a live editor would break it.
 - **Load or prepare failed** — the replacement wouldn't load, or wouldn't
@@ -304,10 +318,10 @@ takes a risk with the live stream to push a swap through:
   longer exist.
 - **Port shape changed** — the replacement has a different number of input
   or output ports, so it can't drop into the same wiring.
-- **Latency changed** — the replacement reports a different processing
-  latency, which would shift delay compensation and produce an audible
-  splice. (A node that would add or remove a PDC delay line is refused for
-  the same reason.)
+- **Latency or delay structure changed** — the replacement reports a different
+  processing latency, or the edit adds, removes, resizes, disconnects, or
+  reconnects a PDC-delayed edge. Unchanged feed-forward PDC rings are carried by
+  private connection identity; feedback state is never carried.
 - **Over budget** — the graph projects that running the replacement would push
   CPU load past the node's `headroom_threshold`. To judge that for a *different*
   plugin (which has never run, so has no measured cost), the graph **pre-warms**
