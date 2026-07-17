@@ -121,9 +121,14 @@ endif()
 # Globbed rather than listed file-by-file: naming one entry point meant a new
 # `*.test.mjs` beside it was silently never executed, so a suite could be green
 # in CI while testing nothing. CONFIGURE_DEPENDS re-globs when a file is added.
+#
+# The glob covers the tool directory as well as fig/, for the same reason: the
+# import-design tools beside the decoder (material_audit.mjs) are part of this
+# suite, and a test file that no glob names is a suite testing nothing.
 if(_PULP_NODE_FOR_TESTS)
     file(GLOB _PULP_FIG_TESTS CONFIGURE_DEPENDS
-         ${CMAKE_SOURCE_DIR}/tools/import-design/fig/*.test.mjs)
+         ${CMAKE_SOURCE_DIR}/tools/import-design/fig/*.test.mjs
+         ${CMAKE_SOURCE_DIR}/tools/import-design/*.test.mjs)
     add_test(NAME pulp-fig-decode-unit
              COMMAND ${_PULP_NODE_FOR_TESTS} --test ${_PULP_FIG_TESTS})
     set_tests_properties(pulp-fig-decode-unit PROPERTIES

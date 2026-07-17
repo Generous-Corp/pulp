@@ -137,6 +137,18 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
+  - name: material-audit
+    path: tools/import-design/material_audit.mjs
+    category: visual-compare
+    use_when: An import renders "wrong" but nothing failed, and you need to know whether a declared material property (stroke, shadow, blend, corner radius) reached the render at all. Run it FIRST on any fidelity complaint — it is deterministic, needs no reference image, and answers "was it dropped?" before you spend time on "is it drawn right?".
+    invocation: node tools/import-design/material_audit.mjs --fig <design.fig> --frame <name|guid> [--json report.json]
+    inputs: A local .fig (decoded in-process), or --dir pointing at a `fig_decode.mjs emit` output holding materials.json + scene.pulp.json. No reference image, no network, no Figma.
+    outputs: A declared-vs-emitted-vs-diagnosed count per property, then every SILENT DROP by node_id + property + declared-vs-emitted. Exit 1 on any silent drop. The invariant is `survived ∨ diagnosed-as-degraded ∨ known-unsupported` — anything else is the design saying something the import discarded without telling anyone.
+    caveat: PRESENCE only, never correctness. It proves a property SURVIVED to the envelope; it can say nothing about whether the value is right or renders right. A gradient emitted with a reversed axis, a shadow at the wrong offset, a blend mapped to the wrong CSS name — all pass. It also stops at the ENVELOPE, so a property the envelope carries and codegen later drops looks emitted from here. For "is it drawn right" use thumb-parity or a montage; for boxes use layout-parity.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
   - name: thumb-parity
     path: tools/import-design/thumb_parity.py
     category: visual-compare

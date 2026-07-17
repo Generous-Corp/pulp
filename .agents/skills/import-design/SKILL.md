@@ -18,6 +18,7 @@ exists:
 | Need | Tool |
 |---|---|
 | **"It looks off" → which node, and by how many px** | `pulp-import-design … --validate --dump-layout L.json` then `python3 tools/import-design/layout_parity.py L.json` |
+| **"It looks wrong but nothing failed" → was a property DROPPED?** | `node tools/import-design/material_audit.mjs --fig d.fig --frame F` — run this FIRST on any fidelity complaint |
 | Labeled N-panel comparison montage | `python3 tools/import-design/montage.py --out cmp.png ...` |
 | Per-widget fidelity audit + JSON report | `python3 tools/import-design/fidelity_diff.py --render r.png --scene scene.pulp.json --assets-dir DIR --frame-reference src.png` |
 | Side-by-side + heatmap + top offending regions | `python3 tools/scripts/figma_import_diff.py` — use after EVERY codegen change |
@@ -66,8 +67,25 @@ right-sized bounds, a colour, a gradient — all invisible to it, by constructio
 This is not hypothetical: an icon-placement change that moved glyphs *within*
 their correct boxes made `fg-icon` findings disappear and layout_parity went
 greener while the render got worse. **Never read a clean layout_parity as "the
-render is right."** It means the boxes are right. `thumb_parity.py` is the
-colour/ink half, and a human looking at a montage is still the final say.
+render is right."** It means the boxes are right.
+
+The other half is TWO tools, not one, because they fail differently.
+`material_audit.mjs` counts what the `.fig` DECLARES against what the import
+emits, so it answers "was this dropped?" — deterministically, with no reference
+image. `thumb_parity.py` compares block means against Figma's own raster, so it
+answers "is the colour roughly right?" — and it is blind to anything that
+preserves a region's mean. Reach for the audit first: a property that never
+survived cannot be diagnosed by looking at pixels, and it is the cheaper
+question. Neither proves the render is CORRECT; a human looking at a montage is
+still the final say.
+
+The one thing this design's fg-icon bug proves about all of them: **every checker
+here went green while the icons were visibly broken.** layout_parity said the
+boxes were right — and they were, because the box had collapsed to width 0 and
+the glyph inside it was absolutely positioned, so the finding it *did* report
+(`dx=+6.5 dw=-12`) read as a placement problem rather than the sizing one it was.
+Read a tool's number as the answer to the question it asks, never as "the import
+is fine."
 
 **Free offline ground truth:** every `.fig` is a ZIP containing `thumbnail.png`
 (Figma's own raster of the design) and a `meta.json` whose `render_coordinates`
