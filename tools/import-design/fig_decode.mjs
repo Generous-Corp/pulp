@@ -133,7 +133,7 @@ function cmdEmit(path, opts) {
     // real time can override provenance downstream.
     exportedAt: '1970-01-01T00:00:00Z',
   };
-  const { envelope, assetHashes, diagnostics } = materializeFrame(scene, frame, ctx);
+  const { envelope, geometry, assetHashes, diagnostics } = materializeFrame(scene, frame, ctx);
 
   mkdirSync(opts.out, { recursive: true });
   if (assetHashes.size) mkdirSync(join(opts.out, 'assets'), { recursive: true });
@@ -142,6 +142,11 @@ function cmdEmit(path, opts) {
     if (bytes) writeFileSync(join(opts.out, asset.local_path), bytes);
   }
   writeFileSync(join(opts.out, 'scene.pulp.json'), JSON.stringify(envelope, bigintReplacer, 2));
+  // Figma's own solved rects, keyed by the same node_id the envelope carries.
+  // A sidecar rather than an envelope key: this is reference data for validating
+  // the import, not part of the design the importer consumes, and the
+  // figma-plugin envelope schema is a shared contract with the in-editor plugin.
+  writeFileSync(join(opts.out, 'geometry.json'), JSON.stringify(geometry, bigintReplacer, 2));
 
   const warn = diagnostics.filter((d) => d.severity === 'warning').length;
   process.stderr.write(

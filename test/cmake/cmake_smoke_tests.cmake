@@ -247,6 +247,18 @@ if(Python3_Interpreter_FOUND)
         LABELS "import;fidelity"
         TIMEOUT 60)
 
+    # Geometry-parity tool (tools/import-design/layout_parity.py): diffs a
+    # design's own solved rects against Pulp's laid-out view tree, by node id.
+    # Covers the parent-relative attribution + per-parent clustering that turn a
+    # dropped alignment into ONE finding naming the parent instead of a wall of
+    # near-identical lines. Pure stdlib — no PIL, no numpy, so it never skips.
+    add_test(NAME import-layout-parity
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_layout_parity.py)
+    set_tests_properties(import-layout-parity PROPERTIES
+        LABELS "import;fidelity"
+        TIMEOUT 60)
+
     # Headless Figma REST exporter — font-capture + content-hash unit test.
     add_test(NAME figma-rest-export
         COMMAND ${Python3_EXECUTABLE}

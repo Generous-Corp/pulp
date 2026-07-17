@@ -27,6 +27,11 @@ struct LaneArgs {
     /// generated scene.pulp.json + assets so the caller can remove it once the
     /// import has finished reading them. Left untouched on the outline path.
     std::string* created_tmp_dir = nullptr;
+    /// When a frame is decoded, set to the decoder's `geometry.json` — Figma's
+    /// own solved rect for every emitted node, keyed by the same node_id the
+    /// envelope carries. It lives in the scratch directory and dies with it, so
+    /// a caller that wants it (--dump-layout) must copy it out before returning.
+    std::string* geometry_file = nullptr;
 };
 
 /// Handle `--from fig`, and reject `--outline` on any other source. Returns an

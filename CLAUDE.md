@@ -726,6 +726,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Measure how close an imported+rendered design is to its Figma source, per node. → `tools/import-design/fidelity_diff.py`
 - See WHERE a Figma reference and a Pulp render disagree, without eyeballing Preview. → `tools/scripts/figma_import_diff.py`
 - Prove an importer change didn't silently regress a design that already imported correctly. → `tools/import-validation/golden_regression.py`
+- An import "looks off" and you need the NODE and the exact pixel delta, not a score. → `tools/import-design/layout_parity.py`
 - Stack reference vs render into ONE labeled image so a comparison is self-documenting. → `tools/import-design/montage.py`
 - Render an import at the design's OWN canvas size (a mismatched size voids every score). → `tools/scripts/render-figma-import.sh`
 

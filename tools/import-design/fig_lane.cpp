@@ -155,6 +155,11 @@ std::optional<int> handle(const LaneArgs& args) {
         return r.exit_code == 2 ? 2 : 3;
     }
 
+    if (args.geometry_file) {
+        if (const auto geom = scratch / "geometry.json"; fs::exists(geom))
+            *args.geometry_file = geom.string();
+    }
+
     args.input_file = (scratch / "scene.pulp.json").string();
     args.source_str = "figma-plugin";
     return std::nullopt;  // continue down the figma-plugin path

@@ -17,6 +17,7 @@ exists:
 
 | Need | Tool |
 |---|---|
+| **"It looks off" → which node, and by how many px** | `pulp-import-design … --validate --dump-layout L.json` then `python3 tools/import-design/layout_parity.py L.json` |
 | Labeled N-panel comparison montage | `python3 tools/import-design/montage.py --out cmp.png ...` |
 | Per-widget fidelity audit + JSON report | `python3 tools/import-design/fidelity_diff.py --render r.png --scene scene.pulp.json --assets-dir DIR --frame-reference src.png` |
 | Side-by-side + heatmap + top offending regions | `python3 tools/scripts/figma_import_diff.py` — use after EVERY codegen change |
@@ -31,6 +32,27 @@ so it is always in context. The table above is the fast path for this skill's
 own work; the registry is the source of truth, and a coverage sweep in
 `tools/scripts/tools_registry_check.py` fails CI if a tool lands here without
 an entry — so nothing can go quiet the way `fidelity_diff.py` did.
+
+**Check geometry BEFORE you look at pixels.** A `.fig` carries Figma's
+already-SOLVED rect for every node — auto-layout children included — so where
+each node belongs is a known number, not something to infer from a screenshot.
+`--dump-layout` writes Pulp's laid-out rects plus the design's own (as a
+`<stem>.geometry.json` sibling), and `layout_parity.py` joins them by node id:
+
+```bash
+pulp-import-design --from fig --file d.fig --frame 'Main' --output ui.js \
+    --validate --screenshot-backend skia --dump-layout /tmp/layout.json
+python3 tools/import-design/layout_parity.py /tmp/layout.json   # exit 1 = findings
+```
+
+This is pixel-free — no thresholds, no anti-aliasing noise — and it answers the
+question a screenshot cannot: *which* node, off by *how much*, and under which
+parent. Deltas are parent-relative and clustered by parent, so a shifted panel
+is ONE finding rather than one per descendant, and a group of children sharing
+one offset is reported as an alignment/padding drop on the parent by name.
+Unmatched ids are listed as dropped/extra — a completeness check no pixel
+heuristic can match. Reach for this FIRST when a layout looks wrong; the
+montage/heatmap tools tell you *that* something moved, this tells you *what*.
 
 **Free offline ground truth:** every `.fig` is a ZIP containing `thumbnail.png`
 (Figma's own raster of the design) and a `meta.json` whose `render_coordinates`

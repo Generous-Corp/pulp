@@ -119,6 +119,17 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
+  - name: layout-parity
+    path: tools/import-design/layout_parity.py
+    category: visual-compare
+    use_when: An import "looks off" and you need the NODE and the exact pixel delta, not a score.
+    invocation: python3 tools/import-design/layout_parity.py <layout.json> [--geometry <layout.geometry.json>] [--json report.json]
+    inputs: The --dump-layout JSON from pulp-import-design, plus the design's own solved rects (its <stem>.geometry.json sibling, which --dump-layout writes for you).
+    outputs: Per-node dx/dy/dw/dh in design px, clustered by parent so one dropped alignment reports ONCE naming the parent; unmatched ids listed as dropped/extra. Exit 1 on findings. No pixels — nothing to tune, nothing fighting anti-aliasing.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
   - name: render-figma-import
     path: tools/scripts/render-figma-import.sh
     category: visual-compare
