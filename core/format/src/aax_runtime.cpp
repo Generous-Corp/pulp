@@ -6,6 +6,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/max_block_contract.hpp>
 #include <pulp/format/parameter_text.hpp>
@@ -175,41 +176,9 @@ uint32_t category_to_aax(PluginCategory category) {
     return AAX_ePlugInCategory_Effect;
 }
 
-void clear_audio(float** channels, int channel_count, int sample_count) {
-    if (!channels) {
-        return;
-    }
-    for (int ch = 0; ch < channel_count; ++ch) {
-        if (channels[ch]) {
-            std::fill_n(channels[ch], sample_count, 0.0f);
-        }
-    }
-}
-
-void copy_audio(float** output,
-                int output_channels,
-                float** input,
-                int input_channels,
-                int sample_count)
-{
-    if (!output) {
-        return;
-    }
-
-    const int shared_channels = std::min(output_channels, input_channels);
-    for (int ch = 0; ch < shared_channels; ++ch) {
-        if (!output[ch] || !input || !input[ch]) {
-            continue;
-        }
-        std::memcpy(output[ch], input[ch], static_cast<std::size_t>(sample_count) * sizeof(float));
-    }
-
-    for (int ch = shared_channels; ch < output_channels; ++ch) {
-        if (output[ch]) {
-            std::fill_n(output[ch], sample_count, 0.0f);
-        }
-    }
-}
+// The bypass audio pass-through (copy main input → output, silence-pad, and
+// latency-compensate the dry signal) is the shared
+// `boundary::render_bypass_passthrough` helper — see the render loop below.
 
 void copy_midi(const midi::MidiBuffer& in, midi::MidiBuffer& out) {
     // Short MidiEvent entries (note/CC/pitchbend/etc).
@@ -441,6 +410,13 @@ struct InstanceState {
         prepared_input_channels = input_channels;
         prepared_output_channels = output_channels;
 
+        // Size the bypass dry-delay line to the SAME latency the controller
+        // reports to the host via SetSignalLatency(aax_reported_latency(...)),
+        // so a bypassed block emits `input[n - latency]` and stays aligned with
+        // the host's PDC on the wet path. Off the render thread; a 0 latency
+        // leaves it a zero-copy passthrough. Same policy as CLAP/VST3/AU.
+        bypass.prepare(aax_reported_latency(definition.latency_samples));
+
         // Pre-reserve the render-thread pointer scratch so the per-block
         // clear()/push_back() below never allocates (they stay within this
         // reserved capacity), keeping the process() region no-alloc.
@@ -467,6 +443,11 @@ struct InstanceState {
     std::vector<const float*> input_ptrs;
     std::vector<float*> output_ptrs;
     std::vector<const float*> sidechain_ptrs;
+    // Dry-delay line for the bypass pass-through. Sized to the processor's
+    // reported latency in ensure_prepared(); keeps the bypassed dry signal
+    // aligned with the host's plugin-delay-compensation instead of arriving
+    // `latency` samples early (a 0 latency leaves it a zero-copy passthrough).
+    boundary::LatencyCompensatedBypass bypass;
     midi::MidiBuffer midi_in;
     midi::MidiBuffer midi_out;
     bool prepared = false;
@@ -738,15 +719,16 @@ void AAX_CALLBACK process_callback(AlgorithmContext* const instances_begin[],
         const bool bypass = context->parameter_packet && context->parameter_packet[0] >= 0.5f;
         if (bypass) {
             if (component.main_output_channels > 0) {
-                if (component.main_input_channels > 0) {
-                    copy_audio(context->audio_output,
-                               component.main_output_channels,
-                               context->audio_input,
-                               component.main_input_channels,
-                               process_count);
-                } else {
-                    clear_audio(context->audio_output, component.main_output_channels, process_count);
-                }
+                // Copy main input → main output latency-compensated through the
+                // shared dry-delay line so the bypassed dry signal stays aligned
+                // with the host's PDC on the wet path (channels beyond the
+                // boundary ceiling fall back to an undelayed copy uniformly);
+                // an absent input bus (main_input_channels == 0) yields silence.
+                boundary::render_bypass_passthrough(
+                    state.bypass, context->audio_output,
+                    component.main_output_channels, context->audio_input,
+                    component.main_input_channels,
+                    static_cast<std::uint32_t>(process_count));
             }
             if (definition.supports_midi_output) {
                 copy_midi(state.midi_in, state.midi_out);
