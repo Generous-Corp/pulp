@@ -120,6 +120,15 @@ There is deliberately no bypass in CI other than the commit trailers. The audit 
 
 ### fix/feat-needs-bump (issue #1009)
 
+> **Intent-trailer model is LIVE (2026-07-17):** on `pull_request` events the
+> workflow now runs `version_bump_check.py --accept-intent-trailers` (a SWAP of
+> the flag below, not an add — the two fail closed together). A release-worthy
+> PR DECLARES `Version-Bump: <surface>=<level>` and touches no version files;
+> the post-merge `version-at-land` bot assigns the number. A touched surface
+> with no bump/intent/skip still hard-fails, so coverage is unchanged. See
+> `docs/guides/version-at-land-cutover.md`. The historical file-bump behavior
+> below still describes what a file-bump satisfies.
+
 On `pull_request` events, the workflow additionally runs
 `version_bump_check.py --require-bump-for-fix-feat`. This asserts that
 PRs whose title or any live commit-derived signal carries the Conventional
