@@ -73,6 +73,68 @@ say()  { [ "$QUIET" -eq 1 ] || printf '%s\n' "$*"; }
 warn() { printf 'WARN: %s\n' "$*" >&2; }
 err()  { printf 'ERROR: %s\n' "$*" >&2; }
 
+# Converge the user keychain search list to a deduplicated set that contains ONLY
+# keychains still present on disk, with the dedicated signing keychain ($1) first
+# and every other surviving entry (login keychain, etc.) kept in its original
+# relative order.
+#
+# This must CONVERGE, not accumulate: signing/notarization churn deletes temp and
+# scratch keychains, and a naive "prepend when absent" rebuild neither prunes the
+# resulting dangling entries nor deduplicates, so the list grows without bound and
+# fills with keychain files that no longer exist. securityd walks that list on
+# every codesign, so a bloated list of dangling entries is a real signing
+# slowness/flakiness source. Convergence makes the operation idempotent: running
+# it N times leaves the same list as running it once.
+#
+# The `security list-keychains` read/write is the injectable seam — the whole
+# script is written against stock `security`, so a PATH shim can drive this logic
+# against a fake list without touching a real keychain.
+converge_keychain_search_list() {
+  local want="$1"
+  local line entry i
+  local -a current=() converged=() seen=()
+
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"          # ltrim
+    line="${line%"${line##*[![:space:]]}"}"           # rtrim
+    line="${line%\"}"; line="${line#\"}"              # strip surrounding quotes
+    [ -n "$line" ] || continue
+    current+=("$line")
+  done < <(security list-keychains -d user)
+
+  # An empty read is treated as a transient failure: never write an empty list,
+  # which would wipe the login keychain from the search path.
+  if [ "${#current[@]}" -eq 0 ]; then
+    warn "keychain search list read empty — leaving it unchanged"
+    return 0
+  fi
+
+  _seen_has() { local x; for x in "${seen[@]}"; do [ "$x" = "$1" ] && return 0; done; return 1; }
+
+  # The dedicated keychain is authoritative (just created/unlocked/imported above),
+  # so it always leads the list and is never subject to the existence prune below.
+  converged+=("$want"); seen+=("$want")
+
+  # Keep every other entry that STILL EXISTS on disk, once, in original order.
+  # Dropping duplicates and dangling (deleted) keychains is the convergence.
+  for entry in "${current[@]}"; do
+    [ "$entry" = "$want" ] && continue     # already leads the list
+    _seen_has "$entry" && continue          # dedup
+    [ -f "$entry" ] || continue             # prune dangling
+    converged+=("$entry"); seen+=("$entry")
+  done
+
+  # Idempotent write: only touch the search list when the converged form differs
+  # from what is already installed, so a steady state is a genuine no-op.
+  if [ "${#converged[@]}" -eq "${#current[@]}" ]; then
+    for i in "${!converged[@]}"; do
+      [ "${converged[$i]}" = "${current[$i]}" ] || { security list-keychains -d user -s "${converged[@]}"; return 0; }
+    done
+    return 0
+  fi
+  security list-keychains -d user -s "${converged[@]}"
+}
+
 SECRETS_DIR="${PULP_SECRETS_DIR:-$HOME/.config/pulp/secrets}"
 
 # Load an env file WITHOUT clobbering values already set in the environment
@@ -137,23 +199,10 @@ if [ -n "$KC" ] && [ -n "${PULP_SIGN_KEYCHAIN_PW:-}" ]; then
     || warn "set-key-partition-list failed (signing may prompt)"
 
   # Ensure the keychain is on the user search list so bare `codesign --sign HASH`
-  # resolves it even without an explicit --keychain. Parse the existing list into
-  # an array so keychain paths CONTAINING SPACES survive (an unquoted $(...) split
-  # would shatter them and could replace the whole search list with broken paths,
-  # silently dropping the login keychain). Membership is matched on the full path,
-  # not the basename. Rebuild only when absent, and never to an empty list.
-  declare -a _kc_list=()
-  _kc_present=0
-  while IFS= read -r _kc_line; do
-    _kc_line="${_kc_line#"${_kc_line%%[![:space:]]*}"}"   # ltrim
-    _kc_line="${_kc_line%\"}"; _kc_line="${_kc_line#\"}"   # strip surrounding quotes
-    [ -n "$_kc_line" ] || continue
-    _kc_list+=("$_kc_line")
-    [ "$_kc_line" = "$KC" ] && _kc_present=1
-  done < <(security list-keychains -d user)
-  if [ "$_kc_present" -eq 0 ] && [ "${#_kc_list[@]}" -gt 0 ]; then
-    security list-keychains -d user -s "$KC" "${_kc_list[@]}"
-  fi
+  # resolves it even without an explicit --keychain. Converge the list every run
+  # (dedup + prune deleted keychains, spaced paths preserved as single tokens) so
+  # it never accumulates dangling entries — see converge_keychain_search_list.
+  converge_keychain_search_list "$KC"
 
   if security find-identity -v -p codesigning "$KC" 2>/dev/null | grep -q "Developer ID Application"; then
     SIGN_READY=1
