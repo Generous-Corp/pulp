@@ -5,6 +5,7 @@
 #include <pulp/audio/sample_stream_service.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -24,7 +25,7 @@ struct SampleAssetConfig {
     SampleStreamSourceToken source{};
     std::uint32_t channels = 0;
     std::uint64_t total_frames = 0;
-    std::uint32_t sample_rate = 0;
+    double sample_rate = 0.0;
     std::uint64_t preload_frames = 0;
     // Required for a streamed tail. The loader supplies the sampler's actual
     // prepared host/rate/block/interpolation limits, not source-authored metadata.
@@ -43,7 +44,7 @@ public:
                  const float* const* preload_channels,
                  std::uint32_t channels,
                  std::uint64_t total_frames,
-                 std::uint32_t sample_rate,
+                 double sample_rate,
                  std::uint64_t preload_frames,
                  bool has_preload_contract,
                  const SamplePreloadContract& preload_contract,
@@ -95,7 +96,7 @@ private:
     const float* const* preload_channels_ = nullptr;
     std::uint32_t channels_ = 0;
     std::uint64_t total_frames_ = 0;
-    std::uint32_t sample_rate_ = 0;
+    double sample_rate_ = 0.0;
     std::uint64_t preload_frames_ = 0;
     bool has_preload_contract_ = false;
     SamplePreloadContract preload_contract_{};
@@ -113,7 +114,7 @@ struct SampleAssetView {
     const float* const* preload_channels = nullptr;
     std::uint32_t channels = 0;
     std::uint64_t total_frames = 0;
-    std::uint32_t sample_rate = 0;
+    double sample_rate = 0.0;
     std::uint64_t preload_frames = 0;
     bool has_preload_contract = false;
     SamplePreloadContract preload_contract{};
@@ -125,7 +126,8 @@ struct SampleAssetView {
         const bool base_valid = asset.asset_id != 0 && asset.asset_generation != 0 &&
                                 source.source_id != 0 && source.source_generation != 0 &&
                                 preload_channels != nullptr && channels != 0 &&
-                                total_frames != 0 && sample_rate != 0 &&
+                                total_frames != 0 && sample_rate > 0.0 &&
+                                std::isfinite(sample_rate) &&
                                 preload_frames != 0 && preload_frames <= total_frames &&
                                 (preload_frames == total_frames || has_stream_source);
         if (!base_valid ||
@@ -144,7 +146,7 @@ struct SampleAssetView {
         if (!has_stream_source) return true;
         if (preload_frames < total_frames &&
             (!has_preload_contract ||
-             preload_contract.source_sample_rate != static_cast<double>(sample_rate) ||
+             preload_contract.source_sample_rate != sample_rate ||
              preload_contract.configured_preload_frames != preload_frames)) {
             return false;
         }
@@ -236,7 +238,8 @@ private:
                              BufferView<SampleType> preload) noexcept {
         if (config.asset.asset_id == 0 || config.asset.asset_generation == 0 ||
             config.source.source_id == 0 || config.source.source_generation == 0 ||
-            config.channels == 0 || config.total_frames == 0 || config.sample_rate == 0 ||
+            config.channels == 0 || config.total_frames == 0 ||
+            !(config.sample_rate > 0.0) || !std::isfinite(config.sample_rate) ||
             config.preload_frames == 0 || config.preload_frames > config.total_frames ||
             config.preload_frames > std::numeric_limits<std::size_t>::max() ||
             config.preload_frames >
@@ -253,7 +256,7 @@ private:
         if (config.preload_frames < config.total_frames) {
             if (!config.preload_contract) return false;
             const auto& contract = *config.preload_contract;
-            if (contract.source_sample_rate != static_cast<double>(config.sample_rate) ||
+            if (contract.source_sample_rate != config.sample_rate ||
                 contract.configured_preload_frames != config.preload_frames ||
                 contract.maximum_host_block_frames == 0 ||
                 contract.interpolation_guard_frames == 0) {

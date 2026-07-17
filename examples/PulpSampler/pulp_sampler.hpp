@@ -339,6 +339,17 @@ private:
         return level == nullptr ? SamplerMipLevelView{} : *level;
     }
 
+    static const SamplerStreamMipLevelView* select_streamed_mip(
+        const SamplerPublishedSource& source,
+        audio::SampleInterpolationPolicy policy,
+        double base_source_frames_per_output,
+        bool loop,
+        bool reverse) noexcept {
+        if (!polynomial_mip_policy(policy) || loop || reverse) return nullptr;
+        return source.streamed_mips.level(
+            sampler_exact_mip_octave(base_source_frames_per_output));
+    }
+
     audio::PreparedSampleInterpolation prepared_interpolation(
         audio::SampleInterpolationPolicy policy,
         double source_frames_per_output) const noexcept {
@@ -354,7 +365,7 @@ private:
         return interpolation;
     }
 
-    audio::PreparedSampleInterpolation prepared_resident_interpolation(
+    audio::PreparedSampleInterpolation prepared_rate_safe_interpolation(
         audio::SampleInterpolationPolicy policy,
         double source_frames_per_output) const noexcept {
         if (polynomial_mip_policy(policy) && source_frames_per_output > 1.0) {
@@ -423,7 +434,7 @@ private:
                 voice.adsr.set_params(params.adsr);
                 const auto source_frames_per_output =
                     playback_speed(voice.note, source_sample_rate, params);
-                const auto interpolation = prepared_resident_interpolation(
+                const auto interpolation = prepared_rate_safe_interpolation(
                     params.interpolation, source_frames_per_output);
                 if (!(source_frames_per_output > 0.0) ||
                     !interpolation.valid() ||
@@ -477,7 +488,7 @@ private:
         const auto source_frames_per_output =
             pitch_ratio * static_cast<double>(voice.streamed_asset.sample_rate) /
             static_cast<double>(host_sample_rate_);
-        const auto interpolation = prepared_interpolation(
+        const auto interpolation = prepared_rate_safe_interpolation(
             params.interpolation, source_frames_per_output);
         if (!interpolation.valid()) {
             queue_voice_cancellation(voice_index, voice.requester);
@@ -862,24 +873,34 @@ private:
                 return;
             auto& requester_generation = requester_generations_[target_index];
             if (++requester_generation == 0) ++requester_generation;
-            const auto source_frames_per_output =
+            const auto base_source_frames_per_output =
                 pitch_ratio * static_cast<double>(source.streamed.sample_rate) /
                 static_cast<double>(host_sample_rate_);
-            const auto region = make_region(source.streamed.total_frames,
-                                            source.streamed.sample_rate,
+            const auto* mip = select_streamed_mip(
+                source, params.interpolation, base_source_frames_per_output,
+                params.loop, params.reverse);
+            const auto& selected = mip == nullptr
+                ? source.streamed
+                : mip->asset;
+            const auto source_frames_per_output =
+                pitch_ratio * selected.sample_rate /
+                static_cast<double>(host_sample_rate_);
+            const auto region = make_region(selected.total_frames,
+                                            selected.sample_rate,
                                             params.loop,
                                             params.reverse);
             target->start_streamed(
                 note,
                 velocity,
                 host_sample_rate_,
-                source.streamed,
+                selected,
                 region,
                 source_frames_per_output,
-                prepared_interpolation(params.interpolation,
-                                       source_frames_per_output),
+                prepared_rate_safe_interpolation(
+                    params.interpolation, source_frames_per_output),
                 {target_index + 1, requester_generation},
-                source.selection_generation);
+                source.selection_generation,
+                mip == nullptr ? 0 : mip->octave);
             return;
         }
 
@@ -894,7 +915,7 @@ private:
         const auto region = make_region(selected_frames, selected_rate,
                                         params.loop, params.reverse);
         const auto speed = playback_speed(note, selected_rate, params);
-        const auto interpolation = prepared_resident_interpolation(
+        const auto interpolation = prepared_rate_safe_interpolation(
             params.interpolation, speed);
         if (!interpolation.valid()) return;
         target->start(note, velocity, speed, host_sample_rate_, sample, mip, region,

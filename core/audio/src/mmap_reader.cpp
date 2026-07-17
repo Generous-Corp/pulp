@@ -6,6 +6,8 @@
 #include <choc/audio/choc_SampleBuffers.h>
 
 #include <algorithm>
+#include <cctype>
+#include <filesystem>
 #include <istream>
 #include <memory>
 #include <streambuf>
@@ -77,15 +79,19 @@ bool MemoryMappedAudioReader::open(std::string_view path) {
     close();
     path_ = std::string(path);
 
-    if (!mmap_.open(path))
-        return false;
-
-    auto file_info = FormatRegistry::instance().read_info(path_);
-    if (!file_info) {
+    auto extension = std::filesystem::path(path_).extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char value) {
+                       return static_cast<char>(std::tolower(value));
+                   });
+    auto* registered_reader = FormatRegistry::instance().find_reader(extension);
+    if (registered_reader == nullptr) {
         close();
         return false;
     }
-    info_ = *file_info;
+
+    if (!mmap_.open(path))
+        return false;
 
     // Build a ranged decoder over the mapped bytes. WAV delegates requested
     // frames to choc; uncompressed AIFF records the validated PCM byte layout.
@@ -93,13 +99,38 @@ bool MemoryMappedAudioReader::open(std::string_view path) {
     if (mmap_.data() != nullptr && mmap_.size() > 0) {
         ranged_ = std::make_unique<RangedState>(
             reinterpret_cast<const char*>(mmap_.data()), mmap_.size());
-        choc::audio::AudioFileFormatList formats;
-        formats.addFormat<choc::audio::WAVAudioFileFormat<false>>();
-        ranged_->reader = formats.createReader(ranged_->stream);
-        if (!ranged_->reader) {
+        if (extension == ".wav" || extension == ".wave") {
+            choc::audio::AudioFileFormatList formats;
+            formats.addFormat<choc::audio::WAVAudioFileFormat<false>>();
+            ranged_->reader = formats.createReader(ranged_->stream);
+        } else if (extension == ".aif" || extension == ".aiff" ||
+                   extension == ".aifc") {
             ranged_->aiff = detail::parse_aiff_layout(
                 *ranged_->stream, mmap_.size(), true);
         }
+    }
+    if (ranged_ && ranged_->reader) {
+        const auto props = ranged_->reader->getProperties();
+        if (!(props.sampleRate > 0) || props.numChannels == 0) {
+            close();
+            return false;
+        }
+        info_.sample_rate = static_cast<std::uint32_t>(props.sampleRate);
+        info_.num_channels = props.numChannels;
+        info_.num_frames = props.numFrames;
+        info_.bits_per_sample = choc::audio::getBytesPerSample(props.bitDepth) * 8;
+        info_.format = props.formatName;
+        info_.duration_seconds = static_cast<double>(props.numFrames) /
+            props.sampleRate;
+    } else if (ranged_ && ranged_->aiff) {
+        info_ = ranged_->aiff->info;
+    } else {
+        auto file_info = registered_reader->read_info(path_);
+        if (!file_info) {
+            close();
+            return false;
+        }
+        info_ = *file_info;
     }
     return true;
 }

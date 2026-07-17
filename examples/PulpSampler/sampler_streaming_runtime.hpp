@@ -9,6 +9,7 @@
 #include <pulp/runtime/seqlock.hpp>
 
 #include "sampler_mip_pyramid.hpp"
+#include "sampler_stream_mip_sidecar.hpp"
 
 #include <algorithm>
 #include <array>
@@ -34,12 +35,38 @@ enum class SamplerPublishedSourceKind : std::uint8_t {
     Streamed,
 };
 
+struct SamplerStreamMipLevelView {
+    audio::SampleAssetView asset{};
+    std::uint32_t octave = 0;
+
+    bool valid() const noexcept { return octave != 0 && asset.valid(); }
+};
+
+struct SamplerStreamMipPyramidView {
+    std::array<SamplerStreamMipLevelView,
+               SamplerStreamMipSidecar::kMaximumLevels> levels{};
+    std::uint32_t level_count = 0;
+
+    const SamplerStreamMipLevelView* level(
+        std::uint32_t octave) const noexcept {
+        if (octave == 0 || octave > level_count || octave > levels.size())
+            return nullptr;
+        const auto& candidate = levels[octave - 1];
+        return candidate.valid() && candidate.octave == octave
+            ? &candidate
+            : nullptr;
+    }
+};
+
+static_assert(std::is_trivially_copyable_v<SamplerStreamMipPyramidView>);
+
 struct SamplerPublishedSource {
     SamplerPublishedSourceKind kind = SamplerPublishedSourceKind::None;
     std::uint64_t selection_generation = 0;
     audio::PublishedSampleView resident{};
     audio::SampleAssetView streamed{};
     SamplerMipPyramidView resident_mips{};
+    SamplerStreamMipPyramidView streamed_mips{};
 };
 
 static_assert(std::is_trivially_copyable_v<SamplerPublishedSource>);
@@ -83,6 +110,14 @@ public:
         reverse_decode_entered_for_test_.store(false, std::memory_order_relaxed);
         release_reverse_decode_for_test_.store(true, std::memory_order_relaxed);
         unpublished_rollback_count_for_test_.store(0, std::memory_order_relaxed);
+        unpublished_rollback_attempts_for_test_.store(0,
+                                                      std::memory_order_relaxed);
+        fail_after_stream_member_count_for_test_.store(
+            -1, std::memory_order_relaxed);
+        pause_before_bundle_publish_for_test_.store(false,
+                                                    std::memory_order_relaxed);
+        bundle_publish_paused_ack_for_test_.store(false,
+                                                  std::memory_order_relaxed);
         service_command_drain_paused_for_test_.store(false,
                                                      std::memory_order_relaxed);
         service_command_drain_paused_ack_for_test_.store(
@@ -151,6 +186,8 @@ public:
         }
 #if defined(PULP_SAMPLER_TEST_HOOKS)
         release_reverse_decode_for_test_.store(true, std::memory_order_release);
+        pause_before_bundle_publish_for_test_.store(false,
+                                                    std::memory_order_release);
 #endif
         service_wake_.notify_all();
         file_request_changed_.notify_all();
@@ -169,7 +206,9 @@ public:
         unpublished_rollback_count_for_test_.store(0, std::memory_order_relaxed);
 #endif
         for (auto& slot : slots_) {
-            if (slot) slot->asset.release();
+            if (slot) {
+                for (auto& member : slot->members) member.asset.release();
+            }
             slot.reset();
         }
         service_ready_ = false;
@@ -272,7 +311,11 @@ private:
     friend struct PulpSamplerTestAccess;
 
     static constexpr std::uint32_t kWorkerCount = 2;
-    static constexpr std::uint32_t kSourceCapacity = 2;
+    static constexpr std::uint32_t kBundleSlotCount = 2;
+    static constexpr std::uint32_t kMaximumBundleMembers =
+        1 + SamplerStreamMipSidecar::kMaximumLevels;
+    static constexpr std::uint32_t kSourceCapacity =
+        kBundleSlotCount * kMaximumBundleMembers;
     static constexpr std::uint32_t kMaximumVoices = 8;
     static constexpr std::uint32_t kPagesPerVoiceWorkingSet =
         audio::kSampleStreamVoiceMaxPageDemands;
@@ -300,12 +343,18 @@ private:
                       kCrossfadeReadRegionCount == 0);
     static_assert(kSourceAdvancePageDemandsPerRegion > 0);
 
-    struct StreamedSlot {
+    struct StreamedMember {
         audio::SampleAsset asset;
         audio::SampleStreamSourceToken source{};
+        bool present = false;
+        bool retirement_scheduled = false;
+    };
+
+    struct StreamedSlot {
+        std::array<StreamedMember, kMaximumBundleMembers> members{};
+        std::uint32_t member_count = 0;
         std::uint64_t selection_generation = 0;
         bool occupied = false;
-        bool retirement_scheduled = false;
     };
 
     runtime::SeqLock<SamplerPublishedSource> published_source_;
@@ -320,7 +369,7 @@ private:
     std::atomic<std::uint64_t> preload_frames_{0};
     audio::SampleStreamAsyncService<> service_;
     CommandInbox commands_;
-    std::array<std::unique_ptr<StreamedSlot>, kSourceCapacity> slots_{};
+    std::array<std::unique_ptr<StreamedSlot>, kBundleSlotCount> slots_{};
     std::array<audio::SampleStreamSourceToken, kSourceCapacity>
         unpublished_rollbacks_{};
     std::thread service_thread_;
@@ -332,6 +381,10 @@ private:
     std::atomic<bool> reverse_decode_entered_for_test_{false};
     std::atomic<bool> release_reverse_decode_for_test_{true};
     std::atomic<std::uint32_t> unpublished_rollback_count_for_test_{0};
+    std::atomic<std::uint64_t> unpublished_rollback_attempts_for_test_{0};
+    std::atomic<int> fail_after_stream_member_count_for_test_{-1};
+    std::atomic<bool> pause_before_bundle_publish_for_test_{false};
+    std::atomic<bool> bundle_publish_paused_ack_for_test_{false};
     std::atomic<bool> service_command_drain_paused_for_test_{false};
     std::atomic<bool> service_command_drain_paused_ack_for_test_{false};
     bool reverse_prewarm_timeout_override_for_test_ = false;
@@ -436,54 +489,101 @@ private:
         }
         if (slot == nullptr) return false;
 
-        auto file = audio::make_memory_mapped_frame_reader(path, true);
-        if (!file.valid || !file.supports_ranged_read ||
-            file.channels == 0 || file.channels > kMaximumChannels ||
-            file.sample_rate == 0 || file.sample_rate > kMaximumSourceRate) {
+        for (auto& member : slot->members) {
+            member.asset.release();
+            member.source = {};
+            member.present = false;
+            member.retirement_scheduled = false;
+        }
+        slot->member_count = 0;
+        slot->selection_generation = 0;
+
+        const bool has_sidecar = sampler_stream_mip_sidecar_exists(path);
+        auto base = audio::make_memory_mapped_frame_reader(
+            path, true, has_sidecar);
+        if (!base.valid || !base.supports_ranged_read ||
+            base.channels == 0 || base.channels > kMaximumChannels ||
+            base.sample_rate == 0 || base.sample_rate > kMaximumSourceRate) {
             return false;
         }
 
-        audio::SamplePreloadContract contract{
-            .source_sample_rate = static_cast<double>(file.sample_rate),
-            .host_sample_rate = static_cast<double>(host_sample_rate_),
-            .maximum_playback_ratio = kMaximumPitchRatio,
-            .certified_io_latency_seconds = kCertifiedIoLatencySeconds,
-            .scheduler_margin_seconds = kSchedulerMarginSeconds,
-            .decoder_latency_seconds = kDecoderLatencySeconds,
-            .maximum_host_block_frames = maximum_host_block_frames_,
-            .interpolation_guard_frames = audio::kDefaultSampleSincHalfWidth,
-        };
-        const auto block_source_frames = std::ceil(
-            static_cast<double>(maximum_host_block_frames_) * file.sample_rate /
-            static_cast<double>(host_sample_rate_) * kMaximumPitchRatio);
-        if (!std::isfinite(block_source_frames) ||
-            block_source_frames >= static_cast<double>(
-                std::numeric_limits<std::uint64_t>::max())) {
-            return false;
+        auto sidecar = has_sidecar
+            ? load_sampler_stream_mip_sidecar(path, base)
+            : SamplerStreamMipSidecar{};
+        std::array<audio::FileFrameReader, kMaximumBundleMembers> files{};
+        std::array<double, kMaximumBundleMembers> logical_rates{};
+        std::array<std::uint32_t, kMaximumBundleMembers> octaves{};
+        std::uint32_t member_count = 1;
+        logical_rates[0] = static_cast<double>(base.sample_rate);
+        files[0] = std::move(base);
+        if (sidecar.status == SamplerStreamMipSidecarStatus::Valid) {
+            member_count += sidecar.level_count;
+            for (std::uint32_t level = 0;
+                 level < sidecar.level_count;
+                 ++level) {
+                files[level + 1] = std::move(sidecar.levels[level].reader);
+                logical_rates[level + 1] = sidecar.levels[level].sample_rate;
+                octaves[level + 1] = sidecar.levels[level].octave;
+            }
         }
-        contract.loop_prefetch_guard_frames =
-            static_cast<std::uint64_t>(block_source_frames);
-        const auto required = audio::evaluate_sample_preload_contract(contract);
-        if (!required.valid() || required.required_preload_frames == 0) return false;
-        const auto preload_frames =
-            std::min(file.total_frames, required.required_preload_frames);
-        contract.configured_preload_frames = preload_frames;
 
-        audio::Buffer<float> preload(file.channels,
-                                     static_cast<std::size_t>(preload_frames));
-        if (file.binding.read(0,
-                              preload.view(),
-                              preload_frames,
-                              std::stop_token{}) != preload_frames) {
-            return false;
+        std::array<audio::SamplePreloadContract, kMaximumBundleMembers>
+            contracts{};
+        std::array<audio::Buffer<float>, kMaximumBundleMembers> preloads{};
+        std::array<std::uint64_t, kMaximumBundleMembers> preload_counts{};
+        for (std::uint32_t member = 0; member < member_count; ++member) {
+            const auto& file = files[member];
+            const auto logical_rate = logical_rates[member];
+            if (!file.valid || !file.supports_ranged_read ||
+                file.channels != files[0].channels ||
+                !(logical_rate > 0.0) || !std::isfinite(logical_rate) ||
+                logical_rate > kMaximumSourceRate) {
+                return false;
+            }
+            auto& contract = contracts[member];
+            contract = {
+                .source_sample_rate = logical_rate,
+                .host_sample_rate = static_cast<double>(host_sample_rate_),
+                .maximum_playback_ratio = kMaximumPitchRatio,
+                .certified_io_latency_seconds = kCertifiedIoLatencySeconds,
+                .scheduler_margin_seconds = kSchedulerMarginSeconds,
+                .decoder_latency_seconds = kDecoderLatencySeconds,
+                .maximum_host_block_frames = maximum_host_block_frames_,
+                .interpolation_guard_frames = audio::kDefaultSampleSincHalfWidth,
+            };
+            const auto block_source_frames = std::ceil(
+                static_cast<double>(maximum_host_block_frames_) * logical_rate /
+                static_cast<double>(host_sample_rate_) * kMaximumPitchRatio);
+            if (!std::isfinite(block_source_frames) ||
+                block_source_frames >= static_cast<double>(
+                    std::numeric_limits<std::uint64_t>::max())) {
+                return false;
+            }
+            contract.loop_prefetch_guard_frames =
+                static_cast<std::uint64_t>(block_source_frames);
+            const auto required = audio::evaluate_sample_preload_contract(contract);
+            if (!required.valid() || required.required_preload_frames == 0)
+                return false;
+            const auto preload_frames = std::min(
+                file.total_frames, required.required_preload_frames);
+            contract.configured_preload_frames = preload_frames;
+            preloads[member].resize(
+                file.channels, static_cast<std::size_t>(preload_frames));
+            if (file.binding.read(0,
+                                  preloads[member].view(),
+                                  preload_frames,
+                                  std::stop_token{}) != preload_frames) {
+                return false;
+            }
+            preload_counts[member] = preload_frames;
         }
         if (!service_running_.load(std::memory_order_acquire)) return false;
 
 #if defined(PULP_SAMPLER_TEST_HOOKS)
         if (block_next_reverse_decode_for_test_.exchange(
                 false, std::memory_order_acq_rel)) {
-            auto reader = std::move(file.binding.read);
-            file.binding.read =
+            auto reader = std::move(files[0].binding.read);
+            files[0].binding.read =
                 [this, reader = std::move(reader)](
                     std::uint64_t start,
                     audio::BufferView<float> destination,
@@ -503,67 +603,122 @@ private:
                     }
                     return reader(start, destination, frames, stop_token);
                 };
-            file.binding.stop_mode = audio::FrameReaderStopMode::Cooperative;
+            files[0].binding.stop_mode = audio::FrameReaderStopMode::Cooperative;
         }
 #endif
 
-        const audio::SampleStreamSourceToken source{next_source_id_++, 1};
-        const auto added = service_.add_source(
-            {
-                .token = source,
-                .channels = file.channels,
-                .total_frames = file.total_frames,
-                .page_frames = page_frames_,
-                .cache_page_count = kCachePagesPerSource,
-            },
-            std::move(file.binding));
-        if (!added.added()) return false;
-
-        if (preload_frames < file.total_frames &&
-            !prewarm_reverse_entry_pages(source,
-                                         added.view,
-                                         file.total_frames,
-                                         preload_frames,
-                                         file.sample_rate)) {
-            rollback_unpublished_source(source);
-            return false;
-        }
-
-        const audio::SampleAssetConfig asset_config{
-            .asset = {next_asset_id_++, 1},
-            .source = source,
-            .channels = file.channels,
-            .total_frames = file.total_frames,
-            .sample_rate = file.sample_rate,
-            .preload_frames = preload_frames,
-            .preload_contract = contract,
-            .stream_source = added.view,
-        };
-        if (!slot->asset.prepare(asset_config, preload.view())) {
-            rollback_unpublished_source(source);
-            return false;
-        }
-
-        {
-            std::lock_guard lock(file_request_mutex_);
-            if (service_running_.load(std::memory_order_acquire)) {
-                slot->source = source;
-                slot->selection_generation = ++selection_generation_;
-                slot->occupied = true;
-                slot->retirement_scheduled = false;
-                published_source_.write({
-                    .kind = SamplerPublishedSourceKind::Streamed,
-                    .selection_generation = slot->selection_generation,
-                    .streamed = slot->asset.view(),
-                });
-                active_sources_.fetch_add(1, std::memory_order_relaxed);
-                preload_frames_.store(preload_frames, std::memory_order_relaxed);
-                return true;
+        std::array<audio::SampleStreamCacheSourceView, kMaximumBundleMembers>
+            stream_views{};
+        try {
+            for (std::uint32_t member = 0; member < member_count; ++member) {
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+                if (fail_after_stream_member_count_for_test_.load(
+                        std::memory_order_acquire) ==
+                    static_cast<int>(member)) {
+                    discard_unpublished_slot(*slot);
+                    return false;
+                }
+#endif
+                const audio::SampleStreamSourceToken source{next_source_id_++, 1};
+                const auto added = service_.add_source(
+                    {
+                        .token = source,
+                        .channels = files[member].channels,
+                        .total_frames = files[member].total_frames,
+                        .page_frames = page_frames_,
+                        .cache_page_count = kCachePagesPerSource,
+                    },
+                    std::move(files[member].binding));
+                if (!added.added()) {
+                    discard_unpublished_slot(*slot);
+                    return false;
+                }
+                auto& owned = slot->members[member];
+                owned.source = source;
+                owned.present = true;
+                stream_views[member] = added.view;
             }
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+            if (fail_after_stream_member_count_for_test_.load(
+                    std::memory_order_acquire) ==
+                static_cast<int>(member_count)) {
+                discard_unpublished_slot(*slot);
+                return false;
+            }
+#endif
+
+            if (preload_counts[0] < files[0].total_frames &&
+                !prewarm_reverse_entry_pages(
+                    slot->members[0].source,
+                    stream_views[0],
+                    files[0].total_frames,
+                    preload_counts[0],
+                    logical_rates[0])) {
+                discard_unpublished_slot(*slot);
+                return false;
+            }
+
+            for (std::uint32_t member = 0; member < member_count; ++member) {
+                const audio::SampleAssetConfig asset_config{
+                    .asset = {next_asset_id_++, 1},
+                    .source = slot->members[member].source,
+                    .channels = files[member].channels,
+                    .total_frames = files[member].total_frames,
+                    .sample_rate = logical_rates[member],
+                    .preload_frames = preload_counts[member],
+                    .preload_contract = contracts[member],
+                    .stream_source = stream_views[member],
+                };
+                if (!slot->members[member].asset.prepare(
+                        asset_config, preloads[member].view())) {
+                    discard_unpublished_slot(*slot);
+                    return false;
+                }
+            }
+
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+            bundle_publish_paused_ack_for_test_.store(
+                pause_before_bundle_publish_for_test_.load(
+                    std::memory_order_acquire),
+                std::memory_order_release);
+            while (pause_before_bundle_publish_for_test_.load(
+                       std::memory_order_acquire) &&
+                   service_running_.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            bundle_publish_paused_ack_for_test_.store(
+                false, std::memory_order_release);
+#endif
+
+            std::lock_guard lock(file_request_mutex_);
+            if (!service_running_.load(std::memory_order_acquire)) {
+                discard_unpublished_slot(*slot);
+                return false;
+            }
+            SamplerStreamMipPyramidView streamed_mips;
+            streamed_mips.level_count = member_count - 1;
+            for (std::uint32_t member = 1; member < member_count; ++member) {
+                streamed_mips.levels[member - 1] = {
+                    .asset = slot->members[member].asset.view(),
+                    .octave = octaves[member],
+                };
+            }
+            slot->member_count = member_count;
+            slot->selection_generation = ++selection_generation_;
+            slot->occupied = true;
+            published_source_.write({
+                .kind = SamplerPublishedSourceKind::Streamed,
+                .selection_generation = slot->selection_generation,
+                .streamed = slot->members[0].asset.view(),
+                .streamed_mips = streamed_mips,
+            });
+            active_sources_.fetch_add(1, std::memory_order_relaxed);
+            preload_frames_.store(preload_counts[0], std::memory_order_relaxed);
+            return true;
+        } catch (...) {
+            discard_unpublished_slot(*slot);
+            return false;
         }
-        slot->asset.release();
-        rollback_unpublished_source(source);
-        return false;
     }
 
     bool prewarm_reverse_entry_pages(
@@ -571,7 +726,7 @@ private:
         const audio::SampleStreamCacheSourceView& view,
         std::uint64_t total_frames,
         std::uint64_t preload_frames,
-        std::uint32_t sample_rate) noexcept {
+        double sample_rate) noexcept {
         const auto tail_frame = total_frames - 1;
         const auto first_frame = total_frames > preload_frames
             ? total_frames - preload_frames
@@ -666,8 +821,25 @@ private:
         return std::max(kMinimumTimeout, derived);
     }
 
+    void discard_unpublished_slot(StreamedSlot& slot) noexcept {
+        for (auto& member : slot.members) member.asset.release();
+        for (auto& member : slot.members) {
+            if (member.present) rollback_unpublished_source(member.source);
+            member.source = {};
+            member.present = false;
+            member.retirement_scheduled = false;
+        }
+        slot.member_count = 0;
+        slot.selection_generation = 0;
+        slot.occupied = false;
+    }
+
     void rollback_unpublished_source(
         audio::SampleStreamSourceToken source) noexcept {
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        unpublished_rollback_attempts_for_test_.fetch_add(
+            1, std::memory_order_relaxed);
+#endif
         (void) service_.cancel_pending_source_demands(source);
         service_.drain_completions();
         if (service_.discard_unpublished_source(source)) return;
@@ -707,25 +879,45 @@ private:
             const bool current_slot =
                 current.kind == SamplerPublishedSourceKind::Streamed &&
                 current.selection_generation == slot.selection_generation;
-            if (!current_slot && !slot.retirement_scheduled &&
-                acknowledged > slot.selection_generation) {
-                slot.asset.release();
-                if (service_.retire_source_after_asset_unpublish(slot.source) ==
-                    audio::SampleStreamSourceRetireStatus::Scheduled) {
-                    slot.retirement_scheduled = true;
+            if (!current_slot && acknowledged > slot.selection_generation) {
+                for (auto& member : slot.members) member.asset.release();
+                for (auto& member : slot.members) {
+                    if (!member.present || member.retirement_scheduled) continue;
+                    const auto status =
+                        service_.retire_source_after_asset_unpublish(
+                            member.source);
+                    if (status ==
+                            audio::SampleStreamSourceRetireStatus::Scheduled ||
+                        status ==
+                            audio::SampleStreamSourceRetireStatus::AlreadyScheduled ||
+                        status ==
+                            audio::SampleStreamSourceRetireStatus::StaleSource) {
+                        member.retirement_scheduled = true;
+                    }
                 }
             }
         }
 
         (void) service_.collect_retired_sources();
         for (auto& owned : slots_) {
-            if (!owned || !owned->occupied || !owned->retirement_scheduled)
-                continue;
-            if (service_.cache_service().contains_source(owned->source)) continue;
-            owned->source = {};
+            if (!owned || !owned->occupied) continue;
+            bool all_retired = true;
+            for (const auto& member : owned->members) {
+                if (member.present &&
+                    service_.cache_service().contains_source(member.source)) {
+                    all_retired = false;
+                    break;
+                }
+            }
+            if (!all_retired) continue;
+            for (auto& member : owned->members) {
+                member.source = {};
+                member.present = false;
+                member.retirement_scheduled = false;
+            }
+            owned->member_count = 0;
             owned->selection_generation = 0;
             owned->occupied = false;
-            owned->retirement_scheduled = false;
             sources_retired_.fetch_add(1, std::memory_order_relaxed);
             active_sources_.fetch_sub(1, std::memory_order_relaxed);
         }

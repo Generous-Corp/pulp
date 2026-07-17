@@ -1060,14 +1060,17 @@ TEST_CASE("MemoryMappedAudioReader opens WAV files and reads frame ranges",
 TEST_CASE("MemoryMappedAudioReader fails closed for unsupported mapped files",
           "[audio][file][mmap][issue-640]") {
     auto wav_path = unique_temp_audio_path("_mmap_valid.wav");
+    auto renamed_wav_path = unique_temp_audio_path("_mmap_valid.bin");
     auto text_path = unique_temp_audio_path("_mmap_unsupported.txt");
     std::filesystem::remove(wav_path);
+    std::filesystem::remove(renamed_wav_path);
     std::filesystem::remove(text_path);
 
     AudioFileData data;
     data.sample_rate = 44100;
     data.channels = {{0.0f, 0.25f, 0.5f}};
     REQUIRE(write_wav_file(wav_path.string(), data));
+    REQUIRE(std::filesystem::copy_file(wav_path, renamed_wav_path));
     {
         std::ofstream f(text_path, std::ios::binary);
         f << "not audio";
@@ -1079,6 +1082,9 @@ TEST_CASE("MemoryMappedAudioReader fails closed for unsupported mapped files",
     REQUIRE(reader.is_open());
     REQUIRE(reader.info().num_frames == 3);
 
+    REQUIRE_FALSE(reader.open(renamed_wav_path.string()));
+    REQUIRE_FALSE(reader.is_open());
+
     REQUIRE_FALSE(reader.open(text_path.string()));
     REQUIRE_FALSE(reader.is_open());
     REQUIRE(reader.info().num_frames == 0);
@@ -1086,6 +1092,7 @@ TEST_CASE("MemoryMappedAudioReader fails closed for unsupported mapped files",
     REQUIRE(reader.size() == 0);
 
     std::filesystem::remove(wav_path);
+    std::filesystem::remove(renamed_wav_path);
     std::filesystem::remove(text_path);
 }
 

@@ -3,6 +3,7 @@
 
 #include <pulp/audio/sample_asset.hpp>
 
+#include <limits>
 #include <type_traits>
 
 using Catch::Matchers::WithinAbs;
@@ -71,6 +72,23 @@ TEST_CASE("Sample asset owns an immutable resident preload behind a trivial view
     REQUIRE_THAT(first.preload_channel_data(0)[3], WithinAbs(4.0f, 1.0e-6f));
 }
 
+TEST_CASE("Sample asset preserves finite fractional sample rates",
+          "[audio][sampler][sample-asset]") {
+    Buffer<float> preload(2, 4);
+    fill_preload(preload);
+    auto config = resident_config();
+    config.sample_rate = 5512.5;
+
+    SampleAsset asset;
+    REQUIRE(asset.prepare(config, preload.view()));
+    REQUIRE(asset.view().sample_rate == 5512.5);
+
+    config.sample_rate = std::numeric_limits<double>::infinity();
+    REQUIRE_FALSE(asset.prepare(config, preload.view()));
+    config.sample_rate = std::numeric_limits<double>::quiet_NaN();
+    REQUIRE_FALSE(asset.prepare(config, preload.view()));
+}
+
 TEST_CASE("Partial sample asset requires a matching prepared stream source",
           "[audio][sampler][sample-asset][streaming]") {
     SampleStreamCacheService service;
@@ -119,6 +137,16 @@ TEST_CASE("Partial sample asset requires a matching prepared stream source",
     REQUIRE(view.has_stream_source);
     REQUIRE(view.stream_source.window == stream.window);
     REQUIRE(view.stream_source.token.source_id == source.source_id);
+
+    config.sample_rate = 5512.5;
+    config.preload_contract->source_sample_rate = 5512.5;
+    REQUIRE(asset.prepare(config, preload.view()));
+    REQUIRE(asset.view().sample_rate == 5512.5);
+    auto tampered_fractional_view = asset.view();
+    tampered_fractional_view.sample_rate = 5513.0;
+    REQUIRE_FALSE(tampered_fractional_view.valid());
+    config.sample_rate = 44100.0;
+    config.preload_contract->source_sample_rate = 44100.0;
 
     config.stream_source.reset();
     REQUIRE_FALSE(asset.prepare(config, preload.view()));
