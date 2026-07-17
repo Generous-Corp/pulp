@@ -56,6 +56,7 @@
 #import <mach/mach_time.h>
 #include <pulp/events/plugin_main_thread.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/parameter_text.hpp>
 #include <pulp/format/host_quirks.hpp>
@@ -121,6 +122,13 @@ struct AUBridge {
     // GPU engine drives its work synchronously instead of dropping it). Written
     // from the host's setRenderingOffline:, read on the render thread.
     std::atomic<bool> rendering_offline{false};
+
+    // Dry-delay line for the bypass pass-through. Sized to the processor's
+    // reported latency in allocateRenderResources; keeps the bypassed dry
+    // signal aligned with the host's plugin-delay-compensation instead of
+    // arriving `latency` samples early (a 0 latency leaves it a zero-copy
+    // passthrough).
+    boundary::LatencyCompensatedBypassT<kMaxChannels> bypass;
 
     // Pre-allocated — no heap allocation on audio thread
     float* output_ptrs[kMaxChannels] = {};
@@ -690,6 +698,13 @@ struct ScopedAuV3HostWriting {
         ctx.output_channels = _bridge.output_channels;
         ctx.input_channels = _bridge.input_channels;
         _bridge.processor->prepare(ctx);
+
+        // Size the bypass dry-delay line to the reported latency so a bypassed
+        // block emits `input[n - latency]`, matching the host's PDC on the wet
+        // path. Off the render thread; a 0 latency leaves it a zero-copy
+        // passthrough. Same policy the CLAP/VST3/AU v2 adapters apply.
+        _bridge.bypass.prepare(pulp::format::reported_latency_samples(
+            _bridge.processor->latency_samples(), _bridge.host_quirks));
     }
 
     pulp::runtime::log_info("AU: render resources at {} Hz, {} frames",
@@ -1041,17 +1056,16 @@ struct ScopedAuV3HostWriting {
             ? (bridge->store.get_value(bridge->bypass_param_id) >= 0.5f)
             : bridge->bypass_flag.load(std::memory_order_acquire);
         if (bypassed) {
-            const UInt32 inCount = static_cast<UInt32>(bridge->input_channels);
-            for (UInt32 i = 0; i < outChans; ++i) {
-                if (i < inCount && bridge->input_ptrs[i]) {
-                    std::memcpy(bridge->output_ptrs[i],
-                                bridge->input_ptrs[i],
-                                frameCount * sizeof(float));
-                } else {
-                    std::memset(bridge->output_ptrs[i], 0,
-                                frameCount * sizeof(float));
-                }
-            }
+            // Copy input → output latency-compensated through the shared dry-
+            // delay line so the bypassed dry signal stays aligned with the
+            // host's PDC on the wet path (channels beyond the boundary ceiling
+            // fall back to an undelayed copy uniformly); zero any output channel
+            // with no matching input.
+            pulp::format::boundary::render_bypass_passthrough(
+                bridge->bypass, bridge->output_ptrs,
+                static_cast<int>(outChans), bridge->input_ptrs,
+                bridge->input_channels,
+                static_cast<std::uint32_t>(frameCount));
             // Trigger reset is a single-exit invariant: settle Reset/trigger
             // params even on the bypass short-circuit so a panic/reset raised
             // while bypassed clears this block. The parameter tree's

@@ -49,6 +49,7 @@ RUNNER_GROUP_ID="${PULP_RUNNER_GROUP_ID:-1}"
 LOOP=0
 CAP="${PULP_VM_CAP:-2}"          # macOS 2-VM kernel cap per host
 POLL="${PULP_VM_POLL:-20}"       # seconds to wait when there's no work or no free slot
+BACKOFF_MAX="${PULP_VM_BACKOFF_MAX:-300}"  # ceiling for the post-failure backoff
 # Static, machine-recognizable runner name (see derive_runner_name below).
 # The old `ephr-$$-$i` names changed on every launchd restart and the index grew
 # per job, so the same physical Mac showed up under a new throwaway name each
@@ -62,7 +63,17 @@ PRINT_NAME=0                                   # --print-name: derive + echo the
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 -o BatchMode=yes)
 
 note(){ printf '\033[36m• %s\033[0m\n' "$*" >&2; }
+# `die` is for FATAL PRECONDITIONS only — bad args, missing tart/gh — all of which
+# are checked before the supervisor loop starts. It must never be reached from
+# inside run_one: `exit` in a function terminates the whole script, and a caller's
+# `|| true` cannot catch it, so one transient failure would kill the supervisor.
 die(){ printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+# `soft_fail` is the per-iteration counterpart: same red line, but it RETURNS 1 so
+# run_one can unwind and the loop can count the failure, back off, and keep
+# serving. Transient failures (JIT mint hiccup, slow boot, network blip) are the
+# supervisor's normal weather, not a reason to exit and rely on launchd KeepAlive
+# — whose respawn throttle turns a brief outage into a long one.
+soft_fail(){ printf '\033[31m✗ %s\033[0m\n' "$*" >&2; return 1; }
 
 while [ $# -gt 0 ]; do case "$1" in
   --loop) LOOP=1; shift;;
@@ -240,11 +251,15 @@ run_one(){ # $1=iteration index — log label only; the VM/runner name is now st
   for l in "${_ls[@]}"; do label_args+=(-f "labels[]=$l"); done
   jit="$(gh api -X POST "repos/$REPO/actions/runners/generate-jitconfig" \
         -f "name=$vm" -F "runner_group_id=$RUNNER_GROUP_ID" "${label_args[@]}" \
-        --jq '.encoded_jit_config')" || die "JIT config mint failed (need repo admin)"
-  [ -n "$jit" ] || die "empty JIT config"
+        --jq '.encoded_jit_config')" \
+    || { soft_fail "[$i] JIT config mint failed (transient API error, or gh lacks repo admin)"; return 1; }
+  [ -n "$jit" ] || { soft_fail "[$i] empty JIT config"; return 1; }
 
   note "[$i] clone $GOLDEN → $vm (CoW) + boot with host ccache mounted"
-  tart clone "$GOLDEN" "$vm"
+  # Explicit check, not errexit: run_one is invoked from the loop in a context
+  # that suppresses `set -e` for its whole body, so an unchecked failure here
+  # would fall through and boot nothing.
+  tart clone "$GOLDEN" "$vm" || { soft_fail "[$i] tart clone $GOLDEN → $vm failed"; return 1; }
   CURRENT_VM="$vm"   # from here on, a stop/SIGTERM must tear this VM down
   # The --dir mount target MUST exist on the host. If it doesn't, `tart run`
   # exits instantly with "directory sharing device configuration is invalid"
@@ -263,7 +278,8 @@ run_one(){ # $1=iteration index — log label only; the VM/runner name is now st
     note "[$i] no IP after 120s — last lines of \`tart run\` ($boot_log):"; tail -3 "$boot_log" >&2 2>/dev/null || true
     tart stop "$vm" >/dev/null 2>&1||true; kill "$rpid" 2>/dev/null||true; tart delete "$vm" >/dev/null 2>&1||true
     CURRENT_VM=""; CURRENT_RPID=""
-    rm -f "$boot_log"; die "[$i] no IP (see \`tart run\` output above)"
+    rm -f "$boot_log"
+    soft_fail "[$i] no IP (see \`tart run\` output above)"; return 1
   fi
   rm -f "$boot_log"
   for k in $(seq 1 90); do ssh "${SSH_OPTS[@]}" -i "$SSH_KEY_PRIV" "$VM_USER@$ip" true 2>/dev/null && break; sleep 2; done
@@ -287,14 +303,38 @@ run_one(){ # $1=iteration index — log label only; the VM/runner name is now st
   CURRENT_VM=""; CURRENT_RPID=""
 }
 
+# Exponential backoff for CONSECUTIVE failed iterations, capped at BACKOFF_MAX:
+# POLL, 2*POLL, 4*POLL, … A tight retry against a rate-limited API or a wedged
+# host is its own outage, but a supervisor that stops retrying is a worse one.
+backoff_secs(){ # $1=consecutive failure count (>=1)
+  local n="$1" s="$POLL"
+  while [ "$n" -gt 1 ]; do
+    s=$((s * 2)); n=$((n - 1))
+    [ "$s" -ge "$BACKOFF_MAX" ] && { s="$BACKOFF_MAX"; break; }
+  done
+  printf '%s' "$s"
+}
+
 i=0
+fails=0
 if [ "$LOOP" = 1 ]; then
   note "ephemeral runner LOOP (Ctrl-C to stop); workflow=$WORKFLOW_NAME labels_match=$MATCH_LABELS golden=$GOLDEN labels=$LABELS cap=$CAP"
   while true; do
     q="$(queued_work)"; r="$(running_macos_vms)"
     if [ "${q:-0}" -gt 0 ] && [ "${r:-0}" -lt "$CAP" ]; then
       i=$((i+1)); note "[$i] queued=$q running_vms=$r/$CAP → booting ephemeral VM"
-      run_one "$i" || true
+      if run_one "$i"; then
+        fails=0
+      else
+        # run_one cleans up its own VM on every failure path it owns; this is the
+        # belt-and-suspenders for one it doesn't (a no-op when CURRENT_VM is
+        # empty), so a failed iteration can never leak a clone into the next one.
+        discard_current_vm
+        fails=$((fails + 1))
+        b="$(backoff_secs "$fails")"
+        note "[$i] iteration failed (consecutive=$fails) — backing off ${b}s, then continuing"
+        sleep "$b"
+      fi
     else
       note "waiting ${POLL}s (queued=$q running_vms=$r/$CAP — no work or no free slot)"
       sleep "$POLL"

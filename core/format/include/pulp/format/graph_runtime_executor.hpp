@@ -208,6 +208,12 @@ struct GraphRuntimeExecutorResult {
 /// not be overloaded onto this shared pool.
 class GraphRuntimeBufferPool {
 public:
+    GraphRuntimeBufferPool() = default;
+    GraphRuntimeBufferPool(const GraphRuntimeBufferPool& other);
+    GraphRuntimeBufferPool& operator=(const GraphRuntimeBufferPool& other);
+    GraphRuntimeBufferPool(GraphRuntimeBufferPool&&) noexcept = default;
+    GraphRuntimeBufferPool& operator=(GraphRuntimeBufferPool&&) noexcept = default;
+
     // Off-RT: (re)allocate storage for `slot_count` mono slots of `max_frames`.
     // Zero-fills, so the first block (and any feedback edge) reads silence.
     // Returns false on allocation failure or zero max_frames with slots.
@@ -252,9 +258,23 @@ public:
     DelayRing delay_ring(std::uint32_t index) noexcept {
         if (index >= ring_.size()) return {};
         RingSlot& r = ring_[index];
-        if (r.size == 0) return {};
-        return DelayRing{ring_storage_.data() + r.offset, r.size, r.delay, &r.write_pos};
+        if (!r.state) return {};
+        return DelayRing{r.state->storage.data(),
+                         static_cast<std::uint32_t>(r.state->storage.size()),
+                         r.delay,
+                         &r.state->write_pos};
     }
+
+    // Off-RT: make one destination ring share the source ring's mutable RT
+    // state. Used by SignalGraph's gap-free snapshot swap after it has matched
+    // connection identities and proven equal delay structure. No live samples
+    // or write position are read/copied while the audio thread may be running.
+    bool can_adopt_delay_ring_state(std::uint32_t index,
+                                    const GraphRuntimeBufferPool& source,
+                                    std::uint32_t source_index) const noexcept;
+    bool adopt_delay_ring_state(std::uint32_t index,
+                                const GraphRuntimeBufferPool& source,
+                                std::uint32_t source_index) noexcept;
 
     // True when the pool can back `snapshot`'s routing for a block of `frames`:
     // enough mono slots, a large-enough max_frames, and — if the snapshot needs
@@ -281,17 +301,18 @@ public:
 private:
     // Per-connection delay-ring layout (parallel to the plan's connections; empty
     // when the pool was reset without delays). size == 0 means no ring.
+    struct DelayRingState {
+        std::vector<float> storage;
+        int write_pos = 0;
+    };
     struct RingSlot {
-        std::uint32_t offset = 0;  // into ring_storage_
-        std::uint32_t size = 0;    // delay + max_frames; 0 = no ring
         std::uint32_t delay = 0;
-        int write_pos = 0;         // persisted RT state, advanced per block
+        std::shared_ptr<DelayRingState> state;
     };
 
     std::vector<float> storage_;
     std::uint32_t slot_count_ = 0;
     std::uint32_t max_frames_ = 0;
-    std::vector<float> ring_storage_;
     std::vector<RingSlot> ring_;
 };
 

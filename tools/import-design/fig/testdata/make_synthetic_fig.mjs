@@ -79,8 +79,9 @@ const D = {
   ImageRef: 5,
   TextData: 6,
   NodeType: 7,
-  NodeChange: 8,
-  Message: 9,
+  Matrix: 8,
+  NodeChange: 9,
+  Message: 10,
 };
 
 const defs = [];
@@ -123,6 +124,17 @@ defs[D.NodeType] = { name: 'NodeType', kind: 0, fields: [
   { name: 'TEXT', type: 0, isArray: false, value: 3 },
   { name: 'VECTOR', type: 0, isArray: false, value: 4 },
 ]};
+// A node's affine placement. m02/m12 are the translation column — the
+// frame-relative x/y styleFor reads, and (composed down the tree) the geometry
+// sidecar's ground truth.
+defs[D.Matrix] = { name: 'Matrix', kind: 1, fields: [
+  { name: 'm00', type: T.FLOAT, isArray: false, value: 0 },
+  { name: 'm01', type: T.FLOAT, isArray: false, value: 0 },
+  { name: 'm02', type: T.FLOAT, isArray: false, value: 0 },
+  { name: 'm10', type: T.FLOAT, isArray: false, value: 0 },
+  { name: 'm11', type: T.FLOAT, isArray: false, value: 0 },
+  { name: 'm12', type: T.FLOAT, isArray: false, value: 0 },
+]};
 defs[D.NodeChange] = { name: 'NodeChange', kind: 2, fields: [
   { name: 'guid', type: D.GUID, isArray: false, value: 1 },
   { name: 'parentIndex', type: D.ParentIndex, isArray: false, value: 2 },
@@ -133,6 +145,18 @@ defs[D.NodeChange] = { name: 'NodeChange', kind: 2, fields: [
   { name: 'cornerRadius', type: T.FLOAT, isArray: false, value: 7 },
   { name: 'textData', type: D.TextData, isArray: false, value: 8 },
   { name: 'internalOnly', type: T.BOOL, isArray: false, value: 9 },
+  { name: 'transform', type: D.Matrix, isArray: false, value: 10 },
+  // Auto-layout. Figma stores these on the PARENT; the children's transforms are
+  // its already-solved output. Both halves are here on purpose: without them the
+  // fixture cannot exercise the flex pass, and a layout-parity gate built on it
+  // would pass forever while testing nothing — which is the exact failure this
+  // whole fixture exists to catch.
+  { name: 'stackMode', type: T.STRING, isArray: false, value: 11 },
+  { name: 'stackSpacing', type: T.FLOAT, isArray: false, value: 12 },
+  { name: 'stackPrimaryAlignItems', type: T.STRING, isArray: false, value: 13 },
+  { name: 'stackCounterAlignItems', type: T.STRING, isArray: false, value: 14 },
+  { name: 'stackHorizontalPadding', type: T.FLOAT, isArray: false, value: 15 },
+  { name: 'stackVerticalPadding', type: T.FLOAT, isArray: false, value: 16 },
 ]};
 defs[D.Message] = { name: 'Message', kind: 2, fields: [
   { name: 'nodeChanges', type: D.NodeChange, isArray: true, value: 1 },
@@ -157,6 +181,10 @@ function writeSchema(w) {
 const guid = (w, s, l) => { w.varUint(s); w.varUint(l); };
 const vector = (w, x, y) => { w.float(x); w.float(y); };
 const color = (w, r, g, b, a) => { w.float(r); w.float(g); w.float(b); w.float(a); };
+const matrix = (w, x, y) => {
+  w.float(1); w.float(0); w.float(x);   // m00 m01 m02
+  w.float(0); w.float(1); w.float(y);   // m10 m11 m12
+};
 
 function solidPaint(w, [r, g, b, a]) {
   w.varUint(1); w.string('SOLID');
@@ -184,6 +212,15 @@ function writeNode(w, n) {
   }
   if (n.radius !== undefined) { w.varUint(7); w.float(n.radius); }
   if (n.text !== undefined) { w.varUint(8); w.varUint(1); w.string(n.text); w.varUint(0); }
+  if (n.at) { w.varUint(10); matrix(w, n.at[0], n.at[1]); }
+  if (n.stack) {
+    w.varUint(11); w.string(n.stack);
+    if (n.gap !== undefined) { w.varUint(12); w.float(n.gap); }
+    if (n.justify) { w.varUint(13); w.string(n.justify); }
+    if (n.align) { w.varUint(14); w.string(n.align); }
+    if (n.padX !== undefined) { w.varUint(15); w.float(n.padX); }
+    if (n.padY !== undefined) { w.varUint(16); w.float(n.padY); }
+  }
   w.varUint(0); // end NodeChange
 }
 
@@ -195,15 +232,36 @@ const PNG_1x1 = Buffer.from(
   'hex',
 );
 
+// `at` is a node's own frame-relative position. On a child of an auto-layout
+// parent it is Figma's SOLVED output, not an input — the importer drops it (the
+// child flows) while the geometry sidecar keeps it as ground truth. That
+// asymmetry is the whole basis of layout parity, so the fixture carries both
+// kinds of parent: `Plugin UI` positions absolutely, `Transport` flows.
 const NODES = [
   { s: 0, l: 0, type: 0, name: 'Document' },
   { s: 0, l: 1, type: 1, name: 'Page One', parent: [0, 0] },
   { s: 0, l: 2, type: 2, name: 'Plugin UI', parent: [0, 1], pos: 'a',
     size: [320, 200], radius: 8, fills: [{ color: [0.08, 0.09, 0.11, 1] }] },
   { s: 0, l: 3, type: 2, name: 'Knob — Cutoff', parent: [0, 2], pos: 'a',
-    size: [64, 64], radius: 32, fills: [{ image: IMAGE_HASH }] },
+    size: [64, 64], radius: 32, fills: [{ image: IMAGE_HASH }], at: [16, 16] },
   { s: 0, l: 4, type: 3, name: 'Label', parent: [0, 2], pos: 'b',
-    size: [80, 16], text: 'CUTOFF', fills: [{ color: [1, 1, 1, 1] }] },
+    size: [80, 16], text: 'CUTOFF', fills: [{ color: [1, 1, 1, 1] }], at: [16, 96] },
+  // An auto-layout row with a NON-MIN counter alignment. CENTER matters: MIN is
+  // Yoga's default, so a fixture that only used MIN would still pass with the
+  // alignment dropped entirely — testing nothing, exactly the bug this catches.
+  { s: 0, l: 6, type: 2, name: 'Transport', parent: [0, 2], pos: 'c',
+    size: [288, 40], at: [16, 130], fills: [{ color: [0.12, 0.13, 0.15, 1] }],
+    stack: 'HORIZONTAL', gap: 8, align: 'CENTER', padX: 4, padY: 8 },
+  // Figma's solved result for the row above: x strides by 4 → 36 → 68 (padding
+  // 4, then +24 width +8 gap), and y = 8 is the CENTER alignment placing a
+  // 24-tall button in a 40-tall row. Drop the flex and all three pile at the
+  // row's origin; drop just the alignment and all three share dy = -8.
+  { s: 0, l: 7, type: 2, name: 'Play', parent: [0, 6], pos: 'a',
+    size: [24, 24], at: [4, 8], fills: [{ color: [1, 1, 1, 1] }] },
+  { s: 0, l: 8, type: 2, name: 'Stop', parent: [0, 6], pos: 'b',
+    size: [24, 24], at: [36, 8], fills: [{ color: [1, 1, 1, 1] }] },
+  { s: 0, l: 9, type: 2, name: 'Rec', parent: [0, 6], pos: 'c',
+    size: [24, 24], at: [68, 8], fills: [{ color: [1, 1, 1, 1] }] },
   { s: 0, l: 5, type: 1, name: 'Empty Page', parent: [0, 0], pos: 'b' },
 ];
 

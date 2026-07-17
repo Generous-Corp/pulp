@@ -5,12 +5,16 @@
 #include <pulp/view/widget_skin_derive.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/inspector.hpp>
+#include <choc/text/choc_JSON.h>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/state/store.hpp>
 #include "import_detect.hpp"
 #include "fig_lane.hpp"
+#include "envelope_merge.hpp"
+#include "render_artifact_path.hpp"
 #include <miniz.h>
 // getpid() is POSIX-only via <unistd.h>; MSVC ships an equivalent
 // `_getpid` declaration in <process.h>. Wrap both to keep the
@@ -29,6 +33,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <random>
 #include <sstream>
@@ -896,9 +901,16 @@ static void print_usage() {
     std::cout << "  jsx      Precompiled React JSX runtime bundle for live pass-through or baked snapshots\n\n";
     std::cout << "Options:\n";
     std::cout << "  --from <source>   Design source (required)\n";
-    std::cout << "  --file <path>     Input file path\n";
+    std::cout << "  --file <path>     Input file path. Repeatable with --from figma-plugin:\n";
+    std::cout << "                    one already-exported envelope per state captures a\n";
+    std::cout << "                    multi-state design into one view. Order sets the frame\n";
+    std::cout << "                    index a \"swap <n>\" button targets (the first --file is\n";
+    std::cout << "                    frame 0).\n";
     std::cout << "  --url <url>       Design URL (Figma file URL or v0 share link)\n";
-    std::cout << "  --frame <name>    Frame/artboard to import (Figma; guid or name for --from fig)\n";
+    std::cout << "  --frame <name>    Frame/artboard to import (Figma; guid or name for --from fig).\n";
+    std::cout << "                    Repeatable: give it once per state to capture a multi-state\n";
+    std::cout << "                    design into one view. Order sets the frame index a \"swap <n>\"\n";
+    std::cout << "                    button targets (the first --frame is frame 0).\n";
     std::cout << "  --page <name>     Restrict frame lookup to one page (--from fig)\n";
     std::cout << "  --outline         List pages/frames of a .fig file and exit (--from fig)\n";
     std::cout << "  --json            With --outline, emit the inventory as JSON\n";
@@ -941,6 +953,12 @@ static void print_usage() {
     std::cout << "                    finds a skewed / unverifiable sprite (always warns)\n";
     std::cout << "  --fidelity-report <file>  Write the run's fidelity findings as a JSON ledger\n";
     std::cout << "                    (named taxonomy + per-kind counts) — a diffable contract\n";
+    std::cout << "  --dump-layout <file>  Write the laid-out view tree as JSON (implies\n";
+    std::cout << "                    --validate): per view its anchor, source node id, and\n";
+    std::cout << "                    absolute bounds in design px. Feed it to\n";
+    std::cout << "                    tools/import-design/layout_parity.py alongside the\n";
+    std::cout << "                    source's own solved rects (--from fig writes those to\n";
+    std::cout << "                    geometry.json) to diff placement per node.\n";
     std::cout << "  --reference <png> Compare render against a reference screenshot\n";
     std::cout << "  --diff <png>      Save visual diff image\n";
     std::cout << "  --import-report <path>  Write the per-control resolution report (JSON) — rung,\n";
@@ -957,7 +975,7 @@ static void print_usage() {
     std::cout << "                    geometry controls (a knob layer named \"Cutoff\", not a\n";
     std::cout << "                    param: sigil) by their stamped source_node_id. A layer-name\n";
     std::cout << "                    sigil still wins; the manifest never overwrites one.\n";
-    std::cout << "  --render-size WxH Render dimensions (default: 340x280)\n";
+    std::cout << "  --render-size WxH Render dimensions (default: the design's canvas size)\n";
     std::cout << "  --bridge-output <path>  Path to write bridge handler scaffold (default: bridge_handlers.cpp,\n";
     std::cout << "                          only emitted for --from claude)\n";
     std::cout << "  --no-bridge-scaffold    Skip bridge handler scaffold (claude only)\n";
@@ -1000,11 +1018,66 @@ static void print_usage() {
     std::cout << "  pulp import-design --from claude --file design.html\n";
     std::cout << "  pulp import-design --from fig --file design.fig --outline\n";
     std::cout << "  pulp import-design --from fig --file design.fig --frame 'Main' --output ui.js\n";
+    std::cout << "  pulp import-design --from figma-plugin --file typing.pulp.json --file piano.pulp.json --emit cpp --output kbd.cpp\n";
     std::cout << "  pulp import-design --from figma --file design.json --format css-variables --tokens theme.css\n";
     std::cout << "  pulp import-design --export-tokens --format css-variables   # built-in dark theme → theme.css\n";
     std::cout << "  pulp import-design --from jsx --file bundle.js --mode live --emit js --output live-ui.js\n";
     std::cout << "  pulp import-design --from jsx --file bundle.js --mode baked --emit cpp --output imported_ui.cpp\n";
     std::cout << "  pulp import-design --from figma --file design.json --mode baked --emit swiftui --output ImportedPulpView.swift\n";
+}
+
+// ── Layout dump (--dump-layout) ─────────────────────────────────────────────
+//
+// Serialize the laid-out view tree: per view, its anchor, the source node id it
+// came from, and its absolute bounds in design px.
+//
+// This exists so a layout bug cannot hide. The auto-layout regression that
+// motivated it — flex emitted into `style`, where nothing reads it — still
+// rendered SOMETHING for every node, so every test stayed green and only a
+// human squinting at a screenshot ever noticed. A source that ships its own
+// solved rects (a .fig does, for auto-layout children too) can be diffed
+// against these bounds by node id: no pixels, no thresholds fighting
+// anti-aliasing, and a failure names a node and an exact delta.
+//
+// The join key the VIEW tree carries is its anchor (set_anchor_id, populated by
+// the bridge's setAnchor call). The SOURCE keys its rects by its own node id.
+// The IR is the only place both live side by side, so it supplies the mapping —
+// which is also why this is a map lookup rather than string surgery on the
+// anchor's "<adapter>:<node-id>" shape: a Figma guid contains colons of its own.
+
+void collect_anchor_source_ids(const pulp::view::IRNode& node,
+                               std::map<std::string, std::string>& out) {
+    if (node.stable_anchor_id && !node.stable_anchor_id->empty() &&
+        node.source_node_id && !node.source_node_id->empty()) {
+        out.emplace(*node.stable_anchor_id, *node.source_node_id);
+    }
+    for (const auto& child : node.children) collect_anchor_source_ids(child, out);
+}
+
+void collect_layout_dump(const pulp::view::View& view,
+                         const std::map<std::string, std::string>& source_ids,
+                         choc::value::Value& views) {
+    const auto& anchor = view.anchor_id();
+    if (!anchor.empty()) {
+        auto entry = choc::value::createObject("");
+        entry.addMember("anchor_id", choc::value::createString(anchor));
+        if (auto it = source_ids.find(anchor); it != source_ids.end())
+            entry.addMember("node_id", choc::value::createString(it->second));
+        entry.addMember("type",
+            choc::value::createString(pulp::view::ViewInspector::type_name(view)));
+        entry.addMember("visible", choc::value::createBool(view.visible()));
+        // Absolute, so the numbers are in the same space as a source's own
+        // frame-relative rects. A view's own bounds() are parent-relative and
+        // would make every nested node look misplaced by its ancestors' offsets.
+        auto abs = pulp::view::ViewInspector::absolute_bounds(view);
+        entry.addMember("x", choc::value::createFloat64(abs.x));
+        entry.addMember("y", choc::value::createFloat64(abs.y));
+        entry.addMember("width", choc::value::createFloat64(abs.width));
+        entry.addMember("height", choc::value::createFloat64(abs.height));
+        views.addArrayElement(entry);
+    }
+    for (size_t i = 0; i < view.child_count(); ++i)
+        collect_layout_dump(*view.child_at(i), source_ids, views);
 }
 
 // Bridge-handler scaffold body lives in core/view/src/design_import.cpp
@@ -1695,8 +1768,17 @@ static bool write_file(const std::string& path, const std::string& content) {
 int main(int argc, char* argv[]) {
     std::string source_str;
     std::string input_file;
+    // --file: repeatable. Two or more paths capture a MULTI-STATE design from
+    // already-exported envelopes — one per state, in the order given — which is
+    // how a lane that exports a faithful frame at a time (the Figma REST
+    // faithful-vector export, the Figma plugin) reaches multi-state capture.
+    // input_file stays the first, so every single-file path is untouched.
+    std::vector<std::string> input_files;
     std::string input_url;           // --url: Figma file URL or v0 share link
-    std::string frame_name;          // --frame: Figma frame/artboard name
+    // --frame: Figma frame/artboard name. Repeatable — two or more capture a
+    // multi-state design into one DesignFrameView, in the order given, so a
+    // `swap` element's target_frame is an index into this list.
+    std::vector<std::string> frame_names;
     std::string screen_name;         // --screen: Stitch screen name
     std::string page_name;           // --page: Figma page name (scopes the .fig lane)
     bool outline_mode = false;       // --outline: read-only page/frame inventory (fig lane)
@@ -1713,20 +1795,34 @@ int main(int argc, char* argv[]) {
     bool include_comments = true;
     bool export_tokens_mode = false;
     bool validate = false;           // --validate: render + compare after import
+    std::string dump_layout_path;    // --dump-layout <file>: write the laid-out view tree as JSON
     bool strict_fidelity = false;    // --strict-fidelity: fail on a fidelity self-check finding
     bool fidelity_failed = false;    // set when strict_fidelity + at least one finding
     std::string fidelity_report_path; // --fidelity-report <file>: write the JSON fidelity ledger
     bool use_web_compat = false;     // --web-compat: use DOM API instead of native
     bool preview_mode = false;       // --preview: minimal widget style for design comparison
-    // figma-plugin lane only: native knobs default on; @sprite/@silver node
-    // suffixes override the global flag per knob.
-    bool use_silver_knobs = true;    // figma-plugin default; sprite via --knob-style=sprite
+    // figma-plugin lane only: @sprite/@silver node suffixes override per knob.
+    //
+    // `use_silver_knobs` no longer means "always paint Pulp's knob". It is the
+    // FALLBACK for a knob the design gives us nothing to draw. A knob the
+    // designer actually drew — captured art or vector geometry — keeps their
+    // art; substituting our own would overwrite the design we were asked to
+    // import. `--knob-style silver` is the explicit opt-out for anyone who
+    // wants our widget regardless.
+    bool use_silver_knobs = true;    // fallback only; sprite via --knob-style=sprite
     bool skin_faders = true;         // plain via --fader-style=default
     bool skin_meters = true;         // plain via --meter-style=default
     bool debug_json = false;         // --debug: output JSON report with all metrics
     std::string debug_output;        // --debug-output: path for JSON report
+    // Fallback only. --validate defaults to the DESIGN's own canvas size (set
+    // below once the IR is parsed); these apply solely when the root declares no
+    // size. A fixed 340x280 default silently rendered a 1004x672 design into a
+    // third of its area, so every --validate screenshot and every similarity
+    // score compared a squeezed render against a full-size reference. A
+    // verification default that reshapes what it verifies is worse than none.
     int render_width = 340;
     int render_height = 280;
+    bool render_size_explicit = false;  // --render-size overrides the canvas
     // --validate backend: Skia is faithful for file-backed images; CoreGraphics
     // renders filename placeholders and is an explicit escape hatch.
     pulp::view::ScreenshotBackend screenshot_backend =
@@ -1768,11 +1864,11 @@ int main(int argc, char* argv[]) {
         if (std::strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
             source_str = argv[++i];
         } else if (std::strcmp(argv[i], "--file") == 0 && i + 1 < argc) {
-            input_file = argv[++i];
+            input_files.push_back(argv[++i]);
         } else if (std::strcmp(argv[i], "--url") == 0 && i + 1 < argc) {
             input_url = argv[++i];
         } else if (std::strcmp(argv[i], "--frame") == 0 && i + 1 < argc) {
-            frame_name = argv[++i];
+            frame_names.push_back(argv[++i]);
         } else if (std::strcmp(argv[i], "--screen") == 0 && i + 1 < argc) {
             screen_name = argv[++i];
         } else if (std::strcmp(argv[i], "--page") == 0 && i + 1 < argc) {
@@ -1805,6 +1901,12 @@ int main(int argc, char* argv[]) {
             strict_fidelity = true;
         } else if (std::strcmp(argv[i], "--fidelity-report") == 0 && i + 1 < argc) {
             fidelity_report_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--dump-layout") == 0 && i + 1 < argc) {
+            // The dump is taken after the layout pass, which only runs under
+            // --validate. Implying it (as --reference does) beats asking for
+            // both and silently writing nothing when the caller forgets one.
+            dump_layout_path = argv[++i];
+            validate = true;
         } else if (std::strcmp(argv[i], "--reference") == 0 && i + 1 < argc) {
             reference_image = argv[++i];
             validate = true;
@@ -1825,6 +1927,7 @@ int main(int argc, char* argv[]) {
             if (x != std::string::npos) {
                 render_width = std::stoi(sz.substr(0, x));
                 render_height = std::stoi(sz.substr(x + 1));
+                render_size_explicit = true;
             }
         } else if (std::strcmp(argv[i], "--screenshot-backend") == 0 && i + 1 < argc) {
             std::string b = argv[++i];
@@ -2028,6 +2131,10 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Every path below reads the first --file; a second one only means
+    // multi-state capture, handled once the source is known.
+    if (!input_files.empty()) input_file = input_files.front();
+
     // Export-tokens mode: read a Pulp theme JSON and export in --format.
     if (export_tokens_mode) {
         // Tailwind formats need DESIGN.md section context that --export-tokens
@@ -2172,9 +2279,42 @@ int main(int argc, char* argv[]) {
         }
     } fig_scratch_cleanup{fig_scratch_dir};
 
+    // Both multi-value flags are validated against the source the USER named,
+    // before the fig lane runs — it rewrites source_str to "figma-plugin" once it
+    // has decoded, at which point a `--from fig` run is no longer distinguishable
+    // from a real figma-plugin one.
+    //
+    // `--file` names the design to read, so repeating it is only meaningful for a
+    // source whose input IS one already-exported state (figma-plugin envelopes);
+    // `--from fig` takes one .fig and selects states from it with --frame.
+    if (input_files.size() > 1 && source_str != "figma-plugin") {
+        std::cerr << "Error: --file is repeatable only with --from figma-plugin (got "
+                  << input_files.size() << " --file values with --from " << source_str << ")\n";
+        std::cerr << "       Repeated --file merges one already-exported envelope per state "
+                     "into a\n"
+                     "       multi-state design; other sources parse a single file.\n";
+        return 2;
+    }
+
+    // `--frame` selects a frame from ONE design file, which only the .fig lane
+    // does per-frame; every other source resolves a single frame per run. Repeat
+    // it elsewhere and the extra states would be dropped without a word.
+    if (frame_names.size() > 1 && source_str != "fig") {
+        std::cerr << "Error: --frame is repeatable only with --from fig (got "
+                  << frame_names.size() << " --frame values with --from "
+                  << source_str << ")\n";
+        std::cerr << "       To capture a multi-state design from another source, export "
+                     "each state to its\n"
+                     "       own envelope and pass a --file per state: --from figma-plugin "
+                     "--file a.pulp.json --file b.pulp.json\n";
+        return 2;
+    }
+
     pulp::import_design::fig::LaneArgs fig_args{
-        source_str, input_file, frame_name, page_name, outline_mode, outline_json};
+        source_str, input_file, frame_names, page_name, outline_mode, outline_json};
     fig_args.created_tmp_dir = &fig_scratch_dir;
+    std::string fig_geometry_file;
+    fig_args.geometry_file = &fig_geometry_file;
     if (auto fig_code = pulp::import_design::fig::handle(fig_args)) {
         return *fig_code;
     }
@@ -2184,6 +2324,39 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: unknown source '" << source_str << "'\n";
         std::cerr << "Valid sources: fig, figma, figma-plugin, stitch, v0, pencil, claude, designmd, jsx\n";
         return 1;
+    }
+
+    // Multi-state capture from pre-exported envelopes: one --file per state, in
+    // capture order, merged into a single envelope whose root carries the rest as
+    // alternate_frames. This is the multi-state surface for the lanes that export
+    // one faithful frame per run — the Figma REST faithful-vector export and the
+    // Figma plugin both write this envelope — and it is deliberately a merge of
+    // finished exports rather than a new decode path, so it inherits whatever
+    // render mode those exporters produced.
+    if (input_files.size() > 1) {
+        namespace id = pulp::import_design;
+        const fs::path scratch = id::make_scratch_dir("states", input_files.front());
+        std::error_code sec;
+        fs::create_directories(scratch, sec);
+        if (sec) {
+            std::cerr << "Error: could not create scratch dir " << scratch << ": "
+                      << sec.message() << "\n";
+            return 1;
+        }
+        fig_scratch_dir = scratch.string();   // removed when main returns
+
+        std::vector<fs::path> envelopes;
+        envelopes.reserve(input_files.size());
+        for (const auto& f : input_files) {
+            if (!fs::exists(f)) {
+                std::cerr << "Error: --file " << f << " does not exist\n";
+                return 1;
+            }
+            envelopes.emplace_back(f);
+        }
+        const fs::path merged = scratch / "scene.pulp.json";
+        if (auto err = id::merge_frame_envelopes(envelopes, scratch, merged)) return *err;
+        input_file = merged.string();
     }
 
     // Tailwind formats are gated to DESIGN.md (they re-parse it for section
@@ -2480,7 +2653,18 @@ int main(int argc, char* argv[]) {
     if (!fetched_tmp.empty()) fs::remove(fetched_tmp);
 
     // Store frame/screen selection metadata
-    if (!frame_name.empty()) ir.root.attributes["frame"] = frame_name;
+    if (!frame_names.empty()) {
+        // Frame 0 keeps the plain "frame" attribute so a single-state import's
+        // metadata is unchanged; a multi-state capture additionally records the
+        // full ordered list, which is the frame index a swap target names.
+        ir.root.attributes["frame"] = frame_names.front();
+        if (frame_names.size() > 1) {
+            std::string all;
+            for (std::size_t i = 0; i < frame_names.size(); ++i)
+                all += (i ? "," : "") + frame_names[i];
+            ir.root.attributes["frames"] = all;
+        }
+    }
     if (!screen_name.empty()) ir.root.attributes["screen"] = screen_name;
 
     // ── Extensible key-based recognition manifest merge ──────────────────────
@@ -2621,6 +2805,37 @@ int main(int argc, char* argv[]) {
     apply_placement_verification(ir.root,
                                  ir.root.style.width.value_or(0.0f),
                                  ir.root.style.height.value_or(0.0f));
+    // Swap-target verification: a swap-link button whose target frame was never
+    // captured would render as a button that silently does nothing, so flag it
+    // here — before the report collects verification_pass — and let the same
+    // --import-report / --fail-on-unresolved channel carry it.
+    apply_swap_target_verification(ir.root);
+
+    // Captured states nobody can render are a hard error, not a diagnostic. Only
+    // a faithful_svg node lowers alternate_frames to DesignFrameView::add_frame,
+    // so on any other node the extra states are dropped and the import "succeeds"
+    // with a single frame — the user asked for N states and silently got one.
+    // Refusing here is what keeps that from shipping as a working command.
+    if (const auto dropped = find_unrenderable_alternate_frames(ir.root); !dropped.empty()) {
+        std::size_t total = 0;
+        for (const auto& d : dropped) total += d.alternates;
+        std::cerr << "Error: " << total << " captured state"
+                  << (total == 1 ? "" : "s") << " cannot be rendered and would be "
+                     "dropped:\n";
+        for (const auto& d : dropped)
+            std::cerr << "       - " << d.node_name << ": " << d.alternates
+                      << " alternate frame" << (d.alternates == 1 ? "" : "s")
+                      << " — " << d.reason << "\n";
+        std::cerr << "       Multi-state capture needs a faithful-vector export. The Figma "
+                     "REST lane produces one:\n"
+                     "         python3 tools/import-design/figma_rest_export.py --file-key "
+                     "<KEY> --node <A> --out a.pulp.json --faithful-vector\n"
+                     "         python3 tools/import-design/figma_rest_export.py --file-key "
+                     "<KEY> --node <B> --out b.pulp.json --faithful-vector\n"
+                     "         pulp import-design --from figma-plugin --file a.pulp.json "
+                     "--file b.pulp.json ...\n";
+        return 2;
+    }
     const auto import_report = collect_import_report(ir.root);
     if (!import_report.controls.empty())
         std::cerr << import_report_to_text(import_report);
@@ -3384,6 +3599,17 @@ int main(int argc, char* argv[]) {
                 "  (extract the data:image/svg+xml payload from the scene JSON first).\n";
         }
 
+        // Render at the design's own size unless the caller asked otherwise, so
+        // the render and its reference are the same shape by default.
+        if (!render_size_explicit) {
+            const int design_w = static_cast<int>(ir.root.style.width.value_or(0.0f));
+            const int design_h = static_cast<int>(ir.root.style.height.value_or(0.0f));
+            if (design_w > 0 && design_h > 0) {
+                render_width = design_w;
+                render_height = design_h;
+            }
+        }
+
         // Render the generated JS headlessly
         View render_root;
         render_root.set_theme(Theme::dark());
@@ -3407,13 +3633,69 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        auto rendered_path = design_name + "-" + source_lower + "-render.png";
+        auto rendered_path = pulp::import_design::render_artifact_path(output_file, design_name + "-" + source_lower + "-render.png");
         {
             std::ofstream f(rendered_path, std::ios::binary);
             f.write(reinterpret_cast<const char*>(rendered_png.data()),
                     static_cast<std::streamsize>(rendered_png.size()));
         }
         std::cout << "Rendered → " << rendered_path << " (" << render_width << "x" << render_height << ")\n";
+
+        // Dump the laid-out tree. AFTER the render, deliberately: render_to_png
+        // is what runs the layout pass, so dumping before it would serialize a
+        // tree of zero-sized views that all agree with each other and with
+        // nothing real.
+        if (!dump_layout_path.empty()) {
+            std::map<std::string, std::string> source_ids;
+            collect_anchor_source_ids(ir.root, source_ids);
+            auto views = choc::value::createEmptyArray();
+            collect_layout_dump(render_root, source_ids, views);
+
+            auto dump = choc::value::createObject("");
+            dump.addMember("units", choc::value::createString("design-px"));
+            dump.addMember("render_width", choc::value::createInt64(render_width));
+            dump.addMember("render_height", choc::value::createInt64(render_height));
+            dump.addMember("views", views);
+
+            std::ofstream f(dump_layout_path);
+            if (!f) {
+                std::cerr << "Error: could not write --dump-layout file "
+                          << dump_layout_path << "\n";
+                return 1;
+            }
+            f << choc::json::toString(dump, true) << "\n";
+            std::cout << "Layout dump → " << dump_layout_path << " ("
+                      << views.size() << " anchored view(s))\n";
+
+            // A dump alone proves nothing — it needs the source's own rects to
+            // be diffed against. `--from fig` decodes those into a scratch
+            // directory this process deletes on the way out, so copy them next
+            // to the dump: that makes the one-shot `--from fig … --dump-layout`
+            // produce BOTH halves of a parity run, which is the only reason
+            // either file exists.
+            if (!fig_geometry_file.empty()) {
+                fs::path sidecar = dump_layout_path;
+                sidecar.replace_extension();
+                sidecar += ".geometry.json";
+                std::error_code copy_ec;
+                fs::copy_file(fig_geometry_file, sidecar,
+                              fs::copy_options::overwrite_existing, copy_ec);
+                if (copy_ec) {
+                    std::cerr << "Warning: could not copy the source's geometry to "
+                              << sidecar << ": " << copy_ec.message() << "\n";
+                } else {
+                    std::cout << "Source geometry → " << sidecar.string() << "\n";
+                }
+            }
+            // An anchorless dump is useless and looks like a passing parity run,
+            // so say what happened rather than writing an empty file quietly.
+            if (views.size() == 0) {
+                std::cout << "  NOTE: no view carries an anchor, so this dump has nothing to "
+                             "join on.\n  Generated JS emits setAnchor() only with comments "
+                             "enabled and an IR that\n  resolved anchors — check --no-comments "
+                             "and the source's node ids.\n";
+            }
+        }
 
         // Compare with reference if provided
         if (!reference_image.empty()) {
@@ -3436,7 +3718,7 @@ int main(int argc, char* argv[]) {
             // Always generate diff image when reference is provided
             // Use --diff path if given, otherwise auto-generate alongside render
             auto actual_diff_path = diff_output.empty()
-                ? (design_name + "-" + source_lower + "-diff.png") : diff_output;
+                ? pulp::import_design::render_artifact_path(output_file, design_name + "-" + source_lower + "-diff.png") : diff_output;
             {
                 auto ref_bytes = [&]() -> std::vector<uint8_t> {
                     std::ifstream f(reference_image, std::ios::binary);
@@ -3489,7 +3771,7 @@ int main(int argc, char* argv[]) {
 
         // Validation results if available
         if (validate && !reference_image.empty()) {
-            auto result = compare_screenshot_files(reference_image, design_name + "-" + source_lower + "-render.png");
+            auto result = compare_screenshot_files(reference_image, pulp::import_design::render_artifact_path(output_file, design_name + "-" + source_lower + "-render.png"));
             dbg << "  \"validation\": {\n";
             dbg << "    \"reference\": \"" << reference_image << "\",\n";
             dbg << "    \"similarity_pct\": " << static_cast<int>(result.similarity * 100) << ",\n";

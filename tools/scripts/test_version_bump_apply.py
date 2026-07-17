@@ -171,6 +171,133 @@ class VersionBumpApplyTests(GateFixtureTestCase):
         # identical stub headers.
         self.assertNotIn("CHANGELOG.md", status)
 
+    def _fork_behind_a_bumped_main(self) -> None:
+        """origin/main gains a version bump this branch forked before.
+
+        The everyday state on a busy main, not an exotic one: any PR that
+        merges a `chore: bump versions` while yours is open puts your branch
+        behind on the version line.
+        """
+        _git(self.tmp, "checkout", "-q", "-b", "mainline")
+        (self.tmp / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "test", "version": "0.3.0"}, indent=2) + "\n"
+        )
+        self.f.commit("chore: bump versions")
+        _git(self.tmp, "update-ref", "refs/remotes/origin/main", "HEAD")
+        _git(self.tmp, "checkout", "-q", "-b", "feature", "mainline~1")
+
+    def test_apply_on_a_stale_base_writes_instead_of_claiming_a_phantom_bump(
+        self,
+    ) -> None:
+        """A branch BEHIND base must still get a real write.
+
+        `already_bumped` compared base != head, so a branch behind on the
+        version line (head 0.1.0, base 0.3.0) read as "already bumped":
+        `apply_bumps` short-circuited, wrote nothing, and the report still
+        printed `✓ bumped` at exit 0. The `chore: bump versions` marker never
+        appeared and CI's fix/feat gate failed downstream with no hint why.
+        Ordering the comparison makes the skip conditional on being AHEAD.
+        """
+        self._fork_behind_a_bumped_main()
+        self.f.write(".claude-plugin/cmd.md", "do a thing\n")
+        self.f.commit("feat: add a plugin command")
+
+        code, out = self.f.run_vbc(["--mode=apply"])
+        self.assertEqual(code, 0, msg=out)
+        # Bumped from the version at base (0.3.0), not from the stale 0.1.0
+        # on disk — so the result is correct against the main we'll merge to.
+        self.assertEqual(
+            json.loads(
+                (self.tmp / ".claude-plugin" / "plugin.json").read_text()
+            )["version"],
+            "0.4.0",
+            msg=out,
+        )
+
+    def test_stale_base_bump_is_not_a_version_regression(self) -> None:
+        """Behind base but self-bumped is still behind.
+
+        head 0.2.0 under base 0.3.0 differs from base, so the inequality
+        check called it bumped and let the PR merge a version REGRESSION
+        onto main.
+        """
+        self._fork_behind_a_bumped_main()
+        (self.tmp / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "test", "version": "0.2.0"}, indent=2) + "\n"
+        )
+        self.f.write(".claude-plugin/cmd.md", "do a thing\n")
+        self.f.commit("feat: add a plugin command")
+
+        code, out = self.f.run_vbc(["--mode=apply"])
+        self.assertEqual(code, 0, msg=out)
+        self.assertEqual(
+            json.loads(
+                (self.tmp / ".claude-plugin" / "plugin.json").read_text()
+            )["version"],
+            "0.4.0",
+            msg=out,
+        )
+
+    def test_apply_refuses_success_when_the_write_silently_no_ops(self) -> None:
+        """The guard fires when apply requests a bump that never lands.
+
+        An internal-only `fix:` classifies as `patch`, which `render_report`
+        scores as an advisory `?` and exits 0 — so a dropped patch write is
+        invisible to the report alone. Here the project() line has no VERSION
+        field (a reformat, or a drifted versioning.json pattern), so
+        `apply_bumps` finds no `current_version`, declines to write, and
+        returns normally. Nothing raises; only re-reading the file catches it.
+        """
+        self.f.write("core/runtime/src/foo.cpp", "int foo() { return 2; }\n")
+        self.f.write(
+            "CMakeLists.txt",
+            "cmake_minimum_required(VERSION 3.24)\n"
+            "project(Test LANGUAGES CXX)\n",
+        )
+        self.f.commit("fix: tighten foo")
+
+        code, out = self.f.run_vbc(["--mode=apply"])
+        self.assertEqual(code, 1, msg=out)
+        self.assertIn("refusing to report success", out)
+        self.assertIn("CMakeLists.txt", out)
+
+    def test_apply_verification_stays_quiet_on_a_healthy_apply(self) -> None:
+        """PASS control for the guard above.
+
+        A checker that only ever reports failure is indistinguishable from a
+        broken one, so pin the negative: a normal apply whose write lands must
+        exit 0 and say nothing about refusing.
+        """
+        self.f.write("core/runtime/src/foo.cpp", "int foo() { return 2; }\n")
+        self.f.commit("fix: tighten foo")
+
+        code, out = self.f.run_vbc(["--mode=apply"])
+        self.assertEqual(code, 0, msg=out)
+        self.assertNotIn("refusing to report success", out)
+        self.assertIn("VERSION 0.1.1", (self.tmp / "CMakeLists.txt").read_text())
+
+    def test_apply_verification_allows_a_version_file_new_in_this_branch(
+        self,
+    ) -> None:
+        """A surface whose version file does not exist at base is not stranded.
+
+        `version_at_base` returns None for a file this branch adds, so there
+        is no ordering to compare and "not ahead of base" proves nothing about
+        a dropped write. The guard must not fail an added surface.
+        """
+        vbc = self._import_gate_module("version_bump_check")
+        surface = vbc.Surface(
+            "new", "New",
+            [vbc.VersionFile("brand-new.json", "json_field", "version")],
+            ["src/**"],
+        )
+        self.f.write("brand-new.json", '{"version": "0.1.0"}\n')
+        verdict = vbc.Verdict(surface, "minor", None, "0.1.0", "minor")
+
+        self.assertIsNone(
+            vbc.verify_applied_bumps([verdict], "origin/main", self.tmp)
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

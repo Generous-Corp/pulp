@@ -236,6 +236,18 @@ not apply — `_bridge` is a C++ struct). The block:
    `self.MIDIOutputEventBlock` (AU v3.1+). Each event's
    `sample_offset` is added to `timestamp->mSampleTime`.
 
+The bypass short-circuit (before step 6, when `shouldBypassEffect`) must NOT
+`memcpy` the dry input straight to the output. When the Processor reports a
+non-zero latency the host has delay-aligned the *wet* path by that latency
+(PDC), so a raw dry copy arrives `latency` samples early — comb-filtering on
+parallel busses. Route it through `boundary::render_bypass_passthrough`
+(`adapter_boundary.hpp`), sizing the `AUBridge::bypass` delay line to
+`reported_latency_samples(processor->latency_samples(), host_quirks)` in
+`allocateRenderResources`. A zero latency collapses to a straight passthrough.
+The AU v3 render block can't be driven in stock CI (needs a live host), so the
+bypass logic is covered by the shared `test_adapter_boundary_parity.cpp`
+`[bypass]` fixture the helper is exercised through.
+
 ### State: `fullState` dictionary
 
 `fullState` wraps `store_.serialize()` bytes inside an `NSData` keyed
@@ -437,9 +449,9 @@ Apple's "Creating custom audio effects" sample doc states verbatim:
 > contain at least one source file for the extension binary to be
 > created, properly loaded, and linked with the framework bundle."
 
-iPlug2 ships the same 3-tier architecture. Pulp's macOS AU v3 lane
+That constraint is what forces the 3-tier shape. Pulp's macOS AU v3 lane
 (`tools/cmake/PulpAuv3.cmake`'s `_pulp_add_auv3_macos_*` helpers,
-on the macOS framework path) follows this pattern exactly:
+on the macOS framework path) implements it:
 
 ```
 ChainerSynth.app/                                 ← container .app
@@ -491,7 +503,7 @@ the macOS framework path on macOS.
 **Do NOT put `au_entry.mm`'s `PulpAUFactoryObj` (legacy
 AudioComponentRegister factory C function) anywhere in the macOS AU v3
 lane.** The macOS path uses `_NSExtensionMain` + `NSExtensionPrincipalClass`
-to find the factory class. iPlug2 follows the same convention.
+to find the factory class.
 
 ### rpath: 4 levels up, not 2
 
@@ -506,10 +518,11 @@ set_target_properties(${appex_target} PROPERTIES
     INSTALL_RPATH "@executable_path/../../../../Frameworks")
 ```
 
-**iPlug2's modern CMake helper has this wrong** — it sets
-`@executable_path/../../Frameworks` which works for iOS's flat .appex
-layout but breaks macOS where the .appex has its own
-`Contents/MacOS/`. Don't copy that recipe.
+**`@executable_path/../../Frameworks` is the tempting wrong answer** — it
+suits iOS's flat .appex layout, but breaks on macOS, where the .appex has
+its own `Contents/MacOS/` and sits one bundle deeper. An rpath recipe
+carried over from an iOS lane will resolve inside the .appex and the
+framework silently fails to load.
 
 The container .app's binary at `MyApp.app/Contents/MacOS/MyApp` needs
 2 parent dirs up: `INSTALL_RPATH "@executable_path/../Frameworks"`.

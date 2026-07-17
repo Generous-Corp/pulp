@@ -57,6 +57,61 @@ def bandlimited_square(
     return (amp * (4.0 / np.pi)) * y
 
 
+def _polyblep(phase: np.ndarray, dt: float) -> np.ndarray:
+    """The 2-point polyBLEP correction for a unit downward step, evaluated at `phase` in
+    [0,1) for a per-sample phase increment `dt`. Non-zero only within one sample of the
+    wrap, where it replaces the naive jump with the sampled band-limited step."""
+    b = np.zeros_like(phase)
+    m = phase < dt
+    t = phase[m] / dt
+    b[m] = 2.0 * t - t * t - 1.0
+    m = phase > 1.0 - dt
+    t = (phase[m] - 1.0) / dt
+    b[m] = t * t + 2.0 * t + 1.0
+    return b
+
+
+def polyblep_saw(sr: int, f0: float, dur_s: float, amp: float = 0.7, phase0: float = 0.0) -> np.ndarray:
+    """A polyBLEP sawtooth — a REAL antialiased oscillator, the way a plugin renders one,
+    as opposed to the exact additive `bandlimited_saw`.
+
+    The distinction is the whole reason this fixture exists. `bandlimited_saw` is an exact
+    Fourier sum: sampled, it is precisely sinc-periodic, so a fractional-period delay
+    reproduces it and a comb self-reference nulls it to the interpolator floor. A polyBLEP
+    saw only *approximates* the bandlimited waveform, and it anchors its correction to the
+    wrap's sub-sample phase — which, at a non-integer period ``sr/f0``, advances every
+    period. So successive periods differ slightly AT THE WRAP, and a comb self-reference
+    canNOT null that: it leaves a per-edge approximation residual. That residual is a
+    genuine property of a real oscillator, not a defect, and it is exactly what a
+    click detector built on the additive fixtures fails to anticipate.
+
+    The 2-point polyBLEP is genuinely clean (alias well below the residual) at a low
+    ``f0/sr`` and degrades toward high ``f0/sr`` where a period spans few samples — so a
+    caller asserting "the render is clean, the residual is edge smear not alias" should
+    stay at a low ``f0`` and/or a high ``sr`` (e.g. 220 Hz at 96 kHz), where the alias
+    floor sits tens of dB below the smear.
+    """
+    n = int(round(dur_s * sr))
+    dt = f0 / sr
+    phase = (phase0 + np.arange(n) * dt) % 1.0
+    return amp * ((2.0 * phase - 1.0) - _polyblep(phase, dt))
+
+
+def polyblep_square(sr: int, f0: float, dur_s: float, amp: float = 0.7, phase0: float = 0.0) -> np.ndarray:
+    """A polyBLEP square — the two-edges-per-period counterpart of `polyblep_saw`.
+
+    Same point: a real antialiased square, not an exact Fourier sum, so its two edges land
+    at a fractional sub-sample phase that moves every period and its comb self-reference
+    leaves a per-edge smear the additive `bandlimited_square` does not exhibit. See
+    `polyblep_saw` for the alias-vs-``f0/sr`` caveat.
+    """
+    n = int(round(dur_s * sr))
+    dt = f0 / sr
+    phase = (phase0 + np.arange(n) * dt) % 1.0
+    naive = np.where(phase < 0.5, 1.0, -1.0)
+    return amp * (naive + _polyblep(phase, dt) - _polyblep((phase + 0.5) % 1.0, dt))
+
+
 def _piecewise_linear_fourier(
     breaks: np.ndarray, slopes: np.ndarray, offsets: np.ndarray, period: float, n_harm: int
 ) -> np.ndarray:

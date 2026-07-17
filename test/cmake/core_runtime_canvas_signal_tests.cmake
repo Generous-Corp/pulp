@@ -147,6 +147,10 @@ pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
 # analyzers, hence the analysis lib alongside the DSP under test.
 pulp_add_test_suite(pulp-test-oversampling-quality
     LIBRARIES pulp::signal pulp::audio-analysis)
+# Fundamental-frequency estimator for harmonically-dense oscillator output plus
+# the f0(t) trajectory extractor — proven accurate to well under a cent, and
+# proven to beat the shipped zero-crossing detector on dense material.
+pulp_add_test_suite(pulp-test-pitch-track LIBRARIES pulp::audio-analysis)
 pulp_add_test_suite(pulp-test-transition-mixer LIBRARIES pulp::signal)
 # Signal filter tests extracted from test_signal.cpp.
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
@@ -189,6 +193,18 @@ pulp_add_test_suite(pulp-test-osc-sync LIBRARIES pulp::signal pulp::audio-analys
 # The circuit-flavored VCO's core is gated on measured alias rejection, and its
 # deterministic character stages on level/DC/pitch correctness.
 pulp_add_test_suite(pulp-test-osc-vco LIBRARIES pulp::signal pulp::audio-analysis)
+# The divider-clocked DCO front-end: pitch quantization asserted on the derived
+# integer N / rational period AND on the rendered pitch (hence the analysis lib),
+# with the fractional-N jitter and the shared-path alias rejection measured too.
+pulp_add_test_suite(pulp-test-osc-dco LIBRARIES pulp::signal pulp::audio-analysis)
+# The modern wavetable tier is gated on alias rejection swept to the top of every
+# band, a click-free band-switch seam, and a zipper-free scan.
+pulp_add_test_suite(pulp-test-osc-wt LIBRARIES pulp::signal pulp::audio-analysis)
+# The lo-fi wavetable tier is a dedicated variable-clock ZOH engine, gated on the
+# pitch-tracking n·L·f0 image ladder matching the analytic sinc model, odd-
+# harmonic 8-bit grit, a reconstruction stage that kills the naive in-band fold,
+# and a faithful stepped wave-scan.
+pulp_add_test_suite(pulp-test-osc-wt-lofi LIBRARIES pulp::signal pulp::audio-analysis)
 # SF-2 crossfade unification: live_kernel structural-swap fade now matches the
 # native signal::TransitionMixer (EqualPower) law bit-for-bit — an intended,
 # documented behavior change (the fade previously used a linear theta).

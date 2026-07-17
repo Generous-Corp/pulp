@@ -6,6 +6,7 @@
 #include <pulp/view/geometry.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/theme.hpp>
+#include <pulp/view/value_source.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/view_effect.hpp>
 #include <optional>
@@ -24,6 +25,8 @@ class GestureArbiter; class GestureRecognizer;
 class FrameClock;
 class WidgetPainter;     // pulp/view/widget_painter.hpp — pluggable paint delegate
 class WidgetMetrics;     // pulp/view/widget_metrics.hpp — pluggable sizing delegate
+class FrameClockBinding; // pulp/view/value_source_binding.hpp
+struct ViewValueBindings; // pulp/view/src/view.cpp — lazily allocated value-source bindings
 struct FileDragRequest;  // pulp/view/drag_drop.hpp
 struct ActiveDrag;       // pulp/view/drag_drop.hpp
 struct DropData;         // pulp/view/drag_drop.hpp
@@ -354,6 +357,45 @@ public:
 
     /// Get the frame clock (walks up parent chain to find it).
     FrameClock* frame_clock() const;
+
+    // ── Live host→view value sources ────────────────────────────────────────
+    // The seam a view showing a live host value (a meter, a readout, a
+    // modulation ring) uses instead of hand-rolling a frame-clock-polled
+    // reader. nullptr unbinds. UI thread. Semantics, paint-safety, the
+    // frames-alive effect and the FrameClock lifetime contract are documented
+    // once in value_source_binding.hpp.
+
+    /// Bind a MeterSource. `channel` is the primary channel — the one
+    /// `on_meter_frame` drives a single-value widget from. A view painting
+    /// several meters reads the whole snapshot via `meter_frame()` instead.
+    void set_meter_source(std::shared_ptr<MeterSource> source, int channel = 0);
+    bool has_meter_source() const;
+    int meter_source_channel() const;
+
+    /// The latest MeterFrame snapshotted on the clock. All-zero
+    /// (`channels == 0`) until the first frame, and again from the moment the
+    /// source is changed or unbound. Bound your channel index by
+    /// `min(frame.channels, MeterFrame::kMaxChannels)` — `publish()` stores the
+    /// frame verbatim and never trusts the count to gate an access.
+    const MeterFrame& meter_frame() const;
+
+    /// Bind a ScalarSource — one cached number (a readout, a modulation ring's
+    /// modulated position).
+    void set_scalar_source(std::shared_ptr<ScalarSource> source);
+    bool has_scalar_source() const;
+
+    /// The latest scalar snapshotted on the clock. 0 until the first frame, and
+    /// again from the moment the source is changed or unbound.
+    float scalar_value() const;
+
+    /// A new MeterFrame was snapshotted this frame, `dt` seconds after the last.
+    /// Default no-op — `meter_frame()` already exposes it to `paint()`. A widget
+    /// that advances per-frame state from the reading (ballistics, smoothing)
+    /// overrides this. UI thread, on the FrameClock.
+    virtual void on_meter_frame(const MeterFrame& frame, float dt) {
+        (void)frame;
+        (void)dt;
+    }
 
     // ── Transient-animation glue ─────────────────────────────────────────────
     // Tween/easing already exist; what a faithful port re-rolls every time is
@@ -876,13 +918,34 @@ public:
         Color color{0, 0, 0, 80};
         bool inset = false;
     };
+    /// Replaces the whole stack with one layer. CSS `box-shadow: A` semantics —
+    /// a declaration always supersedes the previous one rather than adding to
+    /// it, so every existing single-shadow caller keeps its exact behavior.
     void set_box_shadow(float ox, float oy, float blur, float spread, Color c,
                         bool inset = false) {
-        shadow_ = {ox, oy, blur, spread, c, inset}; has_shadow_ = true;
+        shadows_.assign(1, BoxShadow{ox, oy, blur, spread, c, inset});
     }
-    void clear_box_shadow() { has_shadow_ = false; }
-    bool has_box_shadow() const { return has_shadow_; }
-    const BoxShadow& box_shadow() const { return shadow_; }
+    /// Appends a layer, preserving CSS author order: `box-shadow: A, B` is
+    /// set_box_shadow(A) followed by add_box_shadow(B). A is the first layer
+    /// and therefore paints ON TOP of B — see the reverse iteration in
+    /// View::paint_all. Layered shadows are how a design expresses depth: a
+    /// wide soft halo plus a tight dark contact shadow. Keeping only the first
+    /// layer keeps the halo and drops the contact shadow, which reads as flat.
+    void add_box_shadow(float ox, float oy, float blur, float spread, Color c,
+                        bool inset = false) {
+        shadows_.push_back(BoxShadow{ox, oy, blur, spread, c, inset});
+    }
+    void clear_box_shadow() { shadows_.clear(); }
+    bool has_box_shadow() const { return !shadows_.empty(); }
+    /// The first (topmost) layer, or a default-constructed shadow when the
+    /// stack is empty — callers that only ever set one shadow can keep
+    /// treating this as "the" shadow.
+    const BoxShadow& box_shadow() const {
+        static const BoxShadow kEmpty{};
+        return shadows_.empty() ? kEmpty : shadows_.front();
+    }
+    /// Every layer, in CSS author order (first paints on top).
+    const std::vector<BoxShadow>& box_shadows() const { return shadows_; }
 
     /// RN iOS-legacy shadow* longhand setters. RN 0.71+ added `boxShadow` as
     /// the cross-platform path, but the four per-attribute setters still appear
@@ -891,21 +954,23 @@ public:
     /// one field of the shared BoxShadow struct so a JSX prop diff that touches
     /// one prop doesn't clobber the others.
     ///
-    /// Any of these turns has_shadow_ on (matches React Native's
-    /// behavior — setting any shadow prop activates the shadow paint).
+    /// Any of these activates the shadow paint (matches React Native's
+    /// behavior — setting any shadow prop activates it), creating a
+    /// default-valued first layer if the stack is empty. RN has no
+    /// multi-shadow longhand, so these address the first layer only.
     void set_box_shadow_color(Color c) {
-        shadow_.color = c; has_shadow_ = true;
+        first_box_shadow().color = c;
     }
     void set_box_shadow_offset(float ox, float oy) {
-        shadow_.offset_x = ox; shadow_.offset_y = oy; has_shadow_ = true;
+        auto& s = first_box_shadow(); s.offset_x = ox; s.offset_y = oy;
     }
     void set_box_shadow_opacity(float a) {
         // RN's shadowOpacity is 0..1; overwrite the shadow color's normalized
         // alpha channel while preserving the existing RGB channels.
-        shadow_.color.a = a; has_shadow_ = true;
+        first_box_shadow().color.a = a;
     }
     void set_box_shadow_radius(float r) {
-        shadow_.blur = r; has_shadow_ = true;
+        first_box_shadow().blur = r;
     }
 
     /// Generic click callback (fires on mouse-down, if set).
@@ -1652,6 +1717,20 @@ private:
     /// after the subtree was built reaches self-subscribing descendants.
     void notify_frame_clock_changed();
 
+    /// Re-point every FrameClockBinding registered on this view at the
+    /// currently reachable clock. Called non-virtually from
+    /// `notify_frame_clock_changed()`, and bindings enrol themselves rather
+    /// than being listed by hand, so no subclass can strand a binding on a
+    /// stale clock by overriding a hook without chaining. No-op when nothing is
+    /// bound.
+    void sync_value_bindings();
+
+    /// Enrol/withdraw a binding constructed with this view as its owner.
+    /// FrameClockBinding calls these from its own ctor/dtor; nothing else does.
+    void register_value_binding(FrameClockBinding* b);
+    void unregister_value_binding(FrameClockBinding* b);
+    friend class FrameClockBinding;
+
     /// Seed corner_radii_ from the uniform corner_radius_ on the first
     /// transition into per-corner mode. Idempotent: subsequent calls (when
     /// has_corner_radii_ is already true) are no-ops.
@@ -1710,6 +1789,13 @@ private:
     bool requires_gpu_host_ = false;
     bool contains_native_overlay_ = false;
     FrameClock* frame_clock_ = nullptr;
+    // Lazily allocated on the first set_meter_source / set_scalar_source, so a
+    // view that shows no live value costs one null pointer.
+    std::unique_ptr<ViewValueBindings> value_bindings_;
+    // Head of the intrusive list of every FrameClockBinding owned by this view —
+    // the two above plus any a subclass holds (DesignFrameView's per-element
+    // scalars). Intrusive so enrolling a binding never allocates.
+    FrameClockBinding* value_binding_head_ = nullptr;
 
     // Visual properties
     float opacity_ = 1.0f;
@@ -1779,8 +1865,14 @@ private:
     // intentionally need clipping must call set_overflow(Overflow::hidden)
     // explicitly — same opt-in as `overflow:hidden` in CSS.
     Overflow overflow_ = Overflow::visible;
-    BoxShadow shadow_{};
-    bool has_shadow_ = false;
+    /// CSS box-shadow layers in author order; empty means no shadow.
+    std::vector<BoxShadow> shadows_;
+    /// The first layer, materialized with default values when absent. Backs
+    /// the RN longhand setters, which mutate one field at a time.
+    BoxShadow& first_box_shadow() {
+        if (shadows_.empty()) shadows_.emplace_back();
+        return shadows_.front();
+    }
     float scale_ = 1.0f;
     float translate_x_ = 0, translate_y_ = 0;
     float rotation_deg_ = 0;

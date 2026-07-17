@@ -10,6 +10,7 @@
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/value_source_binding.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <memory>
 #include <algorithm>
@@ -25,6 +26,16 @@
 #include <utility>
 
 namespace pulp::view {
+
+// Holds a view's value-source bindings behind one lazily allocated pointer, so
+// the common view (no live value) pays a single null pointer rather than two
+// bindings' worth of members. Defined before ~View so the unique_ptr member has
+// a complete type to destroy.
+struct ViewValueBindings {
+    explicit ViewValueBindings(View& owner) : meter(owner), scalar(owner) {}
+    MeterSourceBinding meter;
+    ScalarSourceBinding scalar;
+};
 
 namespace {
 
@@ -452,12 +463,21 @@ void View::paint_all(canvas::Canvas& canvas) {
     // overflow is hidden, the clip below limits the halo to the bounds
     // — same behavior browsers exhibit for clipped boxes. Inset shadows
     // paint later, on top of the content, see below.
-    if (has_shadow_ && !shadow_.inset) {
-        canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
-                               shadow_.offset_x, shadow_.offset_y,
-                               shadow_.blur, shadow_.spread,
-                               shadow_.color, /*inset=*/false,
-                               effective_corner_radius(bounds_.width, bounds_.height));
+    //
+    // CSS paints a shadow list back-to-front: the FIRST layer in the
+    // declaration ends up nearest the viewer, so the list is walked in
+    // reverse and each layer paints over the one behind it. Order is
+    // load-bearing whenever layers overlap — a soft wide halo declared
+    // first must not bury the tight dark contact shadow declared after it.
+    if (!shadows_.empty()) {
+        const float eff_r = effective_corner_radius(bounds_.width, bounds_.height);
+        for (auto it = shadows_.rbegin(); it != shadows_.rend(); ++it) {
+            if (it->inset) continue;
+            canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
+                                   it->offset_x, it->offset_y,
+                                   it->blur, it->spread,
+                                   it->color, /*inset=*/false, eff_r);
+        }
     }
 
     // Clip only when overflow:hidden / overflow:scroll is explicitly
@@ -678,11 +698,13 @@ void View::paint_all(canvas::Canvas& canvas) {
     // shows through children (CSS spec: inset shadows are above the
     // background but below the border-image, here approximated as above
     // children too).
-    if (has_shadow_ && shadow_.inset) {
+    // Reverse order for the same reason as the outset pass above.
+    for (auto it = shadows_.rbegin(); it != shadows_.rend(); ++it) {
+        if (!it->inset) continue;
         canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
-                               shadow_.offset_x, shadow_.offset_y,
-                               shadow_.blur, shadow_.spread,
-                               shadow_.color, /*inset=*/true,
+                               it->offset_x, it->offset_y,
+                               it->blur, it->spread,
+                               it->color, /*inset=*/true,
                                eff_r);
     }
 
@@ -1677,10 +1699,68 @@ void View::set_frame_clock(FrameClock* clock) {
 }
 
 void View::notify_frame_clock_changed() {
+    sync_value_bindings();
     on_frame_clock_changed();
     for (auto& child : children_) {
         if (child) child->notify_frame_clock_changed();
     }
+}
+
+// ── Live host→view value sources ────────────────────────────────────────────
+
+void View::sync_value_bindings() {
+    for (FrameClockBinding* b = value_binding_head_; b; b = b->next_) b->refresh();
+}
+
+void View::register_value_binding(FrameClockBinding* b) {
+    b->next_ = value_binding_head_;
+    value_binding_head_ = b;
+}
+
+void View::unregister_value_binding(FrameClockBinding* b) {
+    for (FrameClockBinding** slot = &value_binding_head_; *slot; slot = &(*slot)->next_) {
+        if (*slot != b) continue;
+        *slot = b->next_;
+        b->next_ = nullptr;
+        return;
+    }
+}
+
+void View::set_meter_source(std::shared_ptr<MeterSource> source, int channel) {
+    // Unbinding a view that never bound anything: nothing to allocate or drop.
+    if (!source && !value_bindings_) return;
+    if (!value_bindings_) value_bindings_ = std::make_unique<ViewValueBindings>(*this);
+    value_bindings_->meter.set_source(std::move(source), channel);
+}
+
+bool View::has_meter_source() const {
+    return value_bindings_ && value_bindings_->meter.has_source();
+}
+
+int View::meter_source_channel() const {
+    return value_bindings_ ? value_bindings_->meter.channel() : 0;
+}
+
+const MeterFrame& View::meter_frame() const {
+    // Paint-safe: a cached copy, or a shared all-zero frame when nothing is
+    // bound. Constant-initialized, so reading it costs no thread-safe-static
+    // guard (which would be a lock on the paint path).
+    static constexpr MeterFrame kNoFrame{};
+    return value_bindings_ ? value_bindings_->meter.frame() : kNoFrame;
+}
+
+void View::set_scalar_source(std::shared_ptr<ScalarSource> source) {
+    if (!source && !value_bindings_) return;
+    if (!value_bindings_) value_bindings_ = std::make_unique<ViewValueBindings>(*this);
+    value_bindings_->scalar.set_source(std::move(source));
+}
+
+bool View::has_scalar_source() const {
+    return value_bindings_ && value_bindings_->scalar.has_source();
+}
+
+float View::scalar_value() const {
+    return value_bindings_ ? value_bindings_->scalar.value() : 0.0f;
 }
 
 void View::request_repaint() {

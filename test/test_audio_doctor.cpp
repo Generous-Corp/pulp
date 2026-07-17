@@ -21,8 +21,10 @@
 #include <choc/text/choc_JSON.h>
 
 #include <pulp/format/processor.hpp>
+#include <pulp/signal/halfband_iir.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
 #include <numeric>
@@ -98,11 +100,229 @@ public:
     }
 };
 
+// ── Test-only processors with a known-truth group delay ────────────────────
+// Two processors whose group delay is known analytically, and one wrapping the
+// shipped half-band design. They are the calibration standards for the
+// group-delay analyzer: if it cannot recover a textbook delay it cannot be
+// trusted on a real filter.
+
+// A pure delay line. h[n] = delta[n - kDelay], so |H| = 1 at every frequency
+// and the group delay is exactly kDelay samples, flat across the whole
+// spectrum — the simplest possible ground truth.
+class DelayLineProcessor : public pulp::format::Processor {
+public:
+    static constexpr int kDelay = 17;
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {.name = "DoctorDelayLine",
+                .manufacturer = "Pulp",
+                .bundle_id = "com.pulp.doctor.delayline",
+                .version = "1.0.0",
+                .category = pulp::format::PluginCategory::Effect,
+                .input_buses = {{"In", 2}},
+                .output_buses = {{"Out", 2}}};
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {
+        for (auto& ch : history_) ch.fill(0.0f);
+        pos_ = 0;
+    }
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        const std::size_t channels =
+            std::min(out.num_channels(), in.num_channels());
+        if (channels == 0)
+            return;
+        for (std::size_t n = 0; n < out.channel(0).size(); ++n) {
+            for (std::size_t ch = 0; ch < channels && ch < history_.size(); ++ch) {
+                out.channel(ch)[n] = history_[ch][pos_];
+                history_[ch][pos_] = in.channel(ch)[n];
+            }
+            pos_ = (pos_ + 1) % kDelay;
+        }
+    }
+
+private:
+    std::array<std::array<float, kDelay>, 2> history_{};
+    std::size_t pos_ = 0;
+};
+
+// An N-tap linear-phase FIR: the length-65 moving average. All taps equal, so
+// the impulse response is symmetric — the textbook Type-I linear-phase case,
+// whose group delay is exactly (N-1)/2 = 32 samples at EVERY frequency,
+// independent of the (sinc-shaped) magnitude response. Its magnitude nulls
+// double as a stopband probe.
+class LinearPhaseFirProcessor : public pulp::format::Processor {
+public:
+    static constexpr int kTaps = 65;
+    static constexpr double kExpectedGroupDelay = (kTaps - 1) / 2.0; // 32.0
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {.name = "DoctorLinearPhaseFir",
+                .manufacturer = "Pulp",
+                .bundle_id = "com.pulp.doctor.linearphasefir",
+                .version = "1.0.0",
+                .category = pulp::format::PluginCategory::Effect,
+                .input_buses = {{"In", 2}},
+                .output_buses = {{"Out", 2}}};
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {
+        for (auto& ch : history_) ch.fill(0.0f);
+        pos_ = 0;
+    }
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        const std::size_t channels =
+            std::min(out.num_channels(), in.num_channels());
+        if (channels == 0)
+            return;
+        for (std::size_t n = 0; n < out.channel(0).size(); ++n) {
+            for (std::size_t ch = 0; ch < channels && ch < history_.size(); ++ch) {
+                history_[ch][pos_] = in.channel(ch)[n];
+                // Accumulate in double: the analyzer is calibrating against an
+                // analytic delay, so the reference must not carry avoidable
+                // summation error of its own.
+                double sum = 0.0;
+                for (float v : history_[ch]) sum += v;
+                out.channel(ch)[n] = static_cast<float>(sum / kTaps);
+            }
+            pos_ = (pos_ + 1) % kTaps;
+        }
+    }
+
+private:
+    std::array<std::array<float, kTaps>, 2> history_{};
+    std::size_t pos_ = 0;
+};
+
+// The shipped default half-band design, wired as the round trip it is deployed
+// as: upsample 2x, then immediately downsample 2x. Both ends run at the
+// scenario's rate, so the measured group delay is expressed in samples at the
+// half-band's input rate — the rate its documented delay figure is quoted at.
+class HalfBandRoundTripProcessor : public pulp::format::Processor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {.name = "DoctorHalfBandRoundTrip",
+                .manufacturer = "Pulp",
+                .bundle_id = "com.pulp.doctor.halfband",
+                .version = "1.0.0",
+                .category = pulp::format::PluginCategory::Effect,
+                .input_buses = {{"In", 2}},
+                .output_buses = {{"Out", 2}}};
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {
+        for (auto& u : up_) u.reset();
+        for (auto& d : down_) d.reset();
+    }
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        const std::size_t channels =
+            std::min(out.num_channels(), in.num_channels());
+        for (std::size_t ch = 0; ch < channels && ch < up_.size(); ++ch) {
+            auto i = in.channel(ch);
+            auto o = out.channel(ch);
+            for (std::size_t n = 0; n < o.size(); ++n) {
+                float lo = 0.0f, hi = 0.0f;
+                up_[ch].process(i[n], lo, hi);
+                o[n] = down_[ch].process(lo, hi);
+            }
+        }
+    }
+
+private:
+    std::array<pulp::signal::HalfBandUpsampler2x, 2> up_{};
+    std::array<pulp::signal::HalfBandDownsampler2x, 2> down_{};
+};
+
 std::unique_ptr<pulp::format::Processor> create_passthrough() {
     return std::make_unique<PassthroughProcessor>();
 }
 std::unique_ptr<pulp::format::Processor> create_hard_clip() {
     return std::make_unique<HardClipProcessor>();
+}
+std::unique_ptr<pulp::format::Processor> create_delay_line() {
+    return std::make_unique<DelayLineProcessor>();
+}
+std::unique_ptr<pulp::format::Processor> create_linear_phase_fir() {
+    return std::make_unique<LinearPhaseFirProcessor>();
+}
+std::unique_ptr<pulp::format::Processor> create_halfband_round_trip() {
+    return std::make_unique<HalfBandRoundTripProcessor>();
+}
+
+// Closed-form group delay at DC of a cascade of first-order allpass sections
+// H(z) = (a + z^-1) / (1 + a*z^-1), whose delay at DC is (1-a)/(1+a). Lets the
+// half-band cases predict their own answer from the shipped coefficients
+// instead of asserting a magic number.
+double allpass_dc_group_delay(std::span<const float> coefficients) {
+    double tau = 0.0;
+    for (float a : coefficients)
+        tau += (1.0 - static_cast<double>(a)) / (1.0 + static_cast<double>(a));
+    return tau;
+}
+
+// Worst deviation of the measured group delay from `expected` over every
+// defined bin in [lo_hz, hi_hz]. Undefined bins are skipped — that is the
+// stopband contract, not a gap in the check.
+struct DelaySpread {
+    double worst_deviation = 0.0;
+    double worst_hz = 0.0;
+    int defined_bins = 0;
+};
+
+DelaySpread delay_spread(const PhaseCurve& curve, double expected, double lo_hz,
+                         double hi_hz) {
+    DelaySpread s;
+    for (const auto& p : curve.full) {
+        if (!p.defined || p.hz < lo_hz || p.hz > hi_hz)
+            continue;
+        ++s.defined_bins;
+        const double dev = std::abs(p.group_delay_samples - expected);
+        if (dev > s.worst_deviation) {
+            s.worst_deviation = dev;
+            s.worst_hz = p.hz;
+        }
+    }
+    return s;
+}
+
+// Reference and output for a pure z^-delay transfer, built directly as buffers
+// so the transfer is exact by construction rather than rendered. The reference
+// is an impulse train of the given `period`, whose spectrum is nonzero only
+// every fft_length/period bins: `period == fft_length` is the single impulse
+// at frame 0 that excites EVERY bin, and any shorter period leaves the analyzer
+// a GAPPED reference to unwrap across. The shift is circular, so H is exactly
+// e^(-j2πk·delay/fft_length) at every excited bin — no truncation, no
+// windowing, no approximation.
+std::pair<pulp::audio::Buffer<float>, pulp::audio::Buffer<float>>
+make_delayed_train(int fft_length, int period, int delay) {
+    pulp::audio::Buffer<float> reference(1, fft_length);
+    pulp::audio::Buffer<float> output(1, fft_length);
+    reference.clear();
+    output.clear();
+    auto* r = reference.channel(0).data();
+    auto* o = output.channel(0).data();
+    for (int n = 0; n < fft_length; n += period) {
+        r[n] = 1.0f;
+        o[(n + delay) % fft_length] = 1.0f;
+    }
+    return {std::move(reference), std::move(output)};
+}
+
+// True unwrapped phase of a pure delay of `delay` samples at `bin`: the
+// transfer is e^(-j2πk·delay/N), so φ(k) = -2πk·delay/N — monotonic and
+// unbounded, which is exactly what an unwrap must reconstruct from wrapped
+// atan2 output.
+double pure_delay_phase(int bin, int delay, int fft_length) {
+    return -2.0 * std::numbers::pi * delay * bin / fft_length;
 }
 
 RenderScenario lowpass_scenario(const char* name, float cutoff_hz) {
@@ -283,6 +503,210 @@ TEST_CASE("Doctor: PulpEffect lowpass magnitude response", "[audio][doctor]") {
     REQUIRE(curve.full.size() == 16384 / 2 + 1);
 }
 
+TEST_CASE("Doctor: group delay recovers a pure delay line",
+          "[audio][doctor][group-delay]") {
+    // Ground truth #1. h[n] = delta[n-17]: |H| = 1 everywhere, group delay
+    // exactly 17 samples at every frequency. Nothing is undefined, so the flat
+    // delay must hold across the entire spectrum. Determinism contract:
+    // unit-impulse stimulus at frame 0, rectangular window, 16384-sample
+    // segment at offset 0, 48 kHz. Tolerance class: numeric — the estimator is
+    // analytically exact for a signal wholly inside the window, so the margin
+    // is numerical only.
+    auto scenario = RenderScenario(create_delay_line)
+                        .name("doctor.group-delay-pure-delay")
+                        .sample_rate(kSampleRate)
+                        .block_size(256);
+    GroupDelayOptions opts;
+    opts.fft_length = 16384;
+    const double checkpoints[] = {100.0, 1000.0, 10000.0};
+    const auto curve = measure_group_delay(scenario, checkpoints, opts);
+
+    const auto spread = delay_spread(curve, DelayLineProcessor::kDelay, 0.0,
+                                     kSampleRate / 2.0);
+    INFO("expected " << DelayLineProcessor::kDelay << " samples; worst "
+                     << "deviation " << spread.worst_deviation << " at "
+                     << spread.worst_hz << " Hz over " << spread.defined_bins
+                     << " defined bins");
+
+    // An allpass delay is defined at every bin — no stopband anywhere.
+    REQUIRE(spread.defined_bins == 16384 / 2 + 1);
+    CHECK(spread.worst_deviation < 0.01);
+
+    // The ergonomic accessors report the same fact, in both units.
+    CHECK(curve.defined_at(1000.0));
+    CHECK_THAT(curve.group_delay_samples_at(1000.0),
+               Catch::Matchers::WithinAbs(DelayLineProcessor::kDelay, 0.01));
+    CHECK_THAT(curve.group_delay_seconds_at(1000.0),
+               Catch::Matchers::WithinAbs(DelayLineProcessor::kDelay / kSampleRate,
+                                          1e-7));
+
+    // Curve carries the determinism-contract fields for review.
+    CHECK(curve.analyzer == "group_delay");
+    CHECK(curve.fft_length == 16384);
+    CHECK(curve.window == Window::rectangular);
+    REQUIRE(curve.checkpoints.size() == 3);
+}
+
+TEST_CASE("Doctor: group delay recovers a linear-phase FIR",
+          "[audio][doctor][group-delay]") {
+    // Ground truth #2 and the estimator's real calibration. A 65-tap
+    // linear-phase FIR has group delay exactly (65-1)/2 = 32 samples, FLAT at
+    // every frequency — including across its magnitude nulls, where the phase
+    // steps by pi but the delay does not change. Recovering a flat 32 from a
+    // sinc-shaped magnitude response is what proves the estimator measures
+    // delay rather than magnitude. Determinism contract: as above.
+    auto scenario = RenderScenario(create_linear_phase_fir)
+                        .name("doctor.group-delay-linear-phase-fir")
+                        .sample_rate(kSampleRate)
+                        .block_size(256);
+    GroupDelayOptions opts;
+    opts.fft_length = 16384;
+    const double checkpoints[] = {100.0, 500.0};
+    const auto curve = measure_group_delay(scenario, checkpoints, opts);
+
+    constexpr double kExpected = LinearPhaseFirProcessor::kExpectedGroupDelay;
+    const auto spread = delay_spread(curve, kExpected, 0.0, kSampleRate / 2.0);
+    INFO("expected " << kExpected << " samples; worst deviation "
+                     << spread.worst_deviation << " at " << spread.worst_hz
+                     << " Hz over " << spread.defined_bins << " defined bins");
+
+    // Flat (N-1)/2 across every bin the magnitude gate admits — the whole
+    // sinc, main lobe and side lobes alike, not just the passband.
+    REQUIRE(spread.defined_bins > 1000);
+    CHECK(spread.worst_deviation < 0.01);
+
+    // Passband spot check via the accessor.
+    CHECK(curve.defined_at(100.0));
+    CHECK_THAT(curve.group_delay_samples_at(100.0),
+               Catch::Matchers::WithinAbs(kExpected, 0.01));
+}
+
+TEST_CASE("Doctor: half-band round-trip group delay", "[audio][doctor][group-delay]") {
+    // The shipped default half-band design (six allpass sections per path),
+    // measured as the 2x-up -> 2x-down round trip it is deployed as. Both ends
+    // run at 48 kHz so the delay is expressed in samples at the half-band's
+    // input rate. Unlike the two calibration cases this is a minimum-phase
+    // IIR: its group delay is frequency-DEPENDENT, so the check is the
+    // passband value plus the shape, not a single flat number.
+    //
+    // Determinism contract: unit impulse at frame 0, rectangular window,
+    // 16384-sample segment at offset 0, 48 kHz. The IIR's response decays far
+    // inside the window, so estimator truncation is not a factor. Tolerance
+    // class: numeric.
+    auto scenario = RenderScenario(create_halfband_round_trip)
+                        .name("doctor.group-delay-halfband")
+                        .sample_rate(kSampleRate)
+                        .block_size(256);
+    GroupDelayOptions opts;
+    opts.fft_length = 16384;
+    // The design's stated passband is up to 0.4 * Nyquist of the half-band's
+    // input rate (9.6 kHz at 48 kHz); probe across it and beyond.
+    const double checkpoints[] = {100.0, 1000.0, 5000.0, 9600.0};
+    const auto curve = measure_group_delay(scenario, checkpoints, opts);
+
+    // Independent ground truth from the shipped coefficients themselves, not a
+    // magic number: an oversampling round trip cascades both allpass paths
+    // (the two paths are LTI and commute, so up-then-down collapses to
+    // A(z)*B(z) at the input rate), and a first-order allpass (a + z^-1) /
+    // (1 + a*z^-1) has group delay (1-a)/(1+a) at DC. Summing that over both
+    // paths predicts the low-frequency delay in closed form.
+    const double expected_dc =
+        allpass_dc_group_delay(pulp::signal::kDefaultCoefficientsA) +
+        allpass_dc_group_delay(pulp::signal::kDefaultCoefficientsB);
+
+    INFO("half-band round-trip group delay (samples at 48 kHz): 100 Hz "
+         << curve.group_delay_samples_at(100.0) << "; 1 kHz "
+         << curve.group_delay_samples_at(1000.0) << "; 5 kHz "
+         << curve.group_delay_samples_at(5000.0) << "; 9.6 kHz "
+         << curve.group_delay_samples_at(9600.0)
+         << "; closed-form DC prediction " << expected_dc
+         << "; magnitude at 9.6 kHz " << curve.magnitude_db_rel_peak_at(9600.0) << " dB");
+
+    // The passband is defined — the round trip is allpass (unity magnitude at
+    // every frequency), so there is real signal to measure a phase from
+    // everywhere, and nothing is gated out.
+    REQUIRE(curve.defined_at(100.0));
+    REQUIRE(curve.defined_at(9600.0));
+
+    // The measurement matches the closed-form prediction near DC. This is the
+    // check that ties the analyzer to the real shipped coefficients.
+    CHECK_THAT(curve.group_delay_samples_at(100.0),
+               Catch::Matchers::WithinAbs(expected_dc, 0.01));
+
+    // Group delay of a minimum-phase IIR RISES toward the transition band —
+    // the defining property that makes a scalar latency claim unsafe and this
+    // curve necessary. Flat-delay assumptions do not hold here.
+    CHECK(curve.group_delay_samples_at(9600.0) >
+          curve.group_delay_samples_at(100.0) + 0.5);
+}
+
+TEST_CASE("Doctor: half-band filter group delay at its own rate",
+          "[audio][doctor][group-delay]") {
+    // The half-band filter itself, rather than the oversampling round trip.
+    // The 2x upsampler realises H(z) = A(z^2) + z^-1 * B(z^2) at its OUTPUT
+    // rate: zero-stuffing an impulse leaves an impulse, so driving the
+    // upsampler with a unit impulse at the input rate and reading its
+    // interleaved output against an impulse reference at 2x gives H's transfer
+    // function directly. Buffer-level analyzer — no processor needed, because
+    // the stage changes rate and a Processor cannot express that.
+    //
+    // Determinism contract: impulse at frame 0, rectangular window, 16384-
+    // sample segment at offset 0, analyzed at 96 kHz (the 2x rate). Tolerance
+    // class: numeric.
+    constexpr int kFft = 16384;
+    constexpr double kUpRate = kSampleRate * 2.0;
+
+    auto input = make_impulse(/*channels=*/1, kFft / 2, 1.0f, /*position=*/0);
+    // Reference at the 2x rate: the zero-stuffed impulse is still a unit
+    // impulse at frame 0, which is exactly what H(z) is driven by.
+    auto reference = make_impulse(/*channels=*/1, kFft, 1.0f, /*position=*/0);
+    pulp::audio::Buffer<float> upsampled(1, kFft);
+    pulp::signal::HalfBandUpsampler2x up;
+    up.process_block(std::as_const(input).view().channel(0),
+                     upsampled.view().channel(0));
+
+    GroupDelayOptions opts;
+    opts.fft_length = kFft;
+    const double checkpoints[] = {100.0, 9600.0, 40000.0};
+    const auto curve = measure_group_delay(
+        std::as_const(reference).view(), std::as_const(upsampled).view(),
+        kUpRate, checkpoints, opts);
+
+    // Closed form for H(z) = A(z^2) + z^-1 * B(z^2) at DC, in samples at the
+    // 2x rate: substituting z^2 doubles each path's delay, the z^-1 adds one
+    // sample to the B branch, and in the passband the two branches are in
+    // phase so the sum's delay is their average.
+    const double tau_paths =
+        allpass_dc_group_delay(pulp::signal::kDefaultCoefficientsA) +
+        allpass_dc_group_delay(pulp::signal::kDefaultCoefficientsB);
+    const double expected_dc_at_2x = (2.0 * tau_paths + 1.0) / 2.0;
+
+    const double measured_2x = curve.group_delay_samples_at(100.0);
+    INFO("half-band filter group delay at DC: " << measured_2x
+         << " samples at the 2x rate (closed form " << expected_dc_at_2x
+         << "), i.e. " << measured_2x / 2.0
+         << " samples at the half-band's input rate. Stopband probe at 40 kHz: "
+         << curve.magnitude_db_rel_peak_at(40000.0) << " dB, defined="
+         << curve.defined_at(40000.0));
+
+    REQUIRE(curve.defined_at(100.0));
+    CHECK_THAT(measured_2x,
+               Catch::Matchers::WithinAbs(expected_dc_at_2x, 0.01));
+
+    CHECK(curve.defined_at(9600.0));
+
+    // Above the half-band's Fs/4 cutoff (24 kHz at the 2x rate) the design
+    // attenuates, but only moderately — this is the documented "Tier-2"
+    // trade-off, ~-40 dB at 40 kHz. That is still well ABOVE the -60 dB gate,
+    // so these bins stay defined and their group delay is a real measurement.
+    // The gate is a signal-present test, not a passband test: a filter with a
+    // shallow stopband is measurable there, and this analyzer says so rather
+    // than discarding data it does have.
+    CHECK(curve.magnitude_db_rel_peak_at(40000.0) < -20.0);
+    CHECK(curve.defined_at(40000.0));
+    CHECK(std::isfinite(curve.group_delay_samples_at(40000.0)));
+}
+
 TEST_CASE("Doctor: THD discriminates clean vs clipped sine", "[audio][doctor]") {
     // Determinism contract: bin-coherent 1 kHz-ish tone (exactly k cycles in
     // 16384 samples at 48 kHz → rectangular window, zero leakage), amplitude
@@ -380,6 +804,365 @@ TEST_CASE("Doctor: curve artifact round-trips", "[audio][doctor]") {
     CHECK(thd_parsed["coherent"].getWithDefault<bool>(false));
     REQUIRE(thd_parsed["harmonics"].isArray());
     CHECK(thd_parsed["harmonics"].size() >= 2);
+}
+
+TEST_CASE("Doctor: group delay reports a stopband as undefined",
+          "[audio][doctor][group-delay]") {
+    // The honesty contract. Phase is meaningless where the magnitude is at the
+    // noise floor: atan2 of numerical dust still returns a plausible-looking
+    // angle, and differentiating it yields a confident-looking group delay
+    // that measures nothing. The analyzer must refuse to report it.
+    //
+    // A 200 Hz lowpass leaves 20 kHz ~80 dB down — far below the default
+    // -60 dB gate — while its passband is untouched. Determinism contract: as
+    // the other group-delay cases. Tolerance class: exact (the gate is a
+    // boolean; NaN-ness is exact).
+    auto scenario = lowpass_scenario("doctor.group-delay-stopband", 200.0f);
+    GroupDelayOptions opts;
+    opts.fft_length = 16384;
+    const double checkpoints[] = {50.0, 20000.0};
+    const auto curve = measure_group_delay(scenario, checkpoints, opts);
+
+    INFO("passband 50 Hz: " << curve.magnitude_db_rel_peak_at(50.0) << " dB, defined="
+                            << curve.defined_at(50.0) << "; stopband 20 kHz: "
+                            << curve.magnitude_db_rel_peak_at(20000.0) << " dB, defined="
+                            << curve.defined_at(20000.0) << "; floor "
+                            << curve.magnitude_floor_db << " dB");
+
+    // The passband carries signal, so its group delay is a real measurement.
+    REQUIRE(curve.defined_at(50.0));
+    CHECK(std::isfinite(curve.group_delay_samples_at(50.0)));
+
+    // The deep stopband does not, and must be reported as undefined rather
+    // than handed a number read out of the noise floor.
+    CHECK(curve.magnitude_db_rel_peak_at(20000.0) < curve.magnitude_floor_db);
+    CHECK_FALSE(curve.defined_at(20000.0));
+
+    // Undefined means NaN, not a plausible zero: a caller who ignores the gate
+    // gets a value that fails every comparison rather than a quiet lie.
+    CHECK(std::isnan(curve.group_delay_samples_at(20000.0)));
+    CHECK(std::isnan(curve.group_delay_seconds_at(20000.0)));
+    CHECK(std::isnan(curve.phase_radians_at(20000.0)));
+
+    // The gate is a magnitude decision, so magnitude stays readable either way
+    // — it is the evidence for the verdict.
+    CHECK(std::isfinite(curve.magnitude_db_rel_peak_at(20000.0)));
+
+    // Every undefined bin in the curve obeys the same contract. `defined`
+    // implies "at or above the stated floor" for ANY curve — that is one
+    // conjunct of the gate. The converse holds only because this stimulus is a
+    // real lowpass with a genuine passband: `defined` also requires reference
+    // and output energy above the estimator's own floor, and on a curve whose
+    // output has collapsed those gates reject bins the dB floor would admit
+    // (see the near-silent-output case). Here they never fire, so the floor is
+    // the only gate in play and every undefined bin is a stopband bin.
+    for (const auto& p : curve.full) {
+        if (p.defined) {
+            CHECK(p.magnitude_db_rel_peak >= curve.magnitude_floor_db);
+        } else {
+            CHECK(p.magnitude_db_rel_peak < curve.magnitude_floor_db);
+            CHECK(std::isnan(p.group_delay_samples));
+        }
+    }
+}
+
+TEST_CASE("Doctor: group delay reports a silent output as undefined",
+          "[audio][doctor][group-delay]") {
+    // The degenerate case the relative magnitude gate cannot see. A silent
+    // output has no peak to be relative TO — the peak collapses onto the
+    // numerical floor, every bin reads 0 dB against it, and the curve would
+    // claim a flat, fully-defined, zero-delay response for a processor that
+    // emitted nothing. Nothing was measured here, so nothing may be reported.
+    // Tolerance class: exact (the gate is a boolean).
+    constexpr int kFft = 1024;
+    auto impulse = make_impulse(/*channels=*/1, kFft, 1.0f, /*position=*/0);
+    pulp::audio::Buffer<float> silent(1, kFft); // all zeros — emits nothing
+
+    GroupDelayOptions opts;
+    opts.fft_length = kFft;
+    const double checkpoints[] = {1000.0};
+    const auto curve =
+        measure_group_delay(std::as_const(impulse).view(),
+                            std::as_const(silent).view(), kSampleRate,
+                            checkpoints, opts);
+
+    // Not one bin may claim a measurement, and no accessor may hand back a
+    // number — a silent processor is not a zero-latency processor.
+    int defined_bins = 0;
+    for (const auto& p : curve.full)
+        if (p.defined)
+            ++defined_bins;
+    INFO("defined bins in a silent-output curve: " << defined_bins << " of "
+                                                   << curve.full.size());
+    CHECK(defined_bins == 0);
+    CHECK_FALSE(curve.defined_at(1000.0));
+    CHECK(std::isnan(curve.group_delay_samples_at(1000.0)));
+    CHECK(std::isnan(curve.phase_radians_at(1000.0)));
+}
+
+TEST_CASE("Doctor: group delay reports a near-silent output as undefined",
+          "[audio][doctor][group-delay]") {
+    // An exactly-zero output is the easy half of this. The hard half is an
+    // output that is a PERFECTLY VALID impulse response — a delay line, here —
+    // scaled to nothing: a collapsed gain stage, a numerically degenerate
+    // filter. It carries real phase, so the relative gate sees a clean 0 dB
+    // peak, and its magnitude clears any absolute transfer-ratio threshold.
+    // But it sits below the group-delay estimator's own energy floor, so the
+    // estimator has nothing to differentiate and yields its zero placeholder.
+    // A curve that called such a bin `defined` would report group delay 0 for
+    // a delay of exactly kDelay samples — a specific, confident, wrong number
+    // that the analyzer never measured. It must be undefined instead.
+    // Tolerance class: exact (the gate is a boolean).
+    constexpr int kFft = 1024;
+    constexpr int kDelay = 8;
+    constexpr float kCollapsedGain = 1e-8f; // ~-160 dBFS
+
+    auto impulse = make_impulse(/*channels=*/1, kFft, 1.0f, /*position=*/0);
+    // The impulse response of a delay-by-kDelay line, at -160 dBFS.
+    auto tiny = make_impulse(/*channels=*/1, kFft, kCollapsedGain,
+                             /*position=*/kDelay);
+
+    GroupDelayOptions opts;
+    opts.fft_length = kFft;
+    const double checkpoints[] = {1000.0};
+    const auto curve =
+        measure_group_delay(std::as_const(impulse).view(),
+                            std::as_const(tiny).view(), kSampleRate,
+                            checkpoints, opts);
+
+    int defined_bins = 0;
+    for (const auto& p : curve.full)
+        if (p.defined)
+            ++defined_bins;
+    INFO("defined bins in a "
+         << kCollapsedGain << "-scaled delay-by-" << kDelay
+         << " curve: " << defined_bins << " of " << curve.full.size()
+         << "; group delay at 1 kHz " << curve.group_delay_samples_at(1000.0)
+         << " (true delay " << kDelay << ")");
+    CHECK(defined_bins == 0);
+    CHECK_FALSE(curve.defined_at(1000.0));
+    CHECK(std::isnan(curve.group_delay_samples_at(1000.0)));
+    CHECK(std::isnan(curve.phase_radians_at(1000.0)));
+}
+
+TEST_CASE("Doctor: group delay reports true unwrapped phase",
+          "[audio][doctor][group-delay]") {
+    // The positive half of the phase contract: when `phase_defined` says the
+    // unwrap is trustworthy, the number must actually BE the phase. A gate that
+    // only ever rejects is satisfied by an analyzer that reports nothing; this
+    // is what stops `phase_defined` from being vacuous.
+    //
+    // Ground truth: a pure delay of kDelay samples. |H| = 1 at every bin, so
+    // nothing is gated and the unwrap walks the whole band unbroken; the true
+    // phase is -2πk·kDelay/N, which sweeps well past ±π and so is a real
+    // unwrap, not a wrap-free special case. Determinism contract: buffers built
+    // directly (no render), rectangular window, offset 0. Tolerance class:
+    // numeric — the assertion below is 1e-12, against ~1.8e-15 observed.
+    constexpr int kFft = 1024;
+    constexpr int kDelay = 3;
+    // period == kFft: one impulse at frame 0, so every bin is excited.
+    auto [reference, output] = make_delayed_train(kFft, /*period=*/kFft, kDelay);
+
+    GroupDelayOptions opts;
+    opts.fft_length = kFft;
+    const double checkpoints[] = {1000.0};
+    const auto curve = measure_group_delay(
+        std::as_const(reference).view(), std::as_const(output).view(),
+        kSampleRate, checkpoints, opts);
+
+    // An all-pass transfer gates nothing, so both flags hold everywhere. If
+    // this fails the gate is over-rejecting and the phase assertions below are
+    // passing vacuously.
+    int defined_bins = 0;
+    int phase_defined_bins = 0;
+    for (const auto& p : curve.full) {
+        if (p.defined)
+            ++defined_bins;
+        if (p.phase_defined)
+            ++phase_defined_bins;
+    }
+    INFO("defined " << defined_bins << ", phase_defined " << phase_defined_bins
+                    << " of " << curve.full.size());
+    CHECK(defined_bins == static_cast<int>(curve.full.size()));
+    CHECK(phase_defined_bins == static_cast<int>(curve.full.size()));
+
+    // Every bin's unwrapped phase equals the closed form — including the bins
+    // many 2π branches down, which is what the accumulated offset exists for.
+    double worst_error = 0.0;
+    int worst_bin = 0;
+    for (std::size_t k = 0; k < curve.full.size(); ++k) {
+        const double error =
+            std::abs(curve.full[k].phase_rad -
+                     pure_delay_phase(static_cast<int>(k), kDelay, kFft));
+        if (error > worst_error) {
+            worst_error = error;
+            worst_bin = static_cast<int>(k);
+        }
+    }
+    INFO("worst phase error " << worst_error << " rad at bin " << worst_bin
+                              << " (true phase there "
+                              << pure_delay_phase(worst_bin, kDelay, kFft)
+                              << " rad)");
+    CHECK(worst_error < 1e-12);
+
+    // The accessor agrees with the curve, and the phase it returns is the
+    // unwrapped branch rather than the wrapped one atan2 would hand back.
+    const int bin_1k = static_cast<int>(std::lround(1000.0 / curve.bin_hz));
+    REQUIRE(curve.phase_defined_at(1000.0));
+    CHECK_THAT(curve.phase_radians_at(1000.0),
+               Catch::Matchers::WithinAbs(pure_delay_phase(bin_1k, kDelay, kFft),
+                                          1e-12));
+    // Nyquist is the deepest branch in the curve: -π·kDelay, i.e. kDelay/2 full
+    // turns from DC. A wrapped reading could not tell it from -π·(kDelay mod 2).
+    CHECK_THAT(curve.full.back().phase_rad,
+               Catch::Matchers::WithinAbs(-std::numbers::pi * kDelay, 1e-12));
+}
+
+TEST_CASE("Doctor: group delay refuses phase the unwrap could not reach",
+          "[audio][doctor][group-delay]") {
+    // The two gates are not the same gate, and this is the case that separates
+    // them. Group delay is a per-bin estimate — a bin with energy has one.
+    // Unwrapped phase is accumulated by walking from DC, so it is only as good
+    // as the bins BELOW it, and no per-bin test can see that.
+    //
+    // Stimulus: an impulse train of period 16 as the reference, so the
+    // reference spectrum is nonzero only every kFft/16 = 64 bins and the
+    // analyzer must unwrap across 63-bin gaps of pure absence. The output is
+    // the same train circularly delayed by kDelay, so the transfer is exactly
+    // z^-kDelay: every excited bin has full magnitude and a group delay of
+    // exactly kDelay, and the ONLY thing wrong with those bins is that the
+    // unwrap could not carry a branch to them.
+    //
+    // Without the chain gate this curve reports `defined = true` with phase off
+    // by a whole 2π at bin 192 and 4π at bin 512 — a fabricated `arg({0,0}) =
+    // 0` at each absent bin resets the accumulated offset. Tolerance class:
+    // exact for the gates (boolean) and for group delay's independence of them.
+    constexpr int kFft = 1024;
+    constexpr int kDelay = 3;
+    constexpr int kPeriod = 16;
+    constexpr int kSpacing = kFft / kPeriod; // 64: bins the reference excites
+    auto [reference, output] = make_delayed_train(kFft, kPeriod, kDelay);
+
+    GroupDelayOptions opts;
+    opts.fft_length = kFft;
+    // 9 kHz is bin 192 at this rate and length — an EXCITED bin two gaps up,
+    // so the accessors below exercise defined-but-unreachable, not a plain
+    // stopband. Checked, not assumed, right below.
+    constexpr double kExcitedHz = 9000.0;
+    const double checkpoints[] = {kExcitedHz};
+    const auto curve = measure_group_delay(
+        std::as_const(reference).view(), std::as_const(output).view(),
+        kSampleRate, checkpoints, opts);
+
+    // Group delay survives the gaps intact — it never consults the unwrap, so
+    // a gapped reference costs it nothing. This is the half that must NOT be
+    // thrown away by gating phase.
+    int measured_bins = 0;
+    for (int bin = kSpacing; bin < static_cast<int>(curve.full.size());
+         bin += kSpacing) {
+        const auto& p = curve.full[static_cast<std::size_t>(bin)];
+        INFO("bin " << bin << ": defined=" << p.defined << " group_delay="
+                    << p.group_delay_samples << " phase_defined="
+                    << p.phase_defined);
+        REQUIRE(p.defined);
+        CHECK_THAT(p.group_delay_samples,
+                   Catch::Matchers::WithinAbs(kDelay, 1e-9));
+        ++measured_bins;
+    }
+    CHECK(measured_bins > 1); // the walk really did cross gaps
+
+    // Phase does not. Every excited bin above the first gap is `defined` — it
+    // has a real measurement — yet its phase is unreachable, so it must be
+    // NaN and flagged, not a plausible wrong branch under a truthful-looking
+    // `defined`.
+    for (int bin = 2 * kSpacing; bin < static_cast<int>(curve.full.size());
+         bin += kSpacing) {
+        const auto& p = curve.full[static_cast<std::size_t>(bin)];
+        INFO("bin " << bin << " (defined=" << p.defined << ")");
+        CHECK_FALSE(p.phase_defined);
+        CHECK(std::isnan(p.phase_rad));
+    }
+
+    // The two flags disagree here, which is the whole point: `defined` is not a
+    // license to read `phase_rad`. Were they interchangeable this lane would
+    // not need both.
+    constexpr int kGappedBin = 3 * kSpacing; // 192
+    REQUIRE(std::lround(kExcitedHz / curve.bin_hz) == kGappedBin);
+    const auto& gapped = curve.full[kGappedBin];
+    REQUIRE(gapped.defined);
+    CHECK_FALSE(gapped.phase_defined);
+
+    // `phase_defined` implies `defined` — never the converse — everywhere.
+    for (const auto& p : curve.full) {
+        if (p.phase_defined)
+            CHECK(p.defined);
+        if (!p.phase_defined)
+            CHECK(std::isnan(p.phase_rad));
+    }
+
+    // The accessors carry the same split, so a caller who only ever touches
+    // the curve through them cannot read a branch the analyzer never resolved.
+    CHECK(curve.defined_at(kExcitedHz));
+    CHECK_FALSE(curve.phase_defined_at(kExcitedHz));
+    CHECK(std::isnan(curve.phase_radians_at(kExcitedHz)));
+    CHECK(std::isfinite(curve.group_delay_samples_at(kExcitedHz)));
+
+    // The artifact must not serialize the branch it refused in memory, while
+    // still publishing the group delay it did measure.
+    const auto parsed = choc::json::parse(
+        phase_curve_to_json(curve, "doctor.group-delay-gapped-reference"));
+    REQUIRE(parsed["curve"].isArray());
+    const auto point = parsed["curve"][kGappedBin];
+    CHECK(point["defined"].getWithDefault<bool>(false));
+    CHECK_FALSE(point["phase_defined"].getWithDefault<bool>(true));
+    CHECK_FALSE(point.hasObjectMember("phase_rad"));
+    CHECK(point.hasObjectMember("group_delay_samples"));
+}
+
+TEST_CASE("Doctor: group-delay artifact round-trips",
+          "[audio][doctor][group-delay]") {
+    // Asserts the artifact schema, not DSP. A stopband point must omit the
+    // delay fields entirely rather than serialize a placeholder — JSON has no
+    // NaN, and a reader must never mistake a gated bin for a measurement.
+    // Tolerance class: exact (field presence).
+    auto scenario = lowpass_scenario("doctor.group-delay-artifact", 200.0f);
+    GroupDelayOptions opts;
+    opts.fft_length = 8192;
+    const double checkpoints[] = {50.0, 20000.0};
+    const auto curve = measure_group_delay(scenario, checkpoints, opts);
+
+    const auto path = write_phase_artifact(curve, "doctor.group-delay-artifact");
+    REQUIRE(std::filesystem::exists(path));
+
+    const auto parsed =
+        choc::json::parse(phase_curve_to_json(curve, "doctor.group-delay"));
+    REQUIRE(parsed.isObject());
+    CHECK(parsed["schema_version"].getWithDefault<int64_t>(-1) ==
+          kDoctorCurveSchemaVersion);
+    CHECK(parsed["analyzer"].getWithDefault<std::string>("") == "group_delay");
+    CHECK(parsed["window"].getWithDefault<std::string>("") == "rectangular");
+    CHECK(parsed["fft_length"].getWithDefault<int64_t>(0) == 8192);
+    CHECK(parsed["magnitude_floor_db"].getWithDefault<double>(0.0) == -60.0);
+    REQUIRE(parsed["curve"].isArray());
+    CHECK(parsed["curve"].size() == 8192 / 2 + 1);
+    REQUIRE(parsed["checkpoints"].isArray());
+    REQUIRE(parsed["checkpoints"].size() == 2);
+
+    // The passband checkpoint carries a measurement in both units.
+    const auto passband = parsed["checkpoints"][0];
+    REQUIRE(passband["defined"].getWithDefault<bool>(false));
+    CHECK(passband.hasObjectMember("group_delay_samples"));
+    CHECK(passband.hasObjectMember("group_delay_seconds"));
+    CHECK(passband.hasObjectMember("phase_rad"));
+
+    // The stopband checkpoint carries the verdict and its evidence, and no
+    // delay number at all.
+    const auto stopband = parsed["checkpoints"][1];
+    REQUIRE_FALSE(stopband["defined"].getWithDefault<bool>(true));
+    CHECK(stopband.hasObjectMember("magnitude_db_rel_peak"));
+    CHECK_FALSE(stopband.hasObjectMember("group_delay_samples"));
+    CHECK_FALSE(stopband.hasObjectMember("group_delay_seconds"));
+    CHECK_FALSE(stopband.hasObjectMember("phase_rad"));
 }
 
 TEST_CASE("Doctor: response guards an empty impulse reference window",

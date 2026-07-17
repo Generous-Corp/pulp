@@ -22,10 +22,15 @@ on:
       - "tools/cmake/PulpWclap.cmake"
       - "tools/cmake/wasi-toolchain.cmake"
       - ".github/workflows/wclap-cloudflare.yml"
+  # No paths filter on pull_request ON PURPOSE: this lane is a REQUIRED status check
+  # (branch protection), and a required check that is path-filtered leaves any PR that
+  # does not touch those paths stuck forever on "Expected — Waiting for status". It must
+  # run on EVERY PR. It ALSO catches the real silent-breakage risk this lane exists for:
+  # the wasm UI build hand-lists its sources (PulpWebUi.cmake), so a CORE refactor
+  # (core/view/**, core/canvas/**) that splits a TU breaks the link with nothing under
+  # examples/web-demos/** touched — invisible to a path-filtered lane. Deploy stays
+  # owner-gated + main-only, so a PR run builds + proves and never deploys.
   pull_request:
-    paths:
-      - "examples/web-demos/wclap-build/**"
-      - ".github/workflows/wclap-cloudflare.yml"
   # Weekly drift check — a broken build is a red run, not a dead site.
   schedule:
     - cron: "0 8 * * 1"

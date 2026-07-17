@@ -73,9 +73,44 @@ Example: `pulpgain-pencil-source.png`, `pulpgain-pencil-render.png`, `pulpgain-p
 
 ### Figma
 
-Figma imports are file/URL based at the CLI. Use `fig` for local `.fig` save
-files decoded offline, `figma-plugin` for the Pulp Figma plugin's `.pulp.json`
-/ `.pulp.zip` envelope, or `figma` for raw REST/file JSON:
+**Save a `.fig` and import it locally. It is the best lane, and it is not close.**
+
+In Figma: **File → Save local copy…**, then:
+
+```bash
+pulp import-design --from fig --file design.fig --outline     # list frames
+pulp import-design --from fig --file design.fig --frame "Plugin UI" --output ui.js
+```
+
+| | lane | use when |
+|---|---|---|
+| **1st** | **`--from fig`** (local save file) | **Always, if you can get the file.** No API, no quota, no rate limit, no network, reproducible forever. It also carries the MOST data (see below). |
+| 2nd | Figma desktop MCP | You cannot get a `.fig` — someone else's file, or you only have view access. Metered: as low as **6 calls per _month_** on a View/Collab seat. |
+| 3rd | REST / file JSON | CI, or true headless with a token. Strictest limits; the `/images` render endpoint 429s for minutes on a dense frame. |
+
+**Why the local file wins on fidelity, not just on quota** — a `.fig` is a ZIP
+that carries things the other lanes never see:
+
+- **Vector geometry, pre-flattened.** Booleans resolved and strokes expanded into
+  fillable outlines, so no vector-network evaluation is needed.
+- **Glyph outlines for every text node.** Icon fonts address glyphs by LIGATURE
+  ("lock" → a padlock), so without the font they render as the literal word. The
+  outlines are in the file — icons render with no font installed, and text whose
+  font is missing renders exactly as designed rather than re-measured with a
+  substitute face.
+- **Shared styles — the design's actual tokens.** Named colour/text/effect
+  definitions that nodes reference. These are load-bearing: Figma caches a
+  style's resolved colour on the referencing node only *sometimes*, and that
+  cache is lossy (it drops paint opacity).
+- **Figma's own SOLVED layout** for every node, including auto-layout children.
+  This is what makes `layout_parity.py` possible — pixel-free geometry checking
+  against the design's real answer.
+- **`thumbnail.png` + `meta.json`** — Figma's own raster of the design plus an
+  exact canvas→thumbnail transform. A free, offline reference image. It is ~0.4×,
+  so it adjudicates gross colour and placement, never material detail.
+
+Use `figma-plugin` for the Pulp Figma plugin's `.pulp.json` / `.pulp.zip`
+envelope, or `figma` for raw REST/file JSON:
 
 ```bash
 pulp import-design --from fig --file design.fig --outline
@@ -272,10 +307,12 @@ Some components have more than one *state frame* — e.g. a keyboard with a
   rect calls `set_active_frame(target_frame)`. This is how an in-design toggle
   control (the 🎹/⌨ buttons in the Musical Typing Keyboard) drives the swap.
 
-### Worked example — re-importing two mode frames
+### Capturing every state in one import
 
-When a design stacks its states in one spec frame (to show them side-by-side),
-import each state **sub-frame** standalone — they become the swap targets:
+Alternate frames are a **faithful-vector** feature: only a faithful_svg node
+renders them, so the capture has to come from a lane that exports one. Export
+each state's sub-frame standalone, then pass one `--file` per state — the
+importer merges them into a single view holding them all:
 
 ```bash
 # Typing mode (Figma node 187:15) and piano mode (187:349) of one component.
@@ -283,15 +320,70 @@ python3 tools/import-design/figma_rest_export.py \
   --file-key <KEY> --node 187:15  --out typing.pulp.json --faithful-vector
 python3 tools/import-design/figma_rest_export.py \
   --file-key <KEY> --node 187:349 --out piano.pulp.json  --faithful-vector
+
+# Merge the two states into one component.
+pulp import-design --from figma-plugin \
+  --file typing.pulp.json --file piano.pulp.json \
+  --emit cpp --mode baked --output keyboard.cpp
 ```
 
+**`--file` order is the frame index.** The first `--file` is frame 0, the
+second is frame 1, and so on — that index is what a swap button targets, so
+reordering the flags re-points the swaps. Name the swap layer `swap 1` in the
+design to target frame 1. (The trailing number in the layer name is the
+target; a layer named just `swap` has no target and is reported as an error.)
+
+A single `--file` behaves exactly as it always has: one frame, no swap wiring.
+
 Each export's faithful SVG (a `data:image/svg+xml;base64` asset in the
-`asset_manifest`) is embedded; the component adds both as frames and wires the
-toggle's buttons as `swap` elements. Re-importing a revised frame is the same
-command on the same node — re-export, re-embed, re-extract rects. Name the link
-in plain English at import time using the interaction-linking vocabulary (swap /
-resize / modal / popover / navigate / open-window / drawer); `swap` is the one
-used here. (`MusicalTypingKeyboard` is the reference consumer.)
+`asset_manifest`) is embedded, and the merge folds the later states into the
+first envelope's root as `alternate_frames`; both the C++ codegen and the
+native materializer then emit one `add_frame` per entry, in order.
+Re-importing a revised state is the same command on the same node — re-export,
+re-merge.
+
+> **Which lanes can capture states.** The faithful-vector REST export above and
+> the Figma plugin's `Export to Pulp` both emit faithful frames, so both feed
+> this merge. `--from fig` (the offline `.fig` decoder) emits a
+> widget-recognition tree instead — it has no faithful mode yet — so it cannot
+> capture multi-state designs. Asking it to (repeated `--frame`) is refused with
+> an error rather than quietly importing one state, and the refusal names the
+> REST recipe above.
+>
+> **Swap buttons come from the plugin lane.** The plugin reads a layer named
+> `swap <n>` into a swap element. The REST exporter does not detect swaps today,
+> so a REST-captured multi-state component holds all its frames but is driven by
+> calling `set_active_frame(i)` from your own code (which is what
+> `MusicalTypingKeyboard` does).
+
+### A swap with no captured target is an error, not a dead button
+
+A swap button pointing at a frame you didn't capture would render as a control
+that silently does nothing. The importer refuses to let that pass quietly — it
+reports the swap through the same channel as any other unresolved control:
+
+```bash
+pulp import-design --from figma-plugin --file typing.pulp.json \
+  --emit cpp --mode baked --output keyboard.cpp \
+  --import-report report.json --fail-on-unresolved
+```
+
+```
+import report: 1 control(s), 1 conflicted, 0 low-confidence, 0 unresolved (inert)
+  - 12:7  kind=swap rung=0 confidence=1 [verify-FAIL]
+      conflict: swap link targets frame 1 but only 1 frame captured (valid indices 0..0)
+```
+
+`--fail-on-unresolved` exits `2`, so CI catches it. The fix is either to
+capture the missing state (add its `--file`) or to correct the layer's target
+number. This applies to a single-frame import too — a design whose swap was
+always dead now says so. A swap that targets the frame it already sits on is
+reported the same way: the button would render and do nothing.
+
+Name the link in plain English at import time using the interaction-linking
+vocabulary (swap / resize / modal / popover / navigate / open-window /
+drawer); `swap` is the one used here. (`MusicalTypingKeyboard` is the
+reference consumer, hand-written before multi-state capture existed.)
 
 > Hit-rects for a standalone sub-frame are in the sub-frame's own coordinate
 > space. Extract them from the node's `absoluteBoundingBox` geometry minus the

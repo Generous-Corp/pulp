@@ -606,6 +606,120 @@ TEST_CASE("codegen synthesizes SVG paths for bare vector shape primitives",
     }
 }
 
+TEST_CASE("a solid-filled ellipse renders as a filled circle, not a dropped node",
+          "[view][import][codegen][vector]") {
+    // The synthesis guard treated "has a fill" as "already renderable". True for
+    // a rect — a frame paints its own background box — but codegen has no
+    // painter for a round primitive, so a filled ellipse emitted NOTHING and the
+    // shape vanished: a design's red record dot rendered as an empty cell right
+    // beside a play triangle that rendered fine (that one carried a real path).
+    //
+    // Both halves matter. The fill has to move ONTO the path, and the node's own
+    // background has to be cleared with it — otherwise the frame paints a square
+    // behind the circle, which is the stray box that shows up behind a knob.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 400.0f;
+
+    IRNode dot;
+    dot.type = "ellipse";
+    dot.name = "RecDot";
+    dot.style.width = 10.0f;
+    dot.style.height = 10.0f;
+    dot.style.background_color = "#dd5151";
+    ir.root.children.push_back(dot);
+
+    std::vector<pulp::view::FidelityIssue> report;
+    CodeGenOptions opts;
+    opts.fidelity_report = &report;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO("js=\n" << js);
+
+    CHECK(js.find("createSvgPath('RecDot") != std::string::npos);
+    CHECK(js.find("A5 5") != std::string::npos);          // the circle's arcs
+    CHECK(js.find("setSvgFill('RecDot") != std::string::npos);
+    CHECK(js.find("'#dd5151')") != std::string::npos);    // fill moved onto the path
+    // The background must NOT also paint: no square behind the dot.
+    CHECK(js.find("setBackgroundColor('RecDot") == std::string::npos);
+
+    bool dropped = false;
+    for (const auto& iss : report)
+        if (iss.kind == "dropped-vector" && iss.node_name == "RecDot") dropped = true;
+    CHECK_FALSE(dropped);
+}
+
+TEST_CASE("a gradient-filled ellipse rides its gradient onto the path",
+          "[view][import][codegen][vector]") {
+    // This case used to bail: a gradient could not move onto a path, so
+    // synthesizing one yielded svg_fill:none — an invisible circle, strictly
+    // worse than the filled box. setSvgFillGradient lets the path carry it, so
+    // the knob body is a lit disc instead of a flat one.
+    //
+    // The square-behind-the-circle rule still binds, and now binds to BOTH
+    // paints: whatever moves onto the path must be cleared off the node's own
+    // background, or the frame paints a gradient rectangle behind the circle —
+    // the exact failure the old bail existed to avoid.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 400.0f;
+
+    IRNode blob;
+    blob.type = "ellipse";
+    blob.name = "GradDot";
+    blob.style.width = 10.0f;
+    blob.style.height = 10.0f;
+    blob.style.background_gradient = "linear-gradient(180deg, #111111 0%, #222222 100%)";
+    ir.root.children.push_back(blob);
+
+    CodeGenOptions opts;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO("js=\n" << js);
+
+    CHECK(js.find("createSvgPath('GradDot") != std::string::npos);
+    CHECK(js.find("A5 5") != std::string::npos);   // it really is the circle
+    CHECK(js.find("linear-gradient(180deg, #111111 0%, #222222 100%)") != std::string::npos);
+    CHECK(js.find("setSvgFillGradient('GradDot") != std::string::npos);
+    // No gradient rectangle and no stale solid behind the circle.
+    CHECK(js.find("setBackgroundGradient('GradDot") == std::string::npos);
+    CHECK(js.find("setBackgroundColor('GradDot") == std::string::npos);
+}
+
+TEST_CASE("a gradient ellipse's solid fill follows it onto the path as the fallback",
+          "[view][import][codegen][vector]") {
+    // SvgPathWidget prefers the gradient and drops back to fill_color_ only when
+    // the string won't parse, so carrying both is a safety net rather than a
+    // conflict — and emission order cannot decide the paint. What must NOT
+    // happen is the solid staying behind on the node as a background box.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 400.0f;
+
+    IRNode blob;
+    blob.type = "ellipse";
+    blob.name = "Knob";
+    blob.style.width = 28.0f;
+    blob.style.height = 28.0f;
+    blob.style.background_color = "#5d5e63";
+    blob.style.background_gradient = "linear-gradient(180deg, #5d5e63 0%, #56575c 100%)";
+    ir.root.children.push_back(blob);
+
+    CodeGenOptions opts;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO("js=\n" << js);
+
+    CHECK(js.find("setSvgFillGradient('Knob") != std::string::npos);
+    CHECK(js.find("setSvgFill('Knob") != std::string::npos);
+    CHECK(js.find("'#5d5e63')") != std::string::npos);
+    CHECK(js.find("setBackgroundColor('Knob") == std::string::npos);
+    CHECK(js.find("setBackgroundGradient('Knob") == std::string::npos);
+}
+
 TEST_CASE("synthesized rect honors border-radius and stroke-only borders",
           "[view][import][codegen][vector]") {
     // A rounded rect emits arc commands; a stroke-only shape carries its border
@@ -1223,4 +1337,47 @@ TEST_CASE("an undersized widget reports informational (never a hard finding)",
         if (iss.node_name == "Tiny") CHECK(iss.informational);
     }
     CHECK(saw_undersized);
+}
+
+TEST_CASE("codegen emits an IR node's flex_shrink instead of dropping it",
+          "[view][import][codegen][layout]") {
+    // flex_shrink was the one flex property the IR could parse
+    // (design_ir_json.cpp reads "flexShrink") and write, but codegen never
+    // emitted — so a source lane that set it was silently overruled by Yoga's
+    // default of 1. It cost a .fig import its toolbar icons: the importer
+    // pinned shrink to 0, nothing carried it to the bridge, and a 12px icon
+    // inside a button whose padding exceeded its width collapsed to width 0.
+    //
+    // Assert on the emitted setFlex call, because that is the only thing the
+    // bridge reads. A test that checked the IR round-trip alone stays green
+    // through this bug — the IR was never where it was lost.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 400.0f;
+
+    IRNode pinned;
+    pinned.type = "frame";
+    pinned.name = "Pinned";
+    pinned.style.width = 12.0f;
+    pinned.style.height = 12.0f;
+    pinned.layout.flex_shrink = 0.0f;
+    ir.root.children.push_back(pinned);
+
+    // Control: a node that says nothing about shrink must stay silent, so Yoga's
+    // default still governs everything that has not opted out.
+    IRNode plain;
+    plain.type = "frame";
+    plain.name = "Plain";
+    plain.style.width = 12.0f;
+    plain.style.height = 12.0f;
+    ir.root.children.push_back(plain);
+
+    const auto js = generate_pulp_js(ir, CodeGenOptions{});
+    INFO("js=\n" << js);
+
+    CHECK(js.find("setFlex('Pinned") != std::string::npos);
+    CHECK(js.find("'flex_shrink', 0") != std::string::npos);
+    CHECK(js.find("setFlex('Plain1', 'flex_shrink'") == std::string::npos);
 }

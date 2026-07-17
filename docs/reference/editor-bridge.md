@@ -214,7 +214,22 @@ view.route_changes_to_host_params(true);   // OFF by default
 
 With routing on, a user gesture on a key-tagged control drives the surface directly
 (`begin_gesture` / `set_param` / `end_gesture`), and `sync_from_host_params()` pulls
-current values and display text back at tick.
+current values and display text back the other way.
+
+Both directions are wired for you in a plugin editor. `ViewBridge::open()` installs
+a `StateStore`-backed surface on the tree, and the editor idle pump pulls every
+`DesignFrameView` in the open tree on every UI tick, so an imported design's
+controls **follow host automation and host-side edits** with no per-plugin
+wiring. (That pull is internal to the bridge — how a frame receives its host
+value is not a contract to reach for; `sync_from_host_params()` on the view is.
+A `bind_parameter` widget gets this from a store listener that
+`pump_listeners()` drains; a `DesignFrameView` binds through the abstract surface
+and registers no listener, so it is pulled instead.)
+
+The pull is **silent** — it writes the element directly and does not re-emit
+`on_element_changed` — so it cannot echo back into the surface or fight automation.
+Embedding Pulp views in your own host? Call `sync_from_host_params()` from your own
+UI tick to get the same behavior.
 
 > ### ⚠️ Pick exactly ONE path — wiring both double-writes
 >
@@ -418,3 +433,105 @@ The keys are **caller-supplied** because `HostParamSurface` deliberately exposes
 no parameter *enumeration* — it answers questions about a key you already hold
 (`has_param` / `get_param` / `param_step_count`). A host reaching this surface has
 that list on its own side; passing it in is the honest wiring rather than a guess.
+
+### Reading a host parameter's formatted text from `paint()`
+
+`param_display_text(key, normalized)` returns the host's own formatted readout —
+`"500 ms"`, `"-6.0 dB"`, `"Sine"`. It is **tick-only**: it calls the host's
+formatter (arbitrary code, which may hold locks shared with the audio thread) and
+returns a fresh `std::string`. Both make it illegal mid-render, and a debug build
+asserts if you call it from `paint()`.
+
+So the round-trip happens once per tick and `paint()` reads the cache:
+
+| | Call | Context |
+|---|---|---|
+| **Write** | `sync_from_host_params()` | tick — one host call per bound element |
+| **Read** | `element_display_text(i)` | `paint()` — no host call, no lock, no allocation |
+
+`sync_from_host_params()` caches the text for **every** element whose `param_key`
+the surface resolves, not just a `Kind::value_label`. A subclass painting its own
+readout — a rack slot's `"Mix 45%"`, a knob's hover tooltip — reads it back by
+index:
+
+```cpp
+class MySlotView : public DesignFrameView {
+    std::string key_ = "slot1_mix";   // a member, not a literal — see below
+
+    void paint(canvas::Canvas& canvas) override {
+        DesignFrameView::paint(canvas);
+        const int i = element_for_param_key(key_);
+        if (element_has_display_text(i))
+            canvas.fill_text(element_display_text(i), x, y);   // "45 %"
+    }
+};
+```
+
+Combined with the bind grid above, this is a complete keyed readout: every host
+parameter has an element, so a parameter the design draws **no** control for still
+has text to paint.
+
+**The returned reference is valid until the next `sync_from_host_params()`, a
+frame swap, or a `build_bind_grid()` rebuild** — paint reads it and draws; it does
+not store it. The last two *reallocate* `elements_`, so they invalidate every
+outstanding reference.
+
+> ### ⚠️ Do not cache the index either
+>
+> A frame swap and a `build_bind_grid()` rebuild replace the element set, so an
+> index resolved before one **silently means a different parameter after it**.
+> `element_display_text` bounds-checks, so this does not crash — it returns
+> *another parameter's readout*, which is precisely the stale lie the rest of this
+> channel is built to prevent.
+>
+> **Resolve the index in `paint()`, every paint** (`element_for_param_key` is a
+> vector scan over a handful of elements, not a host call). If you do hold an
+> index across ticks, re-resolve it on `on_param_key_changed`, on
+> `on_active_frame_changed`, and after any `build_bind_grid()` you issue.
+
+**Hold your keys as `std::string` members.** `element_for_param_key` takes a
+`const std::string&`, so passing a string literal from `paint()` builds a
+temporary and allocates in exactly the place that must not.
+
+**The cache does not truncate and carries no length cap** — it holds whatever the
+host returned, verbatim, so *the cache* is never where a readout becomes a partial
+lie. That is a claim about the cache, not about the whole path: a surface's own
+formatter may cap before the text ever reaches it. `StateStoreHostParamSurface`'s
+fallback for a parameter that declares no `ParamInfo::to_string` formats through a
+`char[64]`, so its default numeric+unit rendering is bounded at 63 characters.
+
+A fixed-capacity buffer here would only be needed to cross a thread or a C ABI, and
+this channel does neither: `sync_from_host_params()` and `paint()` both run on the
+UI thread **by contract** (`sync_from_host_params()` asserts it in debug builds),
+so the read is a plain member read rather than a published frame. (Contrast
+`MeterSource` / `ScalarSource`, whose producer genuinely *is* the audio thread and
+which therefore ride a `TripleBuffer` of fixed-capacity, trivially-copyable
+frames.)
+
+**Staleness is tick-granular.** `paint()` sees the text from the most recent
+`sync_from_host_params()`, and repainting never re-reaches the host — three paints
+between two ticks make zero formatter calls and show one consistent snapshot.
+Before the first sync, the text is empty.
+
+**An unbound key reads as unbound, never as a stale value.** `element_display_text`
+returns empty and `element_has_display_text` returns `false` for an out-of-range
+index, an element with no `param_key`, and a key no surface resolves. A key the
+host *stops* resolving is **cleared** at the next sync rather than left at its last
+value — a readout for a parameter that no longer exists would be a stale lie.
+
+**Display text is a host cache, not local state — a frame swap empties it.**
+Removing the surface entirely (the preview/screenshot path) makes
+`sync_from_host_params()` a no-op, so the elements *currently loaded* keep their
+last readout. That is the same "degrade to local state" the value channel has, but
+it does **not** survive a frame swap, and the difference is structural rather than
+an oversight: `value` and `text` have authored counterparts in each frame's own
+element set, so a swap restores something meaningful, whereas display text exists
+only in the cache the tick fills. A swap installs elements that have never been
+synced, so their readout is empty — the same state as before the first sync — and
+stays empty until a sync against a live surface. It reads as **unbound**, so a
+painter gated on `element_has_display_text` draws nothing rather than the previous
+frame's value.
+
+Empty text alone is therefore ambiguous: a host may legitimately format a value
+*as* an empty string. Gate on `element_has_display_text(i)` when the difference
+matters.

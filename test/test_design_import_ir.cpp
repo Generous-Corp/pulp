@@ -1290,3 +1290,231 @@ TEST_CASE("parse_param_binding_manifest_json reads a node-id → key object",
     auto arr = parse_param_binding_manifest_json(R"(["10:1"])", &err);
     REQUIRE_FALSE(arr.has_value());
 }
+
+TEST_CASE("a path's gradient paint survives the IR JSON round-trip",
+          "[view][import][svg]") {
+    using namespace pulp::view;
+
+    // A vector's gradient rides on the path, not on the box behind it, so it
+    // travels as its own `fillGradient` field rather than as a background. The
+    // decoder writes the field and the bridge has setSvgFillGradient; this
+    // asserts the middle link, which is the one that has repeatedly been the
+    // unplugged end of a chain like this. The node is named "Wedge", not
+    // "Dial": a vector named for a knob is recognized INTO a knob widget and
+    // never reaches the svg branch at all.
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version": 1, "source": "figma",
+      "root": {
+        "type": "frame", "name": "Panel",
+        "children": [{
+          "type": "path", "name": "Wedge",
+          "pathData": "M0 0 L10 0 L10 10 Z",
+          "viewBox": "0 0 10 10",
+          "fill": "#ff0000",
+          "fillGradient": "linear-gradient(180deg, #ffffff 0%, #000000 100%)"
+        }]
+      }
+    })JSON");
+
+    REQUIRE(ir.root.children.size() == 1);
+    const auto& dial = ir.root.children[0].attributes;
+
+    // Carried BESIDE the solid, not instead of it: the widget falls back to the
+    // solid when the gradient string won't parse, which needs both present.
+    REQUIRE(dial.count("svg_fill_gradient") == 1);
+    REQUIRE(dial.at("svg_fill_gradient") ==
+            "linear-gradient(180deg, #ffffff 0%, #000000 100%)");
+    REQUIRE(dial.at("svg_fill") == "#ff0000");
+
+    // And it reaches the generated JS — a parsed attribute nothing emits is
+    // the same silent drop as never parsing it.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    REQUIRE(js.find("setSvgFillGradient(") != std::string::npos);
+    REQUIRE(js.find("linear-gradient(180deg, #ffffff 0%, #000000 100%)") !=
+            std::string::npos);
+}
+
+TEST_CASE("a control's art layers stay art, and are not each promoted to a control",
+          "[view][import][audio-widget]") {
+    using namespace pulp::view;
+
+    // A designer's knob is a frame named for the control, holding art layers:
+    // "knob base", "knob indicator", "knob ring". Every one of those tokenizes
+    // to {knob, …} and matched the name heuristic, so ONE designer knob promoted
+    // to THREE stacked built-in knobs, each painting Pulp's stock skin over the
+    // art it was meant to be.
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version": 1, "source": "figma",
+      "root": {
+        "type": "frame", "name": "Panel",
+        "children": [{
+          "type": "frame", "name": "sound / knob / small unipolar",
+          "children": [
+            {"type": "ellipse", "name": "knob base"},
+            {"type": "frame",   "name": "knob indicator"},
+            {"type": "vector",  "name": "knob ring", "pathData": "M0 0 L10 0 L10 10 Z"}
+          ]
+        }]
+      }
+    })JSON");
+
+    const auto& knob = ir.root.children.at(0);
+    REQUIRE(knob.children.size() == 3);
+    for (const auto& layer : knob.children)
+        REQUIRE(layer.audio_widget == AudioWidgetType::none);
+
+    // And the art survives to the render rather than being replaced: the ring
+    // lowers to its own path.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    REQUIRE(js.find("createKnob(") == std::string::npos);
+    REQUIRE(js.find("setWidgetStyle(") == std::string::npos);
+    REQUIRE(js.find("createSvgPath(") != std::string::npos);
+}
+
+TEST_CASE("a control-named row does not swallow the controls inside it",
+          "[view][import][audio-widget]") {
+    using namespace pulp::view;
+
+    // The other side of the rule. "KnobRow" tokenizes to {knob, row} and matches
+    // too, and so do the knobs inside it — so the suppression has to tell a
+    // control from a layer by something other than the name that made them look
+    // alike. Each of these brings art of its own; that is the difference.
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version": 1, "source": "figma",
+      "root": {
+        "type": "frame", "name": "Panel",
+        "children": [{
+          "type": "frame", "name": "KnobRow",
+          "children": [
+            {"type": "frame", "name": "Knob 1",
+             "children": [{"type": "ellipse", "name": "body"}]},
+            {"type": "frame", "name": "Knob 2",
+             "children": [{"type": "ellipse", "name": "body"}]}
+          ]
+        }]
+      }
+    })JSON");
+
+    const auto& row = ir.root.children.at(0);
+    REQUIRE(row.audio_widget == AudioWidgetType::none);   // a row of knobs is a row
+    REQUIRE(row.children.at(0).audio_widget == AudioWidgetType::knob);
+    REQUIRE(row.children.at(1).audio_widget == AudioWidgetType::knob);
+}
+
+TEST_CASE("a differently-named control inside a control keeps its promotion",
+          "[view][import][audio-widget]") {
+    using namespace pulp::view;
+
+    // Only layers of the SAME kind are treated as that control's art. A fader
+    // sitting inside a knob-named frame is its own control, not a knob's layer.
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version": 1, "source": "figma",
+      "root": {
+        "type": "frame", "name": "Panel",
+        "children": [{
+          "type": "frame", "name": "Knob Panel",
+          "children": [
+            {"type": "ellipse", "name": "knob base"},
+            {"type": "frame",   "name": "Fader"}
+          ]
+        }]
+      }
+    })JSON");
+
+    const auto& panel = ir.root.children.at(0);
+    REQUIRE(panel.children.at(0).audio_widget == AudioWidgetType::none);   // layer
+    REQUIRE(panel.children.at(1).audio_widget == AudioWidgetType::fader);  // control
+}
+// ── interactive_element `kind`: the wire contract ────────────────────────────
+
+TEST_CASE("every interactive kind survives the wire round-trip",
+          "[view][import][ir-v1]") {
+    // The IR reader maps an UNRECOGNIZED kind to `knob`. That makes a kind
+    // dropped from (or misspelled in) interactive_kind_from_id indistinguishable
+    // from a working import at the type level: a real control quietly becomes a
+    // knob. The existing round-trip case pins three kinds; the coercion applies
+    // to all of them, so pin the whole enum. Extend this list when the enum
+    // grows — a new kind that serializes but does not parse lands here.
+    // The wire id is spelled out rather than read back from the writer, so a
+    // rename that changes BOTH sides in step still fails here — the string is
+    // the cross-tool contract (the Figma plugin's schema and the REST exporter
+    // emit it), not an internal detail.
+    const struct { InteractiveElementKind kind; const char* wire; } kAll[] = {
+        {InteractiveElementKind::knob, "knob"},
+        {InteractiveElementKind::fader, "fader"},
+        {InteractiveElementKind::toggle, "toggle"},
+        {InteractiveElementKind::dropdown, "dropdown"},
+        {InteractiveElementKind::text_field, "text_field"},
+        {InteractiveElementKind::tab_group, "tab_group"},
+        {InteractiveElementKind::stepper, "stepper"},
+        {InteractiveElementKind::swap, "swap"},
+        {InteractiveElementKind::action, "action"},
+        {InteractiveElementKind::xy_pad, "xy_pad"},
+        {InteractiveElementKind::value_label, "value_label"},
+        {InteractiveElementKind::custom, "custom"},
+    };
+
+    for (const auto& [kind, wire] : kAll) {
+        DesignIR ir;
+        ir.source = DesignSource::figma;
+        ir.root.type = "frame";
+        ir.root.render_mode = NodeRenderMode::faithful_svg;
+        ir.root.svg_asset_id = "asset-svg";
+
+        IRInteractiveElement el;
+        el.kind = kind;
+        el.x = 10; el.y = 20; el.w = 30; el.h = 40;
+        el.source_node_id = "1:1";
+        ir.root.interactive_elements.push_back(el);
+
+        // Named in the failure message, since `kind` is an opaque int here.
+        INFO("kind wire id: " << wire);
+        const auto canonical = serialize_design_ir(ir);
+        // The kind reached the wire under its documented id...
+        CHECK(canonical.find(std::string("\"kind\":\"") + wire + "\"") != std::string::npos);
+        // ...and came back as itself, not as a coerced knob.
+        const auto parsed = parse_design_ir_json(canonical);
+        REQUIRE(parsed.root.interactive_elements.size() == 1);
+        CHECK(parsed.root.interactive_elements[0].kind == kind);
+    }
+}
+
+TEST_CASE("an unrecognized interactive kind degrades to knob rather than failing the load",
+          "[view][import][ir-v1]") {
+    // Deliberate, and deliberately NOT symmetric with the annotated-capture
+    // tool, which hard-errors on an unknown kind. The tool AUTHORS the IR, so
+    // refusing bad input costs one re-run. This is the RUNTIME reader, which
+    // may be handed a file written by a newer importer: hard-failing here would
+    // drop a whole design because one element used a kind this build predates.
+    // The element is not accepted silently — parse_ir_interactive_element logs
+    // the unknown kind and its source node — but the load survives.
+    // Built from the serializer and then retagged, so the envelope is exactly
+    // the shape the reader expects and `kind` is the only unusual thing in it.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "asset-svg";
+    IRInteractiveElement el;
+    el.kind = InteractiveElementKind::fader;   // a real kind, retagged below
+    el.x = 10; el.y = 20; el.w = 30; el.h = 40;
+    el.source_node_id = "1:1";
+    ir.root.interactive_elements.push_back(el);
+
+    std::string json = serialize_design_ir(ir);
+    const auto at = json.find("\"kind\":\"fader\"");
+    REQUIRE(at != std::string::npos);
+    json.replace(at, std::string("\"kind\":\"fader\"").size(),
+                 "\"kind\":\"holographic_slider\"");
+
+    const auto parsed = parse_design_ir_json(json);
+    REQUIRE(parsed.root.interactive_elements.size() == 1);
+    CHECK(parsed.root.interactive_elements[0].kind == InteractiveElementKind::knob);
+    // The geometry still lands, so the fallback renders where the design put it.
+    CHECK(parsed.root.interactive_elements[0].x == 10);
+    CHECK(parsed.root.interactive_elements[0].w == 30);
+}

@@ -188,7 +188,7 @@ test      = "ctest --test-dir build -C Release --output-on-failure --label-inclu
 stages = ["setup", "configure", "build"]
 setup     = "./setup.sh --ci --deps-only"
 configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF"
-build     = "cmake --build build --parallel $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8) && cmake --install build --prefix install && cmake -S tools/validation/sdk-smoke -B smoke/build -DCMAKE_PREFIX_PATH=install && cmake --build smoke/build --parallel $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8)"
+build     = "tools/ci/governed-build.sh cmake --build build && cmake --install build --prefix install && cmake -S tools/validation/sdk-smoke -B smoke/build -DCMAKE_PREFIX_PATH=install && tools/ci/governed-build.sh cmake --build smoke/build"
 
 [validation.smoke.overrides.windows]
 configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF"

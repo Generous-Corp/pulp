@@ -1,9 +1,11 @@
 #pragma once
 
 #include <pulp/view/svg_fragment.hpp>
+#include <pulp/view/value_source_binding.hpp>
 #include <pulp/view/view.hpp>
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -147,6 +149,34 @@ struct DesignFrameElement {
     /// imported view may leave it empty and let the binder fall back to
     /// source_node_id. Empty = this element is not bound to a host parameter.
     std::string param_key;
+
+    /// Host-formatted readout for `param_key`, cached by sync_from_host_params()
+    /// once per tick so paint() can read it without re-entering the host. Empty
+    /// and `display_text_bound == false` when the element carries no param_key,
+    /// when no HostParamSurface resolves it, or before the first sync. Read it
+    /// via element_display_text() / element_has_display_text() rather than
+    /// directly — those bound the index and carry the contract.
+    ///
+    /// Purely a HOST CACHE, with no authored counterpart — which is what makes
+    /// it behave differently from `value` and `text` when the host goes away.
+    /// Those two have an authored value in the frame's own element set, so a
+    /// frame swap restores something meaningful ("degrade to local state"). This
+    /// has none: the frames_ copy never carries display text, so a swap installs
+    /// elements that have simply never been synced, and their readout is empty
+    /// until the next sync against a live surface — the same state as before the
+    /// first sync. That reads as UNBOUND (display_text_bound == false), so a
+    /// painter gated on element_has_display_text() draws nothing rather than a
+    /// stale value from the frame it just left.
+    ///
+    /// Distinct from `text`, which is the value_label's own painted readout and
+    /// is author-owned (set_element_text): an element may carry a caller-set
+    /// `text` AND a host-formatted `display_text` without either clobbering the
+    /// other.
+    std::string display_text;
+    /// Whether `display_text` came from a host parameter at the last sync, as
+    /// opposed to being empty because nothing resolved. Distinguishes "the host
+    /// formats this as an empty string" from "no host parameter here".
+    bool display_text_bound = false;
 };
 
 // ── Custom-control factory registry ──────────────────────────────────────────
@@ -350,6 +380,31 @@ public:
     // position its own overlay relative to an element (e.g. the piano C-labels
     // drawn under the C keys, which shift as the window moves).
     Rect element_rect(int i) const;
+    // The point, in this view's LOCAL coordinates, at which a pointer event lands
+    // on element `i` — writes it to `out` and returns true, or returns false and
+    // leaves `out` untouched when no such point exists. Dispatching on_mouse_down()
+    // at a reported point hits element `i`.
+    //
+    // This is the INVERSE of hit_element(): it forward-maps the element's hit
+    // anchor through the same panel_transform() that hit_element() inverts, and
+    // picks that anchor the way hit_element() matches each kind — a knob by
+    // distance to its pivot (cx, cy), every other kind by containment in its rect.
+    // Both facts live behind this view's private state (the pivot, the panel crop
+    // origin, and the fit itself), so a caller outside the class cannot derive
+    // this point; re-deriving it against a copy of the fit would be a second
+    // source of truth that drifts from paint(). It exists so a foreign-host
+    // adapter or QA harness can drive a NAMED control through the REAL pointer
+    // path — hit-test included — instead of reaching past hit-testing to poke the
+    // element directly, which would pass even with the hit path broken.
+    //
+    // Returns false — rather than a nearby-looking coordinate — whenever the
+    // element is genuinely unclickable: `i` out of range, the panel not laid out
+    // yet, a disabled element, a momentary key outside the active view group, a
+    // degenerate hit radius or rect, an element occluded by a rect-tested one
+    // ahead of it, and the non-interactive kinds (a value_label readout, a custom
+    // control whose factory never registered). Check the return value: a false
+    // means "there is no such point", never "use (0,0)".
+    bool element_hit_point(int i, Point& out) const;
     // The `action` id of element `i` (for Kind::action command buttons and the
     // readout tag of Kind::value_label), or empty. Lets a consumer route by id.
     const std::string& element_action(int i) const {
@@ -386,6 +441,78 @@ public:
         static const std::string kEmpty;
         return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].text : kEmpty;
     }
+    // ── Paint-safe host readout ──────────────────────────────────────────────
+    // The host-formatted display text of element `i`'s bound parameter — e.g.
+    // "500 ms", "-6.0 dB", "Sine" — as of the last sync_from_host_params().
+    //
+    // This is the READ half of the host readout channel, and the ONLY one legal
+    // from paint(). HostParamSurface::param_display_text() calls the host's own
+    // formatter (arbitrary code, possibly holding locks shared with the audio
+    // thread) and returns a fresh std::string; both make it illegal mid-render,
+    // which is why the surface asserts on a call from a no-alloc scope. So the
+    // one host round-trip happens at tick — sync_from_host_params() caches every
+    // bound element's text — and paint reads the cache.
+    //
+    // Paint-safe: bounds `i` and returns a reference to the cached string. No
+    // host call, no lock, no allocation, no copy. The reference is valid until
+    // the next sync_from_host_params(), a frame swap, or a build_bind_grid()
+    // rebuild — each replaces or reallocates elements_. A painter reads it and
+    // draws; it does not store it, and it does not cache the INDEX across those
+    // either (see element_for_param_key).
+    //
+    // Returning a reference rather than publishing a fixed-capacity frame is the
+    // same call `text` / element_text() already make: both fields live in the
+    // same elements_ vector, are written by the same tick, and are read by the
+    // same paint. Whatever is true of one is true of the other, so a TripleBuffer
+    // on this one and a bare reference on the field beside it would be
+    // incoherent. What makes it safe is not that a tick is somehow guaranteed to
+    // be on the paint thread — nothing here enforces that, which is why
+    // sync_from_host_params() asserts it in debug — but that the ONE writer and
+    // the ONE reader are the same UI thread by contract. (Contrast
+    // MeterSource/ScalarSource, whose producer genuinely IS the audio thread and
+    // which therefore ride a TripleBuffer of fixed-capacity frames. That is the
+    // shape this would need if the tick ever moved off the UI thread — and
+    // display_text is the field that would hurt, since a >SSO string reassigned
+    // under a concurrent reader is a use-after-free, not a torn value.)
+    //
+    // The CACHE does not truncate and carries no length cap: it holds whatever
+    // string the host returned, verbatim, so the cache is never where a readout
+    // becomes a partial lie. That is a claim about this cache only, not about the
+    // whole path — a surface's own formatter may cap before the text ever
+    // arrives (StateStoreHostParamSurface's no-formatter fallback builds through
+    // a char[64], so its default numeric+unit rendering is bounded at 63 chars).
+    //
+    // Every host parameter has an element once build_bind_grid() has run, so
+    // `element_for_param_key(key)` + this is a complete keyed readout for a
+    // parameter the design draws no control for — the shape a rack/chain UI
+    // painting its own per-slot readouts needs.
+    //
+    // Returns empty when `i` is out of range, when the element carries no
+    // param_key, when no HostParamSurface resolves that key, or before the first
+    // sync. Empty is therefore ambiguous on its own — a host may legitimately
+    // format a value AS an empty string. Gate on element_has_display_text(i)
+    // when the difference matters.
+    const std::string& element_display_text(int i) const {
+        static const std::string kEmpty;
+        return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].display_text
+                                                                  : kEmpty;
+    }
+
+    // Whether element `i`'s display text came from a host parameter at the last
+    // sync — i.e. the element carries a param_key that a HostParamSurface
+    // resolved. False for an out-of-range index, an element with no param_key, a
+    // key no surface resolves, and any element before the first
+    // sync_from_host_params(). Paint-safe, same as element_display_text().
+    //
+    // A key the host stops resolving is CLEARED at the next sync rather than
+    // left at its last value: a readout that keeps painting the text of a
+    // parameter that no longer exists is a stale lie, and unbound must read as
+    // unbound.
+    bool element_has_display_text(int i) const {
+        return i >= 0 && i < static_cast<int>(elements_.size()) &&
+               elements_[i].display_text_bound;
+    }
+
     // Whether a Kind::value_label element `i` left-aligns its readout.
     bool element_left_align(int i) const {
         return (i >= 0 && i < static_cast<int>(elements_.size())) && elements_[i].value_left_align;
@@ -418,6 +545,36 @@ public:
             if (elements_[i].param_key == key) return i;
         return -1;
     }
+    // ── Live per-element scalars ─────────────────────────────────────────────
+    // Bind a ScalarSource to the element bound to host parameter `param_key` —
+    // the live per-frame value a subclass paints over that element (an LFO's
+    // modulated position for a macro knob's modulation ring, say). The host
+    // publishes from the audio/host thread; `element_scalar` reads paint-safe.
+    // See View::set_meter_source for the shared lifecycle + lifetime contract.
+    //
+    // Why per-element, and why keyed by param_key: a DesignFrameView is ONE view
+    // painting MANY elements, so the view's own single scalar
+    // (View::set_scalar_source) cannot carry a value per ring. Elements are
+    // keyed by param_key rather than index because `elements_` is REPLACED
+    // wholesale on a frame swap (set_active_frame) — an index means a different
+    // control in a different frame, whereas param_key is the element's stable
+    // host-binding identity. A binding therefore survives a frame swap and
+    // re-points at whichever element carries that key in the new frame; a key no
+    // frame declares reads 0 and stays parked — it never subscribes, so a typo'd
+    // key cannot quietly pin the editor at full frame rate. An empty key never
+    // matches.
+    void set_element_scalar_source(const std::string& param_key,
+                                   std::shared_ptr<ScalarSource> source);
+
+    /// The latest value published for element `i` of the ACTIVE frame, or 0 when
+    /// `i` is out of range or its element has no bound source. Paint-safe: an
+    /// index into a per-frame slot table and a cached float read — no lookup, no
+    /// allocation, no lock.
+    float element_scalar(int i) const;
+
+    /// Whether element `i` of the active frame has a scalar source bound.
+    bool element_has_scalar_source(int i) const;
+
     // Active view group for per-view momentary keyboards (e.g. typing=0, piano=1).
     // hit_element only tests momentary elements whose view_group is -1 or equals
     // this. Switching it releases any held momentary key (note-off) so no notes
@@ -797,6 +954,14 @@ private:
     // Whether a live surface carries `key` — ParamScaleMismatch::host_has_param.
     bool host_has_param_for(const std::string& key) const;
 
+    // Re-point the active frame's slot table at the bindings whose param_key the
+    // new element set declares, and park the rest. Called after every elements_
+    // swap, so a binding outlives a frame change and paint stays a plain index.
+    // Keeping each binding pointed at the reachable clock needs no hook here:
+    // bindings enrol with the View base, which re-points them all from its
+    // non-virtual funnel (see value_source_binding.hpp).
+    void rebuild_element_scalar_slots();
+
     // Map a choice element's selected index to a normalized [0,1] value and back,
     // using resolve_value_count. Single source of truth for choice<->normalized.
     float choice_to_norm(int i, int selected) const;
@@ -860,6 +1025,11 @@ private:
 
     std::string svg_;
     std::vector<DesignFrameElement> elements_;
+    // Element scalar bindings, owned by stable param_key so they survive a frame
+    // swap, plus the active frame's index-aligned view of them (non-owning; null
+    // where the element has no binding) so element_scalar() stays paint-safe.
+    std::unordered_map<std::string, std::unique_ptr<ScalarSourceBinding>> element_scalars_;
+    std::vector<ScalarSourceBinding*> active_element_scalars_;
     std::vector<Overlay> overlays_;
     float svg_w_ = 0.0f, svg_h_ = 0.0f;            // SVG intrinsic size
     float panel_x_ = 0, panel_y_ = 0, panel_w_ = 0, panel_h_ = 0;  // crop, SVG coords

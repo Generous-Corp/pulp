@@ -930,31 +930,69 @@ std::unique_ptr<View> make_faithful_svg_frame(const IRNode& node,
     // A custom control whose factory isn't registered renders inert (the baked
     // SVG underneath still shows). Diagnose it so the gap is SEEN and never
     // becomes a silent knob.
-    for (const auto& ie : node.interactive_elements) {
-        if (ie.kind != InteractiveElementKind::custom) continue;
-        if (ie.factory_id.empty() || !has_design_control_factory(ie.factory_id)) {
-            diagnostics.push_back(diagnostic(
-                ImportDiagnosticSeverity::warning,
-                ImportDiagnosticKind::unsupported_property,
-                "native-materialize-custom-factory-unregistered",
-                std::string(path),
-                ie.factory_id.empty()
-                    ? "custom interactive element has no factory_id (renders inert)"
-                    : "custom interactive element factory '" + ie.factory_id +
-                          "' is not registered (renders inert)",
-                node,
-                std::nullopt));
+    auto diagnose_custom_controls = [&](const IRNode& n) {
+        for (const auto& ie : n.interactive_elements) {
+            if (ie.kind != InteractiveElementKind::custom) continue;
+            if (ie.factory_id.empty() || !has_design_control_factory(ie.factory_id)) {
+                diagnostics.push_back(diagnostic(
+                    ImportDiagnosticSeverity::warning,
+                    ImportDiagnosticKind::unsupported_property,
+                    "native-materialize-custom-factory-unregistered",
+                    std::string(path),
+                    ie.factory_id.empty()
+                        ? "custom interactive element has no factory_id (renders inert)"
+                        : "custom interactive element factory '" + ie.factory_id +
+                              "' is not registered (renders inert)",
+                    n,
+                    std::nullopt));
+            }
         }
-    }
+    };
+    diagnose_custom_controls(node);
+
     auto frame = std::make_unique<DesignFrameView>(std::move(svg),
                                                    to_frame_elements(node.interactive_elements));
+
+    // Frames 1..N: the node's alternate states, in capture order. A `swap`
+    // element addresses frames POSITIONALLY, so every alternate must produce
+    // exactly one add_frame call in order — an alternate whose SVG failed to
+    // resolve is added blank (with its overlays) and diagnosed, never skipped,
+    // because skipping would silently re-point every later swap target.
+    for (std::size_t i = 0; i < node.alternate_frames.size(); ++i) {
+        const IRNode& alt = node.alternate_frames[i];
+        const std::string alt_id = alt.svg_asset_id.value_or("");
+        const IRAssetRef* alt_asset = alt_id.empty() ? nullptr : manifest.resolve(alt_id);
+        std::string alt_svg = alt_asset ? resolve_svg_document(*alt_asset) : std::string{};
+        if (alt_svg.empty()) {
+            diagnostics.push_back(diagnostic(
+                ImportDiagnosticSeverity::warning,
+                ImportDiagnosticKind::unresolved_asset,
+                "native-materialize-faithful-svg-frame-unresolved",
+                std::string(path),
+                "frame " + std::to_string(i + 1) + ": " +
+                    (alt_id.empty()
+                         ? "alternate frame has no svg_asset_id"
+                         : "alternate frame asset '" + alt_id +
+                               "' could not be resolved to an SVG document") +
+                    " (added blank to keep swap target indices stable)",
+                alt,
+                alt_id.empty() ? std::optional<std::string>("svg_asset_id") : std::nullopt));
+        }
+        diagnose_custom_controls(alt);
+        frame->add_frame(std::move(alt_svg), to_frame_elements(alt.interactive_elements));
+    }
+
     // If any control carries a host-param binding key, self-wire gestures to the
     // framework-agnostic HostParamSurface so an imported design with bound
     // controls drives host parameters directly. Controls with an empty key still
     // fall back to on_value_changed, so an all-unbound frame stays inert here.
-    const bool any_bound = std::any_of(
-        node.interactive_elements.begin(), node.interactive_elements.end(),
-        [](const IRInteractiveElement& e) { return !e.param_key.empty(); });
+    auto bound = [](const IRNode& n) {
+        return std::any_of(n.interactive_elements.begin(), n.interactive_elements.end(),
+                           [](const IRInteractiveElement& e) { return !e.param_key.empty(); });
+    };
+    const bool any_bound =
+        bound(node) || std::any_of(node.alternate_frames.begin(),
+                                   node.alternate_frames.end(), bound);
     if (any_bound) frame->route_changes_to_host_params(true);
     return frame;
 }
@@ -1108,21 +1146,37 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
         flex.dim_height = {0.0f, DimensionUnit::auto_};
 }
 
+// Every CSS color a design can write, from ONE place.
+//
+// This exists because the fallback used to live at a single call site. Prefer
+// the hex fast path, then the shared CSS parser for rgb()/rgba()/transparent:
+// Figma demotes a hairline stroke (the FILTER & EQ grid `Line`s) to a 1px frame
+// whose fill is the stroke color — often rgba(171,171,171,0.1) — which
+// parse_hex_color drops, leaving the grid invisible.
+//
+// That fallback was attached to `background_color` alone, while SEVEN paint
+// sites here call parse_hex_color: background, text `color`, `border_color`, and
+// the four per-side border colors. So a design saying `color: rgba(...)` got
+// its background right and silently lost its TEXT and every BORDER. One branch
+// learned the lesson; its six siblings never heard it — the same shape as
+// setBoxShadow being emitted from the frame branch alone, so that 16 declared
+// shadows became 1.
+//
+// A helper rather than six more fallbacks, because the bug is that the
+// knowledge lived at a call site: the eighth paint site added later would have
+// repeated it.
+static std::optional<Color> parse_any_css_color(const std::string& value) {
+    if (auto color = parse_hex_color(value)) return color;
+    if (value.rfind("rgb", 0) == 0 || value.rfind("hsl", 0) == 0 || value == "transparent")
+        return parse_css_color(value);
+    return std::nullopt;
+}
+
 void apply_visual_style(View& view, const IRStyle& style,
                         bool skip_border = false) {
     if (style.background_color) {
-        // Prefer the hex fast path; fall back to the shared CSS parser for
-        // rgb()/rgba()/transparent. Figma demotes a hairline stroke (the
-        // FILTER & EQ grid `Line`s) to a 1px frame whose fill is the stroke
-        // color — often rgba(171,171,171,0.1) — which parse_hex_color drops,
-        // leaving the grid invisible. parse_css_color resolves it.
-        auto color = parse_hex_color(*style.background_color);
-        if (!color) {
-            const std::string& bc = *style.background_color;
-            if (bc.rfind("rgb", 0) == 0 || bc == "transparent")
-                color = parse_css_color(bc);
-        }
-        if (color) view.set_background_color(*color);
+        if (auto color = parse_any_css_color(*style.background_color))
+            view.set_background_color(*color);
     }
     // A CSS background-gradient (the light "hero" panels and the cube/prism/
     // cylinder illustration fills in real Figma imports) paints over the solid
@@ -1133,7 +1187,7 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (style.background_repeat)
         view.set_background_repeat(*style.background_repeat);
     if (style.color) {
-        if (auto color = parse_hex_color(*style.color))
+        if (auto color = parse_any_css_color(*style.color))
             view.set_inheritable_text_color(*color);
     }
     if (style.opacity)
@@ -1149,7 +1203,7 @@ void apply_visual_style(View& view, const IRStyle& style,
         if (style.border_width)
             view.set_border_width(*style.border_width);
         if (style.border_color) {
-            if (auto color = parse_hex_color(*style.border_color))
+            if (auto color = parse_any_css_color(*style.border_color))
                 view.set_border_color(*color);
         }
         if (style.border_top_width) view.set_border_top_width(*style.border_top_width);
@@ -1157,19 +1211,19 @@ void apply_visual_style(View& view, const IRStyle& style,
         if (style.border_bottom_width) view.set_border_bottom_width(*style.border_bottom_width);
         if (style.border_left_width) view.set_border_left_width(*style.border_left_width);
         if (style.border_top_color) {
-            if (auto color = parse_hex_color(*style.border_top_color))
+            if (auto color = parse_any_css_color(*style.border_top_color))
                 view.set_border_top_color(*color);
         }
         if (style.border_right_color) {
-            if (auto color = parse_hex_color(*style.border_right_color))
+            if (auto color = parse_any_css_color(*style.border_right_color))
                 view.set_border_right_color(*color);
         }
         if (style.border_bottom_color) {
-            if (auto color = parse_hex_color(*style.border_bottom_color))
+            if (auto color = parse_any_css_color(*style.border_bottom_color))
                 view.set_border_bottom_color(*color);
         }
         if (style.border_left_color) {
-            if (auto color = parse_hex_color(*style.border_left_color))
+            if (auto color = parse_any_css_color(*style.border_left_color))
                 view.set_border_left_color(*color);
         }
     }
@@ -1204,7 +1258,7 @@ void apply_label_style(Label& label, const IRStyle& style) {
     if (style.line_height) label.set_line_height(*style.line_height);
     if (style.text_align) label.set_text_align(parse_label_align(*style.text_align));
     if (style.color) {
-        if (auto color = parse_hex_color(*style.color)) label.set_text_color(*color);
+        if (auto color = parse_any_css_color(*style.color)) label.set_text_color(*color);
     }
     if (style.text_transform) {
         const auto value = lower_copy(*style.text_transform);
@@ -1238,11 +1292,11 @@ void apply_label_style(Label& label, const IRStyle& style) {
 void apply_svg_paint(SvgPathWidget& path, const IRNode& node) {
     if (auto fill = attr(node, "fill")) {
         if (*fill == "none") path.clear_fill();
-        else if (auto color = parse_hex_color(*fill)) path.set_fill_color(*color);
+        else if (auto color = parse_any_css_color(*fill)) path.set_fill_color(*color);
     }
     if (auto stroke = attr(node, "stroke")) {
         if (*stroke == "none") path.clear_stroke();
-        else if (auto color = parse_hex_color(*stroke)) path.set_stroke_color(*color);
+        else if (auto color = parse_any_css_color(*stroke)) path.set_stroke_color(*color);
     }
     if (auto stroke_width = attr_float(node, "stroke-width"))
         path.set_stroke_width(*stroke_width);
@@ -1251,11 +1305,11 @@ void apply_svg_paint(SvgPathWidget& path, const IRNode& node) {
 void apply_svg_paint(SvgRectWidget& rect, const IRNode& node) {
     if (auto fill = attr(node, "fill")) {
         if (*fill == "none") rect.clear_fill();
-        else if (auto color = parse_hex_color(*fill)) rect.set_fill_color(*color);
+        else if (auto color = parse_any_css_color(*fill)) rect.set_fill_color(*color);
     }
     if (auto stroke = attr(node, "stroke")) {
         if (*stroke == "none") rect.clear_stroke();
-        else if (auto color = parse_hex_color(*stroke)) rect.set_stroke_color(*color);
+        else if (auto color = parse_any_css_color(*stroke)) rect.set_stroke_color(*color);
     }
     if (auto stroke_width = attr_float(node, "stroke-width"))
         rect.set_stroke_width(*stroke_width);
@@ -1264,7 +1318,7 @@ void apply_svg_paint(SvgRectWidget& rect, const IRNode& node) {
 void apply_svg_paint(SvgLineWidget& line, const IRNode& node) {
     if (auto stroke = attr(node, "stroke")) {
         if (*stroke == "none") line.clear_stroke();
-        else if (auto color = parse_hex_color(*stroke)) line.set_stroke_color(*color);
+        else if (auto color = parse_any_css_color(*stroke)) line.set_stroke_color(*color);
     }
     if (auto stroke_width = attr_float(node, "stroke-width"))
         line.set_stroke_width(*stroke_width);
@@ -1300,7 +1354,7 @@ void apply_captured_art_knob_skin(Knob& knob, const IRNode& node) {
         const float w = attr_float(node, "knob_ind_w").value_or(0.0f);
         Color color = Color::rgba(0.92f, 0.92f, 0.92f, 1.0f);
         if (auto hex = attr(node, "knob_ind_color"))
-            if (auto parsed = parse_hex_color(*hex)) color = *parsed;
+            if (auto parsed = parse_any_css_color(*hex)) color = *parsed;
         knob.set_captured_indicator(r_in, *r_out, w, color);
     }
 }
@@ -1370,22 +1424,22 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             if (!text.empty()) button->set_label(text);
             button->set_on(semantics.toggle_on);
             if (semantics.toggle_on_background_color) {
-                if (auto parsed = parse_hex_color(*semantics.toggle_on_background_color)) button->set_on_background_color(*parsed);
+                if (auto parsed = parse_any_css_color(*semantics.toggle_on_background_color)) button->set_on_background_color(*parsed);
             }
             if (semantics.toggle_off_background_color) {
-                if (auto parsed = parse_hex_color(*semantics.toggle_off_background_color)) button->set_off_background_color(*parsed);
+                if (auto parsed = parse_any_css_color(*semantics.toggle_off_background_color)) button->set_off_background_color(*parsed);
             }
             if (semantics.toggle_on_text_color) {
-                if (auto parsed = parse_hex_color(*semantics.toggle_on_text_color)) button->set_on_text_color(*parsed);
+                if (auto parsed = parse_any_css_color(*semantics.toggle_on_text_color)) button->set_on_text_color(*parsed);
             }
             if (semantics.toggle_off_text_color) {
-                if (auto parsed = parse_hex_color(*semantics.toggle_off_text_color)) button->set_off_text_color(*parsed);
+                if (auto parsed = parse_any_css_color(*semantics.toggle_off_text_color)) button->set_off_text_color(*parsed);
             }
             if (semantics.toggle_on_border_color) {
-                if (auto parsed = parse_hex_color(*semantics.toggle_on_border_color)) button->set_on_border_color(*parsed);
+                if (auto parsed = parse_any_css_color(*semantics.toggle_on_border_color)) button->set_on_border_color(*parsed);
             }
             if (semantics.toggle_off_border_color) {
-                if (auto parsed = parse_hex_color(*semantics.toggle_off_border_color)) button->set_off_border_color(*parsed);
+                if (auto parsed = parse_any_css_color(*semantics.toggle_off_border_color)) button->set_off_border_color(*parsed);
             }
             if (semantics.toggle_corner_radius)
                 button->set_corner_radius(*semantics.toggle_corner_radius);
@@ -1477,7 +1531,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                 std::stringstream gs(*grad);
                 std::string tok;
                 while (std::getline(gs, tok, ','))
-                    if (auto c = parse_hex_color(tok)) stops.push_back(*c);
+                    if (auto c = parse_any_css_color(tok)) stops.push_back(*c);
                 if (stops.size() >= 2) image->set_fill_gradient(std::move(stops));
             }
             return image;

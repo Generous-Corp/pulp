@@ -182,9 +182,10 @@ grep -q "security import" "$LOG" 2>/dev/null \
   || bad "import must fire when only an Installer cert is present"$'\n'"$(cat "$LOG")"
 
 # 10. A keychain path CONTAINING A SPACE must survive the search-list rebuild as a
-#     single token, and the existing login keychain must be preserved (not dropped).
+#     single token, and an existing ON-DISK login keychain must be preserved.
 S="$TMP/s10"; mkdir -p "$S"
 SPACED_KC="$TMP/My Keychains/pulp-signing.keychain-db"; mkdir -p "$(dirname "$SPACED_KC")"; : > "$SPACED_KC"
+SPACED_LOGIN="$TMP/My Keychains/login.keychain-db"; : > "$SPACED_LOGIN"
 : > "$S/id.p12"
 cat > "$S/keychain.env" <<EOF
 PULP_SIGN_KEYCHAIN="$SPACED_KC"
@@ -195,15 +196,79 @@ PULP_SIGN_IDENTITY_HASH="DEADBEEF"
 EOF
 ARGV="$TMP/argv10"; : > "$ARGV"
 # existing search list ALSO has a spaced path, to prove the parser preserves it.
-SHIM_EXISTING_KEYCHAINS=$'    "/Users/x/My Keychains/login.keychain-db"' \
+SHIM_EXISTING_KEYCHAINS="    \"$SPACED_LOGIN\"" \
 SHIM_ARGV_LOG="$ARGV" \
   PATH="$SHIMBIN:$PATH" PULP_SECRETS_DIR="$S" SHIM_IDENTITY_IN_DEDICATED=1 \
   env -u PULP_SIGN_KEYCHAIN -u PULP_NOTARY_KEY_PATH bash "$DOCTOR" --quiet >/dev/null 2>&1 || true
 # the dedicated spaced path must appear as exactly one argv line…
 { grep -Fxq "$SPACED_KC" "$ARGV" \
-  && grep -Fxq "/Users/x/My Keychains/login.keychain-db" "$ARGV"; } \
+  && grep -Fxq "$SPACED_LOGIN" "$ARGV"; } \
   && ok "spaced keychain paths survive search-list rebuild as single tokens" \
   || bad "spaced-path search-list rebuild corrupted tokenization"$'\n'"argv:"$'\n'"$(cat "$ARGV")"
+
+# ── search-list CONVERGENCE (dedup + prune + idempotence) ─────────────────────
+# These drive the real search-list rebuild through the shimmed `security`
+# read/write seam. Existence is a real `[ -f ]` on disk, so a "surviving" entry
+# is an actual file under $TMP and a "dangling" entry is a path that does not
+# exist. A search list must CONVERGE — never grow, never keep deleted keychains.
+render_existing() {  # emit a `security list-keychains`-style block for $@ paths
+  local p; for p in "$@"; do printf '    "%s"\n' "$p"; done
+}
+render_from_file() { while IFS= read -r p; do [ -n "$p" ] && printf '    "%s"\n' "$p"; done < "$1"; }
+kc_paths_of() { grep -E '\.keychain-db$' "$1" 2>/dev/null || true; }  # written keychains
+converge_run() {  # $1 secretsdir  $2 existing-list block  $3 argv-log
+  SHIM_EXISTING_KEYCHAINS="$2" SHIM_ARGV_LOG="$3" \
+    PATH="$SHIMBIN:$PATH" PULP_SECRETS_DIR="$1" SHIM_IDENTITY_IN_DEDICATED=1 \
+    env -u PULP_SIGN_KEYCHAIN -u PULP_NOTARY_KEY_PATH \
+    bash "$DOCTOR" --quiet >/dev/null 2>&1 || true
+}
+
+# 11. PRUNE: a search list carrying deleted (dangling) keychains must be rewritten
+#     WITHOUT them — securityd should never be handed a keychain file that is gone.
+S="$TMP/s11"; make_secrets "$S"
+KC11="$S/pulp-signing.keychain-db"
+LOGIN11="$TMP/login11.keychain-db"; : > "$LOGIN11"        # exists on disk
+GONE11A="$TMP/gone-11a.keychain-db"                        # never created
+GONE11B="$TMP/gone-11b.keychain-db"                        # never created
+ARGV="$TMP/argv11"; : > "$ARGV"
+converge_run "$S" "$(render_existing "$LOGIN11" "$GONE11A" "$GONE11B")" "$ARGV"
+kc_paths_of "$ARGV" > "$TMP/paths11"
+{ grep -Fxq "$KC11" "$TMP/paths11" && grep -Fxq "$LOGIN11" "$TMP/paths11" \
+  && ! grep -Fxq "$GONE11A" "$TMP/paths11" && ! grep -Fxq "$GONE11B" "$TMP/paths11"; } \
+  && ok "search list prunes dangling (deleted) keychains" \
+  || bad "dangling keychains were NOT pruned from the search list"$'\n'"written:"$'\n'"$(cat "$TMP/paths11")"
+
+# 12. DEDUP: duplicate entries (including the dedicated keychain itself) must
+#     collapse to a single occurrence each.
+S="$TMP/s12"; make_secrets "$S"
+KC12="$S/pulp-signing.keychain-db"; : > "$KC12"
+LOGIN12="$TMP/login12.keychain-db"; : > "$LOGIN12"
+ARGV="$TMP/argv12"; : > "$ARGV"
+converge_run "$S" "$(render_existing "$KC12" "$LOGIN12" "$KC12" "$LOGIN12")" "$ARGV"
+kc_paths_of "$ARGV" > "$TMP/paths12"
+{ grep -Fxq "$KC12" "$TMP/paths12" && grep -Fxq "$LOGIN12" "$TMP/paths12" \
+  && [ -z "$(sort "$TMP/paths12" | uniq -d)" ]; } \
+  && ok "search list deduplicates repeated keychains" \
+  || bad "duplicate keychains survived the search-list rebuild"$'\n'"written:"$'\n'"$(cat "$TMP/paths12")"
+
+# 13. IDEMPOTENCE: running twice must equal running once. Thread run-1's written
+#     list back into run-2 and assert the stable list never accumulates — no
+#     dangling, no duplicates, login + dedicated keychain still present.
+S="$TMP/s13"; make_secrets "$S"
+KC13="$S/pulp-signing.keychain-db"
+LOGIN13="$TMP/login13.keychain-db"; : > "$LOGIN13"
+GONE13="$TMP/gone-13.keychain-db"
+A1="$TMP/argv13a"; : > "$A1"; A2="$TMP/argv13b"; : > "$A2"
+converge_run "$S" "$(render_existing "$LOGIN13" "$GONE13" "$GONE13")" "$A1"
+kc_paths_of "$A1" > "$TMP/stable13a"
+converge_run "$S" "$(render_from_file "$TMP/stable13a")" "$A2"
+kc_paths_of "$A2" > "$TMP/stable13b"
+# run-2's write if it wrote, else exactly what run-2 was handed (a true no-op).
+if [ -s "$TMP/stable13b" ]; then STABLE="$TMP/stable13b"; else STABLE="$TMP/stable13a"; fi
+{ grep -Fxq "$KC13" "$STABLE" && grep -Fxq "$LOGIN13" "$STABLE" \
+  && ! grep -Fxq "$GONE13" "$STABLE" && [ -z "$(sort "$STABLE" | uniq -d)" ]; } \
+  && ok "search-list convergence is idempotent (N runs == 1 run)" \
+  || bad "search list grew / retained dangling across repeated runs"$'\n'"stable:"$'\n'"$(cat "$STABLE")"
 
 echo ""
 echo "passed: $PASS   failed: $FAIL"

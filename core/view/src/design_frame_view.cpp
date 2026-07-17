@@ -1,6 +1,7 @@
 #include <pulp/view/design_frame_view.hpp>
 
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/view/host_param_surface.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -324,8 +325,68 @@ void DesignFrameView::activate_frame(int index) {
     // the stand-ins and never a real control.
     apply_bind_grid();
     build_overlays();
+    rebuild_element_scalar_slots();
     invalidate_layout();
     on_active_frame_changed();
+}
+
+// ── Live per-element scalars ────────────────────────────────────────────────
+
+void DesignFrameView::set_element_scalar_source(const std::string& param_key,
+                                                std::shared_ptr<ScalarSource> source) {
+    if (param_key.empty()) return;  // never a valid element identity
+    if (!source) {
+        // Unbinding drops the binding (and its subscription), so an unbound view
+        // stops holding the editor's frames alive.
+        element_scalars_.erase(param_key);
+        rebuild_element_scalar_slots();
+        return;
+    }
+    auto& slot = element_scalars_[param_key];
+    if (!slot) slot = std::make_unique<ScalarSourceBinding>(*this);
+    slot->set_source(std::move(source));
+    rebuild_element_scalar_slots();
+}
+
+float DesignFrameView::element_scalar(int i) const {
+    if (i < 0 || i >= static_cast<int>(active_element_scalars_.size())) return 0.0f;
+    const ScalarSourceBinding* b = active_element_scalars_[i];
+    return b ? b->value() : 0.0f;
+}
+
+bool DesignFrameView::element_has_scalar_source(int i) const {
+    if (i < 0 || i >= static_cast<int>(active_element_scalars_.size())) return false;
+    return active_element_scalars_[i] != nullptr;
+}
+
+void DesignFrameView::rebuild_element_scalar_slots() {
+    active_element_scalars_.assign(elements_.size(), nullptr);
+    if (element_scalars_.empty()) return;
+
+    for (size_t i = 0; i < elements_.size(); ++i) {
+        const std::string& key = elements_[i].param_key;
+        if (key.empty()) continue;
+        auto it = element_scalars_.find(key);
+        if (it == element_scalars_.end() || !it->second) continue;
+        active_element_scalars_[i] = it->second.get();
+    }
+
+    // A binding is live iff the ACTIVE frame declares its key. A key no frame
+    // carries — a typo, or a param dropped from a redesign — would otherwise
+    // hold the editor at full frame rate forever to feed a ring nothing paints,
+    // silently costing the plugin the idle-at-0-fps behavior the whole unbind
+    // path exists to protect. Decided from the rebuilt table rather than by
+    // parking everything and un-parking the matches, so a binding that stays
+    // matched is never toggled off and on — that would drop its cached value and
+    // churn its subscription on every rebuild, including the rebuild that runs
+    // when a SIBLING element is bound.
+    for (auto& [key, binding] : element_scalars_) {
+        if (!binding) continue;
+        const bool declared = std::find(active_element_scalars_.begin(),
+                                        active_element_scalars_.end(),
+                                        binding.get()) != active_element_scalars_.end();
+        binding->set_active(declared);
+    }
 }
 
 int DesignFrameView::add_frame(std::string svg, std::vector<DesignFrameElement> elements,
@@ -629,15 +690,70 @@ void DesignFrameView::emit_gesture_end(int i) {
 }
 
 void DesignFrameView::sync_from_host_params() {
+    // The whole channel's safety rests on writer and reader sharing a thread:
+    // element_display_text() hands paint a reference INTO elements_, which this
+    // loop reassigns. Nothing in the type system enforces that, so make the
+    // violation loud where it happens rather than letting it surface as a torn
+    // readout — or, for a string past the small-string buffer, a use-after-free
+    // of the heap block paint is mid-read. Inert when no backend is registered
+    // (every headless test), so an inline-driven test never trips it, and the
+    // whole check sits inside assert() — so it compiles out entirely under
+    // NDEBUG rather than costing a release build anything.
+    assert((!events::MainThreadDispatcher::has_backend() ||
+            events::MainThreadDispatcher::is_main_thread()) &&
+           "DesignFrameView::sync_from_host_params called off the host main "
+           "thread; it writes the cache paint() reads");
+
     HostParamSurface* surface = host_params();
     if (!surface) return;  // preview/screenshot: degrade to local state
     for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
-        const auto& e = elements_[i];
-        if (e.param_key.empty() || !surface->has_param(e.param_key)) continue;
+        auto& e = elements_[i];
+        if (e.param_key.empty() || !surface->has_param(e.param_key)) {
+            // Unbound (no key, or the host stopped resolving one it used to).
+            // Clear rather than leave the last text standing: paint must not
+            // keep drawing the readout of a parameter that is no longer there.
+            e.display_text.clear();
+            e.display_text_bound = false;
+            continue;
+        }
         const double norm = surface->get_param(e.param_key);
+
+        // Cache the host-formatted readout for EVERY bound element, not just a
+        // value_label. The formatter round-trip is legal here (tick) and illegal
+        // in paint, so a painter that draws its own readout — a rack slot's
+        // "Mix 45%", a knob's hover tooltip — has no other way to reach it. A
+        // bind-grid stand-in draws nothing itself and is cached for exactly that
+        // reason: its whole purpose is to give a subclass text to paint for a
+        // parameter the design has no control for.
+        //
+        // COST: this is one formatter call per BOUND ELEMENT per tick, where the
+        // old code made one per value_label — same call, but the count now scales
+        // with the bind grid rather than with the handful of readouts a design
+        // draws. A 200-key grid at 60 Hz is ~12k calls/sec, each of which on the
+        // native path is a resolver lookup + a snprintf + a string construction.
+        // That is not free, and it is deliberately NOT dirty-checked against the
+        // last `norm`: display text is not a pure function of (key, normalized).
+        // ParamInfo::to_string is a std::function whose closure may capture other
+        // state, do_param_display_text is virtual and a foreign host's override
+        // may consult anything, and the canonical case is real — a tempo-synced
+        // delay reformats "500 ms" to "1/4" when a sync toggle flips while its own
+        // value never moves. A last-norm guard would freeze exactly that readout,
+        // which is the stale lie this channel exists to avoid. Memoization is the
+        // HOST's call because only the host knows whether its formatting is pure
+        // in the value; HostParamSurface asks for it in the contract.
+        e.display_text = surface->param_display_text(e.param_key, norm);
+        e.display_text_bound = true;
+
         if (e.kind == DesignFrameElement::Kind::value_label) {
-            // A readout tracks its param's host-formatted display text.
-            set_element_text(i, surface->param_display_text(e.param_key, norm));
+            // A readout also tracks the text as its own painted string, so a
+            // value_label keeps rendering with no subclass involvement. This
+            // copies: `text` and `display_text` are two owning fields that must
+            // both hold the value, so a value_label costs one assign more than a
+            // plain bound element. Keeping them distinct is the point — an
+            // author-set `text` and a host `display_text` must not clobber each
+            // other — so the copy is the price of that separation, not an
+            // oversight.
+            set_element_text(i, e.display_text);
         } else {
             // Silent host->view push (no echo back to the surface).
             set_element_value(i, static_cast<float>(norm));
@@ -888,6 +1004,32 @@ Rect DesignFrameView::element_rect(int i) const {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return {0, 0, 0, 0};
     const auto& e = elements_[i];
     return {e.x, e.y, e.w, e.h};
+}
+
+bool DesignFrameView::element_hit_point(int i, Point& out) const {
+    if (i < 0 || i >= static_cast<int>(elements_.size())) return false;
+    const auto t = panel_transform(local_bounds());
+    if (t.scale <= 0.0f) return false;  // not laid out: no point exists yet
+    const auto& e = elements_[i];
+    // The anchor hit_element() matches this kind by: a knob by distance to its
+    // pivot, every other kind by containment in its rect.
+    const bool by_pivot = e.kind == DesignFrameElement::Kind::knob;
+    const float sx = by_pivot ? e.cx : e.x + e.w * 0.5f;
+    const float sy = by_pivot ? e.cy : e.y + e.h * 0.5f;
+    // Forward the paint/hit fit: SVG coords -> view px (hit_element inverts this).
+    const Point p{t.ox + (sx - panel_x_) * t.scale, t.oy + (sy - panel_y_) * t.scale};
+    // Prove the anchor before promising it. An element with a native overlay is
+    // clicked through its child widget, which View::hit_test reaches before this
+    // parent, and layout_children() puts that widget on exactly this rect — so the
+    // rect center lands on it. Every other kind must round-trip through the real
+    // hit-tester, which is the only thing that knows the element is disabled, is a
+    // momentary key outside the active view group, has a degenerate hit radius or
+    // rect, or is occluded by a rect-tested element ahead of it. In each of those
+    // cases NO point hits `i`, and saying so beats handing back a coordinate that
+    // misses silently and reads as a dead control.
+    if (overlay_widget(i) == nullptr && hit_element(p) != i) return false;
+    out = p;
+    return true;
 }
 
 float DesignFrameView::element_value(int i) const {

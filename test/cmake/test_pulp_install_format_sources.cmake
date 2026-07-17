@@ -56,6 +56,7 @@ endif()
 # _PULP_FORMAT_SOURCE_DIR so an installed-SDK consumer can build any
 # format the SDK ships.
 set(_required_sources
+    aax_effect_gui.cpp
     aax_runtime.cpp
     au_adapter.mm
     au_audio_unit.h

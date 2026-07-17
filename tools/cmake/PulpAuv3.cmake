@@ -14,7 +14,6 @@
 #    Required because Apple's docs explicitly say "the extension's main
 #    binary cannot be dynamically loaded into another app, so all
 #    executable AU code must live in a separate framework bundle."
-#    iPlug2 ships the same architecture.
 #
 # Per-plugin macOS AU v3 targets created:
 #   ${target}_AUv3Framework  — SHARED FRAMEWORK with the AU code
@@ -77,7 +76,7 @@ function(_pulp_add_auv3_macos_framework target name bundle_id version auv3_entry
     # intentionally do NOT include au_entry.mm here. That file defined a
     # legacy AudioComponent C factory; AU v3 instead loads the principal
     # class (PulpAUMacViewController, which adopts AUAudioUnitFactory) via
-    # _NSExtensionMain. iPlug2 follows the same convention.
+    # _NSExtensionMain.
     add_library(${fw_target} SHARED
         ${PULP_${target}_CORE_OBJECTS}
         ${_PULP_FORMAT_SOURCE_DIR}/au_adapter.mm
@@ -122,9 +121,8 @@ function(_pulp_add_auv3_macos_framework target name bundle_id version auv3_entry
         @ONLY
     )
 
-    # Framework bundle properties. install_name lets the .appex find the
-    # framework via @rpath at runtime. iPlug2's xcconfig uses the same
-    # @rpath-relative install name on macOS.
+    # Framework bundle properties. An @rpath-relative install_name lets the
+    # .appex find the framework at runtime.
     set_target_properties(${fw_target} PROPERTIES
         FRAMEWORK TRUE
         FRAMEWORK_VERSION A
@@ -151,7 +149,7 @@ function(_pulp_add_auv3_macos_appex target name bundle_id version manufacturer m
     # source file so it has an executable; the source itself does nothing
     # — _NSExtensionMain (Apple-provided via Foundation) reads the
     # NSExtension Info.plist and loads the principal class from the
-    # framework. iPlug2's IPlugAUv3Appex.m is the exact same shape.
+    # framework.
     set(stub_src "${CMAKE_BINARY_DIR}/AUv3/${appex_target}_stub.mm")
     # Sanitize plugin name into a C identifier for the keep-alive symbol.
     string(MAKE_C_IDENTIFIER "${name}" PLUGIN_NAME_CSYM)
@@ -189,9 +187,13 @@ function(_pulp_add_auv3_macos_appex target name bundle_id version manufacturer m
 
     # Bundle shape: .appex with app-extension product type. _NSExtensionMain
     # is the entry point (provided by Foundation; we set -e explicitly).
-    # rpath: from .appex/Contents/MacOS/X → .app/Contents/Frameworks is 4
-    # parent dirs up, NOT 2. iPlug2's newer CMake helper has this wrong
-    # for macOS; this is the correct macOS appex rpath.
+    # rpath: on macOS the .appex is nested one bundle deeper than an app
+    # binary, so @executable_path → Frameworks is 4 parents up, NOT 2:
+    #   .app/Contents/PlugIns/X.appex/Contents/MacOS  ← @executable_path
+    #   ../ Contents  ../../ X.appex  ../../../ PlugIns  ../../../../ Contents
+    # 2 is the app-binary distance (see the container .app below) and is the
+    # easy wrong answer here — it resolves inside the .appex and the
+    # framework silently fails to load.
     set_target_properties(${appex_target} PROPERTIES
         BUNDLE TRUE
         BUNDLE_EXTENSION "appex"

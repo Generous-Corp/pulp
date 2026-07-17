@@ -97,6 +97,10 @@ EMSCRIPTEN_KEEPALIVE int pulp_gpu_init(void) {
         m.gpu.reset();
         return 0;
     }
+    // Opt the async convolution path into GPU-busy timing so pulp_gpu_stat(4) can
+    // report the shader's real execution time (this is the browser demo; the native
+    // audio path leaves it off). A no-op when the device lacks timestamp-query.
+    gpu->set_async_timing_enabled(true);
     return 1;
 }
 
@@ -185,14 +189,14 @@ EMSCRIPTEN_KEEPALIVE int pulp_gpu_poll(void) {
 /// rather than fail the whole lane. It stays STRICT whenever 6 == 0, which is every
 /// shipped configuration.
 ///
-/// gpu_ns_last is ALWAYS 0 today, and that is a capability statement, not a
-/// failure: GpuCompute's timestamp-query timing lives on the *_timed() variants,
-/// and every one of them resolves its query set with a BLOCKING map — which is
-/// exactly what the async path exists to avoid. Until an async timing path
-/// exists, this module has no honest GPU-busy number to report, so it reports
-/// none. (Chrome also quantizes timestamps and returns 0 ns for small dispatches,
-/// so 0 could never be treated as an error anyway.) The JS must render 0 as
-/// "no timing", never as a stall.
+/// case 4 is the async convolution shader's GPU-busy time in NANOSECONDS (the field
+/// is gpuNsLast throughout the JS), or 0 when the device lacks timestamp-query or
+/// quantized a small dispatch to 0 ns (Metal and Chrome do). GpuCompute::
+/// convolve_batch_async() brackets its passes with a timestamp query and reads the
+/// ticks back through the SAME non-blocking readback path as the audio — never a
+/// blocking map — so this is honest and costs the audio path nothing (it is off
+/// unless set_async_timing_enabled(true), which pulp_gpu_init does here). The JS
+/// still must render 0 as "no timing", never as a stall.
 EMSCRIPTEN_KEEPALIVE double pulp_gpu_stat(int idx) {
     Module& m = mod();
     switch (idx) {
@@ -200,7 +204,7 @@ EMSCRIPTEN_KEEPALIVE double pulp_gpu_stat(int idx) {
         case 1: return static_cast<double>(m.convolver.resolves());
         case 2: return static_cast<double>(m.convolver.expired());
         case 3: return static_cast<double>(m.convolver.failed());
-        case 4: return 0.0;
+        case 4: return m.gpu ? m.gpu->last_gpu_busy_ns() : 0.0;  // ns (gpuNsLast)
         case 5: return (m.gpu && m.gpu->device_lost()) ? 1.0 : 0.0;
         case 6: return static_cast<double>(m.overridden_kernels);
         default: return 0.0;

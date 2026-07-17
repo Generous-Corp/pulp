@@ -6,7 +6,7 @@ description: Editor lifecycle and multi-view attach for Pulp plugins — when to
 # ViewBridge skill
 
 **TL;DR.** Every Pulp plugin format adapter (VST3, AU v2, AU v3, CLAP,
-Standalone) opens its editor through
+AAX, Standalone) opens its editor through
 `pulp::format::ViewBridge`. You only touch the bridge when you override
 `Processor::create_view()` or write a new adapter. This skill captures
 the invariants the API enforces and the pitfalls that bit us enough
@@ -62,7 +62,16 @@ protocol** (`open()` then `notify_attached()`).
 | CLAP | `gui_create` | Inside `gui_set_parent` on the matched window API |
 | AU v2 | `uiViewForAudioUnit` — after fetching context via `kPulpEditorContextProperty` | After `PluginViewHost::create` succeeds |
 | AU v3 | `viewDidLoad` | After `PluginViewHost::attach_to_parent` in `viewDidLoad` |
+| AAX | `AAX_CEffectGUI::CreateViewContainer()` — not `CreateViewContents()`, which runs before any window exists | After `try_attach_to_parent` succeeds |
 | Standalone | Before `WindowHost::create` | After `WindowHost::create` succeeds |
+
+AAX is the one adapter whose editor runs on its **own** `Processor`. AAX keeps
+the host-side data model and the real-time algorithm apart, and the algorithm's
+`Processor` lives in a private data block the model cannot reach, so
+`EffectParameters` builds a second one for `create_view()` and mirrors its store
+against the AAX parameter manager (the value authority). Do not "fix" that into
+a shared instance by analogy with AU v2 — there, a second `Processor` was a real
+bug; here it is the format's structure. See the `aax` skill.
 
 ## `release_view()` — for containers that own the view
 
@@ -458,7 +467,7 @@ cp core/view/include/pulp/view/widget_bridge.hpp \
 rm -rf "$CONSUMER/build/CMakeFiles/<your-target>.dir"
 
 # Rebuild the consumer from clean
-cmake --build "$CONSUMER/build" --target <your-target> -j
+tools/ci/governed-build.sh cmake --build "$CONSUMER/build" --target <your-target>
 ```
 
 When you `pulp upgrade --install` this is automatic because the SDK
@@ -1502,6 +1511,47 @@ Related: an element re-keyed at runtime with `set_element_param_key()` now
 re-binds. It previously kept driving the parameter it was first bound to, so a
 view that re-keyed on a preset change was quietly writing to the **wrong
 parameter**.
+
+### A DesignFrameView must be PULLED — `pump_listeners()` cannot reach it
+
+The two host→UI channels are **not** the same mechanism, and the difference is
+easy to miss:
+
+- a `bind_parameter` widget **registers a store listener**, so
+  `StateStore::pump_listeners()` pushes host automation into it;
+- a `DesignFrameView` binds through the abstract `HostParamSurface` (so one view
+  runs against JUCE APVTS / iPlug2 / StateStore) and therefore registers **no
+  listener at all**. Nothing pushes to it. It has to be pulled with
+  `sync_from_host_params()`.
+
+The editor idle pump (`make_scripted_idle_pump`) drives both — `pump_listeners()`
+and the bridge's private `sync_design_frames_from_host()`, which it reaches as a
+`friend` — so every plugin editor gets both channels. The pull is deliberately
+NOT public: the pump is its only production caller, and a view-side enrolment
+registry could retire the tree walk without an API deprecation. Reach it from a
+test via `ViewBridgeTestAccess`, not by widening the class. Embedding Pulp views
+in your own host? Wiring only the pump's listener drain gives you a design whose
+knobs drive the host but never follow it — call the view's public
+`sync_from_host_params()` from your own tick.
+
+The pull is **silent**: `set_element_value` writes the element directly and never
+re-emits `on_element_changed`, so it cannot echo back into the surface. That is
+what makes it safe to pull unconditionally on a tick even though routing is
+auto-enabled for every bound imported design — do not "optimize" it into a
+re-emit.
+
+**Testing that property: assert zero writes, not "it converges."** A
+settle/no-drift check over repeated pulls looks like the natural convergence
+proof and is nearly worthless here — a discrete parameter quantizes a small echo
+straight back onto the same option, so an echoing pull can touch the host every
+single frame while the value never moves and the check stays green. (Verified by
+injecting exactly that echo: the settle/drift sweep passed; only
+`FakeHostParamSurface::set_calls == 0` caught it, 180 == 0.) The pull is a read
+— assert it that way, across every element kind, since routing is on for all of
+them. Equally, do not add a naive `last_norm` guard: display text is not pure
+in `(key, norm)` (`ParamInfo::to_string` is a closure and `do_param_display_text`
+is virtual), so a tempo-synced delay reformats `"500 ms"` → `"1/4"` with its value
+unmoved, and a value-only guard would freeze that readout.
 
 ## Widget-bridge JS dispatch and CSS color parsing have one home each
 

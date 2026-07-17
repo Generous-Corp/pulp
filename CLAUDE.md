@@ -42,9 +42,12 @@ Rules of thumb:
 - **A struct-layout change must compile EVERYWHERE before shipping**: when a
   change alters the field layout of a struct that is brace-initialized
   positionally (adding/removing a field, swapping a `bool` for an `enum`), run a
-  FULL `cmake --build build -j$(sysctl -n hw.ncpu)` over ALL targets — not just
-  the named feature/parity targets — and run it in the background (a full build
-  exceeds a short foreground budget). Stray positional inits in unrelated test
+  FULL `pulp build` over ALL targets — not just the named feature/parity
+  targets — and run it in the background (a full build exceeds a short foreground
+  budget). This is the longest build anyone runs, so it is the one that most
+  needs to take a governed *share* of the machine rather than every core; `pulp
+  build` (or `tools/ci/governed-build.sh cmake --build build`) does that, a raw
+  `cmake --build … -j$(sysctl -n hw.ncpu)` does not. Stray positional inits in unrelated test
   files fail *closed* at compile time, so they are safe, but only a full build
   surfaces them; building a subset and shipping pushes the discovery to CI. A
   uniform build failure across macOS/Linux/Windows is the tell for a real
@@ -58,8 +61,8 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 # Or preferred for repo + example builds:
 ./build/pulp build
 
-# Build everything
-cmake --build build -j$(sysctl -n hw.ncpu)
+# Build everything (takes its job count from the host build governor)
+./build/pulp build
 
 # Run all tests
 ctest --test-dir build --output-on-failure
@@ -89,16 +92,44 @@ cmake --build build --target pulp-test-state
 cmake -S . -B build -DPULP_SANITIZER=address
 ```
 
-**Builds are always bounded.** Every build command Pulp emits or ships carries
-an explicit job count — a literal, a `$(getconf _NPROCESSORS_ONLN)` expansion,
-or a value from the tartci host lease. `pulp build/dev/loop` and the local-SDK
-build fall back to a host default of `min(cores, RAM_budget / 1.5 GiB)` when no
-lease store is present (override with `PULP_BUILD_MEM_BUDGET_MB`), so a build can
-never fan out unbounded and oversubscribe a shared machine. A bare
-`cmake --build … --parallel` (which maps to unbounded `make -j`) is rejected
-repo-wide by `tools/scripts/build_parallelism_guard.py` (a ctest and a Shipyard
-gate). When adding a build command anywhere — CLI, script, `.shipyard/config.toml`,
-CI workflow — give `--parallel`/`-j` an explicit count.
+**Builds take a share of a shared host, not the whole machine.** "Bounded" does
+NOT mean "not infinite" — a `-j$(sysctl -n hw.ncpu)` / `-j$(nproc)` /
+`--parallel $(getconf _NPROCESSORS_ONLN)` carries an explicit count and is still
+the melt: it claims *every* core, so four concurrent agent builds on one shared
+Mac request 4 × cores and starve each other — and the required `macos` gate
+validating in one of those checkouts starves with them. The bound that matters
+on a shared host is a *share*, and a share comes from the governor, never from
+the hardware. **Prefer `pulp build`** (and `pulp dev` / `pulp loop`): they take
+their `-j` from the tartci host lease when one is present, acquiring it before
+building, so concurrent builds divide the host. Shipyard's `local` mac lane —
+which does not go through the CLI — routes its raw `cmake --build` through
+`tools/ci/governed-build.sh` for the same reason. Reach for a raw `cmake --build`
+only for a one-off target, and give it a literal (`-j8`) or a derived share
+(`-j$(( $(sysctl -n hw.ncpu) / 4 ))`), never an undivided core count.
+
+Without a lease store — the ordinary single-machine / external-cloner case —
+`pulp build/dev/loop` and the local-SDK build still bound themselves to
+`min(cores, RAM_budget / 1.5 GiB)` (override with `PULP_BUILD_MEM_BUDGET_MB`), so
+a build cannot fan out unbounded. That floor is a *memory* guard, not a fairness
+one: on a big-RAM host the memory axis never binds and it resolves to the full
+core count — fine for a solo builder, which is why the public repo needs nothing
+more. Fairness under contention comes from the lease, not from this fallback.
+
+`tools/scripts/build_parallelism_guard.py` (a ctest and a Shipyard gate) rejects
+a bare `cmake --build … --parallel` (unbounded `make -j`) *everywhere*, and an
+explicit-but-whole-machine core-count expansion on the shared-host surfaces
+agents copy from (`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`). It
+does NOT scan `.github/workflows/**` for whole-machine — **not** because those
+runners never share a box, but because a workflow's `runs-on` is resolved
+dynamically (e.g. `${{ fromJSON(matrix.runs_on_json) }}`) and a static scan
+cannot tell whether a leg is ephemeral or one of the shared self-hosted Studios
+(the macOS matrix leg resolves to `PULP_LOCAL_MACOS_RUNS_ON_JSON` — the shared
+Studios that host the required `macos` gate). In a workflow, bounding a
+whole-machine build is therefore the **author's** job: route a self-hosted leg
+through `tools/ci/governed-build.sh` (as `build.yml`, `examples-validation.yml`,
+`web-plugins.yml`, and `format-baseline-diff.yml` do for their macOS legs). When
+adding a build command anywhere, give `--parallel`/`-j` a bounded share (or route
+it through the governor), not the machine's core count.
 
 **External SDKs** (not committed, cloned at configure time or manually):
 - VST3 SDK → `external/vst3sdk` (MIT, `git clone --depth 1 --branch v3.8.0_build_66`)
@@ -693,6 +724,93 @@ Before adding ANY bundled or redistributed dependency: check its license, add it
 ### Attribution Ordering
 
 DEPENDENCIES.md and NOTICE.md entries are always sorted **alphabetically by name**. When adding a new dependency, insert it in the correct alphabetical position — don't append to the end. This applies to both manual additions and `pulp add` / `pulp audit` operations.
+
+---
+
+## Tool Registry
+
+Pulp ships tools for the jobs agents most often hand-roll — comparing a render
+against its design source, scoring an import, proving what a plugin emitted.
+They already existed the day an agent wrote its own PIL crop script to do one of
+them: the guidance wasn't missing, it was buried and contradicted. So the
+registry below is generated into this file, which is always in context, and
+`docs/status/tools.yaml` is its source of truth.
+
+The manifest is enforced by `tools/scripts/tools_registry_check.py` (run from
+`tools/check-docs.sh` and the `tools-registry-check` ctest): every entry's path
+and invocation must resolve, and every agent-invocable entry point under the
+swept directories must be registered or explicitly excluded — so a new tool
+can't go missing. **Adding a tool means adding its entry**, then
+`python3 tools/scripts/tools_registry_check.py --write`.
+
+<!-- generated:start id=tools-digest -->
+### Registered tools — check before hand-rolling
+
+**These already exist. Do not write a script that does one of these jobs.**
+Full detail (inputs, outputs, owning skill): `docs/status/tools.yaml`.
+Reach for the tool whose *use when* matches your need; open its `skill`
+for the real guidance. If nothing here fits, say so — then hand-roll.
+
+**visual-compare** — compare a render against its source / a baseline
+- Get one similarity score + verdict BEFORE showing the user any native screenshot. → `tools/import-validation/diff_against_reference.py`
+  - ⚠ **Cannot see:** POSITION-BLIND. The score is histogram cosine similarity (gross colour distribution), so a design with every element in the wrong place scores identically to a correct one — same pixels, different arrangement. It catches obviously-broken only. Never read a high score as 'laid out right'; that is layout-parity's job.
+- A whole-image score is hiding a broken sub-region (empty canvas, broken chrome). → `tools/import-validation/diff_against_reference_regions.py`
+  - ⚠ **Cannot see:** Only the regions you hand it. Anything outside a declared rect is UNCHECKED, and the built-in defaults are hand-authored percent rects for one specific design (Spectr) — pointing it at another design silently scores the wrong boxes. Each region still scores by the position-blind metric above.
+- Measure how close an imported+rendered design is to its Figma source, per node. → `tools/import-design/fidelity_diff.py`
+  - ⚠ **Cannot see:** Only nodes lowered to RECOGNIZED Pulp widgets. A design imported as the designer's own art (audio_widget "none") is invisible to its widget heuristics — it once read that opt-out sentinel as a kind and reported a near-perfect import as 832 failures. A high skip count means it checked little, not that little was wrong.
+- See WHERE a Figma reference and a Pulp render disagree, without eyeballing Preview. → `tools/scripts/figma_import_diff.py`
+  - ⚠ **Cannot see:** Exact-pixel differencing across two DIFFERENT rasterizers, so anti-aliasing and sub-pixel placement register as real differences. Its ranking finds where to LOOK; it does not adjudicate right vs wrong. A busy diff can be a faithful import.
+- Prove an importer change didn't silently regress a design that already imported correctly. → `tools/import-validation/golden_regression.py`
+  - ⚠ **Cannot see:** Compares against OUR OWN prior render, never the design. It is change-detection, not fidelity — a baseline captured while the import was wrong stays green forever, and every bug found on 2026-07-16 would have passed it. Use it to prove you changed nothing you did not mean to; never to prove the import is right.
+- An import "looks off" and you need the NODE and the exact pixel delta, not a score. → `tools/import-design/layout_parity.py`
+  - ⚠ **Cannot see:** BOXES only, never the ink inside them. It went GREEN on a change that displaced glyph ink within correct boxes — a clean run means the boxes are right, never that the render is. For material (colour/opacity/gradients/shadows) nothing here helps; look at pixels.
+- An import renders "wrong" but nothing failed, and you need to know whether a declared material property (stroke, shadow, blend, corner radius) reached the render at all. Run it FIRST on any fidelity complaint — it is deterministic, needs no reference image, and answers "was it dropped?" before you spend time on "is it drawn right?". → `tools/import-design/material_audit.mjs`
+  - ⚠ **Cannot see:** PRESENCE only, never correctness. It proves a property SURVIVED to the envelope; it can say nothing about whether the value is right or renders right. A gradient emitted with a reversed axis, a shadow at the wrong offset, a blend mapped to the wrong CSS name — all pass. It also stops at the ENVELOPE, so a property the envelope carries and codegen later drops looks emitted from here. For "is it drawn right" use thumb-parity or a montage; for boxes use layout-parity.
+- Stack reference vs render into ONE labeled image so a comparison is self-documenting. → `tools/import-design/montage.py`
+  - ⚠ **Cannot see:** Nothing — it renders no verdict at all. Building a montage is not verifying one; a montage nobody looked at is decoration. It is the instrument of last resort precisely because a human is the only thing that reads it.
+- Render an import at the design's OWN canvas size (a mismatched size voids every score). → `tools/scripts/render-figma-import.sh`
+  - ⚠ **Cannot see:** It renders; it judges nothing. Producing a render is not evidence about it — the render is the INPUT every checker above reads, and each of those has its own blind spot. Its one real guarantee is size fidelity; render at any other size and every score downstream is measuring a reshaped design.
+- Triage an import's GROSS colour against Figma's own raster, offline, with no API call. Advisory only — never a gate. → `tools/import-design/thumb_parity.py`
+  - ⚠ **Cannot see:** MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under ~3 design px. For geometry use layout-parity; for material survival use the material audit.
+
+**design-import** — get a design into Pulp
+- Decode a local .fig file offline — no Figma desktop, no REST quota. → `tools/import-design/fig_decode.mjs emit`
+- A vector ILLUSTRATION group imported as a flat stack of boxes instead of art. → `tools/import-design/figma_rasterize_vector_frames.py`
+- Pull a Figma frame headlessly (CI) — the LAST resort; local lanes have no rate limit. → `tools/import-design/figma_rest_export.py`
+- Audit the JSX runtime shim against the contract it promises importers. → `tools/import-design/jsx-runtime/jsx-contract-audit.mjs`
+- Transform JSX/React design output into the Pulp runtime-import lane. → `tools/import-design/jsx-runtime/jsx-transform.mjs`
+- Turn a Figma node into a 1:1 catalog component instead of hand-painting a C++ widget. → `tools/import-design/make_catalog_component.py`
+- Re-export/re-embed the Musical Typing Keyboard's two faithful Figma frames specifically. → `tools/import-design/reembed_mtk.py`
+
+**import-roundtrip** — validate an import lane end to end
+- Check the importer's IR actually captured the UI text the reference shows. → `tools/import-validation/check_label_coverage.sh`
+- Check the import source-contract registry for drift. → `tools/import-validation/check-source-contracts.py`
+- Confirm the live host really drives JS timers (setInterval/setTimeout not queuing forever). → `tools/import-validation/live-host-pump-smoke.sh`
+- Validate the DESIGN.md import lane end to end. → `tools/import-validation/designmd-roundtrip.sh`
+- Validate the Figma Make runtime-import lane end to end before pushing. → `tools/import-validation/figma-roundtrip.sh`
+- Validate the JSX/React import lane end to end. → `tools/import-validation/jsx-roundtrip.sh`
+- Validate the Pencil (.pen) import lane end to end. → `tools/import-validation/pencil-roundtrip.sh`
+- Validate the React Native import lane end to end. → `tools/import-validation/rn-roundtrip.sh`
+- Validate the Spectr import lane end to end. → `tools/import-validation/spectr-roundtrip.sh`
+- Validate the Stitch import lane end to end. → `tools/import-validation/stitch-roundtrip.sh`
+- Validate the v0 import lane end to end. → `tools/import-validation/v0-roundtrip.sh`
+- A render "looks right" but you need to know it actually mounted and settled. → `tools/import-validation/semantic_probes.sh`
+
+**harness** — coverage + deterministic visual harness
+- The visual-harness Dockerfile's Skia pin may have drifted from the manifest. → `tools/harness/visual/check_skia_pin.py`
+- Check web-compat coverage — and that a `supported` claim is backed by a real test. → `python3 -m tools.harness.verifier`
+- Build the visual-harness Docker image — use this, not a raw docker build. → `tools/harness/visual/docker-build.sh`
+- Run the deterministic visual layout snapshots. → `python3 -m tools.harness.visual.runner`
+
+**audio** — prove what the audio actually did
+- Decide whether a DSP change made a sound WORSE — and at which timestamp. *(needs install)* → `python -m quality_lab.cli compare`
+- Render a plugin bundle offline — no DAW, no audio device — to a WAV + metrics. → `pulp audio render`
+- Look at a sample window of a WAV — waveform/spectrum — as JSON or PNG. → `pulp audio scope`
+- Prove what a plugin actually emitted — summarize, diagnose, compare, or gate a WAV. → `pulp audio validate summarize`
+
+This digest is GENERATED from `docs/status/tools.yaml` by
+`tools/scripts/tools_registry_check.py --write`. Do not edit it by hand.
+<!-- generated:end id=tools-digest -->
 
 ---
 
@@ -1378,7 +1496,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `aax` | Optional AAX format: developer-supplied Avid SDK, CMake enablement, DigiShell/AAX Validator workflows |
 | `android` | Android NDK builds, Oboe audio, Dawn/Skia GPU, JNI bridge, emulator smoke, platform gotchas |
 | `ara` | Optional ARA support: developer-supplied SDK, companion APIs, adapter wiring, validation |
-| `audio-harness` | Prove/debug what a Processor emits: signal generators, metrics, assertions, RenderScenario, contracts + offline Audio Doctor (response, THD) |
+| `audio-harness` | Prove/debug what a Processor emits: signal generators, metrics, assertions, RenderScenario, contracts + offline Audio Doctor (response, THD, group delay) |
 | `audio-headless-debug` | Headless Processor scenes and standalone AU probes for DAW-only audio bugs |
 | `auv2` | AU v2 adapter: aufx/aumf/aumi/aumu component types, MIDI input wiring, DAW cache gotchas |
 | `auv3` | AU v3 adapter: AUAudioUnit render block, parameter tree, UMP / sysex, sidechain, iOS extension |
@@ -1391,6 +1509,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `daw-smoke` | Real-DAW (REAPER) functional smoke for reload/editor/format-adapter changes — opt-in, scoped, headless-safe, zero-pollution |
 | `engine` | JS engine backend selection (QuickJS / JavaScriptCore / V8) with recommendations per workload |
 | `faust` | FAUST DSP plugins: offline codegen, pre-generated C++ headers, FaustProcessor wrapper |
+| `handoff` | Coordinate a cross-session / cross-machine handoff: snapshot open work, write a status doc to pulp-planning main, emit a goal prompt linking it, verify monitored work is terminal before retiring |
 | `hosting` | Load + run + test VST3 / AU / CLAP / LV2 plugins from Pulp (scanner, plugin_slot, signal_graph) |
 | `import-design` | Import designs from Figma / Stitch / v0 / Pencil into Pulp web-compat JS with visual validation |
 | `installable-tools` | Acceptance bar for anything Pulp can install (`pulp tool` / `pulp add`): validate install AND uninstall from OUTSIDE a checkout before the README ships; uninstall-safety contract |
@@ -1580,6 +1699,13 @@ live on m3/m5/m1, layered in tiers:
 Every build path is bounded — the CLI (Tier 0), the shipyard-local wrapper, and
 the VM runners (Tier 1 leases). `pulp status` prints a `Build governance: Tier N
 (…)` line reporting which layer bounds the current host. A bare
-`--parallel`/`-j` anywhere in the repo is rejected by
-`tools/scripts/build_parallelism_guard.py`. Host-side tartci details (lease
-store, memory axis, role profiles) live in `docs/guides/local-ci.md`.
+`--parallel`/`-j` anywhere in the repo — and, on the shared-host surfaces agents
+copy from (`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`), an
+explicit-but-whole-machine core-count expansion (`-j$(nproc)` and friends) — is
+rejected by `tools/scripts/build_parallelism_guard.py`. The guard does not scan
+`.github/workflows/**` for whole-machine, because a workflow's `runs-on` is
+dynamic and may itself resolve to a shared self-hosted runner — so bounding a
+whole-machine build there is the workflow author's job (route the self-hosted leg
+through the governor), not something the scan can enforce. Host-side tartci
+details (lease store, memory axis, role profiles) live in
+`docs/guides/local-ci.md`.

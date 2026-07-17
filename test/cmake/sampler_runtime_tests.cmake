@@ -177,6 +177,12 @@ pulp_add_test_suite(pulp-test-live-dsp-telemetry-graph
 pulp_add_test_suite(pulp-test-signal-graph-prepared-swap-live
     SOURCES test_signal_graph_prepared_swap_live.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
+# Feed-forward PDC delay history survives a gap-free structural edit in the
+# legacy walk and both routed execution domains. A 97-sample delay rendered in
+# 64-frame blocks catches cursor resets that block-aligned fixtures would miss.
+pulp_add_test_suite(pulp-test-signal-graph-pdc-swap-continuity
+    SOURCES test_signal_graph_pdc_swap_continuity.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 # Transport plumbing for SignalGraph::process: the transport-aware overload is
 # bit-identical for transport-inert routed nodes, populates the routed block so a
 # ProcessorNode consumer receives the host transport / process_mode / render-speed

@@ -48,7 +48,9 @@ public:
     bool prepare(const AnticipationSubgraph& sub,
                  const std::function<std::atomic<float>*(NodeId)>& gain_for,
                  const std::function<PluginSlot*(NodeId)>& plugin_for,
-                 double sample_rate, int block_frames, int lead_blocks);
+                 double sample_rate, int block_frames, int lead_blocks,
+                 const std::function<ParameterEventInjectionBinding(NodeId)>&
+                     parameter_events_for = {});
 
     bool prepared() const noexcept { return prepared_; }
     std::size_t output_channels() const noexcept { return out_channels_; }

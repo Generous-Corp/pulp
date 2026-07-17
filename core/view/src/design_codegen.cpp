@@ -492,11 +492,16 @@ struct NativeEmit {
     std::string parent_id;
 };
 
-// emit_js_container recurses through the same entry point that dispatched to it.
+// emit_js_container recurses through the same entry point that dispatched to it
+// — the wrapper, not the impl, so every child gets its anchor bound too.
 static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                                  const CodeGenOptions& opts, int depth,
                                  int& var_counter, const std::string& parent_id,
                                  std::unordered_map<const IRNode*, std::string>* id_map = nullptr);
+static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node,
+                                      const CodeGenOptions& opts, int depth,
+                                      int& var_counter, const std::string& parent_id,
+                                      std::unordered_map<const IRNode*, std::string>* id_map);
 
 // Map Figma resize CONSTRAINTS (node.layout.h/v_constraint) onto flex within
 // the parent: center → auto margins both sides; right/bottom → auto margin on
@@ -511,6 +516,12 @@ static void emit_js_layout_constraints(const NativeEmit& e, const std::string& t
     const int depth = e.depth;
     if (depth == 0) return;  // the root is not laid out within a parent
     const auto& L = node.layout;
+    // flex-shrink is the one flex property the IR could carry but codegen
+    // never wrote, so a source lane that set it was overruled by Yoga's
+    // default of 1 without a word. An importer replaying an already-solved
+    // layout needs shrink:0 to keep the sizes it emitted.
+    if (L.flex_shrink)
+        ss << ind << "setFlex('" << target_id << "', 'flex_shrink', " << *L.flex_shrink << ");\n";
     bool grow_done = false, stretch_done = false;
     auto grow = [&] {
         if (grow_done) return;
@@ -626,10 +637,17 @@ static void emit_js_absolute_position(const NativeEmit& e, const std::string& ta
 
 // Emit a node's per-View visual overrides that the native engine applies
 // at compositing/paint time: mix-blend-mode (View::set_mix_blend_mode), the
-// clip-path, and the mask shorthand / image / size (View::set_clip_path /
-// set_mask / set_mask_image / set_mask_size). mix-blend-mode is
-// parse-normalized (normal / pass-through dropped); the clip/mask values
-// are raw CSS the bridge parses.
+// clip-path, the mask shorthand / image / size (View::set_clip_path /
+// set_mask / set_mask_image / set_mask_size), the drop shadow, the corner
+// radii, and opacity. mix-blend-mode is parse-normalized (normal /
+// pass-through dropped); the clip/mask values are raw CSS the bridge parses.
+//
+// Everything here is a property of a View, not of a node KIND, so it is
+// emitted for every kind — that is the whole point of this function. What does
+// NOT belong here is anything whose meaning depends on how the node paints:
+// setBackgroundGradient is the counter-example (see emit_js_container),
+// because on a node that lowers to an SvgPathWidget it would paint a
+// gradient SQUARE behind the path.
 static void emit_js_visual_overrides(const NativeEmit& e, const std::string& target_id) {
     auto& ss = e.ss;
     const auto& node = e.node;
@@ -650,6 +668,54 @@ static void emit_js_visual_overrides(const NativeEmit& e, const std::string& tar
     if (st.mask_size && !st.mask_size->empty())
         ss << ind << "setMaskSize('" << target_id << "', '"
            << js_single_quote_escape(*st.mask_size) << "');\n";
+    // A shadow is a visual override like any other here, and it belongs on
+    // EVERY kind of node — not just frames. Before this lived here, a shadow
+    // painted only on frames: a design whose 44 knob bases are ellipses had
+    // 49 shadowed nodes in its scene and emitted exactly ONE setBoxShadow,
+    // leaving every knob flat. Nothing said so, because the boxes were the
+    // right size in the right place — they just had no depth.
+    //
+    // Every layer is emitted, in CSS author order: the first as
+    // setBoxShadow (replacing whatever was there) and the rest as
+    // addBoxShadow. Emitting only the first layer here is what left the
+    // knobs flat — a Figma knob declares a soft 10% halo AND a tight 25%
+    // contact shadow that seats it on the panel, and dropping the second
+    // silently removed exactly the layer that reads as depth.
+    for (size_t i = 0; i < st.box_shadow.size(); ++i) {
+        const auto& sh = st.box_shadow[i];
+        const std::string color = sh.color.empty() ? "#00000050" : sh.color;
+        ss << ind << (i == 0 ? "setBoxShadow('" : "addBoxShadow('") << target_id << "', "
+           << sh.offset_x << ", " << sh.offset_y << ", " << sh.blur << ", " << sh.spread
+           << ", '" << js_single_quote_escape(color) << "'"
+           << (sh.inset ? ", true" : "") << ");\n";
+    }
+    // Opacity, same story as the shadow just above. It was emitted from the
+    // image branch and the container branch only, so a faded TEXT node
+    // rendered at full strength in every lane — a 50%-dimmed caption or a
+    // ghosted placeholder label came out as solid as the live text beside
+    // it. Every kind of node can be faded; only two kinds were honoring it.
+    if (st.opacity)
+        ss << ind << "setOpacity('" << target_id << "', " << *st.opacity << ");\n";
+
+    // Per-corner radii. The bridge takes setCornerRadius(id, "TopLeft", r)
+    // (widget_bridge/border_box_api.cpp) and IRStyle carries all four, but
+    // codegen only ever emitted the uniform 'All' — so an asymmetric card
+    // imported with square corners while a diagnostic explained that fixing
+    // it required "widening the IR, its JSON, and codegen". The IR and its
+    // JSON already had them; the gap was these four lines.
+    //
+    // Emitted only when the node has no uniform radius: the single 'All'
+    // call is exact when the corners agree, and one call beats four.
+    if (!st.border_radius) {
+        auto corner = [&](const char* name, const std::optional<float>& r) {
+            if (r) ss << ind << "setCornerRadius('" << target_id << "', '"
+                      << name << "', " << *r << ");\n";
+        };
+        corner("TopLeft", st.border_top_left_radius);
+        corner("TopRight", st.border_top_right_radius);
+        corner("BottomRight", st.border_bottom_right_radius);
+        corner("BottomLeft", st.border_bottom_left_radius);
+    }
 }
 
 // Audio-widget terminal: the native widget API (Knob / Fader / Meter / XYPad /
@@ -691,7 +757,18 @@ static void emit_js_audio_widget(const NativeEmit& e) {
     // Synthesize a generic "VALUE" label so the silver path stays
     // visually parity with sprite. Only fires when both label slots
     // are empty (we'd never overwrite a real Figma label).
-    if (opts.use_silver_knobs && label_text.empty() && value_text.empty()) {
+    //
+    // ...but ONLY when the design gave us nothing to draw. Once .fig
+    // instances expand, a knob carries the designer's own art (frames +
+    // vectors), and the caption they wrote is a SIBLING text node — so both
+    // label slots on the knob itself read empty and this guard fires,
+    // stamping an invented "VALUE" across artwork we were asked to import.
+    // That is the overwrite the comment above promises never to do: the
+    // check was written when an empty slot really did mean "no label
+    // anywhere", which stopped being true.
+    const bool design_supplied_art = !node.children.empty();
+    if (opts.use_silver_knobs && label_text.empty() && value_text.empty() &&
+        !design_supplied_art) {
         label_text = "VALUE";
     }
 
@@ -794,11 +871,14 @@ static void emit_js_audio_widget(const NativeEmit& e) {
         emit_js_absolute_position(e, col_id);
         ss << ind << "setFlex('" << col_id << "', 'align_items', 'center');\n";
         ss << ind << "setFlex('" << col_id << "', 'gap', 4);\n";
-    } else {
-        // No wrapper. Emit any absolute position on the widget itself.
-        // (emit_position_if_absolute is called below at the createKnob site
-        // by using id directly — we don't need to repeat here.)
     }
+    // No wrapper → the widget itself carries the node's absolute position.
+    // That is emitted once below, after the create<Widget> chain, because
+    // every sub-branch has created `id` by then. It used to be emitted at
+    // the createKnob site instead, with a comment here promising it covered
+    // the branch — it only ever covered KNOBS, so an unlabeled fader, meter,
+    // XY pad, waveform or spectrum silently lost its absolute position and
+    // landed wherever flex put it.
 
     if (wtype == AudioWidgetType::knob) {
         // Knob sizing priority:
@@ -824,7 +904,6 @@ static void emit_js_audio_widget(const NativeEmit& e) {
         }
         fid_w = shape_w; fid_h = shape_h;  // emitted widget dims (fidelity)
         ss << ind << "createKnob('" << id << "', '" << col_id << "');\n";
-        if (!needs_label_wrapper) emit_js_absolute_position(e, id);
         ss << ind << "setFlex('" << id << "', 'width', " << shape_w << ");\n";
         ss << ind << "setFlex('" << id << "', 'height', " << shape_h << ");\n";
         // Clear built-in label — use separate Yoga-positioned labels for exact placement
@@ -1153,6 +1232,13 @@ static void emit_js_audio_widget(const NativeEmit& e) {
         ss << ind << "setFlex('" << id << "', 'height', " << h << ");\n";
     }
 
+    // Every sub-branch above has created `id`, so this is the one place that
+    // covers all six widget kinds. Without it a widget got no shadow, blend
+    // mode, clip/mask or opacity at all: a knob the designer faded to 30% to
+    // read as disabled came out indistinguishable from a live one.
+    if (!needs_label_wrapper) emit_js_absolute_position(e, id);
+    emit_js_visual_overrides(e, id);
+
     // Reference-free fidelity self-checks for this widget (see design_fidelity).
     if (opts.fidelity_report)
         run_fidelity_checks({node, id, fid_w, fid_h, FidelityElement::widget},
@@ -1209,12 +1295,36 @@ static bool emit_js_svg_path_node(const NativeEmit& e) {
     if (auto f = node.attributes.find("svg_fill"); f != node.attributes.end())
         ss << ind << "setSvgFill('" << id << "', '"
            << js_single_quote_escape(f->second) << "');\n";
+    // Emission order is irrelevant — SvgPathWidget resolves the two at
+    // paint time, preferring the gradient and using the solid only as
+    // the parse-failure fallback — but the solid is emitted first so
+    // the generated JS reads the way it resolves.
+    if (auto g = node.attributes.find("svg_fill_gradient");
+        g != node.attributes.end() && !g->second.empty())
+        ss << ind << "setSvgFillGradient('" << id << "', '"
+           << js_single_quote_escape(g->second) << "');\n";
     if (auto s = node.attributes.find("svg_stroke"); s != node.attributes.end())
         ss << ind << "setSvgStroke('" << id << "', '"
            << js_single_quote_escape(s->second) << "');\n";
+    else if (node.style.border_color && !node.style.border_color->empty())
+        // A vector that arrived WITH its own path never passes through
+        // synthesize_node — it returns early on `path_data` — so nothing
+        // moved the node's stroke onto the path, and this branch is the
+        // only place left that could paint it. That is why every `Oval`
+        // rim in a real design lowered to no stroke at all.
+        ss << ind << "setSvgStroke('" << id << "', '"
+           << js_single_quote_escape(*node.style.border_color) << "');\n";
     if (auto sw = node.attributes.find("svg_stroke_width");
         sw != node.attributes.end())
         ss << ind << "setSvgStrokeWidth('" << id << "', " << sw->second << ");\n";
+    else if (node.style.border_color && !node.style.border_color->empty() &&
+             node.style.border_width && *node.style.border_width > 0.0f)
+        // Paired with the stroke color above: a stroke emitted without
+        // its weight paints at the widget's default, so a 1px rim
+        // arrives at the wrong thickness — visible, but wrong, which is
+        // harder to spot than missing.
+        ss << ind << "setSvgStrokeWidth('" << id << "', "
+           << *node.style.border_width << ");\n";
     const float vw = node.style.width.value_or(0.0f);
     const float vh = node.style.height.value_or(0.0f);
     if (vw > 0.0f) ss << ind << "setFlex('" << id << "', 'width', " << vw << ");\n";
@@ -1245,6 +1355,12 @@ static void emit_js_image_node(const NativeEmit& e) {
     ss << ind << "createImage('" << id << "', " << pid << ");\n";
     emit_js_absolute_position(e, id);
     emit_js_visual_overrides(e, id);
+    // A background gradient paints the box BEHIND the image — the canonical
+    // case is a transparent PNG over a gradient plate. Not in the shared
+    // emit_js_visual_overrides: see the note there.
+    if (node.style.background_gradient)
+        ss << ind << "setBackgroundGradient('" << id << "', '"
+           << js_single_quote_escape(*node.style.background_gradient) << "');\n";
     auto it = node.attributes.find("asset_path");
     if (it != node.attributes.end() && !it->second.empty()) {
         ss << ind << "setImageSource('" << id << "', '"
@@ -1373,6 +1489,14 @@ static void emit_js_text_node(const NativeEmit& e) {
     ss << ind << "createLabel('" << id << "', '" << js_single_quote_escape(node.text_content) << "', " << pid << ");\n";
     emit_js_absolute_position(e, id);
     emit_js_visual_overrides(e, id);
+    // A label's own box paints its background, exactly like a container's.
+    // The v0 lane maps `background: linear-gradient(...)` on any inline tag
+    // (<span>, <h1>, …) onto style.background_gradient, and those tags lower
+    // to text nodes — so the gradient plate behind a heading was dropped.
+    // Not in the shared emit_js_visual_overrides: see the note there.
+    if (node.style.background_gradient)
+        ss << ind << "setBackgroundGradient('" << id << "', '"
+           << js_single_quote_escape(*node.style.background_gradient) << "');\n";
 
     // Honor the IR-declared height when present; absolute-positioned labels
     // that are centered in a slot rely on the emitted height matching that
@@ -1641,6 +1765,14 @@ static void emit_js_container(const NativeEmit& e, int& var_counter,
     // Visual styles
     if (node.style.background_color)
         ss << ind << "setBackground('" << id << "', '" << *node.style.background_color << "');\n";
+    // Emitted per-branch rather than from emit_js_visual_overrides, and
+    // deliberately so: this paints the node's own BOX, so it is only correct
+    // for kinds that lower to a plain View (container, text, image, and the
+    // childless fall-through). The path branch must never get it — a node
+    // that lowers to an SvgPathWidget already carries its gradient as
+    // setSvgFillGradient, and painting the box too puts a gradient SQUARE
+    // behind the circle. See synthesize_node(), which clears the style
+    // gradient off the node precisely to stop that.
     if (node.style.background_gradient)
         ss << ind << "setBackgroundGradient('" << id << "', '" << js_single_quote_escape(*node.style.background_gradient) << "');\n";
     if (node.style.border_radius)
@@ -1657,21 +1789,9 @@ static void emit_js_container(const NativeEmit& e, int& var_counter,
            << js_single_quote_escape(*node.style.border_color) << "', "
            << *node.style.border_width << ", " << br << ");\n";
     }
-    if (!node.style.box_shadow.empty()) {
-        // The IR carries parsed CSS box-shadow layers. The bridge's
-        // setBoxShadow(id, ox, oy, blur, spread, color, inset?) takes a
-        // single drop shadow; emit the first layer (CSS paints the first
-        // layer on top). An omitted color falls back to the bridge's
-        // default tint rather than letting setBoxShadow guess numerics.
-        const auto& sh = node.style.box_shadow.front();
-        const std::string color = sh.color.empty() ? "#00000050" : sh.color;
-        ss << ind << "setBoxShadow('" << id << "', "
-           << sh.offset_x << ", " << sh.offset_y << ", " << sh.blur << ", " << sh.spread
-           << ", '" << js_single_quote_escape(color) << "'"
-           << (sh.inset ? ", true" : "") << ");\n";
-    }
-    if (node.style.opacity)
-        ss << ind << "setOpacity('" << id << "', " << *node.style.opacity << ");\n";
+    // NOTE: no setBoxShadow and no setOpacity here. This branch calls
+    // emit_js_visual_overrides above, which emits both for every node
+    // kind. Keeping a copy here wrote the line TWICE for every container.
 
     ss << "\n";
 
@@ -1759,7 +1879,20 @@ static void emit_js_container(const NativeEmit& e, int& var_counter,
 
 }
 
-// Generic frame without children (divider, spacer, etc.)
+// Last resort: a childless node of a kind no branch above claimed.
+//
+// This is NOT "a generic frame without children", as it read for a long
+// time — a childless frame has type == "frame", so is_container is true and
+// the container branch takes it. Nothing with type "frame" ever reaches
+// here, and believing otherwise is what made this branch look like dead code
+// worth leaving alone. What actually lands here is a childless node of some
+// other kind: the v0 lane's void tags (<input>, <textarea>, <select>,
+// <canvas>), and any vector primitive whose path synthesis declined —
+// notably a gradient-filled <rect>, which synthesize_node deliberately
+// leaves alone on the grounds that "a frame paints its own background box".
+// That is a promise about THIS code, so it has to keep it: emit the same
+// box paint the container branch does, or the shape it declined to path-ify
+// renders as nothing at all.
 static void emit_js_generic_frame(const NativeEmit& e) {
     auto& ss = e.ss;
     const auto& node = e.node;
@@ -1767,20 +1900,42 @@ static void emit_js_generic_frame(const NativeEmit& e) {
     const auto& id = e.id;
     const auto& pid = e.pid;
     ss << ind << "createRow('" << id << "', " << pid << ");\n";
-    emit_js_layout_constraints(e, id);
+    emit_js_absolute_position(e, id);
+    emit_js_visual_overrides(e, id);
     if (node.style.height)
         ss << ind << "setFlex('" << id << "', 'height', " << *node.style.height << ");\n";
     else
         ss << ind << "setFlex('" << id << "', 'height', 1);\n";
     if (node.style.background_color)
         ss << ind << "setBackground('" << id << "', '" << *node.style.background_color << "');\n";
+    if (node.style.background_gradient)
+        ss << ind << "setBackgroundGradient('" << id << "', '"
+           << js_single_quote_escape(*node.style.background_gradient) << "');\n";
+    if (node.style.border_radius)
+        ss << ind << "setCornerRadius('" << id << "', 'All', " << *node.style.border_radius << ");\n";
     ss << "\n";
 }
 
-static void generate_native_node(std::ostringstream& ss, const IRNode& node,
-                                 const CodeGenOptions& opts, int depth,
-                                 int& var_counter, const std::string& parent_id,
-                                 std::unordered_map<const IRNode*, std::string>* id_map) {
+/// Emit one node's bridge-native JS, then bind its anchor to the live widget.
+///
+/// The anchor binding lives in the generate_native_node wrapper rather than in
+/// this body: the body has a terminal branch per node kind (widget, vector,
+/// image, text, container, bare frame), each with its own create call and its
+/// own `return`, so binding inside it would mean six call sites and a seventh
+/// kind silently unanchored. This body already funnels the one fact the binding
+/// needs — the exact bridge id it emitted — into `id_map` at its single entry
+/// point, so the wrapper reads it back and binds afterwards. setAnchor only
+/// needs the widget to exist by the time the script finishes, so trailing the
+/// subtree is fine.
+///
+/// Without this the native lane produced anchor COMMENTS and nothing else: the
+/// views carried no anchor, so the inspector could not key tweaks against
+/// source, and every node-keyed validation (fidelity_diff, --dump-layout parity)
+/// had nothing to join on and skipped — reporting success by finding nothing.
+static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node,
+                                      const CodeGenOptions& opts, int depth,
+                                      int& var_counter, const std::string& parent_id,
+                                      std::unordered_map<const IRNode*, std::string>* id_map) {
     std::string id = sanitize_var(node.name.empty() ? node.type : node.name);
     if (depth > 0) id += std::to_string(var_counter++);
     else id = opts.root_variable;
@@ -1802,11 +1957,9 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         !node.stable_anchor_id->empty()) {
         ss << e.ind << "// @pulp-anchor " << *node.stable_anchor_id << "\n";
     }
-    // Bridge-native-JS currently does not emit setAnchor(id, anchor) calls.
-    // The web-compat path (generate_node) is wired; bridge-native-JS has many
-    // early returns and several create call sites. Imports that opt into native
-    // codegen do not bind anchors to live widgets for inspector tweaks.
-    // Web-compat is the default mode, so most imports are unaffected.
+    // The matching setAnchor(id, anchor) call is emitted by the
+    // generate_native_node wrapper once this body has created the widget and
+    // recorded its bridge id — see the rationale there.
 
     if (node.audio_widget != AudioWidgetType::none) {
         emit_js_audio_widget(e);
@@ -1832,6 +1985,22 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         return;
     }
     emit_js_generic_frame(e);
+}
+
+static void generate_native_node(std::ostringstream& ss, const IRNode& node,
+                                 const CodeGenOptions& opts, int depth,
+                                 int& var_counter, const std::string& parent_id,
+                                 std::unordered_map<const IRNode*, std::string>* id_map) {
+    // The caller's map when it wants the ids, a local one otherwise — the
+    // binding must not depend on whether someone else asked for the mapping.
+    std::unordered_map<const IRNode*, std::string> local_ids;
+    auto* ids = id_map ? id_map : &local_ids;
+    generate_native_node_impl(ss, node, opts, depth, var_counter, parent_id, ids);
+    if (!node.stable_anchor_id || node.stable_anchor_id->empty()) return;
+    auto it = ids->find(&node);
+    if (it == ids->end()) return;
+    ss << indent(depth, opts.indent_spaces) << "setAnchor('" << it->second << "', '"
+       << js_single_quote_escape(*node.stable_anchor_id) << "');\n";
 }
 
 // ── Public code generation ──────────────────────────────────────────────
@@ -2026,6 +2195,11 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         // IR untouched; the web-compat arm (which does not own the dropped-shape
         // fall-through) is intentionally not affected.
         IRNode native_root = ir.root;
+        // Before synthesis: synthesize_node moves border_color onto the path it
+        // builds, and it only ever sees the discrete field — so the shorthand
+        // has to be split first or a stroked primitive synthesizes a path with
+        // no stroke on it.
+        normalize_border_shorthand(native_root);
         synthesize_primitive_paths(native_root);
 
         int var_counter = 0;

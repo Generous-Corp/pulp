@@ -274,6 +274,235 @@ ResponseCurve magnitude_spectrum_curve(
     const pulp::audio::BufferView<const float>& signal, double sample_rate,
     std::span<const double> checkpoints_hz, const ResponseOptions& options = {});
 
+// ── Phase / group delay ───────────────────────────────────────────────────
+
+/// One point on a phase/group-delay curve.
+///
+/// **Two gates, because the two measurements have different preconditions.**
+/// Both are honesty gates: neither field may carry a number the analyzer did
+/// not measure, and each is NaN rather than a plausible value when its gate is
+/// false.
+///
+///   * `defined` gates `group_delay_samples`. Group delay is estimated per bin
+///     from that bin's own energy and never consults a neighbor, so this bin
+///     having signal — in the reference, in the output, and in the transfer
+///     ratio relative to the curve's peak — is the whole precondition.
+///   * `phase_defined` gates `phase_rad`, and is STRICTER. Unwrapped phase is
+///     not a per-bin quantity: it is accumulated by walking every bin from DC
+///     upward, so it is trustworthy only when that entire walk crossed real
+///     data. `defined` cannot express that, and a bin can legitimately be
+///     `defined` while its `phase_rad` sits on the wrong 2π branch because the
+///     walk below it passed through bins that had none.
+///
+/// `hz` and `magnitude_db_rel_peak` are always readable — the magnitude IS the
+/// gate input, i.e. the evidence for the verdict. Check the matching gate
+/// before reading either measurement.
+///
+/// **`magnitude_db_rel_peak` is NOT the same quantity as
+/// `ResponsePoint::magnitude_db`**, despite both curves coming from the same
+/// Doctor run over the same stimulus. `ResponsePoint::magnitude_db` from
+/// `response_relative_to_input` is the ABSOLUTE transfer ratio
+/// (20*log10(|out|/|in|)), so a processor with 12 dB of passband gain reports
+/// +12 there. This field is normalized to the phase curve's OWN peak transfer
+/// magnitude (20*log10(|H|/peak|H|)), so that same processor reports 0 here —
+/// it is the input to the relative half of the `defined` gate, and reads 0 dB
+/// at the loudest bin whatever the overall gain is. The name carries the
+/// distinction because the two are written to sibling artifacts.
+struct PhasePoint {
+    double hz = 0.0;
+    /// Transfer magnitude in dB relative to the curve's own peak transfer
+    /// magnitude (peak bin = 0 dB, everything else negative) — the gate input.
+    double magnitude_db_rel_peak = 0.0;
+    /// Unwrapped transfer phase; NaN unless `phase_defined`.
+    double phase_rad = 0.0;
+    /// -dφ/dω in samples; NaN unless `defined`.
+    double group_delay_samples = 0.0;
+    /// Gates `group_delay_samples`. False where the reference bin, the output
+    /// bin, or the transfer ratio carries too little energy to differentiate —
+    /// three gates, not one; see `measure_group_delay`.
+    bool defined = false;
+    /// Gates `phase_rad`. True only when this bin is `defined` AND every bin
+    /// from DC up to it is too, so the unwrap reached here without crossing a
+    /// bin that had no phase to read. Implies `defined`; never the converse.
+    bool phase_defined = false;
+};
+
+/// Phase / group-delay curve of a transfer function.
+///
+/// Determinism contract (echoed into the artifact):
+///   * stimulus: a unit impulse (or caller-supplied reference) driven through
+///     the processor, same as the magnitude response;
+///   * window/length: stated `window` over an `fft_length`-sample segment
+///     beginning at `analysis_offset`. `rectangular` is the default and the
+///     only window for which the estimator below returns the segment's true
+///     group delay (see `measure_group_delay`);
+///   * reference: phase and group delay are those of the transfer function
+///     H = output/input, so a delay common to both cancels and the absolute
+///     FFT scale is irrelevant (both facts are ratios) — backend-stable;
+///   * resolution: one bin every `sample_rate / fft_length` Hz; checkpoints
+///     read the nearest bin (no interpolation).
+///
+/// **Sign convention**: group delay is positive for a causal delay — a filter
+/// that delays by k samples reports +k, matching `-dφ/dω`.
+struct PhaseCurve {
+    std::string analyzer = "group_delay";
+    std::string stimulus;
+    Window window = Window::rectangular;
+    int fft_length = 0;
+    int analysis_offset = 0;
+    double sample_rate = 0.0;
+    double bin_hz = 0.0;
+    /// Magnitude gate, in dB **relative to the curve's peak transfer
+    /// magnitude**. Bins below it are reported `defined = false`. Necessary,
+    /// not sufficient: clearing it does not by itself make a bin `defined` —
+    /// the reference- and output-energy gates apply too (see
+    /// `measure_group_delay`).
+    double magnitude_floor_db = 0.0;
+    std::vector<PhasePoint> full;        ///< Bin 0..N/2, monotonic in hz.
+    std::vector<PhasePoint> checkpoints; ///< Requested frequencies only.
+
+    /// True when the bin nearest `hz` carries enough energy for its group
+    /// delay to be a measurement. False for an empty curve. This does NOT
+    /// qualify `phase_radians_at` — see `phase_defined_at`.
+    bool defined_at(double hz) const;
+    /// True when the bin nearest `hz` is `defined_at` AND the unwrap reached it
+    /// over an unbroken run of defined bins from DC, so its phase sits on the
+    /// right 2π branch. False for an empty curve.
+    bool phase_defined_at(double hz) const;
+    /// Group delay in samples at the bin nearest `hz`. **NaN when
+    /// `defined_at(hz)` is false** — the caller must not treat a stopband as a
+    /// measurement. NaN propagates loudly through arithmetic and fails any
+    /// comparison, which is the intended failure mode.
+    double group_delay_samples_at(double hz) const;
+    /// Group delay in seconds at `hz` (samples / sample_rate). NaN when undefined.
+    double group_delay_seconds_at(double hz) const;
+    /// Unwrapped transfer phase in radians at `hz`. **NaN when
+    /// `phase_defined_at(hz)` is false** — which includes bins that are
+    /// `defined_at` but sit above a gap the unwrap could not carry a branch
+    /// across. See `measure_group_delay`.
+    double phase_radians_at(double hz) const;
+    /// Transfer magnitude at `hz` in dB **relative to this curve's own peak
+    /// transfer magnitude** — always defined (it IS the gate input). NOT the
+    /// absolute out/in ratio that `ResponseCurve::magnitude_db_at` returns;
+    /// see `PhasePoint::magnitude_db_rel_peak`. Returns kSilenceFloorDb for an
+    /// empty curve.
+    double magnitude_db_rel_peak_at(double hz) const;
+};
+
+/// Options for the phase/group-delay analyzer. Lengths must be powers of two.
+struct GroupDelayOptions {
+    /// Power of two; also the impulse render length. Must exceed twice the
+    /// largest group delay present — see `measure_group_delay`.
+    int fft_length = 16384;
+    /// Samples skipped before the analysis segment. **Meaningful only on the
+    /// buffer-level `measure_group_delay(input, output, ...)` overload with a
+    /// caller-supplied non-impulse reference.** The scenario overload always
+    /// synthesizes its reference impulse at frame 0, so any nonzero offset
+    /// moves the window past the only sample the reference has and throws
+    /// ("reference (input) analysis window is effectively silent") rather than
+    /// dividing noise by noise. Leave it 0 there.
+    int analysis_offset = 0;
+    /// Rectangular by default, for the same reason as the response analyzer
+    /// (an impulse at frame 0 would be annihilated by a Hann window) and
+    /// because the group-delay estimator is exact only for a rectangular
+    /// window — a taper measures the group delay of the *windowed* signal.
+    Window window = Window::rectangular;
+    int channel = 0;
+    /// Magnitude gate in dB below the curve's peak transfer magnitude. Bins
+    /// quieter than this are reported undefined rather than given a number
+    /// read out of the noise floor. −60 dB is the default: it keeps a normal
+    /// passband and transition band while rejecting a stopband, and is far
+    /// enough above the analyzer's own numerical floor that a `defined` bin is
+    /// genuinely measured.
+    double magnitude_floor_db = -60.0;
+};
+
+/// Phase and group delay of `output` relative to `input`, one channel.
+///
+/// ── Estimator ──────────────────────────────────────────────────────────────
+/// Group delay is the derivative `τ(ω) = -dφ/dω`, and differentiating a noisy,
+/// wrapped phase curve by finite differences is both fragile (it aliases
+/// whenever the true phase advances more than π between bins) and noisy (a
+/// difference amplifies the bin-to-bin error). This analyzer instead uses the
+/// **Fourier/ramped-signal identity**, which computes the derivative
+/// analytically rather than numerically:
+///
+///     τ(ω) = Re{ X_r(ω) · conj(X(ω)) } / |X(ω)|²   where X_r = FFT(n·x[n])
+///
+/// (from `dX/dω = -j·FFT(n·x[n])`). It is evaluated per bin on the reference
+/// and the output separately and subtracted — `τ_H = τ_output − τ_input` —
+/// because phase subtracts in a ratio and the derivative is linear. Three
+/// properties follow, and they are why this estimator was chosen:
+///   * **No unwrapping is involved.** Group delay is exact per bin and cannot
+///     be corrupted by an unwrapping mistake elsewhere in the curve.
+///   * **No frequency step to choose.** There is no finite-difference stride
+///     trading resolution against noise; the value at each bin is the true
+///     derivative of the segment's phase there.
+///   * **Exact, not approximate**, for any signal that lies entirely inside
+///     the rectangular analysis window. A truncated (still-ringing) IR is the
+///     one real error source: the estimator faithfully reports the group delay
+///     of the *truncated* signal. Budget `fft_length` so the response has
+///     decayed into the noise floor within it.
+/// Expected tolerance for a well-contained IR: within ~0.01 samples of truth
+/// for a pure delay or FIR, and dominated by IR truncation otherwise. The
+/// asserted tolerances in the tests state what was actually observed.
+///
+/// ── Phase unwrapping ───────────────────────────────────────────────────────
+/// `phase_rad` is reported separately and IS unwrapped, by the standard
+/// cumulative-offset method: walk the bins low to high and add the multiple of
+/// 2π that keeps each successive raw `atan2` difference inside (−π, π]. This is
+/// exact only while the true phase advances less than π per bin, i.e. while
+/// `group_delay < fft_length / 2` samples (the phase slope is `−τ·2π/N` per
+/// bin). Beyond that the phase aliases and unwrapping silently tracks the
+/// wrong branch — budget `fft_length` accordingly.
+///
+/// Unwrapping also cannot recover the branch across a magnitude null or a gap
+/// in the reference spectrum: there is no phase to read in between, so the
+/// accumulated offset carries an unresolved 2πk ambiguity past it. That is a
+/// precondition on the WALK, not on the destination bin, so `defined` — which
+/// asks only about a bin's own energy — cannot express it. **`phase_defined`
+/// is the gate that does**: it is true only for a bin the unwrap reached over
+/// an unbroken run of defined bins from DC, and `phase_rad` is NaN everywhere
+/// else, including at bins that are themselves perfectly well `defined`. So a
+/// band-limited or gapped reference yields real group delay at every bin it
+/// excites and phase only up to the first gap — which is the honest split.
+/// `group_delay_samples` does not inherit the ambiguity at all; it never
+/// consults the unwrapped phase.
+///
+/// The aliasing bound above (`group_delay < fft_length / 2`) is NOT gated: it
+/// is a budgeting duty on the caller, and per bin the analyzer cannot tell an
+/// aliased phase from a true one. It is stated, not enforced. The gap
+/// ambiguity is gated because it IS exactly testable.
+///
+/// ── Stopband contract ──────────────────────────────────────────────────────
+/// Where the transfer magnitude is at the noise floor there is no signal whose
+/// phase could be measured, and `atan2` of numerical noise yields a plausible-
+/// looking number that means nothing. Every bin whose magnitude is more than
+/// `options.magnitude_floor_db` below the curve's peak is therefore reported
+/// `defined = false` with NaN group delay, and NaN phase both there and at
+/// every bin above it that the unwrap could only reach through it. A bin whose
+/// reference (input) spectrum is itself negligible is undefined for the same
+/// reason.
+///
+/// That relative gate is backstopped by an absolute one, because the two fail
+/// in different places: the relative gate is measured against the curve's own
+/// peak, so a processor whose output is entirely silent has a peak that IS the
+/// numerical floor, putting every bin at 0 dB relative to it. Such a curve
+/// would report a flat, fully-defined, zero-delay response for a processor that
+/// emitted nothing. Bins whose absolute transfer magnitude is at the numerical
+/// floor are therefore undefined regardless of the relative reading, and a
+/// silent output yields a curve with no defined bins at all — which is the
+/// honest answer. The analyzer reports no group delay it did not measure.
+///
+/// Computed in double precision (`Fft64`) throughout: the estimator's numerator
+/// is a difference of products that can cancel heavily near a null, and the
+/// double path is also the backend-portable one.
+PhaseCurve measure_group_delay(
+    const pulp::audio::BufferView<const float>& input,
+    const pulp::audio::BufferView<const float>& output, double sample_rate,
+    std::span<const double> checkpoints_hz,
+    const GroupDelayOptions& options = {});
+
 // ── THD / THD+N ───────────────────────────────────────────────────────────
 
 /// One harmonic's contribution to a distortion measurement.

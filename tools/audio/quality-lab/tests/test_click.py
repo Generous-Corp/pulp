@@ -550,6 +550,111 @@ def test_blind_spot_c_a_defect_on_an_edge_is_NOT_masked():
     assert on == pytest.approx(off, abs=2.0)
 
 
+# ── A real BLEP oscillator: the additive fixtures' blind spot, made real ─────────────
+#
+# The additive true-negatives above are exact Fourier sums — precisely sinc-periodic, so
+# the comb nulls them to the interpolator floor. A REAL antialiased oscillator is not a
+# Fourier sum: at a fractional period its edge lands at a moving sub-sample phase, so
+# successive periods differ at the edges and the comb leaves a per-edge approximation
+# smear that reads -22 to -31 dB. That is not a click, and a detector validated only on
+# the additive fixtures false-fires on it. These pin the refusal that replaces the false
+# fire, and prove the render is genuinely clean while it happens.
+
+BLEP_GRID = [(44100, 55.0), (44100, 220.0), (48000, 110.0), (48000, 440.0),
+             (48000, 880.0), (96000, 220.0)]
+
+
+def _alias_floor_db(y, sr, f0, harmonic_step):
+    """The largest NON-harmonic spectral peak, dB below the fundamental — the independent
+    "is the render actually dirty" check the comb self-reference lacks. A saw/square at a
+    non-integer period has its true harmonics at k*f0; energy anywhere else is alias.
+    `harmonic_step` is 1 for a saw (all harmonics), 2 for a square (odd only)."""
+    n = len(y)
+    spec = np.abs(np.fft.rfft((y - np.mean(y)) * np.hanning(n)))
+    freqs = np.fft.rfftfreq(n, 1.0 / sr)
+    bin_hz = sr / n
+    harmonic = np.zeros(len(freqs), bool)
+    for k in range(1, int((sr / 2) / f0), harmonic_step):
+        harmonic |= np.abs(freqs - k * f0) < 4 * bin_hz
+    fundamental = spec[harmonic & (freqs < 1.5 * f0)].max()
+    alias = spec[~harmonic & (freqs > 0.5 * f0)].max()
+    return 20 * np.log10(alias / fundamental)
+
+
+@pytest.mark.parametrize("sr,f0", BLEP_GRID)
+@pytest.mark.parametrize("wave", ["saw", "square"])
+def test_a_clean_blep_oscillator_is_refused_not_called_clicky(sr, f0, wave):
+    """The gap the additive true-negatives cannot cover. A clean polyBLEP oscillator's
+    comb residual is a -22 to -31 dB per-edge smear, and the detector must REFUSE it
+    rather than report a click — a false -25 dB click on a correct oscillator is exactly
+    the failure a click detector cannot have."""
+    y = getattr(fx, f"polyblep_{wave}")(sr, f0, DUR)
+    r = click.detect(y, sr, f0_hint=f0)
+    assert not r.fired, f"clean polyBLEP {wave} at {f0} Hz / {sr} flagged as clicky: {r.notes}"
+    assert r.low_coverage, "a refused BLEP render must surface as low_coverage, never as clean"
+
+
+def test_the_blep_smear_reads_as_a_click_but_the_render_is_not_dirty():
+    """The finding, end to end: the comb reading IS a false-click level, yet the render is
+    genuinely clean by an independent measure — so the -23 dB is edge smear, not a defect,
+    and refusing it is correct rather than a miss. The note names the reference route."""
+    sr, f0 = 96000, 220.0
+    for wave, step in (("saw", 1), ("square", 2)):
+        y = getattr(fx, f"polyblep_{wave}")(sr, f0, DUR)
+        a = click.analyze(y, sr, f0_hint=f0)
+        assert a.click_db >= FIRE_DB, "premise: the raw comb reading IS above the fire threshold"
+        assert _alias_floor_db(y, sr, f0, step) < a.click_db - 20.0, (
+            "premise: the render is clean — its alias floor sits >20 dB below the reading, "
+            "so the reading is edge smear, not a dirty signal"
+        )
+        r = click.detect(y, sr, f0_hint=f0)
+        assert not r.fired and r.low_coverage
+        assert "smear" in r.notes and "reference" in r.notes
+
+
+def test_the_edge_smear_guard_not_the_drift_guard_is_what_refuses_a_steady_blep():
+    """The guard the fix adds, isolated from the pre-existing drift guard. A polyBLEP
+    render steady enough to clear the drift guard (220 Hz at 96 kHz) STILL false-fires
+    without the edge-smear guard — so it is the new guard, not drift, doing the work.
+    Asserted by disabling only the edge guard (a concentration can never exceed 1.0) and
+    showing the reading flip from fired to refused."""
+    sr, f0 = 96000, 220.0
+    for wave in ("saw", "square"):
+        y = getattr(fx, f"polyblep_{wave}")(sr, f0, DUR)
+        assert click.analyze(y, sr, f0_hint=f0).period_drift <= 3e-5, (
+            "premise: this render is steady, so the drift guard does not refuse it"
+        )
+        assert click.detect(y, sr, f0_hint=f0, max_edge_concentration=1.0).fired, (
+            "premise: with the edge-smear guard disabled, the steady render false-fires"
+        )
+        r = click.detect(y, sr, f0_hint=f0)
+        assert not r.fired and r.low_coverage, "the edge-smear guard turns that into a refusal"
+
+
+@pytest.mark.parametrize("db", [-12, -20, -30])
+def test_a_seam_above_the_blep_smear_floor_still_fires(db):
+    """The refusal is regime-scoped, not a blanket 'ignore this oscillator': a seam louder
+    than the smear is a localized, off-edge outlier, so it fires despite the smear."""
+    sr, f0 = 48000, 440.0
+    y = fx.polyblep_square(sr, f0, DUR)
+    peak = float(np.max(np.abs(y - np.mean(y))))
+    seam = fx.inject_step(y, int(0.15 * sr), peak * 10 ** (db / 20.0))
+    assert click.detect(seam, sr, f0_hint=f0).fired, f"missed a {db} dB seam on a polyBLEP square"
+
+
+def test_a_seam_below_the_blep_smear_floor_is_refused_never_passed():
+    """The honest limit, pinned in the safe direction. On a real oscillator the smear sets
+    a floor (~-31 dB here), and a seam quieter than it is masked — but it is REFUSED, not
+    read clean. The comb cannot see below the smear; the reference route is what can, which
+    is why the refusal points there."""
+    sr, f0 = 48000, 440.0
+    y = fx.polyblep_square(sr, f0, DUR)
+    peak = float(np.max(np.abs(y - np.mean(y))))
+    seam = fx.inject_step(y, int(0.15 * sr), peak * 10 ** (-40 / 20.0))
+    r = click.detect(seam, sr, f0_hint=f0)
+    assert not r.fired and r.low_coverage, "a seam below the smear floor must refuse, never read clean"
+
+
 # ── Preconditions and machinery ─────────────────────────────────────────────────────
 
 def test_noise_has_no_period_and_is_refused_not_called_clicky():

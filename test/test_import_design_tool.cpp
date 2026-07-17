@@ -1,7 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <miniz.h>
+#include "envelope_merge.hpp"
 #include "fig_lane.hpp"
+#include "render_artifact_path.hpp"
 
 #include <iostream>
 
@@ -2590,7 +2592,7 @@ TEST_CASE("fig::handle drives the offline lane in-process",
         std::string file = fixture;
         std::string scratch;
         LaneArgs args{src, file};
-        args.frame_name = "Plugin UI";
+        args.frame_names = {"Plugin UI"};
         args.created_tmp_dir = &scratch;
         auto code = handle(args);
         REQUIRE_FALSE(code.has_value());  // caller continues
@@ -2606,7 +2608,7 @@ TEST_CASE("fig::handle drives the offline lane in-process",
         std::string src = "fig";
         std::string file = fixture;
         LaneArgs args{src, file};
-        args.frame_name = "Definitely Not Here";
+        args.frame_names = {"Definitely Not Here"};
         auto code = handle(args);
         REQUIRE(code.has_value());
         REQUIRE(*code == 2);
@@ -2646,4 +2648,311 @@ TEST_CASE("fig::handle drives the offline lane in-process",
         REQUIRE_FALSE(code.has_value());
         REQUIRE(src == "figma-plugin");
     }
+}
+
+// ── multi-state capture through a real export lane ──────────────────────────
+//
+// The frame set a multi-state import produces is only real if a lane that
+// actually exports faithful frames can reach it. These drive the REST
+// faithful-vector exporter (tools/import-design/figma_rest_export.py) for real —
+// two states, two envelopes — merge them through the CLI's repeated --file, and
+// assert the generated C++ holds BOTH states. Only the two network payloads are
+// supplied from fixtures (--node-json / --frame-svg, the exporter's own offline
+// seam); every transform between them and the emitted add_frame is the shipping
+// code. A hand-built IR cannot prove this: it would assert the generators against
+// a shape no exporter has to produce.
+#ifndef PULP_FIGMA_REST_EXPORT
+#define PULP_FIGMA_REST_EXPORT ""
+#endif
+
+namespace {
+
+bool python_available() {
+    return pulp::platform::find_on_path("python3").has_value();
+}
+
+// A Figma /nodes payload for one frame: the shape figma_rest_export.py's
+// --node-json reads in place of a REST call.
+std::string rest_nodes_json(const std::string& node_id, const std::string& name) {
+    return R"({"nodes":{")" + node_id + R"(":{"document":{"id":")" + node_id +
+           R"(","name":")" + name +
+           R"(","type":"FRAME","absoluteBoundingBox":{"x":0.0,"y":0.0,)"
+           R"("width":100.0,"height":100.0},"fills":[],"children":[]}}}})";
+}
+
+// One state's frame SVG. The 100x100 rect is 69% of the 120x120 frame, so the
+// exporter's panel detect finds it; the fill differs per state, which is what
+// makes "emitted frame 0 twice" observable.
+std::string rest_frame_svg(const std::string& fill) {
+    return R"(<svg width="120" height="120" xmlns="http://www.w3.org/2000/svg">)"
+           R"(<rect x="10" y="10" width="100" height="100" rx="4" fill=")" + fill +
+           R"("/></svg>)";
+}
+
+// The base64 SVG payload of each frame the codegen emitted, in emit order.
+std::vector<std::string> emitted_frame_payloads(const std::string& source) {
+    std::vector<std::string> out;
+    const std::string open = "static const char* const kParts[] = {";
+    for (size_t at = source.find(open); at != std::string::npos;
+         at = source.find(open, at + open.size())) {
+        const size_t end = source.find("};", at);
+        if (end == std::string::npos) break;
+        out.push_back(source.substr(at, end - at));
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("multi-state capture reaches add_frame through the REST faithful lane",
+          "[cli][import-design][tool][multi-state]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+    if (!python_available()) { SUCCEED("skipped: python3 not on PATH"); return; }
+    const std::string exporter = PULP_FIGMA_REST_EXPORT;
+    if (exporter.empty() || !fs::exists(exporter)) {
+        SUCCEED("skipped: figma_rest_export.py not located");
+        return;
+    }
+
+    TempDir tmp("pulp-multi-state-real-lane");
+    write_text(tmp.path / "typing.nodes.json", rest_nodes_json("1:1", "Typing"));
+    write_text(tmp.path / "piano.nodes.json", rest_nodes_json("1:2", "Piano"));
+    write_text(tmp.path / "typing.svg", rest_frame_svg("#111111"));
+    write_text(tmp.path / "piano.svg", rest_frame_svg("#222222"));
+
+    // Export each state exactly as the documented two-export procedure does.
+    auto export_state = [&](const std::string& node_id, const std::string& stem) {
+        auto r = exec("python3",
+                      {exporter, "--file-key", "FIXTURE", "--node", node_id, "--node-json",
+                       (tmp.path / (stem + ".nodes.json")).string(), "--frame-svg",
+                       (tmp.path / (stem + ".svg")).string(), "--faithful-vector",
+                       "--no-assets", "--out", (tmp.path / (stem + ".pulp.json")).string()},
+                      60000);
+        INFO("exporter stderr: " << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 0);
+        // The whole point of this lane: it emits a node the frame set can hang off.
+        const auto env = read_text(tmp.path / (stem + ".pulp.json"));
+        REQUIRE(env.find("\"render_mode\": \"faithful_svg\"") != std::string::npos);
+    };
+    export_state("1:1", "typing");
+    export_state("1:2", "piano");
+
+    SECTION("two exported states generate one view holding both frames") {
+        const auto out = tmp.path / "kbd.cpp";
+        auto r = run_import_design({"--from", "figma-plugin", "--file",
+                                    (tmp.path / "typing.pulp.json").string(), "--file",
+                                    (tmp.path / "piano.pulp.json").string(), "--mode", "baked",
+                                    "--emit", "cpp", "--output", out.string(),
+                                    "--fail-on-unresolved"},
+                                   60000);
+        INFO("import stderr: " << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 0);
+
+        const auto source = read_text(out);
+        // One DesignFrameView holding N frames — not N views.
+        CHECK(count_occurrences(source, "make_unique<pulp::view::DesignFrameView>") == 1);
+        CHECK(count_occurrences(source, "->add_frame(") == 1);
+
+        // Both states' own SVGs are in the output, in capture order. Distinct
+        // payloads are what rule out frame 0 being emitted twice.
+        const auto payloads = emitted_frame_payloads(source);
+        REQUIRE(payloads.size() == 2);
+        CHECK(payloads[0] != payloads[1]);
+    }
+
+    SECTION("a third state adds a third frame, in --file order") {
+        write_text(tmp.path / "drums.nodes.json", rest_nodes_json("1:3", "Drums"));
+        write_text(tmp.path / "drums.svg", rest_frame_svg("#333333"));
+        export_state("1:3", "drums");
+
+        const auto out = tmp.path / "kbd3.cpp";
+        auto r = run_import_design({"--from", "figma-plugin", "--file",
+                                    (tmp.path / "typing.pulp.json").string(), "--file",
+                                    (tmp.path / "piano.pulp.json").string(), "--file",
+                                    (tmp.path / "drums.pulp.json").string(), "--mode", "baked",
+                                    "--emit", "cpp", "--output", out.string()},
+                                   60000);
+        INFO("import stderr: " << r.stderr_output);
+        REQUIRE(r.exit_code == 0);
+
+        const auto source = read_text(out);
+        CHECK(count_occurrences(source, "->add_frame(") == 2);
+        // The alternates are named in capture order, which is the swap index.
+        const auto f1 = source.find("// frame 1: Piano");
+        const auto f2 = source.find("// frame 2: Drums");
+        REQUIRE(f1 != std::string::npos);
+        REQUIRE(f2 != std::string::npos);
+        CHECK(f1 < f2);
+    }
+
+    SECTION("a single --file is unchanged — one frame, no add_frame") {
+        const auto out = tmp.path / "one.cpp";
+        auto r = run_import_design({"--from", "figma-plugin", "--file",
+                                    (tmp.path / "typing.pulp.json").string(), "--mode", "baked",
+                                    "--emit", "cpp", "--output", out.string()},
+                                   60000);
+        REQUIRE(r.exit_code == 0);
+        const auto source = read_text(out);
+        CHECK(count_occurrences(source, "make_unique<pulp::view::DesignFrameView>") == 1);
+        CHECK(source.find("->add_frame(") == std::string::npos);
+    }
+
+    SECTION("repeated --file on a source that parses one file is rejected") {
+        auto r = run_import_design({"--from", "figma", "--file",
+                                    (tmp.path / "typing.pulp.json").string(), "--file",
+                                    (tmp.path / "piano.pulp.json").string(), "--emit", "cpp",
+                                    "--output", (tmp.path / "no.cpp").string()},
+                                   60000);
+        CHECK(r.exit_code == 2);
+        CHECK(r.stderr_output.find("--file is repeatable only with --from figma-plugin") !=
+              std::string::npos);
+    }
+}
+
+TEST_CASE("captured states that cannot render fail loudly instead of dropping",
+          "[cli][import-design][tool][multi-state][fig]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+    if (!node_available()) { SUCCEED("skipped: node not on PATH"); return; }
+    static FigDecodeEnv fig_env;
+    const std::string fixture = PULP_FIG_FIXTURE;
+    REQUIRE_FALSE(fixture.empty());
+
+    // The .fig decoder emits a widget-recognition tree — no render_mode, no
+    // svg_asset_id — so nothing lowers the states it captured. Importing two
+    // frames from it once exited 0 with a single frame and an empty report: the
+    // user asked for two states and silently got one. It must refuse instead.
+    TempDir tmp("pulp-multi-state-unrenderable");
+    const auto out = tmp.path / "out.cpp";
+    auto r = run_import_design({"--from", "fig", "--file", fixture, "--frame", "Plugin UI",
+                                "--frame", "Plugin UI", "--mode", "baked", "--emit", "cpp",
+                                "--output", out.string()},
+                               60000);
+    INFO("stderr: " << r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    CHECK(r.exit_code == 2);
+    CHECK(r.stderr_output.find("cannot be rendered and would be dropped") != std::string::npos);
+    // It names the way to actually capture states, not just the refusal.
+    CHECK(r.stderr_output.find("--faithful-vector") != std::string::npos);
+    // And it refused rather than writing a single-state file that looks complete.
+    CHECK_FALSE(fs::exists(out));
+}
+
+TEST_CASE("repeated --frame on a source that resolves one frame is rejected",
+          "[cli][import-design][tool][multi-state]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+    TempDir tmp("pulp-multi-state-frame-reject");
+    write_text(tmp.path / "d.json", "{}");
+    auto r = run_import_design({"--from", "figma", "--file", (tmp.path / "d.json").string(),
+                                "--frame", "A", "--frame", "B", "--emit", "cpp", "--output",
+                                (tmp.path / "o.cpp").string()});
+    CHECK(r.exit_code == 2);
+    CHECK(r.stderr_output.find("--frame is repeatable only with --from fig") != std::string::npos);
+    // It points at the surface that DOES capture states from this source.
+    CHECK(r.stderr_output.find("--file a.pulp.json --file b.pulp.json") != std::string::npos);
+}
+
+// ── Merging N per-state envelopes: asset id collisions ───────────────────────
+//
+// Flattening every state's assets into one directory rests on an asset_id
+// naming its content. That holds for the hash-keyed producers and NOT for the
+// REST export, which keys by Figma node id — so re-exporting a node whose
+// content changed between captures produces two entries with one id and two
+// pictures. Dedupe would keep the first and render it in both states.
+
+namespace {
+
+// A minimal per-state envelope in the shape merge_frame_envelopes consumes.
+// `content_hash` is emitted only when non-empty, so the hash-keyed lane (which
+// carries no such field) can be modeled exactly.
+std::string state_envelope(const std::string& frame_name,
+                           const std::string& asset_id,
+                           const std::string& content_hash) {
+    std::string asset = "{\"asset_id\":\"" + asset_id + "\"";
+    if (!content_hash.empty()) asset += ",\"content_hash\":\"" + content_hash + "\"";
+    asset += ",\"mime\":\"image/svg+xml\"}";
+    return "{\"provenance\":{\"source\":\"figma-rest\"},"
+           "\"asset_manifest\":{\"assets\":[" + asset + "]},"
+           "\"root\":{\"name\":\"" + frame_name + "\",\"type\":\"frame\"}}";
+}
+
+}  // namespace
+
+TEST_CASE("merging states rejects one asset id naming two different pictures",
+          "[import-design][envelope-merge]") {
+    TempDir tmp("pulp-envelope-merge-collision");
+    const auto a = tmp.path / "a" / "design.pulp.json";
+    const auto b = tmp.path / "b" / "design.pulp.json";
+    // The REST shape: asset_id is the NODE id, so it survives a content edit
+    // that moves content_hash. This is exactly what re-exporting node 1:1
+    // after a design change produces.
+    write_text(a, state_envelope("state-a", "frame-svg-1:1", std::string(64, 'a')));
+    write_text(b, state_envelope("state-b", "frame-svg-1:1", std::string(64, 'b')));
+
+    const auto rc = pulp::import_design::merge_frame_envelopes(
+        {a, b}, tmp.path / "scratch", tmp.path / "merged.pulp.json");
+
+    REQUIRE(rc.has_value());          // refused, rather than silently dedupe-ing
+    CHECK(*rc == 3);
+    // ...and refused BEFORE writing a merged envelope that renders state-a's
+    // artwork in state-b's frame.
+    CHECK_FALSE(fs::exists(tmp.path / "merged.pulp.json"));
+}
+
+TEST_CASE("merging states dedupes one asset id naming the same picture",
+          "[import-design][envelope-merge]") {
+    TempDir tmp("pulp-envelope-merge-same");
+    const auto a = tmp.path / "a" / "design.pulp.json";
+    const auto b = tmp.path / "b" / "design.pulp.json";
+    // Same id, same content: the ordinary case — an unchanged shared asset
+    // reused across states. Must still collapse to one entry.
+    write_text(a, state_envelope("state-a", "frame-svg-1:1", std::string(64, 'a')));
+    write_text(b, state_envelope("state-b", "frame-svg-1:1", std::string(64, 'a')));
+
+    const auto rc = pulp::import_design::merge_frame_envelopes(
+        {a, b}, tmp.path / "scratch", tmp.path / "merged.pulp.json");
+
+    REQUIRE_FALSE(rc.has_value());
+    const auto merged = read_text(tmp.path / "merged.pulp.json");
+    // One asset entry survives, and both states are present.
+    CHECK(count_occurrences(merged, "frame-svg-1:1") == 1);
+    CHECK(merged.find("alternate_frames") != std::string::npos);
+}
+
+TEST_CASE("merging states does not fail a hash-keyed lane that omits content_hash",
+          "[import-design][envelope-merge]") {
+    TempDir tmp("pulp-envelope-merge-hashkeyed");
+    const auto a = tmp.path / "a" / "design.pulp.json";
+    const auto b = tmp.path / "b" / "design.pulp.json";
+    // The .fig / Figma-plugin shape: asset_id IS the content hash and there is
+    // no separate content_hash field. A repeated id is provably the same bytes,
+    // so the guard must stay quiet rather than reject a valid multi-state fig
+    // capture — the false-positive that would make this guard unshippable.
+    write_text(a, state_envelope("state-a", std::string(64, 'c'), ""));
+    write_text(b, state_envelope("state-b", std::string(64, 'c'), ""));
+
+    const auto rc = pulp::import_design::merge_frame_envelopes(
+        {a, b}, tmp.path / "scratch", tmp.path / "merged.pulp.json");
+
+    REQUIRE_FALSE(rc.has_value());
+    CHECK(fs::exists(tmp.path / "merged.pulp.json"));
+}
+
+
+TEST_CASE("render_artifact_path places the render beside --output, not the CWD",
+          "[import][validate][artifact-path]") {
+    using pulp::import_design::render_artifact_path;
+    // --output in a directory -> the render lands in that directory.
+    CHECK(render_artifact_path("/tmp/out/ui.js", "design-fig-render.png")
+          == "/tmp/out/design-fig-render.png");
+    CHECK(render_artifact_path("/a/b/c/panel.js", "x-render.png")
+          == "/a/b/c/x-render.png");
+    // A bare --output (no directory) keeps the artifact in the CWD — the
+    // intended default for that invocation, and the ONLY case the old bare-name
+    // behavior was ever correct for.
+    CHECK(render_artifact_path("ui.js", "design-fig-render.png")
+          == "design-fig-render.png");
+    // A relative --output with a directory still carries that directory.
+    CHECK(render_artifact_path("sub/ui.js", "y-render.png") == "sub/y-render.png");
 }

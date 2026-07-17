@@ -20,15 +20,16 @@ name: Version-at-Land (single-writer, dry-run)
 on:
   push:
     branches: [main]
-    # Only when a version-relevant surface could have moved. Kept broad on
-    # purpose in dry-run; narrowed with the config's trigger_paths at flip time.
-    paths:
-      - 'core/**'
-      - 'tools/**'
-      - '.claude-plugin/**'
-      - '.agents/skills/**'
-      - '.claude/commands/**'
-      - 'hooks/**'
+    # Deliberately NO `paths:` filter — run on EVERY push to main. A filter here
+    # is a silent-loss hole: a fix/feat that touches only a surface path the
+    # filter omits (e.g. `experimental/pulp-rs/**`, a live sdk trigger path in
+    # versioning.json) would declare a `Version-Bump:` intent, merge, never
+    # trigger this workflow, and — because the auto-release stranded detector
+    # treats a pending intent as covered — never alarm. The drain is bounded by
+    # the `Version-Bump-Applied` marker, so a push with no intent in range is a
+    # cheap no-op (see test_version_at_land.py::test_non_trigger_change_is_noop);
+    # correctness beats saving a few trivial ubuntu runs. The pending-intent
+    # liveness alarm is the time-based backstop if this ever fails to run.
   workflow_dispatch: {}
 
 concurrency:
