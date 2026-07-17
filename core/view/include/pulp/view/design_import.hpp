@@ -306,6 +306,22 @@ void hoist_captured_art_knobs(DesignIR& ir);
 /// attributes) — never a layer name or source quirk.
 void synthesize_primitive_paths(IRNode& root);
 
+/// Split the CSS `border` shorthand — "1px solid #333" — into the discrete
+/// border_color / border_width / border_style fields, for every node in the
+/// tree that set the shorthand but not the parts.
+///
+/// IRStyle carries both spellings, and the producers all write the shorthand:
+/// the .fig decoder, the Claude bundle reader, and the v0 TSX reader. Every
+/// native consumer reads only the parts — codegen's setBorder requires
+/// border_color AND border_width, and synthesize_node moves border_color onto a
+/// synthesized path. So a stroke declared in a design reached the IR and then
+/// went nowhere: six declared strokes lowered to zero setBorder + zero
+/// setSvgStroke calls in a real 1115-node import.
+///
+/// Only fills gaps — a producer that already set the parts wins, since it said
+/// what it meant more precisely than the shorthand can.
+void normalize_border_shorthand(IRNode& root);
+
 /// Bind geometry-detected controls to host parameters from an out-of-band
 /// manifest that maps a Figma node id (`IRInteractiveElement::source_node_id`,
 /// stamped by the producer) to a host-param key. For each interactive element

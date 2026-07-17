@@ -339,7 +339,7 @@ commands:
         description: Overwrite an existing output file.
       - name: --no-mint
         required: false
-        description: "For CI / non-interactive use: refuse to mint a new signing identity if the --sign-key path is absent (exit 2 instead of silently signing under a new key).
+        description: "For CI / non-interactive use: refuse to mint a new signing identity if the --sign-key path is absent (exit 2 instead of silently signing under a new key)."
     subcommands:
       - name: verify
         summary: "Verify a signed .pulpbake against a trust set and print ACCEPTED/REJECTED. Checks the Ed25519 signature and runs the bounded parse only; never executes the plan or loads custom state."
@@ -694,7 +694,7 @@ commands:
         args:
           - name: component
             kind: positional
-            description: Version component to increment: patch, minor, or major.
+            description: "Version component to increment: patch, minor, or major."
           - name: --plugin
             kind: flag
             description: Bump the plugin version declared in `pulp_add_plugin(... VERSION ...)` instead of the framework version.
@@ -1598,7 +1598,7 @@ commands:
             description: Optional package kind filter, e.g. ui-kit or content-pack
           - name: --lane
             kind: option
-            description: Optional trust/workflow lane filter: kit or content
+            description: "Optional trust/workflow lane filter: kit or content"
           - name: --json
             kind: flag
             description: Emit machine-readable search results
@@ -1724,7 +1724,7 @@ commands:
           - name: --kind
             kind: option
             required: true
-            description: Manifest kind: source, ui-kit, or template
+            description: "Manifest kind: source, ui-kit, or template"
           - name: --id
             kind: option
             required: true
@@ -2240,7 +2240,7 @@ commands:
     args:
       - name: --format
         kind: option
-        description: Restrict to one format (clap, vst3, au, auv3, lv2); default is every compiled-in format. Alias: -f
+        description: "Restrict to one format (clap, vst3, au, auv3, lv2); default is every compiled-in format. Alias: -f"
       - name: --no-load
         kind: flag
         description: Compatibility no-op on the Rust front end because it is already filesystem-only; on pulp-cpp, skip dlopen and use filename-derived enumeration when rich scanning crashes while loading malformed plug-ins.
@@ -2256,7 +2256,7 @@ commands:
         description: Path to the plug-in bundle (.clap / .vst3 / .component / .lv2)
       - name: --format
         kind: option
-        description: Format selector (clap default, vst3, au, auv3, lv2). Alias: -f
+        description: "Format selector (clap default, vst3, au, auv3, lv2). Alias: -f"
       - name: --id
         kind: option
         description: Unique id / URI to select a specific descriptor in the bundle (LV2 and multi-plugin CLAP)

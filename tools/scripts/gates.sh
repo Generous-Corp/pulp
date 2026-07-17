@@ -133,6 +133,23 @@ if [ -x "$HOST_VITALS" ]; then
     fi
 fi
 
+# ── 0b. shipyard-local mac routing (ADVISORY) ──────────────────────────────
+# The required `macos` check is posted ONLY by the local self-hosted runner.
+# A `[targets.mac]` override in the gitignored .shipyard.local/config.toml can
+# silently route that lane to a cloud provider, and the failure looks like a
+# hang, not a misconfiguration: shipyard watches a redundant cloud run and
+# times out at 3600s while the required check never appears. Surfacing it here
+# costs a millisecond and saves an hour. Read-only and advisory — a deliberate
+# cloud macOS lane is legitimate, and this must never strand a push.
+SHIPYARD_LOCAL="$ROOT/tools/scripts/shipyard_local_check.py"
+if [ -f "$SHIPYARD_LOCAL" ]; then
+    echo "" >&2
+    echo "▸ shipyard-local mac routing (advisory)" >&2
+    if "$PYTHON" "$SHIPYARD_LOCAL" --repo-root "$ROOT"; then
+        echo "  mac → local self-hosted runners (required 'macos' check will post)." >&2
+    fi
+fi
+
 # ── 1. skill-sync ──────────────────────────────────────────────────────────
 echo "" >&2
 echo "▸ skill-sync check" >&2

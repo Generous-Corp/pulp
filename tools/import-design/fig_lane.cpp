@@ -151,10 +151,22 @@ std::optional<int> handle(const LaneArgs& args) {
         return std::nullopt;
     };
 
+    // geometry.json is the decoder's solved rect for the PRIMARY frame — the
+    // one the merged envelope's root is built from. Resolve it against
+    // whichever scratch directory that primary frame decoded into: the scratch
+    // root on the single-frame fast path, the `f0` subdir once the multi-state
+    // path decodes each frame into its own directory.
+    auto resolve_geometry = [&](const fs::path& dir) {
+        if (!args.geometry_file) return;
+        if (const auto geom = dir / "geometry.json"; fs::exists(geom))
+            *args.geometry_file = geom.string();
+    };
+
     // Single-state capture: decode straight into the scratch root, exactly as a
     // pre-multi-state import did (no merge step on the common path).
     if (args.frame_names.size() == 1) {
         if (auto err = decode_frame(args.frame_names.front(), scratch)) return *err;
+        resolve_geometry(scratch);
         args.input_file = (scratch / "scene.pulp.json").string();
         args.source_str = "figma-plugin";
         return std::nullopt;
@@ -179,6 +191,8 @@ std::optional<int> handle(const LaneArgs& args) {
     const fs::path merged = scratch / "scene.pulp.json";
     if (auto err = merge_frame_envelopes(envelopes, scratch, merged)) return *err;
 
+    // The merged root is frame 0, so its geometry is f0's.
+    resolve_geometry(scratch / "f0");
     args.input_file = merged.string();
     args.source_str = "figma-plugin";
     return std::nullopt;  // continue down the figma-plugin path

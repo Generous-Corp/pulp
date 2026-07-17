@@ -55,6 +55,8 @@ from test_pr_release_tag_report import PrReleaseTagReportTests  # noqa: E402,F40
 from test_compose_release_notes import ComposeReleaseNotesTests  # noqa: E402,F401
 from test_apply_intent_bump import ApplyIntentBumpTests  # noqa: E402,F401
 from test_skill_sync import SkillSyncTests  # noqa: E402,F401
+from test_shipyard_local_check import MacRerouteWarningTests  # noqa: E402,F401
+from test_shipyard_local_check import MainTests as ShipyardLocalMainTests  # noqa: E402,F401
 
 
 # ── Entry ──────────────────────────────────────────────────────────────

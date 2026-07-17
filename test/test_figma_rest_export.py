@@ -53,13 +53,125 @@ class CodexP2FollowupTest(unittest.TestCase):
                      "children": [{"type": "INSTANCE", "name": "Knob", "id": "1:2",
                                    "absoluteBoundingBox": {"x": 0, "y": 0, "width": 60, "height": 60}}]}
         out, _ctx = frx.node_tree_to_ir(container)
-        self.assertNotIn("audio_widget", out)        # not promoted
+        # Not promoted — and the container decision is PINNED as an explicit
+        # "none": asset capture can collapse child containers into leaf images,
+        # and without the pin the C++ importer's name heuristic re-promotes
+        # this node from that degraded envelope.
+        self.assertEqual(out.get("audio_widget"), "none")
         self.assertTrue(out.get("children"))         # children preserved
-        # A leaf knob instance (vector/group visual children) IS promoted.
-        leaf = {"type": "INSTANCE", "name": "Knob Small", "id": "2:1",
-                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 28, "height": 41},
-                "children": [{"type": "GROUP", "name": "g"}, {"type": "VECTOR", "name": "v"}]}
+        # An EMPTY hand-drawn frame named like a knob (no component identity,
+        # no art inside) is still promoted — name recognition remains the
+        # placeholder fallback when there is nothing to paint over.
+        leaf = {"type": "FRAME", "name": "Knob Small", "id": "2:1",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 28, "height": 41}}
         self.assertEqual(frx.node_tree_to_ir(leaf)[0].get("audio_widget"), "knob")
+        # The same frame WITH drawn shapes is the designer's widget art: not
+        # promoted, and (being all-vector) captured whole as one image.
+        drawn = {"type": "FRAME", "name": "Knob Small", "id": "2:2",
+                 "absoluteBoundingBox": {"x": 0, "y": 0, "width": 28, "height": 41},
+                 "children": [{"type": "GROUP", "name": "g",
+                               "children": [{"type": "VECTOR", "name": "v", "id": "2:4"}]}]}
+        dout, _ = frx.node_tree_to_ir(drawn)
+        self.assertEqual(dout.get("audio_widget"), "none")
+        self.assertEqual(dout.get("type"), "image", "all-vector art captured whole")
+
+    def test_instance_keeps_designer_art_and_carries_component_identity(self):
+        # A component instance is the designer's own widget art. It must NOT be
+        # name-promoted to the built-in silver knob; it gets the explicit
+        # audio_widget "none" opt-out (which parse_ir_audio_widget honors), its
+        # children are preserved, and it carries figma.component_key /
+        # main_component_name so the recognition resolver can wire a MATCHED
+        # component by key — never-silent-knob, same contract as the .fig lane.
+        inst = {"type": "INSTANCE", "name": "sound / knob / mixer", "id": "2:1",
+                "componentId": "9:9",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 28, "height": 41},
+                "children": [
+                    {"type": "ELLIPSE", "name": "knob base", "id": "2:2",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 28, "height": 28}},
+                    {"type": "TEXT", "name": "caption", "id": "2:3",
+                     "characters": "Attack",
+                     "absoluteBoundingBox": {"x": 0, "y": 30, "width": 28, "height": 11}},
+                ]}
+        out, _ctx = frx.node_tree_to_ir(
+            inst, components={"9:9": {"key": "abc123", "name": "sound / knob / mixer"}})
+        self.assertEqual(out.get("audio_widget"), "none")
+        self.assertEqual(out["figma"]["component_key"], "abc123")
+        self.assertEqual(out["figma"]["main_component_name"], "sound / knob / mixer")
+        self.assertEqual(len(out.get("children", [])), 2, "designer art preserved")
+
+    def test_nodes_inside_instances_are_not_name_promoted(self):
+        # The internals ('knob base', 'fader track', …) match the name
+        # vocabulary but are component art — each gets the "none" opt-out so
+        # neither this exporter nor the C++ importer's name heuristic promotes
+        # them, at any depth.
+        inst = {"type": "INSTANCE", "name": "widget", "id": "3:1", "componentId": "9:9",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 60, "height": 60},
+                "children": [
+                    {"type": "FRAME", "name": "knob", "id": "3:2",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 28, "height": 28},
+                     "children": [
+                         {"type": "FRAME", "name": "fader", "id": "3:3",
+                          "absoluteBoundingBox": {"x": 0, "y": 0, "width": 4, "height": 20}},
+                     ]},
+                ]}
+        out, _ctx = frx.node_tree_to_ir(inst)
+        knob = out["children"][0]
+        self.assertEqual(knob.get("audio_widget"), "none")
+        self.assertEqual(knob["children"][0].get("audio_widget"), "none")
+
+    def test_component_set_key_preferred_over_component_key(self):
+        # The resolver's tables (library-manifest.json, --recognition-manifest)
+        # are keyed by component_set_key; a variant instance must carry the
+        # SET's key, not the individual variant component's.
+        inst = {"type": "INSTANCE", "name": "Pulp / Knob", "id": "4:1",
+                "componentId": "9:1",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 56, "height": 56}}
+        out, _ctx = frx.node_tree_to_ir(
+            inst,
+            components={"9:1": {"key": "variantkey", "name": "size=small",
+                                "componentSetId": "8:1"}},
+            component_sets={"8:1": {"key": "setkey", "name": "Pulp / Knob"}})
+        self.assertEqual(out["figma"]["component_key"], "setkey")
+        self.assertEqual(out["figma"]["main_component_name"], "Pulp / Knob")
+
+    def test_detached_copy_subtree_is_art_not_widgets(self):
+        # A DETACHED component copy is a widget-named FRAME that directly owns
+        # raw shapes ('knob base', 'knob ring'). It is ONE widget whose parts
+        # are art: nothing inside it may be name-promoted (the old behavior
+        # painted a silver knob over each part), and every part carries the
+        # "none" opt-out so the C++ name heuristic stays off too.
+        detached = {"type": "FRAME", "name": "sound / knob / small unipolar", "id": "5:1",
+                    "absoluteBoundingBox": {"x": 0, "y": 0, "width": 40, "height": 52},
+                    "children": [
+                        {"type": "FRAME", "name": "sound / knob label", "id": "5:2",
+                         "absoluteBoundingBox": {"x": 0, "y": 40, "width": 40, "height": 12},
+                         "children": [{"type": "TEXT", "name": "caption", "id": "5:3",
+                                       "characters": "Attack",
+                                       "absoluteBoundingBox": {"x": 0, "y": 40, "width": 40, "height": 12}}]},
+                        {"type": "ELLIPSE", "name": "knob base", "id": "5:4",
+                         "absoluteBoundingBox": {"x": 6, "y": 6, "width": 28, "height": 28}},
+                        {"type": "BOOLEAN_OPERATION", "name": "knob ring", "id": "5:5",
+                         "absoluteBoundingBox": {"x": 0, "y": 0, "width": 40, "height": 34}},
+                    ]}
+        out, _ctx = frx.node_tree_to_ir(detached)
+        # The copy itself keeps the opt-out (so the C++ name heuristic stays
+        # off) and stays a container with its art inside.
+        self.assertEqual(out.get("audio_widget"), "none")
+        self.assertTrue(out.get("children"))
+        parts = {c["name"]: c for c in out["children"]}
+        self.assertEqual(parts["sound / knob label"].get("audio_widget"), "none")
+        self.assertEqual(parts["knob ring"].get("audio_widget"), "none")
+        # Control: a widget-named group of CONTAINERS is a row, not one widget —
+        # an EMPTY placeholder frame inside it still gets promoted.
+        row = {"type": "FRAME", "name": "Knob Row", "id": "6:1",
+               "absoluteBoundingBox": {"x": 0, "y": 0, "width": 200, "height": 60},
+               "children": [
+                   {"type": "FRAME", "name": "Knob", "id": "6:2",
+                    "absoluteBoundingBox": {"x": 0, "y": 0, "width": 60, "height": 60}},
+               ]}
+        rout, _ = frx.node_tree_to_ir(row)
+        self.assertEqual(rout.get("audio_widget"), "none")  # row pinned, not promoted
+        self.assertEqual(rout["children"][0].get("audio_widget"), "knob")
 
     def test_node_tree_to_ir_returns_side_effects_explicitly(self):
         # P2 decomposition: walk()'s three side effects (asset ids, fonts, image
@@ -983,6 +1095,60 @@ class ExportCacheTest(unittest.TestCase):
         self.assertIsNone(
             frx.fetch_frame_svg_cached("FK", "1:2", None, cache_dir=self._tmp))
         self.assertEqual(called["n"], 0)
+
+
+class ShapePrimitiveTypingTest(unittest.TestCase):
+    """Shape leaves must reach the IR as the shape they are.
+
+    Asserted through node_tree_to_ir — the producer's real entry point — so the
+    assertion is about what this exporter actually WRITES, not what a helper
+    returns in isolation.
+    """
+
+    @staticmethod
+    def _shape(**over):
+        # Figma's own default layer name. A widget-ish name ("knob base") would
+        # be name-promoted to audio_widget=knob, and synthesize_node returns
+        # early on a recognized widget — so this fixture would then assert
+        # nothing about the shape path it is here to cover.
+        n = {"type": "ELLIPSE", "name": "Ellipse 1", "id": "3:1",
+             "absoluteBoundingBox": {"x": 0, "y": 0, "width": 40, "height": 40},
+             "fills": [{"type": "SOLID", "color": {"r": 1, "g": 0, "b": 0, "a": 1}}]}
+        n.update(over)
+        return n
+
+    def test_filled_ellipse_is_typed_ellipse_not_frame(self):
+        # A filled ELLIPSE typed `frame` renders as a SQUARE: a frame paints its
+        # own background box, and codegen has no painter for a circle, so the
+        # fill has no way to become round. `ellipse` is what the C++ side has
+        # accepted all along (is_synthesizable_primitive → synth_ellipse_path).
+        out, _ctx = frx.node_tree_to_ir(self._shape())
+        self.assertEqual(out["type"], "ellipse")
+        # Plain art, not a recognized widget — the case where synthesize_node
+        # actually runs and needs the type to be right.
+        self.assertIsNone(out.get("audio_widget"))
+        # The fill must survive: synthesize_node moves background_color onto the
+        # synthesized path. A typed ellipse with no fill would paint nothing.
+        self.assertEqual(out["style"]["background_color"], "#ff0000")
+
+    def test_rectangle_stays_frame(self):
+        # The control for the rule above: a rect IS a box, so a frame's own
+        # background paints it correctly and it must NOT be re-typed.
+        rect = self._shape(type="RECTANGLE", name="Rectangle 1")
+        self.assertEqual(frx.node_tree_to_ir(rect)[0]["type"], "frame")
+
+    def test_star_and_polygon_are_captured_as_images_not_frames(self):
+        # Pins the reason ELLIPSE needs a fix and these do not: is_vector_like()
+        # captures them as PNG assets before frame typing can matter. If this
+        # ever regresses to "frame", they become squares the same way — and this
+        # test says so instead of leaving the omission looking like an oversight.
+        for figma_type in ("STAR", "POLYGON", "REGULAR_POLYGON"):
+            with self.subTest(figma_type=figma_type):
+                out, ctx = frx.node_tree_to_ir(self._shape(type=figma_type,
+                                                           name="Pentagon"))
+                self.assertEqual(out["type"], "image")
+                self.assertEqual(out["asset_ref"], "3:1")
+                self.assertIn("3:1", ctx.asset_ids)
 
 
 if __name__ == "__main__":
