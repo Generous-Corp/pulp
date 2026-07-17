@@ -2068,6 +2068,56 @@ TEST_CASE("SkiaCanvas tracks non-opaque layers for text edging "
     }
 }
 
+// restore_to_count must run each closed mask layer's deferred kDstIn composite
+// (so the content is actually masked) AND not leak the PendingMask — a bare
+// SkCanvas::restoreToCount skipped both, leaving mask layers UNMASKED and the
+// stale mask queued to false-match a later same-depth layer (Skia reuses save
+// counts).
+TEST_CASE("SkiaCanvas restore_to_count applies pending masks without leaking them",
+          "[canvas][skia][mask][restore-to-count]") {
+    SkImageInfo info = SkImageInfo::Make(64, 64, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+    SkiaCanvas canvas(surface->getCanvas());
+
+    const int baseline = canvas.save_count();
+
+    // Open a mask layer whose mask fades white(opaque)->transparent left-to-right,
+    // fill it fully red, then close via restore_to_count (NOT restore()).
+    canvas.save_layer_with_mask(
+        0, 0, 64, 64, 1.0f,
+        "linear-gradient(to right, white, transparent)", "cover");
+    canvas.set_fill_color(Color::rgba8(255, 0, 0, 255));
+    canvas.fill_rect(0, 0, 64, 64);
+    canvas.restore_to_count(baseline);
+
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    SkColor left = pm.getColor(4, 32);    // mask opaque -> red present
+    SkColor right = pm.getColor(60, 32);  // mask transparent -> masked out
+    INFO("left.r=" << SkColorGetR(left) << " right.r=" << SkColorGetR(right));
+    REQUIRE(SkColorGetR(left) > 180);
+    // Masked out on the right (fixed ~47 from the mask's transparent edge; the
+    // bug left it UNMASKED at full red ~255 — the two are cleanly separated).
+    REQUIRE(SkColorGetR(right) < 90);
+
+    // A subsequent unrelated layer at the SAME depth must NOT inherit the mask:
+    // fill blue everywhere and assert the right edge (where a leaked mask would
+    // have hidden it) is fully blue.
+    canvas.save_layer(0, 0, 64, 64, 1.0f, 0.0f);
+    canvas.set_fill_color(Color::rgba8(0, 0, 255, 255));
+    canvas.fill_rect(0, 0, 64, 64);
+    canvas.restore();
+
+    REQUIRE(surface->peekPixels(&pm));
+    SkColor right2 = pm.getColor(60, 32);
+    INFO("right2.b=" << SkColorGetB(right2));
+    REQUIRE(SkColorGetB(right2) > 180);  // unrelated layer not masked
+}
+
 // End-to-end: render the same glyph twice into the same surface, once inside
 // save_layer(opacity = 0.5) and once outside, and verify the inside-layer
 // pixels show no LCD subpixel pattern. LCD AA produces unequal R / G / B

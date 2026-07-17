@@ -344,18 +344,26 @@ int SkiaCanvas::save_count() const {
 
 void SkiaCanvas::restore_to_count(int target) {
     GUARD_CANVAS;
-    // SkCanvas::restoreToCount pops down to and including `target`; we
-    // match that contract so a CanvasWidget that captured save_count()
-    // == 4 at entry and got back depth 7 (three leaked saves) returns
-    // to exactly 4 at exit. SkCanvas guards target == 0 internally.
+    // SkCanvas::restoreToCount pops down to and including `target`; we match that
+    // contract so a CanvasWidget that captured save_count() == 4 at entry and
+    // got back depth 7 (three leaked saves) returns to exactly 4 at exit.
     const int safe_target = target < 1 ? 1 : target;
-    // Drop any tracked non-opaque layers whose save count is strictly above the
-    // target, since SkCanvas is about to close all of them in one shot.
-    while (!non_opaque_layer_stack_.empty() &&
-           non_opaque_layer_stack_.back() > safe_target) {
-        non_opaque_layer_stack_.pop_back();
+    // Close layers ONE AT A TIME through the mask-aware restore(), NOT via a bare
+    // canvas_->restoreToCount(). A single restoreToCount would close every layer
+    // above the target in one shot, which for a mask layer skips its deferred
+    // kDstIn composite (the content restores UNMASKED) and leaves the stale
+    // PendingMask queued — and because Skia reuses save counts, a later unrelated
+    // save_layer restore at the same depth would then false-match that leaked
+    // mask and apply it to unrelated content. Looping restore() applies each
+    // layer's pending mask + non-opaque-stack pop exactly as an explicit
+    // restore() would. Each restore() nets one save-count decrement (the mask
+    // composite's internal saveLayer/restore is balanced), so the loop
+    // terminates; a defensive break guards against any non-progress.
+    while (canvas_->getSaveCount() > safe_target) {
+        const int before = canvas_->getSaveCount();
+        restore();
+        if (canvas_->getSaveCount() >= before) break;
     }
-    canvas_->restoreToCount(safe_target);
 }
 
 void SkiaCanvas::translate(float x, float y) { GUARD_CANVAS; canvas_->translate(x, y); }
