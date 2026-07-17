@@ -486,7 +486,7 @@ public:
         // multi-room moving-pan reverb — stays native-only (the whole GpuMultiConvolver
         // stack is `#if !defined(PULP_WASM)`); on the web these two steer the field
         // VISUALIZATION, which is exactly what that field IS. Rooms>20 flips the engine
-        // to GPU, mirroring the native "past the CPU's room cap → GPU" behaviour.
+        // to GPU, mirroring the native "past the CPU's room cap → GPU" behavior.
         store.add_parameter({.id = kRooms, .name = "Rooms", .unit = "",
                              .range = {1.0f, 128.0f, 16.0f, 1.0f}});
         store.add_parameter({.id = kFlow, .name = "Flow", .unit = "%",
