@@ -55,6 +55,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <numbers>
 #include <utility>
 #include <vector>
@@ -313,24 +314,54 @@ TEST_CASE("polyBLEP kernel matches its closed form at known points",
 
 TEST_CASE("polyBLEP kernel handles edge and out-of-range positions",
           "[signal][osc][blep]") {
-    SECTION("a discontinuity landing exactly on a sample stays finite") {
-        // d = 0: the discontinuity coincides with the `before` sample, which by
-        // the after-branch convention has already taken the step.
-        const Correction at_zero = poly_blep(0.0, -2.0);
-        CHECK_THAT(at_zero.before, WithinAbs(1.0, 1e-15));
-        CHECK_THAT(at_zero.after, WithinAbs(0.0, 1e-15));
+    SECTION("a sample landing exactly on a discontinuity lands on its midpoint") {
+        // The physical statement of the boundary cases, and the one that matters:
+        // a bandlimited step passes through the MIDPOINT of its own jump. Both
+        // boundaries are ordinary operating points — a phase sitting at 0 and
+        // driven backward produces d = 0, a phase wrapping to exactly 0 produces
+        // d = 1 — and at each of them one tap coincides with the discontinuity.
+        //
+        // Which limit that tap needs depends on the value the sample already
+        // carries, and the two boundaries differ: at d = 0 the `before` sample
+        // was taken before the step (it needs +h/2 to reach the midpoint), while
+        // at d = 1 the `after` sample was taken after it (it needs -h/2). A
+        // kernel that reads both taps off one side gets d = 0 backwards by a
+        // full `h`, which is worse than not correcting at all — and asserting on
+        // the midpoint, rather than on a tap's raw number, is what states that
+        // in terms a reader can check against the physics.
+        for (const double h : {-2.0, +2.0, +1.0, -0.5}) {
+            const Correction at_zero = poly_blep(0.0, h);
+            INFO("h = " << h << ", d = 0: before tap " << at_zero.before << ", want " << (h / 2.0));
+            CHECK_THAT(at_zero.before, WithinAbs(h / 2.0, 1e-15));
+            CHECK_THAT(at_zero.after, WithinAbs(0.0, 1e-15));
 
-        // d = 1: it coincides with the `after` sample instead. This is a real
-        // operating point, not a pathology — a phase that wraps to exactly 0
-        // produces it — and it is where a naive kernel divides by zero.
-        const Correction at_one = poly_blep(1.0, -2.0);
-        CHECK_THAT(at_one.before, WithinAbs(0.0, 1e-15));
-        CHECK_THAT(at_one.after, WithinAbs(1.0, 1e-15));
+            const Correction at_one = poly_blep(1.0, h);
+            INFO("h = " << h << ", d = 1: after tap " << at_one.after << ", want " << (-h / 2.0));
+            CHECK_THAT(at_one.before, WithinAbs(0.0, 1e-15));
+            CHECK_THAT(at_one.after, WithinAbs(-h / 2.0, 1e-15));
+        }
+
+        // BLAMP has no such split: it is continuous at the origin, so both sides
+        // agree and each boundary's coincident tap reads the same 1/6.
+        for (const double s : {-1.6, +0.25}) {
+            CHECK_THAT(poly_blamp(0.0, s).before, WithinAbs(s / 6.0, 1e-15));
+            CHECK_THAT(poly_blamp(1.0, s).after, WithinAbs(s / 6.0, 1e-15));
+        }
     }
 
-    SECTION("positions just inside the boundaries do not blow up") {
-        for (const double d : {1e-12, 1e-6, 1.0 - 1e-6, 1.0 - 1e-12}) {
-            const Correction c = poly_blep(d, -2.0);
+    SECTION("the correction is continuous as d approaches each boundary") {
+        // The boundary values are not a special case bolted onto the interior —
+        // they are its limit. A tap that jumped as d crossed a boundary would
+        // mean a sub-ULP change in a wrap's position could flip a correction by
+        // the full step height.
+        const double h = -2.0;
+        CHECK_THAT(poly_blep(1e-12, h).before, WithinAbs(poly_blep(0.0, h).before, 1e-11));
+        CHECK_THAT(poly_blep(1e-12, h).after, WithinAbs(poly_blep(0.0, h).after, 1e-11));
+        CHECK_THAT(poly_blep(1.0 - 1e-12, h).before, WithinAbs(poly_blep(1.0, h).before, 1e-11));
+        CHECK_THAT(poly_blep(1.0 - 1e-12, h).after, WithinAbs(poly_blep(1.0, h).after, 1e-11));
+
+        for (const double d : {1e-12, 1e-6, 0.5, 1.0 - 1e-6, 1.0 - 1e-12}) {
+            const Correction c = poly_blep(d, h);
             CHECK(std::isfinite(c.before));
             CHECK(std::isfinite(c.after));
             CHECK(std::abs(c.before) <= 1.0 + 1e-9);
@@ -338,15 +369,40 @@ TEST_CASE("polyBLEP kernel handles edge and out-of-range positions",
         }
     }
 
-    SECTION("a position outside [0,1] yields no correction rather than garbage") {
-        for (const double d : {-0.5, 1.5, 2.0, 10.0}) {
+    SECTION("a position outside [0,1] yields exactly no correction") {
+        // Asserted as == 0 for every value, not merely `isfinite`. A discontinuity
+        // always lands inside the sample it was found in, so an out-of-window
+        // position is a caller error; the only answer that cannot make the output
+        // worse than leaving it alone is none. Checking finiteness here would pass
+        // on a spurious half-step, which is the failure this rules out.
+        for (const double d : {-10.0, -1.0, -0.5, -1e-12, 1.0 + 1e-12, 1.5, 2.0, 5.0, 10.0}) {
             const Correction c = poly_blep(d, -2.0);
-            CHECK(std::isfinite(c.before));
-            CHECK(std::isfinite(c.after));
+            INFO("d = " << d << " -> {" << c.before << ", " << c.after << "}");
+            CHECK(c.before == 0.0);
+            CHECK(c.after == 0.0);
+
+            const Correction r = poly_blamp(d, -1.6);
+            INFO("blamp d = " << d << " -> {" << r.before << ", " << r.after << "}");
+            CHECK(r.before == 0.0);
+            CHECK(r.after == 0.0);
         }
-        const Correction far = poly_blep(5.0, -2.0);
-        CHECK(far.before == 0.0);
-        CHECK(far.after == 0.0);
+
+        // A non-finite position is a caller error too, and must not become one of
+        // the caller's samples.
+        const double inf = std::numeric_limits<double>::infinity();
+        for (const double d : {std::nan(""), inf, -inf}) {
+            CHECK(poly_blep(d, -2.0).before == 0.0);
+            CHECK(poly_blep(d, -2.0).after == 0.0);
+            CHECK(poly_blamp(d, -1.6).before == 0.0);
+            CHECK(poly_blamp(d, -1.6).after == 0.0);
+        }
+
+        // The sentinel is guaranteed by that window check rather than by the
+        // arithmetic happening to vanish, which is what makes it safe to rely on.
+        CHECK(poly_blep(pulp::signal::osc::kNoDiscontinuity, -2.0).before == 0.0);
+        CHECK(poly_blep(pulp::signal::osc::kNoDiscontinuity, -2.0).after == 0.0);
+        CHECK(poly_blamp(pulp::signal::osc::kNoDiscontinuity, -1.6).before == 0.0);
+        CHECK(poly_blamp(pulp::signal::osc::kNoDiscontinuity, -1.6).after == 0.0);
     }
 
     SECTION("total correction never exceeds half the step height") {
@@ -359,14 +415,33 @@ TEST_CASE("polyBLEP kernel handles edge and out-of-range positions",
         }
     }
 
-    SECTION("a non-advancing phase has no wrap to place") {
-        CHECK(wrap_position(0.0, 0.0) == 0.0);
-        CHECK(wrap_position(0.5, -1.0) == 0.0);
+    SECTION("a non-advancing phase produces exactly no correction") {
+        // The guard must yield ZERO correction, which is a stronger claim than
+        // "returns some finite number". Returning 0 would satisfy the weaker
+        // claim while injecting a half-step on every sample of a stopped
+        // oscillator: d = 0 means "the discontinuity is on the `before` sample",
+        // not "there is no discontinuity". Assert the correction, not the code.
+        for (const double increment : {0.0, -1.0, -0.01}) {
+            const Correction c = poly_blep(wrap_position(0.0, increment), -2.0);
+            CHECK(c.before == 0.0);
+            CHECK(c.after == 0.0);
+            const Correction r = poly_blamp(wrap_position(0.0, increment), -0.25);
+            CHECK(r.before == 0.0);
+            CHECK(r.after == 0.0);
+        }
+        // A frozen phase divides 0 by 0; NaN survives both kernels' range checks
+        // and would reach the output buffer, so the guard is load-bearing.
         CHECK(std::isfinite(wrap_position(0.0, 0.0)));
+        CHECK(std::isfinite(poly_blep(wrap_position(0.0, 0.0), -2.0).before));
+    }
+
+    SECTION("a wrap that did happen is placed where it belongs") {
         // A wrap landing exactly on the boundary sits at d = 1.
         CHECK_THAT(wrap_position(0.0, 0.01), WithinAbs(1.0, 1e-15));
         // Half an increment past the boundary sits halfway between samples.
         CHECK_THAT(wrap_position(0.005, 0.01), WithinAbs(0.5, 1e-15));
+        // A wrap a hair past the boundary sits just shy of the `after` sample.
+        CHECK_THAT(wrap_position(0.0099, 0.01), WithinAbs(0.01, 1e-12));
     }
 }
 

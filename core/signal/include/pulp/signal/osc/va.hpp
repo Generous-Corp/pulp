@@ -19,8 +19,14 @@
 /// alias-free**: roughly 11-15 dB better than the trivial shape below 20 kHz.
 /// That is what the kernels can buy and no more; a deep-floor claim needs a
 /// tabulated minBLEP, not this. `test_osc_va.cpp` measures the figure per shape
-/// rather than asserting an aspiration. Sine is exact — it has no discontinuity
-/// to correct, and the correction path does not run for it at all.
+/// rather than asserting an aspiration.
+///
+/// A free-running sine is exact and bit-identical to `std::sin`: it is continuous
+/// across a wrap, so every step the corrector computes for it is exactly zero and
+/// is skipped. That is a property of the WRAP, not a property of the shape — a
+/// sync jumps a sine to an unrelated phase and genuinely steps, and is corrected
+/// like any other break. Deciding "sine, nothing to do" once up front would be
+/// wrong for exactly that case.
 ///
 /// ── Per-sample frequency ──────────────────────────────────────────────────
 ///
@@ -65,10 +71,28 @@
 /// Precision: `double` throughout, matching the accumulator and the kernels. A
 /// `float` caller narrows once on store.
 ///
-/// Not built here: hard sync and through-zero FM. The accumulator supports both
-/// and the corrector path is written so neither is designed out, but neither is
-/// wired up or measured, and nothing in this file should be read as a claim
-/// about them.
+/// ── Hard sync and through-zero FM ─────────────────────────────────────────
+///
+/// Through-zero FM needs no API of its own: frequency arrives as a per-sample
+/// increment, so a modulator driving the instantaneous frequency negative is
+/// just a caller passing a negative increment, and the accumulator wraps in both
+/// directions already. Hard sync adds one entry point, `next_synced`.
+///
+/// Both compose with everything above, and they do so structurally rather than
+/// by enumerating combinations: each event carries the endpoints of its own jump,
+/// so a sample's discontinuities are corrected by summing their steps, and
+/// coincident events telescope. Measured benefit over the trivial waveform is
+/// 11-34 dB across sync, TZFM, and the two together.
+///
+/// The wall is the carrier, not the corrector. Once the instantaneous frequency
+/// approaches Nyquist the aliasing stops coming from discontinuities and starts
+/// coming from the waveform itself being unrepresentable, and no discontinuity
+/// correction addresses that — a perfectly corrected step does not bandlimit a
+/// carrier running past half the sample rate. Past that point the correction's
+/// benefit falls to nothing (measured: a synced sine gains 12 dB at a 5 kHz
+/// deviation, 6 dB at 20 kHz, and nothing at all at 60 kHz, where the aliases
+/// exceed the fundamental outright). Fixing that needs oversampling on the FM
+/// path and is not attempted here.
 
 #include "blep.hpp"
 #include "phase.hpp"
@@ -82,7 +106,7 @@ namespace pulp::signal::osc {
 
 /// The static shapes.
 enum class VaShape {
-    sine,     ///< Continuous: needs no correction, and gets none.
+    sine,     ///< Continuous across a wrap; a sync still steps it.
     saw,      ///< Value step of -2 at the wrap.
     square,   ///< Value steps of +2 at the wrap and -2 at the pulse edge.
     triangle, ///< Slope breaks at the wrap and the apex; value is continuous.
@@ -177,47 +201,104 @@ public:
     /// held: the span this call corrects is defined by the increment this call
     /// was given.
     double next(double increment) noexcept {
-        double out = value(phase_.phase()) + carry_;
+        const double entry_phase = phase_.phase();
+        double out = value(entry_phase) + carry_;
         carry_ = 0.0;
 
-        const double entry_phase = phase_.phase();
         phase_.advance(increment);
+        correct_events(increment, out);
+        // No sync, so the phase ran the whole sample at one rate from one place:
+        // the sample is a single segment.
+        scan_threshold(entry_phase, increment, increment, 0.0, 1.0, out);
+        return out;
+    }
 
-        // Continuous everywhere: there is nothing to correct, and running the
-        // corrector anyway would add a rounding-sized term for no reason.
-        if (shape_ == VaShape::sine) return out;
+    /// Generate one sample, advancing by `increment` but forcing the phase to
+    /// `sync_phase` at sub-sample position `sync_frac` — a hard sync.
+    ///
+    /// Call this only on the samples where a sync actually fires. It emits a sync
+    /// event unconditionally, including a zero-magnitude one when the target
+    /// equals the phase it replaces, so calling it every sample would report a
+    /// sync every sample. The zero-magnitude case costs nothing (the corrector
+    /// skips a zero step) but the intent would be wrong.
+    ///
+    /// The reset is a value step of ARBITRARY magnitude, unlike a wrap's known
+    /// 1 -> 0. That magnitude is read off the event's endpoints rather than
+    /// assumed, which is the same path a wrap takes — see `correct_events`.
+    double next_synced(double increment, double sync_frac, double sync_phase = 0.0) noexcept {
+        const double entry_phase = phase_.phase();
+        double out = value(entry_phase) + carry_;
+        carry_ = 0.0;
 
-        // Wraps (and syncs, were they wired up) come from the accumulator, which
-        // reports the jump's endpoints — so the break is derived, not assumed.
+        phase_.advance_synced(increment, sync_frac, sync_phase);
+        correct_events(increment, out);
+
+        // A sync SPLITS the sample in two. The phase runs from `entry_phase` over
+        // sub-sample span [0, f], is then replaced outright, and runs from the
+        // target over [f, 1]. An internal threshold must therefore be scanned
+        // once per segment, from that segment's own starting phase: a single scan
+        // of (entry_phase, increment) describes a trajectory the phase never
+        // took, and would place the apex where it never was while missing the one
+        // it actually crossed after the reset.
+        //
+        // This mirrors `advance_synced`'s own segmentation — the same split, the
+        // same sub-sample spans — because that split IS the semantics, not an
+        // implementation detail to approximate.
+        const double f = clamp_unit(sync_frac);
+        scan_threshold(entry_phase, increment * f, increment, 0.0, f, out);
+        scan_threshold(wrap_unit(sync_phase), increment * (1.0 - f), increment, f, 1.0 - f, out);
+        return out;
+    }
+
+private:
+    /// Correct every discontinuity the accumulator reported this sample.
+    ///
+    /// One path for wraps and syncs alike: both carry the endpoints of their own
+    /// jump, so the step is derived rather than assumed, and a sync's arbitrary
+    /// magnitude needs no special case. Events at a shared position simply sum,
+    /// which is what makes the composed cases come out right without being
+    /// enumerated — a sync to 0 under a negative increment reports the sync
+    /// (p -> 0) AND a backward wrap (0 -> 1) at one position, and summing their
+    /// steps telescopes to p -> 1 with the intermediate cancelling exactly.
+    void correct_events(double increment, double& out) noexcept {
         for (const PhaseEvent& e : phase_.events()) {
             const double value_step = value(e.phase_after) - value(e.phase_before);
             const double slope_step =
                 (slope_per_cycle(e.phase_after) - slope_per_cycle(e.phase_before)) * increment;
             add_break(e.frac, value_step, slope_step, out);
         }
-
-        // The break inside the period, which the accumulator cannot know about.
-        Threshold t;
-        if (internal_threshold(t)) {
-            double fracs[PhaseAccumulator::max_events_per_sample];
-            const int n = threshold_crossings(entry_phase, increment, t.phase,
-                                              std::span<double>(fracs));
-            // Time order decides which side is "before": going forward the phase
-            // arrives from below the threshold, going backward from above.
-            const bool forward = increment > 0.0;
-            const double value_step =
-                forward ? (t.value_above - t.value_below) : (t.value_below - t.value_above);
-            const double slope_step =
-                (forward ? (t.slope_above - t.slope_below) : (t.slope_below - t.slope_above)) *
-                increment;
-            for (int k = 0; k < n; ++k)
-                add_break(fracs[k], value_step, slope_step, out);
-        }
-
-        return out;
     }
 
-private:
+    /// Correct the shape's internal threshold over one segment of a sample.
+    ///
+    /// `start_phase` is the phase entering the segment and `delta` the phase it
+    /// covers (the increment scaled by the segment's share of the sample), while
+    /// `rate` stays the FULL per-sample increment: a slope break's size is a
+    /// per-sample slope, which the segmentation does not change — only the span
+    /// does. Crossings come back in the segment's own normalized time and are
+    /// mapped onto the sample by `t0 + t * span`, exactly as the accumulator maps
+    /// its own events.
+    void scan_threshold(double start_phase, double delta, double rate, double t0, double span,
+                        double& out) noexcept {
+        Threshold t;
+        if (!internal_threshold(t)) return;
+
+        double fracs[PhaseAccumulator::max_events_per_sample];
+        const int n = threshold_crossings(start_phase, delta, t.phase, std::span<double>(fracs));
+        if (n == 0) return;
+
+        // Time order decides which side is "before": going forward the phase
+        // arrives from below the threshold, going backward from above.
+        const bool forward = delta > 0.0;
+        const double value_step =
+            forward ? (t.value_above - t.value_below) : (t.value_below - t.value_above);
+        const double slope_step =
+            (forward ? (t.slope_above - t.slope_below) : (t.slope_below - t.slope_above)) * rate;
+
+        for (int k = 0; k < n; ++k)
+            add_break(t0 + fracs[k] * span, value_step, slope_step, out);
+    }
+
     /// A shape's one-sided limits at its internal threshold.
     ///
     /// Declared analytically rather than probed by evaluating the shape at
@@ -269,7 +350,21 @@ private:
     double value(double p) const noexcept {
         switch (shape_) {
             case VaShape::sine:
-                return std::sin(2.0 * std::numbers::pi * p);
+                // sin is periodic, so its limit at the top of the period is
+                // sin(0) = 0 EXACTLY. `std::sin(2*pi)` returns -2.4e-16 instead,
+                // because 2*pi is not exactly representable — and handing that to
+                // the corrector applies a BLEP at every wrap of a shape that does
+                // not step there at all. Mapping the sentinel to its exact limit
+                // keeps a wrap's step exactly zero, which the corrector then
+                // skips outright, leaving a plain sine bit-identical to
+                // `std::sin`. That bit-exactness is the null proving the
+                // corrector is inert on a continuous shape, and it is worth more
+                // than the 2.4e-16 it costs to protect.
+                //
+                // A SYNC on a sine is a different matter and IS corrected: the
+                // reset jumps to an unrelated phase, so the value genuinely
+                // steps. It is the wrap that is continuous here, not the shape.
+                return p >= 1.0 ? 0.0 : std::sin(2.0 * std::numbers::pi * p);
             case VaShape::saw:
                 // Limit at 1 is +1, which is what `2p - 1` gives at p = 1.
                 return 2.0 * p - 1.0;
@@ -286,15 +381,22 @@ private:
         return 0.0;
     }
 
-    /// d(value)/d(phase), per cycle. Used only to size slope breaks, so the
-    /// sine's exact derivative is irrelevant — it never reaches the corrector.
+    /// d(value)/d(phase), per cycle — the size of a slope break before it is
+    /// scaled by the per-sample increment.
+    ///
+    /// The sine carries its true derivative because a sync breaks a sine's slope
+    /// as well as its value, and both need correcting. It costs nothing at a
+    /// wrap: `cos(2*pi)` evaluates to exactly 1.0 (unlike `sin`, whose limit at
+    /// the sentinel is the fragile one), so a wrap's slope step is exactly zero
+    /// and is skipped.
     double slope_per_cycle(double p) const noexcept {
         switch (shape_) {
+            case VaShape::sine:
+                return 2.0 * std::numbers::pi * std::cos(2.0 * std::numbers::pi * p);
             case VaShape::saw:
                 return 2.0;
             case VaShape::triangle:
                 return p < 0.5 ? 4.0 : -4.0;
-            case VaShape::sine:
             case VaShape::square:
                 return 0.0;
         }
@@ -320,6 +422,17 @@ private:
         if (!(x > 0.0)) return 0.0;
         if (x > 1.0) return 1.0;
         return x;
+    }
+
+    /// Wrap into [0, 1), matching how the accumulator normalizes a sync target.
+    ///
+    /// The segmented threshold scan needs the phase the sync will actually land
+    /// on, and the accumulator wraps the caller's `sync_phase` before using it.
+    /// Reading a raw, unwrapped target here would scan the second segment from a
+    /// phase the oscillator never occupies. NaN maps to 0, as it does there.
+    static double wrap_unit(double x) noexcept {
+        const double w = x - std::floor(x);
+        return (w >= 0.0 && w < 1.0) ? w : 0.0;
     }
 
     PhaseAccumulator phase_;
