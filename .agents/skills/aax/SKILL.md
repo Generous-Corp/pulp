@@ -177,6 +177,22 @@ multi-packet sysex vector (at least one packet across the 4-byte boundary
 and one terminator-only packet) in a unit test. Adapter fixes should ship with
 the regression tests that prove the fixed behavior.
 
+### Bypass audio must be latency-compensated (PDC alignment)
+
+The AAX bypass short-circuit must NOT `memcpy` the dry input straight to the
+output. When the wrapped Processor reports a non-zero latency, the host has
+already delay-aligned the plugin's *wet* path by that latency (PDC), so a raw
+dry copy arrives `latency` samples early — comb-filtering on parallel/mix
+busses. Route the bypass pass-through through
+`boundary::render_bypass_passthrough` (in `adapter_boundary.hpp`), sizing the
+shared `LatencyCompensatedBypass` delay line to
+`aax_reported_latency(definition.latency_samples)` in `ensure_prepared()` —
+the same value `SetSignalLatency()` reports to the host. A zero latency
+collapses to a straight passthrough. VST3/CLAP/AU v2/v3 use the identical
+helper; a shared bit-exact fixture in `test_adapter_boundary_parity.cpp`
+(`[bypass]`) covers it since the real AAX runtime can't build without the Avid
+SDK.
+
 ## Review Checklist
 
 ### Parameter semantics and declared layouts
