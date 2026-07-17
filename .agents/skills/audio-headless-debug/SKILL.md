@@ -291,6 +291,16 @@ oscillator — it will send you chasing a phantom octave error. Use
 sub-cent, and it refuses noise/silence rather than reporting a wrong pitch.
 `track_pitch` gives the `f0(t)` trajectory for drift/jitter analysis.
 
+It also **recovers the true fundamental when a harmonic is the loudest partial**
+(a rolled-off or resonant oscillator whose 2nd/3rd/… partial dominates the FFT
+peak) by descending to the lowest subharmonic that carries real energy at its own
+fundamental — so on a bright oscillator it no longer certifies a confident octave
+error. One honest exception to trust when you see it: a genuine MISSING fundamental
+(energy only at 2·f0/3·f0, nothing at f0) reports the loudest PRESENT partial
+(2·f0), not a fabricated f0 — that octave-up reading is the truth about the signal,
+not an analyzer bug. See the audio-harness `estimate_pitch` section for the
+algorithm detail.
+
 ## Never gate on `detection_floor_db`
 
 It is a ~2σ bound that assumes a **white** residual. Aliases are discrete tones,

@@ -859,12 +859,31 @@ error. Reach for **`estimate_pitch` / `track_pitch`** (`pitch_track.hpp`)
 instead: a coarse `magnitude_spectrum_curve` peak seeds a golden-section refine
 over the shipped `fit_tone` projection, so it is leakage-free and sub-cent
 (<0.002 cent on a clean tone, coherent or not) and FFT-backend-stable. It
-**refuses** silence, noise, and a missing fundamental rather than octave-guessing
-— honor the confidence gate. `track_pitch` gives the `f0(t)` trajectory; the
-drift/jitter statistics over it (Allan deviation, Theil-Sen slope) stay in the
-Quality Lab per the C++/Python split. A steep glide needs the window short
-relative to the sweep, and a fully flat missing-fundamental comb is refused, not
-solved — both fail closed.
+**refuses** silence and noise rather than octave-guessing — honor the confidence
+gate. `track_pitch` gives the `f0(t)` trajectory; the drift/jitter statistics over
+it (Allan deviation, Theil-Sen slope) stay in the Quality Lab per the C++/Python
+split. A steep glide needs the window short relative to the sweep.
+
+**Harmonic-dominant material — don't assume the loudest bin is f0.** A rolled-off
+or resonant oscillator can carry MORE energy in an upper partial than in the
+fundamental, so the loudest FFT bin lands an octave/twelfth/higher above the true
+pitch. `estimate_pitch` recovers f0: it ranks the coarse peak against its
+subharmonics (to coarse/8) and adopts the lowest root that BOTH explains the
+segment (harmonic-comb energy within a margin of the best) AND carries real energy
+at its OWN fundamental tooth. That own-tooth test is load-bearing — explained
+energy alone cannot tell f0 from f0/N (a near-pure tone lets any subharmonic refine
+one of its harmonics onto the tone), and only the TRUE root has a partial sitting
+at the root itself (`kFundamentalFloor` separates a genuine faint fundamental,
+~0.6% of the loudest partial for an 8%-amplitude f0, from the noise/leakage floor
+< 0.1%). Do NOT "fix" a wrong octave by lowering that floor — it re-opens the
+octave trap. **One honest residual, NOT a refusal:** a genuine missing-fundamental
+comb (energy only at 2·f0/3·f0, nothing at f0) has no tooth at f0 to lock, so the
+estimate stays on the loudest PRESENT partial (2·f0) — the frequency actually
+there, never a fabricated virtual f0. It reports voiced at the real partial; it
+does not fail closed. (Regression fixed 2026-07: a 5th-harmonic-dominant signal
+read +2786 cents at conf 0.775 and an 8%-fundamental locked an octave up at conf
+0.994 because the old guard stopped at coarse/4 and gated on an unproven fixed 10%
+amplitude cliff.)
 
 ## Never gate on `detection_floor_db`
 
