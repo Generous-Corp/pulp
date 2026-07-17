@@ -55,6 +55,7 @@ target_link_libraries(pulp-format
         pulp::state
         pulp::view
         pulp::runtime
+        pulp::timebase
         pulp::native-components
 )
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)

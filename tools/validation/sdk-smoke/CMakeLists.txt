@@ -42,7 +42,7 @@ set(PULP_SDK_SMOKE_REQUIRE_FORMATS ""
 find_package(Pulp REQUIRED CONFIG)
 
 foreach(_pulp_alias_target
-        dsl events format host signal state view standalone gpu-audio)
+        dsl events format host signal state timebase view standalone gpu-audio)
     if(TARGET "Pulp::${_pulp_alias_target}"
        AND NOT TARGET "pulp::${_pulp_alias_target}")
         message(FATAL_ERROR
@@ -54,6 +54,24 @@ foreach(_pulp_alias_target
     endif()
 endforeach()
 unset(_pulp_alias_target)
+
+if(NOT TARGET Pulp::timebase)
+    message(FATAL_ERROR
+        "Pulp SDK smoke: installed SDK does not expose Pulp::timebase")
+endif()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/timebase_export_probe.cpp"
+"#include <pulp/timebase/compiled_tempo_map.hpp>\n"
+"\n"
+"int main() {\n"
+"    const pulp::timebase::TempoPoint point{{0}, 120.0};\n"
+"    const pulp::timebase::CompiledTempoMap map(\n"
+"        std::span<const pulp::timebase::TempoPoint>(&point, 1), {48'000, 1});\n"
+"    return map.ticks_to_samples({pulp::timebase::kTicksPerQuarter}).value == 24'000\n"
+"        ? 0 : 1;\n"
+"}\n")
+add_executable(PulpSDKSmokeTimebaseProbe
+    "${CMAKE_CURRENT_BINARY_DIR}/timebase_export_probe.cpp")
+target_link_libraries(PulpSDKSmokeTimebaseProbe PRIVATE Pulp::timebase)
 
 # Installed host/state/dsl header + link probe. These targets were exported
 # before all of their public headers were reliably copied into the SDK, so a
