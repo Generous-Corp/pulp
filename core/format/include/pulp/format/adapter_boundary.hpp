@@ -25,9 +25,11 @@
 ///      VST3 and AU drive `detail::playhead_diff` directly.
 ///   3. **latency-compensated bypass** — `LatencyCompensatedBypass` is the
 ///      per-channel dry delay line that keeps a bypassed signal sample-aligned
-///      with the host's plugin-delay-compensation. Consumed by CLAP and VST3.
-///      AU/AAX/LV2 still emit a plain memcpy that does not delay the dry signal
-///      by the reported latency while bypassed (a separate correctness fix).
+///      with the host's plugin-delay-compensation. CLAP and VST3 feed it inline
+///      (they also marshal f64 host buffers); AU v2, AU v3, and AAX route their
+///      float bypass pass-through through the shared `render_bypass_passthrough`
+///      helper. LV2 has no adapter-level bypass short-circuit (its `run()`
+///      always calls `process()`), so there is no dry copy to compensate.
 ///   4. **parameter dual-write** — `apply_param_value` enqueues an incoming
 ///      host param event for the sample-accurate DSP cursor *and* publishes it
 ///      to the RT-safe listener path, the pair every adapter must keep in sync.
@@ -275,6 +277,52 @@ private:
 };
 
 using LatencyCompensatedBypass = LatencyCompensatedBypassT<kBoundaryMaxChannels>;
+
+/// Render one bypassed block: copy main input → output per channel, latency-
+/// compensated through @p bypass so the dry signal stays sample-aligned with
+/// the host's plugin-delay-compensation, and zero any output channel without a
+/// matching input. This is the single implementation of the float-buffer
+/// bypass pass-through the AU v2/v3 and AAX adapters share; VST3 and CLAP keep
+/// their own inline loops because they additionally marshal f64 host buffers
+/// (see the per-format usage of `LatencyCompensatedBypass` above).
+///
+/// **All-or-nothing across the block.** Compensation is applied only when the
+/// boundary owns a dry-delay line for *every* output channel — a channel count
+/// above `bypass.channel_capacity()` falls back to a zero-delay copy for the
+/// whole block, degrading uniformly rather than mixing delayed and undelayed
+/// channels (matches the VST3/CLAP `delayed` gate). A zero reported latency
+/// collapses to a straight passthrough at no cost.
+///
+/// @p out_ptrs / @p in_ptrs are the per-channel float pointers (either may hold
+/// null entries — a null output channel is skipped, a null/absent input channel
+/// yields silence). @p count is the block frame count. RT-safe: no allocation,
+/// no lock (the delay lines were sized in `bypass.prepare()` off the audio
+/// thread).
+template <std::size_t MaxChannels>
+inline void render_bypass_passthrough(
+    LatencyCompensatedBypassT<MaxChannels>& bypass,
+    float* const* out_ptrs, int out_channels,
+    const float* const* in_ptrs, int in_channels,
+    std::uint32_t count) {
+    const bool delayed = bypass.is_latency_compensated() &&
+        out_channels <= static_cast<int>(bypass.channel_capacity());
+    for (int ch = 0; ch < out_channels; ++ch) {
+        float* dst = out_ptrs ? out_ptrs[ch] : nullptr;
+        if (dst == nullptr) continue;
+        const float* src =
+            (in_ptrs && ch < in_channels) ? in_ptrs[ch] : nullptr;
+        if (delayed) {
+            // process_channel emits `src[n - latency]`, or delayed silence when
+            // src is null — every channel takes the same delayed path.
+            bypass.process_channel(dst, src, count,
+                                   static_cast<std::size_t>(ch));
+        } else if (src != nullptr) {
+            std::memcpy(dst, src, sizeof(float) * count);
+        } else {
+            std::memset(dst, 0, sizeof(float) * count);
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // 4. parameter dual-write

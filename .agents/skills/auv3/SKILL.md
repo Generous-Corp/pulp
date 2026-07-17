@@ -236,6 +236,18 @@ not apply — `_bridge` is a C++ struct). The block:
    `self.MIDIOutputEventBlock` (AU v3.1+). Each event's
    `sample_offset` is added to `timestamp->mSampleTime`.
 
+The bypass short-circuit (before step 6, when `shouldBypassEffect`) must NOT
+`memcpy` the dry input straight to the output. When the Processor reports a
+non-zero latency the host has delay-aligned the *wet* path by that latency
+(PDC), so a raw dry copy arrives `latency` samples early — comb-filtering on
+parallel busses. Route it through `boundary::render_bypass_passthrough`
+(`adapter_boundary.hpp`), sizing the `AUBridge::bypass` delay line to
+`reported_latency_samples(processor->latency_samples(), host_quirks)` in
+`allocateRenderResources`. A zero latency collapses to a straight passthrough.
+The AU v3 render block can't be driven in stock CI (needs a live host), so the
+bypass logic is covered by the shared `test_adapter_boundary_parity.cpp`
+`[bypass]` fixture the helper is exercised through.
+
 ### State: `fullState` dictionary
 
 `fullState` wraps `store_.serialize()` bytes inside an `NSData` keyed
