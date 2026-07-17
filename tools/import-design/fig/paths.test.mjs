@@ -271,3 +271,70 @@ test('a resolved vector is terminal — flattened operands are not re-emitted', 
   assert.equal(v.name, 'Union');
   assert.ok(!v.children, 'a resolved boolean must not re-emit its operands');
 });
+
+// ── the geometry sidecar's rect for a resolved vector ────────────────────────
+
+test("the geometry sidecar reports a vector's INK, not its node box", () => {
+  // The sidecar is layout_parity.py's ground truth, and for every other node
+  // kind it is the node's transform + size. A resolved vector is the exception:
+  // its path is baked into parent space, so styleFor positions it by the path's
+  // BOUNDS, and Figma's translation column can sit a long way from the geometry
+  // it names. On a real file one `Bg PAnel` carries m02 = 462 while its path
+  // starts at 350 — filling the 112-wide parent that ENDS at 462.
+  //
+  // Reading the node box made the parity tool report "112px misplaced" against
+  // a vector Pulp had placed exactly right, and those phantoms were the three
+  // WORST findings on an otherwise clean import — a checker crying wolf about
+  // the very thing it exists to adjudicate. Both quantities are Figma's own
+  // decoding; the bug was comparing one against the other.
+  const node = {
+    type: 'VECTOR',
+    name: 'Bg PAnel',
+    // The node box claims x=200 …
+    transform: { m00: 1, m01: 0, m02: 200, m10: 0, m11: 1, m12: 0 },
+    size: { x: 10, y: 10 },
+    // … while the ink sits 100 to its LEFT and is 30 wide: nothing about the
+    // box predicts either number.
+    fillGeometry: [{ commandsBlob: 2 }],
+    fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 1 }, visible: true }],
+  };
+  const localBlobs = [
+    ...blobs,
+    { bytes: encode([MOVE, -100, 5], [LINE, -70, 5], [LINE, -70, 25], [LINE, -100, 25], [CLOSE]) },
+  ];
+  const frame = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'F', size: { x: 400, y: 100 } };
+  const child = { guid: { sessionID: 0, localID: 2 }, parentIndex: { guid: frame.guid, position: '!' }, ...node };
+  const scene = buildScene({ nodeChanges: [frame, child], blobs: localBlobs });
+  const { envelope, geometry } = materializeFrame(scene, frame, CTX);
+
+  const v = firstVector(envelope.root);
+  assert.ok(v && v.path_data, 'the vector resolved (otherwise this proves nothing)');
+
+  const rect = geometry.nodes.find((n) => n.node_id === '0:2');
+  // The ink: 200 + (-100) = 100, y = 5, and 30x20 — NOT the box's 200,0,10x10.
+  assert.deepEqual([rect.x, rect.y, rect.width, rect.height], [100, 5, 30, 20]);
+  // And it agrees with what the importer emitted, which is the whole point:
+  // these two must be the same quantity or every vector reads as misplaced.
+  assert.equal(rect.x, v.style.left);
+  assert.equal(rect.y, v.style.top);
+  assert.equal(rect.width, v.style.width);
+});
+
+test('an UNRESOLVED vector keeps its node box in the sidecar', () => {
+  // The bound on the fix: no path means no ink to prefer, and the node box is
+  // the only thing Figma has said about where this node is. Falling back to
+  // nothing would drop the node from the sidecar and turn a real dropped-node
+  // check into a silent skip.
+  const node = {
+    type: 'VECTOR', name: 'unreadable',
+    transform: { m00: 1, m01: 0, m02: 60, m10: 0, m11: 1, m12: 12 },
+    size: { x: 8, y: 9 },
+    fillGeometry: null, strokeGeometry: null,
+  };
+  const frame = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'F', size: { x: 200, y: 100 } };
+  const child = { guid: { sessionID: 0, localID: 2 }, parentIndex: { guid: frame.guid, position: '!' }, ...node };
+  const scene = buildScene({ nodeChanges: [frame, child], blobs });
+  const { geometry } = materializeFrame(scene, frame, CTX);
+  const rect = geometry.nodes.find((n) => n.node_id === '0:2');
+  assert.deepEqual([rect.x, rect.y, rect.width, rect.height], [60, 12, 8, 9]);
+});

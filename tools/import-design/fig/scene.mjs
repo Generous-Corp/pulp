@@ -802,7 +802,9 @@ export function materializeFrame(scene, frame, ctx) {
     // under import anchors the space, so its own canvas transform is dropped and
     // it sits at the origin — the same space `style.left`/`top` are expressed in.
     const abs = parent ? composeTransform(parentAbs, localTransform(node)) : IDENTITY;
-    geometryNodes.push({
+    // Held, not just pushed: a resolved vector's ink is not where its node box
+    // says, and the vector branch below corrects this entry once it knows.
+    const geomEntry = {
       node_id: key,
       parent_id: parentId || null,
       name: node.name || '',
@@ -811,7 +813,8 @@ export function materializeFrame(scene, frame, ctx) {
       y: round2(abs.m12),
       width: node.size ? round2(node.size.x) : null,
       height: node.size ? round2(node.size.y) : null,
-    });
+    };
+    geometryNodes.push(geomEntry);
 
     if (assetRef) out.asset_ref = assetRef;
 
@@ -856,6 +859,25 @@ export function materializeFrame(scene, frame, ctx) {
         out.type = 'vector';
         out.path_data = resolved.d;
         out.viewBox = `0 0 ${round2(resolved.box.width)} ${round2(resolved.box.height)}`;
+        // A vector's INK is where its baked path is, not where its node box is,
+        // so the sidecar's rect has to move with it. Figma's translation column
+        // can sit far from the geometry it names — one `Bg PAnel` reports
+        // m02 = 462 while its path starts at 350, filling a 112-wide parent
+        // that ends at 462. Reading the box made the parity tool cry "112px
+        // misplaced!" at a vector Pulp had placed exactly right, and those
+        // phantoms were the three worst findings on a clean import. A checker
+        // that cries wolf gets ignored, which is the failure mode this whole
+        // tool exists to avoid — so use the same ground truth the renderer
+        // does. The bounds are Figma's own decoded geometry either way; what
+        // changes is only that we stop comparing two different quantities.
+        const inkAbs = composeTransform(parentAbs || IDENTITY, {
+          m00: 1, m01: 0, m02: resolved.box.minX,
+          m10: 0, m11: 1, m12: resolved.box.minY,
+        });
+        geomEntry.x = round2(inkAbs.m02);
+        geomEntry.y = round2(inkAbs.m12);
+        geomEntry.width = round2(resolved.box.width);
+        geomEntry.height = round2(resolved.box.height);
         // The path is already baked into parent space (transform included), so
         // an absolutely-placed vector is positioned by its own bounds, which
         // supersede the left/top styleFor derived from the transform: a mirrored
