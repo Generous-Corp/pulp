@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 
 import { ByteReader, readSchema, makeDecoder } from './kiwi.mjs';
 import { unpackFig, isZip } from './container.mjs';
-import { buildScene, outline, findFrame, materializeFrame, countFramesByName, framesByName, nodesByName } from './scene.mjs';
+import { buildScene, outline, findFrame, materializeFrame, countFramesByName, framesByName, nodesByName, DIAGNOSTIC_SEVERITY, emittedDiagnosticCodes } from './scene.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(here, '../../../test/fixtures/imports/fig/synthetic.fig');
@@ -583,6 +583,49 @@ test('auto-layout lands on the sibling `layout` object the IR actually reads', (
     'flex must not be left in `style`, where nothing reads it');
 });
 
+test('an auto-layout child never shrinks below the size Figma solved for it', () => {
+  // Figma has no flex-shrink: a child is FIXED, HUG, or FILL, and it overflows
+  // its parent rather than rendering narrower than its solved size. Yoga
+  // defaults flex-shrink to 1, so a parent whose padding exceeds its own width
+  // squeezed the child to nothing — and because the glyph inside was absolutely
+  // placed, it went on painting from the collapsed box's origin. The icon looked
+  // SHOVED RIGHT, so the bug read as positioning and the sizing went unexamined.
+  //
+  // The numbers are SmallTriaz2's real toolbar button: a 20-wide frame with
+  // 11 + 10 padding around a 12-wide icon. Figma solves that negative content
+  // box by centring on it (x = 4.5), which is the tell that it never shrinks.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Button',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+      size: { x: 20, y: 20 }, stackMode: 'HORIZONTAL',
+      stackHorizontalPadding: 11, stackPaddingRight: 10,
+      stackPrimaryAlignItems: 'CENTER', stackCounterAlignItems: 'CENTER' },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'fg-icon',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' },
+      size: { x: 12, y: 12 },
+      transform: { m00: 1, m01: 0, m02: 4.5, m10: 0, m11: 1, m12: 3.5 } },
+    // Control: an ABSOLUTE-positioned child has opted out of auto-layout, so it
+    // is not flowed and shrink does not apply to it.
+    { guid: { sessionID: 0, localID: 4 }, type: 'FRAME', name: 'badge',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+      size: { x: 6, y: 6 }, stackPositioning: 'ABSOLUTE',
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 } },
+  ]});
+  const f = materializeFrame(scene, findFrame(scene, 'Button'), { images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
+  const byName = Object.fromEntries(f.envelope.root.children.map((c) => [c.name, c]));
+
+  // `flexShrink` is the key parse_ir_layout reads (design_ir_json.cpp:426) and
+  // it sits on `layout`, not `style` — asserting anywhere else stays green
+  // through the bug, exactly as the flex-in-`style` drop above did.
+  assert.equal(byName['fg-icon'].layout.flexShrink, 0,
+    'a flowed child is pinned against Yoga shrinking it');
+  assert.equal(byName['fg-icon'].style.width, 12, 'and keeps the width Figma solved');
+  assert.ok(!(byName['badge'].layout && 'flexShrink' in byName['badge'].layout),
+    'an ABSOLUTE child is out of the flow entirely — shrink never applied to it');
+});
+
 // ── component-instance expansion ─────────────────────────────────────────────
 //
 // An INSTANCE has no children in the scene graph; its content is its master
@@ -1074,4 +1117,210 @@ test('an override that DETACHES a style keeps its own literal, at every level', 
   const tab = findByName(envelope.root, 'tab');
   assert.ok(tab, 'tab must survive expansion');
   assert.equal(tab.style.color ?? tab.style.background_color, '#ffffff59');
+});
+
+// ── material fidelity: what the design declares must survive or be said aloud ──
+//
+// Each of these three properties was dropped SILENTLY: the design declared it,
+// the import discarded it, no diagnostic fired, and every checker we own stayed
+// green — because none of them counts what the file declares. material_audit.mjs
+// is the counterpart that does; these are the fixes it exists to prove.
+
+test('a stroke paint carries its own opacity, not just its colour alpha', () => {
+  // Figma multiplies paint.opacity by color.a. Reading only color.a rendered a
+  // stroke the designer set to 20% at FULL strength — and that does not read as
+  // a dropped property, it reads as a design with harder edges than expected, so
+  // it never got reported as a bug. The fill and text paths already take the
+  // product; only the stroke path forgot.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Faint',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 50, y: 50 },
+      strokeWeight: 1,
+      strokePaints: [{ type: 'SOLID', visible: true, opacity: 0.2,
+                       color: { r: 1, g: 1, b: 1, a: 1 } }] },
+  ]});
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const faint = findByName(envelope.root, 'Faint');
+  // 0.2 * 1.0 -> alpha 51 -> 0x33. Asserting the ALPHA specifically: a test that
+  // only checked "a border was emitted" stays green through the whole bug.
+  assert.equal(faint.style.border, '1px solid #ffffff33');
+});
+
+test('an effect with no lowering is diagnosed, never dropped in silence', () => {
+  // effectsToBoxShadow `continue`s past anything that is not a shadow, so a
+  // LAYER_BLUR produced no shadow, no style, and no word about either.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Blurred',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 50, y: 50 },
+      effects: [{ type: 'LAYER_BLUR', visible: true, radius: 8 }] },
+    // Control: a shadow DOES lower, so it must not be diagnosed as unsupported.
+    { guid: { sessionID: 0, localID: 4 }, type: 'FRAME', name: 'Shadowed',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 50, y: 50 },
+      effects: [{ type: 'DROP_SHADOW', visible: true, radius: 4,
+                  offset: { x: 0, y: 2 }, color: { r: 0, g: 0, b: 0, a: 0.25 } }] },
+    // Control: an invisible effect is not declared at all — diagnosing it would
+    // be noise, and noise is how a checker gets ignored.
+    { guid: { sessionID: 0, localID: 5 }, type: 'FRAME', name: 'Off',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'c' }, size: { x: 50, y: 50 },
+      effects: [{ type: 'LAYER_BLUR', visible: false, radius: 8 }] },
+  ]});
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const unsupported = diagnostics.filter((d) => d.code === 'effect-unsupported');
+  assert.equal(unsupported.length, 1, 'exactly the blur is diagnosed');
+  assert.equal(unsupported[0].node_id, '0:3');
+  assert.match(unsupported[0].detail, /LAYER_BLUR/);
+  assert.ok(findByName(envelope.root, 'Shadowed').style.box_shadow, 'a shadow still lowers');
+});
+
+test('non-uniform corner radii are diagnosed rather than silently squared', () => {
+  // cornerRadius() returns null unless all four corners agree, so an asymmetric
+  // card imported with SQUARE corners and said nothing. The bridge takes
+  // per-corner radii already; the IR carries a single border_radius, so the
+  // honest interim is to say what is being lost rather than lose it quietly.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'ROUNDED_RECTANGLE', name: 'Card',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 50, y: 50 },
+      rectangleTopLeftCornerRadius: 8, rectangleTopRightCornerRadius: 8,
+      rectangleBottomRightCornerRadius: 0, rectangleBottomLeftCornerRadius: 0 },
+    // Control: four corners that AGREE lower fine and must stay undiagnosed —
+    // otherwise the check fires on every rounded box in every design.
+    { guid: { sessionID: 0, localID: 4 }, type: 'ROUNDED_RECTANGLE', name: 'Even',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 50, y: 50 },
+      rectangleTopLeftCornerRadius: 4, rectangleTopRightCornerRadius: 4,
+      rectangleBottomRightCornerRadius: 4, rectangleBottomLeftCornerRadius: 4 },
+    // Control: a genuinely square node declares no radius, so "could not express
+    // it" must not be confused with "did not ask for it".
+    { guid: { sessionID: 0, localID: 5 }, type: 'FRAME', name: 'Square',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'c' }, size: { x: 50, y: 50 } },
+  ]});
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const simplified = diagnostics.filter((d) => d.code === 'corner-radius-simplified');
+  assert.equal(simplified.length, 1, 'only the asymmetric card is diagnosed');
+  assert.equal(simplified[0].node_id, '0:3');
+  assert.equal(findByName(envelope.root, 'Even').style.border_radius, 4);
+});
+
+test('the materials sidecar reports what the design declares, not what we read', () => {
+  // The sidecar's independence is the whole point of the audit: it is built from
+  // the resolved node's own fields, never from what styleFor chose to look at.
+  // If it were sourced from the emitter it would agree with the emitter by
+  // construction and could never catch a drop — which is precisely the blind
+  // spot every other checker has.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Rich',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 50, y: 50 },
+      strokeWeight: 2, blendMode: 'MULTIPLY',
+      strokePaints: [{ type: 'SOLID', visible: true, opacity: 0.5, color: { r: 1, g: 1, b: 1, a: 1 } }],
+      effects: [{ type: 'LAYER_BLUR', visible: true, radius: 4 }],
+      rectangleTopLeftCornerRadius: 6, rectangleTopRightCornerRadius: 2,
+      rectangleBottomRightCornerRadius: 6, rectangleBottomLeftCornerRadius: 2 },
+    // A node with no material at all stays OUT of the sidecar, so it tracks the
+    // design's material rather than its node count.
+    { guid: { sessionID: 0, localID: 4 }, type: 'FRAME', name: 'Bare',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 10, y: 10 } },
+  ]});
+  const { materials } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const rich = materials.nodes.find((n) => n.node_id === '0:3');
+  assert.ok(rich, 'a node declaring material is inventoried');
+  assert.deepEqual(rich.declared.stroke, [{ type: 'SOLID', opacity: 0.5, color_alpha: 1 }]);
+  assert.deepEqual(rich.declared.effects, ['LAYER_BLUR']);
+  assert.deepEqual(rich.declared.corner_radius, [6, 2, 6, 2]);
+  assert.equal(rich.declared.blend_mode, 'MULTIPLY');
+  assert.ok(!materials.nodes.some((n) => n.node_id === '0:4'),
+    'a node declaring no material is not inventoried');
+});
+
+test('a stacked fill list composites; taking only the first paints the wrong colour', () => {
+  // Figma's fillPaints is a STACK painted in array order, index 0 at the bottom.
+  // Reading `.find(SOLID)` took the bottom paint and threw the rest away, so the
+  // slider thumb — a #4b4d51 base with white at 55% OVER it — rendered as the
+  // bare dark base instead of the light thumb the design shows.
+  //
+  // The failure mode is what makes this worth a test: a dropped paint does not
+  // look dropped, it looks like the WRONG COLOUR, which sends you hunting through
+  // style refs and override precedence for a bug that is in neither.
+  //
+  // These are the thumb's real declared paints, and #aeafb1 is not a guess: it is
+  // what Figma's own embedded thumbnail samples at that node.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'ELLIPSE', name: 'Thumb',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 7, y: 7 },
+      fillPaints: [
+        { type: 'SOLID', visible: true, opacity: 1,
+          color: { r: 0.29411765933036804, g: 0.3019607961177826, b: 0.3176470696926117, a: 1 } },
+        { type: 'SOLID', visible: true, opacity: 0.550000011920929,
+          color: { r: 1, g: 1, b: 1, a: 1 } },
+      ] },
+    // Control: an invisible paint in the stack must not composite — it is not
+    // painted in Figma either.
+    { guid: { sessionID: 0, localID: 4 }, type: 'ELLIPSE', name: 'HiddenTop',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 7, y: 7 },
+      fillPaints: [
+        { type: 'SOLID', visible: true, opacity: 1, color: { r: 0, g: 0, b: 0, a: 1 } },
+        { type: 'SOLID', visible: false, opacity: 1, color: { r: 1, g: 1, b: 1, a: 1 } },
+      ] },
+    // Control: an opaque paint ON TOP hides what is under it. This is the
+    // assertion that pins the ORDER — if the stack composited top-to-bottom this
+    // would come out white, and the Thumb case alone would not catch it.
+    { guid: { sessionID: 0, localID: 5 }, type: 'ELLIPSE', name: 'OpaqueTop',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'c' }, size: { x: 7, y: 7 },
+      fillPaints: [
+        { type: 'SOLID', visible: true, opacity: 1, color: { r: 1, g: 1, b: 1, a: 1 } },
+        { type: 'SOLID', visible: true, opacity: 1, color: { r: 0, g: 0, b: 0, a: 1 } },
+      ] },
+    // Control: a single paint is unchanged — the common case must not move.
+    { guid: { sessionID: 0, localID: 6 }, type: 'ELLIPSE', name: 'Single',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'd' }, size: { x: 7, y: 7 },
+      fillPaints: [{ type: 'SOLID', visible: true, opacity: 0.35, color: { r: 0, g: 0, b: 0, a: 1 } }] },
+  ]});
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const bg = (n) => findByName(envelope.root, n).style.background_color;
+  assert.equal(bg('Thumb'), '#aeafb1', 'white@0.55 over #4b4d51 — what Figma rasterizes');
+  assert.equal(bg('HiddenTop'), '#000000', 'an invisible paint contributes nothing');
+  assert.equal(bg('OpaqueTop'), '#000000', 'the LAST paint is on top and hides the first');
+  assert.equal(bg('Single'), '#00000059', 'a lone paint still folds its opacity, unchanged');
+});
+
+test('every diagnostic code this module emits is registered with a severity', () => {
+  // An unregistered code falls through `DIAGNOSTIC_SEVERITY[code] || 'info'` to
+  // info, and BOTH consumers drop info: fig_decode's "N warning(s)" count
+  // excludes it, and print_import_diagnostics skips it. So a diagnostic written
+  // precisely to make a fidelity loss visible becomes invisible — the loss AND
+  // its report both vanish because a table entry was missing. Four codes were in
+  // that state at once, found by a review rather than by any test.
+  //
+  // This reads the SOURCE instead of listing codes by hand, because a hand-kept
+  // list is the same failure one level up: it would drift the moment someone
+  // adds a fifth.
+  const src = readFileSync(join(here, 'scene.mjs'), 'utf8');
+  const emitted = emittedDiagnosticCodes(src);
+  const registered = Object.keys(DIAGNOSTIC_SEVERITY).sort();
+
+  assert.ok(emitted.length >= 8, `expected the decoder to emit several codes, saw ${emitted.length}`);
+
+  const unregistered = emitted.filter((c) => !registered.includes(c));
+  assert.deepEqual(unregistered, [],
+    'emitted but unregistered — these silently downgrade to info and are shown nowhere');
+
+  // The other direction: a registered code nobody emits is a promise not kept.
+  // 'unresolved-token' sat here for exactly that reason — the table implied a
+  // design with an unresolvable token would be told, and it never was.
+  const unemitted = registered.filter((c) => !emitted.includes(c));
+  assert.deepEqual(unemitted, [],
+    'registered but never emitted — the table promises a warning that cannot happen');
 });

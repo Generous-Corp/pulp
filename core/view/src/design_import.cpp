@@ -1989,6 +1989,55 @@ DesignIR parse_figma_plugin_json(const std::string& json) {
     ir.root.provenance = std::move(provenance);
     ir.root.confidence = IRConfidence::pass;
 
+    // The envelope's diagnostics are the whole point of emitting them: they are
+    // how a fidelity loss becomes a stated result instead of a silent one. This
+    // parser documented `diagnostics?: [...]` in its own shape comment above and
+    // then never read the field, so `ir.diagnostics` stayed empty and
+    // `print_import_diagnostics` had nothing to print.
+    //
+    // Nothing about that was visible. The decoder emitted the warnings correctly
+    // and wrote them to scene.pulp.json; the JS lane even printed "N warning(s)"
+    // from its own array. But `--from fig` rewrites its source to figma-plugin
+    // and lands HERE, so every gradient flattened to its mean, every dropped
+    // blend mode, every missing icon font and every unresolvable asset was
+    // announced to a file and to nobody. The skill promises the opposite
+    // (import-design SKILL.md: "reported as named warnings ... rather than
+    // silently dropped") — true of the JSON on disk, false of the CLI.
+    //
+    // A comment describing a field the code does not parse is the same failure
+    // this whole lane keeps producing: a chain that runs end to end with one end
+    // quietly unplugged, where nothing errors and the result is merely wrong.
+    if (parsed.hasObjectMember("diagnostics") && parsed["diagnostics"].isArray()) {
+        const auto diags = parsed["diagnostics"];
+        // Local to this parser and matching its house idiom (hasObjectMember +
+        // isString), rather than reaching for a helper this TU does not have.
+        auto str = [](const choc::value::ValueView& o, const char* k) -> std::string {
+            return (o.hasObjectMember(k) && o[k].isString())
+                       ? std::string(o[k].toString()) : std::string{};
+        };
+        for (uint32_t i = 0; i < diags.size(); ++i) {
+            const auto d = diags[i];
+            if (!d.isObject()) continue;
+            ImportDiagnostic out;
+            out.code = str(d, "code");
+            if (out.code.empty()) continue;  // a diagnostic with no code says nothing
+            // `detail` is the decoder's field name; accept `message` too so a
+            // different emitter of this envelope is not silently blanked.
+            out.message = str(d, "detail");
+            if (out.message.empty()) out.message = str(d, "message");
+            // Prefer the readable node name for `path`; fall back to the guid,
+            // which is at least resolvable.
+            out.path = str(d, "node_name");
+            if (out.path.empty()) out.path = str(d, "node_id");
+            const std::string sev = str(d, "severity");
+            out.severity = sev == "error" ? ImportDiagnosticSeverity::error
+                         : sev == "info"  ? ImportDiagnosticSeverity::info
+                                          : ImportDiagnosticSeverity::warning;
+            if (auto id = str(d, "node_id"); !id.empty()) out.anchor_id = id;
+            ir.diagnostics.push_back(std::move(out));
+        }
+    }
+
     promote_interactive_frames(ir.root);
     assign_anchors(ir.root, AnchorStrategy::adapter, "figma-plugin");
 

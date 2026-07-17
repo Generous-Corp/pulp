@@ -462,6 +462,31 @@ function firstSolidFill(node) {
   return paints.find((p) => p.type === 'SOLID' && p.visible !== false) || null;
 }
 
+/**
+ * Composite a stack of SOLID paints the way Figma paints them: array order,
+ * index 0 at the bottom, each one source-over the result so far. A paint's own
+ * `opacity` multiplies its colour's alpha, as everywhere else.
+ *
+ * The order is not a guess. The file's slider thumb declares #4b4d51 then
+ * white@0.55; bottom-to-top composites to #aeafb1 and top-to-bottom leaves the
+ * opaque #4b4d51 covering everything. Figma's own thumbnail samples #aeafb1
+ * there, so bottom-to-top is what Figma does.
+ */
+function compositeSolids(solids) {
+  let r = 0, g = 0, b = 0, a = 0;   // accumulated, non-premultiplied
+  for (const p of solids) {
+    const sa = (p.color?.a ?? 1) * (p.opacity ?? 1);
+    if (sa <= 0) continue;
+    const na = sa + a * (1 - sa);
+    if (na <= 0) continue;
+    r = ((p.color?.r ?? 0) * sa + r * a * (1 - sa)) / na;
+    g = ((p.color?.g ?? 0) * sa + g * a * (1 - sa)) / na;
+    b = ((p.color?.b ?? 0) * sa + b * a * (1 - sa)) / na;
+    a = na;
+  }
+  return { r, g, b, a };
+}
+
 function firstGradient(paints) {
   return (paints || []).find(
     (p) => typeof p.type === 'string' && p.type.startsWith('GRADIENT') && p.visible !== false,
@@ -622,9 +647,19 @@ function gradientPaintToCss(paint, w, h) {
  * `fill: 'none'` rather than leaving the widget on its black default.
  */
 function approximatePaintColor(paints) {
-  const solid = (paints || []).find((p) => p.type === 'SOLID' && p.visible !== false);
-  if (solid) {
-    return colorToHex({ ...solid.color, a: (solid.color?.a ?? 1) * (solid.opacity ?? 1) });
+  // Figma's fillPaints is a STACK, painted in array order with index 0 at the
+  // bottom, and taking `.find(SOLID)` off the top of it silently threw the rest
+  // away. The slider thumb declares two: a #4b4d51 base with white at 55% over
+  // it. Figma composites those to #aeafb1 — a light thumb — and we painted the
+  // bare base, so it came out dark. That does not present as a dropped property;
+  // it presents as a wrong COLOUR, which sends you hunting through style refs and
+  // override precedence for a bug that is neither.
+  //
+  // Verified against the file's own thumbnail: Figma's raster samples #aeafb1
+  // there, exactly what compositing the two declared paints predicts.
+  const solids = (paints || []).filter((p) => p.type === 'SOLID' && p.visible !== false);
+  if (solids.length) {
+    return colorToHex(compositeSolids(solids));
   }
   const grad = firstGradient(paints);
   if (grad && Array.isArray(grad.stops) && grad.stops.length) {
@@ -663,6 +698,21 @@ function cornerRadius(node) {
   ].filter((v) => typeof v === 'number');
   if (corners.length && corners.every((v) => v === corners[0])) return Math.round(corners[0]);
   return null;
+}
+
+/**
+ * Whether the node asked for ANY rounding — the question `cornerRadius()` cannot
+ * answer, because it returns null both for "square" and for "rounded, but I
+ * could not express it". Those two need telling apart: only the second is a drop.
+ */
+function hasCornerRadius(node) {
+  if (typeof node.cornerRadius === 'number' && node.cornerRadius > 0) return true;
+  return [
+    node.rectangleTopLeftCornerRadius,
+    node.rectangleTopRightCornerRadius,
+    node.rectangleBottomRightCornerRadius,
+    node.rectangleBottomLeftCornerRadius,
+  ].some((v) => typeof v === 'number' && v > 0);
 }
 
 const IDENTITY = { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 };
@@ -713,6 +763,7 @@ export function materializeFrame(scene, frame, ctx) {
   const diagnostics = [];
   const assetHashes = new Set();
   const geometryNodes = [];
+  const materialNodes = [];
   const seenTokens = new Map();
   // How much text to lower to glyph outlines. Figma bakes an outline for EVERY
   // text node, so this is a fidelity/liveness trade, not a capability one:
@@ -846,6 +897,18 @@ export function materializeFrame(scene, frame, ctx) {
     }
     const radius = cornerRadius(node);
     if (radius !== null) style.border_radius = radius;
+    else if (hasCornerRadius(node)) {
+      // Four corners that disagree collapse to nothing today: `cornerRadius()`
+      // returns null unless they all match, so an asymmetric card imports with
+      // SQUARE corners and says nothing. The bridge is not the limit — it takes
+      // per-corner radii already (setCornerRadius(id, 'TopLeft', r),
+      // border_box_api.cpp:47) and View has set_corner_radius_tl/tr/bl/br. What
+      // is missing is the carriage between: IRStyle holds ONE border_radius, so
+      // lowering this properly means widening the IR, its JSON, and codegen.
+      // Until that lands, say so rather than let the corners vanish quietly.
+      pushDiag('corner-radius-simplified', node,
+        'non-uniform corner radii have no IR representation; corners render square');
+    }
     // A node's own opacity — EXCEPT the frame we are importing. A top-level
     // frame's opacity composites it against the Figma canvas; it is not part of
     // the UI, and Figma itself ignores it when rendering/exporting that frame
@@ -885,6 +948,17 @@ export function materializeFrame(scene, frame, ctx) {
     // resolves boxShadow -> box_shadow), and it takes CSS syntax directly.
     const shadow = effectsToBoxShadow(node.effects);
     if (shadow) style.box_shadow = shadow;
+    // Everything effectsToBoxShadow walked past. It `continue`s on any type that
+    // is not a shadow, so a LAYER_BLUR or BACKGROUND_BLUR — a real, visible
+    // instruction — left no shadow, no style, and no word about either. A blur
+    // that renders sharp is a design decision the importer made on the user's
+    // behalf; the least it can do is admit to it.
+    for (const e of node.effects || []) {
+      if (e.visible === false) continue;
+      if (e.type === 'DROP_SHADOW' || e.type === 'INNER_SHADOW') continue;
+      pushDiag('effect-unsupported', node,
+        `${e.type} has no lowering in the render stack; the node composites without it`);
+    }
 
     // Auto-layout → flex. This MUST land on a sibling `layout` object, not in
     // `style`: parse_ir_layout reads node["layout"] (design_ir_json.cpp:1042)
@@ -923,6 +997,22 @@ export function materializeFrame(scene, frame, ctx) {
     if (parentIsAutoLayout && FIGMA_STACK_ALIGN[node.stackChildAlignSelf]) {
       layout = layout || {};
       layout.alignSelf = FIGMA_STACK_ALIGN[node.stackChildAlignSelf];
+    }
+    // Figma auto-layout has no flex-shrink: a child is FIXED, HUG, or FILL, and
+    // none of those let it render narrower than the size Figma solved for it. It
+    // overflows its parent instead — the file's own toolbar buttons declare
+    // width 20 with 11+10 padding and Figma still draws the 12px icon, centred
+    // on the resulting negative content box (x=4.5). Yoga defaults flex-shrink
+    // to 1, so that same child collapsed to width 0 and its absolutely-placed
+    // glyph then painted from the empty box's origin — the icon appeared shoved
+    // right, which read as a positioning bug rather than a sizing one.
+    //
+    // We are replaying a SOLVED layout, not re-solving one, so this holds for
+    // every flowed child: `style.width` above is the width Figma already
+    // committed to, and any shrink can only move us away from it.
+    if (parentIsAutoLayout && !optedOut) {
+      layout = layout || {};
+      layout.flexShrink = 0;
     }
     return { style, assetRef, layout };
   }
@@ -1062,6 +1152,8 @@ export function materializeFrame(scene, frame, ctx) {
       height: node.size ? round2(node.size.y) : null,
     };
     geometryNodes.push(geomEntry);
+    const declared = declaredMaterials(node);
+    if (declared) materialNodes.push({ node_id: key, name: node.name || '', type, declared });
 
     if (assetRef) out.asset_ref = assetRef;
 
@@ -1273,7 +1365,15 @@ export function materializeFrame(scene, frame, ctx) {
 
     if ((node.strokePaints || []).length && typeof node.strokeWeight === 'number' && node.strokeWeight > 0) {
       const s = firstSolidStroke(node);
-      if (s) out.style.border = `${Math.round(node.strokeWeight)}px solid ${colorToHex(s.color)}`;
+      // Figma multiplies a paint's own `opacity` by its colour's alpha — the
+      // same product the fill and text paths already take. Reading only
+      // `color.a` here rendered a stroke the designer set to 20% at FULL
+      // strength, which does not look like a dropped property; it looks like the
+      // design just has a harder edge than it should, so nobody calls it a bug.
+      if (s) {
+        const hex = colorToHex({ ...s.color, a: (s.color?.a ?? 1) * (s.opacity ?? 1) });
+        out.style.border = `${Math.round(node.strokeWeight)}px solid ${hex}`;
+      }
     }
 
     // A resolved vector is terminal. Figma already flattened the operands into
@@ -1345,11 +1445,100 @@ export function materializeFrame(scene, frame, ctx) {
     },
     nodes: geometryNodes,
   };
-  return { envelope, geometry, assetHashes, diagnostics };
+  // The material inventory rides alongside geometry for the same reason geometry
+  // does: it is what the design DECLARES, kept separate from what we emitted, so
+  // the two can be counted against each other by a tool that trusts neither.
+  const materials = {
+    $schema: 'https://pulp.dev/schemas/fig-materials-v1.json',
+    source: geometry.source,
+    frame: { node_id: guidKey(frame.guid), name: frame.name || '' },
+    nodes: materialNodes,
+  };
+  return { envelope, geometry, materials, assetHashes, diagnostics };
 }
 
 function firstSolidStroke(node) {
   return (node.strokePaints || []).find((p) => p.type === 'SOLID' && p.visible !== false) || null;
+}
+
+/**
+ * What this node's MATERIAL properties say, read straight off the resolved node
+ * — deliberately without consulting styleFor, envelopeType, or any other
+ * emitter. That independence is the whole point: every checker we own declares a
+ * blind spot, and each one has been green through a real bug. `layout_parity`
+ * compares boxes, so it cannot see the ink inside them; `thumb_parity` cannot
+ * resolve a 2px arc; `fidelity_diff` was once blind to our own opt-out sentinel.
+ * A COUNT has no equivalent excuse — 16 declared drop shadows against 1 emitted
+ * is a number, and it sat in the file all evening with nothing to say it.
+ *
+ * So this function must never ask "what does the decoder look at?", only "what
+ * does the design SAY?". A property the decoder forgot entirely still gets
+ * declared here, and that is exactly the case the audit exists to catch.
+ *
+ * Returns null for a node that declares no material at all, so the sidecar stays
+ * proportional to the design rather than to the node count.
+ */
+function declaredMaterials(node) {
+  const d = {};
+
+  // The fill STACK, not just its first paint. Figma composites the whole list;
+  // a reader that takes one of them renders a colour that is wrong rather than
+  // missing, which is the hardest kind to attribute — the slider thumb read as a
+  // precedence bug and then as a dropped node before anyone counted the paints.
+  const fills = (node.fillPaints || []).filter((p) => p.visible !== false);
+  if (fills.length) {
+    d.fill = fills.map((p) => ({
+      type: p.type || null,
+      opacity: p.opacity ?? 1,
+      color_alpha: p.color && typeof p.color.a === 'number' ? p.color.a : 1,
+      // The paint's own RGB, so the audit can tell a composited result from the
+      // bare bottom paint. Alpha alone cannot: the correct composite and the bug
+      // are both opaque.
+      rgb: p.color ? colorToHex({ ...p.color, a: 1 }).slice(0, 7) : null,
+    }));
+  }
+
+  // Visible stroke paints, with each paint's own opacity kept SEPARATE from its
+  // colour's alpha. Figma multiplies the two; a reader that takes only
+  // `color.a` silently renders a 20%-opacity stroke at full strength.
+  const strokes = (node.strokePaints || []).filter((p) => p.visible !== false);
+  if (strokes.length && typeof node.strokeWeight === 'number' && node.strokeWeight > 0) {
+    d.stroke = strokes.map((p) => ({
+      type: p.type || null,
+      opacity: p.opacity ?? 1,
+      color_alpha: p.color && typeof p.color.a === 'number' ? p.color.a : 1,
+    }));
+  }
+
+  // Every visible effect, by type — not just the two that lower to box-shadow.
+  // Listing only the supported ones would make an unsupported effect invisible
+  // to the count, which is the bug.
+  const effects = (node.effects || []).filter((e) => e.visible !== false);
+  if (effects.length) d.effects = effects.map((e) => e.type || 'UNKNOWN');
+
+  // Corner radii, always as four corners. `cornerRadius()` collapses to a single
+  // number and returns null when the four disagree, so a design's asymmetric
+  // corners vanish; recording all four means the audit sees what was thrown away.
+  const uniform = typeof node.cornerRadius === 'number' ? node.cornerRadius : null;
+  const corners = [
+    node.rectangleTopLeftCornerRadius,
+    node.rectangleTopRightCornerRadius,
+    node.rectangleBottomRightCornerRadius,
+    node.rectangleBottomLeftCornerRadius,
+  ];
+  if (corners.some((v) => typeof v === 'number')) {
+    d.corner_radius = corners.map((v) => (typeof v === 'number' ? v : uniform ?? 0));
+  } else if (uniform) {
+    d.corner_radius = [uniform, uniform, uniform, uniform];
+  }
+
+  // A non-default blend mode is a compositing instruction, not decoration: the
+  // file's single MULTIPLY noise layer composited NORMAL lightened every panel.
+  if (typeof node.blendMode === 'string' && !BLEND_IS_DEFAULT.has(node.blendMode)) {
+    d.blend_mode = node.blendMode;
+  }
+
+  return Object.keys(d).length ? d : null;
 }
 
 function envelopeType(figmaType) {
@@ -1428,11 +1617,42 @@ function collectVariableTokens(scene, seen, pushDiag) {
   return { colors, dimensions, strings };
 }
 
+// EVERY code pushDiag can emit must appear here. An unregistered code falls
+// through `DIAGNOSTIC_SEVERITY[code] || 'info'` to 'info', and BOTH consumers
+// drop info: fig_decode's "N warning(s)" count excludes it, and
+// print_import_diagnostics skips it outright. So a diagnostic written precisely
+// to make a loss visible becomes invisible — the failure it was reporting AND
+// the report both vanish, silently, because a table entry was missing.
+//
+// This bit four codes at once (corner-radius-simplified, effect-unsupported,
+// fonts-required, icon-font-required). The sharpest was icon-font-required: an
+// icon font missing AND its glyph outlines unreadable renders the ligature name
+// as literal text ("lockquestion"), and the one diagnostic that explains why was
+// downgraded to info and shown nowhere.
+//
+// `assertDiagnosticCodesRegistered` below is the guard, because a convention
+// that lives only in a comment is how this got to four.
 export const DIAGNOSTIC_SEVERITY = {
   'vector-simplified': 'warning',
   'gradient-approximated': 'warning',
   'blend-unsupported': 'warning',
   'asset-missing': 'warning',
   'external-component': 'warning',
-  'unresolved-token': 'warning',
+  'corner-radius-simplified': 'warning',
+  'effect-unsupported': 'warning',
+  'fonts-required': 'warning',
+  'icon-font-required': 'warning',
 };
+
+/**
+ * Every code this module can emit, read out of the source itself.
+ *
+ * A test asserts this equals DIAGNOSTIC_SEVERITY's keys, in both directions:
+ * an emitted-but-unregistered code silently downgrades to info (four did), and a
+ * registered-but-never-emitted code is a promise nobody keeps ('unresolved-token'
+ * was one — declared here while `collectVariableTokens` never raised it, so a
+ * design with an unresolvable token said nothing and the table implied it would).
+ */
+export function emittedDiagnosticCodes(source) {
+  return [...new Set([...source.matchAll(/pushDiag\('([a-z-]+)'/g)].map((m) => m[1]))].sort();
+}
