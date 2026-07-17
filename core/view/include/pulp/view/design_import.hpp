@@ -279,7 +279,7 @@ void hoist_captured_art_knobs(DesignIR& ir);
 /// attributes) — never a layer name or source quirk.
 void synthesize_primitive_paths(IRNode& root);
 
-/// Split the CSS `border` shorthand ("1px solid #333") into the discrete
+/// Split the CSS `border` shorthand — "1px solid #333" — into the discrete
 /// border_color / border_width / border_style fields, for every node in the
 /// tree that set the shorthand but not the parts.
 ///

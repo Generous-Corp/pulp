@@ -2460,7 +2460,7 @@ TEST_CASE("native codegen paints a gradient behind a transparent image",
 
 TEST_CASE("native codegen paints a stroke declared as the CSS border shorthand",
           "[view][import][border]") {
-    // IRStyle carries `border` ("1px solid #333") AND the discrete
+    // IRStyle carries `border` — "1px solid #333" — AND the discrete
     // border_color / border_width. Every producer writes the shorthand — the
     // .fig decoder, the Claude bundle reader, the v0 TSX reader — and every
     // native consumer reads only the parts. So a stroke reached the IR and then
