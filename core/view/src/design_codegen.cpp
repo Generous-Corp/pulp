@@ -14,6 +14,7 @@
 #include <pulp/view/input_events.hpp>
 
 #include "design_import_internal.hpp"
+#include "design_import_native_common.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -484,6 +485,12 @@ static float compute_node_height(const IRNode& node) {
 struct NativeEmit {
     std::ostringstream& ss;
     const IRNode& node;
+    // The shared recognition resolver's classification for `node`, threaded in
+    // parallel with the IR tree (same walk order, so resolved.children[i]
+    // corresponds to node.children[i]). Widget-kind dispatch reads this instead
+    // of re-deriving classification inline, so the JS lane converges on the same
+    // recognition the cpp and Swift lanes already use.
+    const ResolvedNativeNode& resolved;
     const CodeGenOptions& opts;
     int depth;
     std::string id;
@@ -493,12 +500,16 @@ struct NativeEmit {
 };
 
 // emit_js_container recurses through the same entry point that dispatched to it
-// — the wrapper, not the impl, so every child gets its anchor bound too.
+// — the wrapper, not the impl, so every child gets its anchor bound too. The
+// ResolvedNativeNode is threaded alongside the IRNode so the recursion keeps the
+// two trees aligned.
 static void generate_native_node(std::ostringstream& ss, const IRNode& node,
+                                 const ResolvedNativeNode& resolved,
                                  const CodeGenOptions& opts, int depth,
                                  int& var_counter, const std::string& parent_id,
                                  std::unordered_map<const IRNode*, std::string>* id_map = nullptr);
 static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node,
+                                      const ResolvedNativeNode& resolved,
                                       const CodeGenOptions& opts, int depth,
                                       int& var_counter, const std::string& parent_id,
                                       std::unordered_map<const IRNode*, std::string>* id_map);
@@ -1842,7 +1853,14 @@ static void emit_js_container(const NativeEmit& e, int& var_counter,
                           : 0.0f;
 
     std::string last_text_child_id;
-    for (auto& child : node.children) {
+    // Index-walk so each child's resolved node travels with it. The resolver
+    // walked node.children in the same order, so resolved.children[i] pairs with
+    // node.children[i]; the min() guard is belt-and-suspenders against any drift.
+    const std::size_t child_count =
+        std::min(node.children.size(), e.resolved.children.size());
+    for (std::size_t ci = 0; ci < child_count; ++ci) {
+        auto& child = node.children[ci];
+        const ResolvedNativeNode& child_resolved = e.resolved.children[ci];
         std::string child_var_id_pre;
         if (is_space_between && text_child_count >= 2 &&
             (child.type == "text" || child.type == "label")) {
@@ -1865,7 +1883,7 @@ static void emit_js_container(const NativeEmit& e, int& var_counter,
                 nudge_this_child = true;
             }
         }
-        generate_native_node(ss, child, opts, depth + 1, var_counter, id, id_map);
+        generate_native_node(ss, child, child_resolved, opts, depth + 1, var_counter, id, id_map);
         if (nudge_this_child) {
             std::string child_ind = indent(depth + 1, opts.indent_spaces);
             ss << child_ind << "setFlex('" << child_var_id_pre
@@ -1945,6 +1963,7 @@ static void emit_js_generic_frame(const NativeEmit& e) {
 /// source, and every node-keyed validation (fidelity_diff, --dump-layout parity)
 /// had nothing to join on and skipped — reporting success by finding nothing.
 static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node,
+                                      const ResolvedNativeNode& resolved,
                                       const CodeGenOptions& opts, int depth,
                                       int& var_counter, const std::string& parent_id,
                                       std::unordered_map<const IRNode*, std::string>* id_map) {
@@ -1956,7 +1975,7 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
     // codegen used, not a re-derived best-effort name.
     if (id_map) (*id_map)[&node] = id;
 
-    const NativeEmit e{ss, node, opts, depth, id,
+    const NativeEmit e{ss, node, resolved, opts, depth, id,
                        indent(depth, opts.indent_spaces),
                        parent_id.empty() ? "''" : ("'" + parent_id + "'"),
                        parent_id};
@@ -1979,10 +1998,22 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
     }
     if (emit_js_svg_path_node(e)) return;
 
-    // Container, image, or text node
-    const bool is_image = (node.type == "image" || node.attributes.count("asset_path") > 0);
+    // Container, image, or text node. Classification comes from the shared
+    // recognition resolver (resolved.kind) rather than an inline re-derivation:
+    //   * image_view  → the resolver recognizes both "image" and "img" (the
+    //     inline path only knew "image"); the asset_path disjunct is kept so a
+    //     pre-resolved asset riding on a non-image node still lowers to an image.
+    //   * label       → the resolver recognizes span/p and the design-system
+    //     badge/chip/tag/pill idioms, not just "text"/"label".
+    // Where those recognize a widget the inline path missed, the JS lane now
+    // converges on the cpp/Swift lanes' classification. Audio widgets and SVG
+    // paths keep their own upstream guards above (emit_js_audio_widget reads
+    // node.audio_widget directly; emit_js_svg_path_node keys off path_data).
+    const NativeWidgetKind kind = resolved.kind;
+    const bool is_image = (kind == NativeWidgetKind::image_view) ||
+                          node.attributes.count("asset_path") > 0;
+    const bool is_text = (kind == NativeWidgetKind::label);
     const bool is_container = !is_image && (!node.children.empty() || node.type == "frame");
-    const bool is_text = (node.type == "text" || node.type == "label");
 
     if (is_image) {
         emit_js_image_node(e);
@@ -2000,6 +2031,7 @@ static void generate_native_node_impl(std::ostringstream& ss, const IRNode& node
 }
 
 static void generate_native_node(std::ostringstream& ss, const IRNode& node,
+                                 const ResolvedNativeNode& resolved,
                                  const CodeGenOptions& opts, int depth,
                                  int& var_counter, const std::string& parent_id,
                                  std::unordered_map<const IRNode*, std::string>* id_map) {
@@ -2007,7 +2039,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
     // binding must not depend on whether someone else asked for the mapping.
     std::unordered_map<const IRNode*, std::string> local_ids;
     auto* ids = id_map ? id_map : &local_ids;
-    generate_native_node_impl(ss, node, opts, depth, var_counter, parent_id, ids);
+    generate_native_node_impl(ss, node, resolved, opts, depth, var_counter, parent_id, ids);
     if (!node.stable_anchor_id || node.stable_anchor_id->empty()) return;
     auto it = ids->find(&node);
     if (it == ids->end()) return;
@@ -2219,9 +2251,20 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         reconnect_slider_fill(native_root);
         synthesize_primitive_paths(native_root);
 
+        // Resolve widget kinds through the SHARED recognition resolver — the
+        // same pass the cpp and Swift emitters run — so this default JS lane
+        // classifies from one source of truth instead of re-deriving it inline.
+        // Resolved AFTER the tree mutations above so the resolved tree mirrors
+        // exactly what the emit walk sees; the walks share order, so a node and
+        // its ResolvedNativeNode travel together through the recursion.
+        DesignIR native_ir = ir;
+        native_ir.root = native_root;
+        const ResolvedNativeNode resolved_root =
+            resolve_design_ir_native(native_ir, native_ir.asset_manifest);
+
         int var_counter = 0;
         std::unordered_map<const IRNode*, std::string> id_map;
-        generate_native_node(ss, native_root, opts, 0, var_counter, "", &id_map);
+        generate_native_node(ss, native_root, resolved_root, opts, 0, var_counter, "", &id_map);
         ss << "void 0;\n";
 
         // Tree-level fidelity pass: catch vector/path nodes codegen dropped to
