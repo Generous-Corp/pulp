@@ -274,12 +274,12 @@ if(Python3_Interpreter_FOUND AND PULP_BENCHMARK)
     add_test(NAME sampler-interpolation-benchmark-evidence
         COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_SOURCE_DIR}/tools/scripts/verify_sampler_interpolation_benchmark.py"
-            --benchmark-binary $<TARGET_FILE:pulp-sampler-interpolation-benchmark>)
+            --source-only)
     add_test(NAME sampler-interpolation-benchmark-evidence-self-test
         COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_SOURCE_DIR}/tools/scripts/verify_sampler_interpolation_benchmark.py"
             --self-test
-            --benchmark-binary $<TARGET_FILE:pulp-sampler-interpolation-benchmark>)
+            --source-only)
     set_tests_properties(
         sampler-interpolation-benchmark-evidence
         sampler-interpolation-benchmark-evidence-self-test

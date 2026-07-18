@@ -1,5 +1,38 @@
 #include "test_pulp_sampler_support.hpp"
 
+TEST_CASE("PulpSampler fails closed when selection generations are exhausted",
+          "[sampler][stream][generation][transaction]") {
+    SECTION("resident publication") {
+        SamplerFixture fixture;
+        const std::array<float, 4> samples{0.25f, 0.5f, -0.25f, -0.5f};
+        PulpSamplerTestAccess::exhaust_selection_generation(*fixture.proc);
+
+        REQUIRE_FALSE(fixture.proc->load_sample(samples.data(), samples.size(), 48000.0f));
+        REQUIRE_FALSE(fixture.proc->has_sample());
+        REQUIRE(PulpSamplerTestAccess::published_selection_generation(*fixture.proc) == 0);
+    }
+
+    SECTION("streamed publication") {
+        TempSamplerWav first("generation_exhaustion_first", 24000, 0.25f);
+        TempSamplerWav second("generation_exhaustion_second", 24000, 0.5f);
+        SamplerFixture fixture;
+        REQUIRE(fixture.proc->load_sample_file(first.path));
+        const auto retained_source =
+            PulpSamplerTestAccess::published_stream_source(*fixture.proc);
+        const auto retained_generation =
+            PulpSamplerTestAccess::published_selection_generation(*fixture.proc);
+        PulpSamplerTestAccess::exhaust_selection_generation(*fixture.proc);
+
+        const auto rejected = fixture.proc->load_sample_file_result(second.path);
+        REQUIRE(rejected.status == PulpSamplerLoadStatus::GenerationExhausted);
+        REQUIRE(PulpSamplerTestAccess::published_stream_source(*fixture.proc).source_id ==
+                retained_source.source_id);
+        REQUIRE(PulpSamplerTestAccess::published_selection_generation(*fixture.proc) ==
+                retained_generation);
+        REQUIRE(PulpSamplerTestAccess::physical_stream_source_count(*fixture.proc) == 1);
+    }
+}
+
 TEST_CASE("PulpSampler streams continuously across the preload boundary", "[sampler][stream]") {
     TempSamplerWav wav("boundary", 24000, 0.5f);
     SamplerFixture fixture;

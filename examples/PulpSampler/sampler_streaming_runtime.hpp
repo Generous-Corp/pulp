@@ -147,16 +147,20 @@ class SamplerStreamingRuntime {
                                    const SamplerMipPyramidView& resident_mips,
                                    Publisher&& on_published) {
         std::lock_guard lock(source_load_mutex_);
+        if (selection_generation_ == std::numeric_limits<std::uint64_t>::max())
+            return false;
         if (!loader())
             return false;
         const auto resident = read_view();
         if (!resident.valid)
             return false;
-        const auto generation = ++selection_generation_;
-        on_published(generation);
+        const auto generation = next_selection_generation();
+        if (!generation)
+            return false;
+        on_published(*generation);
         published_source_.write({
             .kind = SamplerPublishedSourceKind::Resident,
-            .selection_generation = generation,
+            .selection_generation = *generation,
             .resident = resident,
             .resident_mips = resident_mips,
         });
@@ -419,6 +423,8 @@ class SamplerStreamingRuntime {
     bool file_request_complete_ = false;
     PulpSamplerLoadResult file_request_result_{};
     StreamedSourceRecipe retained_stream_recipe_{};
+
+    std::optional<std::uint64_t> next_selection_generation() noexcept;
 
     void service_loop() noexcept;
 

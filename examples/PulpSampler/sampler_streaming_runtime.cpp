@@ -214,12 +214,20 @@ bool SamplerStreamingRuntime::republish_resident(const SamplerPublishedSource& r
         return false;
     }
     std::lock_guard lock(source_load_mutex_);
-    const auto generation = ++selection_generation_;
+    const auto generation = next_selection_generation();
+    if (!generation)
+        return false;
     auto published = retained;
-    published.selection_generation = generation;
+    published.selection_generation = *generation;
     published_source_.write(published);
     service_wake_.notify_all();
     return true;
+}
+
+std::optional<std::uint64_t> SamplerStreamingRuntime::next_selection_generation() noexcept {
+    if (selection_generation_ == std::numeric_limits<std::uint64_t>::max())
+        return std::nullopt;
+    return ++selection_generation_;
 }
 
 PulpSamplerLoadResult SamplerStreamingRuntime::load_sample_file_result(std::string_view path) {
