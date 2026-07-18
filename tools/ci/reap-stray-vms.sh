@@ -21,7 +21,13 @@
 # Usage: reap-stray-vms.sh [--fix] [--include-running]
 #   (default: DRY-RUN — prints what it would do)
 set -uo pipefail
-export TART_HOME="${TART_HOME:-$HOME/VMs}"
+
+# The store must come from the host. A wrong store is not a loud failure here —
+# `tart list` against it simply returns nothing, so this reaper would inspect an
+# empty universe, reap nothing, and exit 0 reporting success.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/tart-home.sh"
+pulp_require_tart_home
+
 FIX=0; INCLUDE_RUNNING=0
 for a in "$@"; do
   case "$a" in
