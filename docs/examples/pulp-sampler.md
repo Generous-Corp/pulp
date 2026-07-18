@@ -189,15 +189,14 @@ ctest --test-dir build-aql \
   --output-on-failure
 ```
 
-The checked-in interpolation benchmark capture under
-`docs/validation/sampler-interpolation/` is historical evidence. Its source
-bundle digest does not match the current sampler sources, so recapture and
-verification are required before using it as current performance evidence.
+The checked-in interpolation benchmark under
+`docs/validation/sampler-interpolation/` is a current 108-row Apple M5 Max
+Release capture. Its verifier checks the complete matrix, acceptance budgets,
+source bundle, binary hash, environment, and negative controls.
 
 ## Current gaps
 
 - Wire configuration, prepare/load results, preload policy, envelope state, and
   the combined diagnostic record through `PulpSamplerProcessor`.
-- Recapture current interpolation performance evidence.
 - Named machine profiles remain intentionally unshipped until research,
   provenance, capture, and listening gates are satisfied.
