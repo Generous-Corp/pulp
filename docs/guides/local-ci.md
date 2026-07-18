@@ -1289,6 +1289,11 @@ and Visual Studio generation do not move underneath the complete runtime
 suite. The standalone MSVC release-path, MIDI 2, and BLE compile gates remain
 on `windows-latest`; release builds and the nightly Intel safety net also keep
 tracking the newest hosted image.
+`tools/scripts/test_windows_runner_policy.py` enforces this split across the
+actual build, release, coverage, and nightly workflows plus the release runner
+resolver and Shipyard mirror. It runs in `workflow-lint`, including when the
+profile or the policy test itself changes, so these surfaces cannot drift while
+an isolated mirror test remains green.
 
 ### Nightly GitHub Intel validation
 

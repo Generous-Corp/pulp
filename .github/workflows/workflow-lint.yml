@@ -12,20 +12,26 @@ name: Workflow lint
 # failed silently with "workflow file issue" and 0 jobs; this lint workflow
 # prevents the recurrence class.
 #
-# Scope: runs only on PRs that touch `.github/workflows/**` or this
-# file itself. Keeps the check fast on the 99% of PRs that don't
-# touch CI.
+# Scope: runs only on PRs that touch workflows/actions or the independently
+# tested Windows runner-policy surfaces. Keeps the check fast on the 99% of
+# PRs that don't touch CI.
 
 on:
   pull_request:
     paths:
       - '.github/workflows/**'
       - '.github/actions/**'
+      - '.shipyard/ci-profiles/normal-local-fast.toml'
+      - 'tools/scripts/resolve_release_runners.py'
+      - 'tools/scripts/test_windows_runner_policy.py'
   push:
     branches: [main]
     paths:
       - '.github/workflows/**'
       - '.github/actions/**'
+      - '.shipyard/ci-profiles/normal-local-fast.toml'
+      - 'tools/scripts/resolve_release_runners.py'
+      - 'tools/scripts/test_windows_runner_policy.py'
 
 permissions:
   contents: read
@@ -127,6 +133,9 @@ jobs:
           python3 tools/scripts/test_workflow_build_dirs.py
           python3 tools/scripts/test_fetch_skia_for_release.py
           python3 tools/scripts/test_resolve_provider_busy_probe.py
+          # Keep the authoritative Windows runtime suite pinned independently
+          # from moving latest-toolchain release/coverage/nightly lanes.
+          python3 tools/scripts/test_windows_runner_policy.py
           # Pulp #47 — guard the linux-arm64 Skia manifest entry against
           # silent regressions (parallel to the linux-x64 / mac-arm64
           # entries enforced by tests/test_skia_determinism.py).
