@@ -2,6 +2,7 @@
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/sample_asset.hpp>
+#include <pulp/audio/sample_starvation_envelope.hpp>
 
 #include <algorithm>
 #include <array>
@@ -23,6 +24,15 @@ enum class SampleStreamVoiceSupply : std::uint8_t {
     InvalidContract,
 };
 
+enum class SampleStreamVoiceOutcomeClass : std::uint8_t {
+    None,
+    ServiceStarvation,
+    InvalidPreloadContract,
+    StaleGeneration,
+    NormalEndOfSource,
+    InvalidRenderContract,
+};
+
 struct SampleStreamVoiceBlockPlan {
     SampleAssetToken asset{};
     SampleStreamSourceToken source{};
@@ -37,6 +47,8 @@ struct SampleStreamVoiceBlockPlan {
 
 struct SampleStreamVoiceBlockResult {
     SampleStreamVoiceSupply supply = SampleStreamVoiceSupply::InvalidContract;
+    SampleStreamVoiceOutcomeClass outcome =
+        SampleStreamVoiceOutcomeClass::InvalidRenderContract;
     std::uint32_t ready_output_frames = 0;
 };
 
@@ -50,15 +62,66 @@ struct SampleStreamVoiceDemandEnqueueResult {
 static_assert(std::is_trivially_copyable_v<SampleStreamVoiceBlockPlan>);
 static_assert(std::is_trivially_copyable_v<SampleStreamVoiceBlockResult>);
 
+namespace detail {
+
+inline void apply_sample_starvation_envelope(
+    SampleStarvationEnvelope& envelope,
+    BufferView<float> destination,
+    const SampleStreamVoiceBlockResult& result,
+    std::uint32_t output_frames) noexcept {
+    if (result.supply == SampleStreamVoiceSupply::Starved) {
+        const auto fade_frames = std::min(
+            result.ready_output_frames, envelope.fade_out_frames());
+        const auto prefix_frames = result.ready_output_frames - fade_frames;
+        if (result.ready_output_frames != 0 &&
+            envelope.mode() == SampleStarvationMode::Silent) {
+            envelope.begin_recovery();
+        }
+        for (std::uint32_t frame = 0; frame < prefix_frames; ++frame) {
+            const auto gain = envelope.next_valid_gain();
+            for (std::size_t channel = 0; channel < destination.num_channels(); ++channel)
+                destination.channel_ptr(channel)[frame] *= gain;
+        }
+        envelope.begin_predicted_fade(fade_frames);
+        for (std::uint32_t frame = prefix_frames;
+             frame < result.ready_output_frames; ++frame) {
+            const auto gain = envelope.next_valid_gain();
+            for (std::size_t channel = 0; channel < destination.num_channels(); ++channel)
+                destination.channel_ptr(channel)[frame] *= gain;
+        }
+        const auto missing_frames = output_frames - result.ready_output_frames;
+        for (std::size_t channel = 0; channel < destination.num_channels(); ++channel) {
+            std::fill_n(destination.channel_ptr(channel) + result.ready_output_frames,
+                        missing_frames, 0.0f);
+        }
+        envelope.mark_starved(missing_frames);
+        return;
+    }
+    if (result.ready_output_frames == 0) return;
+    if (envelope.mode() == SampleStarvationMode::Silent)
+        envelope.begin_recovery();
+    if (envelope.mode() != SampleStarvationMode::Recovering) return;
+    for (std::uint32_t frame = 0; frame < result.ready_output_frames; ++frame) {
+        const auto gain = envelope.next_valid_gain();
+        for (std::size_t channel = 0; channel < destination.num_channels(); ++channel)
+            destination.channel_ptr(channel)[frame] *= gain;
+    }
+}
+
+} // namespace detail
+
 /// Allocation-free linear forward one-shot reader over immutable sample assets.
 /// Looping, reverse playback, and crossfade-region planning are separate policies.
 class SampleStreamVoiceReader {
 public:
     bool prepare(const SampleAssetView& asset,
-                 SampleStreamRequesterToken requester) noexcept {
+                 SampleStreamRequesterToken requester,
+                 SampleStarvationEnvelopeConfig starvation =
+                     kDefaultSampleStarvationEnvelopeConfig) noexcept {
         reset();
         if (!asset.valid() || requester.requester_id == 0 ||
-            requester.requester_generation == 0) {
+            requester.requester_generation == 0 ||
+            !starvation_envelope_.prepare(starvation)) {
             return false;
         }
         asset_ = asset.asset;
@@ -73,6 +136,7 @@ public:
         source_ = {};
         requester_ = {};
         source_position_ = 0.0;
+        starvation_envelope_.reset();
         prepared_ = false;
     }
 
@@ -83,10 +147,17 @@ public:
             return false;
         }
         source_position_ = source_frame;
+        starvation_envelope_.restart_audio();
         return true;
     }
 
     double source_position() const noexcept { return source_position_; }
+    SampleStarvationMode starvation_mode() const noexcept {
+        return starvation_envelope_.mode();
+    }
+    SampleStarvationEnvelopeStats starvation_stats() const noexcept {
+        return starvation_envelope_.stats();
+    }
 
     SampleStreamVoiceBlockPlan plan_block(const SampleAssetView& asset,
                                           std::uint32_t output_frames,
@@ -202,6 +273,11 @@ public:
         }
         if (plan.supply == SampleStreamVoiceSupply::StaleGeneration) {
             result.supply = SampleStreamVoiceSupply::StaleGeneration;
+            result.outcome = SampleStreamVoiceOutcomeClass::StaleGeneration;
+            return result;
+        }
+        if (plan.supply == SampleStreamVoiceSupply::InvalidContract) {
+            result.outcome = SampleStreamVoiceOutcomeClass::InvalidPreloadContract;
             return result;
         }
         if (plan.supply != SampleStreamVoiceSupply::Ready &&
@@ -213,20 +289,24 @@ public:
             plan.source.source_id != asset.source.source_id ||
             plan.source.source_generation != asset.source.source_generation) {
             result.supply = SampleStreamVoiceSupply::StaleGeneration;
+            result.outcome = SampleStreamVoiceOutcomeClass::StaleGeneration;
             return result;
         }
         if (plan.supply == SampleStreamVoiceSupply::EndOfSource) {
             result.supply = SampleStreamVoiceSupply::EndOfSource;
+            result.outcome = SampleStreamVoiceOutcomeClass::NormalEndOfSource;
             return result;
         }
 
         result.supply = SampleStreamVoiceSupply::Ready;
+        result.outcome = SampleStreamVoiceOutcomeClass::None;
         for (std::uint32_t output = 0; output < plan.output_frames; ++output) {
             const auto position = plan.start_source_frame +
                                   static_cast<double>(output) *
                                       plan.source_frames_per_output;
             if (position >= static_cast<double>(asset.total_frames)) {
                 result.supply = SampleStreamVoiceSupply::EndOfSource;
+                result.outcome = SampleStreamVoiceOutcomeClass::NormalEndOfSource;
                 break;
             }
 
@@ -236,6 +316,7 @@ public:
             const auto upper = locate(plan, asset, upper_frame);
             if (!lower.ready || !upper.ready) {
                 result.supply = SampleStreamVoiceSupply::Starved;
+                result.outcome = SampleStreamVoiceOutcomeClass::ServiceStarvation;
                 break;
             }
 
@@ -245,15 +326,18 @@ public:
                 const auto* upper_sample = sample_pointer(asset, upper, channel);
                 if (lower_sample == nullptr || upper_sample == nullptr) {
                     result.supply = SampleStreamVoiceSupply::Starved;
-                    advance_timeline(asset, plan);
-                    return result;
+                    result.outcome = SampleStreamVoiceOutcomeClass::ServiceStarvation;
+                    break;
                 }
                 destination.channel_ptr(channel)[output] =
                     *lower_sample + (*upper_sample - *lower_sample) * fraction;
             }
+            if (result.supply == SampleStreamVoiceSupply::Starved) break;
             ++result.ready_output_frames;
         }
 
+        detail::apply_sample_starvation_envelope(
+            starvation_envelope_, destination, result, plan.output_frames);
         advance_timeline(asset, plan);
         return result;
     }
@@ -382,6 +466,7 @@ private:
     SampleStreamSourceToken source_{};
     SampleStreamRequesterToken requester_{};
     double source_position_ = 0.0;
+    SampleStarvationEnvelope starvation_envelope_;
     bool prepared_ = false;
 };
 

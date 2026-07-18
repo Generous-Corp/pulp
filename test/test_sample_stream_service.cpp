@@ -450,7 +450,7 @@ TEST_CASE("Sample stream cache reuses retired pages only after the audio generat
     REQUIRE(stats.invalid_audio_generation_updates == 1);
 }
 
-TEST_CASE("Sample stream cache retires the oldest published page deterministically",
+TEST_CASE("Sample stream cache preserves a refreshed ready page during deterministic eviction",
           "[audio][sampler][stream-service][eviction]") {
     SampleStreamCacheService service;
     REQUIRE(service.prepare({.scheduler_capacity = 4, .page_memory_budget_bytes = 32}));
@@ -467,18 +467,21 @@ TEST_CASE("Sample stream cache retires the oldest published page deterministical
     REQUIRE(service.request_page(demand(added.view.token, 60, 1)) ==
             SampleStreamScheduleStatus::Inserted);
     REQUIRE(service.service_once() == SampleStreamServiceStatus::Published);
+    REQUIRE(service.request_page(demand(added.view.token, 60, 0)) ==
+            SampleStreamScheduleStatus::Inserted);
+    REQUIRE(service.service_once() == SampleStreamServiceStatus::AlreadyReady);
     REQUIRE(service.request_page(demand(added.view.token, 60, 2)) ==
             SampleStreamScheduleStatus::Inserted);
 
     REQUIRE(service.service_once() == SampleStreamServiceStatus::PageRetired);
     REQUIRE(added.view.window->page_state(0) ==
-            pulp::audio::SampleStreamPageState::Retired);
-    REQUIRE(added.view.window->page_state(1) ==
             pulp::audio::SampleStreamPageState::Ready);
+    REQUIRE(added.view.window->page_state(1) ==
+            pulp::audio::SampleStreamPageState::Retired);
     REQUIRE(service.scheduler_stats().pending == 1);
     REQUIRE(service.service_once() ==
             SampleStreamServiceStatus::WaitingForAudioGeneration);
-    REQUIRE(added.view.window->page_state(1) ==
+    REQUIRE(added.view.window->page_state(0) ==
             pulp::audio::SampleStreamPageState::Ready);
     REQUIRE(service.stats().pages_retired == 1);
 }

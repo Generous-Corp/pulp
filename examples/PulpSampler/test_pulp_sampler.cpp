@@ -12,6 +12,7 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <numbers>
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/scope_guard.hpp>
@@ -28,6 +29,50 @@ using Catch::Matchers::WithinAbs;
 namespace pulp::examples {
 
 struct PulpSamplerTestAccess {
+    static audio::SampleStreamSourceToken
+    published_stream_source(const PulpSamplerProcessor& processor) {
+        return processor.streaming_.published_source().streamed.source;
+    }
+
+    static std::uint64_t
+    published_stream_page_frames(const PulpSamplerProcessor& processor) {
+        return processor.streaming_.published_source().streamed.stream_source.page_frames;
+    }
+
+    static std::size_t active_streamed_voices_for_source(
+        const PulpSamplerProcessor& processor,
+        audio::SampleStreamSourceToken source) {
+        std::size_t count = 0;
+        for (const auto& voice : processor.voices_) {
+            const auto candidate = voice.streamed_asset.source;
+            if (voice.active && voice.streamed &&
+                candidate.source_id == source.source_id &&
+                candidate.source_generation == source.source_generation) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
+    static bool force_active_stream_rate_capacity(PulpSamplerProcessor& processor,
+                                                  double frames_per_second) {
+        processor.stream_rate_capacity_override_for_test_ = frames_per_second;
+        return std::any_of(std::begin(processor.voices_), std::end(processor.voices_),
+                           [](const SamplerVoice& voice) {
+                               return voice.active && voice.streamed;
+                           });
+    }
+
+    static std::vector<int> active_streamed_notes(
+        const PulpSamplerProcessor& processor) {
+        std::vector<int> notes;
+        for (const auto& voice : processor.voices_) {
+            if (voice.active && voice.streamed) notes.push_back(voice.note);
+        }
+        std::sort(notes.begin(), notes.end());
+        return notes;
+    }
+
     static audio::SampleInterpolationPolicy
     interpolation_policy(const PulpSamplerProcessor& processor) {
         return processor.current_params().interpolation;
@@ -69,6 +114,22 @@ struct PulpSamplerTestAccess {
     static void pause_stream_dispatch(PulpSamplerProcessor& processor, bool paused) {
         processor.streaming_.service_dispatch_paused_.store(paused, std::memory_order_release);
         processor.streaming_.service_wake_.notify_all();
+    }
+
+    static void fail_next_stream_decode(PulpSamplerProcessor& processor) {
+        processor.streaming_.fail_next_stream_decode_for_test_.store(
+            true, std::memory_order_release);
+        processor.streaming_.service_wake_.notify_all();
+    }
+
+    static bool invalidate_active_stream_preload_contract(
+        PulpSamplerProcessor& processor) {
+        for (auto& voice : processor.voices_) {
+            if (!voice.active || !voice.streamed) continue;
+            voice.streamed_asset.preload_contract.maximum_host_block_frames = 1;
+            return true;
+        }
+        return false;
     }
 
     static bool pause_stream_command_drain(PulpSamplerProcessor& processor, bool paused) {
@@ -2737,6 +2798,168 @@ TEST_CASE("PulpSampler retunes streamed sinc across pitch modulation",
             audio::SampleInterpolationPolicy::Nearest);
 }
 
+namespace {
+
+constexpr double kSamplerModulationSampleRate = 44100.0;
+constexpr double kSamplerModulationSourceCycles = 0.20;
+constexpr double kSamplerModulationCentreRatio = 1.5;
+constexpr double kSamplerModulationDepth = 0.25;
+constexpr std::size_t kSamplerModulationFrames = 8820;
+
+double sampler_modulation_ratio(double modulation_hz, std::size_t frame) {
+    return kSamplerModulationCentreRatio + kSamplerModulationDepth * std::sin(
+        2.0 * std::numbers::pi * modulation_hz * static_cast<double>(frame) /
+        kSamplerModulationSampleRate);
+}
+
+// Deliberately duplicates the public test specification instead of calling the
+// production-stimulus helper above. A mutation of that helper must not move the
+// expected trajectory with the rendered candidate.
+double sampler_modulation_oracle_ratio(double modulation_hz, std::size_t frame) {
+    return 1.5 + 0.25 * std::sin(
+        2.0 * std::numbers::pi * modulation_hz * static_cast<double>(frame) /
+        44100.0);
+}
+
+std::vector<double> sampler_modulation_reference(double modulation_hz,
+                                                 std::size_t block_frames,
+                                                 bool freeze_modulation = false,
+                                                 bool zero_modulation = false) {
+    std::vector<double> result(kSamplerModulationFrames);
+    double source_position = 0.0;
+    for (std::size_t frame = 0; frame < result.size(); ++frame) {
+        result[frame] = 0.5 * std::sin(
+            2.0 * std::numbers::pi * kSamplerModulationSourceCycles *
+            source_position);
+        const auto control_frame = (frame / block_frames) * block_frames;
+        const auto ratio = zero_modulation
+            ? kSamplerModulationCentreRatio
+            : freeze_modulation
+            ? kSamplerModulationCentreRatio + kSamplerModulationDepth
+            : sampler_modulation_oracle_ratio(modulation_hz, control_frame);
+        source_position += ratio;
+    }
+    return result;
+}
+
+std::vector<double> render_pulp_sampler_modulation(double modulation_hz,
+                                                   std::size_t block_frames) {
+    SamplerFixture fixture(static_cast<std::uint32_t>(block_frames),
+                           kSamplerModulationSampleRate);
+    fixture.store.set_value(kSamplerGain, 0.0f);
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerRelease, 0.0f);
+    fixture.store.set_value(kSamplerInterpolation, 5.0f);
+
+    std::vector<float> source(32768);
+    for (std::size_t frame = 0; frame < source.size(); ++frame) {
+        source[frame] = static_cast<float>(0.5 * std::sin(
+            2.0 * std::numbers::pi * kSamplerModulationSourceCycles *
+            static_cast<double>(frame)));
+    }
+    REQUIRE(fixture.proc->load_sample(
+        source.data(), static_cast<int>(source.size()),
+        static_cast<float>(kSamplerModulationSampleRate)));
+
+    std::vector<double> result;
+    result.reserve(kSamplerModulationFrames);
+    for (std::size_t start = 0; start < kSamplerModulationFrames;
+         start += block_frames) {
+        const auto frames = std::min(block_frames,
+                                     kSamplerModulationFrames - start);
+        const auto ratio = sampler_modulation_ratio(modulation_hz, start);
+        fixture.store.set_value(
+            kSamplerPitch, static_cast<float>(12.0 * std::log2(ratio)));
+        SamplerProcessBlock block(static_cast<std::uint32_t>(frames),
+                                  kSamplerModulationSampleRate);
+        if (start == 0)
+            block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+        block.run(*fixture.proc);
+        result.insert(result.end(), block.left.begin(), block.left.end());
+    }
+    return result;
+}
+
+double sampler_modulation_residual_db(std::span<const double> reference,
+                                      std::span<const double> candidate) {
+    REQUIRE(reference.size() == candidate.size());
+    double reference_energy = 0.0;
+    double residual_energy = 0.0;
+    for (std::size_t index = 0; index < reference.size(); ++index) {
+        reference_energy += reference[index] * reference[index];
+        const auto residual = candidate[index] - reference[index];
+        residual_energy += residual * residual;
+    }
+    return 10.0 * std::log10(std::max(
+        residual_energy / reference_energy, 1.0e-20));
+}
+
+}  // namespace
+
+TEST_CASE("PulpSampler sinc follows independent continuous pitch modulation controls",
+          "[sampler][interpolation][sinc][modulation][quality]") {
+    constexpr std::array<double, 5> modulation_rates = {
+        5.0, 20.0, 50.0, 100.0, 200.0,
+    };
+    constexpr std::array<std::size_t, 3> blocks = {1, 16, 64};
+    // Mutation sentinels pin the production-driving trajectory independently
+    // of the rendered-audio oracle. These catch a frozen value, wrong depth,
+    // wrong waveform phase, or wrong rate scaling before a shared-mode error
+    // can masquerade as a good render comparison.
+    CHECK_THAT(sampler_modulation_ratio(5.0, 0), WithinAbs(1.5, 1.0e-12));
+    CHECK_THAT(sampler_modulation_ratio(5.0, 2205), WithinAbs(1.75, 1.0e-12));
+    CHECK_THAT(sampler_modulation_ratio(5.0, 4410), WithinAbs(1.5, 1.0e-12));
+    CHECK_THAT(sampler_modulation_ratio(5.0, 6615), WithinAbs(1.25, 1.0e-12));
+    CHECK(sampler_modulation_ratio(20.0, 551) > 1.749);
+    CHECK(sampler_modulation_ratio(200.0, 55) > 1.749);
+    for (const auto modulation_hz : modulation_rates) {
+        const auto continuous = sampler_modulation_reference(modulation_hz, 1);
+        const auto frozen = sampler_modulation_reference(
+            modulation_hz, 1, true, false);
+        const auto zero_depth = sampler_modulation_reference(
+            modulation_hz, 1, false, true);
+        CAPTURE(modulation_hz,
+                sampler_modulation_residual_db(continuous, frozen),
+                sampler_modulation_residual_db(continuous, zero_depth));
+        CHECK(sampler_modulation_residual_db(continuous, frozen) > -20.0);
+        CHECK(sampler_modulation_residual_db(continuous, zero_depth) > -20.0);
+
+        std::array<std::vector<double>, blocks.size()> production;
+        std::array<double, blocks.size()> continuous_error{};
+        for (std::size_t index = 0; index < blocks.size(); ++index) {
+            const auto block_frames = blocks[index];
+            production[index] = render_pulp_sampler_modulation(
+                modulation_hz, block_frames);
+            const auto stepped = sampler_modulation_reference(
+                modulation_hz, block_frames);
+            const auto stepped_error = sampler_modulation_residual_db(
+                stepped, production[index]);
+            continuous_error[index] = sampler_modulation_residual_db(
+                continuous, production[index]);
+            CAPTURE(modulation_hz, block_frames, stepped_error,
+                    continuous_error[index]);
+            // This includes the production StateStore's float semitone control
+            // and float WAV/source path, so it owns a separate control-trajectory
+            // tolerance from the raw interpolator's -55 dB alias-rejection gate.
+            CHECK(stepped_error < -48.0);
+        }
+        CHECK(continuous_error[0] < -48.0);
+        for (std::size_t index = 1; index < blocks.size(); ++index) {
+            const auto stepped_error = sampler_modulation_residual_db(
+                sampler_modulation_reference(modulation_hz, blocks[index]),
+                production[index]);
+            CHECK(continuous_error[index] > -20.0);
+            CHECK(stepped_error + 25.0 < continuous_error[index]);
+            CHECK(sampler_modulation_residual_db(
+                      production[0], production[index]) > -20.0);
+        }
+        CHECK(sampler_modulation_residual_db(
+                  production[1], production[2]) > -20.0);
+    }
+}
+
 TEST_CASE("PulpSampler prewarms reverse entry before publishing a stream", "[sampler][stream]") {
     TempSamplerWav wav("reverse_entry", 24000, 0.5f);
     SamplerFixture fixture;
@@ -2935,7 +3158,7 @@ TEST_CASE("PulpSampler emits streamed reverse one-shots from the tail",
     block.run(*fixture.proc);
 
     REQUIRE(block.left.front() > 0.85f);
-    REQUIRE(block.left[400] < block.left.front());
+    REQUIRE(block.left[400] < block.left[63]);
     REQUIRE(fixture.proc->stream_stats().starved_output_frames == 0);
 }
 
@@ -2979,8 +3202,10 @@ TEST_CASE("PulpSampler holds a reverse attack while its tail is refilled",
         },
         std::chrono::milliseconds(5000)));
     block.run(*fixture.proc);
-    REQUIRE(block.left.front() > 0.85f);
-    REQUIRE(block.left[400] < block.left.front());
+    REQUIRE(block.left.front() == 0.0f);
+    REQUIRE(block.left[1] > 0.0f);
+    REQUIRE(block.left[63] > 0.85f);
+    REQUIRE(block.left[400] < block.left[63]);
 }
 
 TEST_CASE("PulpSampler keeps streamed reverse loops supplied across the seam",
@@ -3158,8 +3383,112 @@ TEST_CASE("PulpSampler reports deterministic streamed starvation", "[sampler][st
     }
 
     REQUIRE(fixture.proc->stream_stats().starved_output_frames > 0);
+    REQUIRE(fixture.proc->stream_stats().service_starvation_events > 0);
+    REQUIRE(fixture.proc->stream_stats().decode_failure_events == 0);
+    REQUIRE(fixture.proc->stream_stats().invalid_preload_contract_events == 0);
+    REQUIRE(fixture.proc->stream_stats().normal_end_of_source_events == 0);
     REQUIRE_THAT(block.left.back(), WithinAbs(0.0f, 0.0f));
     PulpSamplerTestAccess::pause_stream_dispatch(*fixture.proc, false);
+}
+
+TEST_CASE("PulpSampler distinguishes decode failure from service starvation",
+          "[sampler][stream][diagnostics]") {
+    TempSamplerWav wav("decode_failure_diagnostics", 100000, 0.5f);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+    PulpSamplerTestAccess::fail_next_stream_decode(*fixture.proc);
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    block.run(*fixture.proc);
+    block.midi_in.clear();
+
+    REQUIRE(wait_for_condition([&] {
+        block.run(*fixture.proc);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        return fixture.proc->stream_stats().decode_failure_events != 0;
+    }));
+    const auto diagnostics = fixture.proc->stream_stats();
+    REQUIRE(diagnostics.decode_failure_events == 1);
+    REQUIRE(diagnostics.invalid_preload_contract_events == 0);
+    REQUIRE(diagnostics.stale_generation_events == 0);
+    REQUIRE(diagnostics.normal_end_of_source_events == 0);
+    REQUIRE(diagnostics.invalid_render_contract_events == 0);
+
+    // Decode failures are worker-side root causes. If dispatch is then held
+    // until the voice reaches the failed/unavailable region, the resulting
+    // output starvation is a distinct symptom and both counters must remain.
+    PulpSamplerTestAccess::pause_stream_dispatch(*fixture.proc, true);
+    REQUIRE(wait_for_condition([&] {
+        block.run(*fixture.proc);
+        return fixture.proc->stream_stats().service_starvation_events != 0;
+    }));
+    const auto root_and_symptom = fixture.proc->stream_stats();
+    REQUIRE(root_and_symptom.decode_failure_events == 1);
+    REQUIRE(root_and_symptom.service_starvation_events > 0);
+    PulpSamplerTestAccess::pause_stream_dispatch(*fixture.proc, false);
+
+    fixture.proc->release();
+    REQUIRE(fixture.proc->stream_stats().decode_failure_events == 1);
+}
+
+TEST_CASE("PulpSampler reports an invalid streamed preload contract distinctly",
+          "[sampler][stream][diagnostics]") {
+    TempSamplerWav wav("invalid_contract_diagnostics", 24000, 0.5f);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    block.run(*fixture.proc);
+    block.midi_in.clear();
+    REQUIRE(PulpSamplerTestAccess::invalidate_active_stream_preload_contract(
+        *fixture.proc));
+    block.run(*fixture.proc);
+
+    const auto diagnostics = fixture.proc->stream_stats();
+    REQUIRE(diagnostics.invalid_preload_contract_events == 1);
+    REQUIRE(diagnostics.service_starvation_events == 0);
+    REQUIRE(diagnostics.decode_failure_events == 0);
+    REQUIRE(diagnostics.stale_generation_events == 0);
+    REQUIRE(diagnostics.normal_end_of_source_events == 0);
+    REQUIRE(diagnostics.invalid_render_contract_events == 0);
+}
+
+TEST_CASE("PulpSampler reports normal streamed end of source distinctly",
+          "[sampler][stream][diagnostics]") {
+    TempSamplerWav wav("normal_eos_diagnostics", 24000, 0.5f);
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerPitch, 24.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    for (std::uint32_t callback = 0;
+         callback < 100 &&
+         fixture.proc->stream_stats().normal_end_of_source_events == 0;
+         ++callback) {
+        block.run(*fixture.proc);
+        block.midi_in.clear();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    const auto diagnostics = fixture.proc->stream_stats();
+    REQUIRE(diagnostics.normal_end_of_source_events == 1);
+    REQUIRE(diagnostics.service_starvation_events == 0);
+    REQUIRE(diagnostics.decode_failure_events == 0);
+    REQUIRE(diagnostics.invalid_preload_contract_events == 0);
+    REQUIRE(diagnostics.stale_generation_events == 0);
+    REQUIRE(diagnostics.invalid_render_contract_events == 0);
 }
 
 TEST_CASE("PulpSampler keeps staggered streamed voices supplied", "[sampler][stream][polyphony]") {
@@ -3189,6 +3518,299 @@ TEST_CASE("PulpSampler keeps staggered streamed voices supplied", "[sampler][str
     REQUIRE(fixture.proc->stream_stats().pages_published > 0);
     REQUIRE(fixture.proc->stream_stats().starved_output_frames == 0);
     REQUIRE_THAT(block.left.front(), WithinAbs(2.0f, 1e-5));
+}
+
+TEST_CASE("PulpSampler rejects streamed note admission above serialized source throughput",
+          "[sampler][stream][contract][admission]") {
+    TempSamplerWav wav("aggregate_rate_admission", 500000, 0.25f);
+    SamplerFixture fixture(64);
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+    const auto source = PulpSamplerTestAccess::published_stream_source(*fixture.proc);
+    const auto page_frames =
+        PulpSamplerTestAccess::published_stream_page_frames(*fixture.proc);
+
+    SamplerProcessBlock block(64);
+    for (int voice = 0; voice < PulpSamplerProcessor::kMaxVoices; ++voice) {
+        block.midi_in.add(midi::MidiEvent::note_on(0, 84, 100));
+        block.run(*fixture.proc);
+        block.midi_in.clear();
+    }
+
+    const auto active = PulpSamplerTestAccess::active_streamed_voices_for_source(
+        *fixture.proc, source);
+    const auto diagnostics = fixture.proc->stream_stats();
+    REQUIRE(active > 0);
+    REQUIRE(active < PulpSamplerProcessor::kMaxVoices);
+    REQUIRE(active * 4.0 * 44100.0 <= page_frames / 0.005);
+    REQUIRE((active + 1) * 4.0 * 44100.0 > page_frames / 0.005);
+    const auto notes_before_rejected_steal =
+        PulpSamplerTestAccess::active_streamed_notes(*fixture.proc);
+    block.midi_in.add(midi::MidiEvent::note_on(0, 72, 100));
+    block.run(*fixture.proc);
+    block.midi_in.clear();
+    REQUIRE(PulpSamplerTestAccess::active_streamed_notes(*fixture.proc) ==
+            notes_before_rejected_steal);
+    REQUIRE(fixture.proc->stream_stats().aggregate_rate_admission_rejections ==
+            diagnostics.aggregate_rate_admission_rejections + 1);
+    REQUIRE(diagnostics.aggregate_rate_admission_rejections > 0);
+    REQUIRE(diagnostics.aggregate_rate_automation_rejections == 0);
+    REQUIRE(diagnostics.service_starvation_events == 0);
+}
+
+TEST_CASE("PulpSampler sheds streamed voices when pitch automation exceeds source throughput",
+          "[sampler][stream][contract][automation]") {
+    TempSamplerWav wav("aggregate_rate_automation", 500000, 0.25f);
+    SamplerFixture fixture(64);
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+    const auto source = PulpSamplerTestAccess::published_stream_source(*fixture.proc);
+    const auto page_frames =
+        PulpSamplerTestAccess::published_stream_page_frames(*fixture.proc);
+
+    SamplerProcessBlock block(64);
+    for (int voice = 0; voice < PulpSamplerProcessor::kMaxVoices; ++voice) {
+        block.midi_in.add(midi::MidiEvent::note_on(0, 60, 100));
+        block.run(*fixture.proc);
+        block.midi_in.clear();
+    }
+    REQUIRE(PulpSamplerTestAccess::active_streamed_voices_for_source(
+                *fixture.proc, source) == PulpSamplerProcessor::kMaxVoices);
+
+    fixture.store.set_value(kSamplerPitch, 24.0f);
+    block.run(*fixture.proc);
+    const auto active = PulpSamplerTestAccess::active_streamed_voices_for_source(
+        *fixture.proc, source);
+    const auto diagnostics = fixture.proc->stream_stats();
+    REQUIRE(active > 0);
+    REQUIRE(active < PulpSamplerProcessor::kMaxVoices);
+    REQUIRE(active * 4.0 * 44100.0 <= page_frames / 0.005);
+    REQUIRE(diagnostics.aggregate_rate_admission_rejections == 0);
+    REQUIRE(diagnostics.aggregate_rate_automation_rejections > 0);
+    REQUIRE(diagnostics.service_starvation_events == 0);
+}
+
+TEST_CASE("PulpSampler click-gates an automated source-throughput rejection",
+          "[sampler][stream][contract][automation][click]") {
+    TempSamplerWav wav("aggregate_rate_automation_fade", 500000, 0.5f);
+    SamplerFixture fixture(64);
+    fixture.store.set_value(kSamplerGain, 0.0f);
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+
+    SamplerProcessBlock attack(64);
+    attack.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    attack.run(*fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::force_active_stream_rate_capacity(
+        *fixture.proc, 1.0));
+    fixture.store.set_value(kSamplerPitch, 12.0f);
+
+    SamplerProcessBlock fade(64);
+    fade.run(*fixture.proc);
+    REQUIRE(std::abs(fade.left.front()) > 0.1f);
+    REQUIRE_THAT(fade.left.back(), WithinAbs(0.0f, 1.0e-6f));
+    REQUIRE(fixture.proc->stream_stats().aggregate_rate_automation_rejections == 1);
+    const auto source = PulpSamplerTestAccess::published_stream_source(*fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::active_streamed_voices_for_source(
+                *fixture.proc, source) == 0);
+    SamplerProcessBlock tail(64);
+    tail.run(*fixture.proc);
+    REQUIRE_THAT(tail.left.front(), WithinAbs(0.0f, 1.0e-6f));
+    REQUIRE(fixture.proc->stream_stats().aggregate_rate_automation_rejections == 1);
+}
+
+TEST_CASE("PulpSampler counts fading voices during mid-block note admission",
+          "[sampler][stream][contract][automation][admission]") {
+    TempSamplerWav wav("aggregate_rate_mid_fade_admission", 500000, 0.5f);
+    SamplerFixture fixture(64);
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+    const auto source = PulpSamplerTestAccess::published_stream_source(*fixture.proc);
+
+    SamplerProcessBlock attack(64);
+    attack.midi_in.add(midi::MidiEvent::note_on(0, 72, 127));
+    attack.run(*fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::force_active_stream_rate_capacity(
+        *fixture.proc, 100000.0));
+    fixture.store.set_value(kSamplerPitch, 12.0f);
+
+    SamplerProcessBlock automated(64);
+    auto later_low_note = midi::MidiEvent::note_on(0, 48, 127);
+    later_low_note.sample_offset = 32;
+    automated.midi_in.add(later_low_note);
+    automated.run(*fixture.proc);
+
+    const auto diagnostics = fixture.proc->stream_stats();
+    REQUIRE(diagnostics.aggregate_rate_automation_rejections == 1);
+    REQUIRE(diagnostics.aggregate_rate_admission_rejections == 1);
+    REQUIRE(PulpSamplerTestAccess::active_streamed_voices_for_source(
+                *fixture.proc, source) == 0);
+}
+
+TEST_CASE("PulpSampler in-contract stream torture survives bounded eviction and churn",
+          "[sampler][stream][polyphony][torture]") {
+    TempSamplerWav short_loop("torture_short_loop", 32000, 0.2f);
+    TempSamplerWav long_source("torture_long", 500000, 0.25f);
+    SamplerFixture fixture(64);
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerRelease, 0.0f);
+
+    SamplerProcessBlock block(64);
+    REQUIRE(fixture.proc->load_sample_file(short_loop.path));
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+    fixture.store.set_value(kSamplerReverse, 0.0f);
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 100));
+    block.run(*fixture.proc);
+    block.midi_in.clear();
+    block.midi_in.add(midi::MidiEvent::note_on(0, 67, 100));
+    block.run(*fixture.proc);
+    block.midi_in.clear();
+    const auto short_source =
+        PulpSamplerTestAccess::published_stream_source(*fixture.proc);
+    const auto short_page_frames =
+        PulpSamplerTestAccess::published_stream_page_frames(*fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::active_streamed_voices_for_source(
+                *fixture.proc, short_source) == 2);
+    REQUIRE(fixture.proc->load_sample_file(long_source.path));
+    const auto long_source_token =
+        PulpSamplerTestAccess::published_stream_source(*fixture.proc);
+    const auto long_page_frames =
+        PulpSamplerTestAccess::published_stream_page_frames(*fixture.proc);
+    REQUIRE((long_source_token.source_id != short_source.source_id ||
+             long_source_token.source_generation != short_source.source_generation));
+    constexpr auto kCertifiedDecoderLatencySeconds = 0.005;
+    constexpr auto kLongSourceMaximumAggregateRatio = 8.625;
+    const auto short_source_aggregate_ratio =
+        1.0 + std::exp2(7.0 / 12.0);
+    REQUIRE(short_source_aggregate_ratio * 44100.0 <=
+            short_page_frames / kCertifiedDecoderLatencySeconds);
+    REQUIRE(kLongSourceMaximumAggregateRatio * 44100.0 <=
+            long_page_frames / kCertifiedDecoderLatencySeconds);
+
+    constexpr std::array notes{48, 60, 72, 84};
+    constexpr std::array churn_notes{36, 43};
+    constexpr int kConcurrentTortureVoices = 4;
+    for (int voice = 0; voice < kConcurrentTortureVoices - 1; ++voice) {
+        fixture.store.set_value(kSamplerLoop, voice % 3 == 0 ? 0.0f : 1.0f);
+        fixture.store.set_value(kSamplerReverse, voice % 2 == 0 ? 0.0f : 1.0f);
+        block.midi_in.add(midi::MidiEvent::note_on(
+            0, notes[static_cast<std::size_t>(voice + 1) % notes.size()], 100));
+        block.run(*fixture.proc);
+        block.midi_in.clear();
+    }
+
+    using TortureClock = std::chrono::steady_clock;
+    constexpr auto kCallbackFrames = 64;
+    constexpr auto kHostSampleRate = 44100;
+    constexpr std::uint32_t kTortureCallbacks = 1800;
+    constexpr auto kTotalDeadlineSlack = std::chrono::milliseconds(10);
+    const auto pressure_baseline = fixture.proc->stream_stats();
+    const auto torture_started = TortureClock::now();
+    bool observed_both_sources_under_eviction = false;
+    std::uint32_t first_starved_callback = kTortureCallbacks;
+    for (std::uint32_t callback = 0; callback < kTortureCallbacks; ++callback) {
+        if (callback != 0 && callback <= 1500 && callback % 300 == 0) {
+            // Force deterministic steals while alternating forward one-shots
+            // and crossfade loops at mixed note-derived ratios.
+            const auto steal = callback / 300;
+            fixture.store.set_value(kSamplerLoop, steal % 2 == 0 ? 0.0f : 1.0f);
+            // Reverse refill recovery is gated separately above. Keep churn
+            // steals forward so unpredictable note-on timing does not redefine
+            // an intentional held attack as an in-contract output underrun.
+            fixture.store.set_value(kSamplerReverse, 0.0f);
+            block.midi_in.add(midi::MidiEvent::note_on(
+                0, churn_notes[steal % churn_notes.size()], 110));
+        }
+        block.run(*fixture.proc);
+        block.midi_in.clear();
+        if (first_starved_callback == kTortureCallbacks &&
+            fixture.proc->stream_stats().starved_output_frames != 0)
+            first_starved_callback = callback;
+        const auto live = fixture.proc->stream_stats();
+        observed_both_sources_under_eviction |=
+            live.cache_pages_retired > pressure_baseline.cache_pages_retired &&
+            live.cache_pages_reused > pressure_baseline.cache_pages_reused &&
+            PulpSamplerTestAccess::active_streamed_voices_for_source(
+                *fixture.proc, short_source) > 0 &&
+            PulpSamplerTestAccess::active_streamed_voices_for_source(
+                *fixture.proc, long_source_token) > 0;
+
+        // Drive the owner/service/decode threads at the declared host cadence:
+        // callback N may use wall time only until its 64/44.1 kHz deadline.
+        const auto deadline = torture_started +
+                              std::chrono::duration_cast<TortureClock::duration>(
+                                  std::chrono::duration<double>(
+                                      (callback + 1) * kCallbackFrames /
+                                      static_cast<double>(kHostSampleRate)));
+        std::this_thread::sleep_until(deadline);
+    }
+
+    const auto torture_elapsed = TortureClock::now() - torture_started;
+    const auto rendered_duration = std::chrono::duration_cast<TortureClock::duration>(
+        std::chrono::duration<double>(
+            kTortureCallbacks * kCallbackFrames /
+            static_cast<double>(kHostSampleRate)));
+    const auto diagnostics = fixture.proc->stream_stats();
+    CAPTURE(first_starved_callback, diagnostics.pages_published,
+            diagnostics.cache_pages_retired, diagnostics.cache_pages_reused,
+            diagnostics.decode_source_outstanding_high_water,
+            diagnostics.decode_completed_frames,
+            diagnostics.same_source_reader_concurrency_high_water,
+            diagnostics.cache_async_reservations_high_water,
+            diagnostics.active_reservations_high_water,
+            diagnostics.aggregate_rate_admission_rejections,
+            diagnostics.aggregate_rate_automation_rejections,
+            diagnostics.decode_scratch_bytes,
+            diagnostics.current_total_memory_bytes,
+            diagnostics.total_memory_capacity_bytes,
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                torture_elapsed - rendered_duration)
+                .count());
+    REQUIRE(diagnostics.pages_published - pressure_baseline.pages_published > 128);
+    REQUIRE(diagnostics.cache_pages_retired > pressure_baseline.cache_pages_retired);
+    REQUIRE(diagnostics.cache_pages_reused > pressure_baseline.cache_pages_reused);
+    REQUIRE(diagnostics.decode_source_outstanding_high_water > 1);
+    REQUIRE(diagnostics.decode_completed_frames >
+            pressure_baseline.decode_completed_frames);
+    REQUIRE(diagnostics.same_source_reader_concurrency_high_water == 1);
+    REQUIRE(diagnostics.cache_async_reservations_high_water > 1);
+    REQUIRE(diagnostics.active_reservations_high_water > 1);
+    REQUIRE(diagnostics.aggregate_rate_admission_rejections == 0);
+    REQUIRE(diagnostics.aggregate_rate_automation_rejections == 0);
+    REQUIRE(diagnostics.decode_scratch_bytes ==
+            2ULL * 8ULL * 2ULL * long_page_frames * sizeof(float));
+    REQUIRE(diagnostics.total_memory_capacity_bytes ==
+            diagnostics.memory.capacity_bytes + diagnostics.decode_scratch_bytes);
+    REQUIRE(diagnostics.current_total_memory_bytes ==
+            diagnostics.memory.current_total_bytes + diagnostics.decode_scratch_bytes);
+    REQUIRE(diagnostics.peak_total_memory_bytes ==
+            diagnostics.memory.peak_total_bytes + diagnostics.decode_scratch_bytes);
+    REQUIRE(observed_both_sources_under_eviction);
+    REQUIRE(torture_elapsed <= rendered_duration + kTotalDeadlineSlack);
+    REQUIRE(diagnostics.starved_output_frames == 0);
+    REQUIRE(diagnostics.service_starvation_events == 0);
+    REQUIRE(diagnostics.decode_failure_events == 0);
+    REQUIRE(diagnostics.invalid_preload_contract_events == 0);
+    REQUIRE(diagnostics.stale_generation_events == 0);
+    REQUIRE(diagnostics.invalid_render_contract_events == 0);
+    REQUIRE(diagnostics.current_total_memory_bytes <=
+            diagnostics.total_memory_capacity_bytes);
+    REQUIRE(diagnostics.peak_total_memory_bytes <=
+            diagnostics.total_memory_capacity_bytes);
 }
 
 TEST_CASE("PulpSampler retains a replaced stream until its voice acknowledges",

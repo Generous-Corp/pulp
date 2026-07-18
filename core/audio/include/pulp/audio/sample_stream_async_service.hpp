@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -45,12 +46,18 @@ struct SampleStreamAsyncServiceTelemetry {
     std::uint64_t completions_published = 0;
     std::uint64_t completions_discarded = 0;
     std::uint64_t completion_copy_failures = 0;
+    std::uint64_t active_reservations_high_water = 0;
+};
+
+struct SampleStreamAsyncNoopDispatchCutpoint {
+    static void after_queue_full_before_reserve() noexcept {}
 };
 
 /// Owner-thread integration for cache reservations and background decode workers.
 /// Destruction joins workers before any cache source or window is destroyed.
 template<std::size_t JobMailboxCapacity = 8,
-         std::size_t CompletionMailboxCapacity = 8>
+         std::size_t CompletionMailboxCapacity = 8,
+         typename DispatchCutpoint = SampleStreamAsyncNoopDispatchCutpoint>
 class SampleStreamAsyncService {
     struct ReservationRecord;
 
@@ -64,12 +71,25 @@ public:
     bool prepare(const SampleStreamAsyncServiceConfig& config) {
         release();
         if (config.decode.source_capacity == 0 ||
-            !cache_.prepare(config.cache) || !decode_.prepare(config.decode)) {
+            config.decode.maximum_outstanding_jobs_per_source == 0 ||
+            config.decode.source_capacity >
+                std::numeric_limits<std::size_t>::max() /
+                    config.decode.maximum_outstanding_jobs_per_source) {
+            release();
+            return false;
+        }
+        const auto record_capacity =
+            static_cast<std::size_t>(config.decode.source_capacity) *
+            config.decode.maximum_outstanding_jobs_per_source;
+        auto cache_config = config.cache;
+        cache_config.maximum_async_reservations_per_source =
+            config.decode.maximum_outstanding_jobs_per_source;
+        if (!cache_.prepare(cache_config) || !decode_.prepare(config.decode)) {
             release();
             return false;
         }
         try {
-            records_.resize(config.decode.source_capacity);
+            records_.resize(record_capacity);
             retirements_.reserve(config.decode.source_capacity);
         } catch (...) {
             release();
@@ -77,6 +97,7 @@ public:
         }
         prepared_ = true;
         telemetry_ = {};
+        active_record_count_ = 0;
         return true;
     }
 
@@ -85,13 +106,14 @@ public:
         for (auto& record : records_) {
             if (record.active) {
                 (void) cache_.cancel_async_reservation(record.reservation);
-                record = {};
+                clear_record(record);
             }
         }
         cache_.release();
         records_.clear();
         retirements_.clear();
         telemetry_ = {};
+        active_record_count_ = 0;
         prepared_ = false;
     }
 
@@ -198,7 +220,7 @@ public:
                     record.reservation.source.source_generation ==
                         source.source_generation) {
                     (void) cache_.cancel_async_reservation(record.reservation);
-                    record = {};
+                    clear_record(record);
                 }
             }
             (void) decode_.remove_idle_source(source);
@@ -216,6 +238,11 @@ public:
         std::optional<SampleStreamAsyncDispatchResult> queue_full;
         for (auto& record : records_) {
             if (!record.active || record.submitted) continue;
+            // A worker mailbox can become writable between retries. Never let
+            // a later serial exploit that race and make an earlier retained
+            // reservation permanently stale; unrelated sources may still use
+            // the newly available worker capacity.
+            if (has_earlier_unsubmitted_same_source(record)) continue;
             const auto retried = submit_record(record);
             if (retried.status == SampleStreamAsyncDispatchStatus::Queued)
                 return retried;
@@ -225,6 +252,8 @@ public:
             }
             return retried;
         }
+        if (queue_full)
+            DispatchCutpoint::after_queue_full_before_reserve();
         const auto reserved = cache_.reserve_async_page();
         if (reserved.status == SampleStreamAsyncReserveStatus::Idle) {
             if (queue_full) return *queue_full;
@@ -244,6 +273,11 @@ public:
         record->active = true;
         record->submitted = false;
         record->reservation = reserved.reservation;
+        ++active_record_count_;
+        telemetry_.active_reservations_high_water = std::max<std::uint64_t>(
+            telemetry_.active_reservations_high_water, active_record_count_);
+        if (has_earlier_unsubmitted_same_source(*record) && queue_full)
+            return *queue_full;
         return submit_record(*record);
     }
 
@@ -253,7 +287,7 @@ private:
         const auto& reservation = record.reservation;
         if (!cache_.async_reservation_has_interest(reservation)) {
             (void) cache_.cancel_async_reservation(reservation);
-            record = {};
+            clear_record(record);
             return {SampleStreamAsyncDispatchStatus::Deferred,
                     SampleStreamAsyncReserveStatus::Idle,
                     SampleStreamDecodeSubmitStatus::InvalidJob};
@@ -267,7 +301,7 @@ private:
         if (submitted != SampleStreamDecodeSubmitStatus::Queued) {
             if (submitted != SampleStreamDecodeSubmitStatus::QueueFull) {
                 (void) cache_.cancel_async_reservation(reservation);
-                record = {};
+                clear_record(record);
             }
             return {SampleStreamAsyncDispatchStatus::PoolRejected,
                     SampleStreamAsyncReserveStatus::Reserved,
@@ -335,6 +369,26 @@ private:
         return nullptr;
     }
 
+    void clear_record(ReservationRecord& record) noexcept {
+        if (record.active && active_record_count_ != 0) --active_record_count_;
+        record = {};
+    }
+
+    bool has_earlier_unsubmitted_same_source(
+        const ReservationRecord& candidate) const noexcept {
+        return std::any_of(
+            records_.begin(), records_.end(),
+            [&candidate](const ReservationRecord& record) noexcept {
+                return record.active && !record.submitted &&
+                       record.reservation.source.source_id ==
+                           candidate.reservation.source.source_id &&
+                       record.reservation.source.source_generation ==
+                           candidate.reservation.source.source_generation &&
+                       record.reservation.reservation_serial <
+                           candidate.reservation.reservation_serial;
+            });
+    }
+
     ReservationRecord* find_record(
         const SampleStreamDecodeCompletion& completion) noexcept {
         for (auto& record : records_) {
@@ -368,7 +422,7 @@ private:
             completed = cache_.cancel_async_reservation(record->reservation);
         }
         (void) decode_.release_completion(completion->completion);
-        if (record != nullptr) *record = {};
+        if (record != nullptr) clear_record(*record);
 
         if (completed == SampleStreamAsyncCompletionStatus::Published) {
             ++telemetry_.completions_published;
@@ -389,6 +443,7 @@ private:
     std::vector<ReservationRecord> records_;
     std::vector<SampleStreamSourceToken> retirements_;
     SampleStreamAsyncServiceTelemetry telemetry_{};
+    std::size_t active_record_count_ = 0;
     bool prepared_ = false;
 };
 

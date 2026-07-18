@@ -12,8 +12,10 @@
 
 namespace pulp::audio {
 
-inline constexpr std::size_t kMaximumSampleSincCutoffTables = 8;
+inline constexpr std::size_t kMaximumSampleSincCutoffTables = 32;
+inline constexpr std::size_t kMaximumSampleSincOctaveTables = 8;
 inline constexpr std::uint32_t kDefaultSampleSincHalfWidth = 16;
+inline constexpr std::uint32_t kHighQualitySampleSincHalfWidth = 24;
 
 struct SampleSincKernelConfig {
     std::uint32_t half_width = kDefaultSampleSincHalfWidth;
@@ -287,10 +289,50 @@ public:
         const auto octave = maximum_source_frames_per_output <= 1.0
             ? 0.0
             : std::ceil(std::log2(maximum_source_frames_per_output));
-        if (octave >= static_cast<double>(kMaximumSampleSincCutoffTables))
+        if (octave >= static_cast<double>(kMaximumSampleSincOctaveTables))
             return false;
         return build(static_cast<std::uint32_t>(octave) + 1,
                      half_width, phases, kaiser_beta);
+    }
+
+    // Production-quality bank: quarter-octave cutoff spacing bounds the
+    // above-target contribution while preserving continuous table blending.
+    // The 48-tap default supplies enough transition rejection for the first
+    // fractional-downsample interval, where octave-only 32-tap tables leak a
+    // near-Nyquist source tone into the output by only 7-11 dB.
+    bool build_dense_for_maximum_consumption(
+        double maximum_source_frames_per_output,
+        std::uint32_t tables_per_octave = 4,
+        std::uint32_t half_width = kHighQualitySampleSincHalfWidth,
+        std::uint32_t phases = 512,
+        double kaiser_beta = 9.0) {
+        release();
+        if (!(maximum_source_frames_per_output > 0.0) ||
+            maximum_source_frames_per_output > 128.0 ||
+            !std::isfinite(maximum_source_frames_per_output) ||
+            tables_per_octave == 0 || tables_per_octave > 8) {
+            return false;
+        }
+        const auto intervals = maximum_source_frames_per_output <= 1.0
+            ? 0.0
+            : std::ceil(std::log2(maximum_source_frames_per_output) *
+                        static_cast<double>(tables_per_octave));
+        if (intervals >= static_cast<double>(kMaximumSampleSincCutoffTables))
+            return false;
+        const auto table_count = static_cast<std::uint32_t>(intervals) + 1;
+        for (std::uint32_t index = 0; index < table_count; ++index) {
+            const auto cutoff = std::exp2(
+                -static_cast<double>(index) /
+                static_cast<double>(tables_per_octave));
+            if (!kernels_[index].build(
+                    {half_width, phases, cutoff, kaiser_beta})) {
+                release();
+                return false;
+            }
+            view_.kernels[index] = kernels_[index].view();
+        }
+        view_.kernel_count = table_count;
+        return true;
     }
 
     bool build(std::uint32_t cutoff_table_count,
