@@ -2744,6 +2744,38 @@ TEST_CASE("border shorthand normalization defers and declines",
     normalize_border_shorthand(root);
     REQUIRE(*root.children[0].children[0].style.border_color == "#123456");
 }
+
+TEST_CASE("a border on a generic-frame fall-through node survives to setBorder",
+          "[view][import][border]") {
+    // A childless node whose kind is neither a recognized container, widget,
+    // vector, image, nor text lowers via emit_js_generic_frame. That path
+    // emitted setBackground / setCornerRadius but NOT setBorder, so a bordered
+    // v0/claude/stitch `button`/`canvas`/`input` div lost its stroke even though
+    // normalize_border_shorthand had already split the shorthand. Regression:
+    // this is exactly the v0 audio-control-panel case (0 setBorder for two
+    // bordered nodes) before the fix.
+    DesignIR ir;
+    ir.source = DesignSource::v0;
+    ir.root.type = "frame";
+    ir.root.name = "root";
+
+    IRNode cta;
+    cta.type = "button";              // unmapped kind, no children -> generic frame
+    cta.name = "cta";
+    cta.style.border = "1px solid #475569";  // shorthand: normalize splits it
+    cta.style.border_radius = 6.0f;
+    ir.root.children.push_back(cta);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    opts.include_comments = false;
+    const auto js = generate_pulp_js(ir, opts);
+
+    // The stroke, its split-out width, and the corner radius all reach the call.
+    // (The bridge id carries a depth counter suffix, so match on the prefix.)
+    REQUIRE(js.find("setBorder('cta") != std::string::npos);
+    REQUIRE(js.find("'#475569', 1, 6") != std::string::npos);
+}
 // ── rgba() must survive the baked-C++ lane, not just the live-JS one ─────
 // color_literal_expr() parsed hex only and returned an empty expression for
 // rgb()/rgba(), so the baked-C++ emitter silently dropped colors the live

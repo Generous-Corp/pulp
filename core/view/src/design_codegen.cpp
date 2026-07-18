@@ -1913,6 +1913,18 @@ static void emit_js_generic_frame(const NativeEmit& e) {
            << js_single_quote_escape(*node.style.background_gradient) << "');\n";
     if (node.style.border_radius)
         ss << ind << "setCornerRadius('" << id << "', 'All', " << *node.style.border_radius << ");\n";
+    // A border on a generic-frame fall-through node was silently dropped: only
+    // emit_js_container emitted setBorder, so any bordered node whose kind lands
+    // here (a v0/claude/stitch `div`/`button`/`canvas` that maps to no widget)
+    // lost its stroke even though normalize_border_shorthand had split it into
+    // the discrete fields. Mirror emit_js_container's border emit exactly.
+    if (node.style.border_color && node.style.border_width &&
+        *node.style.border_width > 0.0f) {
+        float br = node.style.border_radius.value_or(0.0f);
+        ss << ind << "setBorder('" << id << "', '"
+           << js_single_quote_escape(*node.style.border_color) << "', "
+           << *node.style.border_width << ", " << br << ");\n";
+    }
     ss << "\n";
 }
 
