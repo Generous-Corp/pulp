@@ -307,6 +307,13 @@ pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
 # hosts (test/test_pointer_dispatch.cpp).
 pulp_add_test_suite(pulp-test-pointer-dispatch LIBRARIES pulp::view)
 
+# Headless characterization of the hosting/DAW input stack — mouse down/up/click
+# routing, keyboard focus protocol, and overlay/popup lifecycle — that the
+# window hosts drive. Anchors the S11 (root-owned interaction context) and S31
+# (portable mouse down/up dispatch) refactors under pulp #6223
+# (test/test_hosting_input_smoke.cpp).
+pulp_add_test_suite(pulp-test-hosting-input-smoke LIBRARIES pulp::view)
+
 # Browser (Emscripten) window host: the CSS-pixel <-> root coordinate mapping,
 # the HiDPI backing-store rule, browser-event translation, and View-tree routing
 # from core/view/include/pulp/view/web/web_event_translate.hpp. Header-only and
