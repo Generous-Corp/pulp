@@ -550,12 +550,12 @@ public:
     /// Stroke the current path.
     virtual void stroke_current_path() {}
 
-    // ── Bloom / Glow post-effect ────────────────────────────────────────
-    /// Apply bloom/glow effect to the current layer.
-    /// intensity: glow strength (0=none, 1=full), threshold: brightness cutoff (0-1).
-    virtual void set_bloom(float intensity, float threshold = 0.7f) {
-        (void)intensity; (void)threshold;
-    }
+    // A `set_bloom()` was removed from here: documented as "implemented in
+    // SkiaCanvas", it had no override in any backend — the base no-op was the
+    // only implementation, so every call silently did nothing. A real bloom
+    // (bright-pass + blur + additive composite) needs the layer's own content,
+    // so it belongs on the layer paint in `save_layer_with_filters`, not a
+    // standalone setter. `GpuBloomEffect` approximates glow with a blur layer.
 
     // ── Shapes ───────────────────────────────────────────────────────────
     virtual void fill_rect(float x, float y, float w, float h) = 0;

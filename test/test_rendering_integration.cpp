@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <vector>
 
 using namespace pulp;
 
@@ -30,13 +31,74 @@ TEST_CASE("GpuBlurEffect configures layer with blur", "[render][effect]") {
     REQUIRE(rc.command_count() > 0);  // save_layer recorded
 }
 
-TEST_CASE("GpuBloomEffect configures with intensity", "[render][effect]") {
-    canvas::RecordingCanvas rc;
+// RecordingCanvas does not override save_layer, so the base falls through to a
+// bare save() and the recorded command carries no layer params. To assert what
+// an effect actually asks the backend for, spy on save_layer directly.
+namespace {
+struct LayerSpy : canvas::RecordingCanvas {
+    struct Layer { float x, y, w, h, opacity, blur_radius; };
+    std::vector<Layer> layers;
+
+    void save_layer(float x, float y, float w, float h,
+                    float opacity = 1.0f, float blur_radius = 0.0f) override {
+        layers.push_back({x, y, w, h, opacity, blur_radius});
+        canvas::RecordingCanvas::save_layer(x, y, w, h, opacity, blur_radius);
+    }
+};
+}  // namespace
+
+// Pins the approximation GpuBloomEffect actually is, so it cannot quietly
+// drift back to claiming more than it does. Bloom today is a plain blur layer:
+// no bright-pass, no additive composite, no brightness gain. The old version of
+// this test set intensity + threshold and asserted only `command_count() > 0` —
+// which a lone save() satisfies, so it passed while threshold was fed to a
+// no-op Canvas::set_bloom() that no backend implemented.
+//
+// If real bloom ever lands, this test SHOULD fail. Update it and the doc
+// comment on GpuBloomEffect together — do not relax it in place.
+TEST_CASE("GpuBloomEffect is a blur approximation and not a bright-pass bloom",
+          "[render][effect]") {
+    LayerSpy spy;
     canvas::GpuBloomEffect bloom;
-    bloom.intensity = 0.7f;
-    bloom.threshold = 0.9f;
-    bloom.configure_layer(rc, 0, 0, 200, 200);
-    REQUIRE(rc.command_count() > 0);
+    bloom.intensity = 0.5f;
+    bloom.radius = 8.0f;
+    bloom.configure_layer(spy, 0, 0, 200, 200);
+
+    // Exactly one layer, matching layer_count() — View::paint_all pops that many.
+    REQUIRE(spy.layers.size() == 1);
+    REQUIRE(static_cast<int>(spy.layers.size()) == bloom.layer_count());
+
+    // The whole effect is: blur the subtree by radius * intensity and composite
+    // it back at full opacity. Nothing bloom-specific reaches the backend.
+    REQUIRE(spy.layers[0].blur_radius == Catch::Approx(4.0f));
+    REQUIRE(spy.layers[0].opacity == Catch::Approx(1.0f));
+
+    // intensity scales the blur radius — it is not a brightness gain.
+    LayerSpy hotter_spy;
+    canvas::GpuBloomEffect hotter;
+    hotter.intensity = 1.0f;
+    hotter.radius = 8.0f;
+    hotter.configure_layer(hotter_spy, 0, 0, 200, 200);
+    REQUIRE(hotter_spy.layers[0].blur_radius == Catch::Approx(8.0f));
+    REQUIRE(hotter_spy.layers[0].opacity == Catch::Approx(1.0f));
+
+    // A bloom at intensity 0 is indistinguishable from no effect at all: a real
+    // bright-pass bloom would still composite thresholded content additively.
+    LayerSpy off_spy;
+    canvas::GpuBloomEffect off;
+    off.intensity = 0.0f;
+    off.configure_layer(off_spy, 0, 0, 200, 200);
+    REQUIRE(off_spy.layers[0].blur_radius == Catch::Approx(0.0f));
+
+    // Bloom makes the same request GpuBlurEffect does at the same effective
+    // radius. If these ever diverge, bloom grew a real implementation.
+    LayerSpy blur_spy;
+    canvas::GpuBlurEffect blur;
+    blur.radius_x = blur.radius_y = 4.0f;
+    blur.configure_layer(blur_spy, 0, 0, 200, 200);
+    REQUIRE(blur_spy.layers.size() == spy.layers.size());
+    REQUIRE(blur_spy.layers[0].blur_radius == Catch::Approx(spy.layers[0].blur_radius));
+    REQUIRE(blur_spy.layers[0].opacity == Catch::Approx(spy.layers[0].opacity));
 }
 
 TEST_CASE("VignetteEffect has meaningful intensity", "[render][effect]") {

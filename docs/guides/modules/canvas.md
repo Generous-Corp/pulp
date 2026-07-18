@@ -94,6 +94,10 @@ The effects system applies GPU-accelerated post-processing to rendered content.
 
 BlurEffect blur{.radius_x = 10.0f, .radius_y = 10.0f};
 ShadowEffect shadow{.offset_x = 2, .offset_y = 4, .blur_radius = 8, .color = Color::rgba8(0, 0, 0, 128)};
+// NOTE: BloomEffect (effects.hpp) is a parameter struct only — nothing in
+// core/ consumes it, so constructing one has no rendering effect today. For a
+// working blur-based glow over a view subtree, use GpuBloomEffect from
+// core/canvas/include/pulp/canvas/view_effect.hpp instead.
 BloomEffect bloom{.threshold = 0.8f, .intensity = 1.5f};
 ColorAdjust color{.brightness = 0.1f, .contrast = 1.2f, .saturation = 0.9f};
 ```

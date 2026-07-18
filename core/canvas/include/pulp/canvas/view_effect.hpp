@@ -43,16 +43,30 @@ struct GpuBlurEffect : ViewEffect {
     }
 };
 
-/// GPU bloom/glow effect — HDR-aware bloom (threshold + blur + additive blend).
-/// Requires float-based color pipeline for proper HDR threshold.
+/// Glow approximation — a blur layer whose radius scales with `intensity`.
+///
+/// This is NOT a true bloom. A real bloom bright-passes the subtree, blurs
+/// only what survives the threshold, and composites that back additively; this
+/// blurs the subtree uniformly and composites it normally, so dark pixels
+/// smear exactly as much as bright ones and nothing ever gets brighter. It
+/// reads as a soft glow on light-on-dark content, which is what it is for.
+///
+/// It is also not HDR-aware, and cannot be: every Pulp surface is 8-bit
+/// unorm + sRGB (see `core/render/`), so there is no headroom above 1.0 to
+/// threshold against. An earlier revision claimed both "HDR-aware" and a
+/// `threshold` knob "implemented in SkiaCanvas" — neither was true. The
+/// threshold knob was removed rather than left inert; `Canvas::set_bloom()`,
+/// which it fed, was a no-op with no override in any backend.
+///
+/// A real bloom would bright-pass + blur + additively composite via
+/// `SkImageFilters::Blend(kPlus, ...)` on the layer paint, which belongs in
+/// `save_layer_with_filters` rather than a standalone setter. Whoever lands it
+/// must update this comment and the test that pins the approximation.
 struct GpuBloomEffect : ViewEffect {
-    float threshold = 0.8f;
-    float intensity = 0.5f;
-    float radius = 8.0f;
+    float intensity = 0.5f;  ///< Scales the blur radius. Not a brightness gain.
+    float radius = 8.0f;     ///< Base blur radius, in pixels, before `intensity`.
 
     void configure_layer(Canvas& canvas, float x, float y, float w, float h) override {
-        // Bloom uses the canvas bloom API (which is implemented in SkiaCanvas)
-        canvas.set_bloom(intensity, threshold);
         canvas.save_layer(x, y, w, h, 1.0f, radius * intensity);
     }
 };
