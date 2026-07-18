@@ -866,7 +866,7 @@ float height = shaper.measure_height(prepared, 300.0f);  // Fast
 | Feature | Header | Description |
 |---------|--------|-------------|
 | Attributed String | `attributed_string.hpp` | Rich text spans — mixed font, color, weight per range |
-| Effects | `effects.hpp` | Drop shadow, bloom, blur, color adjustment |
+| View effects | `view_effect.hpp` | Per-view GPU post-processing: blur, bloom, vignette, chromatic aberration, EffectChain |
 | Image Convolution | `image_convolution.hpp` | `ImageConvolutionKernel::gaussian_blur_5().apply(pixels, w, h)` |
 | Rectangle List | `rectangle_list.hpp` | Clip regions with add/subtract/intersect for dirty tracking |
 | SVG | `svg.hpp` | Load and render SVG vector graphics via nanosvg |

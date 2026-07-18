@@ -1,16 +1,152 @@
 // widget_bridge/style_effects_api.cpp - CSS filter, clip-path, backdrop, and blend style registrations.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/canvas/view_effect.hpp>
+#include <pulp/runtime/log.hpp>
 #include "api_registry.hpp"
 #include "css_color.hpp"
 
+#include <choc/text/choc_JSON.h>
+
+#include <algorithm>
 #include <cctype>
 #include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace pulp::view {
+namespace {
+
+// Forward declarations (defined below, used by build_view_effect's sksl case).
+canvas::Canvas::BlendMode parse_blend_keyword(const std::string& kw);
+void parse_named_uniforms(const choc::value::ValueView& obj,
+                          std::vector<canvas::Canvas::NamedUniform>& out);
+
+// Numeric member with a fallback (non-numeric or missing → fallback).
+float effect_num(const choc::value::ValueView& obj, const char* key, float fallback) {
+    if (obj.isObject() && obj.hasObjectMember(key))
+        return static_cast<float>(obj[key].getWithDefault<double>(fallback));
+    return fallback;
+}
+
+// CSS-color member with a fallback.
+canvas::Color effect_color(const choc::value::ValueView& obj, const char* key,
+                           canvas::Color fallback) {
+    if (obj.isObject() && obj.hasObjectMember(key)) {
+        std::string s(obj[key].getWithDefault<std::string_view>(""));
+        if (!s.empty()) return parse_bridge_css_color(s);
+    }
+    return fallback;
+}
+
+// Build one ViewEffect from a `{type, ...params}` spec. Returns nullptr and
+// sets `error` for an unknown type or an sksl shader that fails to compile.
+std::shared_ptr<canvas::ViewEffect> build_view_effect(
+        const choc::value::ValueView& spec, std::string& error) {
+    if (!spec.isObject()) { error = "effect spec must be an object"; return nullptr; }
+    std::string type(spec.hasObjectMember("type")
+                         ? spec["type"].getWithDefault<std::string_view>("") : "");
+    if (type == "blur") {
+        auto e = std::make_shared<canvas::GpuBlurEffect>();
+        e->radius_x = effect_num(spec, "radiusX", effect_num(spec, "radius", e->radius_x));
+        e->radius_y = effect_num(spec, "radiusY", effect_num(spec, "radius", e->radius_y));
+        return e;
+    }
+    if (type == "bloom") {
+        auto e = std::make_shared<canvas::GpuBloomEffect>();
+        e->intensity = effect_num(spec, "intensity", e->intensity);
+        e->threshold = effect_num(spec, "threshold", e->threshold);
+        e->radius = effect_num(spec, "radius", e->radius);
+        return e;
+    }
+    if (type == "vignette") {
+        auto e = std::make_shared<canvas::VignetteEffect>();
+        e->intensity = effect_num(spec, "intensity", e->intensity);
+        e->radius = effect_num(spec, "radius", e->radius);
+        e->edge_color = effect_color(spec, "color", e->edge_color);
+        return e;
+    }
+    if (type == "chromatic") {
+        auto e = std::make_shared<canvas::ChromaticAberrationEffect>();
+        e->offset = effect_num(spec, "offset", e->offset);
+        return e;
+    }
+    if (type == "sksl") {
+        std::string src(spec.hasObjectMember("source")
+                            ? spec["source"].getWithDefault<std::string_view>("") : "");
+        if (src.empty()) { error = "sksl effect requires a non-empty 'source'"; return nullptr; }
+        // Validate at install time like setWidgetShader — reject with the
+        // compile error rather than installing a shader that paints nothing.
+        auto compile_error = canvas::Canvas::compile_sksl(src);
+        if (!compile_error.empty()) { error = compile_error; return nullptr; }
+        auto e = std::make_shared<canvas::SkslPostEffect>();
+        e->sksl = std::move(src);
+        e->value = effect_num(spec, "value", 0.0f);
+        e->time = effect_num(spec, "time", 0.0f);
+        e->sample_radius = effect_num(spec, "sampleRadius", 0.0f);
+        if (spec.hasObjectMember("blend")) {
+            e->blend_mode = parse_blend_keyword(
+                std::string(spec["blend"].getWithDefault<std::string_view>("")));
+        }
+        if (spec.hasObjectMember("uniforms"))
+            parse_named_uniforms(spec["uniforms"], e->uniforms);
+        return e;
+    }
+    error = "unknown effect type '" + type + "'";
+    return nullptr;
+}
+
+// CSS / W3C blend keyword → canvas BlendMode (subset relevant to post-effects;
+// `lighter`/`additive`/`plus-*` all map to the additive kPlus glow).
+canvas::Canvas::BlendMode parse_blend_keyword(const std::string& kw) {
+    using BM = canvas::Canvas::BlendMode;
+    if (kw == "multiply")    return BM::multiply;
+    if (kw == "screen")      return BM::screen;
+    if (kw == "overlay")     return BM::overlay;
+    if (kw == "darken")      return BM::darken;
+    if (kw == "lighten")     return BM::lighten;
+    if (kw == "color-dodge") return BM::color_dodge;
+    if (kw == "color-burn")  return BM::color_burn;
+    if (kw == "hard-light")  return BM::hard_light;
+    if (kw == "soft-light")  return BM::soft_light;
+    if (kw == "difference")  return BM::difference;
+    if (kw == "exclusion")   return BM::exclusion;
+    if (kw == "lighter" || kw == "additive" ||
+        kw == "plus-lighter" || kw == "plus-darker") return BM::lighter;
+    return BM::normal;
+}
+
+// Parse an `{name: number | [x,y,z,w]}` object into arbitrary shader uniforms.
+void parse_named_uniforms(const choc::value::ValueView& obj,
+                          std::vector<canvas::Canvas::NamedUniform>& out) {
+    if (!obj.isObject()) return;
+    for (uint32_t i = 0; i < obj.size(); ++i) {
+        canvas::Canvas::NamedUniform nu;
+        nu.name = std::string(obj.getObjectMemberAt(i).name);
+        const auto& val = obj[nu.name.c_str()];
+        if (val.isArray()) {
+            nu.count = std::min<int>(4, static_cast<int>(val.size()));
+            for (int k = 0; k < nu.count; ++k)
+                nu.v[k] = static_cast<float>(val[static_cast<uint32_t>(k)]
+                                                 .getWithDefault<double>(0.0));
+        } else {
+            nu.count = 1;
+            nu.v[0] = static_cast<float>(val.getWithDefault<double>(0.0));
+        }
+        out.push_back(std::move(nu));
+    }
+}
+
+choc::value::Value effect_result(bool success, const std::string& error) {
+    auto result = choc::value::createObject("");
+    result.addMember("success", choc::value::createBool(success));
+    result.addMember("error", choc::value::createString(error));
+    return result;
+}
+
+} // namespace
 
 void BridgeRegistrars::register_widget_style_filter_clip_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
@@ -151,17 +287,27 @@ void BridgeRegistrars::register_widget_style_filter_clip_api(WidgetBridge& self)
             return choc::value::Value();
         });
 
-    // setClipPath(id, value) - CSS `clip-path`. The paint side feeds the
-    // stored slot to `Canvas::clip_path_svg` which calls
-    // `SkPath::FromSVGString`; that parser only accepts raw SVG path "d"
-    // data. Unwrap `path("...")` here and explicitly skip shapes / URL
-    // refs the paint side cannot honor.
+    // setClipPath(id, value) - CSS `clip-path` -> {applied, warning}. The paint
+    // side feeds the stored slot to `Canvas::clip_path_svg` which calls
+    // `SkPath::FromSVGString`; that parser only accepts raw SVG path "d" data.
+    // Unwrap `path("...")` here. The CSS basic-shape / url() forms
+    // (circle/ellipse/inset/polygon/rect/xywh/url) cannot be honored by the
+    // paint side, so instead of clearing the clip SILENTLY (which reads like a
+    // rendering bug) we name the unsupported shape in the returned `warning` and
+    // a host log line — the same "surface the reason" contract setWidgetShader
+    // uses for compile errors.
     register_bridge_function(api, "setClipPath",
         [&self](choc::javascript::ArgumentList args) {
+            auto clip_result = [](bool applied, const std::string& warning) {
+                auto r = choc::value::createObject("");
+                r.addMember("applied", choc::value::createBool(applied));
+                r.addMember("warning", choc::value::createString(warning));
+                return r;
+            };
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
             auto* v = id.empty() ? &self.root_ : self.widget(id);
-            if (!v) return choc::value::Value();
+            if (!v) return clip_result(false, "No widget with id '" + id + "'");
             auto trim = [](std::string s) {
                 auto a = s.find_first_not_of(" \t\n\r");
                 if (a == std::string::npos) return std::string{};
@@ -177,26 +323,91 @@ void BridgeRegistrars::register_widget_style_filter_clip_api(WidgetBridge& self)
             for (auto& c : t_lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             if (t_lower.empty() || t_lower == "none") {
                 v->set_clip_path("");
-            } else if (t_lower.size() > 6 && t_lower.rfind("path(", 0) == 0 && t.back() == ')') {
+                return clip_result(true, "");
+            }
+            if (t_lower.size() > 6 && t_lower.rfind("path(", 0) == 0 && t.back() == ')') {
                 std::string inner = trim(t.substr(5, t.size() - 6));
                 if (inner.size() >= 2 && (inner.front() == '"' || inner.front() == '\'')
                     && inner.back() == inner.front()) {
                     inner = inner.substr(1, inner.size() - 2);
                 }
                 v->set_clip_path(inner);
-            } else {
-                bool deferred_shape = false;
-                for (const char* p : {"circle(", "ellipse(", "inset(", "polygon(",
-                                       "rect(", "xywh(", "url("}) {
-                    if (t_lower.rfind(p, 0) == 0) { deferred_shape = true; break; }
-                }
-                if (deferred_shape) {
-                    v->set_clip_path("");
-                } else {
-                    v->set_clip_path(t);
+                return clip_result(true, "");
+            }
+            for (const char* p : {"circle(", "ellipse(", "inset(", "polygon(",
+                                   "rect(", "xywh(", "url("}) {
+                if (t_lower.rfind(p, 0) == 0) {
+                    v->set_clip_path("");  // cannot honor — leave unclipped
+                    std::string warning =
+                        "clip-path '" + t + "' is not supported: Pulp can only "
+                        "clip to a path(\"<svg-d>\") (basic-shape and url() "
+                        "clip-path forms need primitives Pulp does not implement). "
+                        "No clip applied.";
+                    runtime::log_warn("[clip-path] {}", warning);
+                    return clip_result(false, warning);
                 }
             }
-            return choc::value::Value();
+            // A bare SVG path "d" string (no wrapper) — install as-is.
+            v->set_clip_path(t);
+            return clip_result(true, "");
+        });
+
+    // setViewEffect(id, specJson) -> {success, error}
+    //
+    // Attach a per-view GPU post-effect — the ViewEffect system that
+    // View::paint_all already consumes, but which was previously unreachable
+    // from JS (no bridge entry, so app authors could not use bloom / vignette /
+    // chromatic aberration / a custom SkSL post-effect at all).
+    //
+    // `specJson` is either a single object
+    //   {type:'blur'|'bloom'|'vignette'|'chromatic'|'sksl', ...params}
+    // or an array of them (composed into an EffectChain, one layer per effect).
+    // JSON `null` / "" / "none" clears the effect. An `sksl` effect is compiled
+    // at install time and rejected with its error (mirrors setWidgetShader)
+    // rather than installing a shader that would paint nothing.
+    register_bridge_function(api, "setViewEffect",
+        [&self](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto spec_json = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
+            if (!v) return effect_result(false, "No widget with id '" + id + "'");
+
+            if (spec_json.empty() || spec_json == "none" || spec_json == "null") {
+                v->set_effect(nullptr);
+                self.request_repaint();
+                return effect_result(true, "");
+            }
+
+            choc::value::Value parsed;
+            try {
+                parsed = choc::json::parse(spec_json);
+            } catch (...) {
+                return effect_result(false, "invalid effect spec JSON");
+            }
+            if (parsed.isVoid()) {  // JSON null parses to a void value
+                v->set_effect(nullptr);
+                self.request_repaint();
+                return effect_result(true, "");
+            }
+
+            std::string error;
+            std::shared_ptr<canvas::ViewEffect> effect;
+            if (parsed.isArray()) {
+                auto chain = std::make_shared<canvas::EffectChain>();
+                for (uint32_t i = 0; i < parsed.size(); ++i) {
+                    auto child = build_view_effect(parsed[i], error);
+                    if (!child) return effect_result(false, error);
+                    chain->add(std::move(child));
+                }
+                effect = std::move(chain);
+            } else {
+                effect = build_view_effect(parsed, error);
+                if (!effect) return effect_result(false, error);
+            }
+
+            v->set_effect(std::move(effect));
+            self.request_repaint();
+            return effect_result(true, "");
         });
 }
 

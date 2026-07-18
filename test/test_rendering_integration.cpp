@@ -22,96 +22,89 @@ using namespace pulp;
 
 // ── ViewEffect tests ────────────────────────────────────────────────────
 
-TEST_CASE("GpuBlurEffect configures layer with blur", "[render][effect]") {
+TEST_CASE("GpuBlurEffect configures a blur layer with its radius", "[render][effect]") {
     canvas::RecordingCanvas rc;
     canvas::GpuBlurEffect blur;
-    blur.radius_x = 8.0f;
+    blur.radius_x = 8.0f;  // radius_y stays 4 → the layer blur is max(8,4)=8
     REQUIRE(blur.needs_layer());
     blur.configure_layer(rc, 0, 0, 100, 100);
-    REQUIRE(rc.command_count() > 0);  // save_layer recorded
+    // Exactly one compositing layer, carrying the blur radius — not just "some
+    // command was emitted" (the tautology this wave is removing).
+    REQUIRE(rc.count(canvas::DrawCommand::Type::save_layer) == 1);
+    const auto& cmd = rc.commands().back();
+    REQUIRE(cmd.type == canvas::DrawCommand::Type::save_layer);
+    REQUIRE(cmd.f[4] == Catch::Approx(1.0f));  // opacity
+    REQUIRE(cmd.f[5] == Catch::Approx(8.0f));  // blur radius
 }
 
-// RecordingCanvas does not override save_layer, so the base falls through to a
-// bare save() and the recorded command carries no layer params. To assert what
-// an effect actually asks the backend for, spy on save_layer directly.
-namespace {
-struct LayerSpy : canvas::RecordingCanvas {
-    struct Layer { float x, y, w, h, opacity, blur_radius; };
-    std::vector<Layer> layers;
-
-    void save_layer(float x, float y, float w, float h,
-                    float opacity = 1.0f, float blur_radius = 0.0f) override {
-        layers.push_back({x, y, w, h, opacity, blur_radius});
-        canvas::RecordingCanvas::save_layer(x, y, w, h, opacity, blur_radius);
-    }
-};
-}  // namespace
-
-// Pins the approximation GpuBloomEffect actually is, so it cannot quietly
-// drift back to claiming more than it does. Bloom today is a plain blur layer:
-// no bright-pass, no additive composite, no brightness gain. The old version of
-// this test set intensity + threshold and asserted only `command_count() > 0` —
-// which a lone save() satisfies, so it passed while threshold was fed to a
-// no-op Canvas::set_bloom() that no backend implemented.
-//
-// If real bloom ever lands, this test SHOULD fail. Update it and the doc
-// comment on GpuBloomEffect together — do not relax it in place.
-TEST_CASE("GpuBloomEffect is a blur approximation and not a bright-pass bloom",
+// GpuBloomEffect must route through the real bloom layer API, not a plain
+// save_layer. RecordingCanvas records save_layer_with_bloom as its own command
+// carrying intensity / threshold / radius, so a headless test can prove the
+// effect asked for a bloom (not just "some command was emitted").
+TEST_CASE("GpuBloomEffect emits a bloom layer with its parameters",
           "[render][effect]") {
-    LayerSpy spy;
+    canvas::RecordingCanvas rc;
     canvas::GpuBloomEffect bloom;
-    bloom.intensity = 0.5f;
-    bloom.radius = 8.0f;
-    bloom.configure_layer(spy, 0, 0, 200, 200);
+    bloom.intensity = 0.7f;
+    bloom.threshold = 0.9f;
+    bloom.radius = 12.0f;
+    bloom.configure_layer(rc, 0, 0, 200, 200);
 
-    // Exactly one layer, matching layer_count() — View::paint_all pops that many.
-    REQUIRE(spy.layers.size() == 1);
-    REQUIRE(static_cast<int>(spy.layers.size()) == bloom.layer_count());
-
-    // The whole effect is: blur the subtree by radius * intensity and composite
-    // it back at full opacity. Nothing bloom-specific reaches the backend.
-    REQUIRE(spy.layers[0].blur_radius == Catch::Approx(4.0f));
-    REQUIRE(spy.layers[0].opacity == Catch::Approx(1.0f));
-
-    // intensity scales the blur radius — it is not a brightness gain.
-    LayerSpy hotter_spy;
-    canvas::GpuBloomEffect hotter;
-    hotter.intensity = 1.0f;
-    hotter.radius = 8.0f;
-    hotter.configure_layer(hotter_spy, 0, 0, 200, 200);
-    REQUIRE(hotter_spy.layers[0].blur_radius == Catch::Approx(8.0f));
-    REQUIRE(hotter_spy.layers[0].opacity == Catch::Approx(1.0f));
-
-    // A bloom at intensity 0 is indistinguishable from no effect at all: a real
-    // bright-pass bloom would still composite thresholded content additively.
-    LayerSpy off_spy;
-    canvas::GpuBloomEffect off;
-    off.intensity = 0.0f;
-    off.configure_layer(off_spy, 0, 0, 200, 200);
-    REQUIRE(off_spy.layers[0].blur_radius == Catch::Approx(0.0f));
-
-    // Bloom makes the same request GpuBlurEffect does at the same effective
-    // radius. If these ever diverge, bloom grew a real implementation.
-    LayerSpy blur_spy;
-    canvas::GpuBlurEffect blur;
-    blur.radius_x = blur.radius_y = 4.0f;
-    blur.configure_layer(blur_spy, 0, 0, 200, 200);
-    REQUIRE(blur_spy.layers.size() == spy.layers.size());
-    REQUIRE(blur_spy.layers[0].blur_radius == Catch::Approx(spy.layers[0].blur_radius));
-    REQUIRE(blur_spy.layers[0].opacity == Catch::Approx(spy.layers[0].opacity));
+    REQUIRE(rc.count(canvas::DrawCommand::Type::save_layer_bloom) == 1);
+    REQUIRE(rc.count(canvas::DrawCommand::Type::save_layer) == 0);  // not a plain layer
+    const auto& cmd = rc.commands().back();
+    REQUIRE(cmd.f[4] == Catch::Approx(0.7f));   // intensity
+    REQUIRE(cmd.f[5] == Catch::Approx(0.9f));   // threshold
+    REQUIRE(cmd.floats.size() == 1);
+    REQUIRE(cmd.floats[0] == Catch::Approx(12.0f));  // radius
 }
 
-TEST_CASE("VignetteEffect has meaningful intensity", "[render][effect]") {
-    canvas::VignetteEffect vignette;
-    vignette.intensity = 0.8f;
-    REQUIRE(vignette.intensity == Catch::Approx(0.8f));
-    REQUIRE(vignette.needs_layer());
+// A View with a vignette must paint the edge-darkening overlay INSIDE its
+// compositing layer — i.e. after the subtree draws and before the layer is
+// popped. Its pixel behavior is proven on a raster surface in test_canvas.cpp
+// ("VignetteEffect darkens the corners more than the center"); here we assert
+// the overlay is emitted in the right place and the save stack stays balanced.
+TEST_CASE("A View with a vignette paints the edge-darkening overlay in its layer",
+          "[render][effect][view]") {
+    view::View root;
+    root.set_bounds({0, 0, 100, 100});
+    root.set_effect(std::make_shared<canvas::VignetteEffect>());
+
+    canvas::RecordingCanvas canvas;
+    const int depth_before = canvas.save_count();
+    root.paint_all(canvas);
+    REQUIRE(canvas.save_count() == depth_before);  // balanced
+
+    // The overlay drew a radial gradient, and a restore comes AFTER it — so the
+    // darkening composited inside the effect layer, not after the pop.
+    const auto& cmds = canvas.commands();
+    std::size_t grad = SIZE_MAX, last_restore = 0;
+    for (std::size_t i = 0; i < cmds.size(); ++i) {
+        if (cmds[i].type == canvas::DrawCommand::Type::set_fill_gradient_radial)
+            grad = i;
+        if (cmds[i].type == canvas::DrawCommand::Type::restore)
+            last_restore = i;
+    }
+    REQUIRE(grad != SIZE_MAX);
+    REQUIRE(last_restore > grad);
 }
 
-TEST_CASE("ChromaticAberrationEffect has offset", "[render][effect]") {
+// ChromaticAberrationEffect must route its subtree through exactly one
+// compositing layer (the SkSL post-effect on GPU, a plain layer fallback on a
+// recorder). Its pixel behavior is proven on a raster surface in test_canvas.cpp
+// ("ChromaticAberrationEffect splits color channels at an edge"); here we only
+// assert the layer routing so paint_all's pop count stays correct.
+TEST_CASE("ChromaticAberrationEffect pushes exactly one compositing layer",
+          "[render][effect]") {
     canvas::ChromaticAberrationEffect ca;
     ca.offset = 3.0f;
-    REQUIRE(ca.offset == Catch::Approx(3.0f));
+    REQUIRE(ca.needs_layer());
+    REQUIRE(ca.layer_count() == 1);
+
+    canvas::RecordingCanvas rc;
+    const int depth_before = rc.save_count();
+    ca.configure_layer(rc, 0, 0, 100, 100);
+    REQUIRE(rc.save_count() == depth_before + 1);  // exactly one layer pushed
 }
 
 TEST_CASE("EffectChain composes multiple effects", "[render][effect]") {
@@ -202,9 +195,11 @@ TEST_CASE("An empty EffectChain does not swallow the opacity layer",
     const int depth_before = canvas.save_count();
     root.paint_all(canvas);
 
-    // Balanced, and the opacity layer was actually pushed.
+    // Balanced, and the opacity layer was actually pushed. RecordingCanvas now
+    // records the opacity compositing layer as a distinct save_layer command
+    // rather than a bare save(), so assert on that.
     REQUIRE(canvas.save_count() == depth_before);
-    REQUIRE(canvas.count(canvas::DrawCommand::Type::save) >= 1);
+    REQUIRE(canvas.count(canvas::DrawCommand::Type::save_layer) >= 1);
 }
 
 // ── Dimension tests ─────────────────────────────────────────────────────

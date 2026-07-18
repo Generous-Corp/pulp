@@ -3,6 +3,7 @@
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/window_host.hpp>
+#include <pulp/runtime/log.hpp>
 
 #include <algorithm>
 
@@ -288,6 +289,20 @@ WindowHost::~WindowHost() {
     for (NativeViewHost* v : views)
         if (v) v->on_host_destroyed();
     attached_native_views_.clear();
+}
+
+void WindowHost::note_unsupported_feature(const char* method) {
+    // Log exactly once per method per host so a silently-degraded host (e.g. the
+    // CPU-only Mac window host, which no-ops the full window-feature set) is
+    // self-diagnosing rather than a multi-hour "why doesn't resize/aspect/
+    // viewport work" debug. A host that implements the feature overrides the
+    // method and never reaches here.
+    if (unsupported_features_logged_.insert(method).second) {
+        runtime::log_info(
+            "[window-host] {} is a no-op on this host — feature not implemented; "
+            "content will not react to it",
+            method);
+    }
 }
 
 void NativeViewHost::reconcile_host() {

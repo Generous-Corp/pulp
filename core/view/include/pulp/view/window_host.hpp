@@ -2,6 +2,7 @@
 
 #include <pulp/view/view.hpp>
 #include <algorithm>
+#include <set>
 #include <string>
 #include <memory>
 #include <functional>
@@ -321,6 +322,7 @@ public:
     // remove. No-op on platforms without an app-global key hook.
     virtual void set_app_key_monitor(std::function<bool(const KeyEvent&)> handler) {
         (void)handler;
+        note_unsupported_feature("set_app_key_monitor");
     }
 
     // Set a callback for when the window is closed
@@ -332,7 +334,10 @@ public:
 
     // ── D.1 Client-side window decoration ───────────────────────────────
     /// Remove native title bar and let the app draw its own.
-    virtual void set_client_decoration(bool enabled) { (void)enabled; }
+    virtual void set_client_decoration(bool enabled) {
+        (void)enabled;
+        note_unsupported_feature("set_client_decoration");
+    }
 
     /// Hit-test region types for client-decorated windows.
     enum class HitTestRegion {
@@ -344,10 +349,16 @@ public:
 
     // ── D.2 Window features ─────────────────────────────────────────────
     /// Constrain window resize to maintain aspect ratio.
-    virtual void set_fixed_aspect_ratio(float ratio) { (void)ratio; }
+    virtual void set_fixed_aspect_ratio(float ratio) {
+        (void)ratio;
+        note_unsupported_feature("set_fixed_aspect_ratio");
+    }
 
     /// Keep window above all others.
-    virtual void set_always_on_top(bool on_top) { (void)on_top; }
+    virtual void set_always_on_top(bool on_top) {
+        (void)on_top;
+        note_unsupported_feature("set_always_on_top");
+    }
 
     /// Request the native window resize so its CONTENT area becomes (w × h),
     /// keeping the window's TOP-LEFT corner fixed (so a pinned toolbar / toggle
@@ -358,7 +369,10 @@ public:
     /// letterboxes within the current window). Callers that also use a design
     /// viewport should update set_design_viewport()/set_fixed_aspect_ratio() to
     /// the same (w, h) so paint scale and the OS aspect lock track the resize.
-    virtual void request_content_size(float w, float h) { (void)w; (void)h; }
+    virtual void request_content_size(float w, float h) {
+        (void)w; (void)h;
+        note_unsupported_feature("request_content_size");
+    }
 
     /// Set a fixed "design viewport". When set, the root view's bounds are
     /// pinned to (design_w x design_h) and paint applies an aspect-correct
@@ -397,6 +411,7 @@ public:
     /// coords so hit-test still works.
     virtual void set_design_viewport(float design_w, float design_h) {
         (void)design_w; (void)design_h;
+        note_unsupported_feature("set_design_viewport");
     }
 
     /// Pure math behind set_design_viewport — used both by the platform
@@ -474,9 +489,34 @@ public:
 
     // ── D.4 Mouse relative mode ─────────────────────────────────────────
     /// Hide cursor and report relative deltas (infinite drag for knobs).
-    virtual void set_mouse_relative_mode(bool enabled) { (void)enabled; }
+    virtual void set_mouse_relative_mode(bool enabled) {
+        (void)enabled;
+        note_unsupported_feature("set_mouse_relative_mode");
+    }
+
+    /// True once `note_unsupported_feature(method)` has fired for `method` on
+    /// this host — i.e. a window feature was requested that this host silently
+    /// no-ops (the base-class default ran because the host did not override it).
+    /// Diagnostic surface for the "CPU host silently degrades" gotcha; also the
+    /// test seam for the one-time logging.
+    bool feature_marked_unsupported(const char* method) const {
+        return unsupported_features_logged_.count(method) > 0;
+    }
+
+protected:
+    /// Log ONCE (per method, per host instance) that a window feature is a
+    /// base-class no-op on this host, so a silently-degraded CPU / headless host
+    /// is self-diagnosing instead of a multi-hour debug (see the CLAUDE.md
+    /// GPU-host gotcha). A host that really implements the feature overrides the
+    /// method and never calls this.
+    void note_unsupported_feature(const char* method);
 
 private:
+    // Method names already logged by note_unsupported_feature(), so each
+    // unsupported feature diagnoses exactly once per host instead of once per
+    // call.
+    std::set<std::string> unsupported_features_logged_;
+
     // Shared vblank-paced-or-direct repaint scheduling for mark_dirty() and
     // mark_dirty(Rect).
     void schedule_repaint();

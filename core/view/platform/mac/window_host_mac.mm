@@ -35,6 +35,7 @@
 #include <pulp/render/dirty_tracker.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
+#include <pulp/render/skp_capture.hpp>
 #import <QuartzCore/CAMetalLayer.h>
 #import <CoreVideo/CVDisplayLink.h>
 #import <Metal/Metal.h>
@@ -1377,6 +1378,42 @@ static void install_app_menu(NSString* appName) {
 
 namespace pulp::view {
 
+namespace {
+// Shared NSScreen-backed DPI / monitor queries used by BOTH the CPU
+// (MacWindowHost) and GPU (MacGpuWindowHost) window hosts. Before this the CPU
+// host inherited the base-class placeholders — dpi_scale() 1.0 (wrong on every
+// Retina display), max_dimensions() a fake 1920×1080, get_monitors() one fake
+// monitor — so any CPU-host coordinate conversion or monitor query was silently
+// wrong (the CLAUDE.md CPU-host degradation). Both hosts now share this real
+// implementation.
+float mac_backing_scale(NSWindow* window) {
+    if (window) return static_cast<float>([window backingScaleFactor]);
+    return static_cast<float>([[NSScreen mainScreen] backingScaleFactor]);
+}
+
+Size mac_visible_max_dimensions() {
+    NSRect frame = [[NSScreen mainScreen] visibleFrame];
+    return {static_cast<float>(frame.size.width),
+            static_cast<float>(frame.size.height)};
+}
+
+std::vector<WindowHost::MonitorInfo> mac_enumerate_monitors() {
+    std::vector<WindowHost::MonitorInfo> monitors;
+    for (NSScreen* screen in [NSScreen screens]) {
+        NSRect frame = [screen frame];
+        WindowHost::MonitorInfo info;
+        info.bounds = {static_cast<float>(frame.origin.x),
+                       static_cast<float>(frame.origin.y),
+                       static_cast<float>(frame.size.width),
+                       static_cast<float>(frame.size.height)};
+        info.dpi_scale = static_cast<float>([screen backingScaleFactor]);
+        info.name = std::string([[screen localizedName] UTF8String]);
+        monitors.push_back(info);
+    }
+    return monitors;
+}
+} // namespace
+
 class MacWindowHost : public WindowHost {
 public:
     MacWindowHost(View& root, const WindowOptions& options)
@@ -1487,6 +1524,17 @@ public:
 
     void* native_window_handle() const override { return (__bridge void*) window_; }
     void* native_content_view_handle() const override { return (__bridge void*) view_; }
+
+    // Real DPI / monitor geometry (shared with the GPU host) instead of the
+    // base-class 1.0 / fake-1080p / one-fake-monitor placeholders. Without
+    // these, coordinate conversion (convert_to_logical/native) was identity on
+    // every Retina display when running the CPU host.
+    float dpi_scale() const override { return mac_backing_scale(window_); }
+    Size max_dimensions() const override { return mac_visible_max_dimensions(); }
+    std::vector<MonitorInfo> get_monitors() const override {
+        return mac_enumerate_monitors();
+    }
+
     ContentSize get_content_size() const override {
         NSSize size = view_ ? view_.bounds.size : NSZeroSize;
         return {
@@ -1965,16 +2013,9 @@ public:
         }
     }
 
-    float dpi_scale() const override {
-        if (window_) return static_cast<float>([window_ backingScaleFactor]);
-        return 1.0f;
-    }
+    float dpi_scale() const override { return mac_backing_scale(window_); }
 
-    Size max_dimensions() const override {
-        NSScreen* screen = [NSScreen mainScreen];
-        NSRect frame = [screen visibleFrame];
-        return {static_cast<float>(frame.size.width), static_cast<float>(frame.size.height)};
-    }
+    Size max_dimensions() const override { return mac_visible_max_dimensions(); }
 
     void set_always_on_top(bool on_top) override {
         if (window_)
@@ -2064,19 +2105,7 @@ public:
     }
 
     std::vector<MonitorInfo> get_monitors() const override {
-        std::vector<MonitorInfo> monitors;
-        for (NSScreen* screen in [NSScreen screens]) {
-            NSRect frame = [screen frame];
-            MonitorInfo info;
-            info.bounds = {static_cast<float>(frame.origin.x),
-                           static_cast<float>(frame.origin.y),
-                           static_cast<float>(frame.size.width),
-                           static_cast<float>(frame.size.height)};
-            info.dpi_scale = static_cast<float>([screen backingScaleFactor]);
-            info.name = std::string([[screen localizedName] UTF8String]);
-            monitors.push_back(info);
-        }
-        return monitors;
+        return mac_enumerate_monitors();
     }
 
 private:
@@ -2305,6 +2334,16 @@ private:
         }
 
         paint_scene(*canvas);
+
+        // Env-var one-shot .skp capture: when PULP_SKP_CAPTURE_DIR is set, dump
+        // this frame's draw ops to a backend-independent .skp for offline
+        // inspection (Skia debugger / SVG). Re-runs paint_scene into the capture
+        // canvas so the artifact matches what was just presented; one-shot per
+        // env value, so a live loop writes one file, not one per frame.
+        pulp::render::maybe_capture_skp_from_env(
+            static_cast<int>(width_), static_cast<int>(height_),
+            [this](canvas::Canvas& c) { paint_scene(c); },
+            skia_surface_->graphite_context());
 
         continuous_frames_.store(
             pulp::view::needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),

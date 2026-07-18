@@ -394,7 +394,7 @@ CPU implementation beats or ties the GPU at all musical settings.
 | SVG rendering | experimental | [canvas](modules.md#canvas) | |
 | Effects (shadow, blur, gradients) | usable | [canvas](modules.md#canvas) | |
 
-Key headers: `pulp/canvas/canvas.hpp`, `pulp/canvas/cg_canvas.hpp`, `pulp/canvas/skia_canvas.hpp`, `pulp/canvas/svg.hpp`, `pulp/canvas/effects.hpp`
+Key headers: `pulp/canvas/canvas.hpp`, `pulp/canvas/cg_canvas.hpp`, `pulp/canvas/skia_canvas.hpp`, `pulp/canvas/svg.hpp`, `pulp/canvas/view_effect.hpp`
 
 ---
 

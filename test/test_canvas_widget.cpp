@@ -1119,15 +1119,16 @@ TEST_CASE("CanvasWidget::paint opens a per-canvas save_layer over its bounds",
     // Post-paint depth returns to entry depth — bracketed correctly.
     REQUIRE(rc.save_count() == 0);
 
-    // The recorded stream must contain exactly one save (the layer push)
-    // attributable to the canvas widget itself. Future state-tracking
-    // additions to paint() may add nested saves; but at minimum, paint()
-    // must contribute a leading save. Walk the recorded commands,
-    // verify a `save` appears before the queued fill_rect.
+    // The recorded stream must contain the layer push attributable to the
+    // canvas widget itself, before the queued fill_rect. CanvasWidget::paint
+    // opens a save_layer-backed offscreen, which RecordingCanvas records as a
+    // `save_layer` command (a plain `save` on backends that don't distinguish).
     int save_idx = -1, fill_idx = -1;
     int idx = 0;
     for (const auto& cmd : rc.commands()) {
-        if (save_idx < 0 && cmd.type == DrawCommand::Type::save) save_idx = idx;
+        if (save_idx < 0 && (cmd.type == DrawCommand::Type::save ||
+                             cmd.type == DrawCommand::Type::save_layer))
+            save_idx = idx;
         if (cmd.type == DrawCommand::Type::fill_rect) { fill_idx = idx; break; }
         ++idx;
     }
@@ -1152,7 +1153,8 @@ TEST_CASE("CanvasWidget::paint skips save_layer when bounds are degenerate",
     // CanvasWidget::paint from emitting a save layer.
     int save_count_in_stream = 0;
     for (const auto& cmd : rc.commands()) {
-        if (cmd.type == DrawCommand::Type::save) ++save_count_in_stream;
+        if (cmd.type == DrawCommand::Type::save ||
+            cmd.type == DrawCommand::Type::save_layer) ++save_count_in_stream;
     }
     REQUIRE(save_count_in_stream == 0);
 }
@@ -1210,7 +1212,9 @@ TEST_CASE("Two sibling CanvasWidgets each open their own backing store",
     for (const auto& cmd : rc.commands()) {
         if (first_fill < 0 && cmd.type == DrawCommand::Type::fill_rect) {
             first_fill = idx;
-        } else if (first_fill >= 0 && cmd.type == DrawCommand::Type::save) {
+        } else if (first_fill >= 0 &&
+                   (cmd.type == DrawCommand::Type::save ||
+                    cmd.type == DrawCommand::Type::save_layer)) {
             ++save_between;
         } else if (first_fill >= 0 && clear_after_first_fill < 0 &&
                    cmd.type == DrawCommand::Type::clear_rect) {

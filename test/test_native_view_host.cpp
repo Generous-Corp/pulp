@@ -194,6 +194,43 @@ TEST_CASE("Host set_native_child_view_clip defaults to unsupported (false)",
                                                     10, 10));
 }
 
+// A host that does NOT override a window feature (like the CPU-only Mac host)
+// silently no-ops it. The base class now marks + logs that once per feature so
+// the degradation is self-diagnosing instead of a multi-hour debug (CLAUDE.md
+// GPU-host gotcha). The stub host overrides none of these features.
+TEST_CASE("Unsupported window features are marked once on a base-default host",
+          "[view][window-host]") {
+    BareWindowHost host;
+
+    // Nothing requested yet.
+    REQUIRE_FALSE(host.feature_marked_unsupported("set_fixed_aspect_ratio"));
+    REQUIRE_FALSE(host.feature_marked_unsupported("set_design_viewport"));
+
+    host.set_fixed_aspect_ratio(1.5f);
+    REQUIRE(host.feature_marked_unsupported("set_fixed_aspect_ratio"));
+    // Calling again keeps it marked (idempotent latch — logs only once).
+    host.set_fixed_aspect_ratio(2.0f);
+    REQUIRE(host.feature_marked_unsupported("set_fixed_aspect_ratio"));
+
+    // Each feature is tracked independently.
+    REQUIRE_FALSE(host.feature_marked_unsupported("set_design_viewport"));
+    host.set_design_viewport(800.0f, 600.0f);
+    host.set_always_on_top(true);
+    host.set_client_decoration(true);
+    host.request_content_size(320.0f, 240.0f);
+    host.set_mouse_relative_mode(true);
+    host.set_app_key_monitor({});
+    REQUIRE(host.feature_marked_unsupported("set_design_viewport"));
+    REQUIRE(host.feature_marked_unsupported("set_always_on_top"));
+    REQUIRE(host.feature_marked_unsupported("set_client_decoration"));
+    REQUIRE(host.feature_marked_unsupported("request_content_size"));
+    REQUIRE(host.feature_marked_unsupported("set_mouse_relative_mode"));
+    REQUIRE(host.feature_marked_unsupported("set_app_key_monitor"));
+
+    // A feature that was never requested stays unmarked.
+    REQUIRE_FALSE(host.feature_marked_unsupported("set_never_called"));
+}
+
 TEST_CASE("NativeViewHost attaches once a host and handle are present",
           "[view][native-view-host]") {
     View root;

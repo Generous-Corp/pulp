@@ -20,22 +20,15 @@ enum class RenderPassType {
 /// Statistics for a single render pass.
 ///
 /// `time_ms` is CPU wall-time measured around the pass's draw-call
-/// submission. `gpu_time_ms` is the true GPU-side execution time of the pass,
-/// sampled via Dawn timestamp queries
-/// (`pulp::render::GpuTimestamps`). The two numbers diverge exactly
-/// where perf bugs hide — a pass cheap on the CPU but expensive on the
-/// GPU (overdraw, expensive shaders) is invisible without the GPU clock.
-///
-/// `gpu_time_ms` is only meaningful when `gpu_time_valid` is true.
-/// It stays false when the adapter lacks the `timestamp-query` feature,
-/// when the resolved sample has not landed yet (timestamps lag the
-/// submitting frame by one frame), or in a CPU-only build.
+/// submission. There is deliberately NO per-pass GPU number: Skia Graphite
+/// owns the command encoders, so Pulp cannot inject per-pass timestamp writes
+/// from outside — per-pass GPU timing is structurally unavailable under
+/// Graphite. The honest GPU clock is frame-level, whole-recording
+/// (`RenderPassManager::gpu_render_time_ms()`), not per pass.
 struct PassStats {
     RenderPassType type;
     int draw_calls = 0;
     float time_ms = 0;        ///< CPU wall-time around draw submission (ms).
-    float gpu_time_ms = 0;    ///< True GPU execution time (ms); see gpu_time_valid.
-    bool  gpu_time_valid = false;  ///< Whether gpu_time_ms holds a real sample.
 
     /// Explicit alias for the CPU number. `cpu_time_ms()` makes call sites
     /// that want the CPU clock self-documenting without changing the wire
@@ -82,39 +75,15 @@ public:
         over_budget_ = (budget_ms_ > 0 && total_time_ms_ > budget_ms_);
     }
 
-    /// Feed a resolved GPU-side duration into a pass.
-    ///
-    /// GPU timestamp queries are resolved one frame after the pass that
-    /// wrote them was submitted, so this is called by the GPU-timestamp
-    /// readback path with the *previous* frame's per-pass durations. The
-    /// index is the pass's position within `passes()` for the frame the
-    /// timestamps belong to. Out-of-range indices are ignored (the pass
-    /// list may legitimately have changed between frames).
-    void set_pass_gpu_time(std::size_t pass_index, float gpu_ms) {
-        if (pass_index < passes_.size() && gpu_ms >= 0.0f) {
-            passes_[pass_index].gpu_time_ms = gpu_ms;
-            passes_[pass_index].gpu_time_valid = true;
-        }
-    }
-
-    /// Whether any pass in the last frame carries a valid GPU timestamp.
-    /// The inspector uses this to decide between showing GPU numbers and
-    /// showing "GPU timestamps unavailable".
-    bool has_gpu_timing() const {
-        for (const auto& p : passes_) {
-            if (p.gpu_time_valid) return true;
-        }
-        return false;
-    }
-
     /// Feed the whole-recording GPU render time for this frame.
     ///
     /// This is FRAME-LEVEL — the entire render recording's GPU-side elapsed
     /// time (Skia Graphite GpuStats(kElapsedTime), surfaced by
     /// `SkiaSurface::gpu_render_time_ms()` / `WindowHost::gpu_render_time_ms()`).
-    /// It is distinct from the per-pass `set_pass_gpu_time()` numbers: the GPU
-    /// render clock is whole-recording, not per-pass, so this is the honest
-    /// place to record it. `valid` should reflect
+    /// It is the ONLY GPU-clock granularity Pulp exposes: per-pass GPU timing is
+    /// structurally unavailable under Graphite (Graphite owns the command
+    /// encoders), so the whole-recording number is the honest place to record
+    /// the GPU clock. `valid` should reflect
     /// `WindowHost::gpu_render_timing_available()`. Negative durations are
     /// clamped to "invalid".
     void set_gpu_render_time_ms(float ms, bool valid) {
@@ -163,8 +132,9 @@ private:
     float total_time_ms_ = 0;
     bool over_budget_ = false;
     uint64_t frame_count_ = 0;
-    // Frame-level (whole-recording) GPU render time, distinct from the
-    // per-pass PassStats::gpu_time_ms. See set_gpu_render_time_ms().
+    // Frame-level (whole-recording) GPU render time. This is the ONLY GPU-clock
+    // granularity Pulp exposes — per-pass GPU timing is structurally unavailable
+    // under Skia Graphite (see PassStats + set_gpu_render_time_ms()).
     float gpu_render_time_ms_ = 0.0f;
     bool gpu_render_time_valid_ = false;
 };

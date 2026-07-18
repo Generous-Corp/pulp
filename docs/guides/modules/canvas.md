@@ -4,7 +4,7 @@ The canvas module provides a 2D drawing abstraction with multiple backends. Widg
 
 **Status**: experimental
 **Dependencies**: runtime
-**Headers**: `pulp/canvas/canvas.hpp`, `pulp/canvas/cg_canvas.hpp`, `pulp/canvas/skia_canvas.hpp`, `pulp/canvas/effects.hpp`, `pulp/canvas/svg.hpp`
+**Headers**: `pulp/canvas/canvas.hpp`, `pulp/canvas/cg_canvas.hpp`, `pulp/canvas/skia_canvas.hpp`, `pulp/canvas/view_effect.hpp`, `pulp/canvas/svg.hpp`
 
 ## Canvas Interface
 
@@ -87,19 +87,24 @@ REQUIRE(rec.count(DrawCommand::Type::fill_text) == 1);
 
 ## Post-Processing Effects
 
-The effects system applies GPU-accelerated post-processing to rendered content.
+GPU post-processing is applied per-view via the `ViewEffect` system
+(`pulp/canvas/view_effect.hpp`): an effect opens a compositing layer for the
+view's subtree and, on the GPU (SkiaCanvas) backend, runs a real image-filter
+graph over it. Attach one with `View::set_effect`.
 
 ```cpp
-#include <pulp/canvas/effects.hpp>
+#include <pulp/canvas/view_effect.hpp>
 
-BlurEffect blur{.radius_x = 10.0f, .radius_y = 10.0f};
-ShadowEffect shadow{.offset_x = 2, .offset_y = 4, .blur_radius = 8, .color = Color::rgba8(0, 0, 0, 128)};
-// NOTE: BloomEffect (effects.hpp) is a parameter struct only — nothing in
-// core/ consumes it, so constructing one has no rendering effect today. For a
-// working blur-based glow over a view subtree, use GpuBloomEffect from
-// core/canvas/include/pulp/canvas/view_effect.hpp instead.
-BloomEffect bloom{.threshold = 0.8f, .intensity = 1.5f};
-ColorAdjust color{.brightness = 0.1f, .contrast = 1.2f, .saturation = 0.9f};
+view.set_effect(std::make_shared<GpuBlurEffect>());          // Gaussian blur
+view.set_effect(std::make_shared<GpuBloomEffect>());         // threshold + additive glow
+view.set_effect(std::make_shared<VignetteEffect>());         // radial edge darkening
+view.set_effect(std::make_shared<ChromaticAberrationEffect>());  // per-channel offset
+
+// Compose several with EffectChain (one compositing layer per effect):
+auto chain = std::make_shared<EffectChain>();
+chain->add(std::make_shared<GpuBlurEffect>());
+chain->add(std::make_shared<VignetteEffect>());
+view.set_effect(chain);
 ```
 
 ## SVG Loading

@@ -10,6 +10,7 @@
 #include <pulp/canvas/lottie_animation.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/motion_preferences.hpp>
+#include <pulp/runtime/log.hpp>
 
 namespace pulp::view {
 
@@ -82,9 +83,42 @@ void LottieView::advance(float dt) {
 }
 
 void LottieView::paint(canvas::Canvas& canvas) {
+    // When Lottie is compiled out of this build, a valid()==false LottieView
+    // used to paint NOTHING — indistinguishable from a broken import. Paint a
+    // bordered placeholder + log once so the disabled build is self-evident.
+    if (!supported()) {
+        paint_unsupported_placeholder(canvas);
+        return;
+    }
     if (!valid()) return;
     const Rect b = local_bounds();
     animation_->render(canvas, time_, b.x, b.y, b.width, b.height);
+}
+
+void LottieView::paint_unsupported_placeholder(canvas::Canvas& canvas) {
+    if (!unsupported_logged_) {
+        runtime::log_info(
+            "[lottie] LottieView painted but Lottie is disabled in this build "
+            "(bundled Skia lacks skjson/skottie); showing a placeholder");
+        unsupported_logged_ = true;
+    }
+    const Rect b = local_bounds();
+    if (b.width <= 0.0f || b.height <= 0.0f) return;
+
+    // Subtle fill + border + centered label — the missing-asset placeholder
+    // convention (mirrors ImageView's missing-image box). Neutral-grey
+    // diagnostic literals (this view has no theme/resolve_color access, and a
+    // compiled-out-build placeholder is not themeable UI surface).
+    canvas.set_fill_color(canvas::Color::rgba(0.5f, 0.5f, 0.5f, 0.12f));  // token-lint:allow (placeholder diagnostic)
+    canvas.fill_rect(b.x, b.y, b.width, b.height);
+    canvas.set_stroke_color(canvas::Color::rgba(0.6f, 0.6f, 0.6f, 0.7f));  // token-lint:allow (placeholder diagnostic)
+    canvas.set_line_width(1.0f);
+    canvas.stroke_rect(b.x, b.y, b.width, b.height);
+    canvas.set_fill_color(canvas::Color::rgba(0.72f, 0.72f, 0.72f, 0.9f));  // token-lint:allow (placeholder diagnostic)
+    canvas.set_font("", 12.0f);
+    canvas.set_text_align(canvas::TextAlign::center);
+    canvas.fill_text("Lottie unavailable",
+                     b.x + b.width * 0.5f, b.y + b.height * 0.5f);
 }
 
 void LottieView::on_attached() { subscribe_clock(); }

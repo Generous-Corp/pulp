@@ -808,6 +808,21 @@ void View::paint_all(canvas::Canvas& canvas) {
         // skip the generic ring.
     }
 
+    // Effect overlay — painted on TOP of the subtree but INSIDE the effect's
+    // compositing layer(s), so it composites as part of the effect (e.g. a
+    // vignette's radial-gradient edge darkening). Only meaningful when the
+    // effect actually pushed a layer.
+    //
+    // LIMITATION (revisit when overlays-in-chains matter): this draws into the
+    // INNERMOST (top) still-open layer — correct for the single-effect path
+    // (the only non-chain path today). In a multi-effect EffectChain like
+    // [vignette, blur], the layers stack vignette→blur, so the vignette's
+    // overlay would draw into the blur layer and get blurred. Wiring an overlay
+    // to composite into a SPECIFIC effect's layer (pop-interleaved with the
+    // overlay draws) is the fix if/when that combination is needed.
+    if (effect_ && layers_pushed > 0)
+        effect_->paint_overlay(canvas, 0, 0, bounds_.width, bounds_.height);
+
     // End compositing layer(s) — each restore pops one saveLayer, compositing
     // the subtree back through that layer's filter / opacity. An EffectChain
     // pushes one layer per effect, so pop what we actually pushed rather than

@@ -7,6 +7,7 @@
 
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/lottie_view.hpp>
+#include <pulp/canvas/recording_canvas.hpp>
 
 #include <string>
 
@@ -33,6 +34,34 @@ TEST_CASE("LottieView graceful behavior when Lottie is not compiled in",
     REQUIRE_FALSE(v.valid());
     REQUIRE_FALSE(v.set_source_json(kLottieJson));
     REQUIRE(v.duration() == 0.0);
+}
+
+// When Lottie is compiled out, painting a LottieView must draw a visible
+// placeholder (border + label), not nothing — a silently blank box reads as a
+// broken import rather than "unavailable in this build".
+TEST_CASE("LottieView paints a placeholder when Lottie is not compiled in",
+          "[view][lottie]") {
+    if (LottieView::supported()) {
+        SUCCEED("Lottie compiled in; the placeholder path is disabled-build only");
+        return;
+    }
+    LottieView v;
+    v.set_bounds({0, 0, 120, 90});
+
+    pulp::canvas::RecordingCanvas rc;
+    v.paint(rc);
+
+    // A bordered placeholder + label drew — not a silent no-op.
+    REQUIRE(rc.count(pulp::canvas::DrawCommand::Type::stroke_rect) >= 1);
+    REQUIRE(rc.count(pulp::canvas::DrawCommand::Type::fill_text) >= 1);
+    bool found_label = false;
+    for (const auto& c : rc.commands()) {
+        if (c.type == pulp::canvas::DrawCommand::Type::fill_text &&
+            c.text.find("Lottie") != std::string::npos) {
+            found_label = true;
+        }
+    }
+    REQUIRE(found_label);
 }
 
 TEST_CASE("LottieView parses and advances when Lottie is compiled in",

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <pulp/canvas/canvas.hpp>
+#include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <vector>
@@ -31,6 +33,23 @@ public:
 
     /// Whether this effect requires a compositing layer (most do).
     virtual bool needs_layer() const { return true; }
+
+    /// Paint an overlay on TOP of the already-painted subtree, but still INSIDE
+    /// the effect's compositing layer(s) (called by `View::paint_all` just
+    /// before the layers are popped). This is how an effect that darkens or
+    /// tints the finished content — a vignette drawing a radial gradient — is
+    /// implemented, instead of the wrong "reduce the whole layer's opacity"
+    /// approximation. Default: nothing.
+    ///
+    /// Limitation: the overlay draws into the innermost still-open layer. That
+    /// is correct for a single effect (the only non-chain path today), but in a
+    /// multi-effect `EffectChain` (e.g. [vignette, blur]) an earlier effect's
+    /// overlay lands in a later effect's layer and is filtered by it. See the
+    /// `View::paint_all` call site — revisit if overlays-in-chains are needed.
+    virtual void paint_overlay(Canvas& canvas, float x, float y,
+                               float w, float h) {
+        (void)canvas; (void)x; (void)y; (void)w; (void)h;
+    }
 };
 
 /// GPU blur effect — multi-pass Gaussian blur via SkImageFilters.
@@ -43,63 +62,120 @@ struct GpuBlurEffect : ViewEffect {
     }
 };
 
-/// Glow approximation — a blur layer whose radius scales with `intensity`.
+/// GPU bloom/glow — a real bright-pass + blur + additive composite.
 ///
-/// This is NOT a true bloom. A real bloom bright-passes the subtree, blurs
-/// only what survives the threshold, and composites that back additively; this
-/// blurs the subtree uniformly and composites it normally, so dark pixels
-/// smear exactly as much as bright ones and nothing ever gets brighter. It
-/// reads as a soft glow on light-on-dark content, which is what it is for.
+/// SkiaCanvas thresholds the subtree (only pixels brighter than `threshold`
+/// contribute), blurs the survivors by `radius`, and composites them back
+/// additively (kPlus) so bright regions bleed a glow past their edges. Backends
+/// without offscreen post-processing degrade to a plain blurred layer (the base
+/// `save_layer_with_bloom` default); RecordingCanvas records the bloom intent
+/// so headless tests can assert it.
 ///
-/// It is also not HDR-aware, and cannot be: every Pulp surface is 8-bit
-/// unorm + sRGB (see `core/render/`), so there is no headroom above 1.0 to
-/// threshold against. An earlier revision claimed both "HDR-aware" and a
-/// `threshold` knob "implemented in SkiaCanvas" — neither was true. The
-/// threshold knob was removed rather than left inert; `Canvas::set_bloom()`,
-/// which it fed, was a no-op with no override in any backend.
-///
-/// A real bloom would bright-pass + blur + additively composite via
-/// `SkImageFilters::Blend(kPlus, ...)` on the layer paint, which belongs in
-/// `save_layer_with_filters` rather than a standalone setter. Whoever lands it
-/// must update this comment and the test that pins the approximation.
+/// `threshold` is a brightness cutoff WITHIN the 8-bit [0,1] range — Pulp
+/// surfaces are 8-bit unorm + sRGB (see `core/render/`), so this is a
+/// low-dynamic-range bloom, not HDR headroom above 1.0. That is enough for the
+/// light-on-dark glow it exists for; a true HDR bloom would need a float color
+/// pipeline Pulp does not have.
 struct GpuBloomEffect : ViewEffect {
-    float intensity = 0.5f;  ///< Scales the blur radius. Not a brightness gain.
-    float radius = 8.0f;     ///< Base blur radius, in pixels, before `intensity`.
+    float threshold = 0.8f;  ///< Brightness cutoff in [0,1]; below it, no glow.
+    float intensity = 0.5f;  ///< Glow gain applied to the thresholded highlights.
+    float radius = 8.0f;     ///< Blur radius (px) of the glow.
 
     void configure_layer(Canvas& canvas, float x, float y, float w, float h) override {
-        canvas.save_layer(x, y, w, h, 1.0f, radius * intensity);
+        // Real bloom: SkiaCanvas thresholds + blurs + additively composites the
+        // glow; other backends degrade to a plain blurred layer (base default).
+        canvas.save_layer_with_bloom(x, y, w, h, intensity, threshold, radius);
     }
 };
 
-/// Chromatic aberration — RGB channel offset for a glitch/lens effect.
-/// Chromatic aberration — RGB channel offset for glitch/lens effect.
-/// Requires the full GPU post-effect pipeline (render to texture, apply
-/// SkSL shader, composite back). Currently applies a subtle color-shift
-/// approximation via layer opacity. Full per-channel offset requires
-/// SkImageFilter::MakeColorFilter with channel matrices.
+/// Chromatic aberration — real per-channel RGB offset for a glitch/lens effect.
+/// Post-processes the painted subtree via the SkSL child-shader compositor:
+/// the red channel samples `offset` px to one side and blue `offset` px to the
+/// other, so edges fringe red on one side and blue on the other. On non-Skia
+/// backends the compositor falls back to a plain (unfiltered) layer.
 struct ChromaticAberrationEffect : ViewEffect {
     float offset = 2.0f;  ///< Pixel offset between channels
 
     void configure_layer(Canvas& canvas, float x, float y, float w, float h) override {
-        // The full implementation needs per-channel offset rendering.
-        // Approximation: subtle blur simulates the softness of chromatic aberration.
-        canvas.save_layer(x, y, w, h, 1.0f, offset * 0.5f);
+        Canvas::ShaderUniforms u;
+        u.value = offset;  // per-channel offset (px), passed via `value`
+        canvas.save_layer_with_sksl_post_effect(
+            x, y, w, h,
+            "uniform shader content;"
+            "uniform float value;"
+            "half4 main(float2 xy) {"
+            "  return half4(content.eval(xy + float2(value, 0.0)).r,"
+            "               content.eval(xy).g,"
+            "               content.eval(xy - float2(value, 0.0)).b,"
+            "               content.eval(xy).a);"
+            "}",
+            u, /*sample_radius=*/offset);
     }
 };
 
-/// Vignette — darken edges of the view by drawing a radial gradient overlay.
-/// The overlay is drawn ON TOP of the content after the subtree paints,
-/// so we use needs_layer=false and instead paint the overlay in a post-paint hook.
-/// For now, we apply it as a slight opacity reduction on the layer.
+/// Vignette — darken the edges of the view by drawing a real radial-gradient
+/// overlay on top of the finished content: transparent at the center, fading to
+/// `edge_color` (scaled by `intensity`) at the corners. The overlay is painted
+/// in `paint_overlay()`, INSIDE the effect's compositing layer, so it darkens
+/// the edges rather than uniformly fading the whole view (the old
+/// approximation, which just reduced the layer opacity).
 struct VignetteEffect : ViewEffect {
-    float intensity = 0.5f;     ///< Darkening strength (0=none, 1=full black edges)
-    float radius = 0.75f;       ///< Fraction of view size where darkening starts
+    float intensity = 0.5f;     ///< Darkening strength (0=none, 1=full edge_color)
+    float radius = 0.75f;       ///< Fraction of view half-extent where darkening starts
     Color edge_color = Color::rgba(0.0f, 0.0f, 0.0f, 0.5f);
 
     void configure_layer(Canvas& canvas, float x, float y, float w, float h) override {
-        // Apply as a layer — the vignette darkening happens via reduced edge opacity.
-        // A full implementation would draw a radial gradient overlay after the content.
-        canvas.save_layer(x, y, w, h, 1.0f - intensity * 0.2f);
+        // Plain compositing layer; the darkening happens in paint_overlay().
+        canvas.save_layer(x, y, w, h, 1.0f, 0.0f);
+    }
+
+    void paint_overlay(Canvas& canvas, float x, float y,
+                       float w, float h) override {
+        if (intensity <= 0.0f || w <= 0.0f || h <= 0.0f) return;
+        const float cx = x + w * 0.5f;
+        const float cy = y + h * 0.5f;
+        const float outer = 0.5f * std::sqrt(w * w + h * h);  // center→corner
+        const float inner = radius * std::min(w, h) * 0.5f;   // darkening start
+        const float inner_frac =
+            outer > 0.0f ? std::min(inner / outer, 0.99f) : 0.0f;
+
+        const Color clear = Color::rgba(edge_color.r, edge_color.g,
+                                        edge_color.b, 0.0f);
+        const Color edge = Color::rgba(edge_color.r, edge_color.g, edge_color.b,
+                                       edge_color.a * intensity);
+        const Color colors[3] = {clear, clear, edge};
+        const float positions[3] = {0.0f, inner_frac, 1.0f};
+        canvas.set_fill_gradient_radial(cx, cy, outer, colors, positions, 3);
+        canvas.fill_rect(x, y, w, h);
+        canvas.clear_fill_gradient();
+    }
+};
+
+/// Arbitrary-SkSL view post-effect. Runs a child-shader over the finished
+/// subtree via `Canvas::save_layer_with_sksl_post_effect`; the SkSL must
+/// declare `uniform shader content` (sampled with `content.eval(xy)`). The JS
+/// bridge (`setViewEffect`) compiles/validates the source at install time and
+/// rejects a bad shader with its error, so a broken shader never installs
+/// silently. On non-Skia backends the compositor falls back to a plain layer.
+struct SkslPostEffect : ViewEffect {
+    std::string sksl;
+    float value = 0.0f;   ///< bound to the shader's `value` uniform when present
+    float time = 0.0f;    ///< bound to the shader's `time` uniform when present
+    /// Arbitrary named uniforms (name → float/vec) the shader declares — the
+    /// real user-facing surface. Bound guarded by findUniform.
+    std::vector<Canvas::NamedUniform> uniforms;
+    /// How the finished post-effect layer composites onto its parent.
+    /// `BlendMode::lighter` = additive glow. Default source-over.
+    Canvas::BlendMode blend_mode = Canvas::BlendMode::normal;
+    /// Max neighbor-sampling distance (px) for content.eval offsets.
+    float sample_radius = 0.0f;
+
+    void configure_layer(Canvas& canvas, float x, float y, float w, float h) override {
+        Canvas::ShaderUniforms u;
+        u.value = value;
+        u.time = time;
+        canvas.save_layer_with_sksl_post_effect(x, y, w, h, sksl, u,
+                                                sample_radius, uniforms, blend_mode);
     }
 };
 
@@ -107,9 +183,12 @@ struct VignetteEffect : ViewEffect {
 // here. It stored `sksl`, `value`, and `time` and then ignored all three —
 // `configure_layer()` pushed a plain layer, so setting one had no visual effect
 // whatsoever. Applying SkSL to already-rendered subtree content needs a
-// child-shader compositor (Skia's runtime-shader image filter) that Pulp does
-// not have yet; `draw_with_sksl()` fills a fresh rect and cannot post-process.
-// Widget body shaders — which do work — are `CustomShaderHost`.
+// child-shader compositor (Skia's runtime-shader image filter), which now
+// exists as `Canvas::save_layer_with_sksl_post_effect` (the SkSL declares
+// `uniform shader content`). A view post-effect can be built on it; note that
+// this is distinct from `draw_with_sksl()`, which fills a fresh rect from a
+// generative shader and cannot post-process. Widget body shaders — which do
+// work — are `CustomShaderHost`.
 
 /// Chains multiple effects in sequence.
 class EffectChain : public ViewEffect {
@@ -136,6 +215,14 @@ public:
 
     bool needs_layer() const override {
         return !effects_.empty();
+    }
+
+    /// Forward the overlay to every child (in order). Non-overlay effects have
+    /// an empty paint_overlay, so only the overlay-drawing ones (vignette) act.
+    void paint_overlay(Canvas& canvas, float x, float y,
+                       float w, float h) override {
+        for (auto& effect : effects_)
+            effect->paint_overlay(canvas, x, y, w, h);
     }
 
     const std::vector<std::shared_ptr<ViewEffect>>& effects() const { return effects_; }

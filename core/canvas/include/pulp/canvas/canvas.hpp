@@ -550,12 +550,27 @@ public:
     /// Stroke the current path.
     virtual void stroke_current_path() {}
 
-    // A `set_bloom()` was removed from here: documented as "implemented in
-    // SkiaCanvas", it had no override in any backend — the base no-op was the
-    // only implementation, so every call silently did nothing. A real bloom
-    // (bright-pass + blur + additive composite) needs the layer's own content,
-    // so it belongs on the layer paint in `save_layer_with_filters`, not a
-    // standalone setter. `GpuBloomEffect` approximates glow with a blur layer.
+    // ── Bloom / Glow post-effect ────────────────────────────────────────
+    /// Save a compositing layer that applies a real bloom/glow post-effect to
+    /// the subtree painted into it. The layer content is thresholded (only
+    /// pixels brighter than `threshold` contribute), blurred by `radius`, and
+    /// additively composited (kPlus) back over the original — so bright regions
+    /// bleed a glow beyond their edges. Restored by the matching `restore()`.
+    ///
+    /// @param intensity  glow gain applied to the thresholded highlights
+    /// @param threshold  brightness cutoff in [0,1]; pixels below it don't glow
+    /// @param radius     blur radius (px) of the glow
+    ///
+    /// The base implementation has no offscreen post-processing, so it degrades
+    /// to a plain blurred layer (`save_layer` with `radius * intensity` blur) —
+    /// the de-facto behavior effects had before a real bloom existed. Only the
+    /// GPU backend (SkiaCanvas) implements the true threshold+blur+additive
+    /// graph; RecordingCanvas records the bloom intent for headless assertions.
+    virtual void save_layer_with_bloom(float x, float y, float w, float h,
+                                       float intensity, float threshold,
+                                       float radius) {
+        save_layer(x, y, w, h, 1.0f, radius * intensity);
+    }
 
     // ── Shapes ───────────────────────────────────────────────────────────
     virtual void fill_rect(float x, float y, float w, float h) = 0;
@@ -1429,6 +1444,19 @@ public:
         Color thumb_color{};
     };
 
+    /// An arbitrary named shader uniform (name → float / vec2 / vec3 / vec4).
+    /// Lets a custom post-effect (`save_layer_with_sksl_post_effect`) accept any
+    /// uniform its shader declares, not just the fixed widget vocabulary above —
+    /// the difference between a real user-facing shader-effect API and a toy.
+    /// `count` selects the arity (1..4); only that many of `v` are read. Bound
+    /// via `SkRuntimeEffectBuilder::uniform(name)` guarded by `findUniform`, so
+    /// names the shader doesn't declare are ignored.
+    struct NamedUniform {
+        std::string name;
+        int count = 1;             ///< 1=float, 2=vec2, 3=vec3, 4=vec4
+        float v[4] = {0, 0, 0, 0};
+    };
+
     /// Validate and compile an SkSL shader without drawing. Returns error string (empty = success).
     /// Static so it can be called without a Canvas instance.
     /// Non-Skia builds return a non-empty "Skia not available" error rather than
@@ -1456,6 +1484,46 @@ public:
         set_fill_color(uniforms.fill_color.a > 0.0f ? uniforms.fill_color : Color::rgba(0.314f, 0.314f, 0.392f, 0.784f));
         fill_rect(x, y, w, h);
         return false; // shader not rendered
+    }
+
+    /// Save a compositing layer whose ALREADY-PAINTED content is post-processed
+    /// by a custom SkSL shader. Unlike `draw_with_sksl` (which fills a fresh
+    /// rect from a generative shader), this is a child-shader compositor: the
+    /// subtree paints into the layer, then on `restore()` the shader runs over
+    /// that content. The SkSL MUST declare `uniform shader content;` as its
+    /// child — `content.eval(xy)` samples the subtree's rendered pixels — e.g.
+    ///   uniform shader content;
+    ///   half4 main(float2 xy) { return content.eval(xy).bgra; }  // channel swap
+    /// The same fixed uniform vocabulary as `draw_with_sksl`
+    /// (resolution / value / time / accentColor / bgColor / trackColor /
+    /// fillColor / thumbColor) is bound when declared, PLUS any arbitrary
+    /// `extra_uniforms` (name → float/vec) the shader declares — guarded by
+    /// `findUniform`, so unknown names are ignored.
+    ///
+    /// `blend_mode` is how the finished post-effect layer composites back onto
+    /// its parent (default source-over). `BlendMode::lighter` gives the additive
+    /// audio-UI glow pattern.
+    ///
+    /// `sample_radius` is the maximum distance (px) the shader may sample
+    /// `content.eval()` away from the pixel being shaded — Skia needs this so a
+    /// shader that reads neighboring texels (e.g. chromatic aberration's
+    /// per-channel offset) gets valid samples near the layer edge instead of
+    /// transparent black. Leave 0 for shaders that only read the current pixel.
+    ///
+    /// Returns true when the shader was installed on the layer. Only the GPU
+    /// backend (SkiaCanvas) implements it; the base falls back to a plain
+    /// `save_layer` (still balanced — the subtree renders unfiltered) and
+    /// returns false so callers can log the unsupported path once.
+    virtual bool save_layer_with_sksl_post_effect(
+            float x, float y, float w, float h,
+            const std::string& sksl, const ShaderUniforms& uniforms,
+            float sample_radius = 0.0f,
+            const std::vector<NamedUniform>& extra_uniforms = {},
+            BlendMode blend_mode = BlendMode::normal) {
+        (void)sksl; (void)uniforms; (void)sample_radius;
+        (void)extra_uniforms; (void)blend_mode;
+        save_layer(x, y, w, h, 1.0f, 0.0f);
+        return false;
     }
 
     // ── Image transforms, fitting, and tiling ───────────────────────────

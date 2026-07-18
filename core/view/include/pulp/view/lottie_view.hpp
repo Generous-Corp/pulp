@@ -57,6 +57,11 @@ public:
 private:
     void subscribe_clock();
     void unsubscribe_clock();
+    // Paint a bordered "Lottie unavailable" placeholder when Lottie is compiled
+    // out of this build, so a disabled build reads as intentionally-unavailable
+    // rather than a silently blank box (mirrors the ImageView missing-image
+    // placeholder). Logs the reason once per view instance.
+    void paint_unsupported_placeholder(canvas::Canvas& canvas);
 
     std::unique_ptr<canvas::LottieAnimation> animation_;
     double time_ = 0.0;
@@ -64,6 +69,7 @@ private:
     bool playing_ = true;
     bool looping_ = true;
     int clock_subscription_ = -1;
+    bool unsupported_logged_ = false;
 };
 
 }  // namespace pulp::view

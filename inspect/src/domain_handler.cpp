@@ -614,36 +614,29 @@ InspectorMessage DomainHandler::handle_performance(const InspectorMessage& req) 
             obj.addMember("budget_ms", choc::value::createFloat64(rpm_->budget()));
             obj.addMember("over_budget", choc::value::createBool(rpm_->over_budget()));
 
-            // Per-pass timing carries both clocks.
+            // Per-pass timing reports CPU wall-time only.
             //  - `time_ms`/`cpu_time_ms`: CPU wall-time around draw
-            //    submission (unchanged; legacy `time_ms` kept for
-            //    back-compat with overlay consumers).
-            //  - `gpu_time_ms`: true GPU-side execution time from Dawn
-            //    timestamp queries, only meaningful when `gpu_time_valid`.
-            // `gpu_timing_available` lets the inspector pick between a
-            // CPU-vs-GPU view and an honest "GPU timestamps unavailable".
+            //    submission (legacy `time_ms` kept for back-compat with
+            //    overlay consumers).
+            // There is deliberately NO per-pass GPU number: Skia Graphite owns
+            // the command encoders, so Pulp cannot inject per-pass timestamp
+            // writes from outside. Per-pass GPU timing is structurally
+            // unavailable under Graphite; the honest GPU clock is the
+            // frame-level whole-recording number below.
             auto passes = choc::value::createEmptyArray();
             for (auto& p : rpm_->passes()) {
                 auto pass = choc::value::createObject("");
                 pass.addMember("draw_calls", choc::value::createInt32(p.draw_calls));
                 pass.addMember("time_ms", choc::value::createFloat64(p.time_ms));
                 pass.addMember("cpu_time_ms", choc::value::createFloat64(p.cpu_time_ms()));
-                pass.addMember("gpu_time_ms", choc::value::createFloat64(p.gpu_time_ms));
-                pass.addMember("gpu_time_valid", choc::value::createBool(p.gpu_time_valid));
                 passes.addArrayElement(pass);
             }
             obj.addMember("passes", passes);
-            obj.addMember("gpu_timing_available",
-                          choc::value::createBool(rpm_->has_gpu_timing()));
 
             // Frame-level, whole-recording GPU *render* time (Skia
-            // Graphite GpuStats elapsed time), distinct from the
-            // per-pass `gpu_time_ms` above. The per-pass numbers are
-            // Dawn-timestamp-query per-pass durations; this is the GPU
-            // clock for the entire render recording, which is the only
+            // Graphite GpuStats elapsed time). This is the only GPU-clock
             // granularity the Graphite path exposes.
-            // `gpu_render_timing_available` gates it just like the
-            // per-pass `gpu_timing_available`.
+            // `gpu_render_timing_available` gates it honestly.
             obj.addMember("gpu_render_time_ms",
                           choc::value::createFloat64(rpm_->gpu_render_time_ms()));
             obj.addMember("gpu_render_timing_available",

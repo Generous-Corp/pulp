@@ -61,31 +61,43 @@ void SkiaCanvas::set_opacity(float alpha) {
     (void)alpha; // Handled via save_layer in paint_all
 }
 
-void SkiaCanvas::save_layer(float x, float y, float w, float h,
-                             float opacity, float blur_radius) {
-    if (!canvas_) { save(); return; }
-
+// Shared saveLayer for every compositing-layer entry point. See the header for
+// the parameter contract. Consolidates what were four near-identical bodies
+// (opacity, blend, bloom, filter chain) and the SkSL post-effect.
+void SkiaCanvas::push_layer(float x, float y, float w, float h,
+                            float opacity, float blur_radius,
+                            Canvas::BlendMode mode,
+                            sk_sp<SkImageFilter> image_filter,
+                            bool force_non_opaque) {
     SkRect bounds = SkRect::MakeXYWH(x, y, w, h);
     SkPaint layer_paint;
-
-    // Set layer opacity (composited when the layer is restored)
     if (opacity < 1.0f) {
         layer_paint.setAlphaf(opacity);
     }
-
-    // Optionally apply blur as an image filter on the layer
-    if (blur_radius > 0.0f) {
+    // A caller-supplied image filter (blur chain, bloom, runtime shader) takes
+    // precedence; otherwise a plain blur radius becomes a Gaussian blur filter.
+    if (image_filter) {
+        layer_paint.setImageFilter(std::move(image_filter));
+    } else if (blur_radius > 0.0f) {
         layer_paint.setImageFilter(
             SkImageFilters::Blur(blur_radius, blur_radius, SkTileMode::kClamp, nullptr));
     }
-
+    if (mode != Canvas::BlendMode::normal) {
+        layer_paint.setBlendMode(skia_blend_mode_for(mode));
+    }
     canvas_->saveLayer(&bounds, &layer_paint);
-
-    // Record that this layer's destination is non-opaque so text-paint paths
-    // inside it use greyscale AA.
-    if (opacity < 1.0f) {
+    // Track non-opaque destinations so text-paint paths inside pick greyscale AA
+    // over LCD subpixel AA (browser parity). A filter chain can reduce coverage
+    // below opaque even with opacity == 1 (force_non_opaque).
+    if (opacity < 1.0f || force_non_opaque) {
         non_opaque_layer_stack_.push_back(canvas_->getSaveCount());
     }
+}
+
+void SkiaCanvas::save_layer(float x, float y, float w, float h,
+                             float opacity, float blur_radius) {
+    if (!canvas_) { save(); return; }
+    push_layer(x, y, w, h, opacity, blur_radius, Canvas::BlendMode::normal, nullptr);
 }
 
 // saveLayer with explicit blend mode. The layer-paint's blend mode is the one
@@ -96,30 +108,55 @@ void SkiaCanvas::save_layer_with_blend(float x, float y, float w, float h,
                                        float opacity, float blur_radius,
                                        Canvas::BlendMode mode) {
     if (!canvas_) { save(); return; }
-
-    SkRect bounds = SkRect::MakeXYWH(x, y, w, h);
-    SkPaint layer_paint;
-
-    if (opacity < 1.0f) {
-        layer_paint.setAlphaf(opacity);
-    }
-    if (blur_radius > 0.0f) {
-        layer_paint.setImageFilter(
-            SkImageFilters::Blur(blur_radius, blur_radius, SkTileMode::kClamp, nullptr));
-    }
-    if (mode != Canvas::BlendMode::normal) {
-        layer_paint.setBlendMode(skia_blend_mode_for(mode));
-    }
-
-    canvas_->saveLayer(&bounds, &layer_paint);
-
-    // Mirror save_layer(): track non-opaque layers so text inside them picks
-    // greyscale AA over LCD subpixel AA.
-    if (opacity < 1.0f) {
-        non_opaque_layer_stack_.push_back(canvas_->getSaveCount());
-    }
+    push_layer(x, y, w, h, opacity, blur_radius, mode, nullptr);
 }
 
+
+// Real bloom / glow post-effect.
+//
+// Threshold the layer content (keep only pixels brighter than `threshold`,
+// gained by `intensity`), blur the result, and additively composite (kPlus)
+// that glow back over the original layer content — so bright regions bleed a
+// halo beyond their edges. Restored by the matching restore() like any layer.
+//
+//   out_rgb   = clamp((in_rgb   - threshold) * g)      // thresholded highlight
+//   out_alpha = clamp((luma(in) - threshold) * g)      // luma-gated so that
+//                                                        // below-threshold
+//                                                        // regions glow nothing
+//   layer     = source + blur(out)                     // additive bloom
+//
+// Gating alpha by luminance (rather than leaving it identity) matters: a plain
+// identity-alpha threshold matrix would spread a faint alpha halo from
+// below-threshold regions even though their color is zero. SkColorFilters::
+// Matrix operates on UNPREMUL color, and — verified by pixel readback in
+// test_canvas.cpp — the translation column is in NORMALIZED [0,1] space in this
+// Skia build, so the bias is -threshold*g (no 255 scale).
+void SkiaCanvas::save_layer_with_bloom(float x, float y, float w, float h,
+                                       float intensity, float threshold,
+                                       float radius) {
+    if (!canvas_) { save(); return; }
+
+    const float denom = std::max(1.0f - threshold, 0.05f);
+    const float g = intensity / denom;
+    const float bias = -threshold * g;
+    // Rec.709 luma weights for the alpha (glow) gate.
+    const float lr = 0.2126f * g, lg = 0.7152f * g, lb = 0.0722f * g;
+    float m[20] = {
+        g,  0,  0,  0, bias,
+        0,  g,  0,  0, bias,
+        0,  0,  g,  0, bias,
+        lr, lg, lb, 0, bias,
+    };
+    sk_sp<SkImageFilter> thresholded =
+        SkImageFilters::ColorFilter(SkColorFilters::Matrix(m), nullptr);
+    sk_sp<SkImageFilter> glow = SkImageFilters::Blur(
+        radius, radius, SkTileMode::kClamp, std::move(thresholded));
+    sk_sp<SkImageFilter> bloom = SkImageFilters::Blend(
+        SkBlendMode::kPlus, /*background=*/nullptr, /*foreground=*/std::move(glow));
+
+    push_layer(x, y, w, h, /*opacity=*/1.0f, /*blur=*/0.0f,
+               Canvas::BlendMode::normal, std::move(bloom));
+}
 
 // Full CSS filter chain composition.
 //
@@ -137,8 +174,6 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
                                           const FilterChainEntry* chain,
                                           int count) {
     if (!canvas_) { save(); return; }
-    SkRect bounds = SkRect::MakeXYWH(x, y, w, h);
-    SkPaint layer_paint;
 
     // Walk the chain. Build a single composed image filter per CSS
     // semantics: filters are applied in source order, so chain[0] is
@@ -150,6 +185,16 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
             ? SkImageFilters::Compose(std::move(next), std::move(composed))
             : std::move(next);
     };
+
+    // A filter chain can drive the layer's destination below full opacity even
+    // when the `opacity` parameter is 1 — a `Kind::opacity` entry reduces alpha
+    // via a color matrix INSIDE the composed filter, and drop-shadow adds
+    // partially-transparent pixels. Text painted into such a layer needs
+    // greyscale AA (not LCD subpixel), same as a plain opacity layer. Track it
+    // so push_layer marks the layer non-opaque. Without this, glyphs inside
+    // `filter: opacity(0.5)` render LCD-fringed while plain `opacity: 0.5` is
+    // correct.
+    bool reduces_coverage = false;
 
     for (int i = 0; i < count; ++i) {
         const FilterChainEntry& f = chain[i];
@@ -170,6 +215,7 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
                 // AFTER the shadow was generated, which produces a different
                 // and incorrect result for `opacity(0.5) drop-shadow(...)`.
                 const float a = std::min(std::max(f.amount, 0.0f), 1.0f);
+                if (a < 1.0f) reduces_coverage = true;
                 float m[20] = {
                     1, 0, 0, 0, 0,
                     0, 1, 0, 0, 0,
@@ -195,12 +241,13 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
             }
             case FilterChainEntry::Kind::contrast: {
                 // Per CSS — c=amount, slope=c, intercept=0.5*(1-c).
-                // SkColorFilters::Matrix expects the translation column in
-                // 0..255 space, so the bias term is multiplied by 255 to land
-                // at mid-gray for contrast(0). The slope multipliers stay
-                // normalized.
+                // SkColorFilters::Matrix's translation column is NORMALIZED
+                // [0,1] (not 0..255 — verified by pixel readback here and in the
+                // bloom path), so the bias is 0.5*(1-c). contrast(0) → 0.5 on
+                // every channel = mid-gray. (A prior *255 scale blew this out to
+                // white, masked by a [!mayfail] tag.)
                 const float c = f.amount;
-                const float t = 0.5f * (1.0f - c) * 255.0f;
+                const float t = 0.5f * (1.0f - c);
                 float m[20] = {
                     c, 0, 0, 0, t,
                     0, c, 0, 0, t,
@@ -244,12 +291,14 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
             }
             case FilterChainEntry::Kind::invert: {
                 // Per CSS spec — amount=1 fully inverts, amount=0 is identity.
-                // SkColorFilters::Matrix expects the translation column in
-                // 0..255 space, so the bias term `a` is multiplied by 255 to
-                // map black->white at invert(1).
+                // SkColorFilters::Matrix's translation column is NORMALIZED
+                // [0,1], so the bias is `a` (not a*255). invert(1): k=-1, t=1 →
+                // black(0)→1=white, white(1)→-1+1=0=black. (A prior *255 scale
+                // left white uninverted; black→white worked only by clamp
+                // accident, which is why the [!mayfail] black-only test passed.)
                 const float a = std::min(std::max(f.amount, 0.0f), 1.0f);
                 const float k = 1.0f - 2.0f * a;
-                const float t = a * 255.0f;
+                const float t = a;
                 float m[20] = {
                     k, 0, 0, 0, t,
                     0, k, 0, 0, t,
@@ -327,15 +376,8 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
         }
     }
 
-    if (composed) layer_paint.setImageFilter(composed);
-    if (opacity < 1.0f) layer_paint.setAlphaf(opacity);
-
-    canvas_->saveLayer(&bounds, &layer_paint);
-
-    // Track non-opaque destination for text-edging.
-    if (opacity < 1.0f) {
-        non_opaque_layer_stack_.push_back(canvas_->getSaveCount());
-    }
+    push_layer(x, y, w, h, opacity, /*blur=*/0.0f, Canvas::BlendMode::normal,
+               std::move(composed), /*force_non_opaque=*/reduces_coverage);
 }
 
 void SkiaCanvas::save_backdrop_filter(float x, float y, float w, float h,

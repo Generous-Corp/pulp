@@ -3,8 +3,11 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/sdf_atlas.hpp>
+#include <pulp/canvas/view_effect.hpp>
 #include <array>
+#include <atomic>
 #include <functional>
+#include <thread>
 #include <vector>
 
 #ifdef PULP_HAS_SKIA
@@ -329,13 +332,24 @@ TEST_CASE("Canvas fallback helpers record CPU-safe commands", "[canvas]") {
     REQUIRE(metrics.descent == Catch::Approx(5.0f));
     REQUIRE(metrics.line_height == Catch::Approx(24.0f));
 
+    // RecordingCanvas now records the layer intent as its own command instead
+    // of collapsing to a bare save(); the bounds/opacity/blur are captured.
     canvas.save_layer(1, 2, 3, 4, 0.5f, 6.0f);
-    REQUIRE(canvas.count(DrawCommand::Type::save) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::save_layer) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::save) == 0);
+    const auto& layer = canvas.commands().back();
+    REQUIRE(layer.type == DrawCommand::Type::save_layer);
+    REQUIRE(layer.f[0] == Catch::Approx(1.0f));
+    REQUIRE(layer.f[4] == Catch::Approx(0.5f));  // opacity
+    REQUIRE(layer.f[5] == Catch::Approx(6.0f));  // blur
 
+    // The CPU-safe placeholder fill lives on the base Canvas::draw_with_sksl.
+    // RecordingCanvas overrides draw_with_sksl to record intent (see the
+    // dedicated recording test), so exercise the base fallback explicitly here.
     Canvas::ShaderUniforms uniforms;
     uniforms.fill_color = Color::rgba8(10, 20, 30, 40);
-    REQUIRE_FALSE(canvas.draw_with_sksl("half4 main(float2 p) { return half4(1); }",
-                                       4, 5, 6, 7, uniforms));
+    REQUIRE_FALSE(canvas.Canvas::draw_with_sksl(
+        "half4 main(float2 p) { return half4(1); }", 4, 5, 6, 7, uniforms));
 
     REQUIRE(canvas.count(DrawCommand::Type::fill_rect) == 1);
     const auto& fill_rect = canvas.commands().back();
@@ -344,6 +358,74 @@ TEST_CASE("Canvas fallback helpers record CPU-safe commands", "[canvas]") {
     REQUIRE(fill_rect.f[1] == Catch::Approx(5.0f));
     REQUIRE(fill_rect.f[2] == Catch::Approx(6.0f));
     REQUIRE(fill_rect.f[3] == Catch::Approx(7.0f));
+}
+
+// The recorder must SEE the save_layer family and sksl draws — before this,
+// every save_layer* collapsed to a bare save() and draw_with_sksl recorded
+// nothing, so a command-stream test could not tell an opacity/filter/blend/mask
+// compositing layer from a plain save(). That blind spot is exactly why the
+// effect facades (bloom/vignette/chromatic aberration) went undetected.
+TEST_CASE("RecordingCanvas records the save_layer family and sksl draws",
+          "[canvas][recording][save-layer]") {
+    RecordingCanvas rc;
+
+    const int depth_before = rc.save_count();
+
+    // save_layer_with_filters: a 2-entry blur chain (5px + 3px). The recorder
+    // captures the command, the raw filter count, and the effective (summed)
+    // blur — none of which a bare save() could carry.
+    Canvas::FilterChainEntry chain[2];
+    chain[0].kind = Canvas::FilterChainEntry::Kind::blur; chain[0].amount = 5.0f;
+    chain[1].kind = Canvas::FilterChainEntry::Kind::blur; chain[1].amount = 3.0f;
+    rc.save_layer_with_filters(0, 0, 100, 100, 1.0f, chain, 2);
+
+    REQUIRE(rc.count(DrawCommand::Type::save_layer_filters) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::save) == 0);  // NOT a bare save()
+    const auto& filt = rc.commands().back();
+    REQUIRE(filt.type == DrawCommand::Type::save_layer_filters);
+    REQUIRE(filt.f[5] == Catch::Approx(8.0f));       // summed blur
+    REQUIRE(filt.floats.size() == 1);
+    REQUIRE(filt.floats[0] == Catch::Approx(2.0f));  // filter count reached the canvas
+
+    // draw_with_sksl records a draw_sksl command, returns true (the recorder
+    // accepted the draw — the success path), and does NOT run the base CPU
+    // placeholder fill on the recorder.
+    Canvas::ShaderUniforms u;
+    u.value = 0.25f;
+    REQUIRE(rc.draw_with_sksl("half4 main(float2 p){return half4(1);}",
+                              1, 2, 3, 4, u));
+    REQUIRE(rc.count(DrawCommand::Type::draw_sksl) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::fill_rect) == 0);
+    const auto& sk = rc.commands().back();
+    REQUIRE(sk.text == "half4 main(float2 p){return half4(1);}");
+    REQUIRE(sk.f[0] == Catch::Approx(1.0f));
+    REQUIRE(sk.f[4] == Catch::Approx(0.25f));  // uniforms.value captured
+
+    // Each save_layer* increments the save stack by exactly one; restore pops it.
+    REQUIRE(rc.save_count() == depth_before + 1);
+    rc.restore();
+    REQUIRE(rc.save_count() == depth_before);
+
+    // The other three family members each record a distinct command; the blend
+    // mode and mask-image intent are captured.
+    rc.clear();
+    rc.save_layer(0, 0, 10, 10, 0.5f, 0.0f);
+    rc.save_layer_with_blend(0, 0, 10, 10, 1.0f, 0.0f, Canvas::BlendMode::multiply);
+    rc.save_layer_with_mask(0, 0, 10, 10, 1.0f, "linear-gradient(black,white)", "cover");
+    REQUIRE(rc.count(DrawCommand::Type::save_layer) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::save_layer_blend) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::save_layer_mask) == 1);
+
+    for (const auto& c : rc.commands()) {
+        if (c.type == DrawCommand::Type::save_layer_blend) {
+            REQUIRE(c.floats.size() == 1);
+            REQUIRE(static_cast<int>(c.floats[0]) ==
+                    static_cast<int>(Canvas::BlendMode::multiply));
+        }
+        if (c.type == DrawCommand::Type::save_layer_mask) {
+            REQUIRE(c.text == "linear-gradient(black,white)");
+        }
+    }
 }
 
 namespace {
@@ -867,8 +949,11 @@ TEST_CASE("Canvas fallbacks cover shader, clear, and shadow no-op paths",
           "[canvas][fallback]") {
     RecordingCanvas rc;
 
+    // Exercise the BASE Canvas::draw_with_sksl CPU fallback (fills a placeholder
+    // rect) — RecordingCanvas's own override records intent instead, so this
+    // test qualifies the call to reach the base contract it is asserting.
     Canvas::ShaderUniforms uniforms;
-    REQUIRE_FALSE(rc.draw_with_sksl("ignored", 1, 2, 3, 4, uniforms));
+    REQUIRE_FALSE(rc.Canvas::draw_with_sksl("ignored", 1, 2, 3, 4, uniforms));
     REQUIRE(rc.count(DrawCommand::Type::set_fill_color) == 1);
     REQUIRE(rc.count(DrawCommand::Type::fill_rect) == 1);
     REQUIRE(rc.commands()[1].f[0] == Catch::Approx(1.0f));
@@ -878,7 +963,7 @@ TEST_CASE("Canvas fallbacks cover shader, clear, and shadow no-op paths",
 
     rc.clear();
     uniforms.fill_color = Color::rgba8(11, 22, 33, 128);
-    REQUIRE_FALSE(rc.draw_with_sksl("ignored", 5, 6, 7, 8, uniforms));
+    REQUIRE_FALSE(rc.Canvas::draw_with_sksl("ignored", 5, 6, 7, 8, uniforms));
     REQUIRE(rc.commands()[0].color.r8() == 11);
     REQUIRE(rc.commands()[0].color.g8() == 22);
     REQUIRE(rc.commands()[0].color.b8() == 33);
@@ -1401,6 +1486,374 @@ TEST_CASE("LottieAnimation composites skottie frames onto a SkiaCanvas",
     REQUIRE(painted > static_cast<std::size_t>(px) * px / 2);
 }
 
+// Real bloom must bleed a glow beyond a bright region's edge, and must NOT bleed
+// from a region below the brightness threshold. This is a pixel-readback proof
+// of SkiaCanvas::save_layer_with_bloom — the fake `set_bloom` it replaced was a
+// no-op, so a bloom "test" could only ever assert that some command ran.
+TEST_CASE("SkiaCanvas save_layer_with_bloom bleeds bright highlights past their edge",
+          "[canvas][skia][bloom][save-layer]") {
+    auto make_surface = []() {
+        SkImageInfo info = SkImageInfo::Make(64, 64, kN32_SkColorType,
+                                             kPremul_SkAlphaType,
+                                             SkColorSpace::MakeSRGB());
+        return SkSurfaces::Raster(info);
+    };
+    // The rect spans x:28..36; sample x=38 (2px right of the edge), y=32 —
+    // close enough that the Gaussian glow is well above the 8-bit floor, but
+    // still strictly outside the painted rect.
+    constexpr int kProbeX = 38, kProbeY = 32;
+
+    // (a) A bright (white) rect above threshold bleeds a glow OUTSIDE its edge.
+    {
+        auto surface = make_surface();
+        surface->getCanvas()->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(surface->getCanvas());
+        canvas.save_layer_with_bloom(0, 0, 64, 64, /*intensity=*/0.8f,
+                                     /*threshold=*/0.5f, /*radius=*/8.0f);
+        canvas.set_fill_color(Color::rgba8(255, 255, 255, 255));
+        canvas.fill_rect(28, 28, 8, 8);
+        canvas.restore();
+
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        SkColor out = pm.getColor(kProbeX, kProbeY);
+        unsigned lum = SkColorGetR(out) + SkColorGetG(out) + SkColorGetB(out);
+        INFO("bright-rect outside luminance = " << lum);
+        REQUIRE(lum > 0u);  // the glow bled past the rect edge
+    }
+
+    // (b) A dim (0.2 grey) rect below threshold produces NO glow — outside stays
+    //     at the background. Same geometry, same probe.
+    {
+        auto surface = make_surface();
+        surface->getCanvas()->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(surface->getCanvas());
+        canvas.save_layer_with_bloom(0, 0, 64, 64, 0.8f, 0.5f, 8.0f);
+        canvas.set_fill_color(Color::rgba8(51, 51, 51, 255));  // 0.2 grey < 0.5
+        canvas.fill_rect(28, 28, 8, 8);
+        canvas.restore();
+
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        SkColor out = pm.getColor(kProbeX, kProbeY);
+        unsigned lum = SkColorGetR(out) + SkColorGetG(out) + SkColorGetB(out);
+        INFO("dim-rect outside luminance = " << lum);
+        REQUIRE(lum == 0u);  // below threshold: no bleed
+    }
+}
+
+// Bloom must scale ONLY the additive bleed: the opaque center of a bright
+// region stays undimmed and independent of intensity (source + glow, clamped),
+// and a large radius stays stable (no NaN / garbage / black-out).
+TEST_CASE("SkiaCanvas save_layer_with_bloom preserves the source and is stable at large radius",
+          "[canvas][skia][bloom][save-layer]") {
+    auto make_surface = []() {
+        SkImageInfo info = SkImageInfo::Make(64, 64, kN32_SkColorType,
+                                             kPremul_SkAlphaType,
+                                             SkColorSpace::MakeSRGB());
+        return SkSurfaces::Raster(info);
+    };
+
+    // Center luminance of a white rect, optionally through bloom at `intensity`.
+    auto center_lum = [&](bool bloom, float intensity) -> unsigned {
+        auto surface = make_surface();
+        surface->getCanvas()->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(surface->getCanvas());
+        if (bloom) canvas.save_layer_with_bloom(0, 0, 64, 64, intensity, 0.5f, 8.0f);
+        else       canvas.save_layer(0, 0, 64, 64, 1.0f, 0.0f);
+        canvas.set_fill_color(Color::rgba8(255, 255, 255, 255));
+        canvas.fill_rect(16, 16, 32, 32);
+        canvas.restore();
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        SkColor c = pm.getColor(32, 32);
+        return static_cast<unsigned>(SkColorGetR(c) + SkColorGetG(c) + SkColorGetB(c));
+    };
+
+    // (a) Center undimmed vs no-bloom, and identical across intensities — the
+    // original content is preserved; intensity scales only the bleed.
+    const unsigned baseline = center_lum(false, 0.0f);
+    REQUIRE(baseline > 740u);                     // ~765 (opaque white)
+    REQUIRE(center_lum(true, 0.8f) == baseline);  // undimmed by bloom
+    REQUIRE(center_lum(true, 0.2f) == baseline);  // and independent of intensity
+
+    // (b) Large radius is stable: center still fully bright, and an outside
+    // pixel is a finite, in-range value (never NaN/garbage).
+    {
+        auto surface = make_surface();
+        surface->getCanvas()->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(surface->getCanvas());
+        canvas.save_layer_with_bloom(0, 0, 64, 64, 0.8f, 0.5f, /*radius=*/32.0f);
+        canvas.set_fill_color(Color::rgba8(255, 255, 255, 255));
+        canvas.fill_rect(24, 24, 16, 16);
+        canvas.restore();
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        SkColor center = pm.getColor(32, 32);
+        REQUIRE(SkColorGetR(center) > 200);  // not blacked out
+        SkColor out = pm.getColor(52, 32);
+        unsigned lum = SkColorGetR(out) + SkColorGetG(out) + SkColorGetB(out);
+        REQUIRE(lum <= 765u);  // in range (readback can't be NaN; guards garbage)
+    }
+}
+
+// The child-shader compositor must post-process ALREADY-PAINTED layer content
+// (unlike draw_with_sksl, which fills a fresh rect). Prove it with a channel
+// swap, and prove the failure paths fall back to a plain unfiltered layer so
+// the subtree is never lost.
+TEST_CASE("SkiaCanvas save_layer_with_sksl_post_effect post-processes layer content",
+          "[canvas][skia][sksl-post-effect][save-layer]") {
+    auto make_surface = []() {
+        SkImageInfo info = SkImageInfo::Make(32, 32, kN32_SkColorType,
+                                             kPremul_SkAlphaType,
+                                             SkColorSpace::MakeSRGB());
+        return SkSurfaces::Raster(info);
+    };
+
+    // (a) A channel-swap post-effect (content.bgra) turns a red subtree blue.
+    {
+        auto surface = make_surface();
+        surface->getCanvas()->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(surface->getCanvas());
+        Canvas::ShaderUniforms u;
+        REQUIRE(canvas.save_layer_with_sksl_post_effect(
+            0, 0, 32, 32,
+            "uniform shader content;"
+            "half4 main(float2 xy) { return content.eval(xy).bgra; }", u));
+        canvas.set_fill_color(Color::rgba8(255, 0, 0, 255));  // red subtree
+        canvas.fill_rect(0, 0, 32, 32);
+        canvas.restore();
+
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        SkColor c = pm.getColor(16, 16);
+        INFO("swapped pixel rgb=(" << SkColorGetR(c) << ","
+             << SkColorGetG(c) << "," << SkColorGetB(c) << ")");
+        REQUIRE(SkColorGetB(c) > 200);  // red became blue
+        REQUIRE(SkColorGetR(c) < 60);
+    }
+
+    // (b) Invalid SkSL: returns false and the subtree still renders unfiltered.
+    {
+        auto surface = make_surface();
+        surface->getCanvas()->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(surface->getCanvas());
+        Canvas::ShaderUniforms u;
+        REQUIRE_FALSE(canvas.save_layer_with_sksl_post_effect(
+            0, 0, 32, 32, "this is not valid sksl {{{", u));
+        canvas.set_fill_color(Color::rgba8(255, 0, 0, 255));
+        canvas.fill_rect(0, 0, 32, 32);
+        canvas.restore();
+
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        SkColor c = pm.getColor(16, 16);
+        REQUIRE(SkColorGetR(c) > 200);  // unfiltered: still red
+        REQUIRE(SkColorGetB(c) < 60);
+    }
+
+    // (c) A valid but generative shader (no `content` child) also falls back:
+    //     it cannot post-process, so return false and render the subtree plain.
+    {
+        auto surface = make_surface();
+        surface->getCanvas()->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(surface->getCanvas());
+        Canvas::ShaderUniforms u;
+        REQUIRE_FALSE(canvas.save_layer_with_sksl_post_effect(
+            0, 0, 32, 32,
+            "half4 main(float2 xy) { return half4(0, 1, 0, 1); }", u));
+        canvas.set_fill_color(Color::rgba8(255, 0, 0, 255));
+        canvas.fill_rect(0, 0, 32, 32);
+        canvas.restore();
+
+        SkPixmap pm;
+        REQUIRE(surface->peekPixels(&pm));
+        SkColor c = pm.getColor(16, 16);
+        REQUIRE(SkColorGetR(c) > 200);  // subtree preserved, not replaced by green
+        REQUIRE(SkColorGetG(c) < 60);
+    }
+}
+
+// A real shader-effect API accepts ARBITRARY named uniforms, not just the fixed
+// widget vocabulary — the difference between a user-facing effect API and a toy.
+TEST_CASE("SkiaCanvas sksl post-effect binds arbitrary named uniforms",
+          "[canvas][skia][sksl-post-effect][save-layer]") {
+    SkImageInfo info = SkImageInfo::Make(32, 32, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+    SkiaCanvas canvas(surface->getCanvas());
+
+    Canvas::ShaderUniforms u;
+    std::vector<Canvas::NamedUniform> extra;
+    Canvas::NamedUniform boost;
+    boost.name = "boost"; boost.count = 1; boost.v[0] = 2.0f;  // custom uniform
+    extra.push_back(boost);
+
+    REQUIRE(canvas.save_layer_with_sksl_post_effect(
+        0, 0, 32, 32,
+        "uniform shader content; uniform float boost;"
+        "half4 main(float2 xy) { half4 c = content.eval(xy); "
+        "return half4(c.rgb * boost, c.a); }",
+        u, /*sample_radius=*/0.0f, extra));
+    canvas.set_fill_color(Color::rgba8(100, 100, 100, 255));  // grey 100
+    canvas.fill_rect(0, 0, 32, 32);
+    canvas.restore();
+
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    SkColor c = pm.getColor(16, 16);
+    INFO("boosted grey r=" << SkColorGetR(c));
+    // grey 100 * boost 2 = ~200. An unbound `boost` would default to 0 (black),
+    // so a bright pixel proves the arbitrary uniform was actually bound.
+    REQUIRE(SkColorGetR(c) > 180);
+    REQUIRE(SkColorGetR(c) < 230);
+}
+
+// The post-effect layer must support a composite blend mode — the additive glow
+// (`lighter`/kPlus) is the audio-UI pattern — not source-over only.
+TEST_CASE("SkiaCanvas sksl post-effect composites with an additive blend mode",
+          "[canvas][skia][sksl-post-effect][save-layer]") {
+    SkImageInfo info = SkImageInfo::Make(32, 32, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+    SkiaCanvas canvas(surface->getCanvas());
+
+    // Input A: a grey-100 background painted before the layer.
+    canvas.set_fill_color(Color::rgba8(100, 100, 100, 255));
+    canvas.fill_rect(0, 0, 32, 32);
+
+    // Input B: the post-effect layer's own grey-100 content, passed through and
+    // composited additively (BlendMode::lighter). 100 + 100 = 200 — brighter
+    // than EITHER input; source-over would leave it at 100.
+    Canvas::ShaderUniforms u;
+    REQUIRE(canvas.save_layer_with_sksl_post_effect(
+        0, 0, 32, 32,
+        "uniform shader content; half4 main(float2 xy) { return content.eval(xy); }",
+        u, /*sample_radius=*/0.0f, /*extra_uniforms=*/{},
+        Canvas::BlendMode::lighter));
+    canvas.set_fill_color(Color::rgba8(100, 100, 100, 255));
+    canvas.fill_rect(0, 0, 32, 32);
+    canvas.restore();
+
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    SkColor c = pm.getColor(16, 16);
+    INFO("additive result r=" << SkColorGetR(c));
+    REQUIRE(SkColorGetR(c) > 150);  // brighter than either 100 input
+}
+
+// Real chromatic aberration: the ChromaticAberrationEffect must fringe a white
+// edge red on one side and blue on the other via the per-channel offset shader
+// (the effect it replaced only pushed a subtle uniform blur — no color split).
+TEST_CASE("ChromaticAberrationEffect splits color channels at an edge",
+          "[canvas][skia][chromatic][effect]") {
+    SkImageInfo info = SkImageInfo::Make(32, 32, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+    SkiaCanvas canvas(surface->getCanvas());
+
+    ChromaticAberrationEffect ca;
+    ca.offset = 4.0f;
+    ca.configure_layer(canvas, 0, 0, 32, 32);
+    // White rect spanning x:[12,20), full height.
+    canvas.set_fill_color(Color::rgba8(255, 255, 255, 255));
+    canvas.fill_rect(12, 0, 8, 32);
+    canvas.restore();
+
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    // 2px left of the left edge (x=10): red-dominant fringe.
+    SkColor left = pm.getColor(10, 16);
+    INFO("left fringe rgb=(" << SkColorGetR(left) << "," << SkColorGetG(left)
+         << "," << SkColorGetB(left) << ")");
+    REQUIRE(SkColorGetR(left) > 150);
+    REQUIRE(SkColorGetR(left) > SkColorGetB(left) + 60);
+    // 2px right of the right edge (x=22): blue-dominant fringe.
+    SkColor right = pm.getColor(22, 16);
+    INFO("right fringe rgb=(" << SkColorGetR(right) << "," << SkColorGetG(right)
+         << "," << SkColorGetB(right) << ")");
+    REQUIRE(SkColorGetB(right) > 150);
+    REQUIRE(SkColorGetB(right) > SkColorGetR(right) + 60);
+}
+
+// Real vignette: the corners must be darkened MORE than the center by the
+// radial-gradient overlay. The effect it replaced only reduced the whole
+// layer's opacity uniformly (no edge darkening at all).
+TEST_CASE("VignetteEffect darkens the corners more than the center",
+          "[canvas][skia][vignette][effect]") {
+    SkImageInfo info = SkImageInfo::Make(64, 64, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+    SkiaCanvas canvas(surface->getCanvas());
+
+    VignetteEffect vignette;
+    vignette.intensity = 0.8f;
+    // Mimic View::paint_all: open the layer, paint the subtree, overlay, pop.
+    vignette.configure_layer(canvas, 0, 0, 64, 64);
+    canvas.set_fill_color(Color::rgba8(128, 128, 128, 255));  // mid-grey subtree
+    canvas.fill_rect(0, 0, 64, 64);
+    vignette.paint_overlay(canvas, 0, 0, 64, 64);
+    canvas.restore();
+
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    SkColor center = pm.getColor(32, 32);
+    SkColor corner = pm.getColor(2, 2);
+    unsigned center_lum =
+        SkColorGetR(center) + SkColorGetG(center) + SkColorGetB(center);
+    unsigned corner_lum =
+        SkColorGetR(corner) + SkColorGetG(corner) + SkColorGetB(corner);
+    INFO("center_lum=" << center_lum << " corner_lum=" << corner_lum);
+    REQUIRE(corner_lum + 30 < center_lum);  // corners meaningfully darker
+}
+
+// Concurrent compiles must each get their OWN error. The RuntimeEffectCache
+// used to stash the last error in a shared member written between two lock
+// scopes, so two threads compiling different bad shaders could read each
+// other's error. Each thread here compiles a bad shader carrying a distinctive
+// identifier and asserts the returned error names ITS identifier — a race
+// would surface as the other thread's marker (or an empty error).
+TEST_CASE("compile_sksl reports each shader's own error under concurrent compiles",
+          "[canvas][shader][thread][compile]") {
+    std::atomic<int> good_failures{0};
+    std::atomic<int> mismatches{0};
+
+    auto run = [&](const char* marker) {
+        // `marker` is an undefined identifier, so the shader fails to compile
+        // and the SkSL error names it. A distinct marker per thread makes any
+        // cross-thread error attribution detectable.
+        const std::string bad =
+            std::string("half4 main(float2 p) { return ") + marker + "; }";
+        for (int i = 0; i < 300; ++i) {
+            // A shared good shader compiles (exercises the cache concurrently).
+            if (!Canvas::compile_sksl(
+                    "half4 main(float2 p) { return half4(1); }").empty()) {
+                ++good_failures;
+            }
+            const std::string err = Canvas::compile_sksl(bad);
+            if (err.empty() || err.find(marker) == std::string::npos) {
+                ++mismatches;
+            }
+        }
+    };
+
+    std::thread ta([&] { run("ZZMARKERAAA"); });
+    std::thread tb([&] { run("ZZMARKERBBB"); });
+    ta.join();
+    tb.join();
+
+    REQUIRE(good_failures.load() == 0);  // the good shader always compiled
+    REQUIRE(mismatches.load() == 0);     // no cross-thread error attribution
+}
+
 #endif  // PULP_HAS_SKIA
 
 
@@ -1742,6 +2195,56 @@ TEST_CASE("SkiaCanvas tracks non-opaque layers for text edging "
     }
 }
 
+// restore_to_count must run each closed mask layer's deferred kDstIn composite
+// (so the content is actually masked) AND not leak the PendingMask — a bare
+// SkCanvas::restoreToCount skipped both, leaving mask layers UNMASKED and the
+// stale mask queued to false-match a later same-depth layer (Skia reuses save
+// counts).
+TEST_CASE("SkiaCanvas restore_to_count applies pending masks without leaking them",
+          "[canvas][skia][mask][restore-to-count]") {
+    SkImageInfo info = SkImageInfo::Make(64, 64, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+    SkiaCanvas canvas(surface->getCanvas());
+
+    const int baseline = canvas.save_count();
+
+    // Open a mask layer whose mask fades white(opaque)->transparent left-to-right,
+    // fill it fully red, then close via restore_to_count (NOT restore()).
+    canvas.save_layer_with_mask(
+        0, 0, 64, 64, 1.0f,
+        "linear-gradient(to right, white, transparent)", "cover");
+    canvas.set_fill_color(Color::rgba8(255, 0, 0, 255));
+    canvas.fill_rect(0, 0, 64, 64);
+    canvas.restore_to_count(baseline);
+
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    SkColor left = pm.getColor(4, 32);    // mask opaque -> red present
+    SkColor right = pm.getColor(60, 32);  // mask transparent -> masked out
+    INFO("left.r=" << SkColorGetR(left) << " right.r=" << SkColorGetR(right));
+    REQUIRE(SkColorGetR(left) > 180);
+    // Masked out on the right (fixed ~47 from the mask's transparent edge; the
+    // bug left it UNMASKED at full red ~255 — the two are cleanly separated).
+    REQUIRE(SkColorGetR(right) < 90);
+
+    // A subsequent unrelated layer at the SAME depth must NOT inherit the mask:
+    // fill blue everywhere and assert the right edge (where a leaked mask would
+    // have hidden it) is fully blue.
+    canvas.save_layer(0, 0, 64, 64, 1.0f, 0.0f);
+    canvas.set_fill_color(Color::rgba8(0, 0, 255, 255));
+    canvas.fill_rect(0, 0, 64, 64);
+    canvas.restore();
+
+    REQUIRE(surface->peekPixels(&pm));
+    SkColor right2 = pm.getColor(60, 32);
+    INFO("right2.b=" << SkColorGetB(right2));
+    REQUIRE(SkColorGetB(right2) > 180);  // unrelated layer not masked
+}
+
 // End-to-end: render the same glyph twice into the same surface, once inside
 // save_layer(opacity = 0.5) and once outside, and verify the inside-layer
 // pixels show no LCD subpixel pattern. LCD AA produces unequal R / G / B
@@ -1829,5 +2332,69 @@ TEST_CASE("SkiaCanvas text inside opacity layer uses greyscale AA "
     // Core assertion — inside the opacity layer, the renderer used
     // greyscale AA, so glyph-edge pixels carry uniform R / G / B.
     REQUIRE(unequal_channel_pixels == 0);
+}
+
+// CSS `filter: opacity(0.5)` reduces coverage via a color matrix INSIDE the
+// filter chain — the layer's own opacity parameter stays 1 — so before WI-23
+// the non-opaque-layer tracking never fired and text rendered LCD-fringed,
+// unlike plain `opacity: 0.5`. The layer must be tracked non-opaque.
+TEST_CASE("SkiaCanvas text inside filter:opacity layer uses greyscale AA "
+          "(pulp #1899 gap #3, WI-23)", "[canvas][skia][filter-opacity][issue-1899]") {
+    // Direct: the mechanism that drives greyscale AA flips true for a filter
+    // chain whose opacity() entry reduces coverage, even at layer opacity == 1.
+    {
+        SkImageInfo info = SkImageInfo::Make(32, 32, kN32_SkColorType,
+                                             kPremul_SkAlphaType,
+                                             SkColorSpace::MakeSRGB());
+        auto surface = SkSurfaces::Raster(info);
+        REQUIRE(surface != nullptr);
+        SkiaCanvas canvas(surface->getCanvas());
+        Canvas::FilterChainEntry chain[1];
+        chain[0].kind = Canvas::FilterChainEntry::Kind::opacity;
+        chain[0].amount = 0.5f;
+        REQUIRE_FALSE(canvas.inside_non_opaque_layer());
+        canvas.save_layer_with_filters(0, 0, 32, 32, /*opacity=*/1.0f, chain, 1);
+        REQUIRE(canvas.inside_non_opaque_layer());
+        canvas.restore();
+        REQUIRE_FALSE(canvas.inside_non_opaque_layer());
+    }
+
+    // Pixel: glyph edges inside filter:opacity(0.5) carry uniform R/G/B
+    // (greyscale AA), matching the plain opacity:0.5 case above.
+    {
+        SkImageInfo info = SkImageInfo::Make(96, 32, kN32_SkColorType,
+                                             kPremul_SkAlphaType,
+                                             SkColorSpace::MakeSRGB());
+        auto layer_surface = SkSurfaces::Raster(info);
+        REQUIRE(layer_surface != nullptr);
+        auto* sc = layer_surface->getCanvas();
+        sc->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(sc);
+        Canvas::FilterChainEntry chain[1];
+        chain[0].kind = Canvas::FilterChainEntry::Kind::opacity;
+        chain[0].amount = 0.5f;
+        canvas.save_layer_with_filters(0, 0, 96, 32, /*opacity=*/1.0f, chain, 1);
+        canvas.set_font("Inter", 18.0f);
+        canvas.set_fill_color(Color::rgba8(255, 255, 255, 255));
+        canvas.fill_text("Hg", 4.0f, 24.0f);
+        canvas.restore();
+
+        SkImageInfo rinfo = SkImageInfo::Make(96, 32, kRGBA_8888_SkColorType,
+                                              kUnpremul_SkAlphaType,
+                                              SkColorSpace::MakeSRGB());
+        std::vector<uint8_t> pixels(96 * 32 * 4, 0);
+        REQUIRE(layer_surface->readPixels(rinfo, pixels.data(), 96 * 4, 0, 0));
+        int unequal = 0, edges = 0;
+        for (int i = 0; i < 96 * 32; ++i) {
+            const uint8_t r = pixels[i * 4 + 0];
+            const uint8_t g = pixels[i * 4 + 1];
+            const uint8_t b = pixels[i * 4 + 2];
+            const int maxc = std::max({r, g, b});
+            const int minc = std::min({r, g, b});
+            if (maxc > 4 && maxc < 250) { ++edges; if (maxc - minc > 1) ++unequal; }
+        }
+        REQUIRE(edges > 0);
+        REQUIRE(unequal == 0);
+    }
 }
 #endif // PULP_HAS_SKIA

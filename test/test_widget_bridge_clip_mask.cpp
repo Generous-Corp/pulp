@@ -58,6 +58,45 @@ TEST_CASE("WidgetBridge setClipPath stores SVG-path-d on the View",
     REQUIRE_FALSE(panel->has_clip_path());
 }
 
+// A CSS basic-shape / url() clip-path cannot be honored by the paint side (it
+// only parses an SVG path "d"). setClipPath must NAME the unsupported shape in
+// its result instead of silently clearing the clip (which reads like a
+// rendering bug) — the same "surface the reason" contract setWidgetShader uses.
+TEST_CASE("WidgetBridge setClipPath warns and drops unsupported basic-shape clip-paths",
+          "[view][bridge][issue-1515]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createPanel('p', '')");
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+
+    // circle(): dropped, but with a warning that names the shape.
+    auto circle = engine.evaluate("setClipPath('p', 'circle(40%)')");
+    REQUIRE_FALSE(circle["applied"].getWithDefault<bool>(true));
+    const std::string warn = circle["warning"].toString();
+    REQUIRE_FALSE(warn.empty());
+    REQUIRE(warn.find("circle(40%)") != std::string::npos);
+    REQUIRE_FALSE(panel->has_clip_path());  // no clip installed
+
+    // polygon(): likewise dropped with a warning.
+    auto poly = engine.evaluate("setClipPath('p', 'polygon(0 0, 100% 0, 50% 100%)')");
+    REQUIRE_FALSE(poly["applied"].getWithDefault<bool>(true));
+    REQUIRE_FALSE(poly["warning"].toString().empty());
+    REQUIRE_FALSE(panel->has_clip_path());
+
+    // A real path() still installs and reports applied=true, no warning.
+    auto ok = engine.evaluate(
+        "setClipPath('p', 'path(\"M 0 0 L 100 0 L 100 100 Z\")')");
+    REQUIRE(ok["applied"].getWithDefault<bool>(false));
+    REQUIRE(ok["warning"].toString().empty());
+    REQUIRE(panel->has_clip_path());
+    REQUIRE(panel->clip_path() == "M 0 0 L 100 0 L 100 100 Z");
+}
+
 // `setUserSelect` routes the CSS keyword to View::user_select_ and backs
 // the compat catalog's `supported` claim with bridge-level coverage. This
 // is the #1657 evidence gate for claims promoted out of `partial`.

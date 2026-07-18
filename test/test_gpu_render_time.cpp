@@ -73,10 +73,11 @@ TEST_CASE("GpuRenderTimeTracker retains the last good sample across no-sample fr
 }
 
 // ── RenderPassManager frame-level (whole-recording) GPU render time ──────────
-// Follow-up #2611 plumbing: a FRAME-level GPU render time on the manager,
-// distinct from the per-pass set_pass_gpu_time(). This is the value the
-// WindowHost forwards from SkiaSurface::gpu_render_time_ms() and that the
-// inspector surfaces as `gpu_render_time_ms`.
+// Follow-up #2611 plumbing: a FRAME-level GPU render time on the manager. This
+// is the ONLY GPU-clock granularity Pulp exposes — per-pass GPU timing is
+// structurally unavailable under Skia Graphite. It is the value the WindowHost
+// forwards from SkiaSurface::gpu_render_time_ms() and that the inspector
+// surfaces as `gpu_render_time_ms`.
 
 TEST_CASE("RenderPassManager frame GPU render time starts unavailable",
           "[render][gpu-render-time][render-pass][issue-2611]") {
@@ -127,7 +128,7 @@ TEST_CASE("RenderPassManager frame GPU validity resets on begin_frame",
     REQUIRE(rpm.gpu_render_time_ms() == 6.0f);
 }
 
-TEST_CASE("RenderPassManager frame GPU time is independent of per-pass GPU time",
+TEST_CASE("RenderPassManager frame GPU render time is independent of pass recording",
           "[render][gpu-render-time][render-pass][issue-2611]") {
     RenderPassManager rpm;
     rpm.begin_frame();
@@ -135,21 +136,22 @@ TEST_CASE("RenderPassManager frame GPU time is independent of per-pass GPU time"
     rpm.end_pass(5.0f, 10);
     rpm.end_frame();
 
-    // Per-pass GPU timing and frame-level GPU render time are separate seams.
-    REQUIRE_FALSE(rpm.has_gpu_timing());
+    // Recording a pass never fabricates a frame-level GPU sample. There is no
+    // per-pass GPU clock — it is structurally unavailable under Skia Graphite,
+    // which owns the command encoders — only the whole-recording frame number,
+    // fed on its own seam.
     REQUIRE_FALSE(rpm.gpu_render_timing_available());
 
-    // Set only the per-pass clock: frame-level stays unavailable.
-    rpm.set_pass_gpu_time(0, 2.0f);
-    REQUIRE(rpm.has_gpu_timing());
-    REQUIRE_FALSE(rpm.gpu_render_timing_available());
-
-    // Set only the frame-level clock on a fresh frame: per-pass stays empty.
-    rpm.begin_frame();
     rpm.set_gpu_render_time_ms(8.0f, true);
     REQUIRE(rpm.gpu_render_timing_available());
     REQUIRE(rpm.gpu_render_time_ms() == 8.0f);
-    REQUIRE_FALSE(rpm.has_gpu_timing());
+
+    // A fresh frame invalidates it until the next sample lands, regardless of
+    // any passes recorded in between.
+    rpm.begin_frame();
+    rpm.begin_pass(RenderPassType::overlay);
+    rpm.end_pass(3.0f, 2);
+    REQUIRE_FALSE(rpm.gpu_render_timing_available());
 }
 
 TEST_CASE("RenderPassManager handles empty pass endings and disabled budgets",

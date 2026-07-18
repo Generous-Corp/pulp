@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/view_effect.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/modal.hpp>
@@ -256,6 +257,78 @@ TEST_CASE("WidgetBridge shader and schema APIs apply to knob, fader, and toggle"
     REQUIRE(knob->widget_schema().empty());
     REQUIRE(fader->widget_schema().empty());
     REQUIRE(toggle->widget_schema().empty());
+}
+
+// The ViewEffect system (bloom / vignette / chromatic / custom SkSL) was
+// consumed by View::paint_all but had no JS entry point, so app authors could
+// not reach it at all. setViewEffect is that entry point.
+TEST_CASE("WidgetBridge setViewEffect installs, clears, and rejects bad shaders",
+          "[view][bridge][style][effect]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Install a bloom effect from JS on the root view.
+    auto r1 = engine.evaluate(
+        R"(setViewEffect('', '{"type":"bloom","intensity":0.7,"threshold":0.8,"radius":10}'))");
+    REQUIRE(r1["success"].getWithDefault<bool>(false));
+    REQUIRE(root.effect() != nullptr);
+
+    // Painting the view emits the bloom compositing layer (WI-1 records it).
+    {
+        pulp::canvas::RecordingCanvas rc;
+        root.paint_all(rc);
+        REQUIRE(rc.count(pulp::canvas::DrawCommand::Type::save_layer_bloom) >= 1);
+    }
+
+    // Clearing with JSON null removes the effect.
+    auto r2 = engine.evaluate("setViewEffect('', 'null')");
+    REQUIRE(r2["success"].getWithDefault<bool>(false));
+    REQUIRE(root.effect() == nullptr);
+
+    // An array installs an EffectChain (one layer per effect).
+    auto r3 = engine.evaluate(
+        R"(setViewEffect('', '[{"type":"blur","radius":4},{"type":"vignette","intensity":0.6}]'))");
+    REQUIRE(r3["success"].getWithDefault<bool>(false));
+    REQUIRE(root.effect() != nullptr);
+
+    // An unknown effect type is rejected with an error and leaves the effect
+    // unchanged (still the chain).
+    auto rbad = engine.evaluate(R"(setViewEffect('', '{"type":"bogus"}'))");
+    REQUIRE_FALSE(rbad["success"].getWithDefault<bool>(true));
+    REQUIRE_FALSE(rbad["error"].toString().empty());
+    REQUIRE(root.effect() != nullptr);
+
+#ifdef PULP_HAS_SKIA
+    // An invalid SkSL post-effect is compiled at install time and rejected;
+    // the previously-installed effect is untouched.
+    auto rsksl_bad = engine.evaluate(
+        R"(setViewEffect('', '{"type":"sksl","source":"not valid sksl {{{"}'))");
+    REQUIRE_FALSE(rsksl_bad["success"].getWithDefault<bool>(true));
+    REQUIRE_FALSE(rsksl_bad["error"].toString().empty());
+    REQUIRE(root.effect() != nullptr);
+
+    // A valid SkSL post-effect (declares `uniform shader content`) installs.
+    auto rsksl_ok = engine.evaluate(
+        R"(setViewEffect('', '{"type":"sksl","source":"uniform shader content; half4 main(float2 xy){ return content.eval(xy); }"}'))");
+    REQUIRE(rsksl_ok["success"].getWithDefault<bool>(false));
+    REQUIRE(root.effect() != nullptr);
+
+    // The sksl descriptor's ARBITRARY named uniforms and composite blend mode
+    // must reach the installed effect (not just the fixed vocabulary).
+    auto rsksl_full = engine.evaluate(
+        R"(setViewEffect('', '{"type":"sksl","source":"uniform shader content; uniform float boost; half4 main(float2 xy){ return content.eval(xy) * boost; }","uniforms":{"boost":2.0},"blend":"lighter"}'))");
+    REQUIRE(rsksl_full["success"].getWithDefault<bool>(false));
+    auto eff = std::dynamic_pointer_cast<pulp::canvas::SkslPostEffect>(root.effect());
+    REQUIRE(eff != nullptr);
+    REQUIRE(eff->blend_mode == pulp::canvas::Canvas::BlendMode::lighter);
+    REQUIRE(eff->uniforms.size() == 1);
+    REQUIRE(eff->uniforms[0].name == "boost");
+    REQUIRE(eff->uniforms[0].v[0] == 2.0f);
+#endif
 }
 
 TEST_CASE("WidgetBridge Lottie APIs store state on knob, fader, and toggle", "[view][bridge][style]") {
