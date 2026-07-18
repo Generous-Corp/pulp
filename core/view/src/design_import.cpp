@@ -2383,6 +2383,103 @@ void normalize_border_shorthand(IRNode& root) {
     visit(visit, root);
 }
 
+namespace {
+
+// The resolved box of a slider child in its parent's coordinate space. A child
+// only qualifies once it carries all four absolute fields — a flow-positioned
+// child has no fixed geometry to reason about, so it never joins the triplet.
+struct SliderBox {
+    IRNode* node = nullptr;
+    float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;
+    bool ok = false;
+};
+
+SliderBox slider_box(IRNode& c) {
+    SliderBox b;
+    b.node = &c;
+    if (c.style.left && c.style.top && c.style.width && c.style.height) {
+        b.x = *c.style.left;
+        b.y = *c.style.top;
+        b.w = *c.style.width;
+        b.h = *c.style.height;
+        b.ok = b.w > 0.0f && b.h > 0.0f;
+    }
+    return b;
+}
+
+// A slider thumb reads as a circle. The .fig decoder emits it as an ellipse;
+// other producers may emit a square frame rounded to a pill by its radius.
+bool slider_thumb_is_round(const IRNode& n, float w, float h) {
+    if (n.type == "ellipse" || n.type == "circle") return true;
+    const float side = std::min(w, h);
+    const float r = n.style.border_top_left_radius.value_or(
+        n.style.border_radius.value_or(0.0f));
+    return std::abs(w - h) <= 1.0f && r >= 0.4f * side;
+}
+
+}  // namespace
+
+void reconnect_slider_fill(IRNode& root) {
+    auto visit = [](auto&& self, IRNode& n) -> void {
+        // A horizontal slider is a short, wide container: a near-full-width
+        // track, a shorter colored progress fill on the same band, and a round
+        // thumb whose height fills the bar. Detect that triplet structurally —
+        // never by layer name — so only a real slider is ever touched.
+        if (n.style.width && n.style.height && *n.style.height > 0.0f &&
+            n.children.size() >= 2 && n.children.size() <= 4) {
+            const float W = *n.style.width;
+            const float H = *n.style.height;
+            if (W >= 3.0f * H) {
+                SliderBox thumb, track, fill;
+                for (auto& c : n.children) {
+                    const SliderBox b = slider_box(c);
+                    if (!b.ok) continue;
+                    const bool thin = b.h <= 0.5f * H;
+                    if (!thumb.ok && slider_thumb_is_round(c, b.w, b.h) &&
+                        std::abs(b.w - b.h) <= std::max(3.0f, 0.3f * b.w) &&
+                        b.h >= 0.7f * H) {
+                        thumb = b;
+                    } else if (!track.ok && thin && b.w >= 0.85f * W) {
+                        track = b;
+                    } else if (!fill.ok && thin && b.w < 0.85f * W &&
+                               c.style.background_color) {
+                        fill = b;
+                    }
+                }
+                // Require a distinct fill: its color must differ from the track,
+                // so a plain progress bar's own track is never mistaken for a
+                // fill and pulled around.
+                const bool distinct_fill =
+                    fill.ok &&
+                    (!track.node || !track.node->style.background_color ||
+                     *fill.node->style.background_color !=
+                         *track.node->style.background_color);
+                if (thumb.ok && track.ok && distinct_fill) {
+                    const float thumb_left = thumb.x;
+                    const float thumb_right = thumb.x + thumb.w;
+                    const float thumb_center = thumb.x + thumb.w * 0.5f;
+                    const float fill_left = fill.x;
+                    const float fill_right = fill.x + fill.w;
+                    // Only act when the fill floats in a gap away from the thumb.
+                    // A fill already touching or overlapping its thumb is stored
+                    // faithfully and left exactly as-is.
+                    if (fill_left > thumb_right) {
+                        // Fill sits to the right of the thumb: pull its left edge
+                        // back to the thumb so the bar meets the handle.
+                        fill.node->style.left = thumb_center;
+                        fill.node->style.width = fill_right - thumb_center;
+                    } else if (fill_right < thumb_left) {
+                        // Fill sits to the left: push its right edge to the thumb.
+                        fill.node->style.width = thumb_center - fill_left;
+                    }
+                }
+            }
+        }
+        for (auto& c : n.children) self(self, c);
+    };
+    visit(visit, root);
+}
+
 void synthesize_primitive_paths(IRNode& root) {
     synthesize_node(root);
     for (auto& child : root.children)

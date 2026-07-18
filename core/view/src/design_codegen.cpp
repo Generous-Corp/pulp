@@ -2200,6 +2200,11 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         // has to be split first or a stroked primitive synthesizes a path with
         // no stroke on it.
         normalize_border_shorthand(native_root);
+        // Reconnect a slider's detached progress fill to its thumb before path
+        // synthesis bakes the fill rect's width into path_data — a fill that
+        // floats away from the thumb in the stored geometry would otherwise
+        // render as a broken detached bar.
+        reconnect_slider_fill(native_root);
         synthesize_primitive_paths(native_root);
 
         int var_counter = 0;
