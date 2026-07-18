@@ -430,6 +430,14 @@ class SamplerStreamingRuntime {
     }
 
 #if defined(PULP_SAMPLER_TEST_HOOKS)
+    void pause_file_stage_for_test(bool paused) noexcept {
+        file_stage_paused_for_test_.store(paused, std::memory_order_release);
+    }
+
+    bool file_stage_paused_for_test() const noexcept {
+        return file_stage_paused_ack_for_test_.load(std::memory_order_acquire);
+    }
+
     bool has_retained_streamed_source_for_test() const noexcept {
         return retained_stream_recipe_.valid();
     }
