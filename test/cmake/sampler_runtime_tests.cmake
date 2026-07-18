@@ -39,6 +39,9 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/tools/scripts/web_timeline_source_closure_check.py
             --root ${CMAKE_SOURCE_DIR})
+    add_test(NAME web-timeline-source-closure-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/test_web_timeline_source_closure_check.py)
 endif()
 
 add_library(pulp-test-timeline-no-exceptions OBJECT
