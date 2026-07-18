@@ -116,6 +116,8 @@ struct detail::TimelineGraphBindingState {
     std::vector<std::shared_ptr<TimelineGraphBoundTrack>> tracks;
     TimelineGraphBindingConfig config;
     std::vector<timeline::ItemId> prepared_track_ids;
+    std::shared_ptr<const playback::PlaybackProgram> program;
+    SignalGraph::ExecutionSnapshot graph_snapshot;
     double prepared_sample_rate = 0.0;
     std::uint32_t prepared_max_block_size = 0;
 };
@@ -352,6 +354,19 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::preflight(
 TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare(
     const playback::PlaybackProgram& program, std::span<const TimelineTrackGraphRoute> routes,
     const TimelineGraphBindingConfig& config, double sample_rate, int maximum_block_size) {
+    return prepare_impl(program, routes, config, sample_rate, maximum_block_size, false);
+}
+
+TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare_quiesced(
+    const playback::PlaybackProgram& program, std::span<const TimelineTrackGraphRoute> routes,
+    const TimelineGraphBindingConfig& config, double sample_rate, int maximum_block_size) {
+    return prepare_impl(program, routes, config, sample_rate, maximum_block_size, true);
+}
+
+TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare_impl(
+    const playback::PlaybackProgram& program, std::span<const TimelineTrackGraphRoute> routes,
+    const TimelineGraphBindingConfig& config, double sample_rate, int maximum_block_size,
+    bool quiesced) {
     const double program_sample_rate = sample_rate_double(program.tempo_map().sample_rate());
     if (!std::isfinite(sample_rate) || sample_rate <= 0.0 || sample_rate != program_sample_rate)
         return reject(TimelineGraphAdmissionCode::SampleRateMismatch);
@@ -366,6 +381,7 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare(
     auto previous = state_.read();
     auto next = std::make_shared<detail::TimelineGraphBindingState>();
     next->config = config;
+    next->program = std::make_shared<const playback::PlaybackProgram>(program);
     next->prepared_sample_rate = program_sample_rate;
     next->prepared_max_block_size = static_cast<std::uint32_t>(maximum_block_size);
     next->tracks.reserve(ordered.size());
@@ -511,7 +527,17 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare(
     }
 
     edit->set_canonical_executor_routing_enabled(true);
-    const auto prepared = edit->prepare(sample_rate, maximum_block_size);
+    const bool dimensions_changed = previous &&
+        (previous->prepared_sample_rate != sample_rate ||
+         previous->prepared_max_block_size != static_cast<std::uint32_t>(maximum_block_size));
+    const auto prepared = quiesced
+        ? edit->prepare_quiesced(sample_rate, maximum_block_size)
+        : edit->prepare(sample_rate, maximum_block_size);
+    if (prepared == SignalGraph::PreparedTopologyEdit::Result::QuiescedRollbackFailed) {
+        state_.publish_prepared({});
+        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed,
+                      static_cast<std::uint64_t>(prepared));
+    }
     if (prepared != SignalGraph::PreparedTopologyEdit::Result::Prepared)
         return reject(TimelineGraphAdmissionCode::GraphPrepareFailed,
                       static_cast<std::uint64_t>(prepared));
@@ -522,12 +548,66 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare(
         return reject(TimelineGraphAdmissionCode::GraphPrepareFailed,
                       static_cast<std::uint64_t>(committed));
 
-    // Publish only after the graph transaction commits. An in-flight audio
-    // block keeps its prior immutable state pinned; Slot reclaims it later on
-    // this control thread, never in process().
+    next->graph_snapshot = edit->committed_execution_snapshot();
+    if (!next->graph_snapshot) {
+        // commit() advanced the graph already. This should be unreachable, but
+        // keeping the prior binding would pair its program/renderers with a
+        // different live graph, so fail closed if the invariant is ever broken.
+        state_.publish_prepared({});
+        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed);
+    }
+    if (quiesced && dimensions_changed) {
+        for (const auto& track : next->tracks) {
+            track->audio_renderer->reset();
+            track->note_renderer->reset();
+        }
+    }
+    if (before_binding_publish_hook_for_test_ != nullptr)
+        before_binding_publish_hook_for_test_(before_binding_publish_context_for_test_);
+
+    // The exact graph snapshot and exact program become visible through this one
+    // publication. An in-flight block therefore remains wholly old while the
+    // next block is wholly new, even if the graph's ordinary live slot advanced.
     state_.publish_prepared(std::shared_ptr<const detail::TimelineGraphBindingState>(
         std::move(next)));
     return {};
+}
+
+TimelineGraphAdmission
+TimelineGraphPlaybackBinding::adopt_program(const playback::PlaybackProgram& program) {
+    auto previous = state_.read();
+    if (!previous)
+        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed);
+    if (sample_rate_double(program.tempo_map().sample_rate()) != previous->prepared_sample_rate)
+        return reject(TimelineGraphAdmissionCode::SampleRateMismatch);
+    if (program.tracks().size() != previous->prepared_track_ids.size())
+        return reject(TimelineGraphAdmissionCode::MissingTrack, program.tracks().size(),
+                      previous->prepared_track_ids.size());
+    for (const auto id : previous->prepared_track_ids)
+        if (program.find_track(id) == nullptr)
+            return reject(TimelineGraphAdmissionCode::MissingTrack, 0, 1, id);
+
+    auto next = std::make_shared<detail::TimelineGraphBindingState>();
+    next->tracks = previous->tracks;
+    next->config = previous->config;
+    next->prepared_track_ids = previous->prepared_track_ids;
+    next->program = std::make_shared<const playback::PlaybackProgram>(program);
+    next->graph_snapshot = previous->graph_snapshot;
+    next->prepared_sample_rate = previous->prepared_sample_rate;
+    next->prepared_max_block_size = previous->prepared_max_block_size;
+    state_.prepare_publish();
+    if (before_binding_publish_hook_for_test_ != nullptr)
+        before_binding_publish_hook_for_test_(before_binding_publish_context_for_test_);
+    state_.publish_prepared(std::shared_ptr<const detail::TimelineGraphBindingState>(
+        std::move(next)));
+    return {};
+}
+
+TimelineGraphAdmission TimelineGraphPlaybackBinding::adopt_latest_program() {
+    auto latest = store_.read();
+    if (!latest)
+        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed);
+    return adopt_program(*latest);
 }
 
 TimelineGraphProcessResult
@@ -539,6 +619,7 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
     auto state = state_.read();
     if (!state) {
         result.code = TimelineGraphProcessCode::MissingProgram;
+        output.clear();
         return result;
     }
     // Bound every later fail-closed clear before it can touch caller memory.
@@ -555,12 +636,12 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
         result.code = TimelineGraphProcessCode::InputShapeMismatch;
         return result;
     }
-    auto block = latch_.begin_block(store_);
-    if (!block) {
+    if (!state->program) {
         result.code = TimelineGraphProcessCode::MissingProgram;
         output.clear();
         return result;
     }
+    playback::PlaybackProgramBlock block(state->program.get());
     if (sample_rate_double(block.program()->tempo_map().sample_rate()) !=
         state->prepared_sample_rate) {
         result.code = TimelineGraphProcessCode::InvalidTransport;
@@ -592,7 +673,8 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
             output.clear();
             return result;
         }
-        if (!graph_.inject_midi(track->midi_node, track->note_renderer->events())) {
+        if (!state->graph_snapshot.inject_midi(track->midi_node,
+                                               track->note_renderer->events())) {
             // Admission bounds every note stream to the graph mailbox's exact
             // capacity, so a failed injection here means the prepared live
             // snapshot (and therefore the admitted routed path) disappeared.
@@ -619,7 +701,7 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
     // for every custom-node callback, including all parallel workers. Clear the
     // shared pointers only after that barrier has returned.
     const auto routed_failures_before = graph_.routed_only_execution_failures();
-    graph_.process(output, input, static_cast<int>(transport.frame_count), context);
+    state->graph_snapshot.process(output, input, static_cast<int>(transport.frame_count), context);
     const bool routed_dispatch_failed =
         graph_.routed_only_execution_failures() != routed_failures_before;
     shared_->block.store(nullptr, std::memory_order_release);

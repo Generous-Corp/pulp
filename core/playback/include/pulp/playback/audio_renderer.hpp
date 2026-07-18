@@ -160,6 +160,7 @@ class ArrangementAudioTrackRenderer {
     RendererCarryState state_snapshot() const noexcept {
         return shell_.state_snapshot();
     }
+    void reset() noexcept { shell_.reset(); }
 
   private:
     StableRendererShell shell_;

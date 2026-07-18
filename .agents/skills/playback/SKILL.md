@@ -38,6 +38,13 @@ once per callback and pass that pin to every `StableRendererShell`. Never cache
 a `TrackProgram*` past the pin. Adoption accepts skipped generations
 (`candidate > active`) for the same ItemId and proves carry-state ownership
 against the shell's `RendererCarryState` SeqLock snapshot.
+The host's `TimelineGraphBinding` is the deliberate exception to independently
+latching `PlaybackProgramStore`: its enclosing immutable binding generation
+already owns the exact `PlaybackProgram` together with the exact graph snapshot
+and renderer set. It constructs a non-owning `PlaybackProgramBlock` only while
+that generation is pinned, so program destruction/refcount traffic still never
+runs on the audio thread. Content adoption republishes the whole binding
+generation; do not reintroduce a separate store latch there.
 
 For arrangement note playback, construct one `ArrangementNoteRenderer` per
 track, call `prepare(maximum_events_per_block)` off the audio thread, then pass
@@ -78,6 +85,11 @@ the format-layer projection from playback snapshots to `ProcessContext`.
 - Arrangement note events are compiled against the owning program's exact
   tempo map and ordered by sample, note-off before note-on, then clip/note ID.
   A renderer uses half-open sample ranges and never latches a callback size.
+- `StableRendererShell`, `ArrangementAudioTrackRenderer`, and
+  `ArrangementNoteRenderer` expose control-thread `reset()` for a successful
+  quiesced sample-rate or maximum-block-size lifecycle change. Reset every
+  bound renderer together after graph reprepare; note reset also clears active
+  counts, pending flush/overflow state, current event buffers, and block index.
 - Note rendering is a transport-tick MIDI lane. Do not lower it to an audio
   `CustomNodeType`; the host/embedded adapter routes its bounded MIDI output.
 - `core/playback` must not include `pulp/format`, `pulp/host`, or `pulp/view`.

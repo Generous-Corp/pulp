@@ -78,6 +78,7 @@ class ArrangementNoteRenderer {
     const midi::MidiBuffer& events() const noexcept { return output_; }
     RendererProgramKey active_key() const noexcept { return shell_.active_key(); }
     bool has_active_notes() const noexcept;
+    void reset() noexcept;
 
   private:
     static constexpr std::size_t kMidiKeyCount = 16u * 128u;

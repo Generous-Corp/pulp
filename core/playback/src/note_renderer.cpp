@@ -91,6 +91,18 @@ bool ArrangementNoteRenderer::has_active_notes() const noexcept {
                        [](std::uint16_t count) { return count != 0; });
 }
 
+void ArrangementNoteRenderer::reset() noexcept {
+    shell_.reset();
+    output_.clear();
+    ump_output_.clear();
+    active_counts_.fill(0);
+    pending_flush_ = false;
+    state_overflow_ = false;
+    has_block_index_ = false;
+    last_block_index_ = 0;
+    dropped_events_ = 0;
+}
+
 bool ArrangementNoteRenderer::emit(const NoteProgramEvent& event,
                                    std::uint32_t sample_offset) noexcept {
     const auto index = key_index(event.channel, event.pitch);

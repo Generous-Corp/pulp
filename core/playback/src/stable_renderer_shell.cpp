@@ -49,4 +49,10 @@ bool StableRendererShell::end_block(RendererCarryState state) noexcept {
     return true;
 }
 
+void StableRendererShell::reset() noexcept {
+    active_key_ = {};
+    active_provider_ = ProviderKind::Arrangement;
+    state_.write({});
+}
+
 } // namespace pulp::playback
