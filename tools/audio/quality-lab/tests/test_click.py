@@ -631,15 +631,83 @@ def test_the_edge_smear_guard_not_the_drift_guard_is_what_refuses_a_steady_blep(
         assert not r.fired and r.low_coverage, "the edge-smear guard turns that into a refusal"
 
 
+# The render lengths the length-independence contract is pinned over. 0.3 s is the rest of
+# the suite's default; 3.0 s is ten times that — long enough that a GLOBAL smear statistic
+# would have drifted a near-floor seam's verdict across it (the N3 bug this section pins as
+# fixed). 1.0 s sits between so the sweep is not just its two endpoints.
+DUR_SWEEP = [0.3, 1.0, 3.0]
+
+
+@pytest.mark.parametrize("dur", DUR_SWEEP)
 @pytest.mark.parametrize("db", [-12, -20, -30])
-def test_a_seam_above_the_blep_smear_floor_still_fires(db):
-    """The refusal is regime-scoped, not a blanket 'ignore this oscillator': a seam louder
-    than the smear is a localized, off-edge outlier, so it fires despite the smear."""
+def test_a_seam_above_the_blep_smear_floor_fires_at_every_render_length(dur, db):
+    """Tier B: the refusal is regime-scoped AND render-length-independent. A seam louder than
+    the smear is the one period whose residual does not match the recurring per-period
+    template — a large novelty outlier — so it fires despite the smear, and because the
+    discriminator is a per-period RATIO it fires at 0.3 s and at 3.0 s alike.
+
+    The old global `edge_concentration` statistic drifted with the period count, so the SAME
+    near-floor seam fired on a short clip and was REFUSED on a multi-second one (N3). This
+    parametrizes the seam over an order of magnitude of render length to pin that gone.
+    """
     sr, f0 = 48000, 440.0
-    y = fx.polyblep_square(sr, f0, DUR)
+    y = fx.polyblep_square(sr, f0, dur)
     peak = float(np.max(np.abs(y - np.mean(y))))
-    seam = fx.inject_step(y, int(0.15 * sr), peak * 10 ** (db / 20.0))
-    assert click.detect(seam, sr, f0_hint=f0).fired, f"missed a {db} dB seam on a polyBLEP square"
+    seam = fx.inject_step(y, int(0.5 * dur * sr), peak * 10 ** (db / 20.0))
+    assert click.detect(seam, sr, f0_hint=f0).fired, f"missed a {db} dB seam at dur={dur}s"
+
+
+def test_the_near_floor_seam_verdict_no_longer_depends_on_render_length():
+    """The N3 fix, asserted at the level where the bug actually bit. A seam only ~5 dB above
+    the BLEP smear floor is close enough that the earlier global statistic crossed its
+    threshold as the render lengthened: it FIRED on a 0.3 s clip and was REFUSED on a 1-3 s
+    one. It must now yield the SAME verdict at every length, and the per-period novelty that
+    drives that verdict must barely move with length — that ratio invariance IS the fix.
+
+    Placed near the floor deliberately: a comfortably-loud seam fired under the old statistic
+    too, so it would not exercise the bug. Before this change the dur=1.0 and dur=3.0 branches
+    of this test failed (refused); after it, all three fire and the novelty spread is < 2 dB.
+    """
+    sr, f0 = 48000, 440.0
+    verdicts, novelties = [], []
+    for dur in DUR_SWEEP:
+        y = fx.polyblep_square(sr, f0, dur)
+        peak = float(np.max(np.abs(y - np.mean(y))))
+        seam = fx.inject_step(y, int(0.5 * dur * sr), peak * 10 ** (-25 / 20.0))
+        verdicts.append(click.detect(seam, sr, f0_hint=f0).fired)
+        novelties.append(click.analyze(seam, sr, f0_hint=f0).template_novelty_db)
+    assert all(verdicts), f"a near-floor seam's verdict flipped with length: fired={verdicts}"
+    assert max(novelties) - min(novelties) < 2.0, (
+        f"template novelty must be render-length-independent, got {novelties}"
+    )
+
+
+@pytest.mark.parametrize("dur", DUR_SWEEP)
+@pytest.mark.parametrize("wave", ["saw", "square"])
+def test_a_clean_blep_render_stays_refused_at_every_render_length(dur, wave):
+    """The other half of the length-independence contract: a pure-smear render (no seam)
+    must stay REFUSED at 0.3 s and 3.0 s alike. Length-independence has to cut both ways —
+    a discriminator that fixed the seam side by quietly starting to PASS a clean oscillator
+    on a long render would be a worse bug than the one it replaced."""
+    sr, f0 = 48000, 440.0
+    y = getattr(fx, f"polyblep_{wave}")(sr, f0, dur)
+    r = click.detect(y, sr, f0_hint=f0)
+    assert not r.fired and r.low_coverage, f"clean polyBLEP {wave} at dur={dur}s not refused: {r.notes}"
+
+
+@pytest.mark.parametrize("dur", DUR_SWEEP)
+def test_template_novelty_is_low_and_stable_for_pure_smear(dur):
+    """The mechanism behind the refusal, isolated and pinned. A pure BLEP smear repeats the
+    same shape every period, so after period-synchronous alignment every frame matches the
+    median-frame template and the per-period novelty stays a small ratio — well under the
+    `_TEMPLATE_NOVELTY_DB` outlier threshold — at every length. Pinned to the measured worst
+    (~4.5 dB across the grid) with margin, so a regression that lets the smear read as an
+    outlier (and thus a real seam read as smear) fails here."""
+    sr, f0 = 48000, 440.0
+    for wave in ("saw", "square"):
+        nov = click.analyze(getattr(fx, f"polyblep_{wave}")(sr, f0, dur), sr, f0_hint=f0).template_novelty_db
+        assert nov < 8.0, f"pure {wave} smear at dur={dur}s read as an outlier: {nov:.1f} dB"
+        assert nov < click._TEMPLATE_NOVELTY_DB, "smear must sit below the refusal threshold"
 
 
 def test_a_seam_below_the_blep_smear_floor_is_refused_never_passed():

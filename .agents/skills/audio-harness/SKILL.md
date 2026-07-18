@@ -486,6 +486,16 @@ harness or `ctest`.
   `engine [--input <wav>] --character <c>` (validate the REAL stretch engine, reference-free
   on a dry input), `engine-baseline` (regression gate: did an engine change make it worse?),
   `corpus list|add` (versioned, license-guarded corpus).
+- **`corpus.seed()`** ships FIVE synthetic families, not just the two stretch-oriented ones:
+  `synthetic_drumbreak` / `synthetic_tonalpad` (time-stretch / tonal) plus three oscillator
+  families (`family: "oscillator"`, `material_class: "synth"`) built from `osc_fixtures.py`'s
+  corpus-render helpers (`render_static_shapes`, `render_sync_sweep`, `render_tzfm_grid`) —
+  `synthetic_osc_static_shapes` (sine/saw/square/triangle at a few pitches), `synthetic_osc_sync_sweep`
+  (`hard_synced_saw` swept across master frequencies), `synthetic_osc_tzfm_grid` (`tzfm_sine` over a
+  mod-rate/index grid). They gate on the SAME `regression_net` ratchet as any other family — no
+  bespoke oscillator ratchet — typically via the `added-hf` axis (aliasing reads as added HF energy)
+  and `dsp.null_residual_db`'s bit-identical clamp (`-160.0`) for the determinism check. See
+  `tests/test_corpus_osc.py`.
 - Aligns a candidate to a reference (onset-map + local cross-correlation), runs the
   detectors (`transient_sharpness`, `spectral_centroid`, `hf_fizz`, `spectral_flux`, `hnr` —
   tonal noise/roughness via autocorrelation HNR; plus the standalone `stereo_width` for
@@ -804,12 +814,19 @@ Durable "why / watch-out-for" notes so this isn't re-litigated (rationale, not w
   oscillator: on a polyBLEP saw/square, `sr/f0` is fractional, so the discontinuity lands at a
   different sub-sample phase every period and the comb leaves a per-edge *approximation* residual
   that reads a false −20 to −30 dB "click" even when the render's alias floor is −55 dB or lower.
-  `detect()` now discriminates that regime with two measurements — `localization_db` (worst
-  excursion over the MEDIAN per-period peak: a one-off seam towers over the background, smear
-  recurs so it barely exceeds the median) AND `edge_concentration` (cosine similarity of
-  `|residual|` to `|diff(y)|`: smear rides the waveform's own edges, a block-rate zipper does
-  not) — and REFUSES (`low_coverage`, `fired=False`, a *third* refusal precondition alongside
-  low period-confidence and pitch drift) rather than false-firing. A refusal is NOT a pass:
+  `detect()` discriminates that regime with two measurements — `template_novelty_db` and
+  `edge_concentration` — and REFUSES (`low_coverage`, `fired=False`, a *third* refusal
+  precondition alongside low period-confidence and pitch drift) rather than false-firing.
+  `template_novelty_db` aligns the comb residual into per-period frames at the fitted fractional
+  period, builds the median-frame TEMPLATE, and scores the worst period's departure from it over
+  the median period's — a one-off seam is the single period that does NOT match the recurring
+  template (a large outlier), while the smear repeats the same per-edge shape every period so it
+  barely departs. It is a per-period RATIO, so it is **render-length INDEPENDENT** (a longer clip
+  only adds more template-matching periods — it moves neither the worst nor the median): the same
+  near-floor seam that a global statistic dropped on a multi-second render now fires at any length.
+  `edge_concentration` (cosine similarity of `|residual|` to `|diff(y)|`) is kept, but ONLY to
+  split smear (rides the waveform's own edges) from a block-rate zipper (off the edges) — novelty
+  alone reads a stationary zipper as low-novelty and would wrongly refuse it. A refusal is NOT a pass:
   the honest gate for a discontinuous real oscillator is a **frozen-reference null**
   (`dsp.null_residual_db` — render the same patch with the offending parameter held frozen), not
   the comb self-reference. When you add a click fixture for a new oscillator, grow a REAL polyBLEP

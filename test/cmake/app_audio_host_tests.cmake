@@ -183,6 +183,16 @@ target_link_libraries(pulp-test-wav-bridge PRIVATE pulp-audio-test-support Catch
 catch_discover_tests(pulp-test-wav-bridge)
 add_executable(pulp-osc-render-wav osc_render_wav.cpp)
 target_link_libraries(pulp-osc-render-wav PRIVATE pulp-audio-test-support)
+
+# CLI argv smoke for the tool above: shells out per --engine and for --seed,
+# asserting exit code + a non-empty WAV. See test_osc_render_wav_cli.cpp.
+add_executable(pulp-test-osc-render-wav-cli test_osc_render_wav_cli.cpp)
+target_link_libraries(pulp-test-osc-render-wav-cli PRIVATE
+    pulp::platform Catch2::Catch2WithMain)
+add_dependencies(pulp-test-osc-render-wav-cli pulp-osc-render-wav)
+target_compile_definitions(pulp-test-osc-render-wav-cli PRIVATE
+    PULP_OSC_RENDER_WAV_BINARY="$<TARGET_FILE:pulp-osc-render-wav>")
+catch_discover_tests(pulp-test-osc-render-wav-cli)
 if(PULP_HAS_VST3)
     # The VST3 sibling of the CLAP null above: same deterministic Processor,
     # same stimulus, driven through the real PulpVst3Processor::process()

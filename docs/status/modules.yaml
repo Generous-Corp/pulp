@@ -27,7 +27,7 @@ modules:
     docs: reference/modules.md#midi
 
   - name: signal
-    summary: 30+ DSP processors — filters (IIR, FIR, SVF, ladder, Linkwitz-Riley), oscillators, convolution, compressor, limiter, reverb, chorus, delay, oversampling, FFT (vDSP), SIMD ops, dry/wet mixer
+    summary: 30+ DSP processors — filters (IIR, FIR, SVF, ladder, Linkwitz-Riley), oscillators (legacy signal::Oscillator plus the pulp::signal::osc VA/VCO/DCO/WT suite), convolution, compressor, limiter, reverb, chorus, delay, oversampling, FFT (vDSP), SIMD ops, dry/wet mixer
     status: usable
     dependencies: []
     docs: reference/modules.md#signal

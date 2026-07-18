@@ -116,3 +116,86 @@ def test_bridge_int24_path_is_readable(tmp_path):
     assert sr == 48000
     assert channels == 1
     assert abs(_fundamental_hz(y, sr) - 440.0) < 2.0
+
+
+@requires_tool
+@pytest.mark.parametrize("engine", ["vco", "dco", "wt"])
+def test_bridge_engine_renders_on_pitch(tmp_path, engine):
+    """Each oscillator engine (`--engine vco|dco|wt`) renders a readable,
+    on-pitch WAV. `vco`/`dco` share the classical-shape parameter; `wt` has
+    none (it always plays its own bandlimited saw table), so this exercises
+    the engine-selection path end to end for all three."""
+    freq = 440.0
+    kwargs = dict(engine=engine, freq=freq, sr=48000, dur_ms=500)
+    if engine != "wt":
+        kwargs["shape"] = "saw"
+    wav = _render(tmp_path, **kwargs)
+
+    y, sr, channels = load_wav_info(str(wav))
+    assert sr == 48000
+    assert channels == 1
+    assert len(y) == 24000  # 500 ms at 48 kHz.
+    assert np.max(np.abs(y)) > 0.05  # not silence.
+
+    est = _fundamental_hz(y, sr)
+    # dco's pitch is quantized (not exact) by design, but at 440 Hz against
+    # the tool's 1 MHz default master clock the worst-case error is well
+    # under a cent — far inside this 2 Hz bin-spacing tolerance.
+    assert abs(est - freq) < 2.0, f"{engine}@{freq}Hz read back as {est:.2f} Hz"
+
+
+@requires_tool
+def test_bridge_seed_selects_vco_jitter_realization(tmp_path):
+    """`--seed` only has an audible effect on `vco` with nonzero drift/jitter
+    (the noise streams it seeds); it picks which pseudo-random realization
+    plays. The same seed must render byte-identical output (the tool's own
+    determinism contract — see osc_render_wav.cpp's usage doc); a different
+    seed must render a different one."""
+    common = dict(engine="vco", freq=440.0, sr=48000, dur_ms=100,
+                  jitter_cents=20.0)
+
+    dir_a1 = tmp_path / "seed-a1"
+    dir_a2 = tmp_path / "seed-a2"
+    dir_b = tmp_path / "seed-b"
+    for d in (dir_a1, dir_a2, dir_b):
+        d.mkdir()
+
+    wav_a1 = _render(dir_a1, seed=111, **common)
+    wav_a2 = _render(dir_a2, seed=111, **common)
+    wav_b = _render(dir_b, seed=222, **common)
+
+    assert wav_a1.read_bytes() == wav_a2.read_bytes(), (
+        "same --seed must render byte-identical output"
+    )
+    assert wav_a1.read_bytes() != wav_b.read_bytes(), (
+        "different --seed must render a different noise realization"
+    )
+
+
+@requires_tool
+@pytest.mark.parametrize("engine,flag", [
+    ("dco", "--seed"),
+    ("dco", "--drift-cents"),
+    ("wt", "--seed"),
+    ("wt", "--jitter-cents"),
+])
+def test_bridge_rejects_vco_only_flags_on_other_engines(tmp_path, engine, flag):
+    """`--seed`/`--drift-cents`/`--jitter-cents` apply only to `--engine vco`;
+    the tool must reject them on `dco`/`wt` with a clear message rather than
+    silently ignoring them."""
+    out = tmp_path / "osc.wav"
+    args = [str(TOOL), "--out", str(out), "--engine", engine, flag, "5"]
+    proc = subprocess.run(args, capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 2, f"expected rejection, got: {proc.stdout}{proc.stderr}"
+    assert not out.exists()
+
+
+@requires_tool
+def test_bridge_rejects_shape_on_wt_engine(tmp_path):
+    """`--shape` does not apply to `--engine wt` (it plays a fixed wavetable
+    set, not a classical shape)."""
+    out = tmp_path / "osc.wav"
+    args = [str(TOOL), "--out", str(out), "--engine", "wt", "--shape", "saw"]
+    proc = subprocess.run(args, capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 2, f"expected rejection, got: {proc.stdout}{proc.stderr}"
+    assert not out.exists()
