@@ -7,6 +7,7 @@
 #include <pulp/audio/audio_file.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -99,6 +100,15 @@ void write_u32(std::vector<std::uint8_t>& bytes, std::size_t offset,
     bytes[offset + 3] = static_cast<std::uint8_t>(value >> 24);
 }
 
+void write_f64(std::vector<std::uint8_t>& bytes, std::size_t offset,
+               double value) {
+    auto bits = std::bit_cast<std::uint64_t>(value);
+    for (std::size_t index = 0; index < sizeof(bits); ++index) {
+        bytes[offset + index] = static_cast<std::uint8_t>(bits & 0xffu);
+        bits >>= 8;
+    }
+}
+
 std::vector<std::uint8_t> sampler_state_envelope(std::string_view profile_json,
                                                   std::string_view runtime_json) {
     std::vector<std::uint8_t> bytes(examples::kSamplerHeritageStateHeaderBytes);
@@ -109,6 +119,8 @@ std::vector<std::uint8_t> sampler_state_envelope(std::string_view profile_json,
         : static_cast<std::uint8_t>(examples::kSamplerHeritageStateHasRuntime);
     write_u32(bytes, 8, static_cast<std::uint32_t>(profile_json.size()));
     write_u32(bytes, 12, static_cast<std::uint32_t>(runtime_json.size()));
+    write_f64(bytes, examples::kSamplerHeritageStateV1HeaderBytes,
+              runtime_json.empty() ? 0.0 : 48000.0);
     bytes.insert(bytes.end(), profile_json.begin(), profile_json.end());
     bytes.insert(bytes.end(), runtime_json.begin(), runtime_json.end());
     return bytes;
@@ -207,6 +219,7 @@ TEST_CASE("PulpSampler heritage state round-trips canonical profile and RNG stat
     source.profile = sampler_state_profile();
     source.has_runtime_state = true;
     source.runtime_state = sampler_runtime_state(source.profile);
+    source.runtime_host_sample_rate = 48000.0;
 
     const auto written = examples::write_sampler_heritage_state(source);
     REQUIRE(written.valid());
@@ -227,6 +240,16 @@ TEST_CASE("PulpSampler heritage state round-trips canonical profile and RNG stat
     REQUIRE(parsed.state.runtime_state.rng_states[1].random_state == 0xfedcba);
     REQUIRE(examples::write_sampler_heritage_state(parsed.state).bytes ==
             written.bytes);
+
+    auto legacy_v1 = written.bytes;
+    legacy_v1.erase(
+        legacy_v1.begin() + examples::kSamplerHeritageStateV1HeaderBytes,
+        legacy_v1.begin() + examples::kSamplerHeritageStateHeaderBytes);
+    legacy_v1[4] = 1;
+    const auto parsed_v1 = examples::parse_sampler_heritage_state(legacy_v1);
+    REQUIRE(parsed_v1.valid());
+    REQUIRE(parsed_v1.state.has_runtime_state);
+    REQUIRE(parsed_v1.state.runtime_host_sample_rate == 0.0);
 }
 
 TEST_CASE("PulpSampler empty legacy heritage state restores disabled defaults",
@@ -264,7 +287,7 @@ TEST_CASE("PulpSampler heritage envelope rejects malformed boundaries atomically
     require_rejected(bad_magic, examples::SamplerHeritageStateStatus::BadMagic);
 
     auto bad_version = valid;
-    bad_version[4] = 2;
+    bad_version[4] = 3;
     require_rejected(bad_version,
                      examples::SamplerHeritageStateStatus::UnsupportedVersion);
 
@@ -291,6 +314,12 @@ TEST_CASE("PulpSampler heritage envelope rejects malformed boundaries atomically
     auto flag_length_disagree = valid;
     flag_length_disagree[6] = examples::kSamplerHeritageStateHasRuntime;
     require_rejected(flag_length_disagree,
+                     examples::SamplerHeritageStateStatus::LengthOutOfRange);
+
+    auto rate_without_runtime = valid;
+    write_f64(rate_without_runtime,
+              examples::kSamplerHeritageStateV1HeaderBytes, 44100.0);
+    require_rejected(rate_without_runtime,
                      examples::SamplerHeritageStateStatus::LengthOutOfRange);
 }
 
@@ -325,6 +354,12 @@ TEST_CASE("PulpSampler heritage state rejects runtime identity and layout mismat
     source.profile = sampler_state_profile();
     source.has_runtime_state = true;
     source.runtime_state = sampler_runtime_state(source.profile);
+    source.runtime_host_sample_rate = 48000.0;
+
+    auto missing_runtime_rate = source;
+    missing_runtime_rate.runtime_host_sample_rate = 0.0;
+    REQUIRE(examples::write_sampler_heritage_state(missing_runtime_rate).status ==
+            examples::SamplerHeritageStateStatus::LengthOutOfRange);
 
     auto wrong_digest = source;
     wrong_digest.runtime_state.profile_digest[0] ^= 0xff;

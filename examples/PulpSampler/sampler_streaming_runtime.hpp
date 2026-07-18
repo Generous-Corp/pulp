@@ -121,6 +121,12 @@ class SamplerStreamingRuntime {
 
     bool prepare(float host_sample_rate, std::uint32_t maximum_host_block_frames) {
         release();
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        if (fail_next_prepare_for_test_.exchange(false,
+                                                 std::memory_order_acq_rel)) {
+            return false;
+        }
+#endif
         host_sample_rate_ = host_sample_rate;
         maximum_host_block_frames_ = std::max<std::uint32_t>(1, maximum_host_block_frames);
         selection_generation_ = 0;
@@ -297,6 +303,7 @@ class SamplerStreamingRuntime {
             }
             slot.reset();
         }
+        retained_stream_recipe_ = {};
         service_ready_ = false;
         active_sources_.store(0, std::memory_order_relaxed);
         {
@@ -325,6 +332,21 @@ class SamplerStreamingRuntime {
             .resident = resident,
             .resident_mips = resident_mips,
         });
+        retained_stream_recipe_ = {};
+        service_wake_.notify_all();
+        return true;
+    }
+
+    bool republish_resident(const SamplerPublishedSource& retained) noexcept {
+        if (retained.kind != SamplerPublishedSourceKind::Resident ||
+            !retained.resident.valid) {
+            return false;
+        }
+        std::lock_guard lock(source_load_mutex_);
+        const auto generation = ++selection_generation_;
+        auto published = retained;
+        published.selection_generation = generation;
+        published_source_.write(published);
         service_wake_.notify_all();
         return true;
     }
@@ -357,33 +379,51 @@ class SamplerStreamingRuntime {
         }
         if (!staged.prepared)
             return staged.result;
-
-        std::unique_lock request_lock(file_request_mutex_);
-        if (!service_running_.load(std::memory_order_acquire)) {
-            staged.result.status = PulpSamplerLoadStatus::ShuttingDown;
-            return staged.result;
-        }
-        if (file_request_pending_) {
-            staged.result.status = PulpSamplerLoadStatus::Busy;
-            return staged.result;
-        }
-        file_request_prepared_ = std::move(staged.prepared);
-        file_request_result_ = staged.result;
-        file_request_complete_ = false;
-        file_request_pending_ = true;
-        service_wake_.notify_all();
-        file_request_changed_.wait(request_lock, [this] {
-            return file_request_complete_ || !service_running_.load(std::memory_order_acquire);
-        });
-        if (!file_request_complete_) {
-            file_request_result_.status = PulpSamplerLoadStatus::ShuttingDown;
-        }
-        return file_request_result_;
+        return submit_staged_file(std::move(staged));
     }
 
     bool load_sample_file(std::string_view path) {
         return load_sample_file_result(path).loaded();
     }
+
+    bool restore_retained_streamed_source() {
+        std::lock_guard source_lock(source_load_mutex_);
+        if (!service_running_.load(std::memory_order_acquire) ||
+            !retained_stream_recipe_.valid()) {
+            return false;
+        }
+        auto staged = stage_retained_streamed_file();
+        return staged.prepared && submit_staged_file(std::move(staged)).loaded();
+    }
+
+    bool clone_published_source_to(SamplerStreamingRuntime& target) {
+        std::lock_guard source_lock(source_load_mutex_);
+        const auto retained = published_source_.read();
+        if (retained.kind == SamplerPublishedSourceKind::None) return true;
+        if (retained.kind == SamplerPublishedSourceKind::Resident)
+            return target.republish_resident(retained);
+        if (retained.kind != SamplerPublishedSourceKind::Streamed ||
+            !retained_stream_recipe_.valid()) {
+            return false;
+        }
+        target.retained_stream_recipe_ = retained_stream_recipe_;
+        return target.restore_retained_streamed_source();
+    }
+
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+    bool has_retained_streamed_source_for_test() const noexcept {
+        return retained_stream_recipe_.valid();
+    }
+
+    void fail_next_retained_source_publish_for_test() noexcept {
+        fail_after_stream_member_count_for_test_.store(
+            0, std::memory_order_release);
+    }
+
+    void fail_next_prepare_for_test() noexcept {
+        fail_next_prepare_for_test_.store(true, std::memory_order_release);
+    }
+#endif
 
     SamplerPublishedSource published_source() const noexcept {
         return published_source_.read();
@@ -569,6 +609,18 @@ class SamplerStreamingRuntime {
         std::uint32_t member_count = 0;
     };
 
+    struct StreamedSourceRecipe {
+        std::array<audio::FileFrameReader, kMaximumBundleMembers> files{};
+        std::array<double, kMaximumBundleMembers> logical_rates{};
+        std::array<std::uint32_t, kMaximumBundleMembers> octaves{};
+        std::uint32_t member_count = 0;
+
+        bool valid() const noexcept {
+            return member_count != 0 && member_count <= files.size() &&
+                   files[0].valid && files[0].binding.read != nullptr;
+        }
+    };
+
     struct StagedStreamedFile {
         std::unique_ptr<PreparedStreamedFile> prepared;
         PulpSamplerLoadResult result{};
@@ -651,6 +703,7 @@ class SamplerStreamingRuntime {
     std::atomic<bool> file_stage_paused_ack_for_test_{false};
     std::atomic<std::uint64_t> file_stage_attempts_for_test_{0};
     std::atomic<bool> throw_during_file_stage_for_test_{false};
+    std::atomic<bool> fail_next_prepare_for_test_{false};
     bool reverse_prewarm_timeout_override_for_test_ = false;
     std::chrono::milliseconds reverse_prewarm_timeout_for_test_{0};
 #endif
@@ -670,6 +723,7 @@ class SamplerStreamingRuntime {
     bool file_request_pending_ = false;
     bool file_request_complete_ = false;
     PulpSamplerLoadResult file_request_result_{};
+    StreamedSourceRecipe retained_stream_recipe_{};
 
     void service_loop() noexcept {
         while (service_running_.load(std::memory_order_acquire)) {
@@ -789,6 +843,137 @@ class SamplerStreamingRuntime {
         file_request_changed_.notify_all();
     }
 
+    PulpSamplerLoadResult submit_staged_file(StagedStreamedFile staged) {
+        std::unique_lock request_lock(file_request_mutex_);
+        if (!service_running_.load(std::memory_order_acquire)) {
+            staged.result.status = PulpSamplerLoadStatus::ShuttingDown;
+            return staged.result;
+        }
+        if (file_request_pending_) {
+            staged.result.status = PulpSamplerLoadStatus::Busy;
+            return staged.result;
+        }
+        file_request_prepared_ = std::move(staged.prepared);
+        file_request_result_ = staged.result;
+        file_request_complete_ = false;
+        file_request_pending_ = true;
+        service_wake_.notify_all();
+        file_request_changed_.wait(request_lock, [this] {
+            return file_request_complete_ ||
+                   !service_running_.load(std::memory_order_acquire);
+        });
+        if (!file_request_complete_)
+            file_request_result_.status = PulpSamplerLoadStatus::ShuttingDown;
+        return file_request_result_;
+    }
+
+    bool prepare_streamed_preloads(PreparedStreamedFile& prepared,
+                                   PulpSamplerLoadResult& result) {
+        for (std::uint32_t member = 0; member < prepared.member_count; ++member) {
+            const auto& file = prepared.files[member];
+            const auto logical_rate = prepared.logical_rates[member];
+            if (!file.valid || !file.supports_ranged_read ||
+                file.channels != prepared.files[0].channels ||
+                !(logical_rate > 0.0) || !std::isfinite(logical_rate) ||
+                logical_rate > kMaximumSourceRate) {
+                result.status = member == 0
+                    ? PulpSamplerLoadStatus::UnsupportedCodec
+                    : PulpSamplerLoadStatus::PublishFailed;
+                return false;
+            }
+            auto& contract = prepared.contracts[member];
+            contract = {
+                .source_sample_rate = logical_rate,
+                .host_sample_rate = static_cast<double>(host_sample_rate_),
+                .maximum_playback_ratio = kMaximumPitchRatio,
+                .certified_io_latency_seconds = kCertifiedIoLatencySeconds,
+                .scheduler_margin_seconds = kSchedulerMarginSeconds,
+                .decoder_latency_seconds = kDecoderLatencySeconds,
+                .maximum_host_block_frames = maximum_host_block_frames_,
+                .interpolation_guard_frames =
+                    audio::kHighQualitySampleSincHalfWidth,
+            };
+            const auto block_source_frames = std::ceil(
+                static_cast<double>(maximum_host_block_frames_) * logical_rate /
+                static_cast<double>(host_sample_rate_) * kMaximumPitchRatio);
+            if (!std::isfinite(block_source_frames) ||
+                block_source_frames >= static_cast<double>(
+                    std::numeric_limits<std::uint64_t>::max())) {
+                result.status = PulpSamplerLoadStatus::InvalidPreloadContract;
+                return false;
+            }
+            contract.loop_prefetch_guard_frames =
+                static_cast<std::uint64_t>(block_source_frames);
+            const auto required = audio::evaluate_sample_preload_contract(contract);
+            if (!required.valid() || required.required_preload_frames == 0) {
+                result.status = PulpSamplerLoadStatus::InvalidPreloadContract;
+                return false;
+            }
+            const auto preload_frames =
+                std::min(file.total_frames, required.required_preload_frames);
+            contract.configured_preload_frames = preload_frames;
+            const auto preload_bytes = audio::checked_sample_storage_bytes(
+                file.channels, preload_frames);
+            if (!preload_bytes ||
+                *preload_bytes > std::numeric_limits<std::uint64_t>::max() -
+                                     result.requested_streaming_memory_bytes) {
+                result.status =
+                    PulpSamplerLoadStatus::StreamingMemoryBudgetExceeded;
+                return false;
+            }
+            result.requested_streaming_memory_bytes += *preload_bytes;
+            auto reservation = memory_governor_.reserve(
+                audio::SampleMemoryCategory::Preload, *preload_bytes);
+            if (!reservation.acquired()) {
+                result.status = reservation.status ==
+                        audio::SampleMemoryReserveStatus::BudgetExceeded
+                    ? PulpSamplerLoadStatus::StreamingMemoryBudgetExceeded
+                    : PulpSamplerLoadStatus::InternalFailure;
+                return false;
+            }
+            prepared.preload_leases[member] = std::move(reservation.lease);
+            prepared.preloads[member].resize(
+                file.channels, static_cast<std::size_t>(preload_frames));
+            if (file.binding.read(0, prepared.preloads[member].view(),
+                                  preload_frames, std::stop_token{}) !=
+                preload_frames) {
+                result.status = PulpSamplerLoadStatus::PreloadReadFailed;
+                return false;
+            }
+            prepared.preload_counts[member] = preload_frames;
+            if (member == 0) {
+                result.channels = file.channels;
+                result.sample_rate = static_cast<std::uint32_t>(logical_rate);
+                result.total_frames = file.total_frames;
+                result.required_preload_frames = required.required_preload_frames;
+                result.configured_preload_frames = preload_frames;
+            }
+        }
+        return true;
+    }
+
+    StagedStreamedFile stage_retained_streamed_file() {
+        StagedStreamedFile staged;
+        if (!retained_stream_recipe_.valid()) {
+            staged.result.status = PulpSamplerLoadStatus::NotPrepared;
+            return staged;
+        }
+        auto prepared = std::make_unique<PreparedStreamedFile>();
+        prepared->files = retained_stream_recipe_.files;
+        prepared->logical_rates = retained_stream_recipe_.logical_rates;
+        prepared->octaves = retained_stream_recipe_.octaves;
+        prepared->member_count = retained_stream_recipe_.member_count;
+        staged.result.codec_capability = PulpSamplerCodecCapability::Ranged;
+        staged.result.sidecar_level_count = prepared->member_count - 1;
+        staged.result.sidecar_status = prepared->member_count > 1
+            ? PulpSamplerSidecarStatus::Loaded
+            : PulpSamplerSidecarStatus::NotPresent;
+        if (!prepare_streamed_preloads(*prepared, staged.result)) return staged;
+        staged.result.status = PulpSamplerLoadStatus::NotAttempted;
+        staged.prepared = std::move(prepared);
+        return staged;
+    }
+
     StagedStreamedFile stage_streamed_file(std::string_view path) {
         StagedStreamedFile staged;
         auto& result = staged.result;
@@ -894,78 +1079,7 @@ class SamplerStreamingRuntime {
             }
         }
 
-        for (std::uint32_t member = 0; member < prepared->member_count; ++member) {
-            const auto& file = files[member];
-            const auto logical_rate = logical_rates[member];
-            if (!file.valid || !file.supports_ranged_read || file.channels != files[0].channels ||
-                !(logical_rate > 0.0) || !std::isfinite(logical_rate) ||
-                logical_rate > kMaximumSourceRate) {
-                result.status = member == 0
-                    ? PulpSamplerLoadStatus::UnsupportedCodec
-                    : PulpSamplerLoadStatus::PublishFailed;
-                return staged;
-            }
-            auto& contract = prepared->contracts[member];
-            contract = {
-                .source_sample_rate = logical_rate,
-                .host_sample_rate = static_cast<double>(host_sample_rate_),
-                .maximum_playback_ratio = kMaximumPitchRatio,
-                .certified_io_latency_seconds = kCertifiedIoLatencySeconds,
-                .scheduler_margin_seconds = kSchedulerMarginSeconds,
-                .decoder_latency_seconds = kDecoderLatencySeconds,
-                .maximum_host_block_frames = maximum_host_block_frames_,
-                .interpolation_guard_frames = audio::kHighQualitySampleSincHalfWidth,
-            };
-            const auto block_source_frames =
-                std::ceil(static_cast<double>(maximum_host_block_frames_) * logical_rate /
-                          static_cast<double>(host_sample_rate_) * kMaximumPitchRatio);
-            if (!std::isfinite(block_source_frames) ||
-                block_source_frames >=
-                    static_cast<double>(std::numeric_limits<std::uint64_t>::max())) {
-                result.status = PulpSamplerLoadStatus::InvalidPreloadContract;
-                return staged;
-            }
-            contract.loop_prefetch_guard_frames = static_cast<std::uint64_t>(block_source_frames);
-            const auto required = audio::evaluate_sample_preload_contract(contract);
-            if (!required.valid() || required.required_preload_frames == 0) {
-                result.status = PulpSamplerLoadStatus::InvalidPreloadContract;
-                return staged;
-            }
-            const auto preload_frames =
-                std::min(file.total_frames, required.required_preload_frames);
-            contract.configured_preload_frames = preload_frames;
-            const auto preload_bytes = audio::checked_sample_storage_bytes(
-                file.channels, preload_frames);
-            if (!preload_bytes ||
-                *preload_bytes > std::numeric_limits<std::uint64_t>::max() -
-                                     result.requested_streaming_memory_bytes) {
-                result.status = PulpSamplerLoadStatus::StreamingMemoryBudgetExceeded;
-                return staged;
-            }
-            result.requested_streaming_memory_bytes += *preload_bytes;
-            auto preload_reservation = memory_governor_.reserve(
-                audio::SampleMemoryCategory::Preload, *preload_bytes);
-            if (!preload_reservation.acquired()) {
-                result.status = preload_reservation.status ==
-                                        audio::SampleMemoryReserveStatus::BudgetExceeded
-                    ? PulpSamplerLoadStatus::StreamingMemoryBudgetExceeded
-                    : PulpSamplerLoadStatus::InternalFailure;
-                return staged;
-            }
-            prepared->preload_leases[member] = std::move(preload_reservation.lease);
-            prepared->preloads[member].resize(file.channels,
-                                              static_cast<std::size_t>(preload_frames));
-            if (file.binding.read(0, prepared->preloads[member].view(), preload_frames,
-                                  std::stop_token{}) != preload_frames) {
-                result.status = PulpSamplerLoadStatus::PreloadReadFailed;
-                return staged;
-            }
-            prepared->preload_counts[member] = preload_frames;
-            if (member == 0) {
-                result.required_preload_frames = required.required_preload_frames;
-                result.configured_preload_frames = preload_frames;
-            }
-        }
+        if (!prepare_streamed_preloads(*prepared, result)) return staged;
         if (!service_running_.load(std::memory_order_acquire)) {
             result.status = PulpSamplerLoadStatus::ShuttingDown;
             return staged;
@@ -985,6 +1099,16 @@ class SamplerStreamingRuntime {
         }
         if (slot == nullptr)
             return PulpSamplerLoadStatus::BundleCapacityExceeded;
+
+        StreamedSourceRecipe candidate_recipe;
+        try {
+            candidate_recipe.files = prepared.files;
+            candidate_recipe.logical_rates = prepared.logical_rates;
+            candidate_recipe.octaves = prepared.octaves;
+            candidate_recipe.member_count = prepared.member_count;
+        } catch (...) {
+            return PulpSamplerLoadStatus::AllocationFailure;
+        }
 
         for (auto& member : slot->members) {
             member.asset.release();
@@ -1143,6 +1267,7 @@ class SamplerStreamingRuntime {
                 .streamed = slot->members[0].asset.view(),
                 .streamed_mips = streamed_mips,
             });
+            retained_stream_recipe_ = std::move(candidate_recipe);
             active_sources_.fetch_add(1, std::memory_order_relaxed);
             preload_frames_.store(preload_counts[0], std::memory_order_relaxed);
             return PulpSamplerLoadStatus::Ok;
