@@ -405,26 +405,6 @@ For the user-facing version of this rationale, see `docs/reference/layout-model.
 
 This repo will be open-sourced. Every commit, every file, every directory name should reflect that. No throwaway code on main. No "WIP" commits. No embarrassing history.
 
-### Language: American English, everywhere
-
-Pulp is written in **American English** — identifiers, comments, docs, and commit
-messages alike. This is a consistency rule, nothing more: a codebase with one
-spelling per word is greppable and guessable, while a mix of `color`/`colour` or
-`normalize`/`normalise` forces every reader to remember which spelling the author
-reached for. It is not aimed at any contributor or dialect; it is house style.
-
-- **Contributions in another dialect are rewritten**, not rejected. Run
-  `python3 tools/scripts/us_english_check.py --fix` to apply the house spelling,
-  then review the diff.
-- The gate (`us_english_check.py`) runs in the pre-push `gates.sh` and in CI
-  (`version-skill-check.yml`), and hard-fails on a non-US spelling in Pulp's own
-  source. Its dictionary is deliberately conservative — only words with a single
-  unambiguous American form (so `canceled`/`cancelled` and `gray`/`grey`, both
-  current in US usage, are NOT flagged).
-- A genuine external contract (a foreign API symbol, a value quoted verbatim from
-  a third-party licence) is exempted via `EXEMPT_SUBSTRINGS` in that script — use
-  it sparingly, and only when the spelling is not ours to change.
-
 `tools/scripts/docs_noise_lint.py` guards the repo against stale workflow breadcrumbs in long-lived docs and comments.
 Long-lived docs and source comments should explain current behavior, invariants, and upstream/vendor quirks — not workflow history.
 Transient issue/PR/wave/handoff references belong in `planning/`, `docs/migrations/`, `docs/reports/`, or the changelog.
