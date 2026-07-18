@@ -1074,6 +1074,25 @@ use GitHub-hosted runners by default. macOS routes through the self-hosted
 `pulp-build` pool (`pulp-m1-01`, `pulp-m1-02`) via
 `PULP_LOCAL_MACOS_RUNS_ON_JSON`; repository variables control any overflow.
 
+The authoritative Windows x64 functional matrix is pinned to `windows-2022`
+(Visual Studio 2022) by `.github/workflows/build.yml`. Shipyard's current ship
+path does not send a `windows_runner_selector_json`, so the workflow fallback
+is the operative selector. `.shipyard/ci-profiles/normal-local-fast.toml`
+mirrors that PR policy with its PR-only `github.windows-x64-runtime` target for
+profile inspection; the current profile planner is read-only and does not
+override dispatch. Its shared coverage/scheduled `github.windows-x64` target
+remains `windows-latest`. Keep those mirrors truthful, but never rely on them
+to route a run. The standalone MSVC release-path, MIDI 2, and BLE compile gates
+remain on `windows-latest`, as do release builds, so the newest hosted compiler
+and SDK are still exercised without allowing an in-place runner-image
+migration to change the CRT/toolchain beneath the complete runtime suite.
+`tools/scripts/test_windows_runner_policy.py` reads every operative surface
+(build, release, coverage, nightly, release resolver, and Shipyard profile)
+independently and runs in the PR `workflow-lint` lane. Update that one
+cross-surface invariant whenever the split changes; a profile-only or
+workflow-only assertion is not enough because the two can self-agree while a
+different production lane drifts.
+
 Do not push empty commits just to churn queued macOS checks. Cancel
 superseded SHAs, rebase or push only when a PR needs current `main`, and
 wait unless a check has actually failed.
@@ -1832,13 +1851,14 @@ Shipyard macOS GUI. The explicit selector has NO capacity fallback, so only set
 it when the pool reliably serves that lane — else legs route to a label with no
 online runner and queue.
 
-Windows is intentionally different. The required `Windows (x64)` gate must stay
-on real GitHub-hosted `windows-latest` unless a local x64 lane is explicitly
-proven and promoted. The current local Windows pool is Windows ARM64 on QEMU
-(`qemu-system-aarch64`): it can maybe smoke x64 via Windows-on-ARM translation,
-but it is not the authoritative Intel/x64 gate. Do not wire
-`PULP_LOCAL_WINDOWS_RUNS_ON_JSON` into the required Build-and-Test Windows x64
-matrix leg; use a separate/dedicated label for any local Windows ARM64 smoke.
+Windows is intentionally different. The required `Windows (x64)` functional
+gate stays on real GitHub-hosted `windows-2022`; the separate build-only MSVC
+release-path gate tracks `windows-latest`. The current local Windows pool is
+Windows ARM64 on QEMU (`qemu-system-aarch64`): it can maybe smoke x64 via
+Windows-on-ARM translation, but it is not the authoritative Intel/x64 gate.
+Do not wire `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` into the required Build-and-Test
+Windows x64 matrix leg; use a separate/dedicated label for any local Windows
+ARM64 smoke.
 
 ### macOS runner routing (current)
 

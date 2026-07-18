@@ -39,6 +39,9 @@ class FluidityInvariant(unittest.TestCase):
     def test_no_variables_means_github_hosted_everywhere(self) -> None:
         self.assertEqual(resolve({}), HOSTED)
 
+    def test_windows_x64_release_tracks_latest(self) -> None:
+        self.assertEqual(HOSTED["windows-x64"], "windows-latest")
+
     def test_every_leg_has_a_hosted_default(self) -> None:
         """A leg with no default could resolve to nothing and queue forever."""
         for leg in LEGS:
