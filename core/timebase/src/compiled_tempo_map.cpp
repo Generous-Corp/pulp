@@ -156,6 +156,23 @@ SamplePosition CompiledTempoMap::ticks_to_samples(TickPosition tick) const noexc
     return {saturating_add(segment.start_sample.value, offset)};
 }
 
+double CompiledTempoMap::tempo_at_tick(TickPosition tick) const noexcept {
+    const auto& segment = segments_[segment_for_tick(tick)];
+    if (tick < segment.start_tick || segment.curve == TempoCurve::Constant ||
+        segment.start_bpm == segment.end_bpm || segment.end_tick == segment.start_tick) {
+        return segment.start_bpm;
+    }
+
+    const auto offset = static_cast<long double>(tick.value) -
+                        static_cast<long double>(segment.start_tick.value);
+    const auto length = static_cast<long double>(segment.end_tick.value) -
+                        static_cast<long double>(segment.start_tick.value);
+    const auto fraction = std::clamp(offset / length, 0.0L, 1.0L);
+    return static_cast<double>(static_cast<long double>(segment.start_bpm) +
+                               fraction * (static_cast<long double>(segment.end_bpm) -
+                                           static_cast<long double>(segment.start_bpm)));
+}
+
 TickPosition CompiledTempoMap::samples_to_ticks(SamplePosition sample) const noexcept {
     return resolve_sample(sample).tick;
 }

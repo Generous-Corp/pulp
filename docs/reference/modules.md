@@ -761,6 +761,48 @@ This initial surface intentionally excludes commands, undo, journals,
 persistence, publication, playback, automation, launch slots, takes, nesting,
 devices, routing, and UI.
 
+## playback
+
+The master timeline transport publishes integer-authoritative block snapshots.
+Normal blocks contain one `TransportRange`; a block crossing a loop boundary
+contains exactly two, with the second range marked as a discontinuity. Timeline
+ticks wrap while `MonotonicBeat` remains continuous, so launch and scheduling
+intent can use a clock that does not repeat. Forward, backward, and stopped
+seeks reanchor only the timeline; they never jump the monotonic clock.
+
+Control-thread changes are published as one coherent `SeqLock` state. The audio
+thread consumes that state through allocation-free `begin_block()` calls. A
+stopped block still covers the callback's frames while holding both musical
+clocks. Loops shorter than the configured maximum block are rejected, which
+guarantees one block can cross at most one loop boundary.
+
+Snapshots carry first-block-safe transport and meter change flags, while each
+range carries its own tempo and `tempo_changed` flag. This keeps a loop split
+across tempo regions faithful when projected into per-range `ProcessContext`s.
+
+**Link:** `pulp::playback` · **Include prefix:** `<pulp/playback/...>`
+
+```cpp
+#include <pulp/playback/transport.hpp>
+
+pulp::playback::MasterTransport transport;
+transport.prepare(tempo, {
+    .max_buffer_size = 1024,
+    .initially_playing = true,
+});
+
+pulp::playback::TransportSnapshot block;
+transport.begin_block(512, block);
+for (std::uint8_t i = 0; i < block.range_count; ++i) {
+    schedule(block.ranges[i]);
+}
+```
+
+Plugin/host adapters include
+`<pulp/format/playback_context_projection.hpp>` to project a range into the
+public `ProcessContext`. That header is the only lossy tick-to-double boundary;
+`core/playback` does not depend on format, host, or view code.
+
 ## format
 
 Plugin format adapters — write your plugin once, deploy to 9 formats.

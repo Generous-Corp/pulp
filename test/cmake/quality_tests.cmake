@@ -7,6 +7,15 @@ target_link_libraries(pulp-test-build-check PRIVATE pulp::platform pulp::runtime
 add_test(NAME build-check COMMAND pulp-test-build-check)
 
 if(Python3_Interpreter_FOUND)
+    # Playback is engine-core: format/host/view may consume it, but it may not
+    # include or link back upward. The selftest proves every forbidden layer is
+    # actually detected in both source includes and CMake linkage.
+    add_test(NAME timeline-engine-dependency-floor COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/playback_dependency_floor_check.py")
+    add_test(NAME timeline-engine-dependency-floor-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/playback_dependency_floor_check.py"
+        --selftest)
+
     # Reskinnability ratchet: fail on a NEW hardcoded theme color.
     add_test(NAME token-coverage-ratchet COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/token_coverage_check.py")

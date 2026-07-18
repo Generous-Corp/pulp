@@ -4,6 +4,12 @@
 pulp_add_test_suite(pulp-test-transport-quantizer LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-timebase LIBRARIES pulp::timebase TIMEOUT 60)
 pulp_add_test_suite(pulp-test-timeline-model LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-playback-transport
+    SOURCES test_playback_transport.cpp
+        $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+        $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::playback pulp::format ${CMAKE_DL_LIBS}
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 
 # Sample asset drop target adapter over cheap extension classification.
 pulp_add_test_suite(pulp-test-sample-asset-drop-target LIBRARIES pulp::view)

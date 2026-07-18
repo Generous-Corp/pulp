@@ -26,7 +26,7 @@ include(GNUInstallDirs)
 # `pulp-render`, are optional in smoke or non-GPU builds, so only export targets
 # that were actually configured in this build tree.
 set(PULP_SDK_TARGETS
-    pulp-platform pulp-runtime pulp-timebase pulp-timeline pulp-events pulp-state
+    pulp-platform pulp-runtime pulp-timebase pulp-timeline pulp-playback pulp-events pulp-state
     pulp-audio pulp-midi pulp-signal pulp-graph pulp-format
     pulp-osc pulp-canvas pulp-view-core pulp-view
     pulp-standalone pulp-dsl pulp-native-components
@@ -181,7 +181,7 @@ endif()
 # aligned with the targets exported above: iOS deliberately has no pulp-host,
 # so it must not receive orphaned desktop-host headers either.
 set(_pulp_sdk_header_subsystems
-    platform runtime timebase timeline events state audio midi signal graph format osc canvas
+    platform runtime timebase timeline playback events state audio midi signal graph format osc canvas
     render view gpu_audio native-components dsl
 )
 if(TARGET pulp-host)
