@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <limits>
 #include <tuple>
 #include <unordered_set>
@@ -126,8 +127,7 @@ runtime::Result<NoteContent, ModelError> NoteContent::replace_note(NoteEvent not
 }
 
 runtime::Result<RegisteredContent, ModelError>
-RegisteredContent::create_no_owned_ids(SchemaIdentity schema,
-                                       std::shared_ptr<const void> value) {
+RegisteredContent::create_no_owned_ids(SchemaIdentity schema, std::shared_ptr<const void> value) {
     if (!schema.valid() || !value)
         return fail<RegisteredContent>(ModelErrorCode::InvalidSchemaIdentity);
     return runtime::Result<RegisteredContent, ModelError>(
@@ -135,12 +135,10 @@ RegisteredContent::create_no_owned_ids(SchemaIdentity schema,
 }
 
 runtime::Result<OpaqueContent, ModelError>
-OpaqueContent::create(SchemaIdentity schema, std::string raw_json,
-                      OpaqueContentLimits limits) {
+OpaqueContent::create(SchemaIdentity schema, std::string raw_json, OpaqueContentLimits limits) {
     if (!schema.valid())
         return fail<OpaqueContent>(ModelErrorCode::InvalidSchemaIdentity);
-    if (raw_json.size() > limits.max_input_bytes ||
-        raw_json.size() > limits.max_opaque_bytes)
+    if (raw_json.size() > limits.max_input_bytes || raw_json.size() > limits.max_opaque_bytes)
         return fail<OpaqueContent>(ModelErrorCode::OpaqueContentLimitExceeded);
     DecodeLimits decode_limits;
     decode_limits.max_input_bytes = limits.max_input_bytes;
@@ -157,8 +155,8 @@ OpaqueContent::create(SchemaIdentity schema, std::string raw_json,
                               : ModelErrorCode::InvalidOpaqueContent;
         return fail<OpaqueContent>(code);
     }
-    auto envelope = validate_exact_envelope(parsed.value()->root(), schema.type_name,
-                                            schema.version);
+    auto envelope =
+        validate_exact_envelope(parsed.value()->root(), schema.type_name, schema.version);
     if (!envelope)
         return fail<OpaqueContent>(ModelErrorCode::InvalidOpaqueContent);
     return runtime::Result<OpaqueContent, ModelError>(
@@ -169,15 +167,24 @@ struct Clip::Data {
     ItemId id;
     ClipTimeRange range;
     ClipContent content;
+    ClipPlaybackProperties playback;
 };
 
+bool valid_playback_properties(ClipPlaybackProperties playback, std::uint64_t duration) noexcept {
+    if (!std::isfinite(playback.gain_linear) || playback.gain_linear < 0.0f)
+        return false;
+    return playback.fade_in_duration <= duration && playback.fade_out_duration <= duration;
+}
+
 runtime::Result<Clip, ModelError> Clip::create(ItemId id, timebase::TickPosition start,
-                                               timebase::TickDuration duration,
-                                               ClipContent content) {
+                                               timebase::TickDuration duration, ClipContent content,
+                                               ClipPlaybackProperties playback) {
     if (!id.valid())
         return fail<Clip>(ModelErrorCode::InvalidItemId, id);
     if (!positive_range(start.value, duration.value))
         return fail<Clip>(ModelErrorCode::InvalidDuration, id);
+    if (!valid_playback_properties(playback, static_cast<std::uint64_t>(duration.value)))
+        return fail<Clip>(ModelErrorCode::InvalidClipPlaybackProperties, id);
     if (const auto* media = std::get_if<MediaRef>(&content)) {
         if (!media->asset_id.valid() || media->source_start.value < 0 || media->frame_count == 0 ||
             static_cast<std::uint64_t>(media->source_start.value) >
@@ -185,13 +192,14 @@ runtime::Result<Clip, ModelError> Clip::create(ItemId id, timebase::TickPosition
             return fail<Clip>(ModelErrorCode::InvalidMediaRange, id, media->asset_id);
     }
     return runtime::Result<Clip, ModelError>(runtime::Ok(Clip(std::make_shared<const Data>(
-        Data{id, MusicalTimeRange{start, duration}, std::move(content)}))));
+        Data{id, MusicalTimeRange{start, duration}, std::move(content), playback}))));
 }
 
 runtime::Result<Clip, ModelError> Clip::create_absolute(ItemId id, timebase::SamplePosition start,
                                                         std::uint64_t sample_count,
                                                         timebase::RationalRate sample_rate,
-                                                        ClipContent content) {
+                                                        ClipContent content,
+                                                        ClipPlaybackProperties playback) {
     if (!id.valid())
         return fail<Clip>(ModelErrorCode::InvalidItemId, id);
     if (!sample_rate.valid())
@@ -201,6 +209,8 @@ runtime::Result<Clip, ModelError> Clip::create_absolute(ItemId id, timebase::Sam
         start.value >
             std::numeric_limits<std::int64_t>::max() - static_cast<std::int64_t>(sample_count))
         return fail<Clip>(ModelErrorCode::InvalidDuration, id);
+    if (!valid_playback_properties(playback, sample_count))
+        return fail<Clip>(ModelErrorCode::InvalidClipPlaybackProperties, id);
     if (const auto* media = std::get_if<MediaRef>(&content)) {
         if (!media->asset_id.valid() || media->source_start.value < 0 || media->frame_count == 0 ||
             static_cast<std::uint64_t>(media->source_start.value) >
@@ -209,7 +219,7 @@ runtime::Result<Clip, ModelError> Clip::create_absolute(ItemId id, timebase::Sam
     }
     return runtime::Result<Clip, ModelError>(runtime::Ok(Clip(std::make_shared<const Data>(
         Data{id, AbsoluteTimeRange{start, sample_count, sample_rate.normalized()},
-             std::move(content)}))));
+             std::move(content), playback}))));
 }
 
 ItemId Clip::id() const noexcept {
@@ -251,20 +261,23 @@ timebase::SamplePosition Clip::absolute_end() const noexcept {
 const ClipContent& Clip::content() const noexcept {
     return data_->content;
 }
+ClipPlaybackProperties Clip::playback_properties() const noexcept {
+    return data_->playback;
+}
 
 runtime::Result<Clip, ModelError> Clip::with_time_range(ClipTimeRange range) const {
     if (const auto* musical = std::get_if<MusicalTimeRange>(&range))
-        return create(id(), musical->start, musical->duration, content());
+        return create(id(), musical->start, musical->duration, content(), playback_properties());
     const auto& absolute = std::get<AbsoluteTimeRange>(range);
     return create_absolute(id(), absolute.start, absolute.sample_count, absolute.sample_rate,
-                           content());
+                           content(), playback_properties());
 }
 
 runtime::Result<Clip, ModelError> Clip::with_content(ClipContent replacement) const {
     if (time_anchor() == ClipTimeAnchor::Musical)
-        return create(id(), start(), duration(), std::move(replacement));
+        return create(id(), start(), duration(), std::move(replacement), playback_properties());
     return create_absolute(id(), absolute_start(), absolute_duration_samples(),
-                           absolute_sample_rate(), std::move(replacement));
+                           absolute_sample_rate(), std::move(replacement), playback_properties());
 }
 
 static std::atomic<std::uint64_t> g_live_index_nodes{0};
@@ -1061,10 +1074,10 @@ runtime::Result<Clip, ModelError> rebuild_clip(const Clip& clip, const IdRemapTa
     }
     if (clip.time_anchor() == ClipTimeAnchor::Musical)
         return Clip::create(*table.find(clip.id()), clip.start(), clip.duration(),
-                            std::move(content));
+                            std::move(content), clip.playback_properties());
     return Clip::create_absolute(*table.find(clip.id()), clip.absolute_start(),
                                  clip.absolute_duration_samples(), clip.absolute_sample_rate(),
-                                 std::move(content));
+                                 std::move(content), clip.playback_properties());
 }
 
 void allocate_clip_owned(const Clip& clip, IdRemapTable& table, ItemIdAllocator& allocator,

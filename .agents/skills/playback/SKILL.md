@@ -1,6 +1,6 @@
 ---
 name: playback
-description: Pulp timeline transport and immutable compiled playback programs, bounded compile execution, block-level publication latches, stable shells, and ProcessContext projection.
+description: Pulp timeline transport, immutable compiled playback programs, bounded arrangement audio rendering, block-level publication latches, stable shells, and ProcessContext projection.
 ---
 
 # Playback
@@ -20,6 +20,18 @@ pending deltas with latest-track wins.
 For this phase, only `ProviderKind::Arrangement` with the arrangement-only
 availability mask is valid; reject launcher or external-input claims until
 their provider payloads are compiled.
+
+For MediaRef clips, prepare a `DecodedAudioAssetPool` off the audio thread. Use
+`DecodedAudioAssetPool::decode_wav()` for bounded in-memory WAV bytes, then pass
+the immutable pool in `ProgramCompileRequest::audio_assets`. The existing
+compiler incrementally lowers media clips into each `TrackProgram`; do not build
+a second playback-program model. The renderer uses bounded stateless linear SRC so
+source audio runs at its native wall-clock rate after sample-rate conversion.
+A musically anchored clip changes placement and timeline extent through the
+tempo map but does not imply warp or time-stretch.
+Gain and anchor-native fade durations live on the immutable Clip. Missing,
+mismatched, or over-capacity assets fail compilation instead of creating a
+silent placeholder.
 
 On the audio thread, call `PlaybackProgramBlockLatch::begin_block()` exactly
 once per callback and pass that pin to every `StableRendererShell`. Never cache
@@ -72,11 +84,17 @@ the format-layer projection from playback snapshots to `ProcessContext`.
   `<pulp/format/playback_context_projection.hpp>` owns the one-way adapter.
   Keep `timeline-engine-dependency-floor` green; it allowlists source includes
   and CMake links for timebase, timeline (when present), and playback.
+- `ArrangementAudioRenderer::process()` clears output, validates the complete
+  zero/one-wrap snapshot, and mixes arrangement-selected tracks in stable
+  PlaybackProgram order. It is immutable-input RT safe, wraps `ScopedNoAlloc`,
+  and must remain covered by `rt_allocation_probe`. Mono duplicates on wider
+  output, multichannel-to-mono averages, wider sources map by channel, and the
+  engine does not clip or normalize deterministic float sums.
 
 ## Validation
 
 Build and run `pulp-test-playback-transport`, `pulp-test-timebase`, and
-`pulp-test-transport-quantizer`. Keep loop-boundary, variable-block, ramp,
+`pulp-test-transport-quantizer`, plus `pulp-test-playback-audio-renderer`. Keep loop-boundary, variable-block, ramp,
 negative-preroll, extreme-position, SeqLock hammer, and RT-allocation cases.
 When export/install wiring changes, also run the installed SDK consumer smoke.
 Also build `timeline-program-threadless-no-exceptions-check`; it compiles the

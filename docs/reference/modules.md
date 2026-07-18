@@ -753,9 +753,14 @@ next never-used value; `UINT64_MAX` is the explicit exhausted allocator state
 and is valid project state after ownership reaches `UINT64_MAX - 1`.
 `ClipTimeAnchor` distinguishes tempo-following musical tick ranges from fixed
 absolute ranges expressed as `SamplePosition`, integer sample count, and a
-normalized `RationalRate`. Phase 1 rejects mixed-anchor clips within one Track
-until a context-owned projection can compare those domains; a Sequence can
-still contain separate musical and absolute Tracks and bound both domains.
+normalized `RationalRate`. `ClipPlaybackProperties` carries nonnegative linear
+gain plus fade-in and fade-out lengths in the clip anchor's native unit:
+canonical ticks for musical clips and timeline samples for absolute clips.
+Construction checks both fades against clip duration; compilation maps musical
+fades through the tempo map to exact frame counts. Mixed-anchor clips within
+one Track are rejected until a context-owned projection can compare those
+domains; a Sequence can still contain separate musical and absolute Tracks and
+bound both domains.
 `remap_ids()` performs two passes: it allocates every destination identity
 before rebuilding the immutable hierarchy. Clip, Track, and Sequence subtree
 overloads distinguish owned IDs from external media-asset references and accept
@@ -828,11 +833,29 @@ Sparse per-track policy deltas select an available provider and whether a stable
 shell carries state by ItemId or resets it on stateless adoption. Omitted tracks
 retain their published policy, and coalescing merges deltas with latest-track
 wins before publication.
-Phase 1 compiles arrangement payloads only: launcher/external-input selections
-and availability bits are rejected until those provider programs exist.
+The compiler currently accepts arrangement payloads only: launcher/external-input
+selections and availability bits are rejected until those provider programs exist.
 `DeferredCompileExecutor` advances bounded slices from an idle/UI pump and
 `WorkerCompileExecutor` supplies the native background lane, with an explicit
 unsupported stub in threadless builds.
+
+MediaRef clips use an immutable `DecodedAudioAssetPool`. Complete WAV bytes can
+be decoded into this pool through the bounded no-file-I/O decoder, then the
+ordinary incremental compiler lowers source ranges, musical or absolute clip
+placement, gain, and fades into each `TrackProgram`. The renderer uses bounded
+stateless linear sample-rate conversion so media retains its native wall-clock
+speed; musical anchoring uses the tempo map for placement and extent but does
+not silently introduce warp or time-stretch. A later quality pass decides
+whether linear SRC should be upgraded. Missing media, metadata mismatches,
+invalid ranges, and capacity excesses reject compilation.
+
+`ArrangementAudioRenderer::process()` consumes the same pinned
+`PlaybackProgram` and the transport's complete zero/one-wrap snapshot. It
+clears output, mixes arrangement-selected tracks in deterministic ItemId order,
+zero-fills stops and source EOF, applies gain and linear fades sample-exactly,
+and performs no allocation or lock on the audio thread. Mono sources duplicate
+to wider output; multichannel sources average to mono or map like-numbered
+channels. Float sums are not clipped or normalized by the engine.
 
 At an audio callback boundary, one `PlaybackProgramBlockLatch` pins the whole
 program for the block. Every `StableRendererShell` consults that same pin,
@@ -852,8 +875,8 @@ seek, loop wrap, and stop release active notes and reset the cursor; Phase 1 doe
 not chase a note whose onset precedes the new range. The transport snapshot and
 program must name the same compiled tempo-map identity, and overlapping logical
 notes on one channel/pitch are reference-counted so the physical note-off waits
-for the last overlap. Audio rendering, graph binding, commands, undo, and
-persistence schemas remain separate slices.
+for the last overlap. Timeline commands and persistence preserve the clip gain
+and fade properties consumed by the audio compiler.
 
 ## format
 

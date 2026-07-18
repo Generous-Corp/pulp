@@ -1,4 +1,5 @@
 add_library(pulp-playback
+    src/audio_renderer.cpp
     src/compile_executor.cpp
     src/note_renderer.cpp
     src/program.cpp
@@ -36,6 +37,7 @@ endif()
 # excludes transport (whose tempo-map construction belongs off the RT lane).
 if(PULP_BUILD_TESTS AND NOT MSVC)
     add_library(timeline-program-threadless-no-exceptions-check OBJECT
+        src/audio_renderer.cpp
         src/compile_executor.cpp
         src/note_renderer.cpp
         src/program.cpp

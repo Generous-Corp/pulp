@@ -1,9 +1,9 @@
 #pragma once
 
 #include <pulp/runtime/result.hpp>
-#include <pulp/timeline/assets.hpp>
 #include <pulp/timebase/rational_time.hpp>
 #include <pulp/timebase/tick.hpp>
+#include <pulp/timeline/assets.hpp>
 
 #include <compare>
 #include <cstddef>
@@ -59,6 +59,7 @@ enum class ModelErrorCode : std::uint8_t {
     InvalidOpaqueContent,
     OpaqueContentLimitExceeded,
     OpaqueContentCannotRemap,
+    InvalidClipPlaybackProperties,
 };
 
 struct ModelError {
@@ -125,6 +126,16 @@ struct AbsoluteTimelineDuration {
     timebase::RationalRate sample_rate;
 };
 
+/// Clip-level audio controls. Fade lengths use the clip anchor's native
+/// unit: canonical ticks for musical clips and timeline samples for absolute
+/// clips. The playback compiler resolves both to sample-exact frame counts.
+struct ClipPlaybackProperties {
+    float gain_linear = 1.0f;
+    std::uint64_t fade_in_duration = 0;
+    std::uint64_t fade_out_duration = 0;
+    constexpr auto operator<=>(const ClipPlaybackProperties&) const = default;
+};
+
 using ClipTimeRange = std::variant<MusicalTimeRange, AbsoluteTimeRange>;
 
 struct NoteEvent {
@@ -161,11 +172,16 @@ class RegisteredContent {
     static runtime::Result<RegisteredContent, ModelError>
     create_no_owned_ids(SchemaIdentity schema, std::shared_ptr<const void> value);
 
-    const SchemaIdentity& schema() const noexcept { return schema_; }
-    const std::shared_ptr<const void>& value() const noexcept { return value_; }
+    const SchemaIdentity& schema() const noexcept {
+        return schema_;
+    }
+    const std::shared_ptr<const void>& value() const noexcept {
+        return value_;
+    }
 
-    template <typename T>
-    const T* value_as() const noexcept { return static_cast<const T*>(value_.get()); }
+    template <typename T> const T* value_as() const noexcept {
+        return static_cast<const T*>(value_.get());
+    }
 
   private:
     RegisteredContent(SchemaIdentity schema, std::shared_ptr<const void> value)
@@ -195,12 +211,17 @@ struct OpaqueContentLimits {
 class OpaqueContent {
   public:
     static runtime::Result<OpaqueContent, ModelError>
-    create(SchemaIdentity schema, std::string raw_json,
-           OpaqueContentLimits limits = {});
+    create(SchemaIdentity schema, std::string raw_json, OpaqueContentLimits limits = {});
 
-    const SchemaIdentity& schema() const noexcept { return schema_; }
-    const std::string& raw_json() const noexcept { return raw_json_; }
-    const OpaqueContentLimits& validation_limits() const noexcept { return limits_; }
+    const SchemaIdentity& schema() const noexcept {
+        return schema_;
+    }
+    const std::string& raw_json() const noexcept {
+        return raw_json_;
+    }
+    const OpaqueContentLimits& validation_limits() const noexcept {
+        return limits_;
+    }
 
   private:
     OpaqueContent(SchemaIdentity schema, std::string raw_json, OpaqueContentLimits limits)
@@ -217,10 +238,12 @@ class Clip {
   public:
     static runtime::Result<Clip, ModelError> create(ItemId id, timebase::TickPosition start,
                                                     timebase::TickDuration duration,
-                                                    ClipContent content);
+                                                    ClipContent content,
+                                                    ClipPlaybackProperties playback = {});
     static runtime::Result<Clip, ModelError>
     create_absolute(ItemId id, timebase::SamplePosition start, std::uint64_t sample_count,
-                    timebase::RationalRate sample_rate, ClipContent content);
+                    timebase::RationalRate sample_rate, ClipContent content,
+                    ClipPlaybackProperties playback = {});
 
     ItemId id() const noexcept;
     ClipTimeAnchor time_anchor() const noexcept;
@@ -235,6 +258,7 @@ class Clip {
     const ClipContent& content() const noexcept;
     runtime::Result<Clip, ModelError> with_time_range(ClipTimeRange range) const;
     runtime::Result<Clip, ModelError> with_content(ClipContent content) const;
+    ClipPlaybackProperties playback_properties() const noexcept;
 
   private:
     struct Data;

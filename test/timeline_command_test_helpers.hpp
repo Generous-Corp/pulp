@@ -16,10 +16,11 @@ inline ContentHash content_hash(char digit = 'a') {
 }
 
 inline Clip make_note_clip(ItemId clip_id, ItemId note_id, std::int64_t start,
-                           std::uint16_t velocity = 1000) {
+                           std::uint16_t velocity = 1000, ClipPlaybackProperties playback = {}) {
     auto notes = NoteContent::create({{note_id, {0}, {kTicksPerQuarter / 4}, velocity, 60, 0}});
     assert(notes);
-    auto clip = Clip::create(clip_id, {start}, {kTicksPerQuarter}, std::move(notes).value());
+    auto clip =
+        Clip::create(clip_id, {start}, {kTicksPerQuarter}, std::move(notes).value(), playback);
     assert(clip);
     return std::move(clip).value();
 }

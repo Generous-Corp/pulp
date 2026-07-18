@@ -55,6 +55,32 @@ TEST_CASE("Timeline move and note velocity commands enforce typed preconditions"
     REQUIRE(rejected.error().code == ConflictCode::ExpectedValueMismatch);
 }
 
+TEST_CASE("Timeline edits and inverses preserve clip playback properties") {
+    const ClipPlaybackProperties playback{0.375f, 120, 240};
+    auto track = Track::create({4}, "track", {make_note_clip({5}, {6}, 0, 1000, playback)});
+    REQUIRE(track);
+    auto sequence = Sequence::create({3}, "sequence", TickDuration{8 * kTicksPerQuarter},
+                                     {std::move(track).value()});
+    REQUIRE(sequence);
+    auto original = Project::create({{1}, "project", 7, {3}, {}, {std::move(sequence).value()}});
+    REQUIRE(original);
+
+    const auto old_range = clip(original.value()).time_range();
+    ClipTimeRange new_range = MusicalTimeRange{{2 * kTicksPerQuarter}, {kTicksPerQuarter}};
+    auto edit = transaction({1}, 1, 1, {},
+                            {MoveClip{{3}, {4}, {5}, old_range, new_range},
+                             SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 4096}});
+    auto changed = reduce_transaction(original.value(), edit);
+    REQUIRE(changed);
+    REQUIRE(clip(changed->project).playback_properties() == playback);
+
+    auto inverse = transaction({1}, 2, 3, {}, changed->inverses);
+    auto restored = reduce_transaction(changed->project, inverse);
+    REQUIRE(restored);
+    REQUIRE(clip(restored->project).playback_properties() == playback);
+    REQUIRE(same_project(original.value(), restored->project));
+}
+
 TEST_CASE("Timeline move rejects sequence-boundary violations without touching the source") {
     const auto original = make_project();
     const auto old_range = clip(original).time_range();
