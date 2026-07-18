@@ -1,12 +1,20 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/auto_ui.hpp>
+#include <pulp/view/frame_clock.hpp>
+#include <pulp/view/motion.hpp>
+#include <pulp/view/screenshot.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/canvas/canvas.hpp>
 
+#include <cmath>
+#include <cstdlib>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 using namespace pulp::view;
 using namespace pulp::state;
@@ -46,6 +54,34 @@ bool paints_text(View& view, std::string_view text) {
     return false;
 }
 
+double motion_component(const pulp::view::motion::SampleEvent& event,
+                        std::string_view name) {
+    for (const auto& [key, value] : event.components)
+        if (key == name) return value;
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
+class AutoUiMotionCapture {
+public:
+    AutoUiMotionCapture() {
+        auto& coordinator = pulp::view::motion::Coordinator::instance();
+        coordinator.reset();
+        coordinator.bind(clock);
+        coordinator.set_tracing_enabled(true);
+        coordinator.add_sink([this](const auto& event) {
+            if (event.kind != pulp::view::motion::SampleEvent::Kind::TraceStarted)
+                samples.push_back(event);
+        });
+    }
+
+    ~AutoUiMotionCapture() {
+        pulp::view::motion::Coordinator::instance().reset();
+    }
+
+    FrameClock clock;
+    std::vector<pulp::view::motion::SampleEvent> samples;
+};
+
 } // namespace
 
 TEST_CASE("AutoUi builds from parameter store", "[view][auto_ui]") {
@@ -64,6 +100,48 @@ TEST_CASE("AutoUi builds from parameter store", "[view][auto_ui]") {
     REQUIRE(body->child_count() == 1);
     auto* grid = body->child_at(0);
     REQUIRE(grid->child_count() == 3);  // Gain + Mix + Bypass
+
+    // Knob text belongs to dedicated rows below the dial instead of being
+    // painted over its artwork.
+    auto* gain_tile = grid->child_at(0);
+    REQUIRE(gain_tile->child_count() == 3);
+    auto* gain_knob = dynamic_cast<Knob*>(gain_tile->child_at(0));
+    REQUIRE(gain_knob != nullptr);
+    CHECK_FALSE(gain_knob->show_label());
+    CHECK_FALSE(gain_knob->show_value());
+    CHECK(gain_knob->get_value_string() == "0.00 dB");
+    auto* gain_name = dynamic_cast<Label*>(gain_tile->child_at(1));
+    auto* gain_value = dynamic_cast<Label*>(gain_tile->child_at(2));
+    REQUIRE(gain_name != nullptr);
+    REQUIRE(gain_value != nullptr);
+    CHECK(gain_name->text() == "Gain");
+    CHECK(gain_value->text() == "0.00 dB");
+}
+
+TEST_CASE("AutoUi renders knob names and values outside the dial",
+          "[view][auto_ui][screenshot]") {
+    StateStore store;
+    store.add_parameter(make_param(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    store.add_parameter(make_param(2, "Mix", "%", {0.0f, 100.0f, 75.0f}));
+    store.add_parameter(make_param(3, "Frequency", "Hz", {20.0f, 20000.0f, 440.0f}));
+    store.add_parameter(make_param(4, "Resonance", "%", {0.0f, 100.0f, 35.0f}));
+
+    auto root = AutoUi::build(store);
+    REQUIRE(root != nullptr);
+
+    constexpr uint32_t width = 400;
+    constexpr uint32_t height = 300;
+    root->set_bounds({0.0f, 0.0f, static_cast<float>(width),
+                      static_cast<float>(height)});
+    auto png = render_to_png(*root, width, height, 2.0f, ScreenshotBackend::skia);
+    if (png.empty()) SKIP("Skia raster backend unavailable");
+    REQUIRE(png.size() > 2000);
+
+    // Optional durable artifact for local visual review. CI remains clean.
+    if (const char* out = std::getenv("PULP_AUTO_UI_SCREENSHOT_OUT")) {
+        REQUIRE(render_to_file(*root, width, height, out, 2.0f,
+                               ScreenshotBackend::skia));
+    }
 }
 
 TEST_CASE("AutoUi builds empty parameter grids", "[view][auto_ui]") {
@@ -147,10 +225,12 @@ TEST_CASE("AutoUi tiles: fixed size, no shrink, knob/toggle inside",
     // Tile 0 → Knob
     auto* tile_knob = grid->child_at(0);
     REQUIRE(tile_knob->flex().preferred_width == 82);
-    REQUIRE(tile_knob->flex().preferred_height == 96);
+    REQUIRE(tile_knob->flex().preferred_height == 112);
     REQUIRE(tile_knob->flex().flex_shrink == 0);  // tiles never shrink
-    REQUIRE(tile_knob->child_count() == 1);
+    REQUIRE(tile_knob->child_count() == 3);
     REQUIRE(dynamic_cast<Knob*>(tile_knob->child_at(0)) != nullptr);
+    REQUIRE(dynamic_cast<Label*>(tile_knob->child_at(1)) != nullptr);
+    REQUIRE(dynamic_cast<Label*>(tile_knob->child_at(2)) != nullptr);
 
     // Tile 1 → Toggle (Switch range [0,1] step 1 → toggle path)
     auto* tile_toggle = grid->child_at(1);
@@ -184,6 +264,125 @@ TEST_CASE("AutoUi scales from 1 param up to 16 without losing structure",
     }
 }
 
+TEST_CASE("AutoUi scrolls large parameter sets instead of truncating them",
+          "[view][auto_ui][scroll]") {
+    StateStore store;
+    for (std::uint32_t i = 0; i < 54; ++i) {
+        store.add_parameter({i, "P" + std::to_string(i), "",
+                             {0.0f, 1.0f, 0.5f}});
+    }
+
+    auto root = AutoUi::build(store);
+    root->set_bounds({0, 0, 400, 300});
+    root->layout_children();
+
+    auto* body = dynamic_cast<ScrollView*>(root->child_at(1));
+    REQUIRE(body != nullptr);
+    REQUIRE(body->child_count() == 1);
+    REQUIRE(body->child_at(0)->child_count() == 54);
+    REQUIRE(find_widget<Knob>(*root, "P53") != nullptr);
+    CHECK(body->content_size().height > body->local_bounds().height);
+    CHECK(body->wants_wheel_scroll());
+
+    AutoUiMotionCapture motion;
+    auto trace = pulp::view::motion::Coordinator::instance()
+        .trace("AutoUiBody", {60})
+        .scroll_geometry(
+            "scroll", *body,
+            {pulp::view::motion::ScrollProperty::ContentOffsetY,
+             pulp::view::motion::ScrollProperty::VisibleRectHeight,
+             pulp::view::motion::ScrollProperty::ContentSizeHeight,
+             pulp::view::motion::ScrollProperty::ScrollableMaxY})
+        .attach();
+    motion.clock.tick(1.0f / 60.0f);
+    REQUIRE(motion.samples.size() == 1);
+    CHECK(motion_component(motion.samples.front(), "contentOffsetY") == 0.0);
+    CHECK(motion_component(motion.samples.front(), "contentSizeHeight") >
+          motion_component(motion.samples.front(), "visibleRectHeight"));
+    CHECK(motion_component(motion.samples.front(), "scrollableMaxY") > 0.0);
+
+    body->scroll_by(0, 100, /*animate=*/false);
+    CHECK(body->target_scroll_y() > 0.0f);
+    motion.clock.tick(1.0f / 60.0f);
+    bool traced_scrolled_offset = false;
+    for (const auto& sample : motion.samples) {
+        const double offset = motion_component(sample, "contentOffsetY");
+        if (!std::isnan(offset) && offset >= 99.5) traced_scrolled_offset = true;
+    }
+    CHECK(traced_scrolled_offset);
+}
+
+TEST_CASE("AutoUi renders registered parameter groups as scrollable sections",
+          "[view][auto_ui][groups][scroll]") {
+    StateStore store;
+    store.add_group({1, "Oscillator", 0});
+    store.add_group({2, "Envelope", 0});
+    for (std::uint32_t i = 0; i < 8; ++i) {
+        store.add_parameter({.id = i,
+                             .name = "G" + std::to_string(i),
+                             .range = {0.0f, 1.0f, 0.5f},
+                             .group_id = i < 4 ? 1 : 2});
+    }
+
+    auto root = AutoUi::build(store);
+    root->set_bounds({0, 0, 320, 240});
+    root->layout_children();
+
+    auto* body = dynamic_cast<ScrollView*>(root->child_at(1));
+    REQUIRE(body != nullptr);
+    REQUIRE(body->child_count() == 1);
+    auto* content = body->child_at(0);
+    REQUIRE(content->child_count() == 2);
+    auto* oscillator = dynamic_cast<GroupBox*>(content->child_at(0));
+    auto* envelope = dynamic_cast<GroupBox*>(content->child_at(1));
+    REQUIRE(oscillator != nullptr);
+    REQUIRE(envelope != nullptr);
+    CHECK(oscillator->title() == "Oscillator");
+    CHECK(envelope->title() == "Envelope");
+    CHECK(find_widget<Knob>(*root, "G0") != nullptr);
+    CHECK(find_widget<Knob>(*root, "G7") != nullptr);
+    CHECK(body->content_size().height > body->local_bounds().height);
+    body->scroll_by(0, 100, /*animate=*/false);
+    CHECK(body->target_scroll_y() > 0.0f);
+}
+
+TEST_CASE("AutoUi keeps parameters whose group is not registered",
+          "[view][auto_ui][groups]") {
+    StateStore store;
+    store.add_group({1, "Registered", 0});
+    store.add_parameter({.id = 1,
+                         .name = "Registered param",
+                         .range = {0.0f, 1.0f, 0.5f},
+                         .group_id = 1});
+    store.add_parameter({.id = 2,
+                         .name = "Unknown group param",
+                         .range = {0.0f, 1.0f, 0.5f},
+                         .group_id = 999});
+    store.add_parameter({.id = 3,
+                         .name = "Ungrouped param",
+                         .range = {0.0f, 1.0f, 0.5f}});
+
+    auto root = AutoUi::build(store);
+    root->set_bounds({0, 0, 400, 300});
+    root->layout_children();
+
+    auto* body = dynamic_cast<ScrollView*>(root->child_at(1));
+    REQUIRE(body != nullptr);
+    REQUIRE(body->child_count() == 1);
+    auto* content = body->child_at(0);
+    REQUIRE(content->child_count() == 2);
+
+    auto* registered = dynamic_cast<GroupBox*>(content->child_at(0));
+    auto* other = dynamic_cast<GroupBox*>(content->child_at(1));
+    REQUIRE(registered != nullptr);
+    REQUIRE(other != nullptr);
+    CHECK(registered->title() == "Registered");
+    CHECK(other->title() == "Other");
+    CHECK(find_widget<Knob>(*root, "Registered param") != nullptr);
+    CHECK(find_widget<Knob>(*root, "Unknown group param") != nullptr);
+    CHECK(find_widget<Knob>(*root, "Ungrouped param") != nullptr);
+}
+
 TEST_CASE("AutoUi sync updates widgets", "[view][auto_ui]") {
     StateStore store;
     store.add_parameter(make_param(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
@@ -209,6 +408,21 @@ TEST_CASE("AutoUi sync updates widgets", "[view][auto_ui]") {
     auto* knob = find_knob(*root);
     REQUIRE(knob != nullptr);
     REQUIRE_THAT(knob->value(), WithinAbs(0.8, 0.01));
+}
+
+TEST_CASE("AutoUi sync updates the padded value row", "[view][auto_ui]") {
+    StateStore store;
+    store.add_parameter(make_param(7, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    auto root = AutoUi::build(store);
+    auto* tile = root->child_at(1)->child_at(0)->child_at(0);
+    REQUIRE(tile->child_count() == 3);
+    auto* value = dynamic_cast<Label*>(tile->child_at(2));
+    REQUIRE(value != nullptr);
+    CHECK(value->text() == "0.00 dB");
+
+    store.set_value(7, -24.0f);
+    AutoUi::sync(*root, store);
+    CHECK(value->text() == "-24.0 dB");
 }
 
 TEST_CASE("AutoUi generated controls write changes back to the store",
@@ -259,13 +473,22 @@ TEST_CASE("AutoUi generated controls expose toggle state and formatted values",
     REQUIRE(bypass->is_on());
     REQUIRE(bypass->label() == "Bypass");
 
-    frequency->set_bounds({0, 0, 80, 80});
-    drive->set_bounds({0, 0, 80, 80});
-    fine->set_bounds({0, 0, 80, 80});
+    auto* frequency_value = find_widget<Label>(*root, "__auto_ui_value_1");
+    auto* drive_value = find_widget<Label>(*root, "__auto_ui_value_2");
+    auto* fine_value = find_widget<Label>(*root, "__auto_ui_value_3");
+    REQUIRE(frequency_value != nullptr);
+    REQUIRE(drive_value != nullptr);
+    REQUIRE(fine_value != nullptr);
+    CHECK(frequency_value->text() == "500 Hz");
+    CHECK(drive_value->text() == "50.0 dB");
+    CHECK(fine_value->text() == "5.00");
 
-    REQUIRE(paints_text(*frequency, "500 Hz"));
-    REQUIRE(paints_text(*drive, "50.0 dB"));
-    REQUIRE(paints_text(*fine, "5.00"));
+    frequency->set_bounds({0, 0, 64, 64});
+    drive->set_bounds({0, 0, 64, 64});
+    fine->set_bounds({0, 0, 64, 64});
+    CHECK_FALSE(paints_text(*frequency, "500 Hz"));
+    CHECK_FALSE(paints_text(*drive, "50.0 dB"));
+    CHECK_FALSE(paints_text(*fine, "5.00"));
 }
 
 TEST_CASE("AutoUi sync updates generated toggles and existing faders",

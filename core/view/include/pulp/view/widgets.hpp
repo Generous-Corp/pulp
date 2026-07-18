@@ -516,6 +516,16 @@ public:
     }
     bool show_label() const { return show_label_; }
 
+    /// Controls only the formatter text painted inside the dial. The formatter
+    /// remains active for accessibility even when the visible value is supplied
+    /// by a separate label elsewhere in the layout.
+    void set_show_value(bool show) {
+        if (show_value_ == show) return;
+        show_value_ = show;
+        request_repaint();
+    }
+    bool show_value() const { return show_value_; }
+
     // Display format: called with normalized value to produce display text.
     // No equality check (std::function doesn't compare) — formatters are
     // set at construction or theme-change time, not in tight sync loops.
@@ -656,6 +666,7 @@ private:
         return true;
     }
     bool show_label_ = true;
+    bool show_value_ = true;
     std::string widget_schema_;   // JSON declarative schema
     std::string lottie_json_;     // Lottie animation JSON
     WidgetRenderStyle render_style_ = WidgetRenderStyle::standard;
