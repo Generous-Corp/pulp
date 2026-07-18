@@ -199,7 +199,7 @@ test('a rotated box-model layer carries its rotation, not just its origin', () =
   // A knob's value needle is a thin ROUNDED_RECTANGLE the .fig rotates to the
   // value angle. Dropping the rotation (keeping only m02/m12) rendered it as an
   // axis-aligned stub off-center. The decoder must lower the rotation to
-  // `transform: rotate()` and compensate left/top for the renderer's centre
+  // `transform: rotate()` and compensate left/top for the renderer's center
   // pivot. A VECTOR (path-baked rotation) must NOT get a second rotation.
   const deg = 45;
   const rad = deg * Math.PI / 180;
@@ -231,9 +231,9 @@ test('a rotated box-model layer carries its rotation, not just its origin', () =
   const indicator = envelope.root.children.find((n) => n.name === 'knob indicator');
   assert.equal(indicator.style.transform, 'rotate(45.00deg)',
     'box-model layer lowers its rotation to transform: rotate()');
-  // Centre-pivot compensation: left/top are shifted off the raw m02/m12 so the
-  // renderer's centre rotation reproduces Figma's origin rotation.
-  assert.notEqual(indicator.style.left, 28, 'left compensated for centre pivot');
+  // Center-pivot compensation: left/top are shifted off the raw m02/m12 so the
+  // renderer's center rotation reproduces Figma's origin rotation.
+  assert.notEqual(indicator.style.left, 28, 'left compensated for center pivot');
 
   const ring = envelope.root.children.find((n) => n.name === 'ring');
   assert.ok(!ring.style.transform,
