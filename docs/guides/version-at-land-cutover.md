@@ -8,6 +8,15 @@
 > no-ops safely through the bot, so no double-bump — the treadmill just isn't
 > fully dead for brand-new PRs). Rollback = revert this trio to dry-run, but
 > recover any outstanding pending intent FIRST (see Rollback).
+>
+> **Bot liveness (2026-07-17):** version-at-land also runs on a `*/15` `schedule`
+> with an EVENT-SCOPED concurrency group (`version-at-land-${{ github.event_name }}`).
+> GitHub holds one queued run per group, so on a high-churn main every push
+> supersedes the bot's push-triggered run — a manual dispatch was observed
+> CANCELLED this way (zero successful runs post-flip). The scheduled drain lands
+> in its own group, immune to push supersession, and always completes within the
+> cadence (the coverage.yml precedent). Concurrent push+schedule drains are safe
+> (ff-only + marker idempotency).
 
 This guide is the reviewed, sequenced procedure for turning off the
 per-PR version-bump treadmill and turning on **post-merge version
