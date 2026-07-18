@@ -12,6 +12,13 @@
 namespace pulp::format {
 namespace {
 
+static_assert(std::atomic<std::uint64_t>::is_always_lock_free,
+              "GraphRuntimeWorkerPool RT epochs require lock-free uint64 atomics");
+static_assert(std::atomic<void*>::is_always_lock_free,
+              "GraphRuntimeWorkerPool RT publication requires lock-free pointers");
+static_assert(std::atomic<bool>::is_always_lock_free,
+              "GraphRuntimeWorkerPool RT acknowledgments require lock-free bool atomics");
+
 constexpr auto kHotIdleWindow = std::chrono::microseconds(5000);
 constexpr auto kColdIdleSleep = std::chrono::milliseconds(1);
 constexpr std::uint32_t kIdleSpinBeforeBackoff = 256;
@@ -55,6 +62,7 @@ bool GraphRuntimeWorkerPool::start(std::uint32_t worker_count) {
     completed_.store(0, std::memory_order_release);
     cold_transition_gate_.store(false, std::memory_order_release);
     reheat_requested_.store(false, std::memory_order_release);
+    workgroup_prepare_epoch_.store(0, std::memory_order_release);
     active_worker_threads_.store(0, std::memory_order_release);
     worker_backoff_count_.store(0, std::memory_order_release);
     worker_idle_sleep_count_.store(0, std::memory_order_release);
@@ -67,8 +75,12 @@ bool GraphRuntimeWorkerPool::start(std::uint32_t worker_count) {
     try {
         worker_workgroup_generation_ =
             std::make_unique<std::atomic<std::uint64_t>[]>(worker_count_ - 1);
+        worker_workgroup_join_succeeded_ =
+            std::make_unique<std::atomic<bool>[]>(worker_count_ - 1);
         for (std::uint32_t w = 1; w < worker_count_; ++w) {
             worker_workgroup_generation_[w - 1].store(0, std::memory_order_relaxed);
+            worker_workgroup_join_succeeded_[w - 1].store(
+                false, std::memory_order_relaxed);
         }
         threads_.reserve(worker_count_ - 1);
         for (std::uint32_t w = 1; w < worker_count_; ++w) {
@@ -96,6 +108,7 @@ void GraphRuntimeWorkerPool::stop() noexcept {
     }
     worker_count_ = 0;
     worker_workgroup_generation_.reset();
+    worker_workgroup_join_succeeded_.reset();
     active_worker_threads_.store(0, std::memory_order_release);
     cold_transition_gate_.store(false, std::memory_order_release);
     reheat_requested_.store(false, std::memory_order_release);
@@ -103,22 +116,73 @@ void GraphRuntimeWorkerPool::stop() noexcept {
 }
 
 void GraphRuntimeWorkerPool::set_audio_workgroup(void* workgroup) noexcept {
-    audio_workgroup_.store(workgroup, std::memory_order_release);
-    audio_workgroup_generation_.fetch_add(1, std::memory_order_release);
+    // Standalone/CoreAudio path: the device owns a caller-retained query
+    // reference until every worker acknowledges removal. This lifetime permits
+    // adoption at the next explicit full-participant preparation barrier.
+    publish_audio_workgroup(workgroup);
+}
+
+void GraphRuntimeWorkerPool::set_audio_workgroup_from_render_context(
+    void* workgroup) noexcept {
+    // AU observer path. Reference counting is not documented RT-safe.
+    // Publication is therefore borrowed and adoption is completed synchronously
+    // inside the triggering render before its serialized thread can receive B.
+    publish_audio_workgroup(workgroup);
+}
+
+void GraphRuntimeWorkerPool::publish_audio_workgroup(void* workgroup) noexcept {
+    // Single-writer seqlock. AU observers are serialized on the render thread;
+    // CoreAudio device publications are serialized by switch_mutex_ and happen
+    // with the device callback stopped. Pointer + generation are one coherent
+    // logical publication without allocation, retain/release, or a lock.
+    const auto odd = audio_workgroup_sequence_.fetch_add(
+                         1, std::memory_order_acq_rel) +
+                     1;
+    audio_workgroup_.store(workgroup, std::memory_order_relaxed);
+    audio_workgroup_sequence_.store(odd + 1, std::memory_order_release);
     // Cold workers wake on their bounded polling interval. Until every worker
     // adopts this generation, run() remains inline rather than dispatching into
     // a stale render context.
     reheat_requested_.store(true, std::memory_order_release);
 }
 
+GraphRuntimeWorkerPool::AudioWorkgroupPublication
+GraphRuntimeWorkerPool::current_audio_workgroup_publication() const noexcept {
+    for (;;) {
+        const auto before =
+            audio_workgroup_sequence_.load(std::memory_order_acquire);
+        if ((before & 1u) != 0u) {
+            cpu_relax();
+            continue;
+        }
+        void* const workgroup =
+            audio_workgroup_.load(std::memory_order_relaxed);
+        const auto after =
+            audio_workgroup_sequence_.load(std::memory_order_acquire);
+        if (before == after) return {workgroup, after};
+    }
+}
+
 bool GraphRuntimeWorkerPool::workers_use_current_audio_workgroup() const noexcept {
+    if (!workers_acknowledged_current_audio_workgroup()) return false;
+    if (worker_count_ <= 1 || threads_.empty()) return true;
+    for (std::uint32_t w = 1; w < worker_count_; ++w) {
+        if (!worker_workgroup_join_succeeded_[w - 1].load(
+                std::memory_order_acquire)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool GraphRuntimeWorkerPool::workers_acknowledged_current_audio_workgroup()
+    const noexcept {
     if (worker_count_ <= 1 || threads_.empty()) return true;
     if (!worker_workgroup_generation_) return false;
-    const auto generation =
-        audio_workgroup_generation_.load(std::memory_order_acquire);
+    const auto publication = current_audio_workgroup_publication();
     for (std::uint32_t w = 1; w < worker_count_; ++w) {
         if (worker_workgroup_generation_[w - 1].load(std::memory_order_acquire) !=
-            generation) {
+            publication.generation) {
             return false;
         }
     }
@@ -126,11 +190,54 @@ bool GraphRuntimeWorkerPool::workers_use_current_audio_workgroup() const noexcep
 }
 
 void GraphRuntimeWorkerPool::wait_for_audio_workgroup_update() noexcept {
-    // Control-thread only. Workers poll publications while hot and at a bounded
-    // 1 ms cadence while cold, so this does not need to wake or lock them.
-    while (!workers_use_current_audio_workgroup()) {
-        std::this_thread::sleep_for(kColdIdleSleep);
+    // Control-thread only. A failed new join still acknowledges the publication:
+    // that worker has completed leave(old), so the old owner may retire safely.
+    (void)prepare_audio_workgroup_for_render();
+}
+
+bool GraphRuntimeWorkerPool::prepare_audio_workgroup_for_render() noexcept {
+    if (worker_count_ <= 1 || threads_.empty()) return true;
+    if (workers_acknowledged_current_audio_workgroup()) {
+        return workers_use_current_audio_workgroup();
     }
+
+    // Serialize with a worker entering its cold sleep and with run(). Unlike a
+    // normal batch, a borrowed AU transition cannot fall back when a worker is
+    // cold: that worker may still be joined to the context the host is about to
+    // retire. This lock-free gate wait and every barrier below use CPU relax
+    // only; no scheduler syscall is made from the render thread.
+    for (;;) {
+        bool gate_expected = false;
+        if (cold_transition_gate_.compare_exchange_weak(
+                gate_expected, true, std::memory_order_acq_rel,
+                std::memory_order_acquire)) {
+            break;
+        }
+        cpu_relax();
+    }
+    if (workers_acknowledged_current_audio_workgroup()) {
+        const bool joined = workers_use_current_audio_workgroup();
+        cold_transition_gate_.store(false, std::memory_order_release);
+        return joined;
+    }
+
+    const auto publication = current_audio_workgroup_publication();
+    // Publish a transition-only epoch, separate from the task completion
+    // counter. reheat_requested_ causes cold sleepers to resume on their next
+    // bounded poll; every worker must acknowledge this exact generation.
+    const auto prepare_epoch = epoch_.load(std::memory_order_relaxed) + 1;
+    workgroup_prepare_epoch_.store(prepare_epoch, std::memory_order_relaxed);
+    reheat_requested_.store(true, std::memory_order_release);
+    epoch_.store(prepare_epoch, std::memory_order_release);
+
+    for (std::uint32_t w = 1; w < worker_count_; ++w) {
+        while (worker_workgroup_generation_[w - 1].load(
+                   std::memory_order_acquire) != publication.generation) {
+            cpu_relax();
+        }
+    }
+    cold_transition_gate_.store(false, std::memory_order_release);
+    return workers_use_current_audio_workgroup();
 }
 
 void GraphRuntimeWorkerPool::run(std::uint32_t task_count, TaskFn fn,
@@ -142,8 +249,12 @@ void GraphRuntimeWorkerPool::run(std::uint32_t task_count, TaskFn fn,
         for (std::uint32_t i = 0; i < task_count; ++i) fn(context, i);
         return;
     }
-    if (!workers_use_current_audio_workgroup()) {
-        reheat_requested_.store(true, std::memory_order_release);
+    if (!workers_use_current_audio_workgroup() &&
+        !prepare_audio_workgroup_for_render()) {
+        // Every worker acknowledged this publication, but at least one join
+        // failed. Do not hot-spin retries against the same borrowed handle;
+        // remain inline until a later observer publication supplies a new one.
+        reheat_requested_.store(false, std::memory_order_release);
         pulp::signal::ScopedFlushDenormals flush_denormals;
         for (std::uint32_t i = 0; i < task_count; ++i) fn(context, i);
         return;
@@ -193,14 +304,8 @@ void GraphRuntimeWorkerPool::run(std::uint32_t task_count, TaskFn fn,
     // visible via the completed_ acquire/release barrier).
     // `< target` (not `!=`): completed_ reaches target exactly, but a `<` guard
     // can never deadlock the spin if the count ever overshoots.
-    std::uint32_t spins = 0;
     while (completed_.load(std::memory_order_acquire) < target) {
-        if (++spins < 1024) {
-            cpu_relax();
-        } else {
-            std::this_thread::yield();
-            spins = 0;
-        }
+        cpu_relax();
     }
     completed_base_ = target;
     assert((in_run_.store(false, std::memory_order_relaxed), true));
@@ -230,15 +335,14 @@ void GraphRuntimeWorkerPool::worker_loop(std::uint32_t worker_index) noexcept {
     pulp::audio::AudioWorkgroup workgroup;
     std::uint64_t local_workgroup_generation = 0;
     const auto adopt_audio_workgroup = [&] {
-        const auto generation =
-            audio_workgroup_generation_.load(std::memory_order_acquire);
-        if (generation == local_workgroup_generation) return;
+        const auto publication = current_audio_workgroup_publication();
+        if (publication.generation == local_workgroup_generation) return;
 
         workgroup.leave();
         bool adopted = true;
 #if defined(__APPLE__)
         const auto handle = reinterpret_cast<os_workgroup_t>(
-            audio_workgroup_.load(std::memory_order_acquire));
+            publication.workgroup);
         workgroup.set_workgroup(handle);
         // A null AU render context means leave the old workgroup and join
         // nothing. Do not invoke AudioWorkgroup's standalone fallback here:
@@ -251,20 +355,27 @@ void GraphRuntimeWorkerPool::worker_loop(std::uint32_t worker_index) noexcept {
         // generation unsafe to acknowledge.
         (void)workgroup.join_from_audio_thread();
 #endif
-        // A non-null join failure is not adoption. Keep the advertised worker
-        // generation stale so run() stays inline, and retry from this worker's
-        // next polling pass. Null removal is complete once leave() returns.
-        if (!adopted) return;
-        local_workgroup_generation = generation;
+        // If a newer observer call raced the join, this worker is safely joined
+        // to an intermediate host-owned context but must not advertise itself
+        // current. Its next poll leaves that group and adopts the latest one.
+        // This check also closes rapid publication ABA: equality includes the
+        // stable even sequence, not only the recycled pointer value.
+        if (current_audio_workgroup_publication().generation !=
+            publication.generation) {
+            return;
+        }
+        local_workgroup_generation = publication.generation;
+        worker_workgroup_join_succeeded_[worker_index - 1].store(
+            adopted, std::memory_order_release);
         worker_workgroup_generation_[worker_index - 1].store(
-            generation, std::memory_order_release);
+            publication.generation, std::memory_order_release);
         // start() may still be appending to threads_ while early workers enter
         // this loop. Inspect only the fully allocated generation array here;
         // workers must never read the control-thread-owned vector.
         bool all_workers_current = true;
         for (std::uint32_t w = 1; w < worker_count_; ++w) {
             if (worker_workgroup_generation_[w - 1].load(
-                    std::memory_order_acquire) != generation) {
+                    std::memory_order_acquire) != publication.generation) {
                 all_workers_current = false;
                 break;
             }
@@ -276,8 +387,6 @@ void GraphRuntimeWorkerPool::worker_loop(std::uint32_t worker_index) noexcept {
                 std::memory_order_acquire);
         }
     };
-
-    adopt_audio_workgroup();
 
     const auto mark_active = [this] {
         const auto active =
@@ -295,7 +404,6 @@ void GraphRuntimeWorkerPool::worker_loop(std::uint32_t worker_index) noexcept {
         std::uint64_t e;
         while ((e = epoch_.load(std::memory_order_acquire)) == local_epoch) {
             if (stopping_.load(std::memory_order_acquire)) return;
-            adopt_audio_workgroup();
             if (++spins < kIdleSpinBeforeBackoff) {
                 cpu_relax();
             } else {
@@ -340,7 +448,22 @@ void GraphRuntimeWorkerPool::worker_loop(std::uint32_t worker_index) noexcept {
         }
         local_epoch = e;
         if (stopping_.load(std::memory_order_acquire)) return;
-        run_range(worker_index);
+        if (workgroup_prepare_epoch_.load(std::memory_order_acquire) == e) {
+#ifndef NDEBUG
+            if (transition_pause_enabled_for_test_.load(
+                    std::memory_order_acquire)) {
+                transition_pause_reached_for_test_.store(
+                    true, std::memory_order_release);
+                while (!transition_pause_released_for_test_.load(
+                    std::memory_order_acquire)) {
+                    cpu_relax();
+                }
+            }
+#endif
+            adopt_audio_workgroup();
+        } else {
+            run_range(worker_index);
+        }
         hot_until = std::chrono::steady_clock::now() + kHotIdleWindow;
     }
 }

@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/audio/device.hpp>
+#include "../core/audio/platform/mac/coreaudio_device.hpp"
 
 #include <CoreAudio/CoreAudio.h>
 
@@ -24,6 +25,13 @@
 using namespace pulp::audio;
 
 namespace {
+
+std::atomic<int> released_workgroups{0};
+
+void count_and_release_workgroup(os_workgroup_t value) noexcept {
+    released_workgroups.fetch_add(1, std::memory_order_relaxed);
+    os_release(value);
+}
 
 AudioDeviceID sys_default_output() {
     AudioObjectPropertyAddress a{kAudioHardwarePropertyDefaultOutputDevice,
@@ -63,6 +71,94 @@ std::vector<AudioDeviceID> all_devices() {
 }
 
 }  // namespace
+
+TEST_CASE("CoreAudio caller-owned workgroup references release exactly once",
+          "[audio][coreaudio][workgroup][lifetime]") {
+    released_workgroups.store(0, std::memory_order_relaxed);
+    auto* first = os_workgroup_parallel_create("pulp-coreaudio-owned-first", nullptr);
+    auto* second = os_workgroup_parallel_create("pulp-coreaudio-owned-second", nullptr);
+    auto* third = os_workgroup_parallel_create("pulp-coreaudio-owned-third", nullptr);
+    REQUIRE(first != nullptr);
+    REQUIRE(second != nullptr);
+    REQUIRE(third != nullptr);
+
+    {
+        pulp::audio::mac::CoreAudioWorkgroupReference owned{
+            count_and_release_workgroup};
+        owned.adopt(first);
+        REQUIRE(owned.get() == first);
+        REQUIRE(released_workgroups.load(std::memory_order_relaxed) == 0);
+
+        // Replacement consumes the new +1 and releases only the old +1.
+        owned.adopt(second);
+        REQUIRE(owned.get() == second);
+        REQUIRE(released_workgroups.load(std::memory_order_relaxed) == 1);
+
+        owned.reset();
+        REQUIRE(owned.get() == nullptr);
+        REQUIRE(released_workgroups.load(std::memory_order_relaxed) == 2);
+
+        // Destruction covers the close-with-live-query path.
+        owned.adopt(third);
+    }
+    REQUIRE(released_workgroups.load(std::memory_order_relaxed) == 3);
+}
+
+TEST_CASE("CoreAudio failed stop preserves old device and workgroup",
+          "[audio][coreaudio][workgroup][lifetime]") {
+    released_workgroups.store(0, std::memory_order_relaxed);
+    auto* old_workgroup =
+        os_workgroup_parallel_create("pulp-coreaudio-stop-failure-old", nullptr);
+    REQUIRE(old_workgroup != nullptr);
+
+    AudioDeviceID current_device = 41;
+    int current_device_sets = 0;
+    int workgroup_requeries = 0;
+    {
+        pulp::audio::mac::CoreAudioWorkgroupReference owned{
+            count_and_release_workgroup};
+        owned.adopt(old_workgroup);
+
+        const OSStatus failed_stop = kAudio_ParamError;
+        if (pulp::audio::mac::coreaudio_stop_allows_device_switch(failed_stop)) {
+            current_device = 42;
+            ++current_device_sets;
+            owned.reset();
+            ++workgroup_requeries;
+        }
+
+        CHECK(current_device == 41);
+        CHECK(current_device_sets == 0);
+        CHECK(workgroup_requeries == 0);
+        CHECK(owned.get() == old_workgroup);
+        CHECK(released_workgroups.load(std::memory_order_relaxed) == 0);
+    }
+    CHECK(released_workgroups.load(std::memory_order_relaxed) == 1);
+    STATIC_REQUIRE(pulp::audio::mac::coreaudio_stop_allows_device_switch(noErr));
+}
+
+TEST_CASE("CoreAudio fallback priority retries failure and resets per lifetime",
+          "[audio][coreaudio][workgroup][rt-priority]") {
+    std::atomic<bool> configured{false};
+    int attempts = 0;
+    const auto fail_then_succeed = [&]() noexcept { return ++attempts >= 2; };
+
+    CHECK_FALSE(pulp::audio::mac::configure_coreaudio_fallback_priority_once(
+        configured, fail_then_succeed));
+    CHECK_FALSE(configured.load(std::memory_order_acquire));
+    CHECK(pulp::audio::mac::configure_coreaudio_fallback_priority_once(
+        configured, fail_then_succeed));
+    CHECK(configured.load(std::memory_order_acquire));
+    CHECK(attempts == 2);
+
+    CHECK(pulp::audio::mac::configure_coreaudio_fallback_priority_once(
+        configured, fail_then_succeed));
+    CHECK(attempts == 2);
+    configured.store(false, std::memory_order_release);
+    CHECK(pulp::audio::mac::configure_coreaudio_fallback_priority_once(
+        configured, fail_then_succeed));
+    CHECK(attempts == 3);
+}
 
 TEST_CASE("follow-default output device tracks the system default live",
           "[audio][coreaudio][device-follow]") {

@@ -689,6 +689,13 @@ public:
     void set_audio_workgroup(void* workgroup) noexcept override {
         worker_pool_.set_audio_workgroup(workgroup);
     }
+    void set_audio_workgroup_from_render_context(
+        void* workgroup) noexcept override {
+        worker_pool_.set_audio_workgroup_from_render_context(workgroup);
+    }
+    bool prepare_audio_workgroup_for_render() noexcept override {
+        return worker_pool_.prepare_audio_workgroup_for_render();
+    }
     void wait_for_audio_workgroup_update() noexcept override {
         worker_pool_.wait_for_audio_workgroup_update();
     }

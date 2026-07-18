@@ -47,6 +47,7 @@
 #include <mutex>
 #include <thread>
 #include <utility>
+#include <vector>
 
 using namespace pulp::audio;
 
@@ -99,6 +100,7 @@ public:
 
     void set_workgroup_change_callback(WorkgroupChangeCallback value) override {
         change_callback = std::move(value);
+        if (change_callback) change_callback(handle);
     }
 
     void close() override {
@@ -130,6 +132,7 @@ public:
     void set_workgroup_change_callback(WorkgroupChangeCallback value) override {
         std::lock_guard<std::mutex> lock(switch_mutex);
         change_callback = std::move(value);
+        if (change_callback) change_callback(initial_handle);
     }
 
     void quiesce_workgroup_changes() override {
@@ -187,6 +190,75 @@ private:
     bool allow_switch_finish = false;
 };
 
+class RecordingWorkgroupClient final : public pulp::format::AudioWorkgroupClient {
+public:
+    void set_audio_workgroup(void* value) noexcept override {
+        std::lock_guard<std::mutex> lock(mutex);
+        observations.push_back(value);
+    }
+    void wait_for_audio_workgroup_update() noexcept override {}
+
+    std::vector<void*> snapshot() const {
+        std::lock_guard<std::mutex> lock(mutex);
+        return observations;
+    }
+
+private:
+    mutable std::mutex mutex;
+    std::vector<void*> observations;
+};
+
+class AtomicBindRaceDevice final : public StubDevice {
+public:
+    void* callback_workgroup() const override {
+        getter_calls.fetch_add(1, std::memory_order_relaxed);
+        return current;
+    }
+
+    void set_workgroup_change_callback(WorkgroupChangeCallback value) override {
+        std::unique_lock<std::mutex> switch_lock(switch_mutex);
+        callback = std::move(value);
+        {
+            std::lock_guard<std::mutex> state_lock(state_mutex);
+            bind_installed = true;
+            state_changed.notify_all();
+        }
+        std::unique_lock<std::mutex> state_lock(state_mutex);
+        state_changed.wait(state_lock, [&] { return allow_initial_delivery; });
+        if (callback) callback(current);
+    }
+
+    void switch_to(void* replacement) {
+        switch_attempted.store(true, std::memory_order_release);
+        std::lock_guard<std::mutex> switch_lock(switch_mutex);
+        if (callback) callback(nullptr);
+        current = replacement;
+        if (callback) callback(current);
+    }
+
+    void wait_until_bind_installed() {
+        std::unique_lock<std::mutex> lock(state_mutex);
+        state_changed.wait(lock, [&] { return bind_installed; });
+    }
+    void allow_bind_delivery() {
+        std::lock_guard<std::mutex> lock(state_mutex);
+        allow_initial_delivery = true;
+        state_changed.notify_all();
+    }
+
+    void* current = reinterpret_cast<void*>(std::uintptr_t{0x9090});
+    mutable std::atomic<int> getter_calls{0};
+    std::atomic<bool> switch_attempted{false};
+
+private:
+    std::mutex switch_mutex;
+    std::mutex state_mutex;
+    std::condition_variable state_changed;
+    WorkgroupChangeCallback callback;
+    bool bind_installed = false;
+    bool allow_initial_delivery = false;
+};
+
 }  // namespace
 
 TEST_CASE("AudioDevice base class callback_workgroup defaults to null",
@@ -203,16 +275,40 @@ TEST_CASE("Audio device workgroup binding forwards changes and removal",
 
     pulp::format::bind_audio_device_workgroup(client, &device);
     REQUIRE(client.handle.load(std::memory_order_acquire) == device.handle);
-    REQUIRE(device.calls.load(std::memory_order_relaxed) == 1);
+    REQUIRE(device.calls.load(std::memory_order_relaxed) == 0);
 
     device.handle = reinterpret_cast<void*>(std::uintptr_t{0x5050});
     pulp::format::bind_audio_device_workgroup(client, &device);
     REQUIRE(client.handle.load(std::memory_order_acquire) == device.handle);
-    REQUIRE(device.calls.load(std::memory_order_relaxed) == 2);
+    REQUIRE(device.calls.load(std::memory_order_relaxed) == 0);
 
     pulp::format::bind_audio_device_workgroup(client, nullptr);
     REQUIRE(client.handle.load(std::memory_order_acquire) == nullptr);
-    REQUIRE(device.calls.load(std::memory_order_relaxed) == 2);
+    REQUIRE(device.calls.load(std::memory_order_relaxed) == 0);
+}
+
+TEST_CASE("Audio device bind serializes initial delivery with a live switch",
+          "[audio][workgroup][wiring][lifetime][threads]") {
+    AtomicBindRaceDevice device;
+    RecordingWorkgroupClient client;
+    auto* const first = device.current;
+    auto* const second = reinterpret_cast<void*>(std::uintptr_t{0xA0A0});
+
+    std::thread binder([&] {
+        pulp::format::bind_audio_device_workgroup(client, &device);
+    });
+    device.wait_until_bind_installed();
+    std::thread switcher([&] { device.switch_to(second); });
+    while (!device.switch_attempted.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+    device.allow_bind_delivery();
+    binder.join();
+    switcher.join();
+
+    const auto observations = client.snapshot();
+    REQUIRE(observations == std::vector<void*>{first, nullptr, second});
+    REQUIRE(device.getter_calls.load(std::memory_order_relaxed) == 0);
 }
 
 TEST_CASE("Live device workgroup switch drains the old borrowed handle first",

@@ -495,11 +495,24 @@ struct ScopedAuV3HostWriting {
     auto* bridge = &_bridge;
     AURenderContextObserver observer = ^(const AudioUnitRenderContext *context) {
         // The OS calls this on the realtime render thread immediately before a
-        // render whose workgroup changed. Publication is atomic; auxiliary
-        // workers perform their own leave/join before taking another batch.
+        // render whose workgroup changed. Copy only the host-owned workgroup
+        // value; the AudioUnitRenderContext struct itself is callback-scoped.
+        // GraphRuntimeWorkerPool publishes pointer + generation coherently and
+        // auxiliary workers perform their own leave/join before another batch.
+        // os_retain/os_release are deliberately absent: Apple marks this block
+        // CA_REALTIME_API but does not document reference-count operations as
+        // RT-safe. Lifetime instead follows the render-context observer
+        // protocol described in AudioUnitProperties.h.
         if (bridge->audio_workgroup_client) {
-            bridge->audio_workgroup_client->set_audio_workgroup(
+            bridge->audio_workgroup_client->set_audio_workgroup_from_render_context(
                 context ? reinterpret_cast<void*>(context->workgroup) : nullptr);
+            // Apple's render-context contract requires auxiliary realtime
+            // threads to leave the preceding workgroup and join the new one as
+            // part of this observer call. The full-participant barrier is
+            // allocation-free, lock-free, and relax-only on the render thread;
+            // it returns only after every worker has completed leave(old) and
+            // acknowledged its join result.
+            (void)bridge->audio_workgroup_client->prepare_audio_workgroup_for_render();
         }
     };
 #if __has_feature(objc_arc)
@@ -819,6 +832,13 @@ struct ScopedAuV3HostWriting {
         const AURenderEvent *realtimeEventListHead,
         AURenderPullInputBlock __unsafe_unretained pullInputBlock)
     {
+        // The observer completes a changed borrowed-handle transition before it
+        // returns. Keep this idempotent entry guard so every render path also
+        // verifies the current publication before *any* early exit.
+        if (bridge->audio_workgroup_client) {
+            (void)bridge->audio_workgroup_client->prepare_audio_workgroup_for_render();
+        }
+
         if (!bridge->processor) {
             if (outputData) {
                 for (UInt32 i = 0; i < outputData->mNumberBuffers; ++i) {

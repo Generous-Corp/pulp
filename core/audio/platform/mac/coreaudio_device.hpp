@@ -14,6 +14,55 @@
 
 namespace pulp::audio::mac {
 
+#if defined(__APPLE__)
+/// A failed AudioOutputUnitStop does not prove that the old render callback has
+/// drained. The caller must leave CurrentDevice and its retained workgroup
+/// reference untouched in that case.
+constexpr bool coreaudio_stop_allows_device_switch(OSStatus status) noexcept {
+    return status == noErr;
+}
+
+template <typename ConfigureFn>
+bool configure_coreaudio_fallback_priority_once(
+    std::atomic<bool>& configured, ConfigureFn&& configure) noexcept {
+    if (configured.load(std::memory_order_acquire)) return true;
+    if (!configure()) return false;
+    configured.store(true, std::memory_order_release);
+    return true;
+}
+
+/// Owning slot for the caller-retained value returned by
+/// kAudioDevicePropertyIOThreadOSWorkgroup. `adopt()` consumes one query
+/// reference; replacement, reset, and destruction release it exactly once.
+/// The injectable release operation is a narrow ownership-balance test seam.
+class CoreAudioWorkgroupReference {
+public:
+    using ReleaseFn = void (*)(os_workgroup_t) noexcept;
+
+    explicit CoreAudioWorkgroupReference(
+        ReleaseFn release = release_os_workgroup) noexcept
+        : release_(release) {}
+    ~CoreAudioWorkgroupReference() { reset(); }
+
+    CoreAudioWorkgroupReference(const CoreAudioWorkgroupReference&) = delete;
+    CoreAudioWorkgroupReference& operator=(const CoreAudioWorkgroupReference&) = delete;
+
+    void adopt(os_workgroup_t value) noexcept {
+        auto* const old = handle_;
+        handle_ = value;
+        if (old) release_(old);
+    }
+    void reset() noexcept { adopt(nullptr); }
+    os_workgroup_t get() const noexcept { return handle_; }
+
+private:
+    static void release_os_workgroup(os_workgroup_t value) noexcept;
+
+    os_workgroup_t handle_ = nullptr;
+    ReleaseFn release_;
+};
+#endif
+
 class CoreAudioDevice : public AudioDevice {
 public:
     CoreAudioDevice(AudioDeviceID device_id);
@@ -33,15 +82,10 @@ public:
     /// Returns the device's I/O thread workgroup (`os_workgroup_t`)
     /// queried via `kAudioDevicePropertyIOThreadOSWorkgroup` on
     /// macOS 13+, or `nullptr` on older targets / when the device
-    /// does not publish a workgroup. Owned by the device; valid for
-    /// the lifetime of the open device.
-    void* callback_workgroup() const override {
-#if defined(__APPLE__)
-        return reinterpret_cast<void*>(workgroup_);
-#else
-        return nullptr;
-#endif
-    }
+    /// does not publish a workgroup. The CoreAudio property query returns a
+    /// retained object; this device owns that reference and releases it after
+    /// callbacks and auxiliary clients have left, on replacement or close.
+    void* callback_workgroup() const override;
 
     std::uint64_t xrun_count() const override {
         return xrun_counter_.load(std::memory_order_relaxed);
@@ -80,8 +124,8 @@ private:
         void* inClientData);
     void switch_to_default_output();
 
-    /// Query the active device for its IO-thread workgroup; cache it
-    /// into `workgroup_`. No-op on older OS / when the device does
+    /// Query the active device for its IO-thread workgroup; adopt the caller's
+    /// retained result into `workgroup_reference_`. No-op on older OS / when the device does
     /// not publish one.
     void query_callback_workgroup();
 
@@ -98,13 +142,14 @@ private:
     uint64_t sample_position_ = 0;
 
 #if defined(__APPLE__)
-    os_workgroup_t workgroup_ = nullptr;
+    CoreAudioWorkgroupReference workgroup_reference_;
 #endif
 
-    // RAII workgroup join that lives on the render thread. First
-    // invocation of render_callback joins; leaves on device close().
-    AudioWorkgroup wg_join_;
-    std::atomic<bool> wg_joined_{false};
+    // The CoreAudio I/O thread already belongs to the device workgroup exposed
+    // by kAudioDevicePropertyIOThreadOSWorkgroup; only auxiliary threads join
+    // it. A device without a workgroup uses the Mach RT-priority fallback once
+    // per render-thread lifetime.
+    std::atomic<bool> fallback_priority_configured_{false};
     std::atomic<std::uint64_t> xrun_counter_{0};
     bool overload_listener_installed_ = false;
 
@@ -115,7 +160,7 @@ private:
     // the listener is mid-switch.
     bool follow_default_ = false;
     bool default_output_listener_installed_ = false;
-    std::mutex switch_mutex_;
+    mutable std::mutex switch_mutex_;
     WorkgroupChangeCallback workgroup_change_callback_;
     bool workgroup_changes_quiesced_ = false;
 
