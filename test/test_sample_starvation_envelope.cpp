@@ -24,7 +24,7 @@ TEST_CASE("Sample starvation envelope fades valid gains to silence and back",
     REQUIRE(envelope.mode() == SampleStarvationMode::Silent);
 
     envelope.mark_starved(19);
-    REQUIRE(envelope.next_valid_gain() == 0.0f);
+    REQUIRE_THAT(envelope.next_valid_gain(), WithinAbs(0.0f, 1.0e-6f));
     envelope.begin_recovery();
     REQUIRE(envelope.mode() == SampleStarvationMode::Recovering);
     float recovery[5]{};
@@ -84,9 +84,32 @@ TEST_CASE("Sample starvation envelope cancels an averted prediction without muti
     REQUIRE(envelope.stats().recovery_events == 1);
 
     envelope.begin_predicted_fade(1);
-    REQUIRE(envelope.mode() == SampleStarvationMode::Ready);
+    REQUIRE(envelope.mode() == SampleStarvationMode::FadingOut);
     REQUIRE(envelope.stats().insufficient_lead_events == 1);
+    REQUIRE_THAT(envelope.next_valid_gain(), WithinAbs(0.0f, 1.0e-6f));
+    REQUIRE(envelope.mode() == SampleStarvationMode::Silent);
     envelope.mark_starved(1);
+    REQUIRE(envelope.stats().emergency_events == 1);
+}
+
+TEST_CASE("Sample starvation envelope reverses an interrupted recovery without a gain jump",
+          "[audio][sampler][starvation][recovery]") {
+    SampleStarvationEnvelope envelope;
+    REQUIRE(envelope.prepare({.fade_out_frames = 4, .recovery_frames = 5}));
+
+    envelope.mark_starved(4);
+    envelope.begin_recovery();
+    REQUIRE(envelope.next_valid_gain() == 0.0f);
+    const auto recovered_gain = envelope.next_valid_gain();
+    REQUIRE(recovered_gain > 0.0f);
+
+    envelope.begin_predicted_fade(3);
+    REQUIRE(envelope.mode() == SampleStarvationMode::FadingOut);
+    REQUIRE_THAT(envelope.next_valid_gain(), WithinAbs(recovered_gain, 1.0e-6f));
+    REQUIRE(envelope.next_valid_gain() < recovered_gain);
+    REQUIRE_THAT(envelope.next_valid_gain(), WithinAbs(0.0f, 1.0e-6f));
+    REQUIRE(envelope.mode() == SampleStarvationMode::Silent);
+    REQUIRE(envelope.stats().predicted_events == 1);
     REQUIRE(envelope.stats().emergency_events == 1);
 }
 

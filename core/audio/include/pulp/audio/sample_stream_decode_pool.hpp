@@ -3,6 +3,7 @@
 #include <pulp/audio/sample_stream_service.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
@@ -24,6 +25,10 @@ struct SampleStreamDecodePoolConfig {
     std::uint32_t source_capacity = 0;
     std::uint32_t maximum_channels = 0;
     std::uint64_t maximum_frames_per_job = 0;
+    /// Bounded serial pipeline depth for each source. Jobs for one source stay
+    /// pinned to one worker and are decoded FIFO, so non-thread-safe readers
+    /// are never entered concurrently.
+    std::uint32_t maximum_outstanding_jobs_per_source = 1;
 };
 
 struct SampleStreamDecodeJob {
@@ -50,6 +55,11 @@ struct SampleStreamDecodeCompletion {
     SampleStreamDecodeCompletionStatus status =
         SampleStreamDecodeCompletionStatus::ReaderError;
     std::uint32_t worker_index = 0;
+    std::uint32_t scratch_slot = 0;
+    /// Qualifies reuse of one scratch slot within a prepare epoch.
+    std::uint64_t scratch_lease_generation = 0;
+    /// Qualifies scratch leases across release()/prepare() cycles.
+    std::uint64_t pool_prepare_epoch = 0;
 };
 
 enum class SampleStreamDecodeCompletionMatch : std::uint8_t {
@@ -128,6 +138,9 @@ struct SampleStreamDecodePoolTelemetry {
     std::uint64_t decode_errors = 0;
     std::uint64_t canceled_completions = 0;
     std::uint64_t stopped_jobs = 0;
+    std::uint64_t source_outstanding_high_water = 0;
+    std::uint64_t completed_frames = 0;
+    std::uint64_t same_source_reader_concurrency_high_water = 0;
 };
 
 struct SampleStreamDecodeCompletionView {
@@ -147,6 +160,8 @@ class SampleStreamDecodePool {
 public:
     static_assert(JobMailboxCapacity > 0);
     static_assert(CompletionMailboxCapacity > 0);
+    static_assert(CompletionMailboxCapacity <=
+                  std::numeric_limits<std::uint32_t>::max());
 
     SampleStreamDecodePool() = default;
     ~SampleStreamDecodePool() { release(); }
@@ -158,24 +173,55 @@ public:
         release();
         if (config.worker_count == 0 || config.source_capacity == 0 ||
             config.maximum_channels == 0 || config.maximum_frames_per_job == 0 ||
+            config.maximum_outstanding_jobs_per_source == 0 ||
+            config.maximum_outstanding_jobs_per_source > JobMailboxCapacity ||
+            config.maximum_outstanding_jobs_per_source > CompletionMailboxCapacity ||
             config.maximum_frames_per_job >
                 static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
             return false;
         }
 
+        const auto frames_per_slot = checked_multiply(
+            static_cast<std::uint64_t>(config.maximum_channels),
+            config.maximum_frames_per_job);
+        const auto slots = checked_multiply(
+            static_cast<std::uint64_t>(config.worker_count),
+            config.maximum_outstanding_jobs_per_source);
+        const auto reserved_samples = frames_per_slot && slots
+            ? checked_multiply(*frames_per_slot, *slots)
+            : std::nullopt;
+        if (!frames_per_slot ||
+            *frames_per_slot > std::numeric_limits<std::size_t>::max() ||
+            !reserved_samples) {
+            return false;
+        }
+
+        if (next_prepare_epoch_ == 0) return false;
+        const auto prepare_epoch = next_prepare_epoch_++;
         try {
             workers_ = std::make_unique<Worker[]>(config.worker_count);
             sources_ = std::make_unique<Source[]>(config.source_capacity);
             config_ = config;
             for (std::uint32_t index = 0; index < config.worker_count; ++index) {
                 auto& worker = workers_[index];
-                worker.scratch.resize(config.maximum_channels,
-                                      static_cast<std::size_t>(
-                                          config.maximum_frames_per_job));
-                worker.channel_ptrs.resize(config.maximum_channels);
-                worker.const_channel_ptrs.resize(config.maximum_channels);
+                worker.scratch_slot_count =
+                    config.maximum_outstanding_jobs_per_source;
+                worker.scratch_slots = std::make_unique<ScratchSlot[]>(
+                    worker.scratch_slot_count);
+                for (std::uint32_t scratch_index = 0;
+                     scratch_index < worker.scratch_slot_count;
+                     ++scratch_index) {
+                    auto& scratch = worker.scratch_slots[scratch_index];
+                    scratch.audio.resize(config.maximum_channels,
+                                         static_cast<std::size_t>(
+                                             config.maximum_frames_per_job));
+                    scratch.channel_ptrs.resize(config.maximum_channels);
+                    scratch.const_channel_ptrs.resize(config.maximum_channels);
+                }
             }
             reset_telemetry();
+            reserved_scratch_samples_ = *reserved_samples;
+            active_prepare_epoch_ = prepare_epoch;
             prepared_ = true;
             for (std::uint32_t index = 0; index < config.worker_count; ++index) {
                 workers_[index].thread =
@@ -210,6 +256,8 @@ public:
         workers_.reset();
         config_ = {};
         next_worker_ = 0;
+        reserved_scratch_samples_ = 0;
+        active_prepare_epoch_ = 0;
     }
 
     bool prepared() const noexcept { return prepared_; }
@@ -217,8 +265,7 @@ public:
     std::uint32_t source_capacity() const noexcept { return config_.source_capacity; }
 
     std::uint64_t reserved_scratch_samples() const noexcept {
-        return static_cast<std::uint64_t>(config_.worker_count) *
-               config_.maximum_channels * config_.maximum_frames_per_job;
+        return reserved_scratch_samples_;
     }
 
     SampleStreamDecodeSourceAddResult add_source(SampleStreamSourceToken token,
@@ -262,7 +309,7 @@ public:
             source.binding = std::move(binding);
             source.worker_index = next_worker_++ % config_.worker_count;
             source.last_reservation_serial = 0;
-            source.in_flight = false;
+            source.outstanding_jobs = 0;
             source.canceled.store(false, std::memory_order_relaxed);
             source.registered = true;
             return {SampleStreamDecodeSourceAddStatus::Added, source.worker_index};
@@ -289,19 +336,28 @@ public:
             telemetry_.stale_reservation.fetch_add(1, std::memory_order_relaxed);
             return SampleStreamDecodeSubmitStatus::StaleReservation;
         }
-        if (source->in_flight) return SampleStreamDecodeSubmitStatus::SourceInFlight;
+        if (source->outstanding_jobs >=
+            config_.maximum_outstanding_jobs_per_source) {
+            return SampleStreamDecodeSubmitStatus::SourceInFlight;
+        }
         if (source->canceled.load(std::memory_order_acquire))
             return SampleStreamDecodeSubmitStatus::StaleSource;
 
         auto& worker = workers_[source->worker_index];
+        if (worker.scratch_lease_exhausted.load(std::memory_order_acquire) ||
+            worker.stopping.load(std::memory_order_acquire)) {
+            return SampleStreamDecodeSubmitStatus::Stopped;
+        }
         InternalJob internal{job, static_cast<std::uint32_t>(source - sources_.get())};
-        source->in_flight = true;
+        ++source->outstanding_jobs;
         if (!worker.jobs.try_push(internal)) {
-            source->in_flight = false;
+            --source->outstanding_jobs;
             telemetry_.job_queue_full.fetch_add(1, std::memory_order_relaxed);
             return SampleStreamDecodeSubmitStatus::QueueFull;
         }
         source->last_reservation_serial = job.reservation_serial;
+        update_high_water(telemetry_.source_outstanding_high_water,
+                          source->outstanding_jobs);
         telemetry_.jobs_queued.fetch_add(1, std::memory_order_relaxed);
         worker.wake.notify_one();
         return SampleStreamDecodeSubmitStatus::Queued;
@@ -319,14 +375,14 @@ public:
         if (source->canceled.exchange(true, std::memory_order_acq_rel))
             return SampleStreamDecodeCancelStatus::AlreadyCanceled;
         source->active_stop_source.request_stop();
-        if (!source->in_flight) clear_source(*source);
+        if (source->outstanding_jobs == 0) clear_source(*source);
         return SampleStreamDecodeCancelStatus::Canceled;
     }
 
     bool remove_idle_source(SampleStreamSourceToken token) noexcept {
         if (!prepared_) return false;
         auto* source = find_source(token);
-        if (source == nullptr || source->in_flight) return false;
+        if (source == nullptr || source->outstanding_jobs != 0) return false;
         clear_source(*source);
         return true;
     }
@@ -335,6 +391,8 @@ public:
         std::uint32_t worker_index) noexcept {
         if (!prepared_ || worker_index >= config_.worker_count) return std::nullopt;
         auto& worker = workers_[worker_index];
+        if (worker.scratch_lease_exhausted.load(std::memory_order_acquire))
+            return std::nullopt;
         if (worker.completion_leased) return std::nullopt;
         auto completion = worker.completions.try_pop();
         if (!completion) return std::nullopt;
@@ -345,10 +403,15 @@ public:
             completion->status == SampleStreamDecodeCompletionStatus::Decoded
                 ? completion->decoded_frames
                 : std::uint64_t{0};
+        if (completion->scratch_slot >= worker.scratch_slot_count) {
+            worker.completion_leased = false;
+            return std::nullopt;
+        }
+        auto& scratch = worker.scratch_slots[completion->scratch_slot];
         return SampleStreamDecodeCompletionView{
             .completion = *completion,
             .audio = BufferView<const float>(
-                worker.const_channel_ptrs.data(),
+                scratch.const_channel_ptrs.data(),
                 completion->channels,
                 static_cast<std::size_t>(publishable_frames)),
         };
@@ -362,10 +425,15 @@ public:
             std::unique_lock lock(worker.mutex);
             worker.wake.wait(lock, [&] {
                 return worker.stopping.load(std::memory_order_acquire) ||
+                       worker.scratch_lease_exhausted.load(
+                           std::memory_order_acquire) ||
                        !worker.completions.empty();
             });
         }
-        if (worker.stopping.load(std::memory_order_acquire)) return std::nullopt;
+        if (worker.stopping.load(std::memory_order_acquire) ||
+            worker.scratch_lease_exhausted.load(std::memory_order_acquire)) {
+            return std::nullopt;
+        }
         return try_pop_completion(worker_index);
     }
 
@@ -377,18 +445,29 @@ public:
             worker.leased_completion.source.source_generation !=
                 completion.source.source_generation ||
             worker.leased_completion.reservation_serial !=
-                completion.reservation_serial) {
+                completion.reservation_serial ||
+            worker.leased_completion.scratch_slot != completion.scratch_slot ||
+            worker.leased_completion.scratch_lease_generation !=
+                completion.scratch_lease_generation) {
+            return false;
+        }
+        if (worker.leased_completion.pool_prepare_epoch !=
+                completion.pool_prepare_epoch ||
+            completion.pool_prepare_epoch != active_prepare_epoch_) {
             return false;
         }
 
         auto* source = find_source(completion.source);
-        if (source != nullptr &&
-            source->last_reservation_serial == completion.reservation_serial) {
-            source->in_flight = false;
-            if (source->canceled.load(std::memory_order_acquire)) clear_source(*source);
+        if (source != nullptr && source->outstanding_jobs != 0) {
+            --source->outstanding_jobs;
+            if (source->outstanding_jobs == 0 &&
+                source->canceled.load(std::memory_order_acquire)) {
+                clear_source(*source);
+            }
         }
         worker.completion_leased = false;
-        worker.scratch_released.store(true, std::memory_order_release);
+        worker.scratch_slots[completion.scratch_slot].in_use.store(
+            false, std::memory_order_release);
         worker.wake.notify_one();
         return true;
     }
@@ -409,6 +488,13 @@ public:
             .canceled_completions =
                 telemetry_.canceled_completions.load(std::memory_order_relaxed),
             .stopped_jobs = telemetry_.stopped_jobs.load(std::memory_order_relaxed),
+            .source_outstanding_high_water =
+                telemetry_.source_outstanding_high_water.load(std::memory_order_relaxed),
+            .completed_frames =
+                telemetry_.completed_frames.load(std::memory_order_relaxed),
+            .same_source_reader_concurrency_high_water =
+                telemetry_.same_source_reader_concurrency_high_water.load(
+                    std::memory_order_relaxed),
         };
     }
 
@@ -425,23 +511,31 @@ private:
         std::uint32_t worker_index = 0;
         std::uint32_t channels = 0;
         std::atomic<bool> canceled{false};
+        std::atomic<std::uint32_t> active_reader_calls{0};
         std::stop_source active_stop_source;
         bool registered = false;
-        bool in_flight = false;
+        std::uint32_t outstanding_jobs = 0;
+    };
+
+    struct ScratchSlot {
+        Buffer<float> audio;
+        std::vector<float*> channel_ptrs;
+        std::vector<const float*> const_channel_ptrs;
+        std::atomic<bool> in_use{false};
+        std::uint64_t next_lease_generation = 1;
     };
 
     struct Worker {
         runtime::SpscQueue<InternalJob, JobMailboxCapacity> jobs;
         runtime::SpscQueue<SampleStreamDecodeCompletion,
                            CompletionMailboxCapacity> completions;
-        Buffer<float> scratch;
-        std::vector<float*> channel_ptrs;
-        std::vector<const float*> const_channel_ptrs;
+        std::unique_ptr<ScratchSlot[]> scratch_slots;
+        std::uint32_t scratch_slot_count = 0;
         std::thread thread;
         std::mutex mutex;
         std::condition_variable wake;
         std::atomic<bool> stopping{false};
-        std::atomic<bool> scratch_released{false};
+        std::atomic<bool> scratch_lease_exhausted{false};
         SampleStreamDecodeCompletion leased_completion{};
         bool completion_leased = false;
     };
@@ -456,6 +550,9 @@ private:
         std::atomic<std::uint64_t> decode_errors{0};
         std::atomic<std::uint64_t> canceled_completions{0};
         std::atomic<std::uint64_t> stopped_jobs{0};
+        std::atomic<std::uint64_t> source_outstanding_high_water{0};
+        std::atomic<std::uint64_t> completed_frames{0};
+        std::atomic<std::uint64_t> same_source_reader_concurrency_high_water{0};
     };
 
     Source* find_source_id(std::uint64_t source_id) noexcept {
@@ -483,8 +580,9 @@ private:
         source.worker_index = 0;
         source.channels = 0;
         source.canceled.store(false, std::memory_order_relaxed);
+        source.active_reader_calls.store(0, std::memory_order_relaxed);
         source.active_stop_source = std::stop_source{};
-        source.in_flight = false;
+        source.outstanding_jobs = 0;
         source.registered = false;
     }
 
@@ -502,32 +600,47 @@ private:
                 continue;
             }
 
+            auto scratch_lease = acquire_scratch_slot(worker);
+            if (!scratch_lease) break;
+            auto& scratch = worker.scratch_slots[scratch_lease->slot];
             auto& source = sources_[internal->source_index];
             for (std::uint32_t channel = 0; channel < source.channels; ++channel) {
-                worker.channel_ptrs[channel] = worker.scratch.channel(channel).data();
-                worker.const_channel_ptrs[channel] = worker.channel_ptrs[channel];
+                scratch.channel_ptrs[channel] = scratch.audio.channel(channel).data();
+                scratch.const_channel_ptrs[channel] = scratch.channel_ptrs[channel];
             }
             BufferView<float> destination(
-                worker.channel_ptrs.data(),
+                scratch.channel_ptrs.data(),
                 source.channels,
                 static_cast<std::size_t>(internal->job.frame_count));
             std::uint64_t decoded = 0;
             bool reader_error = false;
-            try {
-                decoded = source.binding.read(internal->job.start_frame,
-                                              destination,
-                                              internal->job.frame_count,
-                                              source.active_stop_source.get_token());
-                if (decoded > internal->job.frame_count) {
-                    decoded = 0;
+            const auto canceled_before_read =
+                source.canceled.load(std::memory_order_acquire);
+            if (!canceled_before_read) {
+                const auto active_reader_calls =
+                    source.active_reader_calls.fetch_add(1,
+                                                         std::memory_order_acq_rel) + 1;
+                update_high_water(telemetry_.same_source_reader_concurrency_high_water,
+                                  active_reader_calls);
+                try {
+                    decoded = source.binding.read(
+                        internal->job.start_frame,
+                        destination,
+                        internal->job.frame_count,
+                        source.active_stop_source.get_token());
+                    if (decoded > internal->job.frame_count) {
+                        decoded = 0;
+                        reader_error = true;
+                    }
+                } catch (...) {
                     reader_error = true;
+                    decoded = 0;
                 }
-            } catch (...) {
-                reader_error = true;
-                decoded = 0;
+                source.active_reader_calls.fetch_sub(1, std::memory_order_acq_rel);
             }
 
             if (worker.stopping.load(std::memory_order_acquire)) {
+                scratch.in_use.store(false, std::memory_order_release);
                 telemetry_.stopped_jobs.fetch_add(1, std::memory_order_relaxed);
                 break;
             }
@@ -553,6 +666,9 @@ private:
                 .channels = source.channels,
                 .status = status,
                 .worker_index = worker_index,
+                .scratch_slot = scratch_lease->slot,
+                .scratch_lease_generation = scratch_lease->generation,
+                .pool_prepare_epoch = active_prepare_epoch_,
             };
             while (!worker.completions.try_push(completion)) {
                 telemetry_.completion_queue_full.fetch_add(1,
@@ -566,20 +682,17 @@ private:
                 if (worker.stopping.load(std::memory_order_acquire)) break;
             }
             if (worker.stopping.load(std::memory_order_acquire)) {
+                scratch.in_use.store(false, std::memory_order_release);
                 telemetry_.stopped_jobs.fetch_add(1, std::memory_order_relaxed);
                 break;
             }
             telemetry_.completions_published.fetch_add(1,
                                                        std::memory_order_relaxed);
+            if (status == SampleStreamDecodeCompletionStatus::Decoded) {
+                telemetry_.completed_frames.fetch_add(decoded,
+                                                      std::memory_order_relaxed);
+            }
             worker.wake.notify_all();
-
-            std::unique_lock lock(worker.mutex);
-            worker.wake.wait(lock, [&] {
-                return worker.stopping.load(std::memory_order_acquire) ||
-                       worker.scratch_released.load(std::memory_order_acquire);
-            });
-            if (worker.stopping.load(std::memory_order_acquire)) break;
-            worker.scratch_released.store(false, std::memory_order_release);
         }
 
         while (worker.jobs.try_pop())
@@ -592,6 +705,9 @@ private:
     AtomicTelemetry telemetry_{};
     std::uint32_t next_worker_ = 0;
     bool prepared_ = false;
+    std::uint64_t reserved_scratch_samples_ = 0;
+    std::uint64_t active_prepare_epoch_ = 0;
+    std::uint64_t next_prepare_epoch_ = 1;
 
     void reset_telemetry() noexcept {
         telemetry_.jobs_queued.store(0, std::memory_order_relaxed);
@@ -603,6 +719,65 @@ private:
         telemetry_.decode_errors.store(0, std::memory_order_relaxed);
         telemetry_.canceled_completions.store(0, std::memory_order_relaxed);
         telemetry_.stopped_jobs.store(0, std::memory_order_relaxed);
+        telemetry_.source_outstanding_high_water.store(0, std::memory_order_relaxed);
+        telemetry_.completed_frames.store(0, std::memory_order_relaxed);
+        telemetry_.same_source_reader_concurrency_high_water.store(
+            0, std::memory_order_relaxed);
+    }
+
+    static void update_high_water(std::atomic<std::uint64_t>& high_water,
+                                  std::uint64_t candidate) noexcept {
+        auto observed = high_water.load(std::memory_order_relaxed);
+        while (observed < candidate &&
+               !high_water.compare_exchange_weak(observed,
+                                                 candidate,
+                                                 std::memory_order_relaxed)) {}
+    }
+
+    static std::optional<std::uint64_t> checked_multiply(
+        std::uint64_t lhs, std::uint64_t rhs) noexcept {
+        if (lhs != 0 && rhs > std::numeric_limits<std::uint64_t>::max() / lhs)
+            return std::nullopt;
+        return lhs * rhs;
+    }
+
+    struct ScratchLease {
+        std::uint32_t slot = 0;
+        std::uint64_t generation = 0;
+    };
+
+    static std::optional<ScratchLease> acquire_scratch_slot(Worker& worker) noexcept {
+        for (;;) {
+            for (std::uint32_t index = 0; index < worker.scratch_slot_count; ++index) {
+                bool available = false;
+                if (worker.scratch_slots[index].in_use.compare_exchange_strong(
+                        available, true, std::memory_order_acq_rel)) {
+                    auto& scratch = worker.scratch_slots[index];
+                    const auto generation = scratch.next_lease_generation;
+                    if (generation == 0) {
+                        scratch.in_use.store(false, std::memory_order_release);
+                        worker.scratch_lease_exhausted.store(
+                            true, std::memory_order_release);
+                        worker.wake.notify_all();
+                        return std::nullopt;
+                    }
+                    ++scratch.next_lease_generation;
+                    return ScratchLease{index, generation};
+                }
+            }
+            std::unique_lock lock(worker.mutex);
+            worker.wake.wait(lock, [&] {
+                if (worker.stopping.load(std::memory_order_acquire)) return true;
+                for (std::uint32_t index = 0;
+                     index < worker.scratch_slot_count;
+                     ++index) {
+                    if (!worker.scratch_slots[index].in_use.load(
+                            std::memory_order_acquire)) return true;
+                }
+                return false;
+            });
+            if (worker.stopping.load(std::memory_order_acquire)) return std::nullopt;
+        }
     }
 };
 

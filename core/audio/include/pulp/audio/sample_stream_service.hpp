@@ -28,6 +28,8 @@ struct SampleStreamRequesterToken {
 
 struct SampleStreamCacheServiceConfig {
     std::size_t scheduler_capacity = 0;
+    /// Maximum number of independently leased Filling pages for one source.
+    std::uint32_t maximum_async_reservations_per_source = 1;
     /// Page-only cap used when memory_governor is empty. Ignored in shared
     /// mode, where the governor's combined preload+page cap is authoritative.
     std::uint64_t page_memory_budget_bytes = 0;
@@ -306,6 +308,7 @@ struct SampleStreamCacheServiceStats {
     std::uint64_t no_page_available = 0;
     std::uint64_t read_failures = 0;
     std::uint64_t publish_failures = 0;
+    std::uint64_t async_reservations_high_water = 0;
 };
 
 /// Bounded shared-page cache with deterministic caller-driven servicing.
@@ -317,6 +320,7 @@ public:
     bool prepare(const SampleStreamCacheServiceConfig& config) {
         release();
         if (config.scheduler_capacity == 0 ||
+            config.maximum_async_reservations_per_source == 0 ||
             (!config.memory_governor && config.page_memory_budget_bytes == 0)) {
             return false;
         }
@@ -330,6 +334,8 @@ public:
             }
             memory_governor_ = internal_memory_governor_.handle();
         }
+        maximum_async_reservations_per_source_ =
+            config.maximum_async_reservations_per_source;
         prepared_ = true;
         return true;
     }
@@ -342,6 +348,7 @@ public:
         (void) internal_memory_governor_.release();
         active_audio_generation_ = 0;
         completed_audio_generation_ = 0;
+        maximum_async_reservations_per_source_ = 1;
         prepared_ = false;
         stats_ = {};
     }
@@ -464,7 +471,7 @@ public:
                        source->config.token.source_generation ==
                            token.source_generation;
             });
-        if (found == sources_.end() || (*found)->async_in_flight ||
+        if (found == sources_.end() || (*found)->async_reservations != 0 ||
             (*found)->retire_after_audio_generation != 0) {
             return false;
         }
@@ -498,7 +505,7 @@ public:
                 ++source;
                 continue;
             }
-            if ((*source)->async_in_flight) {
+            if ((*source)->async_reservations != 0) {
                 ++source;
                 continue;
             }
@@ -582,7 +589,10 @@ public:
             [this](const SampleStreamPageRequest& candidate) noexcept {
                 const auto* source = find_source(
                     {candidate.source_id, candidate.source_generation});
-                return source == nullptr || !source->async_in_flight;
+                return source == nullptr ||
+                       (source->async_reservations <
+                            maximum_async_reservations_per_source_ &&
+                        !has_matching_filling_page(*source, candidate));
             });
         if (!request) {
             return {scheduler_.stats().pending == 0
@@ -597,10 +607,13 @@ public:
             ++stats_.stale_requests;
             return {SampleStreamAsyncReserveStatus::StaleSource, {}};
         }
-        if (source->async_in_flight)
+        if (source->async_reservations >= maximum_async_reservations_per_source_)
             return {SampleStreamAsyncReserveStatus::SourceInFlight, {}};
-        if (source->window.ready_page_for_frame(request->source_generation,
-                                                request->start_frame).valid) {
+        const auto ready = source->window.ready_page_for_frame(
+            request->source_generation, request->start_frame);
+        if (ready.valid) {
+            source->slots[ready.page_index].publish_sequence =
+                source->next_publish_sequence++;
             scheduler_.complete_page(*request);
             ++stats_.already_ready;
             return {SampleStreamAsyncReserveStatus::AlreadyReady, {}};
@@ -624,7 +637,9 @@ public:
         }
         if (page.reused_retired) ++stats_.retired_pages_reused;
 
-        source->async_in_flight = true;
+        ++source->async_reservations;
+        stats_.async_reservations_high_water = std::max<std::uint64_t>(
+            stats_.async_reservations_high_water, source->async_reservations);
         auto& slot = source->slots[page.page_index];
         slot.fill_registration_epoch = source->registration_epoch;
         slot.fill_start_frame = request->start_frame;
@@ -675,7 +690,7 @@ public:
                          reservation.reservation_serial)) {
             return SampleStreamAsyncCompletionStatus::StaleReservation;
         }
-        source->async_in_flight = false;
+        finish_async_reservation(*source);
         return SampleStreamAsyncCompletionStatus::Canceled;
     }
 
@@ -696,7 +711,7 @@ public:
             cancel_fill(*source,
                         reservation.page_index,
                         reservation.reservation_serial);
-            source->async_in_flight = false;
+            finish_async_reservation(*source);
             ++stats_.read_failures;
             return SampleStreamAsyncCompletionStatus::CopyFailed;
         }
@@ -711,14 +726,14 @@ public:
             cancel_fill(*source,
                         reservation.page_index,
                         reservation.reservation_serial);
-            source->async_in_flight = false;
+            finish_async_reservation(*source);
             ++stats_.publish_failures;
             return SampleStreamAsyncCompletionStatus::PublishFailed;
         }
         auto& slot = source->slots[reservation.page_index];
         slot.fill_serial = 0;
         slot.publish_sequence = source->next_publish_sequence++;
-        source->async_in_flight = false;
+        finish_async_reservation(*source);
         ++stats_.pages_published;
         return SampleStreamAsyncCompletionStatus::Published;
     }
@@ -735,7 +750,11 @@ public:
         }
 
         const auto start_frame = request->start_frame;
-        if (source->window.ready_page_for_frame(request->source_generation, start_frame).valid) {
+        const auto ready = source->window.ready_page_for_frame(
+            request->source_generation, start_frame);
+        if (ready.valid) {
+            source->slots[ready.page_index].publish_sequence =
+                source->next_publish_sequence++;
             scheduler_.complete_page(*request);
             ++stats_.already_ready;
             return SampleStreamServiceStatus::AlreadyReady;
@@ -843,7 +862,7 @@ private:
         std::uint64_t next_publish_sequence = 1;
         std::uint64_t retire_after_audio_generation = 0;
         std::uint64_t registration_epoch = 0;
-        bool async_in_flight = false;
+        std::uint32_t async_reservations = 0;
     };
 
     enum class PageReservationStatus : std::uint8_t {
@@ -940,7 +959,7 @@ private:
         const Source& source,
         const SampleStreamAsyncReservation& reservation) noexcept {
         return reservation.page_index < source.slots.size() &&
-               source.async_in_flight &&
+               source.async_reservations != 0 &&
                source.slots[reservation.page_index].fill_serial ==
                    reservation.reservation_serial &&
                source.slots[reservation.page_index].fill_registration_epoch ==
@@ -951,6 +970,21 @@ private:
                    reservation.frame_count &&
                source.window.page_state(reservation.page_index) ==
                    SampleStreamPageState::Filling;
+    }
+
+    static bool has_matching_filling_page(
+        const Source& source,
+        const SampleStreamPageRequest& request) noexcept {
+        for (std::uint32_t page = 0; page < source.slots.size(); ++page) {
+            const auto& slot = source.slots[page];
+            if (slot.fill_registration_epoch == source.registration_epoch &&
+                slot.fill_start_frame == request.start_frame &&
+                slot.fill_frame_count == request.frame_count &&
+                source.window.page_state(page) == SampleStreamPageState::Filling) {
+                return true;
+            }
+        }
+        return false;
     }
 
     Source* matching_async_source(
@@ -1054,6 +1088,12 @@ private:
         return true;
     }
 
+    static bool finish_async_reservation(Source& source) noexcept {
+        if (source.async_reservations == 0) return false;
+        --source.async_reservations;
+        return true;
+    }
+
     std::vector<std::unique_ptr<Source>> sources_;
     std::vector<SourceGenerationRecord> source_generations_;
     SampleStreamScheduler scheduler_;
@@ -1063,6 +1103,7 @@ private:
     std::uint64_t completed_audio_generation_ = 0;
     std::uint64_t next_registration_epoch_ = 1;
     std::uint64_t next_reservation_serial_ = 1;
+    std::uint32_t maximum_async_reservations_per_source_ = 1;
     bool prepared_ = false;
     SampleStreamCacheServiceStats stats_{};
 };

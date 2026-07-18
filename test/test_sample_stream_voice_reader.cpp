@@ -20,6 +20,7 @@ using pulp::audio::SampleStreamCommandInbox;
 using pulp::audio::SampleStreamPageDemand;
 using pulp::audio::SampleStreamServiceStatus;
 using pulp::audio::SampleStreamVoiceReader;
+using pulp::audio::SampleStreamVoiceOutcomeClass;
 using pulp::audio::SampleStreamVoiceSupply;
 
 namespace {
@@ -123,6 +124,66 @@ TEST_CASE("Stream voice reader is exact across preload and pages at pitched rati
         REQUIRE(rendered.ready_output_frames == 6);
         require_ramp(output, start, ratio, 6);
     }
+}
+
+TEST_CASE("Stream voice output is bit exact across deterministic page-arrival schedules",
+          "[audio][sampler][stream-voice][schedule][parity]") {
+    StreamedRampAsset early;
+    StreamedRampAsset just_in_time;
+
+    SampleStreamVoiceReader first;
+    SampleStreamVoiceReader second;
+    REQUIRE(first.prepare(early.asset.view(), {21, 1}));
+    REQUIRE(second.prepare(just_in_time.asset.view(), {22, 1}));
+    REQUIRE(first.seek(early.asset.view(), 35.0));
+    REQUIRE(second.seek(just_in_time.asset.view(), 35.0));
+
+    Buffer<float> first_output(1, 16);
+    Buffer<float> second_output(1, 16);
+
+    // The first schedule publishes one callback ahead; the second publishes
+    // only the page needed by the callback that is about to render. Both are
+    // explicitly in contract before every render, so starvation is not part
+    // of this parity proof.
+    for (std::uint64_t page = 9; page <= 12; ++page)
+        early.publish_logical_page(page);
+    just_in_time.publish_logical_page(9);
+    for (std::size_t callback = 0; callback < 4; ++callback) {
+        if (callback != 0) {
+            just_in_time.publish_logical_page(9 + callback);
+        }
+
+        auto first_block = first_output.view().slice(callback * 4, 4);
+        auto second_block = second_output.view().slice(callback * 4, 4);
+        const auto first_plan = first.plan_block(early.asset.view(), 4, 1.0, 48000.0);
+        const auto second_plan =
+            second.plan_block(just_in_time.asset.view(), 4, 1.0, 48000.0);
+        REQUIRE(first_plan.supply == SampleStreamVoiceSupply::Ready);
+        REQUIRE(second_plan.supply == SampleStreamVoiceSupply::Ready);
+        const auto first_result =
+            first.render_block(early.asset.view(), first_plan, first_block);
+        const auto second_result =
+            second.render_block(just_in_time.asset.view(), second_plan, second_block);
+        REQUIRE(first_result.supply == SampleStreamVoiceSupply::Ready);
+        REQUIRE(second_result.supply == SampleStreamVoiceSupply::Ready);
+        REQUIRE(first_result.ready_output_frames == 4);
+        REQUIRE(second_result.ready_output_frames == 4);
+        for (std::size_t frame = 0; frame < 4; ++frame) {
+            REQUIRE(std::bit_cast<std::uint32_t>(first_block.channel_ptr(0)[frame]) ==
+                    std::bit_cast<std::uint32_t>(second_block.channel_ptr(0)[frame]));
+        }
+        REQUIRE(std::bit_cast<std::uint64_t>(first.source_position()) ==
+                std::bit_cast<std::uint64_t>(second.source_position()));
+    }
+
+    REQUIRE(first.starvation_stats().starved_frames == 0);
+    REQUIRE(second.starvation_stats().starved_frames == 0);
+    for (std::size_t frame = 0; frame < first_output.num_samples(); ++frame) {
+        REQUIRE(std::bit_cast<std::uint32_t>(first_output.channel(0)[frame]) ==
+                std::bit_cast<std::uint32_t>(second_output.channel(0)[frame]));
+    }
+    REQUIRE(std::bit_cast<std::uint64_t>(first.source_position()) ==
+            std::bit_cast<std::uint64_t>(second.source_position()));
 }
 
 TEST_CASE("Stream voice reader is block-partition invariant near page boundaries",
@@ -258,13 +319,15 @@ TEST_CASE("Stream voice reader starves then recovers on the current source timel
     StreamedRampAsset fixture;
     const auto asset = fixture.asset.view();
     SampleStreamVoiceReader reader;
-    REQUIRE(reader.prepare(asset, {4, 1}));
+    REQUIRE(reader.prepare(asset, {4, 1},
+                           {.fade_out_frames = 4, .recovery_frames = 4}));
     REQUIRE(reader.seek(asset, 35.0));
 
     Buffer<float> missed(1, 4);
     const auto missed_plan = reader.plan_block(asset, 4, 1.0, 48000.0);
     const auto missed_result = reader.render_block(asset, missed_plan, missed.view());
     REQUIRE(missed_result.supply == SampleStreamVoiceSupply::Starved);
+    REQUIRE(missed_result.outcome == SampleStreamVoiceOutcomeClass::ServiceStarvation);
     REQUIRE(missed_result.ready_output_frames == 0);
     REQUIRE_THAT(reader.source_position(), WithinAbs(39.0, 1.0e-12));
     for (const auto sample : missed.channel(0)) REQUIRE(sample == 0.0f);
@@ -276,9 +339,96 @@ TEST_CASE("Stream voice reader starves then recovers on the current source timel
     const auto recovered_result =
         reader.render_block(asset, recovered_plan, recovered.view());
     REQUIRE(recovered_result.supply == SampleStreamVoiceSupply::Ready);
+    REQUIRE(recovered_result.outcome == SampleStreamVoiceOutcomeClass::None);
     REQUIRE(recovered_result.ready_output_frames == 2);
-    REQUIRE_THAT(recovered.channel(0)[0], WithinAbs(39.0f, 1.0e-6f));
-    REQUIRE_THAT(recovered.channel(0)[1], WithinAbs(40.0f, 1.0e-6f));
+    REQUIRE_THAT(recovered.channel(0)[0], WithinAbs(0.0f, 1.0e-6f));
+    REQUIRE_THAT(recovered.channel(0)[1], WithinAbs(20.0f, 1.0e-5f));
+    const auto stats = reader.starvation_stats();
+    REQUIRE(stats.predicted_events == 1);
+    REQUIRE(stats.insufficient_lead_events == 1);
+    REQUIRE(stats.emergency_events == 1);
+    REQUIRE(stats.starved_frames == 4);
+    REQUIRE(stats.recovery_events == 1);
+}
+
+TEST_CASE("Stream voice reader fades a valid prefix to zero before a predicted miss",
+          "[audio][sampler][stream-voice][starvation][telemetry]") {
+    StreamedRampAsset fixture;
+    fixture.publish_logical_page(9);
+    const auto asset = fixture.asset.view();
+    SampleStreamVoiceReader reader;
+    REQUIRE(reader.prepare(asset, {13, 1},
+                           {.fade_out_frames = 8, .recovery_frames = 4}));
+    REQUIRE(reader.seek(asset, 35.0));
+
+    Buffer<float> faded(1, 8);
+    const auto faded_plan = reader.plan_block(asset, 8, 1.0, 48000.0);
+    const auto faded_result = reader.render_block(asset, faded_plan, faded.view());
+    REQUIRE(faded_result.supply == SampleStreamVoiceSupply::Starved);
+    REQUIRE(faded_result.outcome == SampleStreamVoiceOutcomeClass::ServiceStarvation);
+    REQUIRE(faded_result.ready_output_frames == 4);
+    REQUIRE_THAT(faded.channel(0)[0], WithinAbs(35.0f, 1.0e-6f));
+    REQUIRE(faded.channel(0)[1] < 36.0f);
+    REQUIRE(faded.channel(0)[1] > 0.0f);
+    REQUIRE(faded.channel(0)[2] < faded.channel(0)[1]);
+    REQUIRE_THAT(faded.channel(0)[3], WithinAbs(0.0f, 1.0e-5f));
+    for (std::size_t frame = 4; frame < faded.num_samples(); ++frame)
+        REQUIRE(faded.channel(0)[frame] == 0.0f);
+    REQUIRE_THAT(faded.channel(0)[3] - faded.channel(0)[4],
+                 WithinAbs(0.0f, 1.0e-5f));
+
+    fixture.publish_logical_page(10);
+    fixture.publish_logical_page(11);
+    Buffer<float> recovered(1, 4);
+    const auto recovered_plan = reader.plan_block(asset, 4, 1.0, 48000.0);
+    const auto recovered_result =
+        reader.render_block(asset, recovered_plan, recovered.view());
+    REQUIRE(recovered_result.supply == SampleStreamVoiceSupply::Ready);
+    REQUIRE(recovered_result.ready_output_frames == 4);
+    REQUIRE(recovered.channel(0)[0] == 0.0f);
+    REQUIRE_THAT(faded.channel(0)[7] - recovered.channel(0)[0],
+                 WithinAbs(0.0f, 1.0e-7f));
+    REQUIRE(recovered.channel(0)[1] > 0.0f);
+    REQUIRE_THAT(recovered.channel(0)[3], WithinAbs(46.0f, 1.0e-5f));
+
+    const auto stats = reader.starvation_stats();
+    REQUIRE(stats.predicted_events == 1);
+    REQUIRE(stats.insufficient_lead_events == 0);
+    REQUIRE(stats.emergency_events == 0);
+    REQUIRE(stats.starved_frames == 4);
+    REQUIRE(stats.recovery_events == 1);
+}
+
+TEST_CASE("Stream voice reader right-aligns a short fade to the missing-frame boundary",
+          "[audio][sampler][stream-voice][starvation][boundary]") {
+    StreamedRampAsset fixture;
+    fixture.publish_logical_page(9);
+    fixture.publish_logical_page(10);
+    const auto asset = fixture.asset.view();
+    SampleStreamVoiceReader reader;
+    REQUIRE(reader.prepare(asset, {14, 1},
+                           {.fade_out_frames = 4, .recovery_frames = 4}));
+    REQUIRE(reader.seek(asset, 37.0));
+
+    Buffer<float> output(1, 8);
+    const auto plan = reader.plan_block(asset, 8, 1.0, 48000.0);
+    const auto result = reader.render_block(asset, plan, output.view());
+
+    REQUIRE(result.supply == SampleStreamVoiceSupply::Starved);
+    REQUIRE(result.ready_output_frames == 6);
+    // The two valid frames before the four-frame fade remain untouched.
+    REQUIRE(output.channel(0)[0] == 37.0f);
+    REQUIRE(output.channel(0)[1] == 38.0f);
+    // The fade begins at unity on the last four valid frames and reaches zero
+    // exactly where the unavailable suffix starts.
+    REQUIRE(output.channel(0)[2] == 39.0f);
+    REQUIRE(output.channel(0)[3] < 40.0f);
+    REQUIRE(output.channel(0)[3] > 0.0f);
+    REQUIRE(output.channel(0)[4] < output.channel(0)[3]);
+    REQUIRE_THAT(output.channel(0)[5], WithinAbs(0.0f, 1.0e-6f));
+    REQUIRE(output.channel(0)[6] == 0.0f);
+    REQUIRE(output.channel(0)[7] == 0.0f);
+    REQUIRE(reader.starvation_stats().emergency_events == 0);
 }
 
 TEST_CASE("Stream voice reader rejects stale generation plans",
@@ -314,6 +464,7 @@ TEST_CASE("Stream voice reader rejects stale generation plans",
     std::fill(output.channel(0).begin(), output.channel(0).end(), 1.0f);
     const auto result = reader.render_block(stale, plan, output.view());
     REQUIRE(result.supply == SampleStreamVoiceSupply::StaleGeneration);
+    REQUIRE(result.outcome == SampleStreamVoiceOutcomeClass::StaleGeneration);
     REQUIRE(result.ready_output_frames == 0);
     REQUIRE(reader.source_position() == 0.0);
     for (const auto sample : output.channel(0)) REQUIRE(sample == 0.0f);
@@ -328,6 +479,10 @@ TEST_CASE("Stream voice reader enforces the asset preload capability",
 
     REQUIRE(reader.plan_block(asset, 9, 1.0, 48000.0).supply ==
             SampleStreamVoiceSupply::InvalidContract);
+    const auto invalid_plan = reader.plan_block(asset, 9, 1.0, 48000.0);
+    Buffer<float> invalid_output(1, 9);
+    REQUIRE(reader.render_block(asset, invalid_plan, invalid_output.view()).outcome ==
+            SampleStreamVoiceOutcomeClass::InvalidPreloadContract);
     REQUIRE(reader.plan_block(asset, 8, 4.01, 48000.0).supply ==
             SampleStreamVoiceSupply::InvalidContract);
     REQUIRE(reader.plan_block(asset, 8, 1.0, 44100.0).supply ==
@@ -348,6 +503,7 @@ TEST_CASE("Stream voice reader reports and clears end of source",
     REQUIRE(plan.supply == SampleStreamVoiceSupply::EndOfSource);
     const auto result = reader.render_block(asset, plan, output.view());
     REQUIRE(result.supply == SampleStreamVoiceSupply::EndOfSource);
+    REQUIRE(result.outcome == SampleStreamVoiceOutcomeClass::NormalEndOfSource);
     REQUIRE(result.ready_output_frames == 0);
     for (const auto sample : output.channel(0)) REQUIRE(sample == 0.0f);
 }

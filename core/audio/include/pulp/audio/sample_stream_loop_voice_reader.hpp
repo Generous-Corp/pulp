@@ -62,12 +62,14 @@ public:
                  SampleStreamRequesterToken requester,
                  const LoopRegion& region,
                  double playback_rate,
-                 const PreparedSampleInterpolation& interpolation) noexcept {
+                 const PreparedSampleInterpolation& interpolation,
+                 SampleStarvationEnvelopeConfig starvation =
+                     kDefaultSampleStarvationEnvelopeConfig) noexcept {
         reset();
         if (!asset.valid() || requester.requester_id == 0 ||
             requester.requester_generation == 0 ||
             !positive_finite(playback_rate) ||
-            !interpolation.valid() ||
+            !interpolation.valid() || !starvation_envelope_.prepare(starvation) ||
             !cursor_.set_region(region, asset.total_frames)) {
             return false;
         }
@@ -94,6 +96,7 @@ public:
         requester_ = {};
         interpolation_ = {};
         cursor_ = {};
+        starvation_envelope_.reset();
         timeline_serial_ = 1;
         prepared_ = false;
     }
@@ -136,6 +139,19 @@ public:
         return interpolation_;
     }
     bool active() const noexcept { return prepared_ && cursor_.active(); }
+    SampleStarvationMode starvation_mode() const noexcept {
+        return starvation_envelope_.mode();
+    }
+    SampleStarvationEnvelopeStats starvation_stats() const noexcept {
+        return starvation_envelope_.stats();
+    }
+
+    /// Records an externally held all-silent block without advancing the
+    /// cursor. Recovery is click-gated by the reader's prepared envelope when
+    /// valid pages become available again.
+    void mark_held_starvation(std::uint64_t frames) noexcept {
+        starvation_envelope_.mark_starved(frames);
+    }
 
     bool synchronize_cursor(const SampleAssetView& asset,
                             const LoopPlaybackCursor& cursor) noexcept {
@@ -271,6 +287,7 @@ public:
         }
         if (!same_plan_generation(asset, plan)) {
             result.supply = SampleStreamVoiceSupply::StaleGeneration;
+            result.outcome = SampleStreamVoiceOutcomeClass::StaleGeneration;
             return result;
         }
         if (plan.timeline_serial != timeline_serial_ ||
@@ -280,12 +297,18 @@ public:
         }
         if (plan.supply == SampleStreamVoiceSupply::EndOfSource) {
             result.supply = SampleStreamVoiceSupply::EndOfSource;
+            result.outcome = SampleStreamVoiceOutcomeClass::NormalEndOfSource;
+            return result;
+        }
+        if (plan.supply == SampleStreamVoiceSupply::InvalidContract) {
+            result.outcome = SampleStreamVoiceOutcomeClass::InvalidPreloadContract;
             return result;
         }
         if (plan.supply != SampleStreamVoiceSupply::Ready) return result;
 
         auto replay = plan.start_cursor;
         result.supply = SampleStreamVoiceSupply::Ready;
+        result.outcome = SampleStreamVoiceOutcomeClass::None;
         for (std::uint32_t output = 0; output < plan.output_frames && replay.active(); ++output) {
             const auto frame_plan = replay.frame_read_plan();
             ResolvedRead primary;
@@ -296,12 +319,14 @@ public:
                 resolve_read(plan, asset, replay.region(), frame_plan.blend_position, blend);
             if (!primary_ready || !blend_ready) {
                 result.supply = SampleStreamVoiceSupply::Starved;
+                result.outcome = SampleStreamVoiceOutcomeClass::ServiceStarvation;
                 break;
             }
             for (std::uint32_t channel = 0; channel < asset.channels; ++channel) {
                 const auto a = interpolate(asset, primary, channel);
                 if (!a.ready) {
                     result.supply = SampleStreamVoiceSupply::Starved;
+                    result.outcome = SampleStreamVoiceOutcomeClass::ServiceStarvation;
                     break;
                 }
                 double sample = a.sample;
@@ -309,6 +334,7 @@ public:
                     const auto b = interpolate(asset, blend, channel);
                     if (!b.ready) {
                         result.supply = SampleStreamVoiceSupply::Starved;
+                        result.outcome = SampleStreamVoiceOutcomeClass::ServiceStarvation;
                         break;
                     }
                     sample = sample * frame_plan.primary_gain +
@@ -321,10 +347,14 @@ public:
             (void) replay.advance();
         }
 
+        detail::apply_sample_starvation_envelope(
+            starvation_envelope_, destination, result, plan.output_frames);
         cursor_ = plan.end_cursor;
         ++timeline_serial_;
-        if (result.supply == SampleStreamVoiceSupply::Ready && !cursor_.active())
+        if (result.supply == SampleStreamVoiceSupply::Ready && !cursor_.active()) {
             result.supply = SampleStreamVoiceSupply::EndOfSource;
+            result.outcome = SampleStreamVoiceOutcomeClass::NormalEndOfSource;
+        }
         return result;
     }
 
@@ -571,6 +601,7 @@ private:
     PreparedSampleInterpolation interpolation_{};
     LoopPlaybackCursor cursor_{};
     std::uint64_t timeline_serial_ = 1;
+    SampleStarvationEnvelope starvation_envelope_;
     bool prepared_ = false;
 };
 

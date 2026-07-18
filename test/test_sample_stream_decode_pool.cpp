@@ -5,10 +5,13 @@
 #include "harness/rt_allocation_probe.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <latch>
+#include <limits>
 #include <mutex>
+#include <set>
 #include <thread>
 
 using pulp::audio::SampleStreamDecodeCancelStatus;
@@ -500,4 +503,184 @@ TEST_CASE("Sample stream decode pool keeps prepared memory fixed across jobs",
     REQUIRE(owner_allocations == 0);
     REQUIRE(pool.reserved_scratch_samples() == 16);
     REQUIRE(pool.telemetry().completions_published == 100);
+
+    SampleStreamDecodePool<1, 1> overflow;
+    REQUIRE_FALSE(overflow.prepare({
+        .worker_count = 1,
+        .source_capacity = 1,
+        .maximum_channels = std::numeric_limits<std::uint32_t>::max(),
+        .maximum_frames_per_job =
+            std::numeric_limits<std::size_t>::max(),
+    }));
+}
+
+TEST_CASE("Sample stream decode pool pipelines one source serially into distinct leases",
+          "[audio][sampler][decode-pool][pipeline]") {
+    SampleStreamDecodePool<3, 3> pool;
+    REQUIRE(pool.prepare({
+        .worker_count = 1,
+        .source_capacity = 1,
+        .maximum_channels = 1,
+        .maximum_frames_per_job = 4,
+        .maximum_outstanding_jobs_per_source = 3,
+    }));
+    REQUIRE(pool.reserved_scratch_samples() == 12);
+    REQUIRE(pool.add_source({80, 1}, 1, ramp_reader()).added());
+    for (std::uint64_t serial = 1; serial <= 3; ++serial) {
+        REQUIRE(pool.submit({.source = {80, 1},
+                             .reservation_serial = serial,
+                             .start_frame = serial * 10,
+                             .frame_count = 4}) ==
+                SampleStreamDecodeSubmitStatus::Queued);
+    }
+    REQUIRE(pool.submit({.source = {80, 1},
+                         .reservation_serial = 4,
+                         .frame_count = 4}) ==
+            SampleStreamDecodeSubmitStatus::SourceInFlight);
+
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(2);
+    while (pool.telemetry().completions_published != 3 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    REQUIRE(pool.telemetry().completions_published == 3);
+
+    std::set<std::uint32_t> scratch_slots;
+    for (std::uint64_t serial = 1; serial <= 3; ++serial) {
+        auto completion = pool.wait_pop_completion(0);
+        REQUIRE(completion.has_value());
+        REQUIRE(completion->completion.reservation_serial == serial);
+        REQUIRE(completion->audio.channel_ptr(0)[0] ==
+                static_cast<float>(serial * 10));
+        scratch_slots.insert(completion->completion.scratch_slot);
+        if (serial == 1) {
+            auto wrong = completion->completion;
+            wrong.scratch_slot = (wrong.scratch_slot + 1) % 3;
+            REQUIRE_FALSE(pool.release_completion(wrong));
+            REQUIRE(completion->audio.channel_ptr(0)[0] == 10.0f);
+        }
+        REQUIRE(pool.release_completion(completion->completion));
+        REQUIRE_FALSE(pool.release_completion(completion->completion));
+    }
+    REQUIRE(scratch_slots.size() == 3);
+    const auto telemetry = pool.telemetry();
+    REQUIRE(telemetry.source_outstanding_high_water == 3);
+    REQUIRE(telemetry.completed_frames == 12);
+    REQUIRE(telemetry.same_source_reader_concurrency_high_water == 1);
+}
+
+TEST_CASE("Sample stream decode pool cancellation drains every serial reservation",
+          "[audio][sampler][decode-pool][pipeline][cancel]") {
+    SampleStreamDecodePool<3, 3> pool;
+    REQUIRE(pool.prepare({
+        .worker_count = 1,
+        .source_capacity = 1,
+        .maximum_channels = 1,
+        .maximum_frames_per_job = 4,
+        .maximum_outstanding_jobs_per_source = 3,
+    }));
+    ReaderGate gate;
+    std::atomic<std::uint32_t> reads{0};
+    REQUIRE(pool.add_source(
+        {81, 1}, 1,
+        [&](std::uint64_t start,
+            pulp::audio::BufferView<float> destination,
+            std::uint64_t frames) {
+            reads.fetch_add(1, std::memory_order_relaxed);
+            return gate.read(start, destination, frames);
+        }).added());
+    for (std::uint64_t serial = 1; serial <= 3; ++serial) {
+        REQUIRE(pool.submit({.source = {81, 1},
+                             .reservation_serial = serial,
+                             .frame_count = 4}) ==
+                SampleStreamDecodeSubmitStatus::Queued);
+    }
+    gate.wait_until_entered();
+    REQUIRE(pool.cancel_source({81, 1}) == SampleStreamDecodeCancelStatus::Canceled);
+    gate.allow();
+
+    for (std::uint64_t serial = 1; serial <= 3; ++serial) {
+        auto completion = pool.wait_pop_completion(0);
+        REQUIRE(completion.has_value());
+        REQUIRE(completion->completion.status ==
+                SampleStreamDecodeCompletionStatus::Canceled);
+        REQUIRE(pool.release_completion(completion->completion));
+        if (serial != 3) {
+            REQUIRE(pool.add_source({81, 2}, 1, ramp_reader()).status ==
+                    SampleStreamDecodeSourceAddStatus::DuplicateSource);
+        }
+    }
+    REQUIRE(reads.load(std::memory_order_relaxed) == 1);
+    REQUIRE(pool.add_source({81, 2}, 1, ramp_reader()).added());
+}
+
+TEST_CASE("Sample stream decode scratch leases reject stale prepare epochs",
+          "[audio][sampler][decode-pool][pipeline][generation]") {
+    SampleStreamDecodePool<1, 1> pool;
+    const pulp::audio::SampleStreamDecodePoolConfig config{
+        .worker_count = 1,
+        .source_capacity = 1,
+        .maximum_channels = 1,
+        .maximum_frames_per_job = 4,
+    };
+    REQUIRE(pool.prepare(config));
+    REQUIRE(pool.add_source({82, 1}, 1, ramp_reader()).added());
+    REQUIRE(pool.submit({.source = {82, 1},
+                         .reservation_serial = 1,
+                         .frame_count = 4}) == SampleStreamDecodeSubmitStatus::Queued);
+    auto old = pool.wait_pop_completion(0);
+    REQUIRE(old.has_value());
+    REQUIRE(pool.release_completion(old->completion));
+
+    pool.release();
+    REQUIRE(pool.prepare(config));
+    REQUIRE(pool.add_source({82, 1}, 1, ramp_reader()).added());
+    REQUIRE(pool.submit({.source = {82, 1},
+                         .reservation_serial = 1,
+                         .frame_count = 4}) == SampleStreamDecodeSubmitStatus::Queued);
+    auto current = pool.wait_pop_completion(0);
+    REQUIRE(current.has_value());
+    REQUIRE(current->completion.pool_prepare_epoch !=
+            old->completion.pool_prepare_epoch);
+    REQUIRE_FALSE(pool.release_completion(old->completion));
+    REQUIRE(current->audio.channel_ptr(0)[0] == 0.0f);
+    REQUIRE(pool.release_completion(current->completion));
+}
+
+TEST_CASE("Sample stream decode scratch leases reject stale same-epoch copies",
+          "[audio][sampler][decode-pool][pipeline][generation]") {
+    SampleStreamDecodePool<1, 1> pool;
+    REQUIRE(pool.prepare({
+        .worker_count = 1,
+        .source_capacity = 1,
+        .maximum_channels = 1,
+        .maximum_frames_per_job = 4,
+    }));
+    REQUIRE(pool.add_source({83, 1}, 1, ramp_reader()).added());
+    REQUIRE(pool.submit({.source = {83, 1},
+                         .reservation_serial = 1,
+                         .frame_count = 4}) == SampleStreamDecodeSubmitStatus::Queued);
+    const auto old = pool.wait_pop_completion(0);
+    REQUIRE(old.has_value());
+    REQUIRE(pool.release_completion(old->completion));
+    REQUIRE(pool.remove_idle_source({83, 1}));
+
+    // The low-level pool permits an idle token to be rebound. Reusing the same
+    // serial and slot must not let a retained completion copy release the new
+    // live scratch lease.
+    REQUIRE(pool.add_source({83, 1}, 1, ramp_reader()).added());
+    REQUIRE(pool.submit({.source = {83, 1},
+                         .reservation_serial = 1,
+                         .frame_count = 4}) == SampleStreamDecodeSubmitStatus::Queued);
+    const auto current = pool.wait_pop_completion(0);
+    REQUIRE(current.has_value());
+    REQUIRE(current->completion.scratch_slot == old->completion.scratch_slot);
+    REQUIRE(current->completion.pool_prepare_epoch ==
+            old->completion.pool_prepare_epoch);
+    REQUIRE(current->completion.scratch_lease_generation !=
+            old->completion.scratch_lease_generation);
+    REQUIRE_FALSE(pool.release_completion(old->completion));
+    REQUIRE(current->audio.channel_ptr(0)[0] == 0.0f);
+    REQUIRE(pool.release_completion(current->completion));
 }

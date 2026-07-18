@@ -74,6 +74,29 @@ static_assert(std::is_trivially_copyable_v<SamplerPublishedSource>);
 struct PulpSamplerStreamStats {
     std::uint64_t pages_published = 0;
     std::uint64_t starved_output_frames = 0;
+    // Output-supply symptoms. A decode failure can later cause one of these,
+    // so it is intentionally allowed to co-occur with decode_failure_events.
+    std::uint64_t service_starvation_events = 0;
+    // Root-cause failures reported by the non-RT worker pool, independent of
+    // whether contract lead hid the failed attempt from audible output.
+    std::uint64_t decode_failure_events = 0;
+    std::uint64_t invalid_preload_contract_events = 0;
+    std::uint64_t stale_generation_events = 0;
+    std::uint64_t normal_end_of_source_events = 0;
+    std::uint64_t invalid_render_contract_events = 0;
+    std::uint64_t cache_pages_retired = 0;
+    std::uint64_t cache_pages_reused = 0;
+    std::uint64_t decode_source_outstanding_high_water = 0;
+    std::uint64_t decode_completed_frames = 0;
+    std::uint64_t same_source_reader_concurrency_high_water = 0;
+    std::uint64_t cache_async_reservations_high_water = 0;
+    std::uint64_t active_reservations_high_water = 0;
+    std::uint64_t aggregate_rate_admission_rejections = 0;
+    std::uint64_t aggregate_rate_automation_rejections = 0;
+    std::uint64_t decode_scratch_bytes = 0;
+    std::uint64_t total_memory_capacity_bytes = 0;
+    std::uint64_t current_total_memory_bytes = 0;
+    std::uint64_t peak_total_memory_bytes = 0;
     std::uint64_t sources_retired = 0;
     std::uint64_t active_sources = 0;
     std::uint64_t preload_frames = 0;
@@ -102,11 +125,28 @@ class SamplerStreamingRuntime {
         next_audio_generation_.store(1, std::memory_order_relaxed);
         pages_published_.store(0, std::memory_order_relaxed);
         starved_frames_.store(0, std::memory_order_relaxed);
+        service_starvation_events_.store(0, std::memory_order_relaxed);
+        decode_failure_events_.store(0, std::memory_order_relaxed);
+        invalid_preload_contract_events_.store(0, std::memory_order_relaxed);
+        stale_generation_events_.store(0, std::memory_order_relaxed);
+        normal_end_of_source_events_.store(0, std::memory_order_relaxed);
+        invalid_render_contract_events_.store(0, std::memory_order_relaxed);
+        cache_pages_retired_.store(0, std::memory_order_relaxed);
+        cache_pages_reused_.store(0, std::memory_order_relaxed);
+        decode_source_outstanding_high_water_.store(0, std::memory_order_relaxed);
+        decode_completed_frames_.store(0, std::memory_order_relaxed);
+        same_source_reader_concurrency_high_water_.store(0, std::memory_order_relaxed);
+        cache_async_reservations_high_water_.store(0, std::memory_order_relaxed);
+        active_reservations_high_water_.store(0, std::memory_order_relaxed);
+        aggregate_rate_admission_rejections_.store(0, std::memory_order_relaxed);
+        aggregate_rate_automation_rejections_.store(0, std::memory_order_relaxed);
+        decode_scratch_bytes_.store(0, std::memory_order_relaxed);
         sources_retired_.store(0, std::memory_order_relaxed);
         active_sources_.store(0, std::memory_order_relaxed);
         preload_frames_.store(0, std::memory_order_relaxed);
         service_dispatch_paused_.store(false, std::memory_order_relaxed);
 #if defined(PULP_SAMPLER_TEST_HOOKS)
+        fail_next_stream_decode_for_test_.store(false, std::memory_order_relaxed);
         reverse_prewarm_pending_for_test_.store(false, std::memory_order_relaxed);
         block_next_reverse_decode_for_test_.store(false, std::memory_order_relaxed);
         reverse_decode_entered_for_test_.store(false, std::memory_order_relaxed);
@@ -139,7 +179,7 @@ class SamplerStreamingRuntime {
             .scheduler_margin_seconds = kSchedulerMarginSeconds,
             .decoder_latency_seconds = kDecoderLatencySeconds,
             .maximum_host_block_frames = maximum_host_block_frames_,
-            .interpolation_guard_frames = audio::kDefaultSampleSincHalfWidth,
+            .interpolation_guard_frames = audio::kHighQualitySampleSincHalfWidth,
             .loop_prefetch_guard_frames =
                 static_cast<std::uint64_t>(maximum_source_frames_per_block),
         });
@@ -166,11 +206,20 @@ class SamplerStreamingRuntime {
                   maximum_preload.required_preload_frames,
                   kSourceCapacity)
             : std::nullopt;
+        const auto decode_scratch_budget = audio::checked_sample_storage_bytes(
+            kMaximumChannels,
+            page_frames_,
+            static_cast<std::uint64_t>(kWorkerCount) *
+                kMaximumOutstandingJobsPerSource);
         if (!page_budget || !preload_budget ||
             *preload_budget > std::numeric_limits<std::uint64_t>::max() - *page_budget ||
+            !decode_scratch_budget ||
+            *decode_scratch_budget > std::numeric_limits<std::uint64_t>::max() -
+                                         (*page_budget + *preload_budget) ||
             !memory_governor_.prepare(*page_budget + *preload_budget)) {
             return false;
         }
+        decode_scratch_bytes_.store(*decode_scratch_budget, std::memory_order_relaxed);
 
         service_ready_ = service_.prepare({
             .cache =
@@ -185,6 +234,8 @@ class SamplerStreamingRuntime {
                     .source_capacity = kSourceCapacity,
                     .maximum_channels = kMaximumChannels,
                     .maximum_frames_per_job = page_frames_,
+                    .maximum_outstanding_jobs_per_source =
+                        kMaximumOutstandingJobsPerSource,
                 },
         });
         for (auto& slot : slots_)
@@ -222,6 +273,13 @@ class SamplerStreamingRuntime {
             service_.drain_commands(commands_);
         }
         service_.release();
+        decode_scratch_bytes_.store(0, std::memory_order_relaxed);
+        // SampleStreamAsyncService::release() joins every decode worker while
+        // the decode pool deliberately retains its telemetry until prepare().
+        // Snapshot only after that join so a late short-read cannot disappear.
+        decode_failure_events_.store(
+            service_.decode_telemetry().decode_errors,
+            std::memory_order_relaxed);
         unpublished_rollbacks_.fill({});
 #if defined(PULP_SAMPLER_TEST_HOOKS)
         unpublished_rollback_count_for_test_.store(0, std::memory_order_relaxed);
@@ -302,13 +360,54 @@ class SamplerStreamingRuntime {
     }
 
     PulpSamplerStreamStats stats() const noexcept {
+        const auto memory = memory_governor_.stats();
+        const auto decode_scratch_bytes =
+            decode_scratch_bytes_.load(std::memory_order_relaxed);
         return {
             .pages_published = pages_published_.load(std::memory_order_relaxed),
             .starved_output_frames = starved_frames_.load(std::memory_order_relaxed),
+            .service_starvation_events =
+                service_starvation_events_.load(std::memory_order_relaxed),
+            .decode_failure_events =
+                decode_failure_events_.load(std::memory_order_relaxed),
+            .invalid_preload_contract_events =
+                invalid_preload_contract_events_.load(std::memory_order_relaxed),
+            .stale_generation_events =
+                stale_generation_events_.load(std::memory_order_relaxed),
+            .normal_end_of_source_events =
+                normal_end_of_source_events_.load(std::memory_order_relaxed),
+            .invalid_render_contract_events =
+                invalid_render_contract_events_.load(std::memory_order_relaxed),
+            .cache_pages_retired =
+                cache_pages_retired_.load(std::memory_order_relaxed),
+            .cache_pages_reused =
+                cache_pages_reused_.load(std::memory_order_relaxed),
+            .decode_source_outstanding_high_water =
+                decode_source_outstanding_high_water_.load(std::memory_order_relaxed),
+            .decode_completed_frames =
+                decode_completed_frames_.load(std::memory_order_relaxed),
+            .same_source_reader_concurrency_high_water =
+                same_source_reader_concurrency_high_water_.load(
+                    std::memory_order_relaxed),
+            .cache_async_reservations_high_water =
+                cache_async_reservations_high_water_.load(std::memory_order_relaxed),
+            .active_reservations_high_water =
+                active_reservations_high_water_.load(std::memory_order_relaxed),
+            .aggregate_rate_admission_rejections =
+                aggregate_rate_admission_rejections_.load(std::memory_order_relaxed),
+            .aggregate_rate_automation_rejections =
+                aggregate_rate_automation_rejections_.load(std::memory_order_relaxed),
+            .decode_scratch_bytes = decode_scratch_bytes,
+            .total_memory_capacity_bytes =
+                memory.capacity_bytes + decode_scratch_bytes,
+            .current_total_memory_bytes =
+                memory.current_total_bytes + decode_scratch_bytes,
+            .peak_total_memory_bytes =
+                memory.peak_total_bytes + decode_scratch_bytes,
             .sources_retired = sources_retired_.load(std::memory_order_relaxed),
             .active_sources = active_sources_.load(std::memory_order_relaxed),
             .preload_frames = preload_frames_.load(std::memory_order_relaxed),
-            .memory = memory_governor_.stats(),
+            .memory = memory,
         };
     }
 
@@ -330,8 +429,36 @@ class SamplerStreamingRuntime {
         stream_audio_ack_selection_.store(generation, std::memory_order_release);
     }
 
-    void add_starved_frames(std::uint64_t frames) noexcept {
-        starved_frames_.fetch_add(frames, std::memory_order_relaxed);
+    void record_voice_outcome(audio::SampleStreamVoiceOutcomeClass outcome,
+                              std::uint64_t starved_frames = 0) noexcept {
+        switch (outcome) {
+        case audio::SampleStreamVoiceOutcomeClass::None:
+            return;
+        case audio::SampleStreamVoiceOutcomeClass::ServiceStarvation:
+            service_starvation_events_.fetch_add(1, std::memory_order_relaxed);
+            starved_frames_.fetch_add(starved_frames, std::memory_order_relaxed);
+            return;
+        case audio::SampleStreamVoiceOutcomeClass::InvalidPreloadContract:
+            invalid_preload_contract_events_.fetch_add(1, std::memory_order_relaxed);
+            return;
+        case audio::SampleStreamVoiceOutcomeClass::StaleGeneration:
+            stale_generation_events_.fetch_add(1, std::memory_order_relaxed);
+            return;
+        case audio::SampleStreamVoiceOutcomeClass::NormalEndOfSource:
+            normal_end_of_source_events_.fetch_add(1, std::memory_order_relaxed);
+            return;
+        case audio::SampleStreamVoiceOutcomeClass::InvalidRenderContract:
+            invalid_render_contract_events_.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+    }
+
+    void record_aggregate_rate_admission_rejection() noexcept {
+        aggregate_rate_admission_rejections_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void record_aggregate_rate_automation_rejection() noexcept {
+        aggregate_rate_automation_rejections_.fetch_add(1, std::memory_order_relaxed);
     }
 
     static constexpr double maximum_pitch_ratio() noexcept {
@@ -346,10 +473,15 @@ class SamplerStreamingRuntime {
         return kMaximumSourceRate;
     }
 
+    static constexpr double certified_decoder_latency_seconds() noexcept {
+        return kDecoderLatencySeconds;
+    }
+
   private:
     friend struct PulpSamplerTestAccess;
 
     static constexpr std::uint32_t kWorkerCount = 2;
+    static constexpr std::uint32_t kMaximumOutstandingJobsPerSource = 8;
     static constexpr std::uint32_t kBundleSlotCount = 2;
     static constexpr std::uint32_t kMaximumBundleMembers =
         1 + SamplerStreamMipSidecar::kMaximumLevels;
@@ -365,7 +497,8 @@ class SamplerStreamingRuntime {
     static constexpr std::uint32_t kSourceAdvancePageDemandsPerRegion =
         audio::kSampleStreamVoiceMaxPageDemands / kCrossfadeReadRegionCount -
         kBoundaryPageDemandsPerRegion;
-    static constexpr std::uint32_t kCachePagesPerSource = kMaximumVoices * kPagesPerVoiceWorkingSet;
+    static constexpr std::uint32_t kCachePagesPerSource =
+        kMaximumVoices * kPagesPerVoiceWorkingSet;
     static constexpr std::uint32_t kMaximumChannels = 2;
     static constexpr std::uint64_t kDefaultPageFrames = 2048;
     static constexpr double kMaximumPitchRatio = 4.0;
@@ -413,6 +546,22 @@ class SamplerStreamingRuntime {
     std::atomic<std::uint64_t> next_audio_generation_{1};
     std::atomic<std::uint64_t> pages_published_{0};
     std::atomic<std::uint64_t> starved_frames_{0};
+    std::atomic<std::uint64_t> service_starvation_events_{0};
+    std::atomic<std::uint64_t> decode_failure_events_{0};
+    std::atomic<std::uint64_t> invalid_preload_contract_events_{0};
+    std::atomic<std::uint64_t> stale_generation_events_{0};
+    std::atomic<std::uint64_t> normal_end_of_source_events_{0};
+    std::atomic<std::uint64_t> invalid_render_contract_events_{0};
+    std::atomic<std::uint64_t> cache_pages_retired_{0};
+    std::atomic<std::uint64_t> cache_pages_reused_{0};
+    std::atomic<std::uint64_t> decode_source_outstanding_high_water_{0};
+    std::atomic<std::uint64_t> decode_completed_frames_{0};
+    std::atomic<std::uint64_t> same_source_reader_concurrency_high_water_{0};
+    std::atomic<std::uint64_t> cache_async_reservations_high_water_{0};
+    std::atomic<std::uint64_t> active_reservations_high_water_{0};
+    std::atomic<std::uint64_t> aggregate_rate_admission_rejections_{0};
+    std::atomic<std::uint64_t> aggregate_rate_automation_rejections_{0};
+    std::atomic<std::uint64_t> decode_scratch_bytes_{0};
     std::atomic<std::uint64_t> sources_retired_{0};
     std::atomic<std::uint64_t> active_sources_{0};
     std::atomic<std::uint64_t> preload_frames_{0};
@@ -425,6 +574,7 @@ class SamplerStreamingRuntime {
     std::atomic<bool> service_running_{false};
     std::atomic<bool> service_dispatch_paused_{false};
 #if defined(PULP_SAMPLER_TEST_HOOKS)
+    std::atomic<bool> fail_next_stream_decode_for_test_{false};
     std::atomic<bool> reverse_prewarm_pending_for_test_{false};
     std::atomic<bool> block_next_reverse_decode_for_test_{false};
     std::atomic<bool> reverse_decode_entered_for_test_{false};
@@ -481,7 +631,7 @@ class SamplerStreamingRuntime {
             if (!service_dispatch_paused_.load(std::memory_order_acquire)) {
                 for (std::uint32_t attempt = 0; attempt < kSourceCapacity * 2; ++attempt) {
                     const auto dispatched = service_.dispatch_once();
-                    if (dispatched.status != audio::SampleStreamAsyncDispatchStatus::Queued) {
+                    if (!dispatch_made_owner_progress(dispatched)) {
                         break;
                     }
                 }
@@ -489,6 +639,27 @@ class SamplerStreamingRuntime {
             retire_sources();
             pages_published_.store(service_.telemetry().completions_published,
                                    std::memory_order_relaxed);
+            decode_failure_events_.store(
+                service_.decode_telemetry().decode_errors,
+                std::memory_order_relaxed);
+            const auto cache = service_.cache_stats();
+            cache_pages_retired_.store(cache.pages_retired,
+                                       std::memory_order_relaxed);
+            cache_pages_reused_.store(cache.retired_pages_reused,
+                                      std::memory_order_relaxed);
+            const auto decode = service_.decode_telemetry();
+            decode_source_outstanding_high_water_.store(
+                decode.source_outstanding_high_water, std::memory_order_relaxed);
+            decode_completed_frames_.store(decode.completed_frames,
+                                           std::memory_order_relaxed);
+            same_source_reader_concurrency_high_water_.store(
+                decode.same_source_reader_concurrency_high_water,
+                std::memory_order_relaxed);
+            cache_async_reservations_high_water_.store(
+                cache.async_reservations_high_water, std::memory_order_relaxed);
+            active_reservations_high_water_.store(
+                service_.telemetry().active_reservations_high_water,
+                std::memory_order_relaxed);
 
             std::unique_lock lock(service_wait_mutex_);
             service_wake_.wait_for(lock, std::chrono::milliseconds(1), [this] {
@@ -501,6 +672,24 @@ class SamplerStreamingRuntime {
     bool file_request_pending_snapshot() noexcept {
         std::lock_guard lock(file_request_mutex_);
         return file_request_pending_;
+    }
+
+    static bool dispatch_made_owner_progress(
+        const audio::SampleStreamAsyncDispatchResult& dispatched) noexcept {
+        if (dispatched.status == audio::SampleStreamAsyncDispatchStatus::Queued)
+            return true;
+        if (dispatched.status != audio::SampleStreamAsyncDispatchStatus::Deferred)
+            return false;
+        // These owner-side outcomes consume a ready/stale request or begin a
+        // bounded retirement. Keep draining within the fixed attempt budget;
+        // stopping after the first already-ready demand lets harmless refresh
+        // traffic head-of-line block pages that actually need decoding.
+        return dispatched.reserve_status ==
+                   audio::SampleStreamAsyncReserveStatus::AlreadyReady ||
+               dispatched.reserve_status ==
+                   audio::SampleStreamAsyncReserveStatus::StaleSource ||
+               dispatched.reserve_status ==
+                   audio::SampleStreamAsyncReserveStatus::PageRetired;
     }
 
     void process_file_request() noexcept {
@@ -591,7 +780,7 @@ class SamplerStreamingRuntime {
                 .scheduler_margin_seconds = kSchedulerMarginSeconds,
                 .decoder_latency_seconds = kDecoderLatencySeconds,
                 .maximum_host_block_frames = maximum_host_block_frames_,
-                .interpolation_guard_frames = audio::kDefaultSampleSincHalfWidth,
+                .interpolation_guard_frames = audio::kHighQualitySampleSincHalfWidth,
             };
             const auto block_source_frames =
                 std::ceil(static_cast<double>(maximum_host_block_frames_) * logical_rate /
@@ -690,6 +879,19 @@ class SamplerStreamingRuntime {
                     discard_unpublished_slot(*slot);
                     return false;
                 }
+                auto reader = std::move(files[member].binding.read);
+                files[member].binding.read =
+                    [this, reader = std::move(reader)](
+                        std::uint64_t start,
+                        audio::BufferView<float> destination,
+                        std::uint64_t frames,
+                        std::stop_token stop_token) {
+                        if (fail_next_stream_decode_for_test_.exchange(
+                                false, std::memory_order_acq_rel)) {
+                            return std::uint64_t{0};
+                        }
+                        return reader(start, destination, frames, stop_token);
+                    };
 #endif
                 const audio::SampleStreamSourceToken source{next_source_id_++, 1};
                 const auto added = service_.add_source(
@@ -850,8 +1052,7 @@ class SamplerStreamingRuntime {
             }
             if (!service_dispatch_paused_.load(std::memory_order_acquire)) {
                 for (std::uint32_t attempt = 0; attempt < kSourceCapacity * 2; ++attempt) {
-                    if (service_.dispatch_once().status !=
-                        audio::SampleStreamAsyncDispatchStatus::Queued) {
+                    if (!dispatch_made_owner_progress(service_.dispatch_once())) {
                         break;
                     }
                 }

@@ -18,6 +18,11 @@ struct SampleStarvationEnvelopeConfig {
     std::uint32_t recovery_frames = 0;
 };
 
+inline constexpr SampleStarvationEnvelopeConfig kDefaultSampleStarvationEnvelopeConfig{
+    .fade_out_frames = 64,
+    .recovery_frames = 64,
+};
+
 struct SampleStarvationEnvelopeStats {
     std::uint64_t predicted_events = 0;
     std::uint64_t insufficient_lead_events = 0;
@@ -45,20 +50,41 @@ public:
         prepared_ = false;
         last_gain_ = 1.0f;
         recovery_start_gain_ = 0.0f;
+        fade_start_gain_ = 1.0f;
+        pending_emergency_ = false;
+    }
+
+    /// Restarts the audio gain at unity after an explicit timeline jump while
+    /// preserving the prepared configuration and lifetime telemetry.
+    void restart_audio() noexcept {
+        if (!prepared_) return;
+        mode_ = SampleStarvationMode::Ready;
+        ramp_frames_ = 0;
+        ramp_position_ = 0;
+        last_gain_ = 1.0f;
+        recovery_start_gain_ = 0.0f;
+        fade_start_gain_ = 1.0f;
+        pending_emergency_ = false;
     }
 
     bool prepared() const noexcept { return prepared_; }
     SampleStarvationMode mode() const noexcept { return mode_; }
+    std::uint32_t fade_out_frames() const noexcept {
+        return prepared_ ? config_.fade_out_frames : 0;
+    }
 
     void begin_predicted_fade(std::uint32_t available_valid_frames) noexcept {
-        if (!prepared_ || mode_ != SampleStarvationMode::Ready) {
+        if (!prepared_ || (mode_ != SampleStarvationMode::Ready &&
+                           mode_ != SampleStarvationMode::Recovering)) {
             return;
         }
         ++stats_.predicted_events;
         if (available_valid_frames < 2) {
             ++stats_.insufficient_lead_events;
-            return;
+            pending_emergency_ = true;
+            if (available_valid_frames == 0) return;
         }
+        fade_start_gain_ = mode_ == SampleStarvationMode::Ready ? 1.0f : last_gain_;
         ramp_frames_ = std::min(config_.fade_out_frames, available_valid_frames);
         ramp_position_ = 0;
         mode_ = ramp_frames_ == 0
@@ -72,7 +98,8 @@ public:
         if (mode_ == SampleStarvationMode::Silent) return 0.0f;
         if (mode_ == SampleStarvationMode::Recovering) return next_recovery_gain();
 
-        const float gain = equal_power_fade_out(ramp_position_, ramp_frames_);
+        const float gain = fade_start_gain_ *
+                           equal_power_fade_out(ramp_position_, ramp_frames_);
         last_gain_ = gain;
         if (++ramp_position_ >= ramp_frames_) {
             mode_ = SampleStarvationMode::Silent;
@@ -82,12 +109,14 @@ public:
 
     void mark_starved(std::uint64_t frames) noexcept {
         if (!prepared_) return;
-        if (mode_ != SampleStarvationMode::Silent) ++stats_.emergency_events;
+        if (mode_ != SampleStarvationMode::Silent || pending_emergency_)
+            ++stats_.emergency_events;
         stats_.starved_frames += frames;
         mode_ = SampleStarvationMode::Silent;
         ramp_frames_ = 0;
         ramp_position_ = 0;
         last_gain_ = 0.0f;
+        pending_emergency_ = false;
     }
 
     void begin_recovery() noexcept {
@@ -123,6 +152,7 @@ private:
 
     static float equal_power_fade_out(std::uint32_t position,
                                       std::uint32_t frames) noexcept {
+        if (position + 1 >= frames) return 0.0f;
         constexpr float kHalfPi = 1.57079632679489661923f;
         return std::cos(kHalfPi * ramp_fraction(position, frames));
     }
@@ -149,6 +179,8 @@ private:
     bool prepared_ = false;
     float last_gain_ = 1.0f;
     float recovery_start_gain_ = 0.0f;
+    float fade_start_gain_ = 1.0f;
+    bool pending_emergency_ = false;
 };
 
 }  // namespace pulp::audio

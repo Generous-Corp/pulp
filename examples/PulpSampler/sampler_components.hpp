@@ -39,6 +39,8 @@ struct SamplerVoice {
     bool stream_attack_pending = false;
     bool stream_boundary_pending = false;
     bool pending_lookahead_valid = false;
+    bool stream_contract_fade_pending = false;
+    std::uint32_t stream_contract_fade_position = 0;
     bool released = false;
 
     void reset() {
@@ -63,6 +65,8 @@ struct SamplerVoice {
         stream_attack_pending = false;
         stream_boundary_pending = false;
         pending_lookahead_valid = false;
+        stream_contract_fade_pending = false;
+        stream_contract_fade_position = 0;
         released = false;
         adsr.reset();
         renderer.reset();
