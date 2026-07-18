@@ -190,13 +190,15 @@ public:
 
     void release() noexcept {
         if (workers_) {
+            for (std::uint32_t index = 0; index < config_.worker_count; ++index) {
+                workers_[index].stopping.store(true, std::memory_order_release);
+            }
             if (sources_) {
                 for (std::uint32_t index = 0; index < config_.source_capacity; ++index) {
                     sources_[index].active_stop_source.request_stop();
                 }
             }
             for (std::uint32_t index = 0; index < config_.worker_count; ++index) {
-                workers_[index].stopping.store(true, std::memory_order_release);
                 workers_[index].wake.notify_all();
             }
             for (std::uint32_t index = 0; index < config_.worker_count; ++index) {

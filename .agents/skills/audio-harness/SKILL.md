@@ -440,6 +440,13 @@ audio validate` verbs read, then exits. Pick the mode by which window you need:
 WAV writing is `pulp::audio::write_wav_file(path, data, WavBitDepth)` —
 `Int16` (default overload), `Int24`, or `Float32`.
 
+For streamed sampler assets, build the production mip sidecar with
+`pulp audio sampler-mip build <source.wav>`. It uses the sampler's shared 140 dB
+decimator, publishes source-and-payload-hash-addressed float32 WAV levels, and
+atomically publishes the `.pulpmip` manifest last. `--levels 1|2`,
+`--max-source-bytes`, and `--max-output-bytes` bound offline production;
+`--json` is the automation surface.
+
 ### In-tree render → WAV bridge (no plugin bundle)
 
 `pulp audio render` and `pulp run --audio-capture-*` both need a built plugin
