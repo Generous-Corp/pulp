@@ -11,6 +11,30 @@ TEST_CASE("parse_stitch_html extracts text from simple HTML", "[view][import]") 
     REQUIRE(ir.root.children[0].text_content == "Plugin Title");
 }
 
+TEST_CASE("parse_stitch_html skips non-visible element content",
+          "[view][import]") {
+    // The regex fallback matches any <tag>...</tag>, so a <script> body (a
+    // Stitch tailwind.config block, a Claude bundler placeholder — parse_claude_html
+    // routes through here too) or a <style> sheet would otherwise become a text
+    // label that paints raw JS/CSS into the imported design. Only real content
+    // survives.
+    auto html =
+        "<style>.card { color: red; }</style>\n"
+        "<script>tailwind.config = { theme: {} }</script>\n"
+        "<div>Real Content</div>";
+    auto ir = parse_stitch_html(html);
+
+    for (const auto& child : ir.root.children) {
+        REQUIRE(child.text_content.find("tailwind.config") == std::string::npos);
+        REQUIRE(child.text_content.find("color: red") == std::string::npos);
+    }
+    // The visible div text still lands.
+    bool has_real = false;
+    for (const auto& child : ir.root.children)
+        if (child.text_content == "Real Content") has_real = true;
+    REQUIRE(has_real);
+}
+
 TEST_CASE("parse_stitch_html accepts JSON IR directly", "[view][import]") {
     auto json = R"({"type": "frame", "name": "Screen", "children": []})";
     auto ir = parse_stitch_html(json);
