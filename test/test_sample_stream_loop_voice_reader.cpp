@@ -134,6 +134,11 @@ void require_matches_resident(
             REQUIRE(actual.channel(0)[frame] == expected.channel(0)[frame]);
         if (!reference.active) break;
     }
+    const auto stats = streamed.starvation_stats();
+    REQUIRE(stats.predicted_events == 0);
+    REQUIRE(stats.insufficient_lead_events == 0);
+    REQUIRE(stats.emergency_events == 0);
+    REQUIRE(stats.starved_frames == 0);
 }
 
 }  // namespace
@@ -369,10 +374,27 @@ TEST_CASE("Paged loop reader snapshots missing crossfade pages and advances time
     REQUIRE(first.demand_count > 0);
     const auto rendered = reader.render_block(asset, first, output.view());
     REQUIRE(rendered.supply == SampleStreamVoiceSupply::Starved);
+    REQUIRE(rendered.outcome == SampleStreamVoiceOutcomeClass::ServiceStarvation);
     REQUIRE(rendered.ready_output_frames == 0);
     REQUIRE(reader.cursor().position() == first.end_cursor.position());
     for (std::size_t frame = 0; frame < output.num_samples(); ++frame)
         REQUIRE(output.channel(0)[frame] == 0.0f);
+
+    auto stats = reader.starvation_stats();
+    REQUIRE(stats.predicted_events == 1);
+    REQUIRE(stats.insufficient_lead_events == 1);
+    REQUIRE(stats.emergency_events == 1);
+    REQUIRE(stats.starved_frames == 8);
+
+    fixture.publish_pages();
+    Buffer<float> recovered(1, 8);
+    const auto recovered_plan = reader.plan_block(asset, 8, 48000.0);
+    const auto recovered_result =
+        reader.render_block(asset, recovered_plan, recovered.view());
+    REQUIRE(recovered_result.ready_output_frames == 8);
+    REQUIRE(recovered.channel(0)[0] == 0.0f);
+    stats = reader.starvation_stats();
+    REQUIRE(stats.recovery_events == 1);
 }
 
 TEST_CASE("Paged loop reader reports stale asset generations",
@@ -410,6 +432,8 @@ TEST_CASE("Paged loop reader reports stale asset generations",
     Buffer<float> output(1, 8);
     REQUIRE(reader.render_block(stale, plan, output.view()).supply ==
             SampleStreamVoiceSupply::StaleGeneration);
+    REQUIRE(reader.render_block(stale, plan, output.view()).outcome ==
+            SampleStreamVoiceOutcomeClass::StaleGeneration);
 }
 
 TEST_CASE("Paged loop demand urgency includes accumulated lookahead lead",
