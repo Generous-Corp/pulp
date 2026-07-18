@@ -1,4 +1,5 @@
 #include <pulp/timeline/model.hpp>
+#include <pulp/timeline/schema_json.hpp>
 
 #include "identity_directory.hpp"
 #include "project_state_access.hpp"
@@ -134,11 +135,34 @@ RegisteredContent::create_no_owned_ids(SchemaIdentity schema,
 }
 
 runtime::Result<OpaqueContent, ModelError>
-OpaqueContent::create(SchemaIdentity schema, std::string raw_json) {
-    if (!schema.valid() || raw_json.empty())
+OpaqueContent::create(SchemaIdentity schema, std::string raw_json,
+                      OpaqueContentLimits limits) {
+    if (!schema.valid())
         return fail<OpaqueContent>(ModelErrorCode::InvalidSchemaIdentity);
+    if (raw_json.size() > limits.max_input_bytes ||
+        raw_json.size() > limits.max_opaque_bytes)
+        return fail<OpaqueContent>(ModelErrorCode::OpaqueContentLimitExceeded);
+    DecodeLimits decode_limits;
+    decode_limits.max_input_bytes = limits.max_input_bytes;
+    decode_limits.max_depth = limits.max_depth;
+    decode_limits.max_total_values = limits.max_total_values;
+    decode_limits.max_array_elements = limits.max_array_elements;
+    decode_limits.max_object_members = limits.max_object_members;
+    decode_limits.max_string_bytes = limits.max_string_bytes;
+    decode_limits.max_opaque_bytes = limits.max_opaque_bytes;
+    auto parsed = parse_json(raw_json, decode_limits);
+    if (!parsed) {
+        const auto code = parsed.error().code == PersistenceErrorCode::LimitExceeded
+                              ? ModelErrorCode::OpaqueContentLimitExceeded
+                              : ModelErrorCode::InvalidOpaqueContent;
+        return fail<OpaqueContent>(code);
+    }
+    auto envelope = validate_exact_envelope(parsed.value()->root(), schema.type_name,
+                                            schema.version);
+    if (!envelope)
+        return fail<OpaqueContent>(ModelErrorCode::InvalidOpaqueContent);
     return runtime::Result<OpaqueContent, ModelError>(
-        runtime::Ok(OpaqueContent(std::move(schema), std::move(raw_json))));
+        runtime::Ok(OpaqueContent(std::move(schema), std::move(raw_json), limits)));
 }
 
 struct Clip::Data {
@@ -995,8 +1019,11 @@ std::optional<ModelError> preflight(const Clip& clip) {
 
 std::optional<ModelError> preflight(const Track& track) {
     std::vector<ItemId> ids{track.id()};
-    for (const auto& clip : track.clips())
+    for (const auto& clip : track.clips()) {
+        if (std::holds_alternative<OpaqueContent>(clip.content()))
+            return ModelError{ModelErrorCode::OpaqueContentCannotRemap, clip.id(), {}};
         append_clip_ids(clip, ids);
+    }
     return validate_owned_ids(std::move(ids));
 }
 
@@ -1004,8 +1031,11 @@ std::optional<ModelError> preflight(const Sequence& sequence) {
     std::vector<ItemId> ids{sequence.id()};
     for (const auto& track : sequence.tracks()) {
         ids.push_back(track.id());
-        for (const auto& clip : track.clips())
+        for (const auto& clip : track.clips()) {
+            if (std::holds_alternative<OpaqueContent>(clip.content()))
+                return ModelError{ModelErrorCode::OpaqueContentCannotRemap, clip.id(), {}};
             append_clip_ids(clip, ids);
+        }
     }
     return validate_owned_ids(std::move(ids));
 }

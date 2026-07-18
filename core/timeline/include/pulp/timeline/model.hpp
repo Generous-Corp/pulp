@@ -56,6 +56,8 @@ enum class ModelErrorCode : std::uint8_t {
     InvalidContentHash,
     InvalidAssetLocator,
     DuplicateAssetRepresentation,
+    InvalidOpaqueContent,
+    OpaqueContentLimitExceeded,
     OpaqueContentCannotRemap,
 };
 
@@ -172,22 +174,40 @@ class RegisteredContent {
     std::shared_ptr<const void> value_;
 };
 
+// Opaque extension envelopes retain the exact parser bounds under which they
+// were admitted. This keeps a caller-selected trust boundary stable when the
+// immutable value is later serialized again.
+struct OpaqueContentLimits {
+    std::size_t max_input_bytes = 1024ull * 1024ull * 1024ull;
+    std::size_t max_depth = 64;
+    std::size_t max_total_values = 30'000'000;
+    std::size_t max_array_elements = 10'000'000;
+    std::size_t max_object_members = 4'096;
+    std::size_t max_string_bytes = 16ull * 1024ull * 1024ull;
+    std::size_t max_opaque_bytes = 64ull * 1024ull * 1024ull;
+
+    constexpr auto operator<=>(const OpaqueContentLimits&) const = default;
+};
+
 // Unknown extension content remains an exact validated JSON envelope. It is
 // safe to retain and re-save but cannot be copied/imported because its internal
 // identity/reference shape is unavailable.
 class OpaqueContent {
   public:
     static runtime::Result<OpaqueContent, ModelError>
-    create(SchemaIdentity schema, std::string raw_json);
+    create(SchemaIdentity schema, std::string raw_json,
+           OpaqueContentLimits limits = {});
 
     const SchemaIdentity& schema() const noexcept { return schema_; }
     const std::string& raw_json() const noexcept { return raw_json_; }
+    const OpaqueContentLimits& validation_limits() const noexcept { return limits_; }
 
   private:
-    OpaqueContent(SchemaIdentity schema, std::string raw_json)
-        : schema_(std::move(schema)), raw_json_(std::move(raw_json)) {}
+    OpaqueContent(SchemaIdentity schema, std::string raw_json, OpaqueContentLimits limits)
+        : schema_(std::move(schema)), raw_json_(std::move(raw_json)), limits_(limits) {}
     SchemaIdentity schema_;
     std::string raw_json_;
+    OpaqueContentLimits limits_;
 };
 
 using ClipContent =

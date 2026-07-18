@@ -1,6 +1,7 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include <algorithm>
+#include <charconv>
 #include <limits>
 
 namespace pulp::timeline {
@@ -25,40 +26,96 @@ runtime::Result<T, PersistenceError> model_fail(ModelError error, std::string pa
     return runtime::Result<T, PersistenceError>(runtime::Err(std::move(failure)));
 }
 
-std::string object(std::initializer_list<std::pair<std::string_view, std::string>> fields) {
-    std::vector<std::pair<std::string_view, std::string>> sorted(fields.begin(), fields.end());
-    std::sort(sorted.begin(), sorted.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.first < rhs.first;
-    });
-    std::string result = "{";
-    for (std::size_t index = 0; index < sorted.size(); ++index) {
-        if (index != 0) result.push_back(',');
-        result += quote_json_string(sorted[index].first);
-        result.push_back(':');
-        result += sorted[index].second;
+class JsonWriter {
+  public:
+    explicit JsonWriter(std::size_t maximum) : maximum_(maximum) {}
+
+    bool append(std::string_view text) {
+        if (failed_) return false;
+        if (text.size() > maximum_ - std::min(maximum_, output_.size())) {
+            failed_ = true;
+            const auto room = std::numeric_limits<std::uint64_t>::max() - output_.size();
+            actual_ = text.size() > room ? std::numeric_limits<std::uint64_t>::max()
+                                         : output_.size() + text.size();
+            return false;
+        }
+        output_.append(text);
+        return true;
     }
-    result.push_back('}');
-    return result;
-}
 
-std::string array(const std::vector<std::string>& elements) {
-    std::string result = "[";
-    for (std::size_t index = 0; index < elements.size(); ++index) {
-        if (index != 0) result.push_back(',');
-        result += elements[index];
+    bool character(char value) { return append(std::string_view(&value, 1)); }
+
+    bool quoted(std::string_view value) {
+        constexpr char digits[] = "0123456789abcdef";
+        if (!character('"')) return false;
+        for (const auto raw : value) {
+            const auto byte = static_cast<unsigned char>(raw);
+            switch (raw) {
+                case '"': if (!append("\\\"")) return false; break;
+                case '\\': if (!append("\\\\")) return false; break;
+                case '\b': if (!append("\\b")) return false; break;
+                case '\f': if (!append("\\f")) return false; break;
+                case '\n': if (!append("\\n")) return false; break;
+                case '\r': if (!append("\\r")) return false; break;
+                case '\t': if (!append("\\t")) return false; break;
+                default:
+                    if (byte < 0x20) {
+                        char escaped[] = {'\\', 'u', '0', '0', digits[byte >> 4],
+                                          digits[byte & 0x0f]};
+                        if (!append(std::string_view(escaped, sizeof(escaped)))) return false;
+                    } else if (!character(raw)) {
+                        return false;
+                    }
+            }
+        }
+        return character('"');
     }
-    result.push_back(']');
-    return result;
-}
 
-std::string wide(std::uint64_t value) { return quote_json_string(std::to_string(value)); }
-std::string wide(std::int64_t value) { return quote_json_string(std::to_string(value)); }
-std::string small(std::uint32_t value) { return std::to_string(value); }
+    bool u64(std::uint64_t value, bool quoted_value = false) {
+        char buffer[32];
+        const auto encoded = std::to_chars(buffer, buffer + sizeof(buffer), value);
+        return (!quoted_value || character('"')) &&
+               append(std::string_view(buffer, encoded.ptr - buffer)) &&
+               (!quoted_value || character('"'));
+    }
 
-std::string envelope(std::string data, std::string_view type_name, std::uint32_t version) {
-    return object({{"data", std::move(data)},
-                   {"type_name", quote_json_string(type_name)},
-                   {"version", small(version)}});
+    bool i64(std::int64_t value, bool quoted_value = false) {
+        char buffer[32];
+        const auto encoded = std::to_chars(buffer, buffer + sizeof(buffer), value);
+        return (!quoted_value || character('"')) &&
+               append(std::string_view(buffer, encoded.ptr - buffer)) &&
+               (!quoted_value || character('"'));
+    }
+
+    bool failed() const noexcept { return failed_; }
+    std::size_t remaining() const noexcept { return maximum_ - output_.size(); }
+    PersistenceError error() const {
+        return PersistenceError{PersistenceErrorCode::OutputLimitExceeded, 0, actual_,
+                                maximum_, "/"};
+    }
+    std::string take() { return std::move(output_); }
+
+  private:
+    std::size_t maximum_ = 0;
+    std::string output_;
+    bool failed_ = false;
+    std::uint64_t actual_ = 0;
+};
+
+struct EncodeContext {
+    JsonWriter writer;
+    const SchemaRegistry& registry;
+    bool opaque = false;
+    std::optional<PersistenceError> failure;
+};
+
+template <typename DataFn>
+bool write_envelope(EncodeContext& context, std::string_view type_name,
+                    std::uint32_t version, DataFn&& write_data) {
+    return context.writer.append("{\"data\":") && write_data() &&
+           context.writer.append(",\"type_name\":") && context.writer.quoted(type_name) &&
+           context.writer.append(",\"version\":") && context.writer.u64(version) &&
+           context.writer.character('}');
 }
 
 const char* storage_name(AssetStoragePolicy value) noexcept {
@@ -74,168 +131,230 @@ const char* locator_name(AssetLocatorKind value) noexcept {
     return value == AssetLocatorKind::PackageRelative ? "package_relative" : "external_uri";
 }
 
-std::string encode_rate(timebase::RationalRate rate) {
-    return object({{"denominator", wide(rate.denominator)},
-                   {"numerator", wide(rate.numerator)}});
+bool write_rate(EncodeContext& context, timebase::RationalRate rate) {
+    return context.writer.append("{\"denominator\":") &&
+           context.writer.u64(rate.denominator, true) &&
+           context.writer.append(",\"numerator\":") &&
+           context.writer.u64(rate.numerator, true) && context.writer.character('}');
 }
 
-std::string encode_locator(const AssetLocator& locator) {
-    return object({{"hint", quote_json_string(locator.hint)},
-                   {"kind", quote_json_string(locator_name(locator.kind))}});
+bool write_locator(EncodeContext& context, const AssetLocator& locator) {
+    return context.writer.append("{\"hint\":") && context.writer.quoted(locator.hint) &&
+           context.writer.append(",\"kind\":") &&
+           context.writer.quoted(locator_name(locator.kind)) && context.writer.character('}');
 }
 
-std::string encode_representation(const AssetRepresentation& representation) {
-    std::vector<std::string> locators;
-    locators.reserve(representation.locators.size());
-    for (const auto& locator : representation.locators)
-        locators.push_back(encode_locator(locator));
-    const auto data = object({{"content_hash", quote_json_string(representation.content_hash.to_hex())},
-                              {"locators", array(locators)},
-                              {"role", quote_json_string(representation.role)},
-                              {"storage_policy", quote_json_string(
-                                                     storage_name(representation.storage_policy))}});
-    return envelope(data, "pulp.timeline.asset_representation", 1);
+bool write_representation(EncodeContext& context,
+                          const AssetRepresentation& representation) {
+    return write_envelope(context, "pulp.timeline.asset_representation", 1, [&] {
+        if (!context.writer.append("{\"content_hash\":") ||
+            !context.writer.quoted(representation.content_hash.to_hex()) ||
+            !context.writer.append(",\"locators\":[")) return false;
+        for (std::size_t index = 0; index < representation.locators.size(); ++index) {
+            if ((index != 0 && !context.writer.character(',')) ||
+                !write_locator(context, representation.locators[index])) return false;
+        }
+        return context.writer.append("],\"role\":") &&
+               context.writer.quoted(representation.role) &&
+               context.writer.append(",\"storage_policy\":") &&
+               context.writer.quoted(storage_name(representation.storage_policy)) &&
+               context.writer.character('}');
+    });
 }
 
-std::string encode_asset(const MediaAsset& asset) {
-    std::vector<std::string> locators;
-    for (const auto& locator : asset.locators) locators.push_back(encode_locator(locator));
-    std::vector<std::string> representations;
-    for (const auto& representation : asset.representations)
-        representations.push_back(encode_representation(representation));
-    const auto data = object({{"content_hash", quote_json_string(asset.content_hash.to_hex())},
-                              {"frame_count", wide(asset.frame_count)},
-                              {"id", wide(asset.id.value)},
-                              {"locators", array(locators)},
-                              {"name", quote_json_string(asset.name)},
-                              {"representations", array(representations)},
-                              {"sample_rate", encode_rate(asset.sample_rate)},
-                              {"storage_policy", quote_json_string(
-                                                     storage_name(asset.storage_policy))}});
-    return envelope(data, "pulp.timeline.asset", 1);
+bool write_asset(EncodeContext& context, const MediaAsset& asset) {
+    return write_envelope(context, "pulp.timeline.asset", 1, [&] {
+        if (!context.writer.append("{\"content_hash\":") ||
+            !context.writer.quoted(asset.content_hash.to_hex()) ||
+            !context.writer.append(",\"frame_count\":") ||
+            !context.writer.u64(asset.frame_count, true) ||
+            !context.writer.append(",\"id\":") || !context.writer.u64(asset.id.value, true) ||
+            !context.writer.append(",\"locators\":[")) return false;
+        for (std::size_t index = 0; index < asset.locators.size(); ++index) {
+            if ((index != 0 && !context.writer.character(',')) ||
+                !write_locator(context, asset.locators[index])) return false;
+        }
+        if (!context.writer.append("],\"name\":") || !context.writer.quoted(asset.name) ||
+            !context.writer.append(",\"representations\":[")) return false;
+        for (std::size_t index = 0; index < asset.representations.size(); ++index) {
+            if ((index != 0 && !context.writer.character(',')) ||
+                !write_representation(context, asset.representations[index])) return false;
+        }
+        return context.writer.append("],\"sample_rate\":") &&
+               write_rate(context, asset.sample_rate) &&
+               context.writer.append(",\"storage_policy\":") &&
+               context.writer.quoted(storage_name(asset.storage_policy)) &&
+               context.writer.character('}');
+    });
 }
 
-runtime::Result<std::string, PersistenceError>
-encode_content(const ClipContent& content, const SchemaRegistry& registry, bool& opaque) {
+bool write_canonical(EncodeContext& context, const JsonValue& value) {
+    switch (value.kind) {
+        case JsonValue::Kind::Null: return context.writer.append("null");
+        case JsonValue::Kind::Boolean:
+            return context.writer.append(value.boolean ? "true" : "false");
+        case JsonValue::Kind::String: return context.writer.quoted(value.scalar);
+        case JsonValue::Kind::Number: {
+            if (value.scalar.find_first_of(".eE") != std::string::npos) {
+                context.failure = PersistenceError{PersistenceErrorCode::InvalidNumber,
+                                                   value.begin};
+                return false;
+            }
+            std::int64_t number = 0;
+            const auto parsed = std::from_chars(value.scalar.data(),
+                                                value.scalar.data() + value.scalar.size(), number);
+            if (parsed.ec != std::errc{} ||
+                parsed.ptr != value.scalar.data() + value.scalar.size()) {
+                context.failure = PersistenceError{PersistenceErrorCode::InvalidNumber,
+                                                   value.begin};
+                return false;
+            }
+            return context.writer.i64(number);
+        }
+        case JsonValue::Kind::Array:
+            if (!context.writer.character('[')) return false;
+            for (std::size_t index = 0; index < value.array.size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_canonical(context, value.array[index])) return false;
+            return context.writer.character(']');
+        case JsonValue::Kind::Object: {
+            std::vector<const std::pair<std::string, JsonValue>*> members;
+            members.reserve(value.object.size());
+            for (const auto& member : value.object) members.push_back(&member);
+            std::sort(members.begin(), members.end(), [](const auto* lhs, const auto* rhs) {
+                return lhs->first < rhs->first;
+            });
+            if (!context.writer.character('{')) return false;
+            for (std::size_t index = 0; index < members.size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !context.writer.quoted(members[index]->first) ||
+                    !context.writer.character(':') ||
+                    !write_canonical(context, members[index]->second)) return false;
+            return context.writer.character('}');
+        }
+    }
+    return false;
+}
+
+bool write_content(EncodeContext& context, const ClipContent& content) {
     if (std::holds_alternative<EmptyContent>(content))
-        return runtime::Result<std::string, PersistenceError>(runtime::Ok(
-            envelope("{}", "pulp.timeline.content.empty", 1)));
+        return write_envelope(context, "pulp.timeline.content.empty", 1,
+                              [&] { return context.writer.append("{}"); });
     if (const auto* media = std::get_if<MediaRef>(&content)) {
-        const auto data = object({{"asset_id", wide(media->asset_id.value)},
-                                  {"frame_count", wide(media->frame_count)},
-                                  {"source_start", wide(media->source_start.value)}});
-        return runtime::Result<std::string, PersistenceError>(runtime::Ok(
-            envelope(data, "pulp.timeline.content.media", 1)));
+        return write_envelope(context, "pulp.timeline.content.media", 1, [&] {
+            return context.writer.append("{\"asset_id\":") &&
+                   context.writer.u64(media->asset_id.value, true) &&
+                   context.writer.append(",\"frame_count\":") &&
+                   context.writer.u64(media->frame_count, true) &&
+                   context.writer.append(",\"source_start\":") &&
+                   context.writer.i64(media->source_start.value, true) &&
+                   context.writer.character('}');
+        });
     }
     if (const auto* note_content = std::get_if<NoteContent>(&content)) {
-        std::vector<std::string> notes;
-        notes.reserve(note_content->notes().size());
-        for (const auto& note : note_content->notes()) {
-            notes.push_back(object({{"channel", small(note.channel)},
-                                    {"duration_ticks", wide(note.duration.value)},
-                                    {"id", wide(note.id.value)},
-                                    {"pitch", small(note.pitch)},
-                                    {"start_ticks", wide(note.start.value)},
-                                    {"velocity", small(note.velocity)}}));
-        }
-        return runtime::Result<std::string, PersistenceError>(runtime::Ok(
-            envelope(object({{"notes", array(notes)}}), "pulp.timeline.content.notes", 1)));
+        return write_envelope(context, "pulp.timeline.content.notes", 1, [&] {
+            if (!context.writer.append("{\"notes\":[")) return false;
+            for (std::size_t index = 0; index < note_content->notes().size(); ++index) {
+                const auto& note = note_content->notes()[index];
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !context.writer.append("{\"channel\":") ||
+                    !context.writer.u64(note.channel) ||
+                    !context.writer.append(",\"duration_ticks\":") ||
+                    !context.writer.i64(note.duration.value, true) ||
+                    !context.writer.append(",\"id\":") ||
+                    !context.writer.u64(note.id.value, true) ||
+                    !context.writer.append(",\"pitch\":") ||
+                    !context.writer.u64(note.pitch) ||
+                    !context.writer.append(",\"start_ticks\":") ||
+                    !context.writer.i64(note.start.value, true) ||
+                    !context.writer.append(",\"velocity\":") ||
+                    !context.writer.u64(note.velocity) || !context.writer.character('}'))
+                    return false;
+            }
+            return context.writer.append("]}");
+        });
     }
     if (const auto* registered = std::get_if<RegisteredContent>(&content)) {
-        const auto* schema = registry.find(SchemaDomain::Content,
-                                           registered->schema().type_name);
-        if (!schema || !schema->codec.encode ||
-            registered->schema().version != schema->current_version)
-            return fail<std::string>(PersistenceErrorCode::InvalidSchema, "/content");
-        auto data = schema->codec.encode(registered->value(), schema->codec.context.get());
-        if (!data) return data;
+        auto data = context.registry.encode_registered(
+            SchemaDomain::Content, registered->schema(), registered->value(),
+            context.writer.remaining());
+        if (!data) { context.failure = data.error(); return false; }
         DecodeLimits validation_limits;
         validation_limits.max_input_bytes = data.value().size();
         auto parsed = parse_json(data.value(), validation_limits);
-        if (!parsed || parsed.value()->root().kind != JsonValue::Kind::Object)
-            return fail<std::string>(PersistenceErrorCode::InvalidSchema, "/content/data");
-        auto canonical = canonicalize_json(parsed.value()->root());
-        if (!canonical) return canonical;
-        return runtime::Result<std::string, PersistenceError>(runtime::Ok(
-            envelope(std::move(canonical).value(), schema->type_name, schema->current_version)));
+        if (!parsed || parsed.value()->root().kind != JsonValue::Kind::Object) {
+            context.failure = PersistenceError{PersistenceErrorCode::InvalidSchema, 0, 0, 0,
+                                               "/content/data"};
+            return false;
+        }
+        return write_envelope(context, registered->schema().type_name,
+                              registered->schema().version,
+                              [&] { return write_canonical(context, parsed.value()->root()); });
     }
     const auto& unknown = std::get<OpaqueContent>(content);
-    DecodeLimits validation_limits;
-    validation_limits.max_input_bytes = unknown.raw_json().size();
-    validation_limits.max_opaque_bytes = unknown.raw_json().size();
-    auto parsed = parse_json(unknown.raw_json(), validation_limits);
-    if (!parsed || parsed.value()->root().kind != JsonValue::Kind::Object)
-        return fail<std::string>(PersistenceErrorCode::InvalidSchema, "/content");
-    const auto* type = parsed.value()->root().find("type_name");
-    const auto* version = parsed.value()->root().find("version");
-    const auto* data = parsed.value()->root().find("data");
-    if (!type || type->kind != JsonValue::Kind::String ||
-        type->scalar != unknown.schema().type_name || !version || !data)
-        return fail<std::string>(PersistenceErrorCode::InvalidSchema, "/content");
-    auto parsed_version = parse_u32_number(*version, "/content/version");
-    if (!parsed_version || parsed_version.value() != unknown.schema().version)
-        return fail<std::string>(PersistenceErrorCode::InvalidSchema, "/content/version");
-    opaque = true;
-    return runtime::Result<std::string, PersistenceError>(
-        runtime::Ok(unknown.raw_json()));
+    context.opaque = true;
+    return context.writer.append(unknown.raw_json());
 }
 
-runtime::Result<std::string, PersistenceError>
-encode_clip(const Clip& clip, const SchemaRegistry& registry, bool& opaque) {
-    auto content = encode_content(clip.content(), registry, opaque);
-    if (!content) return content;
-    std::string range;
-    if (clip.time_anchor() == ClipTimeAnchor::Musical) {
-        range = object({{"duration_ticks", wide(clip.duration().value)},
-                        {"kind", quote_json_string("musical")},
-                        {"start_ticks", wide(clip.start().value)}});
-    } else {
-        range = object({{"kind", quote_json_string("absolute")},
-                        {"sample_count", wide(clip.absolute_duration_samples())},
-                        {"sample_rate", encode_rate(clip.absolute_sample_rate())},
-                        {"start_sample", wide(clip.absolute_start().value)}});
-    }
-    return runtime::Result<std::string, PersistenceError>(runtime::Ok(envelope(
-        object({{"content", std::move(content).value()},
-                {"id", wide(clip.id().value)}, {"time_range", std::move(range)}}),
-        "pulp.timeline.clip", 1)));
+bool write_clip(EncodeContext& context, const Clip& clip) {
+    return write_envelope(context, "pulp.timeline.clip", 1, [&] {
+        if (!context.writer.append("{\"content\":") ||
+            !write_content(context, clip.content()) ||
+            !context.writer.append(",\"id\":") ||
+            !context.writer.u64(clip.id().value, true) ||
+            !context.writer.append(",\"time_range\":")) return false;
+        if (clip.time_anchor() == ClipTimeAnchor::Musical)
+            return context.writer.append("{\"duration_ticks\":") &&
+                   context.writer.i64(clip.duration().value, true) &&
+                   context.writer.append(",\"kind\":\"musical\",\"start_ticks\":") &&
+                   context.writer.i64(clip.start().value, true) &&
+                   context.writer.append("}}");
+        return context.writer.append("{\"kind\":\"absolute\",\"sample_count\":") &&
+               context.writer.u64(clip.absolute_duration_samples(), true) &&
+               context.writer.append(",\"sample_rate\":") &&
+               write_rate(context, clip.absolute_sample_rate()) &&
+               context.writer.append(",\"start_sample\":") &&
+               context.writer.i64(clip.absolute_start().value, true) &&
+               context.writer.append("}}");
+    });
 }
 
-runtime::Result<std::string, PersistenceError>
-encode_track(const Track& track, const SchemaRegistry& registry, bool& opaque) {
-    std::vector<std::string> clips;
-    clips.reserve(track.clips().size());
-    for (const auto& clip : track.clips()) {
-        auto encoded = encode_clip(clip, registry, opaque);
-        if (!encoded) return encoded;
-        clips.push_back(std::move(encoded).value());
-    }
-    return runtime::Result<std::string, PersistenceError>(runtime::Ok(envelope(
-        object({{"clips", array(clips)}, {"id", wide(track.id().value)},
-                {"name", quote_json_string(track.name())}}),
-        "pulp.timeline.track", 1)));
+bool write_track(EncodeContext& context, const Track& track) {
+    return write_envelope(context, "pulp.timeline.track", 1, [&] {
+        if (!context.writer.append("{\"clips\":[")) return false;
+        for (std::size_t index = 0; index < track.clips().size(); ++index)
+            if ((index != 0 && !context.writer.character(',')) ||
+                !write_clip(context, track.clips()[index])) return false;
+        return context.writer.append("],\"id\":") &&
+               context.writer.u64(track.id().value, true) &&
+               context.writer.append(",\"name\":") && context.writer.quoted(track.name()) &&
+               context.writer.character('}');
+    });
 }
 
-runtime::Result<std::string, PersistenceError>
-encode_sequence(const Sequence& sequence, const SchemaRegistry& registry, bool& opaque) {
-    std::vector<std::string> tracks;
-    for (const auto& track : sequence.tracks()) {
-        auto encoded = encode_track(track, registry, opaque);
-        if (!encoded) return encoded;
-        tracks.push_back(std::move(encoded).value());
-    }
-    std::string absolute = "null";
-    if (sequence.absolute_duration())
-        absolute = object({{"sample_count", wide(sequence.absolute_duration()->sample_count)},
-                           {"sample_rate", encode_rate(sequence.absolute_duration()->sample_rate)}});
-    const auto musical = sequence.duration() ? wide(sequence.duration()->value) : "null";
-    return runtime::Result<std::string, PersistenceError>(runtime::Ok(envelope(
-        object({{"absolute_duration", std::move(absolute)},
-                {"id", wide(sequence.id().value)},
-                {"musical_duration", musical},
-                {"name", quote_json_string(sequence.name())},
-                {"tracks", array(tracks)}}),
-        "pulp.timeline.sequence", 1)));
+bool write_sequence(EncodeContext& context, const Sequence& sequence) {
+    return write_envelope(context, "pulp.timeline.sequence", 1, [&] {
+        if (!context.writer.append("{\"absolute_duration\":")) return false;
+        if (sequence.absolute_duration()) {
+            if (!context.writer.append("{\"sample_count\":") ||
+                !context.writer.u64(sequence.absolute_duration()->sample_count, true) ||
+                !context.writer.append(",\"sample_rate\":") ||
+                !write_rate(context, sequence.absolute_duration()->sample_rate) ||
+                !context.writer.character('}')) return false;
+        } else if (!context.writer.append("null")) return false;
+        if (!context.writer.append(",\"id\":") ||
+            !context.writer.u64(sequence.id().value, true) ||
+            !context.writer.append(",\"musical_duration\":")) return false;
+        if (sequence.duration()) {
+            if (!context.writer.i64(sequence.duration()->value, true)) return false;
+        } else if (!context.writer.append("null")) return false;
+        if (!context.writer.append(",\"name\":") || !context.writer.quoted(sequence.name()) ||
+            !context.writer.append(",\"tracks\":[")) return false;
+        for (std::size_t index = 0; index < sequence.tracks().size(); ++index)
+            if ((index != 0 && !context.writer.character(',')) ||
+                !write_track(context, sequence.tracks()[index])) return false;
+        return context.writer.append("]}");
+    });
 }
 
 struct DecodeCounts {
@@ -439,7 +558,12 @@ decode_content(const std::shared_ptr<const ParsedJson>& document, const JsonValu
         if (raw.size() > limits.max_opaque_bytes)
             return fail<ClipContent>(PersistenceErrorCode::LimitExceeded, std::move(path),
                                      value.begin, raw.size(), limits.max_opaque_bytes);
-        auto opaque = OpaqueContent::create({type.value(), version.value()}, std::string(raw));
+        const OpaqueContentLimits opaque_limits{
+            limits.max_input_bytes, limits.max_depth, limits.max_total_values,
+            limits.max_array_elements, limits.max_object_members, limits.max_string_bytes,
+            limits.max_opaque_bytes};
+        auto opaque = OpaqueContent::create({type.value(), version.value()}, std::string(raw),
+                                            opaque_limits);
         if (!opaque)
             return model_fail<ClipContent>(opaque.error(), std::move(path));
         return runtime::Result<ClipContent, PersistenceError>(
@@ -675,13 +799,105 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
     return runtime::Result<Sequence, PersistenceError>(runtime::Ok(std::move(created).value()));
 }
 
+std::optional<PersistenceErrorCode>
+validate_structural_registry(const SchemaRegistry& registry) noexcept {
+    struct ExpectedField {
+        std::string_view name;
+        SchemaValueKind kind;
+        bool required = true;
+    };
+    struct RequiredSchema {
+        SchemaDomain domain;
+        std::string_view type_name;
+        std::span<const ExpectedField> fields;
+    };
+
+    static constexpr ExpectedField project_fields[] = {
+        {"assets", SchemaValueKind::Array},
+        {"id", SchemaValueKind::U64String},
+        {"name", SchemaValueKind::String},
+        {"next_item_id", SchemaValueKind::U64String},
+        {"root_sequence_id", SchemaValueKind::U64String},
+        {"sequences", SchemaValueKind::Array},
+    };
+    static constexpr ExpectedField asset_fields[] = {
+        {"content_hash", SchemaValueKind::String},
+        {"frame_count", SchemaValueKind::U64String},
+        {"id", SchemaValueKind::U64String},
+        {"locators", SchemaValueKind::Array},
+        {"name", SchemaValueKind::String},
+        {"representations", SchemaValueKind::Array},
+        {"sample_rate", SchemaValueKind::Object},
+        {"storage_policy", SchemaValueKind::String},
+    };
+    static constexpr ExpectedField representation_fields[] = {
+        {"content_hash", SchemaValueKind::String},
+        {"locators", SchemaValueKind::Array},
+        {"role", SchemaValueKind::String},
+        {"storage_policy", SchemaValueKind::String},
+    };
+    static constexpr ExpectedField sequence_fields[] = {
+        {"absolute_duration", SchemaValueKind::Object},
+        {"id", SchemaValueKind::U64String},
+        {"musical_duration", SchemaValueKind::I64String},
+        {"name", SchemaValueKind::String},
+        {"tracks", SchemaValueKind::Array},
+    };
+    static constexpr ExpectedField track_fields[] = {
+        {"clips", SchemaValueKind::Array},
+        {"id", SchemaValueKind::U64String},
+        {"name", SchemaValueKind::String},
+    };
+    static constexpr ExpectedField clip_fields[] = {
+        {"content", SchemaValueKind::Object},
+        {"id", SchemaValueKind::U64String},
+        {"time_range", SchemaValueKind::Object},
+    };
+    static constexpr ExpectedField media_fields[] = {
+        {"asset_id", SchemaValueKind::U64String},
+        {"frame_count", SchemaValueKind::U64String},
+        {"source_start", SchemaValueKind::I64String},
+    };
+    static constexpr ExpectedField notes_fields[] = {
+        {"notes", SchemaValueKind::Array},
+    };
+    constexpr RequiredSchema required[] = {
+        {SchemaDomain::Document, "pulp.timeline.project", project_fields},
+        {SchemaDomain::Document, "pulp.timeline.asset", asset_fields},
+        {SchemaDomain::AssetRepresentation, "pulp.timeline.asset_representation",
+         representation_fields},
+        {SchemaDomain::Document, "pulp.timeline.sequence", sequence_fields},
+        {SchemaDomain::Document, "pulp.timeline.track", track_fields},
+        {SchemaDomain::Document, "pulp.timeline.clip", clip_fields},
+        {SchemaDomain::Content, "pulp.timeline.content.empty", {}},
+        {SchemaDomain::Content, "pulp.timeline.content.media", media_fields},
+        {SchemaDomain::Content, "pulp.timeline.content.notes", notes_fields},
+    };
+    for (const auto& expected : required) {
+        const auto* schema = registry.find(expected.domain, expected.type_name);
+        if (!schema) return PersistenceErrorCode::UnsupportedStructuralType;
+        if (schema->current_version != 1)
+            return PersistenceErrorCode::UnsupportedSchemaVersion;
+        if (schema->fields.size() != expected.fields.size())
+            return PersistenceErrorCode::InvalidSchema;
+        for (std::size_t index = 0; index < expected.fields.size(); ++index) {
+            const auto& actual = schema->fields[index];
+            const auto& field = expected.fields[index];
+            if (actual.name != field.name || actual.kind != field.kind ||
+                actual.required != field.required || !actual.referenced_type.empty())
+                return PersistenceErrorCode::InvalidSchema;
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 runtime::Result<SerializedSnapshot, PersistenceError>
 serialize_project(const Project& project, const SchemaRegistry& registry,
                   const SerializeOptions& options) {
-    if (!registry.find(SchemaDomain::Document, "pulp.timeline.project"))
-        return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidSchema, "/");
+    if (const auto invalid = validate_structural_registry(registry))
+        return fail<SerializedSnapshot>(*invalid, "/");
     if (!is_valid_utf8(project.name()))
         return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8, "/data/name");
     for (std::size_t asset_index = 0; asset_index < project.assets().size(); ++asset_index) {
@@ -724,33 +940,47 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
                     PersistenceErrorCode::InvalidUtf8,
                     sequence_path + "/tracks/" + std::to_string(track_index) + "/data/name");
     }
-    bool opaque = false;
-    std::vector<std::string> assets;
-    for (const auto& asset : project.assets()) assets.push_back(encode_asset(asset));
-    std::vector<std::string> sequences;
-    for (const auto& sequence : project.sequences()) {
-        auto encoded = encode_sequence(sequence, registry, opaque);
-        if (!encoded) return fail<SerializedSnapshot>(encoded.error().code, encoded.error().path,
-                                                       encoded.error().byte_offset);
-        sequences.push_back(std::move(encoded).value());
+    EncodeContext context{JsonWriter(options.max_output_bytes), registry, false, std::nullopt};
+    const auto wrote = write_envelope(context, "pulp.timeline.project", 1, [&] {
+        if (!context.writer.append("{\"assets\":[")) return false;
+        for (std::size_t index = 0; index < project.assets().size(); ++index)
+            if ((index != 0 && !context.writer.character(',')) ||
+                !write_asset(context, project.assets()[index])) return false;
+        if (!context.writer.append("],\"id\":") ||
+            !context.writer.u64(project.id().value, true) ||
+            !context.writer.append(",\"name\":") ||
+            !context.writer.quoted(project.name()) ||
+            !context.writer.append(",\"next_item_id\":") ||
+            !context.writer.u64(project.next_item_id(), true) ||
+            !context.writer.append(",\"root_sequence_id\":") ||
+            !context.writer.u64(project.root_sequence_id().value, true) ||
+            !context.writer.append(",\"sequences\":[")) return false;
+        for (std::size_t index = 0; index < project.sequences().size(); ++index)
+            if ((index != 0 && !context.writer.character(',')) ||
+                !write_sequence(context, project.sequences()[index])) return false;
+        return context.writer.append("]}");
+    });
+    if (!wrote) {
+        if (context.failure)
+            return runtime::Result<SerializedSnapshot, PersistenceError>(
+                runtime::Err(std::move(*context.failure)));
+        return runtime::Result<SerializedSnapshot, PersistenceError>(
+            runtime::Err(context.writer.error()));
     }
-    auto json = envelope(object({{"assets", array(assets)},
-                                 {"id", wide(project.id().value)},
-                                 {"name", quote_json_string(project.name())},
-                                 {"next_item_id", wide(project.next_item_id())},
-                                 {"root_sequence_id", wide(project.root_sequence_id().value)},
-                                 {"sequences", array(sequences)}}),
-                         "pulp.timeline.project", 1);
-    if (json.size() > options.max_output_bytes)
-        return fail<SerializedSnapshot>(PersistenceErrorCode::OutputLimitExceeded, "/", 0,
-                                        json.size(), options.max_output_bytes);
+    auto json = context.writer.take();
     return runtime::Result<SerializedSnapshot, PersistenceError>(
-        runtime::Ok(SerializedSnapshot{std::move(json), opaque}));
+        runtime::Ok(SerializedSnapshot{std::move(json), context.opaque}));
 }
 
 runtime::Result<Project, PersistenceError>
 deserialize_project(std::string_view json, const SchemaRegistry& registry,
                     const DecodeLimits& limits) {
+    if (const auto invalid = validate_structural_registry(registry))
+        return fail<Project>(*invalid, "/");
+    auto structural = preflight_timeline_structure(json, limits);
+    if (!structural)
+        return runtime::Result<Project, PersistenceError>(
+            runtime::Err(structural.error()));
     auto parsed = parse_json(json, limits);
     if (!parsed) return fail<Project>(parsed.error().code, parsed.error().path,
                                       parsed.error().byte_offset, parsed.error().actual,
@@ -758,8 +988,6 @@ deserialize_project(std::string_view json, const SchemaRegistry& registry,
     auto data = data_for(parsed.value()->root(), "pulp.timeline.project", "");
     if (!data) return fail<Project>(data.error().code, data.error().path,
                                     data.error().byte_offset);
-    if (!registry.find(SchemaDomain::Document, "pulp.timeline.project"))
-        return fail<Project>(PersistenceErrorCode::InvalidSchema, "/");
     auto id = required(*data.value(), "id", "/data");
     auto name = string_field(*data.value(), "name", "/data");
     auto next = required(*data.value(), "next_item_id", "/data");

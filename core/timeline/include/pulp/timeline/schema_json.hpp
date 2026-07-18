@@ -62,6 +62,8 @@ struct DecodeLimits {
     std::size_t max_tracks = 10'000;
     std::size_t max_clips = 100'000;
     std::size_t max_notes = 5'000'000;
+    std::size_t max_locators = 1'000'000;
+    std::size_t max_representations = 1'000'000;
 
     static DecodeLimits web_defaults() noexcept;
 };
@@ -95,6 +97,20 @@ class ParsedJson {
 
 runtime::Result<std::shared_ptr<const ParsedJson>, PersistenceError>
 parse_json(std::string_view json, const DecodeLimits& limits = {});
+
+// Exact extension/migration envelope contract. The object must contain only
+// data, type_name and version; data must itself be an object.
+runtime::Result<const JsonValue*, PersistenceError>
+validate_exact_envelope(const JsonValue& value, std::string_view expected_type,
+                        std::uint32_t expected_version, std::string path = {},
+                        PersistenceErrorCode failure_code =
+                            PersistenceErrorCode::InvalidSchema);
+
+// Allocation-light schema-aware quota pass used before the generic DOM parser.
+// Only arrays reached through known v1 structural envelopes are counted.
+struct StructuralPreflightSuccess {};
+runtime::Result<StructuralPreflightSuccess, PersistenceError>
+preflight_timeline_structure(std::string_view json, const DecodeLimits& limits);
 
 runtime::Result<std::string, PersistenceError> canonicalize_json(const JsonValue& value);
 std::string quote_json_string(std::string_view value);
