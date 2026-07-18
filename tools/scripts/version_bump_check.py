@@ -1072,6 +1072,21 @@ def main(argv: list[str]) -> int:
     verdicts = assess_surfaces(cfg, changed, args.base, args.head, root)
 
     if args.mode == "apply":
+        # Model B (post_merge_assignment): PRs must not write version files —
+        # the version-at-land bot infers the level from the heuristic and
+        # assigns it on merge. So apply is a verified NO-OP here (shipyard's
+        # apply-call therefore produces a PR with no version-file diff, so
+        # batch-mates never race on the version line). Recovery
+        # (`--recover-stranded-release`) is the one path that legitimately
+        # WRITES a catch-up bump, so it is exempt.
+        if cfg.post_merge_assignment and not args.recover_stranded_release:
+            print(
+                "post-merge assignment: version files not written — "
+                "version-at-land assigns the version on merge from the "
+                "heuristic (see docs/guides/version-at-land-cutover.md)."
+            )
+            return 0
+
         apply_base = args.apply_version_base or args.base
         apply_verdicts = [
             verdict
@@ -1205,9 +1220,47 @@ def main(argv: list[str]) -> int:
     text, code = render_report(
         verdicts, args.mode, args.base, root,
         accept_intent_trailers=args.accept_intent_trailers,
+        post_merge_assignment=cfg.post_merge_assignment,
     )
     if text:
         print(text)
+
+    if cfg.post_merge_assignment:
+        # Model B: a file bump is no longer required for a touched surface (the
+        # version-at-land bot assigns it on merge). The `--require-bump-for-fix-feat`
+        # check is REPLACED by the Z2 guard: a fix/feat the heuristic scores
+        # `none` on EVERY surface would merge into a silent bot no-op and never
+        # ship. Runs regardless of the invocation flags (all three gates read the
+        # same versioning.json), so they stay consistent.
+        if args.mode != "hint":
+            pr_title = (
+                args.pr_title if args.pr_title is not None
+                else os.environ.get("GITHUB_PR_TITLE", "")
+            )
+            ff_signal = bool(
+                _range_fix_feat_subjects(args.base, args.head)
+            ) or _is_fix_or_feat_title(pr_title)
+            any_positive = any(v.final_level != "none" for v in verdicts)
+            has_skip = _range_has_version_bump_skip_trailer(args.base, args.head)
+            print()
+            print("── fix/feat-touches-a-surface check (post-merge assignment) ──")
+            if ff_signal and not any_positive and not has_skip:
+                print(
+                    "✗ this fix/feat touches NO versioned surface, so the "
+                    "version-at-land bot would assign nothing and the change "
+                    "would never ship. Resolve one of:\n"
+                    "  • re-title to `chore:` / `docs:` / `refactor:` / `build:` "
+                    "if it is genuinely not user-facing, OR\n"
+                    "  • declare intent on a commit: "
+                    '`Version-Bump: <surface>=<patch|minor|major>`, OR\n'
+                    '  • opt out: `Version-Bump: skip reason="..."`.'
+                )
+                return 1
+            print(
+                "✓ the touched surface(s) will be assigned post-merge by "
+                "version-at-land (or this is not a release-worthy change)."
+            )
+        return code
 
     if args.require_bump_for_fix_feat:
         # Hint mode keeps its "always exit 0" contract — the fix/feat

@@ -48,6 +48,7 @@ def render_report(
     base: str,
     repo: Path,
     accept_intent_trailers: bool = False,
+    post_merge_assignment: bool = False,
 ) -> tuple[str, int]:
     lines: list[str] = []
     failures = 0
@@ -78,10 +79,20 @@ def render_report(
             and v.trailer_override != "none"
         )
 
+        # Model B (post_merge_assignment): PRs touch NO version files; the
+        # version-at-land bot infers this same level from the heuristic and
+        # assigns it on merge. So a touched surface that isn't file-bumped and
+        # isn't intent-declared is NOT a failure — it's owned by the bot. (An
+        # explicit intent trailer still shows as such; a partial file-bump still
+        # hard-fails as split-brain.)
+        assigned_post_merge = post_merge_assignment and not any_bumped
+
         if all_bumped:
             tag = "✓ bumped"
         elif intent_declared and not any_bumped:
             tag = f"✓ intent declared (Version-Bump: {v.surface.name}={v.trailer_override})"
+        elif assigned_post_merge:
+            tag = "✓ assigned post-merge (version-at-land infers this level)"
         elif any_bumped:
             unbumped = [vf.path for vf, b in per_file if not b]
             tag = f"✗ partial bump — not moved: {', '.join(unbumped)}"
@@ -98,7 +109,11 @@ def render_report(
             f"current={v.current_version or '?'} "
             f"{tag}"
         )
-        if not all_bumped and not (intent_declared and not any_bumped):
+        if (
+            not all_bumped
+            and not (intent_declared and not any_bumped)
+            and not assigned_post_merge
+        ):
             # Partial-bump is always a hard fail — split-brain versions are
             # never acceptable. Patch-suggested stays advisory only when
             # nothing has been bumped at all.
