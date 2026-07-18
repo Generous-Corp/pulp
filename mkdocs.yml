@@ -157,6 +157,8 @@ nav:
   - Guides:
       - Hosting Plugins: guides/hosting.md
       - Plugin Interrogation: guides/plugin-interrogation.md
+      - Sample Stream Service: guides/sample-stream-service.md
+      - Streaming Sample Source: guides/streaming-sample-source.md
       - Web Plugins: guides/web-plugins.md
       - Copyright Protection: guides/copyright-protection.md
       - GPU Validation: guides/gpu-validation-checklist.md

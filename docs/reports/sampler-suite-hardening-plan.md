@@ -50,13 +50,14 @@ gates:
 - S7 remains intentionally unshipped. There are no named hardware profiles or
   capture-matched claims; those still require the research, provenance,
   measurement, listening, and clean-room gates below.
-- S8 is partial. This documentation now describes current integration and
-  limitations. The example's API records define configuration, prepare/load,
-  preload, envelope, heritage, and combined diagnostics, but the processor
-  currently forwards only boolean file load, stream stats, heritage controls,
-  heritage diagnostics, latency, and heritage plugin state. The
-  streaming-memory configuration and combined diagnostics are not yet wired
-  through the processor.
+- S8 is implemented pending final landing evidence. This documentation
+  describes current integration and limitations. The processor exposes its
+  pre-prepare streaming-memory configuration, typed prepare and file-load
+  results, last-load result, stream statistics, heritage controls and state,
+  and one coherent combined diagnostic record covering prepare, load, preload,
+  starvation envelopes, heritage, and streaming-memory use. Control-plane
+  publication is serialized so concurrent loads, rebinds, release, and
+  diagnostic reads cannot expose a destroyed runtime or a mixed publication.
 
 Quality Lab remains supplementary to exact transport, telemetry, lifetime,
 allocation, and current artifact-verification gates.
@@ -598,11 +599,7 @@ python3 tools/scripts/verify_sampler_interpolation_benchmark.py --self-test \
 
 ```bash
 tools/check-docs.sh
-python3 tools/scripts/docs_noise_lint.py --mode report \
-  docs/examples/pulp-sampler.md \
-  docs/reports/sampler-suite-hardening-plan.md \
-  docs/validation/sampler-interpolation/README.md
-python3 tools/scripts/us_english_check.py
+python3 tools/scripts/docs_noise_lint.py --mode report
 git diff --check
 ```
 

@@ -98,7 +98,10 @@ Features:
 - ADSR, pitch, loop, reverse, and interpolation controls
 - Eight-voice polyphony with bounded starvation fades
 - Resident and persisted streamed octave mips with ratio-tracking sinc fallback
-- Optional typed synthetic heritage processing and diagnostics
+- Checked streaming-memory configuration plus typed prepare/load and coherent
+  combined diagnostics
+- Optional typed synthetic heritage processing, transactional clock-domain
+  rebind, and strict profile/runtime-state persistence
 
 ## PulpPluck
 
