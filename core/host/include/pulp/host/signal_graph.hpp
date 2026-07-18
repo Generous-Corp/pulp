@@ -523,7 +523,9 @@ public:
         Staged,            // a replacement instance is staged for prepare_swap().
         NeedsEagerPrepare, // not reinit-free (or a latency change) — caller must
                            // call prepare() under the usual no-process/no-pump
-                           // contract; the live snapshot has been invalidated.
+                           // contract. Ordinary failures invalidate the live
+                           // snapshot; the MidiOutput pending-egress refusal keeps
+                           // it live for extraction until that eager prepare.
         NotInSwapEdit,     // prepare_swap called without a matching begin_swap_edit.
     };
     // Begin a transactional topology edit that MAY publish with no silence. Between
@@ -537,7 +539,9 @@ public:
     void begin_swap_edit();
     // Publish the staged topology with no silent block if it is reinit-free (same
     // instances, no re-init, unchanged latency, no per-snapshot state to glitch);
-    // otherwise invalidate + return NeedsEagerPrepare so the caller eager-prepares.
+    // otherwise return NeedsEagerPrepare so the caller eager-prepares. Ordinary
+    // refusals invalidate the live snapshot. The MidiOutput pending-egress refusal
+    // deliberately leaves it live so the caller can drain extract_midi() first.
     SwapResult prepare_swap(double sample_rate, int max_block_size);
     // Abandon the no-silence attempt: invalidate the live snapshot (the staged
     // edits remain in the graph and take effect on the next prepare()).
@@ -1548,9 +1552,12 @@ private:
     // Reinit-free-swap predicate (PRE-compile half). True iff a live topology
     // swap to the current nodes_/connections_ needs NO plugin/custom re-init and
     // carries no per-snapshot mutable state a fresh snapshot would glitch: same
-    // sr/block; unchanged custom registry; anticipation off both sides; no MIDI
-    // edge; no smoothed sparse-automation edge; identical node set + plugin/custom
-    // instance identity; every resolved plugin node has a cached-metadata entry.
+    // sr/block; unchanged custom registry; anticipation off both sides; no
+    // MidiOutput in either the candidate or live snapshot; no smoothed sparse-
+    // automation edge; identical node set + plugin/custom instance identity; every
+    // resolved plugin node has a cached-metadata entry. Ingress-only MIDI is
+    // eligible because a stable MidiInput shares its mailbox and consumed-sequence
+    // state across snapshots.
     // The latency-equality gate is checked POST-compile in prepare_swap(). Pure
     // const read; caller holds the mutation mutex.
     bool snapshot_is_plugin_reinit_free_locked_(const CompiledGraph& old_cg,

@@ -341,10 +341,12 @@ takes a risk with the live stream to push a swap through:
   an eager re-prepare only when the measured cost would actually risk an overload
   on the audio thread, not merely because the plugin is different.
 
-When any gate refuses, the transaction is abandoned, the live snapshot is
-dropped, and `prepare_swap` returns `NeedsEagerPrepare` so the host
-re-prepares with a brief silence — the safe fallback, never a partial or
-racy swap.
+When a gate refuses, the transaction is abandoned and `prepare_swap` returns
+`NeedsEagerPrepare` so the host re-prepares with a brief silence — the safe
+fallback, never a partial or racy swap. Ordinary refusals drop the live snapshot.
+The one deliberate exception is a candidate or live graph containing
+`MidiOutput`: its pending-egress refusal keeps the old snapshot readable so the
+control thread can drain `extract_midi()` before ordinary `prepare()` replaces it.
 
 The staging, policy, catalog, and swap-transaction calls all run on the
 control/UI thread, never the audio thread.
