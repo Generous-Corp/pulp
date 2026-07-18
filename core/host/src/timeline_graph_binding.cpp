@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <limits>
 #include <string>
 #include <utility>
@@ -49,8 +50,11 @@ bool checked_add(std::uint64_t& value, std::uint64_t add) noexcept {
     return true;
 }
 
-std::string custom_type_id(timeline::ItemId id) {
-    return "pulp.timeline.arrangement-audio-track." + std::to_string(id.value);
+std::atomic<std::uint64_t> next_binding_instance_id{1};
+
+std::string custom_type_id(std::uint64_t binding_instance_id, timeline::ItemId id) {
+    return "pulp.timeline.arrangement-audio-track." + std::to_string(binding_instance_id) + "." +
+           std::to_string(id.value);
 }
 
 } // namespace
@@ -119,7 +123,8 @@ bool owns_node(std::span<const std::unique_ptr<detail::TimelineGraphBoundTrack>>
 TimelineGraphPlaybackBinding::TimelineGraphPlaybackBinding(
     SignalGraph& graph, const playback::PlaybackProgramStore& store)
     : graph_(graph), store_(store),
-      shared_(std::make_shared<detail::TimelineGraphSharedBlockState>()) {}
+      shared_(std::make_shared<detail::TimelineGraphSharedBlockState>()),
+      binding_instance_id_(next_binding_instance_id.fetch_add(1, std::memory_order_relaxed)) {}
 
 TimelineGraphPlaybackBinding::~TimelineGraphPlaybackBinding() {
     remove_all_owned_nodes();
@@ -133,6 +138,8 @@ void TimelineGraphPlaybackBinding::remove_all_owned_nodes() noexcept {
             (void)graph_.remove_node(track->midi_node);
     }
     tracks_.clear();
+    prepared_track_ids_.clear();
+    prepared_sample_rate_ = {0, 1};
     prepared_max_block_size_ = 0;
     prepared_ = false;
 }
@@ -148,6 +155,10 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::preflight(
                        config.maximum_note_events_per_track_per_block !=
                            config_.maximum_note_events_per_track_per_block)))
         return reject(TimelineGraphAdmissionCode::InvalidConfiguration);
+    if (config.maximum_note_events_per_track_per_block > maximum_graph_midi_events_per_block)
+        return reject(TimelineGraphAdmissionCode::NoteCapacityExceeded,
+                      config.maximum_note_events_per_track_per_block,
+                      maximum_graph_midi_events_per_block);
     if (routes.size() != program.tracks().size())
         return reject(TimelineGraphAdmissionCode::MissingTrack, routes.size(),
                       program.tracks().size());
@@ -198,7 +209,7 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::preflight(
         audio_node.id = synthetic++;
         audio_node.type = NodeType::Custom;
         audio_node.num_output_ports = static_cast<int>(config.audio_channels);
-        audio_node.custom_type_id = custom_type_id(route.track_id);
+        audio_node.custom_type_id = custom_type_id(binding_instance_id_, route.track_id);
         audio_node.custom_type_version = 1;
         audio_node.transport_sensitive = true;
         nodes.push_back(audio_node);
@@ -240,13 +251,14 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::preflight(
     std::uint64_t routed_ports = 0;
     std::vector<graph::GraphRuntimeNodeSpec> node_specs;
     node_specs.reserve(nodes.size());
+    const graph::GraphRuntimeLimits routed_limits;
     for (const auto& node : nodes) {
         const auto inputs = static_cast<std::uint64_t>(std::max(0, node.num_input_ports));
         const auto outputs = static_cast<std::uint64_t>(std::max(0, node.num_output_ports));
-        if (inputs > config.routed_limits.max_ports_per_node ||
-            outputs > config.routed_limits.max_ports_per_node) {
+        if (inputs > routed_limits.max_ports_per_node ||
+            outputs > routed_limits.max_ports_per_node) {
             return reject(TimelineGraphAdmissionCode::PerNodePortLimitExceeded,
-                          std::max(inputs, outputs), config.routed_limits.max_ports_per_node, {},
+                          std::max(inputs, outputs), routed_limits.max_ports_per_node, {},
                           node.id);
         }
         if (!checked_add(graph_ports, inputs) || !checked_add(graph_ports, outputs) ||
@@ -254,7 +266,7 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::preflight(
             (has_midi && !checked_add(routed_ports, 2)))
             return reject(TimelineGraphAdmissionCode::TotalPortLimitExceeded,
                           std::numeric_limits<std::uint64_t>::max(),
-                          config.routed_limits.max_total_ports);
+                          routed_limits.max_total_ports);
         node_specs.push_back({node.id, runtime_kind(node.type), static_cast<std::uint32_t>(inputs),
                               static_cast<std::uint32_t>(outputs), has_midi ? 1u : 0u,
                               has_midi ? 1u : 0u});
@@ -262,15 +274,15 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::preflight(
     if (graph_ports > graph_limits.max_ports)
         return reject(TimelineGraphAdmissionCode::TotalPortLimitExceeded, graph_ports,
                       graph_limits.max_ports);
-    if (nodes.size() > config.routed_limits.max_nodes)
+    if (nodes.size() > routed_limits.max_nodes)
         return reject(TimelineGraphAdmissionCode::NodeLimitExceeded, nodes.size(),
-                      config.routed_limits.max_nodes);
-    if (connections.size() > config.routed_limits.max_connections)
+                      routed_limits.max_nodes);
+    if (connections.size() > routed_limits.max_connections)
         return reject(TimelineGraphAdmissionCode::ConnectionLimitExceeded, connections.size(),
-                      config.routed_limits.max_connections);
-    if (routed_ports > config.routed_limits.max_total_ports)
+                      routed_limits.max_connections);
+    if (routed_ports > routed_limits.max_total_ports)
         return reject(TimelineGraphAdmissionCode::TotalPortLimitExceeded, routed_ports,
-                      config.routed_limits.max_total_ports);
+                      routed_limits.max_total_ports);
 
     std::vector<graph::GraphRuntimeConnectionSpec> connection_specs;
     connection_specs.reserve(connections.size());
@@ -285,8 +297,7 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::preflight(
                                     : graph::GraphRuntimeConnectionKind::Audio;
         connection_specs.push_back(spec);
     }
-    const auto plan =
-        graph::build_graph_runtime_plan(node_specs, connection_specs, config.routed_limits);
+    const auto plan = graph::build_graph_runtime_plan(node_specs, connection_specs);
     if (!plan.ok())
         return reject(TimelineGraphAdmissionCode::RoutedPlanRejected, plan.error.index, 0, {},
                       plan.error.node_id);
@@ -301,6 +312,10 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::preflight(
 TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare(
     const playback::PlaybackProgram& program, std::span<const TimelineTrackGraphRoute> routes,
     const TimelineGraphBindingConfig& config, double sample_rate, int maximum_block_size) {
+    if (!std::isfinite(sample_rate) || sample_rate <= 0.0 ||
+        static_cast<long double>(sample_rate) !=
+            program.tempo_map().sample_rate().as_long_double())
+        return reject(TimelineGraphAdmissionCode::SampleRateMismatch);
     const auto admission = preflight(program, routes, config, maximum_block_size);
     if (!admission)
         return admission;
@@ -324,8 +339,8 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare(
         auto found = std::find_if(tracks_.begin(), tracks_.end(),
                                   [&](const auto& track) { return track->id == route.track_id; });
         if (found == tracks_.end()) {
-            const auto type_id = custom_type_id(route.track_id);
-            auto shared = shared_;
+            const auto type_id = custom_type_id(binding_instance_id_, route.track_id);
+            std::weak_ptr<detail::TimelineGraphSharedBlockState> shared = shared_;
             const auto track_id = route.track_id;
             const auto audio_limits = config.audio_limits;
             auto audio_renderer =
@@ -335,8 +350,14 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare(
             type.version = 1;
             type.num_output_ports = static_cast<int>(config.audio_channels);
             type.default_name = "Timeline audio track " + std::to_string(track_id.value);
-            type.create = [shared, audio_renderer, audio_limits]() -> void* {
-                return new AudioNodeInstance(shared, audio_renderer, audio_limits);
+            std::weak_ptr<playback::ArrangementAudioTrackRenderer> weak_renderer = audio_renderer;
+            type.create = [shared, weak_renderer, audio_limits]() -> void* {
+                auto locked_shared = shared.lock();
+                auto locked_renderer = weak_renderer.lock();
+                if (!locked_shared || !locked_renderer)
+                    return nullptr;
+                return new AudioNodeInstance(std::move(locked_shared), std::move(locked_renderer),
+                                             audio_limits);
             };
             type.destroy = [](void* value) { delete static_cast<AudioNodeInstance*>(value); };
             type.process_instance = [](void* value, audio::BufferView<float>& output,
@@ -404,6 +425,11 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare(
     if (!signal_graph_executor_eligible(graph_))
         return reject(TimelineGraphAdmissionCode::RoutedTopologyIneligible);
     config_ = config;
+    prepared_track_ids_.clear();
+    prepared_track_ids_.reserve(tracks_.size());
+    for (const auto& track : tracks_)
+        prepared_track_ids_.push_back(track->id);
+    prepared_sample_rate_ = program.tempo_map().sample_rate().normalized();
     prepared_max_block_size_ = static_cast<std::uint32_t>(maximum_block_size);
     prepared_ = true;
     return {};
@@ -428,17 +454,37 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
         result.code = TimelineGraphProcessCode::CapacityExceeded;
         return result;
     }
+    if (input.num_channels() != output.num_channels() ||
+        input.num_samples() != output.num_samples()) {
+        result.code = TimelineGraphProcessCode::InputShapeMismatch;
+        return result;
+    }
     auto block = latch_.begin_block(store_);
     if (!block) {
         result.code = TimelineGraphProcessCode::MissingProgram;
         output.clear();
         return result;
     }
-    if (transport.tempo_map != &block.program()->tempo_map() ||
+    if (block.program()->tempo_map().sample_rate().normalized() != prepared_sample_rate_) {
+        result.code = TimelineGraphProcessCode::InvalidTransport;
+        return result;
+    }
+    if (transport.sample_rate.normalized() != prepared_sample_rate_ ||
+        transport.tempo_map != &block.program()->tempo_map() ||
         transport.frame_count != output.num_samples() || transport.range_count == 0) {
         result.code = TimelineGraphProcessCode::InvalidTransport;
         output.clear();
         return result;
+    }
+    if (block.program()->tracks().size() != prepared_track_ids_.size()) {
+        result.code = TimelineGraphProcessCode::TopologyChanged;
+        return result;
+    }
+    for (const auto id : prepared_track_ids_) {
+        if (block.program()->find_track(id) == nullptr) {
+            result.code = TimelineGraphProcessCode::TopologyChanged;
+            return result;
+        }
     }
 
     for (const auto& track : tracks_) {
@@ -460,12 +506,14 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
     shared_->audio_code.store(TimelineGraphProcessCode::Ok, std::memory_order_relaxed);
     shared_->transport.store(&transport, std::memory_order_release);
     shared_->block.store(&block, std::memory_order_release);
-    // Phase 1 gives every timeline-owned node the exact multi-range snapshot via
-    // SharedBlockState. SignalGraph's existing format ABI accepts one
-    // ProcessContext, so non-timeline downstream nodes receive the first range's
-    // projection on a split block. They must not use it to re-render timeline
-    // material; extending that host-wide ABI is a later phase boundary.
-    const auto context = format::project_process_context(transport, transport.ranges[0]);
+    // Timeline nodes consume the exact multi-range snapshot above. The graph-wide
+    // callback context describes the whole callback, including a discontinuity
+    // if any constituent range jumps.
+    auto context = format::project_process_context(transport, transport.ranges[0]);
+    context.num_samples = transport.frame_count;
+    context.transport_jump = false;
+    for (std::uint8_t index = 0; index < transport.range_count; ++index)
+        context.transport_jump = context.transport_jump || transport.ranges[index].discontinuity;
     // SignalGraph::process is a fork/join barrier: its parallel executor's
     // worker-pool run() waits for every participant before returning. Therefore
     // the stack-owned `block` pin and caller-owned exact snapshot remain alive
