@@ -51,6 +51,7 @@ target_sources(pulp-audio PRIVATE
     src/sample_asset_io.cpp
     src/sample_edit_document.cpp
     src/sample_key_map.cpp
+    src/sample_mip_sidecar.cpp
     src/sample_pool.cpp
     src/sample_stream_window.cpp
     src/sample_voice_renderer.cpp
@@ -139,6 +140,7 @@ elseif(WIN32)
     )
     target_link_libraries(pulp-audio PRIVATE
         ole32
+        Advapi32
         winmm
     )
 elseif(UNIX AND NOT APPLE AND NOT ANDROID)
