@@ -574,6 +574,43 @@ fresh lib instead of segfaulting at first paint.
    on THAT object, not just its host. Test: `[idle-pump][crash]` in
    `test_view_bridge.cpp` builds the pump, destroys the bridge, calls the pump →
    no-op instead of use-after-free.
+9b. **A retained bridge needs the FORMAT OWNER's lifetime token, covering BOTH
+   `Processor&` and `StateStore&`.** A second Live crash (EXC_BAD_ACCESS in
+   `ViewBridge::poll_editor_reload`, AU embedded in Ableton Live 12, 2026-07-17)
+   got past the bridge's own `alive_` check: AU audio-unit and view-controller
+   lifetimes are independently ordered by the host, so Live can destroy the
+   adapter's Processor and StateStore while retaining an editor whose display-link
+   pump still fires. Guarding only `processor_` is incomplete: the same tick first
+   drains `store_.pump_listeners()`, and the installed host-parameter surface also
+   retains the store.
+
+   The contract is therefore adapter-owner scoped:
+
+   - The AUv2/AUv3/VST3/CLAP owner holds a `runtime::AliveToken` and passes a
+     captured handle into every `ViewBridge` constructed from its Processor and
+     StateStore. Retire it at the START of explicit teardown (`destroy`,
+     `terminate`, `dealloc`) before either referent can die. As a fallback for
+     implicit C++ teardown, declare the token after Processor/StateStore members
+     so reverse member destruction retires it first.
+   - Every bridge path that can reach `processor_` OR `store_` fails closed when
+     the owner handle is retired: idle store pumping, scripted-session lookup,
+     editor reload, attach/resize/close callbacks, rebuild, and the
+     `StateStoreHostParamSurface`. `supports_editor_reload_` remains cached so the
+     common non-reload tick does not need a virtual call, but caching is not the
+     lifetime fix.
+   - `AliveToken` only makes the check/no-op DECISION safe. It does not own either
+     referent and does not establish cross-thread quiescence. Adapter teardown,
+     editor teardown, and the idle pump remain serialized on the main thread;
+     use a real join/quiescence protocol before extending this pattern across
+     concurrently executing threads.
+
+   Lifecycle coverage must exercise the full teardown-order matrix, not merely
+   bridge-first destruction: retained editor after owner teardown, idle pump and
+   host-param calls after owner retirement, and format-specific churn. Canonical
+   cases carry `[owner-lifetime][lifecycle]`; run them under ASan with
+   `ctest --test-dir build-asan -L lifecycle --output-on-failure`. The separate
+   IPC self-destroy regression applies the same post-callback liveness principle:
+   re-check after user code before touching connection state again.
 10. **In a multi-plugin bundle, editor/metadata callbacks must resolve
     PER-INSTANCE state — never a process global.** A CLAP/AU/VST3 bundle exposes
     N plugins from one binary, so a single shared descriptor global would hand

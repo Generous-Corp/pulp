@@ -57,12 +57,12 @@ jobs:
           # a core-only PR sailed through. Watch the include dirs so that class
           # of change compiles the examples here, at PR time.
           if git diff --name-only "$base"...HEAD \
-               | grep -qE '^(examples/|core/state/include/|core/format/include/)'; then
+               | grep -qE '^(examples/|core/state/include/|core/format/)'; then
             echo "examples=true" >> "$GITHUB_OUTPUT"
-            echo "examples/** or a brace-initialized core header changed — will run example validators."
+            echo "examples/**, core/format/**, or a brace-initialized state header changed — will run example validators."
           else
             echo "examples=false" >> "$GITHUB_OUTPUT"
-            echo "no examples/** or core/{state,format}/include change — skipping example validators."
+            echo "no examples/**, core/format/**, or core/state/include change — skipping example validators."
           fi
 
   validate:

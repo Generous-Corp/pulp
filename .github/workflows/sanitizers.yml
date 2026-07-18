@@ -193,13 +193,50 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
             -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+            -DCMAKE_OBJCXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address" \
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_GPU=OFF
 
       - name: Build
         run: cmake --build build-asan -j$(sysctl -n hw.ncpu)
+
+      # Keep the host/editor lifetime regressions as an explicit ASan gate in
+      # addition to the broad ctest pass. These reproduce the orderings real
+      # hosts are allowed to use: owner before editor, callback destroying its
+      # own IPC connection, and a queued AppKit click after editor teardown.
+      - name: Test lifecycle regressions with ASan
+        env:
+          ASAN_OPTIONS: "detect_leaks=0:halt_on_error=1"
+        run: |
+          ctest --test-dir build-asan --output-on-failure \
+            --timeout 120 \
+            -L lifecycle
+
+      - name: Test real plugin bundle lifecycles with ASan
+        env:
+          ASAN_OPTIONS: "detect_leaks=0:halt_on_error=1"
+        run: |
+          cmake -S . -B build-asan-artifact \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+            -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+            -DCMAKE_OBJCXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address" \
+            -DPULP_BUILD_TESTS=ON \
+            -DPULP_BUILD_EXAMPLES=ON \
+            -DPULP_ENABLE_GPU=OFF
+          cmake --build build-asan-artifact \
+            --target PulpEffect_CLAP PulpEffect_VST3 PulpEffect_AU \
+              pulp-clap-bundle-lifecycle-test \
+              pulp-vst3-bundle-lifecycle-test \
+              pulp-au-bundle-lifecycle-test \
+            -j$(sysctl -n hw.ncpu)
+          ctest --test-dir build-asan-artifact --output-on-failure \
+            -R '^(clap|vst3|au)-bundle-lifecycle-PulpEffect$'
 
       - name: Test with ASan
         env:
@@ -213,18 +250,16 @@ jobs:
         # a platform packaging assertion unrelated to memory safety (#3113).
         # Skip the WebSocket 16-bit payload subprocess under ASan until its
         # sanitizer-only abort is isolated; non-sanitized Build/Test keeps the
-        # protocol coverage active (#3113). ASan also exposes intermittent
-        # process/scanner cleanup failures in unrelated slow tests. The
-        # deferred-click teardown case is likewise covered by regular Build/Test
-        # and currently aborts only under the no-GPU ASan run-loop teardown.
-        # Keep exclusions named, not path-wide, so the rest of the ASan matrix
-        # still gates (#3113).
+        # protocol coverage active (#3113). The teardown/free-under-callback
+        # exclusions formerly listed here are now ASan-clean and deliberately
+        # un-excluded. Keep remaining exclusions named, not path-wide, so the
+        # rest of the ASan matrix still gates (#3113).
         run: |
           ctest --test-dir build-asan --output-on-failure \
             --repeat until-pass:2 \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
-            --exclude-regex 'hover -> click -> drag record/replay produces matching motion fixture|IPC named pipe observes abrupt peer death|cmake-ios-auv3-configure|WebSocketChannel echoes a >126-byte message|deleted plugin entry remains blacklisted|ConnectedChildProcess|ChildProcessManager cleanup is safe from exit callback|PulpView deferred click is cancelled when bridge/engine are torn down first'
+            --exclude-regex 'hover -> click -> drag record/replay produces matching motion fixture|cmake-ios-auv3-configure|WebSocketChannel echoes a >126-byte message'
 
   tsan:
     needs: resolve-runners
@@ -249,7 +284,9 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_FLAGS="-fsanitize=thread" \
             -DCMAKE_C_FLAGS="-fsanitize=thread" \
+            -DCMAKE_OBJCXX_FLAGS="-fsanitize=thread" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=thread" \
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_GPU=OFF
@@ -269,8 +306,9 @@ jobs:
         # Osc/WebSocket/Channel), and MIDI/MPE/UMP buffer threading. Catches
         # what TSan exists for;
         # ASan + UBSan still cover the full matrix.
-        # AudioWorkgroup is a pre-existing flake (#412 step 4 will
-        # replace it with a deterministic race-hammer harness).
+        # AudioWorkgroup's deterministic first-entry hammer claims the one
+        # thread-affine join operation before touching the OS token, so this
+        # lifecycle surface now runs under TSan instead of being excluded.
         # 120s per-test timeout caps any future hang.
         # Full hardening (#412 steps 2/4/5): suppressions file,
         # audio-race hammer, path-gated trigger.

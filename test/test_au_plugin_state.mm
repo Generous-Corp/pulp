@@ -284,6 +284,18 @@ public:
     }
 };
 
+class TestAULayoutProcessor : public TestAUEffectProcessor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        auto d = TestAUEffectProcessor::descriptor();
+        d.supported_bus_layouts = {
+            {.inputs = {2}, .outputs = {2}, .name = "Stereo"},
+            {.inputs = {1}, .outputs = {1}, .name = "Mono"},
+        };
+        return d;
+    }
+};
+
 class TestAUSidechainEffectProcessor : public TestAUEffectProcessor {
 public:
     pulp::format::PluginDescriptor descriptor() const override {
@@ -333,6 +345,10 @@ private:
 
 std::unique_ptr<pulp::format::Processor> create_effect_processor() {
     return std::make_unique<TestAUEffectProcessor>();
+}
+
+std::unique_ptr<pulp::format::Processor> create_layout_processor() {
+    return std::make_unique<TestAULayoutProcessor>();
 }
 
 std::unique_ptr<pulp::format::Processor> create_instrument_processor() {
@@ -432,6 +448,146 @@ OSStatus auv2_test_transport_state(void* user_data,
 
 } // namespace
 
+TEST_CASE("AU adapters retire editor owner tokens before processor/store teardown",
+          "[au][editor][crash][owner-lifetime][lifecycle]") {
+    ScopedFactoryRegistration registration(create_effect_processor);
+
+    SECTION("AU v2 Cocoa editor context") {
+        pulp::runtime::AliveToken::Handle owner_alive;
+        {
+            pulp::format::au::PulpAUEffect effect(nullptr);
+            pulp::format::au::PulpEditorContext ctx{};
+            REQUIRE(effect.GetProperty(pulp::format::au::kPulpEditorContextProperty,
+                                       kAudioUnitScope_Global, 0, &ctx) == noErr);
+            REQUIRE(ctx.processor != nullptr);
+            REQUIRE(ctx.store != nullptr);
+            owner_alive = ctx.owner_alive;
+            REQUIRE(pulp::runtime::AliveToken::is_alive(owner_alive));
+        }
+        REQUIRE_FALSE(pulp::runtime::AliveToken::is_alive(owner_alive));
+    }
+
+    SECTION("AU v3 retained view-controller handle") {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstE';
+        desc.componentManufacturer = 'Plup';
+        NSError* error = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&error];
+        REQUIRE(unit != nil);
+        REQUIRE(error == nil);
+        auto owner_alive = [unit pulpOwnerAlive];
+        REQUIRE(pulp::runtime::AliveToken::is_alive(owner_alive));
+        [unit release];
+        REQUIRE_FALSE(pulp::runtime::AliveToken::is_alive(owner_alive));
+    }
+}
+
+TEST_CASE("AU adapters survive repeated allocate render deallocate destroy cycles",
+          "[au][lifecycle][churn]") {
+    ScopedFactoryRegistration registration(create_effect_processor);
+
+    SECTION("AU v2 initialize and cleanup") {
+        constexpr UInt32 kFrames = 64;
+        AudioStreamBasicDescription format{};
+        format.mSampleRate = 48000.0;
+        format.mFormatID = kAudioFormatLinearPCM;
+        format.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked |
+                              kAudioFormatFlagIsNonInterleaved;
+        format.mBytesPerPacket = sizeof(float);
+        format.mFramesPerPacket = 1;
+        format.mBytesPerFrame = sizeof(float);
+        format.mChannelsPerFrame = 2;
+        format.mBitsPerChannel = 32;
+
+        struct StereoBufferList {
+            AudioBufferList list;
+            AudioBuffer extra[1];
+        };
+        for (int cycle = 0; cycle < 200; ++cycle) {
+            pulp::format::au::PulpAUEffect effect(nullptr);
+            // Direct construction bypasses AUBase's component dispatch, so
+            // mirror the SDK host sequence explicitly before rendering.
+            effect.CreateElements();
+            REQUIRE(effect.Input(0).SetStreamFormat(format) == noErr);
+            REQUIRE(effect.Output(0).SetStreamFormat(format) == noErr);
+            UInt32 max_frames = kFrames;
+            REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                               kAudioUnitScope_Global, 0,
+                                               &max_frames, sizeof(max_frames)) == noErr);
+            REQUIRE(effect.DoInitialize() == noErr);
+
+            float in_l[kFrames] = {};
+            float in_r[kFrames] = {};
+            float out_l[kFrames] = {};
+            float out_r[kFrames] = {};
+            StereoBufferList input{};
+            input.list.mNumberBuffers = 2;
+            input.list.mBuffers[0] = {1, kFrames * sizeof(float), in_l};
+            input.list.mBuffers[1] = {1, kFrames * sizeof(float), in_r};
+            StereoBufferList output{};
+            output.list.mNumberBuffers = 2;
+            output.list.mBuffers[0] = {1, kFrames * sizeof(float), out_l};
+            output.list.mBuffers[1] = {1, kFrames * sizeof(float), out_r};
+            AudioUnitRenderActionFlags flags = 0;
+            const UInt32 frames = cycle % 2 == 0 ? 32 : kFrames;
+            REQUIRE(effect.ProcessBufferLists(
+                        flags, input.list, output.list, frames) == noErr);
+            effect.DoCleanup();
+        }
+    }
+
+    SECTION("AU v3 allocate, render, deallocate, release") {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstE';
+        desc.componentManufacturer = 'Plup';
+        constexpr UInt32 kFrames = 64;
+
+        for (int cycle = 0; cycle < 200; ++cycle) {
+            @autoreleasepool {
+                NSError* error = nil;
+                PulpAudioUnit* unit =
+                    [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                               options:0
+                                                                 error:&error];
+                REQUIRE(unit != nil);
+                REQUIRE(error == nil);
+                unit.maximumFramesToRender = kFrames;
+                NSError* allocate_error = nil;
+                REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+                REQUIRE(allocate_error == nil);
+
+                float left[kFrames] = {};
+                float right[kFrames] = {};
+                struct StereoBufferList {
+                    AudioBufferList list;
+                    AudioBuffer extra[1];
+                } output{};
+                output.list.mNumberBuffers = 2;
+                const UInt32 frames = cycle % 2 == 0 ? 32 : kFrames;
+                const auto bytes = static_cast<UInt32>(frames * sizeof(float));
+                output.list.mBuffers[0] = {1, bytes, left};
+                output.list.mBuffers[1] = {1, bytes, right};
+
+                AudioUnitRenderActionFlags flags = 0;
+                AudioTimeStamp timestamp{};
+                timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+                timestamp.mSampleTime = cycle * kFrames;
+                AUInternalRenderBlock block = [unit internalRenderBlock];
+                REQUIRE(block != nil);
+                REQUIRE(block(&flags, &timestamp, frames, 0, &output.list, nil, nil) == noErr);
+
+                [unit deallocateRenderResources];
+                [unit release];
+            }
+        }
+    }
+}
+
 TEST_CASE("AU v2 effect SaveState/RestoreState round-trips plugin-owned payload",
           "[au][auv2][state]") {
     ScopedFactoryRegistration registration(create_effect_processor);
@@ -498,6 +654,66 @@ TEST_CASE("AU v2 instrument SaveState/RestoreState round-trips plugin-owned payl
     REQUIRE(loader_processor->plugin_state == "snapshot=B");
 
     CFRelease(saved);
+}
+
+TEST_CASE("AU v2 lifecycle churn preserves byte-equivalent plugin state",
+          "[au][auv2][lifecycle][churn][state]") {
+    ScopedFactoryRegistration registration(create_effect_processor);
+
+    for (int cycle = 0; cycle < 200; ++cycle) {
+        const float saved_gain = -24.0f + static_cast<float>(cycle % 48);
+        const std::string saved_payload = "cycle=" + std::to_string(cycle);
+        CFPropertyListRef saved = nullptr;
+
+        {
+            pulp::format::au::PulpAUEffect saver(nullptr);
+            auto* saver_processor = g_last_effect_processor;
+            REQUIRE(saver_processor != nullptr);
+            saver_processor->state().set_value(1, saved_gain);
+            saver_processor->plugin_state = saved_payload;
+            REQUIRE(saver.SaveState(&saved) == noErr);
+            REQUIRE(saved != nullptr);
+
+            // Positive control for the byte-equivalence instrument: repeated
+            // saves from the same live instance must compare equal.
+            CFPropertyListRef control_saved = nullptr;
+            REQUIRE(saver.SaveState(&control_saved) == noErr);
+            REQUIRE(control_saved != nullptr);
+            REQUIRE(CFEqual(saved, control_saved));
+            CFRelease(control_saved);
+        }
+
+        {
+            pulp::format::au::PulpAUEffect loader(nullptr);
+            auto* loader_processor = g_last_effect_processor;
+            REQUIRE(loader_processor != nullptr);
+            REQUIRE_THAT(loader_processor->state().get_value(1), WithinAbs(0.0, 0.01));
+            REQUIRE(loader_processor->plugin_state.empty());
+            REQUIRE(loader.RestoreState(saved) == noErr);
+            REQUIRE_THAT(loader_processor->state().get_value(1),
+                         WithinAbs(saved_gain, 0.01));
+            REQUIRE(loader_processor->plugin_state == saved_payload);
+
+            CFPropertyListRef resaved = nullptr;
+            REQUIRE(loader.SaveState(&resaved) == noErr);
+            REQUIRE(resaved != nullptr);
+            const auto saved_dict = static_cast<CFDictionaryRef>(saved);
+            const auto resaved_dict = static_cast<CFDictionaryRef>(resaved);
+            const auto saved_pulp = static_cast<CFDataRef>(
+                CFDictionaryGetValue(saved_dict, CFSTR("pulp-state")));
+            const auto resaved_pulp = static_cast<CFDataRef>(
+                CFDictionaryGetValue(resaved_dict, CFSTR("pulp-state")));
+            REQUIRE(saved_pulp != nullptr);
+            REQUIRE(resaved_pulp != nullptr);
+            // AUBase contributes instance metadata that can legitimately
+            // differ after destroy/recreate. The Pulp-owned PLST blob is the
+            // byte-equivalence contract this adapter controls.
+            REQUIRE(CFEqual(saved_pulp, resaved_pulp));
+            CFRelease(resaved);
+        }
+
+        CFRelease(saved);
+    }
 }
 
 TEST_CASE("AU v2 latency and tail report processor runtime contract",
@@ -767,6 +983,33 @@ TEST_CASE("AU v3 routes channel-wide MIDI into per-note MPE expression",
         }
     }
     g_au_mpe_declare = true;
+}
+
+TEST_CASE("AU v3 channel capabilities expose only descriptor-declared layouts",
+          "[au][auv3][bus-layout][negotiation]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstL';
+        desc.componentManufacturer = 'Plup';
+        ScopedFactoryRegistration registration(create_layout_processor);
+
+        NSError* error = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&error];
+        REQUIRE(unit != nil);
+        REQUIRE(error == nil);
+        NSArray<NSNumber*>* capabilities = [unit channelCapabilities];
+        REQUIRE(capabilities != nil);
+        REQUIRE(capabilities.count == 4);
+        REQUIRE([capabilities[0] intValue] == 2);
+        REQUIRE([capabilities[1] intValue] == 2);
+        REQUIRE([capabilities[2] intValue] == 1);
+        REQUIRE([capabilities[3] intValue] == 1);
+        [unit release];
+    }
 }
 
 TEST_CASE("AU v3 render events preserve parameter sample offsets and update StateStore",
@@ -1283,10 +1526,10 @@ TEST_CASE("AU v3 render block substitutes scratch output buffers when host buffe
             AudioBuffer extra[1];
         } output{};
         output.list.mNumberBuffers = 2;
-        output.list.mBuffers[0].mNumberChannels = 2;
+        output.list.mBuffers[0].mNumberChannels = 1;
         output.list.mBuffers[0].mDataByteSize = 0;
         output.list.mBuffers[0].mData = nullptr;
-        output.list.mBuffers[1].mNumberChannels = 2;
+        output.list.mBuffers[1].mNumberChannels = 1;
         output.list.mBuffers[1].mDataByteSize = sizeof(float);
         output.list.mBuffers[1].mData = &undersized;
 
@@ -1315,6 +1558,154 @@ TEST_CASE("AU v3 render block substitutes scratch output buffers when host buffe
         [unit deallocateRenderResources];
         [unit release];
     }
+}
+
+TEST_CASE("AU v3 fails closed for malformed render buffer topology",
+          "[au][auv3][render][malformed-layout]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstE';
+        desc.componentManufacturer = 'Plup';
+        ScopedFactoryRegistration registration(create_effect_processor);
+
+        NSError* error = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&error];
+        REQUIRE(unit != nil);
+        REQUIRE(error == nil);
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+        NSError* allocate_error = nil;
+        REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+        REQUIRE(allocate_error == nil);
+
+        constexpr UInt32 kFrames = 8;
+        std::array<std::array<float, kFrames>, 3> samples{};
+        struct ThreeBufferList {
+            AudioBufferList list;
+            AudioBuffer extra[2];
+        } output{};
+        output.list.mNumberBuffers = 2;
+        for (UInt32 i = 0; i < 3; ++i) {
+            samples[i].fill(9.0f);
+            output.list.mBuffers[i] = {
+                1, static_cast<UInt32>(sizeof(samples[i])), samples[i].data()};
+        }
+
+        AURenderPullInputBlock pull = nil;
+        SECTION("fewer channel buffers") {
+            output.list.mNumberBuffers = 1;
+        }
+        SECTION("more channel buffers") {
+            output.list.mNumberBuffers = 3;
+        }
+        SECTION("wrong channel count") {
+            output.list.mBuffers[1].mNumberChannels = 2;
+        }
+        SECTION("null active main-input storage") {
+            pull = ^AUAudioUnitStatus(
+                AudioUnitRenderActionFlags*, const AudioTimeStamp*,
+                AUAudioFrameCount, NSInteger bus, AudioBufferList* input) {
+                if (bus == 0 && input && input->mNumberBuffers > 1)
+                    input->mBuffers[1].mData = nullptr;
+                return noErr;
+            };
+        }
+
+        AudioUnitRenderActionFlags flags = 0;
+        AudioTimeStamp timestamp{};
+        AUInternalRenderBlock block = [unit internalRenderBlock];
+        REQUIRE(block != nil);
+        REQUIRE(block(&flags, &timestamp, kFrames, 0,
+                      &output.list, nullptr, pull) == noErr);
+        REQUIRE(processor->process_buffers_count == 0);
+        REQUIRE((flags & kAudioUnitRenderAction_OutputIsSilence) != 0);
+        for (UInt32 b = 0; b < output.list.mNumberBuffers; ++b) {
+            REQUIRE(std::all_of(samples[b].begin(), samples[b].end(),
+                                [](float value) { return value == 0.0f; }));
+        }
+
+        [unit deallocateRenderResources];
+        [unit release];
+    }
+}
+
+TEST_CASE("AU v2 fails closed for malformed ProcessBufferLists topology",
+          "[au][auv2][render][malformed-layout]") {
+    ScopedFactoryRegistration registration(create_effect_processor);
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    effect.CreateElements();
+
+    AudioStreamBasicDescription format{};
+    format.mSampleRate = 48000.0;
+    format.mFormatID = kAudioFormatLinearPCM;
+    format.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked |
+                          kAudioFormatFlagIsNonInterleaved;
+    format.mBytesPerPacket = sizeof(float);
+    format.mFramesPerPacket = 1;
+    format.mBytesPerFrame = sizeof(float);
+    format.mChannelsPerFrame = 2;
+    format.mBitsPerChannel = 32;
+    REQUIRE(effect.Input(0).SetStreamFormat(format) == noErr);
+    REQUIRE(effect.Output(0).SetStreamFormat(format) == noErr);
+    constexpr UInt32 kFrames = 8;
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0,
+                                       &max_frames, sizeof(max_frames)) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+    auto* processor = g_last_effect_processor;
+    REQUIRE(processor != nullptr);
+
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    struct StereoBufferList {
+        AudioBufferList list;
+        AudioBuffer extra[1];
+    } input{};
+    input.list.mNumberBuffers = 2;
+    input.list.mBuffers[0] = {1, sizeof(in_l), in_l.data()};
+    input.list.mBuffers[1] = {1, sizeof(in_r), in_r.data()};
+
+    std::array<std::array<float, kFrames>, 3> samples{};
+    struct ThreeBufferList {
+        AudioBufferList list;
+        AudioBuffer extra[2];
+    } output{};
+    output.list.mNumberBuffers = 2;
+    for (UInt32 i = 0; i < 3; ++i) {
+        samples[i].fill(9.0f);
+        output.list.mBuffers[i] = {
+            1, static_cast<UInt32>(sizeof(samples[i])), samples[i].data()};
+    }
+
+    SECTION("fewer channel buffers") {
+        output.list.mNumberBuffers = 1;
+    }
+    SECTION("more channel buffers") {
+        output.list.mNumberBuffers = 3;
+    }
+    SECTION("wrong channel count") {
+        output.list.mBuffers[1].mNumberChannels = 2;
+    }
+    SECTION("null active-bus pointer") {
+        output.list.mBuffers[0].mData = nullptr;
+    }
+
+    AudioUnitRenderActionFlags flags = 0;
+    REQUIRE(effect.ProcessBufferLists(
+                flags, input.list, output.list, kFrames) == noErr);
+    REQUIRE(processor->process_buffers_count == 0);
+    REQUIRE((flags & kAudioUnitRenderAction_OutputIsSilence) != 0);
+    for (UInt32 b = 0; b < output.list.mNumberBuffers; ++b) {
+        if (!output.list.mBuffers[b].mData) continue;
+        REQUIRE(std::all_of(samples[b].begin(), samples[b].end(),
+                            [](float value) { return value == 0.0f; }));
+    }
+    effect.DoCleanup();
 }
 
 TEST_CASE("AU v2 SaveState accepts pre-existing property lists",
@@ -1544,7 +1935,17 @@ public:
         (void)in;
     }
 
+    std::vector<uint8_t> serialize_plugin_state() const override {
+        return {plugin_state.begin(), plugin_state.end()};
+    }
+
+    bool deserialize_plugin_state(std::span<const uint8_t> data) override {
+        plugin_state.assign(data.begin(), data.end());
+        return true;
+    }
+
     int process_count = 0;
+    std::string plugin_state;
     static TestAUBypassProcessor* g_last;
 };
 
@@ -1690,6 +2091,105 @@ TEST_CASE("AU v3 render block short-circuits to pass-through when bypassed",
 
         [unit deallocateRenderResources];
         [unit release];
+    }
+}
+
+TEST_CASE("AU v3 lifecycle churn preserves state and tolerates bypass toggles",
+          "[au][auv3][lifecycle][churn][state][bypass]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TBpE';
+        desc.componentManufacturer = 'Plup';
+
+        ScopedFactoryRegistration registration(create_bypass_processor);
+        for (int cycle = 0; cycle < 200; ++cycle) {
+            const float saved_gain = -24.0f + static_cast<float>(cycle % 48);
+            const std::string saved_payload = "cycle=" + std::to_string(cycle);
+
+            NSError* saver_error = nil;
+            PulpAudioUnit* saver =
+                [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                           options:0
+                                                             error:&saver_error];
+            REQUIRE(saver != nil);
+            REQUIRE(saver_error == nil);
+            auto* saver_processor = TestAUBypassProcessor::g_last;
+            REQUIRE(saver_processor != nullptr);
+            saver_processor->state().set_value(7, saved_gain);
+            saver_processor->plugin_state = saved_payload;
+            [saver setShouldBypassEffect:(cycle % 2 == 0 ? YES : NO)];
+
+            NSDictionary<NSString*, id>* saved = [[saver fullState] retain];
+            REQUIRE(saved != nil);
+            NSData* saved_payload_data = saved[@"pulpState"];
+            REQUIRE(saved_payload_data != nil);
+            [saver release];
+
+            NSError* loader_error = nil;
+            PulpAudioUnit* loader =
+                [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                           options:0
+                                                             error:&loader_error];
+            REQUIRE(loader != nil);
+            REQUIRE(loader_error == nil);
+            auto* loader_processor = TestAUBypassProcessor::g_last;
+            REQUIRE(loader_processor != nullptr);
+            [loader setFullState:saved];
+            REQUIRE_THAT(loader_processor->state().get_value(7),
+                         WithinAbs(saved_gain, 0.01));
+            REQUIRE(loader_processor->plugin_state == saved_payload);
+            REQUIRE([loader shouldBypassEffect] == (cycle % 2 == 0 ? YES : NO));
+
+            NSDictionary<NSString*, id>* resaved = [loader fullState];
+            REQUIRE(resaved != nil);
+            NSData* resaved_payload_data = resaved[@"pulpState"];
+            REQUIRE(resaved_payload_data != nil);
+            REQUIRE([resaved_payload_data isEqualToData:saved_payload_data]);
+
+            NSError* allocate_error = nil;
+            REQUIRE([loader allocateRenderResourcesAndReturnError:&allocate_error]);
+            REQUIRE(allocate_error == nil);
+            constexpr UInt32 kFrames = 4;
+            float left[kFrames]{};
+            float right[kFrames]{};
+            struct StereoBufferList {
+                AudioBufferList list;
+                AudioBuffer extra[1];
+            } output{};
+            output.list.mNumberBuffers = 2;
+            output.list.mBuffers[0] = {1, kFrames * sizeof(float), left};
+            output.list.mBuffers[1] = {1, kFrames * sizeof(float), right};
+            AURenderPullInputBlock pull = ^AUAudioUnitStatus(
+                AudioUnitRenderActionFlags*, const AudioTimeStamp*,
+                AUAudioFrameCount, NSInteger, AudioBufferList* input) {
+                for (UInt32 b = 0; b < input->mNumberBuffers; ++b) {
+                    auto* samples = static_cast<float*>(input->mBuffers[b].mData);
+                    const UInt32 count = input->mBuffers[b].mDataByteSize / sizeof(float);
+                    for (UInt32 i = 0; i < count; ++i) samples[i] = 0.25f;
+                }
+                return noErr;
+            };
+            AudioUnitRenderActionFlags flags = 0;
+            AudioTimeStamp timestamp{};
+            timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+            timestamp.mSampleTime = cycle * kFrames;
+            AUInternalRenderBlock render = [loader internalRenderBlock];
+            REQUIRE(render != nil);
+            REQUIRE(render(&flags, &timestamp, kFrames, 0,
+                           &output.list, nullptr, pull) == noErr);
+
+            // Toggle mid-lifecycle and render the opposite path too. The next
+            // fresh instance must still begin from its own defaults until the
+            // saved state is explicitly restored.
+            [loader setShouldBypassEffect:(cycle % 2 == 0 ? NO : YES)];
+            REQUIRE([loader shouldBypassEffect] == (cycle % 2 == 0 ? NO : YES));
+            REQUIRE(render(&flags, &timestamp, kFrames, 0,
+                           &output.list, nullptr, pull) == noErr);
+            [loader deallocateRenderResources];
+            [loader release];
+            [saved release];
+        }
     }
 }
 

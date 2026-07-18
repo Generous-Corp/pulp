@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 
+#include <pulp/runtime/alive_token.hpp>
 #include <pulp/state/parameter.hpp>
 
 namespace pulp::state {
@@ -218,6 +219,13 @@ public:
     /// @param resolver  key→ParamID map; default matches ParamInfo::name == key
     explicit StateStoreHostParamSurface(state::StateStore& store, KeyResolver resolver = {});
 
+    /// Owner-lifetime-aware form used by format adapters. A host may retain an
+    /// editor after destroying its plugin instance; once @p owner_alive retires
+    /// every operation fails closed without touching the dangling store.
+    StateStoreHostParamSurface(state::StateStore& store,
+                               runtime::AliveToken::Handle owner_alive,
+                               KeyResolver resolver = {});
+
 protected:
     bool do_has_param(std::string_view key) override;
     double do_get_param(std::string_view key) override;
@@ -228,7 +236,10 @@ protected:
     int do_param_step_count(std::string_view key) override;
 
 private:
+    bool owner_is_alive() const;
+
     state::StateStore& store_;
+    runtime::AliveToken::Handle owner_alive_;
     KeyResolver resolver_;
 };
 

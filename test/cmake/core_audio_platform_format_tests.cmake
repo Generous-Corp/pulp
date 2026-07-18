@@ -176,6 +176,10 @@ if(PULP_HAS_CLAP)
     target_link_libraries(pulp-test-clap-midi-events PRIVATE pulp::format clap Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
     target_compile_definitions(pulp-test-clap-midi-events PRIVATE PULP_CLAP_GUI=1 $<$<BOOL:${UNIX}>:PULP_CLAP_PROCESS_RT_TRAP_TESTS=1>)
     catch_discover_tests(pulp-test-clap-midi-events)
+    catch_discover_tests(pulp-test-clap-midi-events
+        TEST_SPEC "[lifecycle]"
+        TEST_PREFIX "lifecycle::"
+        PROPERTIES LABELS lifecycle)
 
     # Pin the CLAP host-facing API contract that Bitwig / Reaper /
     # FL Studio / Studio One depend on. Re-compiles the
@@ -240,6 +244,10 @@ if(PULP_HAS_VST3)
         PULP_VST3_GUI=1
     )
     catch_discover_tests(pulp-test-vst3-plugin-state)
+    catch_discover_tests(pulp-test-vst3-plugin-state
+        TEST_SPEC "[lifecycle]"
+        TEST_PREFIX "lifecycle::"
+        PROPERTIES LABELS lifecycle)
 
     # VST3 parameter display-string round-trip (getParamStringByValue /
     # getParamValueByString -> ParamInfo::to_string / from_string). Compiles
@@ -304,6 +312,10 @@ if(APPLE AND PULP_HAS_AUSDK)
         OBJCXX_STANDARD 23
     )
     catch_discover_tests(pulp-test-au-plugin-state)
+    catch_discover_tests(pulp-test-au-plugin-state
+        TEST_SPEC "[lifecycle]"
+        TEST_PREFIX "lifecycle::"
+        PROPERTIES LABELS lifecycle)
 
     # AU v2 instrument (aumu) render-path RT-safety guard. Drives
     # PulpAUInstrument::Render for one steady-state block under

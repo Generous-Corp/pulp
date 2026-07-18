@@ -24,7 +24,8 @@ namespace pulp::format::vst3 {
 // lifecycle callbacks on the Processor, and tracks secondary views.
 class PulpPlugView : public Steinberg::CPluginView {
 public:
-    PulpPlugView(Processor& processor, state::StateStore& store);
+    PulpPlugView(Processor& processor, state::StateStore& store,
+                 runtime::AliveToken::Handle owner_alive = {});
 
     // IPlugView overrides
     Steinberg::tresult PLUGIN_API isPlatformTypeSupported(Steinberg::FIDString type) override;
@@ -40,6 +41,7 @@ public:
     Steinberg::tresult PLUGIN_API checkSizeConstraint(Steinberg::ViewRect* rect) override;
 
 private:
+    friend struct PulpPlugViewTestAccess;
     Processor& processor_;
     state::StateStore& store_;
     ViewBridge bridge_;

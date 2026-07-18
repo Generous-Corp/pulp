@@ -10,6 +10,7 @@
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/events/plugin_main_thread.hpp>
+#include <pulp/runtime/alive_token.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/modulation_lane.hpp>
 #include <pulp/state/preset_manager.hpp>
@@ -37,6 +38,10 @@ namespace pulp::format::clap_adapter {
 // value (8) across every adapter; change it once at the boundary.
 static constexpr int kMaxChannels =
     static_cast<int>(boundary::kBoundaryMaxChannels);
+// The Processor surface currently exposes a main input and one optional
+// sidechain input. Keep the process-time layout cache fixed-size so validating
+// a host block never allocates on the audio thread.
+static constexpr int kMaxInputBuses = 2;
 // Upper bound on output buses routed to the Processor in one block. Index 0 is
 // the main output; indices 1..kMaxOutputBuses-1 are secondary (aux) outputs for
 // multi-out instruments (drum machines, multitimbral, stem renderers). Host
@@ -54,6 +59,9 @@ struct PulpClapPlugin {
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
     std::unique_ptr<Processor> processor;
+    // Declared after processor so reverse member destruction retires retained
+    // editor handles before either referenced object is released.
+    runtime::AliveToken owner_alive;
     ProcessorFactory factory;
 
     // Descriptor snapshot cached at create_plugin() from this instance's plugin
@@ -94,6 +102,10 @@ struct PulpClapPlugin {
     double sample_rate = 48000.0;
     int max_buffer_size = 512;
     clap_id selected_bus_layout = 0;
+    uint32_t declared_input_bus_count = 0;
+    uint32_t declared_output_bus_count = 0;
+    std::array<int, kMaxInputBuses> declared_input_channels{};
+    std::array<int, kMaxOutputBuses> declared_output_channels{};
 
     // Pre-allocated buffers — no heap allocation on audio thread
     float* output_ptrs[kMaxChannels] = {};

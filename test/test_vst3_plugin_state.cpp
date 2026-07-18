@@ -196,10 +196,11 @@ public:
         return config_.descriptor;
     }
 
-    bool is_bus_layout_supported(const BusesLayout&) const override {
+    bool is_bus_layout_supported(const BusesLayout& layout) const override {
         // Simulate a processor that enforces a layout contract (e.g. linked
         // main/sidechain counts). When set, EVERY proposal is vetoed.
-        return !config_.veto_bus_layout;
+        if (config_.veto_bus_layout) return false;
+        return Processor::is_bus_layout_supported(layout);
     }
 
     void define_parameters(pulp::state::StateStore& store) override {
@@ -659,6 +660,14 @@ private:
 
 } // namespace
 
+namespace pulp::format::vst3 {
+struct PulpPlugViewTestAccess {
+    static bool owner_is_alive(const PulpPlugView& view) {
+        return view.bridge_.owner_is_alive();
+    }
+};
+} // namespace pulp::format::vst3
+
 TEST_CASE("VST3 adapter exposes parameter metadata and lifecycle values",
           "[vst3][issue-493]") {
     TestVst3Config config;
@@ -710,6 +719,161 @@ TEST_CASE("VST3 adapter exposes parameter metadata and lifecycle values",
     REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
     REQUIRE(test_processor->release_count == 1);
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 retained editor observes processor-owner teardown",
+          "[vst3][editor][crash][owner-lifetime][lifecycle]") {
+    ScopedEnv disable_editor("PULP_DISABLE_PLUGIN_EDITOR");
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+    disable_editor.unset();
+    headless.unset();
+    test_mode.unset();
+    ci.unset();
+
+    reset_test_processor();
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* raw_view = processor.createView(Steinberg::Vst::ViewType::kEditor);
+    REQUIRE(raw_view != nullptr);
+    auto* view = static_cast<pulp::format::vst3::PulpPlugView*>(raw_view);
+    REQUIRE(pulp::format::vst3::PulpPlugViewTestAccess::owner_is_alive(*view));
+
+    // Hosts own IPlugView independently from the processor component. The
+    // adapter must retire the token before processor_/store_ die even when the
+    // host retains the editor until later.
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    REQUIRE_FALSE(pulp::format::vst3::PulpPlugViewTestAccess::owner_is_alive(*view));
+    view->release();
+}
+
+TEST_CASE("VST3 survives repeated initialize activate process deactivate terminate cycles",
+          "[vst3][lifecycle][churn]") {
+    constexpr int kFrames = 64;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* inputs[2] = {in_l.data(), in_r.data()};
+    float* outputs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers input_bus{};
+    input_bus.numChannels = 2;
+    input_bus.channelBuffers32 = inputs;
+    Steinberg::Vst::AudioBusBuffers output_bus{};
+    output_bus.numChannels = 2;
+    output_bus.channelBuffers32 = outputs;
+
+    for (int cycle = 0; cycle < 200; ++cycle) {
+        reset_test_processor();
+        HostApp host_app;
+        pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+        Steinberg::Vst::ProcessSetup setup{};
+        setup.processMode = Steinberg::Vst::kRealtime;
+        setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+        setup.maxSamplesPerBlock = kFrames;
+        setup.sampleRate = cycle % 2 == 0 ? 44100.0 : 96000.0;
+        REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+        REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+        Steinberg::Vst::ProcessData data{};
+        data.symbolicSampleSize = Steinberg::Vst::kSample32;
+        data.numSamples = cycle % 2 == 0 ? 32 : kFrames;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = &input_bus;
+        data.outputs = &output_bus;
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+        REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+        REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    }
+}
+
+TEST_CASE("VST3 lifecycle churn preserves state and tolerates bypass toggles",
+          "[vst3][lifecycle][churn][state][bypass]") {
+    constexpr int kFrames = 64;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* inputs[2] = {in_l.data(), in_r.data()};
+    float* outputs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers input_bus{};
+    input_bus.numChannels = 2;
+    input_bus.channelBuffers32 = inputs;
+    Steinberg::Vst::AudioBusBuffers output_bus{};
+    output_bus.numChannels = 2;
+    output_bus.channelBuffers32 = outputs;
+
+    HostApp host_app;
+    TestVst3Config config;
+    config.add_bypass_param = true;
+
+    for (int cycle = 0; cycle < 200; ++cycle) {
+        const float saved_gain = -24.0f + static_cast<float>(cycle % 48);
+        const std::string saved_payload = "cycle=" + std::to_string(cycle);
+
+        reset_test_processor(config);
+        pulp::format::vst3::PulpVst3Processor saver(create_test_processor);
+        REQUIRE(saver.initialize(&host_app) == Steinberg::kResultOk);
+        auto* saver_processor = TestVst3Processor::g_last_processor;
+        REQUIRE(saver_processor != nullptr);
+        saver_processor->state().set_value(kGainParamId, saved_gain);
+        saver_processor->plugin_state = saved_payload;
+
+        Steinberg::Vst::ProcessSetup setup{};
+        setup.processMode = Steinberg::Vst::kRealtime;
+        setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+        setup.maxSamplesPerBlock = kFrames;
+        setup.sampleRate = cycle % 2 == 0 ? 44100.0 : 96000.0;
+        REQUIRE(saver.setupProcessing(setup) == Steinberg::kResultOk);
+        REQUIRE(saver.setActive(true) == Steinberg::kResultOk);
+
+        Steinberg::Vst::ParameterChanges input_params(1);
+        Steinberg::int32 queue_index = 0;
+        auto* bypass_queue = input_params.addParameterData(kBypassParamId, queue_index);
+        REQUIRE(bypass_queue != nullptr);
+        Steinberg::int32 point_index = 0;
+        REQUIRE(bypass_queue->addPoint(0, cycle % 2 == 0 ? 1.0 : 0.0,
+                                       point_index) == Steinberg::kResultTrue);
+
+        Steinberg::Vst::ProcessData data{};
+        data.symbolicSampleSize = Steinberg::Vst::kSample32;
+        data.numSamples = cycle % 2 == 0 ? 32 : kFrames;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = &input_bus;
+        data.outputs = &output_bus;
+        data.inputParameterChanges = &input_params;
+        REQUIRE(saver.process(data) == Steinberg::kResultOk);
+
+        VectorStream saved_stream;
+        REQUIRE(saver.getState(&saved_stream) == Steinberg::kResultOk);
+        auto saved = saved_stream.take();
+        REQUIRE_FALSE(saved.empty());
+        REQUIRE(saver.setActive(false) == Steinberg::kResultOk);
+        REQUIRE(saver.terminate() == Steinberg::kResultOk);
+
+        reset_test_processor(config);
+        pulp::format::vst3::PulpVst3Processor loader(create_test_processor);
+        REQUIRE(loader.initialize(&host_app) == Steinberg::kResultOk);
+        auto* loader_processor = TestVst3Processor::g_last_processor;
+        REQUIRE(loader_processor != nullptr);
+        VectorStream restore_stream(saved);
+        REQUIRE(loader.setState(&restore_stream) == Steinberg::kResultOk);
+        REQUIRE_THAT(loader_processor->state().get_value(kGainParamId),
+                     WithinAbs(saved_gain, 0.01));
+        REQUIRE(loader_processor->plugin_state == saved_payload);
+
+        VectorStream resaved_stream;
+        REQUIRE(loader.getState(&resaved_stream) == Steinberg::kResultOk);
+        REQUIRE(resaved_stream.take() == saved);
+        REQUIRE(loader.terminate() == Steinberg::kResultOk);
+    }
 }
 
 TEST_CASE("VST3 processes kSample64 buffers through the f32 boundary path",
@@ -2812,14 +2976,16 @@ TEST_CASE("VST3 rejects an unsupported arrangement when silence accommodation is
 // while an individual channelBuffers32[ch] is null (#178); without the guard
 // the bypass short-circuit dereferenced null on the audio thread — a crash
 // P3b widened by making the short-circuit reachable for synthesized bypass.
-TEST_CASE("VST3 bypass pass-through tolerates a null output channel pointer",
-          "[vst3][bypass][regression]") {
+TEST_CASE("VST3 fails closed for a null active output channel pointer",
+          "[vst3][bypass][regression][malformed-layout]") {
     TestVst3Config config;
     config.add_bypass_param = true;  // declared bypass — policy-independent
     reset_test_processor(config);
     HostApp host_app;
     pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
     REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
     REQUIRE(processor.bypass_parameter_id() == kBypassParamId);
 
     Steinberg::Vst::SpeakerArrangement io[1] = {SpeakerArr::kStereo};
@@ -2860,9 +3026,88 @@ TEST_CASE("VST3 bypass pass-through tolerates a null output channel pointer",
 
     // Must not dereference the null channel-1 pointer.
     REQUIRE(processor.process(data) == Steinberg::kResultOk);
-    // The live channel 0 still got the pass-through copy.
+    // The live channel is silenced and DSP/bypass routing is skipped because
+    // the active bus storage is incomplete.
     for (int i = 0; i < kFrames; ++i) {
-        REQUIRE_THAT(out_l[i], WithinAbs(in_l[i], 1e-6f));
+        REQUIRE_THAT(out_l[i], WithinAbs(0.0f, 1e-9f));
+    }
+    REQUIRE(test_processor->process_count == 0);
+}
+
+TEST_CASE("VST3 fails closed for malformed host bus topology",
+          "[vst3][process][multi-out][malformed-layout]") {
+    TestVst3Config config;
+    config.descriptor.output_buses = {
+        {"Main Out", 2, false}, {"Aux Out", 2, true}};
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    Steinberg::Vst::SpeakerArrangement inputs_arr[1] = {SpeakerArr::kStereo};
+    Steinberg::Vst::SpeakerArrangement outputs_arr[2] = {
+        SpeakerArr::kStereo, SpeakerArr::kStereo};
+    REQUIRE(processor.setBusArrangements(inputs_arr, 1, outputs_arr, 2) ==
+            Steinberg::kResultTrue);
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 4;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 4;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    float* input_ptrs[2] = {in_l.data(), in_r.data()};
+    Steinberg::Vst::AudioBusBuffers input_bus{};
+    input_bus.numChannels = 2;
+    input_bus.channelBuffers32 = input_ptrs;
+
+    std::array<std::array<std::array<float, kFrames>, 2>, 3> samples{};
+    std::array<std::array<float*, 2>, 3> pointers{};
+    Steinberg::Vst::AudioBusBuffers output_buses[3]{};
+    for (int bus = 0; bus < 3; ++bus) {
+        for (int ch = 0; ch < 2; ++ch) {
+            samples[bus][ch].fill(9.0f);
+            pointers[bus][ch] = samples[bus][ch].data();
+        }
+        output_buses[bus].numChannels = 2;
+        output_buses[bus].channelBuffers32 = pointers[bus].data();
+    }
+
+    Steinberg::Vst::ProcessData data{};
+    data.symbolicSampleSize = Steinberg::Vst::kSample32;
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.inputs = &input_bus;
+    data.outputs = output_buses;
+
+    SECTION("more buses than advertised") {
+        data.numOutputs = 3;
+    }
+    SECTION("fewer buses than advertised") {
+        data.numOutputs = 1;
+    }
+    SECTION("wrong channel count") {
+        data.numOutputs = 2;
+        output_buses[1].numChannels = 1;
+    }
+    SECTION("null active-bus pointer") {
+        data.numOutputs = 2;
+        output_buses[1].channelBuffers32 = nullptr;
+    }
+
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    REQUIRE(test_processor->process_count == 0);
+    for (int bus = 0; bus < data.numOutputs; ++bus) {
+        if (!output_buses[bus].channelBuffers32) continue;
+        for (int ch = 0; ch < output_buses[bus].numChannels; ++ch) {
+            REQUIRE(std::all_of(samples[bus][ch].begin(), samples[bus][ch].end(),
+                                [](float v) { return v == 0.0f; }));
+        }
     }
 }
 
@@ -2888,6 +3133,32 @@ TEST_CASE("VST3 honors a processor mono/stereo bus-layout veto even with the qui
     REQUIRE(processor.setBusArrangements(io, 1, io, 1) == Steinberg::kResultFalse);
 
     pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
+TEST_CASE("VST3 resolves only descriptor-declared bus layouts",
+          "[vst3][bus-layout][negotiation]") {
+    TestVst3Config config;
+    config.descriptor.supported_bus_layouts = {
+        {.inputs = {2}, .outputs = {2}, .name = "Stereo"},
+        {.inputs = {1}, .outputs = {1}, .name = "Mono"},
+    };
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    Steinberg::Vst::SpeakerArrangement stereo[1] = {SpeakerArr::kStereo};
+    Steinberg::Vst::SpeakerArrangement mono[1] = {SpeakerArr::kMono};
+    Steinberg::Vst::SpeakerArrangement surround[1] = {SpeakerArr::k51};
+    REQUIRE(processor.setBusArrangements(stereo, 1, stereo, 1) ==
+            Steinberg::kResultTrue);
+    REQUIRE(processor.setBusArrangements(mono, 1, mono, 1) ==
+            Steinberg::kResultTrue);
+    REQUIRE(processor.setBusArrangements(mono, 1, stereo, 1) ==
+            Steinberg::kResultFalse);
+    REQUIRE(processor.setBusArrangements(surround, 1, surround, 1) ==
+            Steinberg::kResultFalse);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
 // A spec-violating host that renders MORE frames than the prepared

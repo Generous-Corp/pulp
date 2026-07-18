@@ -1164,6 +1164,50 @@ TEST_CASE("IPC socket server can dispatch first frame before accepted callback r
     REQUIRE_FALSE(server.is_running());
 }
 
+TEST_CASE("IPC message callback may destroy its own connection",
+          "[events][ipc][socket][crash][owner-lifetime][lifecycle]") {
+    InterprocessConnectionServer server;
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::unique_ptr<InterprocessConnection> accepted;
+    bool ready = false;
+    bool destroyed = false;
+
+    server.on_client_connected = [&](std::unique_ptr<InterprocessConnection> conn) {
+        conn->set_on_message([&](const void*, size_t) {
+            std::lock_guard<std::mutex> lock(mutex);
+            accepted.reset();  // destroys this connection on its read thread
+            destroyed = true;
+            cv.notify_all();
+        });
+        std::lock_guard<std::mutex> lock(mutex);
+        accepted = std::move(conn);
+        ready = true;
+        cv.notify_all();
+    };
+
+    const auto port = start_socket_server_on_loopback(server);
+    REQUIRE(port.has_value());
+
+    InterprocessConnection client;
+    REQUIRE(client.connect("127.0.0.1:" + std::to_string(*port),
+                           IpcTransport::Socket));
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] { return ready; }));
+    }
+
+    REQUIRE(client.send_message("destroy-from-callback"));
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] { return destroyed; }));
+        REQUIRE(accepted == nullptr);
+    }
+
+    client.disconnect();
+    server.stop();
+}
+
 TEST_CASE("IPC socket server virtual callback accepts empty frames",
           "[events][ipc][socket][issue-642]") {
     CapturingServer server;

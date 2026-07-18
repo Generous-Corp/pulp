@@ -15,11 +15,12 @@ namespace pulp::format::vst3 {
 
 using namespace Steinberg;
 
-PulpPlugView::PulpPlugView(Processor& processor, state::StateStore& store)
+PulpPlugView::PulpPlugView(Processor& processor, state::StateStore& store,
+                           runtime::AliveToken::Handle owner_alive)
     : CPluginView(nullptr)
     , processor_(processor)
     , store_(store)
-    , bridge_(processor, store)
+    , bridge_(processor, store, std::move(owner_alive))
 {
     const auto& hints = bridge_.size_hints();
     ViewRect r(0, 0, static_cast<int32>(hints.preferred_width),
