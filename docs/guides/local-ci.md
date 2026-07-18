@@ -1269,20 +1269,26 @@ label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
 | `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Local Linux ARM64 VM pool | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","ARM64","pulp-build-linux"]'` |
 | `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local Windows ARM64 QEMU pool | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","Windows","ARM64","pulp-build-windows"]'` |
 
-`.tartci/normal-local-fast.toml` is the repo-local profile that documents the
-intended default policy: PR macOS, Linux, and Windows prefer local ARM64 VMs
-where available, while GitHub-hosted x64 Linux/Windows remains the scheduled
-compatibility safety net. Use `tartci profile plan normal-local-fast --repo
-danielraffel/pulp --json` from the tartci checkout to see the concrete variable
-values before changing repository variables.
+`.shipyard/ci-profiles/normal-local-fast.toml` is the repo-local, read-only
+policy mirror. Its PR-only `github.windows-x64-runtime` target records the
+stable `windows-2022` functional lane, while the shared
+`github.windows-x64` target records the `windows-latest` coverage/scheduled
+lane. The current Shipyard profile planner does not apply these selectors to
+a dispatch; `build.yml` remains authoritative. Inspect the profile when
+reviewing policy, then verify the workflow input and repository-variable
+precedence before changing live routing.
 
 Do not put ordered fallback chains directly into GitHub Actions. GitHub receives
 one `runs-on` selector per job; Shipyard/tartci must resolve "Mac Studio, then
 M5/blackbook, then GitHub" before dispatch or variable application.
 
 Windows local QEMU is Windows ARM64. An x64 MSVC/Prism smoke can be useful, but
-it is not a replacement for the GitHub-hosted `windows-latest` Intel/x64 signal
-until explicitly proven.
+it is not a replacement for the GitHub-hosted Intel/x64 functional gate. The
+required `build.yml` functional matrix is pinned to `windows-2022` so its CRT
+and Visual Studio generation do not move underneath the complete runtime
+suite. The standalone MSVC release-path, MIDI 2, and BLE compile gates remain
+on `windows-latest`; release builds and the nightly Intel safety net also keep
+tracking the newest hosted image.
 
 ### Nightly GitHub Intel validation
 

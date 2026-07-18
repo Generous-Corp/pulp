@@ -16,6 +16,7 @@ Run:  python3 tools/scripts/test_resolve_classify_base.py
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -27,6 +28,9 @@ from resolve_classify_base import DEFAULT_BASE, ZERO_SHA, resolve_base  # noqa: 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
+SHIPYARD_PROFILE = (
+    REPO_ROOT / ".shipyard" / "ci-profiles" / "normal-local-fast.toml"
+)
 SCRIPT = Path(__file__).with_name("resolve_classify_base.py")
 
 BASE_SHA = "a" * 40
@@ -151,6 +155,48 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertNotIn(
             "github.event.pull_request.base.sha || 'origin/main'", self.text
         )
+
+    def test_windows_functional_matrix_uses_the_stable_runtime_image(self) -> None:
+        self.assertIn(
+            '"--github-hosted-label", "windows-2022"', self.text
+        )
+        self.assertNotIn(
+            '"--github-hosted-label", "windows-latest"', self.text
+        )
+        # Newest-toolchain coverage remains explicit in the three standalone
+        # compile gates, where an image migration cannot invalidate runtime
+        # behavior across the entire Windows test suite.
+        self.assertEqual(self.text.count("runs-on: windows-latest"), 3)
+        for job_name in (
+            "windows-msvc-release-gate",
+            "windows-midi2-gate",
+            "windows-ble-gate",
+        ):
+            with self.subTest(job=job_name):
+                marker = f"\n  {job_name}:\n"
+                self.assertIn(marker, self.text)
+                remainder = self.text.split(marker, 1)[1]
+                job = re.split(r"\n  [A-Za-z0-9_-]+:\n", remainder, 1)[0]
+                self.assertIn("runs-on: windows-latest", job)
+
+        # The profile planner is currently read-only, but its inspected PR
+        # policy must not contradict the workflow selector that dispatches.
+        # Coverage and scheduled validation deliberately retain latest.
+        shipyard_profile = SHIPYARD_PROFILE.read_text(encoding="utf-8")
+        pr_policy = shipyard_profile.split(
+            '[repo."danielraffel/pulp".pr.windows]', 1
+        )[1].split("\n[", 1)[0]
+        self.assertIn('targets = ["github.windows-x64-runtime"]', pr_policy)
+
+        runtime_target = shipyard_profile.split(
+            '[targets."github.windows-x64-runtime"]', 1
+        )[1].split("\n[", 1)[0]
+        self.assertIn('runs_on_json = "windows-2022"', runtime_target)
+
+        latest_target = shipyard_profile.split(
+            '[targets."github.windows-x64"]', 1
+        )[1].split("\n[", 1)[0]
+        self.assertIn('runs_on_json = "windows-latest"', latest_target)
 
     def test_workflow_triggers_on_push_to_main(self) -> None:
         # Without this trigger the cache-save steps below are unreachable:

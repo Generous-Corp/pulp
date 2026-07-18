@@ -27,7 +27,7 @@ github_variable = "PULP_LOCAL_LINUX_RUNS_ON_JSON"
 
 [repo."danielraffel/pulp".pr.windows]
 strategy = "github-only"
-targets = ["github.windows-x64"]
+targets = ["github.windows-x64-runtime"]
 
 [repo."danielraffel/pulp".release.macos]
 strategy = "ordered-fallback"
@@ -84,4 +84,8 @@ authoritative_for = ["linux-x64"]
 
 [targets."github.windows-x64"]
 runs_on_json = "windows-latest"
+authoritative_for = ["windows-x64"]
+
+[targets."github.windows-x64-runtime"]
+runs_on_json = "windows-2022"
 authoritative_for = ["windows-x64"]
