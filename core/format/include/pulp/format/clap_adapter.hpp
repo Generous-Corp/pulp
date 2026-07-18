@@ -38,6 +38,10 @@ namespace pulp::format::clap_adapter {
 // value (8) across every adapter; change it once at the boundary.
 static constexpr int kMaxChannels =
     static_cast<int>(boundary::kBoundaryMaxChannels);
+// The Processor surface currently exposes a main input and one optional
+// sidechain input. Keep the process-time layout cache fixed-size so validating
+// a host block never allocates on the audio thread.
+static constexpr int kMaxInputBuses = 2;
 // Upper bound on output buses routed to the Processor in one block. Index 0 is
 // the main output; indices 1..kMaxOutputBuses-1 are secondary (aux) outputs for
 // multi-out instruments (drum machines, multitimbral, stem renderers). Host
@@ -98,6 +102,10 @@ struct PulpClapPlugin {
     double sample_rate = 48000.0;
     int max_buffer_size = 512;
     clap_id selected_bus_layout = 0;
+    uint32_t declared_input_bus_count = 0;
+    uint32_t declared_output_bus_count = 0;
+    std::array<int, kMaxInputBuses> declared_input_channels{};
+    std::array<int, kMaxOutputBuses> declared_output_channels{};
 
     // Pre-allocated buffers — no heap allocation on audio thread
     float* output_ptrs[kMaxChannels] = {};

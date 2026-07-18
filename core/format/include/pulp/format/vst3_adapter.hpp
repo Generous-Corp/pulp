@@ -330,6 +330,13 @@ private:
     // param_events_ on exit.
     void process_decode_input_parameters(Steinberg::Vst::ProcessData& data);
 
+    // Validate the host block against the currently negotiated component-bus
+    // topology. Malformed layouts are zeroed and rejected before any host
+    // storage is published to the Processor.
+    bool process_validate_layout(Steinberg::Vst::ProcessData& data,
+                                 bool host_f64,
+                                 int original_num_samples);
+
     // Phase (d, f32 half): wire the host's main input, sidechain, and main
     // output channel pointers (with f64 boundary marshalling) into the reused
     // ptr vectors, pre-zero routed aux output buses, and report the resolved

@@ -789,6 +789,18 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
             return kResultFalse;
         }
 
+        // An explicit layout list is an exact host-facing contract. Do not
+        // widen it through the legacy unsupported-layout silence quirk: hosts
+        // may cache an accepted arrangement and later instantiate the plugin
+        // under a layout its descriptor never promised.
+        if (!desc.supported_bus_layouts.empty()) {
+            runtime::log_info(
+                "VST3 setBusArrangements: rejected layout outside explicit "
+                "supported_bus_layouts ({} in / {} out buses)",
+                numIns, numOuts);
+            return kResultFalse;
+        }
+
         // The arrangement is not expressible as mono/stereo, such as 5.1,
         // but the host policy can request graceful silence instead of
         // rejection. process() clamps the processor's views to prepared
@@ -1182,6 +1194,79 @@ void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
         }
     }
     param_events_.sort();
+}
+
+bool PulpVst3Processor::process_validate_layout(
+    ProcessData& data, bool host_f64, int original_num_samples) {
+    const auto zero_host_outputs = [&] {
+        if (!data.outputs) return;
+        for (int32 b = 0; b < data.numOutputs; ++b) {
+            auto& bus = data.outputs[b];
+            for (int32 ch = 0; ch < bus.numChannels; ++ch) {
+                if (host_f64 && bus.channelBuffers64 && bus.channelBuffers64[ch]) {
+                    boundary::zero_f64(
+                        bus.channelBuffers64[ch],
+                        static_cast<std::uint32_t>(original_num_samples));
+                } else if (!host_f64 && bus.channelBuffers32 &&
+                           bus.channelBuffers32[ch]) {
+                    std::memset(bus.channelBuffers32[ch], 0,
+                                sizeof(float) * original_num_samples);
+                }
+            }
+            bus.silenceFlags = bus.numChannels >= 64
+                ? ~Steinberg::uint64{0}
+                : (bus.numChannels > 0
+                       ? (Steinberg::uint64{1} << bus.numChannels) - 1
+                       : 0);
+        }
+    };
+    const auto host_bus_is_valid = [&](const AudioBusBuffers& host_bus,
+                                       AudioBus* declared_bus) {
+        if (!declared_bus) return false;
+        const int expected_channels = static_cast<int>(
+            SpeakerArr::getChannelCount(declared_bus->getArrangement()));
+        if (host_bus.numChannels == 0) return true;
+        if (host_bus.numChannels != expected_channels) return false;
+        if (host_f64) {
+            if (!host_bus.channelBuffers64) return false;
+            for (int32 ch = 0; ch < host_bus.numChannels; ++ch)
+                if (!host_bus.channelBuffers64[ch]) return false;
+        } else {
+            if (!host_bus.channelBuffers32) return false;
+            for (int32 ch = 0; ch < host_bus.numChannels; ++ch)
+                if (!host_bus.channelBuffers32[ch]) return false;
+        }
+        return true;
+    };
+
+    bool malformed_layout =
+        data.numInputs != static_cast<int32>(audioInputs.size()) ||
+        data.numOutputs != static_cast<int32>(audioOutputs.size()) ||
+        (data.numInputs > 0 && !data.inputs) ||
+        (data.numOutputs > 0 && !data.outputs);
+    if (!malformed_layout) {
+        for (int32 b = 0; b < data.numInputs; ++b) {
+            if (!host_bus_is_valid(
+                    data.inputs[b], FCast<AudioBus>(audioInputs.at(b)))) {
+                malformed_layout = true;
+                break;
+            }
+        }
+    }
+    if (!malformed_layout) {
+        for (int32 b = 0; b < data.numOutputs; ++b) {
+            if (!host_bus_is_valid(
+                    data.outputs[b], FCast<AudioBus>(audioOutputs.at(b)))) {
+                malformed_layout = true;
+                break;
+            }
+        }
+    }
+    if (!malformed_layout) return true;
+
+    zero_host_outputs();
+    processor_->set_sidechain(nullptr);
+    return false;
 }
 
 void PulpVst3Processor::process_wire_buffers(
@@ -1650,11 +1735,6 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // docs/guides/dsp-threading.md "Numeric mode".
     pulp::signal::ScopedFlushDenormals flush_denormals;
 
-    // Phase (a): clear the reused param/MIDI buffers, decode host parameter
-    // changes into the StateStore boundary, and divert IMidiMapping-registered
-    // controller changes into midi_in_.
-    process_decode_input_parameters(data);
-
     // Build buffer views
     int32 num_samples = data.numSamples;
     if (num_samples == 0) return kResultOk;
@@ -1669,6 +1749,15 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // back as clean silence rather than garbage.
     const int32 original_num_samples = num_samples;
     num_samples = clamp_block_to_prepared_max(num_samples, max_block_size_);
+
+    if (!process_validate_layout(data, host_f64, original_num_samples)) {
+        return kResultOk;
+    }
+
+    // Phase (a): clear the reused param/MIDI buffers, decode host parameter
+    // changes into the StateStore boundary, and divert IMidiMapping-registered
+    // controller changes into midi_in_.
+    process_decode_input_parameters(data);
 
     // Phase (d, f32 half): wire the host's main input, sidechain, and main
     // output channel pointers into the reused ptr vectors and pre-zero routed

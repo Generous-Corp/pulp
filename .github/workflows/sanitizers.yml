@@ -193,7 +193,9 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
             -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+            -DCMAKE_OBJCXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address" \
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_GPU=OFF
@@ -212,6 +214,29 @@ jobs:
           ctest --test-dir build-asan --output-on-failure \
             --timeout 120 \
             -L lifecycle
+
+      - name: Test real plugin bundle lifecycles with ASan
+        env:
+          ASAN_OPTIONS: "detect_leaks=0:halt_on_error=1"
+        run: |
+          cmake -S . -B build-asan-artifact \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+            -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+            -DCMAKE_OBJCXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address" \
+            -DPULP_BUILD_TESTS=ON \
+            -DPULP_BUILD_EXAMPLES=ON \
+            -DPULP_ENABLE_GPU=OFF
+          cmake --build build-asan-artifact \
+            --target PulpEffect_CLAP PulpEffect_VST3 PulpEffect_AU \
+              pulp-clap-bundle-lifecycle-test \
+              pulp-vst3-bundle-lifecycle-test \
+              pulp-au-bundle-lifecycle-test \
+            -j$(sysctl -n hw.ncpu)
+          ctest --test-dir build-asan-artifact --output-on-failure \
+            -R '^(clap|vst3|au)-bundle-lifecycle-PulpEffect$'
 
       - name: Test with ASan
         env:
@@ -259,7 +284,9 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_FLAGS="-fsanitize=thread" \
             -DCMAKE_C_FLAGS="-fsanitize=thread" \
+            -DCMAKE_OBJCXX_FLAGS="-fsanitize=thread" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=thread" \
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_GPU=OFF
@@ -279,8 +306,9 @@ jobs:
         # Osc/WebSocket/Channel), and MIDI/MPE/UMP buffer threading. Catches
         # what TSan exists for;
         # ASan + UBSan still cover the full matrix.
-        # AudioWorkgroup is a pre-existing flake (#412 step 4 will
-        # replace it with a deterministic race-hammer harness).
+        # AudioWorkgroup's deterministic first-entry hammer claims the one
+        # thread-affine join operation before touching the OS token, so this
+        # lifecycle surface now runs under TSan instead of being excluded.
         # 120s per-test timeout caps any future hang.
         # Full hardening (#412 steps 2/4/5): suppressions file,
         # audio-race hammer, path-gated trigger.

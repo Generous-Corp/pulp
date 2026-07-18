@@ -249,6 +249,38 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
         ctx.input_channels = layout.inputs.empty() ? 0 : layout.inputs.front();
         ctx.output_channels = layout.outputs.empty() ? 0 : layout.outputs.front();
     }
+
+    // Cache the exact layout selected by the host. clap_process() must not call
+    // descriptor() (it allocates), but it still has to reject a malformed
+    // process block whose bus topology differs from what CLAP advertised.
+    // Counts remain exact even when larger than the fixed routing capacity so
+    // an unsupported descriptor cannot accidentally validate by truncation.
+    const auto* selected_layout = desc.supported_bus_layouts.empty()
+        ? nullptr
+        : &desc.supported_bus_layouts[std::min<std::size_t>(
+              self->selected_bus_layout, desc.supported_bus_layouts.size() - 1)];
+    self->declared_input_bus_count = static_cast<uint32_t>(
+        selected_layout ? selected_layout->inputs.size() : desc.input_buses.size());
+    self->declared_output_bus_count = static_cast<uint32_t>(
+        selected_layout ? selected_layout->outputs.size() : desc.output_buses.size());
+    self->declared_input_channels.fill(0);
+    self->declared_output_channels.fill(0);
+    for (std::size_t i = 0;
+         i < self->declared_input_channels.size() &&
+         i < self->declared_input_bus_count;
+         ++i) {
+        self->declared_input_channels[i] = selected_layout
+            ? selected_layout->inputs[i]
+            : desc.input_buses[i].default_channels;
+    }
+    for (std::size_t i = 0;
+         i < self->declared_output_channels.size() &&
+         i < self->declared_output_bus_count;
+         ++i) {
+        self->declared_output_channels[i] = selected_layout
+            ? selected_layout->outputs[i]
+            : desc.output_buses[i].default_channels;
+    }
     self->processor->prepare(ctx);
     self->processor->prepare_f64_fallback_scratch(ctx);
     self->native_f64_enabled = desc.effective_capabilities().supports_f64_audio;
@@ -336,6 +368,75 @@ bool clap_param_modulation_lane(const PulpClapPlugin& self,
         .depth = static_cast<float>(event.amount),
     };
     return state::validate_modulation_lane(lane).accepted;
+}
+
+static bool clap_phase_validate_layout(PulpClapPlugin* self,
+                                       const clap_process_t* process,
+                                       uint32_t original_num_samples) {
+    const auto bus_has_storage = [](const clap_audio_buffer_t& bus) {
+        if (bus.channel_count == 0) return true;
+        if (bus.data64) {
+            for (uint32_t ch = 0; ch < bus.channel_count; ++ch)
+                if (!bus.data64[ch]) return false;
+            return true;
+        }
+        if (bus.data32) {
+            for (uint32_t ch = 0; ch < bus.channel_count; ++ch)
+                if (!bus.data32[ch]) return false;
+            return true;
+        }
+        return false;
+    };
+    const auto zero_host_outputs = [&] {
+        if (!process->audio_outputs) return;
+        for (uint32_t b = 0; b < process->audio_outputs_count; ++b) {
+            auto& bus = process->audio_outputs[b];
+            for (uint32_t ch = 0; ch < bus.channel_count; ++ch) {
+                if (bus.data64 && bus.data64[ch]) {
+                    zero_f64(bus.data64[ch], original_num_samples);
+                } else if (bus.data32 && bus.data32[ch]) {
+                    std::memset(bus.data32[ch], 0,
+                                sizeof(float) * original_num_samples);
+                }
+            }
+            bus.constant_mask = 0;
+        }
+    };
+
+    bool malformed_layout =
+        process->audio_inputs_count != self->declared_input_bus_count ||
+        process->audio_outputs_count != self->declared_output_bus_count ||
+        (process->audio_inputs_count > 0 && !process->audio_inputs) ||
+        (process->audio_outputs_count > 0 && !process->audio_outputs) ||
+        self->declared_input_bus_count > self->declared_input_channels.size() ||
+        self->declared_output_bus_count > self->declared_output_channels.size();
+    if (!malformed_layout) {
+        for (uint32_t b = 0; b < process->audio_inputs_count; ++b) {
+            const auto& bus = process->audio_inputs[b];
+            if (bus.channel_count != static_cast<uint32_t>(
+                    self->declared_input_channels[b]) ||
+                !bus_has_storage(bus)) {
+                malformed_layout = true;
+                break;
+            }
+        }
+    }
+    if (!malformed_layout) {
+        for (uint32_t b = 0; b < process->audio_outputs_count; ++b) {
+            const auto& bus = process->audio_outputs[b];
+            if (bus.channel_count != static_cast<uint32_t>(
+                    self->declared_output_channels[b]) ||
+                !bus_has_storage(bus)) {
+                malformed_layout = true;
+                break;
+            }
+        }
+    }
+    if (!malformed_layout) return true;
+
+    zero_host_outputs();
+    self->processor->set_sidechain(nullptr);
+    return false;
 }
 
 static void clap_phase_decode_param_events(PulpClapPlugin* self,
@@ -994,7 +1095,7 @@ static void clap_phase_request_callback(PulpClapPlugin* self) {
 
 clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process_t* process) {
     auto* self = get_self(plugin);
-    if (!self->processor) return CLAP_PROCESS_ERROR;
+    if (!self->processor || !process) return CLAP_PROCESS_ERROR;
 
     auto num_samples = process->frames_count;
     if (num_samples == 0) return CLAP_PROCESS_CONTINUE;
@@ -1016,6 +1117,12 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     const auto original_num_samples = num_samples;
     num_samples = static_cast<uint32_t>(clamp_block_to_prepared_max(
         static_cast<int>(num_samples), self->max_buffer_size));
+
+    // Reject a host block that differs from the topology selected during
+    // activation before publishing any host storage to the Processor.
+    if (!clap_phase_validate_layout(self, process, original_num_samples)) {
+        return CLAP_PROCESS_CONTINUE;
+    }
 
     clap_phase_decode_param_events(self, process);
 

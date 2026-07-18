@@ -127,26 +127,22 @@ TEST_CASE("AudioWorkgroup leave-then-rejoin tracks per-thread join state",
 
 TEST_CASE("AudioWorkgroup first-entry guard pattern is race-free",
           "[audio][workgroup][wiring][issue-2935]") {
-    // Models the exact acquire/release pattern in
-    // CoreAudioDevice::render_callback: a relaxed-ordered atomic guard
-    // that gates a one-shot join. Hammer it across N threads to
-    // confirm the pattern works under concurrency. (CoreAudio only
-    // ever runs render_callback on a single I/O thread, but TSan in
-    // CI should not flag the pattern.)
+    // CoreAudio invokes one render thread, but a race-hammer must not create
+    // concurrent calls into AudioWorkgroup itself: that object is explicitly
+    // thread-affine and owns one OS join token. Claim the one-shot operation
+    // atomically first, then let only the winner touch it. This keeps the test
+    // faithful to the single-I/O-thread production contract while still making
+    // the guard's exactly-once behavior observable under TSan.
     AudioWorkgroup wg;
-    std::atomic<bool> joined_flag{false};
+    std::atomic<bool> join_claimed{false};
     std::atomic<int>  join_count{0};
 
     auto worker = [&] {
-        if (!joined_flag.load(std::memory_order_acquire)) {
+        bool expected = false;
+        if (join_claimed.compare_exchange_strong(
+                expected, true, std::memory_order_acq_rel)) {
             wg.join_from_audio_thread();
-            // Only the winning thread observes `false` here, so the
-            // counter increments exactly once.
-            bool expected = false;
-            if (joined_flag.compare_exchange_strong(
-                    expected, true, std::memory_order_release)) {
-                join_count.fetch_add(1, std::memory_order_relaxed);
-            }
+            join_count.fetch_add(1, std::memory_order_relaxed);
         }
     };
 
