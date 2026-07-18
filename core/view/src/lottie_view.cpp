@@ -106,13 +106,15 @@ void LottieView::paint_unsupported_placeholder(canvas::Canvas& canvas) {
     if (b.width <= 0.0f || b.height <= 0.0f) return;
 
     // Subtle fill + border + centered label — the missing-asset placeholder
-    // convention (mirrors ImageView's missing-image box).
-    canvas.set_fill_color(canvas::Color::rgba(0.5f, 0.5f, 0.5f, 0.12f));
+    // convention (mirrors ImageView's missing-image box). Neutral-grey
+    // diagnostic literals (this view has no theme/resolve_color access, and a
+    // compiled-out-build placeholder is not themeable UI surface).
+    canvas.set_fill_color(canvas::Color::rgba(0.5f, 0.5f, 0.5f, 0.12f));  // token-lint:allow (placeholder diagnostic)
     canvas.fill_rect(b.x, b.y, b.width, b.height);
-    canvas.set_stroke_color(canvas::Color::rgba(0.6f, 0.6f, 0.6f, 0.7f));
+    canvas.set_stroke_color(canvas::Color::rgba(0.6f, 0.6f, 0.6f, 0.7f));  // token-lint:allow (placeholder diagnostic)
     canvas.set_line_width(1.0f);
     canvas.stroke_rect(b.x, b.y, b.width, b.height);
-    canvas.set_fill_color(canvas::Color::rgba(0.72f, 0.72f, 0.72f, 0.9f));
+    canvas.set_fill_color(canvas::Color::rgba(0.72f, 0.72f, 0.72f, 0.9f));  // token-lint:allow (placeholder diagnostic)
     canvas.set_font("", 12.0f);
     canvas.set_text_align(canvas::TextAlign::center);
     canvas.fill_text("Lottie unavailable",
