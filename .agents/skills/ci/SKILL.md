@@ -1086,6 +1086,12 @@ to route a run. The standalone MSVC release-path, MIDI 2, and BLE compile gates
 remain on `windows-latest`, as do release builds, so the newest hosted compiler
 and SDK are still exercised without allowing an in-place runner-image
 migration to change the CRT/toolchain beneath the complete runtime suite.
+`tools/scripts/test_windows_runner_policy.py` reads every operative surface
+(build, release, coverage, nightly, release resolver, and Shipyard profile)
+independently and runs in the PR `workflow-lint` lane. Update that one
+cross-surface invariant whenever the split changes; a profile-only or
+workflow-only assertion is not enough because the two can self-agree while a
+different production lane drifts.
 
 Do not push empty commits just to churn queued macOS checks. Cancel
 superseded SHAs, rebase or push only when a PR needs current `main`, and
