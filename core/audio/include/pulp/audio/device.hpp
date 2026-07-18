@@ -90,9 +90,11 @@ public:
     /// `nullptr` and callers fall back to
     /// `AudioWorkgroup::set_realtime_priority()`.
     ///
-    /// The returned pointer is owned by the device. It remains valid until
-    /// close or, for a live-retargeting backend, until the removal notification
-    /// registered below has returned. Callers must not free it.
+    /// The returned pointer is owned by the device (CoreAudio owns a retained
+    /// property-query reference). It remains valid until close or, for a
+    /// live-retargeting backend, until the removal notification and auxiliary
+    /// worker acknowledgment registered below have completed. Callers must not
+    /// retain or free it.
     /// Pass it to `AudioWorkgroup::set_workgroup(static_cast<os_workgroup_t>(...))`
     /// before joining from the audio thread.
     ///
@@ -109,13 +111,21 @@ public:
     /// Reset the xrun counter to 0. Safe from any thread.
     virtual void reset_xrun_counter() {}
 
-    /// Observe a live change to callback_workgroup(). Apple devices which
+    /// Atomically subscribe to callback_workgroup() changes and synchronously
+    /// deliver the current value before returning. Live-retargeting backends
+    /// must serialize callback installation + initial delivery with changes, so
+    /// callers cannot publish a stale snapshot after a concurrent switch.
+    /// The callback may execute inside that serialization boundary and must not
+    /// re-enter the device.
+    ///
+    /// Apple devices which
     /// follow the system default output call this off the render thread after
     /// stopping the old callback and before invalidating its borrowed handle,
     /// then again with the replacement handle before rendering resumes.
-    /// Other backends never change their callback workgroup and ignore it.
+    /// Other backends deliver their stable snapshot through the default
+    /// implementation and never send a later change.
     virtual void set_workgroup_change_callback(WorkgroupChangeCallback callback) {
-        (void)callback;
+        if (callback) callback(callback_workgroup());
     }
 
     /// Disable future workgroup-change notifications and serialize with any

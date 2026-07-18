@@ -132,6 +132,11 @@ public:
         audio_workgroup_waits.fetch_add(1, std::memory_order_relaxed);
     }
 
+    bool prepare_audio_workgroup_for_render() noexcept override {
+        audio_workgroup_prepares.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+
     std::string plugin_state;
     int process_count = 0;
     int process_buffers_count = 0;
@@ -150,6 +155,7 @@ public:
     std::atomic<void*> audio_workgroup{nullptr};
     std::atomic<int> audio_workgroup_updates{0};
     std::atomic<int> audio_workgroup_waits{0};
+    std::atomic<int> audio_workgroup_prepares{0};
 };
 
 class TestAUInstrumentProcessor : public pulp::format::Processor {
@@ -1098,6 +1104,20 @@ TEST_CASE("AU v3 render events preserve parameter sample offsets and update Stat
                             &first,
                             nil);
         REQUIRE(status == noErr);
+        REQUIRE(processor->audio_workgroup_prepares.load(std::memory_order_relaxed) == 1);
+
+        // Context adoption precedes every render exit, not only the normal
+        // process path. A host may retire the prior borrowed context as soon as
+        // either of these early-return renders completes.
+        REQUIRE(block(&flags, &timestamp, kFrames, 0, nullptr, nullptr, nil) ==
+                noErr);
+        REQUIRE(processor->audio_workgroup_prepares.load(
+                    std::memory_order_relaxed) == 2);
+        REQUIRE(block(&flags, &timestamp, unit.maximumFramesToRender + 1, 0,
+                      &output.list, nullptr, nil) ==
+                kAudioUnitErr_TooManyFramesToProcess);
+        REQUIRE(processor->audio_workgroup_prepares.load(
+                    std::memory_order_relaxed) == 3);
 
         REQUIRE(processor->process_buffers_count == 1);
         REQUIRE(processor->process_count == 1);
@@ -2311,15 +2331,22 @@ TEST_CASE("AU v3 render context observer forwards workgroup changes and removal"
         REQUIRE(observer != nil);
 
         AudioUnitRenderContext context{};
+        // Deliberately not a real os_object. If the RT observer ever regresses
+        // to os_retain/os_release, this test crashes instead of silently
+        // blessing an undocumented reference-count operation on the audio path.
         context.workgroup = reinterpret_cast<os_workgroup_t>(std::uintptr_t{0x7070});
         observer(&context);
         REQUIRE(processor->audio_workgroup.load(std::memory_order_acquire) ==
                 reinterpret_cast<void*>(context.workgroup));
         REQUIRE(processor->audio_workgroup_updates.load(std::memory_order_relaxed) == 1);
+        REQUIRE(processor->audio_workgroup_prepares.load(
+                    std::memory_order_relaxed) == 1);
 
         observer(nullptr);
         REQUIRE(processor->audio_workgroup.load(std::memory_order_acquire) == nullptr);
         REQUIRE(processor->audio_workgroup_updates.load(std::memory_order_relaxed) == 2);
+        REQUIRE(processor->audio_workgroup_prepares.load(
+                    std::memory_order_relaxed) == 2);
         [unit release];
     }
     pulp::format::set_host_quirk_policy(std::nullopt);

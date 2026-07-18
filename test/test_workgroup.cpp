@@ -1,6 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/audio/workgroup.hpp>
 
+#include <atomic>
+#include <thread>
+
+#if defined(__APPLE__)
+#include <os/object.h>
+#include <os/workgroup.h>
+#endif
+
 using namespace pulp::audio;
 
 TEST_CASE("AudioWorkgroup default state", "[audio][workgroup]") {
@@ -24,6 +32,37 @@ TEST_CASE("AudioWorkgroup leave without join is safe", "[audio][workgroup]") {
     AudioWorkgroup wg;
     wg.leave(); // should be safe even if never joined
     REQUIRE_FALSE(wg.is_joined());
+}
+
+TEST_CASE("AudioWorkgroup scoped join leaves on the joining thread",
+          "[audio][workgroup][lifetime][threads]") {
+#if defined(__APPLE__)
+    auto workgroup = os_workgroup_parallel_create(
+        "pulp-same-thread-scoped-workgroup", nullptr);
+    REQUIRE(workgroup != nullptr);
+    std::atomic<bool> first_joined{false};
+    std::atomic<bool> rejoined_after_scope{false};
+    std::thread render_thread([&] {
+        {
+            AudioWorkgroup scoped_join;
+            scoped_join.set_workgroup(workgroup);
+            first_joined.store(scoped_join.join_from_audio_thread(),
+                               std::memory_order_release);
+        } // leave() consumes the token here, on this same thread.
+        AudioWorkgroup proof_of_leave;
+        proof_of_leave.set_workgroup(workgroup);
+        rejoined_after_scope.store(proof_of_leave.join_from_audio_thread(),
+                                   std::memory_order_release);
+    });
+    render_thread.join();
+    REQUIRE(first_joined.load(std::memory_order_acquire));
+    // A successful second join on the same thread proves the scoped destructor
+    // left the first membership instead of stranding its join token.
+    REQUIRE(rejoined_after_scope.load(std::memory_order_acquire));
+    os_release(workgroup);
+#else
+    SUCCEED("Same-thread token contract is Apple-only");
+#endif
 }
 
 TEST_CASE("AudioWorkgroup join without workgroup uses fallback", "[audio][workgroup]") {

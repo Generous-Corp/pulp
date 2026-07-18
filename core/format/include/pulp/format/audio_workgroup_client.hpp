@@ -10,10 +10,35 @@ namespace pulp::format {
 /// This stays separate from Processor so opting in does not widen the node ABI.
 class AudioWorkgroupClient {
 public:
-    /// Publish the borrowed workgroup for subsequent renders, or null to remove
-    /// it. This may run on the realtime thread and must not allocate, lock,
-    /// block, or call host APIs.
+    /// Publish the host/device-owned workgroup for subsequent renders, or null
+    /// to remove it. The publisher for one client must be serialized (AU calls
+    /// its observer on the render thread; CoreAudio serializes device changes).
+    /// This may run on the realtime thread and must not allocate, lock, block,
+    /// retain/release Objective-C/os objects, or call host APIs.
+    ///
+    /// AU lifetime follows Apple's render-context protocol: the context struct
+    /// is callback-scoped, while its workgroup is the host-owned current render
+    /// context that auxiliary realtime threads are instructed to join and leave
+    /// when the next observer publication arrives. Standalone devices hold a
+    /// caller-owned query reference until the explicit teardown barrier below.
     virtual void set_audio_workgroup(void* workgroup) noexcept = 0;
+
+    /// Publish an AU render-context workgroup. Apple does not document
+    /// os_retain/os_release as RT-safe and supplies no completion callback by
+    /// which a host can know a late asynchronous join no longer references the
+    /// previous context. Pulp therefore adopts it in a synchronous observer
+    /// barrier: every worker, including cold sleepers, completes leave of the
+    /// old context and acknowledges its new join result before the observer
+    /// returns.
+    virtual void set_audio_workgroup_from_render_context(
+        void* workgroup) noexcept {
+        set_audio_workgroup(workgroup);
+    }
+
+    /// RT-safe render-cycle preparation. Every worker completes the transition;
+    /// false means at least one new join failed and the caller must render
+    /// inline for this publication.
+    virtual bool prepare_audio_workgroup_for_render() noexcept { return true; }
 
     /// Off-RT barrier for borrowed-handle teardown. Returns only after every
     /// auxiliary worker has acknowledged the most recently published value.
@@ -28,13 +53,14 @@ protected:
 /// hosts. The device owns the borrowed handle.
 inline void bind_audio_device_workgroup(AudioWorkgroupClient& client,
                                         audio::AudioDevice* device) {
-    client.set_audio_workgroup(device ? device->callback_workgroup() : nullptr);
     if (device) {
         device->set_workgroup_change_callback(
             [&client](void* workgroup) {
                 client.set_audio_workgroup(workgroup);
                 if (!workgroup) client.wait_for_audio_workgroup_update();
             });
+    } else {
+        client.set_audio_workgroup(nullptr);
     }
 }
 
