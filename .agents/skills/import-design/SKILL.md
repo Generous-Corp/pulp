@@ -392,6 +392,19 @@ native codegen lowers `transform: rotate()` to `setRotation` in the shared
 Covered by `[rotation]` in `test_design_import_codegen.cpp` + a decoder test in
 `fig/fig.test.mjs` (45deg needle rotates; VECTOR and 180deg fill do not).
 
+**Gotcha - a "label" token names the caption, not the control.**
+`detect_audio_widget` (`design_import.cpp`) whole-token-matches "knob"/"fader"/…
+to promote a node to a built-in widget. A node named `sound / knob label`
+tokenizes to {sound, knob, label} and matched "knob", so the caption FRAME
+promoted to a knob and painted a stock knob disc over its text (a "Classic"
+filter-mode caption imported as a dark knob). The recognizer now returns `none`
+whenever the name carries a `label` token — the caption is text; the real
+control (`sound / knob / small unipolar`, no `label`) keeps its recognition.
+This is the same "the layer name IS the art, not a control" rule as the
+knob-art-layer suppression, one level up. Verified: `createKnob` count on a real
+`.fig` dropped from 6 (all captions) to 0 while every art-layer knob still
+rendered. Covered in `detect_audio_widget` tests.
+
 ### Design contract (`pulp design compile`) — the token/widget allowlist
 
 Before generating or hand-writing a UI, compile the **design contract**: the

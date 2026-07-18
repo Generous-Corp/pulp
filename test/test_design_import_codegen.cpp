@@ -1129,6 +1129,14 @@ TEST_CASE("detect_audio_widget identifies widget types from names", "[view][impo
     REQUIRE(detect_audio_widget("analyser_view") == AudioWidgetType::spectrum);
     REQUIRE(detect_audio_widget("header_label") == AudioWidgetType::none);
     REQUIRE(detect_audio_widget("save_button") == AudioWidgetType::none);
+    // A "label" token names the TEXT that annotates a control, not the control:
+    // "knob label" is the caption, so it must not promote to a knob (which
+    // painted a stock knob disc over a "Classic" filter-mode caption). The real
+    // control keeps its recognition — only the label frame is excluded.
+    REQUIRE(detect_audio_widget("sound / knob label") == AudioWidgetType::none);
+    REQUIRE(detect_audio_widget("fader label") == AudioWidgetType::none);
+    REQUIRE(detect_audio_widget("value label") == AudioWidgetType::none);
+    REQUIRE(detect_audio_widget("sound / knob / small unipolar") == AudioWidgetType::knob);
 }
 
 TEST_CASE("detect_audio_widget matches whole words not substrings", "[view][import]") {
