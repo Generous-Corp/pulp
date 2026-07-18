@@ -58,16 +58,16 @@ decode_step_pattern(const JsonValue& data, const void*) noexcept {
     snapshot.active_lane_count = static_cast<std::uint8_t>(lane_count.value());
     snapshot.active_pattern_count = static_cast<std::uint8_t>(pattern_count.value());
 
-    std::size_t expected_cells = 0;
     for (std::size_t index = 0; index < lengths->array.size(); ++index) {
         auto length = timeline::parse_u32_number(lengths->array[index]);
         if (!length || length.value() > state::kStepCount)
             return fail<std::shared_ptr<const void>>(PersistenceErrorCode::InvalidSchema,
                                                      "/lengths");
         snapshot.patterns[index].length = static_cast<std::uint8_t>(length.value());
-        const auto steps = length.value() == 0 ? state::kStepCount : length.value();
-        expected_cells += lane_count.value() * steps;
     }
+    const auto expected_cells = static_cast<std::size_t>(pattern_count.value()) *
+                                static_cast<std::size_t>(lane_count.value()) *
+                                state::kStepCount;
     if (cells->array.size() != expected_cells)
         return fail<std::shared_ptr<const void>>(PersistenceErrorCode::InvalidSchema,
                                                  "/cells");
@@ -76,9 +76,8 @@ decode_step_pattern(const JsonValue& data, const void*) noexcept {
     for (std::uint8_t pattern_index = 0; pattern_index < snapshot.active_pattern_count;
          ++pattern_index) {
         auto& pattern = snapshot.patterns[pattern_index];
-        const auto steps = pattern.length == 0 ? state::kStepCount : pattern.length;
         for (std::uint8_t lane = 0; lane < snapshot.active_lane_count; ++lane) {
-            for (std::uint8_t step = 0; step < steps; ++step) {
+            for (std::uint8_t step = 0; step < state::kStepCount; ++step) {
                 const auto& encoded = cells->array[cell_index++];
                 if (encoded.kind != JsonValue::Kind::Array || encoded.array.size() != 6)
                     return fail<std::shared_ptr<const void>>(
@@ -144,11 +143,10 @@ encode_step_pattern(const std::shared_ptr<const void>& value, BoundedJsonSink& o
     for (std::uint8_t pattern_index = 0; pattern_index < snapshot.active_pattern_count;
          ++pattern_index) {
         const auto& pattern = snapshot.patterns[pattern_index];
-        const auto steps = pattern.length == 0 ? state::kStepCount : pattern.length;
-        if (steps > state::kStepCount)
+        if (pattern.length > state::kStepCount)
             return fail<SchemaWriteSuccess>(PersistenceErrorCode::InvalidSchema);
         for (std::uint8_t lane = 0; lane < snapshot.active_lane_count; ++lane) {
-            for (std::uint8_t step = 0; step < steps; ++step) {
+            for (std::uint8_t step = 0; step < state::kStepCount; ++step) {
                 if (!first)
                     output.append(",");
                 first = false;

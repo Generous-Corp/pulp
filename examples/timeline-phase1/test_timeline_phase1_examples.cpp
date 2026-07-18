@@ -79,6 +79,36 @@ bool submit_pitch_edit(TimelineStepSequencerProcessor& processor,
     return processor.channel().ui_try_submit(command);
 }
 
+bool cells_equal(const state::StepCell& left, const state::StepCell& right) {
+    return left.flags == right.flags && left.velocity == right.velocity &&
+           left.probability == right.probability &&
+           left.pitch_offset == right.pitch_offset &&
+           left.gate_ticks == right.gate_ticks && left.ratchet == right.ratchet;
+}
+
+state::StepEditCommand length_command(state::ClientSequence sequence,
+                                      std::uint8_t length) {
+    state::StepEditCommand command;
+    command.client_sequence = sequence;
+    command.kind = state::StepEditKind::SetPatternLength;
+    command.payload.set_pattern_length.pattern = 0;
+    command.payload.set_pattern_length.length = length;
+    return command;
+}
+
+state::StepEditCommand clear_command(state::ClientSequence sequence,
+                                     state::ClearScope scope,
+                                     std::uint8_t pattern = 0,
+                                     std::uint8_t lane = 0,
+                                     std::uint8_t step = 0) {
+    state::StepEditCommand command;
+    command.client_sequence = sequence;
+    command.transaction_id = static_cast<state::EditTransactionId>(sequence + 100);
+    command.kind = state::StepEditKind::Clear;
+    command.payload.clear = {scope, pattern, lane, step};
+    return command;
+}
+
 } // namespace
 
 namespace pulp::format {
@@ -395,12 +425,31 @@ TEST_CASE("timeline step lane randomize preserves save load expand equivalence")
     processor.prepare(prepare_context());
     REQUIRE(processor.engine_prepared());
 
-    std::array<state::StepCell, state::kStepCount> hidden_before{};
-    for (std::uint8_t step = 16; step < state::kStepCount; ++step)
-        hidden_before[step] = processor.pattern_snapshot().patterns[0].lanes[0][step];
+    REQUIRE(processor.channel().ui_try_submit(length_command(11, state::kStepCount)));
+    REQUIRE(processor.apply_pending_edits_and_recompile());
+    REQUIRE(processor.channel().ui_try_pop_applied());
+
+    state::StepEditCommand hidden;
+    hidden.client_sequence = 12;
+    hidden.kind = state::StepEditKind::SetCell;
+    hidden.payload.set_cell.pattern = 0;
+    hidden.payload.set_cell.lane = 0;
+    hidden.payload.set_cell.step = 31;
+    hidden.payload.set_cell.cell.flags = state::StepCell::kEnabledBit;
+    hidden.payload.set_cell.cell.velocity = 117;
+    hidden.payload.set_cell.cell.pitch_offset = 19;
+    hidden.payload.set_cell.cell.gate_ticks = 12;
+    REQUIRE(processor.channel().ui_try_submit(hidden));
+    REQUIRE(processor.apply_pending_edits_and_recompile());
+    REQUIRE(processor.channel().ui_try_pop_applied());
+    const auto hidden_before = processor.pattern_snapshot().patterns[0].lanes[0][31];
+
+    REQUIRE(processor.channel().ui_try_submit(length_command(13, 16)));
+    REQUIRE(processor.apply_pending_edits_and_recompile());
+    REQUIRE(processor.channel().ui_try_pop_applied());
 
     state::StepEditCommand randomize;
-    randomize.client_sequence = 11;
+    randomize.client_sequence = 14;
     randomize.kind = state::StepEditKind::RandomizeLane;
     randomize.payload.randomize_lane.pattern = 0;
     randomize.payload.randomize_lane.lane = 0;
@@ -416,12 +465,8 @@ TEST_CASE("timeline step lane randomize preserves save load expand equivalence")
     REQUIRE(randomize_echo->kind == state::AppliedEditKind::StepRangeChanged);
     REQUIRE(randomize_echo->dirty.step_count == 16);
     REQUIRE(randomize_echo->payload.step_range.step_count == 16);
-    for (std::uint8_t step = 16; step < state::kStepCount; ++step) {
-        const auto& hidden = processor.pattern_snapshot().patterns[0].lanes[0][step];
-        REQUIRE(hidden.flags == hidden_before[step].flags);
-        REQUIRE(hidden.velocity == hidden_before[step].velocity);
-        REQUIRE(hidden.pitch_offset == hidden_before[step].pitch_offset);
-    }
+    REQUIRE(cells_equal(processor.pattern_snapshot().patterns[0].lanes[0][31],
+                        hidden_before));
 
     auto saved = timeline::serialize_project(*processor.persistent_project(),
                                              processor.pattern_registry());
@@ -438,22 +483,26 @@ TEST_CASE("timeline step lane randomize preserves save load expand equivalence")
         std::get_if<timeline::RegisteredContent>(&loaded_clip->content());
     REQUIRE(loaded_registered);
     auto loaded_pattern = loaded_registered->value_as<StepPatternDocument>()->snapshot;
+    REQUIRE(cells_equal(loaded_pattern.patterns[0].lanes[0][31], hidden_before));
 
-    state::StepEditCommand expand;
-    expand.client_sequence = 12;
-    expand.kind = state::StepEditKind::SetPatternLength;
-    expand.payload.set_pattern_length.pattern = 0;
-    expand.payload.set_pattern_length.length = state::kStepCount;
+    TimelineStepSequencerProcessor restored;
+    restored.prepare(prepare_context());
+    REQUIRE(restored.load_persistent_project(loaded.value()));
+    REQUIRE(restored.pattern_snapshot().epoch == 2);
+    REQUIRE(restored.channel().ui_resync_required_epoch() == 2);
+    REQUIRE(cells_equal(restored.pattern_snapshot().patterns[0].lanes[0][31],
+                        hidden_before));
+
+    auto expand = length_command(15, state::kStepCount);
     REQUIRE(processor.channel().ui_try_submit(expand));
     REQUIRE(processor.apply_pending_edits_and_recompile());
     const auto expand_echo = processor.channel().ui_try_pop_applied();
     REQUIRE(expand_echo);
     REQUIRE(expand_echo->kind == state::AppliedEditKind::PatternLengthChanged);
-    loaded_pattern.patterns[0].length = state::kStepCount;
+    REQUIRE(restored.channel().ui_try_submit(expand));
+    REQUIRE(restored.apply_pending_edits_and_recompile());
+    REQUIRE(restored.channel().ui_try_pop_applied());
 
-    auto loaded_expanded = make_registered_step_pattern(loaded_pattern,
-                                                        processor.pattern_registry());
-    REQUIRE(loaded_expanded);
     const auto* live_clip = processor.persistent_project()
                                 ->find_sequence({3})
                                 ->find_track({4})
@@ -462,13 +511,182 @@ TEST_CASE("timeline step lane randomize preserves save load expand equivalence")
     const auto* live_registered =
         std::get_if<timeline::RegisteredContent>(&live_clip->content());
     REQUIRE(live_registered);
-    REQUIRE(loaded_expanded->canonical_payload_json() ==
+    const auto* restored_clip = restored.persistent_project()
+                                    ->find_sequence({3})
+                                    ->find_track({4})
+                                    ->find_clip({5});
+    REQUIRE(restored_clip);
+    const auto* restored_registered =
+        std::get_if<timeline::RegisteredContent>(&restored_clip->content());
+    REQUIRE(restored_registered);
+    REQUIRE(restored_registered->canonical_payload_json() ==
             live_registered->canonical_payload_json());
 
-    REQUIRE(processor.seek_samples(0) == playback::TransportError::None);
-    StereoBlock rendered(128);
-    process_direct(processor, rendered);
-    REQUIRE(rendered.energy() > 0.0);
+    constexpr std::int64_t kStep31Sample = 31 * 6'000;
+    REQUIRE(processor.seek_samples(kStep31Sample) == playback::TransportError::None);
+    REQUIRE(restored.seek_samples(kStep31Sample) == playback::TransportError::None);
+    StereoBlock uninterrupted_render(128);
+    StereoBlock restored_render(128);
+    process_direct(processor, uninterrupted_render);
+    process_direct(restored, restored_render);
+    REQUIRE(uninterrupted_render.energy() > 0.0);
+    REQUIRE(restored_render.left == uninterrupted_render.left);
+    REQUIRE(restored_render.right == uninterrupted_render.right);
+    StereoBlock uninterrupted_next(128);
+    StereoBlock restored_next(128);
+    process_direct(processor, uninterrupted_next);
+    process_direct(restored, restored_next);
+    REQUIRE(restored_next.left == uninterrupted_next.left);
+    REQUIRE(restored_next.right == uninterrupted_next.right);
+    REQUIRE(processor.channel().ui_read_playhead().active_step == 31);
+    REQUIRE(restored.channel().ui_read_playhead().active_step == 31);
+}
+
+TEST_CASE("timeline step cell and lane clears publish exact active extent echoes") {
+    TimelineStepSequencerProcessor cell_processor;
+    cell_processor.prepare(prepare_context());
+    auto cell_clear = clear_command(21, state::ClearScope::Cell, 0, 0, 0);
+    REQUIRE(cell_processor.channel().ui_try_submit(cell_clear));
+    REQUIRE(cell_processor.apply_pending_edits_and_recompile());
+    const auto cell_echo = cell_processor.channel().ui_try_pop_applied();
+    REQUIRE(cell_echo);
+    REQUIRE(cell_echo->kind == state::AppliedEditKind::StepRangeChanged);
+    REQUIRE(cell_echo->dirty.kind == state::DirtyKind::Cell);
+    REQUIRE(cell_echo->payload.step_range.step_count == 1);
+    REQUIRE(cell_echo->client_sequence == 21);
+    REQUIRE(cell_echo->transaction_id == 121);
+    REQUIRE(cell_processor.pattern_snapshot().epoch == 1);
+    REQUIRE_FALSE(cell_processor.pattern_snapshot().patterns[0].lanes[0][0].enabled());
+    REQUIRE(cell_processor.seek_samples(0) == playback::TransportError::None);
+    StereoBlock cleared_start(128);
+    process_direct(cell_processor, cleared_start);
+    REQUIRE(cleared_start.energy() == 0.0);
+
+    TimelineStepSequencerProcessor lane_processor;
+    lane_processor.prepare(prepare_context());
+    REQUIRE(lane_processor.channel().ui_try_submit(
+        length_command(22, state::kStepCount)));
+    REQUIRE(lane_processor.apply_pending_edits_and_recompile());
+    REQUIRE(lane_processor.channel().ui_try_pop_applied());
+    state::StepEditCommand hidden;
+    hidden.client_sequence = 23;
+    hidden.kind = state::StepEditKind::SetCell;
+    hidden.payload.set_cell.pattern = 0;
+    hidden.payload.set_cell.lane = 0;
+    hidden.payload.set_cell.step = 31;
+    hidden.payload.set_cell.cell.flags = state::StepCell::kEnabledBit;
+    hidden.payload.set_cell.cell.velocity = 109;
+    hidden.payload.set_cell.cell.gate_ticks = 12;
+    REQUIRE(lane_processor.channel().ui_try_submit(hidden));
+    REQUIRE(lane_processor.apply_pending_edits_and_recompile());
+    REQUIRE(lane_processor.channel().ui_try_pop_applied());
+    const auto hidden_tail = lane_processor.pattern_snapshot().patterns[0].lanes[0][31];
+    REQUIRE(lane_processor.channel().ui_try_submit(length_command(24, 16)));
+    REQUIRE(lane_processor.apply_pending_edits_and_recompile());
+    REQUIRE(lane_processor.channel().ui_try_pop_applied());
+
+    auto lane_clear = clear_command(25, state::ClearScope::Lane, 0, 0, 255);
+    REQUIRE(lane_processor.channel().ui_try_submit(lane_clear));
+    REQUIRE(lane_processor.apply_pending_edits_and_recompile());
+    const auto lane_echo = lane_processor.channel().ui_try_pop_applied();
+    REQUIRE(lane_echo);
+    REQUIRE(lane_echo->kind == state::AppliedEditKind::StepRangeChanged);
+    REQUIRE(lane_echo->dirty.kind == state::DirtyKind::Lane);
+    REQUIRE(lane_echo->dirty.step_count == 16);
+    REQUIRE(lane_echo->payload.step_range.step_count == 16);
+    REQUIRE(lane_echo->client_sequence == 25);
+    REQUIRE(lane_echo->transaction_id == 125);
+    REQUIRE_FALSE(lane_processor.pattern_snapshot().patterns[0].lanes[0][0].enabled());
+    REQUIRE(cells_equal(lane_processor.pattern_snapshot().patterns[0].lanes[0][31],
+                        hidden_tail));
+    REQUIRE(lane_processor.pattern_snapshot().epoch == 1);
+}
+
+TEST_CASE("timeline step pattern and all clears publish authoritative bulk resyncs") {
+    for (const auto scope : {state::ClearScope::Pattern, state::ClearScope::All}) {
+        TimelineStepSequencerProcessor processor;
+        processor.prepare(prepare_context());
+        REQUIRE(processor.channel().ui_try_submit(
+            length_command(31, state::kStepCount)));
+        REQUIRE(processor.apply_pending_edits_and_recompile());
+        REQUIRE(processor.channel().ui_try_pop_applied());
+        state::StepEditCommand hidden;
+        hidden.client_sequence = 32;
+        hidden.kind = state::StepEditKind::SetCell;
+        hidden.payload.set_cell.pattern = 0;
+        hidden.payload.set_cell.lane = 1;
+        hidden.payload.set_cell.step = 31;
+        hidden.payload.set_cell.cell.flags = state::StepCell::kEnabledBit;
+        hidden.payload.set_cell.cell.velocity = 115;
+        hidden.payload.set_cell.cell.gate_ticks = 12;
+        REQUIRE(processor.channel().ui_try_submit(hidden));
+        REQUIRE(processor.apply_pending_edits_and_recompile());
+        REQUIRE(processor.channel().ui_try_pop_applied());
+        const auto hidden_tail = processor.pattern_snapshot().patterns[0].lanes[1][31];
+        REQUIRE(processor.channel().ui_try_submit(length_command(33, 16)));
+        REQUIRE(processor.apply_pending_edits_and_recompile());
+        REQUIRE(processor.channel().ui_try_pop_applied());
+
+        auto clear = clear_command(34, scope, 0, 255, 255);
+        REQUIRE(processor.channel().ui_try_submit(clear));
+        REQUIRE(processor.apply_pending_edits_and_recompile());
+        REQUIRE_FALSE(processor.channel().ui_try_pop_applied());
+        REQUIRE(processor.pattern_snapshot().engine_sequence == 4);
+        REQUIRE(processor.pattern_snapshot().epoch == 2);
+        REQUIRE(processor.channel().ui_resync_required_epoch() == 2);
+        const auto snapshot = processor.channel().ui_read_latest_snapshot();
+        REQUIRE(snapshot.engine_sequence == 4);
+        REQUIRE(snapshot.epoch == 2);
+        for (std::uint8_t lane = 0; lane < snapshot.active_lane_count; ++lane) {
+            for (std::uint8_t step = 0; step < 16; ++step)
+                REQUIRE_FALSE(snapshot.patterns[0].lanes[lane][step].enabled());
+        }
+        REQUIRE(cells_equal(snapshot.patterns[0].lanes[1][31], hidden_tail));
+
+        auto saved = timeline::serialize_project(*processor.persistent_project(),
+                                                 processor.pattern_registry());
+        REQUIRE(saved);
+        auto loaded = timeline::deserialize_project(saved.value().json,
+                                                    processor.pattern_registry());
+        REQUIRE(loaded);
+        TimelineStepSequencerProcessor restored;
+        restored.prepare(prepare_context());
+        REQUIRE(restored.load_persistent_project(loaded.value()));
+        REQUIRE(cells_equal(restored.pattern_snapshot().patterns[0].lanes[1][31],
+                            hidden_tail));
+        REQUIRE(restored.seek_samples(0) == playback::TransportError::None);
+        StereoBlock cleared(128);
+        process_direct(restored, cleared);
+        REQUIRE(cleared.energy() == 0.0);
+    }
+}
+
+TEST_CASE("timeline step clear rejects only fields relevant to each scope") {
+    TimelineStepSequencerProcessor processor;
+    processor.prepare(prepare_context());
+    const std::array rejected{
+        clear_command(41, state::ClearScope::Cell, 0, 0, 31),
+        clear_command(42, state::ClearScope::Lane, 0, 4, 255),
+        clear_command(43, state::ClearScope::Pattern, 1, 255, 255),
+    };
+    for (const auto& command : rejected) {
+        REQUIRE(processor.channel().ui_try_submit(command));
+        REQUIRE_FALSE(processor.apply_pending_edits_and_recompile());
+        const auto echo = processor.channel().ui_try_pop_applied();
+        REQUIRE(echo);
+        REQUIRE(echo->kind == state::AppliedEditKind::CommandRejected);
+        REQUIRE(echo->client_sequence == command.client_sequence);
+        REQUIRE(echo->transaction_id == command.transaction_id);
+        REQUIRE(echo->payload.reject_reason == 2);
+    }
+
+    const auto all = clear_command(44, state::ClearScope::All, 255, 255, 255);
+    REQUIRE(processor.channel().ui_try_submit(all));
+    REQUIRE(processor.apply_pending_edits_and_recompile());
+    REQUIRE_FALSE(processor.channel().ui_try_pop_applied());
+    REQUIRE(processor.pattern_snapshot().engine_sequence == 4);
+    REQUIRE(processor.pattern_snapshot().epoch == 2);
+    REQUIRE(processor.channel().ui_resync_required_epoch() == 2);
 }
 
 TEST_CASE("timeline step channel snapshots only when applied echoes overflow") {
