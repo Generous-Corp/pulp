@@ -504,6 +504,15 @@
         "examples/view-bridge-demo/**"
       ]
     },
+    "playback": {
+      "paths": [
+        "core/playback/**",
+        "core/format/include/pulp/format/playback_context_projection.hpp",
+        "test/test_playback_transport.cpp",
+        "tools/scripts/playback_dependency_floor_check.py",
+        ".agents/skills/playback/**"
+      ]
+    },
     "timebase": {
       "paths": [
         "core/timebase/**",

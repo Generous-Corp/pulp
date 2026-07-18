@@ -42,7 +42,7 @@ set(PULP_SDK_SMOKE_REQUIRE_FORMATS ""
 find_package(Pulp REQUIRED CONFIG)
 
 foreach(_pulp_alias_target
-        audio dsl events format host signal signal-modal-spec state timebase view standalone gpu-audio)
+        audio dsl events format host playback signal signal-modal-spec state timebase view standalone gpu-audio)
     if(TARGET "Pulp::${_pulp_alias_target}"
        AND NOT TARGET "pulp::${_pulp_alias_target}")
         message(FATAL_ERROR
@@ -89,6 +89,30 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/wav_decoder_export_probe.cpp"
 add_executable(PulpSDKSmokeWavDecoderProbe
     "${CMAKE_CURRENT_BINARY_DIR}/wav_decoder_export_probe.cpp")
 target_link_libraries(PulpSDKSmokeWavDecoderProbe PRIVATE Pulp::audio)
+
+if(NOT TARGET Pulp::playback)
+    message(FATAL_ERROR
+        "Pulp SDK smoke: installed SDK does not expose Pulp::playback")
+endif()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/playback_export_probe.cpp"
+"#include <pulp/playback/transport.hpp>\n"
+"#include <pulp/timebase/compiled_tempo_map.hpp>\n"
+"#include <array>\n"
+"\n"
+"int main() {\n"
+"    const std::array points{pulp::timebase::TempoPoint{{0}, 120.0}};\n"
+"    const pulp::timebase::CompiledTempoMap map(points, {48'000, 1});\n"
+"    pulp::playback::MasterTransport transport;\n"
+"    const auto error = transport.prepare(map, {.max_buffer_size = 64});\n"
+"    pulp::playback::TransportSnapshot snapshot;\n"
+"    return error == pulp::playback::TransportError::None &&\n"
+"                   transport.begin_block(64, snapshot) ==\n"
+"                       pulp::playback::TransportError::None\n"
+"               ? 0 : 1;\n"
+"}\n")
+add_executable(PulpSDKSmokePlaybackProbe
+    "${CMAKE_CURRENT_BINARY_DIR}/playback_export_probe.cpp")
+target_link_libraries(PulpSDKSmokePlaybackProbe PRIVATE Pulp::playback)
 
 # Installed host/state/dsl header + link probe. These targets were exported
 # before all of their public headers were reliably copied into the SDK, so a

@@ -2,6 +2,12 @@
 # Vocabulary: stable, usable, experimental, partial, planned, unsupported
 
 modules:
+  - name: playback
+    summary: Integer-authoritative master transport with bounded loop-split ranges, monotonic musical time, and one-way ProcessContext projection
+    status: experimental
+    dependencies: [runtime, timebase, audio]
+    docs: reference/modules.md#playback
+
   - name: timebase
     summary: Strong musical tick and sample positions, rational sample rates, immutable constant/ramped tempo maps, and shared transport quantization arithmetic
     status: experimental

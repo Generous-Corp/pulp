@@ -46,6 +46,7 @@ class CompiledTempoMap {
     TickPosition samples_to_ticks(SamplePosition sample) const noexcept;
     SampleToTickResult resolve_sample(SamplePosition sample) const noexcept;
     SamplePosition ticks_to_samples(TickPosition tick) const noexcept;
+    double tempo_at_tick(TickPosition tick) const noexcept;
 
     RationalRate sample_rate() const noexcept {
         return sample_rate_;
