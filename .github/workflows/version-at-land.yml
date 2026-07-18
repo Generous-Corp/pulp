@@ -30,10 +30,24 @@ on:
     # cheap no-op (see test_version_at_land.py::test_non_trigger_change_is_noop);
     # correctness beats saving a few trivial ubuntu runs. The pending-intent
     # liveness alarm is the time-based backstop if this ever fails to run.
+  # Supersession-immune safety net. GitHub holds only ONE queued run per
+  # concurrency group; on a high-churn main every new push throws the bot's
+  # queued run to the back and drops the previous one, so under hosted-runner
+  # backlog the push-triggered drain can starve FOREVER — the exact death spiral
+  # coverage.yml documents and fixed the same way (see its header). A scheduled
+  # run lands in its OWN concurrency group (below), immune to push supersession,
+  # so pending intent is always drained within the cadence.
+  schedule:
+    - cron: '*/15 * * * *'
   workflow_dispatch: {}
 
 concurrency:
-  group: version-at-land
+  # Event-scoped so a scheduled drain is never superseded by pushes (and vice
+  # versa). Concurrent push+schedule drains are safe: apply_and_push is
+  # --ff-only + Version-Bump-Applied-marker idempotent + recompute-per-retry, so
+  # a loser re-syncs past the winner's marker and no-ops (test_version_at_land.py
+  # concurrency proof). No double-bump.
+  group: version-at-land-${{ github.event_name }}
   cancel-in-progress: false
 
 permissions:
