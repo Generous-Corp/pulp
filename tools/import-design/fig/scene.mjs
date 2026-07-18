@@ -943,11 +943,20 @@ export function materializeFrame(scene, frame, ctx) {
         // floating off-center instead of a radial pointer. Recover the rotation.
         const angle = Math.atan2(t.m10, t.m00);   // radians
         const deg = angle * 180 / Math.PI;
+        // Only a NON-orthogonal rotation makes an axis-aligned box non-axis-
+        // aligned and needs the transform (a knob's value needle at 43.4deg).
+        // A multiple of 90deg keeps a rect axis-aligned, and for a solid fill a
+        // 180deg spin is a visual no-op — applying it (plus the centre-pivot
+        // compensation below) only shifts the box off its intended row, which is
+        // exactly what floated a slider's 180deg-rotated fill above its track.
+        // Orthogonal rotations fall through to plain m02/m12 placement.
+        const mod90 = Math.abs(deg) % 90;
+        const nonOrthogonal = mod90 > 0.5 && mod90 < 89.5;
         // Scope to box-model nodes (frames / rounded-rects / ellipses). A
         // VECTOR_LIKE node is re-lowered to `path_data`, and Figma bakes the
         // layer rotation into that path — re-applying it here would double-rotate
         // the glyph. The reported bug is a knob's value needle, a ROUNDED_RECTANGLE.
-        if (Math.abs(deg) > 0.5 && !VECTOR_LIKE.has(node.type)) {
+        if (nonOrthogonal && !VECTOR_LIKE.has(node.type)) {
           // Figma rotates the layer around its LOCAL origin (0,0), landing that
           // origin at (m02, m12). The renderer applies `rotate()` around the
           // element's CENTER (default transform-origin). Compensate left/top so

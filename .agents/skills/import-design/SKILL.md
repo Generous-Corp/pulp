@@ -377,12 +377,20 @@ left/top for the renderer's centre transform-origin** (Figma rotates about the
 layer origin; the view rotates about centre) — so NO `setTransformOrigin` is
 emitted and CSS-lane `rotate()` (which is also centre-pivot) stays correct. The
 native codegen lowers `transform: rotate()` to `setRotation` in the shared
-`emit_js_visual_overrides`. CRITICAL scope: only box-model nodes get this — a
-`VECTOR_LIKE` node bakes its rotation into `path_data`, so re-applying it would
-double-rotate the glyph (guard with `!VECTOR_LIKE.has(node.type)`; verify a
-rotated icon like the "Reverse" ↩ button is byte-identical before/after). Covered
-by `[rotation]` in `test_design_import_codegen.cpp` + a decoder test in
-`fig/fig.test.mjs`.
+`emit_js_visual_overrides`. TWO scope guards, both load-bearing:
+1. **Non-orthogonal only.** Apply the transform ONLY when the angle is not a
+   multiple of 90deg (`mod90 > 0.5 && mod90 < 89.5`). A multiple of 90deg keeps a
+   rect axis-aligned, and for a solid fill a 180deg spin is a visual no-op — the
+   centre-pivot compensation then only shifts the box off its row. That exact
+   case floated a slider's 180deg-rotated progress fill ABOVE its track (a
+   regression from the first cut of this fix). Orthogonal rotations fall through
+   to plain `m02`/`m12` placement.
+2. **Box-model only.** A `VECTOR_LIKE` node bakes its rotation into `path_data`,
+   so re-applying it double-rotates the glyph (guard `!VECTOR_LIKE.has(node.type)`;
+   verify a rotated icon like the "Reverse" ↩ button is byte-identical
+   before/after).
+Covered by `[rotation]` in `test_design_import_codegen.cpp` + a decoder test in
+`fig/fig.test.mjs` (45deg needle rotates; VECTOR and 180deg fill do not).
 
 ### Design contract (`pulp design compile`) — the token/widget allowlist
 
