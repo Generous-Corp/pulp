@@ -16,6 +16,10 @@ quantizer's beat/frame arithmetic.
   endpoints; it must not invoke signed-overflow UB.
 - `CompiledTempoMap` is immutable and sample-rate-specific. Its first tempo point
   is tick zero, points are strictly ordered, and BPM is finite in `[1, 1000]`.
+- Construction preserves its established `std::invalid_argument` contract in
+  native exception-enabled builds. WAM/WebCLAP compile the same TU without an
+  exception runtime; invalid constructor input fails closed there, so web-facing
+  decode/model paths must validate tempo points before constructing the map.
 - Tempo ramps are BPM-linear in tick position. Integrate them analytically; do not
   approximate ramps block-by-block or accumulate floating-point deltas.
 - Every segment begins at an integer sample anchor. `samples_to_ticks()` returns

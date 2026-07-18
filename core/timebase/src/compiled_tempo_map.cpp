@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
@@ -46,15 +47,26 @@ bool valid_bpm(double bpm) noexcept {
     return std::isfinite(bpm) && bpm >= kMinimumBpm && bpm <= kMaximumBpm;
 }
 
+[[noreturn]] void reject_invalid_map(const char* message) {
+#if defined(__cpp_exceptions) && __cpp_exceptions
+    throw std::invalid_argument(message);
+#else
+    // The constructor's native contract predates the no-exceptions web lane.
+    // Validated production inputs never take this branch; without an exception
+    // runtime there is no recoverable constructor result, so fail closed.
+    std::abort();
+#endif
+}
+
 } // namespace
 
 CompiledTempoMap::CompiledTempoMap(std::span<const TempoPoint> points, RationalRate sample_rate)
     : sample_rate_(sample_rate.normalized()) {
     if (!sample_rate_.valid() || sample_rate_.as_long_double() > kMaximumSampleRate) {
-        throw std::invalid_argument("CompiledTempoMap requires a sample rate in (0, 768000]");
+        reject_invalid_map("CompiledTempoMap requires a sample rate in (0, 768000]");
     }
     if (points.empty() || points.front().tick.value != 0) {
-        throw std::invalid_argument("CompiledTempoMap requires a tempo point at tick zero");
+        reject_invalid_map("CompiledTempoMap requires a tempo point at tick zero");
     }
 
     segments_.reserve(points.size());
@@ -62,10 +74,10 @@ CompiledTempoMap::CompiledTempoMap(std::span<const TempoPoint> points, RationalR
     for (std::size_t index = 0; index < points.size(); ++index) {
         const auto& point = points[index];
         if (!valid_bpm(point.bpm)) {
-            throw std::invalid_argument("tempo BPM must be finite and in [1, 1000]");
+            reject_invalid_map("tempo BPM must be finite and in [1, 1000]");
         }
         if (index > 0 && point.tick.value <= points[index - 1].tick.value) {
-            throw std::invalid_argument("tempo points must have strictly increasing ticks");
+            reject_invalid_map("tempo points must have strictly increasing ticks");
         }
 
         const auto has_next = index + 1 < points.size();
@@ -75,7 +87,7 @@ CompiledTempoMap::CompiledTempoMap(std::span<const TempoPoint> points, RationalR
                                  ? points[index + 1].bpm
                                  : point.bpm;
         if (!valid_bpm(end_bpm)) {
-            throw std::invalid_argument("tempo ramp endpoint BPM must be finite and in [1, 1000]");
+            reject_invalid_map("tempo ramp endpoint BPM must be finite and in [1, 1000]");
         }
 
         segments_.push_back({point.tick, end_tick, anchor, point.bpm, end_bpm,
@@ -85,12 +97,12 @@ CompiledTempoMap::CompiledTempoMap(std::span<const TempoPoint> points, RationalR
             const auto duration = samples_from_segment_start(segments_.back(), delta);
             if (!std::isfinite(duration) || duration < 0.0L ||
                 duration >= kInt64MaximumRoundingBoundary) {
-                throw std::invalid_argument("tempo map duration exceeds SamplePosition range");
+                reject_invalid_map("tempo map duration exceeds SamplePosition range");
             }
             const auto rounded_duration = static_cast<std::int64_t>(std::llround(duration));
             if (anchor.value >
                 std::numeric_limits<std::int64_t>::max() - rounded_duration) {
-                throw std::invalid_argument("tempo map duration exceeds SamplePosition range");
+                reject_invalid_map("tempo map duration exceeds SamplePosition range");
             }
             anchor.value += rounded_duration;
         }

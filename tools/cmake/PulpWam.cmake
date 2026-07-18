@@ -27,6 +27,9 @@ endif()
 
 # Repo root = two levels up from tools/cmake/.
 get_filename_component(_PULP_WAM_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+include("${CMAKE_CURRENT_LIST_DIR}/PulpTimelineEngineWeb.cmake")
+pulp_timeline_engine_web_sources(
+    "${_PULP_WAM_ROOT}" _PULP_WAM_TIMELINE_SOURCES _PULP_WAM_TIMELINE_INCLUDES)
 
 # choc (header-only, for MIDI). Provided by the parent project's FetchContent or
 # an explicit -DPULP_WAM_CHOC_INCLUDE=<dir containing choc/>; otherwise fall back
@@ -55,6 +58,7 @@ set(_PULP_WAM_INCLUDES
     ${_PULP_WAM_ROOT}/core/events/include
     ${_PULP_WAM_ROOT}/core/format/include
     ${_PULP_WAM_ROOT}/core/signal/include
+    ${_PULP_WAM_TIMELINE_INCLUDES}
     ${_PULP_WAM_ROOT}/external/dr_libs
     ${PULP_WAM_CHOC_INCLUDE}
 )
@@ -68,6 +72,7 @@ set(_PULP_WAM_INCLUDES
 # (one global WamChainBridge) — the two define the SAME C symbols and must never
 # be linked together. Both compile against wam_adapter.cpp, which lives here.
 set(_PULP_WAM_CORE_SOURCES
+    ${_PULP_WAM_TIMELINE_SOURCES}
     ${_PULP_WAM_ROOT}/core/audio/src/wav_decoder.cpp
     ${_PULP_WAM_ROOT}/core/runtime/src/runtime.cpp
     ${_PULP_WAM_ROOT}/core/runtime/src/identity.cpp
@@ -96,7 +101,10 @@ target_include_directories(pulp-wam-dsp PUBLIC ${_PULP_WAM_INCLUDES})
 # Keeping them symmetric with the WebCLAP lane is what makes "same header,
 # bit-identical DSP across WAM and WebCLAP" true by construction instead of by
 # convention.
-target_compile_definitions(pulp-wam-dsp PUBLIC PULP_WASM=1 PULP_HEADLESS=1)
+target_compile_definitions(pulp-wam-dsp PUBLIC
+    PULP_WASM=1
+    PULP_HEADLESS=1
+    PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1)
 target_compile_options(pulp-wam-dsp PRIVATE -fno-exceptions -fno-rtti -O2)
 
 # The wam_* C symbols every plugin entry point exports.

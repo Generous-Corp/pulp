@@ -37,6 +37,9 @@ endif()
 
 # Repo root = two levels up from tools/cmake/.
 get_filename_component(_PULP_WCLAP_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+include("${CMAKE_CURRENT_LIST_DIR}/PulpTimelineEngineWeb.cmake")
+pulp_timeline_engine_web_sources(
+    "${_PULP_WCLAP_ROOT}" _PULP_WCLAP_TIMELINE_SOURCES _PULP_WCLAP_TIMELINE_INCLUDES)
 
 # choc (header-only). Resolution order:
 #   1. -DPULP_WCLAP_CHOC_INCLUDE=<dir containing choc/> (explicit override)
@@ -90,6 +93,7 @@ set(_PULP_WCLAP_INCLUDES
     ${_PULP_WCLAP_ROOT}/core/events/include
     ${_PULP_WCLAP_ROOT}/core/format/include
     ${_PULP_WCLAP_ROOT}/core/signal/include
+    ${_PULP_WCLAP_TIMELINE_INCLUDES}
     ${_PULP_WCLAP_ROOT}/external/dr_libs
     ${PULP_WCLAP_CHOC_INCLUDE}
     ${PULP_WCLAP_CLAP_INCLUDE}
@@ -98,6 +102,7 @@ set(_PULP_WCLAP_INCLUDES
 # Portable DSP + CLAP-adapter subset — compiled once into an OBJECT library and
 # shared across every WebCLAP plugin target.
 set(_PULP_WCLAP_CORE_SOURCES
+    ${_PULP_WCLAP_TIMELINE_SOURCES}
     ${_PULP_WCLAP_ROOT}/core/audio/src/wav_decoder.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_adapter.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_remote_controls.cpp
@@ -120,7 +125,10 @@ set(_PULP_WCLAP_CORE_SOURCES
 
 add_library(pulp-wclap-dsp OBJECT ${_PULP_WCLAP_CORE_SOURCES})
 target_include_directories(pulp-wclap-dsp PUBLIC ${_PULP_WCLAP_INCLUDES})
-target_compile_definitions(pulp-wclap-dsp PUBLIC PULP_WCLAP=1 PULP_WASM=1)
+target_compile_definitions(pulp-wclap-dsp PUBLIC
+    PULP_WCLAP=1
+    PULP_WASM=1
+    PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1)
 
 # pulp_add_wclap(<Name>
 #     ENTRY    <entry.cpp>          # required: the WebCLAP entry point (PULP_WCLAP_PLUGIN)

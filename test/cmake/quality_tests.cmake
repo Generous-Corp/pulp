@@ -20,6 +20,10 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/timeline_dependency_floor_check.py")
     add_test(NAME timeline-dependency-floor-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/timeline_dependency_floor_check.py" --selftest)
+    add_test(NAME timeline-web-source-closure COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/timeline_web_source_closure_check.py")
+    add_test(NAME timeline-web-source-closure-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/timeline_web_source_closure_check.py" --selftest)
     # Reskinnability ratchet: fail on a NEW hardcoded theme color.
     add_test(NAME token-coverage-ratchet COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/token_coverage_check.py")

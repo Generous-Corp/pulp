@@ -78,6 +78,10 @@ the format-layer projection from playback snapshots to `ProcessContext`.
 - Arrangement note events are compiled against the owning program's exact
   tempo map and ordered by sample, note-off before note-on, then clip/note ID.
   A renderer uses half-open sample ranges and never latches a callback size.
+- Audio and note renderers must consume the same `TransportSnapshot` for a
+  callback. The replay golden uses a varying schedule up to the transport's
+  prepared `max_buffer_size`; never cache the first callback size in either
+  renderer or bypass `MasterTransport`'s upper-bound rejection.
 - Note rendering is a transport-tick MIDI lane. Do not lower it to an audio
   `CustomNodeType`; the host/embedded adapter routes its bounded MIDI output.
 - `core/playback` must not include `pulp/format`, `pulp/host`, or `pulp/view`.
@@ -101,3 +105,10 @@ Also build `timeline-program-threadless-no-exceptions-check`; it compiles the
 program/compiler/executor/shell lane with `-fno-exceptions -fno-rtti` and the
 threadless executor stub. Run the WASI SDK build when `/opt/wasi-sdk` is
 available; the native compile-only gate remains mandatory when it is not.
+The authoritative browser compile closure is
+`tools/cmake/PulpTimelineEngineWeb.cmake`, consumed by both `PulpWam.cmake` and
+`PulpWclap.cmake`. Add portable engine translation units there once so both
+production ABIs compile them with the threadless executor and no exceptions.
+`timeline-web-source-closure` compares that manifest with all three native
+module source lists and verifies both ABI consumers; update the manifest in the
+same change as any new engine translation unit.

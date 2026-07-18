@@ -33,6 +33,11 @@ pulp_add_test_suite(pulp-test-timeline-schema-registry LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-persistence LIBRARIES pulp::timeline)
 target_compile_definitions(pulp-test-timeline-persistence PRIVATE
     PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
+pulp_add_test_suite(pulp-test-timeline-replay-golden
+    SOURCES test_timeline_replay_golden.cpp
+    LIBRARIES pulp::playback)
+target_compile_definitions(pulp-test-timeline-replay-golden PRIVATE
+    PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 
 add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/assets.cpp

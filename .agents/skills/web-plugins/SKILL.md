@@ -257,6 +257,14 @@ per-ABI entry point for it.** Go through the plugin's own state:
   to `core/audio/CMakeLists.txt`, mirror it in both lists or the native build can
   pass while one browser ABI link-fails.
 
+- The Creative Timeline Engine is part of both production DSP builds, not a
+  disposable probe. `PulpTimelineEngineWeb.cmake` is the shared source/include
+  manifest for `core/timebase`, `core/timeline`, and `core/playback`; both ABIs
+  compile it with `PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1`, and the web workflow
+  must trigger when any engine module or the WAV decoder changes.
+  `timeline-web-source-closure` prevents the shared list from drifting from the
+  native module source lists or from either ABI consumer.
+
 - Both ABIs already expose the plugin's opaque state behind ONE `HostAdapter`
   call — WAM through `wam_state_size`/`wam_read_state`/`wam_write_state`, WebCLAP
   through the `clap.state` extension — and both produce the *same* `PLST` blob the

@@ -508,9 +508,11 @@
       "paths": [
         "core/playback/**",
         "core/format/include/pulp/format/playback_context_projection.hpp",
-        "test/test_playback_transport.cpp",
-        "test/test_playback_audio_renderer.cpp",
+        "test/test_playback_*.cpp",
+        "test/test_timeline_replay_golden.cpp",
+        "test/cmake/sampler_runtime_tests.cmake",
         "tools/scripts/playback_dependency_floor_check.py",
+        "tools/scripts/timeline_web_source_closure_check.py",
         ".agents/skills/playback/**"
       ]
     },
@@ -527,7 +529,11 @@
     "timeline": {
       "paths": [
         "core/timeline/**",
-        "test/test_timeline_model.cpp",
+        "test/test_timeline_*.cpp",
+        "test/fixtures/timeline/**",
+        "test/timeline_command_test_helpers.hpp",
+        "test/cmake/sampler_runtime_tests.cmake",
+        "tools/scripts/timeline_dependency_floor_check.py",
         ".agents/skills/timeline/**"
       ]
     },
@@ -549,6 +555,9 @@
         "core/render/src/skia_surface_ganesh.cpp",
         "tools/cmake/PulpWam.cmake",
         "tools/cmake/PulpWclap.cmake",
+        "tools/cmake/PulpTimelineEngineWeb.cmake",
+        "tools/scripts/timeline_web_source_closure_check.py",
+        ".github/workflows/web-plugins.yml",
         "tools/cmake/PulpWebUi.cmake"
       ]
     },
