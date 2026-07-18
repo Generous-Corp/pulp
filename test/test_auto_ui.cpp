@@ -3,10 +3,12 @@
 #include <pulp/view/auto_ui.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/motion.hpp>
+#include <pulp/view/screenshot.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/canvas/canvas.hpp>
 
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <string>
@@ -98,6 +100,48 @@ TEST_CASE("AutoUi builds from parameter store", "[view][auto_ui]") {
     REQUIRE(body->child_count() == 1);
     auto* grid = body->child_at(0);
     REQUIRE(grid->child_count() == 3);  // Gain + Mix + Bypass
+
+    // Knob text belongs to dedicated rows below the dial instead of being
+    // painted over its artwork.
+    auto* gain_tile = grid->child_at(0);
+    REQUIRE(gain_tile->child_count() == 3);
+    auto* gain_knob = dynamic_cast<Knob*>(gain_tile->child_at(0));
+    REQUIRE(gain_knob != nullptr);
+    CHECK_FALSE(gain_knob->show_label());
+    CHECK_FALSE(gain_knob->show_value());
+    CHECK(gain_knob->get_value_string() == "0.00 dB");
+    auto* gain_name = dynamic_cast<Label*>(gain_tile->child_at(1));
+    auto* gain_value = dynamic_cast<Label*>(gain_tile->child_at(2));
+    REQUIRE(gain_name != nullptr);
+    REQUIRE(gain_value != nullptr);
+    CHECK(gain_name->text() == "Gain");
+    CHECK(gain_value->text() == "0.00 dB");
+}
+
+TEST_CASE("AutoUi renders knob names and values outside the dial",
+          "[view][auto_ui][screenshot]") {
+    StateStore store;
+    store.add_parameter(make_param(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    store.add_parameter(make_param(2, "Mix", "%", {0.0f, 100.0f, 75.0f}));
+    store.add_parameter(make_param(3, "Frequency", "Hz", {20.0f, 20000.0f, 440.0f}));
+    store.add_parameter(make_param(4, "Resonance", "%", {0.0f, 100.0f, 35.0f}));
+
+    auto root = AutoUi::build(store);
+    REQUIRE(root != nullptr);
+
+    constexpr uint32_t width = 400;
+    constexpr uint32_t height = 300;
+    root->set_bounds({0.0f, 0.0f, static_cast<float>(width),
+                      static_cast<float>(height)});
+    auto png = render_to_png(*root, width, height, 2.0f, ScreenshotBackend::skia);
+    if (png.empty()) SKIP("Skia raster backend unavailable");
+    REQUIRE(png.size() > 2000);
+
+    // Optional durable artifact for local visual review. CI remains clean.
+    if (const char* out = std::getenv("PULP_AUTO_UI_SCREENSHOT_OUT")) {
+        REQUIRE(render_to_file(*root, width, height, out, 2.0f,
+                               ScreenshotBackend::skia));
+    }
 }
 
 TEST_CASE("AutoUi builds empty parameter grids", "[view][auto_ui]") {
@@ -181,10 +225,12 @@ TEST_CASE("AutoUi tiles: fixed size, no shrink, knob/toggle inside",
     // Tile 0 → Knob
     auto* tile_knob = grid->child_at(0);
     REQUIRE(tile_knob->flex().preferred_width == 82);
-    REQUIRE(tile_knob->flex().preferred_height == 96);
+    REQUIRE(tile_knob->flex().preferred_height == 112);
     REQUIRE(tile_knob->flex().flex_shrink == 0);  // tiles never shrink
-    REQUIRE(tile_knob->child_count() == 1);
+    REQUIRE(tile_knob->child_count() == 3);
     REQUIRE(dynamic_cast<Knob*>(tile_knob->child_at(0)) != nullptr);
+    REQUIRE(dynamic_cast<Label*>(tile_knob->child_at(1)) != nullptr);
+    REQUIRE(dynamic_cast<Label*>(tile_knob->child_at(2)) != nullptr);
 
     // Tile 1 → Toggle (Switch range [0,1] step 1 → toggle path)
     auto* tile_toggle = grid->child_at(1);
@@ -364,6 +410,21 @@ TEST_CASE("AutoUi sync updates widgets", "[view][auto_ui]") {
     REQUIRE_THAT(knob->value(), WithinAbs(0.8, 0.01));
 }
 
+TEST_CASE("AutoUi sync updates the padded value row", "[view][auto_ui]") {
+    StateStore store;
+    store.add_parameter(make_param(7, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    auto root = AutoUi::build(store);
+    auto* tile = root->child_at(1)->child_at(0)->child_at(0);
+    REQUIRE(tile->child_count() == 3);
+    auto* value = dynamic_cast<Label*>(tile->child_at(2));
+    REQUIRE(value != nullptr);
+    CHECK(value->text() == "0.00 dB");
+
+    store.set_value(7, -24.0f);
+    AutoUi::sync(*root, store);
+    CHECK(value->text() == "-24.0 dB");
+}
+
 TEST_CASE("AutoUi generated controls write changes back to the store",
           "[view][auto_ui][parameters]") {
     StateStore store;
@@ -412,13 +473,22 @@ TEST_CASE("AutoUi generated controls expose toggle state and formatted values",
     REQUIRE(bypass->is_on());
     REQUIRE(bypass->label() == "Bypass");
 
-    frequency->set_bounds({0, 0, 80, 80});
-    drive->set_bounds({0, 0, 80, 80});
-    fine->set_bounds({0, 0, 80, 80});
+    auto* frequency_value = find_widget<Label>(*root, "__auto_ui_value_1");
+    auto* drive_value = find_widget<Label>(*root, "__auto_ui_value_2");
+    auto* fine_value = find_widget<Label>(*root, "__auto_ui_value_3");
+    REQUIRE(frequency_value != nullptr);
+    REQUIRE(drive_value != nullptr);
+    REQUIRE(fine_value != nullptr);
+    CHECK(frequency_value->text() == "500 Hz");
+    CHECK(drive_value->text() == "50.0 dB");
+    CHECK(fine_value->text() == "5.00");
 
-    REQUIRE(paints_text(*frequency, "500 Hz"));
-    REQUIRE(paints_text(*drive, "50.0 dB"));
-    REQUIRE(paints_text(*fine, "5.00"));
+    frequency->set_bounds({0, 0, 64, 64});
+    drive->set_bounds({0, 0, 64, 64});
+    fine->set_bounds({0, 0, 64, 64});
+    CHECK_FALSE(paints_text(*frequency, "500 Hz"));
+    CHECK_FALSE(paints_text(*drive, "50.0 dB"));
+    CHECK_FALSE(paints_text(*fine, "5.00"));
 }
 
 TEST_CASE("AutoUi sync updates generated toggles and existing faders",

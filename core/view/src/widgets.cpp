@@ -883,7 +883,7 @@ void Knob::paint(canvas::Canvas& canvas) {
     }
 
     // Value text in center (always drawn, even with shader)
-    if (format_) {
+    if (show_value_ && format_) {
         auto text_color = resolve_color("text.primary", canvas::Color::rgba8(200, 200, 200));
         canvas.set_fill_color({text_color.r, text_color.g, text_color.b, text_color.a});
         canvas.set_font("Inter", 11.0f);
