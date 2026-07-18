@@ -41,6 +41,9 @@ class TimelineStepSequencerProcessor final : public format::Processor {
         return persistent_project_.get();
     }
     const timeline::SchemaRegistry& pattern_registry() const noexcept { return registry_; }
+    /// Replace the live grid from its registered persistent component. This is a
+    /// bulk replacement: successful loads publish a fresh snapshot/resync epoch.
+    bool load_persistent_project(const timeline::Project& project);
     playback::TransportError set_playing(bool playing) noexcept;
     playback::TransportError seek_samples(std::int64_t sample) noexcept;
     playback::TransportError set_loop_samples(bool enabled, std::int64_t start,
@@ -58,6 +61,7 @@ class TimelineStepSequencerProcessor final : public format::Processor {
     double sample_rate_ = 0.0;
     std::uint32_t maximum_block_size_ = 0;
     std::atomic<std::uint8_t> active_pattern_{0};
+    std::atomic<std::uint8_t> active_step_count_{state::kStepCount};
     TimelineExampleEngine engine_;
 
     bool compile_pattern(const state::Snapshot& snapshot, bool replace_engine);

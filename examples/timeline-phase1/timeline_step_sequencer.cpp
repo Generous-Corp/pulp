@@ -22,7 +22,12 @@ std::optional<T> value_or_none(runtime::Result<T, E> result) {
 }
 
 constexpr std::int64_t kStepTicks = timebase::kTicksPerQuarter / 4;
-constexpr std::int64_t kBarTicks = timebase::kTicksPerQuarter * 4;
+
+std::int64_t pattern_duration_ticks(const state::Snapshot& pattern) noexcept {
+    const auto length = pattern.patterns[pattern.active_pattern].length;
+    const auto active_steps = length == 0 ? state::kStepCount : length;
+    return static_cast<std::int64_t>(active_steps) * kStepTicks;
+}
 
 bool command_targets_active_extent(const state::Snapshot& snapshot,
                                    const state::StepEditCommand& command) noexcept {
@@ -47,10 +52,21 @@ bool command_targets_active_extent(const state::Snapshot& snapshot,
                step_is_active(command.payload.set_cell.pattern,
                               command.payload.set_cell.step);
     case state::StepEditKind::Clear:
-        return pattern_is_active(command.payload.clear.pattern) &&
-               lane_is_active(command.payload.clear.lane) &&
-               step_is_active(command.payload.clear.pattern,
-                              command.payload.clear.step);
+        switch (command.payload.clear.scope) {
+        case state::ClearScope::Cell:
+            return pattern_is_active(command.payload.clear.pattern) &&
+                   lane_is_active(command.payload.clear.lane) &&
+                   step_is_active(command.payload.clear.pattern,
+                                  command.payload.clear.step);
+        case state::ClearScope::Lane:
+            return pattern_is_active(command.payload.clear.pattern) &&
+                   lane_is_active(command.payload.clear.lane);
+        case state::ClearScope::Pattern:
+            return pattern_is_active(command.payload.clear.pattern);
+        case state::ClearScope::All:
+            return true;
+        }
+        return false;
     case state::StepEditKind::RandomizeLane:
         return pattern_is_active(command.payload.randomize_lane.pattern) &&
                lane_is_active(command.payload.randomize_lane.lane);
@@ -76,13 +92,71 @@ state::AppliedEdit rejected_edit(const state::StepEditCommand& command,
     return echo;
 }
 
-std::optional<state::AppliedEdit>
+struct StepEditResult {
+    std::optional<state::AppliedEdit> echo;
+    bool changed = false;
+    bool bulk_snapshot = false;
+};
+
+StepEditResult
 apply_active_extent_step_edit(state::Snapshot& snapshot,
                               const state::StepEditCommand& command,
                               state::EngineSequence& engine_sequence) {
-    if (command.kind != state::StepEditKind::RandomizeLane)
-        return state::apply_step_edit<state::ReferenceSequencerConfig>(
+    if (command.kind == state::StepEditKind::Clear) {
+        const auto& clear = command.payload.clear;
+        if (clear.scope == state::ClearScope::Cell) {
+            auto echo = state::apply_step_edit<state::ReferenceSequencerConfig>(
+                snapshot, command, engine_sequence);
+            return {std::move(echo), true, false};
+        }
+
+        const auto clear_lane = [&snapshot](std::uint8_t pattern_index,
+                                            std::uint8_t lane_index) {
+            const auto length = snapshot.patterns[pattern_index].length;
+            const auto active_steps = length == 0 ? state::kStepCount : length;
+            for (std::uint8_t step = 0; step < active_steps; ++step)
+                snapshot.patterns[pattern_index].lanes[lane_index][step] = {};
+            return active_steps;
+        };
+
+        if (clear.scope == state::ClearScope::Lane) {
+            const auto active_steps = clear_lane(clear.pattern, clear.lane);
+            state::AppliedEdit echo;
+            echo.engine_sequence = ++engine_sequence;
+            echo.snapshot_epoch = snapshot.epoch;
+            echo.client_sequence = command.client_sequence;
+            echo.transaction_id = command.transaction_id;
+            echo.kind = state::AppliedEditKind::StepRangeChanged;
+            echo.dirty = {state::DirtyKind::Lane, clear.pattern, clear.lane, 0,
+                          active_steps};
+            echo.payload.step_range.pattern = clear.pattern;
+            echo.payload.step_range.lane = clear.lane;
+            echo.payload.step_range.first_step = 0;
+            echo.payload.step_range.step_count = active_steps;
+            for (std::uint8_t step = 0; step < active_steps; ++step)
+                echo.payload.step_range.cells[step] = {};
+            return {std::move(echo), true, false};
+        }
+
+        ++engine_sequence;
+        if (clear.scope == state::ClearScope::Pattern) {
+            for (std::uint8_t lane = 0; lane < snapshot.active_lane_count; ++lane)
+                (void)clear_lane(clear.pattern, lane);
+        } else {
+            for (std::uint8_t pattern = 0; pattern < snapshot.active_pattern_count;
+                 ++pattern) {
+                for (std::uint8_t lane = 0; lane < snapshot.active_lane_count; ++lane)
+                    (void)clear_lane(pattern, lane);
+            }
+        }
+        return {{}, true, true};
+    }
+
+    if (command.kind != state::StepEditKind::RandomizeLane) {
+        auto echo = state::apply_step_edit<state::ReferenceSequencerConfig>(
             snapshot, command, engine_sequence);
+        return {std::move(echo), true, false};
+    }
 
     const auto pattern_index = command.payload.randomize_lane.pattern;
     const auto lane_index = command.payload.randomize_lane.lane;
@@ -90,9 +164,8 @@ apply_active_extent_step_edit(state::Snapshot& snapshot,
     const auto active_steps = length == 0 ? state::kStepCount : length;
 
     // The frozen reference reducer intentionally operates over compile-time
-    // capacity. This example persists only active extent, so preserve the
-    // inactive tail: otherwise randomize -> save/load -> expand reveals state
-    // that was never serialized and the two authoritative histories diverge.
+    // capacity. Randomize is an active-extent command in this example, so keep
+    // the inactive tail byte-for-byte intact.
     std::array<state::StepCell, state::kStepCount> inactive_tail{};
     for (std::uint8_t step = active_steps; step < state::kStepCount; ++step)
         inactive_tail[step] = snapshot.patterns[pattern_index].lanes[lane_index][step];
@@ -100,13 +173,13 @@ apply_active_extent_step_edit(state::Snapshot& snapshot,
     auto echo = state::apply_step_edit<state::ReferenceSequencerConfig>(
         snapshot, command, engine_sequence);
     if (!echo || echo->kind != state::AppliedEditKind::StepRangeChanged)
-        return echo;
+        return {std::move(echo), false, false};
 
     for (std::uint8_t step = active_steps; step < state::kStepCount; ++step)
         snapshot.patterns[pattern_index].lanes[lane_index][step] = inactive_tail[step];
     echo->payload.step_range.step_count = active_steps;
     echo->dirty.step_count = active_steps;
-    return echo;
+    return {std::move(echo), true, false};
 }
 
 std::shared_ptr<const timeline::Project>
@@ -138,8 +211,9 @@ make_playback_pattern_project(const state::Snapshot& pattern) {
     auto content = value_or_none(timeline::NoteContent::create(std::move(notes)));
     if (!content)
         return {};
+    const auto duration = pattern_duration_ticks(pattern);
     auto clip = value_or_none(timeline::Clip::create(
-        {5}, {0}, {kBarTicks}, std::move(*content)));
+        {5}, {0}, {duration}, std::move(*content)));
     if (!clip)
         return {};
     auto track = value_or_none(timeline::Track::create(
@@ -147,7 +221,7 @@ make_playback_pattern_project(const state::Snapshot& pattern) {
     if (!track)
         return {};
     auto sequence = value_or_none(timeline::Sequence::create(
-        {3}, "One bar pattern", timebase::TickDuration{kBarTicks},
+        {3}, "Step pattern", timebase::TickDuration{duration},
         std::vector<timeline::Track>{std::move(*track)}));
     if (!sequence)
         return {};
@@ -167,8 +241,9 @@ make_persistent_pattern_project(const state::Snapshot& pattern,
     auto registered = make_registered_step_pattern(pattern, registry);
     if (!registered)
         return {};
+    const auto duration = pattern_duration_ticks(pattern);
     auto clip = value_or_none(timeline::Clip::create(
-        {5}, {0}, {kBarTicks}, std::move(*registered)));
+        {5}, {0}, {duration}, std::move(*registered)));
     if (!clip)
         return {};
     auto track = value_or_none(timeline::Track::create(
@@ -176,7 +251,7 @@ make_persistent_pattern_project(const state::Snapshot& pattern,
     if (!track)
         return {};
     auto sequence = value_or_none(timeline::Sequence::create(
-        {3}, "One bar pattern", timebase::TickDuration{kBarTicks},
+        {3}, "Step pattern", timebase::TickDuration{duration},
         std::vector<timeline::Track>{std::move(*track)}));
     if (!sequence)
         return {};
@@ -270,43 +345,97 @@ bool TimelineStepSequencerProcessor::compile_pattern(const state::Snapshot& snap
     } else {
         if (!engine_.prepare(std::move(request), sample_rate_, maximum_block_size_, true))
             return false;
-        const auto bar_end =
-            engine_.last_transport().tempo_map->ticks_to_samples({kBarTicks}).value;
-        if (engine_.set_loop_samples(true, 0, bar_end) != playback::TransportError::None)
-            return false;
     }
+    const auto pattern_end = engine_.last_transport().tempo_map
+                                 ->ticks_to_samples({pattern_duration_ticks(snapshot)}).value;
+    if (engine_.set_loop_samples(true, 0, pattern_end) != playback::TransportError::None)
+        return false;
     persistent_project_ = std::move(persistent);
     active_pattern_.store(snapshot.active_pattern, std::memory_order_release);
+    const auto length = snapshot.patterns[snapshot.active_pattern].length;
+    active_step_count_.store(length == 0 ? state::kStepCount : length,
+                             std::memory_order_release);
+    return true;
+}
+
+bool TimelineStepSequencerProcessor::load_persistent_project(
+    const timeline::Project& project) {
+    const auto* sequence = project.find_sequence({3});
+    const auto* track = sequence ? sequence->find_track({4}) : nullptr;
+    const auto* clip = track ? track->find_clip({5}) : nullptr;
+    if (!clip)
+        return false;
+    const auto* registered = std::get_if<timeline::RegisteredContent>(&clip->content());
+    if (!registered || registered->schema().type_name != kStepPatternSchemaName ||
+        registered->schema().version != kStepPatternSchemaVersion)
+        return false;
+    const auto* document = registered->value_as<StepPatternDocument>();
+    if (!document)
+        return false;
+    auto candidate = document->snapshot;
+    if (candidate.active_pattern_count == 0 ||
+        candidate.active_pattern_count > state::kPatternCount ||
+        candidate.active_lane_count == 0 ||
+        candidate.active_lane_count > state::kLaneCount ||
+        candidate.active_pattern >= candidate.active_pattern_count)
+        return false;
+    for (std::uint8_t pattern = 0; pattern < candidate.active_pattern_count; ++pattern) {
+        if (candidate.patterns[pattern].length > state::kStepCount)
+            return false;
+    }
+
+    const auto candidate_sequence = engine_sequence_ + 1;
+    candidate.engine_sequence = candidate_sequence;
+    candidate.epoch = pattern_.epoch;
+    if (!compile_pattern(candidate, false))
+        return false;
+    pattern_ = std::move(candidate);
+    engine_sequence_ = candidate_sequence;
+    pattern_.epoch = ++epoch_;
+    channel_.audio_publish_snapshot(pattern_);
+    channel_.audio_mark_resync_required(pattern_.epoch);
     return true;
 }
 
 bool TimelineStepSequencerProcessor::apply_pending_edits_and_recompile() {
+    struct PendingOutcome {
+        state::StepEditCommand command;
+        std::optional<state::AppliedEdit> echo;
+        state::EngineSequence engine_sequence = 0;
+        bool changed = false;
+        bool bulk_snapshot = false;
+    };
+
     auto candidate = pattern_;
     auto candidate_sequence = engine_sequence_;
-    std::vector<state::AppliedEdit> applied;
-    applied.reserve(state::kCommandQueueCapacity);
+    std::vector<PendingOutcome> outcomes;
+    outcomes.reserve(state::kCommandQueueCapacity);
     while (auto command = channel_.audio_try_pop_command()) {
         if (!command_targets_active_extent(candidate, *command)) {
-            applied.push_back(rejected_edit(*command, candidate_sequence,
-                                            candidate.epoch, 2));
+            auto echo = rejected_edit(*command, candidate_sequence,
+                                      candidate.epoch, 2);
+            outcomes.push_back({*command, std::move(echo), candidate_sequence,
+                                false, false});
             continue;
         }
-        auto echo = apply_active_extent_step_edit(candidate, *command,
-                                                  candidate_sequence);
-        if (echo)
-            applied.push_back(std::move(*echo));
+        auto result = apply_active_extent_step_edit(candidate, *command,
+                                                    candidate_sequence);
+        outcomes.push_back({*command, std::move(result.echo), candidate_sequence,
+                            result.changed, result.bulk_snapshot});
     }
-    if (applied.empty())
+    if (outcomes.empty())
         return false;
 
-    const auto changed = std::any_of(applied.begin(), applied.end(), [](const auto& edit) {
-        return edit.kind != state::AppliedEditKind::CommandRejected;
+    const auto changed = std::any_of(outcomes.begin(), outcomes.end(), [](const auto& outcome) {
+        return outcome.changed;
     });
     if (!changed) {
         engine_sequence_ = candidate_sequence;
         bool echo_lost = false;
-        for (const auto& echo : applied)
-            echo_lost |= !channel_.audio_try_publish_applied(echo);
+        for (const auto& outcome : outcomes) {
+            if (outcome.echo)
+                echo_lost |= !channel_.audio_try_publish_applied(*outcome.echo);
+        }
         if (echo_lost) {
             pattern_.engine_sequence = engine_sequence_;
             pattern_.epoch = ++epoch_;
@@ -319,10 +448,20 @@ bool TimelineStepSequencerProcessor::apply_pending_edits_and_recompile() {
     candidate.engine_sequence = candidate_sequence;
     if (!compile_pattern(candidate, false)) {
         engine_sequence_ = candidate_sequence;
-        for (auto& echo : applied) {
-            echo.kind = state::AppliedEditKind::CommandRejected;
-            echo.payload.reject_reason = 3;
-            (void)channel_.audio_try_publish_applied(echo);
+        for (auto& outcome : outcomes) {
+            state::AppliedEdit rejection;
+            if (outcome.echo &&
+                outcome.echo->kind == state::AppliedEditKind::CommandRejected) {
+                rejection = *outcome.echo;
+            } else {
+                rejection.engine_sequence = outcome.engine_sequence;
+                rejection.snapshot_epoch = pattern_.epoch;
+                rejection.client_sequence = outcome.command.client_sequence;
+                rejection.transaction_id = outcome.command.transaction_id;
+                rejection.kind = state::AppliedEditKind::CommandRejected;
+                rejection.payload.reject_reason = 3;
+            }
+            (void)channel_.audio_try_publish_applied(rejection);
         }
         pattern_.engine_sequence = engine_sequence_;
         pattern_.epoch = ++epoch_;
@@ -333,9 +472,13 @@ bool TimelineStepSequencerProcessor::apply_pending_edits_and_recompile() {
     pattern_ = std::move(candidate);
     engine_sequence_ = candidate_sequence;
     bool echo_lost = false;
-    for (const auto& echo : applied)
-        echo_lost |= !channel_.audio_try_publish_applied(echo);
-    if (echo_lost) {
+    bool bulk_snapshot = false;
+    for (const auto& outcome : outcomes) {
+        if (outcome.echo)
+            echo_lost |= !channel_.audio_try_publish_applied(*outcome.echo);
+        bulk_snapshot |= outcome.bulk_snapshot;
+    }
+    if (echo_lost || bulk_snapshot) {
         pattern_.epoch = ++epoch_;
         channel_.audio_publish_snapshot(pattern_);
         channel_.audio_mark_resync_required(pattern_.epoch);
@@ -355,7 +498,9 @@ void TimelineStepSequencerProcessor::process(audio::BufferView<float>& output,
     playhead.active_pattern = active_pattern_.load(std::memory_order_acquire);
     if (transport.range_count != 0) {
         const auto tick = transport.ranges[0].timeline_tick_start.value;
-        const auto wrapped = ((tick % kBarTicks) + kBarTicks) % kBarTicks;
+        const auto pattern_ticks = static_cast<std::int64_t>(
+            active_step_count_.load(std::memory_order_acquire)) * kStepTicks;
+        const auto wrapped = ((tick % pattern_ticks) + pattern_ticks) % pattern_ticks;
         playhead.active_step = static_cast<std::uint8_t>(wrapped / kStepTicks);
         playhead.sample_time = static_cast<std::uint64_t>(
             std::max<std::int64_t>(0, transport.ranges[0].timeline_sample_start.value));
