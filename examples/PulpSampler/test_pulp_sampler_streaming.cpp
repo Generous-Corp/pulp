@@ -677,11 +677,11 @@ TEST_CASE("PulpSampler holds a reverse attack while its tail is refilled",
     PulpSamplerTestAccess::pause_stream_dispatch(*fixture.proc, false);
     REQUIRE(wait_for_condition(
         [&] {
-            if (PulpSamplerTestAccess::streamed_reverse_horizon_ready(*fixture.proc)) {
-                return true;
-            }
-            block.run(*fixture.proc);
-            return false;
+            // The service refills the queued reverse horizon independently.
+            // Rendering while polling can consume the first recovery block,
+            // making the zero-gain recovery-start assertion timing-dependent.
+            return PulpSamplerTestAccess::streamed_reverse_horizon_ready(
+                *fixture.proc);
         },
         std::chrono::milliseconds(5000)));
     block.run(*fixture.proc);

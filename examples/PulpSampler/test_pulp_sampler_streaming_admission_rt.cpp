@@ -1,5 +1,13 @@
 #include "test_pulp_sampler_support.hpp"
 
+#if defined(__SANITIZE_THREAD__)
+#define PULP_SAMPLER_TEST_THREAD_SANITIZER 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define PULP_SAMPLER_TEST_THREAD_SANITIZER 1
+#endif
+#endif
+
 TEST_CASE("PulpSampler reports deterministic streamed starvation", "[sampler][stream]") {
     TempSamplerWav wav("starvation", 24000, 0.5f);
     SamplerFixture fixture;
@@ -393,7 +401,8 @@ TEST_CASE("PulpSampler in-contract stream torture survives bounded eviction and 
     using TortureClock = std::chrono::steady_clock;
     constexpr auto kCallbackFrames = 64;
     constexpr auto kHostSampleRate = 44100;
-    constexpr auto kMaximumSharedRunnerOverrun = std::chrono::seconds(2);
+    [[maybe_unused]] constexpr auto kMaximumSharedRunnerOverrun =
+        std::chrono::seconds(2);
     const auto pressure_baseline = fixture.proc->stream_stats();
     const auto torture_started = TortureClock::now();
     bool observed_both_sources_under_eviction = false;
@@ -481,8 +490,13 @@ TEST_CASE("PulpSampler in-contract stream torture survives bounded eviction and 
     // scheduling at the former aggregate +10 ms precision. Two seconds of
     // aggregate tolerance absorbs ordinary CI descheduling while still failing
     // a major regression that cannot keep this 2.6-second render near cadence.
+#if !defined(PULP_SAMPLER_TEST_THREAD_SANITIZER)
     REQUIRE(torture_elapsed <=
             rendered_duration + kMaximumSharedRunnerOverrun);
+#endif
+    // TSan deliberately instruments every threaded memory access, so its wall
+    // time is not a realtime throughput measurement. It still runs every
+    // functional starvation, concurrency, memory, eviction, and churn check.
     REQUIRE(diagnostics.starved_output_frames == 0);
     REQUIRE(diagnostics.service_starvation_events == 0);
     REQUIRE(diagnostics.decode_failure_events == 0);
