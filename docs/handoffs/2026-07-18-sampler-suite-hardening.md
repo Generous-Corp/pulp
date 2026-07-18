@@ -1,6 +1,6 @@
 # Sampler suite hardening continuation handoff
 
-Updated: `2026-07-18T19:39:57Z`
+Updated: `2026-07-18` (M3 continuation checkpoint)
 
 ## Objective and completion gate
 
@@ -16,10 +16,16 @@ proven.
 
 - Repository: `https://github.com/danielraffel/pulp.git`
 - Branch: `feature/sampler-suite-hardening`
-- Immutable handoff tag: `sampler-suite-hardening-handoff-20260718`
-- Rebased base: `c2bf1fcf3106c45e81d0bab04c879ab565ed2c79`
-- Code-and-docs checkpoint before this handoff guide: `2359a85081ad96c8441f96272efb83ef06f955ab`
-- The branch and tag include this guide as the next commit after that checkpoint.
+- Immutable current handoff tag: `sampler-suite-hardening-handoff-20260718-r2`
+- Rebased base: `df2f302b12d0a2747c2c395f28ca7a8ea4cd2e85`
+- Rebased implementation checkpoint before the latest adversarial edits:
+  `c1831749160f1ed75703bfb4ab567056517671a0`
+- Partial adversarial-correction checkpoint:
+  `629153ab63a090146925c1e63acb2e354e836c9b`
+- The branch and current tag include this guide as the next commit after that
+  correction checkpoint. The older tag
+  `sampler-suite-hardening-handoff-20260718` is retained for provenance but is
+  superseded and must not be used as the continuation head.
 
 Restore without relying on any prior machine state:
 
@@ -30,7 +36,7 @@ git fetch origin --prune --tags
 git switch -c feature/sampler-suite-hardening \
   --track origin/feature/sampler-suite-hardening
 test "$(git rev-parse HEAD)" = \
-  "$(git rev-list -n1 sampler-suite-hardening-handoff-20260718)"
+  "$(git rev-list -n1 sampler-suite-hardening-handoff-20260718-r2)"
 git merge-base --is-ancestor origin/main HEAD
 git status --short
 ```
@@ -54,8 +60,8 @@ Skill-Update: skip skill=kits reason="sampler-mip documents an audio CLI command
 
 ## Integrated implementation
 
-The checkpoint contains the full sampler hardening implementation and later
-adversarial fixes, rebased onto the recorded `origin/main`:
+The checkpoint contains the sampler hardening implementation and partial
+adversarial corrections, rebased onto the recorded `origin/main`:
 
 - decomposed sampler tests, stream service, and PulpSampler runtime files;
 - persisted authenticated `.pulpmip` production and CLI/help/docs;
@@ -79,6 +85,21 @@ The final checkpoint also passes:
 python3 tools/scripts/node_abi_gate.py --base origin/main --mode=report
 node_abi_gate: Processor and PluginSlot virtual order is additive-only
 ```
+
+The latest partial correction commit additionally:
+
+- binds registered benchmark verification to the actual benchmark binary;
+- replaces minimum-biased timing summaries with median-per-batch and
+  median-p95-epoch summaries;
+- routes WAV/null evidence through the stateful production `LoopRenderer`;
+- adds a CLI-produced-sidecar to `PulpSampler` runtime acceptance probe;
+- expands modulation block partitions to `1`, `17`, `64`, and `257` frames;
+- strengthens heritage stage tests with independent numerical oracles.
+
+These changes are a resumable WIP checkpoint, not landing evidence. Only the
+WAV renderer target was compiled successfully after the edits. The sidecar
+probe, sampler test, heritage test, verifier, and complete changed-target set
+still require builds and execution.
 
 ## Prior evidence that informed the implementation
 
@@ -124,6 +145,12 @@ none produced landing evidence or source edits:
 Restart those gates from fresh build directories. Partial build percentages are
 not evidence.
 
+After the latest correction commit, CMake reconfiguration passed and
+`pulp-sampler-render-wav` compiled. A wider changed-target build was stopped
+during dependencies at about 92 percent to create this handoff. Earlier
+four-configuration baseline work was also stopped and became invalid when the
+source changed. None of those partial builds is final evidence.
+
 ## Open gates
 
 Use the exact arrays and commands in
@@ -140,25 +167,34 @@ Use the exact arrays and commands in
 4. **Full Release and audio harness.** Complete the default-GPU full build,
    full CTest, the explicit audio-harness targets, and the documented
    `audio|golden|render|contract|doctor` CTest regex.
-5. **Sampler file/CLI integration.** Re-run mapped audio-file, ranged reader,
-   streaming source, full sampler, sampler-mip shellout, and sampler-mip help.
+5. **Sampler file/CLI integration.** First build and run the new runtime sidecar
+   probe and corrected stateful renderer tests. Re-run mapped audio-file,
+   ranged reader, streaming source, full sampler, sampler-mip shellout, and
+   sampler-mip help.
    Produce a CLI sidecar and prove the production loader accepts it.
 6. **AQL and null evidence.** Re-run the pinned oscillator-renderer pytest,
    four normative sampler/heritage CTests, six applicable advisory JSON axes,
    graininess negative control, and block-partition null positive/wrong-ratio
    negative controls.
 7. **Benchmark recapture.** The checked 108-row M5 Max artifact is intentionally
-   stale after source changes. Recapture it on the exact final revision, then
-   pass supplied-binary, source-only, and self-test verification. Do not treat
+   stale after source and methodology changes. Recapture it on the exact final
+   revision, then pass supplied-binary, source-only, and self-test verification. Do not treat
    the current expected source-bundle mismatch as a product failure.
 8. **Docs and structural checks.** Run `tools/check-docs.sh`, docs-noise lint,
    `git diff --check`, forbidden-file audit, file-size/hotspot audit, and the
    final thermonuclear maintainability review.
-9. **Final exact Ultra closure.** Run the repository Ultra helper with Codex
-   GPT-5.6, `ultra` thinking, `origin/main` base, read-only streaming, and the
-   exact final branch. Record dispositions for every finding and repeat until
-   no actionable blocker remains.
-10. **Plan, PR, CI, merge.** Update the public report and private plan with
+9. **Resolve remaining adversarial findings.** Assess the extreme resident-ratio
+   fallback from sinc to Cubic Hermite, add or document the appropriate quality
+   diagnostic, verify immutable-source behavior on Windows, and update public
+   benchmark claims only after recapture. Fix the plan ordering so the null
+   commands cannot reference `build-final-aql` before it is configured.
+10. **Final exact Ultra closure.** Run Codex GPT-5.6 with explicit `ultra`
+   reasoning, read-only access, `origin/main` as the base, and the exact final
+   branch. Record dispositions for every finding and repeat until no actionable
+   blocker remains. A portable invocation is `codex exec -m gpt-5.6-sol -c
+   model_reasoning_effort='"ultra"' -s read-only -C . review --base
+   origin/main`.
+11. **Plan, PR, CI, merge.** Update the public report and private plan with
     final hashes/results; push docs; open the PR through Shipyard; require all
     checks green; merge; verify `origin/main`; ask before worktree cleanup.
 
