@@ -2,6 +2,7 @@
 
 #include <pulp/audio/sample_stream_scheduler.hpp>
 #include <pulp/audio/sample_stream_window.hpp>
+#include <pulp/audio/sample_memory_governor.hpp>
 #include <pulp/audio/streaming_sample_source.hpp>
 
 #include <algorithm>
@@ -27,7 +28,12 @@ struct SampleStreamRequesterToken {
 
 struct SampleStreamCacheServiceConfig {
     std::size_t scheduler_capacity = 0;
+    /// Page-only cap used when memory_governor is empty. Ignored in shared
+    /// mode, where the governor's combined preload+page cap is authoritative.
     std::uint64_t page_memory_budget_bytes = 0;
+    /// Optional shared preload+page issuer. When omitted, the service owns a
+    /// page-only governor capped by page_memory_budget_bytes for compatibility.
+    SampleMemoryGovernorHandle memory_governor{};
 };
 
 struct SampleStreamCacheSourceConfig {
@@ -192,10 +198,12 @@ struct SampleStreamCacheSourceView {
     std::uint64_t page_frames = 0;
     std::uint64_t registration_epoch = 0;
     SampleStreamSourceRegistrationProof registration{};
+    SampleMemoryGovernorEpoch memory_governor_epoch{};
 
     bool valid() const noexcept {
         return token.source_id != 0 && token.source_generation != 0 &&
                window != nullptr && total_frames != 0 && page_frames != 0 &&
+               memory_governor_epoch.valid() &&
                registration.matches(token,
                                     window,
                                     total_frames,
@@ -282,6 +290,7 @@ enum class SampleStreamAsyncCompletionStatus : std::uint8_t {
 };
 
 struct SampleStreamCacheServiceStats {
+    SampleMemoryGovernorStats memory{};
     std::uint64_t reserved_page_bytes = 0;
     std::uint64_t source_count = 0;
     std::uint64_t sources_retire_scheduled = 0;
@@ -307,11 +316,20 @@ class SampleStreamCacheService {
 public:
     bool prepare(const SampleStreamCacheServiceConfig& config) {
         release();
-        if (config.scheduler_capacity == 0 || config.page_memory_budget_bytes == 0) {
+        if (config.scheduler_capacity == 0 ||
+            (!config.memory_governor && config.page_memory_budget_bytes == 0)) {
             return false;
         }
         if (!scheduler_.prepare(config.scheduler_capacity)) return false;
-        memory_budget_bytes_ = config.page_memory_budget_bytes;
+        if (config.memory_governor) {
+            memory_governor_ = config.memory_governor;
+        } else {
+            if (!internal_memory_governor_.prepare(config.page_memory_budget_bytes)) {
+                scheduler_.reset();
+                return false;
+            }
+            memory_governor_ = internal_memory_governor_.handle();
+        }
         prepared_ = true;
         return true;
     }
@@ -320,7 +338,8 @@ public:
         sources_.clear();
         source_generations_.clear();
         scheduler_.reset();
-        memory_budget_bytes_ = 0;
+        memory_governor_ = {};
+        (void) internal_memory_governor_.release();
         active_audio_generation_ = 0;
         completed_audio_generation_ = 0;
         prepared_ = false;
@@ -367,14 +386,18 @@ public:
         }
 
         const auto bytes = page_storage_bytes(config);
-        if (!bytes || stats_.reserved_page_bytes > memory_budget_bytes_ ||
-            *bytes > memory_budget_bytes_ - stats_.reserved_page_bytes) {
+        if (!bytes || !memory_governor_) {
             return {SampleStreamSourceAddStatus::BudgetExceeded, {}};
         }
+        auto page_reservation = memory_governor_.reserve(
+            SampleMemoryCategory::Page, *bytes);
+        if (!page_reservation.acquired())
+            return {SampleStreamSourceAddStatus::BudgetExceeded, {}};
 
         try {
             auto source = std::make_unique<Source>();
             source->config = config;
+            source->page_lease = std::move(page_reservation.lease);
             if (next_registration_epoch_ == 0) {
                 return {SampleStreamSourceAddStatus::AllocationFailed, {}};
             }
@@ -789,7 +812,12 @@ public:
         return scheduler_.stats();
     }
 
-    SampleStreamCacheServiceStats stats() const noexcept { return stats_; }
+    SampleStreamCacheServiceStats stats() const noexcept {
+        auto snapshot = stats_;
+        if (memory_governor_)
+            snapshot.memory = memory_governor_.stats();
+        return snapshot;
+    }
 
 private:
     struct SlotRecord {
@@ -807,6 +835,7 @@ private:
 
     struct Source {
         SampleStreamCacheSourceConfig config{};
+        SampleMemoryLease page_lease;
         SampleStreamWindow window;
         FrameReader reader;
         std::vector<float*> channel_ptrs;
@@ -839,19 +868,12 @@ private:
 
     static std::optional<std::uint64_t> page_storage_bytes(
         const SampleStreamCacheSourceConfig& config) noexcept {
-        std::uint64_t result = config.channels;
-        for (const auto factor : {config.page_frames,
-                                  static_cast<std::uint64_t>(config.cache_page_count),
-                                  static_cast<std::uint64_t>(sizeof(float))}) {
-            if (factor != 0 && result > std::numeric_limits<std::uint64_t>::max() / factor) {
-                return std::nullopt;
-            }
-            result *= factor;
-        }
-        return result;
+        return checked_sample_storage_bytes(config.channels,
+                                            config.page_frames,
+                                            config.cache_page_count);
     }
 
-    static SampleStreamCacheSourceView make_view(Source& source) noexcept {
+    SampleStreamCacheSourceView make_view(Source& source) const noexcept {
         return {
             .token = source.config.token,
             .window = &source.window,
@@ -864,6 +886,7 @@ private:
                 source.config.total_frames,
                 source.config.page_frames,
                 source.registration_epoch),
+            .memory_governor_epoch = memory_governor_.epoch(),
         };
     }
 
@@ -1034,7 +1057,8 @@ private:
     std::vector<std::unique_ptr<Source>> sources_;
     std::vector<SourceGenerationRecord> source_generations_;
     SampleStreamScheduler scheduler_;
-    std::uint64_t memory_budget_bytes_ = 0;
+    SampleMemoryGovernor internal_memory_governor_;
+    SampleMemoryGovernorHandle memory_governor_;
     std::uint64_t active_audio_generation_ = 0;
     std::uint64_t completed_audio_generation_ = 0;
     std::uint64_t next_registration_epoch_ = 1;

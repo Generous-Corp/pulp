@@ -1709,6 +1709,7 @@ TEST_CASE("PulpSampler rolls back every partial streamed mip admission",
     SamplerFixture fixture;
     const auto resident_generation =
         PulpSamplerTestAccess::published_selection_generation(*fixture.proc);
+    const auto memory_baseline = fixture.proc->stream_stats().memory;
 
     for (int admitted_members = 0; admitted_members <= 3; ++admitted_members) {
         CAPTURE(admitted_members);
@@ -1728,6 +1729,11 @@ TEST_CASE("PulpSampler rolls back every partial streamed mip admission",
         REQUIRE(PulpSamplerTestAccess::unpublished_rollback_attempts(*fixture.proc) -
                     attempts_before ==
                 static_cast<std::uint64_t>(admitted_members));
+        const auto rolled_back = fixture.proc->stream_stats().memory;
+        REQUIRE(rolled_back.current_preload_bytes ==
+                memory_baseline.current_preload_bytes);
+        REQUIRE(rolled_back.current_page_bytes == memory_baseline.current_page_bytes);
+        REQUIRE(rolled_back.current_total_bytes == memory_baseline.current_total_bytes);
     }
 
     REQUIRE(fixture.proc->load_sample_file(source.path));
@@ -2775,11 +2781,17 @@ TEST_CASE("PulpSampler services active streams while staging a replacement",
 TEST_CASE("PulpSampler reports file staging exceptions as load failures", "[sampler][stream]") {
     TempSamplerWav source("stage_exception", 24000, 0.5f);
     SamplerFixture fixture;
+    const auto memory_baseline = fixture.proc->stream_stats().memory;
     PulpSamplerTestAccess::throw_during_next_file_stage(*fixture.proc);
 
     REQUIRE_FALSE(fixture.proc->load_sample_file(source.path));
     REQUIRE(PulpSamplerTestAccess::published_source_kind(*fixture.proc) ==
             SamplerPublishedSourceKind::Resident);
+    const auto memory_after_failure = fixture.proc->stream_stats().memory;
+    REQUIRE(memory_after_failure.current_preload_bytes ==
+            memory_baseline.current_preload_bytes);
+    REQUIRE(memory_after_failure.current_page_bytes == memory_baseline.current_page_bytes);
+    REQUIRE(memory_after_failure.current_total_bytes == memory_baseline.current_total_bytes);
 }
 
 TEST_CASE("PulpSampler establishes the certified lookahead for small blocks", "[sampler][stream]") {
@@ -3030,6 +3042,7 @@ TEST_CASE("PulpSampler reverse prewarm deadline scales with its page horizon",
 TEST_CASE("PulpSampler does not publish a stream when reverse prewarm fails", "[sampler][stream]") {
     TempSamplerWav wav("reverse_entry_failure", 24000, 0.5f);
     SamplerFixture fixture;
+    const auto memory_baseline = fixture.proc->stream_stats().memory;
     PulpSamplerTestAccess::set_reverse_prewarm_timeout(*fixture.proc, std::chrono::milliseconds(5));
     PulpSamplerTestAccess::pause_stream_dispatch(*fixture.proc, true);
 
@@ -3038,6 +3051,12 @@ TEST_CASE("PulpSampler does not publish a stream when reverse prewarm fails", "[
             SamplerPublishedSourceKind::Resident);
     REQUIRE(fixture.proc->stream_stats().active_sources == 0);
     PulpSamplerTestAccess::pause_stream_dispatch(*fixture.proc, false);
+    REQUIRE(wait_for_condition([&] {
+        const auto memory = fixture.proc->stream_stats().memory;
+        return memory.current_preload_bytes == memory_baseline.current_preload_bytes &&
+               memory.current_page_bytes == memory_baseline.current_page_bytes &&
+               memory.current_total_bytes == memory_baseline.current_total_bytes;
+    }));
 }
 
 TEST_CASE("PulpSampler keeps the resident source published while prewarm waits",
@@ -3067,6 +3086,7 @@ TEST_CASE("PulpSampler reclaims an in-flight failed prewarm registration", "[sam
     TempSamplerWav first("reverse_entry_reuse_a", 24000, 0.25f);
     TempSamplerWav second("reverse_entry_reuse_b", 24000, 0.75f);
     SamplerFixture fixture;
+    const auto memory_baseline = fixture.proc->stream_stats().memory;
     PulpSamplerTestAccess::set_reverse_prewarm_timeout(*fixture.proc,
                                                        std::chrono::milliseconds(20));
     PulpSamplerTestAccess::block_next_reverse_decode(*fixture.proc);
@@ -3084,6 +3104,11 @@ TEST_CASE("PulpSampler reclaims an in-flight failed prewarm registration", "[sam
     REQUIRE(decode_entered);
     REQUIRE(rollback_count == 1);
     REQUIRE(rollback_completed);
+    const auto memory_after_rollback = fixture.proc->stream_stats().memory;
+    REQUIRE(memory_after_rollback.current_preload_bytes ==
+            memory_baseline.current_preload_bytes);
+    REQUIRE(memory_after_rollback.current_page_bytes == memory_baseline.current_page_bytes);
+    REQUIRE(memory_after_rollback.current_total_bytes == memory_baseline.current_total_bytes);
     REQUIRE(fixture.proc->load_sample_file(first.path));
     REQUIRE(fixture.proc->load_sample_file(second.path));
 }
@@ -3107,6 +3132,10 @@ TEST_CASE("PulpSampler shutdown rejects an in-flight prewarm admission", "[sampl
     REQUIRE_FALSE(load_result.load(std::memory_order_acquire));
     REQUIRE(PulpSamplerTestAccess::published_source_kind(*fixture.proc) ==
             SamplerPublishedSourceKind::None);
+    const auto released_memory = fixture.proc->stream_stats().memory;
+    REQUIRE(released_memory.current_preload_bytes == 0);
+    REQUIRE(released_memory.current_page_bytes == 0);
+    REQUIRE(released_memory.current_total_bytes == 0);
 }
 
 TEST_CASE("PulpSampler reports deterministic streamed starvation", "[sampler][stream]") {
@@ -3202,6 +3231,13 @@ TEST_CASE("PulpSampler retires replaced streamed mip bundles as one generation",
     fixture.store.set_value(kSamplerRelease, 0.0f);
     fixture.store.set_value(kSamplerInterpolation, 3.0f);
     REQUIRE(fixture.proc->load_sample_file(first.path));
+    const auto one_bundle_memory = fixture.proc->stream_stats().memory;
+    REQUIRE(one_bundle_memory.current_preload_bytes > 0);
+    REQUIRE(one_bundle_memory.current_page_bytes > 0);
+    REQUIRE(one_bundle_memory.current_total_bytes ==
+            one_bundle_memory.current_preload_bytes +
+                one_bundle_memory.current_page_bytes);
+    REQUIRE(one_bundle_memory.current_total_bytes <= one_bundle_memory.capacity_bytes);
     const std::array first_tokens{
         PulpSamplerTestAccess::published_stream_asset(*fixture.proc, 0).source,
         PulpSamplerTestAccess::published_stream_asset(*fixture.proc, 1).source,
@@ -3215,6 +3251,16 @@ TEST_CASE("PulpSampler retires replaced streamed mip bundles as one generation",
     REQUIRE(fixture.proc->load_sample_file(second.path));
     REQUIRE(fixture.proc->stream_stats().active_sources == 2);
     REQUIRE(PulpSamplerTestAccess::physical_stream_source_count(*fixture.proc) == 6);
+    const auto two_bundle_memory = fixture.proc->stream_stats().memory;
+    REQUIRE(two_bundle_memory.current_preload_bytes ==
+            2 * one_bundle_memory.current_preload_bytes);
+    REQUIRE(two_bundle_memory.current_page_bytes ==
+            2 * one_bundle_memory.current_page_bytes);
+    REQUIRE(two_bundle_memory.current_total_bytes ==
+            two_bundle_memory.current_preload_bytes +
+                two_bundle_memory.current_page_bytes);
+    REQUIRE(two_bundle_memory.current_total_bytes <= two_bundle_memory.capacity_bytes);
+    REQUIRE(two_bundle_memory.peak_total_bytes <= two_bundle_memory.capacity_bytes);
     for (const auto token : first_tokens) {
         REQUIRE(PulpSamplerTestAccess::service_contains_source(*fixture.proc, token));
     }
@@ -3230,6 +3276,11 @@ TEST_CASE("PulpSampler retires replaced streamed mip bundles as one generation",
     for (const auto token : first_tokens) {
         REQUIRE_FALSE(PulpSamplerTestAccess::service_contains_source(*fixture.proc, token));
     }
+    const auto retired_memory = fixture.proc->stream_stats().memory;
+    REQUIRE(retired_memory.current_preload_bytes ==
+            one_bundle_memory.current_preload_bytes);
+    REQUIRE(retired_memory.current_page_bytes == one_bundle_memory.current_page_bytes);
+    REQUIRE(retired_memory.current_total_bytes == one_bundle_memory.current_total_bytes);
 }
 
 TEST_CASE("PulpSampler rejects a third streamed mip bundle until a slot retires",
