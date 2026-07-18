@@ -6,7 +6,9 @@
 // allow-set edits do NOT silence the live snapshot; prepare_swap() recompiles and
 // atomically publishes the new snapshot (publish-new-before-retire, seq_cst) so no
 // output block is ever silent. A non-reinit-free edit instead returns
-// NeedsEagerPrepare (and invalidates), so the caller falls back to prepare().
+// NeedsEagerPrepare, so the caller falls back to prepare(). Ordinary rejection
+// classes invalidate the live snapshot; the MidiOutput pending-egress class keeps
+// it live long enough to drain before eager prepare.
 //
 // This suite asserts (a) a reinit-free gain-graph swap under a live render drops NO
 // block to silence, and (b) each non-reinit-free class is rejected.
