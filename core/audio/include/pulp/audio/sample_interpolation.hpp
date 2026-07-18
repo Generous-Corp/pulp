@@ -5,11 +5,13 @@
 #include <pulp/signal/interpolator.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
 #include <span>
+#include <string_view>
 #include <type_traits>
 
 namespace pulp::audio {
@@ -17,13 +19,62 @@ namespace pulp::audio {
 inline constexpr std::uint32_t kMaximumSampleInterpolationTaps = 128;
 
 enum class SampleInterpolationPolicy : std::uint8_t {
-    Hold,
-    Nearest,
-    Linear,
-    CubicHermite,
-    CubicLagrange,
-    RatioTrackingSinc,
+    Hold = 0,
+    Nearest = 1,
+    Linear = 2,
+    CubicHermite = 3,
+    CubicLagrange = 4,
+    RatioTrackingSinc = 5,
 };
+
+/// Stable serialization/UI metadata for one interpolation policy. `id` is the
+/// machine-facing spelling and must not be changed once published; `name` is
+/// the concise user-facing label. The explicit enum ordinals above preserve
+/// the existing PulpSampler parameter contract (0 through 5).
+struct SampleInterpolationPolicyInfo {
+    SampleInterpolationPolicy policy = SampleInterpolationPolicy::Hold;
+    std::string_view id;
+    std::string_view name;
+};
+
+inline constexpr std::array<SampleInterpolationPolicyInfo, 6>
+    kSampleInterpolationPolicies{{
+        {SampleInterpolationPolicy::Hold, "hold", "Hold"},
+        {SampleInterpolationPolicy::Nearest, "nearest", "Nearest"},
+        {SampleInterpolationPolicy::Linear, "linear", "Linear"},
+        {SampleInterpolationPolicy::CubicHermite,
+         "cubic-hermite", "Cubic Hermite"},
+        {SampleInterpolationPolicy::CubicLagrange,
+         "cubic-lagrange", "Cubic Lagrange"},
+        {SampleInterpolationPolicy::RatioTrackingSinc,
+         "ratio-tracking-sinc", "Ratio-tracking sinc"},
+    }};
+
+constexpr const SampleInterpolationPolicyInfo* sample_interpolation_policy_info(
+    SampleInterpolationPolicy policy) noexcept {
+    for (const auto& candidate : kSampleInterpolationPolicies)
+        if (candidate.policy == policy) return &candidate;
+    return nullptr;
+}
+
+constexpr const SampleInterpolationPolicyInfo* sample_interpolation_policy_info(
+    std::string_view id) noexcept {
+    for (const auto& candidate : kSampleInterpolationPolicies)
+        if (candidate.id == id) return &candidate;
+    return nullptr;
+}
+
+constexpr std::string_view sample_interpolation_policy_id(
+    SampleInterpolationPolicy policy) noexcept {
+    const auto* info = sample_interpolation_policy_info(policy);
+    return info == nullptr ? std::string_view{} : info->id;
+}
+
+constexpr std::string_view sample_interpolation_policy_name(
+    SampleInterpolationPolicy policy) noexcept {
+    const auto* info = sample_interpolation_policy_info(policy);
+    return info == nullptr ? std::string_view{"Unknown"} : info->name;
+}
 
 struct SampleInterpolationFootprint {
     std::int32_t first_offset = 0;
