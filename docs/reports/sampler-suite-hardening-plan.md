@@ -28,7 +28,7 @@ gates:
   to ratio-tracking sinc. The offline `pulp audio sampler-mip build` command
   atomically publishes hash-addressed levels using the 140 dB-design decimator.
 - S5: focused C++ interpolation gates and dependency-bearing Python reference
-  and negative-control gates exist. The current checked-in Apple M5 Max Release
+  and negative-control gates exist. The current checked-in Apple M3 Ultra Release
   capture contains the complete 108-row matrix and passes its full source,
   binary, budget, environment, and negative-control verifier. Its
   content-addressed interpolation source bundle remains current across later
@@ -694,15 +694,15 @@ PULP_BENCHMARK_BINARY_SHA256=$(shasum -a 256 \
   build-final-benchmark/test/pulp-sampler-interpolation-benchmark | \
   awk '{print $1}')
 ./build-final-benchmark/test/pulp-sampler-interpolation-benchmark \
-  --machine-label "Apple M5 Max Mac17,7" \
-  --machine-model "MacBook Pro Mac17,7, Apple M5 Max" \
+  --machine-label "Apple M3 Ultra Mac15,14" \
+  --machine-model "Mac Studio Mac15,14, Apple M3 Ultra" \
   --os "macOS 26.5.2 build 25F84" --architecture arm64 \
   --compiler "Apple clang 21.0.0 (clang-2100.1.1.101)" \
   --source-base-revision "$PULP_BENCHMARK_SOURCE_REVISION" \
   --source-bundle-sha256 "$PULP_BENCHMARK_SOURCE_SHA256" \
   --benchmark-binary-sha256 "$PULP_BENCHMARK_BINARY_SHA256" \
   --generated-utc "$PULP_BENCHMARK_CAPTURED_UTC" \
-  > docs/validation/sampler-interpolation/apple-m5-max-mac17-7.release.json
+  > docs/validation/sampler-interpolation/apple-m3-ultra-mac15-14.release.json
 python3 tools/scripts/verify_sampler_interpolation_benchmark.py \
   --benchmark-binary \
   build-final-benchmark/test/pulp-sampler-interpolation-benchmark

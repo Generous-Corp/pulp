@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_EVIDENCE = (
     REPO_ROOT
     / "docs/validation/sampler-interpolation"
-    / "apple-m5-max-mac17-7.release.json"
+    / "apple-m3-ultra-mac15-14.release.json"
 )
 SCHEMA = "pulp.sampler-interpolation-benchmark.v2"
 TIERS = (
