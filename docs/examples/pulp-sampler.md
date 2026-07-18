@@ -59,9 +59,11 @@ AIFF/AIFF-C `NONE`, at one or two channels and no more than 192 kHz. A codec
 that is available only through decode-once fallback is rejected instead of
 silently loading the entire asset. Admission derives the resident preload and
 page geometry from the 20 ms certified I/O latency, 5 ms scheduler margin,
-5 ms decoder allowance, host block size, interpolation guard, loop guard, a
-maximum 4x playback ratio, and source rate. Failure is transactional: a failed
-replacement leaves the previously published source usable.
+5 ms decoder allowance, host block size, interpolation guard, loop guard, and
+source rate. Streamed playback admits an effective consumption ratio of at most
+4x: the note/key-map pitch ratio multiplied by the active heritage clock ratio.
+Failure is transactional: a failed replacement leaves the previously published
+source usable.
 
 `PulpSamplerProcessor::load_sample_file()` currently returns only `bool`.
 `SamplerStreamingRuntime::load_sample_file_result()` and the trivially copyable
@@ -115,6 +117,18 @@ counters. The richer envelope and combined diagnostic records in
 `sampler_api.hpp` are stable inspection shapes, but the processor does not yet
 return the top-level `PulpSamplerDiagnostics` snapshot.
 
+The stream service also enforces aggregate decode throughput. For active voices
+sharing one source it computes:
+
+```text
+effective source frames/second = sum(pitch ratio * source sample rate) * active clock ratio
+```
+
+Clock-driven note-on rejection increments heritage
+`rate_admission_rejections`; a live pitch change that invalidates an active
+streamed voice increments heritage `rate_automation_rejections`. Those counters
+are distinct from the legacy aggregate-rate counters in `stream_stats()`.
+
 ## Synthetic heritage processing
 
 An optional typed profile applies ordered, independently bypassable stages for
@@ -145,6 +159,12 @@ delay in their output coordinate; the processor rounds the resulting nominal
 host-frame latency up and notifies the host when it changes. An all-bypassed
 profile is transparent and reports zero latency. Render-plan or render failure
 fails closed to silence and increments heritage diagnostics.
+
+Prepare binds streaming to the heritage processing input domain. Its output
+sample rate is the host rate multiplied by the active clock ratio, and its
+maximum block is the heritage engine's maximum input-frame requirement. The
+preload contract therefore records this clocked stream rate, not always the
+host's external output rate. An all-bypassed profile uses a clock ratio of one.
 
 Canonical JSON readers/writers exist for profiles and bounded runtime state.
 Runtime persistence captures only RNG continuation for quantization/noise
@@ -192,7 +212,10 @@ ctest --test-dir build-aql \
 The checked-in interpolation benchmark under
 `docs/validation/sampler-interpolation/` is a current 108-row Apple M5 Max
 Release capture. Its verifier checks the complete matrix, acceptance budgets,
-source bundle, binary hash, environment, and negative controls.
+source bundle, binary hash, environment, and negative controls. Later sampler
+integration commits do not make it stale when the verifier's content-addressed
+interpolation source bundle remains unchanged; the current source-only verifier
+passes that exact digest.
 
 ## Current gaps
 
