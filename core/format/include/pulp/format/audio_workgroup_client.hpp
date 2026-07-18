@@ -10,9 +10,11 @@ namespace pulp::format {
 /// This stays separate from Processor so opting in does not widen the node ABI.
 class AudioWorkgroupClient {
 public:
-    /// Publish the host/device-owned workgroup for subsequent renders, or null
-    /// to remove it. The publisher for one client must be serialized (AU calls
-    /// its observer on the render thread; CoreAudio serializes device changes).
+    /// Publish the device-owned workgroup for subsequent renders, or null when
+    /// the standalone device has no workgroup / removes its current one. A null
+    /// device publication preserves the worker pool's best-effort priority
+    /// fallback. The publisher for one client must be serialized (CoreAudio
+    /// serializes device changes).
     /// This may run on the realtime thread and must not allocate, lock, block,
     /// retain/release Objective-C/os objects, or call host APIs.
     ///
@@ -23,7 +25,9 @@ public:
     /// caller-owned query reference until the explicit teardown barrier below.
     virtual void set_audio_workgroup(void* workgroup) noexcept = 0;
 
-    /// Publish an AU render-context workgroup. Apple does not document
+    /// Publish an AU render-context workgroup. Null is an explicit context
+    /// removal and must not select the standalone no-workgroup fallback. Apple
+    /// does not document
     /// os_retain/os_release as RT-safe and supplies no completion callback by
     /// which a host can know a late asynchronous join no longer references the
     /// previous context. Pulp therefore adopts it in a synchronous observer

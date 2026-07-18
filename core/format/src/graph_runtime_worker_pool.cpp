@@ -119,7 +119,7 @@ void GraphRuntimeWorkerPool::set_audio_workgroup(void* workgroup) noexcept {
     // Standalone/CoreAudio path: the device owns a caller-retained query
     // reference until every worker acknowledges removal. This lifetime permits
     // adoption at the next explicit full-participant preparation barrier.
-    publish_audio_workgroup(workgroup);
+    publish_audio_workgroup(workgroup, true);
 }
 
 void GraphRuntimeWorkerPool::set_audio_workgroup_from_render_context(
@@ -127,10 +127,14 @@ void GraphRuntimeWorkerPool::set_audio_workgroup_from_render_context(
     // AU observer path. Reference counting is not documented RT-safe.
     // Publication is therefore borrowed and adoption is completed synchronously
     // inside the triggering render before its serialized thread can receive B.
-    publish_audio_workgroup(workgroup);
+    // A null AU render context is an explicit removal. Unlike a standalone
+    // device which simply lacks a workgroup, it must not leave auxiliary
+    // workers under a sticky best-effort realtime priority policy.
+    publish_audio_workgroup(workgroup, false);
 }
 
-void GraphRuntimeWorkerPool::publish_audio_workgroup(void* workgroup) noexcept {
+void GraphRuntimeWorkerPool::publish_audio_workgroup(
+    void* workgroup, bool fallback_when_null) noexcept {
     // Single-writer seqlock. AU observers are serialized on the render thread;
     // CoreAudio device publications are serialized by switch_mutex_ and happen
     // with the device callback stopped. Pointer + generation are one coherent
@@ -139,6 +143,8 @@ void GraphRuntimeWorkerPool::publish_audio_workgroup(void* workgroup) noexcept {
                          1, std::memory_order_acq_rel) +
                      1;
     audio_workgroup_.store(workgroup, std::memory_order_relaxed);
+    audio_workgroup_fallback_when_null_.store(fallback_when_null,
+                                              std::memory_order_relaxed);
     audio_workgroup_sequence_.store(odd + 1, std::memory_order_release);
     // Cold workers wake on their bounded polling interval. Until every worker
     // adopts this generation, run() remains inline rather than dispatching into
@@ -157,9 +163,11 @@ GraphRuntimeWorkerPool::current_audio_workgroup_publication() const noexcept {
         }
         void* const workgroup =
             audio_workgroup_.load(std::memory_order_relaxed);
+        const bool fallback_when_null =
+            audio_workgroup_fallback_when_null_.load(std::memory_order_relaxed);
         const auto after =
             audio_workgroup_sequence_.load(std::memory_order_acquire);
-        if (before == after) return {workgroup, after};
+        if (before == after) return {workgroup, after, fallback_when_null};
     }
 }
 
@@ -344,17 +352,22 @@ void GraphRuntimeWorkerPool::worker_loop(std::uint32_t worker_index) noexcept {
         const auto handle = reinterpret_cast<os_workgroup_t>(
             publication.workgroup);
         workgroup.set_workgroup(handle);
-        // A null AU render context means leave the old workgroup and join
-        // nothing. Do not invoke AudioWorkgroup's standalone fallback here:
-        // that would keep an auxiliary worker realtime in a non-realtime host
-        // context instead of honoring removal.
-        if (handle) adopted = workgroup.join_from_audio_thread();
-#else
-        // There is no borrowed platform handle to validate off Apple. Keep
-        // the best-effort priority attempt, but it cannot make a null-removal
-        // generation unsafe to acknowledge.
-        (void)workgroup.join_from_audio_thread();
 #endif
+        if (publication.workgroup) {
+            // Apple joins the published OS workgroup. Other platforms retain
+            // their existing best-effort realtime-priority implementation.
+            adopted = workgroup.join_from_audio_thread();
+        } else if (publication.fallback_when_null) {
+            // A standalone device with no workgroup preserves the baseline
+            // best-effort priority path. Tests intercept only this call so a
+            // failed fallback and its inline behavior are deterministic.
+            adopted = fallback_join_hook_for_test_
+                ? fallback_join_hook_for_test_(fallback_join_context_for_test_)
+                : workgroup.join_from_audio_thread();
+        }
+        // AU render-context null is different: leave the preceding borrowed
+        // context, acknowledge removal, and do not apply a sticky fallback
+        // priority to a worker the host no longer declares realtime.
         // If a newer observer call raced the join, this worker is safely joined
         // to an intermediate host-owned context but must not advertise itself
         // current. Its next poll leaves that group and adopts the latest one.
