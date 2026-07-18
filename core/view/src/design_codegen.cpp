@@ -724,6 +724,16 @@ static void emit_js_visual_overrides(const NativeEmit& e, const std::string& tar
     if (st.opacity)
         ss << ind << "setOpacity('" << target_id << "', " << *st.opacity << ");\n";
 
+    // Overflow is a View compositing property too: a decoder emits `clip` for
+    // a Figma container whose "Clip content" is on, and a component master
+    // whose decoration overhangs its bounds renders CLIPPED in Figma — leaving
+    // this un-emitted painted the overhang over whatever sat below the
+    // instance. Only a non-default value is emitted; the bridge's setOverflow
+    // maps clip/hidden to View::Overflow::hidden.
+    if (st.overflow && !st.overflow->empty() && *st.overflow != "visible")
+        ss << ind << "setOverflow('" << target_id << "', '"
+           << js_single_quote_escape(*st.overflow) << "');\n";
+
     // Per-corner radii. The bridge takes setCornerRadius(id, "TopLeft", r)
     // (widget_bridge/border_box_api.cpp) and IRStyle carries all four, but
     // codegen only ever emitted the uniform 'All' — so an asymmetric card

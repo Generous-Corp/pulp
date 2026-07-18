@@ -851,6 +851,139 @@ test('a self-recursive symbol terminates instead of expanding forever', () => {
   assert.ok(!('children' in top.children[0]), 'the cycle is cut, not recursed');
 });
 
+// ── instance swap (`overriddenSymbolID`) ─────────────────────────────────────
+//
+// Files that predate component properties swap a nested instance's component
+// with an override entry carrying `overriddenSymbolID` — there are no
+// componentPropAssignments anywhere. The entry re-points the WHOLE expansion,
+// so reading only the authored symbolID expands every sibling from one shared
+// master: that is how sixteen mixer channels rendered the same instrument icon
+// under sixteen correct labels. Deeper override paths keep resolving after the
+// swap because the swap target's children carry the matching overrideKeys.
+
+function swapScene(swapTarget) {
+  const g = (l, s = 0) => ({ sessionID: s, localID: l });
+  const enc = (...cmds) => Buffer.concat(cmds.map(([tag, ...args]) => {
+    const b = Buffer.alloc(1 + args.length * 4);
+    b.writeUInt8(tag, 0);
+    args.forEach((v, i) => b.writeFloatLE(v, 1 + i * 4));
+    return b;
+  }));
+  const I = { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 };
+  const white = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, visible: true }];
+  return buildScene({
+    nodeChanges: [
+      { guid: g(1), type: 'CANVAS', name: 'Page' },
+      // Authored icon master: one vector (the kick glyph, blob 0).
+      { guid: g(10), type: 'SYMBOL', name: 'Kick', size: { x: 8, y: 8 } },
+      { guid: g(11), type: 'VECTOR', name: 'Vector', overrideKey: g(700),
+        parentIndex: { guid: g(10), position: 'a' }, size: { x: 8, y: 8 },
+        transform: I, fillGeometry: [{ commandsBlob: 0 }], fillPaints: white },
+      // Swap target: its own vector with its own authored geometry (blob 1).
+      { guid: g(12), type: 'SYMBOL', name: 'Layer', size: { x: 8, y: 8 } },
+      { guid: g(13), type: 'VECTOR', name: 'Layer_Vector', overrideKey: g(701),
+        parentIndex: { guid: g(12), position: 'a' }, size: { x: 8, y: 8 },
+        transform: I, fillGeometry: [{ commandsBlob: 1 }], fillPaints: white },
+      // Channel master: an icon instance authored to point at Kick.
+      { guid: g(20), type: 'SYMBOL', name: 'Channel', size: { x: 60, y: 100 } },
+      { guid: g(21), type: 'INSTANCE', name: 'Kick', overrideKey: g(710),
+        parentIndex: { guid: g(20), position: 'a' }, size: { x: 8, y: 8 },
+        transform: I, symbolData: { symbolID: g(10) } },
+      // The frame under import: channel 1 keeps the authored icon, channel 2
+      // swaps it. The derived entry resolves through the swap target's child
+      // overrideKey — it can only land if the expansion actually swapped.
+      { guid: g(2), type: 'FRAME', name: 'Root',
+        parentIndex: { guid: g(1), position: 'a' }, size: { x: 200, y: 100 } },
+      { guid: g(30), type: 'INSTANCE', name: 'channel 1',
+        parentIndex: { guid: g(2), position: 'a' }, size: { x: 60, y: 100 },
+        transform: I, symbolData: { symbolID: g(20) } },
+      { guid: g(31), type: 'INSTANCE', name: 'channel 2',
+        parentIndex: { guid: g(2), position: 'b' }, size: { x: 60, y: 100 },
+        transform: { ...I, m02: 70 },
+        symbolData: { symbolID: g(20), symbolOverrides: [
+          { guidPath: { guids: [g(710)] }, overriddenSymbolID: swapTarget },
+        ] },
+        derivedSymbolData: [
+          { guidPath: { guids: [g(710), g(701)] },
+            fillGeometry: [{ commandsBlob: 2 }] },
+        ] },
+    ],
+    blobs: [
+      { bytes: enc([1, 0, 0], [2, 8, 0], [2, 8, 8], [0]) },       // 0: kick
+      { bytes: enc([1, 0, 0], [2, 6, 0], [2, 6, 6], [2, 0, 6], [0]) }, // 1: layer, authored
+      { bytes: enc([1, 0, 0], [2, 5, 0], [2, 5, 5], [0]) },       // 2: layer, instance-solved
+    ],
+  });
+}
+
+test('an override carrying overriddenSymbolID swaps the master an instance expands', () => {
+  const scene = swapScene({ sessionID: 0, localID: 12 });
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'),
+    { images: new Map(), fileKey: 'K', parserVersion: 't', compatSchemaVersion: '1',
+      exportedAt: '1970-01-01T00:00:00Z' });
+  const [ch1, ch2] = envelope.root.children;
+  const icon1 = ch1.children[0];
+  const icon2 = ch2.children[0];
+
+  // The unswapped channel renders the authored master's subtree…
+  assert.equal(icon1.children[0].name, 'Vector');
+  assert.equal(icon1.children[0].path_data, 'M0 0 L8 0 L8 8 Z');
+  // …and the swapped channel renders the swap TARGET's subtree, with the
+  // deeper derived-geometry entry resolved through the target's overrideKey.
+  assert.equal(icon2.children[0].name, 'Layer_Vector');
+  assert.equal(icon2.children[0].path_data, 'M0 0 L5 0 L5 5 Z');
+  // Component identity follows the swap — that is what Figma renders, and it
+  // is what the recognition resolver must key on.
+  assert.equal(icon2.figma.main_component_name, 'Layer');
+});
+
+test('a swapped master missing from the file falls back to the authored one', () => {
+  const scene = swapScene({ sessionID: 9, localID: 999 });
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'),
+    { images: new Map(), fileKey: 'K', parserVersion: 't', compatSchemaVersion: '1',
+      exportedAt: '1970-01-01T00:00:00Z' });
+  const [, ch2] = envelope.root.children;
+  const icon2 = ch2.children[0];
+  assert.equal(icon2.children[0].name, 'Vector',
+    'the authored master still expands rather than dropping the instance');
+  assert.ok(diagnostics.some((d) => d.code === 'external-component'),
+    'the unreachable swap target is surfaced, not silently ignored');
+});
+
+// ── clip content → overflow ──────────────────────────────────────────────────
+//
+// Figma clips a container's content to its bounds unless "Clip content" is
+// unchecked (`frameMaskDisabled: true`); a GROUP is a frame with `resizeToFit`
+// and never clips regardless of the flag. The envelope key is `style.overflow`
+// — the same key parse_ir_style reads and figma_rest_export.py emits — so an
+// expanded master whose decoration overhangs its symbol bounds is clipped the
+// way Figma clips it instead of painting over whatever sits below.
+
+test('a clipping container emits overflow:clip; a group or opted-out frame does not', () => {
+  const g = (l) => ({ sessionID: 0, localID: l });
+  const scene = buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page' },
+    { guid: g(2), type: 'FRAME', name: 'Root', frameMaskDisabled: false,
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: g(3), type: 'FRAME', name: 'clips', frameMaskDisabled: false,
+      parentIndex: { guid: g(2), position: 'a' }, size: { x: 40, y: 40 } },
+    { guid: g(4), type: 'FRAME', name: 'group', frameMaskDisabled: false, resizeToFit: true,
+      parentIndex: { guid: g(2), position: 'b' }, size: { x: 40, y: 40 } },
+    { guid: g(5), type: 'FRAME', name: 'open', frameMaskDisabled: true,
+      parentIndex: { guid: g(2), position: 'c' }, size: { x: 40, y: 40 } },
+  ]});
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'),
+    { images: new Map(), fileKey: 'K', parserVersion: 't', compatSchemaVersion: '1',
+      exportedAt: '1970-01-01T00:00:00Z' });
+  const byName = Object.fromEntries(envelope.root.children.map((c) => [c.name, c]));
+  assert.equal(envelope.root.style.overflow, 'clip');
+  assert.equal(byName['clips'].style.overflow, 'clip');
+  assert.ok(!('overflow' in byName['group'].style),
+    'a group never clips, whatever its mask flag says');
+  assert.ok(!('overflow' in byName['open'].style),
+    'an unchecked Clip content stays unclipped — Figma draws that overflow');
+});
+
 // ── geometry sidecar (layout-parity ground truth) ────────────────────────────
 //
 // The envelope deliberately DROPS an auto-layout child's coordinates — they
