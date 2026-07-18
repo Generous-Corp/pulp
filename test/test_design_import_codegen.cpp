@@ -528,6 +528,54 @@ TEST_CASE("generate_pulp_cpp preserves extracted interactive-descendant wrappers
     REQUIRE(count_occurrences(result.source, "->set_pointer_events(pulp::view::View::PointerEvents::box_none);") == 1);
 }
 
+TEST_CASE("a knob emits a value-driven arc, not a parked plain ring",
+          "[view][import][knob]") {
+    // .fig visual-open 6.2: some big knobs looked like a plain ring instead of a
+    // value arc. The arc is driven by setValue(id, knob_norm) — the NORMALIZED
+    // value that rotates the indicator across the [-135deg, +135deg] sweep. If
+    // the taper collapsed (raw value clamped to 0 or 1) the indicator parks at an
+    // end and reads as a plain ring. Lock the taper: a value mid-range must emit
+    // a mid-range setValue, so the arc reflects the parameter.
+    auto knob_norm_for = [](float lo, float hi, float def,
+                            const std::string& units) -> float {
+        DesignIR ir;
+        ir.source = DesignSource::figma;
+        ir.root.type = "frame";
+        IRNode k;
+        k.type = "frame";
+        k.name = "K";
+        k.audio_widget = AudioWidgetType::knob;
+        k.audio_label = "K";
+        k.audio_min = lo;
+        k.audio_max = hi;
+        k.audio_default = def;
+        k.style.width = 80.0f;
+        k.style.height = 80.0f;
+        if (!units.empty()) k.attributes["units"] = units;
+        ir.root.children.push_back(std::move(k));
+
+        CodeGenOptions opts;
+        opts.mode = CodeGenMode::bridge_native_js;
+        opts.include_comments = false;
+        const auto js = generate_pulp_js(ir, opts);
+        REQUIRE(js.find("createKnob('") != std::string::npos);
+        const auto p = js.find("setValue('");
+        REQUIRE(p != std::string::npos);
+        const auto comma = js.find(", ", p);
+        const auto semi = js.find(')', comma);
+        return std::stof(js.substr(comma + 2, semi - comma - 2));
+    };
+
+    // A linear knob at the midpoint sweeps to the center.
+    REQUIRE(knob_norm_for(0.0f, 100.0f, 50.0f, "") == Catch::Approx(0.5f));
+    // A frequency knob uses a LOG taper: 880 Hz in [20, 20000] lands near center
+    // (~0.55), indicator ~straight up — NOT clamped to 1 (which is the parked
+    // "plain ring" symptom a linear map of a raw 880 would produce).
+    const float hz = knob_norm_for(20.0f, 20000.0f, 880.0f, "Hz");
+    REQUIRE(hz > 0.45f);
+    REQUIRE(hz < 0.65f);
+}
+
 TEST_CASE("parse_v0_tsx preserves simple useState event contracts in baked C++ manifest",
           "[view][import][cpp-codegen]") {
     auto ir = parse_v0_tsx(R"tsx(
