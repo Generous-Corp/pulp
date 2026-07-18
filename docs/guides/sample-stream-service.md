@@ -21,17 +21,32 @@ The cache core remains caller-driven. Production users can compose it with
 `SampleStreamDecodePool` through `SampleStreamAsyncService`: one non-audio owner
 registers sources, drains `SampleStreamCommandInbox`, dispatches reservations,
 publishes completions, and collects retired sources. The audio callback may
-read prepared `SampleStreamWindow` views and push bounded demand/cancellation
-commands, but must not call the file reader or service methods directly. Inbox
-overflow is explicit and never blocks; the producer retries commands according
-to voice/source generation.
+read prepared `SampleStreamWindow` views, push bounded demand/cancellation
+commands, and call only the RT-safe `begin_audio_page_read()` /
+`complete_audio_page_read()` lifetime-barrier pair. It must not call the file
+reader or any mutating service operation. Inbox overflow is explicit and never
+blocks; the producer retries commands according to voice/source generation.
 If a requester or pending-demand cancellation cannot be queued, its owner keeps
 the token and retries before reuse; failure may waste bounded decode work but
 cannot make an older requester generation satisfy a newer voice. Source memory
 reclamation uses the non-RT `retire_source_after_asset_unpublish()` watermark
 path, not a lossy inbox command. The asset publisher must first stop issuing
 the old borrowed view; the service then captures the current audio generation
-instead of accepting a caller-invented retirement number.
+instead of accepting a caller-invented retirement number. `PulpSampler` waits
+for the callback's monotonic selection acknowledgement before scheduling the
+old source, so that generation covers the last callback which could have read
+the unpublished asset even when the owner thread was preempted.
+
+Page reuse has a separate retirement barrier because the owner thread's sampled
+audio generation can be stale across multiple callbacks. The service first
+removes a victim from Ready visibility and then publishes a monotonic page
+epoch. Each callback captures that epoch before its first page lookup and
+acknowledges the captured value only after its final page access. A callback
+that borrowed the old page therefore cannot release the newer retirement; at
+least one callback entering after retirement must complete before the storage
+is cleared. This contract assumes the normal plugin render model: one
+non-overlapping audio callback that completes in entry order. Prepare and
+release remain quiescent lifecycle operations.
 
 `service_once()` decodes at most one canonical page. Multiple requesters for
 that page produce one read. A requester cancellation removes only that voice's

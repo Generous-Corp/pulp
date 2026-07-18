@@ -22,6 +22,7 @@ using pulp::audio::SampleStreamCommand;
 using pulp::audio::SampleStreamCommandInbox;
 using pulp::audio::SampleStreamCommandPushStatus;
 using pulp::audio::SampleStreamPageDemand;
+using pulp::audio::SampleStreamPageView;
 using pulp::audio::SampleStreamRequesterToken;
 using pulp::audio::SampleStreamScheduleStatus;
 using pulp::audio::SampleStreamServiceStatus;
@@ -31,6 +32,35 @@ using pulp::audio::SampleStreamSourceToken;
 using pulp::audio::SampleStreamWindowReadRequest;
 
 static_assert(std::is_trivially_copyable_v<SampleStreamCommand>);
+
+namespace pulp::audio {
+
+struct SampleStreamCacheServiceTestAccess {
+    static void set_next_page_retirement_epoch(
+        SampleStreamCacheService& service,
+        std::uint64_t epoch) noexcept {
+        service.next_page_retirement_epoch_ = epoch;
+    }
+
+    static std::uint64_t next_page_retirement_epoch(
+        const SampleStreamCacheService& service) noexcept {
+        return service.next_page_retirement_epoch_;
+    }
+
+    static std::uint64_t published_page_retirement_epoch(
+        const SampleStreamCacheService& service) noexcept {
+        return service.published_page_retirement_epoch_.load(
+            std::memory_order_acquire);
+    }
+
+    static std::uint64_t completed_page_retirement_epoch(
+        const SampleStreamCacheService& service) noexcept {
+        return service.completed_page_retirement_epoch_.load(
+            std::memory_order_acquire);
+    }
+};
+
+} // namespace pulp::audio
 
 namespace {
 
@@ -386,7 +416,7 @@ TEST_CASE("Sample stream cache retains demand while every page slot is busy",
     REQUIRE(service.scheduler_stats().pending == 1);
 }
 
-TEST_CASE("Sample stream cache reuses retired pages only after the audio generation completes",
+TEST_CASE("Sample stream cache reuses retired pages only after the page barrier completes",
           "[audio][sampler][stream-service][generation][eviction]") {
     SampleStreamCacheService service;
     REQUIRE(service.prepare({.scheduler_capacity = 4, .page_memory_budget_bytes = 16}));
@@ -428,6 +458,10 @@ TEST_CASE("Sample stream cache reuses retired pages only after the audio generat
     REQUIRE(service.scheduler_stats().pending == 1);
     REQUIRE_FALSE(service.update_audio_generations(7, 8));
     REQUIRE(service.update_audio_generations(8, 7));
+    REQUIRE(service.service_once() ==
+            SampleStreamServiceStatus::WaitingForAudioGeneration);
+    const auto post_retirement_epoch = service.begin_audio_page_read();
+    service.complete_audio_page_read(post_retirement_epoch);
     REQUIRE(service.service_once() == SampleStreamServiceStatus::Published);
     REQUIRE(service.scheduler_stats().pending == 0);
     REQUIRE(added.view.window->ready_channel_data(old_view, 0) == nullptr);
@@ -446,8 +480,167 @@ TEST_CASE("Sample stream cache reuses retired pages only after the audio generat
     const auto stats = service.stats();
     REQUIRE(stats.pages_retired == 1);
     REQUIRE(stats.retired_pages_reused == 1);
-    REQUIRE(stats.retire_waits == 1);
+    REQUIRE(stats.retire_waits == 2);
     REQUIRE(stats.invalid_audio_generation_updates == 1);
+}
+
+TEST_CASE("Sample stream cache page barrier survives stale owner generations",
+          "[audio][sampler][stream-service][generation][eviction][race]") {
+    SampleStreamCacheService service;
+    REQUIRE(service.prepare({.scheduler_capacity = 4,
+                             .page_memory_budget_bytes = 16}));
+    REQUIRE(service.update_audio_generations(1, 0));
+
+    auto config = source_config();
+    config.cache_page_count = 1;
+    const auto added = service.add_source(
+        config,
+        [](std::uint64_t start, pulp::audio::BufferView<float> destination,
+           std::uint64_t frames) {
+            for (std::uint64_t frame = 0; frame < frames; ++frame) {
+                destination.channel_ptr(0)[frame] =
+                    static_cast<float>(start + frame + 1);
+            }
+            return frames;
+        });
+    REQUIRE(added.added());
+
+    REQUIRE(service.request_page(demand(added.view.token, 51, 0)) ==
+            SampleStreamScheduleStatus::Inserted);
+    REQUIRE(service.service_once() == SampleStreamServiceStatus::Published);
+
+    // The owner can be preempted across arbitrarily many audio callbacks. Page
+    // lifetime acknowledgement is therefore independent of its cached callback
+    // generation snapshot.
+    std::atomic<bool> callback_holds_page{false};
+    std::atomic<bool> release_callback{false};
+    SampleStreamPageView held_view;
+    float held_sample_after_retirement = 0.0f;
+    std::thread callback([&] {
+        const auto held_epoch = service.begin_audio_page_read();
+        held_view = added.view.window->ready_page_for_frame(
+            added.view.token.source_generation, 0);
+        callback_holds_page.store(true, std::memory_order_release);
+        callback_holds_page.notify_one();
+        release_callback.wait(false, std::memory_order_acquire);
+        if (const auto* sample =
+                added.view.window->ready_channel_data(held_view, 0)) {
+            held_sample_after_retirement = *sample;
+        }
+        service.complete_audio_page_read(held_epoch);
+    });
+    callback_holds_page.wait(false, std::memory_order_acquire);
+
+    const auto scheduled = service.request_page(
+        demand(added.view.token, 51, 1));
+    const auto retired = service.service_once();
+    const auto generations_updated = service.update_audio_generations(3, 2);
+    const auto waiting_while_borrowed = service.service_once();
+
+    release_callback.store(true, std::memory_order_release);
+    release_callback.notify_one();
+    callback.join();
+
+    REQUIRE(held_view.valid);
+    REQUIRE(scheduled == SampleStreamScheduleStatus::Inserted);
+    REQUIRE(retired == SampleStreamServiceStatus::PageRetired);
+    REQUIRE(generations_updated);
+    REQUIRE(waiting_while_borrowed ==
+            SampleStreamServiceStatus::WaitingForAudioGeneration);
+    REQUIRE_THAT(held_sample_after_retirement, WithinAbs(1.0f, 1.0e-6f));
+
+    // Completing the callback that borrowed the old page cannot release a
+    // retirement epoch which did not exist when that callback entered.
+    REQUIRE(service.service_once() ==
+            SampleStreamServiceStatus::WaitingForAudioGeneration);
+    const auto* held_data =
+        added.view.window->ready_channel_data(held_view, 0);
+    REQUIRE(held_data != nullptr);
+    REQUIRE_THAT(held_data[0], WithinAbs(1.0f, 1.0e-6f));
+
+    // A later callback observes the retired page as unavailable and completes
+    // the published barrier. Only then may the service clear and reuse storage.
+    const auto post_retirement_epoch = service.begin_audio_page_read();
+    REQUIRE_FALSE(added.view.window->ready_page_for_frame(
+        added.view.token.source_generation, 0).valid);
+    service.complete_audio_page_read(post_retirement_epoch);
+    REQUIRE(service.service_once() == SampleStreamServiceStatus::Published);
+    REQUIRE(added.view.window->ready_channel_data(held_view, 0) == nullptr);
+
+    const auto replacement = added.view.window->ready_page_for_frame(
+        added.view.token.source_generation, 4);
+    REQUIRE(replacement.valid);
+    REQUIRE_THAT(added.view.window->ready_channel_data(replacement, 0)[0],
+                 WithinAbs(5.0f, 1.0e-6f));
+}
+
+TEST_CASE("Sample stream cache page barrier wraps fail closed and resets quiescently",
+          "[audio][sampler][stream-service][generation][eviction][overflow]") {
+    using Access = pulp::audio::SampleStreamCacheServiceTestAccess;
+    constexpr auto maximum_epoch = std::numeric_limits<std::uint64_t>::max();
+
+    SampleStreamCacheService service;
+    REQUIRE(service.prepare({.scheduler_capacity = 4,
+                             .page_memory_budget_bytes = 16}));
+    REQUIRE(service.update_audio_generations(1, 0));
+    auto config = source_config();
+    config.cache_page_count = 1;
+    const auto added = service.add_source(
+        config,
+        [](std::uint64_t start, pulp::audio::BufferView<float> destination,
+           std::uint64_t frames) {
+            for (std::uint64_t frame = 0; frame < frames; ++frame) {
+                destination.channel_ptr(0)[frame] =
+                    static_cast<float>(start + frame + 1);
+            }
+            return frames;
+        });
+    REQUIRE(added.added());
+    REQUIRE(service.request_page(demand(added.view.token, 52, 0)) ==
+            SampleStreamScheduleStatus::Inserted);
+    REQUIRE(service.service_once() == SampleStreamServiceStatus::Published);
+
+    Access::set_next_page_retirement_epoch(service, maximum_epoch);
+    REQUIRE(service.request_page(demand(added.view.token, 52, 1)) ==
+            SampleStreamScheduleStatus::Inserted);
+    REQUIRE(service.service_once() == SampleStreamServiceStatus::PageRetired);
+    REQUIRE(Access::published_page_retirement_epoch(service) == maximum_epoch);
+    REQUIRE(Access::next_page_retirement_epoch(service) == 0);
+
+    const auto final_epoch = service.begin_audio_page_read();
+    REQUIRE(final_epoch == maximum_epoch);
+    service.complete_audio_page_read(final_epoch);
+    REQUIRE(service.service_once() == SampleStreamServiceStatus::Published);
+    REQUIRE(Access::completed_page_retirement_epoch(service) == maximum_epoch);
+
+    REQUIRE(service.request_page(demand(added.view.token, 52, 2)) ==
+            SampleStreamScheduleStatus::Inserted);
+    REQUIRE(service.service_once() ==
+            SampleStreamServiceStatus::NoPageAvailable);
+    REQUIRE(Access::published_page_retirement_epoch(service) == maximum_epoch);
+    REQUIRE(Access::next_page_retirement_epoch(service) == 0);
+
+    service.release();
+    REQUIRE(service.prepare({.scheduler_capacity = 4,
+                             .page_memory_budget_bytes = 16}));
+    REQUIRE(Access::published_page_retirement_epoch(service) == 0);
+    REQUIRE(Access::completed_page_retirement_epoch(service) == 0);
+    REQUIRE(Access::next_page_retirement_epoch(service) == 1);
+
+    REQUIRE(service.update_audio_generations(1, 0));
+    const auto replacement_source = service.add_source(config,
+        [](std::uint64_t, pulp::audio::BufferView<float>, std::uint64_t frames) {
+            return frames;
+        });
+    REQUIRE(replacement_source.added());
+    REQUIRE(service.request_page(demand(replacement_source.view.token, 53, 0)) ==
+            SampleStreamScheduleStatus::Inserted);
+    REQUIRE(service.service_once() == SampleStreamServiceStatus::Published);
+    REQUIRE(service.request_page(demand(replacement_source.view.token, 53, 1)) ==
+            SampleStreamScheduleStatus::Inserted);
+    REQUIRE(service.service_once() == SampleStreamServiceStatus::PageRetired);
+    REQUIRE(Access::published_page_retirement_epoch(service) == 1);
+    REQUIRE(Access::next_page_retirement_epoch(service) == 2);
 }
 
 TEST_CASE("Sample stream cache preserves a refreshed ready page during deterministic eviction",

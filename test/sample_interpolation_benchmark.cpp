@@ -235,7 +235,8 @@ int main(int argc, char** argv) {
                     std::fprintf(stderr,
                                  "p95 %.3f ns/frame exceeds %.3f budget for %s ratio %.3f voices %d\n",
                                  timing.p95_ns_per_frame, p95_budget(policy),
-                                 pulp::test::audio::sample_interpolation_policy_name(policy),
+                                 pulp::test::audio::
+                                     sample_interpolation_policy_cli_id(policy),
                                  ratio, voices);
                     return 1;
                 }
@@ -244,7 +245,8 @@ int main(int argc, char** argv) {
                 std::cout
                     << "{\"tier\":"
                     << std::quoted(
-                           pulp::test::audio::sample_interpolation_policy_name(policy))
+                           pulp::test::audio::sample_interpolation_policy_cli_id(
+                               policy))
                     << ",\"ratio\":" << ratio
                     << ",\"voices\":" << voices
                     << ",\"target_polyphony\":" << (voices == 8 ? "true" : "false")

@@ -114,6 +114,13 @@ struct PulpSamplerStreamStats {
 
 struct PulpSamplerTestAccess;
 
+struct SamplerAudioCallbackToken {
+    std::uint64_t callback_generation = 0;
+    std::uint64_t page_read_epoch = 0;
+
+    bool valid() const noexcept { return callback_generation != 0; }
+};
+
 class SamplerStreamingRuntime {
   public:
     static constexpr std::size_t kCommandCapacity = 256;
@@ -161,6 +168,7 @@ class SamplerStreamingRuntime {
         audio_active_generation_.store(1, std::memory_order_relaxed);
         audio_completed_generation_.store(0, std::memory_order_relaxed);
         next_audio_generation_.store(1, std::memory_order_relaxed);
+        audio_completed_page_read_epoch_ = 0;
         pages_published_.store(0, std::memory_order_relaxed);
         starved_frames_.store(0, std::memory_order_relaxed);
         service_starvation_events_.store(0, std::memory_order_relaxed);
@@ -559,14 +567,26 @@ class SamplerStreamingRuntime {
         return commands_;
     }
 
-    std::uint64_t begin_audio_callback() noexcept {
+    SamplerAudioCallbackToken begin_audio_callback() noexcept {
+        // Capture the page barrier before any page lookup in this callback.
+        // A retirement published after this load requires a later callback to
+        // complete before that page can be cleared and reused.
+        const auto page_read_epoch = service_.begin_audio_page_read();
         const auto generation = next_audio_generation_.fetch_add(1, std::memory_order_relaxed) + 1;
         audio_active_generation_.store(generation, std::memory_order_release);
-        return generation;
+        return {generation, page_read_epoch};
     }
 
-    void complete_audio_callback(std::uint64_t generation) noexcept {
-        audio_completed_generation_.store(generation, std::memory_order_release);
+    void complete_audio_callback(SamplerAudioCallbackToken token) noexcept {
+        if (!token.valid()) return;
+        // All page reads are complete before this acknowledgement. Source
+        // generation completion remains a separate retirement domain.
+        if (token.page_read_epoch != audio_completed_page_read_epoch_) {
+            service_.complete_audio_page_read(token.page_read_epoch);
+            audio_completed_page_read_epoch_ = token.page_read_epoch;
+        }
+        audio_completed_generation_.store(token.callback_generation,
+                                          std::memory_order_release);
     }
 
     void acknowledge_selection(std::uint64_t generation) noexcept {
@@ -819,6 +839,9 @@ class SamplerStreamingRuntime {
     std::atomic<std::uint64_t> audio_active_generation_{1};
     std::atomic<std::uint64_t> audio_completed_generation_{0};
     std::atomic<std::uint64_t> next_audio_generation_{1};
+    // Audio-thread-only acknowledgement cache. Page retirement is infrequent,
+    // so avoid writing the cross-thread completion atomic on unchanged blocks.
+    std::uint64_t audio_completed_page_read_epoch_ = 0;
     std::atomic<std::uint64_t> pages_published_{0};
     std::atomic<audio::SampleStreamAsyncPrepareStatus> service_prepare_status_{
         audio::SampleStreamAsyncPrepareStatus::InvalidConfiguration};
