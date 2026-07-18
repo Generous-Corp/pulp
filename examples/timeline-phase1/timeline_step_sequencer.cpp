@@ -32,15 +32,25 @@ bool command_targets_active_extent(const state::Snapshot& snapshot,
     const auto lane_is_active = [&snapshot](std::uint8_t lane) {
         return lane < snapshot.active_lane_count;
     };
+    const auto step_is_active = [&snapshot, &pattern_is_active](std::uint8_t pattern,
+                                                                std::uint8_t step) {
+        if (!pattern_is_active(pattern))
+            return false;
+        const auto length = snapshot.patterns[pattern].length;
+        const auto active_steps = length == 0 ? state::kStepCount : length;
+        return step < active_steps;
+    };
     switch (command.kind) {
     case state::StepEditKind::SetCell:
         return pattern_is_active(command.payload.set_cell.pattern) &&
                lane_is_active(command.payload.set_cell.lane) &&
-               command.payload.set_cell.step < state::kStepCount;
+               step_is_active(command.payload.set_cell.pattern,
+                              command.payload.set_cell.step);
     case state::StepEditKind::Clear:
         return pattern_is_active(command.payload.clear.pattern) &&
                lane_is_active(command.payload.clear.lane) &&
-               command.payload.clear.step < state::kStepCount;
+               step_is_active(command.payload.clear.pattern,
+                              command.payload.clear.step);
     case state::StepEditKind::RandomizeLane:
         return pattern_is_active(command.payload.randomize_lane.pattern) &&
                lane_is_active(command.payload.randomize_lane.lane);
@@ -289,11 +299,14 @@ bool TimelineStepSequencerProcessor::apply_pending_edits_and_recompile() {
     }
     pattern_ = std::move(candidate);
     engine_sequence_ = candidate_sequence;
+    bool echo_lost = false;
     for (const auto& echo : applied)
-        (void)channel_.audio_try_publish_applied(echo);
-    pattern_.epoch = ++epoch_;
-    channel_.audio_publish_snapshot(pattern_);
-    channel_.audio_mark_resync_required(pattern_.epoch);
+        echo_lost |= !channel_.audio_try_publish_applied(echo);
+    if (echo_lost) {
+        pattern_.epoch = ++epoch_;
+        channel_.audio_publish_snapshot(pattern_);
+        channel_.audio_mark_resync_required(pattern_.epoch);
+    }
     return true;
 }
 

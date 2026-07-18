@@ -269,8 +269,12 @@ TEST_CASE("timeline step channel edits persist recompile and deterministically c
     REQUIRE(applied);
     REQUIRE(applied->kind == state::AppliedEditKind::StepRangeChanged);
     REQUIRE(applied->client_sequence == 1);
+    REQUIRE(applied->snapshot_epoch == 1);
+    REQUIRE(processor.pattern_snapshot().epoch == 1);
+    REQUIRE(processor.channel().ui_resync_required_epoch() == 1);
     const auto published = processor.channel().ui_read_latest_snapshot();
-    REQUIRE(published.patterns[0].lanes[0][0].pitch_offset == 12);
+    REQUIRE(published.engine_sequence == 0);
+    REQUIRE(published.patterns[0].lanes[0][0].pitch_offset == 0);
 
     clip = processor.persistent_project()
                ->find_sequence({3})
@@ -327,6 +331,101 @@ TEST_CASE("timeline step channel rejects edits outside the persisted active exte
     REQUIRE(rejected->payload.reject_reason == 2);
     REQUIRE(processor.pattern_snapshot().active_pattern == 0);
     REQUIRE(processor.engine_prepared());
+}
+
+TEST_CASE("timeline step channel rejects cells beyond active pattern length") {
+    TimelineStepSequencerProcessor processor;
+    processor.prepare(prepare_context());
+    REQUIRE(processor.engine_prepared());
+    REQUIRE(processor.persistent_project());
+    const auto* clip = processor.persistent_project()
+                           ->find_sequence({3})
+                           ->find_track({4})
+                           ->find_clip({5});
+    REQUIRE(clip);
+    const auto* registered = std::get_if<timeline::RegisteredContent>(&clip->content());
+    REQUIRE(registered);
+    const auto before_payload = registered->canonical_payload_json();
+    const auto before_cell = processor.pattern_snapshot().patterns[0].lanes[0][31];
+
+    state::StepEditCommand command;
+    command.client_sequence = 10;
+    command.kind = state::StepEditKind::SetCell;
+    command.payload.set_cell.pattern = 0;
+    command.payload.set_cell.lane = 0;
+    command.payload.set_cell.step = 31;
+    command.payload.set_cell.cell = before_cell;
+    command.payload.set_cell.cell.flags = state::StepCell::kEnabledBit;
+    command.payload.set_cell.cell.pitch_offset = 24;
+    REQUIRE(processor.channel().ui_try_submit(command));
+    REQUIRE_FALSE(processor.apply_pending_edits_and_recompile());
+    const auto rejected = processor.channel().ui_try_pop_applied();
+    REQUIRE(rejected);
+    REQUIRE(rejected->kind == state::AppliedEditKind::CommandRejected);
+    REQUIRE(rejected->client_sequence == 10);
+    REQUIRE(rejected->payload.reject_reason == 2);
+    const auto& after_cell = processor.pattern_snapshot().patterns[0].lanes[0][31];
+    REQUIRE(after_cell.flags == before_cell.flags);
+    REQUIRE(after_cell.pitch_offset == before_cell.pitch_offset);
+
+    clip = processor.persistent_project()
+               ->find_sequence({3})
+               ->find_track({4})
+               ->find_clip({5});
+    registered = std::get_if<timeline::RegisteredContent>(&clip->content());
+    REQUIRE(registered);
+    REQUIRE(registered->canonical_payload_json() == before_payload);
+
+    TimelineStepSequencerProcessor reference;
+    reference.prepare(prepare_context());
+    REQUIRE(reference.engine_prepared());
+    REQUIRE(reference.seek_samples(0) == playback::TransportError::None);
+    StereoBlock before(128);
+    process_direct(reference, before);
+
+    REQUIRE(processor.seek_samples(0) == playback::TransportError::None);
+    StereoBlock after(128);
+    process_direct(processor, after);
+    REQUIRE(after.left == before.left);
+    REQUIRE(after.right == before.right);
+}
+
+TEST_CASE("timeline step channel snapshots only when applied echoes overflow") {
+    TimelineStepSequencerProcessor processor;
+    processor.prepare(prepare_context());
+    REQUIRE(processor.engine_prepared());
+
+    for (std::size_t index = 0; index < state::kAppliedQueueCapacity; ++index) {
+        state::StepEditCommand command;
+        command.client_sequence = index + 1;
+        command.kind = state::StepEditKind::SetCell;
+        command.payload.set_cell.pattern = 0;
+        command.payload.set_cell.lane = 0;
+        command.payload.set_cell.step = 0;
+        command.payload.set_cell.cell = processor.pattern_snapshot().patterns[0].lanes[0][0];
+        command.payload.set_cell.cell.pitch_offset = static_cast<std::int8_t>(index % 24);
+        REQUIRE(processor.channel().ui_try_submit(command));
+    }
+    REQUIRE(processor.apply_pending_edits_and_recompile());
+    REQUIRE(processor.pattern_snapshot().epoch == 1);
+    REQUIRE(processor.channel().ui_resync_required_epoch() == 1);
+
+    state::StepEditCommand overflow;
+    overflow.client_sequence = state::kAppliedQueueCapacity + 1;
+    overflow.kind = state::StepEditKind::SetCell;
+    overflow.payload.set_cell.pattern = 0;
+    overflow.payload.set_cell.lane = 0;
+    overflow.payload.set_cell.step = 0;
+    overflow.payload.set_cell.cell = processor.pattern_snapshot().patterns[0].lanes[0][0];
+    overflow.payload.set_cell.cell.pitch_offset = 42;
+    REQUIRE(processor.channel().ui_try_submit(overflow));
+    REQUIRE(processor.apply_pending_edits_and_recompile());
+    REQUIRE(processor.pattern_snapshot().epoch == 2);
+    REQUIRE(processor.channel().ui_resync_required_epoch() == 2);
+    const auto recovered = processor.channel().ui_read_latest_snapshot();
+    REQUIRE(recovered.epoch == 2);
+    REQUIRE(recovered.engine_sequence == state::kAppliedQueueCapacity + 1);
+    REQUIRE(recovered.patterns[0].lanes[0][0].pitch_offset == 42);
 }
 
 TEST_CASE("timeline examples render deterministically through standalone callback seam") {
