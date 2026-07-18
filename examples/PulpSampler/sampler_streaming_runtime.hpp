@@ -31,6 +31,7 @@
 #include <stop_token>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <type_traits>
 
@@ -77,6 +78,9 @@ struct SamplerPublishedSource {
 static_assert(std::is_trivially_copyable_v<SamplerPublishedSource>);
 
 struct PulpSamplerStreamStats {
+    audio::SampleStreamAsyncPrepareStatus service_prepare_status =
+        audio::SampleStreamAsyncPrepareStatus::InvalidConfiguration;
+    std::uint32_t decode_worker_count = 0;
     std::uint64_t pages_published = 0;
     std::uint64_t starved_output_frames = 0;
     // Output-supply symptoms. A decode failure can later cause one of these,
@@ -239,9 +243,12 @@ class SamplerStreamingRuntime {
             return result;
         }
 #endif
-        service_ready_ = service_.prepare(service_config);
+        const auto service_prepare = service_.prepare_checked(service_config);
+        service_prepare_status_.store(service_prepare.status,
+                                      std::memory_order_relaxed);
+        service_ready_ = service_prepare.prepared();
         if (!service_ready_) {
-            result.status = PulpSamplerPrepareStatus::StreamingServiceUnavailable;
+            result.status = PulpSamplerPrepareStatus::AllocationFailure;
             release();
             return result;
         }
@@ -255,6 +262,13 @@ class SamplerStreamingRuntime {
             for (auto& slot : slots_)
                 slot = std::make_unique<StreamedSlot>();
             service_running_.store(true, std::memory_order_release);
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+            if (fail_next_thread_start_for_test_.exchange(
+                    false, std::memory_order_acq_rel)) {
+                throw std::system_error(
+                    std::make_error_code(std::errc::resource_unavailable_try_again));
+            }
+#endif
             service_thread_ = std::thread([this] { service_loop(); });
         } catch (...) {
             result.status = PulpSamplerPrepareStatus::AllocationFailure;
@@ -428,6 +442,26 @@ class SamplerStreamingRuntime {
     void fail_next_prepare_for_test() noexcept {
         fail_next_prepare_for_test_.store(true, std::memory_order_release);
     }
+
+    void fail_next_thread_start_for_test() noexcept {
+        fail_next_thread_start_for_test_.store(true, std::memory_order_release);
+    }
+
+    void fail_next_service_prepare_for_test() noexcept {
+        fail_next_service_prepare_for_test_.store(true, std::memory_order_release);
+    }
+
+    void fail_next_slot_allocation_for_test() noexcept {
+        fail_next_prepare_allocation_for_test_.store(true,
+                                                     std::memory_order_release);
+    }
+
+    bool fully_released_for_test() const noexcept {
+        if (service_ready_ || service_running_.load(std::memory_order_acquire) ||
+            service_thread_.joinable() || service_.prepared()) return false;
+        return std::all_of(slots_.begin(), slots_.end(),
+                           [](const auto& slot) { return slot == nullptr; });
+    }
 #endif
 
     SamplerPublishedSource published_source() const noexcept {
@@ -439,6 +473,9 @@ class SamplerStreamingRuntime {
         const auto decode_scratch_bytes =
             decode_scratch_bytes_.load(std::memory_order_relaxed);
         return {
+            .service_prepare_status =
+                service_prepare_status_.load(std::memory_order_relaxed),
+            .decode_worker_count = service_ready_ ? kWorkerCount : 0,
             .pages_published = pages_published_.load(std::memory_order_relaxed),
             .starved_output_frames = starved_frames_.load(std::memory_order_relaxed),
             .service_starvation_events =
@@ -491,6 +528,7 @@ class SamplerStreamingRuntime {
         const auto source = published_source_.read();
         if (source.kind != SamplerPublishedSourceKind::Streamed)
             return policy;
+        policy.selection_generation = source.selection_generation;
         const auto& contract = source.streamed.preload_contract;
         const auto evaluated = audio::evaluate_sample_preload_contract(contract);
         policy.source_sample_rate = contract.source_sample_rate;
@@ -774,6 +812,8 @@ class SamplerStreamingRuntime {
     std::atomic<std::uint64_t> audio_completed_generation_{0};
     std::atomic<std::uint64_t> next_audio_generation_{1};
     std::atomic<std::uint64_t> pages_published_{0};
+    std::atomic<audio::SampleStreamAsyncPrepareStatus> service_prepare_status_{
+        audio::SampleStreamAsyncPrepareStatus::InvalidConfiguration};
     std::atomic<std::uint64_t> starved_frames_{0};
     std::atomic<std::uint64_t> service_starvation_events_{0};
     std::atomic<std::uint64_t> decode_failure_events_{0};
@@ -805,6 +845,7 @@ class SamplerStreamingRuntime {
 #if defined(PULP_SAMPLER_TEST_HOOKS)
     std::atomic<bool> fail_next_service_prepare_for_test_{false};
     std::atomic<bool> fail_next_prepare_allocation_for_test_{false};
+    std::atomic<bool> fail_next_thread_start_for_test_{false};
     std::atomic<bool> fail_next_stream_decode_for_test_{false};
     std::atomic<bool> reverse_prewarm_pending_for_test_{false};
     std::atomic<bool> block_next_reverse_decode_for_test_{false};

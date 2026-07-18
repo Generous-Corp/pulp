@@ -111,6 +111,10 @@ public:
             state.has_runtime_state = true;
             state.runtime_state = restored_runtime_state_;
             state.runtime_host_sample_rate = restored_runtime_host_sample_rate_;
+        } else if (pending_runtime_state_available_) {
+            state.has_runtime_state = true;
+            state.runtime_state = pending_runtime_state_;
+            state.runtime_host_sample_rate = pending_runtime_host_sample_rate_;
         }
         auto written = write_sampler_heritage_state(state);
         if (!written.valid() && state.has_runtime_state) {
@@ -186,8 +190,13 @@ public:
     /// Load a true ranged WAV or uncompressed AIFF asset. The call may perform
     /// file I/O and wait for the sampler's non-audio owner thread.
     PulpSamplerLoadResult load_sample_file_result(std::string_view path) {
-        last_load_result_ = streaming_->load_sample_file_result(path);
-        return last_load_result_;
+        DiagnosticsWriteGuard guard(diagnostics_epoch_);
+        auto result = streaming_->load_sample_file_result(path);
+        if (result.loaded())
+            result.selection_generation =
+                streaming_->published_source().selection_generation;
+        last_load_result_.write(result);
+        return result;
     }
 
     bool load_sample_file(std::string_view path) {
@@ -195,7 +204,7 @@ public:
     }
 
     PulpSamplerLoadResult last_load_result() const noexcept {
-        return last_load_result_;
+        return last_load_result_.read();
     }
 
     bool set_config(PulpSamplerConfig config) noexcept {
@@ -206,7 +215,7 @@ public:
 
     PulpSamplerConfig config() const noexcept { return config_; }
     PulpSamplerPrepareResult prepare_result() const noexcept {
-        return prepare_result_;
+        return prepare_result_.read();
     }
 
     bool has_sample() const {
@@ -275,19 +284,25 @@ public:
     }
 
     PulpSamplerDiagnostics diagnostics() const noexcept {
-        const auto stream = streaming_->stats();
-        PulpSamplerDiagnostics result{
-            .prepare = prepare_result_,
-            .last_load = last_load_result_,
-            .preload = streaming_->preload_policy(),
-            .heritage = heritage_.diagnostics(),
-            .streaming_memory_capacity_bytes = stream.total_memory_capacity_bytes,
-            .current_streaming_memory_bytes = stream.current_total_memory_bytes,
-            .peak_streaming_memory_bytes = stream.peak_total_memory_bytes,
-        };
-        if (envelope_snapshot_available_.load(std::memory_order_acquire))
-            result.envelope = envelope_snapshot_.read();
-        return result;
+        for (;;) {
+            const auto before = diagnostics_epoch_.load(std::memory_order_acquire);
+            if ((before & 1u) != 0) continue;
+            const auto stream = streaming_->stats();
+            PulpSamplerDiagnostics result{
+                .snapshot_epoch = before,
+                .prepare = prepare_result_.read(),
+                .last_load = last_load_result_.read(),
+                .preload = streaming_->preload_policy(),
+                .heritage = heritage_.diagnostics(),
+                .streaming_memory_capacity_bytes = stream.total_memory_capacity_bytes,
+                .current_streaming_memory_bytes = stream.current_total_memory_bytes,
+                .peak_streaming_memory_bytes = stream.peak_total_memory_bytes,
+            };
+            if (envelope_snapshot_available_.load(std::memory_order_acquire))
+                result.envelope = envelope_snapshot_.read();
+            const auto after = diagnostics_epoch_.load(std::memory_order_acquire);
+            if (before == after) return result;
+        }
     }
 
     format::PrepareResourceUsage estimate_prepare_resources(
@@ -297,18 +312,96 @@ public:
         usage.input_channels = std::max(0, ctx.input_channels);
         usage.output_channels = std::max(0, ctx.output_channels);
         usage.voices = kMaxVoices;
+        const auto narrowed_rate = static_cast<float>(ctx.sample_rate);
         if (!std::isfinite(ctx.sample_rate) || ctx.sample_rate <= 0.0 ||
+            !std::isfinite(narrowed_rate) || narrowed_rate <= 0.0f ||
             ctx.max_buffer_size <= 0 || ctx.output_channels <= 0 ||
             ctx.output_channels > static_cast<int>(kMaxOutputChannels))
             return usage;
+        auto add = [](std::size_t left, std::size_t right) noexcept {
+            return right > std::numeric_limits<std::size_t>::max() - left
+                ? std::numeric_limits<std::size_t>::max() : left + right;
+        };
+        auto multiply = [](std::size_t left, std::size_t right) noexcept {
+            return left != 0 && right >
+                    std::numeric_limits<std::size_t>::max() / left
+                ? std::numeric_limits<std::size_t>::max() : left * right;
+        };
+        auto sinc_bytes = [&](double maximum_consumption) noexcept {
+            if (!(maximum_consumption > 0.0) ||
+                !std::isfinite(maximum_consumption) || maximum_consumption > 128.0)
+                return std::numeric_limits<std::size_t>::max();
+            const auto intervals = maximum_consumption <= 1.0 ? 0.0
+                : std::ceil(std::log2(maximum_consumption) * 4.0);
+            if (intervals >= 32.0)
+                return std::numeric_limits<std::size_t>::max();
+            return multiply(static_cast<std::size_t>(intervals) + 1,
+                            (512u + 1u) * (2u * 24u) * sizeof(float));
+        };
+
+        double clock_ratio = 1.0;
+        double machine_rate = ctx.sample_rate;
+        bool heritage_processing = false;
+        if (heritage_.configured()) {
+            const auto profile = heritage_.configured_profile();
+            for (const auto& stage : profile.stages) {
+                if (stage.bypass) continue;
+                heritage_processing = true;
+                if (const auto* machine =
+                        std::get_if<audio::SampleHeritageMachineDomainStage>(
+                            &stage.parameters))
+                    machine_rate = machine->sample_rate;
+                if (const auto* clock =
+                        std::get_if<audio::SampleHeritageClockPitchStage>(
+                            &stage.parameters))
+                    clock_ratio = clock->ratio;
+            }
+        }
+        const auto stream_rate = ctx.sample_rate * clock_ratio;
+        const auto stream_frames_double =
+            std::ceil(static_cast<double>(ctx.max_buffer_size) * clock_ratio);
+        if (!std::isfinite(stream_rate) || stream_rate <= 0.0 ||
+            stream_rate > std::numeric_limits<float>::max() ||
+            !std::isfinite(stream_frames_double) || stream_frames_double <= 0.0 ||
+            stream_frames_double > std::numeric_limits<std::uint32_t>::max())
+            return usage;
         const auto streaming = SamplerStreamingRuntime::estimate_prepare(
-            static_cast<float>(ctx.sample_rate),
-            static_cast<std::uint32_t>(ctx.max_buffer_size),
+            static_cast<float>(stream_rate),
+            static_cast<std::uint32_t>(stream_frames_double),
             config_.streaming_memory_budget_bytes);
-        usage.persistent_bytes = streaming.configured_streaming_memory_bytes >
+        auto persistent = streaming.configured_streaming_memory_bytes >
                 std::numeric_limits<std::size_t>::max()
             ? std::numeric_limits<std::size_t>::max()
             : static_cast<std::size_t>(streaming.configured_streaming_memory_bytes);
+        // Two 2-channel, 60-second-at-48k resident slots.
+        persistent = add(persistent, 46'080'000u);
+        // The fixed 140 dB/0.025 transition design is 369 doubles.
+        persistent = add(persistent, 369u * sizeof(double));
+        persistent = add(persistent, sinc_bytes(
+            SamplerStreamingRuntime::maximum_pitch_ratio() *
+            SamplerStreamingRuntime::maximum_source_sample_rate() /
+            stream_rate));
+        // Stream slots, decode/service records, queues, and worker metadata.
+        // This conservative bound is separate from the caller's audio-storage cap.
+        persistent = add(persistent, sizeof(SamplerStreamingRuntime));
+        persistent = add(persistent, 1u << 20);
+        if (heritage_processing) {
+            persistent = add(persistent, sizeof(audio::SampleHeritageEngine));
+            const auto input_ratio = ctx.sample_rate / machine_rate;
+            const auto return_ratio = machine_rate * clock_ratio / ctx.sample_rate;
+            persistent = add(persistent,
+                             sinc_bytes(std::max(input_ratio, return_ratio)));
+            const auto machine_frames = static_cast<std::size_t>(std::ceil(
+                static_cast<double>(ctx.max_buffer_size) * return_ratio));
+            const auto input_frames = static_cast<std::size_t>(stream_frames_double);
+            persistent = add(persistent, multiply(
+                multiply(static_cast<std::size_t>(ctx.output_channels),
+                         add(machine_frames, input_frames)), sizeof(float)));
+            persistent = add(persistent, multiply(
+                static_cast<std::size_t>(ctx.output_channels),
+                2u * 48u * sizeof(float)));
+        }
+        usage.persistent_bytes = persistent;
         const auto scratch_frames = static_cast<std::size_t>(ctx.max_buffer_size);
         if (scratch_frames <= std::numeric_limits<std::size_t>::max() /
                                   (kMaxOutputChannels * sizeof(float))) {
@@ -321,26 +414,38 @@ public:
     }
 
     void prepare(const format::PrepareContext& ctx) override {
+        DiagnosticsWriteGuard guard(diagnostics_epoch_);
+        try {
+            prepare_transaction(ctx);
+        } catch (...) {
+            fail_prepare({.status = PulpSamplerPrepareStatus::AllocationFailure});
+        }
+    }
+
+    void prepare_transaction(const format::PrepareContext& ctx) {
         const auto previous_latency = latency_samples();
         release();
-        last_load_result_ = {};
+        last_load_result_.write({});
         envelope_lifetime_ = {};
         envelope_snapshot_available_.store(false, std::memory_order_release);
+        const auto narrowed_rate = static_cast<float>(ctx.sample_rate);
         if (!std::isfinite(ctx.sample_rate) || ctx.sample_rate <= 0.0 ||
+            !std::isfinite(narrowed_rate) || narrowed_rate <= 0.0f ||
             ctx.max_buffer_size <= 0 || ctx.output_channels <= 0 ||
             ctx.output_channels > static_cast<int>(kMaxOutputChannels) ||
             ctx.input_channels < 0) {
-            prepare_result_.status =
-                PulpSamplerPrepareStatus::InvalidHostConfiguration;
+            prepare_result_.write({.status =
+                PulpSamplerPrepareStatus::InvalidHostConfiguration});
             return;
         }
         if (const auto exceeded = check_prepare_resource_limits(ctx);
             exceeded != format::PrepareResourceLimit::None) {
-            prepare_result_.status = PulpSamplerPrepareStatus::ResourceLimitExceeded;
-            prepare_result_.exceeded_limit = exceeded;
+            prepare_result_.write({
+                .status = PulpSamplerPrepareStatus::ResourceLimitExceeded,
+                .exceeded_limit = exceeded});
             return;
         }
-        host_sample_rate_ = static_cast<float>(ctx.sample_rate);
+        host_sample_rate_ = narrowed_rate;
         max_block_frames_ = static_cast<std::uint32_t>(ctx.max_buffer_size);
         prepared_output_channels_ = static_cast<std::uint32_t>(ctx.output_channels);
 
@@ -397,7 +502,7 @@ public:
         source_publication_.acknowledge_audio(
             streaming_->published_source(), voices_, *streaming_);
         prepared_ = true;
-        prepare_result_ = stream_result;
+        prepare_result_.write(stream_result);
         pending_runtime_state_available_ = false;
         pending_runtime_host_sample_rate_ = 0.0;
         if (latency_samples() != previous_latency) flag_latency_changed();
@@ -410,8 +515,11 @@ public:
         source_publication_.release();
         sinc_bank_->release();
         heritage_.release_processing();
+        for (auto& scratch : voice_scratch_)
+            std::vector<float>().swap(scratch);
+        voice_scratch_ptrs_.fill(nullptr);
         prepared_ = false;
-        prepare_result_ = {};
+        prepare_result_.write({});
         envelope_snapshot_available_.store(false, std::memory_order_release);
     }
 
@@ -497,6 +605,17 @@ private:
         bool valid = false;
     };
 
+    struct DiagnosticsWriteGuard {
+        explicit DiagnosticsWriteGuard(std::atomic<std::uint64_t>& epoch)
+            : epoch_(epoch) {
+            epoch_.fetch_add(1, std::memory_order_acq_rel);
+        }
+        ~DiagnosticsWriteGuard() {
+            epoch_.fetch_add(1, std::memory_order_release);
+        }
+        std::atomic<std::uint64_t>& epoch_;
+    };
+
     struct StreamDomain {
         float sample_rate = 44100.0f;
         std::uint32_t maximum_block_frames = 512;
@@ -551,6 +670,18 @@ private:
         if (fail_next_stream_domain_prepare_for_test_) {
             fail_next_stream_domain_prepare_for_test_ = false;
             candidate_streaming->fail_next_prepare_for_test();
+        }
+        if (fail_next_stream_service_prepare_for_test_) {
+            fail_next_stream_service_prepare_for_test_ = false;
+            candidate_streaming->fail_next_service_prepare_for_test();
+        }
+        if (fail_next_stream_slot_allocation_for_test_) {
+            fail_next_stream_slot_allocation_for_test_ = false;
+            candidate_streaming->fail_next_slot_allocation_for_test();
+        }
+        if (fail_next_stream_thread_start_for_test_) {
+            fail_next_stream_thread_start_for_test_ = false;
+            candidate_streaming->fail_next_thread_start_for_test();
         }
 #endif
         auto result = candidate_streaming->prepare_checked(
@@ -673,7 +804,7 @@ private:
 
     void fail_prepare(PulpSamplerPrepareResult result) noexcept {
         release();
-        prepare_result_ = result;
+        prepare_result_.write(result);
     }
 
     SamplerSourcePublicationOwner source_publication_;
@@ -687,8 +818,9 @@ private:
     std::atomic<bool> envelope_snapshot_available_{false};
     audio::SampleStarvationEnvelopeStats envelope_lifetime_{};
     PulpSamplerConfig config_{};
-    PulpSamplerPrepareResult prepare_result_{};
-    PulpSamplerLoadResult last_load_result_{};
+    runtime::SeqLock<PulpSamplerPrepareResult> prepare_result_{};
+    runtime::SeqLock<PulpSamplerLoadResult> last_load_result_{};
+    std::atomic<std::uint64_t> diagnostics_epoch_{0};
     audio::SampleHeritageRuntimeState restored_runtime_state_{};
     audio::SampleHeritageRuntimeState pending_runtime_state_{};
     double restored_runtime_host_sample_rate_ = 0.0;
@@ -717,6 +849,9 @@ private:
     double last_lookahead_demand_fps_for_test_ = 0.0;
     bool fail_next_stream_domain_prepare_for_test_ = false;
     bool fail_next_stream_domain_source_restore_for_test_ = false;
+    bool fail_next_stream_service_prepare_for_test_ = false;
+    bool fail_next_stream_slot_allocation_for_test_ = false;
+    bool fail_next_stream_thread_start_for_test_ = false;
 #endif
 
     bool published_source_valid(const SamplerPublishedSource& source) const noexcept {

@@ -54,6 +54,8 @@ class SamplerResidentMipStore {
         return !coefficients_.empty() && (coefficients_.size() & 1u) != 0u;
     }
 
+    bool prepared() const noexcept { return !coefficients_.empty(); }
+
     void release() noexcept {
         coefficients_.clear();
         for (auto& slot : slots_)
