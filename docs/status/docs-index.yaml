@@ -209,6 +209,11 @@ docs:
     kind: guide
     summary: Curated gallery index of documented example pages by category
 
+  - slug: example-timeline-phase1
+    path: examples/timeline-phase1.md
+    kind: guide
+    summary: Creative Timeline Engine Phase 1 audio-file and step-pattern worked examples
+
   - slug: example-pulp-gain
     path: examples/pulp-gain.md
     kind: guide

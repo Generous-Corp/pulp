@@ -85,6 +85,12 @@ add_subdirectory(PulpDrums)
 # StepSequencer: synth-class step sequencer (UI <-> channel <-> Processor proof)
 add_subdirectory(StepSequencer)
 
+# Phase-1 Creative Timeline Engine proofs. These are desktop/headless adapters
+# over pulp::host, which is intentionally unavailable in the iOS build.
+if(NOT IOS)
+    add_subdirectory(timeline-phase1)
+endif()
+
 # PulpSynth: macro oscillator with DSP library
 add_subdirectory(PulpSynth)
 
