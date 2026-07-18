@@ -1,12 +1,18 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/auto_ui.hpp>
+#include <pulp/view/frame_clock.hpp>
+#include <pulp/view/motion.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/canvas/canvas.hpp>
 
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 using namespace pulp::view;
 using namespace pulp::state;
@@ -45,6 +51,34 @@ bool paints_text(View& view, std::string_view text) {
     }
     return false;
 }
+
+double motion_component(const pulp::view::motion::SampleEvent& event,
+                        std::string_view name) {
+    for (const auto& [key, value] : event.components)
+        if (key == name) return value;
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
+class AutoUiMotionCapture {
+public:
+    AutoUiMotionCapture() {
+        auto& coordinator = pulp::view::motion::Coordinator::instance();
+        coordinator.reset();
+        coordinator.bind(clock);
+        coordinator.set_tracing_enabled(true);
+        coordinator.add_sink([this](const auto& event) {
+            if (event.kind != pulp::view::motion::SampleEvent::Kind::TraceStarted)
+                samples.push_back(event);
+        });
+    }
+
+    ~AutoUiMotionCapture() {
+        pulp::view::motion::Coordinator::instance().reset();
+    }
+
+    FrameClock clock;
+    std::vector<pulp::view::motion::SampleEvent> samples;
+};
 
 } // namespace
 
@@ -182,6 +216,125 @@ TEST_CASE("AutoUi scales from 1 param up to 16 without losing structure",
         REQUIRE(grid->flex().justify_content == FlexJustify::center);
         REQUIRE(grid->flex().align_content == FlexAlign::center);
     }
+}
+
+TEST_CASE("AutoUi scrolls large parameter sets instead of truncating them",
+          "[view][auto_ui][scroll]") {
+    StateStore store;
+    for (std::uint32_t i = 0; i < 54; ++i) {
+        store.add_parameter({i, "P" + std::to_string(i), "",
+                             {0.0f, 1.0f, 0.5f}});
+    }
+
+    auto root = AutoUi::build(store);
+    root->set_bounds({0, 0, 400, 300});
+    root->layout_children();
+
+    auto* body = dynamic_cast<ScrollView*>(root->child_at(1));
+    REQUIRE(body != nullptr);
+    REQUIRE(body->child_count() == 1);
+    REQUIRE(body->child_at(0)->child_count() == 54);
+    REQUIRE(find_widget<Knob>(*root, "P53") != nullptr);
+    CHECK(body->content_size().height > body->local_bounds().height);
+    CHECK(body->wants_wheel_scroll());
+
+    AutoUiMotionCapture motion;
+    auto trace = pulp::view::motion::Coordinator::instance()
+        .trace("AutoUiBody", {60})
+        .scroll_geometry(
+            "scroll", *body,
+            {pulp::view::motion::ScrollProperty::ContentOffsetY,
+             pulp::view::motion::ScrollProperty::VisibleRectHeight,
+             pulp::view::motion::ScrollProperty::ContentSizeHeight,
+             pulp::view::motion::ScrollProperty::ScrollableMaxY})
+        .attach();
+    motion.clock.tick(1.0f / 60.0f);
+    REQUIRE(motion.samples.size() == 1);
+    CHECK(motion_component(motion.samples.front(), "contentOffsetY") == 0.0);
+    CHECK(motion_component(motion.samples.front(), "contentSizeHeight") >
+          motion_component(motion.samples.front(), "visibleRectHeight"));
+    CHECK(motion_component(motion.samples.front(), "scrollableMaxY") > 0.0);
+
+    body->scroll_by(0, 100, /*animate=*/false);
+    CHECK(body->target_scroll_y() > 0.0f);
+    motion.clock.tick(1.0f / 60.0f);
+    bool traced_scrolled_offset = false;
+    for (const auto& sample : motion.samples) {
+        const double offset = motion_component(sample, "contentOffsetY");
+        if (!std::isnan(offset) && offset >= 99.5) traced_scrolled_offset = true;
+    }
+    CHECK(traced_scrolled_offset);
+}
+
+TEST_CASE("AutoUi renders registered parameter groups as scrollable sections",
+          "[view][auto_ui][groups][scroll]") {
+    StateStore store;
+    store.add_group({1, "Oscillator", 0});
+    store.add_group({2, "Envelope", 0});
+    for (std::uint32_t i = 0; i < 8; ++i) {
+        store.add_parameter({.id = i,
+                             .name = "G" + std::to_string(i),
+                             .range = {0.0f, 1.0f, 0.5f},
+                             .group_id = i < 4 ? 1 : 2});
+    }
+
+    auto root = AutoUi::build(store);
+    root->set_bounds({0, 0, 320, 240});
+    root->layout_children();
+
+    auto* body = dynamic_cast<ScrollView*>(root->child_at(1));
+    REQUIRE(body != nullptr);
+    REQUIRE(body->child_count() == 1);
+    auto* content = body->child_at(0);
+    REQUIRE(content->child_count() == 2);
+    auto* oscillator = dynamic_cast<GroupBox*>(content->child_at(0));
+    auto* envelope = dynamic_cast<GroupBox*>(content->child_at(1));
+    REQUIRE(oscillator != nullptr);
+    REQUIRE(envelope != nullptr);
+    CHECK(oscillator->title() == "Oscillator");
+    CHECK(envelope->title() == "Envelope");
+    CHECK(find_widget<Knob>(*root, "G0") != nullptr);
+    CHECK(find_widget<Knob>(*root, "G7") != nullptr);
+    CHECK(body->content_size().height > body->local_bounds().height);
+    body->scroll_by(0, 100, /*animate=*/false);
+    CHECK(body->target_scroll_y() > 0.0f);
+}
+
+TEST_CASE("AutoUi keeps parameters whose group is not registered",
+          "[view][auto_ui][groups]") {
+    StateStore store;
+    store.add_group({1, "Registered", 0});
+    store.add_parameter({.id = 1,
+                         .name = "Registered param",
+                         .range = {0.0f, 1.0f, 0.5f},
+                         .group_id = 1});
+    store.add_parameter({.id = 2,
+                         .name = "Unknown group param",
+                         .range = {0.0f, 1.0f, 0.5f},
+                         .group_id = 999});
+    store.add_parameter({.id = 3,
+                         .name = "Ungrouped param",
+                         .range = {0.0f, 1.0f, 0.5f}});
+
+    auto root = AutoUi::build(store);
+    root->set_bounds({0, 0, 400, 300});
+    root->layout_children();
+
+    auto* body = dynamic_cast<ScrollView*>(root->child_at(1));
+    REQUIRE(body != nullptr);
+    REQUIRE(body->child_count() == 1);
+    auto* content = body->child_at(0);
+    REQUIRE(content->child_count() == 2);
+
+    auto* registered = dynamic_cast<GroupBox*>(content->child_at(0));
+    auto* other = dynamic_cast<GroupBox*>(content->child_at(1));
+    REQUIRE(registered != nullptr);
+    REQUIRE(other != nullptr);
+    CHECK(registered->title() == "Registered");
+    CHECK(other->title() == "Other");
+    CHECK(find_widget<Knob>(*root, "Registered param") != nullptr);
+    CHECK(find_widget<Knob>(*root, "Unknown group param") != nullptr);
+    CHECK(find_widget<Knob>(*root, "Ungrouped param") != nullptr);
 }
 
 TEST_CASE("AutoUi sync updates widgets", "[view][auto_ui]") {
