@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "name": "marimba-bar-a3",
+  "description": "Tuned rosewood marimba bar, A3. The undercut arch of a tuned bar pulls the first three transverse modes to the published ratios 1 : 3.9 : 9.2 (an untuned rectangular bar sits near 1 : 2.76 : 5.40), which is what makes the bar read as a pitch rather than a clank. Modes are 220 Hz * {1, 3.9, 9.2}. No shape maps: strike and pickup position have no effect here, so every mode's authored gain is the amplitude a measurement of the impulse response reads back.",
+  "modes": [
+    { "freq_hz": 220.0, "t60_s": 1.6, "gain": 1.0 },
+    { "freq_hz": 858.0, "t60_s": 0.45, "gain": 0.35 },
+    { "freq_hz": 2024.0, "t60_s": 0.18, "gain": 0.12 }
+  ],
+  "excitation": {
+    "contact_s": 0.0009,
+    "velocity": 1.0
+  },
+  "tolerances": {
+    "freq_cents": 5.0,
+    "t60_rel": 0.06,
+    "gain_rel": 0.05,
+    "verify_seconds": 2.0
+  }
+}
