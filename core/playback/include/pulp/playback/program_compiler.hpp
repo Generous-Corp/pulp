@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/playback/compile_executor.hpp>
+#include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/program.hpp>
 
 #include <chrono>
@@ -29,6 +30,8 @@ struct ProgramCompileRequest {
     std::uint64_t document_revision = 0;
     DirtyTrackSet dirty;
     std::vector<TrackCompilePolicy> track_policies;
+    std::shared_ptr<const DecodedAudioAssetPool> audio_assets;
+    AudioRendererLimits audio_limits;
 };
 
 enum class CompileErrorCode : std::uint8_t {
@@ -38,12 +41,14 @@ enum class CompileErrorCode : std::uint8_t {
     InvalidStructure,
     GenerationExhausted,
     CompilerAlreadyBound,
+    AudioProgramInvalid,
 };
 
 struct CompileError {
     CompileErrorCode code = CompileErrorCode::InvalidRequest;
     timeline::ItemId item;
     std::uint64_t revision = 0;
+    AudioRendererErrorCode audio_detail = AudioRendererErrorCode::InvalidAsset;
 };
 
 struct CompileTicket { std::uint64_t revision = 0; };

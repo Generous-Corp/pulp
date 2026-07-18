@@ -3,7 +3,7 @@
 
 modules:
   - name: playback
-    summary: Master transport plus immutable incrementally compiled playback programs, bounded executors, block-coherent publication, and stable renderer shells
+    summary: Master transport plus immutable incrementally compiled playback programs, bounded WAV-backed arrangement audio rendering, block-coherent publication, and stable renderer shells
     status: experimental
     dependencies: [runtime, timebase, timeline, audio]
     docs: reference/modules.md#playback

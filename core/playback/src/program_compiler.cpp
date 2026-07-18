@@ -47,6 +47,8 @@ class ProgramCompilerTask final : public CompileTask {
     std::size_t note_merge_j_ = 0;
     bool note_merge_pair_active_ = false;
     bool clearing_note_merge_source_ = false;
+    std::vector<AudioClipRendererProgram> current_audio_clips_;
+    std::uint64_t total_audio_clips_ = 0;
     std::vector<std::shared_ptr<const TrackProgram>> tracks_;
     std::vector<std::shared_ptr<const TrackProgram>> merge_buffer_;
     std::size_t merge_width_ = 1;
@@ -62,8 +64,8 @@ class ProgramCompilerTask final : public CompileTask {
     std::size_t validation_note_ = 0;
 };
 
-struct PlaybackProgramCompilerCore :
-    public std::enable_shared_from_this<PlaybackProgramCompilerCore> {
+struct PlaybackProgramCompilerCore
+    : public std::enable_shared_from_this<PlaybackProgramCompilerCore> {
     PlaybackProgramCompilerCore(PlaybackProgramStore& store_in, CompileExecutor& executor_in,
                                 std::chrono::microseconds window)
         : store(store_in), executor(executor_in), coalescing_window(window),
@@ -80,13 +82,16 @@ struct PlaybackProgramCompilerCore :
     }
 
     ~PlaybackProgramCompilerCore() {
-        if (bound) store.unbind_compiler();
+        if (bound)
+            store.unbind_compiler();
     }
 
     bool dispatch() {
-        const bool accepted = executor.submit(std::make_unique<ProgramCompilerTask>(shared_from_this()),
-            std::chrono::steady_clock::now() + coalescing_window);
-        if (!accepted) dispatch_rejected();
+        const bool accepted =
+            executor.submit(std::make_unique<ProgramCompilerTask>(shared_from_this()),
+                            std::chrono::steady_clock::now() + coalescing_window);
+        if (!accepted)
+            dispatch_rejected();
         return accepted;
     }
 
@@ -96,8 +101,8 @@ struct PlaybackProgramCompilerCore :
         pending.reset();
         status.busy = false;
         status.has_error = true;
-        status.last_error = {CompileErrorCode::ExecutorUnavailable, {},
-                             status.latest_submitted_revision};
+        status.last_error = {
+            CompileErrorCode::ExecutorUnavailable, {}, status.latest_submitted_revision};
         ++status.rejected_requests;
         status.latest_submitted_revision = status.latest_published_revision;
     }
@@ -134,7 +139,8 @@ struct PlaybackProgramCompilerCore :
                 status.busy = false;
             }
         }
-        if (reschedule) (void)dispatch();
+        if (reschedule)
+            (void)dispatch();
     }
 
     PlaybackProgramStore& store;
@@ -159,14 +165,20 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
         if (!sequence_)
             return fail({CompileErrorCode::InvalidStructure, request_->sequence_id,
                          request_->document_revision});
+        if (sequence_->tracks().size() > request_->audio_limits.max_tracks)
+            return fail({CompileErrorCode::AudioProgramInvalid, request_->sequence_id,
+                         request_->document_revision, AudioRendererErrorCode::CapacityExceeded});
         const auto& live = core_->store.live();
         const auto next_generation = next_program_generation(live ? live->generation() : 0);
         if (!next_generation)
             return fail({CompileErrorCode::GenerationExhausted, {}, request_->document_revision});
         generation_ = next_generation.value();
-        all_dirty_ = request_->dirty.all || !live || live->project_id() != request_->project->id() ||
+        all_dirty_ = request_->dirty.all || !live ||
+                     live->project_id() != request_->project->id() ||
                      live->sequence_id() != request_->sequence_id ||
                      live->tempo_map_owner().get() != request_->tempo_map.get() ||
+                     live->audio_assets_owner().get() != request_->audio_assets.get() ||
+                     live->audio_limits() != request_->audio_limits ||
                      live->tempo_map().sample_rate() != request_->tempo_map->sample_rate();
         tracks_.reserve(sequence_->tracks().size());
         merge_buffer_.reserve(sequence_->tracks().size());
@@ -181,14 +193,23 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 continue;
             }
             const auto& track = sequence_->tracks()[track_index_];
-            const bool dirty = all_dirty_ || std::binary_search(
-                request_->dirty.tracks.begin(), request_->dirty.tracks.end(), track.id());
+            const bool dirty =
+                all_dirty_ || std::binary_search(request_->dirty.tracks.begin(),
+                                                 request_->dirty.tracks.end(), track.id());
             if (!dirty) {
                 const auto& live = core_->store.live();
                 const auto* old = live ? live->find_track_owner(track.id()) : nullptr;
                 if (!old)
                     return fail({CompileErrorCode::InvalidStructure, track.id(),
                                  request_->document_revision});
+                if ((*old)->audio_program()) {
+                    const auto count = (*old)->audio_program()->clips().size();
+                    if (count > request_->audio_limits.max_clips - total_audio_clips_)
+                        return fail({CompileErrorCode::AudioProgramInvalid, track.id(),
+                                     request_->document_revision,
+                                     AudioRendererErrorCode::CapacityExceeded});
+                    total_audio_clips_ += count;
+                }
                 tracks_.push_back(*old);
                 core_->track_completed();
                 ++track_index_;
@@ -197,6 +218,8 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             }
             if (clip_index_ == 0 && !clip_started_) {
                 current_clip_ids_.reserve(track.clips().size());
+                current_audio_clips_.reserve(std::min<std::uint64_t>(
+                    track.clips().size(), request_->audio_limits.max_clips));
             }
             if (clip_index_ == track.clips().size()) {
                 if (current_note_events_.size() > 1) {
@@ -214,6 +237,24 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             const auto& clip = track.clips()[clip_index_];
             if (!clip_started_) {
                 current_clip_ids_.push_back(clip.id());
+                if (std::holds_alternative<timeline::MediaRef>(clip.content())) {
+                    if (!request_->audio_assets)
+                        return fail({CompileErrorCode::AudioProgramInvalid, clip.id(),
+                                     request_->document_revision,
+                                     AudioRendererErrorCode::MissingDecodedAsset});
+                    auto compiled =
+                        compile_audio_clip_program(clip, *request_->project, *request_->tempo_map,
+                                                   *request_->audio_assets, request_->audio_limits);
+                    if (!compiled)
+                        return fail({CompileErrorCode::AudioProgramInvalid, compiled.error().item,
+                                     request_->document_revision, compiled.error().code});
+                    if (total_audio_clips_ >= request_->audio_limits.max_clips)
+                        return fail({CompileErrorCode::AudioProgramInvalid, clip.id(),
+                                     request_->document_revision,
+                                     AudioRendererErrorCode::CapacityExceeded});
+                    ++total_audio_clips_;
+                    current_audio_clips_.push_back(std::move(compiled).value());
+                }
                 clip_started_ = true;
             }
             const auto* notes = std::get_if<timeline::NoteContent>(&clip.content());
@@ -225,26 +266,25 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 continue;
             }
             if (clip.time_anchor() != timeline::ClipTimeAnchor::Musical)
-                return fail({CompileErrorCode::InvalidStructure, clip.id(),
-                             request_->document_revision});
+                return fail(
+                    {CompileErrorCode::InvalidStructure, clip.id(), request_->document_revision});
             const auto& note = notes->notes()[note_index_++];
             const auto note_end = note.start + note.duration;
             if (note.start.value < 0 || note_end > timebase::TickPosition{clip.duration().value})
-                return fail({CompileErrorCode::InvalidStructure, note.id,
-                             request_->document_revision});
+                return fail(
+                    {CompileErrorCode::InvalidStructure, note.id, request_->document_revision});
             const auto start_tick = clip.start() + timebase::TickDuration{note.start.value};
             const auto end_tick = clip.start() + timebase::TickDuration{note_end.value};
             const auto start_sample = request_->tempo_map->ticks_to_samples(start_tick);
             const auto end_sample = request_->tempo_map->ticks_to_samples(end_tick);
             if (end_sample <= start_sample)
-                return fail({CompileErrorCode::InvalidStructure, note.id,
-                             request_->document_revision});
+                return fail(
+                    {CompileErrorCode::InvalidStructure, note.id, request_->document_revision});
             current_note_events_.push_back({start_sample, start_tick, clip.id(), note.id,
                                             note.velocity, note.pitch, note.channel,
                                             NoteProgramEventKind::On});
-            current_note_events_.push_back({end_sample, end_tick, clip.id(), note.id,
-                                            note.velocity, note.pitch, note.channel,
-                                            NoteProgramEventKind::Off});
+            current_note_events_.push_back({end_sample, end_tick, clip.id(), note.id, note.velocity,
+                                            note.pitch, note.channel, NoteProgramEventKind::Off});
             ++work;
             continue;
         }
@@ -270,10 +310,10 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 continue;
             }
             if (!note_merge_pair_active_) {
-                note_merge_mid_ = std::min(note_merge_left_ + note_merge_width_,
-                                           current_note_events_.size());
-                note_merge_right_ = std::min(note_merge_left_ + 2 * note_merge_width_,
-                                             current_note_events_.size());
+                note_merge_mid_ =
+                    std::min(note_merge_left_ + note_merge_width_, current_note_events_.size());
+                note_merge_right_ =
+                    std::min(note_merge_left_ + 2 * note_merge_width_, current_note_events_.size());
                 note_merge_i_ = note_merge_left_;
                 note_merge_j_ = note_merge_mid_;
                 note_merge_pair_active_ = true;
@@ -313,13 +353,23 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 provider = policy->provider;
                 state_policy = policy->state_policy;
             }
+            std::shared_ptr<const AudioTrackRendererProgram> audio_program;
+            if (!current_audio_clips_.empty()) {
+                auto linked = link_audio_track_program(track.id(), std::move(current_audio_clips_),
+                                                       request_->audio_limits);
+                if (!linked)
+                    return fail({CompileErrorCode::AudioProgramInvalid, linked.error().item,
+                                 request_->document_revision, linked.error().code});
+                audio_program = std::move(linked).value();
+            }
             tracks_.push_back(std::shared_ptr<const TrackProgram>(new TrackProgram(
-                track.id(), generation_, provider, state_policy,
-                std::move(current_clip_ids_), std::move(current_note_events_))));
+                track.id(), generation_, provider, state_policy, std::move(current_clip_ids_),
+                std::move(current_note_events_), std::move(audio_program))));
             core_->track_completed();
             current_clip_ids_.clear();
             current_note_events_.clear();
             note_merge_buffer_.clear();
+            current_audio_clips_.clear();
             clip_index_ = 0;
             note_index_ = 0;
             clip_started_ = false;
@@ -376,22 +426,23 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             if (validation_clip_ == 0 &&
                 (!track->id().valid() || track->generation() == 0 ||
                  (validation_track_ && tracks_[validation_track_ - 1]->id() == track->id())))
-                return fail({CompileErrorCode::InvalidStructure, track->id(),
-                             request_->document_revision});
+                return fail(
+                    {CompileErrorCode::InvalidStructure, track->id(), request_->document_revision});
             const auto clips = track->ordered_clip_ids();
             if (validation_clip_ < clips.size()) {
                 const auto id = clips[validation_clip_++];
                 ++work;
                 if (!id.valid())
-                    return fail({CompileErrorCode::InvalidStructure, id,
-                                 request_->document_revision});
+                    return fail(
+                        {CompileErrorCode::InvalidStructure, id, request_->document_revision});
                 continue;
             }
             const auto notes = track->arrangement_note_events();
             if (validation_note_ < notes.size()) {
                 const auto& event = notes[validation_note_];
-                const bool malformed = !event.clip_id.valid() || !event.note_id.valid() ||
-                    event.pitch > 127 || event.channel > 15 ||
+                const bool malformed =
+                    !event.clip_id.valid() || !event.note_id.valid() || event.pitch > 127 ||
+                    event.channel > 15 ||
                     static_cast<unsigned>(event.kind) >
                         static_cast<unsigned>(NoteProgramEventKind::On) ||
                     (validation_note_ != 0 &&
@@ -409,9 +460,10 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             }
             continue;
         }
-        auto program = std::shared_ptr<const PlaybackProgram>(new PlaybackProgram(
-            generation_, request_->document_revision, request_->project->id(),
-            request_->sequence_id, request_->tempo_map, std::move(tracks_)));
+        auto program = std::shared_ptr<const PlaybackProgram>(
+            new PlaybackProgram(generation_, request_->document_revision, request_->project->id(),
+                                request_->sequence_id, request_->tempo_map, request_->audio_assets,
+                                request_->audio_limits, std::move(tracks_)));
         core_->store.publish(std::move(program));
         core_->finish(true, request_->document_revision, generation_);
         return CompileTaskStatus::Complete;
@@ -424,9 +476,9 @@ CompileTaskStatus ProgramCompilerTask::fail(CompileError error) noexcept {
     return CompileTaskStatus::Complete;
 }
 
-PlaybackProgramCompiler::PlaybackProgramCompiler(
-    PlaybackProgramStore& store, CompileExecutor& executor,
-    std::chrono::microseconds coalescing_window)
+PlaybackProgramCompiler::PlaybackProgramCompiler(PlaybackProgramStore& store,
+                                                 CompileExecutor& executor,
+                                                 std::chrono::microseconds coalescing_window)
     : core_(std::make_shared<PlaybackProgramCompilerCore>(store, executor, coalescing_window)) {}
 
 PlaybackProgramCompiler::~PlaybackProgramCompiler() {
@@ -450,11 +502,12 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
         return reject({CompileErrorCode::InvalidRequest, {}, request.document_revision});
     const auto* sequence = request.project->find_sequence(request.sequence_id);
     if (!sequence)
-        return reject({CompileErrorCode::InvalidRequest, request.sequence_id,
-                       request.document_revision});
+        return reject(
+            {CompileErrorCode::InvalidRequest, request.sequence_id, request.document_revision});
     std::sort(request.dirty.tracks.begin(), request.dirty.tracks.end());
-    request.dirty.tracks.erase(std::unique(request.dirty.tracks.begin(), request.dirty.tracks.end()),
-                               request.dirty.tracks.end());
+    request.dirty.tracks.erase(
+        std::unique(request.dirty.tracks.begin(), request.dirty.tracks.end()),
+        request.dirty.tracks.end());
     for (const auto id : request.dirty.tracks)
         if (!id.valid() || !sequence->find_track(id))
             return reject({CompileErrorCode::InvalidRequest, id, request.document_revision});
@@ -471,25 +524,28 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
             static_cast<unsigned>(policy.state_policy) >
                 static_cast<unsigned>(RendererStatePolicy::CarryByItemId) ||
             (i && request.track_policies[i - 1].track_id == policy.track_id))
-            return reject({CompileErrorCode::InvalidRequest, policy.track_id,
-                           request.document_revision});
+            return reject(
+                {CompileErrorCode::InvalidRequest, policy.track_id, request.document_revision});
         request.dirty.tracks.push_back(policy.track_id);
     }
     std::sort(request.dirty.tracks.begin(), request.dirty.tracks.end());
-    request.dirty.tracks.erase(std::unique(request.dirty.tracks.begin(), request.dirty.tracks.end()),
-                               request.dirty.tracks.end());
+    request.dirty.tracks.erase(
+        std::unique(request.dirty.tracks.begin(), request.dirty.tracks.end()),
+        request.dirty.tracks.end());
 
     bool dispatch = false;
     {
         std::lock_guard lock(core_->mutex);
         if (!core_->accepting)
-            return runtime::Err(core_->bound
-                ? CompileError{CompileErrorCode::InvalidRequest, {}, request.document_revision}
-                : CompileError{CompileErrorCode::CompilerAlreadyBound, {},
-                               request.document_revision});
+            return runtime::Err(
+                core_->bound
+                    ? CompileError{CompileErrorCode::InvalidRequest, {}, request.document_revision}
+                    : CompileError{
+                          CompileErrorCode::CompilerAlreadyBound, {}, request.document_revision});
         if (request.document_revision <= core_->status.latest_submitted_revision) {
             ++core_->status.rejected_requests;
-            const CompileError error{CompileErrorCode::StaleRevision, {}, request.document_revision};
+            const CompileError error{
+                CompileErrorCode::StaleRevision, {}, request.document_revision};
             core_->status.has_error = true;
             core_->status.last_error = error;
             return runtime::Err(error);
@@ -503,9 +559,11 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
             std::sort(dirty.begin(), dirty.end());
             dirty.erase(std::unique(dirty.begin(), dirty.end()), dirty.end());
             request.dirty.all = request.dirty.all || core_->pending->dirty.all ||
-                core_->pending->sequence_id != request.sequence_id ||
-                core_->pending->project->id() != request.project->id() ||
-                core_->pending->tempo_map.get() != request.tempo_map.get();
+                                core_->pending->sequence_id != request.sequence_id ||
+                                core_->pending->project->id() != request.project->id() ||
+                                core_->pending->tempo_map.get() != request.tempo_map.get() ||
+                                core_->pending->audio_assets.get() != request.audio_assets.get() ||
+                                core_->pending->audio_limits != request.audio_limits;
             request.dirty.tracks = std::move(dirty);
 
             const bool same_policy_domain =
@@ -516,11 +574,11 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
                 // not reached publication; newest delta for a track wins.
                 auto policies = std::move(core_->pending->track_policies);
                 for (const auto& incoming : request.track_policies) {
-                    const auto found = std::lower_bound(
-                        policies.begin(), policies.end(), incoming.track_id,
-                        [](const TrackCompilePolicy& value, timeline::ItemId id) {
-                            return value.track_id < id;
-                        });
+                    const auto found =
+                        std::lower_bound(policies.begin(), policies.end(), incoming.track_id,
+                                         [](const TrackCompilePolicy& value, timeline::ItemId id) {
+                                             return value.track_id < id;
+                                         });
                     if (found != policies.end() && found->track_id == incoming.track_id)
                         *found = incoming;
                     else
@@ -537,8 +595,8 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
         }
     }
     if (dispatch && !core_->dispatch())
-        return runtime::Err(CompileError{CompileErrorCode::ExecutorUnavailable, {},
-                                         submitted_revision});
+        return runtime::Err(
+            CompileError{CompileErrorCode::ExecutorUnavailable, {}, submitted_revision});
     return runtime::Ok(CompileTicket{submitted_revision});
 }
 

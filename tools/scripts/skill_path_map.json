@@ -509,6 +509,7 @@
         "core/playback/**",
         "core/format/include/pulp/format/playback_context_projection.hpp",
         "test/test_playback_transport.cpp",
+        "test/test_playback_audio_renderer.cpp",
         "tools/scripts/playback_dependency_floor_check.py",
         ".agents/skills/playback/**"
       ]

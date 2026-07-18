@@ -68,7 +68,8 @@ bool equivalent(const ClipTimeRange& lhs, const ClipTimeRange& rhs) noexcept {
 
 bool equivalent(const Clip& lhs, const Clip& rhs) noexcept {
     return lhs.id() == rhs.id() && equivalent(lhs.time_range(), rhs.time_range()) &&
-           equal_content(lhs.content(), rhs.content());
+           equal_content(lhs.content(), rhs.content()) &&
+           lhs.playback_properties() == rhs.playback_properties();
 }
 
 bool equivalent(const Command& lhs, const Command& rhs) noexcept {

@@ -16,7 +16,9 @@ ContentHash hash_of(char digit) {
 }
 
 Project make_durable_media_project(ContentHash source_hash = hash_of('a')) {
-    auto clip = Clip::create({5}, {0}, {kTicksPerQuarter}, MediaRef{{2}, {7}, 11});
+    auto clip =
+        Clip::create({5}, {0}, {kTicksPerQuarter}, MediaRef{{2}, {7}, 11},
+                     {.gain_linear = 0.5f, .fade_in_duration = 120, .fade_out_duration = 240});
     REQUIRE(clip);
     auto track = Track::create({4}, "media", {std::move(clip).value()});
     REQUIRE(track);
@@ -84,6 +86,7 @@ TEST_CASE("Timeline commands and replay preserve durable asset metadata") {
     REQUIRE(asset.representations.size() == 1);
     REQUIRE(asset.representations[0].content_hash == hash_of('b'));
     REQUIRE(equivalent(clip(*replayed), clip(*session->snapshot())));
+    REQUIRE(clip(*replayed).playback_properties() == ClipPlaybackProperties{0.5f, 120, 240});
 
     auto registry = make_builtin_timeline_registry();
     REQUIRE(registry);

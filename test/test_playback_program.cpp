@@ -78,7 +78,13 @@ void drain(DeferredCompileExecutor& executor, PlaybackProgramCompiler& compiler)
 ProgramCompileRequest request(std::shared_ptr<const Project> project,
                               std::shared_ptr<const CompiledTempoMap> map,
                               std::uint64_t revision, DirtyTrackSet dirty) {
-    return {std::move(project), {2}, std::move(map), revision, std::move(dirty), {}};
+    ProgramCompileRequest result;
+    result.project = std::move(project);
+    result.sequence_id = {2};
+    result.tempo_map = std::move(map);
+    result.document_revision = revision;
+    result.dirty = std::move(dirty);
+    return result;
 }
 
 class InlineExecutor final : public CompileExecutor {

@@ -401,6 +401,10 @@ if(CMAKE_NM)
         COMMENT "Checking pulp-audio does not export private dr_wav symbols")
 endif()
 
+pulp_add_test_suite(pulp-test-playback-audio-renderer
+    SOURCES test_playback_audio_renderer.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::playback pulp::audio pulp::timeline pulp::timebase pulp::runtime)
+
 # Phase-vocoder offline time-stretch / pitch-shift.
 pulp_add_test_suite(pulp-test-phase-vocoder LIBRARIES pulp::signal)
 

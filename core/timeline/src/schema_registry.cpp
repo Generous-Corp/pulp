@@ -6,7 +6,8 @@
 namespace pulp::timeline {
 
 bool BoundedJsonSink::append(std::string_view bytes) {
-    if (failed_) return false;
+    if (failed_)
+        return false;
     if (bytes.size() > remaining()) {
         failed_ = true;
         const auto room = std::numeric_limits<std::uint64_t>::max() - output_.size();
@@ -47,8 +48,8 @@ bool validate_steps(std::vector<MigrationStep>& steps, bool upgrading,
         const auto& step = steps[index];
         if (!step.migrate)
             return false;
-        if (step.from_version == 0 || step.to_version == 0 ||
-            step.from_version > current_version || step.to_version > current_version)
+        if (step.from_version == 0 || step.to_version == 0 || step.from_version > current_version ||
+            step.to_version > current_version)
             return false;
         if (upgrading ? step.to_version != step.from_version + 1
                       : step.from_version != step.to_version + 1)
@@ -61,10 +62,9 @@ bool validate_steps(std::vector<MigrationStep>& steps, bool upgrading,
 
 const MigrationStep* find_step(const std::vector<MigrationStep>& steps,
                                std::uint32_t from) noexcept {
-    const auto found = std::lower_bound(steps.begin(), steps.end(), from,
-                                        [](const MigrationStep& step, std::uint32_t value) {
-                                            return step.from_version < value;
-                                        });
+    const auto found = std::lower_bound(
+        steps.begin(), steps.end(), from,
+        [](const MigrationStep& step, std::uint32_t value) { return step.from_version < value; });
     return found != steps.end() && found->from_version == from ? &*found : nullptr;
 }
 
@@ -86,16 +86,16 @@ struct SchemaRegistry::Impl {
 
 const TypeSchema* SchemaRegistry::find(SchemaDomain domain,
                                        std::string_view type_name) const noexcept {
-    if (!impl_) return nullptr;
-    const auto found = std::lower_bound(
-        impl_->types.begin(), impl_->types.end(), std::pair(domain, type_name),
-        [](const TypeSchema& schema, const auto& wanted) {
-            if (schema.domain != wanted.first)
-                return schema.domain < wanted.first;
-            return schema.type_name < wanted.second;
-        });
-    return found != impl_->types.end() && found->domain == domain &&
-                   found->type_name == type_name
+    if (!impl_)
+        return nullptr;
+    const auto found =
+        std::lower_bound(impl_->types.begin(), impl_->types.end(), std::pair(domain, type_name),
+                         [](const TypeSchema& schema, const auto& wanted) {
+                             if (schema.domain != wanted.first)
+                                 return schema.domain < wanted.first;
+                             return schema.type_name < wanted.second;
+                         });
+    return found != impl_->types.end() && found->domain == domain && found->type_name == type_name
                ? &*found
                : nullptr;
 }
@@ -132,11 +132,10 @@ SchemaRegistry::migrate(SchemaDomain domain, std::string_view type_name,
         return persistence_fail<std::string>(PersistenceErrorCode::InvalidSchema);
     auto initial = parse_json(source_envelope, limits);
     if (!initial)
-        return runtime::Result<std::string, PersistenceError>(
-            runtime::Err(initial.error()));
-    auto initial_envelope = validate_exact_envelope(
-        initial.value()->root(), type_name, source_version, "",
-        PersistenceErrorCode::InvalidSchema);
+        return runtime::Result<std::string, PersistenceError>(runtime::Err(initial.error()));
+    auto initial_envelope =
+        validate_exact_envelope(initial.value()->root(), type_name, source_version, "",
+                                PersistenceErrorCode::InvalidSchema);
     if (!initial_envelope)
         return persistence_fail<std::string>(PersistenceErrorCode::InvalidSchema);
     if (source_version == target_version)
@@ -154,22 +153,19 @@ SchemaRegistry::migrate(SchemaDomain domain, std::string_view type_name,
         if (!step || (version < target_version ? step->to_version > target_version
                                                : step->to_version < target_version))
             return persistence_fail<std::string>(PersistenceErrorCode::MigrationPathMissing);
-        BoundedJsonSink sink(limits.max_input_bytes,
-                             PersistenceErrorCode::LimitExceeded);
+        BoundedJsonSink sink(limits.max_input_bytes, PersistenceErrorCode::LimitExceeded);
         auto migrated = step->migrate(current, sink, step->context.get());
         if (sink.failed())
-            return runtime::Result<std::string, PersistenceError>(
-                runtime::Err(sink.error()));
+            return runtime::Result<std::string, PersistenceError>(runtime::Err(sink.error()));
         if (!migrated)
-            return runtime::Result<std::string, PersistenceError>(
-                runtime::Err(migrated.error()));
+            return runtime::Result<std::string, PersistenceError>(runtime::Err(migrated.error()));
         std::string next(sink.stored_output());
         auto parsed = parse_json(next, limits);
         if (!parsed)
             return persistence_fail<std::string>(PersistenceErrorCode::MigrationFailed);
-        auto next_envelope = validate_exact_envelope(
-            parsed.value()->root(), type_name, step->to_version, "",
-            PersistenceErrorCode::MigrationFailed);
+        auto next_envelope =
+            validate_exact_envelope(parsed.value()->root(), type_name, step->to_version, "",
+                                    PersistenceErrorCode::MigrationFailed);
         if (!next_envelope)
             return persistence_fail<std::string>(PersistenceErrorCode::MigrationFailed);
         current = std::move(next);
@@ -181,41 +177,39 @@ SchemaRegistry::migrate(SchemaDomain domain, std::string_view type_name,
 runtime::Result<SchemaRegistration, SchemaError>
 SchemaRegistryBuilder::register_type(TypeSchema schema) {
     if (!SchemaIdentity{schema.type_name, schema.current_version}.valid())
-        return schema_fail<SchemaRegistration>(SchemaErrorCode::InvalidIdentity,
-                                               schema.type_name, schema.current_version);
+        return schema_fail<SchemaRegistration>(SchemaErrorCode::InvalidIdentity, schema.type_name,
+                                               schema.current_version);
     if ((schema.codec.decode == nullptr) != (schema.codec.encode == nullptr))
-        return schema_fail<SchemaRegistration>(SchemaErrorCode::InvalidCodec,
-                                               schema.type_name, schema.current_version);
+        return schema_fail<SchemaRegistration>(SchemaErrorCode::InvalidCodec, schema.type_name,
+                                               schema.current_version);
     for (const auto& existing : types_)
         if (existing.domain == schema.domain && existing.type_name == schema.type_name)
-            return schema_fail<SchemaRegistration>(SchemaErrorCode::DuplicateType,
-                                                   schema.type_name, schema.current_version);
-    std::sort(schema.fields.begin(), schema.fields.end(), [](const FieldSchema& lhs,
-                                                             const FieldSchema& rhs) {
-        return lhs.name < rhs.name;
-    });
-    if (std::any_of(schema.fields.begin(), schema.fields.end(), [](const FieldSchema& field) {
-            return field.name.empty();
-        }))
-        return schema_fail<SchemaRegistration>(SchemaErrorCode::InvalidIdentity,
-                                               schema.type_name, schema.current_version);
+            return schema_fail<SchemaRegistration>(SchemaErrorCode::DuplicateType, schema.type_name,
+                                                   schema.current_version);
+    std::sort(schema.fields.begin(), schema.fields.end(),
+              [](const FieldSchema& lhs, const FieldSchema& rhs) { return lhs.name < rhs.name; });
+    if (std::any_of(schema.fields.begin(), schema.fields.end(),
+                    [](const FieldSchema& field) { return field.name.empty(); }))
+        return schema_fail<SchemaRegistration>(SchemaErrorCode::InvalidIdentity, schema.type_name,
+                                               schema.current_version);
     if (std::adjacent_find(schema.fields.begin(), schema.fields.end(),
                            [](const FieldSchema& lhs, const FieldSchema& rhs) {
                                return lhs.name == rhs.name;
                            }) != schema.fields.end())
-        return schema_fail<SchemaRegistration>(SchemaErrorCode::DuplicateField,
-                                               schema.type_name, schema.current_version);
+        return schema_fail<SchemaRegistration>(SchemaErrorCode::DuplicateField, schema.type_name,
+                                               schema.current_version);
     if (!validate_steps(schema.upgrades, true, schema.current_version) ||
         !validate_steps(schema.downgrades, false, schema.current_version))
-        return schema_fail<SchemaRegistration>(SchemaErrorCode::InvalidMigration,
-                                               schema.type_name, schema.current_version);
+        return schema_fail<SchemaRegistration>(SchemaErrorCode::InvalidMigration, schema.type_name,
+                                               schema.current_version);
     types_.push_back(std::move(schema));
     return runtime::Result<SchemaRegistration, SchemaError>(runtime::Ok(SchemaRegistration{}));
 }
 
 runtime::Result<SchemaRegistry, SchemaError> SchemaRegistryBuilder::build() && {
     std::sort(types_.begin(), types_.end(), [](const TypeSchema& lhs, const TypeSchema& rhs) {
-        if (lhs.domain != rhs.domain) return lhs.domain < rhs.domain;
+        if (lhs.domain != rhs.domain)
+            return lhs.domain < rhs.domain;
         return lhs.type_name < rhs.type_name;
     });
     auto impl = std::make_shared<SchemaRegistry::Impl>();
@@ -261,6 +255,9 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"name", SchemaValueKind::String}}));
     schemas.push_back(builtin("pulp.timeline.clip", SchemaDomain::Document,
                               {{"content", SchemaValueKind::Object},
+                               {"fade_in_duration", SchemaValueKind::U64String, false},
+                               {"fade_out_duration", SchemaValueKind::U64String, false},
+                               {"gain_linear_bits", SchemaValueKind::U64String, false},
                                {"id", SchemaValueKind::U64String},
                                {"time_range", SchemaValueKind::Object}}));
     schemas.push_back(builtin("pulp.timeline.content.empty", SchemaDomain::Content, {}));
@@ -272,7 +269,8 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                               {{"notes", SchemaValueKind::Array}}));
     for (auto& schema : schemas) {
         auto result = builder.register_type(std::move(schema));
-        if (!result) return result;
+        if (!result)
+            return result;
     }
     return runtime::Result<SchemaRegistration, SchemaError>(runtime::Ok(SchemaRegistration{}));
 }
@@ -281,8 +279,7 @@ runtime::Result<SchemaRegistry, SchemaError> make_builtin_timeline_registry() {
     SchemaRegistryBuilder builder;
     auto registered = register_builtin_timeline_schemas(builder);
     if (!registered)
-        return schema_fail<SchemaRegistry>(registered.error().code,
-                                           registered.error().type_name,
+        return schema_fail<SchemaRegistry>(registered.error().code, registered.error().type_name,
                                            registered.error().version);
     return std::move(builder).build();
 }

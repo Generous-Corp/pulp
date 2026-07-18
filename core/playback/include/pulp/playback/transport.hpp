@@ -91,8 +91,7 @@ class MasterTransport {
     TransportError set_loop(LoopRegion loop) noexcept;
     TransportError set_meter(MeterSignature meter) noexcept;
 
-    TransportError begin_block(std::uint32_t frame_count,
-                               TransportSnapshot& snapshot) noexcept;
+    TransportError begin_block(std::uint32_t frame_count, TransportSnapshot& snapshot) noexcept;
     void reset() noexcept;
 
   private:
