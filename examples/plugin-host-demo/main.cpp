@@ -13,12 +13,15 @@
 //   pulp-plugin-host-demo --warmup-ms 500       # service native host events
 //                                              # before inspecting/rendering
 //   pulp-plugin-host-demo --manage             # headless plugin-manager UX
-//                                              # (issue #494 demo)
+//   pulp-plugin-host-demo --editor             # embed the loaded plugin's own
+//                                              # editor in a window (auto-closes
+//                                              # after --editor-ms, default 3000)
 //
 // This is a validation harness for loading real plugins through Pulp's host
-// abstraction. It is not a DAW: there is no audio device I/O, no native window,
-// and no graph editor. The point is to prove a real third-party plugin loads
-// and processes audio through the same host boundary used by richer surfaces.
+// abstraction. It is not a DAW: there is no audio device I/O and no graph-editor
+// UI. Its default mode is headless; `--editor` opens a single window to embed
+// the loaded plugin's own editor via the hosted-editor path (create_hosted_editor
+// -> EditorAttachment), the same boundary richer host surfaces use.
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/events/message_loop_integration.hpp>
@@ -28,6 +31,9 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/view/plugin_manager_panel.hpp>
+#include <pulp/view/hosted_editor_attachment.hpp>
+#include <pulp/view/view.hpp>
+#include <pulp/view/window_host.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -38,6 +44,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -398,6 +405,61 @@ bool infer_bundle_format(const std::filesystem::path& bundle, PluginFormat& form
     return false;
 }
 
+// Open the loaded plugin's editor in a native window for a bounded duration,
+// then tear it down. Exercises the host-side editor path end-to-end
+// (create_hosted_editor -> EditorAttachment -> attach into a real WindowHost).
+// The editor's actual on-screen rendering is confirmed by eye / the DAW smoke,
+// not headlessly — CI has no display and no third-party plugin with a GUI.
+int run_editor_demo(const std::shared_ptr<PluginSlot>& slot, int editor_ms) {
+    if (!slot->has_editor()) {
+        std::printf("[editor] '%s' reports no editor; nothing to show.\n",
+                    slot->info().name.c_str());
+        return 0;
+    }
+    // Local-dev audio etiquette: opening the editor can make the plugin active
+    // and audible; it closes itself after the bounded duration.
+    std::printf("[editor] Opening '%s' editor for ~%d ms (audio may be active; "
+                "it closes automatically).\n",
+                slot->info().name.c_str(), editor_ms);
+
+    pulp::view::View root;
+    pulp::view::WindowOptions opts;
+    opts.title = "Pulp Plugin Host \xE2\x80\x94 " + slot->info().name;
+    opts.width = 900;
+    opts.height = 700;
+    auto window = pulp::view::WindowHost::create(root, opts);
+    if (!window) {
+        std::fprintf(stderr, "[editor] WindowHost::create() failed (no display?).\n");
+        return 1;
+    }
+
+    auto attachment = pulp::view::EditorAttachment::create(slot, window.get());
+    if (!attachment) {
+        std::fprintf(stderr,
+                     "[editor] no embeddable editor for '%s' on this platform.\n",
+                     slot->info().name.c_str());
+        return 1;
+    }
+    std::printf("[editor] editor attached (%.0fx%.0f).\n",
+                attachment->width(), attachment->height());
+
+    // Auto-close after the bounded duration via the idle callback (main thread).
+    const auto start = std::chrono::steady_clock::now();
+    window->set_idle_callback([&]() {
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        if (elapsed >= editor_ms) window->request_close();
+    });
+    window->show();
+    window->run_event_loop();  // blocks until request_close()
+
+    // Tear the editor down before the window (WindowHost must outlive the
+    // attachment — the documented EditorAttachment ordering invariant).
+    attachment.reset();
+    std::printf("[editor] closed.\n");
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -405,7 +467,9 @@ int main(int argc, char** argv) {
     std::string filter_id;
     bool list_only = false;
     bool manage_mode = false;
+    bool editor_mode = false;
     int warmup_ms = 0;
+    int editor_ms = 3000;
 
     for (int i = 1; i < argc; ++i) {
         std::string_view a = argv[i];
@@ -413,6 +477,8 @@ int main(int argc, char** argv) {
             list_only = true;
         } else if (a == "--manage") {
             manage_mode = true;
+        } else if (a == "--editor") {
+            editor_mode = true;
         } else if (a == "--path" && i + 1 < argc) {
             filter_path = argv[++i];
         } else if (a == "--id" && i + 1 < argc) {
@@ -422,10 +488,17 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "--warmup-ms requires a non-negative integer\n");
                 return 2;
             }
+        } else if (a == "--editor-ms" && i + 1 < argc) {
+            if (!parse_nonnegative_int(argv[++i], editor_ms)) {
+                std::fprintf(stderr, "--editor-ms requires a non-negative integer\n");
+                return 2;
+            }
         } else if (a == "--help" || a == "-h") {
-            std::printf("Usage: %s [--list] [--manage] "
+            std::printf("Usage: %s [--list] [--manage] [--editor] "
                         "[--path <bundle>] [--id <plugin-id>] "
-                        "[--warmup-ms <milliseconds>]\n", argv[0]);
+                        "[--warmup-ms <milliseconds>] [--editor-ms <milliseconds>]\n"
+                        "  --editor        open the loaded plugin's editor in a window "
+                        "(auto-closes after --editor-ms, default 3000)\n", argv[0]);
             return 0;
         } else {
             std::fprintf(stderr, "Unknown arg: %s\n", argv[i]);
@@ -489,7 +562,9 @@ int main(int argc, char** argv) {
     std::printf("Loading: %s  (%s)\n", chosen.name.c_str(),
                 chosen.path.empty() ? chosen.unique_id.c_str() : chosen.path.c_str());
 
-    auto slot = PluginSlot::load(chosen);
+    // shared_ptr rather than unique_ptr: --editor hands the slot to an
+    // EditorAttachment, which co-owns it for the editor's lifetime.
+    std::shared_ptr<PluginSlot> slot = PluginSlot::load(chosen);
     if (!slot) {
         std::fprintf(stderr, "PluginSlot::load returned nullptr for '%s'\n",
                      chosen.name.c_str());
@@ -549,6 +624,9 @@ int main(int argc, char** argv) {
                 blocks_to_process * kBlockSize, kSampleRate,
                 slot->info().is_instrument ? " with MIDI note C4" : "", peak);
 
+    int editor_rc = 0;
+    if (editor_mode) editor_rc = run_editor_demo(slot, editor_ms);
+
     slot->release();
-    return 0;
+    return editor_rc;
 }
