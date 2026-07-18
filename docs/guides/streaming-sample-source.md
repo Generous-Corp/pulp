@@ -22,9 +22,12 @@ lifetime. WAV and uncompressed AIFF/AIFF-C `NONE` files use bounded ranged
 decode from mapped bytes; they are not decoded completely before playback.
 
 The adapter reports `supports_ranged_read`. A false value means the active file
-format uses `MemoryMappedAudioReader`'s decode-once fallback. Applications with
-a strict streaming-memory contract should reject that source or import it into
-a streamable representation before note-on.
+format uses `MemoryMappedAudioReader`'s decode-once fallback. FLAC currently
+falls into that category: the general audio-file layer can decode it, but this
+adapter does not claim ranged FLAC reads. Applications with a strict
+streaming-memory contract should reject that source transactionally, preserving
+the previously published source, or import it into a streamable representation
+before note-on. `PulpSampler` uses that strict policy.
 
 ```cpp
 auto file = pulp::audio::make_memory_mapped_frame_reader(path);

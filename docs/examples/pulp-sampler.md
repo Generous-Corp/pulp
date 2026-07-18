@@ -55,15 +55,16 @@ bool file_ok = processor.load_sample_file("samples/kick.wav");
 ```
 
 The file path admits only true ranged readers: WAV and uncompressed
-AIFF/AIFF-C `NONE`, at one or two channels and no more than 192 kHz. A codec
-that is available only through decode-once fallback is rejected instead of
-silently loading the entire asset. Admission derives the resident preload and
-page geometry from the 20 ms certified I/O latency, 5 ms scheduler margin,
-5 ms decoder allowance, host block size, interpolation guard, loop guard, and
-source rate. Streamed playback admits an effective consumption ratio of at most
-4x: the note/key-map pitch ratio multiplied by the active heritage clock ratio.
-Failure is transactional: a failed replacement leaves the previously published
-source usable.
+AIFF/AIFF-C `NONE`, at one or two channels and no more than 192 kHz. FLAC is
+available to the general audio-file layer as a decode-once fallback, not as a
+ranged sampler reader, so the sampler rejects it transactionally instead of
+silently loading the entire asset. The same rule applies to any other codec
+that lacks ranged reads: a failed replacement leaves the previously published
+source usable. Admission derives the resident preload and page geometry from
+the 20 ms certified I/O latency, 5 ms scheduler margin, 5 ms decoder allowance,
+host block size, interpolation guard, loop guard, and source rate. Streamed
+playback admits an effective consumption ratio of at most 4x: the note/key-map
+pitch ratio multiplied by the active heritage clock ratio.
 
 `PulpSamplerProcessor::load_sample_file()` currently returns only `bool`.
 `SamplerStreamingRuntime::load_sample_file_result()` and the trivially copyable
