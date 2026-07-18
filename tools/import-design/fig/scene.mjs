@@ -5,7 +5,7 @@
 // (`tools/figma-plugin/schema/figma-plugin-export-v1.json`), so a decoded frame
 // flows through the existing `--from figma-plugin` importer unchanged.
 
-import { geometryToPath, glyphsToPath, isIconFont } from './paths.mjs';
+import { geometryToPath, geometryToClipPath, glyphsToPath, isIconFont } from './paths.mjs';
 import { isFontAvailable } from './fonts.mjs';
 
 const FRAME_LIKE = new Set(['FRAME', 'COMPONENT', 'INSTANCE', 'COMPONENT_SET']);
@@ -827,6 +827,52 @@ function localTransform(node) {
 }
 
 /**
+ * A box-model node's outline as SVG path data in its PARENT's space, for a
+ * rectangle / rounded-rectangle / ellipse / frame used as a mask — shapes whose
+ * geometry is derived from the box, so there are no geometry blobs to decode.
+ * Every point (cubic control points included — an affine maps a bezier's
+ * control polygon exactly) goes through the node transform, so a rotated mask
+ * clips where the design rotated it.
+ */
+function boxMaskOutline(node) {
+  const w = node.size && node.size.x;
+  const h = node.size && node.size.y;
+  if (!(w > 0) || !(h > 0)) return null;
+  const t = localTransform(node);
+  const pt = (x, y) =>
+    `${round2(t.m00 * x + t.m01 * y + t.m02)} ${round2(t.m10 * x + t.m11 * y + t.m12)}`;
+  // Circular-arc-from-cubic constant; the same approximation every renderer's
+  // rounded rect uses, and exact enough that no display resolves the error.
+  const k = 0.5522847498;
+  if (node.type === 'ELLIPSE') {
+    const rx = w / 2;
+    const ry = h / 2;
+    return `M${pt(rx, 0)} `
+      + `C${pt(rx + k * rx, 0)} ${pt(w, ry - k * ry)} ${pt(w, ry)} `
+      + `C${pt(w, ry + k * ry)} ${pt(rx + k * rx, h)} ${pt(rx, h)} `
+      + `C${pt(rx - k * rx, h)} ${pt(0, ry + k * ry)} ${pt(0, ry)} `
+      + `C${pt(0, ry - k * ry)} ${pt(rx - k * rx, 0)} ${pt(rx, 0)} Z`;
+  }
+  const uniform = cornerRadius(node);
+  const per = perCornerRadii(node);
+  const cap = Math.min(w, h) / 2;
+  const r = (v) => Math.min(Math.max(v || 0, 0), cap);
+  const tl = r(per ? per.tl : uniform);
+  const tr = r(per ? per.tr : uniform);
+  const br = r(per ? per.br : uniform);
+  const bl = r(per ? per.bl : uniform);
+  return `M${pt(tl, 0)} L${pt(w - tr, 0)} `
+    + (tr ? `C${pt(w - tr + k * tr, 0)} ${pt(w, tr - k * tr)} ${pt(w, tr)} ` : '')
+    + `L${pt(w, h - br)} `
+    + (br ? `C${pt(w, h - br + k * br)} ${pt(w - br + k * br, h)} ${pt(w - br, h)} ` : '')
+    + `L${pt(bl, h)} `
+    + (bl ? `C${pt(bl - k * bl, h)} ${pt(0, h - bl + k * bl)} ${pt(0, h - bl)} ` : '')
+    + `L${pt(0, tl)} `
+    + (tl ? `C${pt(0, tl - k * tl)} ${pt(tl - k * tl, 0)} ${pt(tl, 0)} ` : '')
+    + 'Z';
+}
+
+/**
  * Materialize one frame subtree into the export envelope.
  *
  * `geometry` is a second, independent product of the same walk: Figma's OWN
@@ -1586,13 +1632,121 @@ export function materializeFrame(scene, frame, ctx) {
     let kids = [];
     if (!vectorResolved) {
       if (node.__masterKey) expandStack.push(node.__masterKey);
-      kids = (node.__children || scene.childrenOf.get(key) || [])
-        .map((c) => walk(c, node, abs, key))
-        .filter(Boolean);
+      kids = walkChildren(node, abs, key);
       if (node.__masterKey) expandStack.pop();
     }
     if (kids.length) out.children = kids;
     return out;
+  }
+
+  // Walk a node's children honoring Figma's `mask` flag. A mask child is
+  // painted NOWHERE — its outline CLIPS the siblings painted after it, and its
+  // own fill never reaches the canvas. Materializing the flag as a normal
+  // child painted an opaque notched panel OVER the very content the design
+  // clips a noise texture to: the selected mixer channel's red accent tab read
+  // gray because its master's `Bg PAnel` mask — invisible in Figma — landed as
+  // the topmost fill in the strip.
+  //
+  // Lowering: the siblings above the mask move into a synthetic wrapper that
+  // spans the parent and carries the mask outline as a CSS clip-path — the
+  // consumer contract the engine already has end-to-end (IRStyle::clip_path →
+  // setClipPath → SkPath::FromSVGString, the "waiting for real mask layers"
+  // note in design_ir.hpp). Siblings BELOW the mask stay outside the wrapper,
+  // unclipped — exactly Figma's scope — and a second mask opens a second
+  // wrapper inside the first, so stacked masks intersect the way nested clips
+  // do.
+  function walkChildren(node, abs, key) {
+    const kids = [];
+    const scopes = [];   // synthetic wrappers, pruned when they end up empty
+    let target = kids;
+    const parentIsAutoLayout =
+      node.stackMode === 'HORIZONTAL' || node.stackMode === 'VERTICAL';
+    for (const child of node.__children || scene.childrenOf.get(key) || []) {
+      if (child.mask === true) {
+        // A hidden mask neither paints nor clips.
+        if (child.visible === false) continue;
+        if (parentIsAutoLayout) {
+          // The wrapper is absolutely placed, which would yank flowed siblings
+          // out of the flex pass. No lowering — but never paint the mask.
+          pushDiag('mask-approximated', child,
+            'mask inside an auto-layout parent has no lowering; siblings flow unmasked');
+          continue;
+        }
+        const d = maskClipOutline(child);
+        if (!d) {
+          pushDiag('mask-approximated', child,
+            'mask outline unresolvable; siblings render unmasked');
+          continue;
+        }
+        // An outline clip is exact for an outline mask and for an alpha mask
+        // whose content is one opaque solid. Anything softer — image or
+        // gradient alpha, partial paint or node opacity — flattens to the hard
+        // outline. Say so: a mask that clips harder than the design intended
+        // looks like a cropping bug, not a dropped property.
+        const resolved = withResolvedPaints(child);
+        const paint = (resolved.fillPaints || []).find((p) => p.visible !== false);
+        const soft = !child.maskIsOutline
+          && (!paint || paint.type !== 'SOLID'
+              || (paint.opacity ?? 1) < 1
+              || ((paint.color && paint.color.a) ?? 1) < 1
+              || (typeof child.opacity === 'number' && child.opacity < 1));
+        if (soft) {
+          pushDiag('mask-approximated', child,
+            'alpha mask flattened to its outline; soft or partial alpha is not reproduced');
+        }
+        const childKey = child.__key || guidKey(child.guid);
+        const wrapper = {
+          type: 'frame',
+          name: `${child.name || 'mask'} (mask scope)`,
+          style: {
+            width: node.size ? Math.round(node.size.x) : 0,
+            height: node.size ? Math.round(node.size.y) : 0,
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            // The outline is in the parent's space, and the wrapper spans the
+            // parent from (0,0) — so the clip lands exactly where the design
+            // put the mask, and the masked siblings keep their coordinates.
+            clip_path: `path("${d}")`,
+          },
+          // Synthetic, so it must not collide with any real node in tools that
+          // join on node_id, and must never be name-guessed into a widget.
+          node_id: `${childKey}/mask-scope`,
+          audio_widget: 'none',
+          children: [],
+        };
+        target.push(wrapper);
+        scopes.push({ wrapper, holder: target });
+        target = wrapper.children;
+        continue;
+      }
+      const walked = walk(child, node, abs, key);
+      if (walked) target.push(walked);
+    }
+    // A scope with nothing above the mask paints nothing. Deepest-first, so a
+    // scope left holding only an emptied deeper scope collapses too.
+    for (let i = scopes.length - 1; i >= 0; i--) {
+      const { wrapper, holder } = scopes[i];
+      if (!wrapper.children.length) holder.splice(holder.indexOf(wrapper), 1);
+    }
+    return kids;
+  }
+
+  // The mask's clip outline in its parent's space: the baked vector geometry
+  // when the node carries one, else the box-model outline synthesized from its
+  // size, corner radii, and transform (a rectangle or ellipse used as a mask
+  // has no geometry blobs to decode).
+  function maskClipOutline(node) {
+    if (node.fillGeometry || node.strokeGeometry) {
+      try {
+        const resolved = geometryToClipPath(node, scene.blobs || []);
+        if (resolved) return resolved.d;
+      } catch {
+        // An unreadable blob falls through to the box outline: an approximate
+        // clip region beats painting the mask or dropping the clip entirely.
+      }
+    }
+    return boxMaskOutline(node);
   }
 
   const root = walk(frame);
@@ -1852,6 +2006,7 @@ export const DIAGNOSTIC_SEVERITY = {
   'effect-unsupported': 'warning',
   'fonts-required': 'warning',
   'icon-font-required': 'warning',
+  'mask-approximated': 'warning',
 };
 
 /**

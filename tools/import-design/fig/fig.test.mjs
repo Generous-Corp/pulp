@@ -1522,6 +1522,88 @@ test('a stacked fill list composites; taking only the first paints the wrong col
   assert.equal(bg('Single'), '#00000059', 'a lone paint still folds its opacity, unchanged');
 });
 
+test('a box-model mask clips via its synthesized outline', () => {
+  // A rectangle / ellipse used as a mask has no geometry blobs — its outline
+  // is derived from the box. The lowering must still produce a parent-space
+  // clip: corner radii as arc cubics, the transform baked into every point.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Panel',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+      size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'ROUNDED_RECTANGLE', name: 'window', mask: true,
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' },
+      size: { x: 40, y: 20 }, cornerRadius: 4,
+      transform: { m00: 1, m01: 0, m02: 2, m10: 0, m11: 1, m12: 1 },
+      fillPaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, visible: true }] },
+    { guid: { sessionID: 0, localID: 4 }, type: 'ROUNDED_RECTANGLE', name: 'content',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+      size: { x: 80, y: 80 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+      fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 1 }, visible: true }] },
+  ]});
+  const ctx = { images: new Map(), parserVersion: 't', compatSchemaVersion: '1', exportedAt: 'x' };
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Panel'), ctx);
+  const scope = envelope.root.children.find((n) => n.name === 'window (mask scope)');
+  assert.ok(scope, 'synthetic clip scope missing');
+  // Top-left corner starts at radius offset (2+4, 1), the top edge runs to the
+  // radius before the top-right corner, then an arc cubic takes over.
+  assert.ok(scope.style.clip_path.startsWith('path("M6 1 L38 1 C'),
+    `unexpected outline start: ${scope.style.clip_path}`);
+  assert.ok(scope.style.clip_path.endsWith('Z")'));
+  assert.deepEqual(scope.children.map((n) => n.name), ['content']);
+});
+
+test('inexact mask lowerings say so — and the mask still never paints', () => {
+  const ctx = { images: new Map(), parserVersion: 't', compatSchemaVersion: '1', exportedAt: 'x' };
+  // A translucent alpha mask clips harder than the design intended: the soft
+  // alpha flattens to the hard outline. That must be confessed, not silent —
+  // a mask that over-clips looks like a cropping bug, not a dropped property.
+  const soft = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Panel',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+      size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'ROUNDED_RECTANGLE', name: 'fade', mask: true,
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' },
+      size: { x: 40, y: 20 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+      fillPaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, opacity: 0.5, visible: true }] },
+    { guid: { sessionID: 0, localID: 4 }, type: 'ROUNDED_RECTANGLE', name: 'content',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+      size: { x: 80, y: 80 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+      fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 1 }, visible: true }] },
+  ]});
+  const softOut = materializeFrame(soft, findFrame(soft, 'Panel'), ctx);
+  assert.ok(softOut.diagnostics.some((d) => d.code === 'mask-approximated' && /alpha mask/.test(d.detail)));
+  assert.equal(DIAGNOSTIC_SEVERITY['mask-approximated'], 'warning');
+  assert.ok(softOut.envelope.root.children.some((n) => n.name === 'fade (mask scope)'),
+    'the outline clip still applies');
+
+  // Inside auto-layout the wrapper would fight the flex pass: no lowering,
+  // but the one invariant that has no exception holds — the mask never paints.
+  const flow = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Row', stackMode: 'HORIZONTAL',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+      size: { x: 100, y: 20 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'ROUNDED_RECTANGLE', name: 'm', mask: true,
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' },
+      size: { x: 20, y: 20 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+      fillPaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, visible: true }] },
+    { guid: { sessionID: 0, localID: 4 }, type: 'ROUNDED_RECTANGLE', name: 'flowed',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+      size: { x: 20, y: 20 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+      fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 1 }, visible: true }] },
+  ]});
+  const flowOut = materializeFrame(flow, findFrame(flow, 'Row'), ctx);
+  assert.ok(flowOut.diagnostics.some((d) => d.code === 'mask-approximated' && /auto-layout/.test(d.detail)));
+  assert.deepEqual(flowOut.envelope.root.children.map((n) => n.name), ['flowed']);
+});
+
 test('every diagnostic code this module emits is registered with a severity', () => {
   // An unregistered code falls through `DIAGNOSTIC_SEVERITY[code] || 'info'` to
   // info, and BOTH consumers drop info: fig_decode's "N warning(s)" count
