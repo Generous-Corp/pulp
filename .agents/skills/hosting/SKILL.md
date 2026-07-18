@@ -76,6 +76,26 @@ still load. Length fields are bounds-checked as `len > remaining` (never
 `remaining - len`) so a malformed blob cannot underflow into an out-of-bounds
 read.
 
+### VST3: embed the editor like CLAP — a parent-consuming IPlugView
+
+`IEditController::createView("editor")` hands back an `IPlugView` that, like
+CLAP `set_parent`, CONSUMES a parent: `IPlugView::attached(container, "NSView")`
+inserts the plug-in's view into a host-owned container rather than returning a
+view. So the VST3 editor path reuses the same container as CLAP
+(`create_editor_container`), and the ordering matters — query
+`IPlugView::getSize` first to size the container, create the container (already
+in the parent window), THEN `attached()`. Tear down in reverse: `removed()`
+before `release()`, and close the editor before terminating the controller it
+came from (`createView`'s view must not outlive its controller).
+
+The AppKit part is only the container; the VST3 negotiation (createView,
+`isPlatformTypeSupported`, `getSize`, `attached`, `onSize`/`checkSizeConstraint`,
+`removed`) is a pure-interface seam, `pulp::host::detail::vst3_editor.hpp`, which
+is where a headless test drives it with a fake `IEditController` / `IPlugView`
+(inherit the SDK `EditController` / `CPluginView` bases). The full container
+attach is only reachable with a real native window, so it is proven by the
+real-DAW smoke, not the unit test.
+
 ### Defensive boundary for entry / factory calls
 
 `scanner_clap.cpp` wraps `entry->init()` and `entry->get_factory()` in
