@@ -199,6 +199,48 @@ class CodexP2FollowupTest(unittest.TestCase):
         self.assertEqual(ctx2.fonts, {})
         self.assertEqual(ctx2.image_fills, set())
 
+    def test_resize_constraints_pass_through_in_rest_spelling(self):
+        # The shared producer contract: node-level `constraints` carrying the
+        # REST API's raw tokens (LEFT/RIGHT/CENTER/LEFT_RIGHT/SCALE and the
+        # vertical analogues). No translation here — design_ir_json.cpp
+        # normalizes and codegen lowers to flex within the parent.
+        tree = {"type": "FRAME", "name": "Panel", "id": "0:1",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 100, "height": 100},
+                "children": [
+                    {"type": "FRAME", "name": "Footer", "id": "0:2",
+                     "absoluteBoundingBox": {"x": 0, "y": 76, "width": 100, "height": 24},
+                     "constraints": {"horizontal": "LEFT_RIGHT", "vertical": "BOTTOM"}},
+                    {"type": "FRAME", "name": "Default", "id": "0:3",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 10, "height": 10}},
+                ]}
+        ir, _ctx = frx.node_tree_to_ir(tree)
+        footer, default = ir["children"]
+        self.assertEqual(footer["constraints"],
+                         {"horizontal": "LEFT_RIGHT", "vertical": "BOTTOM"})
+        self.assertNotIn("constraints", default)   # no source field, no key
+        self.assertNotIn("constraints", ir)        # the imported root anchors the space
+
+    def test_resize_constraints_dropped_for_flowing_auto_layout_children(self):
+        # A FLOWING auto-layout child is sized by the stack; its (stale)
+        # constraints must not ride along to fight the flex pass. A child opted
+        # out with layoutPositioning ABSOLUTE is back in the parent's coordinate
+        # space, so its constraints stay — same gate as absolute positioning.
+        tree = {"type": "FRAME", "name": "Stack", "id": "0:1", "layoutMode": "VERTICAL",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 100, "height": 100},
+                "children": [
+                    {"type": "FRAME", "name": "Row", "id": "0:2",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 100, "height": 24},
+                     "constraints": {"horizontal": "SCALE", "vertical": "TOP"}},
+                    {"type": "FRAME", "name": "Badge", "id": "0:3",
+                     "layoutPositioning": "ABSOLUTE",
+                     "absoluteBoundingBox": {"x": 88, "y": 2, "width": 10, "height": 10},
+                     "constraints": {"horizontal": "RIGHT", "vertical": "TOP"}},
+                ]}
+        ir, _ctx = frx.node_tree_to_ir(tree)
+        row, badge = ir["children"]
+        self.assertNotIn("constraints", row)
+        self.assertEqual(badge["constraints"], {"horizontal": "RIGHT", "vertical": "TOP"})
+
     def test_parse_url_handles_percent_encoded_node_id(self):
         self.assertEqual(frx.parse_url("https://figma.com/design/KEY/x?node-id=3%3A42"), ("KEY", "3:42"))
         self.assertEqual(frx.parse_url("https://figma.com/design/KEY/x?node-id=3-42"), ("KEY", "3:42"))

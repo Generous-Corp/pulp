@@ -144,6 +144,24 @@ test("serializeExport: a plain frame serializes WITHOUT audio_widget (generic)",
   assert.equal(root.attributes, undefined);
 });
 
+test("serializeExport: resize constraints pass through at the node root in Figma spelling", () => {
+  // The shared producer contract: node-level `constraints` carrying the
+  // source's raw tokens; design_ir_json.cpp normalizes, codegen lowers to
+  // flex. The plugin lane must NOT translate spellings.
+  const frame = baseNode({
+    name: "Pinned",
+    figma_node_id: "7:1",
+    constraints: { horizontal: "SCALE", vertical: "MAX" },
+  });
+  const out = serializeExport([frame], [], ctx());
+  assert.deepEqual(rootOf(out).constraints, { horizontal: "SCALE", vertical: "MAX" });
+
+  // A node the extractor gave no constraints (auto-layout child, or a node
+  // type without them) emits NO key — never `constraints: {}` / undefined.
+  const plain = serializeExport([baseNode({ name: "Flow" })], [], ctx());
+  assert.ok(!("constraints" in rootOf(plain)));
+});
+
 // ---------------------------------------------------------------------------
 // Emitter ↔ schema agreement. A tiny structural validator over the subset of
 // JSON Schema the export uses (type, enum, required, properties, $ref,
@@ -237,6 +255,31 @@ test("serialized knob validates against figma-plugin-export-v1 schema", () => {
   const nodeErrors: string[] = [];
   validate(rootOf(out), (schema as any).$defs.node, schema as any, "root", nodeErrors);
   assert.deepEqual(nodeErrors, [], `node schema violations:\n${nodeErrors.join("\n")}`);
+});
+
+test("serialized constraints validate against the schema's constraints subschema", () => {
+  const out = serializeExport(
+    [baseNode({ constraints: { horizontal: "STRETCH", vertical: "MIN" } })],
+    [],
+    ctx(),
+  );
+  const errors: string[] = [];
+  validate(out, schema as any, schema as any, "$", errors);
+  assert.deepEqual(errors, [], `schema violations:\n${errors.join("\n")}`);
+
+  // A misspelled token must FAIL the enum — the schema is the drift guard
+  // between the plugin's passthrough and the C++ normalizer's token set.
+  const bad = serializeExport(
+    [baseNode({ constraints: { horizontal: "LEFT_RIGHT", vertical: "MIN" } })],
+    [],
+    ctx(),
+  );
+  const badErrors: string[] = [];
+  validate(bad, schema as any, schema as any, "$", badErrors);
+  assert.ok(
+    badErrors.some((e) => e.includes("LEFT_RIGHT")),
+    "REST-dialect spelling must be rejected by the plugin schema enum",
+  );
 });
 
 // ---------------------------------------------------------------------------

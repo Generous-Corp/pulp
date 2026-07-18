@@ -874,6 +874,112 @@ TEST_CASE("codegen lowers resize constraints to flex within the parent",
     }
 }
 
+TEST_CASE("resize constraints flow end-to-end: producer wire spellings to flex codegen",
+          "[view][import][codegen][constraints]") {
+    // The full consumer path each Figma producer (.fig decoder, plugin, REST)
+    // now feeds: raw JSON carrying the producer's OWN token spelling →
+    // parse → generate_pulp_js. One child per case so a "does NOT emit"
+    // assertion cannot be satisfied by a sibling's output.
+    auto emit_ir = [](const std::string& h, const std::string& v) {
+        std::string json = R"({
+            "type": "frame", "name": "Root",
+            "style": { "width": 400, "height": 400 },
+            "children": [
+                { "type": "frame", "name": "Child",
+                  "style": { "width": 50, "height": 50 },
+                  "constraints": {)";
+        bool first = true;
+        if (!h.empty()) { json += "\"horizontal\": \"" + h + "\""; first = false; }
+        if (!v.empty()) { json += std::string(first ? "" : ", ") + "\"vertical\": \"" + v + "\""; }
+        json += "} } ] }";
+        return generate_pulp_js(parse_design_ir_json(json), CodeGenOptions{});
+    };
+
+    // REST dialect: LEFT_RIGHT / TOP_BOTTOM (stretch) — the spelling the REST
+    // exporter passes through untranslated.
+    {
+        auto js = emit_ir("LEFT_RIGHT", "TOP_BOTTOM");
+        INFO(js);
+        CHECK(js.find("'align_self', 'stretch')") != std::string::npos);
+        CHECK(js.find("'min_width', '100%')")     != std::string::npos);
+        CHECK(js.find("'min_height', '100%')")    != std::string::npos);
+    }
+    // REST dialect: RIGHT / BOTTOM → leading auto margin only.
+    {
+        auto js = emit_ir("RIGHT", "BOTTOM");
+        INFO(js);
+        CHECK(js.find("'margin_left', 'auto')") != std::string::npos);
+        CHECK(js.find("'margin_top', 'auto')")  != std::string::npos);
+        CHECK(js.find("margin_right")  == std::string::npos);
+        CHECK(js.find("margin_bottom") == std::string::npos);
+    }
+    // Shared spelling: CENTER both axes → auto margins on all four sides.
+    {
+        auto js = emit_ir("CENTER", "CENTER");
+        INFO(js);
+        CHECK(js.find("'margin_left', 'auto')")   != std::string::npos);
+        CHECK(js.find("'margin_right', 'auto')")  != std::string::npos);
+        CHECK(js.find("'margin_top', 'auto')")    != std::string::npos);
+        CHECK(js.find("'margin_bottom', 'auto')") != std::string::npos);
+    }
+    // Shared spelling: SCALE → flex-grow (fill the main axis).
+    {
+        auto js = emit_ir("SCALE", "");
+        INFO(js);
+        CHECK(js.find("'flex_grow', 1)") != std::string::npos);
+    }
+    // REST dialect: LEFT / TOP is the start-anchored flex default — a
+    // constrained-but-default node emits NEITHER margin nor grow nor stretch.
+    {
+        auto js = emit_ir("LEFT", "TOP");
+        INFO(js);
+        CHECK(js.find("margin_left") == std::string::npos);
+        CHECK(js.find("margin_top")  == std::string::npos);
+        CHECK(js.find("flex_grow")   == std::string::npos);
+        CHECK(js.find("align_self")  == std::string::npos);
+    }
+
+    // Plugin/.fig dialect (MIN/MAX/STRETCH), through the ENVELOPE parser the
+    // plugin and .fig lanes actually use — proves the second wire dialect
+    // normalizes on the same path, not just the bare-IR entry point.
+    auto emit_envelope = [](const std::string& h, const std::string& v) {
+        const std::string json = R"({
+            "format_version": "v1", "parser_version": "0.1.0",
+            "root": {
+                "type": "frame", "name": "Root",
+                "style": { "width": 400, "height": 400 },
+                "children": [
+                    { "type": "frame", "name": "Child",
+                      "style": { "width": 50, "height": 50 },
+                      "constraints": { "horizontal": ")" + h +
+                      R"(", "vertical": ")" + v + R"(" } } ] } })";
+        return generate_pulp_js(parse_figma_plugin_json(json), CodeGenOptions{});
+    };
+    {
+        auto js = emit_envelope("STRETCH", "MAX");
+        INFO(js);
+        CHECK(js.find("'align_self', 'stretch')") != std::string::npos);
+        CHECK(js.find("'min_width', '100%')")     != std::string::npos);
+        CHECK(js.find("'margin_top', 'auto')")    != std::string::npos);
+        CHECK(js.find("margin_bottom") == std::string::npos);
+    }
+    {
+        auto js = emit_envelope("MAX", "SCALE");
+        INFO(js);
+        CHECK(js.find("'margin_left', 'auto')") != std::string::npos);
+        CHECK(js.find("margin_right") == std::string::npos);
+        CHECK(js.find("'flex_grow', 1)") != std::string::npos);
+    }
+    {
+        auto js = emit_envelope("MIN", "MIN");
+        INFO(js);
+        CHECK(js.find("margin_left") == std::string::npos);
+        CHECK(js.find("margin_top")  == std::string::npos);
+        CHECK(js.find("flex_grow")   == std::string::npos);
+        CHECK(js.find("align_self")  == std::string::npos);
+    }
+}
+
 TEST_CASE("parse_design_ir_json reads CSS grid container + item placement",
           "[view][import][grid]") {
     auto ir = parse_design_ir_json(R"json({
