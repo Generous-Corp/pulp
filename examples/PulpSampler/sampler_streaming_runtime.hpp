@@ -1,23 +1,28 @@
 #pragma once
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/audio/format_registry.hpp>
 #include <pulp/audio/published_sample_store.hpp>
 #include <pulp/audio/sample_asset.hpp>
 #include <pulp/audio/sample_preload_contract.hpp>
 #include <pulp/audio/sample_stream_async_service.hpp>
+#include <pulp/audio/sample_stream_voice_reader.hpp>
 #include <pulp/audio/streaming_sample_source_file.hpp>
 #include <pulp/runtime/seqlock.hpp>
 
 #include "sampler_mip_pyramid.hpp"
+#include "sampler_api.hpp"
 #include "sampler_stream_mip_sidecar.hpp"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
+#include <filesystem>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -167,6 +172,7 @@ class SamplerStreamingRuntime {
 #endif
         unpublished_rollbacks_.fill({});
         published_source_.write({});
+        file_request_result_ = {};
 
         const auto maximum_source_frames_per_block =
             std::ceil(static_cast<double>(maximum_host_block_frames_) * kMaximumPitchRatio *
@@ -252,7 +258,7 @@ class SamplerStreamingRuntime {
             std::lock_guard lock(file_request_mutex_);
             service_running_.store(false, std::memory_order_release);
             file_request_complete_ = true;
-            file_request_result_ = false;
+            file_request_result_.status = PulpSamplerLoadStatus::ShuttingDown;
         }
 #if defined(PULP_SAMPLER_TEST_HOOKS)
         release_reverse_decode_for_test_.store(true, std::memory_order_release);
@@ -323,36 +329,60 @@ class SamplerStreamingRuntime {
         return true;
     }
 
-    bool load_sample_file(std::string_view path) {
-        if (path.empty())
-            return false;
-        std::lock_guard source_lock(source_load_mutex_);
-        if (!service_running_.load(std::memory_order_acquire))
-            return false;
-        if (active_sources_.load(std::memory_order_acquire) >= kBundleSlotCount)
-            return false;
-
-        std::unique_ptr<PreparedStreamedFile> prepared;
-        try {
-            prepared = stage_streamed_file(path);
-        } catch (...) {
-            return false;
+    PulpSamplerLoadResult load_sample_file_result(std::string_view path) {
+        PulpSamplerLoadResult result;
+        if (path.empty()) {
+            result.status = PulpSamplerLoadStatus::EmptyPath;
+            return result;
         }
-        if (!prepared)
-            return false;
+        std::lock_guard source_lock(source_load_mutex_);
+        if (!service_running_.load(std::memory_order_acquire)) {
+            result.status = PulpSamplerLoadStatus::NotPrepared;
+            return result;
+        }
+        if (active_sources_.load(std::memory_order_acquire) >= kBundleSlotCount) {
+            result.status = PulpSamplerLoadStatus::BundleCapacityExceeded;
+            return result;
+        }
+
+        StagedStreamedFile staged;
+        try {
+            staged = stage_streamed_file(path);
+        } catch (const std::bad_alloc&) {
+            result.status = PulpSamplerLoadStatus::AllocationFailure;
+            return result;
+        } catch (...) {
+            result.status = PulpSamplerLoadStatus::InternalFailure;
+            return result;
+        }
+        if (!staged.prepared)
+            return staged.result;
 
         std::unique_lock request_lock(file_request_mutex_);
-        if (!service_running_.load(std::memory_order_acquire) || file_request_pending_)
-            return false;
-        file_request_prepared_ = std::move(prepared);
-        file_request_result_ = false;
+        if (!service_running_.load(std::memory_order_acquire)) {
+            staged.result.status = PulpSamplerLoadStatus::ShuttingDown;
+            return staged.result;
+        }
+        if (file_request_pending_) {
+            staged.result.status = PulpSamplerLoadStatus::Busy;
+            return staged.result;
+        }
+        file_request_prepared_ = std::move(staged.prepared);
+        file_request_result_ = staged.result;
         file_request_complete_ = false;
         file_request_pending_ = true;
         service_wake_.notify_all();
         file_request_changed_.wait(request_lock, [this] {
             return file_request_complete_ || !service_running_.load(std::memory_order_acquire);
         });
-        return file_request_complete_ && file_request_result_;
+        if (!file_request_complete_) {
+            file_request_result_.status = PulpSamplerLoadStatus::ShuttingDown;
+        }
+        return file_request_result_;
+    }
+
+    bool load_sample_file(std::string_view path) {
+        return load_sample_file_result(path).loaded();
     }
 
     SamplerPublishedSource published_source() const noexcept {
@@ -539,6 +569,37 @@ class SamplerStreamingRuntime {
         std::uint32_t member_count = 0;
     };
 
+    struct StagedStreamedFile {
+        std::unique_ptr<PreparedStreamedFile> prepared;
+        PulpSamplerLoadResult result{};
+    };
+
+    enum class ReversePrewarmStatus : std::uint8_t {
+        Ready,
+        ScheduleFailed,
+        TimedOut,
+        ShuttingDown,
+    };
+
+    template <std::size_t Size>
+    static void copy_fixed_name(std::array<char, Size>& destination,
+                                std::string_view source) noexcept {
+        destination.fill('\0');
+        if constexpr (Size > 0) {
+            const auto count = std::min(source.size(), Size - 1);
+            std::copy_n(source.data(), count, destination.data());
+        }
+    }
+
+    static bool has_registered_audio_reader(std::string_view path) {
+        auto extension = std::filesystem::path(path).extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+                       [](unsigned char value) {
+                           return static_cast<char>(std::tolower(value));
+                       });
+        return audio::FormatRegistry::instance().find_reader(extension) != nullptr;
+    }
+
     runtime::SeqLock<SamplerPublishedSource> published_source_;
     std::atomic<std::uint64_t> stream_audio_ack_selection_{0};
     std::atomic<std::uint64_t> audio_active_generation_{1};
@@ -608,7 +669,7 @@ class SamplerStreamingRuntime {
     std::unique_ptr<PreparedStreamedFile> file_request_prepared_;
     bool file_request_pending_ = false;
     bool file_request_complete_ = false;
-    bool file_request_result_ = false;
+    PulpSamplerLoadResult file_request_result_{};
 
     void service_loop() noexcept {
         while (service_running_.load(std::memory_order_acquire)) {
@@ -702,21 +763,35 @@ class SamplerStreamingRuntime {
             file_request_pending_ = false;
         }
 
-        bool loaded = false;
+        PulpSamplerLoadStatus status = PulpSamplerLoadStatus::InternalFailure;
         try {
-            loaded = prepared && publish_streamed_file(*prepared);
+            status = prepared
+                ? publish_streamed_file(*prepared)
+                : PulpSamplerLoadStatus::InternalFailure;
+        } catch (const std::bad_alloc&) {
+            status = PulpSamplerLoadStatus::AllocationFailure;
         } catch (...) {
-            loaded = false;
+            status = PulpSamplerLoadStatus::InternalFailure;
         }
+        // A completed result promises that every unpublished staging lease has
+        // already rolled back. Destroy the staged bundle before waking the
+        // caller; otherwise it can observe transient retained preload bytes.
+        prepared.reset();
         {
             std::lock_guard lock(file_request_mutex_);
-            file_request_result_ = loaded && service_running_.load(std::memory_order_acquire);
+            file_request_result_.status =
+                status == PulpSamplerLoadStatus::Ok &&
+                        !service_running_.load(std::memory_order_acquire)
+                    ? PulpSamplerLoadStatus::ShuttingDown
+                    : status;
             file_request_complete_ = true;
         }
         file_request_changed_.notify_all();
     }
 
-    std::unique_ptr<PreparedStreamedFile> stage_streamed_file(std::string_view path) {
+    StagedStreamedFile stage_streamed_file(std::string_view path) {
+        StagedStreamedFile staged;
+        auto& result = staged.result;
 #if defined(PULP_SAMPLER_TEST_HOOKS)
         file_stage_attempts_for_test_.fetch_add(1, std::memory_order_relaxed);
         if (throw_during_file_stage_for_test_.exchange(false, std::memory_order_acq_rel)) {
@@ -733,20 +808,75 @@ class SamplerStreamingRuntime {
         }
         file_stage_paused_ack_for_test_.store(false, std::memory_order_release);
 #endif
-        if (!service_running_.load(std::memory_order_acquire))
-            return {};
+        if (!service_running_.load(std::memory_order_acquire)) {
+            result.status = PulpSamplerLoadStatus::ShuttingDown;
+            return staged;
+        }
+        if (!has_registered_audio_reader(path)) {
+            result.status = PulpSamplerLoadStatus::UnsupportedCodec;
+            return staged;
+        }
 
         std::shared_ptr<audio::MemoryMappedAudioReader> retained_base;
         auto base = audio::make_memory_mapped_frame_reader(
-            path, true, has_sidecar, std::numeric_limits<std::uint64_t>::max(), &retained_base);
-        if (!base.valid || !base.supports_ranged_read || base.channels == 0 ||
-            base.channels > kMaximumChannels || base.sample_rate == 0 ||
-            base.sample_rate > kMaximumSourceRate) {
-            return {};
+            path, false, false, std::numeric_limits<std::uint64_t>::max(), &retained_base);
+        if (!base.valid || retained_base == nullptr) {
+            result.status = PulpSamplerLoadStatus::OpenFailed;
+            return staged;
+        }
+        result.channels = base.channels;
+        result.sample_rate = base.sample_rate;
+        result.total_frames = base.total_frames;
+        copy_fixed_name(result.codec_name, retained_base->info().format);
+        result.codec_capability = base.supports_ranged_read
+            ? PulpSamplerCodecCapability::Ranged
+            : PulpSamplerCodecCapability::DecodeOnceFallback;
+        if (!base.supports_ranged_read) {
+            result.status = PulpSamplerLoadStatus::DecodeOnceFallbackRejected;
+            return staged;
+        }
+        if (base.channels == 0 || base.channels > kMaximumChannels) {
+            result.status = PulpSamplerLoadStatus::UnsupportedChannelCount;
+            return staged;
+        }
+        if (base.sample_rate == 0 || base.sample_rate > kMaximumSourceRate) {
+            result.status = PulpSamplerLoadStatus::UnsupportedSampleRate;
+            return staged;
+        }
+        // Reopen with the strict ranged-only binding after capability
+        // inspection. The permissive probe above must never leak its
+        // decode-once fallback into an admitted streaming source.
+        base = audio::make_memory_mapped_frame_reader(
+            path, true, has_sidecar, std::numeric_limits<std::uint64_t>::max(),
+            &retained_base);
+        if (!base.valid || retained_base == nullptr) {
+            result.status = PulpSamplerLoadStatus::OpenFailed;
+            return staged;
+        }
+        // The file may have been replaced between the capability probe and
+        // strict reopen. Validate and report the handle that will actually be
+        // registered, rather than retaining probe-era metadata.
+        result.channels = base.channels;
+        result.sample_rate = base.sample_rate;
+        result.total_frames = base.total_frames;
+        copy_fixed_name(result.codec_name, retained_base->info().format);
+        result.codec_capability = PulpSamplerCodecCapability::Ranged;
+        if (base.channels == 0 || base.channels > kMaximumChannels) {
+            result.status = PulpSamplerLoadStatus::UnsupportedChannelCount;
+            return staged;
+        }
+        if (base.sample_rate == 0 || base.sample_rate > kMaximumSourceRate) {
+            result.status = PulpSamplerLoadStatus::UnsupportedSampleRate;
+            return staged;
         }
 
         auto sidecar = has_sidecar ? load_sampler_stream_mip_sidecar(path, base, retained_base)
                                    : SamplerStreamMipSidecar{};
+        result.sidecar_status = sidecar.status == SamplerStreamMipSidecarStatus::Valid
+            ? PulpSamplerSidecarStatus::Loaded
+            : sidecar.status == SamplerStreamMipSidecarStatus::Invalid
+                ? PulpSamplerSidecarStatus::IgnoredInvalid
+                : PulpSamplerSidecarStatus::NotPresent;
         auto prepared = std::make_unique<PreparedStreamedFile>();
         auto& files = prepared->files;
         auto& logical_rates = prepared->logical_rates;
@@ -756,6 +886,7 @@ class SamplerStreamingRuntime {
         files[0] = std::move(base);
         if (sidecar.status == SamplerStreamMipSidecarStatus::Valid) {
             prepared->member_count += sidecar.level_count;
+            result.sidecar_level_count = sidecar.level_count;
             for (std::uint32_t level = 0; level < sidecar.level_count; ++level) {
                 files[level + 1] = std::move(sidecar.levels[level].reader);
                 logical_rates[level + 1] = sidecar.levels[level].sample_rate;
@@ -769,7 +900,10 @@ class SamplerStreamingRuntime {
             if (!file.valid || !file.supports_ranged_read || file.channels != files[0].channels ||
                 !(logical_rate > 0.0) || !std::isfinite(logical_rate) ||
                 logical_rate > kMaximumSourceRate) {
-                return {};
+                result.status = member == 0
+                    ? PulpSamplerLoadStatus::UnsupportedCodec
+                    : PulpSamplerLoadStatus::PublishFailed;
+                return staged;
             }
             auto& contract = prepared->contracts[member];
             contract = {
@@ -788,38 +922,60 @@ class SamplerStreamingRuntime {
             if (!std::isfinite(block_source_frames) ||
                 block_source_frames >=
                     static_cast<double>(std::numeric_limits<std::uint64_t>::max())) {
-                return {};
+                result.status = PulpSamplerLoadStatus::InvalidPreloadContract;
+                return staged;
             }
             contract.loop_prefetch_guard_frames = static_cast<std::uint64_t>(block_source_frames);
             const auto required = audio::evaluate_sample_preload_contract(contract);
-            if (!required.valid() || required.required_preload_frames == 0)
-                return {};
+            if (!required.valid() || required.required_preload_frames == 0) {
+                result.status = PulpSamplerLoadStatus::InvalidPreloadContract;
+                return staged;
+            }
             const auto preload_frames =
                 std::min(file.total_frames, required.required_preload_frames);
             contract.configured_preload_frames = preload_frames;
             const auto preload_bytes = audio::checked_sample_storage_bytes(
                 file.channels, preload_frames);
-            if (!preload_bytes)
-                return {};
+            if (!preload_bytes ||
+                *preload_bytes > std::numeric_limits<std::uint64_t>::max() -
+                                     result.requested_streaming_memory_bytes) {
+                result.status = PulpSamplerLoadStatus::StreamingMemoryBudgetExceeded;
+                return staged;
+            }
+            result.requested_streaming_memory_bytes += *preload_bytes;
             auto preload_reservation = memory_governor_.reserve(
                 audio::SampleMemoryCategory::Preload, *preload_bytes);
-            if (!preload_reservation.acquired())
-                return {};
+            if (!preload_reservation.acquired()) {
+                result.status = preload_reservation.status ==
+                                        audio::SampleMemoryReserveStatus::BudgetExceeded
+                    ? PulpSamplerLoadStatus::StreamingMemoryBudgetExceeded
+                    : PulpSamplerLoadStatus::InternalFailure;
+                return staged;
+            }
             prepared->preload_leases[member] = std::move(preload_reservation.lease);
             prepared->preloads[member].resize(file.channels,
                                               static_cast<std::size_t>(preload_frames));
             if (file.binding.read(0, prepared->preloads[member].view(), preload_frames,
                                   std::stop_token{}) != preload_frames) {
-                return {};
+                result.status = PulpSamplerLoadStatus::PreloadReadFailed;
+                return staged;
             }
             prepared->preload_counts[member] = preload_frames;
+            if (member == 0) {
+                result.required_preload_frames = required.required_preload_frames;
+                result.configured_preload_frames = preload_frames;
+            }
         }
-        if (!service_running_.load(std::memory_order_acquire))
-            return {};
-        return prepared;
+        if (!service_running_.load(std::memory_order_acquire)) {
+            result.status = PulpSamplerLoadStatus::ShuttingDown;
+            return staged;
+        }
+        result.status = PulpSamplerLoadStatus::NotAttempted;
+        staged.prepared = std::move(prepared);
+        return staged;
     }
 
-    bool publish_streamed_file(PreparedStreamedFile& prepared) {
+    PulpSamplerLoadStatus publish_streamed_file(PreparedStreamedFile& prepared) {
         StreamedSlot* slot = nullptr;
         for (auto& candidate : slots_) {
             if (candidate && !candidate->occupied) {
@@ -828,7 +984,7 @@ class SamplerStreamingRuntime {
             }
         }
         if (slot == nullptr)
-            return false;
+            return PulpSamplerLoadStatus::BundleCapacityExceeded;
 
         for (auto& member : slot->members) {
             member.asset.release();
@@ -877,7 +1033,7 @@ class SamplerStreamingRuntime {
                 if (fail_after_stream_member_count_for_test_.load(std::memory_order_acquire) ==
                     static_cast<int>(member)) {
                     discard_unpublished_slot(*slot);
-                    return false;
+                    return PulpSamplerLoadStatus::SourceRegistrationFailed;
                 }
                 auto reader = std::move(files[member].binding.read);
                 files[member].binding.read =
@@ -905,7 +1061,7 @@ class SamplerStreamingRuntime {
                     std::move(files[member].binding));
                 if (!added.added()) {
                     discard_unpublished_slot(*slot);
-                    return false;
+                    return PulpSamplerLoadStatus::SourceRegistrationFailed;
                 }
                 auto& owned = slot->members[member];
                 owned.source = source;
@@ -916,16 +1072,22 @@ class SamplerStreamingRuntime {
             if (fail_after_stream_member_count_for_test_.load(std::memory_order_acquire) ==
                 static_cast<int>(member_count)) {
                 discard_unpublished_slot(*slot);
-                return false;
+                return PulpSamplerLoadStatus::SourceRegistrationFailed;
             }
 #endif
 
-            if (preload_counts[0] < files[0].total_frames &&
-                !prewarm_reverse_entry_pages(slot->members[0].source, stream_views[0],
-                                             files[0].total_frames, preload_counts[0],
-                                             logical_rates[0])) {
-                discard_unpublished_slot(*slot);
-                return false;
+            if (preload_counts[0] < files[0].total_frames) {
+                const auto prewarm = prewarm_reverse_entry_pages(
+                    slot->members[0].source, stream_views[0], files[0].total_frames,
+                    preload_counts[0], logical_rates[0]);
+                if (prewarm != ReversePrewarmStatus::Ready) {
+                    discard_unpublished_slot(*slot);
+                    if (prewarm == ReversePrewarmStatus::TimedOut)
+                        return PulpSamplerLoadStatus::ReversePrewarmTimedOut;
+                    if (prewarm == ReversePrewarmStatus::ShuttingDown)
+                        return PulpSamplerLoadStatus::ShuttingDown;
+                    return PulpSamplerLoadStatus::PublishFailed;
+                }
             }
 
             for (std::uint32_t member = 0; member < member_count; ++member) {
@@ -944,7 +1106,7 @@ class SamplerStreamingRuntime {
                         std::move(preloads[member]),
                         std::move(preload_leases[member]))) {
                     discard_unpublished_slot(*slot);
-                    return false;
+                    return PulpSamplerLoadStatus::PublishFailed;
                 }
             }
 
@@ -962,7 +1124,7 @@ class SamplerStreamingRuntime {
             std::lock_guard lock(file_request_mutex_);
             if (!service_running_.load(std::memory_order_acquire)) {
                 discard_unpublished_slot(*slot);
-                return false;
+                return PulpSamplerLoadStatus::ShuttingDown;
             }
             SamplerStreamMipPyramidView streamed_mips;
             streamed_mips.level_count = member_count - 1;
@@ -983,24 +1145,28 @@ class SamplerStreamingRuntime {
             });
             active_sources_.fetch_add(1, std::memory_order_relaxed);
             preload_frames_.store(preload_counts[0], std::memory_order_relaxed);
-            return true;
+            return PulpSamplerLoadStatus::Ok;
+        } catch (const std::bad_alloc&) {
+            discard_unpublished_slot(*slot);
+            return PulpSamplerLoadStatus::AllocationFailure;
         } catch (...) {
             discard_unpublished_slot(*slot);
-            return false;
+            return PulpSamplerLoadStatus::InternalFailure;
         }
     }
 
-    bool prewarm_reverse_entry_pages(audio::SampleStreamSourceToken source,
-                                     const audio::SampleStreamCacheSourceView& view,
-                                     std::uint64_t total_frames, std::uint64_t preload_frames,
-                                     double sample_rate) noexcept {
+    ReversePrewarmStatus prewarm_reverse_entry_pages(
+        audio::SampleStreamSourceToken source,
+        const audio::SampleStreamCacheSourceView& view,
+        std::uint64_t total_frames, std::uint64_t preload_frames,
+        double sample_rate) noexcept {
         const auto tail_frame = total_frames - 1;
         const auto first_frame = total_frames > preload_frames ? total_frames - preload_frames : 0;
         const auto first_page = first_frame / page_frames_;
         const auto last_page = tail_frame / page_frames_;
         const auto horizon_page_count = last_page - first_page + 1;
         if (horizon_page_count > kCachePagesPerSource)
-            return false;
+            return ReversePrewarmStatus::ScheduleFailed;
         const audio::SampleStreamRequesterToken requester{kAdmissionRequesterId, source.source_id};
         for (auto page = first_page; page <= last_page; ++page) {
             const auto page_end = page == last_page ? total_frames : (page + 1) * page_frames_;
@@ -1016,7 +1182,7 @@ class SamplerStreamingRuntime {
             if (scheduled != audio::SampleStreamScheduleStatus::Inserted &&
                 scheduled != audio::SampleStreamScheduleStatus::Refreshed) {
                 (void)service_.cancel_requester(requester);
-                return false;
+                return ReversePrewarmStatus::ScheduleFailed;
             }
         }
 #if defined(PULP_SAMPLER_TEST_HOOKS)
@@ -1048,7 +1214,9 @@ class SamplerStreamingRuntime {
 #if defined(PULP_SAMPLER_TEST_HOOKS)
                 reverse_prewarm_pending_for_test_.store(false, std::memory_order_release);
 #endif
-                return service_running_.load(std::memory_order_acquire);
+                return service_running_.load(std::memory_order_acquire)
+                    ? ReversePrewarmStatus::Ready
+                    : ReversePrewarmStatus::ShuttingDown;
             }
             if (!service_dispatch_paused_.load(std::memory_order_acquire)) {
                 for (std::uint32_t attempt = 0; attempt < kSourceCapacity * 2; ++attempt) {
@@ -1065,7 +1233,10 @@ class SamplerStreamingRuntime {
 #if defined(PULP_SAMPLER_TEST_HOOKS)
         reverse_prewarm_pending_for_test_.store(false, std::memory_order_release);
 #endif
-        return ready && service_running_.load(std::memory_order_acquire);
+        if (!service_running_.load(std::memory_order_acquire))
+            return ReversePrewarmStatus::ShuttingDown;
+        return ready ? ReversePrewarmStatus::Ready
+                     : ReversePrewarmStatus::TimedOut;
     }
 
     static std::chrono::milliseconds
