@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06990"></a>
+## [0.699.0] - 2026-07-18
+
+- test(format): assert AU v2 republishes processor latency/tail changes ([#6245](https://github.com/danielraffel/pulp/pull/6245))
+- ci(version): Model B — post-merge assignment, PRs stop touching the version cell ([#6255](https://github.com/danielraffel/pulp/pull/6255))
+
 <a id="v06981"></a>
 ## [0.698.1] - 2026-07-18
 
@@ -6544,6 +6550,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.699.0]: https://github.com/danielraffel/pulp/releases/tag/v0.699.0
 [0.698.1]: https://github.com/danielraffel/pulp/releases/tag/v0.698.1
 [0.698.0]: https://github.com/danielraffel/pulp/releases/tag/v0.698.0
 [0.697.0]: https://github.com/danielraffel/pulp/releases/tag/v0.697.0
