@@ -110,10 +110,12 @@ than no gate. Each of these is measured by a test in `tests/test_click.py`:
   whose alias floor is -55 dB or lower, i.e. genuinely clean. This is NOT tunable away: a
   threshold high enough to pass the smear (-20 dB) blinds the detector to real -25 to
   -45 dB seams. So the detector detects the regime and REFUSES it instead — the smear is
-  not a localized outlier (its worst excursion barely exceeds the median per-period peak)
+  not a per-period NOVELTY outlier (aligned into period-synchronous frames, it repeats the
+  same shape every period, so it barely departs from the per-period median-frame template)
   and it rides the waveform's own edges, and both together separate it from a real seam
-  (localized) and from a block-rate zipper (off the edges). A refusal here is correct, not
-  a miss: on a real oscillator you HAVE a reference — render the same patch without the
+  (the one period that does NOT match the template — a large outlier) and from a block-rate
+  zipper (off the edges, and itself not a per-period outlier). A refusal here is correct,
+  not a miss: on a real oscillator you HAVE a reference — render the same patch without the
   defect — so the honest gate is `dsp.null_residual_db`, not the comb self-reference. See
   "Which detector to reach for".
 
@@ -123,18 +125,21 @@ SUBTRACTS the edge rather than thresholding around it, so the edge does not mask
 anything), and a hard-sync reset does not need special-casing — fitting the period
 finds the master period on its own.
 
-* **The edge-smear REFUSAL band is render-length dependent for seams close to the smear
-  floor.** `edge_concentration` is a global statistic, so the recurring smear dominates
-  it more as the period count grows: a seam only a few dB above a real BLEP oscillator's
-  smear floor can read localized (and FIRE) on a short clip yet smeared (and be REFUSED)
-  on a multi-second one. It is never a silent pass — a refusal is always `low_coverage`,
-  "not proven clean" — and a seam well clear of the smear floor fires at any length; only
-  the near-floor band moves. When gating a real oscillator at length, prefer the honest
-  frozen-reference `dsp.null_residual_db` (render the same patch without the defect) over
-  the comb self-reference, or analyze a shorter window. Making the refusal fully
-  length-independent needs a background-only, per-period-robust concentration that still
-  fires the near-floor seam the current tests pin — a discriminator redesign, tracked
-  separately, not a threshold tweak.
+* **The edge-smear refusal is render-length INDEPENDENT.** The smear-vs-seam decision keys
+  on `template_novelty_db`, a per-period RATIO (worst period's departure from the recurring
+  residual template over the median period's), so a longer render only adds more
+  template-matching periods — it moves neither the max nor the median, and the verdict is
+  the same at 0.3 s and 3.0 s. This replaced an earlier global `edge_concentration` /
+  `localization` statistic whose value drifted with the period count, so the SAME near-floor
+  seam could fire on a short clip and be refused on a multi-second one (the N3 length-
+  dependent-verdict bug). `edge_concentration` is still consulted, but only for the
+  smear-vs-zipper (on-edge vs off-edge) distinction, where it is stable with length. A
+  novelty-firing seam fires at any length; a below-smear-floor seam (novelty under the
+  threshold) is refused at any length — and a refusal is never a silent pass (it is always
+  `low_coverage`, "not proven clean"). The one axis that stays length-limited is a seam
+  quieter than the smear floor: the comb cannot see below the smear, so gate a real
+  oscillator at length with the frozen-reference `dsp.null_residual_db` (render the same
+  patch without the defect) when the seam may be below the floor.
 
 ## Which detector to reach for
 
@@ -190,6 +195,7 @@ from typing import NamedTuple
 
 import numpy as np
 
+from ..dsp import resample_to_length
 from ..schema import DetectorResult, WorstRegion
 
 TOLERANCE_CLASS = "click.v1"
@@ -233,18 +239,32 @@ _MULTIPLE_MARGIN = 6.0
 # EDGES, and the comb leaves a per-edge residual — approximation error, not a click — that
 # reads as a false -20 to -30 dB "click". Two measurements separate that smear from a real
 # one-off seam, and the detector refuses (rather than reports) when both hold:
-#   * localization — the worst residual excursion barely exceeds the MEDIAN per-period
-#     peak. A one-off seam has no predecessor and towers over the per-period background;
-#     smear recurs at every edge, so its worst excursion is not an outlier.
+#   * template novelty — the residual is aligned into per-period frames at the fitted
+#     fractional period (period-synchronous resample, then reshape), a robust per-period
+#     TEMPLATE is built (the median frame), and each period is scored by how far it departs
+#     from that template. A real BLEP oscillator repeats the SAME approximation-error shape
+#     every period, so the template captures it and every period departs from it only by
+#     noise; a one-off seam is the single period whose residual does NOT match the recurring
+#     template, so it is a large outlier in the template-subtracted domain. `template_novelty_db`
+#     is the worst period's departure over the MEDIAN period's departure, in dB. Crucially
+#     this is a per-period ratio — level-independent AND render-length-independent — which is
+#     what the earlier global `localization`/`edge_concentration` statistics were not: a global
+#     sum lets the recurring smear dominate more as the period count grows, so the SAME
+#     near-floor seam could fire on a short clip and be refused on a long one (the N3 bug this
+#     replaced). The per-period ratio yields the same verdict at any length.
 #   * edge concentration — the residual sits ON the waveform's own edges. Smear does; a
-#     block-rate zipper and a period-doubled defect do not (they recur off the edges).
+#     block-rate zipper and a period-doubled defect do not (they recur off the edges). This
+#     is what keeps a STATIONARY zipper — which, like the smear, is not a per-period outlier,
+#     so template novelty alone is blind to it (both are stationary churn) — from being
+#     wrongly refused as smear: a zipper rides no edge, so its edge concentration is low and
+#     the refusal does not apply.
 # Measured across the grid (pinned in `tests/test_click.py`): clean BLEP renders read a
-# localization <= 7 dB and an edge concentration >= 0.46, while a one-off seam reads a
-# localization >= 20 dB and a zipper / period-doubled defect an edge concentration <= 0.31.
-# The thresholds sit in the gap either side. A refusal here is correct — the honest gate
-# for a discontinuous real oscillator is the frozen-reference null (`dsp.null_residual_db`),
-# not the comb self-reference — and it is NOT a pass.
-_LOCALIZED_MARGIN_DB = 15.0
+# template novelty <= 4.5 dB at any length and an edge concentration >= 0.46, while a one-off
+# seam well above the smear floor reads a novelty >= 17 dB (unchanged across 0.3-3.0 s) and a
+# zipper an edge concentration <= 0.31. The thresholds sit in the gap either side. A refusal
+# here is correct — the honest gate for a discontinuous real oscillator is the frozen-reference
+# null (`dsp.null_residual_db`), not the comb self-reference — and it is NOT a pass.
+_TEMPLATE_NOVELTY_DB = 12.0
 _EDGE_CONCENTRATION = 0.40
 
 
@@ -258,8 +278,8 @@ class ClickAnalysis(NamedTuple):
     period_confidence: float  # normalized correlation one period on, 0..1
     period_drift: float       # relative period difference between the two halves
     residual: np.ndarray      # the band-limited comb residual
-    localization_db: float = 0.0     # worst excursion over the median per-period peak, dB
-    edge_concentration: float = 0.0  # residual's alignment with the waveform's own edges, 0..1
+    template_novelty_db: float = 0.0  # worst per-period departure from the residual template over the median, dB
+    edge_concentration: float = 0.0   # residual's alignment with the waveform's own edges, 0..1
 
 
 def _delay_kernel(frac: float, taps: int, beta: float) -> np.ndarray:
@@ -498,20 +518,66 @@ def measure_period_drift(y: np.ndarray, seed: float, guard: int) -> float:
     return max(spreads) if spreads else float("nan")
 
 
+def _template_novelty_db(residual: np.ndarray, period: float, guard: int) -> float:
+    """How much the WORST period's residual departs from the recurring per-period template,
+    over how much the MEDIAN period departs, in dB — the render-length-independent core of
+    the edge-smear refusal (see the module docstring and `_TEMPLATE_NOVELTY_DB`).
+
+    The construction: a real BLEP oscillator repeats the SAME approximation-error shape at
+    every edge, phase-advanced by the fractional period. So the interior residual is first
+    made period-synchronous — resampled by `round(P)/P` so one period occupies exactly
+    `round(P)` samples — and reshaped into per-period frames that line up sample-for-sample.
+    The median frame is a robust TEMPLATE of the recurring shape; subtracting it removes the
+    smear a real oscillator leaves every period, whatever its level. Each period's residual
+    energy AFTER template subtraction (`novelty`) is then near-zero for smear (every period
+    matches the template) and large for the one period a one-off seam lands in (it does not).
+
+    The reported value is `20*log10(max(novelty) / median(novelty))`: a per-period RATIO, so
+    it is invariant to the seam's absolute level AND to the render length (a longer render
+    adds more template-matching periods without moving either the max or the median). That is
+    the property the earlier global localization/edge-concentration statistics lacked — a
+    global sum lets the recurring smear dominate more as the period count grows, flipping a
+    near-floor seam's verdict with length (the N3 bug this replaced).
+
+    Returns +inf ("treat as an outlier, do not refuse on this axis") when there are too few
+    periods to build a stable template — matching the module's convention that an
+    unmeasurable guard withholds the refusal rather than asserting smear it never saw.
+    """
+    interior = residual[guard : len(residual) - guard]
+    m = int(round(period))
+    if len(interior) < 4 or m < 2:
+        return np.inf
+    # Period-synchronous: resample so each period spans exactly `m` samples, then the reshape
+    # aligns edges sample-for-sample and the median frame is a clean template of the smear.
+    target = int(round(len(interior) * m / period))
+    synchronous = resample_to_length(interior, target)
+    n_periods = len(synchronous) // m
+    if n_periods < 4:
+        return np.inf
+    frames = synchronous[: n_periods * m].reshape(n_periods, m)
+    template = np.median(frames, axis=0)
+    novelty = np.sqrt(np.mean((frames - template) ** 2, axis=1))  # per-period residual-of-residual
+    median = float(np.median(novelty))
+    worst = float(novelty.max())
+    return 20.0 * np.log10(worst / median) if median > 0.0 else np.inf
+
+
 def _edge_smear_signature(
     y: np.ndarray, residual: np.ndarray, period: float, guard: int
 ) -> tuple[float, float]:
     """The two numbers that tell a real one-off click from a BLEP oscillator's per-edge
-    approximation residual (see the module docstring and `_LOCALIZED_MARGIN_DB`).
+    approximation residual (see the module docstring and `_TEMPLATE_NOVELTY_DB`).
 
-    `localization_db` — the worst interior residual excursion over the MEDIAN per-period
-    peak, in dB. A one-off seam towers over the per-period background; a per-edge smear
-    recurs every period, so its worst barely exceeds the median. Infinite (i.e. "treat as
-    localized, do not refuse") when the interior is too short to establish a background.
+    `template_novelty_db` — the worst period's departure from the recurring residual template
+    over the median period's, in dB; see `_template_novelty_db`. A one-off seam is a large
+    outlier; a per-edge smear leaves every period close to the template. Render-length- and
+    level-independent by construction.
 
     `edge_concentration` — the cosine similarity in [0,1] between the interior |residual|
     and the waveform's own edge strength |diff(y)|. Smear rides the edges; a block-rate
-    zipper and a period-doubled defect land off them.
+    zipper and a period-doubled defect land off them. This is what keeps a stationary zipper
+    — which template novelty is blind to, for the same reason spectral flux is: it is churn,
+    not a per-period outlier — from being wrongly refused as smear.
     """
     interior = np.abs(residual[guard : len(residual) - guard])
     if not len(interior):
@@ -520,19 +586,12 @@ def _edge_smear_signature(
     if worst <= 0.0:
         return 0.0, 0.0
 
-    p = int(round(period))
-    n_periods = len(interior) // p if p >= 1 else 0
-    if n_periods >= 3:
-        per_peak = interior[: n_periods * p].reshape(n_periods, p).max(axis=1)
-        median = float(np.median(per_peak))
-        localization_db = 20.0 * np.log10(worst / median) if median > 0.0 else np.inf
-    else:
-        localization_db = np.inf
+    template_novelty_db = _template_novelty_db(residual, period, guard)
 
     edge = np.abs(np.diff(y, prepend=y[0]))[guard : len(residual) - guard][: len(interior)]
     denom = float(np.linalg.norm(interior) * np.linalg.norm(edge))
     edge_concentration = float(np.dot(interior, edge) / denom) if denom > 1e-30 else 0.0
-    return localization_db, edge_concentration
+    return template_novelty_db, edge_concentration
 
 
 def analyze(y: np.ndarray, sr: int, f0_hint: float | None = None) -> ClickAnalysis:
@@ -572,9 +631,9 @@ def analyze(y: np.ndarray, sr: int, f0_hint: float | None = None) -> ClickAnalys
     idx = int(np.argmax(np.abs(interior))) + guard
     worst = float(abs(residual[idx]))
     click_db = 20.0 * np.log10(worst / peak) if worst > 0 else -np.inf
-    localization_db, edge_concentration = _edge_smear_signature(y, residual, period, guard)
+    template_novelty_db, edge_concentration = _edge_smear_signature(y, residual, period, guard)
     return ClickAnalysis(click_db, idx / sr, period, confidence, drift, residual,
-                         localization_db, edge_concentration)
+                         template_novelty_db, edge_concentration)
 
 
 def detect(
@@ -584,7 +643,7 @@ def detect(
     fire_threshold_db: float = -45.0,
     min_period_confidence: float = 0.5,
     max_period_drift: float = 3e-5,
-    min_localized_db: float = _LOCALIZED_MARGIN_DB,
+    min_template_novelty_db: float = _TEMPLATE_NOVELTY_DB,
     max_edge_concentration: float = _EDGE_CONCENTRATION,
 ) -> DetectorResult:
     """Fire when `signal` contains a discontinuity its own period does not predict.
@@ -610,12 +669,14 @@ def detect(
       fixtures measure below 7e-6.
     * the reading is per-edge approximation smear, not a click. A real BLEP/BLIT
       oscillator at a fractional period leaves a -22 to -31 dB per-edge residual the comb
-      cannot null (see the module docstring). It is refused when the excursion is not a
-      localized outlier (`localization_db` below `min_localized_db`) AND rides the
-      waveform's own edges (`edge_concentration` above `max_edge_concentration`) — two
-      conditions that together separate it from a one-off seam (localized) and a
-      block-rate zipper (off the edges). The honest gate for that regime is a
-      frozen-reference null; see "Which detector to reach for" in the module docstring.
+      cannot null (see the module docstring). It is refused when the worst period is not a
+      template outlier (`template_novelty_db` below `min_template_novelty_db`) AND the
+      residual rides the waveform's own edges (`edge_concentration` above
+      `max_edge_concentration`) — two conditions that together separate it from a one-off
+      seam (a large per-period outlier at any render length) and a block-rate zipper (off
+      the edges, and — like the smear — not a per-period outlier, so novelty alone cannot
+      tell them apart). The honest gate for that regime is a frozen-reference null; see
+      "Which detector to reach for" in the module docstring.
 
     `max_period_drift=3e-5` is a measured trade with no clean answer, and the shape of
     the trade matters more than the number. The guard cannot distinguish a moving pitch
@@ -646,13 +707,13 @@ def detect(
     a = analyze(signal, sr, f0_hint)
     steady = a.period_drift <= max_period_drift
     # A reading is edge smear — the comb self-reference failing on a fractional-period BLEP
-    # oscillator, NOT a click — when the excursion it would report is not a localized
+    # oscillator, NOT a click — when the period it would report is not a per-period template
     # outlier AND the residual rides the waveform's own edges. Refuse it: the honest gate
-    # here is a frozen-reference null, not the comb (see `_LOCALIZED_MARGIN_DB`).
+    # here is a frozen-reference null, not the comb (see `_TEMPLATE_NOVELTY_DB`).
     edge_smear = (
         np.isfinite(a.click_db)
         and a.click_db >= fire_threshold_db
-        and a.localization_db < min_localized_db
+        and a.template_novelty_db < min_template_novelty_db
         and a.edge_concentration > max_edge_concentration
     )
     trustworthy = (
@@ -682,7 +743,7 @@ def detect(
     elif edge_smear:
         note += (
             " — residual is per-edge approximation smear, not a localized click "
-            f"(localization {a.localization_db:.1f} dB, edge concentration "
+            f"(template novelty {a.template_novelty_db:.1f} dB, edge concentration "
             f"{a.edge_concentration:.2f}); a comb self-reference cannot null a "
             "fractional-period BLEP oscillator — use a frozen-reference null"
         )
