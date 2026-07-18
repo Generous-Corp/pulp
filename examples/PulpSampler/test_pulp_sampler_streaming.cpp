@@ -5,11 +5,17 @@ TEST_CASE("PulpSampler fails closed when selection generations are exhausted",
     SECTION("resident publication") {
         SamplerFixture fixture;
         const std::array<float, 4> samples{0.25f, 0.5f, -0.25f, -0.5f};
+        const auto retained_generation =
+            PulpSamplerTestAccess::published_selection_generation(*fixture.proc);
+        const auto retained_length = fixture.proc->sample_length();
+        REQUIRE(fixture.proc->has_sample());
         PulpSamplerTestAccess::exhaust_selection_generation(*fixture.proc);
 
         REQUIRE_FALSE(fixture.proc->load_sample(samples.data(), samples.size(), 48000.0f));
-        REQUIRE_FALSE(fixture.proc->has_sample());
-        REQUIRE(PulpSamplerTestAccess::published_selection_generation(*fixture.proc) == 0);
+        REQUIRE(fixture.proc->has_sample());
+        REQUIRE(fixture.proc->sample_length() == retained_length);
+        REQUIRE(PulpSamplerTestAccess::published_selection_generation(*fixture.proc) ==
+                retained_generation);
     }
 
     SECTION("streamed publication") {
