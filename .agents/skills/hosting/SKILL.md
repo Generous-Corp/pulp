@@ -54,6 +54,28 @@ its ABI shape rather than as the only implemented backend. Patterns to mirror:
   parameter edits in the slot. Otherwise `get_parameter()` can report a
   stale host-side value even though the plug-in restored its own state.
 
+### VST3: re-sync a separated edit controller on state restore
+
+VST3 splits a plug-in into an `IComponent` (processor) and an
+`IEditController`. When they are *separate objects*, restoring only the
+component state (`IComponent::setState`) leaves the controller — and the
+vendor UI — showing stale values. The host contract is: after
+`component->setState`, push the same processor state into the controller with
+`IEditController::setComponentState`, and separately save/restore the
+controller's own `getState`/`setState`. Combined plug-ins (one object
+implementing both interfaces) skip all of this — detect the combined case by
+`FUnknown` pointer equality (`controller == component`).
+
+`Vst3Slot` lives in an anonymous namespace, so this logic lives in a
+free-function seam, `pulp::host::detail::vst3_state_sync.hpp`
+(`vst3_serialize_state` / `vst3_restore_state`) — that is also the only place a
+host-slot test can reach it. It writes a versioned `PV3S` container (component
+plus an optional controller section); a blob without the magic is treated as
+legacy raw-component state, so sessions saved before the container existed
+still load. Length fields are bounds-checked as `len > remaining` (never
+`remaining - len`) so a malformed blob cannot underflow into an out-of-bounds
+read.
+
 ### Defensive boundary for entry / factory calls
 
 `scanner_clap.cpp` wraps `entry->init()` and `entry->get_factory()` in
