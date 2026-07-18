@@ -14,6 +14,11 @@ source page bytes = channels * page frames * cache page count * sizeof(float)
 `add_source()` fails before playback when the cumulative reservation would
 exceed `page_memory_budget_bytes`. The budget covers page sample storage; source
 metadata, reader state, and control-thread containers are outside that value.
+`source_identity_capacity` separately bounds the retained highest-generation
+history used for ABA rejection. A new source ID fails with
+`SourceIdentityCapacityExceeded` once that table is full; an existing ID may
+continue only with a strictly newer non-zero generation. The current count,
+capacity, and rejection total are exposed in `SampleStreamCacheServiceStats`.
 
 ## Thread boundary
 
@@ -67,7 +72,11 @@ windows are destroyed.
 `PulpSampler` is the first production-shaped integration: strict ranged WAV and
 uncompressed AIFF, pitched one-shots and forward/reverse crossfade loops,
 two decode workers, and a bounded prepared-page demand footprint for each of
-eight independently positioned voices. Its
+eight independently positioned voices. Its two bundle slots assign fixed IDs
+to the base source and each possible mip member, then advance a non-zero
+generation whenever that physical identity is reused. This keeps the service's
+ABA history bounded for the plugin lifetime; generation exhaustion fails closed
+instead of wrapping to an old token. Its
 service thread owns file/source/cache mutation; the callback owns only voice
 state and the SPSC producer. File admission prepares the certified tail horizon
 before it publishes the asset, which gives reverse entry a latency-safe attack
