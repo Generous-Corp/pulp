@@ -142,6 +142,7 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
     }
 
     snapshot = {};
+    snapshot.tempo_map = tempo_map_;
     snapshot.sample_rate = tempo_map_->sample_rate();
     snapshot.block_index = block_index_++;
     snapshot.frame_count = frame_count;

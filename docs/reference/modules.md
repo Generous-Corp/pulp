@@ -837,9 +837,23 @@ unsupported stub in threadless builds.
 At an audio callback boundary, one `PlaybackProgramBlockLatch` pins the whole
 program for the block. Every `StableRendererShell` consults that same pin,
 adopts only a newer generation for the same ItemId, and carries its small cursor
-snapshot through a `SeqLock`. This layer contains structural clip identities
-only: note/audio rendering, graph binding, commands, undo, and persistence
-schemas remain outside this slice.
+snapshot through a `SeqLock`.
+
+Dirty arrangement tracks also compile their note clips into immutable,
+tempo-map-resolved event streams. `ArrangementNoteRenderer` consumes the same
+block pin plus the transport's one or two half-open ranges and emits
+sample-offset MIDI without a graph audio node. Call `prepare()` off the audio
+thread to reserve its bounded output buffer; `process()` is guarded by
+`ScopedNoAlloc`. The output preserves authored 16-bit note velocity in a native
+MIDI-2 UMP sidecar and provides a MIDI-1 compatibility mirror; capacity is
+preflighted so a physical event appears in both lanes or neither. Note-offs
+precede note-ons at equal samples. Program adoption,
+seek, loop wrap, and stop release active notes and reset the cursor; Phase 1 does
+not chase a note whose onset precedes the new range. The transport snapshot and
+program must name the same compiled tempo-map identity, and overlapping logical
+notes on one channel/pitch are reference-counted so the physical note-off waits
+for the last overlap. Audio rendering, graph binding, commands, undo, and
+persistence schemas remain separate slices.
 
 ## format
 

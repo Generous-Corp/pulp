@@ -46,6 +46,9 @@ struct TransportRange {
 };
 
 struct TransportSnapshot {
+    /// Non-owning identity of the exact compiled map used to resolve ranges.
+    /// The map must outlive consumers of this callback snapshot.
+    const timebase::CompiledTempoMap* tempo_map = nullptr;
     timebase::RationalRate sample_rate{};
     std::uint64_t block_index = 0;
     std::uint32_t frame_count = 0;

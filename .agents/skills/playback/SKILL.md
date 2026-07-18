@@ -27,6 +27,21 @@ a `TrackProgram*` past the pin. Adoption accepts skipped generations
 (`candidate > active`) for the same ItemId and proves carry-state ownership
 against the shell's `RendererCarryState` SeqLock snapshot.
 
+For arrangement note playback, construct one `ArrangementNoteRenderer` per
+track, call `prepare(maximum_events_per_block)` off the audio thread, then pass
+the shared block pin and the current `TransportSnapshot` to `process()`. The
+renderer owns a bounded realtime-limited MIDI buffer; inspect `events()` only
+for the current block. The buffer carries a full-resolution native MIDI-2 UMP
+sidecar alongside its MIDI-1 compatibility mirror; treat the two lanes as one
+atomic event block and propagate either lane's overflow. It consumes both
+transport ranges in order, releases
+active notes before the second range on a loop wrap, and intentionally resets
+without note chase on seek/adoption in Phase 1. `TransportSnapshot` carries the
+non-owning identity of the exact compiled tempo map that resolved its ranges;
+the renderer rejects a program compiled against another map. Overlapping
+logical notes on one MIDI key are reference-counted into one physical note-on
+and one final note-off.
+
 Use this skill when changing `core/playback`, the master timeline transport, or
 the format-layer projection from playback snapshots to `ProcessContext`.
 
@@ -48,6 +63,11 @@ the format-layer projection from playback snapshots to `ProcessContext`.
   both allocations and pthread locks.
 - Starting playback is not a seek or DSP reset. Explicit seeks request a reset;
   range discontinuities project to `ProcessContext::transport_jump`.
+- Arrangement note events are compiled against the owning program's exact
+  tempo map and ordered by sample, note-off before note-on, then clip/note ID.
+  A renderer uses half-open sample ranges and never latches a callback size.
+- Note rendering is a transport-tick MIDI lane. Do not lower it to an audio
+  `CustomNodeType`; the host/embedded adapter routes its bounded MIDI output.
 - `core/playback` must not include `pulp/format`, `pulp/host`, or `pulp/view`.
   `<pulp/format/playback_context_projection.hpp>` owns the one-way adapter.
   Keep `timeline-engine-dependency-floor` green; it allowlists source includes
