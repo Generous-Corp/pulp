@@ -307,19 +307,26 @@ device->start([](const auto& input, auto& output, const auto& ctx) {
 
 | Format | Read | Write | Backend |
 |--------|:----:|:-----:|---------|
-| AAC | ✓ | ✓* | ExtAudioFile (macOS) / FDK AAC (`pulp add fdk-aac --accept-license FDK-AAC`) |
+| AAC | macOS | ✓* | Read through ExtAudioFile on macOS; optional FDK AAC adds writing (`pulp add fdk-aac --accept-license FDK-AAC`) |
 | AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit big-endian) |
-| ALAC | ✓ | ✓* | ExtAudioFile (macOS) / Apple ALAC (`pulp add alac`) |
+| ALAC | macOS | ✓* | Read through ExtAudioFile on macOS; optional Apple ALAC adds writing (`pulp add alac`) |
+| CAF | macOS | — | Read through ExtAudioFile on macOS |
 | FLAC | ✓ | ✓* | dr_flac / libflac (`pulp add libflac`) |
 | MP3 | ✓ | ✓* | dr_mp3 / LAME (`pulp add lame --accept-license LGPL-2.0`) |
 | OGG Vorbis | ✓ | — | stb_vorbis |
 | WAV | ✓ | ✓ | CHOC + StreamingWriter |
 
-*\*Write via optional `pulp add` packages. Permissive (libflac, ALAC) install freely. Copyleft (LAME, fdk-aac) require `--accept-license`.*
+*\*Write via optional `pulp add` packages. Those packages do not add portable
+AAC/ALAC readers. Permissive (libflac, ALAC) packages install freely; copyleft
+(LAME, fdk-aac) packages require `--accept-license`.*
 
 ### Sampler, looper, and analysis primitives
 
 Reusable low-level pieces for building samplers, generated-audio freeze/loop workflows, waveform displays, and offline/background sample analysis. These are primitives, not a full sampler UI. Callback-safe operations are documented in `rt_safety_contract.hpp`; import/export, analysis, waveform thumbnail build, publication writes, and materialization stay off the audio callback.
+
+For a runnable integration of the asset, streaming, interpolation, starvation,
+and synthetic-heritage primitives, see the
+[PulpSampler example](../examples/pulp-sampler.md).
 
 | Feature | Headers | Description |
 |---------|---------|-------------|
