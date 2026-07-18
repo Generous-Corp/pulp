@@ -405,6 +405,20 @@ knob-art-layer suppression, one level up. Verified: `createKnob` count on a real
 `.fig` dropped from 6 (all captions) to 0 while every art-layer knob still
 rendered. Covered in `detect_audio_widget` tests.
 
+**Gotcha - a stroke-band vector must not ALSO carry a CSS border.** Figma stores
+a stroke as an already-expanded fillable band (`strokeGeometry`); `geometryToPath`
+resolves it and `scene.mjs` paints it as a FILL in the stroke color (re-stroking
+it would outline the outline). But the generic stroke→`border` lowering
+(`strokePaints` + `strokeWeight` → `style.border`) then fired on that same node,
+so codegen filled the band AND stroked it — two parallel lines where the design
+has one (a triad-pad triangle and every stroked ring rendered doubled/too-thick;
+the button rings even read as dark filled discs). The fix tracks
+`vectorStrokeBand = resolved.paint === 'stroke'` and skips the border for those
+nodes only; a real filled vector with a separate stroke (`paint === 'fill'`)
+keeps its border. Covered by a materialize-level test in `fig/paths.test.mjs`
+(stroke band → no border; fill+stroke → border). One general fix cleared the
+triangle weight AND the transport △○□ button rings at once.
+
 ### Design contract (`pulp design compile`) — the token/widget allowlist
 
 Before generating or hand-writing a UI, compile the **design contract**: the
