@@ -1,5 +1,7 @@
 #include <pulp/runtime/memory_mapped_file.hpp>
 
+#include <algorithm>
+#include <array>
 #include <memory>
 #include <new>
 #include <utility>
@@ -361,6 +363,42 @@ FileIdentity MemoryMappedFile::opened_file_identity() const noexcept {
     return result;
 }
 
+bool MemoryMappedFile::copy_contents_to_new_file(std::string_view destination) const noexcept {
+    if (file_handle_ == nullptr)
+        return false;
+    std::string destination_string;
+    try {
+        destination_string.assign(destination);
+    } catch (...) {
+        return false;
+    }
+    HANDLE target = CreateFileA(destination_string.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                                FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (target == INVALID_HANDLE_VALUE)
+        return false;
+
+    LARGE_INTEGER beginning{};
+    bool ok = SetFilePointerEx(static_cast<HANDLE>(file_handle_), beginning, nullptr, FILE_BEGIN) !=
+              0;
+    std::array<std::uint8_t, 64 * 1024> buffer{};
+    std::size_t remaining = size_;
+    while (ok && remaining != 0) {
+        const auto request = static_cast<DWORD>(std::min(remaining, buffer.size()));
+        DWORD read = 0;
+        ok = ReadFile(static_cast<HANDLE>(file_handle_), buffer.data(), request, &read, nullptr) !=
+                 0 &&
+             read == request;
+        DWORD written = 0;
+        if (ok)
+            ok = WriteFile(target, buffer.data(), read, &written, nullptr) != 0 && written == read;
+        remaining -= ok ? read : 0;
+    }
+    CloseHandle(target);
+    if (!ok)
+        DeleteFileA(destination_string.c_str());
+    return ok;
+}
+
 FileIdentity file_identity(std::string_view path) noexcept {
     std::string path_string;
     try {
@@ -582,6 +620,56 @@ FileIdentity MemoryMappedFile::opened_file_identity() const noexcept {
             .file = static_cast<std::uint64_t>(status.st_ino),
             .generation = generation,
             .valid = true};
+}
+
+bool MemoryMappedFile::copy_contents_to_new_file(std::string_view destination) const noexcept {
+    if (fd_ < 0)
+        return false;
+    std::string destination_string;
+    try {
+        destination_string.assign(destination);
+    } catch (...) {
+        return false;
+    }
+    const int target =
+        ::open(destination_string.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+    if (target < 0)
+        return false;
+
+    std::array<std::uint8_t, 64 * 1024> buffer{};
+    std::size_t copied = 0;
+    bool ok = true;
+    while (copied != size_) {
+        const auto request = std::min(size_ - copied, buffer.size());
+        ssize_t read = -1;
+        do {
+            read = ::pread(fd_, buffer.data(), request, static_cast<off_t>(copied));
+        } while (read < 0 && errno == EINTR);
+        if (read <= 0) {
+            ok = false;
+            break;
+        }
+        std::size_t written = 0;
+        while (written != static_cast<std::size_t>(read)) {
+            ssize_t result = -1;
+            do {
+                result = ::write(target, buffer.data() + written,
+                                 static_cast<std::size_t>(read) - written);
+            } while (result < 0 && errno == EINTR);
+            if (result <= 0) {
+                ok = false;
+                break;
+            }
+            written += static_cast<std::size_t>(result);
+        }
+        if (!ok)
+            break;
+        copied += static_cast<std::size_t>(read);
+    }
+    ok = ::close(target) == 0 && ok;
+    if (!ok)
+        ::unlink(destination_string.c_str());
+    return ok;
 }
 
 FileIdentity file_identity(std::string_view path) noexcept {
