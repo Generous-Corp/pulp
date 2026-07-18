@@ -3,9 +3,9 @@
 
 modules:
   - name: playback
-    summary: Integer-authoritative master transport with bounded loop-split ranges, monotonic musical time, and one-way ProcessContext projection
+    summary: Master transport plus immutable incrementally compiled playback programs, bounded executors, block-coherent publication, and stable renderer shells
     status: experimental
-    dependencies: [runtime, timebase, audio]
+    dependencies: [runtime, timebase, timeline, audio]
     docs: reference/modules.md#playback
 
   - name: timebase

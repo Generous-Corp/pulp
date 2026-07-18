@@ -842,6 +842,28 @@ Plugin/host adapters include
 public `ProcessContext`. That header is the only lossy tick-to-double boundary;
 `core/playback` does not depend on format, host, or view code.
 
+The module also compiles immutable `PlaybackProgram` snapshots off the audio
+thread. A request carries one immutable Project snapshot, its external document
+revision, a precompiled tempo map, and an explicit dirty-track set. Clean
+`TrackProgram` objects retain shared-pointer identity while dirty tracks receive
+a newer generation; revisions skipped by request coalescing are valid.
+Sparse per-track policy deltas select an available provider and whether a stable
+shell carries state by ItemId or resets it on stateless adoption. Omitted tracks
+retain their published policy, and coalescing merges deltas with latest-track
+wins before publication.
+Phase 1 compiles arrangement payloads only: launcher/external-input selections
+and availability bits are rejected until those provider programs exist.
+`DeferredCompileExecutor` advances bounded slices from an idle/UI pump and
+`WorkerCompileExecutor` supplies the native background lane, with an explicit
+unsupported stub in threadless builds.
+
+At an audio callback boundary, one `PlaybackProgramBlockLatch` pins the whole
+program for the block. Every `StableRendererShell` consults that same pin,
+adopts only a newer generation for the same ItemId, and carries its small cursor
+snapshot through a `SeqLock`. This layer contains structural clip identities
+only: note/audio rendering, graph binding, commands, undo, and persistence
+schemas remain outside this slice.
+
 ## format
 
 Plugin format adapters — write your plugin once, deploy to 9 formats.
