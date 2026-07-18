@@ -373,16 +373,8 @@ bool TimelineStepSequencerProcessor::load_persistent_project(
     if (!document)
         return false;
     auto candidate = document->snapshot;
-    if (candidate.active_pattern_count == 0 ||
-        candidate.active_pattern_count > state::kPatternCount ||
-        candidate.active_lane_count == 0 ||
-        candidate.active_lane_count > state::kLaneCount ||
-        candidate.active_pattern >= candidate.active_pattern_count)
+    if (!step_pattern_snapshot_is_canonical(candidate))
         return false;
-    for (std::uint8_t pattern = 0; pattern < candidate.active_pattern_count; ++pattern) {
-        if (candidate.patterns[pattern].length > state::kStepCount)
-            return false;
-    }
 
     const auto candidate_sequence = engine_sequence_ + 1;
     candidate.engine_sequence = candidate_sequence;
