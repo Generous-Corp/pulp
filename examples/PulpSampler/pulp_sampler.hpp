@@ -5,6 +5,7 @@
 /// rendering, ADSR, pitch shifting, and processor parameter serialization.
 
 #include "sampler_source_publication.hpp"
+#include "sampler_heritage_runtime.hpp"
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/loop_renderer.hpp>
@@ -58,8 +59,12 @@ public:
             .output_buses = {{"Audio Out", 2}},
             .accepts_midi = true,
             .produces_midi = false,
-            .tail_samples = 0,
+            .tail_samples = -1,
         };
+    }
+
+    int latency_samples() const override {
+        return heritage_.latency_samples();
     }
 
     void define_parameters(state::StateStore& store) override {
@@ -119,7 +124,49 @@ public:
         return streaming_.stats();
     }
 
+    /// Replaces the optional heritage profile while audio is stopped. Existing
+    /// voices are reset because a profile change establishes a new processing
+    /// timeline and latency contract.
+    PulpSamplerHeritageStatus set_heritage_profile(
+        const audio::SampleHeritageProfile& profile) {
+        const auto previous_latency = latency_samples();
+        if (prepared_) {
+            const auto result = heritage_.replace_prepared(
+                profile, host_sample_rate_, prepared_output_channels_,
+                max_block_frames_);
+            if (result != PulpSamplerHeritageStatus::Ready &&
+                result !=
+                    PulpSamplerHeritageStatus::ReadyRuntimeResetForHostRate) {
+                return result;
+            }
+            reset_all_voices();
+            if (latency_samples() != previous_latency) flag_latency_changed();
+            return result;
+        }
+
+        const auto configured = heritage_.configure(profile);
+        if (configured != PulpSamplerHeritageStatus::PendingPrepare) {
+            return configured;
+        }
+        reset_all_voices();
+        return configured;
+    }
+
+    /// Disables heritage processing while audio is stopped. Like profile
+    /// replacement, this must not race process().
+    void disable_heritage() noexcept {
+        const auto previous_latency = latency_samples();
+        reset_all_voices();
+        heritage_.disable();
+        if (latency_samples() != previous_latency) flag_latency_changed();
+    }
+
+    PulpSamplerHeritageDiagnostics heritage_diagnostics() const noexcept {
+        return heritage_.diagnostics();
+    }
+
     void prepare(const format::PrepareContext& ctx) override {
+        const auto previous_latency = latency_samples();
         release();
         host_sample_rate_ = static_cast<float>(ctx.sample_rate);
         max_block_frames_ = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(ctx.max_buffer_size));
@@ -146,6 +193,12 @@ public:
         streaming_.prepare(host_sample_rate_, max_block_frames_);
         source_publication_.acknowledge_audio(
             streaming_.published_source(), voices_, streaming_);
+        if (heritage_.configured()) {
+            (void) heritage_.prepare(host_sample_rate_, prepared_output_channels_,
+                                     max_block_frames_);
+        }
+        prepared_ = true;
+        if (latency_samples() != previous_latency) flag_latency_changed();
     }
 
     void release() override {
@@ -154,6 +207,8 @@ public:
         streaming_.release();
         source_publication_.release();
         sinc_bank_.release();
+        heritage_.release_processing();
+        prepared_ = false;
     }
 
     void process(
@@ -181,7 +236,7 @@ public:
             const auto offset = static_cast<std::uint32_t>(
                 std::clamp(event.sample_offset, 0, static_cast<int32_t>(block_frames)));
             if (offset > cursor) {
-                render_active_voices(output, cursor, offset - cursor, params);
+                render_output_segment(output, cursor, offset - cursor, params);
             }
 
             if (event.message.isNoteOn() && can_trigger) {
@@ -196,7 +251,7 @@ public:
         }
 
         if (cursor < block_frames) {
-            render_active_voices(output, cursor, block_frames - cursor, params);
+            render_output_segment(output, cursor, block_frames - cursor, params);
         }
 
         source_publication_.acknowledge_audio(published, voices_, streaming_);
@@ -206,6 +261,7 @@ public:
 
 private:
     friend struct PulpSamplerTestAccess;
+    friend struct PulpSamplerHeritageTestAccess;
 
     struct RenderParams {
         float gain = 1.0f;
@@ -224,6 +280,7 @@ private:
 
     SamplerSourcePublicationOwner source_publication_;
     SamplerStreamingRuntime streaming_;
+    SamplerHeritageRuntime heritage_;
     audio::SampleSincKernelBank sinc_bank_;
     audio::SampleKeyMap key_map_;
     std::array<std::vector<float>, kMaxOutputChannels> voice_scratch_{};
@@ -231,6 +288,7 @@ private:
     float host_sample_rate_ = 44100.0f;
     std::uint32_t max_block_frames_ = 512;
     std::uint32_t prepared_output_channels_ = 2;
+    bool prepared_ = false;
     SamplerVoice voices_[kMaxVoices]{};
     std::array<std::uint64_t, kMaxVoices> requester_generations_{};
     std::array<PendingCancellation, kMaxVoices> pending_cancellations_{};
@@ -269,6 +327,14 @@ private:
     static void clear_output(audio::BufferView<float>& output) noexcept {
         for (std::size_t ch = 0; ch < output.num_channels(); ++ch) {
             std::fill_n(output.channel_ptr(ch), output.num_samples(), 0.0f);
+        }
+    }
+
+    static void clear_output_segment(audio::BufferView<float>& output,
+                                     std::uint32_t start_frame,
+                                     std::uint32_t frames) noexcept {
+        for (std::size_t channel = 0; channel < output.num_channels(); ++channel) {
+            std::fill_n(output.channel_ptr(channel) + start_frame, frames, 0.0f);
         }
     }
 
@@ -416,6 +482,46 @@ private:
 #endif
         return std::isfinite(aggregate_frames_per_second) &&
                aggregate_frames_per_second <= certified_frames_per_second;
+    }
+
+    void render_output_segment(audio::BufferView<float>& output,
+                               std::uint32_t start_frame,
+                               std::uint32_t frames,
+                               const RenderParams& params) noexcept {
+        if (frames == 0) return;
+        if (heritage_.direct_path_allowed()) {
+            render_active_voices(output, start_frame, frames, params);
+            return;
+        }
+        if (!heritage_.processing_required()) {
+            clear_output_segment(output, start_frame, frames);
+            return;
+        }
+        if (output.num_channels() > kMaxOutputChannels) {
+            heritage_.reject_process();
+            clear_output_segment(output, start_frame, frames);
+            return;
+        }
+
+        audio::SampleHeritageProcessPlan plan;
+        if (!heritage_.plan(frames, plan)) {
+            clear_output_segment(output, start_frame, frames);
+            return;
+        }
+
+        auto dry = heritage_.dry_buffer(plan.input_frames);
+        clear_output(dry);
+        render_active_voices(dry, 0,
+                             static_cast<std::uint32_t>(plan.input_frames),
+                             params);
+
+        std::array<float*, kMaxOutputChannels> segment_ptrs{};
+        for (std::size_t channel = 0; channel < output.num_channels(); ++channel)
+            segment_ptrs[channel] = output.channel_ptr(channel) + start_frame;
+        audio::BufferView<float> segment(segment_ptrs.data(),
+                                         output.num_channels(), frames);
+        if (!heritage_.process(plan, segment))
+            clear_output_segment(output, start_frame, frames);
     }
 
     void render_active_voices(audio::BufferView<float>& output,
@@ -1049,6 +1155,16 @@ private:
                 voice.release();
             }
         }
+    }
+
+    void reset_all_voices() noexcept {
+        for (std::size_t index = 0; index < kMaxVoices; ++index) {
+            auto& voice = voices_[index];
+            if (voice.active && voice.streamed)
+                queue_voice_cancellation(index, voice.requester);
+            voice.reset();
+        }
+        flush_pending_cancellations();
     }
 };
 
