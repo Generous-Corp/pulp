@@ -116,6 +116,34 @@ private:
     std::vector<GroupLayout> groups_;
 };
 
+/// AutoUi's scroll body derives its wrapped content extent from the viewport
+/// width assigned by the parent Yoga pass. That information does not exist
+/// until the first pass has applied the body's bounds, so the initial layout
+/// needs one bounded convergence pass. Remembering the settled root size keeps
+/// ordinary parameter/value repaints at one pass while still reconverging after
+/// a real host resize.
+class AutoUiRoot final : public View {
+public:
+    void layout_children() override {
+        const auto size = local_bounds();
+        const bool needs_convergence =
+            !has_settled_layout_ || size.width != settled_width_ ||
+            size.height != settled_height_;
+
+        View::layout_children();
+        if (needs_convergence) View::layout_children();
+
+        has_settled_layout_ = true;
+        settled_width_ = size.width;
+        settled_height_ = size.height;
+    }
+
+private:
+    bool has_settled_layout_ = false;
+    float settled_width_ = 0.0f;
+    float settled_height_ = 0.0f;
+};
+
 } // namespace
 
 // AutoUi is the default editor for Processors that don't supply a
@@ -150,7 +178,7 @@ private:
 // hint is a separate feature if Pulp wants smarter defaults later.
 
 std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
-    auto root = std::make_unique<View>();
+    auto root = std::make_unique<AutoUiRoot>();
     root->flex().direction = FlexDirection::column;
     root->flex().padding = 14;
     root->flex().gap = 12;

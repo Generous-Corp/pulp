@@ -41,6 +41,20 @@ TEST_CASE("ActivityChannel coalesces bursts into the newest sequence",
     REQUIRE_FALSE(channel.consume(0, cursor));
 }
 
+TEST_CASE("ActivityChannel preserves burst counts for realtime commands",
+          "[runtime][activity][commands]") {
+    ActivityChannel<2> channel;
+    ActivityChannel<2>::Sequence cursor = 0;
+
+    channel.signal(1);
+    channel.signal(1);
+    channel.signal(1);
+
+    REQUIRE(channel.consume_count(1, cursor) == 3);
+    REQUIRE(cursor == 3);
+    REQUIRE(channel.consume_count(1, cursor) == 0);
+}
+
 TEST_CASE("ActivityChannel invalid lanes fail closed",
           "[runtime][activity]") {
     ActivityChannel<2> channel;
@@ -50,6 +64,8 @@ TEST_CASE("ActivityChannel invalid lanes fail closed",
 
     REQUIRE(channel.sequence(2) == 0);
     REQUIRE_FALSE(channel.consume(2, cursor));
+    REQUIRE(cursor == 7);
+    REQUIRE(channel.consume_count(2, cursor) == 0);
     REQUIRE(cursor == 7);
     REQUIRE(channel.sequence(0) == 0);
     REQUIRE(channel.sequence(1) == 0);
