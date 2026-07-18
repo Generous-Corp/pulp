@@ -14,6 +14,7 @@ The runtime module provides lock-free primitives, logging, assertions, and scope
 | Multi-field coherent read | `SeqLock<T>` | Transport state (tempo + beat position + time sig) |
 | Large data swap | `TripleBuffer<T>` | Wavetables, IR buffers, meter data |
 | Ordered event stream | `SpscQueue<T>` | MIDI events, UI commands |
+| Occurrence-only feedback | `ActivityChannel<N>` | MIDI pad flashes, clip lights |
 | Budgeted optional work | `evaluate_runtime_budget()` | Background analysis, voice/cache refresh, validation helpers |
 
 **Never use on the audio thread**: `std::mutex`, `std::condition_variable`, heap allocation, I/O.
@@ -107,6 +108,33 @@ Use SpscQueue for ordered event streams where every event matters (MIDI,
 parameter automation points, UI commands). If the consumer falls behind,
 producer-side failed pushes increment `overflow_count()` and appear in
 `telemetry()`.
+
+## ActivityChannel
+
+Lock-free occurrence counters for realtime-to-UI feedback where the UI needs
+to know that something happened, but does not need an ordered payload for every
+event. Multiple signals between UI ticks coalesce into one observation.
+
+```cpp
+#include <pulp/runtime/activity_channel.hpp>
+
+enum Voice : std::size_t { Kick, Snare, Hat, VoiceCount };
+auto activity = pulp::runtime::make_activity_channel<VoiceCount>();
+
+// Audio thread — lock-free, allocation-free:
+activity->signal(Kick);
+
+// UI thread — retain one cursor per lane:
+pulp::runtime::ActivityChannel<VoiceCount>::Sequence kick_cursor = 0;
+if (activity->consume(Kick, kick_cursor)) {
+    flash_kick_pad();
+}
+```
+
+Give the Processor and editor shared ownership of the channel. That keeps a
+host-retained editor safe if the host destroys the Processor first. Use an
+`SpscQueue` instead when every event and its payload must be delivered; use a
+`TripleBuffer` for latest-value meters.
 
 ## Budget Policy
 
