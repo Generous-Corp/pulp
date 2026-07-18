@@ -95,6 +95,10 @@ int main(int argc, char** argv) {
         } else if (std::strcmp(arg, "--freq") == 0) {
             const char* v = value_for(argc, argv, i, "--freq");
             if (!v) return 2;
+            // Note: the frequency reaches the oscillator through a float32 StateStore
+            // parameter, so a non-float32-exact value renders at float32(freq) — up to
+            // ~3e-4 Hz off the double parsed here. Harmless for musical use; pick a
+            // float32-exact frequency when cross-checking a double-math model bit-for-bit.
             spec.frequency_hz = std::atof(v);
         } else if (std::strcmp(arg, "--sr") == 0) {
             const char* v = value_for(argc, argv, i, "--sr");
