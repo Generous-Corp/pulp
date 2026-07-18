@@ -3,10 +3,15 @@
 #include <pulp/timeline/transaction.hpp>
 
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <vector>
 
 namespace pulp::timeline {
+
+namespace detail {
+class JournalAccess;
+}
 
 struct JournalLimits {
     std::size_t max_transactions = 1024;
@@ -28,11 +33,8 @@ class CommandJournal {
   public:
     explicit CommandJournal(JournalLimits limits) : limits_(limits) {}
 
-    runtime::Result<bool, TransactionError> preflight(const JournalEntry& entry) const;
-    void append_preflighted(JournalEntry entry);
     runtime::Result<Project, TransactionError> replay(const Project& checkpoint,
                                                       DocumentRevision checkpoint_revision) const;
-    bool checkpoint(DocumentRevision durable_revision);
 
     std::span<const JournalEntry> entries() const noexcept {
         return entries_;
@@ -48,11 +50,23 @@ class CommandJournal {
     }
 
   private:
+    struct WriterWatermark {
+        WriterId id;
+        std::uint64_t transaction = 0;
+        std::uint64_t command = 0;
+    };
+    friend class detail::JournalAccess;
+    runtime::Result<bool, TransactionError> preflight(const JournalEntry& entry) const;
+    void append_preflighted(JournalEntry entry, const Project& before);
+    bool checkpoint(DocumentRevision durable_revision);
+
     JournalLimits limits_;
     std::vector<JournalEntry> entries_;
     std::size_t retained_bytes_ = 0;
     std::size_t command_count_ = 0;
     DocumentRevision base_revision_{};
+    std::optional<Project> base_snapshot_;
+    std::vector<WriterWatermark> base_writers_;
 };
 
 std::size_t retained_size(const JournalEntry& entry) noexcept;

@@ -1,5 +1,7 @@
 #include <pulp/timeline/document_session.hpp>
 
+#include "journal_internal.hpp"
+#include "session_nonce_test_access.hpp"
 #include "transaction_internal.hpp"
 
 #include <algorithm>
@@ -7,6 +9,7 @@
 #include <deque>
 #include <limits>
 #include <mutex>
+#include <utility>
 
 namespace pulp::timeline {
 namespace {
@@ -31,6 +34,11 @@ struct UndoRecord {
     std::vector<Command> inverse;
     std::size_t retained_bytes = 0;
     bool closed = true;
+};
+
+struct OpenGesture {
+    WriterId writer;
+    UndoGroupId group;
 };
 
 enum class CommitKind : std::uint8_t { Ordinary, History };
@@ -84,6 +92,7 @@ struct DocumentSession::Impl {
     std::deque<UndoRecord> redo;
     std::size_t undo_bytes = 0;
     std::size_t redo_bytes = 0;
+    std::optional<OpenGesture> open_gesture;
 
     WriterState* find_writer(WriterId id) noexcept {
         const auto found = std::find_if(writers.begin(), writers.end(),
@@ -124,7 +133,27 @@ struct DocumentSession::Impl {
                 error(ConflictCode::InvalidIdentifier, transaction, current_revision));
         if (transaction.gesture_phase != GesturePhase::Single && !transaction.undo_group)
             return failure<CommitResult>(
-                error(ConflictCode::InvalidIdentifier, transaction, current_revision));
+                error(ConflictCode::GestureState, transaction, current_revision));
+
+        switch (transaction.gesture_phase) {
+        case GesturePhase::Single:
+        case GesturePhase::Begin:
+            if (open_gesture)
+                return failure<CommitResult>(
+                    error(ConflictCode::GestureState, transaction, current_revision));
+            break;
+        case GesturePhase::Update:
+        case GesturePhase::End:
+            if (!open_gesture || !transaction.undo_group ||
+                open_gesture->writer != transaction.id.writer ||
+                open_gesture->group != *transaction.undo_group)
+                return failure<CommitResult>(
+                    error(ConflictCode::GestureState, transaction, current_revision));
+            break;
+        default:
+            return failure<CommitResult>(
+                error(ConflictCode::GestureState, transaction, current_revision));
+        }
 
         std::uint64_t previous_command = writer->command_watermark;
         for (const auto& envelope : transaction.commands) {
@@ -181,14 +210,14 @@ struct DocumentSession::Impl {
         JournalEntry journal_entry{current_revision, next_revision, transaction, reduced->dirty,
                                    kind == CommitKind::History ? JournalEntryKind::History
                                                                : JournalEntryKind::Ordinary};
-        auto journal_preflight = journal.preflight(journal_entry);
+        auto journal_preflight = detail::JournalAccess::preflight(journal, journal_entry);
         if (!journal_preflight)
             return failure<CommitResult>(journal_preflight.error());
 
         // In-memory journal append is the commit point. Publication follows it,
         // so the future durable sink can preserve the same recovery ordering.
-        journal.append_preflighted(std::move(journal_entry));
         auto published = std::make_shared<const Project>(std::move(reduced).value().project);
+        detail::JournalAccess::append(journal, std::move(journal_entry), *current->snapshot);
         auto published_state =
             std::make_shared<const PublishedState>(PublishedState{published, next_revision});
         std::atomic_store_explicit(&this->published, std::move(published_state),
@@ -202,7 +231,10 @@ struct DocumentSession::Impl {
             result.applied_commands.push_back(envelope.id);
 
         if (record_undo) {
-            while ((!undo.empty() && undo.size() >= limits.undo.max_groups) ||
+            const bool will_coalesce =
+                candidate.group && !undo.empty() && undo.back().group == candidate.group &&
+                undo.back().writer == candidate.writer && !undo.back().closed;
+            while ((!will_coalesce && !undo.empty() && undo.size() >= limits.undo.max_groups) ||
                    (!undo.empty() && saturated_add(undo_bytes, candidate.retained_bytes) >
                                          limits.undo.max_retained_bytes)) {
                 if (!undo.front().closed)
@@ -210,10 +242,7 @@ struct DocumentSession::Impl {
                 undo_bytes -= undo.front().retained_bytes;
                 undo.pop_front();
             }
-            const bool coalesces = candidate.group && !undo.empty() &&
-                                   undo.back().group == candidate.group &&
-                                   undo.back().writer == candidate.writer && !undo.back().closed;
-            if (coalesces) {
+            if (will_coalesce) {
                 auto& group = undo.back();
                 group.forward.insert(group.forward.end(), candidate.forward.begin(),
                                      candidate.forward.end());
@@ -227,6 +256,10 @@ struct DocumentSession::Impl {
                 undo_bytes = saturated_add(undo_bytes, candidate.retained_bytes);
                 undo.push_back(std::move(candidate));
             }
+            if (transaction.gesture_phase == GesturePhase::Begin)
+                open_gesture = OpenGesture{transaction.id.writer, *transaction.undo_group};
+            else if (transaction.gesture_phase == GesturePhase::End)
+                open_gesture.reset();
             if (clear_redo) {
                 redo.clear();
                 redo_bytes = 0;
@@ -253,22 +286,46 @@ struct DocumentSession::Impl {
     }
 };
 
+std::uint64_t allocate_sequence(std::atomic<std::uint64_t>& next) noexcept {
+    auto current = next.load(std::memory_order_relaxed);
+    while (current != 0 && current != std::numeric_limits<std::uint64_t>::max()) {
+        if (next.compare_exchange_weak(current, current + 1, std::memory_order_relaxed,
+                                       std::memory_order_relaxed))
+            return current;
+    }
+    return 0;
+}
+
 TransactionId WriterToken::allocate_transaction_id() noexcept {
-    if (next_transaction == 0 || next_transaction == std::numeric_limits<std::uint64_t>::max())
-        return {id_, 0};
-    return {id_, next_transaction++};
+    return {id_, allocate_sequence(next_transaction_)};
 }
 
 CommandId WriterToken::allocate_command_id() noexcept {
-    if (next_command == 0 || next_command == std::numeric_limits<std::uint64_t>::max())
-        return {id_, 0};
-    return {id_, next_command++};
+    return {id_, allocate_sequence(next_command_)};
 }
 
 UndoGroupId WriterToken::allocate_undo_group_id() noexcept {
-    if (next_undo_group == 0 || next_undo_group == std::numeric_limits<std::uint64_t>::max())
-        return {id_, 0};
-    return {id_, next_undo_group++};
+    return {id_, allocate_sequence(next_undo_group_)};
+}
+
+WriterToken::WriterToken(WriterToken&& other) noexcept
+    : id_(std::exchange(other.id_, {})), owner_nonce_(std::exchange(other.owner_nonce_, 0)),
+      next_transaction_(other.next_transaction_.load(std::memory_order_relaxed)),
+      next_command_(other.next_command_.load(std::memory_order_relaxed)),
+      next_undo_group_(other.next_undo_group_.load(std::memory_order_relaxed)) {}
+
+WriterToken& WriterToken::operator=(WriterToken&& other) noexcept {
+    if (this != &other) {
+        id_ = std::exchange(other.id_, {});
+        owner_nonce_ = std::exchange(other.owner_nonce_, 0);
+        next_transaction_.store(other.next_transaction_.load(std::memory_order_relaxed),
+                                std::memory_order_relaxed);
+        next_command_.store(other.next_command_.load(std::memory_order_relaxed),
+                            std::memory_order_relaxed);
+        next_undo_group_.store(other.next_undo_group_.load(std::memory_order_relaxed),
+                               std::memory_order_relaxed);
+    }
+    return *this;
 }
 
 runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>
@@ -278,8 +335,8 @@ DocumentSession::create(Project initial, SessionLimits limits) {
         value.code = ConflictCode::WriterLimit;
         return failure<std::unique_ptr<DocumentSession>>(value);
     }
-    const auto nonce = g_next_session_nonce.fetch_add(1, std::memory_order_relaxed);
-    if (nonce == 0 || nonce == std::numeric_limits<std::uint64_t>::max()) {
+    const auto nonce = allocate_sequence(g_next_session_nonce);
+    if (nonce == 0) {
         TransactionError value;
         value.code = ConflictCode::SequenceExhausted;
         return failure<std::unique_ptr<DocumentSession>>(value);
@@ -287,6 +344,10 @@ DocumentSession::create(Project initial, SessionLimits limits) {
     return runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>(
         runtime::Ok(std::unique_ptr<DocumentSession>(
             new DocumentSession(std::make_unique<Impl>(std::move(initial), limits, nonce)))));
+}
+
+std::uint64_t detail::SessionNonceTestAccess::exchange_next(std::uint64_t value) noexcept {
+    return g_next_session_nonce.exchange(value, std::memory_order_relaxed);
 }
 
 DocumentSession::~DocumentSession() = default;
@@ -344,6 +405,12 @@ runtime::Result<CommitResult, TransactionError> DocumentSession::undo(WriterToke
         value.current_revision = revision();
         return failure<CommitResult>(value);
     }
+    if (impl_->open_gesture) {
+        TransactionError value;
+        value.code = ConflictCode::GestureState;
+        value.current_revision = revision();
+        return failure<CommitResult>(value);
+    }
     const auto record = impl_->undo.back();
     auto transaction = impl_->make_history_transaction(writer, record.inverse);
     auto result = impl_->commit_locked(std::move(transaction), false, false, CommitKind::History);
@@ -361,6 +428,12 @@ runtime::Result<CommitResult, TransactionError> DocumentSession::redo(WriterToke
     if (writer.owner_nonce_ != impl_->session_nonce) {
         TransactionError value;
         value.code = ConflictCode::InvalidIdentifier;
+        return failure<CommitResult>(value);
+    }
+    if (impl_->open_gesture) {
+        TransactionError value;
+        value.code = ConflictCode::GestureState;
+        value.current_revision = revision();
         return failure<CommitResult>(value);
     }
     if (impl_->redo.empty()) {
@@ -383,12 +456,12 @@ runtime::Result<CommitResult, TransactionError> DocumentSession::redo(WriterToke
 
 bool DocumentSession::can_undo() const noexcept {
     std::lock_guard lock(impl_->mutex);
-    return !impl_->undo.empty();
+    return !impl_->open_gesture && !impl_->undo.empty();
 }
 
 bool DocumentSession::can_redo() const noexcept {
     std::lock_guard lock(impl_->mutex);
-    return !impl_->redo.empty();
+    return !impl_->open_gesture && !impl_->redo.empty();
 }
 
 CommandJournal DocumentSession::journal() const {
@@ -398,7 +471,7 @@ CommandJournal DocumentSession::journal() const {
 
 bool DocumentSession::checkpoint(DocumentRevision durable_revision) {
     std::lock_guard lock(impl_->mutex);
-    return impl_->journal.checkpoint(durable_revision);
+    return detail::JournalAccess::checkpoint(impl_->journal, durable_revision);
 }
 
 } // namespace pulp::timeline

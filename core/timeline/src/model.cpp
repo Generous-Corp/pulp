@@ -1,6 +1,7 @@
 #include <pulp/timeline/model.hpp>
 
 #include "identity_directory.hpp"
+#include "project_state_access.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -665,6 +666,11 @@ struct Project::Data {
     std::vector<Sequence> sequences;
     detail::IdentityDirectory identities;
 };
+
+bool detail::ProjectStateAccess::identities_equivalent(const Project& lhs,
+                                                       const Project& rhs) noexcept {
+    return lhs.data_->identities.equivalent(rhs.data_->identities);
+}
 
 runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
     if (!input.id.valid())

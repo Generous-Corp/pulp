@@ -81,3 +81,82 @@ TEST_CASE("Timeline undo capacity rejects an open gesture without partial public
     REQUIRE(session->journal().entries().empty());
     REQUIRE(velocity(*session->snapshot()) == 1000);
 }
+
+TEST_CASE("Timeline gestures enforce phase ownership and coalesce at the group cap") {
+    SessionLimits limits;
+    limits.undo.max_groups = 1;
+    auto session = std::move(DocumentSession::create(make_project(), limits)).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto other = std::move(session->register_writer()).value();
+    const auto group = writer.allocate_undo_group_id();
+
+    auto invalid_phase =
+        session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 1500}});
+    invalid_phase.gesture_phase = static_cast<GesturePhase>(255);
+    auto invalid_phase_result = session->submit(writer, std::move(invalid_phase));
+    REQUIRE_FALSE(invalid_phase_result);
+    REQUIRE(invalid_phase_result.error().code == ConflictCode::GestureState);
+
+    auto malformed =
+        session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 1500}});
+    malformed.undo_group = group;
+    malformed.gesture_phase = GesturePhase::Update;
+    auto missing_begin = session->submit(writer, std::move(malformed));
+    REQUIRE_FALSE(missing_begin);
+    REQUIRE(missing_begin.error().code == ConflictCode::GestureState);
+
+    auto begin = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    begin.undo_group = group;
+    begin.gesture_phase = GesturePhase::Begin;
+    const auto begin_retry = begin;
+    REQUIRE(session->submit(writer, std::move(begin)));
+    REQUIRE(session->submit(writer, begin_retry));
+
+    auto open_redo = session->redo(writer);
+    REQUIRE_FALSE(open_redo);
+    REQUIRE(open_redo.error().code == ConflictCode::GestureState);
+
+    auto interleaved = session_transaction(other, session->revision(),
+                                           {SetNoteVelocity{{3}, {4}, {5}, {6}, 2000, 2500}});
+    auto interleaved_result = session->submit(other, std::move(interleaved));
+    REQUIRE_FALSE(interleaved_result);
+    REQUIRE(interleaved_result.error().code == ConflictCode::GestureState);
+    auto open_undo = session->undo(writer);
+    REQUIRE_FALSE(open_undo);
+    REQUIRE(open_undo.error().code == ConflictCode::GestureState);
+
+    auto duplicate = session_transaction(writer, session->revision(),
+                                         {SetNoteVelocity{{3}, {4}, {5}, {6}, 2000, 2500}});
+    duplicate.undo_group = group;
+    duplicate.gesture_phase = GesturePhase::Begin;
+    REQUIRE_FALSE(session->submit(writer, std::move(duplicate)));
+
+    auto wrong_group = session_transaction(writer, session->revision(),
+                                           {SetNoteVelocity{{3}, {4}, {5}, {6}, 2000, 2500}});
+    wrong_group.undo_group = writer.allocate_undo_group_id();
+    wrong_group.gesture_phase = GesturePhase::End;
+    REQUIRE_FALSE(session->submit(writer, std::move(wrong_group)));
+
+    auto failed_update = session_transaction(writer, session->revision(),
+                                             {SetNoteVelocity{{3}, {4}, {5}, {6}, 999, 2500}});
+    failed_update.undo_group = group;
+    failed_update.gesture_phase = GesturePhase::Update;
+    auto failed_update_result = session->submit(writer, std::move(failed_update));
+    REQUIRE_FALSE(failed_update_result);
+    REQUIRE(failed_update_result.error().code == ConflictCode::ExpectedValueMismatch);
+
+    auto update = session_transaction(writer, session->revision(),
+                                      {SetNoteVelocity{{3}, {4}, {5}, {6}, 2000, 2500}});
+    update.undo_group = group;
+    update.gesture_phase = GesturePhase::Update;
+    REQUIRE(session->submit(writer, std::move(update)));
+    auto end = session_transaction(writer, session->revision(),
+                                   {SetNoteVelocity{{3}, {4}, {5}, {6}, 2500, 3000}});
+    end.undo_group = group;
+    end.gesture_phase = GesturePhase::End;
+    const auto end_retry = end;
+    REQUIRE(session->submit(writer, std::move(end)));
+    REQUIRE(session->submit(writer, end_retry));
+    REQUIRE(session->undo(writer));
+    REQUIRE(velocity(*session->snapshot()) == 1000);
+}

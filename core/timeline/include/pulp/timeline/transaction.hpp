@@ -53,6 +53,8 @@ enum class ConflictCode : std::uint8_t {
     AlreadyAppliedResultExpired,
     TargetMissing,
     WrongTargetKind,
+    InactiveTarget,
+    GestureState,
     ParentMismatch,
     ExpectedValueMismatch,
     IdentityNotAvailable,
@@ -91,11 +93,5 @@ struct CommitResult {
 
 runtime::Result<ReducedTransaction, TransactionError>
 reduce_transaction(const Project& project, const Transaction& transaction);
-
-// Replays commands already authorized as undo/redo history. This reducer can
-// reactivate exact tombstones in caller-owned values; DocumentSession::submit
-// always uses reduce_transaction and cannot be elevated through this API.
-runtime::Result<ReducedTransaction, TransactionError>
-reduce_history_transaction(const Project& project, const Transaction& transaction);
 
 } // namespace pulp::timeline

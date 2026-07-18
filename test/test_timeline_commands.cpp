@@ -23,10 +23,9 @@ TEST_CASE("Timeline commands apply and invert without mutating the source") {
     REQUIRE(restored->project.next_item_id() == 9);
 
     auto revive = transaction({1}, 3, 3, {}, restored->inverses);
-    auto revived = reduce_history_transaction(restored->project, revive);
-    REQUIRE(revived);
-    REQUIRE(equivalent(*revived->project.find_sequence({3})->find_track({4})->find_clip({7}),
-                       inserted));
+    auto revived = reduce_transaction(restored->project, revive);
+    REQUIRE_FALSE(revived);
+    REQUIRE(revived.error().code == ConflictCode::IdentityNotAvailable);
 }
 
 TEST_CASE("Timeline move and note velocity commands enforce typed preconditions") {
@@ -54,6 +53,68 @@ TEST_CASE("Timeline move and note velocity commands enforce typed preconditions"
     auto rejected = reduce_transaction(changed->project, stale);
     REQUIRE_FALSE(rejected);
     REQUIRE(rejected.error().code == ConflictCode::ExpectedValueMismatch);
+}
+
+TEST_CASE("Timeline move rejects sequence-boundary violations without touching the source") {
+    const auto original = make_project();
+    const auto old_range = clip(original).time_range();
+    ClipTimeRange outside = MusicalTimeRange{{8 * kTicksPerQuarter}, {kTicksPerQuarter}};
+    auto tx = transaction({1}, 1, 1, {}, {MoveClip{{3}, {4}, {5}, old_range, outside}});
+    auto rejected = reduce_transaction(original, tx);
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(rejected.error().model_error);
+    REQUIRE(clip(original).start().value == 0);
+    REQUIRE(same_project(original, make_project()));
+}
+
+TEST_CASE("Timeline command diagnostics preserve target and media failure kinds") {
+    const auto original = make_project();
+    auto wrong_kind = transaction({1}, 1, 1, {}, {SetNoteVelocity{{3}, {4}, {5}, {5}, 1000, 2000}});
+    auto wrong_kind_result = reduce_transaction(original, wrong_kind);
+    REQUIRE_FALSE(wrong_kind_result);
+    REQUIRE(wrong_kind_result.error().code == ConflictCode::WrongTargetKind);
+
+    auto remove = transaction({1}, 2, 2, {}, {RemoveClip{{3}, {4}, {5}}});
+    auto removed = reduce_transaction(original, remove);
+    REQUIRE(removed);
+    auto inactive = transaction(
+        {1}, 3, 3, {},
+        {MoveClip{{3}, {4}, {5}, clip(original).time_range(), clip(original).time_range()}});
+    auto inactive_result = reduce_transaction(removed->project, inactive);
+    REQUIRE_FALSE(inactive_result);
+    REQUIRE(inactive_result.error().code == ConflictCode::InactiveTarget);
+
+    auto missing_asset_clip =
+        Clip::create({7}, {2 * kTicksPerQuarter}, {kTicksPerQuarter}, MediaRef{{99}, {0}, 1});
+    REQUIRE(missing_asset_clip);
+    auto missing_asset =
+        transaction({1}, 2, 2, {}, {InsertClip{{3}, {4}, std::move(missing_asset_clip).value()}});
+    auto missing_asset_result = reduce_transaction(original, missing_asset);
+    REQUIRE_FALSE(missing_asset_result);
+    REQUIRE(missing_asset_result.error().model_error);
+    REQUIRE(missing_asset_result.error().model_error->code == ModelErrorCode::MissingAsset);
+    REQUIRE(missing_asset_result.error().related_item == ItemId{99});
+
+    auto track = Track::create({4}, "track", {make_note_clip({5}, {6}, 0)});
+    REQUIRE(track);
+    auto sequence = Sequence::create({3}, "sequence", TickDuration{8 * kTicksPerQuarter},
+                                     {std::move(track).value()});
+    REQUIRE(sequence);
+    MediaAsset asset{{9}, "asset", 10, {48'000, 1}};
+    auto with_asset =
+        Project::create({{1}, "project", 10, {3}, {asset}, {std::move(sequence).value()}});
+    REQUIRE(with_asset);
+    auto invalid_clip =
+        Clip::create({10}, {2 * kTicksPerQuarter}, {kTicksPerQuarter}, MediaRef{{9}, {8}, 4});
+    REQUIRE(invalid_clip);
+    auto invalid_range =
+        transaction({1}, 1, 1, {}, {InsertClip{{3}, {4}, std::move(invalid_clip).value()}});
+    auto invalid_result = reduce_transaction(with_asset.value(), invalid_range);
+    REQUIRE_FALSE(invalid_result);
+    REQUIRE(invalid_result.error().model_error);
+    REQUIRE(invalid_result.error().model_error->code == ModelErrorCode::InvalidMediaRange);
+    REQUIRE(invalid_result.error().related_item == ItemId{9});
 }
 
 TEST_CASE("Timeline identity and clip indexes path copy at logarithmic scale") {
