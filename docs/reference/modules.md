@@ -774,9 +774,8 @@ exact validated bytes for lossless re-save. `SerializedSnapshot` flags those
 opaque objects so callers can surface compatibility risk. This is snapshot JSON
 only; it does not read or write ZIP/package containers.
 
-This initial surface intentionally excludes commands, undo, journals, package
-I/O, publication, playback, automation, launch slots, takes, nesting, devices,
-routing, and UI.
+This initial surface intentionally excludes durable journal sinks, package I/O,
+playback, automation, launch slots, takes, nesting, devices, routing, and UI.
 
 ## playback
 

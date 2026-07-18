@@ -101,7 +101,8 @@ TEST_CASE("Timeline command diagnostics preserve target and media failure kinds"
     auto sequence = Sequence::create({3}, "sequence", TickDuration{8 * kTicksPerQuarter},
                                      {std::move(track).value()});
     REQUIRE(sequence);
-    MediaAsset asset{{9}, "asset", 10, {48'000, 1}};
+    MediaAsset asset{{9}, "asset", 10, {48'000, 1}, content_hash(), AssetStoragePolicy::External,
+                     {},  {}};
     auto with_asset =
         Project::create({{1}, "project", 10, {3}, {asset}, {std::move(sequence).value()}});
     REQUIRE(with_asset);

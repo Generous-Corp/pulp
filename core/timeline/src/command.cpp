@@ -21,10 +21,19 @@ bool equal_content(const ClipContent& lhs, const ClipContent& rhs) noexcept {
         return left->asset_id == right.asset_id && left->source_start == right.source_start &&
                left->frame_count == right.frame_count;
     }
-    const auto left = std::get<NoteContent>(lhs).notes();
-    const auto right = std::get<NoteContent>(rhs).notes();
-    return left.size() == right.size() &&
-           std::equal(left.begin(), left.end(), right.begin(), equal_note);
+    if (const auto* left = std::get_if<NoteContent>(&lhs)) {
+        const auto right = std::get<NoteContent>(rhs).notes();
+        return left->notes().size() == right.size() &&
+               std::equal(left->notes().begin(), left->notes().end(), right.begin(), equal_note);
+    }
+    if (const auto* left = std::get_if<RegisteredContent>(&lhs)) {
+        const auto& right = std::get<RegisteredContent>(rhs);
+        return left->schema() == right.schema() && left->value() == right.value();
+    }
+    const auto& left = std::get<OpaqueContent>(lhs);
+    const auto& right = std::get<OpaqueContent>(rhs);
+    return left.schema() == right.schema() && left.raw_json() == right.raw_json() &&
+           left.validation_limits() == right.validation_limits();
 }
 
 std::size_t saturated_add(std::size_t lhs, std::size_t rhs) noexcept {
@@ -37,6 +46,8 @@ std::size_t clip_retained_size(const Clip& clip) noexcept {
     auto size = sizeof(Clip);
     if (const auto* notes = std::get_if<NoteContent>(&clip.content()))
         size = saturated_add(size, notes->notes().size() * sizeof(NoteEvent));
+    else if (const auto* opaque = std::get_if<OpaqueContent>(&clip.content()))
+        size = saturated_add(size, opaque->raw_json().size());
     return size;
 }
 

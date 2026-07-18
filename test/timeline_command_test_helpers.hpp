@@ -9,6 +9,12 @@ namespace timeline_test {
 using namespace pulp::timeline;
 using namespace pulp::timebase;
 
+inline ContentHash content_hash(char digit = 'a') {
+    const auto hash = ContentHash::from_hex(std::string(64, digit));
+    assert(hash);
+    return *hash;
+}
+
 inline Clip make_note_clip(ItemId clip_id, ItemId note_id, std::int64_t start,
                            std::uint16_t velocity = 1000) {
     auto notes = NoteContent::create({{note_id, {0}, {kTicksPerQuarter / 4}, velocity, 60, 0}});
