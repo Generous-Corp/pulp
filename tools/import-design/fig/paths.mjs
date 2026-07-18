@@ -151,6 +151,47 @@ export function toPathData(commands) {
  * @returns {{ d: string, box: object, paint: 'fill'|'stroke', droppedStroke: boolean }|null}
  */
 export function geometryToPath(node, blobs) {
+  const r = placedGeometry(node, blobs, /* preferFill */ false);
+  if (!r) return null;
+  const { placed, box, useFill, hasStroke } = r;
+
+  return {
+    // Normalize to a (0,0)-origin viewBox: codegen's setSvgViewBox consumes only
+    // the width/height pair and ignores minX/minY, so a path carrying negative
+    // coordinates would otherwise be silently shifted. The caller places the
+    // shape by moving the node to box.minX/minY instead.
+    d: toPathData(translate(placed, -box.minX, -box.minY)),
+    box,
+    paint: useFill ? 'fill' : 'stroke',
+    droppedStroke: Boolean(useFill && hasStroke),
+  };
+}
+
+/**
+ * A mask node's clip outline in its PARENT's coordinate space: transform baked,
+ * NOT normalized to a (0,0)-origin viewBox. The two callers place their result
+ * differently, and that difference is the whole reason this is a second entry
+ * point: an emitted vector is re-placed at its own box (so its `d` must start
+ * at 0,0), while a CSS clip-path is consumed in the border-box space of the
+ * view it clips — the mask's parent — so its coordinates must stay where the
+ * design put them.
+ *
+ * Prefers the fill outline even when no fill paint is visible: what clips is
+ * the mask's SHAPE, and paint visibility on a mask changes its alpha
+ * semantics, not its outline.
+ *
+ * @returns {{ d: string, box: object }|null}
+ */
+export function geometryToClipPath(node, blobs) {
+  const r = placedGeometry(node, blobs, /* preferFill */ true);
+  if (!r) return null;
+  return { d: toPathData(r.placed), box: r.box };
+}
+
+// Decode a node's baked outline blobs and place them in the parent's
+// coordinate space. Shared by geometryToPath (emitted vectors) and
+// geometryToClipPath (mask outlines); only the fill/stroke preference differs.
+function placedGeometry(node, blobs, preferFill) {
   const pick = (list) => {
     if (!Array.isArray(list) || !list.length) return null;
     const cmds = [];
@@ -169,25 +210,15 @@ export function geometryToPath(node, blobs) {
   // Prefer the fill outline, but only when the node actually paints one: Figma
   // still emits a fillGeometry for a stroke-only shape (an open path has a
   // notional fill region), and choosing it would render a filled blob where the
-  // design shows a thin line.
-  const useFill = fill && hasVisibleFill;
+  // design shows a thin line. A mask opts out of the paint check (preferFill).
+  const useFill = fill && (preferFill || hasVisibleFill);
   const chosen = useFill ? fill : stroke || fill;
   if (!chosen) return null;
 
   const placed = applyTransform(chosen, node.transform);
   const box = boundsOf(placed);
   if (!box || !(box.width > 0) || !(box.height > 0)) return null;
-
-  return {
-    // Normalize to a (0,0)-origin viewBox: codegen's setSvgViewBox consumes only
-    // the width/height pair and ignores minX/minY, so a path carrying negative
-    // coordinates would otherwise be silently shifted. The caller places the
-    // shape by moving the node to box.minX/minY instead.
-    d: toPathData(translate(placed, -box.minX, -box.minY)),
-    box,
-    paint: useFill ? 'fill' : 'stroke',
-    droppedStroke: Boolean(useFill && stroke),
-  };
+  return { placed, box, useFill, hasStroke: Boolean(stroke) };
 }
 
 /**

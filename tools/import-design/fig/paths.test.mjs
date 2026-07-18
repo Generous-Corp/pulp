@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { decodePathBlob, applyTransform, boundsOf, toPathData, geometryToPath } from './paths.mjs';
+import { decodePathBlob, applyTransform, boundsOf, toPathData, geometryToPath, geometryToClipPath } from './paths.mjs';
 import { materializeFrame, buildScene, findFrame } from './scene.mjs';
 
 // Encode a command stream the way Figma does: [u8 tag][f32 args…] little-endian.
@@ -483,4 +483,76 @@ test('an UNRESOLVED vector keeps its node box in the sidecar', () => {
   const { geometry } = materializeFrame(scene, frame, CTX);
   const rect = geometry.nodes.find((n) => n.node_id === '0:2');
   assert.deepEqual([rect.x, rect.y, rect.width, rect.height], [60, 12, 8, 9]);
+});
+
+// ── mask lowering ───────────────────────────────────────────────────────────
+
+test('geometryToClipPath stays in parent space — no viewBox normalization', () => {
+  // The consumer difference IS the contract: an emitted vector's d is
+  // re-placed at its own box (0,0-origin), but a clip-path is consumed in the
+  // clipped view's border-box space, so the transform-baked coordinates must
+  // survive. Note the fill outline wins even with no visible fill paint: a
+  // mask's SHAPE is what clips.
+  const node = {
+    type: 'VECTOR', name: 'mask',
+    transform: { m00: 1, m01: 0, m02: 5, m10: 0, m11: 1, m12: 3 },
+    fillGeometry: [{ commandsBlob: 2 }],
+    fillPaints: [],
+  };
+  const clipBlobs = [...blobs, { bytes: encode([MOVE, 0, 0], [LINE, 30, 0], [LINE, 30, 10], [LINE, 15, 5], [LINE, 0, 10], [CLOSE]) }];
+  const r = geometryToClipPath(node, clipBlobs);
+  assert.equal(r.d, 'M5 3 L35 3 L35 13 L20 8 L5 13 Z');
+});
+
+test('a mask child clips the siblings above it and paints nowhere', () => {
+  // Figma never renders a mask's own fill — it clips the siblings painted
+  // AFTER it. Materializing the flag as a normal child painted an opaque
+  // notched panel over the accent tab it was clipping a texture to. The
+  // lowering: siblings above the mask move into a synthetic wrapper spanning
+  // the parent that carries the mask outline as `clip_path` (the contract
+  // parse_ir_style('clipPath') → setClipPath already consumes); the sibling
+  // BELOW stays outside, unclipped — exactly Figma's scope.
+  const scene = buildScene({
+    nodeChanges: [
+      { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+      { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Panel',
+        parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+        size: { x: 100, y: 100 } },
+      { guid: { sessionID: 0, localID: 3 }, type: 'ROUNDED_RECTANGLE', name: 'below',
+        parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' },
+        size: { x: 10, y: 10 },
+        transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+        fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 1 }, visible: true }] },
+      { guid: { sessionID: 0, localID: 4 }, type: 'VECTOR', name: 'notch', mask: true,
+        parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+        size: { x: 30, y: 10 },
+        transform: { m00: 1, m01: 0, m02: 5, m10: 0, m11: 1, m12: 3 },
+        fillGeometry: [{ commandsBlob: 2 }],
+        fillPaints: [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.3, a: 1 }, opacity: 1, visible: true }] },
+      { guid: { sessionID: 0, localID: 5 }, type: 'ROUNDED_RECTANGLE', name: 'above',
+        parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'c' },
+        size: { x: 50, y: 50 },
+        transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+        fillPaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, visible: true }] },
+    ],
+    blobs: [...blobs, { bytes: encode([MOVE, 0, 0], [LINE, 30, 0], [LINE, 30, 10], [LINE, 15, 5], [LINE, 0, 10], [CLOSE]) }],
+  });
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Panel'), CTX);
+  const kids = envelope.root.children;
+  // The mask's own fill must never reach the output, under any name or shape.
+  const all = [];
+  (function collect(n) { all.push(n); (n.children || []).forEach(collect); })(envelope.root);
+  assert.ok(!all.some((n) => n.name === 'notch'), 'mask painted as content');
+  assert.deepEqual(kids.map((n) => n.name), ['below', 'notch (mask scope)']);
+  const scope = kids[1];
+  // Parent-space outline, spanning wrapper — the clip lands where the design
+  // put the mask while the masked sibling keeps its own coordinates.
+  assert.equal(scope.style.clip_path, 'path("M5 3 L35 3 L35 13 L20 8 L5 13 Z")');
+  assert.deepEqual([scope.style.left, scope.style.top, scope.style.width, scope.style.height], [0, 0, 100, 100]);
+  assert.equal(scope.audio_widget, 'none');
+  assert.equal(scope.node_id, '0:4/mask-scope');
+  assert.deepEqual(scope.children.map((n) => n.name), ['above']);
+  // An opaque solid alpha mask lowers exactly — no approximation to confess.
+  assert.ok(!diagnostics.some((d) => d.code === 'mask-approximated'),
+    'exact lowering must not raise mask-approximated');
 });

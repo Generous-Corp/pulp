@@ -337,6 +337,26 @@ overhangs its symbol bounds renders clipped in Figma, so an unclipped import
 paints the overhang over whatever sits below the instance (a channel strip's
 noise card ran 19px past its 235px symbol and buried the transport's step row).
 
+**Gotcha - a `mask: true` child paints NOWHERE; materializing it as content
+occludes everything painted after it.** Figma's mask layer clips the siblings
+painted ABOVE it in the same parent and never renders its own fill. The `.fig`
+decoder lowers this by moving the masked siblings into a synthetic
+`<mask name> (mask scope)` wrapper (spans the parent, `audio_widget: 'none'`,
+node_id `<maskKey>/mask-scope`) whose `style.clip_path = path("<d>")` carries
+the mask outline in PARENT space — `geometryToClipPath` (paths.mjs) skips the
+0,0-viewBox normalization `geometryToPath` does because a CSS clip-path is
+consumed in the clipped view's border-box space, and box-model masks
+(rect/ellipse, no geometry blobs) get a synthesized outline. The chain
+downstream already existed end-to-end (`parse_ir_style('clipPath')` →
+codegen `setClipPath` → `SkPath::FromSVGString` clip); only the extractor
+never emitted it. Siblings BELOW the mask stay outside the wrapper (Figma's
+scope), soft/image alpha masks and auto-layout parents degrade with a
+`mask-approximated` warning — but the mask itself is never painted, in any
+branch. Symptom when broken: a "gray" element whose accent color is right
+there in the data — the selected mixer channel's red tab read gray because the
+master's opaque `Bg PAnel` mask (invisible in Figma) painted over it, and
+every channel body sat one gray lighter than the design.
+
 **Gotcha - a Figma slider stores a value-driven fill position that can detach
 from the thumb.** A slider component (track + progress fill + round thumb) keeps
 the fill's x/width per-instance; Figma's LIVE component render recomputes the
