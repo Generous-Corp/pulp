@@ -493,19 +493,26 @@ fi
 
 ### Audio Quality Lab, CLI, and benchmark evidence
 
+Build and pin the oscillator renderer before running the Python suite. The AQL
+tests otherwise search `build*` directories and can silently select a stale
+binary from an unrelated configuration.
+
 ```bash
 python3 -m venv .venv-aql
+.venv-aql/bin/python -m pip install --upgrade pip
 .venv-aql/bin/python -m pip install -e 'tools/audio/quality-lab[test]'
-.venv-aql/bin/python -m pytest tools/audio/quality-lab/tests -q
 
 cmake -S . -B build-final-aql -DCMAKE_BUILD_TYPE=Release \
   -DPULP_BUILD_TESTS=ON -DPULP_AUDIO_QUALITY_LAB_GATE=ON \
   -DPULP_AUDIO_QUALITY_LAB_PYTHON="$PWD/.venv-aql/bin/python"
 tools/ci/governed-build.sh cmake --build build-final-aql --target \
-  pulp-sampler-render-wav pulp-sampler-heritage-render-wav
+  pulp-osc-render-wav pulp-sampler-render-wav \
+  pulp-sampler-heritage-render-wav
 grep '^CMAKE_BUILD_TYPE' build-final-aql/CMakeCache.txt
 grep '^CXX_FLAGS ' \
   build-final-aql/test/CMakeFiles/pulp-sampler-render-wav.dir/flags.make
+PULP_OSC_RENDER_WAV="$PWD/build-final-aql/test/pulp-osc-render-wav" \
+  .venv-aql/bin/python -m pytest tools/audio/quality-lab/tests -q
 tools/ci/governed-build.sh ctest --test-dir build-final-aql \
   -R '^sampler-(quality-lab|heritage-quality-lab)-' --output-on-failure
 ```
