@@ -100,8 +100,9 @@ TEST_CASE("Sampler interpolation reports swept fixed-ratio tone quality",
     for (const auto policy : kPolicies) {
         for (const auto ratio : kRatios) {
             for (const auto wanted_bin : kPassbandBins) {
-              DYNAMIC_SECTION(sample_interpolation_policy_name(policy) << " ratio=" << ratio
-                              << " wanted-bin=" << wanted_bin) {
+                DYNAMIC_SECTION(
+                    pulp::audio::sample_interpolation_policy_id(policy)
+                    << " ratio=" << ratio << " wanted-bin=" << wanted_bin) {
                 const auto wanted_cycles =
                     static_cast<double>(wanted_bin) / kAnalysisFrames;
                 const auto source_cycles = wanted_cycles / ratio;
@@ -115,7 +116,8 @@ TEST_CASE("Sampler interpolation reports swept fixed-ratio tone quality",
                 const auto unexpected_db = worst_unexpected_db(
                     rendered, expected, &unexpected_cycles);
 
-                CAPTURE(sample_interpolation_policy_name(policy), ratio,
+                CAPTURE(pulp::audio::sample_interpolation_policy_id(policy),
+                        ratio,
                         source_cycles, wanted_cycles, gain_db, residual_db,
                         unexpected_db, unexpected_cycles);
                 REQUIRE(std::isfinite(gain_db));
@@ -261,7 +263,8 @@ TEST_CASE("Fixed-ratio interpolation is invariant to render block partition",
     constexpr std::array<std::size_t, 3> blocks = {1, 64, 511};
     for (const auto policy : kPolicies) {
         for (const auto ratio : kRatios) {
-            DYNAMIC_SECTION(sample_interpolation_policy_name(policy) << " ratio=" << ratio) {
+            DYNAMIC_SECTION(pulp::audio::sample_interpolation_policy_id(policy)
+                            << " ratio=" << ratio) {
                 const auto source_cycles = kWantedCycles / ratio;
                 const auto reference = render_interpolated_tone(
                     policy, ratio, source_cycles, 4096, blocks.front());
