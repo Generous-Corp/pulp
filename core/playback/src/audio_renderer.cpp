@@ -381,4 +381,73 @@ AudioRenderStatus ArrangementAudioRenderer::process(const PlaybackProgram& progr
     return rendered ? AudioRenderStatus::Rendered : AudioRenderStatus::Silent;
 }
 
+AudioRenderStatus ArrangementAudioTrackRenderer::process(const PlaybackProgramBlock& block,
+                                                         const TransportSnapshot& transport,
+                                                         audio::BufferView<float> output,
+                                                         AudioRendererLimits limits) noexcept {
+    runtime::ScopedNoAlloc no_alloc;
+    if (output.empty())
+        return AudioRenderStatus::InvalidOutput;
+    // Reject caller-bounded shapes before touching memory. The compiled program
+    // can only narrow these bounds; that second check below is also performed
+    // before clear so CapacityExceeded always leaves the caller's sentinel data
+    // intact.
+    if (output.num_channels() > limits.max_channels ||
+        output.num_samples() > limits.max_block_frames)
+        return AudioRenderStatus::CapacityExceeded;
+
+    const auto view = shell_.begin_block(block);
+    if (!view.program) {
+        output.clear();
+        return view.adoption == ShellAdoptionResult::Rejected ? AudioRenderStatus::InvalidProgram
+                                                              : AudioRenderStatus::Silent;
+    }
+    const auto& program = *block.program();
+    const auto& compiled_limits = program.audio_limits();
+    limits.max_channels = std::min(limits.max_channels, compiled_limits.max_channels);
+    limits.max_block_frames = std::min(limits.max_block_frames, compiled_limits.max_block_frames);
+    limits.max_asset_frames = std::min(limits.max_asset_frames, compiled_limits.max_asset_frames);
+    limits.max_tracks = std::min(limits.max_tracks, compiled_limits.max_tracks);
+    limits.max_clips = std::min(limits.max_clips, compiled_limits.max_clips);
+    if (output.num_channels() > limits.max_channels ||
+        output.num_samples() > limits.max_block_frames)
+        return AudioRenderStatus::CapacityExceeded;
+    if (!valid_transport(transport, output.num_samples(), program.tempo_map(), limits)) {
+        output.clear();
+        return AudioRenderStatus::InvalidTransport;
+    }
+    output.clear();
+
+    const auto provider = view.program->provider();
+    const auto* audio_program = view.program->audio_program();
+    const bool arrangement_selected = provider.selected == ProviderKind::Arrangement &&
+                                      provider.available(ProviderKind::Arrangement);
+    AudioRenderStatus status = AudioRenderStatus::Silent;
+    if (transport.is_playing && arrangement_selected && audio_program != nullptr) {
+        if (audio_program->id() != view.program->id())
+            return AudioRenderStatus::InvalidProgram;
+        if (audio_program->clips().size() > limits.max_clips)
+            return AudioRenderStatus::CapacityExceeded;
+        for (std::uint8_t index = 0; index < transport.range_count; ++index)
+            render_track(*audio_program, transport.ranges[index], output);
+        if (!audio_program->clips().empty())
+            status = AudioRenderStatus::Rendered;
+    }
+
+    RendererCarryState carry = shell_.state_snapshot();
+    carry.key = shell_.active_key();
+    carry.active_provider = provider.selected;
+    carry.valid = true;
+    if (transport.range_count != 0) {
+        const auto& last = transport.ranges[transport.range_count - 1];
+        carry.source_sample = {last.timeline_sample_start.value +
+                               static_cast<std::int64_t>(last.frame_count)};
+        carry.timeline_tick = last.timeline_tick_end;
+        carry.loop_iteration += transport.range_count > 1 ? 1u : 0u;
+    }
+    if (!shell_.end_block(carry))
+        return AudioRenderStatus::InvalidProgram;
+    return status;
+}
+
 } // namespace pulp::playback

@@ -5,6 +5,7 @@
 #include <pulp/audio/rt_safety_contract.hpp>
 #include <pulp/audio/wav_decoder.hpp>
 #include <pulp/playback/audio_renderer_limits.hpp>
+#include <pulp/playback/stable_renderer_shell.hpp>
 #include <pulp/playback/transport.hpp>
 #include <pulp/runtime/result.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
@@ -135,6 +136,33 @@ class ArrangementAudioRenderer {
                                      const TransportSnapshot& transport,
                                      audio::BufferView<float> output,
                                      AudioRendererLimits limits = {}) noexcept;
+};
+
+/// One stable SignalGraph-facing arrangement audio renderer. The host adapter
+/// owns one instance per timeline track and supplies the callback-wide pinned
+/// PlaybackProgramBlock and exact TransportSnapshot. Program changes are
+/// adopted by StableRendererShell; graph custom-node state is never a program
+/// publication channel.
+class ArrangementAudioTrackRenderer {
+  public:
+    static constexpr audio::RtSafetyClass process_rt_safety_class =
+        audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
+
+    explicit ArrangementAudioTrackRenderer(timeline::ItemId track_id) noexcept : shell_(track_id) {}
+
+    AudioRenderStatus process(const PlaybackProgramBlock& block, const TransportSnapshot& transport,
+                              audio::BufferView<float> output,
+                              AudioRendererLimits limits = {}) noexcept;
+
+    RendererProgramKey active_key() const noexcept {
+        return shell_.active_key();
+    }
+    RendererCarryState state_snapshot() const noexcept {
+        return shell_.state_snapshot();
+    }
+
+  private:
+    StableRendererShell shell_;
 };
 
 } // namespace pulp::playback

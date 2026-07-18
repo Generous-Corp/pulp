@@ -147,6 +147,21 @@ Consumers must honor `HostParamInfo::flags`:
 - `stepped = true` — rounding is the caller's responsibility before writing.
 - `is_bypass = true` — prefer the host's `set_bypass` instead.
 
+## Timeline graph binding
+
+`TimelineGraphPlaybackBinding::prepare()` is control-thread work. It preflights
+the exact candidate routed plan, reconciles ItemId-keyed audio and MIDI nodes,
+and prepares the graph. Stop `process()` before calling it or destroying the
+binding; the referenced `SignalGraph` and `PlaybackProgramStore` must outlive
+the binding.
+
+`TimelineGraphPlaybackBinding::process()` is the only audio-thread entry point.
+It pins one `PlaybackProgramBlock` for the whole callback, uses one exact
+`TransportSnapshot` for every track (including parallel graph workers), renders
+notes outside custom audio nodes, and injects those events into the track's
+stable `MidiInput`. Program publication goes through `PlaybackProgramStore`;
+never use `set_custom_node_state()` to update a timeline renderer program.
+
 ## Snapshot publish protocol
 
 1. UI thread calls an ordinary mutator (e.g. `connect(a, 0, b, 0)`).
