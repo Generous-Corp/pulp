@@ -466,6 +466,11 @@ struct PulpSamplerTestAccess {
         return processor.streaming_->published_source().selection_generation;
     }
 
+    static void exhaust_selection_generation(PulpSamplerProcessor& processor) {
+        processor.streaming_->selection_generation_ =
+            std::numeric_limits<std::uint64_t>::max();
+    }
+
     static std::uint32_t active_streamed_mip_octave(const PulpSamplerProcessor& processor) {
         for (const auto& voice : processor.voices_) {
             if (voice.active && voice.streamed)
