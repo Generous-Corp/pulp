@@ -10,6 +10,7 @@ target_include_directories(pulp-audio
 target_sources(pulp-audio PRIVATE
     src/analyzer_provider.cpp
     src/audio_file.cpp
+    src/wav_decoder.cpp
     src/audio_focus.cpp
     src/audio_probe_json.cpp
     src/audio_scope.cpp
