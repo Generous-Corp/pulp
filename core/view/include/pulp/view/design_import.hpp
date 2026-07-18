@@ -306,6 +306,42 @@ void hoist_captured_art_knobs(DesignIR& ir);
 /// attributes) — never a layer name or source quirk.
 void synthesize_primitive_paths(IRNode& root);
 
+/// Split the CSS `border` shorthand — "1px solid #333" — into the discrete
+/// border_color / border_width / border_style fields, for every node in the
+/// tree that set the shorthand but not the parts.
+///
+/// IRStyle carries both spellings, and the producers all write the shorthand:
+/// the .fig decoder, the Claude bundle reader, and the v0 TSX reader. Every
+/// native consumer reads only the parts — codegen's setBorder requires
+/// border_color AND border_width, and synthesize_node moves border_color onto a
+/// synthesized path. So a stroke declared in a design reached the IR and then
+/// went nowhere: six declared strokes lowered to zero setBorder + zero
+/// setSvgStroke calls in a real 1115-node import.
+///
+/// Only fills gaps — a producer that already set the parts wins, since it said
+/// what it meant more precisely than the shorthand can.
+void normalize_border_shorthand(IRNode& root);
+
+/// Reconnect a slider's progress fill to its thumb.
+///
+/// A Figma slider component stores three absolutely-positioned children — a
+/// full-width track, a short progress "fill", and a round thumb — and the fill's
+/// stored x/width is a per-instance, value-driven position. Figma's *live*
+/// component render recomputes the fill from the current value so it always
+/// touches the thumb, but the stored geometry in a `.fig` (or a REST/plugin
+/// export of one) does not: an instance can persist a fill that floats in a gap
+/// away from the thumb. Rendering that stored geometry faithfully reproduces a
+/// visually broken "detached red bar" that no design ever intended to show.
+///
+/// This pass detects the track+fill+thumb triplet structurally (never by layer
+/// name) and, ONLY when the fill and thumb are horizontally disjoint, extends
+/// the fill across the gap so it meets the thumb — the minimal edit that removes
+/// the detached-bar artifact without inventing a value. A fill that already
+/// touches or overlaps its thumb is left exactly as stored. Detection is tight
+/// (short wide container, near-full-width thin track, thin colored fill, round
+/// thumb) so non-slider rows are never rewritten.
+void reconnect_slider_fill(IRNode& root);
+
 /// Bind geometry-detected controls to host parameters from an out-of-band
 /// manifest that maps a Figma node id (`IRInteractiveElement::source_node_id`,
 /// stamped by the producer) to a host-param key. For each interactive element

@@ -470,6 +470,28 @@ IRNode json_to_ir_node(const choc::value::ValueView& v) {
         node.style.border = style_str("border");
         if (auto bs = style_str("boxShadow"))
             node.style.box_shadow = parse_css_box_shadow(*bs);
+        // CSS gradients arrive via `background` or `backgroundImage`; this lane
+        // never read either, so a gradient panel in a Claude Design page
+        // imported flat while the .fig lane rendered it. background_gradient
+        // feeds the shared setBackgroundGradient codegen — the same primitive
+        // the other lanes already reach. `backgroundImage` wins because
+        // `background` is a shorthand that may also carry a color.
+        auto read_gradient = [&](const char* k) -> bool {
+            if (auto v = style_str(k); v && v->find("gradient(") != std::string::npos) {
+                node.style.background_gradient = *v;
+                return true;
+            }
+            return false;
+        };
+        if (!read_gradient("backgroundImage"))
+            read_gradient("background");
+        // A `background` shorthand carrying a solid color (no gradient) still
+        // paints the box; take it when `backgroundColor` was not set separately.
+        if (!node.style.background_color && !node.style.background_gradient) {
+            if (auto bg = style_str("background");
+                bg && bg->find("gradient(") == std::string::npos && !bg->empty())
+                node.style.background_color = *bg;
+        }
         node.style.font_family = style_str("fontFamily");
         node.style.font_style = style_str("fontStyle");
         node.style.text_align = style_str("textAlign");

@@ -186,6 +186,13 @@
         "tools/cmake/PulpFaust.cmake"
       ]
     },
+    "friction-report": [],
+    "handoff": {
+      "paths": [],
+      "_doc": {
+        "empty-ok": "handoff is a cross-session process skill; it owns no source paths, so no diff triggers a required update (same pattern as code-comments and pr-review-sweep)."
+      }
+    },
     "hosting": {
       "paths": [
         "core/host/**",
@@ -489,6 +496,9 @@
         "core/format/src/au_v2_cocoa_view.mm",
         "core/format/src/au_adapter.mm",
         "core/format/src/au_view_controller_ios.mm",
+        "core/format/src/aax_effect_gui.cpp",
+        "core/format/include/pulp/format/aax_effect_gui.hpp",
+        "core/format/include/pulp/format/aax_editor.hpp",
         "core/view/include/pulp/view/editor_bridge.hpp",
         "core/view/src/editor_bridge.cpp",
         "examples/view-bridge-demo/**"
@@ -519,7 +529,6 @@
       "paths": [
         "examples/webview-*/**"
       ]
-    },
-    "friction-report": []
+    }
   }
 }

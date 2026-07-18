@@ -5,8 +5,10 @@
 #include <pulp/audio/analysis/pitch_track.hpp>
 
 #include <cmath>
+#include <initializer_list>
 #include <random>
 #include <span>
+#include <utility>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -57,6 +59,24 @@ std::vector<float> make_formant(double f0, int n, double sr = kSampleRate) {
         for (int k = 9; k <= 13; ++k)
             s += 0.5 * std::sin(2.0 * kPi * k * f0 * i / sr);
         x[static_cast<std::size_t>(i)] = static_cast<float>(0.3 * s);
+    }
+    return x;
+}
+
+// A sum of sinusoidal partials {harmonic index, amplitude} on fundamental f0.
+// The tool for octave-guard cases where a HARMONIC — not the fundamental — is
+// the loudest partial, so the FFT peak lands an octave (or more) high. The
+// per-partial phase offset keeps the sum from being an artificially symmetric
+// waveform.
+std::vector<float> make_partials(
+    double f0, int n, std::initializer_list<std::pair<int, double>> partials,
+    double sr = kSampleRate) {
+    std::vector<float> x(static_cast<std::size_t>(n), 0.0f);
+    for (int i = 0; i < n; ++i) {
+        double s = 0.0;
+        for (const auto& [k, a] : partials)
+            s += a * std::sin(2.0 * kPi * k * f0 * i / sr + 0.1 * k);
+        x[static_cast<std::size_t>(i)] = static_cast<float>(s);
     }
     return x;
 }
@@ -164,6 +184,111 @@ TEST_CASE("Pitch estimator does not drop a pure tone to a subharmonic",
     REQUIRE_THAT(est.hz, WithinAbs(440.0, 1.0));
 }
 
+TEST_CASE("Pitch estimator recovers f0 when a harmonic is the loudest partial",
+          "[audio][pitch]") {
+    // A rolled-off or resonant oscillator can carry more energy in an upper
+    // partial than in the fundamental, so the loudest FFT bin lands an octave (or
+    // a twelfth, or higher) above the true f0. The estimator must descend to the
+    // fundamental, never certify the harmonic as the pitch.
+    const int n = 1 << 15;
+    const double f0 = 220.0;
+
+    SECTION("2nd harmonic loudest, fundamental at 30%") {
+        const auto x =
+            make_partials(f0, n, {{1, 0.3}, {2, 1.0}, {3, 0.25}, {4, 0.2}});
+        const auto est = estimate_pitch(std::span<const float>(x), kSampleRate);
+        REQUIRE(est.voiced);
+        REQUIRE(std::abs(cents_between(est.hz, f0)) < 1.0);
+    }
+    SECTION("3rd harmonic loudest, fundamental at 30%") {
+        const auto x =
+            make_partials(f0, n, {{1, 0.3}, {2, 0.2}, {3, 1.0}, {4, 0.15}});
+        const auto est = estimate_pitch(std::span<const float>(x), kSampleRate);
+        REQUIRE(est.voiced);
+        REQUIRE(std::abs(cents_between(est.hz, f0)) < 1.0);
+    }
+    SECTION("5th harmonic loudest, odd-only series") {
+        // A square-ish odd-harmonic series whose loudest partial is the 5th. An
+        // earlier guard descended only as far as coarse/4, so it never tested the
+        // true fundamental (coarse/5) and certified the 5th harmonic ~2786 cents
+        // high at confidence 0.775 — a confident wrong number. It must recover f0.
+        const auto x = make_partials(f0, n, {{1, 0.4}, {3, 0.3}, {5, 1.0}, {7, 0.2}});
+        const auto est = estimate_pitch(std::span<const float>(x), kSampleRate);
+        REQUIRE(est.voiced);
+        REQUIRE(std::abs(cents_between(est.hz, f0)) < 1.0);
+    }
+}
+
+TEST_CASE("Pitch estimator does not octave-error across the adoption boundary",
+          "[audio][pitch]") {
+    // The earlier guard adopted a subharmonic only when its single tooth cleared
+    // a fixed 10%-amplitude cliff, an unproven threshold: a fundamental at 8% of
+    // the loudest harmonic fell just under it and was certified an octave high at
+    // confidence 0.994, while a 12% fundamental resolved correctly. Straddle that
+    // old cliff — a fundamental at 8% and at 12% of a loud 2nd harmonic must BOTH
+    // resolve to f0, and in no case become a confident octave error.
+    const int n = 1 << 15;
+    const double f0 = 220.0;
+    for (double frac : {0.08, 0.12}) {
+        const auto x = make_partials(f0, n, {{1, frac}, {2, 1.0}});
+        const auto est = estimate_pitch(std::span<const float>(x), kSampleRate);
+        INFO("fundamental at " << frac << " of the 2nd harmonic, est = "
+                               << est.hz << " conf = " << est.confidence);
+        REQUIRE(est.voiced);
+        REQUIRE(std::abs(cents_between(est.hz, f0)) < 2.0);
+        // The specific failure the fix removes: a confident lock an octave up.
+        REQUIRE(std::abs(cents_between(est.hz, 2.0 * f0)) > 100.0);
+    }
+}
+
+TEST_CASE("Pitch estimator reports the loudest partial for a missing fundamental",
+          "[audio][pitch]") {
+    // Documented residual (see pitch_track.hpp): a signal with energy only at
+    // 2·f0 and 3·f0 has no tone at f0 to lock onto, so the estimate honestly
+    // reports the loudest PRESENT partial (2·f0) rather than fabricating the
+    // absent virtual fundamental. Pin that behavior so it never silently drifts
+    // into a fabricated f0.
+    const int n = 1 << 15;
+    const double f0 = 220.0;
+    const auto x = make_partials(f0, n, {{2, 1.0}, {3, 0.6}});
+    const auto est = estimate_pitch(std::span<const float>(x), kSampleRate);
+    // 2·f0 is a strong present partial whose comb explains the segment, so this
+    // resolves voiced — assert it (a bare `if (voiced)` would pass vacuously if the
+    // estimator ever started refusing this fixture, hiding a real drift).
+    REQUIRE(est.voiced);
+    // A real, present partial (the loudest, 2·f0) — never the absent f0.
+    REQUIRE(std::abs(cents_between(est.hz, 2.0 * f0)) < 2.0);
+    REQUIRE(std::abs(cents_between(est.hz, f0)) > 100.0);
+}
+
+TEST_CASE("Pitch estimator does not drop a plain saw to a subharmonic at a short "
+          "window",
+          "[audio][pitch]") {
+    // Regression: the harmonic-recovery descent, guarded only by a FIXED tooth
+    // floor, confidently reported an octave (or two) DOWN on the most ordinary
+    // waveform in the suite — a plain bandlimited saw whose coarse peak already IS
+    // the fundamental. Over a short analysis window (few periods of a low note),
+    // rectangular-window LSQ leakage from the loud fundamental into the f0/2 fit
+    // exceeded the fixed floor, so f0/2 was adopted: e.g. an 82 Hz saw over 4096
+    // samples read 41 Hz at confidence 0.97, and a 41 Hz saw over 8192 read 20 Hz.
+    // The leakage-aware tooth floor must reject the leaky subharmonic and keep the
+    // true fundamental. Straddles the failing few-period regime and a long window.
+    struct Case { double f0; int n; };
+    for (const Case c : {Case{82.41, 4096}, Case{41.20, 8192}, Case{55.0, 4096},
+                         Case{41.20, 1 << 15}}) {
+        const auto x = make_saw(c.f0, c.n);
+        const auto est = estimate_pitch(std::span<const float>(x), kSampleRate);
+        INFO("saw f0=" << c.f0 << " over " << c.n << " samples -> " << est.hz
+                       << " Hz, conf " << est.confidence);
+        REQUIRE(est.voiced);
+        // The true fundamental, within the short-window refine tolerance...
+        REQUIRE(std::abs(cents_between(est.hz, c.f0)) < 20.0);
+        // ...and specifically NEVER a confident octave-or-more DOWN.
+        REQUIRE(std::abs(cents_between(est.hz, 0.5 * c.f0)) > 100.0);
+        REQUIRE(std::abs(cents_between(est.hz, 0.25 * c.f0)) > 100.0);
+    }
+}
+
 TEST_CASE("f0(t) trajectory recovers a known linear glide", "[audio][pitch]") {
     // A 220 -> 440 Hz linear glide over ~1.37 s. The extracted trajectory must
     // follow it: every voiced frame lands within a few cents of the true
@@ -241,17 +366,19 @@ TEST_CASE("f0(t) trajectory recovers a known sinusoidal vibrato",
 TEST_CASE("Pitch estimator resolves a DCO-style quantization error",
           "[audio][pitch]") {
     // A DCO produces f_clk / N for integer N, so its achievable pitch is
-    // quantized. Linearizing the divider rounding bounds the worst-case error by
-    // |e| <= 865.617·f_note/f_clk
-    // cents. With f_note = 440 Hz and f_clk = 1 MHz the nearest divider gives
-    // ~-0.21 cents of detuning; the estimator must measure that few-cent error,
-    // not round it away — that sensitivity is what gates the DCO pitch table.
+    // quantized. The half-LSB divider rounding bounds the worst-case error by the
+    // EXACT |e| <= 1200·log2(N*/(N*−½)) with N* = f_clk/f_note (NOT the linear
+    // tangent 865.617·f_note/f_clk, which the round-DOWN side exceeds — see the
+    // OSC-DCO bound). With f_note = 440 Hz and f_clk = 1 MHz the nearest divider
+    // gives ~-0.21 cents of detuning; the estimator must measure that few-cent
+    // error, not round it away — that sensitivity is what gates the DCO pitch table.
     const double f_note = 440.0;
     const double f_clk = 1.0e6;
-    const double divider = std::round(f_clk / f_note);
+    const double n_star = f_clk / f_note;
+    const double divider = std::round(n_star);
     const double f_dco = f_clk / divider;
     const double true_error_cents = cents_between(f_dco, f_note);
-    const double quantization_bound_cents = 865.617 * f_note / f_clk;
+    const double quantization_bound_cents = 1200.0 * std::log2(n_star / (n_star - 0.5));
 
     // Sanity: the physical DCO error obeys the divider-quantization bound.
     REQUIRE(std::abs(true_error_cents) <= quantization_bound_cents);

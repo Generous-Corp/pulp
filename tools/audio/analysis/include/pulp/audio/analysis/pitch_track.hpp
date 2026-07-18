@@ -30,7 +30,25 @@
 /// with no clear fundamental is REFUSED (`voiced = false`), never handed a
 /// confident wrong number. Confidence is the fraction of segment energy the
 /// fundamental and its harmonics explain — high for a tone or a saw, low for
-/// noise, and gated below `PitchOptions::min_confidence`.
+/// noise, and gated below `PitchOptions::min_confidence`. The estimator also
+/// recovers the true fundamental when a HARMONIC is the loudest partial (a
+/// rolled-off pulse whose 2nd, 3rd, … or higher partial dominates, or a faint
+/// fundamental beneath a loud harmonic): it ranks the coarse peak against its
+/// subharmonics (down to coarse/8) and adopts the lowest that both explains the
+/// segment and carries real energy at its own fundamental — the tooth measured
+/// against a leakage-aware floor, so a short analysis window's spectral leakage is
+/// not mistaken for a subharmonic partial.
+///
+/// Two honest limitations:
+///  • A genuine MISSING-FUNDAMENTAL signal — energy only at 2·f0 and 3·f0 with
+///    nothing at f0 — has no tone at f0 to lock onto, so the estimate stays on the
+///    loudest present partial (2·f0), an octave above the perceived pitch. This is
+///    reported as the frequency actually present, not a fabricated f0.
+///  • The subharmonic descent stops at coarse/8, so a signal whose loudest partial
+///    is the 9th-or-higher harmonic while the fundamental is faint (rare — most
+///    oscillators roll off monotonically) can report a lower harmonic rather than
+///    the true f0. Both cases return a frequency genuinely present in the signal,
+///    never a fabricated one.
 ///
 /// Determinism: pure arithmetic over the supplied buffer (the FFT peak plus a
 /// deterministic golden-section search). Identical input yields identical output

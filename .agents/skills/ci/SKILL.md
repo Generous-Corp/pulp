@@ -233,6 +233,18 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    Editing a workflow under `.github/workflows/` therefore usually needs a matching
    guide edit; a genuinely doc-irrelevant change bypasses with a
    `Config-Doc: skip reason="..."` trailer on any commit in the range.
+2b1a. **Reaping a release tracker: SHA-keyed ones cannot be judged from the title.**
+   The watchdog opens two shapes of tracking issue, and they are reaped
+   differently. A *version-keyed* tracker ("release: stuck vX.Y.Z") names its
+   version in the title, so the reaper closes it as soon as that tag exists.
+   The *stranded fix/feat* detector instead opens one tracker per tip SHA and
+   the title carries only the short SHA — a tag existing says nothing about
+   whether that commit is in it. Reaping it requires parsing the issue BODY for
+   the full tip SHA and the uncovered surfaces, then closing only once a *later*
+   tag for **every** uncovered surface contains the commit
+   (`git tag --contains <sha>`) — i.e. consumers can actually reach the change.
+   Closing on "a tag appeared" would mark a still-unreleased change as shipped.
+
 2b2. **Hotspot growth?** The `hotspot-size` gate is now net-delta vs merge-base:
    it fails only if THIS PR grows a frozen hotspot past its reference size (main
    growing the same file is NOT your fault and passes). If you must grow one,
@@ -549,25 +561,48 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   (`CMakeLists.txt`, `tools/cmake/PulpAndroid.cmake`,
   `tools/cmake/PulpDependencies.cmake`, `tools/deps/manifest.json`, plus Android
   Gradle files), and do not give `.cxx` a restore key that ignores those inputs.
-- **`intent-bump-on-merge.yml` is the merge-time half of the version-bump
-  intent-trailer model — and it ships DORMANT.** It exists to kill the
-  version-bump merge treadmill (PRs editing `CMakeLists` VERSION /
-  `plugin.json` / `marketplace.json` re-conflict every time main advances). The
-  endgame: a PR declares `Version-Bump: <surface>=<level>` and touches NO
-  version files, and this workflow assigns the exact number after merge from
-  main's current version via `tools/scripts/apply_intent_bump.py`. **Phase 1
-  (current): no-op.** Nothing emits intent trailers yet (Shipyard still file-
-  bumps on the PR side; `version-skill-check.yml` still runs WITHOUT
-  `--accept-intent-trailers`), so every run finds no trailer and exits clean.
-  Two things must be verified before the **phase-2** flip (a separate, reviewed
-  change): (1) `RELEASE_BOT_TOKEN` can push a *commit* to protected `main`
-  (it already pushes tags from `auto-release.yml`; a commit needs the bot on the
-  branch-protection bypass list), and (2) the `Version-Bump:` trailer survives
-  squash-merge into main's commit message. The workflow has a recursion guard
-  (skips its own `chore: bump versions` commit) and a `concurrency` group so
-  near-simultaneous merges bump the version line one at a time. The
-  `chore: bump versions` commit it pushes triggers `auto-release.yml` exactly
-  like a PR-side bump.
+- **`version-at-land.yml` + `version_at_land.py` are the single-writer,
+  post-merge half of the version-bump intent-trailer model — and the workflow
+  ships in DRY-RUN.** They exist to kill the version-bump merge treadmill (PRs
+  editing `CMakeLists` VERSION / `plugin.json` / `marketplace.json` re-conflict
+  every time main advances, and N parallel PRs endlessly re-bump the same
+  shared counter). The endgame: a PR declares `Version-Bump: <surface>=<level>`
+  and touches NO version files, and this bot assigns the exact number AFTER
+  merge from main's current version — so no two PRs ever contend for the same
+  number. **Today (dry-run): computes and logs what it WOULD assign; writes and
+  pushes nothing**, so it is safe to land while PRs still hand-bump. The
+  `--push` path (`apply_and_push`) is built and unit-tested but the workflow
+  does not call it yet.
+  - **Intent is read `--no-merges`-scoped.** `version_at_land.intent_trailers`
+    reads `Version-Bump:` trailers only from the range's NON-merge commits
+    (`git_range_trailers(..., no_merges=True)`). A "Merge origin/main into
+    <branch>" re-sync commit can carry a stale intent trailer that was never
+    meant to declare this range's release; honoring it would silently escalate
+    the version. A PR's real intent lives on its own commits (or the squash
+    commit, single-parent), so this keeps every genuine declaration while
+    dropping re-sync noise. Do NOT change `git_range_trailers`' default
+    (merge-walking) — the bypass-trailer gates depend on it; use the opt-in
+    `no_merges=` flag.
+  - **The `--push` transaction is race-safe by construction:** it recomputes
+    from a fresh `origin/main` each attempt, pushes with no `--force` (git's
+    default non-fast-forward rejection IS the `--ff-only` guarantee), and on
+    rejection re-syncs to the new tip — where the drain range now starts after
+    the winner's `Version-Bump-Applied` marker and collapses to empty, so the
+    loser no-ops instead of double-bumping. **This is why the older
+    `intent-bump-on-merge.yml` was DELETED:** it did a bare
+    `git push origin HEAD:main` with no `--ff-only` + retry, so a second merge
+    during its ~30s window silently discarded the bump (a SILENT RELEASE LOSS).
+    Never reintroduce a force/unguarded push on this path.
+  - **Before the `--push` flip** (a separate, reviewed change — see
+    `docs/guides/version-at-land-cutover.md`): verify the release bot can push a
+    *commit* to protected `main` (it already pushes tags from
+    `auto-release.yml`; a commit needs the bot on the branch-protection bypass
+    list, and the bot commit must be SSH-signed via
+    `configure_release_bot_ssh_signing.sh`), that the `Version-Bump:` trailer
+    survives squash-merge into main's message, and that the one-time in-flight
+    straggler rule (PRs already carrying `chore: bump versions` commits) is
+    applied. The `chore: bump versions` commit the bot pushes triggers
+    `auto-release.yml` exactly like a PR-side bump.
 - **`test/CMakeLists.txt` is now an include hub, not a registration
   manifest.** Add new `add_test`, `add_executable`, and
   `pulp_add_test_suite` blocks to the matching `test/cmake/*_tests.cmake`
@@ -757,8 +792,9 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   Keep it credential-free (notarize/sign stay in the real path) so it can run
   on a schedule without secrets.
 - **Release-bot source refs must be SSH-signed.** `auto-release.yml` creates
-  signed annotated `v*` tags with `git tag -s`, and the bot commit workflows
-  (`intent-bump-on-merge.yml`, `post-tag-sync.yml`) configure the same SSH
+  signed annotated `v*` tags with `git tag -s`, and the bot commit workflow
+  (`post-tag-sync.yml`, and `version-at-land.yml` once flipped to `--push`)
+  configures the same SSH
   signing helper before committing. The required Actions secret is
   `RELEASE_BOT_SSH_SIGNING_KEY`; it is a file-backed OpenSSH private key backed
   up outside the repo. The workflow uses `25807+danielraffel@users.noreply.github.com`
@@ -1010,6 +1046,28 @@ use GitHub-hosted runners by default. macOS routes through the self-hosted
 Do not push empty commits just to churn queued macOS checks. Cancel
 superseded SHAs, rebase or push only when a PR needs current `main`, and
 wait unless a check has actually failed.
+
+### Gotcha: `.shipyard.local` can silently route the macOS lane off the gate
+
+`.shipyard/config.toml` declares `[targets.mac] backend = "local"`, and
+Shipyard merges the gitignored `.shipyard.local/config.toml` on TOP of it. A
+`[targets.mac]` block there overrides the backend — and the failure does not
+look like a misconfiguration, it looks like a hang: `shipyard status` reports
+`mac: cloud`, shipyard watches a redundant GitHub-hosted run and times out at
+3600s, and the required `macos` check (posted ONLY by the local runner) never
+appears. That is why the block in Pulp's own `.shipyard.local/config.toml` is
+commented out and annotated `DISABLED 2026-07-09`.
+
+**A missing `.shipyard.local/` is the CORRECT state, not a gap** — the repo
+config's local mac target stands on its own, which is how the Mac Studio runs.
+Do not "fix" a fresh worktree by copying a config in; that is what causes the
+reroute. In particular never `cp -R` over `.shipyard.local/` — `config.toml` is
+gitignored but `config.toml.example` next to it is TRACKED, so a recursive copy
+clobbers a tracked file.
+
+`tools/scripts/gates.sh` runs `shipyard_local_check.py` as an advisory that
+reports an active non-local mac override before you push. It is read-only by
+design: it never copies or repairs, because the repair instinct is the hazard.
 
 `coverage.yml`'s macOS leg resolves its `runs-on` via
 `resolve_runs_on.py --deny-labels pulp-build,pulp-build-vm`: a coverage
@@ -3887,6 +3945,44 @@ drift; humans run `shipyard update` to apply.
   PR's macOS lane was cancelled by the wedge, even after `rescue` the
   PR may need a fresh push to retrigger the version-skill-sync check
   too.
+- **launchd agent exit 75 + "lease denied … rc=2" → check the plist PATH
+  for `/usr/sbin` FIRST.** Before suspecting tart, network, or auth. A
+  runner agent crash-looping under `KeepAlive` with last-exit **75**
+  (`EX_TEMPFAIL`) and `lease denied … rc=2` in its log, with no VM ever
+  booting and jobs queueing forever, is this: tartci's `host_profile.py`
+  shells bare `sysctl` (which lives at **`/usr/sbin/sysctl`**) to read
+  `hw.ncpu` / `hw.memsize`. launchd agents run a minimal PATH, and the
+  generated plist's PATH omits `/usr/sbin` — so `sysctl` raises
+  `FileNotFoundError`, `host_profile.py` exits 1, the lease governor
+  cannot compute a memory budget, and it denies every lease (failing
+  CLOSED, which is correct). The lane is silently dead. Diagnose and fix:
+
+  ```bash
+  launchctl list | grep tart-runner        # last-exit 75 = this bug
+  # inspect EnvironmentVariables:PATH in the plist; if /usr/sbin is absent:
+  # append ":/usr/sbin:/sbin", then reload the agent.
+  ```
+
+  After the fix the agent goes exit 75 → 0 and logs `lease acquired …
+  cores=6 mem_mb=8192`. Agents that already carry `/usr/sbin` are exit 0;
+  the failing set is exactly the `/usr/sbin`-missing set.
+- **Non-interactive `ssh host 'cmd'` does not source `.zprofile`,** so it
+  lacks `/opt/homebrew/bin` and reports Homebrew tools as missing — this
+  produces a FALSE "tart is not installed" census result. Use
+  `ssh host 'zsh -lc "…"'` for any host census.
+- **`TART_HOME` is per-host BY DESIGN — never default it.** Real VM homes
+  differ intentionally: m3 = `/Volumes/Workshop/VMs` (external SSD), m1 and
+  m5 = `~/VMs` (internal SSD). A default is an undeclared name wearing a
+  trench coat: on a VM host an unset `TART_HOME` must be a **loud hard
+  error naming the fix**, never a guess. The repo holds RULES; the host
+  holds VALUES — per-host truth belongs in the tartci host profile, not a
+  repo constant. `tools/ci/*.sh` currently carry contradictory hardcoded
+  defaults (`/Volumes/Workshop/VMs` in the tart-runner / run-job /
+  provision / runner-linux scripts, `$HOME/VMs` in `reap-stray-vms.sh` and
+  `setup-ci-host.sh`). The worst failure mode: on m3, `reap-stray-vms.sh`
+  defaults to `$HOME/VMs`, which is **empty** on that host — so the reaper
+  inspects the wrong universe, reaps nothing, and exits 0 reporting
+  success. A silent permanent no-op. Always pass `TART_HOME` explicitly.
 
 ### Anti-pattern (legacy)
 
@@ -4058,17 +4154,43 @@ Key facts:
 
 Companion plan: `planning/2026-05-19-ci-optimization-plan.md`.
 
-## macOS runner routing — local primary, GitHub-hosted overflow
+## macOS runner routing — local primary, local-VM overflow
+
+**A routing var describes REALITY; `build.yml`'s `||` default is only the
+fallback.** Read the live variable before reasoning about where a leg runs —
+the workflow's literal default is what happens when the var is *unset*, not
+what happens. Both are documented below, in that order.
+
+### Live routing state (verified 2026-07-16)
+
+| Variable | Value | Lane |
+|---|---|---|
+| `PULP_LOCAL_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build","pulp-build-studio"]` | bare-metal Studios (m3) — the required gate |
+| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]` | JIT VMs (m1 + m5) |
+| `PULP_RELEASE_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build-vm-release"]` | JIT VMs (m1 + m5) |
+| `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build-vm-release"]` | JIT VMs |
+| `PULP_COVERAGE_MACOS_RUNS_ON_JSON` | `"macos-15"` | GitHub-hosted |
+| `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | `3` | busy count that triggers overflow |
+| `PULP_LOCAL_LINUX_PRIMARY_RUNS_ON_JSON` | `[…,"pulp-build-linux","pulp-host-macstudio"]` | capacity 1 |
+| `PULP_LOCAL_LINUX_OVERFLOW_RUNS_ON_JSON` | `[…,"pulp-build-linux","pulp-host-m5"]` | capacity 1 |
+
+So macOS overflow lands on **local JIT VMs**, not the cloud. Namespace vars are
+deliberately UNSET for cost control — do not treat them as an available lane.
+
+If `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` is unset, `build.yml`'s default
+takes over and overflow goes to GitHub-hosted `["macos-15"]`. That default is
+the safety net, not the design.
 
 The `resolve-provider` job in `build.yml` decides per-run where each
 `Build and Test` macOS leg runs:
 
-- **Local first.** While the local self-hosted Mac has spare capacity
-  the macOS leg routes to it (`PULP_LOCAL_MACOS_RUNS_ON_JSON`).
-- **Overflow to free GitHub-hosted `macos-15`.** When the local Mac is
-  saturated the leg routes to `macos-15` instead. The repo is public, so
-  GitHub-hosted macOS is **free**; overflow costs nothing, it just runs
-  slower than the M1 Max.
+- **Local first.** While the local self-hosted Macs have spare capacity
+  the macOS leg routes to them (`PULP_LOCAL_MACOS_RUNS_ON_JSON`).
+- **Overflow.** When the primary pool is saturated the leg routes to
+  `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` — the local VM pool per the
+  table above.
+  GitHub-hosted `macos-15` is free (the repo is public), so falling back
+  to it costs nothing; it just runs slower.
 - **Capacity-aware (`#3299`).** "Saturated" is decided by real SUPPLY
   first, not just DEMAND. `_count_idle_local_runners()` queries
   `actions/runners` for self-hosted macOS runners that are `online` AND
@@ -4105,6 +4227,49 @@ fast no-op — but a `manifest.json` Skia pin bump changes the expected
 sha, the stamp no longer matches, and the asset is re-fetched. Never
 guard the fetch on "is `libskia.a` present?" alone: a stale local
 library would silently shadow a new pin (pulp #2458 follow-up).
+
+### A JIT lane's IDLE state is indistinguishable from DEAD
+
+**NEVER infer a dead lane from a runner census.** The macOS and Linux VM lanes
+are JIT: a runner registers with GitHub **only while serving one job**, then
+deregisters. So "zero runners carry `pulp-build-vm`" in `actions/runners` is
+**both** the healthy-idle state **and** the dead-lane state. The census cannot
+tell them apart.
+
+This has already caused a real misdiagnosis: a census showed 0 runners carrying
+`pulp-build-vm` / `pulp-build-vm-release`, that was read as "dead labels", and
+three lanes were rerouted onto GitHub-hosted `macos-15` — moving work **off
+healthy VMs**. The supervisors were alive and booting VMs the whole time. The
+reroute was reverted.
+
+- **A label-satisfiability check is the WRONG instrument for a JIT lane.** It
+  would false-alarm every idle night. Satisfiability checks are valid only for
+  **persistent** runners — e.g. the bare-metal `pulp-build-studio` Studios.
+- **The only signal that distinguishes alive from dead on a JIT lane is QUEUE
+  AGE.** If jobs are being served, the lane is alive regardless of the census.
+- **Queue DEPTH is not stall.** 40 queued runs with a 5-minute median age is
+  healthy churn from many concurrent agents.
+- **Do not set a naive age threshold.** Measured healthy baseline (2026-07-16):
+  median queue age 5 min, oldest 31 min, 3 runs >30 min under normal busy load.
+  A ">30 min = broken" alarm fires on a healthy pool.
+
+To check a JIT lane is alive, look host-side (supervisor running, VMs booting)
+rather than at the label:
+
+```bash
+ssh <host> 'zsh -lc "launchctl list | grep tart-runner"'   # last-exit 0 = healthy
+```
+
+### The unifying invariant — no name without a heartbeat
+
+> **A name is trustworthy iff an automated process dereferences it on a
+> schedule and alarms on failure.**
+
+A host registry entry, a test asserting a hostname, a runner label, a
+`TART_HOME` path — each is a name written where it is consumed and dereferenced
+by nothing. Every one of them rots silently and is discovered only during an
+outage. When you add a name to CI config, ask what dereferences it on a
+schedule; if the answer is "nothing", it is already suspect.
 
 The overflow target is `OVERFLOW_MACOS_RUNS_ON_JSON`, which defaults to
 `["macos-15"]`. The repo variable `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`
@@ -4154,6 +4319,10 @@ The recovery rules, learned the hard way:
    blackbook M5 are the usual idle ones; `pulp-m1-*` are often offline).
    If a leg failed on saturation while these sit idle, the
    `gh run rerun` will now claim them (capacity-aware routing, #3299).
+   **This census is meaningful for PERSISTENT runners only.** The JIT VM
+   labels (`pulp-build-vm`, `pulp-build-vm-release`) are absent from it
+   whenever they are idle — that is normal, not an outage. See "A JIT
+   lane's IDLE state is indistinguishable from DEAD" above.
 5. **Batch stuck PRs into one.** When several PRs are wedged on the gate,
    combining them into a single PR (cherry-pick onto one branch) cuts N
    macОС runs to 1 — landed `#3411` (four PRs) this way on one local run.

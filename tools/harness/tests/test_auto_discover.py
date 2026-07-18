@@ -286,19 +286,20 @@ class BrokenAdapterIsSkippedTests(unittest.TestCase):
 class YogaAdapterNoRegressionTests(unittest.TestCase):
     """Yoga must be discovered and classify entries identically to before.
 
-    This is the issue's "Existing PASS/DIVERGE/NO-OP/NOT-IMPL/OOS
-    classification unchanged" criterion.
-
-    The expected status counts here mirror the on-main baseline at
-    sha 189255c2 (yoga harness scaffold landed in #1395).
+    Every yoga catalog entry resolves to a PASS: its evidence reference
+    names a test file that exists and lists tags/names that a TEST_CASE in
+    that file actually declares. SUPPORTED_NO_EVIDENCE is pinned at 0 so a
+    future entry whose evidence link rots (a test renamed or split into
+    another file) is caught here rather than silently downgrading coverage.
     """
 
     EXPECTED = {
-        "total": 53,
-        "pass": 7,
-        "diverge": 28,
+        "total": 56,
+        "pass": 56,
+        "supported_no_evidence": 0,
+        "diverge": 0,
         "no_op": 0,
-        "not_impl": 18,
+        "not_impl": 0,
         "oos": 0,
     }
 
@@ -314,6 +315,7 @@ class YogaAdapterNoRegressionTests(unittest.TestCase):
 
         bucketed = {st: 0 for st in (
             Status.PASS,
+            Status.SUPPORTED_NO_EVIDENCE,
             Status.DIVERGE,
             Status.NO_OP,
             Status.NOT_IMPL,
@@ -324,6 +326,9 @@ class YogaAdapterNoRegressionTests(unittest.TestCase):
 
         self.assertEqual(len(results), self.EXPECTED["total"])
         self.assertEqual(bucketed[Status.PASS], self.EXPECTED["pass"])
+        self.assertEqual(
+            bucketed[Status.SUPPORTED_NO_EVIDENCE],
+            self.EXPECTED["supported_no_evidence"])
         self.assertEqual(bucketed[Status.DIVERGE], self.EXPECTED["diverge"])
         self.assertEqual(bucketed[Status.NO_OP], self.EXPECTED["no_op"])
         self.assertEqual(bucketed[Status.NOT_IMPL], self.EXPECTED["not_impl"])

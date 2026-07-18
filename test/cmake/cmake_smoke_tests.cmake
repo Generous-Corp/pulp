@@ -247,6 +247,46 @@ if(Python3_Interpreter_FOUND)
         LABELS "import;fidelity"
         TIMEOUT 60)
 
+    # Geometry-parity tool (tools/import-design/layout_parity.py): diffs a
+    # design's own solved rects against Pulp's laid-out view tree, by node id.
+    # Covers the parent-relative attribution + per-parent clustering that turn a
+    # dropped alignment into ONE finding naming the parent instead of a wall of
+    # near-identical lines. Pure stdlib — no PIL, no numpy, so it never skips.
+    add_test(NAME import-layout-parity
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_layout_parity.py)
+    set_tests_properties(import-layout-parity PROPERTIES
+        LABELS "import;fidelity"
+        TIMEOUT 60)
+
+    # End-to-end layout-parity gate: .fig → import → render → dump → parity.
+    # Proves pulp-import-design reproduces the layout the design specifies, node
+    # for node, against Figma's own solved rects — no pixels, no thresholds.
+    #
+    # Gated on PULP_HAS_SKIA because --dump-layout implies --validate, which
+    # RENDERS, and layout depends on text measurement: without Skia, text is
+    # measured by character-width estimation, so the geometry is a different
+    # quantity and parity against it would be noise. A skip that names the
+    # dependency beats a gate that silently compares the wrong thing.
+    # PROJECT_IS_TOP_LEVEL, not `if(TARGET pulp-import-design)`: test/ is added
+    # before tools/import-design/, so the target does not exist yet at this
+    # point and a TARGET check silently registers nothing. It is the same
+    # condition the root CMakeLists uses to add the tool at all, and
+    # $<TARGET_FILE:> below resolves at generate time, by which point it exists.
+    if(PULP_HAS_SKIA AND PROJECT_IS_TOP_LEVEL)
+        add_test(NAME import-layout-parity-gate
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test_layout_parity_gate.py
+                    --tool $<TARGET_FILE:pulp-import-design>
+                    --fig ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/imports/fig/synthetic.fig
+                    --decode ${CMAKE_SOURCE_DIR}/tools/import-design/fig_decode.mjs
+                    --parity ${CMAKE_SOURCE_DIR}/tools/import-design/layout_parity.py)
+        set_tests_properties(import-layout-parity-gate PROPERTIES
+            SKIP_RETURN_CODE 77
+            LABELS "import;fidelity;fig"
+            TIMEOUT 180)
+    endif()
+
     # Headless Figma REST exporter — font-capture + content-hash unit test.
     add_test(NAME figma-rest-export
         COMMAND ${Python3_EXECUTABLE}
@@ -272,6 +312,15 @@ if(UNIX)
     add_test(NAME inject-claude-prefs-hook
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_inject_claude_prefs_hook.sh)
     set_tests_properties(inject-claude-prefs-hook PROPERTIES TIMEOUT 15)
+
+    # tool-registry-reminder.sh — the PostToolUse hook that catches an agent
+    # hand-rolling a tool the registry already lists. Hermetic (synthetic tool
+    # payloads). Asserts it fires on the real incident's signature and, just as
+    # importantly, stays silent inside the registered tools themselves — a noisy
+    # hook gets ignored, and an ignored hook is worse than none.
+    add_test(NAME tool-registry-reminder-hook
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_tool_registry_reminder_hook.sh)
+    set_tests_properties(tool-registry-reminder-hook PROPERTIES TIMEOUT 15)
 
     # governed-build.sh — the shipyard local-backend build wrapper. Hermetic
     # (stub tartci): asserts bounded parallelism with no tartci, lease

@@ -19,14 +19,6 @@
 name: sandbox-e2e
 
 on:
-  pull_request:
-    paths:
-      - "tools/cli/**"
-      - "experimental/pulp-rs/**"
-      - ".claude/commands/**"
-      - ".claude-plugin/**"
-      - "tools/sandbox-e2e/**"
-      - ".github/workflows/sandbox-e2e.yml"
   push:
     branches: [main]
     paths:
@@ -39,6 +31,9 @@ on:
   # Let release workflows call this as a pre-publish gate.
   workflow_call:
 
+  schedule:
+    - cron: '41 5 * * *'  # nightly de-starve safety net (see planning/fleet/2026-07-17-ci-destarve-analysis.md)
+  workflow_dispatch: {}
 permissions:
   contents: read
 

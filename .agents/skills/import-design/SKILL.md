@@ -7,6 +7,102 @@ description: Import designs from Figma, Stitch, v0, Pencil, React Native, or Cla
 
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
+## TOOLS THIS SKILL ALREADY SHIPS — reach for these before hand-rolling (read this first)
+
+Every one of these is documented further down this file. That was not enough:
+an agent verifying an import hand-rolled PIL crop scripts instead, because the
+guidance sat ~1,000 lines deep and a sibling skill told it to use PIL. If you
+are about to write a script that opens two PNGs and diffs them, stop — it
+exists:
+
+| Need | Tool |
+|---|---|
+| **"It looks off" → which node, and by how many px** | `pulp-import-design … --validate --dump-layout L.json` then `python3 tools/import-design/layout_parity.py L.json` |
+| **"It looks wrong but nothing failed" → was a property DROPPED?** | `node tools/import-design/material_audit.mjs --fig d.fig --frame F` — run this FIRST on any fidelity complaint |
+| Labeled N-panel comparison montage | `python3 tools/import-design/montage.py --out cmp.png ...` |
+| Per-widget fidelity audit + JSON report | `python3 tools/import-design/fidelity_diff.py --render r.png --scene scene.pulp.json --assets-dir DIR --frame-reference src.png` |
+| Side-by-side + heatmap + top offending regions | `python3 tools/scripts/figma_import_diff.py` — use after EVERY codegen change |
+| Render an import at the design's own canvas size | `tools/scripts/render-figma-import.sh` |
+| Masked per-region diff vs a reference | `python3 tools/import-validation/diff_against_reference_regions.py` |
+| Re-import regression vs a golden | `python3 tools/import-validation/golden_regression.py` |
+| Rasterize Figma vector frames | `python3 tools/import-design/figma_rasterize_vector_frames.py` |
+
+The full, machine-checked list is **`docs/status/tools.yaml`** (with inputs,
+outputs, and availability for each), and its digest is generated into CLAUDE.md
+so it is always in context. The table above is the fast path for this skill's
+own work; the registry is the source of truth, and a coverage sweep in
+`tools/scripts/tools_registry_check.py` fails CI if a tool lands here without
+an entry — so nothing can go quiet the way `fidelity_diff.py` did.
+
+**Check geometry BEFORE you look at pixels.** A `.fig` carries Figma's
+already-SOLVED rect for every node — auto-layout children included — so where
+each node belongs is a known number, not something to infer from a screenshot.
+`--dump-layout` writes Pulp's laid-out rects plus the design's own (as a
+`<stem>.geometry.json` sibling), and `layout_parity.py` joins them by node id:
+
+```bash
+pulp-import-design --from fig --file d.fig --frame 'Main' --output ui.js \
+    --validate --screenshot-backend skia --dump-layout /tmp/layout.json
+python3 tools/import-design/layout_parity.py /tmp/layout.json   # exit 1 = findings
+```
+
+`--validate` writes its render PNG **beside `--output`** (e.g. `ui.js` →
+`<name>-<source>-render.png` in the same directory), not into the CWD — so it no
+longer litters whatever directory you ran it from. Pass `--output` into a temp
+dir to keep artifacts together.
+
+This is pixel-free — no thresholds, no anti-aliasing noise — and it answers the
+question a screenshot cannot: *which* node, off by *how much*, and under which
+parent. Deltas are parent-relative and clustered by parent, so a shifted panel
+is ONE finding rather than one per descendant, and a group of children sharing
+one offset is reported as an alignment/padding drop on the parent by name.
+Unmatched ids are listed as dropped/extra — a completeness check no pixel
+heuristic can match. Reach for this FIRST when a layout looks wrong; the
+montage/heatmap tools tell you *that* something moved, this tells you *what*.
+
+`--gate-px 16` blocks only on displacement above 16px and reports the rest as
+advisory drift — a correct import of the reference design tops out at 12px,
+while a dropped auto-layout contract produces ten findings above 16px. The
+`import-layout-parity-gate` ctest runs the whole pipeline on
+`test/fixtures/imports/fig/synthetic.fig` and is strict (exact parity).
+
+**It validates BOXES, not the ink inside them.** A label whose glyphs are shoved
+to one side of a correctly-placed box, an icon drawn at the wrong scale inside
+right-sized bounds, a colour, a gradient — all invisible to it, by construction.
+This is not hypothetical: an icon-placement change that moved glyphs *within*
+their correct boxes made `fg-icon` findings disappear and layout_parity went
+greener while the render got worse. **Never read a clean layout_parity as "the
+render is right."** It means the boxes are right.
+
+The other half is TWO tools, not one, because they fail differently.
+`material_audit.mjs` counts what the `.fig` DECLARES against what the import
+emits, so it answers "was this dropped?" — deterministically, with no reference
+image. `thumb_parity.py` compares block means against Figma's own raster, so it
+answers "is the colour roughly right?" — and it is blind to anything that
+preserves a region's mean. Reach for the audit first: a property that never
+survived cannot be diagnosed by looking at pixels, and it is the cheaper
+question. Neither proves the render is CORRECT; a human looking at a montage is
+still the final say.
+
+The one thing this design's fg-icon bug proves about all of them: **every checker
+here went green while the icons were visibly broken.** layout_parity said the
+boxes were right — and they were, because the box had collapsed to width 0 and
+the glyph inside it was absolutely positioned, so the finding it *did* report
+(`dx=+6.5 dw=-12`) read as a placement problem rather than the sizing one it was.
+Read a tool's number as the answer to the question it asks, never as "the import
+is fine."
+
+**Free offline ground truth:** every `.fig` is a ZIP containing `thumbnail.png`
+(Figma's own raster of the design) and a `meta.json` whose `render_coordinates`
++ `thumbnail_size` give an EXACT canvas→thumbnail transform — no image
+alignment, no MCP, no REST, no rate limit. Note the thumbnail is ~0.4× (400 px
+wide for a 1004 px design), so it adjudicates layout, colour, and presence —
+NOT glyph-level detail. Do not draw fine conclusions from a 5× upscale of it.
+
+**`--validate` renders at the design's own canvas size** by default. Do not
+pass `--render-size` unless you specifically want a different size; a mismatched
+render and reference makes every similarity score meaningless.
+
 ## LOCAL-FIRST — never start with the REST script when Figma desktop is open (read this first)
 
 The headless REST exporter (`figma_rest_export.py`, used in the steps below) is
@@ -47,6 +143,20 @@ Everything below documents lane (3)'s mechanics because it's the scriptable one,
 but the ordering above governs *which lane to start in*. `figma_rest_export.py`
 mirrors the desktop plugin field-for-field, so a scene from lane (2) or (3) is
 interchangeable downstream.
+
+**There is no lane (4): `pulp import-design --url` cannot import from Figma.**
+Do not reach for `--from figma --url 'https://figma.com/design/…'` — the CLI
+help and docs advertised it for a long time, but it never worked. `--url` is a
+bare unauthenticated `curl -fsSL` (`fetch_url_to_file`) and the CLI has no
+credential flag at all, so figma.com returns **403** for a private file and the
+web app's **HTML shell** for a public one; the shell then dies deep inside
+`choc::json::parse` with an error that looks like a parser bug rather than an
+auth problem. The CLI now rejects figma.com `design/`/`file/`/`proto/` URLs up
+front (`tools/import-design/figma_url.hpp`) and names the lanes above. Note the
+two `--url` flags are **different**: `figma_rest_export.py --url` is real — it
+parses `file-key` + `node-id` out of the link and fetches with a token. The only
+authenticated Figma REST client in the repo is that script; nothing in the C++
+CLI can talk to Figma.
 
 ## Figma → Pulp, faithful (1:1) — THE WORKING LANE (read first)
 
@@ -199,6 +309,62 @@ committed the fixture (this is exactly what reddened a VM runner while the same
 commit stayed green on bare-metal). If you touch `make_synthetic_fig.mjs`,
 regenerate the fixture from the canonical toolchain, but keep the comparison at
 the decoded layer.
+
+**Gotcha - a Figma slider stores a value-driven fill position that can detach
+from the thumb.** A slider component (track + progress fill + round thumb) keeps
+the fill's x/width per-instance; Figma's LIVE component render recomputes the
+fill against the thumb at draw time, but the stored `.fig` (and REST/plugin
+exports of it) only carry the frozen geometry - so an instance can persist a fill
+that floats in a gap away from the thumb, and a faithful render draws a broken
+detached bar. `reconnect_slider_fill` (`core/view/src/design_import.cpp`, run in
+the native codegen arm BEFORE `synthesize_primitive_paths` bakes the width into
+`path_data`) detects the triplet STRUCTURALLY - short wide container,
+near-full-width thin track, shorter thin fill whose color differs from the track,
+round thumb whose height fills the bar; never by layer name - and bridges the
+fill to the thumb ONLY when they are horizontally disjoint. Do not "fix" a
+detached fill by inventing a slider value or by matching on names: the structural
+gap-bridge is the whole intervention, and a fill already touching its thumb (plus
+track+thumb-only faders and every non-slider row) is left exactly as stored.
+Covered by the `[slider]` cases in `test_design_import_codegen.cpp`.
+
+**Gotcha - a "universal" IR fix is only universal across the emit paths that
+carry it.** `normalize_border_shorthand` splits `style.border` into
+`border_color`/`border_width` for every lane, but the border only PAINTS if the
+node's emit path calls `setBorder`. `design_codegen.cpp` has TWO native-frame emit
+paths: `emit_js_container` (recognized containers) and `emit_js_generic_frame`
+(the fall-through for a childless node whose kind is neither
+container/widget/vector/image/text — a v0/claude/stitch `button`/`canvas`/`input`
+div). `emit_js_generic_frame` emitted background/gradient/corner-radius but NOT
+setBorder, so a bordered generic-frame node silently lost its stroke on EVERY
+lane even though the shorthand was split correctly. When you add a style emit to
+one frame path, add it to BOTH — and verify a real lane, not a grep: import
+`test/fixtures/v0-dev/audio-control-panel.tsx` and count declared-vs-emitted
+(`setBorder`/`setBackgroundGradient`/`setCornerRadius`) in the output JS. A
+grep-level "the field reaches the IR" check misses a drop that lives one layer
+down in codegen.
+
+**Gotcha - the v0 TSX parser does not resolve `style={constObject}`
+references.** `extract_jsx_style_body` (`design_import_v0_tsx.cpp`) resolves only
+inline `style={{...}}` object literals. A hand-authored/v0 pattern that hoists
+the style into `const panelStyle = {...}` and passes `style={panelStyle}` is
+dropped whole — on `audio-control-panel.tsx` the root panel loses its
+background, padding, border, and radius. Resolving it means extracting
+`const …Style = {…}` decls and threading a registry through
+`apply_v0_jsx_attribute`; treat it as a focused parser change with its own tests,
+not a one-liner.
+
+**Gotcha - the HTML regex fallback (`parse_stitch_html`, shared by the claude
+lane via `parse_claude_html`) must skip non-visible elements.** Its
+`<([a-z][a-z0-9]*)[^>]*>([^<]*)</\1>` regex matches ANY tag, so a `<script>` body
+(a Stitch `tailwind.config = {...}` block, a Claude bundler placeholder) or a
+`<style>` sheet became a visible text LABEL — raw JS/CSS painted into the
+imported UI. The fix filters a `kNonVisibleTags` set
+(script/style/noscript/template/head/title/meta/link/base). When you touch this
+fallback, verify with a real fixture: import
+`test/fixtures/imports/stitch/2025.04/code.html` and confirm the element count
+drops (the `<script>` label is gone) while the visible `<div>` text survives.
+Note this is the LOSSY fallback — a JSON-IR or runtime-DOM claude/stitch input
+never reaches it; it fires only on raw non-JSON HTML.
 
 ### Design contract (`pulp design compile`) — the token/widget allowlist
 
@@ -819,6 +985,44 @@ mind when touching this:
   overlay lane's `kindFromName` (`resolve-control.ts`, P7) shares the same
   whole-word convention for its own (InteractiveElementKind) vocabulary.
 
+### Component content is designer art — the `audio_widget: "none"` opt-out
+
+Name-token recognition must NEVER fire inside a component's own content: a
+layer literally named "knob base" / "knob ring" IS the designer's knob art, and
+promoting it paints Pulp's built-in silver knob over the design. The contract
+(same across lanes):
+
+- **The explicit opt-out**: an envelope node with `audio_widget: "none"` is a
+  real statement, not an absence — `parse_ir_audio_widget`
+  (`design_ir_json.cpp`) treats a literal `"none"` as *explicit* and skips
+  `detect_node_audio_widget` for that node. Only `"none"` opts out; unknown
+  strings still fall through to detection. The recognition resolver still runs
+  afterwards (it is keyed on component identity, not names), so a matched
+  library component becomes a real widget regardless.
+- **The `.fig` lane** (`tools/import-design/fig/scene.mjs`) expands INSTANCE
+  nodes into their master SYMBOL subtree (override guidPaths resolve by guid OR
+  `overrideKey`; multi-segment paths forward into nested instances), stamps the
+  instance + every expanded node `"none"`, and emits
+  `figma.component_key` / `main_component_name` from the master.
+- **The REST lane** (`figma_rest_export.py::walk`) stamps `"none"` on (1) any
+  INSTANCE / COMPONENT and its whole subtree — identity comes from the /nodes
+  `components` + `componentSets` maps, preferring the SET key (that is what the
+  resolver tables are keyed by); (2) any DETACHED copy — a widget-named frame
+  that directly owns raw shapes (`_owns_shape_art`) — one drawn widget whose
+  parts are art; and (3) any widget-named CONTAINER it declined to promote —
+  the pin matters because asset capture can collapse child containers into leaf
+  images, and the C++ heuristic re-run on that DEGRADED envelope would
+  re-promote the parent without it. Name promotion survives only for EMPTY /
+  text-only placeholder frames, where there is no art to destroy.
+- **Known asymmetry (follow-up)**: the TS plugin lane (`extract.ts`) and the
+  C++-side detect on `.fig` DETACHED copies do not stamp the opt-out yet, so a
+  detached knob's shape leaves can still be name-promoted there. Fix belongs in
+  the shared detect gate or per-lane stamping — mirror the REST rules.
+- Pinned by: `test_figma_rest_export.py` (instance/detached/pin cases),
+  `fig.test.mjs` (expansion + opt-out contract), and the
+  `explicit audio_widget 'none' suppresses name-based widget detection` case in
+  `test_design_import_sources.cpp` (with a promoted control sibling).
+
 ### KEY-based recognition + the recognition-resolver merge module
 
 NAME-token recognition (above) is a *fallback*. The AUTHORITATIVE recognition
@@ -863,12 +1067,15 @@ SEPARATE mechanism from the 3-lane name-token vocabulary; do not conflate them.
   instance that matched but was not already recognized. This is the lane that
   turns a pixel-faithful-but-0-controls third-party design (the live Ink &
   Signal "NumberBox" case) into a wired one.
-- **The TS plugin (`extract.ts` → `widgetKindByLibraryKey`) and the Python REST
-  lane (`figma_rest_export.py`) bake recognition at CAPTURE time** for the
-  built-in library only. They are NOT yet wired to a user manifest (the TS lane
-  runs in the Figma sandbox; feeding it a user manifest needs plumbing through
-  the plugin UI). **Follow-up:** accept the user manifest in those two lanes too.
-  Until then, the C++ CLI lane is the single source for user-manifest recognition.
+- **The TS plugin (`extract.ts` → `widgetKindByLibraryKey`) bakes recognition
+  at CAPTURE time** for the built-in library only; it is NOT yet wired to a
+  user manifest (it runs in the Figma sandbox; feeding it a manifest needs
+  plumbing through the plugin UI). **The Python REST lane no longer bakes
+  widget kinds for components at all** — it emits each instance's
+  `figma.component_key` / `main_component_name` (from the /nodes `components` +
+  `componentSets` maps, SET key preferred) and lets the C++ resolver do all
+  key-based recognition, so `--recognition-manifest` works for URL imports.
+  **Follow-up:** accept the user manifest in the TS lane too.
 - **Never-silent-knob (P7) holds.** A component instance present in the design
   but matched by NO source is NEVER guessed into a kind — `apply_recognition_resolver`
   collects it into `UnmatchedComponent[]`, which the CLI surfaces as an
@@ -1592,6 +1799,21 @@ Gotchas:
   to skin, and it falls through to the default/standard knob. To get a
   captured-art sprite knob you need the **figma-plugin "Export to Pulp"**
   envelope (e.g. the ELYSIUM `.pulp.zip`), which captures the disc PNG.
+- The knob's `asset_path` is a **RUNTIME** path, not build scratch. When the
+  disc carries a baked-in indicator (`knob_ind_r_out`), `enrich_imported_image_
+  asset_metadata` re-encodes a *cleaned* disc and repoints `asset_path` at it —
+  and that path is serialized into DesignIR JSON and baked verbatim into
+  codegen (`setKnobSpriteStrip('<abs path>')`), then loaded when the SHIPPED
+  plugin's editor opens. So it must outlive the import process: write derived
+  assets to `default_asset_cache_directory()` (`PULP_IMPORT_ASSET_CACHE`, then
+  a per-user cache dir), NEVER `fs::temp_directory_path()`. A temp-hosted
+  cleaned disc survives local testing and then silently unskins the knob after
+  a temp sweep or reboot, with zero diagnostics — the failure surfaces on a
+  customer's machine, far from the import. Key derived filenames by **sha256**
+  of the content (`pulp::runtime::sha256_hex`), like `asset_id_for()` and
+  `IRAssetRef::content_hash`; `std::hash` is implementation-defined and
+  unstable across runs and compilers. Note `--asset-cache` currently steers
+  only the manifest lane; the cleaned-disc write follows the env var / default.
 - Validate turning headlessly: render the imported knob at value 0.0 / 0.5 /
   1.0 with `pulp-screenshot` and confirm the white notch sweeps
   lower-left → up → lower-right. The engine unit tests
@@ -1995,7 +2217,7 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
 - Detection is strict (all-of fingerprint, 95% min-confidence): filename `DESIGN.md` + `---` frontmatter fence + `name:` key + at least one of `colors`/`typography`/`rounded`/`spacing`/`components`. Generic Jekyll/Hugo blog posts will not match.
 - Diagnostics: structured `[severity] code at path (line:col): message` on stderr. Exit codes — 0 OK, 1 usage/write, 2 detect-only no match, 3 parse error (malformed YAML, duplicate `##` section heading), 4 unsupported.
 - **Format spec pin: tag `0.3.0`** (`paws-and-paths` fixture is byte-identical across 0.1.1→0.3.0, so only the pin strings move — provenance/NOTICE/licensing/compat.json). Frontmatter format coverage tracking 0.3.0: (1) `colors.*` values are **any valid CSS color**, not just hex — `looks_like_css_color()` accepts hex (3/4/6/8-digit), named keywords, and functional `rgb()/hsl()/hwb()/oklch()/oklab()/lch()/lab()/color-mix()`; a real non-color value still emits `color-shape`. (2) `colors`/`rounded`/`spacing` nest to **arbitrary depth** — `walk_color_node`/`walk_dimension_node` recurse and key on the **dot-joined** path (`background.light`, not dashed), matching the `{colors.background.light}` reference syntax that `lookup_color`/`lookup_dimension` already resolve. (3) `spacing` accepts a **bare number** (`base: 8` → 8px) because `parse_dimension`'s unit is optional. (4) **Unknown top-level keys warn** (`unknown-key`, warning-not-error) — catches typo'd keys like `color:`/`typgrphy:`. Numeric/boolean component scalars (`fontWeight: 600`, `enabled: true`) already flow through as strings via yaml-cpp coercion.
-- **Frontmatter-less bodies** (Stitch / Brand-Kit exports authored as prose): when a file has no `---` frontmatter, `parse_designmd` falls back to scanning Markdown body sections so it doesn't import an empty token set. It reads `name: value` list items and `| name | value |` table rows under `## Colors` (color tokens), `## Spacing` (`spacing-*` dims), `## Border Radius`/`## Rounded` (`rounded-*` dims), and `## Shadows`/`## Elevation` (`shadow-*` strings). Table header/separator rows are skipped by requiring the value cell to be a real color/dimension/shadow. A `### Light Mode`/`### Dark Mode` subsection under `## Colors` routes to the bare name (light/default) or a `<name>.dark` suffix (dark) — the **same multi-mode convention the Figma plugin uses** (`tools/figma-plugin/src/tokens.ts`), so dark themes survive into the flat token maps. Emits a `body-tokens` info diagnostic when it recovers any.
+- **Markdown body sections are ALWAYS scanned** — with or without frontmatter. `parse_designmd` reads `name: value` list items and `| name | value |` table rows under `## Colors` (color tokens), `## Spacing` (`spacing-*` dims), `## Border Radius`/`## Rounded` (`rounded-*` dims), and `## Shadows`/`## Elevation` (`shadow-*` strings). **Frontmatter wins on conflict** (compared by normalized name, since frontmatter keys are dot-joined and case-preserving while body keys are lowercased and dash-joined); the body only fills gaps. This used to run **only** when a doc had no `---` frontmatter, which meant adding frontmatter to a prose-authored DESIGN.md silently dropped every body token — total and invisible for `## Shadows`, whose frontmatter key did not exist. `shadows:` is now a real frontmatter group. Table header/separator rows are skipped by requiring the value cell to be a real color/dimension/shadow. A `### Light Mode`/`### Dark Mode` subsection under `## Colors` routes to the bare name (light/default) or a `<name>.dark` suffix (dark) — the **same multi-mode convention the Figma plugin uses** (`tools/figma-plugin/src/tokens.ts`), so dark themes survive into the flat token maps. Emits a `body-tokens` info diagnostic when it recovers any.
 - See `docs/reference/imports/designmd.md` for the full reference (supported subset, reference-resolution rules, attribution).
 
 **v0.dev runtime-import parser (Phase 6.6.2)**:
@@ -2698,14 +2920,24 @@ After generating Pulp code, ALWAYS validate by comparing with the source design:
    ```bash
    python3 tools/import-design/fidelity_diff.py --render render.png --scene scene.pulp.json --frame-reference source.png
    ```
-   > **Do not treat `--validate`'s exit code as a gate.** It prints `PASS` or
-   > `NEEDS REVIEW` but **exits 0 either way**, at any similarity — a 0%-similar
-   > render still exits 0. Read the printed similarity (and the diff image); never
-   > infer success from `$?`.
+   > **`--validate` alone is advisory.** It prints `PASS` or `NEEDS REVIEW` but
+   > **exits 0 either way**, at any similarity — a 0%-similar render still exits
+   > 0. Read the printed similarity (and the diff image); never infer success
+   > from `$?` unless you asked for a gate.
+   >
+   > **To gate on it, add `--fail-below <pct>`** — the run then exits 5 when the
+   > similarity is under `<pct>`. The value is a percentage 0-100 (`85`, not
+   > `0.85`; a fraction is rejected rather than silently treated as 0.85%, which
+   > would never fire). It requires `--reference`, since there is otherwise
+   > nothing to compare against:
+   > ```bash
+   > pulp import-design --from X --file input \
+   >     --validate --reference source.png --fail-below 85
+   > ```
 
 4. **Review the diff image** — red highlights show differences
 
-5. **Iterate if needed** — adjust the generated code and re-render until similarity is acceptable (>85%)
+5. **Iterate if needed** — adjust the generated code and re-render until similarity is acceptable (>=85%, the shared default in `pulp::view::kDefaultSimilarityThreshold`)
 
 **Always show comparisons as a LABELED montage** — `tools/import-design/montage.py` stacks N renders into one image with a titled bar above each panel (labels ON by default), so a reference-vs-render(s) comparison is self-documenting (you can tell which panel is which without an external caption — a bare montage gets misread):
 ```bash
@@ -3225,6 +3457,45 @@ CLI surface:
 - `<name>.defaults.json` diagnostic written alongside `shortcuts.json` showing accepted candidates + collisions
 
 What's NOT in Phase A: Pulp-framework defaults for the built-in `SettingsPanel` Audio/MIDI sub-tabs (`Cmd+Opt+A` / `Cmd+Opt+M`). Phase B follow-up — needs `TabPanel` select-tab JS API + standalone-only emission gate. Spec: `planning/2026-05-16-default-keyboard-shortcuts.md`.
+
+## Gradient paints — the transform is inverted, and only linear survives
+
+`scene.mjs` lowers a Figma `GRADIENT_LINEAR` paint to a CSS
+`linear-gradient(...)` string that `SvgPathWidget` / `setBackgroundGradient`
+paints. Four things about that pipeline are non-obvious, and three of them fail
+SILENTLY — the render just looks subtly wrong rather than erroring.
+
+- **Figma's paint `transform` maps the node's box INTO gradient space.** The
+  ramp runs (0,0)→(1,0) in gradient space, so the axis you want is the
+  **inverse** image of those points. Using the matrix forward renders every
+  gradient **180° flipped** — highlights light from below — and nothing warns
+  you. `gradientPaintToCss` inverts it; the guard is the `fig.test.mjs` case
+  "the paint transform is inverted, so a top→bottom ramp is not flipped".
+- **Scale the axis into PIXEL space (×w, ×h) before taking its angle.** A
+  normalized-space `atan2` is wrong on any non-square box.
+- **Only linear is expressible.** `parse_svg_linear_gradient`
+  (`svg_path_widget.cpp`) matches on the literal `linear-gradient(`, so RADIAL /
+  ANGULAR / DIAMOND have no lowering even though `Canvas` itself has
+  `set_fill_gradient_radial`. They keep flattening to the mean stop colour and
+  keep their `gradient-approximated` diagnostic. Emitting a radial as a linear
+  would silently paint the wrong gradient — worse than an honest approximation.
+- **The widget's gradient line is the box's HALF-DIAGONAL, not the CSS
+  gradient-line length**, and Figma's axis may start/end outside the box. So an
+  angle + the raw stops is still wrong on the ramp's extent; the stops are
+  resampled onto the widget's own axis.
+
+`setSvgFill` and `setSvgFillGradient` do **not** race: the widget prefers the
+gradient and falls back to `fill_color_` only when the string won't parse, so
+carrying both is a safety net and emission order cannot decide the paint.
+
+Whatever paint moves onto a synthesized path must be **cleared off the node's
+own background** (`design_import.cpp`), or the frame paints a gradient/solid
+RECTANGLE behind the circle — the stray box behind a knob.
+
+**Counting `gradient-approximated` is not a fidelity metric.** The warnings are
+per-INSTANCE, so a handful of distinct paints in a symbol master reports as
+dozens (SmallTriaz2: 80 warnings from 9 distinct paints). Judge the fix by the
+distinct nodes and the pixels, not the count.
 
 ## Figma-plugin lane — failure modes + fixes (2026-05)
 

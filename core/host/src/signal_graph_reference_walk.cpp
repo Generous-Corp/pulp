@@ -130,21 +130,22 @@ void SignalGraph::run_reference_walk_(
                 }
                 continue;
             }
-            if (dl.delay_samples <= 0 || dl.ring.empty()) {
+            if (dl.delay_samples <= 0 || !dl.state || dl.state->ring.empty()) {
                 for (int i = 0; i < num_samples; ++i) dst[i] += src[i];
             } else {
-                const int ring_size = (int)dl.ring.size();
+                auto& state = *dl.state;
+                const int ring_size = (int)state.ring.size();
                 const int D = dl.delay_samples;
-                int wp = dl.write_pos;
+                int wp = state.write_pos;
                 int rp = wp - D;
                 if (rp < 0) rp += ring_size;
                 for (int i = 0; i < num_samples; ++i) {
-                    dl.ring[(size_t)wp] = src[i];
-                    dst[i] += dl.ring[(size_t)rp];
+                    state.ring[(size_t)wp] = src[i];
+                    dst[i] += state.ring[(size_t)rp];
                     if (++wp == ring_size) wp = 0;
                     if (++rp == ring_size) rp = 0;
                 }
-                dl.write_pos = wp;
+                state.write_pos = wp;
             }
         }
 
@@ -372,7 +373,8 @@ void SignalGraph::run_reference_walk_(
 
                             const float* src = edge.source_runtime->output_ptrs[sport];
                             auto& dl = cg->connection_delays[ci];
-                            if (dl.delay_samples <= 0 || dl.ring.empty()) {
+                            if (dl.delay_samples <= 0 || !dl.state
+                                || dl.state->ring.empty()) {
                                 for (int i = 0; i < num_samples; ++i) {
                                     const float value = map_modulation_sample(c, src[i]);
                                     if (c.automation_mix == AutomationMix::Replace) {
@@ -384,15 +386,16 @@ void SignalGraph::run_reference_walk_(
                                     }
                                 }
                             } else {
-                                const int ring_size = (int)dl.ring.size();
+                                auto& state = *dl.state;
+                                const int ring_size = (int)state.ring.size();
                                 const int D = dl.delay_samples;
-                                int wp = dl.write_pos;
+                                int wp = state.write_pos;
                                 int rp = wp - D;
                                 if (rp < 0) rp += ring_size;
                                 for (int i = 0; i < num_samples; ++i) {
-                                    dl.ring[static_cast<size_t>(wp)] = src[i];
+                                    state.ring[static_cast<size_t>(wp)] = src[i];
                                     const float value = map_modulation_sample(
-                                        c, dl.ring[static_cast<size_t>(rp)]);
+                                        c, state.ring[static_cast<size_t>(rp)]);
                                     if (c.automation_mix == AutomationMix::Replace) {
                                         dst_values[static_cast<size_t>(i)] = value;
                                         dst.has_replace = true;
@@ -403,7 +406,7 @@ void SignalGraph::run_reference_walk_(
                                     if (++wp == ring_size) wp = 0;
                                     if (++rp == ring_size) rp = 0;
                                 }
-                                dl.write_pos = wp;
+                                state.write_pos = wp;
                             }
                         }
 

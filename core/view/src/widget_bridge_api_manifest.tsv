@@ -282,6 +282,7 @@ setBackgroundPosition	css_style	function	core/view/src/widget_bridge/style_stora
 setBackgroundSize	css_style	function	core/view/src/widget_bridge/style_storage_api.cpp
 setBackgroundGradient	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
 setBoxShadow	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
+addBoxShadow	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
 clearBoxShadow	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
 beginPath	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 drawPath	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp

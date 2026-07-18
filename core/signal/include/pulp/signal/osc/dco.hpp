@@ -181,23 +181,53 @@ public:
     /// approximates.
     double effective_note_hz() const noexcept { return effective_note_hz_; }
     /// Pitch-quantization error in cents: `1200 · log2(realized / f_note_eff)`.
-    /// For integer-N this obeys `|detune| <= |quantization_bound_cents()|`.
+    /// For BOTH schemes this obeys `|detune| <= quantization_bound_cents()`
+    /// whenever the divider is not clamped — integer-N: `f_note_eff < 2·f_clk`
+    /// (the `N ≥ 1` lower clamp); fractional-N: additionally below the `Δ ≤ 2^B−1`
+    /// upper clamp, i.e. roughly `f_note_eff < f_clk`. Both hold for any audio note
+    /// well below the master clock; `quantization_bound_cents()` returns 0 (no
+    /// bound) in the clamp regimes rather than a false one.
     double detune_cents() const noexcept {
         return (realized_hz_ > 0.0 && effective_note_hz_ > 0.0)
                    ? 1200.0 * std::log2(realized_hz_ / effective_note_hz_)
                    : 0.0;
     }
-    /// The worst-case quantization bound in cents for the active scheme.
-    /// Integer-N: `865.617 · f_note_eff / f_clk`, which grows with the note
-    /// (doubles per octave up) and shrinks with a faster clock. Fractional-N:
-    /// `865.617 · f_clk / (2^B · f_note_eff)`, which shrinks with `B` and is
-    /// largest at LOW notes — the opposite note-dependence.
+    /// The worst-case quantization bound in cents for the active scheme — an
+    /// EXACT upper bound on `|detune_cents()|`, not a linearization.
+    ///
+    /// The divider quantizes to the nearest integer, so the fractional part of the
+    /// ideal divider is bounded by ½ LSB; but the resulting error in cents is
+    /// ASYMMETRIC in log-frequency. Rounding the divider DOWN (realized pitch
+    /// HIGHER) detunes MORE than rounding it up by the same ½ LSB, because
+    /// `log2(x/(x-½))` exceeds `log2((x+½)/x)`. The bound is therefore the
+    /// round-down (larger) side, `1200 · log2(x / (x − ½))`, where `x` is the ideal
+    /// divider: `f_clk / f_note` (integer-N) or `2^B · f_note / f_clk`
+    /// (fractional-N). The older linear form `865.617/x` (= `1200 / (2 ln2 · x)`,
+    /// the tangent at ½ LSB) UNDERSTATED exactly the round-down side and was
+    /// violated by any note that rounds down — so it was not a true bound.
+    ///
+    /// The note-dependence is unchanged: integer-N grows with the note (doubles
+    /// per octave up, exact at the bottom), fractional-N is largest at LOW notes
+    /// and shrinks with `B`.
     double quantization_bound_cents() const noexcept {
         if (!(profile_.master_clock_hz > 0.0) || !(effective_note_hz_ > 0.0)) return 0.0;
-        if (profile_.divider_scheme == DcoDivider::integer_n)
-            return 865.617 * effective_note_hz_ / profile_.master_clock_hz;
-        return 865.617 * profile_.master_clock_hz /
-               (static_cast<double>(two_b_) * effective_note_hz_);
+        const double ideal_divider =
+            profile_.divider_scheme == DcoDivider::integer_n
+                ? profile_.master_clock_hz / effective_note_hz_
+                : static_cast<double>(two_b_) * effective_note_hz_ / profile_.master_clock_hz;
+        // A note at/above 2·f_clk drives the ideal divider below ½ LSB, where the
+        // divider clamp — not rounding — governs and the ½-LSB envelope no longer
+        // applies. Report no bound there rather than a false one (unreachable for
+        // any audio note below the master clock).
+        if (!(ideal_divider > 0.5)) return 0.0;
+        // Fractional-N also clamps the tuning word at the TOP (`Δ ≤ 2^B − 1`): as
+        // the note approaches the clock the ideal `Δ` exceeds that and the clamp,
+        // not ½-LSB rounding, governs the realized pitch — so the envelope does not
+        // apply there either. Report no bound rather than a false tiny one.
+        if (profile_.divider_scheme == DcoDivider::fractional_n &&
+            !(ideal_divider < static_cast<double>(two_b_) - 0.5))
+            return 0.0;
+        return 1200.0 * std::log2(ideal_divider / (ideal_divider - 0.5));
     }
 
     /// Fill `out` with the next divider reset intervals, in master clocks, from a

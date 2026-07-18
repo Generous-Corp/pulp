@@ -89,7 +89,12 @@ void WidgetBridge::register_widget_style_background_gradient_api() {
 void WidgetBridge::register_widget_style_box_shadow_api() {
     BridgeApiContext api{engine_};
 
-    register_bridge_function(api, "setBoxShadow", [this](choc::javascript::ArgumentList args) {
+    // setBoxShadow REPLACES the stack; addBoxShadow APPENDS to it. A CSS
+    // shadow list `A, B` lowers to setBoxShadow(A) + addBoxShadow(B), which
+    // keeps a lone setBoxShadow call meaning exactly one shadow — the
+    // pre-existing contract — while letting a multi-layer declaration through
+    // intact. Both take identical args, so they share one parse.
+    auto apply = [this](choc::javascript::ArgumentList args, bool append) {
         auto id = args.get<std::string>(0, "");
         auto ox = static_cast<float>(args.get<double>(1, 0));
         auto oy = static_cast<float>(args.get<double>(2, 2));
@@ -108,7 +113,19 @@ void WidgetBridge::register_widget_style_box_shadow_api() {
             }
         }
         auto* v = id.empty() ? &root_ : widget(id);
-        if (v) v->set_box_shadow(ox, oy, blur, spread, parse_bridge_css_color(hex), inset);
+        if (!v) return;
+        const auto color = parse_bridge_css_color(hex);
+        if (append) v->add_box_shadow(ox, oy, blur, spread, color, inset);
+        else        v->set_box_shadow(ox, oy, blur, spread, color, inset);
+    };
+
+    register_bridge_function(api, "setBoxShadow", [apply](choc::javascript::ArgumentList args) {
+        apply(args, /*append=*/false);
+        return choc::value::Value();
+    });
+
+    register_bridge_function(api, "addBoxShadow", [apply](choc::javascript::ArgumentList args) {
+        apply(args, /*append=*/true);
         return choc::value::Value();
     });
 

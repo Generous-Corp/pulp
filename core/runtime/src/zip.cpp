@@ -1,5 +1,6 @@
 #include <pulp/runtime/zip.hpp>
 #include <miniz.h>
+#include <algorithm>
 #include <cstring>
 
 namespace pulp::runtime {
@@ -60,14 +61,34 @@ std::optional<size_t> parse_gzip_header(const uint8_t* data, size_t size) {
 }
 
 // Decompress a raw DEFLATE stream of unknown decompressed size into a vector.
+// Default ceiling on inflated output. The doubling loop below (and the
+// 32-attempt cap) does NOT bound memory on its own — 32 doublings of even a
+// 64-byte buffer is hundreds of gigabytes — so a small, highly compressible
+// input (a "decompression bomb") could otherwise force a multi-GB allocation
+// and OOM-kill the host. Callers that legitimately need more can raise the
+// cap explicitly. 256 MiB is far above any real gzip payload Pulp handles
+// (design-import bundles, appcast feeds) while making a bomb fail closed.
+constexpr size_t kDefaultMaxInflateOutput = 256u * 1024u * 1024u;
+
+// Grow `result` toward `want` bytes without exceeding `max_output`. Returns
+// false (caller must fail closed) when the buffer is already at the cap and
+// still needs more room — the decompression-bomb signal.
+bool grow_bounded(std::vector<uint8_t>& result, size_t want, size_t max_output) {
+    size_t old_size = result.size();
+    if (old_size >= max_output) return false;
+    result.resize(want > max_output ? max_output : want);
+    return true;
+}
+
 // Used for the gzip path (no zlib header) and as a building block.
-std::optional<std::vector<uint8_t>> inflate_raw(const uint8_t* data, size_t size) {
+std::optional<std::vector<uint8_t>> inflate_raw(const uint8_t* data, size_t size,
+                                                size_t max_output = kDefaultMaxInflateOutput) {
     if (data == nullptr || size == 0)
         return std::nullopt;
 
     std::vector<uint8_t> result;
-    // Heuristic initial size; grows as needed.
-    result.resize(size > 0 ? size * 4 : 64);
+    // Heuristic initial size; grows as needed (bounded by max_output).
+    result.resize(std::min<size_t>(size > 0 ? size * 4 : 64, max_output));
 
     mz_stream stream{};
     stream.next_in = data;
@@ -94,8 +115,10 @@ std::optional<std::vector<uint8_t>> inflate_raw(const uint8_t* data, size_t size
                 mz_inflateEnd(&stream);
                 return std::nullopt;
             }
-            size_t old_size = result.size();
-            result.resize(old_size * 2);
+            if (!grow_bounded(result, result.size() * 2, max_output)) {
+                mz_inflateEnd(&stream);  // decompression bomb — fail closed
+                return std::nullopt;
+            }
             stream.next_out = result.data() + stream.total_out;
             stream.avail_out =
                 static_cast<unsigned int>(result.size() - stream.total_out);
@@ -115,12 +138,13 @@ std::optional<std::vector<uint8_t>> inflate_raw(const uint8_t* data, size_t size
 // can continue past the stream. Required for concatenated RFC 1952 gzip
 // members.
 std::optional<std::vector<uint8_t>> inflate_raw_consumed(
-        const uint8_t* data, size_t size, size_t* consumed_in) {
+        const uint8_t* data, size_t size, size_t* consumed_in,
+        size_t max_output = kDefaultMaxInflateOutput) {
     if (data == nullptr || size == 0)
         return std::nullopt;
 
     std::vector<uint8_t> result;
-    result.resize(size > 0 ? size * 4 : 64);
+    result.resize(std::min<size_t>(size > 0 ? size * 4 : 64, max_output));
 
     mz_stream stream{};
     stream.next_in = data;
@@ -150,9 +174,12 @@ std::optional<std::vector<uint8_t>> inflate_raw_consumed(
             // Need more output room (or we ran out of input prematurely).
             // Doubling output is the right move for MZ_BUF_ERROR; if
             // avail_in is already 0 we'll loop here briefly and the
-            // attempt counter will bound it.
-            size_t old_size = result.size();
-            result.resize(old_size * 2);
+            // attempt counter will bound it. max_output bounds the total so a
+            // decompression bomb fails closed instead of allocating unbounded.
+            if (!grow_bounded(result, result.size() * 2, max_output)) {
+                mz_inflateEnd(&stream);
+                return std::nullopt;
+            }
             stream.next_out = result.data() + stream.total_out;
             stream.avail_out =
                 static_cast<unsigned int>(result.size() - stream.total_out);
@@ -198,7 +225,8 @@ std::optional<std::vector<uint8_t>> gzip_compress(const uint8_t* data, size_t si
     return out;
 }
 
-std::optional<std::vector<uint8_t>> gzip_decompress(const uint8_t* data, size_t size) {
+std::optional<std::vector<uint8_t>> gzip_decompress(const uint8_t* data, size_t size,
+                                                    size_t max_output) {
     // RFC 1952 gzip path — detect via magic bytes 0x1f 0x8b.
     //
     // Loop over concatenated members. RFC 1952 §2.2 permits a gzip file to
@@ -225,8 +253,12 @@ std::optional<std::vector<uint8_t>> gzip_decompress(const uint8_t* data, size_t 
             // payload's length isn't recorded anywhere in the header.
             size_t deflate_consumed = 0;
             const size_t deflate_max = member_max - *header_len - kGzipTrailerSize;
+            // Bound each member by the output budget REMAINING across the whole
+            // file, so concatenated members can't collectively exceed max_output
+            // (a multi-member bomb).
             auto inflated = inflate_raw_consumed(
-                member + *header_len, deflate_max, &deflate_consumed);
+                member + *header_len, deflate_max, &deflate_consumed,
+                max_output - all.size());
             if (!inflated)
                 return std::nullopt;
 
@@ -279,7 +311,11 @@ std::optional<std::vector<uint8_t>> gzip_decompress(const uint8_t* data, size_t 
             return result;
         }
         if (status == MZ_BUF_ERROR) {
-            decomp_size *= 2;
+            // Bound growth so a zlib decompression bomb fails closed instead
+            // of forcing an unbounded allocation.
+            if (decomp_size >= max_output) return std::nullopt;
+            decomp_size = std::min<mz_ulong>(decomp_size * 2,
+                                             static_cast<mz_ulong>(max_output));
             result.resize(decomp_size);
             continue;
         }

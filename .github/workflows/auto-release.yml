@@ -476,6 +476,17 @@ jobs:
           PLUGIN_SHOULD_TAG: ${{ steps.versions.outputs.plugin_should_tag || '0' }}
           SDK_SKIP_BUMP: ${{ steps.versions.outputs.sdk_skip_bump }}
           PLUGIN_SKIP_BUMP: ${{ steps.versions.outputs.plugin_skip_bump }}
+          # Intent-trailer model is LIVE (version-at-land runs --push). A fix/feat
+          # that merged intent-only (no bump yet) has its number assigned by the
+          # bot moments later, so classify-unreleased-range must treat a pending
+          # authored intent as COVERED — not "consumers are stuck" — or it would
+          # false-warn on EVERY intent-only merge. Still --no-merges-scoped, so a
+          # stray intent on a re-sync merge commit, or a fix/feat with NO intent,
+          # correctly still strands. Enabled HERE in the same change as the flip;
+          # enabling it while version-at-land was dry-run would have blinded the
+          # detector (nothing was applying the intent). The pending-intent
+          # liveness alarm covers "intent present but the bot never applied it".
+          PULP_ACCEPT_INTENT_TRAILERS: '1'
         run: |
           set -euo pipefail
 

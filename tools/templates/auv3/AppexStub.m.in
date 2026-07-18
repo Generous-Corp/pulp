@@ -9,12 +9,11 @@
 // class (the AUViewController + AUAudioUnitFactory) from the framework.
 //
 // Don't add factory C functions or AUAudioUnitFactory classes here — they
-// belong in the framework. iPlug2 follows the same pattern (see
-// IPlug/AUv3/IPlugAUv3Appex.m).
+// belong in the framework.
 
 #import <Foundation/Foundation.h>
 
 void Pulp_@PLUGIN_NAME_CSYM@_AUv3_keep_alive(void) {
     // Force the linker to retain this TU + the framework's library
-    // load command. iPlug2 uses the same dummy-function pattern.
+    // load command.
 }

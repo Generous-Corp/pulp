@@ -73,9 +73,44 @@ Example: `pulpgain-pencil-source.png`, `pulpgain-pencil-render.png`, `pulpgain-p
 
 ### Figma
 
-Figma imports are file/URL based at the CLI. Use `fig` for local `.fig` save
-files decoded offline, `figma-plugin` for the Pulp Figma plugin's `.pulp.json`
-/ `.pulp.zip` envelope, or `figma` for raw REST/file JSON:
+**Save a `.fig` and import it locally. It is the best lane, and it is not close.**
+
+In Figma: **File → Save local copy…**, then:
+
+```bash
+pulp import-design --from fig --file design.fig --outline     # list frames
+pulp import-design --from fig --file design.fig --frame "Plugin UI" --output ui.js
+```
+
+| | lane | use when |
+|---|---|---|
+| **1st** | **`--from fig`** (local save file) | **Always, if you can get the file.** No API, no quota, no rate limit, no network, reproducible forever. It also carries the MOST data (see below). |
+| 2nd | Figma desktop MCP | You cannot get a `.fig` — someone else's file, or you only have view access. Metered: as low as **6 calls per _month_** on a View/Collab seat. |
+| 3rd | REST / file JSON | CI, or true headless with a token. Strictest limits; the `/images` render endpoint 429s for minutes on a dense frame. |
+
+**Why the local file wins on fidelity, not just on quota** — a `.fig` is a ZIP
+that carries things the other lanes never see:
+
+- **Vector geometry, pre-flattened.** Booleans resolved and strokes expanded into
+  fillable outlines, so no vector-network evaluation is needed.
+- **Glyph outlines for every text node.** Icon fonts address glyphs by LIGATURE
+  ("lock" → a padlock), so without the font they render as the literal word. The
+  outlines are in the file — icons render with no font installed, and text whose
+  font is missing renders exactly as designed rather than re-measured with a
+  substitute face.
+- **Shared styles — the design's actual tokens.** Named colour/text/effect
+  definitions that nodes reference. These are load-bearing: Figma caches a
+  style's resolved colour on the referencing node only *sometimes*, and that
+  cache is lossy (it drops paint opacity).
+- **Figma's own SOLVED layout** for every node, including auto-layout children.
+  This is what makes `layout_parity.py` possible — pixel-free geometry checking
+  against the design's real answer.
+- **`thumbnail.png` + `meta.json`** — Figma's own raster of the design plus an
+  exact canvas→thumbnail transform. A free, offline reference image. It is ~0.4×,
+  so it adjudicates gross colour and placement, never material detail.
+
+Use `figma-plugin` for the Pulp Figma plugin's `.pulp.json` / `.pulp.zip`
+envelope, or `figma` for raw REST/file JSON:
 
 ```bash
 pulp import-design --from fig --file design.fig --outline

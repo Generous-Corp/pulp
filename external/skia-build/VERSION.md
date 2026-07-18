@@ -58,7 +58,20 @@ Native slices (mac / win / linux / ios / visionos):
 - Metal: enabled (macOS/iOS)
 - ICU Unicode: enabled
 - SVG module: enabled
-- Skottie (Lottie): enabled
+- Skottie (Lottie): **archives ship, but cannot link — Lottie is OFF everywhere.**
+  This is not a wasm-only carve-out: `libskottie.a` / `libsksg.a` are present in
+  every native slice, but skottie's SkJSON dependency
+  (`modules/jsonreader`) is not compiled into any archive in the bundle, so a
+  link against skottie leaves these four SkJSON DOM entry points unresolved:
+  `skjson::DOM::DOM`, `skjson::NullValue::NullValue`,
+  `skjson::ObjectValue::find`, `skjson::Value::toString`.
+  (Most `skjson::*` references *are* satisfied — they are templates/inline
+  instantiated inside `libskottie.a` itself — which is why the shortfall is
+  invisible to a header or archive-presence check.) `core/canvas/CMakeLists.txt`
+  therefore runs a real try-link and auto-disables `PULP_LOTTIE` on **all**
+  native targets; `LottieView` degrades to a no-op. Re-enabling requires a
+  skia-builder re-cut that compiles `modules/jsonreader` (and `skresources`)
+  into the bundle — not a Pulp-side flag change.
 - Paragraph/text shaping: enabled
 - Build type: Release (optimized)
 
@@ -68,9 +81,9 @@ The **`wasm-gpu`** slice is the exception, and the difference is load-bearing:
   `wgpu` symbols, so `SK_GRAPHITE` / `SK_DAWN` must not be defined for
   Emscripten. `FindSkia.cmake`'s Emscripten arm encodes this, and
   `tools/scripts/verify_wasm_skia_slice.py` asserts it in CI.
-- Skottie / sksg: **absent in practice** — `libskottie.a` leaves `skjson::*`
-  undefined and the zip ships no jsonreader/skresources archive, so
-  `PULP_LOTTIE` cannot be enabled on wasm.
+- Skottie / sksg: **absent in practice** — same unresolved-SkJSON root cause as
+  the native slices above (no jsonreader/skresources archive), so `PULP_LOTTIE`
+  cannot be enabled on wasm either.
 - Built with `is_trivial_abi=true`, so consumers **must** define
   `SK_TRIVIAL_ABI` or `wasm-ld` links a trapping stub for cross-boundary
   `sk_sp` calls (the failure is a bare `RuntimeError: unreachable` on the
@@ -134,7 +147,8 @@ Configuration** — the `wasm-gpu` slice ships no `libdawn_combined.a`, and its
 - `libdawn_combined.a` — Dawn WebGPU implementation
 - `libskshaper.a` — Text shaping (HarfBuzz)
 - `libskparagraph.a` — Paragraph layout
-- `libskottie.a` — Lottie animation
+- `libskottie.a` — Lottie animation (ships, but cannot link — see **Build
+  Configuration**; Lottie is disabled on every target)
 - `libsksg.a` — Scene graph
 - `libsvg.a` — SVG rendering
 - `libskunicode_icu.a` — Unicode support

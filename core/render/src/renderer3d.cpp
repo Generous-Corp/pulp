@@ -750,22 +750,6 @@ wgpu::MipmapFilterMode mipmap_filter_mode_from_scene_filter(
     return wgpu::MipmapFilterMode::Nearest;
 }
 
-bool scene_filter_requires_mipmaps(
-    pulp::scene::TextureSamplerData::Filter filter) {
-    switch (filter) {
-        case pulp::scene::TextureSamplerData::Filter::nearest_mipmap_nearest:
-        case pulp::scene::TextureSamplerData::Filter::linear_mipmap_nearest:
-        case pulp::scene::TextureSamplerData::Filter::nearest_mipmap_linear:
-        case pulp::scene::TextureSamplerData::Filter::linear_mipmap_linear:
-            return true;
-        case pulp::scene::TextureSamplerData::Filter::unspecified:
-        case pulp::scene::TextureSamplerData::Filter::nearest:
-        case pulp::scene::TextureSamplerData::Filter::linear:
-            return false;
-    }
-    return false;
-}
-
 std::pair<float, float> transformed_texture_uv(
     const pulp::scene::PrimitiveData& primitive,
     uint32_t texture_texcoord,
@@ -1695,132 +1679,102 @@ struct SceneAnalysis {
     CpuCameraProjection camera_projection;
 };
 
-// Roll one primitive's material / texture feature flags into the scene-wide
-// result. Every flag is sticky: a feature counts as applied for the scene when
-// any single primitive uses it.
-void merge_primitive_feature_flags(Scene3DRenderResult& result,
-                                   const CpuPrimitive& primitive) {
-    result.texture_decoded =
-        result.texture_decoded ||
-        primitive.texture.decoded ||
-        primitive.normal_texture.decoded ||
-        primitive.metallic_roughness_texture.decoded ||
-        primitive.occlusion_texture.decoded ||
-        primitive.emissive_texture.decoded;
+// Copy the scene-wide feature rollup onto the public flat-bool result. Sticky
+// OR (rather than plain assignment) so the copy is order-independent and cannot
+// clear a flag another stage may already have recorded.
+void apply_scene_feature_flags(Scene3DRenderResult& result,
+                               const SceneFeatureFlags& flags) {
+    result.texture_decoded = result.texture_decoded || flags.texture_decoded;
     result.fallback_texture_used =
-        result.fallback_texture_used || primitive.texture.fallback;
+        result.fallback_texture_used || flags.fallback_texture_used;
     result.texture_sampler_applied =
-        result.texture_sampler_applied || primitive.sampler != nullptr;
+        result.texture_sampler_applied || flags.texture_sampler_applied;
+    result.texture_sampler_clamp_s =
+        result.texture_sampler_clamp_s || flags.texture_sampler_clamp_s;
+    result.texture_sampler_clamp_t =
+        result.texture_sampler_clamp_t || flags.texture_sampler_clamp_t;
+    result.texture_sampler_linear =
+        result.texture_sampler_linear || flags.texture_sampler_linear;
+    result.texture_mipmap_filter_downgraded =
+        result.texture_mipmap_filter_downgraded ||
+        flags.texture_mipmap_filter_downgraded;
     result.base_color_transform_applied =
         result.base_color_transform_applied ||
-        primitive.base_color_transform_applied;
+        flags.base_color_transform_applied;
     result.base_color_texcoord1_used =
-        result.base_color_texcoord1_used ||
-        primitive.base_color_texcoord1_used;
+        result.base_color_texcoord1_used || flags.base_color_texcoord1_used;
     result.base_color_factor_applied =
-        result.base_color_factor_applied ||
-        primitive.base_color_factor_applied;
+        result.base_color_factor_applied || flags.base_color_factor_applied;
     result.unlit_material_applied =
-        result.unlit_material_applied || primitive.unlit;
+        result.unlit_material_applied || flags.unlit_material_applied;
     result.alpha_mask_applied =
-        result.alpha_mask_applied || primitive.alpha_mask;
+        result.alpha_mask_applied || flags.alpha_mask_applied;
     result.alpha_blend_applied =
-        result.alpha_blend_applied || primitive.alpha_blend;
+        result.alpha_blend_applied || flags.alpha_blend_applied;
     result.vertex_color_applied =
-        result.vertex_color_applied || primitive.vertex_color_applied;
+        result.vertex_color_applied || flags.vertex_color_applied;
     result.geometry_normals_applied =
-        result.geometry_normals_applied || primitive.geometry_normals_applied;
+        result.geometry_normals_applied || flags.geometry_normals_applied;
     result.metallic_roughness_factor_applied =
         result.metallic_roughness_factor_applied ||
-        primitive.metallic_roughness_factor_applied;
+        flags.metallic_roughness_factor_applied;
     result.metallic_roughness_texture_applied =
         result.metallic_roughness_texture_applied ||
-        primitive.metallic_roughness_texture_applied;
+        flags.metallic_roughness_texture_applied;
     result.double_sided_material_applied =
-        result.double_sided_material_applied || primitive.double_sided;
+        result.double_sided_material_applied ||
+        flags.double_sided_material_applied;
     result.emissive_factor_applied =
-        result.emissive_factor_applied ||
-        primitive.emissive_factor_applied;
+        result.emissive_factor_applied || flags.emissive_factor_applied;
     result.emissive_strength_applied =
-        result.emissive_strength_applied ||
-        primitive.emissive_strength_applied;
+        result.emissive_strength_applied || flags.emissive_strength_applied;
     result.emissive_texture_applied =
-        result.emissive_texture_applied ||
-        primitive.emissive_texture_applied;
+        result.emissive_texture_applied || flags.emissive_texture_applied;
     result.tangent_attributes_available =
         result.tangent_attributes_available ||
-        primitive.tangent_attributes_available;
+        flags.tangent_attributes_available;
     result.tangent_attributes_derived =
         result.tangent_attributes_derived ||
-        primitive.tangent_attributes_derived;
+        flags.tangent_attributes_derived;
     result.normal_texture_applied =
-        result.normal_texture_applied ||
-        primitive.normal_texture_applied;
+        result.normal_texture_applied || flags.normal_texture_applied;
     result.normal_scale_applied =
-        result.normal_scale_applied ||
-        primitive.normal_scale_applied;
+        result.normal_scale_applied || flags.normal_scale_applied;
     result.metallic_roughness_texture_deferred =
         result.metallic_roughness_texture_deferred ||
-        primitive.metallic_roughness_texture_deferred;
+        flags.metallic_roughness_texture_deferred;
     result.normal_texture_deferred =
-        result.normal_texture_deferred ||
-        primitive.normal_texture_deferred;
+        result.normal_texture_deferred || flags.normal_texture_deferred;
     result.normal_scale_deferred =
-        result.normal_scale_deferred ||
-        primitive.normal_scale_deferred;
-    result.occlusion_texture_deferred =
-        result.occlusion_texture_deferred ||
-        primitive.occlusion_texture_deferred;
+        result.normal_scale_deferred || flags.normal_scale_deferred;
     result.occlusion_texture_applied =
-        result.occlusion_texture_applied ||
-        primitive.occlusion_texture_applied;
+        result.occlusion_texture_applied || flags.occlusion_texture_applied;
     result.occlusion_strength_applied =
         result.occlusion_strength_applied ||
-        primitive.occlusion_strength_applied;
+        flags.occlusion_strength_applied;
+    result.occlusion_texture_deferred =
+        result.occlusion_texture_deferred ||
+        flags.occlusion_texture_deferred;
     result.occlusion_strength_deferred =
         result.occlusion_strength_deferred ||
-        primitive.occlusion_strength_deferred;
+        flags.occlusion_strength_deferred;
     result.emissive_texture_deferred =
-        result.emissive_texture_deferred ||
-        primitive.emissive_texture_deferred;
+        result.emissive_texture_deferred || flags.emissive_texture_deferred;
     result.non_base_color_texture_transform_applied =
         result.non_base_color_texture_transform_applied ||
-        primitive.non_base_color_texture_transform_applied;
+        flags.non_base_color_texture_transform_applied;
     result.non_base_color_texcoord1_used =
         result.non_base_color_texcoord1_used ||
-        primitive.non_base_color_texcoord1_used;
+        flags.non_base_color_texcoord1_used;
     result.non_base_color_texture_transform_deferred =
         result.non_base_color_texture_transform_deferred ||
-        primitive.non_base_color_texture_transform_deferred;
+        flags.non_base_color_texture_transform_deferred;
     result.non_base_color_texcoord1_deferred =
         result.non_base_color_texcoord1_deferred ||
-        primitive.non_base_color_texcoord1_deferred;
+        flags.non_base_color_texcoord1_deferred;
     result.advanced_material_extension_deferred =
         result.advanced_material_extension_deferred ||
-        primitive.advanced_material_extension_deferred;
-    if (primitive.sampler != nullptr) {
-        result.texture_sampler_clamp_s =
-            result.texture_sampler_clamp_s ||
-            primitive.sampler->wrap_s ==
-                pulp::scene::TextureSamplerData::Wrap::clamp_to_edge;
-        result.texture_sampler_clamp_t =
-            result.texture_sampler_clamp_t ||
-            primitive.sampler->wrap_t ==
-                pulp::scene::TextureSamplerData::Wrap::clamp_to_edge;
-        result.texture_sampler_linear =
-            result.texture_sampler_linear ||
-            primitive.sampler->mag_filter ==
-                pulp::scene::TextureSamplerData::Filter::linear ||
-            primitive.sampler->min_filter ==
-                pulp::scene::TextureSamplerData::Filter::linear ||
-            primitive.sampler->min_filter ==
-                pulp::scene::TextureSamplerData::Filter::linear_mipmap_nearest ||
-            primitive.sampler->min_filter ==
-                pulp::scene::TextureSamplerData::Filter::linear_mipmap_linear;
-        result.texture_mipmap_filter_downgraded =
-            result.texture_mipmap_filter_downgraded ||
-            scene_filter_requires_mipmaps(primitive.sampler->min_filter);
-    }
+        flags.advanced_material_extension_deferred;
 }
 
 // Normalize the scene on the CPU and record every scene-level result flag:
@@ -1911,9 +1865,11 @@ std::optional<SceneAnalysis> analyze_scene_data(
     result.morph_target_deferred = unsupported_features.morph_target;
     result.gpu_instancing_deferred = unsupported_features.gpu_instancing;
 
+    SceneFeatureFlags scene_flags;
     for (const auto& primitive : analysis.primitives) {
-        merge_primitive_feature_flags(result, primitive);
+        scene_flags.merge(SceneFeatureFlags::from_primitive(primitive));
     }
+    apply_scene_feature_flags(result, scene_flags);
     return analysis;
 }
 

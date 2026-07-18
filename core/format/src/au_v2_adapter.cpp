@@ -508,6 +508,13 @@ OSStatus PulpAUEffect::Initialize()
         // single source of truth and already holds the current values (defaults
         // from define_parameters, or the values RestoreState wrote). Pulling
         // Globals here would clobber a restored preset with construction defaults.
+
+        // Size the bypass dry-delay line to the reported latency so a bypassed
+        // block emits `input[n - latency]`, matching the host's PDC on the wet
+        // path. Allocates here (off the render thread); a 0 latency leaves it a
+        // zero-copy passthrough. Same policy the CLAP/VST3 adapters apply.
+        bypass_.prepare(reported_latency_samples(
+            processor_->latency_samples(), host_quirks_));
     }
 
     // Pre-size the per-block MIDI buffers so the render drain loop appends
@@ -621,15 +628,15 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     // skip the Processor. The value was pulled into the store from
     // GetParameter() above.
     if (bypass_param_id_ != 0 && store_.get_value(bypass_param_id_) >= 0.5f) {
-        for (UInt32 ch = 0; ch < out_channels; ++ch) {
-            float* dst = output_ptrs_[ch];
-            if (dst == nullptr) continue;
-            if (ch < in_channels && input_ptrs_[ch] != nullptr) {
-                std::memcpy(dst, input_ptrs_[ch], sizeof(float) * inFramesToProcess);
-            } else {
-                std::memset(dst, 0, sizeof(float) * inFramesToProcess);
-            }
-        }
+        // Copy main input → main output, latency-compensated through the shared
+        // dry-delay line so the bypassed dry signal stays aligned with the
+        // host's PDC on the wet path (channels beyond the boundary ceiling fall
+        // back to an undelayed copy uniformly). Zero any output channel with no
+        // matching input.
+        boundary::render_bypass_passthrough(
+            bypass_, output_ptrs_.data(), static_cast<int>(out_channels),
+            input_ptrs_.data(), static_cast<int>(in_channels),
+            static_cast<std::uint32_t>(inFramesToProcess));
         // Drain and discard any MIDI queued by HandleMIDIEvent/HandleSysEx
         // while bypassed. Otherwise the queue grows for the whole bypass
         // window and floods the processor with stale notes/CCs the instant

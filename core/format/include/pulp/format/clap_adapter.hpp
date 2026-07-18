@@ -31,7 +31,12 @@
 
 namespace pulp::format::clap_adapter {
 
-static constexpr int kMaxChannels = 8;
+// Per-bus channel ceiling. Single source of truth is
+// boundary::kBoundaryMaxChannels (adapter_boundary.hpp) — kept as an `int` here
+// because CLAP's channel counts, loop indices, and clamps are all signed. Same
+// value (8) across every adapter; change it once at the boundary.
+static constexpr int kMaxChannels =
+    static_cast<int>(boundary::kBoundaryMaxChannels);
 // Upper bound on output buses routed to the Processor in one block. Index 0 is
 // the main output; indices 1..kMaxOutputBuses-1 are secondary (aux) outputs for
 // multi-out instruments (drum machines, multitimbral, stem renderers). Host
@@ -142,11 +147,8 @@ struct PulpClapPlugin {
     // MPE sidecar — populated from midi_in before each process() call when
     // the Processor declares MPE in its effective PluginDescriptor capabilities.
     // Reserved and capacity-limited during activate(); one MIDI event can fan
-    // out to many MPE callbacks.
-    midi::MpeVoiceTracker mpe_tracker;
-    midi::MpeBuffer mpe_buffer;
-    int32_t mpe_current_sample_offset = 0;
-    bool mpe_enabled = false;
+    // out to many MPE callbacks. See boundary::MpeSidecar.
+    boundary::MpeSidecar mpe;
 
     // UMP sidecar — populated by converting midi_in to MIDI 2.0 UMP packets
     // when the Processor declares UMP in its effective PluginDescriptor

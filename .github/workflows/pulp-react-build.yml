@@ -1,12 +1,6 @@
 name: JS packages build + test
 
 on:
-  pull_request:
-    paths:
-      - 'packages/pulp-react/**'
-      - 'packages/pulp-import-ir/**'
-      - 'test/fixtures/anchor_vectors.json'
-      - '.github/workflows/pulp-react-build.yml'
   push:
     branches: [main]
     paths:
@@ -15,6 +9,9 @@ on:
       - 'test/fixtures/anchor_vectors.json'
       - '.github/workflows/pulp-react-build.yml'
 
+  schedule:
+    - cron: '41 5 * * *'  # nightly de-starve safety net (see planning/fleet/2026-07-17-ci-destarve-analysis.md)
+  workflow_dispatch: {}
 concurrency:
   group: js-packages-build-${{ github.ref }}
   cancel-in-progress: true

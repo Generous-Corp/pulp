@@ -3,6 +3,7 @@
 #include <miniz.h>
 #include "envelope_merge.hpp"
 #include "fig_lane.hpp"
+#include "render_artifact_path.hpp"
 
 #include <iostream>
 
@@ -2936,4 +2937,50 @@ TEST_CASE("merging states does not fail a hash-keyed lane that omits content_has
 
     REQUIRE_FALSE(rc.has_value());
     CHECK(fs::exists(tmp.path / "merged.pulp.json"));
+}
+
+
+TEST_CASE("render_artifact_path places the render beside --output, not the CWD",
+          "[import][validate][artifact-path]") {
+    using pulp::import_design::render_artifact_path;
+    // --output in a directory -> the render lands in that directory.
+    CHECK(render_artifact_path("/tmp/out/ui.js", "design-fig-render.png")
+          == "/tmp/out/design-fig-render.png");
+    CHECK(render_artifact_path("/a/b/c/panel.js", "x-render.png")
+          == "/a/b/c/x-render.png");
+    // A bare --output (no directory) keeps the artifact in the CWD — the
+    // intended default for that invocation, and the ONLY case the old bare-name
+    // behavior was ever correct for.
+    CHECK(render_artifact_path("ui.js", "design-fig-render.png")
+          == "design-fig-render.png");
+    // A relative --output with a directory still carries that directory.
+    CHECK(render_artifact_path("sub/ui.js", "y-render.png") == "sub/y-render.png");
+}
+
+TEST_CASE("pulp-import-design --fail-below requires --reference to compare against",
+          "[import][validate][fail-below]") {
+    // --fail-below gates the --validate similarity score, which needs a
+    // --reference PNG to score against. Without one there is nothing to compare,
+    // so the CLI must refuse (exit 2) rather than silently pass — the
+    // silent-no-op class this whole effort is about. Feature landed via
+    // #6186/#6232; this is the shellout test deferred during that merge.
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-fail-below");
+    const auto input = tmp.path / "page.html";
+    // Minimal Claude-style page: a single styled div is enough to import; the
+    // point is the flag validation, which fires before any comparison.
+    write_text(input,
+        "<html><body><div style=\"background:#123456;width:40px;height:40px\">"
+        "</div></body></html>");
+    const auto output = tmp.path / "ui.js";
+
+    auto r = run_import_design({"--from", "claude",
+                               "--file", input.string(),
+                               "--output", output.string(),
+                               "--validate",
+                               "--fail-below", "85"});
+    REQUIRE_FALSE(r.timed_out);
+    CHECK(r.exit_code == 2);
+    CHECK(r.stderr_output.find("--fail-below requires --reference") != std::string::npos);
 }

@@ -11,7 +11,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn batch B: FlexDirection extended with row_reverse/column_reverse; yoga_layout.cpp dispatches to YGFlexDirectionRowReverse/ColumnReverse.",
       "issue": ""
@@ -26,7 +26,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #14 \u2014 FlexStyle.flex_wrap is now FlexWrap enum (no_wrap/wrap/wrap_reverse); yoga_layout.cpp dispatches all three through YGNodeStyleSetFlexWrap with YGWrapNoWrap / YGWrapWrap / YGWrapWrapReverse.",
       "issue": ""
@@ -40,7 +40,7 @@
       "unsupportedValues": [],
       "tests": [
         "semantic:yoga/flex-grow-shrink",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -54,7 +54,7 @@
       "unsupportedValues": [],
       "tests": [
         "semantic:yoga/flex-grow-shrink",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -69,10 +69,10 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "unit:test/test_widget_bridge.cpp [issue-1434-rn-batch-c]",
-        "unit:test/test_widget_bridge.cpp [issue-1545]",
+        "unit:test/test_widget_bridge_yoga.cpp [issue-1434-rn-batch-c]",
+        "unit:test/test_widget_bridge_yoga.cpp [issue-1545]",
         "semantic:yoga/flex-grow-shrink",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "All three Yoga-native value forms route end-to-end. pulp #1434 rn batch C added bridge plumbing (number / 'NN%' / 'auto'); pulp #1545 promoted the entry to supported after re-verifying YGNodeStyleSetFlexBasisPercent is wired and exercised. The CSS-3 `content` keyword (intrinsic-size flex basis) is not modeled by Yoga itself, so it's treated as out-of-scope (parity with upstream Yoga / React Native) rather than as a tracked gap.",
       "issue": ""
@@ -92,7 +92,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "All 6 modes covered. Bridge accepts both CSS spelling (flex-start/flex-end) and Yoga spelling (start/end) \u2014 CSS translator _cssToFlex maps the former to the latter. pulp #1434 rn batch B: confirmed bridge accepts flex-start/flex-end aliases too via @pulp/react prop-applier path.",
       "issue": ""
@@ -111,7 +111,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn batch B: bridge accepts both CSS (flex-start/flex-end/baseline) and Yoga (start/end) spellings; FlexAlign extended with baseline \u2192 YGAlignBaseline.",
       "issue": ""
@@ -131,7 +131,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn batch B: bridge accepts both CSS and Yoga spellings; FlexAlign::baseline added.",
       "issue": ""
@@ -152,7 +152,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 (sub-agent #12 follow-up): multi-line flex cross-axis distribution. Yoga supports it natively via YGNodeStyleSetAlignContent; gap was a missing FlexStyle field + setter wiring. Bridge accepts both bare and prefixed CSS spellings plus the three space-* values. align_content_space encodes space-between / space-around / space-evenly because FlexAlign has no space variants (those don't make sense on align_items / align_self).",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
@@ -168,7 +168,7 @@
       "unsupportedValues": [],
       "tests": [
         "semantic:yoga/percentage-sizing",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1423 wired px + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto'. percent values route through FlexStyle.dim_width (DimensionUnit::percent) -> YGNodeStyleSetWidthPercent; 'auto' routes through DimensionUnit::auto_ -> YGNodeStyleSetWidthAuto (Figma hug-contents, v0 intrinsic-sizing, Claude Design responsive containers). CSS translator and @pulp/react prop-applier pass 'NN%' / 'auto' strings verbatim to the bridge.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
@@ -184,7 +184,7 @@
       "unsupportedValues": [],
       "tests": [
         "semantic:yoga/percentage-sizing",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1423 wired px + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' (YGNodeStyleSetHeightAuto via FlexStyle.dim_height.unit == auto_). Same shape as width.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
@@ -198,7 +198,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn batch C: bridge populates FlexStyle::dim_min_width.unit; yoga_layout.cpp dispatches to YGNodeStyleSetMinWidthPercent.",
       "issue": ""
@@ -212,7 +212,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn batch C: bridge populates FlexStyle::dim_min_height.unit; yoga_layout.cpp dispatches to YGNodeStyleSetMinHeightPercent.",
       "issue": ""
@@ -226,7 +226,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Semantic of 0 differs from CSS unspecified. pulp #1434 rn batch C: bridge populates FlexStyle::dim_max_width.unit; yoga_layout.cpp dispatches to YGNodeStyleSetMaxWidthPercent.",
       "issue": ""
@@ -240,7 +240,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn batch C: bridge populates FlexStyle::dim_max_height.unit; yoga_layout.cpp dispatches to YGNodeStyleSetMaxHeightPercent.",
       "issue": ""
@@ -255,7 +255,7 @@
       "tests": [
         "unit:test/web-compat/test_layout_aspect_ratio.cpp",
         "semantic:yoga/aspect-ratio",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 \u2014 added FlexStyle.aspect_ratio + Yoga dispatch + bridge setFlex 'aspect_ratio' branch + @pulp/react aspectRatio prop. CSS shim accepts plain numbers ('1.5'), 'width/height' ratios ('16/9'), and 'auto' (clears slot).",
       "issue": "1434"
@@ -269,7 +269,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1516]"
+        "test/test_widget_bridge_clip_mask.cpp [issue-1516]"
       ],
       "notes": "pulp #1516 (PR #1538) wired FlexStyle::box_sizing + YGNodeStyleSetBoxSizing. Mirrors css/boxSizing on the same view slot \u2014 the css side is also supported. pulp #1737 catalog hygiene: catalog drifted to `missing` after the wiring landed; flipped now that the wiring is verified end-to-end.",
       "issue": "1516"
@@ -284,7 +284,7 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept 'auto' keyword\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Yoga's YGNodeStyleSetMarginAuto is wired through `apply_margin` and `apply_logical_margin` in yoga_layout.cpp \u2014 `auto` works on every edge (top/right/bottom/left/start/end). The uniform shorthand stays px-only because there's no spec-defined `margin: auto` per-edge expansion that requires the shorthand itself to carry the unit; consumers that want centering set the per-edge keys.",
       "issue": ""
@@ -301,7 +301,7 @@
       "tests": [
         "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept percent strings\"",
         "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept 'auto' keyword\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 per-edge accepts number, percent string, auto.",
       "issue": ""
@@ -318,7 +318,7 @@
       "tests": [
         "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept percent strings\"",
         "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept 'auto' keyword\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 per-edge accepts number, percent string, auto.",
       "issue": ""
@@ -335,7 +335,7 @@
       "tests": [
         "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept percent strings\"",
         "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept 'auto' keyword\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 per-edge accepts number, percent string, auto.",
       "issue": ""
@@ -352,7 +352,7 @@
       "tests": [
         "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept percent strings\"",
         "test/test_widget_bridge_css_per_edge.cpp::\"setFlex margin edges accept 'auto' keyword\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 per-edge accepts number, percent string, auto.",
       "issue": ""
@@ -367,7 +367,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1542]"
+        "test/test_widget_bridge_yoga_a4_oos.cpp [issue-1542]"
       ],
       "notes": "pulp #1542 \u2014 yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL; the new FlexStyle::writing_direction field plus YGNodeStyleSetDirection drives the flip.",
       "issue": "https://github.com/danielraffel/pulp/issues/1542"
@@ -382,7 +382,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1542]"
+        "test/test_widget_bridge_yoga_a4_oos.cpp [issue-1542]"
       ],
       "notes": "pulp #1542 \u2014 yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL.",
       "issue": "https://github.com/danielraffel/pulp/issues/1542"
@@ -398,7 +398,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
@@ -414,7 +414,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
@@ -430,7 +430,7 @@
       "tests": [
         "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
         "semantic:yoga/box-sizing",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "% values flow through the per-edge keys (paddingTop/Right/Bottom/Left/Start/End). The uniform `padding` shorthand is px-only by design \u2014 the bridge expands shorthands at the JS layer (web-compat-style-decl.js `padding` case) into per-edge calls that DO carry the unit. CSS spec rejects `padding: auto` (auto is invalid for padding), matching Yoga's lack of a YGNodeStyleSetPaddingAuto API.",
       "issue": ""
@@ -445,7 +445,7 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 Yoga padding accepts px and percent. `auto` is a Yoga-side gap (Yoga has no YGNodeStyleSetPaddingAuto API).",
       "issue": ""
@@ -460,7 +460,7 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 Yoga padding accepts px and percent. `auto` is a Yoga-side gap (Yoga has no YGNodeStyleSetPaddingAuto API).",
       "issue": ""
@@ -475,7 +475,7 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 Yoga padding accepts px and percent. `auto` is a Yoga-side gap (Yoga has no YGNodeStyleSetPaddingAuto API).",
       "issue": ""
@@ -490,7 +490,7 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge_css_per_edge.cpp::\"setFlex padding edges accept percent strings\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 Yoga padding accepts px and percent. `auto` is a Yoga-side gap (Yoga has no YGNodeStyleSetPaddingAuto API).",
       "issue": ""
@@ -504,7 +504,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1542]"
+        "test/test_widget_bridge_yoga_a4_oos.cpp [issue-1542]"
       ],
       "notes": "pulp #1542 \u2014 yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL. `auto` is spec-invalid for padding (CSS rejects `padding: auto`), so it's not listed as a gap \u2014 Yoga matches the spec by not exposing a YGNodeStyleSetPaddingAuto API.",
       "issue": "https://github.com/danielraffel/pulp/issues/1542"
@@ -518,7 +518,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1542]"
+        "test/test_widget_bridge_yoga_a4_oos.cpp [issue-1542]"
       ],
       "notes": "pulp #1542 \u2014 yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL. `auto` is spec-invalid for padding so it's not listed as a gap.",
       "issue": "https://github.com/danielraffel/pulp/issues/1542"
@@ -533,7 +533,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
@@ -548,7 +548,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
@@ -562,7 +562,7 @@
       "unsupportedValues": [],
       "tests": [
         "semantic:yoga/box-sizing",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Yoga's BORDER edges contribute to content-box sizing. Before #1543, Pulp's borders were paint-only (Skia stroke) and Yoga saw zero border insets, which made box-sizing math wrong when border-box was active. Wired now \u2014 borders affect both layout AND paint. % is intentionally not listed as an unsupported gap because the CSS spec rejects `border-width: <%>` (invalid value); Yoga matches the spec by not exposing a YGNodeStyleSetBorderPercent API.",
       "issue": ""
@@ -575,7 +575,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Same as borderWidth \u2014 the per-edge variants share the same wiring. Reached from JS via setBorderTopWidth(id, w). % is spec-invalid for border-width so not listed as a gap.",
       "issue": ""
@@ -588,7 +588,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Same. Reached via setBorderRightWidth(id, w). % is spec-invalid for border-width so not listed as a gap.",
       "issue": ""
@@ -601,7 +601,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Same. Reached via setBorderBottomWidth(id, w). % is spec-invalid for border-width so not listed as a gap.",
       "issue": ""
@@ -614,7 +614,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Same. Reached via setBorderLeftWidth(id, w). % is spec-invalid for border-width so not listed as a gap.",
       "issue": ""
@@ -632,7 +632,7 @@
       "unsupportedValues": [],
       "tests": [
         "semantic:yoga/position-absolute",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Pulp's enum is a SUPERSET of Yoga's {static, relative, absolute}.",
       "issue": ""
@@ -647,7 +647,7 @@
       "unsupportedValues": [],
       "tests": [
         "semantic:yoga/position-absolute",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 batch 6: percent values route through View::set_top(v, DimensionUnit::percent); yoga_layout.cpp dispatches on top_unit_/right_unit_/bottom_unit_/left_unit_ to call YGNodeStyleSetPositionPercent. CSS translator passes 'NN%' strings verbatim to the bridge. Mirrors the FlexStyle::dim_width path from pulp #1423 (PR #1426) for the View positional fields.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
@@ -661,7 +661,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 batch 6: percent values route through View::set_right(v, DimensionUnit::percent); yoga_layout.cpp dispatches on top_unit_/right_unit_/bottom_unit_/left_unit_ to call YGNodeStyleSetPositionPercent. CSS translator passes 'NN%' strings verbatim to the bridge. Mirrors the FlexStyle::dim_width path from pulp #1423 (PR #1426) for the View positional fields.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
@@ -675,7 +675,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 batch 6: percent values route through View::set_bottom(v, DimensionUnit::percent); yoga_layout.cpp dispatches on top_unit_/right_unit_/bottom_unit_/left_unit_ to call YGNodeStyleSetPositionPercent. CSS translator passes 'NN%' strings verbatim to the bridge. Mirrors the FlexStyle::dim_width path from pulp #1423 (PR #1426) for the View positional fields.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
@@ -690,7 +690,7 @@
       "unsupportedValues": [],
       "tests": [
         "semantic:yoga/position-absolute",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 batch 6: percent values route through View::set_left(v, DimensionUnit::percent); yoga_layout.cpp dispatches on top_unit_/right_unit_/bottom_unit_/left_unit_ to call YGNodeStyleSetPositionPercent. CSS translator passes 'NN%' strings verbatim to the bridge. Mirrors the FlexStyle::dim_width path from pulp #1423 (PR #1426) for the View positional fields.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
@@ -705,7 +705,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1542]",
+        "test/test_widget_bridge_yoga_a4_oos.cpp [issue-1542]",
         "test/test_widget_bridge_css_per_edge.cpp::\"setFlex start/end accept 'auto' keyword\""
       ],
       "notes": "pulp #1542 \u2014 yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL. `auto` (the CSS default \u2014 \"don't anchor to this edge\") routes through Yoga's YGNodeStyleSetPositionAuto via FlexStyle::dim_start.unit = auto_; the bridge accepts `'auto'` verbatim. Wired DIVERGE\u2192PASS sweep.",
@@ -721,7 +721,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1542]",
+        "test/test_widget_bridge_yoga_a4_oos.cpp [issue-1542]",
         "test/test_widget_bridge_css_per_edge.cpp::\"setFlex start/end accept 'auto' keyword\""
       ],
       "notes": "pulp #1542 \u2014 yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL. `auto` routes through YGNodeStyleSetPositionAuto. Wired DIVERGE\u2192PASS sweep.",
@@ -735,7 +735,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -748,7 +748,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -761,7 +761,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -774,7 +774,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -790,10 +790,10 @@
         "contents"
       ],
       "tests": [
-        "test/test_widget_bridge.cpp [display-contents]",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_rn_style.cpp [display-contents]",
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
-      "notes": "pulp #1420: claim flex+none as supported. CSS translator at web-compat-style-decl.js:86-118 routes display:none to setVisible(false) and display:flex to setVisible(true)+setFlex(direction). 'flex' is implicit in pulp's layout model; 'none' uses View visibility. Yoga has YGDisplay {flex, none, contents}; pulp doesn't model 'contents'. ARCH-DEFERRED: display: contents requires parallel block/inline-flow layout that CLAUDE.md's flex+grid-only policy (Yoga 3.0 ceiling) explicitly rules out \u2014 the dispatcher silently no-ops; pinned by test/test_widget_bridge.cpp [display-contents].",
+      "notes": "pulp #1420: claim flex+none as supported. CSS translator at web-compat-style-decl.js:86-118 routes display:none to setVisible(false) and display:flex to setVisible(true)+setFlex(direction). 'flex' is implicit in pulp's layout model; 'none' uses View visibility. Yoga has YGDisplay {flex, none, contents}; pulp doesn't model 'contents'. ARCH-DEFERRED: display: contents requires parallel block/inline-flow layout that CLAUDE.md's flex+grid-only policy (Yoga 3.0 ceiling) explicitly rules out \u2014 the dispatcher silently no-ops; pinned by test/test_widget_bridge_rn_style.cpp [display-contents].",
       "issue": "https://github.com/danielraffel/pulp/issues/1420"
     },
     "yoga/overflow": {
@@ -807,7 +807,7 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge_css_per_edge.cpp::\"setOverflow accepts scroll keyword\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "DIVERGE\u2192PASS sweep \u2014 `scroll` is now accepted as a third keyword and propagates through both the layout engine (Yoga's overflow:scroll affects descendant-overflow contribution) and the paint clip path (matches CSS spec where `scroll` clips the painted box like `hidden`). Scrollbar UI / actual scroll-position state remains a roadmap item; the harness gap was about *layout-side* keyword acceptance, which is now covered.",
       "issue": ""
@@ -822,7 +822,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1542]"
+        "test/test_widget_bridge_yoga_a4_oos.cpp [issue-1542]"
       ],
       "notes": "pulp #1542 \u2014 bridge accepts `direction_writing` sub-key on setFlex (distinct from `direction` for flex-direction). FlexStyle::writing_direction { inherit, ltr, rtl } drives both YGNodeStyleSetDirection on the per-node call and the root's YGNodeCalculateLayout direction argument. Required for yoga's logical-edge resolution (start/end, marginStart, etc.).",
       "issue": "https://github.com/danielraffel/pulp/issues/1542"
@@ -857,7 +857,7 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"flex-flow shorthand recognizes wrap-reverse\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1544 \u2014 catalog promotion. Already wired through `web-compat-style-decl.js` shorthand parser (pulp #1434 Triage #14 extended it to cover `-reverse` modes); mirrors `css/flexFlow`.",
       "issue": ""

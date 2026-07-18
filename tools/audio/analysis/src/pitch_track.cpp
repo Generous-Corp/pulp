@@ -7,7 +7,9 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <stdexcept>
+#include <tuple>
 
 namespace pulp::test::audio {
 namespace {
@@ -36,13 +38,24 @@ double fitted_energy_at(std::span<const double> seg, double hz,
     return fit_tone(seg, cps).fitted_energy;
 }
 
-/// Fitted amplitude of a single sinusoid at `hz`; 0 outside the open band.
-double fitted_amplitude_at(std::span<const double> seg, double hz,
-                           double sample_rate) {
-    const double cps = hz / sample_rate;
-    if (!(cps > 0.0 && cps < 0.5))
-        return 0.0;
-    return fit_tone(seg, cps).amplitude;
+/// Summed fitted energy of the harmonic comb rooted at `f0`: the fundamental
+/// plus every harmonic below Nyquist, capped at `harmonic_ceiling` teeth. This
+/// is the single quantity the octave/subharmonic candidate ranking and the
+/// confidence ratio share — the ranking compares combs rooted at different
+/// subharmonics, and the confidence divides this by the segment energy. Summing
+/// the WHOLE comb (not just the first few partials) is required so a bright
+/// oscillator (BLIT/buzz, narrow pulse) whose energy is spread across hundreds
+/// of partials is scored in full rather than wrongly refused.
+double harmonic_comb_energy(std::span<const double> seg, double f0,
+                            double sample_rate, int harmonic_ceiling) {
+    double energy = 0.0;
+    for (int k = 1; k <= harmonic_ceiling; ++k) {
+        const double hz_k = f0 * static_cast<double>(k);
+        if (hz_k >= 0.5 * sample_rate)
+            break;
+        energy += fitted_energy_at(seg, hz_k, sample_rate);
+    }
+    return energy;
 }
 
 /// Golden-section maximisation of the single-tone fitted energy over [lo, hi].
@@ -169,54 +182,153 @@ PitchEstimate estimate_pitch(std::span<const float> samples, double sample_rate,
     const double coarse_hz = (static_cast<double>(peak_bin) + delta) * bin_hz;
     est.coarse_hz = coarse_hz;
 
-    // ── Octave / harmonic-peak correction. ──
-    // The loudest bin is not always the fundamental: a mildly rolled-off pulse
-    // can carry more energy in its 2nd or 3rd partial than in the fundamental,
-    // and a magnitude peak then lands an octave (or a twelfth) high. Descend to
-    // the LOWEST subharmonic of the coarse peak that still carries real energy.
-    // The guard against over-descending is exactly that energy test: a pure
-    // fundamental has ~none at f/2, so it is never dragged down, while a pulse
-    // whose peak sat on 2·f0 has a genuine partial at f0 and is pulled back.
-    const double amp_peak = fitted_amplitude_at(seg, coarse_hz, sample_rate);
-    double fundamental_hz = coarse_hz;
-    for (int m = 2; m <= 4; ++m) {
-        const double candidate = coarse_hz / static_cast<double>(m);
-        if (candidate < lo_band)
-            break;
-        if (fitted_amplitude_at(seg, candidate, sample_rate) >= 0.1 * amp_peak)
-            fundamental_hz = candidate; // adopt the lowest qualifying subharmonic
-    }
-
-    // ── Refine: maximize the single-tone fitted energy in a one-bin bracket. ──
-    const double lo = std::max(fundamental_hz - bin_hz, lo_band);
-    const double hi = std::min(fundamental_hz + bin_hz, 0.499 * sample_rate);
-    const double refined =
-        hi > lo ? golden_max_frequency(seg, lo, hi, sample_rate, 200)
-                : fundamental_hz;
-
-    // ── Confidence: fraction of energy explained by the harmonic series. ──
-    // Sum the WHOLE comb up to Nyquist, not just the first few partials: a
-    // bright oscillator (BLIT/buzz, narrow pulse) spreads its energy across
-    // hundreds of harmonics, so a fixed low harmonic count would under-count it
-    // and refuse a perfectly voiced signal. `harmonic_count <= 0` means "every
-    // harmonic below Nyquist"; a positive value caps the sum (and the cost).
+    // Harmonics (including the fundamental) summed for the comb-energy measure.
+    // `harmonic_count <= 0` means "every harmonic below Nyquist" — required so a
+    // bright comb (BLIT/buzz, narrow pulse) whose energy is spread across
+    // hundreds of partials is scored in full; a positive value caps the sum.
     const int harmonic_ceiling =
         options.harmonic_count > 0 ? options.harmonic_count
                                    : std::numeric_limits<int>::max();
-    double harmonic_energy = 0.0;
-    if (total_energy > 0.0) {
-        for (int k = 1; k <= harmonic_ceiling; ++k) {
-            const double hz_k = refined * static_cast<double>(k);
-            if (hz_k >= 0.5 * sample_rate)
-                break;
-            harmonic_energy += fitted_energy_at(seg, hz_k, sample_rate);
+
+    // ── Octave / harmonic-peak correction, refine, and confidence in one pass. ──
+    // The loudest bin is not always the fundamental: a mildly rolled-off pulse
+    // can carry more energy in its 2nd, 3rd, or higher partial than in the
+    // fundamental, so a magnitude peak lands an octave (or a twelfth, or higher)
+    // above the true f0. Consider each candidate fundamental — the coarse peak
+    // and its subharmonics coarse/2 … coarse/kMaxSubharmonic — refine it, and
+    // adopt the LOWEST that BOTH explains the segment energy within a small margin
+    // of the best candidate AND carries real energy at its own fundamental tooth.
+    // Explained energy is the same quantity the confidence reports, so the chosen
+    // candidate's score IS the confidence — no separate refine or confidence stage
+    // is needed. This replaces the fixed m<=4 descent ceiling and the single-tooth
+    // amplitude cliff of the earlier guard.
+    //
+    // The own-fundamental-tooth test is what defeats the octave trap. Explained
+    // energy ALONE cannot tell f0 from f0/N: for a pure or near-pure tone every
+    // subharmonic can refine so one of ITS harmonics lands on the tone and
+    // explains the segment just as well (a vibrato/glide frame is nearly a pure
+    // tone, so f0/4 refined to put its 4th harmonic on the tone scores as high as
+    // f0). Only the TRUE root has a partial at the root itself; a subharmonic that
+    // is merely a harmonic-alignment artifact has its own tooth sitting at the
+    // noise/leakage floor, far below a genuine fundamental (an 8%-amplitude
+    // fundamental under a loud 2nd harmonic is ~0.6% of the loudest partial's
+    // energy). `kFundamentalFloor` is the absolute noise floor between them.
+    //
+    // But that fixed floor is not enough on its own: the tooth of a subharmonic
+    // f0/m of a plain saw is fed by SPECTRAL LEAKAGE from the loud coarse partial,
+    // and the leakage grows as the analysis window shortens (a rectangular-window
+    // LSQ fit at a distance Δf from a strong tone leaks ~1/(π·Δf·T) in amplitude,
+    // energy ~ its square). At the default window a low bass saw holds only a
+    // handful of periods and the f0/2 leakage exceeds the fixed floor — the
+    // estimator would then confidently report an octave (or two) DOWN. So the
+    // tooth must clear a LEAKAGE-AWARE floor: the expected leakage of the coarse
+    // peak into the candidate root, `(kLeakageSafety/(π·Δf·T))²` of the peak
+    // partial, with Δf the root-to-coarse distance and T the window duration. A
+    // genuine fundamental far below a loud harmonic (Δf large) or measured over a
+    // long window (T large) sees a negligible leakage floor and is still adopted;
+    // a leaky subharmonic of a saw over a short window (Δf and T both small) does
+    // not clear it and is correctly rejected in favor of the coarse peak (which,
+    // for a saw, IS the true fundamental).
+    //
+    // Residual limitation (documented, not a false contract): a true
+    // missing-fundamental signal — energy only at 2·f0 and 3·f0, none at f0 —
+    // has no tone at f0, so the f0 candidate's own tooth is empty and it is
+    // rejected; the estimate stays on the loudest present partial (2·f0), an
+    // octave above the perceived pitch. The refined score of that partial is what
+    // gates voicing, so the case is reported honestly, never as a fabricated f0.
+    // Symmetrically, a genuine faint fundamental that falls BELOW the leakage
+    // floor at a short window is not resolvable there and is not adopted (the
+    // estimate stays on the loudest partial) rather than guessed — resolve it with
+    // a longer analysis window.
+    constexpr int kMaxSubharmonic = 8;
+    constexpr double kExplainedEnergyMargin = 0.02;
+    constexpr double kFundamentalFloor = 2.5e-3;
+    // Safety factor over the theoretical rectangular-window leakage envelope
+    // (1/(π·Δf·T)); tuned so a real BLEP saw's f0/2 leakage is rejected at the
+    // few-period windows where it bites while genuine faint fundamentals over the
+    // suite's long fixtures still clear the floor.
+    constexpr double kLeakageSafety = 3.0;
+    const double window_dur = static_cast<double>(seg.size()) / sample_rate;
+
+    // Refine a candidate root within its one-bin bracket; report the refined
+    // frequency, the fraction of segment energy its refined harmonic comb
+    // explains (the confidence), and the fitted energy at its own fundamental
+    // tooth (the real-partial-present test).
+    const auto score_root = [&](double root_hz) {
+        const double lo = std::max(root_hz - bin_hz, lo_band);
+        const double hi = std::min(root_hz + bin_hz, 0.499 * sample_rate);
+        const double refined = hi > lo
+            ? golden_max_frequency(seg, lo, hi, sample_rate, 200)
+            : root_hz;
+        const double tooth = fitted_energy_at(seg, refined, sample_rate);
+        const double explained =
+            total_energy > 0.0
+                ? harmonic_comb_energy(seg, refined, sample_rate,
+                                       harmonic_ceiling) / total_energy
+                : 0.0;
+        return std::tuple<double, double, double>{refined, explained, tooth};
+    };
+
+    // The coarse peak's own tooth is the loudest partial; it sets the scale for
+    // "a real partial is present at this root".
+    const double peak_partial = fitted_energy_at(seg, coarse_hz, sample_rate);
+    const double partial_floor = kFundamentalFloor * peak_partial;
+
+    // The coarse peak (index 0) is always scored and is the unconditional
+    // fallback. A subharmonic is only worth the price of a refine + full comb if
+    // a real partial already sits at its root: because the coarse peak is an
+    // accurate harmonic, coarse/m lands essentially on the true partial, so a
+    // cheap single fitted-energy probe there prunes the subharmonics that carry
+    // nothing (a pure tone / saw / noise frame keeps only the coarse peak, and
+    // the low-root combs — thousands of teeth to Nyquist — are never summed). The
+    // half-floor prune threshold leaves headroom for the refinement to recover a
+    // partial that sits a hair off coarse/m.
+    double refined_hz[kMaxSubharmonic] = {};
+    double explained[kMaxSubharmonic] = {};
+    double fundamental_tooth[kMaxSubharmonic] = {};
+    int candidates = 0;
+    double best_explained = 0.0;
+    for (int m = 1; m <= kMaxSubharmonic; ++m) {
+        const double root = coarse_hz / static_cast<double>(m);
+        if (m > 1 && root < lo_band)
+            break;
+        if (m > 1 &&
+            fitted_energy_at(seg, root, sample_rate) < 0.5 * partial_floor)
+            continue; // no partial at this subharmonic — cannot be the fundamental
+        const auto [rf, ex, tooth] = score_root(root);
+        refined_hz[candidates] = rf;
+        explained[candidates] = ex;
+        fundamental_tooth[candidates] = tooth;
+        best_explained = std::max(best_explained, ex);
+        ++candidates;
+    }
+
+    // Adopt the lowest-frequency surviving candidate that both explains the
+    // segment within the margin of the best and clears its fundamental-tooth floor
+    // at its refined root; otherwise keep the coarse peak (index 0). The floor is
+    // the larger of the absolute noise floor and the leakage the coarse peak sheds
+    // into this root over this window (see the leakage note above) — so a leaky
+    // subharmonic of a saw over a short window is rejected while a genuine faint
+    // fundamental clears it.
+    double refined = refined_hz[0];
+    double ratio = explained[0];
+    for (int i = candidates - 1; i >= 1; --i) {
+        const double delta_f = coarse_hz - refined_hz[i]; // > 0 for a subharmonic
+        const double leak_amp =
+            delta_f > 0.0 ? kLeakageSafety / (std::numbers::pi * delta_f * window_dur)
+                          : 1.0;
+        const double leak_floor = leak_amp * leak_amp * peak_partial;
+        const double tooth_floor = std::max(partial_floor, leak_floor);
+        if (explained[i] >= best_explained - kExplainedEnergyMargin &&
+            fundamental_tooth[i] >= tooth_floor) {
+            refined = refined_hz[i];
+            ratio = explained[i];
+            break;
         }
     }
-    const double ratio =
-        total_energy > 0.0 ? harmonic_energy / total_energy : 0.0;
+
     est.harmonic_energy_ratio = ratio;
     est.confidence = std::clamp(ratio, 0.0, 1.0);
-
     est.voiced = rms >= options.silence_rms &&
                  est.confidence >= options.min_confidence && refined > 0.0;
     est.hz = est.voiced ? refined : 0.0;

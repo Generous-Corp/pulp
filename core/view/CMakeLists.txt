@@ -420,6 +420,8 @@ target_sources(pulp-view-core PRIVATE
     src/grid_layout.cpp
     src/layout_snapshot.cpp
     src/widgets.cpp
+    src/widget_schema.cpp
+    src/knob_sprite_paint.cpp
     src/slider_core.cpp
     src/widgets/label.cpp
     src/widgets/visualizers.cpp

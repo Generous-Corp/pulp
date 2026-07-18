@@ -3265,7 +3265,7 @@ private:
     // dev_ts_readback_ with a BLOCKING map — safe to share only because each such op
     // finishes before the next starts. The async path below must never block, so it
     // resolves into dev_ts_resolve_ and copies the two ticks into a POOL readback
-    // buffer drained by poll_readbacks(); it serialises itself with ts_in_flight_ (one
+    // buffer drained by poll_readbacks(); it serializes itself with ts_in_flight_ (one
     // in-flight async sample at a time, since dev_ts_qs_ is a single 2-slot set) and
     // never touches dev_ts_readback_. Native audio leaves async_timing_enabled_ false,
     // so this whole path is dormant and the async convolution is byte-identical there;

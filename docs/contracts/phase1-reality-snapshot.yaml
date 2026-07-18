@@ -66,8 +66,9 @@ subsystems:
     notes: >
       Optional CHOC-based WebView panel, gated behind PULP_BUILD_WEBVIEW (OFF
       by default). Supports navigate/set_html/evaluate_js/bind. Does NOT match
-      iPlug2 model (no custom URL scheme, no structured bidirectional message
-      bridge, no resource bundling, no DevTools toggle from API).
+      a fully integrated WebView model (no custom URL scheme, no structured
+      bidirectional message bridge, no resource bundling, no DevTools toggle
+      from API).
     files:
       - core/view/include/pulp/view/web_view.hpp
       - core/view/src/web_view.cpp
@@ -319,7 +320,7 @@ phases:
     parallel_with: [2, 3, 8, 9, 10, 11]
 
   - id: 7
-    name: WebView integration (iPlug2-style)
+    name: WebView integration (custom scheme + message bridge)
     status: pending
     depends_on: [6]
     parallel_with: [2, 3, 4, 8, 9, 10, 11]
@@ -362,7 +363,7 @@ phases:
 #   - WebGPU compute-audio
 #   - Theme import/export
 #   - Centralized asset management
-#   - iPlug2-style WebView
+#   - Fully integrated WebView (custom scheme + message bridge)
 #
 # Phase 2 additions (now real):
 #   - RTSan (CMake PULP_SANITIZER=realtime, CI on Ubuntu/Clang 18)

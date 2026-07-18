@@ -79,6 +79,11 @@ public:
         table_count_ = tables.size();
         bank_ = WavetableBank64(std::move(tables));
         bank_.set_sample_rate(sample_rate_);
+        // The fresh bank starts on its default band with nothing audible to fade
+        // FROM, so the next frequency must SNAP to its band, not crossfade up from
+        // the default — otherwise swapping the wavetable set mid-note replays the
+        // aliased band-switch onset that `reset()`'s snap exists to prevent.
+        pending_band_snap_ = true;
         update_scan_coeff();
     }
 
@@ -92,6 +97,9 @@ public:
 
     /// Reset phase and crossfade state to the start of the cycle, and snap the
     /// scan position to its target (a reset render starts settled, not mid-slew).
+    /// The band also starts settled: the first `next` after this snaps straight to
+    /// its band rather than crossfading up from the default band, so a fresh voice
+    /// has no aliased band-switch onset.
     ///
     /// No phase-seed parameter: the wavetable engine resets to phase 0 and exposes
     /// no seed, and — unlike the discontinuity-corrected shapes, where a clean
@@ -100,6 +108,7 @@ public:
     /// be the misleading option.
     void reset() {
         bank_.reset();
+        pending_band_snap_ = true;
         scan_position_ = scan_target_;
         bank_.set_position(scan_position_);
     }
@@ -128,7 +137,20 @@ public:
     /// toward its target first, so the morph is smooth under a stepped control.
     double next(double increment) {
         const double frequency = increment * sample_rate_;
-        if (frequency > 0.0) bank_.set_frequency(frequency);
+        if (frequency > 0.0) {
+            // The first frequency after construction/reset snaps to its band with
+            // no crossfade: a fresh voice has no previously audible band to fade
+            // FROM, so a crossfade here would play the default band's harmonics at
+            // the new pitch for 128 samples — an aliased onset on every note-on.
+            // Every later frequency crossfades as normal (a fade between two real
+            // playing bands).
+            if (pending_band_snap_) {
+                bank_.set_frequency_immediate(frequency);
+                pending_band_snap_ = false;
+            } else {
+                bank_.set_frequency(frequency);
+            }
+        }
 
         // One-pole slew of the scan position toward the target. At coeff 1
         // (scan_time_ms == 0) this is an exact jump; otherwise it is a smooth,
@@ -171,6 +193,7 @@ private:
     double scan_position_ = 0.0;
     double scan_time_ms_ = kDefaultScanTimeMs;
     double scan_coeff_ = 1.0;
+    bool pending_band_snap_ = true;
 };
 
 } // namespace pulp::signal::osc

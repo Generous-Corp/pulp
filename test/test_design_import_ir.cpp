@@ -1291,6 +1291,144 @@ TEST_CASE("parse_param_binding_manifest_json reads a node-id → key object",
     REQUIRE_FALSE(arr.has_value());
 }
 
+TEST_CASE("a path's gradient paint survives the IR JSON round-trip",
+          "[view][import][svg]") {
+    using namespace pulp::view;
+
+    // A vector's gradient rides on the path, not on the box behind it, so it
+    // travels as its own `fillGradient` field rather than as a background. The
+    // decoder writes the field and the bridge has setSvgFillGradient; this
+    // asserts the middle link, which is the one that has repeatedly been the
+    // unplugged end of a chain like this. The node is named "Wedge", not
+    // "Dial": a vector named for a knob is recognized INTO a knob widget and
+    // never reaches the svg branch at all.
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version": 1, "source": "figma",
+      "root": {
+        "type": "frame", "name": "Panel",
+        "children": [{
+          "type": "path", "name": "Wedge",
+          "pathData": "M0 0 L10 0 L10 10 Z",
+          "viewBox": "0 0 10 10",
+          "fill": "#ff0000",
+          "fillGradient": "linear-gradient(180deg, #ffffff 0%, #000000 100%)"
+        }]
+      }
+    })JSON");
+
+    REQUIRE(ir.root.children.size() == 1);
+    const auto& dial = ir.root.children[0].attributes;
+
+    // Carried BESIDE the solid, not instead of it: the widget falls back to the
+    // solid when the gradient string won't parse, which needs both present.
+    REQUIRE(dial.count("svg_fill_gradient") == 1);
+    REQUIRE(dial.at("svg_fill_gradient") ==
+            "linear-gradient(180deg, #ffffff 0%, #000000 100%)");
+    REQUIRE(dial.at("svg_fill") == "#ff0000");
+
+    // And it reaches the generated JS — a parsed attribute nothing emits is
+    // the same silent drop as never parsing it.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    REQUIRE(js.find("setSvgFillGradient(") != std::string::npos);
+    REQUIRE(js.find("linear-gradient(180deg, #ffffff 0%, #000000 100%)") !=
+            std::string::npos);
+}
+
+TEST_CASE("a control's art layers stay art, and are not each promoted to a control",
+          "[view][import][audio-widget]") {
+    using namespace pulp::view;
+
+    // A designer's knob is a frame named for the control, holding art layers:
+    // "knob base", "knob indicator", "knob ring". Every one of those tokenizes
+    // to {knob, …} and matched the name heuristic, so ONE designer knob promoted
+    // to THREE stacked built-in knobs, each painting Pulp's stock skin over the
+    // art it was meant to be.
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version": 1, "source": "figma",
+      "root": {
+        "type": "frame", "name": "Panel",
+        "children": [{
+          "type": "frame", "name": "sound / knob / small unipolar",
+          "children": [
+            {"type": "ellipse", "name": "knob base"},
+            {"type": "frame",   "name": "knob indicator"},
+            {"type": "vector",  "name": "knob ring", "pathData": "M0 0 L10 0 L10 10 Z"}
+          ]
+        }]
+      }
+    })JSON");
+
+    const auto& knob = ir.root.children.at(0);
+    REQUIRE(knob.children.size() == 3);
+    for (const auto& layer : knob.children)
+        REQUIRE(layer.audio_widget == AudioWidgetType::none);
+
+    // And the art survives to the render rather than being replaced: the ring
+    // lowers to its own path.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    REQUIRE(js.find("createKnob(") == std::string::npos);
+    REQUIRE(js.find("setWidgetStyle(") == std::string::npos);
+    REQUIRE(js.find("createSvgPath(") != std::string::npos);
+}
+
+TEST_CASE("a control-named row does not swallow the controls inside it",
+          "[view][import][audio-widget]") {
+    using namespace pulp::view;
+
+    // The other side of the rule. "KnobRow" tokenizes to {knob, row} and matches
+    // too, and so do the knobs inside it — so the suppression has to tell a
+    // control from a layer by something other than the name that made them look
+    // alike. Each of these brings art of its own; that is the difference.
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version": 1, "source": "figma",
+      "root": {
+        "type": "frame", "name": "Panel",
+        "children": [{
+          "type": "frame", "name": "KnobRow",
+          "children": [
+            {"type": "frame", "name": "Knob 1",
+             "children": [{"type": "ellipse", "name": "body"}]},
+            {"type": "frame", "name": "Knob 2",
+             "children": [{"type": "ellipse", "name": "body"}]}
+          ]
+        }]
+      }
+    })JSON");
+
+    const auto& row = ir.root.children.at(0);
+    REQUIRE(row.audio_widget == AudioWidgetType::none);   // a row of knobs is a row
+    REQUIRE(row.children.at(0).audio_widget == AudioWidgetType::knob);
+    REQUIRE(row.children.at(1).audio_widget == AudioWidgetType::knob);
+}
+
+TEST_CASE("a differently-named control inside a control keeps its promotion",
+          "[view][import][audio-widget]") {
+    using namespace pulp::view;
+
+    // Only layers of the SAME kind are treated as that control's art. A fader
+    // sitting inside a knob-named frame is its own control, not a knob's layer.
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version": 1, "source": "figma",
+      "root": {
+        "type": "frame", "name": "Panel",
+        "children": [{
+          "type": "frame", "name": "Knob Panel",
+          "children": [
+            {"type": "ellipse", "name": "knob base"},
+            {"type": "frame",   "name": "Fader"}
+          ]
+        }]
+      }
+    })JSON");
+
+    const auto& panel = ir.root.children.at(0);
+    REQUIRE(panel.children.at(0).audio_widget == AudioWidgetType::none);   // layer
+    REQUIRE(panel.children.at(1).audio_widget == AudioWidgetType::fader);  // control
+}
 // ── interactive_element `kind`: the wire contract ────────────────────────────
 
 TEST_CASE("every interactive kind survives the wire round-trip",
@@ -1379,4 +1517,102 @@ TEST_CASE("an unrecognized interactive kind degrades to knob rather than failing
     // The geometry still lands, so the fallback renders where the design put it.
     CHECK(parsed.root.interactive_elements[0].x == 10);
     CHECK(parsed.root.interactive_elements[0].w == 30);
+}
+// ── Captured-art knob cleaned-disc asset durability ─────────────────────
+
+namespace {
+
+// Build a one-node IR whose knob carries the captured-art metadata that makes
+// enrich re-encode a cleaned disc: an asset_ref resolving to `png`, a
+// render_bounds (gates the opaque-core pass) and knob_ind_r_out (gates the
+// indicator clean).
+DesignIR make_captured_art_knob_ir(const fs::path& png) {
+    DesignIR ir;
+    ir.root.type = "knob";
+    ir.root.attributes["asset_ref"] = "knob_body";
+    ir.root.attributes["knob_ind_r_out"] = "0.9";
+    ir.root.style.width = 60.0f;
+    ir.root.style.height = 60.0f;
+    ir.root.style.render_bounds = IRStyle::RenderBounds{60.0f, 60.0f, 0.0f, 0.0f};
+
+    IRAssetRef asset;
+    asset.asset_id = "knob_body";
+    asset.original_uri = "knob_body.png";
+    asset.local_path = png.string();
+    ir.asset_manifest.assets.push_back(asset);
+    return ir;
+}
+
+std::string enriched_knob_asset_path(const fs::path& png) {
+    DesignIR ir = make_captured_art_knob_ir(png);
+    enrich_imported_image_asset_metadata(ir, ir.asset_manifest);
+    return ir.root.attributes["asset_path"];
+}
+
+bool is_under(const fs::path& path, const fs::path& dir) {
+    const auto rel = path.lexically_relative(dir);
+    return !rel.empty() && *rel.begin() != "..";
+}
+
+} // namespace
+
+TEST_CASE("captured-art knob cleaned disc lands in the durable asset cache",
+          "[view][import][knob-art]") {
+    // The cleaned-disc path is serialized into asset_path and reloaded at
+    // RUNTIME by a shipped baked UI. Writing it under the OS temp dir means a
+    // temp sweep or reboot silently unskins the knob with zero diagnostics.
+    TempDir source("pulp-knobclean-src");
+    const fs::path png = source.path / "knob.png";
+    write_text(png, read_fixture("test/fixtures/imports/figma-plugin/synthetic-knob.png"));
+
+    // Route the durable cache to a directory that is NOT under the OS temp dir
+    // so the "escaped temp" assertion is about the code, not the environment.
+    // The ctest working directory is the build tree; assert that premise rather
+    // than let a temp-hosted working dir quietly void the check below.
+    REQUIRE_FALSE(is_under(fs::current_path(), fs::temp_directory_path()));
+    const fs::path home = fs::current_path() / "knobclean-home";
+    fs::create_directories(home);
+    ScopedEnvVar cache("PULP_IMPORT_ASSET_CACHE", (home / "import-assets").string());
+
+    const std::string emitted = enriched_knob_asset_path(png);
+    REQUIRE_FALSE(emitted.empty());
+    // The clean actually ran (a plain passthrough would keep the source path).
+    REQUIRE(fs::path(emitted) != png);
+    CHECK(fs::exists(emitted));
+    CHECK_FALSE(is_under(fs::path(emitted), fs::temp_directory_path()));
+    CHECK(is_under(fs::path(emitted), home));
+
+    std::error_code ec;
+    fs::remove_all(home, ec);
+}
+
+TEST_CASE("captured-art knob cleaned disc filename is content-addressed",
+          "[view][import][knob-art]") {
+    // std::hash is implementation-defined and unstable across runs/compilers,
+    // and keying on the source path makes the same bytes cache twice. The rest
+    // of the asset pipeline is sha256 content-addressed; this path must match.
+    TempDir source("pulp-knobclean-addr");
+    const auto knob_png = read_fixture("test/fixtures/imports/figma-plugin/synthetic-knob.png");
+    const fs::path a = source.path / "a" / "knob.png";
+    const fs::path b = source.path / "b" / "renamed.png";
+    write_text(a, knob_png);
+    write_text(b, knob_png);
+
+    const fs::path other = source.path / "other.png";
+    write_text(other, read_fixture("test/fixtures/import-fidelity/assets/knob_ref.png"));
+
+    ScopedEnvVar cache("PULP_IMPORT_ASSET_CACHE",
+                       (source.path / "cache").string());
+
+    // Same bytes, different source paths → one content-addressed name.
+    const std::string name_a = fs::path(enriched_knob_asset_path(a)).filename().string();
+    const std::string name_b = fs::path(enriched_knob_asset_path(b)).filename().string();
+    REQUIRE_FALSE(name_a.empty());
+    CHECK(name_a == name_b);
+
+    // Different bytes → a different name (no collision, no stale reuse).
+    const std::string name_other =
+        fs::path(enriched_knob_asset_path(other)).filename().string();
+    REQUIRE_FALSE(name_other.empty());
+    CHECK(name_other != name_a);
 }

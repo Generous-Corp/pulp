@@ -185,9 +185,9 @@ std::string css_prop_to_camel_case(const std::string& prop) {
     return out;
 }
 
-// Strip CSS `/* ... */` comments from a block. Multi-line safe. We
-// don't need to be a full CSS tokenizer — Claude Design exports use
-// vanilla rules, not CSS-in-JS or nested at-rules.
+// Strip CSS `/* ... */` comments from a block. Multi-line safe. This
+// runs before the rule walker so brace counting there never has to
+// reason about braces that live inside a comment.
 std::string strip_css_comments(const std::string& css) {
     std::string out;
     out.reserve(css.size());
@@ -224,16 +224,61 @@ std::map<std::string, std::string> parse_css_declarations(const std::string& bod
     return out;
 }
 
+// Advance past a CSS string literal. `quote_at` indexes the opening
+// `'` or `"`; returns the index just past the closing quote, or
+// `css.size()` if the literal is unterminated. Backslash escapes are
+// honored so `content: "\""` doesn't end the literal early.
+size_t skip_css_string(const std::string& css, size_t quote_at) {
+    const char quote = css[quote_at];
+    for (size_t i = quote_at + 1; i < css.size(); ++i) {
+        if (css[i] == '\\') {
+            ++i;  // consume the escaped char
+            continue;
+        }
+        if (css[i] == quote) return i + 1;
+    }
+    return css.size();
+}
+
+// Find the `}` that closes the block opening at `open`, counting
+// nested braces so an at-rule body (`@media { .a {} .b {} }`) is
+// consumed whole rather than stopping at its first inner `}`. Braces
+// inside string literals don't count. Returns npos when unbalanced.
+size_t find_matching_brace(const std::string& css, size_t open) {
+    int depth = 0;
+    for (size_t i = open; i < css.size(); ++i) {
+        const char c = css[i];
+        if (c == '"' || c == '\'') {
+            i = skip_css_string(css, i) - 1;
+            continue;
+        }
+        if (c == '{') {
+            ++depth;
+        } else if (c == '}') {
+            if (--depth == 0) return i;
+        }
+    }
+    return std::string::npos;
+}
+
 // Walk a CSS source string (the inside of one `<style>` block) and
-// merge every `.classname { ... }` rule into `into`. Skips at-rules
-// (anything that begins with `@`), `:root` blocks, descendant /
-// pseudo-class selectors (anything with whitespace, `:`, `>` or `,`
+// merge every top-level `.classname { ... }` rule into `into`. Skips
+// at-rules (anything that begins with `@`), `:root` blocks, descendant
+// / pseudo-class selectors (anything with whitespace, `:`, `>` or `,`
 // between the dot and the `{`), and `.scheme-*` selectors (those are
 // already handled as theme-mode token overrides upstream).
 //
+// Rules nested inside an at-rule are deliberately NOT collected: a
+// `@media` / `@supports` body is conditional, so hoisting its rules
+// into the unconditional classname map would make a responsive or
+// dark-mode override apply always. Consuming each at-rule body whole
+// (balanced braces) is what keeps the walker in sync — stopping at the
+// first inner `}` would both leak the at-rule's later rules and
+// misparse the following top-level rule's selector.
+//
 // We hand-walk character-by-character rather than regex because:
-//   1. CSS values can contain `{` (e.g. `linear-gradient(...)`) — but
-//      not at the top level of a declaration block.
+//   1. Brace nesting is unbounded (`@media { @supports { … } }`), which
+//      a regex cannot match.
 //   2. The selector list can include commas, so we need to split on
 //      `,` and apply the same body to every classname in the list.
 void collect_classnames_from_css(const std::string& css_in,
@@ -245,21 +290,45 @@ void collect_classnames_from_css(const std::string& css_in,
         while (i < css.size() && std::isspace(static_cast<unsigned char>(css[i]))) ++i;
         if (i >= css.size()) break;
 
-        // Find the next `{` that opens a rule body. Anything between
-        // `i` and that brace is the selector list.
-        auto open = css.find('{', i);
+        // Scan the prelude for whichever comes first: the `{` that
+        // opens a body, or the `;` that terminates a body-less
+        // statement at-rule (`@import url(…);`, `@charset "utf-8";`).
+        // Quoted spans are stepped over so a `{` or `;` inside a string
+        // doesn't split the prelude.
+        size_t scan = i;
+        size_t open = std::string::npos;
+        bool statement_at_rule = false;
+        while (scan < css.size()) {
+            const char c = css[scan];
+            if (c == '"' || c == '\'') {
+                scan = skip_css_string(css, scan);
+                continue;
+            }
+            if (c == '{') { open = scan; break; }
+            if (c == ';') { statement_at_rule = true; break; }
+            ++scan;
+        }
+
+        // A body-less statement — consume it and move on. Without this
+        // the `;` would be swallowed into the *next* rule's selector
+        // list, disqualifying an otherwise plain classname rule.
+        if (statement_at_rule) {
+            i = scan + 1;
+            continue;
+        }
         if (open == std::string::npos) break;
         std::string selector_list = css.substr(i, open - i);
 
-        // Find the matching `}`. Top-level only — declaration values
-        // never embed `{...}` braces in well-formed CSS.
-        auto close = css.find('}', open + 1);
+        // Find the matching `}`, counting nested braces.
+        auto close = find_matching_brace(css, open);
         if (close == std::string::npos) break;
         std::string body = css.substr(open + 1, close - (open + 1));
         i = close + 1;
 
         // Skip at-rules (`@media`, `@font-face`, `@keyframes`, etc.).
-        // The first non-whitespace char of the selector tells us.
+        // The first non-whitespace char of the selector tells us. The
+        // whole balanced body is already consumed above, so nested
+        // at-rules are skipped along with it.
         auto first_non_ws = selector_list.find_first_not_of(" \t\r\n");
         if (first_non_ws == std::string::npos) continue;
         if (selector_list[first_non_ws] == '@') continue;
@@ -897,6 +966,7 @@ static std::vector<uint8_t> read_binary_file(const fs::path& path) {
 
 static bool write_binary_file(const fs::path& path,
                               const std::vector<uint8_t>& bytes);
+static fs::path default_asset_cache_directory();
 
 void enrich_imported_image_asset_metadata(DesignIR& ir,
                                           const IRAssetManifest& manifest,
@@ -941,14 +1011,22 @@ void enrich_imported_image_asset_metadata(DesignIR& ir,
                                     if (auto img = decode_png_rgba_for_import(bytes)) {
                                         clean_baked_knob_indicator(*img, *core);
                                         if (auto enc = encode_rgba_png_for_import(*img)) {
-                                            fs::path dir = fs::temp_directory_path() /
-                                                           "pulp-import-assets";
+                                            // The cleaned disc lands in the durable
+                                            // asset cache, not the OS temp dir: this
+                                            // path is serialized into asset_path and
+                                            // reloaded at RUNTIME by a shipped baked
+                                            // UI, so a temp sweep would silently
+                                            // unskin the knob. Content-addressed by
+                                            // sha256 like the rest of the pipeline —
+                                            // std::hash is implementation-defined and
+                                            // unstable across runs and compilers.
+                                            fs::path dir = default_asset_cache_directory();
                                             std::error_code dec;
                                             fs::create_directories(dir, dec);
-                                            const auto key = std::hash<std::string>{}(
-                                                asset_ref->second + path.string());
+                                            const auto digest = pulp::runtime::sha256_hex(
+                                                enc->data(), enc->size());
                                             fs::path cleaned = dir /
-                                                ("knobclean_" + std::to_string(key) + ".png");
+                                                ("knobclean_" + digest.substr(0, 16) + ".png");
                                             if (write_binary_file(cleaned, *enc))
                                                 node.attributes["asset_path"] =
                                                     cleaned.string();
@@ -1672,6 +1750,55 @@ DesignIR parse_figma_plugin_json(const std::string& json) {
     ir.root.provenance = std::move(provenance);
     ir.root.confidence = IRConfidence::pass;
 
+    // The envelope's diagnostics are the whole point of emitting them: they are
+    // how a fidelity loss becomes a stated result instead of a silent one. This
+    // parser documented `diagnostics?: [...]` in its own shape comment above and
+    // then never read the field, so `ir.diagnostics` stayed empty and
+    // `print_import_diagnostics` had nothing to print.
+    //
+    // Nothing about that was visible. The decoder emitted the warnings correctly
+    // and wrote them to scene.pulp.json; the JS lane even printed "N warning(s)"
+    // from its own array. But `--from fig` rewrites its source to figma-plugin
+    // and lands HERE, so every gradient flattened to its mean, every dropped
+    // blend mode, every missing icon font and every unresolvable asset was
+    // announced to a file and to nobody. The skill promises the opposite
+    // (import-design SKILL.md: "reported as named warnings ... rather than
+    // silently dropped") — true of the JSON on disk, false of the CLI.
+    //
+    // A comment describing a field the code does not parse is the same failure
+    // this whole lane keeps producing: a chain that runs end to end with one end
+    // quietly unplugged, where nothing errors and the result is merely wrong.
+    if (parsed.hasObjectMember("diagnostics") && parsed["diagnostics"].isArray()) {
+        const auto diags = parsed["diagnostics"];
+        // Local to this parser and matching its house idiom (hasObjectMember +
+        // isString), rather than reaching for a helper this TU does not have.
+        auto str = [](const choc::value::ValueView& o, const char* k) -> std::string {
+            return (o.hasObjectMember(k) && o[k].isString())
+                       ? std::string(o[k].toString()) : std::string{};
+        };
+        for (uint32_t i = 0; i < diags.size(); ++i) {
+            const auto d = diags[i];
+            if (!d.isObject()) continue;
+            ImportDiagnostic out;
+            out.code = str(d, "code");
+            if (out.code.empty()) continue;  // a diagnostic with no code says nothing
+            // `detail` is the decoder's field name; accept `message` too so a
+            // different emitter of this envelope is not silently blanked.
+            out.message = str(d, "detail");
+            if (out.message.empty()) out.message = str(d, "message");
+            // Prefer the readable node name for `path`; fall back to the guid,
+            // which is at least resolvable.
+            out.path = str(d, "node_name");
+            if (out.path.empty()) out.path = str(d, "node_id");
+            const std::string sev = str(d, "severity");
+            out.severity = sev == "error" ? ImportDiagnosticSeverity::error
+                         : sev == "info"  ? ImportDiagnosticSeverity::info
+                                          : ImportDiagnosticSeverity::warning;
+            if (auto id = str(d, "node_id"); !id.empty()) out.anchor_id = id;
+            ir.diagnostics.push_back(std::move(out));
+        }
+    }
+
     promote_interactive_frames(ir.root);
     assign_anchors(ir.root, AnchorStrategy::adapter, "figma-plugin");
 
@@ -1740,10 +1867,20 @@ DesignIR parse_stitch_html(const std::string& html) {
     auto begin = std::sregex_iterator(html.begin(), html.end(), tag_re);
     auto end = std::sregex_iterator();
 
+    // Non-visible elements carry raw code / metadata, not rendered text: a
+    // `<script>` body (e.g. a Stitch `tailwind.config = {...}` block or a Claude
+    // bundler placeholder) or a `<style>` sheet is NOT UI text, and emitting it
+    // as a label paints raw JavaScript/CSS into the imported design. The regex
+    // matches any `<tag>...</tag>`, so filter these element kinds explicitly.
+    static const std::unordered_set<std::string> kNonVisibleTags = {
+        "script", "style", "noscript", "template",
+        "head", "title", "meta", "link", "base"};
+
     for (auto it = begin; it != end; ++it) {
         std::string tag = (*it)[1].str();
         std::string content = (*it)[2].str();
         if (content.empty()) continue;
+        if (kNonVisibleTags.count(tag)) continue;
 
         IRNode child;
         child.type = "text";
@@ -1953,7 +2090,29 @@ void synthesize_node(IRNode& n) {
     if (!n.children.empty()) return;
     if (n.audio_widget != AudioWidgetType::none) return;
     if (n.attributes.count("asset_path")) return;
-    if (node_has_visible_fill(n)) return;
+    // "Already renderable" holds for a rect or a line: a frame paints its own
+    // background box, so a filled rect needs no path. It does NOT hold for a
+    // round or many-sided primitive — codegen has no painter for those, so a
+    // filled ellipse emits nothing whatsoever and the shape vanishes. The
+    // design's red record dot rendered as an empty cell for exactly this reason
+    // while the play triangle beside it (a vector carrying a real path) was
+    // fine. Their fill is only expressible as a path, so synthesize one and
+    // carry the color across.
+    //
+    // A gradient rides the path too, via setSvgFillGradient. It used to bail
+    // here because a gradient could not move onto the path, and emitting one
+    // anyway painted a gradient SQUARE behind the circle — strictly worse than
+    // a flat disc. The path can carry it now, so the only rule left is the one
+    // that made the square: whatever moves onto the path must be cleared off
+    // the node's own background.
+    const bool fill_needs_path = n.type == "ellipse" || n.type == "circle" ||
+                                 n.type == "polygon" || n.type == "star";
+    const bool solid_filled =
+        n.style.background_color && !n.style.background_color->empty();
+    const bool gradient_filled =
+        n.style.background_gradient && !n.style.background_gradient->empty();
+    if (node_has_visible_fill(n) && !(fill_needs_path && (solid_filled || gradient_filled)))
+        return;
     const float w = n.style.width.value_or(0.0f);
     const float h = n.style.height.value_or(0.0f);
     const bool is_line = (n.type == "line" || n.type == "svg_line");
@@ -1980,10 +2139,26 @@ void synthesize_node(IRNode& n) {
 
     n.attributes["path_data"] = d;
     n.attributes["svg_viewbox"] = "0 0 " + svg_num(w) + " " + svg_num(h);
-    // We only reach here when the node has no visible fill, so force the
-    // SvgPathWidget's default opaque-black fill off — otherwise a stroke-only or
-    // empty shape would render as a solid black box.
-    n.attributes["svg_fill"] = "none";
+    // The synthesized path now IS this node's paint, so a solid fill moves onto
+    // it and the background is cleared. Leaving the background set would paint a
+    // square behind the circle — the stray box that shows up behind a knob.
+    if (gradient_filled) {
+        n.attributes["svg_fill_gradient"] = *n.style.background_gradient;
+        n.style.background_gradient.reset();
+        // The solid, when present, follows it onto the path as the widget's
+        // parse-failure fallback. Either way the node's own background is
+        // cleared: leaving it would paint the box behind the circle.
+        n.attributes["svg_fill"] =
+            solid_filled ? *n.style.background_color : std::string("none");
+        n.style.background_color.reset();
+    } else if (solid_filled) {
+        n.attributes["svg_fill"] = *n.style.background_color;
+        n.style.background_color.reset();
+    } else {
+        // No visible fill: force the SvgPathWidget's default opaque-black fill
+        // off — otherwise a stroke-only or empty shape renders as a black box.
+        n.attributes["svg_fill"] = "none";
+    }
     if (n.style.border_color && !n.style.border_color->empty()) {
         n.attributes["svg_stroke"] = *n.style.border_color;
         n.attributes["svg_stroke_width"] = svg_num(n.style.border_width.value_or(1.0f));
@@ -2129,6 +2304,190 @@ void hoist_captured_art_knobs(DesignIR& ir) {
         for (auto& c : n.children) visit(c);
     };
     visit(ir.root);
+}
+
+namespace {
+
+// Split a CSS `border` shorthand into its parts. Tokenized with paren-depth
+// tracking rather than a plain space split, because `rgba(255, 0, 0, 0.5)` is
+// ONE value containing spaces and commas — a naive split hands back "rgba(255,"
+// as the color and the border silently disappears again, one layer deeper.
+//
+// The color is carried across verbatim rather than parsed: border_color is a
+// string, and every downstream paint site already accepts hex / rgb() / rgba()
+// / hsl(). Parsing here would only add a second place to disagree about color.
+struct BorderShorthand {
+    std::optional<std::string> color;
+    std::optional<float> width;
+    std::optional<std::string> style;
+};
+
+BorderShorthand parse_border_shorthand(const std::string& value) {
+    BorderShorthand out;
+    static const std::unordered_set<std::string> kStyles = {
+        "none", "hidden", "solid", "dashed", "dotted",
+        "double", "groove", "ridge", "inset", "outset",
+    };
+
+    std::vector<std::string> tokens;
+    std::string cur;
+    int depth = 0;
+    for (char c : value) {
+        if (c == '(') ++depth;
+        if (c == ')') --depth;
+        if (std::isspace(static_cast<unsigned char>(c)) && depth == 0) {
+            if (!cur.empty()) { tokens.push_back(cur); cur.clear(); }
+            continue;
+        }
+        cur += c;
+    }
+    if (!cur.empty()) tokens.push_back(cur);
+
+    for (const auto& t : tokens) {
+        const std::string lower = choc::text::toLowerCase(t);
+        if (!out.style && kStyles.count(lower)) { out.style = lower; continue; }
+        // A width is a bare number with an optional unit. Only px is honoured as
+        // a real length; other units are left for the caller's default rather
+        // than converted with a guessed root font size.
+        if (!out.width && !t.empty() &&
+            (std::isdigit(static_cast<unsigned char>(t[0])) || t[0] == '.')) {
+            char* end = nullptr;
+            const float v = std::strtof(t.c_str(), &end);
+            if (end != t.c_str()) {
+                const std::string unit = choc::text::toLowerCase(std::string(end));
+                if (unit.empty() || unit == "px") { out.width = v; continue; }
+            }
+        }
+        if (!out.color) out.color = t;
+    }
+    return out;
+}
+
+}  // namespace
+
+void normalize_border_shorthand(IRNode& root) {
+    auto visit = [](auto&& self, IRNode& n) -> void {
+        if (n.style.border && !n.style.border->empty()) {
+            const auto parts = parse_border_shorthand(*n.style.border);
+            // `border: none` / a zero width is a positive statement that there
+            // is no edge. Recording color-less parts would leave border_width
+            // set with no color, which reads downstream as "no border" anyway —
+            // but say it explicitly so the intent survives a later refactor.
+            const bool suppressed =
+                (parts.style && *parts.style == "none") ||
+                (parts.style && *parts.style == "hidden") ||
+                (parts.width && *parts.width <= 0.0f);
+            if (!suppressed) {
+                // Fill gaps only: a producer that set the discrete fields said
+                // what it meant more precisely than the shorthand can.
+                if (!n.style.border_color && parts.color)
+                    n.style.border_color = *parts.color;
+                if (!n.style.border_width)
+                    n.style.border_width = parts.width.value_or(1.0f);
+                if (!n.style.border_style && parts.style)
+                    n.style.border_style = *parts.style;
+            }
+        }
+        for (auto& c : n.children) self(self, c);
+    };
+    visit(visit, root);
+}
+
+namespace {
+
+// The resolved box of a slider child in its parent's coordinate space. A child
+// only qualifies once it carries all four absolute fields — a flow-positioned
+// child has no fixed geometry to reason about, so it never joins the triplet.
+struct SliderBox {
+    IRNode* node = nullptr;
+    float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;
+    bool ok = false;
+};
+
+SliderBox slider_box(IRNode& c) {
+    SliderBox b;
+    b.node = &c;
+    if (c.style.left && c.style.top && c.style.width && c.style.height) {
+        b.x = *c.style.left;
+        b.y = *c.style.top;
+        b.w = *c.style.width;
+        b.h = *c.style.height;
+        b.ok = b.w > 0.0f && b.h > 0.0f;
+    }
+    return b;
+}
+
+// A slider thumb reads as a circle. The .fig decoder emits it as an ellipse;
+// other producers may emit a square frame rounded to a pill by its radius.
+bool slider_thumb_is_round(const IRNode& n, float w, float h) {
+    if (n.type == "ellipse" || n.type == "circle") return true;
+    const float side = std::min(w, h);
+    const float r = n.style.border_top_left_radius.value_or(
+        n.style.border_radius.value_or(0.0f));
+    return std::abs(w - h) <= 1.0f && r >= 0.4f * side;
+}
+
+}  // namespace
+
+void reconnect_slider_fill(IRNode& root) {
+    auto visit = [](auto&& self, IRNode& n) -> void {
+        // A horizontal slider is a short, wide container: a near-full-width
+        // track, a shorter colored progress fill on the same band, and a round
+        // thumb whose height fills the bar. Detect that triplet structurally —
+        // never by layer name — so only a real slider is ever touched.
+        if (n.style.width && n.style.height && *n.style.height > 0.0f &&
+            n.children.size() >= 2 && n.children.size() <= 4) {
+            const float W = *n.style.width;
+            const float H = *n.style.height;
+            if (W >= 3.0f * H) {
+                SliderBox thumb, track, fill;
+                for (auto& c : n.children) {
+                    const SliderBox b = slider_box(c);
+                    if (!b.ok) continue;
+                    const bool thin = b.h <= 0.5f * H;
+                    if (!thumb.ok && slider_thumb_is_round(c, b.w, b.h) &&
+                        std::abs(b.w - b.h) <= std::max(3.0f, 0.3f * b.w) &&
+                        b.h >= 0.7f * H) {
+                        thumb = b;
+                    } else if (!track.ok && thin && b.w >= 0.85f * W) {
+                        track = b;
+                    } else if (!fill.ok && thin && b.w < 0.85f * W &&
+                               c.style.background_color) {
+                        fill = b;
+                    }
+                }
+                // Require a distinct fill: its color must differ from the track,
+                // so a plain progress bar's own track is never mistaken for a
+                // fill and pulled around.
+                const bool distinct_fill =
+                    fill.ok &&
+                    (!track.node || !track.node->style.background_color ||
+                     *fill.node->style.background_color !=
+                         *track.node->style.background_color);
+                if (thumb.ok && track.ok && distinct_fill) {
+                    const float thumb_left = thumb.x;
+                    const float thumb_right = thumb.x + thumb.w;
+                    const float thumb_center = thumb.x + thumb.w * 0.5f;
+                    const float fill_left = fill.x;
+                    const float fill_right = fill.x + fill.w;
+                    // Only act when the fill floats in a gap away from the thumb.
+                    // A fill already touching or overlapping its thumb is stored
+                    // faithfully and left exactly as-is.
+                    if (fill_left > thumb_right) {
+                        // Fill sits to the right of the thumb: pull its left edge
+                        // back to the thumb so the bar meets the handle.
+                        fill.node->style.left = thumb_center;
+                        fill.node->style.width = fill_right - thumb_center;
+                    } else if (fill_right < thumb_left) {
+                        // Fill sits to the left: push its right edge to the thumb.
+                        fill.node->style.width = thumb_center - fill_left;
+                    }
+                }
+            }
+        }
+        for (auto& c : n.children) self(self, c);
+    };
+    visit(visit, root);
 }
 
 void synthesize_primitive_paths(IRNode& root) {

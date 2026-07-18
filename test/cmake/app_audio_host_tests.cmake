@@ -183,6 +183,16 @@ target_link_libraries(pulp-test-wav-bridge PRIVATE pulp-audio-test-support Catch
 catch_discover_tests(pulp-test-wav-bridge)
 add_executable(pulp-osc-render-wav osc_render_wav.cpp)
 target_link_libraries(pulp-osc-render-wav PRIVATE pulp-audio-test-support)
+
+# CLI argv smoke for the tool above: shells out per --engine and for --seed,
+# asserting exit code + a non-empty WAV. See test_osc_render_wav_cli.cpp.
+add_executable(pulp-test-osc-render-wav-cli test_osc_render_wav_cli.cpp)
+target_link_libraries(pulp-test-osc-render-wav-cli PRIVATE
+    pulp::platform Catch2::Catch2WithMain)
+add_dependencies(pulp-test-osc-render-wav-cli pulp-osc-render-wav)
+target_compile_definitions(pulp-test-osc-render-wav-cli PRIVATE
+    PULP_OSC_RENDER_WAV_BINARY="$<TARGET_FILE:pulp-osc-render-wav>")
+catch_discover_tests(pulp-test-osc-render-wav-cli)
 if(PULP_HAS_VST3)
     # The VST3 sibling of the CLAP null above: same deterministic Processor,
     # same stimulus, driven through the real PulpVst3Processor::process()
@@ -202,6 +212,35 @@ if(PULP_HAS_VST3)
         PULP_VST3_GUI=1
     )
     catch_discover_tests(pulp-test-vst3-audio-parity)
+endif()
+
+if(PULP_HAS_VST3)
+    # Host-side VST3 separated-controller state sync
+    # (pulp::host::detail::vst3_serialize_state / vst3_restore_state). The fakes
+    # inherit the SDK's Component / EditController; vsteditcontroller.cpp is
+    # compiled in directly because the vst3-sdk convenience library does not
+    # include it.
+    add_executable(pulp-test-vst3-state-sync
+        test_vst3_state_sync.cpp
+        ${VST3_SDK_DIR}/public.sdk/source/vst/vsteditcontroller.cpp
+    )
+    target_link_libraries(pulp-test-vst3-state-sync
+        PRIVATE pulp::host vst3-sdk Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-vst3-state-sync)
+endif()
+
+if(PULP_HAS_VST3)
+    # Host-side VST3 editor (IPlugView) negotiation seam
+    # (pulp::host::detail::vst3_editor.hpp). The fake IPlugView inherits the SDK
+    # CPluginView (in the vst3-sdk lib) and the fake controller inherits
+    # EditController; vsteditcontroller.cpp is compiled in directly.
+    add_executable(pulp-test-vst3-editor
+        test_vst3_editor.cpp
+        ${VST3_SDK_DIR}/public.sdk/source/vst/vsteditcontroller.cpp
+    )
+    target_link_libraries(pulp-test-vst3-editor
+        PRIVATE pulp::host vst3-sdk Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-vst3-editor)
 endif()
 
 if(PULP_HAS_CLAP)

@@ -14,13 +14,6 @@ name: Install consumer smoke
 # users feel them.
 
 on:
-  pull_request:
-    paths:
-      - 'core/**'
-      - 'tools/cmake/**'
-      - 'tools/validation/sdk-smoke/**'
-      - 'CMakeLists.txt'
-      - '.github/workflows/install-consumer-smoke.yml'
   push:
     branches: [main]
     paths:
@@ -30,6 +23,9 @@ on:
       - 'CMakeLists.txt'
       - '.github/workflows/install-consumer-smoke.yml'
 
+  schedule:
+    - cron: '41 5 * * *'  # nightly de-starve safety net (see planning/fleet/2026-07-17-ci-destarve-analysis.md)
+  workflow_dispatch: {}
 concurrency:
   group: install-consumer-smoke-${{ github.ref }}
   cancel-in-progress: true

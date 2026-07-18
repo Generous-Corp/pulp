@@ -27,6 +27,9 @@
 #include <public.sdk/source/vst/hosting/eventlist.h>
 
 #include <pulp/host/dl_shim.hpp>
+#include <pulp/host/detail/vst3_state_sync.hpp>
+#include <pulp/host/detail/vst3_editor.hpp>
+#include <pulp/host/hosted_editor_container.hpp>
 #include <atomic>
 #include <cstring>
 #include <filesystem>
@@ -103,6 +106,8 @@ public:
     }
 
     ~Vst3Slot() override {
+        // Tear the editor down before terminating the controller it came from.
+        close_editor_();
         release();
         // Combined plugins implement IComponent + IEditController on the
         // same object — terminating both pointers would call IPluginBase
@@ -402,29 +407,115 @@ public:
         return bypassed_.load(std::memory_order_relaxed);
     }
 
+    // True when the plugin exposes a *separate* edit controller (distinct
+    // object from the component). Combined plugins implement IComponent and
+    // IEditController on one object, detected by FUnknown pointer equality —
+    // see the destructor's `combined` check.
+    bool is_separated_controller_() const {
+        return controller_
+            && static_cast<FUnknown*>(controller_) != static_cast<FUnknown*>(component_);
+    }
+
+    // Detach + release the editor view and destroy its container. Idempotent;
+    // safe to call from destroy_hosted_editor() and from the destructor.
+    void close_editor_() {
+        if (editor_view_) {
+            detail::vst3_detach_editor_view(editor_view_);
+            detail::vst3_release_editor_view(editor_view_);
+            editor_view_ = nullptr;
+        }
+        if (editor_container_) {
+            destroy_editor_container(editor_container_);
+            editor_container_ = nullptr;
+        }
+    }
+
     std::vector<uint8_t> save_state() const override {
         if (!component_) return {};
-        VectorStream stream;
-        if (component_->getState(&stream) != kResultOk) return {};
-        return stream.take();
+        return detail::vst3_serialize_state(component_, controller_,
+                                            is_separated_controller_());
     }
 
     bool restore_state(const std::vector<uint8_t>& data) override {
         if (!component_ || data.empty()) return false;
-        VectorStream stream(data);
-        return component_->setState(&stream) == kResultOk;
+        return detail::vst3_restore_state(data, component_, controller_,
+                                          is_separated_controller_());
     }
 
-    bool has_editor() const override { return false; }
+    bool has_editor() const override { return controller_ != nullptr; }
 #if defined(__GNUC__) || defined(__clang__)
 #  pragma GCC diagnostic push
 #  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
+    // The legacy void* path cannot express VST3's parent-consuming
+    // IPlugView::attached() model — it has nowhere to receive the parent
+    // window. Hosts reach the VST3 editor through create_hosted_editor();
+    // these satisfy the still-pure-virtual legacy interface only.
     void* create_editor_view() override { return nullptr; }
     void destroy_editor_view() override {}
 #if defined(__GNUC__) || defined(__clang__)
 #  pragma GCC diagnostic pop
 #endif
+
+    std::unique_ptr<HostedEditor> create_hosted_editor(void* parent_window) override {
+        if (!controller_ || !parent_window) return nullptr;
+        if (editor_view_) {
+            runtime::log_error(
+                "VST3 editor: create requested while one is already open for '{}'",
+                info_.name);
+            return nullptr;
+        }
+
+        uint32_t width = 0;
+        uint32_t height = 0;
+        bool resizable = false;
+        IPlugView* view =
+            detail::vst3_create_editor_view(controller_, &width, &height, &resizable);
+        if (!view) return nullptr;
+
+        // Order mirrors the container contract (hosted_editor_container.hpp):
+        // size the container from the view, create it already inserted into the
+        // parent window, then let the plug-in attach into it.
+        void* container = create_editor_container(parent_window, width, height);
+        if (!container) {
+            detail::vst3_release_editor_view(view);
+            return nullptr;
+        }
+        if (!detail::vst3_attach_editor_view(view, container)) {
+            runtime::log_error("VST3 editor: attached() failed for '{}'", info_.name);
+            destroy_editor_container(container);
+            detail::vst3_release_editor_view(view);
+            return nullptr;
+        }
+        editor_view_ = view;
+        editor_container_ = container;
+
+        auto ed = std::make_unique<HostedEditor>();
+        ed->native_handle = container;
+        ed->width = width;
+        ed->height = height;
+        ed->resizable = resizable;
+        return ed;
+    }
+
+    void destroy_hosted_editor(std::unique_ptr<HostedEditor> ed) override {
+        if (!ed) return;
+        if (ed->native_handle != editor_container_) {
+            runtime::log_error(
+                "VST3 editor: destroy_hosted_editor for '{}' got an editor this "
+                "slot does not own; ignoring",
+                info_.name);
+            return;
+        }
+        close_editor_();
+    }
+
+    bool set_hosted_editor_size(uint32_t& width, uint32_t& height) override {
+        if (!editor_view_) return false;
+        if (!detail::vst3_resize_editor_view(editor_view_, &width, &height)) return false;
+        resize_editor_container(editor_container_, width, height);
+        return true;
+    }
 
     int latency_samples() const override {
         if (!processor_) return 0;
@@ -451,65 +542,6 @@ public:
         static HostApp app;
         return app;
     }
-
-    // Minimal IBStream backed by std::vector<uint8_t> for state round-trips.
-    class VectorStream final : public IBStream {
-    public:
-        VectorStream() = default;
-        explicit VectorStream(const std::vector<uint8_t>& src) : buf_(src) {}
-        std::vector<uint8_t> take() { return std::move(buf_); }
-        tresult PLUGIN_API read(void* buffer, int32 num_bytes,
-                                int32* num_bytes_read) override {
-            if (num_bytes < 0) return kInvalidArgument;
-            int64 remaining = (int64)buf_.size() - pos_;
-            int64 n = num_bytes < remaining ? num_bytes : remaining;
-            if (n > 0) std::memcpy(buffer, buf_.data() + pos_, (size_t)n);
-            pos_ += n;
-            if (num_bytes_read) *num_bytes_read = (int32)n;
-            return kResultOk;
-        }
-        tresult PLUGIN_API write(void* buffer, int32 num_bytes,
-                                 int32* num_bytes_written) override {
-            if (num_bytes < 0) return kInvalidArgument;
-            const auto* p = static_cast<const uint8_t*>(buffer);
-            buf_.insert(buf_.end(), p, p + num_bytes);
-            pos_ = (int64)buf_.size();
-            if (num_bytes_written) *num_bytes_written = num_bytes;
-            return kResultOk;
-        }
-        tresult PLUGIN_API seek(int64 pos, int32 mode, int64* result) override {
-            int64 new_pos = pos_;
-            switch (mode) {
-                case kIBSeekSet: new_pos = pos; break;
-                case kIBSeekCur: new_pos = pos_ + pos; break;
-                case kIBSeekEnd: new_pos = (int64)buf_.size() + pos; break;
-                default: return kInvalidArgument;
-            }
-            if (new_pos < 0 || new_pos > (int64)buf_.size()) return kInvalidArgument;
-            pos_ = new_pos;
-            if (result) *result = pos_;
-            return kResultOk;
-        }
-        tresult PLUGIN_API tell(int64* pos) override {
-            if (!pos) return kInvalidArgument;
-            *pos = pos_;
-            return kResultOk;
-        }
-        tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override {
-            if (FUnknownPrivate::iidEqual(iid, IBStream::iid)
-                || FUnknownPrivate::iidEqual(iid, FUnknown::iid)) {
-                *obj = static_cast<IBStream*>(this);
-                return kResultTrue;
-            }
-            *obj = nullptr;
-            return kNoInterface;
-        }
-        uint32 PLUGIN_API addRef() override { return 1; }
-        uint32 PLUGIN_API release() override { return 1; }
-    private:
-        std::vector<uint8_t> buf_;
-        int64 pos_ = 0;
-    };
 
     void cache_params_() {
         params_.clear();
@@ -543,6 +575,10 @@ private:
     PluginInfo info_;
     void* handle_ = nullptr;
     IPluginFactory* factory_ = nullptr;
+    // Hosted editor (embedded IPlugView + its host container), null unless open.
+    IPlugView* editor_view_ = nullptr;
+    void* editor_container_ = nullptr;
+
     Vst::IComponent* component_ = nullptr;
     Vst::IAudioProcessor* processor_ = nullptr;
     Vst::IEditController* controller_ = nullptr;

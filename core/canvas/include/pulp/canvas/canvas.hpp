@@ -1409,6 +1409,22 @@ public:
     }
 
     // ── Custom SkSL Shader Rendering (GPU) ──────────────────────────────
+    //
+    // SkSL is the custom-widget-shader contract. It is deliberately declared on
+    // the abstract Canvas rather than on SkiaCanvas: `setWidgetShader(id, sksl)`
+    // in the JS widget bridge accepts SkSL, so every backend must answer for it
+    // — either by compiling it or by degrading predictably.
+    //
+    // A backend without SkSL degrades gracefully and reports the failure rather
+    // than pretending to draw: `compile_sksl` returns a non-empty error string
+    // on non-Skia builds, and `draw_with_sksl` paints a fallback rect and
+    // returns false. Callers must therefore treat a false return / non-empty
+    // error as "no shader ran", not as a hard error.
+    //
+    // The Skia-independent escape hatch is the WGSL tier — the JS WebGPU bridge
+    // talks to Dawn directly with zero Skia involvement — for UIs that need GPU
+    // work on a backend where SkSL is unavailable.
+
     /// Uniforms passed to custom widget shaders.
     struct ShaderUniforms {
         float value = 0;           ///< Widget value (0-1)
@@ -1435,6 +1451,8 @@ public:
 
     /// Validate and compile an SkSL shader without drawing. Returns error string (empty = success).
     /// Static so it can be called without a Canvas instance.
+    /// Non-Skia builds return a non-empty "Skia not available" error rather than
+    /// reporting a false success — there is no compiler to ask.
     static std::string compile_sksl(const std::string& sksl);
 
     /// Whether an SkSL shader declares a uniform of the given name. Compiles via

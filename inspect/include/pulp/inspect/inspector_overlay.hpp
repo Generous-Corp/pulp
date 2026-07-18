@@ -1393,6 +1393,38 @@ private:
     void track_raw_history_view(View* v);
     bool any_raw_history_view_dangling() const;
 
+    // ── Gesture undo target ──────────────────────────────────────────
+    //
+    // Every per-gesture EditHistory closure that mutates a captured View
+    // must survive a live React SUBTREE rebuild between capture and Cmd+Z:
+    // clear_edit_history() only fires at ROOT replacement, so a bare `View*`
+    // held in a closure can dangle. GestureUndoTarget centralizes the one
+    // dangling-mitigation rule that the text-edit and reparent sites
+    // hand-rolled — and that the resize + move-float sites historically
+    // LACKED, a latent use-after-free. It holds the stable anchor when the
+    // view has one (re-found via resolve_anchor() at replay) and falls back
+    // to the raw pointer, TRACKED via track_raw_history_view() so
+    // rebuild_flat_tree() clears the history if it leaves the tree. resolve()
+    // returns nullptr for a freed/unresolvable target so a closure can no-op
+    // gracefully. Copyable (an EditHistory closure captures it by value).
+    struct GestureUndoTarget {
+        View* raw = nullptr;
+        std::string anchor;
+        bool anchored = false;
+        // Re-find the live view at replay time. A nested type may touch the
+        // enclosing class's private resolve_anchor().
+        View* resolve(const InspectorOverlay& ov) const {
+            return anchored ? ov.resolve_anchor(anchor) : raw;
+        }
+    };
+    // Capture `v` as a gesture undo target. `anchored_gate` lets a site keep
+    // its own notion of when the anchored replay path applies (the text-edit
+    // site ties it to a wired TweakStore); the target is anchored only when
+    // the gate holds AND the view carries a non-empty anchor id. Tracks the
+    // raw pointer when the target is NOT anchored so the rebuild seam can
+    // clear the history before a dangling closure runs.
+    GestureUndoTarget capture_undo_target(View* v, bool anchored_gate = true);
+
     // ── Coordinate helpers ──────────────────────────────────────────
     Rect view_bounds_in_root(const View* v) const;
 

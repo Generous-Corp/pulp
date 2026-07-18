@@ -57,6 +57,61 @@ def bandlimited_square(
     return (amp * (4.0 / np.pi)) * y
 
 
+def _polyblep(phase: np.ndarray, dt: float) -> np.ndarray:
+    """The 2-point polyBLEP correction for a unit downward step, evaluated at `phase` in
+    [0,1) for a per-sample phase increment `dt`. Non-zero only within one sample of the
+    wrap, where it replaces the naive jump with the sampled band-limited step."""
+    b = np.zeros_like(phase)
+    m = phase < dt
+    t = phase[m] / dt
+    b[m] = 2.0 * t - t * t - 1.0
+    m = phase > 1.0 - dt
+    t = (phase[m] - 1.0) / dt
+    b[m] = t * t + 2.0 * t + 1.0
+    return b
+
+
+def polyblep_saw(sr: int, f0: float, dur_s: float, amp: float = 0.7, phase0: float = 0.0) -> np.ndarray:
+    """A polyBLEP sawtooth — a REAL antialiased oscillator, the way a plugin renders one,
+    as opposed to the exact additive `bandlimited_saw`.
+
+    The distinction is the whole reason this fixture exists. `bandlimited_saw` is an exact
+    Fourier sum: sampled, it is precisely sinc-periodic, so a fractional-period delay
+    reproduces it and a comb self-reference nulls it to the interpolator floor. A polyBLEP
+    saw only *approximates* the bandlimited waveform, and it anchors its correction to the
+    wrap's sub-sample phase — which, at a non-integer period ``sr/f0``, advances every
+    period. So successive periods differ slightly AT THE WRAP, and a comb self-reference
+    canNOT null that: it leaves a per-edge approximation residual. That residual is a
+    genuine property of a real oscillator, not a defect, and it is exactly what a
+    click detector built on the additive fixtures fails to anticipate.
+
+    The 2-point polyBLEP is genuinely clean (alias well below the residual) at a low
+    ``f0/sr`` and degrades toward high ``f0/sr`` where a period spans few samples — so a
+    caller asserting "the render is clean, the residual is edge smear not alias" should
+    stay at a low ``f0`` and/or a high ``sr`` (e.g. 220 Hz at 96 kHz), where the alias
+    floor sits tens of dB below the smear.
+    """
+    n = int(round(dur_s * sr))
+    dt = f0 / sr
+    phase = (phase0 + np.arange(n) * dt) % 1.0
+    return amp * ((2.0 * phase - 1.0) - _polyblep(phase, dt))
+
+
+def polyblep_square(sr: int, f0: float, dur_s: float, amp: float = 0.7, phase0: float = 0.0) -> np.ndarray:
+    """A polyBLEP square — the two-edges-per-period counterpart of `polyblep_saw`.
+
+    Same point: a real antialiased square, not an exact Fourier sum, so its two edges land
+    at a fractional sub-sample phase that moves every period and its comb self-reference
+    leaves a per-edge smear the additive `bandlimited_square` does not exhibit. See
+    `polyblep_saw` for the alias-vs-``f0/sr`` caveat.
+    """
+    n = int(round(dur_s * sr))
+    dt = f0 / sr
+    phase = (phase0 + np.arange(n) * dt) % 1.0
+    naive = np.where(phase < 0.5, 1.0, -1.0)
+    return amp * (naive + _polyblep(phase, dt) - _polyblep((phase + 0.5) % 1.0, dt))
+
+
 def _piecewise_linear_fourier(
     breaks: np.ndarray, slopes: np.ndarray, offsets: np.ndarray, period: float, n_harm: int
 ) -> np.ndarray:
@@ -223,3 +278,102 @@ def zipper(y: np.ndarray, delta: float, block: int = 64) -> np.ndarray:
     out = np.array(y, dtype=np.float64, copy=True)
     steps = np.arange(len(out)) // block
     return out + delta * (steps % 2).astype(np.float64)
+
+
+# ── Corpus families (§ oscillator golden corpus) ────────────────────────────
+#
+# The fixtures above are click-detector building blocks. The functions below
+# concatenate them into whole, license-clean CORPUS RENDERS — registered as
+# generator-backed sources in `corpus.py` — so the quality-lab's alias/HF
+# regression axis (`compare.py`'s `added-hf`, backed by the `hf_fizz`
+# detector) has oscillator material to gate on, not just drum/tonal stimuli.
+
+
+def sine(sr: int, f0: float, dur_s: float, amp: float = 0.7, phase: float = 0.0) -> np.ndarray:
+    """A pure sine — the trivial static-shape family member and the exact null
+    case for any harmonic-content axis: a sine has no harmonics of its own, so
+    any measured HF energy or aliasing in a render is unambiguously a property
+    of the render path, not the waveform."""
+    n = int(round(dur_s * sr))
+    t = np.arange(n) / sr
+    return amp * np.sin(2 * np.pi * f0 * t + phase)
+
+
+def bandlimited_triangle(
+    sr: int, f0: float, dur_s: float, amp: float = 0.7, phase: float = 0.0
+) -> np.ndarray:
+    """Additive triangle: odd harmonics only, amplitude 1/k^2 with alternating
+    sign — the fourth static shape, and the smoothest of the four (the faster
+    1/k^2 rolloff vs. saw/square's 1/k means less high-frequency content to
+    begin with, the useful contrast in a static-shape sweep)."""
+    n = int(round(dur_s * sr))
+    t = np.arange(n) / sr
+    y = np.zeros(n, dtype=np.float64)
+    sign = 1.0
+    for k in range(1, _harmonic_count(sr, f0) + 1, 2):
+        y += sign * np.sin(2 * np.pi * k * f0 * t + phase) / (k * k)
+        sign = -sign
+    return (amp * (8.0 / (np.pi ** 2))) * y
+
+
+_STATIC_SHAPES = {
+    "sine": sine,
+    "saw": bandlimited_saw,
+    "square": bandlimited_square,
+    "triangle": bandlimited_triangle,
+}
+
+
+def render_static_shapes(
+    sr: int, dur_s: float, pitches: list[float], shapes: list[str] | None = None,
+    gap_s: float = 0.05,
+) -> np.ndarray:
+    """The static-shape corpus family: every (shape, pitch) combination in
+    `shapes x pitches` order, concatenated with a short silence gap between
+    segments so a windowed axis never straddles two different waveforms.
+    `shapes` defaults to all four in `_STATIC_SHAPES` (sine — the null case —
+    plus saw/square/triangle). Peak-normalized like the other corpus
+    generators (`generate.render_drum_break`, `generate.render_tonal`)."""
+    shapes = shapes or list(_STATIC_SHAPES)
+    gap = np.zeros(int(round(gap_s * sr)), dtype=np.float64)
+    segments: list[np.ndarray] = []
+    for shape in shapes:
+        gen = _STATIC_SHAPES[shape]
+        for f0 in pitches:
+            segments.append(gen(sr, f0, dur_s))
+            segments.append(gap)
+    y = np.concatenate(segments) if segments else np.zeros(0, dtype=np.float64)
+    return y / (np.max(np.abs(y)) + 1e-12) * 0.7
+
+
+def render_sync_sweep(
+    sr: int, dur_s: float, f_master_list: list[float], f_slave_ratio: float = 2.5,
+    gap_s: float = 0.05,
+) -> np.ndarray:
+    """The sync-sweep corpus family: `hard_synced_saw` at each master frequency
+    in `f_master_list` (a fixed slave/master ratio), concatenated with a short
+    silence gap — the reset-seam case a naive click/alias rule gets wrong,
+    swept across the range rather than measured at one frequency."""
+    gap = np.zeros(int(round(gap_s * sr)), dtype=np.float64)
+    segments: list[np.ndarray] = []
+    for f_master in f_master_list:
+        segments.append(hard_synced_saw(sr, f_master, f_master * f_slave_ratio, dur_s))
+        segments.append(gap)
+    y = np.concatenate(segments) if segments else np.zeros(0, dtype=np.float64)
+    return y / (np.max(np.abs(y)) + 1e-12) * 0.7
+
+
+def render_tzfm_grid(
+    sr: int, dur_s: float, f_carrier: float, mod_grid: list[list[float]], gap_s: float = 0.05,
+) -> np.ndarray:
+    """The TZFM corpus family: `tzfm_sine` at each `(f_mod, index)` pair in
+    `mod_grid`, concatenated with a short silence gap — through-zero FM
+    sideband content across a grid of modulation rates and indices rather
+    than one fixed operating point."""
+    gap = np.zeros(int(round(gap_s * sr)), dtype=np.float64)
+    segments: list[np.ndarray] = []
+    for f_mod, index in mod_grid:
+        segments.append(tzfm_sine(sr, f_carrier, f_mod, index, dur_s))
+        segments.append(gap)
+    y = np.concatenate(segments) if segments else np.zeros(0, dtype=np.float64)
+    return y / (np.max(np.abs(y)) + 1e-12) * 0.7

@@ -601,8 +601,20 @@ def _range_unreleased_fix_feat_subjects(
     covered_surfaces: dict[str, bool],
     coverage_boundaries: dict[str, str] | None = None,
     source_range: tuple[str, str] | None = None,
+    accept_intent: bool = False,
 ) -> tuple[list[tuple[str, list[str]]], dict[str, str]]:
-    """Return live signals and surfaces not covered by a tag or skip boundary."""
+    """Return live signals and surfaces not covered by a tag or skip boundary.
+
+    ``accept_intent`` (the intent-trailer model is live) treats a surface that
+    carries a pending, authored ``Version-Bump: <surface>=<level>`` intent as
+    COVERED, not stranded: under that model a fix/feat merges with intent and no
+    file bump, and the post-merge ``version_at_land`` bot assigns the number
+    moments later. Without this, every such merge would false-warn "consumers
+    are stuck." Off by default so today's file-bump PRs are classified exactly
+    as before. The pending check is ``--no-merges``-scoped to match what
+    ``version_at_land`` actually honors — a stray intent on a re-sync merge
+    commit must NOT suppress a genuine strand.
+    """
     if _range_has_version_bump_skip_trailer(base, head):
         return [], {}
     if source_range and _range_has_version_bump_skip_trailer(*source_range):
@@ -645,6 +657,18 @@ def _range_unreleased_fix_feat_subjects(
             cfg.trailer_version_bump,
             surface.name,
         )
+        if accept_intent:
+            # Intent-trailer model: a pending authored intent means the
+            # version_at_land bot will assign the number post-merge — not
+            # stranded. Read no-merges so a stray intent on a re-sync merge
+            # commit can't wrongly suppress a real strand.
+            pending_level = surface_trailer_override(
+                git_range_trailers(analysis_base, analysis_head, no_merges=True),
+                cfg.trailer_version_bump,
+                surface.name,
+            )
+            if pending_level in ("patch", "minor", "major"):
+                continue
         boundary_changed = filter_generated(
             git_diff_names(analysis_base, analysis_head),
             cfg.generated_globs,
@@ -766,6 +790,77 @@ def check_fix_feat_requires_bump(
     )
 
 
+def verify_applied_bumps(
+    verdicts: list[Verdict],
+    base: str,
+    repo: Path,
+    accept_intent_trailers: bool = False,
+) -> str | None:
+    """Post-apply proof: every surface that owed a bump is now ahead of `base`.
+
+    `--mode=apply` computes verdicts, then asks `apply_bumps` to write. Every
+    step in between can decline to write while returning normally: the
+    already-bumped short-circuit, an unreadable `current_version`, or a
+    `write_version` whose pattern no longer matches a reformatted file. None of
+    those raise, so apply could print `✓ bumped` and exit 0 having written
+    nothing — the gate meant to enforce the bump silently not enforcing it.
+
+    So don't infer the write from the code path that requested it; re-read the
+    files and check. This is the apply-mode counterpart of the no-surface exit
+    below (issue #4679 acceptance (b)): apply must never report success on a
+    bump it did not actually land. Returns an actionable message, or None when
+    every owed bump is on disk.
+
+    `patch` matters most here — `render_report` scores an unbumped patch as an
+    advisory `?` and still exits 0, so a silently-dropped patch write is
+    invisible to the report alone.
+    """
+    stranded: list[str] = []
+    for v in verdicts:
+        if v.final_level == "none":
+            continue
+        # An accepted intent trailer defers the write to merge-time
+        # automation by design; the files are legitimately unmoved.
+        if (
+            accept_intent_trailers
+            and v.trailer_override in LEVELS
+            and v.trailer_override != "none"
+        ):
+            continue
+        for vf in v.surface.version_files:
+            if already_bumped(base, vf, repo):
+                continue
+            base_ver = version_at_base(base, vf)
+            if base_ver is None:
+                # No version at base — the file is new in this branch (a
+                # surface this PR adds), or the base ref doesn't resolve.
+                # Either way there's no ordering to compare, so absence of
+                # "ahead of base" is not evidence of a dropped write.
+                continue
+            stranded.append(
+                f"  [{v.surface.name}] {vf.path}: "
+                f"base={base_ver} head={read_version(repo, vf) or '?'} "
+                f"(wanted a {v.final_level} bump)"
+            )
+    if not stranded:
+        return None
+    return (
+        "version-bump apply: refusing to report success — apply ran but these "
+        "version files are NOT ahead of the base:\n"
+        + "\n".join(stranded)
+        + "\n\nThe bump was requested and never landed on disk, so the "
+        "`chore: bump versions` marker the caller is about to write would be "
+        "a lie and the CI fix/feat gate would fail downstream with no "
+        "explanation.\n"
+        "\nMost likely: this branch's base has moved on and the version line "
+        f"is stale. Rebase, then re-run:\n"
+        f"    git rebase {base}\n"
+        "    python3 tools/scripts/version_bump_check.py --mode=apply\n"
+        "If a rebase does not resolve it, the version file's pattern in "
+        "tools/scripts/versioning.json no longer matches the file's contents."
+    )
+
+
 # ── Main ────────────────────────────────────────────────────────────────
 
 
@@ -798,6 +893,11 @@ def main(argv: list[str]) -> int:
         source_base = argv[8] if len(argv) >= 9 and argv[8] != "-" else ""
         source_head = argv[9] if len(argv) >= 10 and argv[9] != "-" else ""
         cfg = load_config(config_path)
+        # Enabled by the stranded-fix detector ONLY once version_at_land is in
+        # --push mode (a pending intent is then genuinely on its way to a
+        # number). Inert while unset, so today's file-bump PRs classify
+        # unchanged.
+        accept_intent = os.environ.get("PULP_ACCEPT_INTENT_TRAILERS") == "1"
         signals, levels = _range_unreleased_fix_feat_subjects(
             argv[1],
             argv[2],
@@ -805,6 +905,7 @@ def main(argv: list[str]) -> int:
             {"sdk": argv[3] == "1", "plugin": argv[4] == "1"},
             {"sdk": sdk_boundary, "plugin": plugin_boundary},
             (source_base, source_head) if source_base and source_head else None,
+            accept_intent=accept_intent,
         )
         if not signals:
             return 1
@@ -971,6 +1072,21 @@ def main(argv: list[str]) -> int:
     verdicts = assess_surfaces(cfg, changed, args.base, args.head, root)
 
     if args.mode == "apply":
+        # Model B (post_merge_assignment): PRs must not write version files —
+        # the version-at-land bot infers the level from the heuristic and
+        # assigns it on merge. So apply is a verified NO-OP here (shipyard's
+        # apply-call therefore produces a PR with no version-file diff, so
+        # batch-mates never race on the version line). Recovery
+        # (`--recover-stranded-release`) is the one path that legitimately
+        # WRITES a catch-up bump, so it is exempt.
+        if cfg.post_merge_assignment and not args.recover_stranded_release:
+            print(
+                "post-merge assignment: version files not written — "
+                "version-at-land assigns the version on merge from the "
+                "heuristic (see docs/guides/version-at-land-cutover.md)."
+            )
+            return 0
+
         apply_base = args.apply_version_base or args.base
         apply_verdicts = [
             verdict
@@ -1049,6 +1165,15 @@ def main(argv: list[str]) -> int:
                 print(f"  {e}")
         if text:
             print(text)
+        # Prove the writes landed before anyone acts on this exit code.
+        stranded_msg = verify_applied_bumps(
+            verdicts_after, apply_base, root,
+            accept_intent_trailers=args.accept_intent_trailers,
+        )
+        if stranded_msg:
+            sys.stderr.write(stranded_msg + "\n")
+            if code == 0:
+                code = 1
         if forced_no_surface_msg:
             # No versioned surface was touched — print the actionable
             # reclassify/skip message so the caller (and shipyard pr) sees
@@ -1095,9 +1220,47 @@ def main(argv: list[str]) -> int:
     text, code = render_report(
         verdicts, args.mode, args.base, root,
         accept_intent_trailers=args.accept_intent_trailers,
+        post_merge_assignment=cfg.post_merge_assignment,
     )
     if text:
         print(text)
+
+    if cfg.post_merge_assignment:
+        # Model B: a file bump is no longer required for a touched surface (the
+        # version-at-land bot assigns it on merge). The `--require-bump-for-fix-feat`
+        # check is REPLACED by the Z2 guard: a fix/feat the heuristic scores
+        # `none` on EVERY surface would merge into a silent bot no-op and never
+        # ship. Runs regardless of the invocation flags (all three gates read the
+        # same versioning.json), so they stay consistent.
+        if args.mode != "hint":
+            pr_title = (
+                args.pr_title if args.pr_title is not None
+                else os.environ.get("GITHUB_PR_TITLE", "")
+            )
+            ff_signal = bool(
+                _range_fix_feat_subjects(args.base, args.head)
+            ) or _is_fix_or_feat_title(pr_title)
+            any_positive = any(v.final_level != "none" for v in verdicts)
+            has_skip = _range_has_version_bump_skip_trailer(args.base, args.head)
+            print()
+            print("── fix/feat-touches-a-surface check (post-merge assignment) ──")
+            if ff_signal and not any_positive and not has_skip:
+                print(
+                    "✗ this fix/feat touches NO versioned surface, so the "
+                    "version-at-land bot would assign nothing and the change "
+                    "would never ship. Resolve one of:\n"
+                    "  • re-title to `chore:` / `docs:` / `refactor:` / `build:` "
+                    "if it is genuinely not user-facing, OR\n"
+                    "  • declare intent on a commit: "
+                    '`Version-Bump: <surface>=<patch|minor|major>`, OR\n'
+                    '  • opt out: `Version-Bump: skip reason="..."`.'
+                )
+                return 1
+            print(
+                "✓ the touched surface(s) will be assigned post-merge by "
+                "version-at-land (or this is not a release-worthy change)."
+            )
+        return code
 
     if args.require_bump_for_fix_feat:
         # Hint mode keeps its "always exit 0" contract — the fix/feat
