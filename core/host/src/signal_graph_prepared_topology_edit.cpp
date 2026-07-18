@@ -360,7 +360,7 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
                 return entry.second.type == NodeType::MidiOutput;
             });
         if (candidate_has_midi_output || live_has_midi_output) {
-            return last_result_ = Result::MidiOutputDrainRequired;
+            return last_result_ = Result::MidiOutputSnapshotLocalRequired;
         }
     }
     const bool dimensions_changed = old != nullptr && (old->sample_rate != sample_rate ||

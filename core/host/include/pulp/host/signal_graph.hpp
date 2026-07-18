@@ -1649,7 +1649,7 @@ public:
         StaleBase,
         PreflightFailed,
         ExternalPluginReprepareRequired,
-        MidiOutputDrainRequired,
+        MidiOutputSnapshotLocalRequired,
         ExistingCustomReprepareRequired,
         CustomRegistryConflict,
         CustomInstanceCreateFailed,
