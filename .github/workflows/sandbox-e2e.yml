@@ -46,6 +46,7 @@ concurrency:
 
 jobs:
   resolve-runners:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
     outputs:
       macos_runs_on: ${{ steps.resolve.outputs.macos_runs_on }}
