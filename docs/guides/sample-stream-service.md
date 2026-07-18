@@ -51,8 +51,8 @@ windows are destroyed.
 
 `PulpSampler` is the first production-shaped integration: strict ranged WAV and
 uncompressed AIFF, pitched one-shots and forward/reverse crossfade loops,
-two decode workers, and a bounded sixteen-page working set for each of eight
-independently positioned voices. Its
+two decode workers, and a bounded prepared-page demand footprint for each of
+eight independently positioned voices. Its
 service thread owns file/source/cache mutation; the callback owns only voice
 state and the SPSC producer. File admission prepares the certified tail horizon
 before it publishes the asset, which gives reverse entry a latency-safe attack
@@ -85,8 +85,11 @@ blends adjacent cutoff tables during modulation. If a resident playback ratio
 exceeds the prepared table range, `PulpSampler` falls back to cubic Hermite
 instead of dropping the voice. Each phase row is normalized for DC unity, and
 the streamed preload contract must cover the selected kernel's complete tap
-guard. Persisted octave mip assets and starvation gain shaping remain later
-gates.
+guard. Persisted streamed octave mips are loaded from strict `.pulpmip`
+sidecars, and the voice reader applies a 64-frame equal-power fade to silence
+and recovery ramp around starvation. See the
+[PulpSampler example](../examples/pulp-sampler.md) for the current policy and
+integration limits.
 
 `SampleAsset` accepts streamed tails only through a service-issued registration
 proof whose source identity and page geometry match the prepared cache. The
@@ -95,7 +98,8 @@ documented audio-generation retirement watermark. `SampleStreamVoiceReader`
 provides the narrow linear forward path; `SampleStreamLoopVoiceReader` adds
 allocation-free cursor-driven one-shot, reverse, prepared interpolation-tap, and
 wrap-crossfade page planning. Both return explicit ready/starved/end/stale
-results. Starvation gain policy remains a separate layer.
+results. Starvation gain policy remains a separate layer, implemented by
+`SampleStarvationEnvelope` in the PulpSampler integration.
 
 `StreamingSampleSource` remains the simpler preload-plus-ring utility for
 sequential one-shot playback. It is not instantiated once per sampler voice.

@@ -1,21 +1,200 @@
 # PulpSampler
 
-Sample-buffer sampler instrument with MIDI triggering, ADSR envelope, and pitch control.
+`PulpSampler` is Pulp's production-shaped sampler example. It combines
+eight-voice MIDI playback, resident sample publication, strict file-backed
+streaming, loop and interpolation policies, starvation handling, and an
+optional synthetic heritage-processing chain. The validated plugin format is
+CLAP.
 
-## Formats
-CLAP
+The implementation is in `examples/PulpSampler/`. It is an example integration,
+not a promise that every record in `sampler_api.hpp` is already exposed through
+every plugin-format adapter.
 
-## Features
-- Off-thread mono/stereo sample-buffer publication
-- MIDI note triggering with velocity sensitivity
-- ADSR envelope per voice
-- Pitch control via MIDI note number
-- Multi-voice polyphony
-- One-shot and loop playback
+## Build and load
 
-PulpSampler does not ship a file browser or audio-file decoder. Tests load
-generated sample buffers through the processor helper API to validate sampler
-playback, publication, and realtime-safety behavior.
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DPULP_BUILD_EXAMPLES=ON
+cmake --build build --target PulpSampler_CLAP -j
+```
 
-## Source
-`examples/PulpSampler/`
+The bundle is written under `build/CLAP/`. The processor accepts MIDI and has a
+stereo output. It reports an indefinite tail because a held or looping voice
+can sustain until note release.
+
+## Playback controls
+
+The example exposes gain, ADSR, pitch (`-24` to `+24` semitones), loop, reverse,
+and interpolation parameters. The interpolation integer contract is stable:
+
+| Value | Policy |
+|---:|---|
+| 0 | Hold |
+| 1 | Nearest |
+| 2 | Linear (default) |
+| 3 | Cubic Hermite |
+| 4 | Cubic Lagrange |
+| 5 | Ratio-tracking sinc |
+
+Resident and streamed sources support forward and reverse one-shots and
+forward/reverse wrap-crossfade loops. Resident forward one-shots can use
+immutable octave mips for exact-octave polynomial playback. Fractional-octave,
+loop, reverse, oversized, or missing-level cases use ratio-tracking sinc rather
+than claiming unsupported anti-alias performance. Streamed sources can select
+the same offline-built octave levels from a valid `.pulpmip` sidecar.
+
+## Loading samples
+
+Call all loading APIs off the audio thread and after `prepare()`:
+
+```cpp
+bool mono_ok = processor.load_sample(mono, frame_count, sample_rate);
+bool stereo_ok = processor.load_sample_stereo(
+    interleaved_stereo, frame_count, sample_rate);
+bool file_ok = processor.load_sample_file("samples/kick.wav");
+```
+
+The file path admits only true ranged readers: WAV and uncompressed
+AIFF/AIFF-C `NONE`, at one or two channels and no more than 192 kHz. A codec
+that is available only through decode-once fallback is rejected instead of
+silently loading the entire asset. Admission derives the resident preload and
+page geometry from the 20 ms certified I/O latency, 5 ms scheduler margin,
+5 ms decoder allowance, host block size, interpolation guard, loop guard, a
+maximum 4x playback ratio, and source rate. Failure is transactional: a failed
+replacement leaves the previously published source usable.
+
+`PulpSamplerProcessor::load_sample_file()` currently returns only `bool`.
+`SamplerStreamingRuntime::load_sample_file_result()` and the trivially copyable
+records in `sampler_api.hpp` already distinguish codec capability, sidecar
+status, preload sizes, memory demand, and precise failure status, but that
+detailed result is not yet forwarded by the processor's public helper.
+
+Build one or two persisted streamed mip levels next to a source with:
+
+```bash
+pulp audio sampler-mip build samples/piano.wav --levels 2 --json
+```
+
+The command uses the sampler's 140 dB-design decimator, writes hash-addressed
+float32 WAV payloads, and atomically publishes and verifies the `.pulpmip`
+manifest. An invalid sidecar is ignored and reported by the detailed runtime
+result; it never replaces the base source.
+
+## Threads, memory, and failure behavior
+
+The callback owns voice state and pushes bounded demand/cancellation commands.
+One non-audio owner thread mutates file, source, and cache state; two decode
+workers perform bounded page reads. The callback does not allocate, wait, open
+files, or invoke a decoder.
+
+The current example derives its memory capacity during prepare; the
+`PulpSamplerConfig::streaming_memory_budget_bytes` record is not wired into the
+processor yet. The principal prepared storage is:
+
+```text
+page bytes = 2 channels * page_frames * source_capacity * cache_pages_per_source * sizeof(float)
+preload bytes = 2 channels * required_preload_frames * source_capacity * sizeof(float)
+decode scratch bytes = 2 channels * page_frames * 2 workers * 8 jobs/source * sizeof(float)
+```
+
+`page_frames` is derived from the certified worst case and is at least 2048.
+`source_capacity` is six (two publication bundles with a base plus at most two
+mip members), and `cache_pages_per_source` is 128 (eight voices times the
+16-page maximum block footprint).
+Each registered source or mip member receives a shared page budget sized for
+the bounded aggregate demand footprint of eight independently positioned
+voices; voices do not own duplicate caches. Resident sample and resident-mip
+ownership are outside this streaming figure.
+
+Stream misses never replay stale data. A predicted miss uses a 64-frame
+equal-power fade to silence; recovery uses a 64-frame fade from silence.
+`stream_stats()` separates service starvation, starved output frames, decode
+failure, invalid preload contract, stale generation, normal end of source,
+invalid render contract, memory high-water marks, and source/page lifecycle
+counters. The richer envelope and combined diagnostic records in
+`sampler_api.hpp` are stable inspection shapes, but the processor does not yet
+return the top-level `PulpSamplerDiagnostics` snapshot.
+
+## Synthetic heritage processing
+
+An optional typed profile applies ordered, independently bypassable stages for
+machine-rate conversion, quantization, clock/pitch, DAC hold, reconstruction
+filtering, noise, and output. Profile IDs are neutral identifiers; no named
+hardware profile or capture-matched claim ships.
+
+Configure or replace a profile only while audio is stopped:
+
+```cpp
+pulp::audio::SampleHeritageProfile profile{
+    .schema_version = pulp::audio::kSampleHeritageProfileSchemaVersion,
+    .profile_id = "neutral.example-two-leg-v2",
+    .host_sample_rate = 48000.0,
+    .stages = {
+        {false, pulp::audio::SampleHeritageMachineDomainStage{32000.0}},
+        {false, pulp::audio::SampleHeritageClockPitchStage{1.25}},
+    },
+};
+
+auto status = processor.set_heritage_profile(profile);
+auto diagnostics = processor.heritage_diagnostics();
+```
+
+The engine validates and prepares off-thread. Active host-to-machine and
+machine-to-host conversion legs each contribute the causal 24-tap-half-width
+delay in their output coordinate; the processor rounds the resulting nominal
+host-frame latency up and notifies the host when it changes. An all-bypassed
+profile is transparent and reports zero latency. Render-plan or render failure
+fails closed to silence and increments heritage diagnostics.
+
+Canonical JSON readers/writers exist for profiles and bounded runtime state.
+Runtime persistence captures only RNG continuation for quantization/noise
+stages that opt into `ContinueSerializedState`; it does not capture SRC phase
+or history, DAC-hold state, or reconstruction-filter transients. The example's
+`sampler_heritage_state.hpp` adds a strict, versioned envelope for the profile
+and optional runtime JSON. At this checkpoint that codec is tested but is not
+connected to `PulpSamplerProcessor`'s plugin-state serialization hooks, so host
+session recall must not be assumed from this revision.
+
+## Verification
+
+Focused sampler tests:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON
+cmake --build build --target pulp-sampler-test -j
+./build/examples/PulpSampler/pulp-sampler-test
+```
+
+The dependency-bearing interpolation and heritage reference gates use separate
+render executables and independent Python oracles. Ordinary pytest collection
+skips these renderer-dependent cases; configure the CMake gate to require them:
+
+```bash
+python3 -m venv .venv-aql
+.venv-aql/bin/python -m pip install -e 'tools/audio/quality-lab[test]'
+
+cmake -S . -B build-aql -DCMAKE_BUILD_TYPE=Release \
+  -DPULP_BUILD_TESTS=ON \
+  -DPULP_AUDIO_QUALITY_LAB_GATE=ON \
+  -DPULP_AUDIO_QUALITY_LAB_PYTHON="$PWD/.venv-aql/bin/python"
+cmake --build build-aql \
+  --target pulp-sampler-render-wav pulp-sampler-heritage-render-wav -j
+ctest --test-dir build-aql \
+  -R '^sampler-(quality-lab|heritage-quality-lab)-' \
+  --output-on-failure
+```
+
+The checked-in interpolation benchmark capture under
+`docs/validation/sampler-interpolation/` is historical evidence. Its source
+bundle digest does not match the current sampler sources, so recapture and
+verification are required before using it as current performance evidence.
+
+## Current gaps
+
+- Wire configuration, prepare/load results, preload policy, envelope state, and
+  the combined diagnostic record through `PulpSamplerProcessor`.
+- Complete and verify the in-flight heritage plugin-state wiring.
+- Recapture current interpolation performance evidence.
+- Named machine profiles remain intentionally unshipped until research,
+  provenance, capture, and listening gates are satisfied.
