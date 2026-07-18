@@ -568,6 +568,12 @@ AudioWidgetType detect_audio_widget(const std::string& name) {
     auto has = [&](const std::string& w) {
         return t.find(w) != t.end() || t.find(w + "s") != t.end();
     };
+    // A "label" token names the TEXT that annotates a control, never the control
+    // itself: "sound / knob label", "fader label", "value label" are all text.
+    // Without this the "knob" in "knob label" promoted the label frame to a
+    // built-in knob, painting a stock knob disc over a text label ("Classic"
+    // under a filter-mode picker rendered as a dark knob instead of the word).
+    if (has("label"))                                          return AudioWidgetType::none;
     if (has("knob") || has("dial"))                            return AudioWidgetType::knob;
     if (has("fader") || has("slider"))                         return AudioWidgetType::fader;
     if (has("meter") || has("level") || has("vu"))             return AudioWidgetType::meter;
