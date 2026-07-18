@@ -220,3 +220,57 @@ TEST_CASE("Timeline replay checkpoint equality includes inactive tombstones") {
     REQUIRE(rejected.error().code == ConflictCode::ModelInvariant);
     REQUIRE(session->journal().replay(*session->snapshot(), {1}));
 }
+
+TEST_CASE("Serialized checkpoints retain tombstones for replay and exact reactivation") {
+    const auto initial = make_project();
+    auto session = std::move(DocumentSession::create(initial)).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto remove = session_transaction(writer, {}, {RemoveClip{{3}, {4}, {5}}});
+    REQUIRE(session->submit(writer, std::move(remove)));
+    const auto checkpoint = *session->snapshot();
+    REQUIRE(session->checkpoint({1}));
+    REQUIRE(session->undo(writer));
+
+    auto registry = make_builtin_timeline_registry();
+    REQUIRE(registry);
+    auto encoded = serialize_project(checkpoint, registry.value());
+    REQUIRE(encoded);
+    auto decoded = deserialize_project(encoded->json, registry.value());
+    REQUIRE(decoded);
+    REQUIRE(decoded->locate({5}));
+    REQUIRE_FALSE(decoded->locate({5})->active);
+    REQUIRE(decoded->locate({6}));
+    REQUIRE_FALSE(decoded->locate({6})->active);
+
+    auto malformed = encoded->json;
+    const std::string valid_tombstone =
+        R"({"active":false,"clip_id":"5","id":"5","kind":"clip","sequence_id":"3","track_id":"4"})";
+    const std::string malformed_tombstone =
+        R"({"active":false,"clip_id":"0","id":"5","kind":"clip","sequence_id":"3","track_id":"4"})";
+    const auto tombstone_position = malformed.find(valid_tombstone);
+    REQUIRE(tombstone_position != std::string::npos);
+    malformed.replace(tombstone_position, valid_tombstone.size(), malformed_tombstone);
+    auto rejected = deserialize_project(malformed, registry.value());
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == PersistenceErrorCode::ModelRejected);
+    REQUIRE(rejected.error().model_error);
+    REQUIRE(rejected.error().model_error->code == ModelErrorCode::InvalidSchemaIdentity);
+
+    malformed = encoded->json;
+    const std::string orphaned_tombstone =
+        R"({"active":false,"clip_id":"5","id":"5","kind":"clip","sequence_id":"2","track_id":"4"})";
+    const auto orphan_position = malformed.find(valid_tombstone);
+    REQUIRE(orphan_position != std::string::npos);
+    malformed.replace(orphan_position, valid_tombstone.size(), orphaned_tombstone);
+    rejected = deserialize_project(malformed, registry.value());
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == PersistenceErrorCode::ModelRejected);
+    REQUIRE(rejected.error().model_error);
+    REQUIRE(rejected.error().model_error->code == ModelErrorCode::InvalidSchemaIdentity);
+
+    auto restored = session->journal().replay(decoded.value(), {1});
+    REQUIRE(restored);
+    REQUIRE(restored->find_sequence({3})->find_track({4})->find_clip({5}));
+    REQUIRE(restored->locate({5})->active);
+    REQUIRE(restored->locate({6})->active);
+}

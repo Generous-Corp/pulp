@@ -13,6 +13,8 @@ add_library(pulp-timeline
 )
 add_library(pulp::timeline ALIAS pulp-timeline)
 
+target_compile_features(pulp-timeline PUBLIC cxx_std_20)
+
 target_include_directories(pulp-timeline
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

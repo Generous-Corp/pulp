@@ -4,10 +4,16 @@
 
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace pulp::timeline::detail {
 
 struct IdentityNode;
+
+struct IdentityRecord {
+    ItemId item;
+    ItemLocation location;
+};
 
 // Private persistent index for project-wide identity ownership. Copies are
 // cheap; insert/update path-copy only an AVL search path.
@@ -17,6 +23,7 @@ class IdentityDirectory {
     bool replace(ItemId id, ItemLocation location);
     std::optional<ItemLocation> locate(ItemId id) const noexcept;
     bool equivalent(const IdentityDirectory& other) const noexcept;
+    std::vector<IdentityRecord> entries() const;
     std::size_t shared_nodes_with(const IdentityDirectory& other) const;
     static ProjectIdentityStats stats() noexcept;
 

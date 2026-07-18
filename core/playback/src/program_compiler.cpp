@@ -19,6 +19,9 @@ class ProgramCompilerTask final : public CompileTask {
         Capture,
         CompileTracks,
         SortTrackNotes,
+        SortTrackAudioIds,
+        ValidateTrackAudioIds,
+        SortTrackAudio,
         FinalizeTrack,
         Link,
         Validate,
@@ -48,6 +51,26 @@ class ProgramCompilerTask final : public CompileTask {
     bool note_merge_pair_active_ = false;
     bool clearing_note_merge_source_ = false;
     std::vector<AudioClipRendererProgram> current_audio_clips_;
+    std::vector<timeline::ItemId> current_audio_ids_;
+    std::vector<timeline::ItemId> audio_id_merge_buffer_;
+    std::size_t audio_id_merge_width_ = 1;
+    std::size_t audio_id_merge_left_ = 0;
+    std::size_t audio_id_merge_mid_ = 0;
+    std::size_t audio_id_merge_right_ = 0;
+    std::size_t audio_id_merge_i_ = 0;
+    std::size_t audio_id_merge_j_ = 0;
+    std::size_t audio_id_validation_index_ = 1;
+    bool audio_id_merge_pair_active_ = false;
+    bool clearing_audio_id_merge_source_ = false;
+    std::vector<AudioClipRendererProgram> audio_merge_buffer_;
+    std::size_t audio_merge_width_ = 1;
+    std::size_t audio_merge_left_ = 0;
+    std::size_t audio_merge_mid_ = 0;
+    std::size_t audio_merge_right_ = 0;
+    std::size_t audio_merge_i_ = 0;
+    std::size_t audio_merge_j_ = 0;
+    bool audio_merge_pair_active_ = false;
+    bool clearing_audio_merge_source_ = false;
     std::uint64_t total_audio_clips_ = 0;
     std::vector<std::shared_ptr<const TrackProgram>> tracks_;
     std::vector<std::shared_ptr<const TrackProgram>> merge_buffer_;
@@ -218,16 +241,27 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             }
             if (clip_index_ == 0 && !clip_started_) {
                 current_clip_ids_.reserve(track.clips().size());
-                current_audio_clips_.reserve(std::min<std::uint64_t>(
+                const auto audio_capacity = static_cast<std::size_t>(std::min<std::uint64_t>(
                     track.clips().size(), request_->audio_limits.max_clips));
+                current_audio_clips_.reserve(audio_capacity);
+                current_audio_ids_.reserve(audio_capacity);
+                audio_id_merge_buffer_.reserve(audio_capacity);
+                audio_merge_buffer_.reserve(audio_capacity);
             }
             if (clip_index_ == track.clips().size()) {
                 if (current_note_events_.size() > 1) {
+                    note_merge_buffer_.reserve(current_note_events_.size());
                     note_merge_width_ = 1;
                     note_merge_left_ = 0;
                     note_merge_pair_active_ = false;
                     clearing_note_merge_source_ = false;
                     stage_ = Stage::SortTrackNotes;
+                } else if (current_audio_clips_.size() > 1) {
+                    audio_id_merge_width_ = 1;
+                    audio_id_merge_left_ = 0;
+                    audio_id_merge_pair_active_ = false;
+                    clearing_audio_id_merge_source_ = false;
+                    stage_ = Stage::SortTrackAudioIds;
                 } else {
                     stage_ = Stage::FinalizeTrack;
                 }
@@ -254,6 +288,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                                      AudioRendererErrorCode::CapacityExceeded});
                     ++total_audio_clips_;
                     current_audio_clips_.push_back(std::move(compiled).value());
+                    current_audio_ids_.push_back(clip.id());
                 }
                 clip_started_ = true;
             }
@@ -291,7 +326,15 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
         if (stage_ == Stage::SortTrackNotes) {
             if (current_note_events_.size() <= 1 ||
                 note_merge_width_ >= current_note_events_.size()) {
-                stage_ = Stage::FinalizeTrack;
+                if (current_audio_clips_.size() > 1) {
+                    audio_id_merge_width_ = 1;
+                    audio_id_merge_left_ = 0;
+                    audio_id_merge_pair_active_ = false;
+                    clearing_audio_id_merge_source_ = false;
+                    stage_ = Stage::SortTrackAudioIds;
+                } else {
+                    stage_ = Stage::FinalizeTrack;
+                }
                 continue;
             }
             if (clearing_note_merge_source_) {
@@ -332,6 +375,117 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             }
             continue;
         }
+        if (stage_ == Stage::SortTrackAudioIds) {
+            if (audio_id_merge_width_ >= current_audio_ids_.size()) {
+                audio_id_validation_index_ = 1;
+                stage_ = Stage::ValidateTrackAudioIds;
+                continue;
+            }
+            if (clearing_audio_id_merge_source_) {
+                audio_id_merge_buffer_.pop_back();
+                ++work;
+                if (audio_id_merge_buffer_.empty()) {
+                    clearing_audio_id_merge_source_ = false;
+                    audio_id_merge_width_ *= 2;
+                    audio_id_merge_left_ = 0;
+                }
+                continue;
+            }
+            if (audio_id_merge_left_ >= current_audio_ids_.size()) {
+                current_audio_ids_.swap(audio_id_merge_buffer_);
+                clearing_audio_id_merge_source_ = true;
+                continue;
+            }
+            if (!audio_id_merge_pair_active_) {
+                audio_id_merge_mid_ = std::min(audio_id_merge_left_ + audio_id_merge_width_,
+                                               current_audio_ids_.size());
+                audio_id_merge_right_ = std::min(audio_id_merge_left_ + 2 * audio_id_merge_width_,
+                                                 current_audio_ids_.size());
+                audio_id_merge_i_ = audio_id_merge_left_;
+                audio_id_merge_j_ = audio_id_merge_mid_;
+                audio_id_merge_pair_active_ = true;
+            }
+            if (audio_id_merge_i_ < audio_id_merge_mid_ &&
+                (audio_id_merge_j_ >= audio_id_merge_right_ ||
+                 current_audio_ids_[audio_id_merge_i_] <= current_audio_ids_[audio_id_merge_j_]))
+                audio_id_merge_buffer_.push_back(current_audio_ids_[audio_id_merge_i_++]);
+            else
+                audio_id_merge_buffer_.push_back(current_audio_ids_[audio_id_merge_j_++]);
+            ++work;
+            if (audio_id_merge_i_ == audio_id_merge_mid_ &&
+                audio_id_merge_j_ == audio_id_merge_right_) {
+                audio_id_merge_left_ = audio_id_merge_right_;
+                audio_id_merge_pair_active_ = false;
+            }
+            continue;
+        }
+        if (stage_ == Stage::ValidateTrackAudioIds) {
+            if (audio_id_validation_index_ < current_audio_ids_.size()) {
+                const auto id = current_audio_ids_[audio_id_validation_index_];
+                const bool duplicate = id == current_audio_ids_[audio_id_validation_index_ - 1];
+                ++audio_id_validation_index_;
+                ++work;
+                if (duplicate)
+                    return fail({CompileErrorCode::AudioProgramInvalid, id,
+                                 request_->document_revision,
+                                 AudioRendererErrorCode::InvalidIdentity});
+                continue;
+            }
+            audio_merge_width_ = 1;
+            audio_merge_left_ = 0;
+            audio_merge_pair_active_ = false;
+            clearing_audio_merge_source_ = false;
+            stage_ = Stage::SortTrackAudio;
+            continue;
+        }
+        if (stage_ == Stage::SortTrackAudio) {
+            if (current_audio_clips_.size() <= 1 ||
+                audio_merge_width_ >= current_audio_clips_.size()) {
+                stage_ = Stage::FinalizeTrack;
+                continue;
+            }
+            if (clearing_audio_merge_source_) {
+                audio_merge_buffer_.pop_back();
+                ++work;
+                if (audio_merge_buffer_.empty()) {
+                    clearing_audio_merge_source_ = false;
+                    audio_merge_width_ *= 2;
+                    audio_merge_left_ = 0;
+                }
+                continue;
+            }
+            if (audio_merge_left_ >= current_audio_clips_.size()) {
+                current_audio_clips_.swap(audio_merge_buffer_);
+                clearing_audio_merge_source_ = true;
+                continue;
+            }
+            if (!audio_merge_pair_active_) {
+                audio_merge_mid_ =
+                    std::min(audio_merge_left_ + audio_merge_width_, current_audio_clips_.size());
+                audio_merge_right_ = std::min(audio_merge_left_ + 2 * audio_merge_width_,
+                                              current_audio_clips_.size());
+                audio_merge_i_ = audio_merge_left_;
+                audio_merge_j_ = audio_merge_mid_;
+                audio_merge_pair_active_ = true;
+            }
+            const auto less = [](const AudioClipRendererProgram& lhs,
+                                 const AudioClipRendererProgram& rhs) {
+                return std::pair(lhs.timeline_start, lhs.id.value) <
+                       std::pair(rhs.timeline_start, rhs.id.value);
+            };
+            if (audio_merge_i_ < audio_merge_mid_ &&
+                (audio_merge_j_ >= audio_merge_right_ ||
+                 !less(current_audio_clips_[audio_merge_j_], current_audio_clips_[audio_merge_i_])))
+                audio_merge_buffer_.push_back(std::move(current_audio_clips_[audio_merge_i_++]));
+            else
+                audio_merge_buffer_.push_back(std::move(current_audio_clips_[audio_merge_j_++]));
+            ++work;
+            if (audio_merge_i_ == audio_merge_mid_ && audio_merge_j_ == audio_merge_right_) {
+                audio_merge_left_ = audio_merge_right_;
+                audio_merge_pair_active_ = false;
+            }
+            continue;
+        }
         if (stage_ == Stage::FinalizeTrack) {
             const auto& track = sequence_->tracks()[track_index_];
             ProviderSelectorProgram provider;
@@ -355,12 +509,8 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             }
             std::shared_ptr<const AudioTrackRendererProgram> audio_program;
             if (!current_audio_clips_.empty()) {
-                auto linked = link_audio_track_program(track.id(), std::move(current_audio_clips_),
-                                                       request_->audio_limits);
-                if (!linked)
-                    return fail({CompileErrorCode::AudioProgramInvalid, linked.error().item,
-                                 request_->document_revision, linked.error().code});
-                audio_program = std::move(linked).value();
+                audio_program = std::shared_ptr<const AudioTrackRendererProgram>(
+                    new AudioTrackRendererProgram(track.id(), std::move(current_audio_clips_)));
             }
             tracks_.push_back(std::shared_ptr<const TrackProgram>(new TrackProgram(
                 track.id(), generation_, provider, state_policy, std::move(current_clip_ids_),
@@ -370,6 +520,9 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             current_note_events_.clear();
             note_merge_buffer_.clear();
             current_audio_clips_.clear();
+            current_audio_ids_.clear();
+            audio_id_merge_buffer_.clear();
+            audio_merge_buffer_.clear();
             clip_index_ = 0;
             note_index_ = 0;
             clip_started_ = false;

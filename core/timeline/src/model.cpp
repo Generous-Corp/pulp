@@ -126,14 +126,6 @@ runtime::Result<NoteContent, ModelError> NoteContent::replace_note(NoteEvent not
     return create(std::move(replacement));
 }
 
-runtime::Result<RegisteredContent, ModelError>
-RegisteredContent::create_no_owned_ids(SchemaIdentity schema, std::shared_ptr<const void> value) {
-    if (!schema.valid() || !value)
-        return fail<RegisteredContent>(ModelErrorCode::InvalidSchemaIdentity);
-    return runtime::Result<RegisteredContent, ModelError>(
-        runtime::Ok(RegisteredContent(std::move(schema), std::move(value))));
-}
-
 runtime::Result<OpaqueContent, ModelError>
 OpaqueContent::create(SchemaIdentity schema, std::string raw_json, OpaqueContentLimits limits) {
     if (!schema.valid())
@@ -278,6 +270,14 @@ runtime::Result<Clip, ModelError> Clip::with_content(ClipContent replacement) co
         return create(id(), start(), duration(), std::move(replacement), playback_properties());
     return create_absolute(id(), absolute_start(), absolute_duration_samples(),
                            absolute_sample_rate(), std::move(replacement), playback_properties());
+}
+
+runtime::Result<Clip, ModelError>
+Clip::with_playback_properties(ClipPlaybackProperties playback) const {
+    if (time_anchor() == ClipTimeAnchor::Musical)
+        return create(id(), start(), duration(), content(), playback);
+    return create_absolute(id(), absolute_start(), absolute_duration_samples(),
+                           absolute_sample_rate(), content(), playback);
 }
 
 static std::atomic<std::uint64_t> g_live_index_nodes{0};
@@ -749,6 +749,128 @@ struct Project::Data {
 bool detail::ProjectStateAccess::identities_equivalent(const Project& lhs,
                                                        const Project& rhs) noexcept {
     return lhs.data_->identities.equivalent(rhs.data_->identities);
+}
+
+std::vector<detail::IdentityRecord>
+detail::ProjectStateAccess::identity_entries(const Project& project) {
+    return project.data_->identities.entries();
+}
+
+runtime::Result<Project, ModelError>
+detail::ProjectStateAccess::restore_identities(Project project,
+                                               std::vector<detail::IdentityRecord> entries) {
+    const auto active_entries = project.data_->identities.entries();
+    std::sort(entries.begin(), entries.end(),
+              [](const auto& lhs, const auto& rhs) { return lhs.item < rhs.item; });
+    if (std::adjacent_find(entries.begin(), entries.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.item == rhs.item;
+        }) != entries.end())
+        return fail<Project>(ModelErrorCode::DuplicateItemId);
+
+    detail::IdentityDirectory restored;
+    std::size_t active_index = 0;
+    const auto find_entry = [&](ItemId id) -> const detail::IdentityRecord* {
+        const auto found = std::lower_bound(entries.begin(), entries.end(), id,
+                                            [](const detail::IdentityRecord& candidate,
+                                               ItemId wanted) { return candidate.item < wanted; });
+        return found != entries.end() && found->item == id ? &*found : nullptr;
+    };
+    for (const auto& entry : entries) {
+        const auto& location = entry.location;
+        const auto valid_owner = [](ItemId id, std::uint64_t next) {
+            return !id.valid() || id.value < next;
+        };
+        if (!entry.item.valid() || entry.item.value >= project.next_item_id() ||
+            !valid_owner(location.sequence_id, project.next_item_id()) ||
+            !valid_owner(location.track_id, project.next_item_id()) ||
+            !valid_owner(location.clip_id, project.next_item_id()))
+            return fail<Project>(ModelErrorCode::InvalidSchemaIdentity, entry.item);
+        const auto invalid = ItemId{};
+        const auto valid_shape = [&] {
+            switch (location.kind) {
+            case ItemKind::Project:
+                return entry.item == project.id() && location.sequence_id == invalid &&
+                       location.track_id == invalid && location.clip_id == invalid;
+            case ItemKind::Asset:
+                return location.sequence_id == invalid && location.track_id == invalid &&
+                       location.clip_id == invalid;
+            case ItemKind::Sequence:
+                return location.sequence_id == entry.item && location.track_id == invalid &&
+                       location.clip_id == invalid;
+            case ItemKind::Track:
+                return location.sequence_id.valid() && location.sequence_id != entry.item &&
+                       location.track_id == entry.item && location.clip_id == invalid;
+            case ItemKind::Clip:
+                return location.sequence_id.valid() && location.track_id.valid() &&
+                       location.sequence_id != location.track_id &&
+                       location.sequence_id != entry.item && location.track_id != entry.item &&
+                       location.clip_id == entry.item;
+            case ItemKind::Note:
+                return location.sequence_id.valid() && location.track_id.valid() &&
+                       location.clip_id.valid() && location.sequence_id != location.track_id &&
+                       location.sequence_id != location.clip_id &&
+                       location.track_id != location.clip_id &&
+                       entry.item != location.sequence_id && entry.item != location.track_id &&
+                       entry.item != location.clip_id;
+            }
+            return false;
+        }();
+        if (!valid_shape)
+            return fail<Project>(ModelErrorCode::InvalidSchemaIdentity, entry.item);
+        const auto owner_is = [&](ItemId id, ItemKind kind) {
+            const auto* owner = find_entry(id);
+            return owner && owner->location.kind == kind;
+        };
+        const auto valid_owners = [&] {
+            switch (location.kind) {
+            case ItemKind::Project:
+            case ItemKind::Asset:
+            case ItemKind::Sequence:
+                return true;
+            case ItemKind::Track:
+                return owner_is(location.sequence_id, ItemKind::Sequence);
+            case ItemKind::Clip: {
+                const auto* track = find_entry(location.track_id);
+                return owner_is(location.sequence_id, ItemKind::Sequence) && track &&
+                       track->location.kind == ItemKind::Track &&
+                       track->location.sequence_id == location.sequence_id;
+            }
+            case ItemKind::Note: {
+                const auto* track = find_entry(location.track_id);
+                const auto* clip = find_entry(location.clip_id);
+                return owner_is(location.sequence_id, ItemKind::Sequence) && track && clip &&
+                       track->location.kind == ItemKind::Track &&
+                       track->location.sequence_id == location.sequence_id &&
+                       clip->location.kind == ItemKind::Clip &&
+                       clip->location.sequence_id == location.sequence_id &&
+                       clip->location.track_id == location.track_id;
+            }
+            }
+            return false;
+        }();
+        if (!valid_owners)
+            return fail<Project>(ModelErrorCode::InvalidSchemaIdentity, entry.item);
+        if (location.active) {
+            if (active_index >= active_entries.size() ||
+                active_entries[active_index].item != entry.item ||
+                active_entries[active_index].location.kind != location.kind ||
+                active_entries[active_index].location.sequence_id != location.sequence_id ||
+                active_entries[active_index].location.track_id != location.track_id ||
+                active_entries[active_index].location.clip_id != location.clip_id)
+                return fail<Project>(ModelErrorCode::InvalidSchemaIdentity, entry.item);
+            ++active_index;
+        } else if (project.data_->identities.locate(entry.item)) {
+            return fail<Project>(ModelErrorCode::InvalidSchemaIdentity, entry.item);
+        }
+        restored.insert(entry.item, location);
+    }
+    if (active_index != active_entries.size())
+        return fail<Project>(ModelErrorCode::InvalidSchemaIdentity);
+    project.data_ = std::make_shared<const Project::Data>(
+        Project::Data{project.data_->id, project.data_->name, project.data_->next_item_id,
+                      project.data_->root_sequence_id, project.data_->assets,
+                      project.data_->sequences, std::move(restored)});
+    return runtime::Ok(std::move(project));
 }
 
 runtime::Result<Project, ModelError> Project::create(ProjectInput input) {

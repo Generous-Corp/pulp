@@ -121,6 +121,34 @@ SchemaRegistry::encode_registered(SchemaDomain domain, const SchemaIdentity& ide
         runtime::Ok(std::string(sink.stored_output())));
 }
 
+runtime::Result<RegisteredContent, PersistenceError>
+SchemaRegistry::create_registered_no_owned_ids(const SchemaIdentity& identity,
+                                               std::shared_ptr<const void> value,
+                                               std::size_t maximum_bytes) const {
+    const auto* schema = find(SchemaDomain::Content, identity.type_name);
+    if (!schema || identity.version != schema->current_version || !value || !schema->codec.encode ||
+        !schema->codec.retained_size)
+        return persistence_fail<RegisteredContent>(PersistenceErrorCode::InvalidSchema);
+    auto encoded = encode_registered(SchemaDomain::Content, identity, value, maximum_bytes);
+    if (!encoded)
+        return runtime::Result<RegisteredContent, PersistenceError>(runtime::Err(encoded.error()));
+    DecodeLimits limits;
+    limits.max_input_bytes = maximum_bytes;
+    auto parsed = parse_json(encoded.value(), limits);
+    if (!parsed || parsed.value()->root().kind != JsonValue::Kind::Object)
+        return persistence_fail<RegisteredContent>(PersistenceErrorCode::InvalidSchema);
+    auto canonical = canonicalize_json(parsed.value()->root());
+    if (!canonical || canonical.value().size() > maximum_bytes)
+        return persistence_fail<RegisteredContent>(PersistenceErrorCode::OutputLimitExceeded);
+    const auto payload_bytes = schema->codec.retained_size(value, schema->codec.context.get());
+    const auto retained =
+        payload_bytes > std::numeric_limits<std::size_t>::max() - canonical.value().size()
+            ? std::numeric_limits<std::size_t>::max()
+            : payload_bytes + canonical.value().size();
+    return runtime::Ok(
+        RegisteredContent(identity, std::move(value), std::move(canonical).value(), retained));
+}
+
 runtime::Result<std::string, PersistenceError>
 SchemaRegistry::migrate(SchemaDomain domain, std::string_view type_name,
                         std::uint32_t source_version, std::uint32_t target_version,
@@ -179,7 +207,10 @@ SchemaRegistryBuilder::register_type(TypeSchema schema) {
     if (!SchemaIdentity{schema.type_name, schema.current_version}.valid())
         return schema_fail<SchemaRegistration>(SchemaErrorCode::InvalidIdentity, schema.type_name,
                                                schema.current_version);
-    if ((schema.codec.decode == nullptr) != (schema.codec.encode == nullptr))
+    const auto codec_members = static_cast<unsigned>(schema.codec.decode != nullptr) +
+                               static_cast<unsigned>(schema.codec.encode != nullptr) +
+                               static_cast<unsigned>(schema.codec.retained_size != nullptr);
+    if (codec_members != 0 && codec_members != 3)
         return schema_fail<SchemaRegistration>(SchemaErrorCode::InvalidCodec, schema.type_name,
                                                schema.current_version);
     for (const auto& existing : types_)
@@ -224,6 +255,7 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
     schemas.push_back(builtin("pulp.timeline.project", SchemaDomain::Document,
                               {{"assets", SchemaValueKind::Array},
                                {"id", SchemaValueKind::U64String},
+                               {"identities", SchemaValueKind::Array, false},
                                {"name", SchemaValueKind::String},
                                {"next_item_id", SchemaValueKind::U64String},
                                {"root_sequence_id", SchemaValueKind::U64String},

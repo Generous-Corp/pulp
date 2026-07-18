@@ -249,8 +249,8 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             inverses.emplace_back(MoveClip{move->sequence_id, move->track_id, move->clip_id,
                                            move->replacement_range, move->expected_range});
             dirty.push_back({move->clip_id, move->track_id, move->sequence_id, DirtyFlags::Timing});
-        } else {
-            const auto& velocity = std::get<SetNoteVelocity>(envelope.command);
+        } else if (const auto* velocity_value = std::get_if<SetNoteVelocity>(&envelope.command)) {
+            const auto& velocity = *velocity_value;
             if (const auto code =
                     target_error(project, velocity.note_id, ItemKind::Note, velocity.sequence_id,
                                  velocity.track_id, velocity.clip_id))
@@ -297,6 +297,40 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
                 velocity.replacement_velocity, velocity.expected_velocity});
             dirty.push_back({velocity.note_id, velocity.track_id, velocity.sequence_id,
                              DirtyFlags::Content | DirtyFlags::Notes});
+        } else {
+            const auto& playback = std::get<SetClipPlaybackProperties>(envelope.command);
+            if (const auto code =
+                    target_error(project, playback.clip_id, ItemKind::Clip, playback.sequence_id,
+                                 playback.track_id, playback.clip_id))
+                return fail_target(*code, playback.clip_id);
+            const auto* sequence = project.find_sequence(playback.sequence_id);
+            const auto* track = sequence->find_track(playback.track_id);
+            const auto* clip = track->find_clip(playback.clip_id);
+            if (clip->playback_properties() != playback.expected)
+                return fail_target(ConflictCode::ExpectedValueMismatch, playback.clip_id);
+            auto next_clip = clip->with_playback_properties(playback.replacement);
+            if (!next_clip)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(model_failure(transaction, envelope.id, next_clip.error())));
+            auto next_track = track->replace_clip(std::move(next_clip).value());
+            if (!next_track)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(model_failure(transaction, envelope.id, next_track.error())));
+            auto next_sequence = sequence->replace_track(std::move(next_track).value());
+            if (!next_sequence)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(model_failure(transaction, envelope.id, next_sequence.error())));
+            auto next_project =
+                ProjectEditAccess::replace_sequence(project, std::move(next_sequence).value());
+            if (!next_project)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(model_failure(transaction, envelope.id, next_project.error())));
+            project = std::move(next_project).value();
+            inverses.emplace_back(SetClipPlaybackProperties{playback.sequence_id, playback.track_id,
+                                                            playback.clip_id, playback.replacement,
+                                                            playback.expected});
+            dirty.push_back(
+                {playback.clip_id, playback.track_id, playback.sequence_id, DirtyFlags::Content});
         }
     }
     std::reverse(inverses.begin(), inverses.end());

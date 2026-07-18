@@ -5,8 +5,8 @@
 #include <pulp/audio/rt_safety_contract.hpp>
 #include <pulp/audio/wav_decoder.hpp>
 #include <pulp/playback/audio_renderer_limits.hpp>
-#include <pulp/runtime/result.hpp>
 #include <pulp/playback/transport.hpp>
+#include <pulp/runtime/result.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
 #include <pulp/timeline/model.hpp>
 
@@ -18,6 +18,7 @@
 namespace pulp::playback {
 
 class PlaybackProgram;
+class ProgramCompilerTask;
 
 enum class AudioRendererErrorCode : std::uint8_t {
     InvalidIdentity,
@@ -55,7 +56,9 @@ class DecodedAudioAssetPool {
                audio::WavDecodeLimits decode_limits = {});
 
     const DecodedAudioAsset* find(timeline::ItemId id) const noexcept;
-    std::span<const DecodedAudioAsset> assets() const noexcept { return assets_; }
+    std::span<const DecodedAudioAsset> assets() const noexcept {
+        return assets_;
+    }
 
   private:
     explicit DecodedAudioAssetPool(std::vector<DecodedAudioAsset> assets) noexcept
@@ -82,10 +85,15 @@ struct AudioClipRendererProgram {
 
 class AudioTrackRendererProgram {
   public:
-    timeline::ItemId id() const noexcept { return id_; }
-    std::span<const AudioClipRendererProgram> clips() const noexcept { return clips_; }
+    timeline::ItemId id() const noexcept {
+        return id_;
+    }
+    std::span<const AudioClipRendererProgram> clips() const noexcept {
+        return clips_;
+    }
 
   private:
+    friend class ProgramCompilerTask;
     friend runtime::Result<std::shared_ptr<const AudioTrackRendererProgram>, AudioRendererError>
     link_audio_track_program(timeline::ItemId, std::vector<AudioClipRendererProgram>,
                              const AudioRendererLimits&);
@@ -99,12 +107,10 @@ class AudioTrackRendererProgram {
 runtime::Result<AudioClipRendererProgram, AudioRendererError>
 compile_audio_clip_program(const timeline::Clip& clip, const timeline::Project& project,
                            const timebase::CompiledTempoMap& tempo_map,
-                           const DecodedAudioAssetPool& assets,
-                           const AudioRendererLimits& limits);
+                           const DecodedAudioAssetPool& assets, const AudioRendererLimits& limits);
 
 runtime::Result<std::shared_ptr<const AudioTrackRendererProgram>, AudioRendererError>
-link_audio_track_program(timeline::ItemId track_id,
-                         std::vector<AudioClipRendererProgram> clips,
+link_audio_track_program(timeline::ItemId track_id, std::vector<AudioClipRendererProgram> clips,
                          const AudioRendererLimits& limits);
 
 enum class AudioRenderStatus : std::uint8_t {

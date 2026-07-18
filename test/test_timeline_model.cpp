@@ -1,5 +1,6 @@
 #include "../core/timeline/src/identity_directory.hpp"
 #include <pulp/timeline/model.hpp>
+#include <pulp/timeline/schema_registry.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -7,6 +8,7 @@
 #include <vector>
 
 using namespace pulp::timeline;
+namespace runtime = pulp::runtime;
 
 TEST_CASE("Timeline private identity equality is semantic across insertion histories") {
     pulp::timeline::detail::IdentityDirectory ascending;
@@ -26,12 +28,44 @@ using namespace pulp::timebase;
 
 namespace {
 
+runtime::Result<std::shared_ptr<const void>, PersistenceError>
+decode_test_int(const JsonValue&, const void*) noexcept {
+    std::shared_ptr<const void> value = std::make_shared<const int>(42);
+    return runtime::Ok(std::move(value));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+encode_test_int(const std::shared_ptr<const void>& value, BoundedJsonSink& output,
+                const void*) noexcept {
+    output.append("{\"value\":");
+    output.append(std::to_string(*static_cast<const int*>(value.get())));
+    output.append("}");
+    return runtime::Ok(SchemaWriteSuccess{});
+}
+
+std::size_t retained_test_int(const std::shared_ptr<const void>&, const void*) noexcept {
+    return sizeof(int);
+}
+
+SchemaRegistry test_int_registry() {
+    SchemaRegistryBuilder builder;
+    TypeSchema schema;
+    schema.type_name = "vendor.timeline.generator";
+    schema.domain = SchemaDomain::Content;
+    schema.current_version = 1;
+    schema.fields = {{"value", SchemaValueKind::U32}};
+    schema.codec = {{}, decode_test_int, encode_test_int, retained_test_int};
+    REQUIRE(builder.register_type(std::move(schema)));
+    auto registry = std::move(builder).build();
+    REQUIRE(registry);
+    return std::move(registry).value();
+}
+
 ContentHash content_hash(char digit = 'a') {
     return *ContentHash::from_hex(std::string(64, digit));
 }
 
-template <typename T>
-T take_value(pulp::runtime::Result<T, ModelError> result) {
+template <typename T> T take_value(pulp::runtime::Result<T, ModelError> result) {
     REQUIRE(result.has_value());
     return std::move(result).value();
 }
@@ -57,11 +91,19 @@ Project make_project() {
     auto media_clip = clip({4}, 0, 100, MediaRef{{2}, {25}, 100});
     auto track = take_value(Track::create({6}, "track", {note_clip, media_clip}));
     auto sequence = take_value(Sequence::create({3}, "sequence", TickDuration{400}, {track}));
-    return take_value(Project::create(ProjectInput{{1}, "project", 9, {3},
-                                                    {{{2}, "audio.wav", 1'000, {48'000, 1},
-                                                      content_hash(), AssetStoragePolicy::External,
-                                                       {}, {}}},
-                                                     {sequence}}));
+    return take_value(Project::create(ProjectInput{{1},
+                                                   "project",
+                                                   9,
+                                                   {3},
+                                                   {{{2},
+                                                     "audio.wav",
+                                                     1'000,
+                                                     {48'000, 1},
+                                                     content_hash(),
+                                                     AssetStoragePolicy::External,
+                                                     {},
+                                                     {}}},
+                                                   {sequence}}));
 }
 
 } // namespace
@@ -115,11 +157,19 @@ TEST_CASE("Timeline construction rejects invalid ranges identities and reference
     auto range_track = take_value(Track::create({5}, "track", {out_of_asset}));
     auto range_sequence =
         take_value(Sequence::create({3}, "sequence", TickDuration{100}, {range_track}));
-    auto invalid_range = Project::create(
-        ProjectInput{{1}, "project", 6, {3},
-                     {{{2}, "short.wav", 100, {48'000, 1}, content_hash(),
-                        AssetStoragePolicy::External, {}, {}}},
-                      {range_sequence}});
+    auto invalid_range = Project::create(ProjectInput{{1},
+                                                      "project",
+                                                      6,
+                                                      {3},
+                                                      {{{2},
+                                                        "short.wav",
+                                                        100,
+                                                        {48'000, 1},
+                                                        content_hash(),
+                                                        AssetStoragePolicy::External,
+                                                        {},
+                                                        {}}},
+                                                      {range_sequence}});
     REQUIRE_FALSE(invalid_range.has_value());
     REQUIRE(invalid_range.error().code == ModelErrorCode::InvalidMediaRange);
 
@@ -143,10 +193,16 @@ TEST_CASE("Timeline construction rejects invalid ranges identities and reference
 }
 
 TEST_CASE("Timeline assets separate content identity from resolution hints") {
-    MediaAsset asset{{2}, "audio", 1'000, {48'000, 1}, content_hash('b'),
+    MediaAsset asset{{2},
+                     "audio",
+                     1'000,
+                     {48'000, 1},
+                     content_hash('b'),
                      AssetStoragePolicy::PreferEmbedded,
                      {{AssetLocatorKind::ExternalUri, "file:///music/audio.wav"}},
-                     {{"proxy", content_hash('c'), AssetStoragePolicy::Embedded,
+                     {{"proxy",
+                       content_hash('c'),
+                       AssetStoragePolicy::Embedded,
                        {{AssetLocatorKind::PackageRelative, "media/proxy.wav"}}}}};
     auto sequence = take_value(Sequence::create({3}, "sequence", TickDuration{100}, {}));
     auto project = Project::create(ProjectInput{{1}, "project", 4, {3}, {asset}, {sequence}});
@@ -167,8 +223,11 @@ TEST_CASE("Timeline assets separate content identity from resolution hints") {
 }
 
 TEST_CASE("Timeline registered content remaps while opaque content fails closed") {
-    const auto registered = take_value(RegisteredContent::create_no_owned_ids(
-        {"vendor.timeline.generator", 1}, std::make_shared<const int>(42)));
+    const auto registry = test_int_registry();
+    auto created = registry.create_registered_no_owned_ids({"vendor.timeline.generator", 1},
+                                                           std::make_shared<const int>(42), 1024);
+    REQUIRE(created);
+    const auto registered = std::move(created).value();
     const auto registered_clip = clip({10}, 0, 100, registered);
     ItemIdAllocator allocator(100);
     auto registered_remap = remap_ids(registered_clip, allocator);
@@ -196,8 +255,8 @@ TEST_CASE("Timeline registered content remaps while opaque content fails closed"
     REQUIRE(track_remap.error().code == ModelErrorCode::OpaqueContentCannotRemap);
     REQUIRE(track_allocator.next_value() == track_before);
 
-    const auto opaque_sequence = take_value(
-        Sequence::create({13}, "opaque", TickDuration{100}, {opaque_track}));
+    const auto opaque_sequence =
+        take_value(Sequence::create({13}, "opaque", TickDuration{100}, {opaque_track}));
     ItemIdAllocator sequence_allocator(500);
     const auto sequence_before = sequence_allocator.next_value();
     auto sequence_remap = remap_ids(opaque_sequence, sequence_allocator);
@@ -229,31 +288,27 @@ TEST_CASE("Timeline opaque content validates and retains its exact admission bou
     REQUIRE_FALSE(bounded.has_value());
     REQUIRE(bounded.error().code == ModelErrorCode::OpaqueContentLimitExceeded);
 
+    REQUIRE_FALSE(
+        OpaqueContent::create(
+            identity, R"({"data":{},"extra":0,"type_name":"vendor.timeline.future","version":7})")
+            .has_value());
+    REQUIRE_FALSE(
+        OpaqueContent::create(identity, R"({"type_name":"vendor.timeline.future","version":7})")
+            .has_value());
     REQUIRE_FALSE(OpaqueContent::create(
-        identity,
-        R"({"data":{},"extra":0,"type_name":"vendor.timeline.future","version":7})")
+                      identity, R"({"data":0,"type_name":"vendor.timeline.future","version":7})")
                       .has_value());
     REQUIRE_FALSE(OpaqueContent::create(
-        identity, R"({"type_name":"vendor.timeline.future","version":7})")
+                      identity, R"({"data":{},"type_name":"vendor.timeline.other","version":7})")
                       .has_value());
     REQUIRE_FALSE(OpaqueContent::create(
-        identity,
-        R"({"data":0,"type_name":"vendor.timeline.future","version":7})")
+                      identity, R"({"data":{},"type_name":"vendor.timeline.future","version":8})")
                       .has_value());
-    REQUIRE_FALSE(OpaqueContent::create(
-        identity,
-        R"({"data":{},"type_name":"vendor.timeline.other","version":7})")
-                      .has_value());
-    REQUIRE_FALSE(OpaqueContent::create(
-        identity,
-        R"({"data":{},"type_name":"vendor.timeline.future","version":8})")
-                      .has_value());
-    REQUIRE_FALSE(OpaqueContent::create(
-        identity,
-        R"({"data":{},"data":{},"type_name":"vendor.timeline.future","version":7})")
-                      .has_value());
-    std::string invalid_utf8 =
-        R"({"data":{"text":")";
+    REQUIRE_FALSE(
+        OpaqueContent::create(
+            identity, R"({"data":{},"data":{},"type_name":"vendor.timeline.future","version":7})")
+            .has_value());
+    std::string invalid_utf8 = R"({"data":{"text":")";
     invalid_utf8.push_back(static_cast<char>(0xc0));
     invalid_utf8 += R"("},"type_name":"vendor.timeline.future","version":7})";
     REQUIRE_FALSE(OpaqueContent::create(identity, std::move(invalid_utf8)).has_value());
