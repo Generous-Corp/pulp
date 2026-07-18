@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07120"></a>
+## [0.712.0] - 2026-07-18
+
+- feat(signal): add physical-modeling SDK foundations ([#6304](https://github.com/danielraffel/pulp/pull/6304))
+
 <a id="v07110"></a>
 ## [0.711.0] - 2026-07-18
 
@@ -6604,6 +6609,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.712.0]: https://github.com/danielraffel/pulp/releases/tag/v0.712.0
 [0.711.0]: https://github.com/danielraffel/pulp/releases/tag/v0.711.0
 [0.710.0]: https://github.com/danielraffel/pulp/releases/tag/v0.710.0
 [0.709.0]: https://github.com/danielraffel/pulp/releases/tag/v0.709.0
