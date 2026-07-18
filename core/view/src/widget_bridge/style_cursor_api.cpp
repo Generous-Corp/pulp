@@ -7,14 +7,14 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_style_cursor_direction_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_style_cursor_direction_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setCursor(id, "pointer"|"crosshair"|"text"|"default") - CSS cursor
-    register_bridge_function(api, "setCursor", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setCursor", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto c = args.get<std::string>(1, "default");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         // Map the CSS cursor keyword set to the View::CursorStyle slots that exist
         // today (4 base + 7 resize + invisible + multi-directional = 12
@@ -71,10 +71,10 @@ void WidgetBridge::register_widget_style_cursor_direction_api() {
     // paragraph_style.setTextDirection picks up the same value at
     // shape time. Logical-edge mapping in the @pulp/react prop-applier
     // currently stays LTR-only.
-    register_bridge_function(api, "setDirection", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setDirection", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto d = args.get<std::string>(1, "ltr");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         if (d == "rtl")        v->set_direction(View::WritingDirection::rtl);
         else if (d == "ltr")   v->set_direction(View::WritingDirection::ltr);

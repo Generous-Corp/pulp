@@ -1,5 +1,10 @@
 #pragma once
 
+// Pulls in the BridgeRegistrars declarations so every registrar TU (which
+// already includes this header) can define its `BridgeRegistrars::register_*`
+// statics without a separate include.
+#include "registrars.hpp"
+
 #include <pulp/view/script_engine.hpp>
 
 #include <string>

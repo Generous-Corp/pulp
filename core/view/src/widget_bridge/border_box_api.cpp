@@ -8,26 +8,26 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_border_box_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_border_box_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
-    register_bridge_function(api, "setBorder", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorder", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
         auto width = args.get<double>(2, 1.0);
         auto radius = args.get<double>(3, 0.0);
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v && !hex.empty()) v->set_border(parse_bridge_css_color(hex), (float)width, (float)radius);
         return choc::value::Value();
     });
 
     // setBorderSide(id, side, width, color) — per-side border
-    register_bridge_function(api, "setBorderSide", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderSide", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto side = args.get<std::string>(1, "");
         auto width = static_cast<float>(args.get<double>(2, 1.0));
         auto hex = args.get<std::string>(3, "");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) {
             auto c = hex.empty() ? canvas::Color::rgba8(128,128,128) : parse_bridge_css_color(hex);
             if (side == "top") v->set_border_top(c, width);
@@ -44,11 +44,11 @@ void WidgetBridge::register_widget_border_box_api() {
     // are emitted only when a frame has asymmetric radii. Without the
     // "All" branch, the figma-plugin lane's setCornerRadius calls fell
     // through silently and panel corners stayed sharp.
-    register_bridge_function(api, "setCornerRadius", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setCornerRadius", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto corner = args.get<std::string>(1, "");
         auto r = static_cast<float>(args.get<double>(2, 0));
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) {
             if (corner == "All") v->set_border_radius(r);
             else if (corner == "TopLeft") v->set_corner_radius_tl(r);
@@ -66,19 +66,19 @@ void WidgetBridge::register_widget_border_box_api() {
     // `borderRadius`) can update without recomputing the others.
     //
     // setBorderColor(id, hex)
-    register_bridge_function(api, "setBorderColor", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderColor", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v && !hex.empty()) v->set_border_color(parse_bridge_css_color(hex));
         return choc::value::Value();
     });
 
     // setBorderWidth(id, width)
-    register_bridge_function(api, "setBorderWidth", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderWidth", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto width = static_cast<float>(args.get<double>(1, 1.0));
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) v->set_border_width(width);
         return choc::value::Value();
     });
@@ -88,10 +88,10 @@ void WidgetBridge::register_widget_border_box_api() {
     // Skia paint installs the dashed / dotted SkDashPathEffect at stroke
     // time; double / groove / ridge / inset / outset currently degrade to
     // solid. none / hidden short-circuit the stroke entirely.
-    register_bridge_function(api, "setBorderStyle", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderStyle", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto s = args.get<std::string>(1, "solid");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         if (s == "dashed")        v->set_border_style(View::BorderStyle::dashed);
         else if (s == "dotted")   v->set_border_style(View::BorderStyle::dotted);

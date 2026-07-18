@@ -11,8 +11,8 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_border_side_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_border_side_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // Per-side border color/width shorthands for RN parity. RN exposes
     // `borderTopColor`, `borderTopWidth`, etc. as separate
@@ -48,66 +48,66 @@ void WidgetBridge::register_widget_border_side_api() {
         }
     };
 
-    register_bridge_function(api, "setBorderTopColor", [this, applyBorderSide](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderTopColor", [&self, applyBorderSide](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v && !hex.empty()) applyBorderSide(v, "top", parse_bridge_css_color(hex), std::nullopt);
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setBorderRightColor", [this, applyBorderSide](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderRightColor", [&self, applyBorderSide](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v && !hex.empty()) applyBorderSide(v, "right", parse_bridge_css_color(hex), std::nullopt);
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setBorderBottomColor", [this, applyBorderSide](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderBottomColor", [&self, applyBorderSide](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v && !hex.empty()) applyBorderSide(v, "bottom", parse_bridge_css_color(hex), std::nullopt);
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setBorderLeftColor", [this, applyBorderSide](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderLeftColor", [&self, applyBorderSide](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v && !hex.empty()) applyBorderSide(v, "left", parse_bridge_css_color(hex), std::nullopt);
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setBorderTopWidth", [this, applyBorderSide](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderTopWidth", [&self, applyBorderSide](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto w = static_cast<float>(args.get<double>(1, 1.0));
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) applyBorderSide(v, "top", std::nullopt, w);
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setBorderRightWidth", [this, applyBorderSide](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderRightWidth", [&self, applyBorderSide](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto w = static_cast<float>(args.get<double>(1, 1.0));
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) applyBorderSide(v, "right", std::nullopt, w);
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setBorderBottomWidth", [this, applyBorderSide](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderBottomWidth", [&self, applyBorderSide](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto w = static_cast<float>(args.get<double>(1, 1.0));
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) applyBorderSide(v, "bottom", std::nullopt, w);
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setBorderLeftWidth", [this, applyBorderSide](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderLeftWidth", [&self, applyBorderSide](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto w = static_cast<float>(args.get<double>(1, 1.0));
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) applyBorderSide(v, "left", std::nullopt, w);
         return choc::value::Value();
     });

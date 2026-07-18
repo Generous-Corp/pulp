@@ -7,8 +7,8 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_list_style_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_list_style_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // list-style cluster (listStyle / listStyleType / listStyleImage /
     // listStylePosition). Pulp doesn't model <li>/<ul>/<ol> semantics, so
@@ -23,10 +23,10 @@ void WidgetBridge::register_list_style_api() {
     // The counter-style keywords (lower-roman, etc.) are stored on the
     // View::ListStyleType enum; marker glyph rendering is not wired yet.
     // Unknown keywords fall back to `disc` to match the longstanding default.
-    register_bridge_function(api, "setListStyleType", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setListStyleType", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto s = args.get<std::string>(1, "disc");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         if (s == "none")                       v->set_list_style_type(View::ListStyleType::none);
         else if (s == "circle")                v->set_list_style_type(View::ListStyleType::circle);
@@ -48,10 +48,10 @@ void WidgetBridge::register_list_style_api() {
 
     // setListStyleImage(id, "url(...)" or "none"). Stored verbatim;
     // bullet-image rendering is deferred (same caveat as backgroundImage).
-    register_bridge_function(api, "setListStyleImage", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setListStyleImage", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto url = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         if (url == "none") v->set_list_style_image("");
         else               v->set_list_style_image(url);
@@ -59,10 +59,10 @@ void WidgetBridge::register_list_style_api() {
     });
 
     // setListStylePosition(id, "outside"|"inside").
-    register_bridge_function(api, "setListStylePosition", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setListStylePosition", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto s = args.get<std::string>(1, "outside");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         if (s == "inside") v->set_list_style_position(View::ListStylePosition::inside);
         else               v->set_list_style_position(View::ListStylePosition::outside);

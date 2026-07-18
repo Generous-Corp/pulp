@@ -13,14 +13,14 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_runtime_api() {
+void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
     // __requestFrame__ - requestAnimationFrame implementation.
     // JS side stores callbacks in __frameCallbacks__ map, passes ID to C++.
     // C++ stores pending IDs and invokes them on next frame via __invokeFrame__.
     // Shared pending frame callback IDs.
-    if (!frame_preamble_loaded_) {
-        frame_preamble_loaded_ = true;
-        engine_.evaluate(
+    if (!self.frame_preamble_loaded_) {
+        self.frame_preamble_loaded_ = true;
+        self.engine_.evaluate(
             "var __frameCallbacks__ = {};"
             "var __frameNextId__ = 1;"
             "function __invokeFrame__(id) {"
@@ -45,31 +45,31 @@ void WidgetBridge::register_runtime_api() {
         );
     }
 
-    BridgeApiContext api{engine_};
+    BridgeApiContext api{self.engine_};
 
-    register_bridge_function(api, "__requestFrame__", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__requestFrame__", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<int>(0, 0);
         if (id > 0) {
-            pending_frame_ids_.push_back(id);
+            self.pending_frame_ids_.push_back(id);
             // Signal the host so the next paint runs and service_frame_callbacks()
             // drains the queue. Without this,
             // requestAnimationFrame queues a callback but never asks the
             // host for a frame, so the canvas never repaints.
-            request_repaint();
+            self.request_repaint();
         }
         return choc::value::createInt32(id);
     });
 
-    register_bridge_function(api, "__cancelFrame__", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__cancelFrame__", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<int>(0, 0);
-        auto it = std::find(pending_frame_ids_.begin(), pending_frame_ids_.end(), id);
-        if (it != pending_frame_ids_.end()) pending_frame_ids_.erase(it);
+        auto it = std::find(self.pending_frame_ids_.begin(), self.pending_frame_ids_.end(), id);
+        if (it != self.pending_frame_ids_.end()) self.pending_frame_ids_.erase(it);
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "__flushFrames__", [this](choc::javascript::ArgumentList) {
-        auto ids = pending_frame_ids_;
-        pending_frame_ids_.clear();
+    register_bridge_function(api, "__flushFrames__", [&self](choc::javascript::ArgumentList) {
+        auto ids = self.pending_frame_ids_;
+        self.pending_frame_ids_.clear();
         if (ids.empty()) {
             return choc::value::Value();
         }
@@ -79,7 +79,7 @@ void WidgetBridge::register_runtime_api() {
         // from inside an rAF body inherits source_id =
         // "<script_id>:<callback_id>". One callback at a time so the
         // ambient slot is correct per-invocation.
-        const bool stamp = !active_script_id_.empty();
+        const bool stamp = !self.active_script_id_.empty();
         // RAII guard so an exception in `__invokeFrame__` doesn't leave
         // stale ambient provenance behind, corrupting attribution for
         // every subsequent publish until something else clears it.
@@ -92,11 +92,11 @@ void WidgetBridge::register_runtime_api() {
             if (stamp) {
                 motion::Provenance p;
                 p.source_kind = "rAF";
-                p.source_id = active_script_id_ + ":" + std::to_string(id);
+                p.source_id = self.active_script_id_ + ":" + std::to_string(id);
                 motion::set_ambient_provenance(std::move(p));
             }
             std::string call = "__invokeFrame__(" + std::to_string(id) + ");void 0;";
-            engine_.evaluate(call);
+            self.engine_.evaluate(call);
             // guard's dtor runs on normal and exception paths.
         }
         return choc::value::Value();
@@ -148,7 +148,7 @@ void WidgetBridge::register_runtime_api() {
 
     // Install the JS-side `motion` global wrapping the natives.
     // Idempotent - re-evaluating the same definition is a no-op.
-    engine_.evaluate(
+    self.engine_.evaluate(
         "if (typeof globalThis.motion === 'undefined') {"
         "  globalThis.motion = {"
         "    publishValue: function(view, metric, value) {"
@@ -172,14 +172,14 @@ void WidgetBridge::register_runtime_api() {
     // __timerCallbacks__; native tracks (id, deadline, repeat, interval)
     // so service_frame_callbacks() can fire expired timers without a
     // consumer-side shim.
-    register_bridge_function(api, "__scheduleTimer__", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__scheduleTimer__", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<int>(0, 0);
         auto delay = args.get<double>(1, 0.0);
         auto repeat = args.get<bool>(2, false);
         if (id <= 0) return choc::value::createInt32(0);
         if (delay < 0.0) delay = 0.0;
         auto delay_ms = std::chrono::milliseconds(static_cast<long long>(delay));
-        PendingTimer t;
+        WidgetBridge::PendingTimer t;
         t.id = id;
         t.deadline = std::chrono::steady_clock::now() + delay_ms;
         t.interval = delay_ms;
@@ -187,36 +187,36 @@ void WidgetBridge::register_runtime_api() {
         // Replace any prior schedule for this id (shouldn't happen, but
         // setInterval/setTimeout share the JS-side id allocator and a
         // misbehaving consumer might double-schedule).
-        auto it = std::find_if(pending_timers_.begin(), pending_timers_.end(),
-            [id](const PendingTimer& p){ return p.id == id; });
-        if (it != pending_timers_.end()) *it = t;
-        else pending_timers_.push_back(t);
+        auto it = std::find_if(self.pending_timers_.begin(), self.pending_timers_.end(),
+            [id](const WidgetBridge::PendingTimer& p){ return p.id == id; });
+        if (it != self.pending_timers_.end()) *it = t;
+        else self.pending_timers_.push_back(t);
         return choc::value::createInt32(id);
     });
 
-    register_bridge_function(api, "__cancelTimer__", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__cancelTimer__", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<int>(0, 0);
-        auto it = std::remove_if(pending_timers_.begin(), pending_timers_.end(),
-            [id](const PendingTimer& p){ return p.id == id; });
-        pending_timers_.erase(it, pending_timers_.end());
+        auto it = std::remove_if(self.pending_timers_.begin(), self.pending_timers_.end(),
+            [id](const WidgetBridge::PendingTimer& p){ return p.id == id; });
+        self.pending_timers_.erase(it, self.pending_timers_.end());
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "__flushTimers__", [this](choc::javascript::ArgumentList) {
-        if (pending_timers_.empty()) return choc::value::Value();
+    register_bridge_function(api, "__flushTimers__", [&self](choc::javascript::ArgumentList) {
+        if (self.pending_timers_.empty()) return choc::value::Value();
         auto now = std::chrono::steady_clock::now();
         std::vector<int> to_fire;
         // Two-phase: first collect ids whose deadline has passed, then
         // fire them. Mutating pending_timers_ while iterating would lose
         // re-arms from setInterval (which reschedules its own deadline).
-        for (auto& t : pending_timers_) {
+        for (auto& t : self.pending_timers_) {
             if (t.deadline <= now) to_fire.push_back(t.id);
         }
         if (to_fire.empty()) return choc::value::Value();
         // Re-arm intervals before invocation so the JS callback can call
         // clearInterval(id) and have it actually take effect (which the
         // __cancelTimer__ binding it calls into respects).
-        for (auto& t : pending_timers_) {
+        for (auto& t : self.pending_timers_) {
             if (t.deadline <= now && t.repeating) {
                 // Catch-up by interval - never schedule into the past.
                 while (t.deadline <= now) t.deadline += t.interval;
@@ -224,12 +224,12 @@ void WidgetBridge::register_runtime_api() {
         }
         // Drop expired non-repeating timers from the queue. (Repeating
         // ones already had their deadline advanced above.)
-        pending_timers_.erase(
-            std::remove_if(pending_timers_.begin(), pending_timers_.end(),
-                [now](const PendingTimer& p){
+        self.pending_timers_.erase(
+            std::remove_if(self.pending_timers_.begin(), self.pending_timers_.end(),
+                [now](const WidgetBridge::PendingTimer& p){
                     return !p.repeating && p.deadline <= now;
                 }),
-            pending_timers_.end());
+            self.pending_timers_.end());
         std::string batch;
         batch.reserve(to_fire.size() * 24);
         for (auto id : to_fire) {
@@ -237,7 +237,7 @@ void WidgetBridge::register_runtime_api() {
             batch += std::to_string(id);
             batch += ");";
         }
-        engine_.evaluate(batch + "void 0;");
+        self.engine_.evaluate(batch + "void 0;");
         return choc::value::Value();
     });
 

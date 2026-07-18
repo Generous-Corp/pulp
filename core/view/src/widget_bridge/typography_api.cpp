@@ -12,14 +12,14 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_typography_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_typography_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setFontFamily(id, family) wires web-compat font-family declarations
     // through to Label::set_font_family(); Label::paint() honors it via
     // canvas.set_font_full().
-    register_bridge_function(api, "setFontFamily", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
+    register_bridge_function(api, "setFontFamily", [&self](choc::javascript::ArgumentList args) {
+        auto* v = self.widget(args.get<std::string>(0, ""));
         auto family = args.get<std::string>(1, "");
         if (!v) return choc::value::Value();
         // Pass the comma-separated CSS family list verbatim so the SkiaCanvas typeface resolver
@@ -45,8 +45,8 @@ void WidgetBridge::register_widget_typography_api() {
     // View's inheritable_* slot so descendant Labels pick it up. Do not
     // silently no-op on container Views; that was the dom-adapter
     // workaround this replaces.
-    register_bridge_function(api, "setFontWeight", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
+    register_bridge_function(api, "setFontWeight", [&self](choc::javascript::ArgumentList args) {
+        auto* v = self.widget(args.get<std::string>(0, ""));
         int w = static_cast<int>(args.get<double>(1, 400));
         if (!v) return choc::value::Value();
         if (auto* l = dynamic_cast<Label*>(v)) l->set_font_weight(w);
@@ -54,15 +54,15 @@ void WidgetBridge::register_widget_typography_api() {
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setFontStyle", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
+    register_bridge_function(api, "setFontStyle", [&self](choc::javascript::ArgumentList args) {
+        auto* v = self.widget(args.get<std::string>(0, ""));
         auto s = args.get<std::string>(1, "normal");
         if (auto* l = dynamic_cast<Label*>(v)) l->set_font_style(s == "italic" ? 1 : 0);
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setLetterSpacing", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
+    register_bridge_function(api, "setLetterSpacing", [&self](choc::javascript::ArgumentList args) {
+        auto* v = self.widget(args.get<std::string>(0, ""));
         auto sp = static_cast<float>(args.get<double>(1, 0));
         if (!v) return choc::value::Value();
         if (auto* l = dynamic_cast<Label*>(v)) l->set_letter_spacing(sp);
@@ -70,15 +70,15 @@ void WidgetBridge::register_widget_typography_api() {
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setLineHeight", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
+    register_bridge_function(api, "setLineHeight", [&self](choc::javascript::ArgumentList args) {
+        auto* v = self.widget(args.get<std::string>(0, ""));
         auto lh = static_cast<float>(args.get<double>(1, 0));
         if (auto* l = dynamic_cast<Label*>(v)) l->set_line_height(lh);
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setTextAlign", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
+    register_bridge_function(api, "setTextAlign", [&self](choc::javascript::ArgumentList args) {
+        auto* v = self.widget(args.get<std::string>(0, ""));
         auto a = args.get<std::string>(1, "left");
         if (!v) return choc::value::Value();
         // Accept all six CSS / RN textAlign values:
@@ -107,18 +107,18 @@ void WidgetBridge::register_widget_typography_api() {
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setMultiLine", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
+    register_bridge_function(api, "setMultiLine", [&self](choc::javascript::ArgumentList args) {
+        auto* v = self.widget(args.get<std::string>(0, ""));
         auto ml = args.get<double>(1, 0) > 0.5;
         if (auto* l = dynamic_cast<Label*>(v)) l->set_multi_line(ml);
         else if (auto* e = dynamic_cast<TextEditor*>(v)) e->multi_line = ml;
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setFontSize", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setFontSize", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto size = static_cast<float>(args.get<double>(1, 14));
-        auto* v = widget(id);
+        auto* v = self.widget(id);
         if (!v) return choc::value::Value();
         if (auto* l = dynamic_cast<Label*>(v)) {
             l->set_font_size(size);
@@ -133,13 +133,13 @@ void WidgetBridge::register_widget_typography_api() {
     });
 }
 
-void WidgetBridge::register_widget_typography_color_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_typography_color_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
-    register_bridge_function(api, "setTextColor", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setTextColor", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
-        auto* v = widget(id);
+        auto* v = self.widget(id);
         if (!v || hex.empty()) return choc::value::Value();
         auto color = parse_bridge_css_color(hex);
         // CSS-style cascade.
@@ -164,12 +164,12 @@ void WidgetBridge::register_widget_typography_color_api() {
     });
 }
 
-void WidgetBridge::register_widget_typography_decoration_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_typography_decoration_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setTextTransform(id, "uppercase"/"lowercase"/"capitalize"/"none") - CSS text-transform.
-    register_bridge_function(api, "setTextTransform", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
+    register_bridge_function(api, "setTextTransform", [&self](choc::javascript::ArgumentList args) {
+        auto* v = self.widget(args.get<std::string>(0, ""));
         auto t = args.get<std::string>(1, "none");
         if (auto* l = dynamic_cast<Label*>(v)) {
             if (t == "uppercase") l->set_text_transform(Label::TextTransform::uppercase);
@@ -181,8 +181,8 @@ void WidgetBridge::register_widget_typography_decoration_api() {
     });
 
     // setTextDecoration(id, "underline"/"line-through"/"overline"/"none") - CSS text-decoration.
-    register_bridge_function(api, "setTextDecoration", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
+    register_bridge_function(api, "setTextDecoration", [&self](choc::javascript::ArgumentList args) {
+        auto* v = self.widget(args.get<std::string>(0, ""));
         auto d = args.get<std::string>(1, "none");
         if (auto* l = dynamic_cast<Label*>(v)) {
             if (d == "underline") l->set_text_decoration(Label::TextDecoration::underline);
@@ -201,8 +201,8 @@ void WidgetBridge::register_widget_typography_decoration_api() {
 
     // setTextDecorationColor(id, "#rrggbb"|color-token)
     register_bridge_function(api, "setTextDecorationColor",
-        [this](choc::javascript::ArgumentList args) {
-            auto* v = widget(args.get<std::string>(0, ""));
+        [&self](choc::javascript::ArgumentList args) {
+            auto* v = self.widget(args.get<std::string>(0, ""));
             auto hex = args.get<std::string>(1, "");
             if (auto* l = dynamic_cast<Label*>(v); l && !hex.empty()) {
                 l->set_text_decoration_color(parse_bridge_css_color(hex));
@@ -215,8 +215,8 @@ void WidgetBridge::register_widget_typography_decoration_api() {
     // stored on the Label so future paint logic can honor it without an
     // API break.
     register_bridge_function(api, "setTextDecorationStyle",
-        [this](choc::javascript::ArgumentList args) {
-            auto* v = widget(args.get<std::string>(0, ""));
+        [&self](choc::javascript::ArgumentList args) {
+            auto* v = self.widget(args.get<std::string>(0, ""));
             auto s = args.get<std::string>(1, "solid");
             if (auto* l = dynamic_cast<Label*>(v)) {
                 if (s == "double") l->set_text_decoration_style(Label::TextDecorationStyle::double_);
@@ -230,8 +230,8 @@ void WidgetBridge::register_widget_typography_decoration_api() {
 
     // CSS line-clamp and -webkit-line-clamp route through the same shared
     // case in web-compat-style-decl.js. Numeric only; 0 disables clamping.
-    register_bridge_function(api, "setLineClamp", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
+    register_bridge_function(api, "setLineClamp", [&self](choc::javascript::ArgumentList args) {
+        auto* v = self.widget(args.get<std::string>(0, ""));
         int n = static_cast<int>(args.get<double>(1, 0.0));
         if (auto* l = dynamic_cast<Label*>(v)) {
             l->set_line_clamp(n);
@@ -243,29 +243,29 @@ void WidgetBridge::register_widget_typography_decoration_api() {
     });
 }
 
-void WidgetBridge::register_widget_typography_overflow_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_typography_overflow_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setTextOverflow(id, "ellipsis"|"clip") - CSS text-overflow.
-    register_bridge_function(api, "setTextOverflow", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setTextOverflow", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto mode = args.get<std::string>(1, "clip");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) v->set_text_overflow_ellipsis(mode == "ellipsis");
         return choc::value::Value();
     });
 }
 
-void WidgetBridge::register_widget_typography_extended_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_typography_extended_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setTextIndent(id, px) - CSS text-indent. Storage-only today;
     // SkParagraph::setTextIndent integration is not wired yet.
     register_bridge_function(api, "setTextIndent",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto v = static_cast<float>(args.get<double>(1, 0.0));
-            auto* w = id.empty() ? &root_ : widget(id);
+            auto* w = id.empty() ? &self.root_ : self.widget(id);
             if (w) w->set_text_indent(v);
             return choc::value::Value();
         });
@@ -274,7 +274,7 @@ void WidgetBridge::register_widget_typography_extended_api() {
     // CSS vertical-align. Maps the keyword to the existing
     // canvas::TextVerticalAlign enum on Label; non-Label widgets no-op.
     register_bridge_function(api, "setVerticalAlign",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "baseline");
             using VA = pulp::canvas::TextVerticalAlign;
@@ -285,7 +285,7 @@ void WidgetBridge::register_widget_typography_extended_api() {
             else if (kw == "bottom")   mode = VA::bottom;
             else if (kw == "baseline") mode = VA::baseline;
             else if (kw == "auto")     mode = VA::baseline;
-            if (auto* l = dynamic_cast<Label*>(widget(id))) {
+            if (auto* l = dynamic_cast<Label*>(self.widget(id))) {
                 l->set_vertical_align(mode);
             }
             return choc::value::Value();
@@ -294,10 +294,10 @@ void WidgetBridge::register_widget_typography_extended_api() {
     // setWordBreak(id, kw) - CSS word-break / overflow-wrap.
     // Storage-only today; HarfBuzz line-break feature is deferred.
     register_bridge_function(api, "setWordBreak",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "normal");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_word_break(kw);
             return choc::value::Value();
         });
@@ -305,10 +305,10 @@ void WidgetBridge::register_widget_typography_extended_api() {
     // setFontVariant(id, kw) - CSS / RN font-variant. Storage-only;
     // HarfBuzz feature wiring is deferred.
     register_bridge_function(api, "setFontVariant",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "normal");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_font_variant(kw);
             return choc::value::Value();
         });
@@ -316,45 +316,45 @@ void WidgetBridge::register_widget_typography_extended_api() {
     // RN textShadow* per-attribute setters. Storage-only; SkPaint shadow
     // integration is not wired yet.
     register_bridge_function(api, "setTextShadowColor",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto c  = args.get<std::string>(1, "");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_text_shadow_color(c);
             return choc::value::Value();
         });
     register_bridge_function(api, "setTextShadowOffset",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto dx = static_cast<float>(args.get<double>(1, 0.0));
             auto dy = static_cast<float>(args.get<double>(2, 0.0));
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_text_shadow_offset(dx, dy);
             return choc::value::Value();
         });
     register_bridge_function(api, "setTextShadowRadius",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto r  = static_cast<float>(args.get<double>(1, 0.0));
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_text_shadow_radius(r);
             return choc::value::Value();
         });
 }
 
-void WidgetBridge::register_widget_typography_shadow_shorthand_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_typography_shadow_shorthand_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // CSS-shorthand setTextShadow(id, dx, dy, blur, color).
     // Composes the three existing per-attribute text-shadow slots.
     register_bridge_function(api, "setTextShadow",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto dx = static_cast<float>(args.get<double>(1, 0.0));
             auto dy = static_cast<float>(args.get<double>(2, 0.0));
             auto r  = static_cast<float>(args.get<double>(3, 0.0));
             auto c  = args.get<std::string>(4, "");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) {
                 v->set_text_shadow_offset(dx, dy);
                 v->set_text_shadow_radius(r);

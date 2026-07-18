@@ -10,24 +10,24 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_tokens_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_tokens_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setMotionToken(tokenName, value)
-    register_bridge_function(api, "setMotionToken", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setMotionToken", [&self](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
         auto value = static_cast<float>(args.get<double>(1, 0));
         if (name.empty()) return choc::value::Value();
-        auto theme = root_.theme();
+        auto theme = self.root_.theme();
         theme.dimensions[name] = value;
-        root_.set_theme(theme);
+        self.root_.set_theme(theme);
         return choc::value::Value();
     });
 
     // getMotionToken(tokenName) -> value
-    register_bridge_function(api, "getMotionToken", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "getMotionToken", [&self](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
-        auto d = root_.theme().dimension(name);
+        auto d = self.root_.theme().dimension(name);
         return choc::value::createFloat64(d.value_or(0.0f));
     });
 
@@ -40,45 +40,45 @@ void WidgetBridge::register_tokens_api() {
     // in `fontFamily` / `color` / `borderColor` etc. before forwarding to
     // setFontFamily / setTextColor; otherwise Skia's font matcher receives
     // the literal string "var(--mono)" as a family name.
-    register_bridge_function(api, "setStringToken", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setStringToken", [&self](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
         auto value = args.get<std::string>(1, "");
         if (name.empty()) return choc::value::Value();
-        auto theme = root_.theme();
+        auto theme = self.root_.theme();
         theme.strings[name] = value;
-        root_.set_theme(theme);
+        self.root_.set_theme(theme);
         return choc::value::Value();
     });
 
     // getStringToken(tokenName) -> string. Returns empty string when the
     // token isn't defined - callers (e.g. prop-applier resolveVar) treat
     // empty as "miss" and try the next lookup tier.
-    register_bridge_function(api, "getStringToken", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "getStringToken", [&self](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
-        auto s = root_.theme().string_token(name);
+        auto s = self.root_.theme().string_token(name);
         return choc::value::createString(s.value_or(std::string()));
     });
 
     // setColorToken(name, color) - set a color token on the root theme
-    register_bridge_function(api, "setColorToken", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setColorToken", [&self](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
         auto color_str = args.get<std::string>(1, "");
         if (name.empty()) return choc::value::Value();
-        auto theme = root_.theme();
+        auto theme = self.root_.theme();
         auto c = parse_bridge_css_color(color_str);
         theme.colors[name] = c;
-        root_.set_theme(theme);
+        self.root_.set_theme(theme);
         return choc::value::Value();
     });
 
     // setDimensionToken(name, value) - set a dimension token on the root theme
-    register_bridge_function(api, "setDimensionToken", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setDimensionToken", [&self](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
         auto val = static_cast<float>(args.get<double>(1, 0));
         if (name.empty()) return choc::value::Value();
-        auto theme = root_.theme();
+        auto theme = self.root_.theme();
         theme.dimensions[name] = val;
-        root_.set_theme(theme);
+        self.root_.set_theme(theme);
         return choc::value::Value();
     });
 }

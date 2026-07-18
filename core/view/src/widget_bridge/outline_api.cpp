@@ -11,8 +11,8 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_outline_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_outline_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // CSS / RN outline cluster. Outline is paint-time only: it does NOT
     // take up Yoga layout space (parent never reserves room
@@ -27,10 +27,10 @@ void WidgetBridge::register_widget_outline_api() {
     // setBackground / setBorderColor (#hex / rgb() / named), plus the
     // CSS `currentColor` keyword which resolves to the View's text
     // color via the inheritable cascade.
-    register_bridge_function(api, "setOutlineColor", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setOutlineColor", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v || hex.empty()) return choc::value::Value();
         // CSS `currentColor`: resolve to the element's own computed text
         // color first, then the inheritable cascade, then theme fallback.
@@ -59,10 +59,10 @@ void WidgetBridge::register_widget_outline_api() {
     });
 
     // setOutlineOffset(id, px) - gap between border-box edge and outline.
-    register_bridge_function(api, "setOutlineOffset", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setOutlineOffset", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto offset = static_cast<float>(args.get<double>(1, 0.0));
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) v->set_outline_offset(offset);
         return choc::value::Value();
     });
@@ -70,10 +70,10 @@ void WidgetBridge::register_widget_outline_api() {
     // setOutlineStyle(id, "solid"|"dashed"|...) - same keyword set as
     // setBorderStyle. Reuses View::BorderStyle since the CSS spec lists
     // the same line-style values for both properties.
-    register_bridge_function(api, "setOutlineStyle", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setOutlineStyle", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto s = args.get<std::string>(1, "solid");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         if (s == "dashed")        v->set_outline_style(View::BorderStyle::dashed);
         else if (s == "dotted")   v->set_outline_style(View::BorderStyle::dotted);
@@ -90,10 +90,10 @@ void WidgetBridge::register_widget_outline_api() {
 
     // setOutlineWidth(id, px) - outline stroke thickness. width<=0 or
     // outline_style==none/hidden short-circuits the paint.
-    register_bridge_function(api, "setOutlineWidth", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setOutlineWidth", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto width = static_cast<float>(args.get<double>(1, 0.0));
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) v->set_outline_width(width);
         return choc::value::Value();
     });

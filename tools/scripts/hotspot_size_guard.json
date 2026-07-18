@@ -11,6 +11,11 @@
   },
   "hotspots": [
     {
+      "path": "core/view/include/pulp/view/widget_bridge.hpp",
+      "max_loc": 509,
+      "note": "WidgetBridge public header. The ~75 sub-API registrar declarations moved out to the src-only widget_bridge/registrars.hpp (BridgeRegistrars friend), shrinking this header 571->509 and cutting the recompile blast radius of adding a bridge API. Keep new registrars out of this header; ceiling locks the win."
+    },
+    {
       "path": "core/view/src/widget_bridge.cpp",
       "max_loc": 930,
       "note": "WidgetBridge shell after callback wiring + subtree cleanup extraction; keep widget callbacks in widget_bridge/widget_callbacks.cpp, cleanup in widget_bridge/subtree_cleanup.cpp, JS event dispatch in widget_bridge/bridge_dispatch.cpp, and the CSS color parser in widget_bridge/css_color.cpp; registrar table + shared value-widget access in widget_bridge/value_widget_access.hpp"
