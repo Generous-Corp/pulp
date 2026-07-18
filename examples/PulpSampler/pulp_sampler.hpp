@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -71,6 +72,7 @@ public:
     }
 
     int latency_samples() const override {
+        std::lock_guard lock(control_mutex_);
         return heritage_.latency_samples();
     }
 
@@ -96,6 +98,7 @@ public:
     }
 
     std::vector<std::uint8_t> serialize_plugin_state() const override {
+        std::lock_guard lock(control_mutex_);
         SamplerHeritagePersistentState state;
         state.enabled = heritage_.configured();
         if (!state.enabled) return {};
@@ -129,6 +132,7 @@ public:
 
     bool deserialize_plugin_state(
         std::span<const std::uint8_t> bytes) override {
+        std::lock_guard lock(control_mutex_);
         const auto parsed = parse_sampler_heritage_state(bytes);
         if (!parsed.valid()) return false;
 
@@ -177,12 +181,14 @@ public:
 
     /// Load a mono sample buffer. Call off the audio thread after prepare().
     bool load_sample(const float* data, int num_samples, float sample_rate) {
+        std::lock_guard lock(control_mutex_);
         return source_publication_.load_mono(
             *streaming_, data, num_samples, sample_rate);
     }
 
     /// Load a sample from interleaved stereo. Call off the audio thread after prepare().
     bool load_sample_stereo(const float* interleaved, int num_frames, float sample_rate) {
+        std::lock_guard lock(control_mutex_);
         return source_publication_.load_stereo(
             *streaming_, interleaved, num_frames, sample_rate);
     }
@@ -190,7 +196,13 @@ public:
     /// Load a true ranged WAV or uncompressed AIFF asset. The call may perform
     /// file I/O and wait for the sampler's non-audio owner thread.
     PulpSamplerLoadResult load_sample_file_result(std::string_view path) {
-        DiagnosticsWriteGuard guard(diagnostics_epoch_);
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        control_load_attempts_for_test_.fetch_add(1, std::memory_order_release);
+#endif
+        std::lock_guard lock(control_mutex_);
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        control_load_entries_for_test_.fetch_add(1, std::memory_order_release);
+#endif
         auto result = streaming_->load_sample_file_result(path);
         if (result.loaded())
             result.selection_generation =
@@ -207,22 +219,28 @@ public:
         return last_load_result_.read();
     }
 
-    bool set_config(PulpSamplerConfig config) noexcept {
+    bool set_config(PulpSamplerConfig config) {
+        std::lock_guard lock(control_mutex_);
         if (prepared_) return false;
         config_ = config;
         return true;
     }
 
-    PulpSamplerConfig config() const noexcept { return config_; }
+    PulpSamplerConfig config() const {
+        std::lock_guard lock(control_mutex_);
+        return config_;
+    }
     PulpSamplerPrepareResult prepare_result() const noexcept {
         return prepare_result_.read();
     }
 
     bool has_sample() const {
+        std::lock_guard lock(control_mutex_);
         return streaming_->published_source().kind != SamplerPublishedSourceKind::None;
     }
 
     int sample_length() const {
+        std::lock_guard lock(control_mutex_);
         const auto source = streaming_->published_source();
         const auto frames = source.kind == SamplerPublishedSourceKind::Streamed
             ? source.streamed.total_frames
@@ -232,7 +250,8 @@ public:
             : static_cast<int>(frames);
     }
 
-    PulpSamplerStreamStats stream_stats() const noexcept {
+    PulpSamplerStreamStats stream_stats() const {
+        std::lock_guard lock(control_mutex_);
         return streaming_->stats();
     }
 
@@ -241,6 +260,15 @@ public:
     /// timeline and latency contract.
     PulpSamplerHeritageStatus set_heritage_profile(
         const audio::SampleHeritageProfile& profile) {
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        control_heritage_attempts_for_test_.fetch_add(1,
+                                                      std::memory_order_release);
+#endif
+        std::lock_guard lock(control_mutex_);
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        control_heritage_entries_for_test_.fetch_add(1,
+                                                     std::memory_order_release);
+#endif
         if (prepared_) {
             SamplerHeritageRuntime::PreparedReplacement candidate;
             const auto result = heritage_.stage_replacement(
@@ -266,7 +294,8 @@ public:
     /// Disables heritage processing while audio is stopped. Like profile
     /// replacement, this must not race process(). A prepared clock-domain
     /// change rebinds the stream runtime before heritage is disabled.
-    PulpSamplerHeritageStatus disable_heritage() noexcept {
+    PulpSamplerHeritageStatus disable_heritage() {
+        std::lock_guard lock(control_mutex_);
         const auto previous_latency = latency_samples();
         if (prepared_ && !rebind_stream_domain(
                 {host_sample_rate_, max_block_frames_})) {
@@ -279,17 +308,25 @@ public:
         return PulpSamplerHeritageStatus::Disabled;
     }
 
-    PulpSamplerHeritageDiagnostics heritage_diagnostics() const noexcept {
+    PulpSamplerHeritageDiagnostics heritage_diagnostics() const {
+        std::lock_guard lock(control_mutex_);
         return heritage_.diagnostics();
     }
 
     PulpSamplerDiagnostics diagnostics() const noexcept {
-        for (;;) {
-            const auto before = diagnostics_epoch_.load(std::memory_order_acquire);
-            if ((before & 1u) != 0) continue;
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        control_diagnostics_attempts_for_test_.fetch_add(
+            1, std::memory_order_release);
+#endif
+        try {
+            std::lock_guard lock(control_mutex_);
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+            control_diagnostics_entries_for_test_.fetch_add(
+                1, std::memory_order_release);
+#endif
             const auto stream = streaming_->stats();
             PulpSamplerDiagnostics result{
-                .snapshot_epoch = before,
+                .snapshot_epoch = next_diagnostics_epoch_locked(),
                 .prepare = prepare_result_.read(),
                 .last_load = last_load_result_.read(),
                 .preload = streaming_->preload_policy(),
@@ -300,13 +337,16 @@ public:
             };
             if (envelope_snapshot_available_.load(std::memory_order_acquire))
                 result.envelope = envelope_snapshot_.read();
-            const auto after = diagnostics_epoch_.load(std::memory_order_acquire);
-            if (before == after) return result;
+            diagnostics_snapshot_.write(result);
+            return diagnostics_snapshot_.read();
+        } catch (...) {
+            return diagnostics_snapshot_.read();
         }
     }
 
     format::PrepareResourceUsage estimate_prepare_resources(
         const format::PrepareContext& ctx) const override {
+        std::lock_guard lock(control_mutex_);
         format::PrepareResourceUsage usage;
         usage.block_size = std::max(0, ctx.max_buffer_size);
         usage.input_channels = std::max(0, ctx.input_channels);
@@ -414,7 +454,7 @@ public:
     }
 
     void prepare(const format::PrepareContext& ctx) override {
-        DiagnosticsWriteGuard guard(diagnostics_epoch_);
+        std::lock_guard lock(control_mutex_);
         try {
             prepare_transaction(ctx);
         } catch (...) {
@@ -509,6 +549,15 @@ public:
     }
 
     void release() override {
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        control_release_attempts_for_test_.fetch_add(1,
+                                                     std::memory_order_release);
+#endif
+        std::lock_guard lock(control_mutex_);
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        control_release_entries_for_test_.fetch_add(1,
+                                                    std::memory_order_release);
+#endif
         for (auto& voice : voices_) reset_voice(voice);
         for (auto& cancellation : pending_cancellations_) cancellation = {};
         streaming_->release();
@@ -520,6 +569,7 @@ public:
         voice_scratch_ptrs_.fill(nullptr);
         prepared_ = false;
         prepare_result_.write({});
+        last_load_result_.write({});
         envelope_snapshot_available_.store(false, std::memory_order_release);
     }
 
@@ -605,17 +655,6 @@ private:
         bool valid = false;
     };
 
-    struct DiagnosticsWriteGuard {
-        explicit DiagnosticsWriteGuard(std::atomic<std::uint64_t>& epoch)
-            : epoch_(epoch) {
-            epoch_.fetch_add(1, std::memory_order_acq_rel);
-        }
-        ~DiagnosticsWriteGuard() {
-            epoch_.fetch_add(1, std::memory_order_release);
-        }
-        std::atomic<std::uint64_t>& epoch_;
-    };
-
     struct StreamDomain {
         float sample_rate = 44100.0f;
         std::uint32_t maximum_block_frames = 512;
@@ -629,6 +668,13 @@ private:
         return status == PulpSamplerHeritageStatus::Ready ||
                status ==
                    PulpSamplerHeritageStatus::ReadyRuntimeResetForHostRate;
+    }
+
+    std::uint64_t next_diagnostics_epoch_locked() const noexcept {
+        constexpr auto maximum = std::numeric_limits<std::uint64_t>::max();
+        diagnostics_snapshot_epoch_ = diagnostics_snapshot_epoch_ > maximum - 2
+            ? 2 : diagnostics_snapshot_epoch_ + 2;
+        return diagnostics_snapshot_epoch_;
     }
 
     StreamDomain current_stream_domain() const noexcept {
@@ -701,6 +747,13 @@ private:
         sinc_bank_.swap(candidate_sinc);
         stream_output_sample_rate_ = domain.sample_rate;
         maximum_stream_block_frames_ = domain.maximum_block_frames;
+        const auto published = streaming_->published_source();
+        auto last_load = last_load_result_.read();
+        if (last_load.loaded() &&
+            published.kind == SamplerPublishedSourceKind::Streamed) {
+            last_load.selection_generation = published.selection_generation;
+            last_load_result_.write(last_load);
+        }
         return result;
     }
 
@@ -820,7 +873,9 @@ private:
     PulpSamplerConfig config_{};
     runtime::SeqLock<PulpSamplerPrepareResult> prepare_result_{};
     runtime::SeqLock<PulpSamplerLoadResult> last_load_result_{};
-    std::atomic<std::uint64_t> diagnostics_epoch_{0};
+    mutable std::recursive_mutex control_mutex_;
+    mutable runtime::SeqLock<PulpSamplerDiagnostics> diagnostics_snapshot_{};
+    mutable std::uint64_t diagnostics_snapshot_epoch_ = 0;
     audio::SampleHeritageRuntimeState restored_runtime_state_{};
     audio::SampleHeritageRuntimeState pending_runtime_state_{};
     double restored_runtime_host_sample_rate_ = 0.0;
@@ -842,6 +897,14 @@ private:
     std::array<std::uint64_t, kMaxVoices> requester_generations_{};
     std::array<PendingCancellation, kMaxVoices> pending_cancellations_{};
 #if defined(PULP_SAMPLER_TEST_HOOKS)
+    mutable std::atomic<std::uint64_t> control_diagnostics_attempts_for_test_{0};
+    mutable std::atomic<std::uint64_t> control_diagnostics_entries_for_test_{0};
+    std::atomic<std::uint64_t> control_load_attempts_for_test_{0};
+    std::atomic<std::uint64_t> control_load_entries_for_test_{0};
+    std::atomic<std::uint64_t> control_heritage_attempts_for_test_{0};
+    std::atomic<std::uint64_t> control_heritage_entries_for_test_{0};
+    std::atomic<std::uint64_t> control_release_attempts_for_test_{0};
+    std::atomic<std::uint64_t> control_release_entries_for_test_{0};
     bool retire_reverse_attack_after_horizon_for_test_ = false;
     std::uint64_t lookahead_plans_last_callback_for_test_ = 0;
     double stream_rate_capacity_override_for_test_ = 0.0;
