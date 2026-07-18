@@ -33,10 +33,8 @@ class MemoryMappedAudioReader {
     /// Close the mapped file.
     void close();
 
-    /// Whether a file is currently mapped.
-    bool is_open() const {
-        return mmap_.is_open();
-    }
+    /// Whether an immutable snapshot of the source is currently mapped.
+    bool is_open() const;
 
     /// File info (available after open)
     const AudioFileInfo& info() const {
@@ -49,10 +47,9 @@ class MemoryMappedAudioReader {
     /// Returns false on error. Frames past end-of-file are zero-filled. RT note:
     /// this performs decode/copy work, so it is for the control or background
     /// reader thread, never the audio callback.
-    /// Not thread-safe: the persistent ranged reader carries a single seek
-    /// position plus lazily-initialized scratch/fallback state, so concurrent
-    /// calls on one instance race. Serialize calls (one streaming reader thread
-    /// per reader), or use one MemoryMappedAudioReader per thread.
+    /// Concurrent calls on one instance are serialized internally. Open, close,
+    /// move, and destruction must not overlap reads. This API remains non-RT:
+    /// callers may block on decoding, allocation, I/O, or another reader.
     bool read_frames(float** dest_channels, uint32_t num_channels, uint64_t start_frame,
                      uint64_t num_frames);
 
@@ -68,40 +65,30 @@ class MemoryMappedAudioReader {
     /// reader can't seek).
     bool supports_ranged_read() const;
 
-    /// Read the entire file (convenience — same as read_audio_file but from mapped data)
+    /// Read the entire immutable source snapshot.
     std::optional<AudioFileData> read_all();
 
-    /// Raw mapped bytes (for custom decoding)
-    const uint8_t* data() const {
-        return mmap_.data();
-    }
-    size_t size() const {
-        return mmap_.size();
-    }
+    /// Raw bytes from the immutable source snapshot (for custom decoding).
+    const uint8_t* data() const;
+    size_t size() const;
 
     /// Copy the access policy captured by the retained source handle to an
     /// existing artifact. Control thread only.
-    bool copy_access_policy_to(std::string_view destination) const noexcept {
-        return mmap_.copy_access_policy_to(destination);
-    }
+    bool copy_access_policy_to(std::string_view destination) const noexcept;
     runtime::AccessPolicyTarget
-    prepare_access_policy_target(std::string_view destination) const noexcept {
-        return mmap_.prepare_access_policy_target(destination);
-    }
-    bool path_refers_to_open_file(std::string_view path) const noexcept {
-        return mmap_.path_refers_to_open_file(path);
-    }
-    runtime::FileIdentity opened_file_identity() const noexcept {
-        return mmap_.opened_file_identity();
-    }
+    prepare_access_policy_target(std::string_view destination) const noexcept;
+    bool path_refers_to_open_file(std::string_view path) const noexcept;
+    runtime::FileIdentity opened_file_identity() const noexcept;
 
   private:
     // Ranged (seek-based) decoder state over the mapped bytes; nullptr when the
     // active format can't be range-read (read_frames then decode-once-caches).
-    // Declared AFTER mmap_ so it is destroyed BEFORE the mapping it references.
+    // BackingState retains the original source handle for identity/access-policy
+    // operations and owns an immutable temporary snapshot used for all reads.
+    struct BackingState;
     struct RangedState;
 
-    runtime::MemoryMappedFile mmap_;
+    std::unique_ptr<BackingState> backing_;
     AudioFileInfo info_;
     std::string path_;
     std::unique_ptr<RangedState> ranged_;
