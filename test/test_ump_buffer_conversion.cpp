@@ -190,6 +190,7 @@ TEST_CASE("System real-time and common round-trip as UMP Type 0x1",
     const Case cases[] = {
         {0xF8, 0, 0, 1},   // Timing Clock (real-time, 1 byte)
         {0xFA, 0, 0, 1},   // Start
+        {0xFB, 0, 0, 1},   // Continue
         {0xFC, 0, 0, 1},   // Stop
         {0xF2, 0x7F, 0x40, 3},  // Song Position Pointer (common, 3 bytes)
     };
