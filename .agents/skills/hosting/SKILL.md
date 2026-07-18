@@ -230,6 +230,15 @@ empties `std::filesystem::path::extension()` (step up via `parent_path()` when
 `filename()` is empty), and a plain `dlopen` of a relative bundle path triggers
 the `@rpath` search dance — pass an absolute path.
 
+`--editor` embeds the loaded plug-in's own editor in a window via the
+hosted-editor path (`create_hosted_editor` → `EditorAttachment`), auto-closing
+after `--editor-ms` (default 3000). It is the manual smoke for the whole
+host-side editor chain (CLAP / VST3 / AU): the negotiation seams are unit-tested
+headlessly, but the editor actually rendering needs a display and a real plug-in
+GUI, so run `--editor` (or load a Pulp-hosted plug-in in a DAW) to confirm it by
+eye. Heads-up: opening an editor can make the plug-in active and audible — the
+bounded duration keeps that contained.
+
 ## Headless Audio Unit event-loop servicing
 
 Licensed Audio Units may complete initialization asynchronously via XPC,
