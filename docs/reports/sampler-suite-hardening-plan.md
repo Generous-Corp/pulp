@@ -28,10 +28,9 @@ gates:
   to ratio-tracking sinc. The offline `pulp audio sampler-mip build` command
   atomically publishes hash-addressed levels using the 140 dB-design decimator.
 - S5: focused C++ interpolation gates and dependency-bearing Python reference
-  and negative-control gates exist. The checked-in interpolation benchmark
-  capture is historical: its source-bundle digest no longer matches the current
-  sampler sources and must be recaptured before it is current performance
-  evidence.
+  and negative-control gates exist. The current checked-in Apple M5 Max Release
+  capture contains the complete 108-row matrix and passes its full source,
+  binary, budget, environment, and negative-control verifier.
 - S6: the versioned neutral heritage schema, strict canonical JSON, validated
   prepared profile, ordered independently bypassable stages, exact causal
   two-leg SRC, deterministic RNG policies, bounded runtime RNG-state capture,

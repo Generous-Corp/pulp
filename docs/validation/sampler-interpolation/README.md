@@ -1,9 +1,8 @@
 # Sampler interpolation CPU evidence
 
-**Status:** historical capture; recapture pending. The checked-in artifact's
-`environment.source_bundle_sha256` does not match the current sampler source
-bundle, and the verifier correctly rejects it as current evidence. The commands
-below describe how to replace it with a current capture.
+**Status:** current verified Release capture for sampler source revision
+`e04d34749772af31f52c5fa2e0fe8907ca0cde9b`. The full verifier and its negative
+controls pass against the recorded source bundle and supplied benchmark binary.
 
 This directory holds durable Release measurements for the interpolation
 evaluator only. The measurements exclude sampler streaming, page-cache work,
@@ -17,6 +16,7 @@ cmake -S . -B build-sampler-bench -DCMAKE_BUILD_TYPE=Release \
   -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_TESTS=ON -DPULP_BENCHMARK=ON
 cmake --build build-sampler-bench --target pulp-sampler-interpolation-benchmark -j 4
 PULP_BENCHMARK_CAPTURED_UTC=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+PULP_BENCHMARK_SOURCE_REVISION=$(git rev-parse HEAD)
 PULP_BENCHMARK_SOURCE_SHA256=$(python3 tools/scripts/verify_sampler_interpolation_benchmark.py --print-source-bundle-sha256)
 PULP_BENCHMARK_BINARY_SHA256=$(shasum -a 256 build-sampler-bench/test/pulp-sampler-interpolation-benchmark | awk '{print $1}')
 ./build-sampler-bench/test/pulp-sampler-interpolation-benchmark \
@@ -24,7 +24,7 @@ PULP_BENCHMARK_BINARY_SHA256=$(shasum -a 256 build-sampler-bench/test/pulp-sampl
   --machine-model "MacBook Pro Mac17,7, Apple M5 Max" \
   --os "macOS 26.5.2 build 25F84" --architecture arm64 \
   --compiler "Apple clang 21.0.0 (clang-2100.1.1.101)" \
-  --source-base-revision 10dd9c2d59327a0e29477d30b0ee323c9f3ed1c3 \
+  --source-base-revision "$PULP_BENCHMARK_SOURCE_REVISION" \
   --source-bundle-sha256 "$PULP_BENCHMARK_SOURCE_SHA256" \
   --benchmark-binary-sha256 "$PULP_BENCHMARK_BINARY_SHA256" \
   --generated-utc "$PULP_BENCHMARK_CAPTURED_UTC" \
