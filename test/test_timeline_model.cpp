@@ -1,0 +1,304 @@
+#include <pulp/timeline/model.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <limits>
+#include <vector>
+
+using namespace pulp::timeline;
+using namespace pulp::timebase;
+
+namespace {
+
+template <typename T>
+T take_value(pulp::runtime::Result<T, ModelError> result) {
+    REQUIRE(result.has_value());
+    return std::move(result).value();
+}
+
+NoteContent notes(std::vector<NoteEvent> events) {
+    return take_value(NoteContent::create(std::move(events)));
+}
+
+Clip clip(ItemId id, std::int64_t start, std::int64_t duration, ClipContent content = EmptyContent{}) {
+    return take_value(Clip::create(id, {start}, {duration}, std::move(content)));
+}
+
+Clip absolute_clip(ItemId id, std::int64_t start_sample, std::uint64_t sample_count,
+                   ClipContent content = EmptyContent{}, RationalRate rate = {48'000, 1}) {
+    return take_value(Clip::create_absolute(id, {start_sample}, sample_count, rate,
+                                            std::move(content)));
+}
+
+Project make_project() {
+    auto note_clip = clip({5}, 200, 100,
+                          notes({{{8}, {20}, {10}, 0x8000, 64, 1},
+                                 {{7}, {10}, {10}, 0xffff, 60, 0}}));
+    auto media_clip = clip({4}, 0, 100, MediaRef{{2}, {25}, 100});
+    auto track = take_value(Track::create({6}, "track", {note_clip, media_clip}));
+    auto sequence = take_value(Sequence::create({3}, "sequence", TickDuration{400}, {track}));
+    return take_value(Project::create(ProjectInput{{1}, "project", 9, {3},
+                                                    {{{2}, "audio.wav", 1'000, {48'000, 1}}},
+                                                    {sequence}}));
+}
+
+} // namespace
+
+TEST_CASE("Timeline snapshots retain sorted indexes and immutable note content") {
+    const auto project = make_project();
+    REQUIRE(project.id() == ItemId{1});
+    REQUIRE(project.next_item_id() == 9);
+    REQUIRE(project.find_asset({2}) != nullptr);
+
+    const auto* sequence = project.find_sequence({3});
+    REQUIRE(sequence != nullptr);
+    const auto* track = sequence->find_track({6});
+    REQUIRE(track != nullptr);
+    REQUIRE(track->clips().size() == 2);
+    REQUIRE(track->clips()[0].id() == ItemId{4});
+    REQUIRE(track->clips()[1].id() == ItemId{5});
+    REQUIRE(track->find_clip({5}) == &track->clips()[1]);
+    REQUIRE(track->find_clip({99}) == nullptr);
+
+    const auto& note_content = std::get<NoteContent>(track->find_clip({5})->content());
+    REQUIRE(note_content.notes().size() == 2);
+    REQUIRE(note_content.notes()[0].id == ItemId{7});
+    REQUIRE(note_content.notes()[1].id == ItemId{8});
+
+    const auto snapshot_copy = project;
+    auto allocator = project.item_id_allocator();
+    REQUIRE(take_value(allocator.allocate()) == ItemId{9});
+    REQUIRE(snapshot_copy.next_item_id() == 9);
+}
+
+TEST_CASE("Timeline construction rejects invalid ranges identities and references") {
+    auto overlap_a = clip({10}, 0, 100);
+    auto overlap_b = clip({11}, 99, 10);
+    auto overlap = Track::create({12}, "overlap", {overlap_a, overlap_b});
+    REQUIRE_FALSE(overlap.has_value());
+    REQUIRE(overlap.error().code == ModelErrorCode::OverlappingClips);
+
+    auto bad_note = NoteContent::create({{{1}, {0}, {1}, 0xffff, 128, 0}});
+    REQUIRE_FALSE(bad_note.has_value());
+    REQUIRE(bad_note.error().code == ModelErrorCode::InvalidNote);
+
+    auto missing_media = clip({4}, 0, 10, MediaRef{{99}, {0}, 10});
+    auto track = take_value(Track::create({5}, "track", {missing_media}));
+    auto sequence = take_value(Sequence::create({3}, "sequence", TickDuration{100}, {track}));
+    auto missing = Project::create(ProjectInput{{1}, "project", 100, {3}, {}, {sequence}});
+    REQUIRE_FALSE(missing.has_value());
+    REQUIRE(missing.error().code == ModelErrorCode::MissingAsset);
+
+    auto out_of_asset = clip({4}, 0, 10, MediaRef{{2}, {95}, 10});
+    auto range_track = take_value(Track::create({5}, "track", {out_of_asset}));
+    auto range_sequence =
+        take_value(Sequence::create({3}, "sequence", TickDuration{100}, {range_track}));
+    auto invalid_range = Project::create(
+        ProjectInput{{1}, "project", 6, {3}, {{{2}, "short.wav", 100, {48'000, 1}}},
+                     {range_sequence}});
+    REQUIRE_FALSE(invalid_range.has_value());
+    REQUIRE(invalid_range.error().code == ModelErrorCode::InvalidMediaRange);
+
+    auto duplicate_track = take_value(Track::create({1}, "track", {}));
+    auto duplicate_sequence =
+        take_value(Sequence::create({3}, "sequence", TickDuration{100}, {duplicate_track}));
+    auto duplicate = Project::create(
+        ProjectInput{{1}, "project", 4, {3}, {}, {duplicate_sequence}});
+    REQUIRE_FALSE(duplicate.has_value());
+    REQUIRE(duplicate.error().code == ModelErrorCode::DuplicateItemId);
+
+    auto nonmonotonic = Project::create(ProjectInput{{1}, "project", 3, {3}, {},
+                                                      {take_value(Sequence::create(
+                                                          {3}, "sequence", TickDuration{0}, {}))}});
+    REQUIRE_FALSE(nonmonotonic.has_value());
+    REQUIRE(nonmonotonic.error().code == ModelErrorCode::NextItemIdNotMonotonic);
+}
+
+TEST_CASE("Timeline ID allocation is monotonic and fails closed at exhaustion") {
+    ItemIdAllocator allocator(41);
+    REQUIRE(take_value(allocator.allocate()) == ItemId{41});
+    REQUIRE(take_value(allocator.allocate()) == ItemId{42});
+    REQUIRE(allocator.next_value() == 43);
+
+    ItemIdAllocator exhausted(std::numeric_limits<std::uint64_t>::max());
+    auto result = exhausted.allocate();
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().code == ModelErrorCode::ItemIdExhausted);
+
+    ItemIdAllocator last(std::numeric_limits<std::uint64_t>::max() - 1);
+    REQUIRE(take_value(last.allocate()) ==
+            ItemId{std::numeric_limits<std::uint64_t>::max() - 1});
+    REQUIRE_FALSE(last.allocate().has_value());
+    REQUIRE_FALSE(ItemId{std::numeric_limits<std::uint64_t>::max()}.valid());
+
+    const ItemId terminal_id{std::numeric_limits<std::uint64_t>::max() - 1};
+    auto max_next = Project::create(ProjectInput{
+        {1}, "project", std::numeric_limits<std::uint64_t>::max(), terminal_id, {},
+        {take_value(Sequence::create(terminal_id, "sequence", TickDuration{0}, {}))}});
+    REQUIRE(max_next.has_value());
+    REQUIRE_FALSE(max_next.value().item_id_allocator().allocate().has_value());
+}
+
+TEST_CASE("Timeline anchors model tempo-following and fixed absolute ranges") {
+    const auto musical = clip({10}, 0, 100);
+    const auto absolute = absolute_clip({11}, 0, 48'000, EmptyContent{}, {96'000, 2});
+    REQUIRE(musical.time_anchor() == ClipTimeAnchor::Musical);
+    REQUIRE(absolute.time_anchor() == ClipTimeAnchor::Absolute);
+    REQUIRE(absolute.absolute_duration_samples() == 48'000);
+    REQUIRE(absolute.absolute_sample_rate() == RationalRate{48'000, 1});
+
+    // A Track cannot compare positions from different clock domains without a
+    // context-owned tempo/rate projection, so Phase 1 rejects the mixture.
+    auto mixed = Track::create({12}, "mixed", {absolute, musical});
+    REQUIRE_FALSE(mixed.has_value());
+    REQUIRE(mixed.error().code == ModelErrorCode::MixedTimeAnchors);
+
+    auto absolute_overlap = Track::create(
+        {13}, "bad", {absolute_clip({14}, 0, 100), absolute_clip({15}, 99, 100)});
+    REQUIRE_FALSE(absolute_overlap.has_value());
+    REQUIRE(absolute_overlap.error().code == ModelErrorCode::OverlappingClips);
+
+    auto incompatible_rates = Track::create(
+        {13}, "rates", {absolute_clip({14}, 0, 100),
+                         absolute_clip({15}, 200, 100, EmptyContent{}, {44'100, 1})});
+    REQUIRE_FALSE(incompatible_rates.has_value());
+    REQUIRE(incompatible_rates.error().code == ModelErrorCode::IncompatibleSampleRate);
+
+    auto absolute_track = take_value(Track::create({12}, "absolute", {absolute}));
+    auto bounded = Sequence::create({16}, "bounded", TickDuration{100},
+                                    AbsoluteTimelineDuration{47'999, {48'000, 1}},
+                                    {absolute_track});
+    REQUIRE_FALSE(bounded.has_value());
+    REQUIRE(bounded.error().code == ModelErrorCode::InvalidDuration);
+
+    auto musical_track = take_value(Track::create({13}, "musical", {musical}));
+    auto valid = Sequence::create({16}, "bounded", TickDuration{100},
+                                  AbsoluteTimelineDuration{48'000, {96'000, 2}},
+                                  {absolute_track, musical_track});
+    REQUIRE(valid.has_value());
+    REQUIRE(valid.value().duration()->value == 100);
+    REQUIRE(valid.value().absolute_duration()->sample_count == 48'000);
+    REQUIRE(valid.value().absolute_duration()->sample_rate == RationalRate{48'000, 1});
+}
+
+TEST_CASE("Timeline clip edits path-copy bounded nodes and reclaim snapshots") {
+    const auto before = Track::index_stats();
+    {
+        std::vector<Clip> clips;
+        clips.reserve(10'000);
+        for (std::uint64_t index = 0; index < 10'000; ++index)
+            clips.push_back(clip({index + 1}, static_cast<std::int64_t>(index * 2), 1));
+        const auto original = take_value(Track::create({20'000}, "large", std::move(clips)));
+        const auto after_build = Track::index_stats();
+        REQUIRE(after_build.live_nodes - before.live_nodes == 20'000);
+
+        const auto edited = take_value(original.replace_clip(clip({5'001}, 20'001, 1)));
+        const auto after_edit = Track::index_stats();
+        REQUIRE(after_edit.nodes_created - after_build.nodes_created < 256);
+        REQUIRE(original.find_clip({5'001})->start().value == 10'000);
+        REQUIRE(edited.find_clip({5'001})->start().value == 20'001);
+        REQUIRE(original.shared_index_nodes_with(edited) > 19'800);
+        REQUIRE(edited.clips().size() == 10'000);
+    }
+    REQUIRE(Track::index_stats().live_nodes == before.live_nodes);
+}
+
+TEST_CASE("Timeline subtree remap is two-pass atomic and fixes external references") {
+    const auto source = clip({10}, 0, 100,
+                             MediaRef{{77}, {0}, 100});
+    struct FixupState {
+        bool fail = false;
+    } state;
+    ExternalIdFixup fixup{
+        &state,
+        [](void* raw, ItemId id) noexcept -> pulp::runtime::Result<ItemId, ModelError> {
+            const auto* state = static_cast<FixupState*>(raw);
+            if (state->fail)
+                return pulp::runtime::Result<ItemId, ModelError>(
+                    pulp::runtime::Err(ModelError{ModelErrorCode::MissingAsset, {}, id}));
+            return pulp::runtime::Result<ItemId, ModelError>(pulp::runtime::Ok(ItemId{id.value + 1}));
+        }};
+
+    ItemIdAllocator allocator(100);
+    auto remapped_clip = remap_ids(source, allocator, fixup);
+    REQUIRE(remapped_clip.has_value());
+    REQUIRE(remapped_clip.value().clip.id() == ItemId{100});
+    REQUIRE(std::get<MediaRef>(remapped_clip.value().clip.content()).asset_id == ItemId{78});
+    REQUIRE(allocator.next_value() == 101);
+
+    const auto track = take_value(Track::create({20}, "track", {source}));
+    auto remapped_track = remap_ids(track, allocator, fixup);
+    REQUIRE(remapped_track.has_value());
+    REQUIRE(remapped_track.value().ids.entries().size() == 2);
+    REQUIRE(allocator.next_value() == 103);
+
+    const auto sequence = take_value(Sequence::create({30}, "sequence", TickDuration{100}, {track}));
+    auto remapped_sequence = remap_ids(sequence, allocator, fixup);
+    REQUIRE(remapped_sequence.has_value());
+    REQUIRE(remapped_sequence.value().ids.entries().size() == 3);
+    REQUIRE(allocator.next_value() == 106);
+
+    state.fail = true;
+    const auto before_failure = allocator.next_value();
+    auto failed = remap_ids(source, allocator, fixup);
+    REQUIRE_FALSE(failed.has_value());
+    REQUIRE(failed.error().code == ModelErrorCode::MissingAsset);
+    REQUIRE(allocator.next_value() == before_failure);
+}
+
+TEST_CASE("Timeline subtree remap preflights closure-wide identity uniqueness") {
+    ItemIdAllocator allocator(100);
+
+    const auto colliding_clip = clip(
+        {10}, 0, 100, notes({{{10}, {0}, {10}, 0xffff, 60, 0}}));
+    auto clip_result = remap_ids(colliding_clip, allocator);
+    REQUIRE_FALSE(clip_result.has_value());
+    REQUIRE(clip_result.error().code == ModelErrorCode::DuplicateItemId);
+    REQUIRE(allocator.next_value() == 100);
+
+    const auto colliding_track = take_value(Track::create({20}, "track", {clip({20}, 0, 10)}));
+    auto track_result = remap_ids(colliding_track, allocator);
+    REQUIRE_FALSE(track_result.has_value());
+    REQUIRE(track_result.error().code == ModelErrorCode::DuplicateItemId);
+    REQUIRE(allocator.next_value() == 100);
+
+    const auto track_a = take_value(Track::create({30}, "a", {clip({40}, 0, 10)}));
+    const auto track_b = take_value(Track::create({31}, "b", {clip({40}, 20, 10)}));
+    const auto colliding_sequence =
+        take_value(Sequence::create({32}, "sequence", TickDuration{100}, {track_a, track_b}));
+    auto sequence_result = remap_ids(colliding_sequence, allocator);
+    REQUIRE_FALSE(sequence_result.has_value());
+    REQUIRE(sequence_result.error().code == ModelErrorCode::DuplicateItemId);
+    REQUIRE(allocator.next_value() == 100);
+}
+
+TEST_CASE("Timeline remap allocates first then fixes internal references") {
+    const auto original = make_project();
+    const auto remapped = take_value(remap_ids(original, 100));
+    REQUIRE(remapped.ids.entries().size() == 8);
+    REQUIRE(remapped.project.id() == *remapped.ids.find({1}));
+    REQUIRE(remapped.project.root_sequence_id() == *remapped.ids.find({3}));
+    REQUIRE(remapped.project.next_item_id() == 108);
+
+    const auto* sequence = remapped.project.find_sequence(*remapped.ids.find({3}));
+    REQUIRE(sequence != nullptr);
+    const auto* track = sequence->find_track(*remapped.ids.find({6}));
+    REQUIRE(track != nullptr);
+    const auto* media_clip = track->find_clip(*remapped.ids.find({4}));
+    REQUIRE(media_clip != nullptr);
+    REQUIRE(std::get<MediaRef>(media_clip->content()).asset_id == *remapped.ids.find({2}));
+
+    const auto* note_clip = track->find_clip(*remapped.ids.find({5}));
+    REQUIRE(note_clip != nullptr);
+    const auto& remapped_notes = std::get<NoteContent>(note_clip->content()).notes();
+    REQUIRE(remapped_notes[0].id == *remapped.ids.find({7}));
+    REQUIRE(remapped_notes[1].id == *remapped.ids.find({8}));
+
+    REQUIRE(original.find_asset({2}) != nullptr);
+    REQUIRE(original.find_sequence({3}) != nullptr);
+
+    const auto terminal = take_value(remap_ids(
+        original, std::numeric_limits<std::uint64_t>::max() - 8));
+    REQUIRE(terminal.project.next_item_id() == std::numeric_limits<std::uint64_t>::max());
+    REQUIRE_FALSE(terminal.project.item_id_allocator().allocate().has_value());
+}

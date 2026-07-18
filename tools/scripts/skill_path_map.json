@@ -514,6 +514,13 @@
         ".agents/skills/timebase/**"
       ]
     },
+    "timeline": {
+      "paths": [
+        "core/timeline/**",
+        "test/test_timeline_model.cpp",
+        ".agents/skills/timeline/**"
+      ]
+    },
     "vst3": {
       "paths": [
         "core/format/src/vst3_adapter.cpp",

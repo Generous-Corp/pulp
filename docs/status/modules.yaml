@@ -8,6 +8,12 @@ modules:
     dependencies: []
     docs: reference/modules.md#timebase
 
+  - name: timeline
+    summary: Immutable timeline snapshots with path-copy indexes musical and absolute anchors and atomic scoped two-pass ID remapping
+    status: experimental
+    dependencies: [runtime, timebase]
+    docs: reference/modules.md#timeline
+
   - name: runtime
     summary: Core utilities — SIMD (Highway), XML/JSON, ZIP, HTTP client, sockets, IPC pipes, crypto (SHA-256/AES/RSA via mbedTLS), i18n, analytics, licensing
     status: stable

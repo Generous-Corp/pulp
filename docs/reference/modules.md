@@ -758,6 +758,48 @@ const auto sample = tempo.ticks_to_samples({4 * kTicksPerQuarter});
 clock; the transport owns advancement while timeline positions may seek or
 wrap. `MeterMap` is intentionally deferred to the timeline engine.
 
+## timeline
+
+Immutable document-model foundations for musical timelines. `Project`,
+`Sequence`, `Track`, and `Clip` are cheap copyable snapshots whose construction
+factories validate identities, ranges, references, and non-overlapping sparse
+arrangement lanes. Tracks retain persistent AVL indexes for both
+`(anchor, start, ItemId)` timeline order and `ItemId` lookup. `replace_clip()`
+path-copies only affected search paths while older snapshots share untouched
+subtrees.
+
+**Link:** `pulp::timeline` · **Include prefix:** `<pulp/timeline/...>`
+
+```cpp
+#include <pulp/timeline/model.hpp>
+
+using namespace pulp::timeline;
+auto empty = Clip::create({3}, {0}, {705'600}, EmptyContent{});
+if (!empty)
+    return;
+auto track = Track::create({2}, "Notes", {std::move(empty).value()});
+```
+
+Every owned object uses a nonzero monotonic `ItemId`; a `Project` stores the
+next never-used value; `UINT64_MAX` is the explicit exhausted allocator state
+and is valid project state after ownership reaches `UINT64_MAX - 1`.
+`ClipTimeAnchor` distinguishes tempo-following musical tick ranges from fixed
+absolute ranges expressed as `SamplePosition`, integer sample count, and a
+normalized `RationalRate`. Phase 1 rejects mixed-anchor clips within one Track
+until a context-owned projection can compare those domains; a Sequence can
+still contain separate musical and absolute Tracks and bound both domains.
+`remap_ids()` performs two passes: it allocates every destination identity
+before rebuilding the immutable hierarchy. Clip, Track, and Sequence subtree
+overloads distinguish owned IDs from external media-asset references and accept
+an atomic `ExternalIdFixup`; closure-wide duplicate owned IDs are rejected
+before allocator state changes. `NoteContent` is a flat POD array sorted by
+`(start, ItemId)`. Fallible construction uses
+`pulp::runtime::Result` and reports `ModelError` without exceptions.
+
+This initial surface intentionally excludes commands, undo, journals,
+persistence, publication, playback, automation, launch slots, takes, nesting,
+devices, routing, and UI.
+
 ## format
 
 Plugin format adapters — write your plugin once, deploy to 9 formats.
