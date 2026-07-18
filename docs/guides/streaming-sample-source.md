@@ -17,9 +17,16 @@ this narrow sequential transport primitive; the
 ## File-backed playback
 
 `make_memory_mapped_frame_reader()` adapts a file to the source's `FrameReader`
-contract. The returned object retains its mapped reader for the callback's
-lifetime. WAV and uncompressed AIFF/AIFF-C `NONE` files use bounded ranged
-decode from mapped bytes; they are not decoded completely before playback.
+contract. Opening retains the original file handle for identity/access-policy
+operations, copies exactly the admitted source bytes into an exclusive private
+temporary directory, and maps that immutable snapshot for the callback's
+lifetime. The copy is bounded by `maximum_mapped_bytes`, uses disk rather than
+decoded-audio RAM, and is removed on close. A later in-place overwrite or
+truncate of the source path therefore cannot change playback or fault the
+mapping. WAV and uncompressed AIFF/AIFF-C `NONE` files use bounded ranged decode
+from the snapshot bytes; they are not decoded completely before playback.
+Concurrent non-RT reads on one reader are serialized internally; open, close,
+move, and destruction still require quiescent reads.
 
 The adapter reports `supports_ranged_read`. A false value means the active file
 format uses `MemoryMappedAudioReader`'s decode-once fallback. FLAC currently

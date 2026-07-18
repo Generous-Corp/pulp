@@ -37,11 +37,14 @@ and interpolation parameters. The interpolation integer contract is stable:
 | 5 | Ratio-tracking sinc |
 
 Resident and streamed sources support forward and reverse one-shots and
-forward/reverse wrap-crossfade loops. Resident forward one-shots can use
-immutable octave mips for exact-octave polynomial playback. Fractional-octave,
-loop, reverse, oversized, or missing-level cases use ratio-tracking sinc rather
-than claiming unsupported anti-alias performance. Streamed sources can select
-the same offline-built octave levels from a valid `.pulpmip` sidecar.
+forward/reverse wrap-crossfade loops. Hermite/Lagrange forward one-shots may
+select an available exact positive-octave mip; streamed `.pulpmip` sidecars
+provide at most two levels. Loop, reverse, non-exact, and missing-level playback
+stays on the base asset. When a polynomial policy would consume the selected or
+base source above 1x, it is promoted to ratio-tracking sinc. If the sinc bank
+has no prepared table for that ratio, playback falls back to Hermite instead of
+dropping the voice. Down-pitched fractional ratios do not require that
+anti-alias promotion.
 
 ## Loading samples
 
@@ -66,11 +69,21 @@ available to the general audio-file layer as a decode-once fallback, not as a
 ranged sampler reader, so the sampler rejects it transactionally instead of
 silently loading the entire asset. The same rule applies to any other codec
 that lacks ranged reads: a failed replacement leaves the previously published
-source usable. Admission derives the resident preload and page geometry from
+source usable. A successful open streams from an immutable private disk
+snapshot retained for that publication, so replacing, overwriting, or
+truncating the original path afterward does not change its audio. Snapshot
+creation is a control-thread disk-copy cost bounded by the mapped-source byte
+limit; it does not decode the whole source into RAM. Admission derives the
+resident preload and page geometry from
 the 20 ms certified I/O latency, 5 ms scheduler margin, 5 ms decoder allowance,
 host block size, interpolation guard, loop guard, and source rate. Streamed
 playback admits an effective consumption ratio of at most 4x: the note/key-map
 pitch ratio multiplied by the active heritage clock ratio.
+
+Resident mono and interleaved-stereo loads accept at most 2,880,000 frames.
+Automatic resident mips are attempted only up to 96,000 total samples (96,000
+mono frames or 48,000 stereo frames). Larger valid resident buffers still
+publish and use the base/sinc policy.
 
 `PulpSamplerProcessor::load_sample_file()` is the boolean convenience form.
 Use `load_sample_file_result()` when the caller needs the codec capability,
@@ -172,9 +185,11 @@ are distinct from the legacy aggregate-rate counters in `stream_stats()`.
 ## Control and inspection API
 
 The example exposes typed control-plane results rather than collapsing load,
-prepare, codec, or sidecar failures into booleans. Call these methods while the
-audio callback is stopped unless the method is explicitly an inspection
-snapshot:
+prepare, codec, or sidecar failures into booleans. Lifecycle is method-specific:
+load APIs run off the audio thread after prepare and may publish concurrently
+with `process()`; `set_config()` is pre-prepare; heritage replacement or disable
+requires stopped audio; inspection belongs on a non-audio control/diagnostic
+thread.
 
 | API | Purpose |
 |-----|---------|

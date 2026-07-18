@@ -5,15 +5,18 @@ sharing decoded sample pages across voices. It canonicalizes page geometry from
 registered source metadata, coalesces voice demands for the same source page,
 publishes through `SampleStreamWindow`, and rejects source-generation mismatches.
 
-The service has a hard page-storage budget. Admission uses checked arithmetic:
+Page storage is always leased through `SampleMemoryGovernor`. Without an
+external governor handle, `page_memory_budget_bytes` creates an internal
+page-only cap. With `memory_governor`, that field is ignored and the shared
+preload-plus-page capacity is authoritative. Admission uses checked arithmetic:
 
 ```text
 source page bytes = channels * page frames * cache page count * sizeof(float)
 ```
 
-`add_source()` fails before playback when the cumulative reservation would
-exceed `page_memory_budget_bytes`. The budget covers page sample storage; source
-metadata, reader state, and control-thread containers are outside that value.
+`add_source()` fails before playback when the page lease would exceed the
+active governor. Source metadata, reader state, and control-thread containers
+remain outside that capacity.
 `source_identity_capacity` separately bounds the retained highest-generation
 history used for ABA rejection. A new source ID fails with
 `SourceIdentityCapacityExceeded` once that table is full; an existing ID may
@@ -61,9 +64,10 @@ the request remains pending and `NoPageAvailable` is returned.
 ## Async integration and current limits
 
 `SampleStreamDecodePool` supplies fixed workers, preallocated planar scratch,
-one in-flight decode per source, bounded SPSC mailboxes, cooperative stop
-propagation, and leased completion audio. `SampleStreamAsyncService` binds those
-workers to the cache with registration epochs and reservation serials. Queue
+bounded outstanding reservations/jobs per source, one concurrent reader call
+per source, bounded SPSC mailboxes, cooperative stop propagation, and leased
+completion audio. `SampleStreamAsyncService` binds those workers to the cache
+with registration epochs and reservation serials. Queue
 pressure retains the exact Filling reservation for retry, other sources may
 still dispatch, and stale/error completions cancel only their matching fill
 before the scratch lease is released. Release joins decode workers before cache
