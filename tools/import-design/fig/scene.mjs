@@ -946,7 +946,7 @@ export function materializeFrame(scene, frame, ctx) {
         // Only a NON-orthogonal rotation makes an axis-aligned box non-axis-
         // aligned and needs the transform (a knob's value needle at 43.4deg).
         // A multiple of 90deg keeps a rect axis-aligned, and for a solid fill a
-        // 180deg spin is a visual no-op — applying it (plus the centre-pivot
+        // 180deg spin is a visual no-op — applying it (plus the center-pivot
         // compensation below) only shifts the box off its intended row, which is
         // exactly what floated a slider's 180deg-rotated fill above its track.
         // Orthogonal rotations fall through to plain m02/m12 placement.
