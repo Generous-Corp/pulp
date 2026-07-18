@@ -10,8 +10,9 @@ This is a narrow transport primitive, not Pulp's complete polyphonic sampler
 backend. It supports sequential one-shot playback and fully resident loops.
 Fractional/pitched one-shots and forward/reverse crossfade loops use the shared
 page-cache sampler service described in the sampler hardening plan. Starvation
-gain shaping, sampler-owned mip assets, and broader product policy remain above
-this narrow sequential transport primitive.
+gain shaping, sampler-owned mip assets, and broader product policy live above
+this narrow sequential transport primitive; the
+[PulpSampler example](../examples/pulp-sampler.md) integrates those layers.
 
 ## File-backed playback
 

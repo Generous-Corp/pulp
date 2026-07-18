@@ -1,5 +1,10 @@
 # Sampler interpolation CPU evidence
 
+**Status:** historical capture; recapture pending. The checked-in artifact's
+`environment.source_bundle_sha256` does not match the current sampler source
+bundle, and the verifier correctly rejects it as current evidence. The commands
+below describe how to replace it with a current capture.
+
 This directory holds durable Release measurements for the interpolation
 evaluator only. The measurements exclude sampler streaming, page-cache work,
 envelopes, voice mixing, and host/plugin overhead; they are not a whole-sampler
