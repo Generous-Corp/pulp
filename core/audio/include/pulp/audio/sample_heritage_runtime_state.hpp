@@ -25,10 +25,11 @@ struct SampleHeritageRuntimeRngState {
 };
 
 /// Fixed-capacity RNG-stream continuation payload. It intentionally does not
-/// serialize whole-engine DSP transients: restore resets DAC-hold phase/value
-/// and reconstruction-filter history before resuming only stages that opt into
-/// ContinueSerializedState. Capture and restore require the audio callback to
-/// be quiescent; JSON conversion remains an off-audio-thread API.
+/// serialize whole-engine DSP transients: restore resets both SRC phases and
+/// histories, DAC-hold phase/value, and reconstruction-filter history before
+/// resuming only stages that opt into ContinueSerializedState. Capture and
+/// restore require the audio callback to be quiescent; JSON conversion remains
+/// an off-audio-thread API.
 struct SampleHeritageRuntimeState {
     std::uint32_t schema_version = kSampleHeritageRuntimeStateSchemaVersion;
     std::uint32_t profile_schema_version = 0;

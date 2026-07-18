@@ -13,7 +13,7 @@ using namespace pulp::audio;
 
 SampleHeritageProfile complete_profile() {
     return {
-        .schema_version = 1,
+        .schema_version = kSampleHeritageProfileSchemaVersion,
         .profile_id = "neutral.canonical-v1",
         .host_sample_rate = 48000.0,
         .stages = {
@@ -34,7 +34,7 @@ SampleHeritageProfile complete_profile() {
 
 SampleHeritageProfile continuation_profile(std::string id = "neutral.state-v1") {
     return {
-        .schema_version = 1,
+        .schema_version = kSampleHeritageProfileSchemaVersion,
         .profile_id = std::move(id),
         .host_sample_rate = 48000.0,
         .stages = {
@@ -61,10 +61,10 @@ std::string initial_continuation_state_json() {
 }
 
 constexpr std::string_view canonical_json =
-    R"({"schema_version":1,"profile_id":"neutral.canonical-v1","host_sample_rate":48000,"stages":[{"type":"machine_domain","bypass":true,"sample_rate":48000},{"type":"quantization","bypass":true,"bit_depth":12,"dither_lsb":0.5,"seed":"18446744073709551615","seed_policy":"continue_serialized_state"},{"type":"clock_pitch","bypass":true,"ratio":1},{"type":"dac_hold","bypass":false,"hold_samples":2},{"type":"reconstruction_filter","bypass":false,"cutoff_hz":12000},{"type":"noise","bypass":false,"amplitude":0.25,"seed":"7","seed_policy":"restart_from_profile_seed"},{"type":"output","bypass":false,"gain":0.75}]})";
+    R"({"schema_version":2,"profile_id":"neutral.canonical-v1","host_sample_rate":48000,"stages":[{"type":"machine_domain","bypass":true,"sample_rate":48000},{"type":"quantization","bypass":true,"bit_depth":12,"dither_lsb":0.5,"seed":"18446744073709551615","seed_policy":"continue_serialized_state"},{"type":"clock_pitch","bypass":true,"ratio":1},{"type":"dac_hold","bypass":false,"hold_samples":2},{"type":"reconstruction_filter","bypass":false,"cutoff_hz":12000},{"type":"noise","bypass":false,"amplitude":0.25,"seed":"7","seed_policy":"restart_from_profile_seed"},{"type":"output","bypass":false,"gain":0.75}]})";
 
 constexpr std::string_view canonical_continuation_state_json =
-    R"({"schema_version":1,"profile_schema_version":1,"profile_id":"neutral.state-v1","profile_digest_version":1,"profile_digest":"a254035078ded7b0c7f7b8cd7af2dda0801b4843b7c24bffc01054bbaf9e1b1e","rng_states":[{"stage_index":0,"stage_type":"quantization","random_state":"123"}]})";
+    R"({"schema_version":1,"profile_schema_version":2,"profile_id":"neutral.state-v1","profile_digest_version":2,"profile_digest":"6cda13d2f57a367e095b2f617b588fdc601d3b1c988365ffba20b9777c9b734d","rng_states":[{"stage_index":0,"stage_type":"quantization","random_state":"123"}]})";
 
 void require_error(std::string_view json,
                    SampleHeritageJsonStatus status,
@@ -93,7 +93,7 @@ std::string replace_once(std::string source,
 
 }  // namespace
 
-TEST_CASE("Heritage JSON schema v1 has one deterministic canonical representation",
+TEST_CASE("Heritage JSON schema v2 has one deterministic canonical representation",
           "[audio][sampler][heritage][json]") {
     const auto written = write_sample_heritage_profile_json(complete_profile());
     REQUIRE(written.valid());
@@ -119,8 +119,8 @@ TEST_CASE("Heritage JSON schema v1 has one deterministic canonical representatio
 TEST_CASE("Heritage JSON accepts insignificant whitespace but rewrites canonical form",
           "[audio][sampler][heritage][json]") {
     const auto spaced = replace_once(std::string(canonical_json),
-                                     R"({"schema_version":1,)",
-                                     "{ \n  \"schema_version\" : 1 , ");
+                                     R"({"schema_version":2,)",
+                                     "{ \n  \"schema_version\" : 2 , ");
     const auto parsed = parse_sample_heritage_profile_json(spaced);
     REQUIRE(parsed.valid());
     REQUIRE(write_sample_heritage_profile_json(parsed.profile).json == canonical_json);
@@ -171,14 +171,14 @@ TEST_CASE("Heritage JSON rejects malformed roots and incomplete top-level contra
     require_error("{", SampleHeritageJsonStatus::InvalidJson, "$");
     require_error("[]", SampleHeritageJsonStatus::RootNotObject, "$");
     require_error(
-        R"({"schema_version":1,"profile_id":"neutral.a","host_sample_rate":48000,"stages":[],"extra":0})",
+        R"({"schema_version":2,"profile_id":"neutral.a","host_sample_rate":48000,"stages":[],"extra":0})",
         SampleHeritageJsonStatus::UnknownField, "$.extra");
     require_error(
-        R"({"schema_version":1,"schema_version":1,"profile_id":"neutral.a","host_sample_rate":48000,"stages":[]})",
+        R"({"schema_version":2,"schema_version":2,"profile_id":"neutral.a","host_sample_rate":48000,"stages":[]})",
         SampleHeritageJsonStatus::DuplicateField, "$");
 
     constexpr std::array required{
-        std::pair{"\"schema_version\":1,", "$.schema_version"},
+        std::pair{"\"schema_version\":2,", "$.schema_version"},
         std::pair{"\"profile_id\":\"neutral.canonical-v1\",", "$.profile_id"},
         std::pair{"\"host_sample_rate\":48000,", "$.host_sample_rate"},
         std::pair{",\"stages\":[", "$.stages"},
@@ -199,14 +199,14 @@ TEST_CASE("Heritage JSON rejects malformed roots and incomplete top-level contra
 TEST_CASE("Heritage JSON enforces top-level field types versions and neutral IDs",
           "[audio][sampler][heritage][json][reject]") {
     require_error(replace_once(std::string(canonical_json),
-                               "\"schema_version\":1", "\"schema_version\":1.0"),
+                               "\"schema_version\":2", "\"schema_version\":2.0"),
                   SampleHeritageJsonStatus::WrongType, "$.schema_version");
     require_error(replace_once(std::string(canonical_json),
-                               "\"schema_version\":1", "\"schema_version\":2"),
+                               "\"schema_version\":2", "\"schema_version\":3"),
                   SampleHeritageJsonStatus::ProfileValidationFailed,
                   "$.schema_version");
     require_error(replace_once(std::string(canonical_json),
-                               "\"schema_version\":1", "\"schema_version\":0"),
+                               "\"schema_version\":2", "\"schema_version\":0"),
                   SampleHeritageJsonStatus::ProfileValidationFailed,
                   "$.schema_version");
     require_error(replace_once(std::string(canonical_json),
@@ -227,7 +227,7 @@ TEST_CASE("Heritage JSON enforces top-level field types versions and neutral IDs
                   SampleHeritageJsonStatus::NumberOutOfRange,
                   "$.host_sample_rate");
     require_error(
-        R"({"schema_version":1,"profile_id":"neutral.a","host_sample_rate":48000,"stages":null})",
+        R"({"schema_version":2,"profile_id":"neutral.a","host_sample_rate":48000,"stages":null})",
                   SampleHeritageJsonStatus::WrongType, "$.stages");
 }
 
@@ -284,18 +284,18 @@ TEST_CASE("Heritage JSON requires every parameter in every typed stage contract"
     };
     for (const auto& [stage, path] : cases) {
         const auto json =
-            std::string(R"({"schema_version":1,"profile_id":"neutral.a","host_sample_rate":48000,"stages":[)") +
+            std::string(R"({"schema_version":2,"profile_id":"neutral.a","host_sample_rate":48000,"stages":[)") +
             stage + "]}";
         require_error(json, SampleHeritageJsonStatus::MissingField, path);
     }
 
     require_error(
-        R"({"schema_version":1,"profile_id":"neutral.a","host_sample_rate":48000,"stages":[1]})",
+        R"({"schema_version":2,"profile_id":"neutral.a","host_sample_rate":48000,"stages":[1]})",
         SampleHeritageJsonStatus::WrongType, "$.stages[0]");
     constexpr std::string_view output_stage =
         R"({"type":"output","bypass":true,"gain":1})";
     std::string too_many =
-        R"({"schema_version":1,"profile_id":"neutral.a","host_sample_rate":48000,"stages":[)";
+        R"({"schema_version":2,"profile_id":"neutral.a","host_sample_rate":48000,"stages":[)";
     for (int index = 0; index < 8; ++index) {
         if (index != 0) too_many.push_back(',');
         too_many += output_stage;
@@ -378,14 +378,14 @@ TEST_CASE("Heritage JSON delegates cross-field and duplicate-stage semantics",
           "[audio][sampler][heritage][json][reject]") {
     require_error(replace_once(std::string(canonical_json),
                                "\"bypass\":true,\"sample_rate\":48000",
-                               "\"bypass\":false,\"sample_rate\":44100"),
+                               "\"bypass\":false,\"sample_rate\":7000"),
                   SampleHeritageJsonStatus::ProfileValidationFailed,
                   "$.stages[0]");
     require_error(replace_once(std::string(canonical_json),
                                "\"bypass\":true,\"ratio\":1",
-                               "\"bypass\":false,\"ratio\":0.5"),
+                               "\"bypass\":false,\"ratio\":1000"),
                   SampleHeritageJsonStatus::ProfileValidationFailed,
-                  "$.stages[2]");
+                  "$");
     require_error(replace_once(std::string(canonical_json),
                                R"({"type":"output","bypass":false,"gain":0.75})",
                                R"({"type":"noise","bypass":false,"amplitude":0.5,"seed":"9","seed_policy":"restart_from_profile_seed"})"),
@@ -481,15 +481,15 @@ TEST_CASE("Heritage continuation restores opted-in RNG and restarts restart-poli
 TEST_CASE("Heritage continuation resumes RNG but resets hold and filter transients",
           "[audio][sampler][heritage][json][state]") {
     SampleHeritageProfile profile{
-        .schema_version = 1,
+        .schema_version = kSampleHeritageProfileSchemaVersion,
         .profile_id = "neutral.rng-only-continuation",
         .host_sample_rate = 48000.0,
         .stages = {
+            {false, SampleHeritageDacHoldStage{3}},
+            {false, SampleHeritageReconstructionFilterStage{7000.0}},
             {false, SampleHeritageNoiseStage{
                         0.125f, 987,
                         SampleHeritageSeedPolicy::ContinueSerializedState}},
-            {false, SampleHeritageDacHoldStage{3}},
-            {false, SampleHeritageReconstructionFilterStage{7000.0}},
         },
     };
     const auto validated = validate_sample_heritage_profile(profile);
@@ -552,7 +552,7 @@ TEST_CASE("Heritage continuation rejects profile and stage-layout mismatches ato
     REQUIRE(engine.capture_runtime_state().state.rng_states[0].random_state == 123);
 
     auto wrong_profile_version = state;
-    wrong_profile_version.profile_schema_version = 2;
+    wrong_profile_version.profile_schema_version = 3;
     REQUIRE(engine.restore_runtime_state(wrong_profile_version) ==
             SampleHeritageRuntimeStateStatus::ProfileMismatch);
     auto wrong_state_version = state;
@@ -633,16 +633,16 @@ TEST_CASE("Heritage continuation JSON strictly rejects malformed state contracts
                                "\"profile_id\":\"neutral.state-v1\",\"x\":0,"),
                   SampleHeritageJsonStatus::UnknownField, "$.x");
     require_error(replace_once(std::string(valid),
-                               "\"profile_schema_version\":1,", ""),
+                               "\"profile_schema_version\":2,", ""),
                   SampleHeritageJsonStatus::MissingField,
                   "$.profile_schema_version");
     require_error(replace_once(std::string(valid),
-                               "\"profile_digest_version\":1,", ""),
+                               "\"profile_digest_version\":2,", ""),
                   SampleHeritageJsonStatus::MissingField,
                   "$.profile_digest_version");
     require_error(replace_once(
                       std::string(valid),
-                      "\"profile_digest\":\"a254035078ded7b0c7f7b8cd7af2dda0801b4843b7c24bffc01054bbaf9e1b1e\",",
+                      "\"profile_digest\":\"6cda13d2f57a367e095b2f617b588fdc601d3b1c988365ffba20b9777c9b734d\",",
                       ""),
                   SampleHeritageJsonStatus::MissingField,
                   "$.profile_digest");
@@ -652,21 +652,21 @@ TEST_CASE("Heritage continuation JSON strictly rejects malformed state contracts
                   SampleHeritageJsonStatus::ProfileValidationFailed,
                   "$.schema_version");
     require_error(replace_once(std::string(valid),
-                               "\"profile_schema_version\":1",
-                               "\"profile_schema_version\":2"),
+                               "\"profile_schema_version\":2",
+                               "\"profile_schema_version\":3"),
                   SampleHeritageJsonStatus::ProfileValidationFailed,
                   "$.profile_schema_version");
     require_error(replace_once(std::string(valid),
-                               "\"profile_digest_version\":1",
-                               "\"profile_digest_version\":2"),
+                               "\"profile_digest_version\":2",
+                               "\"profile_digest_version\":3"),
                   SampleHeritageJsonStatus::ProfileValidationFailed,
                   "$.profile_digest_version");
     require_error(replace_once(std::string(valid),
-                               "a2540350", "A2540350"),
+                               "6cda13d2", "6CDA13D2"),
                   SampleHeritageJsonStatus::ProfileValidationFailed,
                   "$.profile_digest");
     require_error(replace_once(std::string(valid),
-                               "a2540350", "a254035"),
+                               "6cda13d2", "6cda13d"),
                   SampleHeritageJsonStatus::ProfileValidationFailed,
                   "$.profile_digest");
     require_error(replace_once(std::string(valid), "neutral.state-v1", "brand.x"),
@@ -729,7 +729,7 @@ TEST_CASE("Heritage continuation JSON rejects duplicate and noncanonical RNG lay
 
     SampleHeritageRuntimeState forged;
     forged.schema_version = 2;
-    forged.profile_schema_version = 1;
+    forged.profile_schema_version = kSampleHeritageProfileSchemaVersion;
     constexpr std::string_view id = "neutral.state-v1";
     std::copy(id.begin(), id.end(), forged.profile_id.begin());
     const auto rejected = write_sample_heritage_runtime_state_json(forged);

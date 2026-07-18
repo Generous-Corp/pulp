@@ -13,7 +13,7 @@ namespace {
 // Changing this byte contract requires a digest-version bump. The prefix keeps
 // these bytes out of every other SHA-256 protocol domain in Pulp.
 constexpr std::string_view kProfileDigestDomain =
-    "pulp.sample-heritage.profile-digest.v1";
+    "pulp.sample-heritage.profile-digest.v2";
 
 class CanonicalBytes {
 public:
@@ -61,7 +61,9 @@ std::array<std::uint8_t, 32> sample_heritage_profile_digest(
     canonical.integer(kSampleHeritageProfileDigestVersion);
     canonical.integer(profile.schema_version);
     canonical.text(profile.profile_id);
-    canonical.floating(profile.host_sample_rate);
+    // Host rate is an execution context, not profile identity. The same typed
+    // machine profile must retain its identity when a host prepares at another
+    // supported rate.
     canonical.integer(static_cast<std::uint64_t>(profile.stages.size()));
     for (const auto& spec : profile.stages) {
         canonical.byte(spec.bypass ? 1 : 0);
