@@ -202,6 +202,13 @@ buffer application, `reset()`, and accessors are real-time safe.
 
 ## 3. Oscillators
 
+This section covers only the legacy `signal::Oscillator` below. For the
+newer VA/VCO/DCO/wavetable suite (`pulp::signal::osc`, under
+`core/signal/include/pulp/signal/osc/`) — analog-modeled shapes, a
+divider-clocked DCO, and two wavetable tiers — see the
+[oscillators guide](oscillators.md). The two are separate, unrelated class
+families; prefer the suite for new work.
+
 ### Oscillator
 
 Band-limited oscillator with polyBLEP anti-aliasing. Supports sine, saw, square, and triangle waveforms.
