@@ -12,7 +12,7 @@
 // | Multi-field coherent read  | SeqLock<T>       | Transport state (tempo+beat) |
 // | Large data swap            | TripleBuffer<T>  | Wavetables, IR buffers       |
 // | Ordered event stream       | SPSC FIFO        | MIDI events, UI commands     |
-// | Occurrence-only feedback   | ActivityChannel  | Pad flashes, clip lights     |
+// | Occurrence signals/counts  | ActivityChannel  | Pad flashes, UI triggers     |
 // | Latest-value metering      | TripleBuffer<T>  | Audio→UI meter data          |
 // | Prepared read-only pointer | RealtimeResourceSlot<T,N> | prepared samples/IRs |
 //

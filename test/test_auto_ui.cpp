@@ -425,6 +425,70 @@ TEST_CASE("AutoUi sync updates the padded value row", "[view][auto_ui]") {
     CHECK(value->text() == "-24.0 dB");
 }
 
+TEST_CASE("AutoUi parameter changes preserve settled control geometry",
+          "[view][auto_ui][layout][regression]") {
+    // Six controls exercise the first-drag failure: the scroll body learned its
+    // viewport width during the first pass, but the parent did not consume the
+    // resulting wrapped extent until a later value-label invalidation. The
+    // visible result was a four-column surface jumping to three columns.
+    StateStore store;
+    for (std::uint32_t i = 0; i < 6; ++i) {
+        store.add_parameter(make_param(
+            i, "Control " + std::to_string(i), i == 1 ? "st" : "%",
+            i == 1 ? ParamRange{-24.0f, 24.0f, 0.0f, 0.01f}
+                   : ParamRange{0.0f, 100.0f, 50.0f, 0.1f}));
+    }
+
+    auto root = AutoUi::build(store);
+    root->set_bounds({0, 0, 400, 300});
+    root->layout_children();
+    auto* grid = root->child_at(1)->child_at(0);
+    REQUIRE(grid->child_count() == 6);
+
+    const auto title_before = root->child_at(0)->bounds();
+    const auto body_before = root->child_at(1)->bounds();
+    const auto grid_before = grid->bounds();
+    std::vector<Rect> before;
+    for (std::size_t i = 0; i < grid->child_count(); ++i)
+        before.push_back(grid->child_at(i)->bounds());
+
+    for (const auto& param : store.all_params())
+        store.set_normalized(param.id, param.id % 2 ? 0.01f : 0.99f);
+    AutoUi::sync(*root, store);
+    root->layout_children();
+
+    CHECK(root->child_at(0)->bounds() == title_before);
+    CHECK(root->child_at(1)->bounds() == body_before);
+    CHECK(grid->bounds() == grid_before);
+    for (std::size_t i = 0; i < grid->child_count(); ++i) {
+        INFO("control " << i);
+        CHECK(grid->child_at(i)->bounds() == before[i]);
+    }
+
+    // An actual host resize must settle in that same single public layout call,
+    // then remain just as stable when another parameter label changes.
+    root->set_bounds({0, 0, 320, 240});
+    root->layout_children();
+    const auto resized_title = root->child_at(0)->bounds();
+    const auto resized_body = root->child_at(1)->bounds();
+    const auto resized_grid = grid->bounds();
+    std::vector<Rect> resized_controls;
+    for (std::size_t i = 0; i < grid->child_count(); ++i)
+        resized_controls.push_back(grid->child_at(i)->bounds());
+
+    store.set_normalized(0, 0.5f);
+    AutoUi::sync(*root, store);
+    root->layout_children();
+
+    CHECK(root->child_at(0)->bounds() == resized_title);
+    CHECK(root->child_at(1)->bounds() == resized_body);
+    CHECK(grid->bounds() == resized_grid);
+    for (std::size_t i = 0; i < grid->child_count(); ++i) {
+        INFO("resized control " << i);
+        CHECK(grid->child_at(i)->bounds() == resized_controls[i]);
+    }
+}
+
 TEST_CASE("AutoUi generated controls write changes back to the store",
           "[view][auto_ui][parameters]") {
     StateStore store;

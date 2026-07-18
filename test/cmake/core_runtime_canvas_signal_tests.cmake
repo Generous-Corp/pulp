@@ -342,7 +342,7 @@ pulp_add_test_suite(pulp-test-runtime
     SOURCES test_runtime.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::runtime)
 
-# Lock-free realtime-to-UI occurrence signals (pad flashes, clip lights, etc.).
+# Lock-free realtime/control-thread occurrence signals (pad flashes, UI triggers).
 pulp_add_test_suite(pulp-test-activity-channel
     LIBRARIES pulp::runtime
     PROPERTIES LABELS lifecycle)

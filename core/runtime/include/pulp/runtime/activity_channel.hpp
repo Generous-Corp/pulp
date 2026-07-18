@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file activity_channel.hpp
-/// Lock-free occurrence signals for realtime-producer to UI-consumer feedback.
+/// Lock-free occurrence signals between realtime and control/UI threads.
 
 #include <array>
 #include <atomic>
@@ -13,11 +13,14 @@ namespace pulp::runtime {
 
 /// A fixed set of lock-free occurrence counters.
 ///
-/// This channel is for transient UI feedback whose payload is simply "lane N
-/// was active": MIDI pad flashes, clipping indicators, voice-activity lights,
-/// and similar signals. A producer calls signal() from the audio thread; a UI
-/// consumer keeps one Sequence cursor per lane and polls consume(). Multiple
-/// signals between UI ticks intentionally coalesce into one observation.
+/// This channel is for payload-free occurrences whose complete meaning is
+/// "lane N was active": MIDI pad flashes, clipping indicators, manual trigger
+/// requests, and similar signals. Producers call signal() from either side;
+/// each consumer keeps one Sequence cursor per lane. consume() intentionally
+/// coalesces a burst into one observation, while consume_count() preserves the
+/// number of occurrences for command paths that must replay every trigger.
+/// signal() is multi-producer safe; consumers are independent because each owns
+/// its cursor.
 ///
 /// The channel carries no associated payload, so relaxed atomic ordering is
 /// sufficient. It allocates nothing and takes no locks in signal(). Share the
@@ -54,11 +57,18 @@ public:
     /// advance by more than one, but is deliberately reported as one visual
     /// wake-up rather than a queue of stale flashes.
     bool consume(std::size_t lane, Sequence& cursor) const noexcept {
-        if (lane >= LaneCount) return false;
+        return consume_count(lane, cursor) != 0;
+    }
+
+    /// Return the number of signals since @p cursor and advance it to the
+    /// newest sequence. Unsigned subtraction deliberately handles sequence
+    /// wrap. Invalid lanes return zero and leave the cursor untouched.
+    Sequence consume_count(std::size_t lane, Sequence& cursor) const noexcept {
+        if (lane >= LaneCount) return 0;
         const Sequence current = sequence(lane);
-        if (current == cursor) return false;
+        const Sequence count = current - cursor;
         cursor = current;
-        return true;
+        return count;
     }
 
 private:
