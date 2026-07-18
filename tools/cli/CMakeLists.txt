@@ -90,6 +90,7 @@ add_executable(pulp-cli
     importer_git_install.cpp
     content_commands.cpp
     kit_commands.cpp
+    kit_manifest_validation.cpp
     cmd_pr.cpp
     cmd_inspect.cpp
     cmd_tweaks.cpp
