@@ -51,12 +51,18 @@ SampleStreamCacheService::~SampleStreamCacheService() = default;
 bool SampleStreamCacheService::prepare(
     const SampleStreamCacheServiceConfig& config) {
     release();
-    if (config.scheduler_capacity == 0 ||
+    if (config.scheduler_capacity == 0 || config.source_identity_capacity == 0 ||
         config.maximum_async_reservations_per_source == 0 ||
         (!config.memory_governor && config.page_memory_budget_bytes == 0)) {
         return false;
     }
     if (!scheduler_.prepare(config.scheduler_capacity)) return false;
+    try {
+        source_generations_.reserve(config.source_identity_capacity);
+    } catch (...) {
+        scheduler_.reset();
+        return false;
+    }
     if (config.memory_governor) {
         memory_governor_ = config.memory_governor;
     } else {
@@ -68,6 +74,8 @@ bool SampleStreamCacheService::prepare(
     }
     maximum_async_reservations_per_source_ =
         config.maximum_async_reservations_per_source;
+    source_identity_capacity_ = config.source_identity_capacity;
+    stats_.source_identity_capacity = source_identity_capacity_;
     prepared_ = true;
     return true;
 }
@@ -84,6 +92,7 @@ void SampleStreamCacheService::release() noexcept {
     completed_page_retirement_epoch_.store(0, std::memory_order_relaxed);
     next_page_retirement_epoch_ = 1;
     maximum_async_reservations_per_source_ = 1;
+    source_identity_capacity_ = 0;
     prepared_ = false;
     stats_ = {};
 }
@@ -135,6 +144,11 @@ SampleStreamSourceAddResult SampleStreamCacheService::add_source(
         config.token.source_generation <= generation_record->highest_generation) {
         return {SampleStreamSourceAddStatus::StaleGeneration, {}};
     }
+    if (generation_record == source_generations_.end() &&
+        source_generations_.size() >= source_identity_capacity_) {
+        ++stats_.source_identity_capacity_rejections;
+        return {SampleStreamSourceAddStatus::SourceIdentityCapacityExceeded, {}};
+    }
 
     const auto bytes = page_storage_bytes(config);
     if (!bytes || !memory_governor_) {
@@ -173,6 +187,7 @@ SampleStreamSourceAddResult SampleStreamCacheService::add_source(
                     .source_id = config.token.source_id,
                     .highest_generation = config.token.source_generation,
                 });
+                stats_.source_identity_count = source_generations_.size();
             } catch (...) {
                 sources_.pop_back();
                 return {SampleStreamSourceAddStatus::AllocationFailed, {}};
