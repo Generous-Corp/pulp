@@ -1,15 +1,6 @@
 name: Android Build
 
 on:
-  pull_request:
-    paths:
-      - 'android/**'
-      - 'core/**'
-      - 'tools/deps/manifest.json'
-      - 'tools/cmake/PulpAndroid.cmake'
-      - 'tools/cmake/PulpDependencies.cmake'
-      - 'CMakeLists.txt'
-      - '.github/workflows/android.yml'
   push:
     branches: [main]
     paths:
@@ -20,6 +11,9 @@ on:
       - 'tools/cmake/PulpDependencies.cmake'
       - 'CMakeLists.txt'
 
+  schedule:
+    - cron: '41 5 * * *'  # nightly de-starve safety net (see planning/fleet/2026-07-17-ci-destarve-analysis.md)
+  workflow_dispatch: {}
 # Cancel superseded PR runs when a new commit lands on the same ref.
 # Main-branch pushes share `refs/heads/main` so consecutive main runs
 # still serialize under the same group — acceptable: Android-on-main
