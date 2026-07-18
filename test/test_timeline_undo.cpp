@@ -1,5 +1,7 @@
 #include "timeline_command_test_helpers.hpp"
 
+#include <pulp/timeline/serialize.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 using namespace timeline_test;
@@ -63,6 +65,66 @@ TEST_CASE("Timeline redo reactivates identities created by an insert") {
     auto replayed = journal.replay(make_project(), {});
     REQUIRE(replayed);
     REQUIRE(same_project(replayed.value(), *session->snapshot()));
+}
+
+TEST_CASE("Timeline undo and replay preserve extension content exactly") {
+    auto exercise = [](Clip inserted) {
+        auto session = std::move(DocumentSession::create(make_project())).value();
+        auto writer = std::move(session->register_writer()).value();
+        auto tx = session_transaction(writer, {}, {InsertClip{{3}, {4}, inserted}});
+        REQUIRE(session->submit(writer, std::move(tx)));
+        REQUIRE(session->undo(writer));
+        REQUIRE(session->redo(writer));
+        const auto* restored =
+            session->snapshot()->find_sequence({3})->find_track({4})->find_clip({7});
+        REQUIRE(restored);
+        REQUIRE(equivalent(*restored, inserted));
+        auto replayed = session->journal().replay(make_project(), {});
+        REQUIRE(replayed);
+        const auto* replayed_clip = replayed->find_sequence({3})->find_track({4})->find_clip({7});
+        REQUIRE(replayed_clip);
+        REQUIRE(equivalent(*replayed_clip, inserted));
+        return std::move(replayed).value();
+    };
+
+    SECTION("registered content retains schema and payload identity") {
+        auto payload = std::make_shared<const int>(42);
+        auto content = RegisteredContent::create_no_owned_ids(
+            {"vendor.registered", 3}, std::static_pointer_cast<const void>(payload));
+        REQUIRE(content);
+        auto inserted = Clip::create({7}, {2 * kTicksPerQuarter}, {kTicksPerQuarter},
+                                     std::move(content).value());
+        REQUIRE(inserted);
+        const auto replayed = exercise(std::move(inserted).value());
+        const auto& value = std::get<RegisteredContent>(clip(replayed, {7}).content());
+        REQUIRE(value.schema() == SchemaIdentity{"vendor.registered", 3});
+        REQUIRE(value.value_as<int>() == payload.get());
+    }
+
+    SECTION("opaque content retains exact admitted envelope") {
+        const std::string raw =
+            R"({"data":{"answer":"42"},"type_name":"vendor.opaque","version":9})";
+        auto content = OpaqueContent::create({"vendor.opaque", 9}, raw);
+        REQUIRE(content);
+        auto inserted = Clip::create({7}, {2 * kTicksPerQuarter}, {kTicksPerQuarter},
+                                     std::move(content).value());
+        REQUIRE(inserted);
+        const auto replayed = exercise(std::move(inserted).value());
+        const auto& value = std::get<OpaqueContent>(clip(replayed, {7}).content());
+        REQUIRE(value.schema() == SchemaIdentity{"vendor.opaque", 9});
+        REQUIRE(value.raw_json() == raw);
+
+        auto registry = make_builtin_timeline_registry();
+        REQUIRE(registry);
+        auto serialized = serialize_project(replayed, registry.value());
+        REQUIRE(serialized);
+        REQUIRE(serialized->has_opaque_objects);
+        auto decoded = deserialize_project(serialized->json, registry.value());
+        REQUIRE(decoded);
+        const auto& decoded_value = std::get<OpaqueContent>(clip(decoded.value(), {7}).content());
+        REQUIRE(decoded_value.schema() == value.schema());
+        REQUIRE(decoded_value.raw_json() == raw);
+    }
 }
 
 TEST_CASE("Timeline undo capacity rejects an open gesture without partial publication") {

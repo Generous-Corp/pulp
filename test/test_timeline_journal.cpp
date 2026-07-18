@@ -1,9 +1,47 @@
 #include "../core/timeline/src/journal_internal.hpp"
 #include "timeline_command_test_helpers.hpp"
 
+#include <pulp/timeline/serialize.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 using namespace timeline_test;
+
+namespace {
+
+ContentHash hash_of(char digit) {
+    const auto hash = ContentHash::from_hex(std::string(64, digit));
+    REQUIRE(hash);
+    return *hash;
+}
+
+Project make_durable_media_project(ContentHash source_hash = hash_of('a')) {
+    auto clip = Clip::create({5}, {0}, {kTicksPerQuarter}, MediaRef{{2}, {7}, 11});
+    REQUIRE(clip);
+    auto track = Track::create({4}, "media", {std::move(clip).value()});
+    REQUIRE(track);
+    auto sequence = Sequence::create({3}, "sequence", TickDuration{8 * kTicksPerQuarter},
+                                     {std::move(track).value()});
+    REQUIRE(sequence);
+    MediaAsset asset{{2},
+                     "audio.wav",
+                     128,
+                     {48'000, 1},
+                     source_hash,
+                     AssetStoragePolicy::PreferEmbedded,
+                     {{AssetLocatorKind::PackageRelative, "media/audio.wav"},
+                      {AssetLocatorKind::ExternalUri, "file:///original/audio.wav"}},
+                     {{"proxy",
+                       hash_of('b'),
+                       AssetStoragePolicy::Embedded,
+                       {{AssetLocatorKind::PackageRelative, "media/proxy.wav"}}}}};
+    auto project = Project::create(
+        {{1}, "durable", 6, {3}, {std::move(asset)}, {std::move(sequence).value()}});
+    REQUIRE(project);
+    return std::move(project).value();
+}
+
+} // namespace
 
 TEST_CASE("Timeline journal replay reproduces the committed document") {
     const auto checkpoint = make_project();
@@ -24,6 +62,46 @@ TEST_CASE("Timeline journal replay reproduces the committed document") {
     auto replayed = journal.replay(*revision_one, {1});
     REQUIRE(replayed);
     REQUIRE(same_project(replayed.value(), *session->snapshot()));
+}
+
+TEST_CASE("Timeline commands and replay preserve durable asset metadata") {
+    const auto checkpoint = make_durable_media_project();
+    auto session = std::move(DocumentSession::create(checkpoint)).value();
+    auto writer = std::move(session->register_writer()).value();
+    const auto before = clip(*session->snapshot()).time_range();
+    ClipTimeRange after = MusicalTimeRange{{2 * kTicksPerQuarter}, {kTicksPerQuarter}};
+    auto move = session_transaction(writer, {}, {MoveClip{{3}, {4}, {5}, before, after}});
+    REQUIRE(session->submit(writer, std::move(move)));
+
+    const auto journal = session->journal();
+    auto replayed = journal.replay(checkpoint, {});
+    REQUIRE(replayed);
+    REQUIRE(replayed->assets().size() == 1);
+    const auto& asset = replayed->assets()[0];
+    REQUIRE(asset.content_hash == hash_of('a'));
+    REQUIRE(asset.storage_policy == AssetStoragePolicy::PreferEmbedded);
+    REQUIRE(asset.locators.size() == 2);
+    REQUIRE(asset.representations.size() == 1);
+    REQUIRE(asset.representations[0].content_hash == hash_of('b'));
+    REQUIRE(equivalent(clip(*replayed), clip(*session->snapshot())));
+
+    auto registry = make_builtin_timeline_registry();
+    REQUIRE(registry);
+    auto serialized = serialize_project(*session->snapshot(), registry.value());
+    REQUIRE(serialized);
+    auto decoded = deserialize_project(serialized->json, registry.value());
+    REQUIRE(decoded);
+    REQUIRE(decoded->assets()[0].content_hash == asset.content_hash);
+    REQUIRE(decoded->assets()[0].locators == asset.locators);
+    REQUIRE(decoded->assets()[0].representations.size() == 1);
+    REQUIRE(decoded->assets()[0].representations[0].content_hash ==
+            asset.representations[0].content_hash);
+    REQUIRE(equivalent(clip(decoded.value()), clip(*session->snapshot())));
+
+    auto wrong_checkpoint = make_durable_media_project(hash_of('c'));
+    auto rejected = journal.replay(wrong_checkpoint, {});
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::ModelInvariant);
 }
 
 TEST_CASE("Timeline journal is fail closed when full and truncates only checkpoints") {

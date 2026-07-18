@@ -37,6 +37,20 @@ bool same_absolute_duration(const std::optional<AbsoluteTimelineDuration>& lhs,
                                                            lhs->sample_rate == rhs->sample_rate));
 }
 
+bool same_representation(const AssetRepresentation& lhs, const AssetRepresentation& rhs) noexcept {
+    return lhs.role == rhs.role && lhs.content_hash == rhs.content_hash &&
+           lhs.storage_policy == rhs.storage_policy && lhs.locators == rhs.locators;
+}
+
+bool same_asset(const MediaAsset& lhs, const MediaAsset& rhs) noexcept {
+    return lhs.id == rhs.id && lhs.name == rhs.name && lhs.frame_count == rhs.frame_count &&
+           lhs.sample_rate == rhs.sample_rate && lhs.content_hash == rhs.content_hash &&
+           lhs.storage_policy == rhs.storage_policy && lhs.locators == rhs.locators &&
+           lhs.representations.size() == rhs.representations.size() &&
+           std::equal(lhs.representations.begin(), lhs.representations.end(),
+                      rhs.representations.begin(), same_representation);
+}
+
 bool same_project(const Project& lhs, const Project& rhs) noexcept {
     if (lhs.id() != rhs.id() || lhs.name() != rhs.name() ||
         lhs.next_item_id() != rhs.next_item_id() ||
@@ -47,8 +61,7 @@ bool same_project(const Project& lhs, const Project& rhs) noexcept {
     for (std::size_t i = 0; i < lhs.assets().size(); ++i) {
         const auto& left = lhs.assets()[i];
         const auto& right = rhs.assets()[i];
-        if (left.id != right.id || left.name != right.name ||
-            left.frame_count != right.frame_count || left.sample_rate != right.sample_rate)
+        if (!same_asset(left, right))
             return false;
     }
     for (std::size_t s = 0; s < lhs.sequences().size(); ++s) {
