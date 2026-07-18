@@ -1355,6 +1355,25 @@ export function materializeFrame(scene, frame, ctx) {
     const out = { type: envelopeType(type), name: node.name || '', style };
     if (layout) out.layout = layout;
 
+    // Resize constraints, in Figma's own spelling (MIN/MAX/CENTER/STRETCH/
+    // SCALE) — design_ir_json.cpp normalizes, codegen lowers to flex within
+    // the parent. Only meaningful where the node is positioned by its parent's
+    // coordinate space, so the gate mirrors styleFor's absolute-placement rule:
+    // a FLOWING auto-layout child is governed by stack sizing/alignment, and
+    // emitting its (stale) constraints would fight the flex pass with margins
+    // and grow the design never asked for.
+    const parentIsStack =
+      parent && (parent.stackMode === 'HORIZONTAL' || parent.stackMode === 'VERTICAL');
+    if (parent && (!parentIsStack || node.stackPositioning === 'ABSOLUTE')) {
+      const h = node.horizontalConstraint;
+      const v = node.verticalConstraint;
+      if (typeof h === 'string' || typeof v === 'string') {
+        out.constraints = {};
+        if (typeof h === 'string') out.constraints.horizontal = h;
+        if (typeof v === 'string') out.constraints.vertical = v;
+      }
+    }
+
     // The node's identity, carried through to the IR (design_ir_json's
     // parse_ir_identity_fields reads `node_id` into source_node_id, which the
     // `adapter` anchor strategy turns into the view's anchor). Without it every

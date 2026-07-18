@@ -230,6 +230,12 @@ function toEnvelopeNode(n: ExtractedFigmaNode): unknown {
   const layoutEntries = Object.entries(n.layout).filter(([, v]) => v !== undefined && v !== null);
   if (layoutEntries.length > 0) out.layout = Object.fromEntries(layoutEntries);
 
+  // Resize constraints at the node root — the shared producer shape all three
+  // Figma lanes (.fig decoder, plugin, REST) emit, and the first place
+  // design_ir_json.cpp::parse_ir_node looks. Figma spelling passes through
+  // untranslated; the importer owns normalization.
+  if (n.constraints) out.constraints = n.constraints;
+
   // Figma metadata — pack non-essential identity / provenance into the figma sub-object
   const figma: Record<string, unknown> = {
     parent_id: n.parent_id,

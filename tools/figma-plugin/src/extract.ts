@@ -39,6 +39,7 @@ import {
   audioWidgetKindFromName,
   isPureVectorIllustration,
   collectFontFamilyAssets,
+  extractConstraints,
 } from "./extract-pure";
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -252,6 +253,19 @@ async function walk(
       ex.style.left = node.x;
       ex.style.top = node.y;
     }
+  }
+
+  // Resize constraints — same gate as absolute positioning (plus the
+  // layoutPositioning opt-out): constraints govern a node placed in its
+  // parent's coordinate space. A FLOWING auto-layout child is sized by the
+  // stack (layout.width_mode/height_mode above), and its stale constraints
+  // would fight that with margins/grow the design never asked for.
+  const absoluteInStack =
+    "layoutPositioning" in node &&
+    (node as SceneNode & { layoutPositioning?: string }).layoutPositioning === "ABSOLUTE";
+  if (parent !== null && (!parentIsAutoLayout(parent) || absoluteInStack)) {
+    const constraints = extractConstraints(node);
+    if (constraints) ex.constraints = constraints;
   }
 
   // Text content + dominant style

@@ -343,6 +343,13 @@ export interface Node {
   attributes?: Attributes;
   style?: Style;
   layout?: Layout;
+  /**
+   * Resize constraints in Figma's Plugin-API spelling. Passed through untranslated; design_ir_json.cpp normalizes and codegen lowers to flex within the parent. Only emitted for nodes positioned in the parent's coordinate space (not flowing auto-layout children).
+   */
+  constraints?: {
+    horizontal?: "MIN" | "MAX" | "CENTER" | "STRETCH" | "SCALE";
+    vertical?: "MIN" | "MAX" | "CENTER" | "STRETCH" | "SCALE";
+  };
   figma?: FigmaMetadata;
   /**
    * When type=image, references asset_manifest.assets[*].asset_id
@@ -360,6 +367,10 @@ export interface Node {
    * Source-identified interactive overlays for a faithful_svg render. Maps to IRNode.interactive_elements.
    */
   interactive_elements?: InteractiveElement[];
+  /**
+   * Alternate states of a faithful_svg node, each itself a faithful_svg node with its own svg_asset_id and interactive_elements. Maps to IRNode.alternate_frames; the importer materializes each via DesignFrameView::add_frame. ORDER IS SIGNIFICANT: this node is frame 0 and entry i is frame i+1, which is the index a swap element's target_frame names. Omit for a single-state design.
+   */
+  alternate_frames?: Node[];
   children?: Node[];
 }
 /**

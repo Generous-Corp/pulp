@@ -72,6 +72,14 @@ export interface ExtractedFigmaNode {
   // `Pulp / XYPad` library instances.
   audio_binding_y?: string;
 
+  // Resize constraints in Figma's Plugin-API spelling
+  // (MIN/MAX/CENTER/STRETCH/SCALE per axis). Serialized at the envelope node
+  // root as `constraints`; design_ir_json.cpp normalizes the tokens and
+  // codegen lowers them to flex within the parent. Only populated for nodes
+  // positioned by their parent's coordinate space (not flowing auto-layout
+  // children, whose sizing is governed by the stack instead).
+  constraints?: { horizontal?: string; vertical?: string };
+
   children: ExtractedFigmaNode[];
 }
 
@@ -82,6 +90,12 @@ export interface ExtractedStyle {
   color?: string;
   opacity?: number;
   border_radius?: number;
+  // Per-corner radii — emitted (and border_radius dropped) only when the four
+  // corners differ; C++ parse_ir_style reads these four fields directly.
+  border_top_left_radius?: number;
+  border_top_right_radius?: number;
+  border_bottom_right_radius?: number;
+  border_bottom_left_radius?: number;
   border?: string;
   border_color?: string;
   border_width?: number;

@@ -360,6 +360,59 @@ test('absolute children keep their Figma coordinates; auto-layout children do no
   assert.ok(!('top' in row.style), 'auto-layout child carries no coordinates');
 });
 
+test('resize constraints reach the envelope in Figma spelling; flowing auto-layout children drop them', () => {
+  // The bug this pins: the decoder read horizontalConstraint/verticalConstraint
+  // never, so a footer pinned MAX (bottom) or a panel set SCALE re-anchored to
+  // the top-left default on every host resize. The raw kiwi spelling passes
+  // through untranslated — design_ir_json.cpp normalizes and codegen lowers to
+  // flex, so a translation table here would just be a dialect to keep in sync.
+  const plain = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Plain',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Pinned',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 100, y: 24 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 76 },
+      horizontalConstraint: 'SCALE', verticalConstraint: 'MAX' },
+    // Only one axis set — the other must be absent, not undefined/null.
+    { guid: { sessionID: 0, localID: 4 }, type: 'FRAME', name: 'HalfPinned',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 10, y: 10 },
+      horizontalConstraint: 'CENTER' },
+    { guid: { sessionID: 0, localID: 5 }, type: 'FRAME', name: 'Default',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'c' }, size: { x: 10, y: 10 } },
+  ]});
+  const pf = materializeFrame(plain, findFrame(plain, 'Plain'), { images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
+  const [pinned, half, dflt] = pf.envelope.root.children;
+  assert.deepEqual(pinned.constraints, { horizontal: 'SCALE', vertical: 'MAX' });
+  assert.deepEqual(half.constraints, { horizontal: 'CENTER' }, 'single axis stays single');
+  assert.ok(!('constraints' in dflt), 'no source field, no key');
+  assert.ok(!('constraints' in pf.envelope.root), 'the frame under import anchors the space');
+
+  // A FLOWING auto-layout child is sized by the stack; its (stale) constraints
+  // must not ride along to fight the flex pass. A child opted out with
+  // stackPositioning ABSOLUTE is back in the parent's coordinate space, so its
+  // constraints are meaningful again — same gate as absolute placement.
+  const auto = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Auto', stackMode: 'VERTICAL',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Row',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 100, y: 24 },
+      horizontalConstraint: 'STRETCH', verticalConstraint: 'MIN' },
+    { guid: { sessionID: 0, localID: 4 }, type: 'FRAME', name: 'Badge', stackPositioning: 'ABSOLUTE',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 10, y: 10 },
+      transform: { m00: 1, m01: 0, m02: 88, m10: 0, m11: 1, m12: 2 },
+      horizontalConstraint: 'MAX', verticalConstraint: 'MIN' },
+  ]});
+  const af = materializeFrame(auto, findFrame(auto, 'Auto'), { images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
+  const [flowRow, badge] = af.envelope.root.children;
+  assert.ok(!('constraints' in flowRow), 'flowing auto-layout child drops constraints');
+  assert.deepEqual(badge.constraints, { horizontal: 'MAX', vertical: 'MIN' },
+    'ABSOLUTE opt-out keeps constraints');
+});
+
 test('a blend mode survives; one CSS lacks is diagnosed, not approximated', () => {
   // A layer that COMPOSITES differently is not cosmetic. This design lays a
   // 912x300 noise texture over its panels at opacity 0.10 blendMode MULTIPLY.

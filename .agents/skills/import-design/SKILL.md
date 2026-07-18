@@ -1397,6 +1397,26 @@ lower to flex at codegen. Facts / gotchas:
   follow-up. `compat.json features.constraints` tracks this (parsed handled,
   codegen partial); `features` rows are documented-only (not probed by the
   `[object-coverage]` drift guard). Tests: `[view][import][constraints]`.
+- **Producers** (all three Figma lanes emit the shared node-level shape,
+  passing their OWN raw spelling through untranslated — the parser owns
+  normalization, so never add a translation table in a producer):
+  - `.fig` (`fig/scene.mjs`): raw kiwi `horizontalConstraint` /
+    `verticalConstraint` (`MIN/MAX/CENTER/STRETCH/SCALE`), possibly one axis
+    only.
+  - plugin (`figma-plugin/src/extract-pure.ts::extractConstraints` →
+    `serialize.ts`): Plugin-API `node.constraints` (same spelling); guarded
+    with a property check — GROUP/SLICE have no `constraints` member. The
+    export schema enum rejects REST spellings by design (drift guard).
+  - REST (`figma_rest_export.py::walk`): REST `constraints`
+    (`LEFT/RIGHT/CENTER/LEFT_RIGHT/SCALE`, `TOP/BOTTOM/CENTER/TOP_BOTTOM/SCALE`).
+- **Auto-layout gate**: all three producers emit constraints only for a node
+  positioned in its parent's coordinate space — the same gate as absolute
+  positioning (parent not auto-layout, OR the child opted out via
+  `stackPositioning`/`layoutPositioning` `ABSOLUTE`). A FLOWING auto-layout
+  child is sized by the stack; its stale constraints would fight the flex pass
+  with margins/grow the design never asked for. Constraints are a no-op at
+  design size (verified pixel-identical on a 1299-node real file) — they only
+  change resize behavior.
 
 ### Grid containers → native grid bridge (NOT Yoga grid)
 
