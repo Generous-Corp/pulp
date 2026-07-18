@@ -359,7 +359,7 @@ public:
         update_high_water(telemetry_.source_outstanding_high_water,
                           source->outstanding_jobs);
         telemetry_.jobs_queued.fetch_add(1, std::memory_order_relaxed);
-        worker.wake.notify_one();
+        worker.wake.notify_all();
         return SampleStreamDecodeSubmitStatus::Queued;
     }
 
@@ -396,7 +396,7 @@ public:
         if (worker.completion_leased) return std::nullopt;
         auto completion = worker.completions.try_pop();
         if (!completion) return std::nullopt;
-        worker.wake.notify_one();
+        worker.wake.notify_all();
         worker.completion_leased = true;
         worker.leased_completion = *completion;
         const auto publishable_frames =
@@ -468,7 +468,7 @@ public:
         worker.completion_leased = false;
         worker.scratch_slots[completion.scratch_slot].in_use.store(
             false, std::memory_order_release);
-        worker.wake.notify_one();
+        worker.wake.notify_all();
         return true;
     }
 
