@@ -382,6 +382,18 @@ catch_discover_tests(pulp-test-events-timer-helpers PROPERTIES LABELS slow)
 
 # Audio file I/O tests
 pulp_add_test_suite(pulp-test-audio-file LIBRARIES pulp::audio pulp::signal)
+pulp_add_test_suite(pulp-test-wav-memory-decoder
+    SOURCES test_wav_memory_decoder.cpp wav_decoder_consumer_drwav.cpp
+    LIBRARIES pulp::audio
+    INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/external/dr_libs")
+if(CMAKE_NM)
+    add_custom_command(TARGET pulp-test-wav-memory-decoder POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+            "-DNM=${CMAKE_NM}"
+            "-DARCHIVE=$<TARGET_FILE:pulp-audio>"
+            -P "${CMAKE_CURRENT_LIST_DIR}/check_no_exported_drwav.cmake"
+        COMMENT "Checking pulp-audio does not export private dr_wav symbols")
+endif()
 
 # Phase-vocoder offline time-stretch / pitch-shift.
 pulp_add_test_suite(pulp-test-phase-vocoder LIBRARIES pulp::signal)

@@ -55,6 +55,7 @@ set(_PULP_WAM_INCLUDES
     ${_PULP_WAM_ROOT}/core/events/include
     ${_PULP_WAM_ROOT}/core/format/include
     ${_PULP_WAM_ROOT}/core/signal/include
+    ${_PULP_WAM_ROOT}/external/dr_libs
     ${PULP_WAM_CHOC_INCLUDE}
 )
 
@@ -67,6 +68,7 @@ set(_PULP_WAM_INCLUDES
 # (one global WamChainBridge) — the two define the SAME C symbols and must never
 # be linked together. Both compile against wam_adapter.cpp, which lives here.
 set(_PULP_WAM_CORE_SOURCES
+    ${_PULP_WAM_ROOT}/core/audio/src/wav_decoder.cpp
     ${_PULP_WAM_ROOT}/core/runtime/src/runtime.cpp
     ${_PULP_WAM_ROOT}/core/runtime/src/identity.cpp
     ${_PULP_WAM_ROOT}/core/state/src/store.cpp
