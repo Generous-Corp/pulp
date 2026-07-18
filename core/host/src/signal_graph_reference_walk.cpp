@@ -93,8 +93,11 @@ void SignalGraph::run_reference_walk_(
         if (shape.type == NodeType::MidiInput && rt.midi_input_mailbox) {
             const auto& injected = rt.midi_input_mailbox->published.read();
             if (injected.sequence != 0
-                && injected.sequence != rt.midi_input_sequence_seen) {
-                rt.midi_input_sequence_seen = injected.sequence;
+                && injected.sequence !=
+                    rt.midi_input_mailbox->sequence_seen.load(
+                        std::memory_order_relaxed)) {
+                rt.midi_input_mailbox->sequence_seen.store(
+                    injected.sequence, std::memory_order_relaxed);
                 if (!injected.copy_to_midi(rt.midi_out)) {
                     rt.midi_out_incomplete = true;
                 }

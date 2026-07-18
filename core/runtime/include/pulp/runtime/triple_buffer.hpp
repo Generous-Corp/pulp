@@ -6,6 +6,7 @@
 #include <atomic>
 #include <array>
 #include <cstdint>
+#include <type_traits>
 
 namespace pulp::runtime {
 
@@ -35,6 +36,9 @@ namespace pulp::runtime {
 template <typename T>
 class TripleBuffer {
 public:
+    static_assert(std::atomic<std::uint8_t>::is_always_lock_free,
+                  "TripleBuffer publication flags must be lock-free");
+
     TripleBuffer() = default;
 
     /// Initialize all three internal buffers with the same value.
@@ -46,7 +50,7 @@ public:
 
     /// Publish a new value from the writer thread.
     /// Writes into the back buffer, then atomically swaps it to middle.
-    void write(const T& value) {
+    void write(const T& value) noexcept(std::is_nothrow_copy_assignable_v<T>) {
         auto idx = flags_.load(std::memory_order_acquire);
         int back = back_index(idx);
         buffers_[back] = value;
@@ -68,7 +72,7 @@ public:
     /// Read the latest published value from the reader thread.
     /// If new data is available, atomically swaps middle to front first.
     /// @return Const reference to the front buffer. Valid until the next read().
-    const T& read() {
+    const T& read() noexcept {
         uint8_t flags = flags_.load(std::memory_order_acquire);
         if (flags & kDirtyBit) {
             for (;;) {
@@ -91,12 +95,12 @@ private:
     // Flags layout: bits [1:0] = back, [3:2] = mid, [5:4] = front, [7] = dirty
     static constexpr uint8_t kDirtyBit = 0x80;
 
-    static uint8_t make_flags(int back, int mid, int front) {
+    static constexpr uint8_t make_flags(int back, int mid, int front) noexcept {
         return static_cast<uint8_t>((back & 3) | ((mid & 3) << 2) | ((front & 3) << 4));
     }
-    static int back_index(uint8_t f)  { return f & 3; }
-    static int mid_index(uint8_t f)   { return (f >> 2) & 3; }
-    static int front_index(uint8_t f) { return (f >> 4) & 3; }
+    static constexpr int back_index(uint8_t f) noexcept { return f & 3; }
+    static constexpr int mid_index(uint8_t f) noexcept { return (f >> 2) & 3; }
+    static constexpr int front_index(uint8_t f) noexcept { return (f >> 4) & 3; }
 
     std::array<T, 3> buffers_{};
     std::atomic<uint8_t> flags_{make_flags(0, 1, 2)};

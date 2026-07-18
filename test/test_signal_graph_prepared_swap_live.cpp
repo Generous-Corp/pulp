@@ -213,7 +213,7 @@ TEST_CASE("prepare_swap rejects non-reinit-free edits -> NeedsEagerPrepare (2.2b
         CHECK(g.prepare_swap(kSr, kFrames)
               == SignalGraph::SwapResult::NeedsEagerPrepare);
     }
-    SECTION("MIDI edge in the graph -> NeedsEagerPrepare (M4 stuck-note gate)") {
+    SECTION("MIDI output keeps pending egress on eager-prepare path") {
         SignalGraph g;
         NodeId gain{};
         build_gain_graph(g, gain);

@@ -597,6 +597,24 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
 
     GraphMutationLock lock(*this);
     if (!in_swap_edit_) return SwapResult::NotInSwapEdit;
+
+    // MidiOutput publication is still owned by the live snapshot. Refuse this
+    // lane before the generic failure path invalidates that snapshot: callers
+    // must be able to drain a pending note-off with extract_midi() and then use
+    // eager prepare(). The authoring edits remain in nodes_/connections_; only
+    // the old compiled snapshot stays live until that eager replacement.
+    const bool has_midi_output = std::any_of(
+        nodes_.begin(), nodes_.end(),
+        [](const GraphNode& node) { return node.type == NodeType::MidiOutput; });
+    if (has_midi_output) {
+        set_live_swap_diagnostics_locked_(
+            LiveSwapFallbackReason::PredicateExcluded,
+            0,
+            "MIDI output has snapshot-local pending egress");
+        cancel_swap_edit_locked_();
+        return SwapResult::NeedsEagerPrepare;
+    }
+
     auto fail = [&](LiveSwapFallbackReason reason,
                     NodeId node,
                     std::string message) {
@@ -897,21 +915,29 @@ bool SignalGraph::snapshot_is_plugin_reinit_free_locked_(const CompiledGraph& ol
         old_cg.anticipation.valid) {
         return false;
     }
-    // (4) MIDI edges carry per-snapshot mailbox state (a dropped note-off = stuck
-    // note) and (5) a smoothed sparse-automation edge would snap its destination
-    // mid-ramp when the fresh snapshot re-primes the slew.
+    // (4) A smoothed sparse-automation edge would snap its destination mid-ramp
+    // when the fresh snapshot re-primes the slew. Ingress-only MIDI needs no
+    // exclusion: routing scratch is block-local, while a stable MidiInput's
+    // mailbox and consumed-sequence state are shared. MidiOutput remains
+    // snapshot-local, however, so swapping could discard an already-published
+    // note-off before extract_midi() observes it; keep output-bearing topologies
+    // on eager prepare until their egress mailbox can also be shared safely.
+    for (const auto& n : nodes_) {
+        if (n.type == NodeType::MidiOutput) return false;
+    }
+    for (const auto& [_, shape] : old_cg.shapes) {
+        if (shape.type == NodeType::MidiOutput) return false;
+    }
     for (const auto& c : connections_) {
         if (c.feedback) return false;
-        if (c.midi) return false;
         if (c.automation && c.automation_smoothing_ms > 0.0f) return false;
     }
     for (const auto& c : old_cg.connections) {
         if (c.feedback) return false;
-        if (c.midi) return false;  // defensive: the live snapshot itself had MIDI
     }
-    // (6) Identical node SET (no node added / removed / re-typed since this
+    // (5) Identical node SET (no node added / removed / re-typed since this
     // snapshot compiled; cg->shapes holds every node id) plus per-node plugin /
-    // custom instance identity, and (7) release-mode cache coverage.
+    // custom instance identity, and (6) release-mode cache coverage.
     if (nodes_.size() != old_cg.shapes.size()) return false;
     for (const auto& n : nodes_) {
         if (old_cg.shapes.find(n.id) == old_cg.shapes.end()) return false;

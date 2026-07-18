@@ -136,7 +136,7 @@ SignalGraph::MidiBlockSnapshot::MidiBlockSnapshot(
 }
 
 SignalGraph::MidiBlockSnapshot&
-SignalGraph::MidiBlockSnapshot::operator=(const MidiBlockSnapshot& other) {
+SignalGraph::MidiBlockSnapshot::operator=(const MidiBlockSnapshot& other) noexcept {
     if (this == &other) return *this;
     set_from_midi(other.events, other.sequence, other.incomplete);
     return *this;
@@ -145,7 +145,7 @@ SignalGraph::MidiBlockSnapshot::operator=(const MidiBlockSnapshot& other) {
 bool SignalGraph::MidiBlockSnapshot::set_from_midi(
     const midi::MidiBuffer& src,
     uint64_t new_sequence,
-    bool source_incomplete) {
+    bool source_incomplete) noexcept {
     clear_midi_block(events);
     sequence = new_sequence;
     const bool copied_all = copy_midi_block(src, events);
@@ -154,7 +154,7 @@ bool SignalGraph::MidiBlockSnapshot::set_from_midi(
 }
 
 bool SignalGraph::MidiBlockSnapshot::copy_to_midi(
-    midi::MidiBuffer& dst) const {
+    midi::MidiBuffer& dst) const noexcept {
     const bool copied_all = copy_midi_block(events, dst);
     return copied_all && !incomplete;
 }
@@ -640,10 +640,10 @@ bool SignalGraph::audio_rate_modulation_lane_locked_(const Connection& connectio
     return false;
 }
 
-bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) {
-    // Pin the live snapshot for the whole dereference: this control-thread API
-    // is not the prepare/release thread, so without the guard a concurrent
-    // prepare()/release()/invalidate could retire+free `cg` mid-use.
+bool SignalGraph::inject_midi(NodeId id,
+                              const midi::MidiBuffer& events) noexcept {
+    // Pin the live snapshot for the whole dereference. Without the guard a
+    // concurrent prepare()/release()/invalidate could retire+free `cg` mid-use.
     auto read_guard = live_slot_.read();
     auto* cg = read_guard.get();
     if (!cg) return false;
@@ -1330,8 +1330,21 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         prepare_midi_block_storage(runtime_it->second.midi_out,
                                    runtime_it->second.midi_out_ump);
         if (n.type == NodeType::MidiInput) {
-            runtime_it->second.midi_input_mailbox =
-                std::make_unique<MidiInputMailbox>();
+            // Keep mailbox identity across a live snapshot recompile so an
+            // injection published between its build and publication cannot fall
+            // between the old and new snapshots. Normal eager prepare has no live
+            // snapshot here and allocates a fresh mailbox.
+            if (const auto live = live_slot_.live()) {
+                auto old_it = live->runtime.find(n.id);
+                if (old_it != live->runtime.end()) {
+                    runtime_it->second.midi_input_mailbox =
+                        old_it->second.midi_input_mailbox;
+                }
+            }
+            if (!runtime_it->second.midi_input_mailbox) {
+                runtime_it->second.midi_input_mailbox =
+                    std::make_shared<MidiInputMailbox>();
+            }
         }
         if (n.type == NodeType::MidiOutput) {
             runtime_it->second.midi_output_mailbox =
@@ -2276,7 +2289,9 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                         const auto& injected =
                             rt_it->second.midi_input_mailbox->published.read();
                         if (injected.sequence != 0 &&
-                            injected.sequence != rt_it->second.midi_input_sequence_seen) {
+                            injected.sequence !=
+                                rt_it->second.midi_input_mailbox->sequence_seen.load(
+                                    std::memory_order_relaxed)) {
                             cg->routed.midi.set_out_incomplete(
                                 mi.plan_index, !injected.copy_to_midi(*out_buf));
                             mi.pending_seq = injected.sequence;
@@ -2292,7 +2307,8 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                         if (mi.pending_seq == 0) continue;
                         auto rt_it = cg->runtime.find(mi.id);
                         if (rt_it != cg->runtime.end()) {
-                            rt_it->second.midi_input_sequence_seen = mi.pending_seq;
+                            rt_it->second.midi_input_mailbox->sequence_seen.store(
+                                mi.pending_seq, std::memory_order_relaxed);
                         }
                     }
                     for (const auto& mo : cg->routed.midi_outputs) {
