@@ -489,13 +489,16 @@ tools/ci/governed-build.sh ctest --test-dir build-final-aql \
 
 The configured renderer-dependent tests remain the normative spectral and
 heritage oracles. In addition, record one advisory report for every named AQL
-axis. Four sustained-material axes use a high-frequency sampler render.
-Transient integrity uses a train assembled from repeated sampler heritage
-impulse renders, because that axis intentionally refuses material with too few
-onsets. The stereo axis uses a declared deterministic right-channel delay
-around the sampler-exported mono signal because this test renderer is mono; it
-proves preservation of that stereo mapping, not independent stereo-voice
-rendering.
+axis. Tonal balance, added HF, and noise roughness use a high-frequency sampler
+render. Graininess needs sustained spectral evolution to make its flux detector
+applicable, so it uses a deterministic time-varying mix of three independently
+rendered sampler tones. A single stationary tone is not valid graininess
+evidence. Transient integrity uses a train assembled from repeated sampler
+heritage impulse renders, because that axis intentionally refuses material with
+too few onsets. The stereo axis uses a declared deterministic right-channel
+delay around the sampler-exported mono signal because this test renderer is
+mono; it proves preservation of that stereo mapping, not independent
+stereo-voice rendering.
 
 ```bash
 ./build-final-aql/test/pulp-sampler-render-wav \
@@ -509,12 +512,26 @@ rendering.
   --policy ratio-sinc --ratio 1.5 --source-frequency 0.1875 \
   --frames 16385 --block-size 257
 
-for profile in tonal-balance added-hf noise-roughness graininess; do
+for profile in tonal-balance added-hf noise-roughness; do
   .venv-aql/bin/python -m quality_lab.cli compare \
     build-final-evidence/sampler/aql-tone-block-1.wav \
     build-final-evidence/sampler/aql-tone-block-257.wav \
     --profile "$profile" --reference-role golden \
     --json "build-final-evidence/sampler/aql-$profile.json"
+done
+
+for source_frequency in 0.03125 0.0729166666666667 0.1145833333333333; do
+  key=${source_frequency//./_}
+  for block in 1 257; do
+    ./build-final-aql/test/pulp-sampler-render-wav \
+      --source-out \
+        "build-final-evidence/sampler/grain-source-$key-block-$block.wav" \
+      --candidate-out \
+        "build-final-evidence/sampler/grain-tone-$key-block-$block.wav" \
+      --policy ratio-sinc --ratio 1.5 \
+      --source-frequency "$source_frequency" --frames 65537 \
+      --block-size "$block"
+  done
 done
 
 ./build-final-aql/test/pulp-sampler-heritage-render-wav \
@@ -531,8 +548,35 @@ done
 from pathlib import Path
 import numpy as np
 import soundfile as sf
+from quality_lab import generate
 
 root = Path("build-final-evidence/sampler")
+keys = ("0_03125", "0_0729166666666667", "0_1145833333333333")
+modulation_rates = (3.1, 4.7, 6.3)
+phases = (0.0, 0.7, 1.3)
+for block in (1, 257):
+    tones = []
+    rate = None
+    for key in keys:
+        tone, tone_rate = sf.read(root / f"grain-tone-{key}-block-{block}.wav",
+                                  dtype="float32")
+        rate = tone_rate if rate is None else rate
+        assert tone_rate == rate
+        tones.append(tone)
+    time = np.arange(len(tones[0]), dtype=np.float64) / rate
+    mix = np.zeros_like(tones[0], dtype=np.float64)
+    for tone, modulation_rate, phase in zip(
+            tones, modulation_rates, phases):
+        weight = 0.6 + 0.4 * np.sin(
+            2.0 * np.pi * modulation_rate * time + phase)
+        mix += weight * tone
+    mix = (mix / len(tones)).astype(np.float32)
+    sf.write(root / f"aql-graininess-block-{block}.wav",
+             mix, rate, subtype="FLOAT")
+    if block == 257:
+        sf.write(root / "aql-graininess-negative.wav",
+                 generate.grainy(mix, rate, amount=0.18),
+                 rate, subtype="FLOAT")
 for block in (1, 257):
     mono, rate = sf.read(root / f"aql-tone-block-{block}.wav", dtype="float32")
     right = np.zeros_like(mono)
@@ -545,6 +589,16 @@ for block in (64, 257):
     sf.write(root / f"aql-transient-train-{block}.wav",
              np.tile(impulse, 4), rate, subtype="FLOAT")
 PY
+.venv-aql/bin/python -m quality_lab.cli compare \
+  build-final-evidence/sampler/aql-graininess-block-1.wav \
+  build-final-evidence/sampler/aql-graininess-block-257.wav \
+  --profile graininess --reference-role golden \
+  --json build-final-evidence/sampler/aql-graininess.json
+.venv-aql/bin/python -m quality_lab.cli compare \
+  build-final-evidence/sampler/aql-graininess-block-1.wav \
+  build-final-evidence/sampler/aql-graininess-negative.wav \
+  --profile graininess --reference-role golden \
+  --json build-final-evidence/sampler/aql-graininess-negative.json
 .venv-aql/bin/python -m quality_lab.cli compare \
   build-final-evidence/sampler/aql-stereo-block-1.wav \
   build-final-evidence/sampler/aql-stereo-block-257.wav \
@@ -570,6 +624,12 @@ for profile in profiles:
     assert report["schema"] == "quality_lab.compare.v1", profile
     assert report["verdict"] == "no_material_change_detected", profile
     assert report["measurements"][0]["applicable"] is True, profile
+
+negative = json.loads((root / "aql-graininess-negative.json").read_text())
+assert negative["schema"] == "quality_lab.compare.v1"
+assert negative["verdict"] == "regression_suspected"
+assert negative["measurements"][0]["applicable"] is True
+assert negative["measurements"][0]["materiality"]["exceeds"] is True
 PY
 
 # CLI and benchmark evidence continue after the six applicable AQL reports.

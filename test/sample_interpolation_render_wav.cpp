@@ -19,8 +19,9 @@ std::optional<Policy> parse_policy(const char* text) {
     for (const auto policy : {Policy::Hold, Policy::Nearest, Policy::Linear,
                               Policy::CubicHermite, Policy::CubicLagrange,
                               Policy::RatioTrackingSinc}) {
-        if (std::strcmp(text,
-                        pulp::test::audio::sample_interpolation_policy_name(policy)) == 0)
+        if (std::strcmp(
+                text,
+                pulp::test::audio::sample_interpolation_policy_cli_id(policy)) == 0)
             return policy;
     }
     return std::nullopt;
@@ -145,6 +146,7 @@ int main(int argc, char** argv) {
                 "frames=%d block=%d policy=%s\n",
                 source_out.c_str(), candidate_out.c_str(), ratio, source_frequency,
                 frames, block_size,
-                pulp::test::audio::sample_interpolation_policy_name(policy));
+                pulp::test::audio::sample_interpolation_policy_cli_id(
+                    policy));
     return 0;
 }

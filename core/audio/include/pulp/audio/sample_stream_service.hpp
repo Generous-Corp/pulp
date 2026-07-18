@@ -150,6 +150,7 @@ struct SampleStreamCommandDrainResult {
 };
 
 class SampleStreamCacheService;
+struct SampleStreamCacheServiceTestAccess;
 
 class SampleStreamSourceRegistrationProof {
 public:
@@ -348,12 +349,30 @@ public:
         (void) internal_memory_governor_.release();
         active_audio_generation_ = 0;
         completed_audio_generation_ = 0;
+        published_page_retirement_epoch_.store(0, std::memory_order_relaxed);
+        completed_page_retirement_epoch_.store(0, std::memory_order_relaxed);
+        next_page_retirement_epoch_ = 1;
         maximum_async_reservations_per_source_ = 1;
         prepared_ = false;
         stats_ = {};
     }
 
     bool prepared() const noexcept { return prepared_; }
+
+    /// RT-safe page-lifetime barrier entry. Capture this before the callback
+    /// performs any page lookup and return the value at callback completion.
+    /// Audio callbacks must be single-threaded, non-overlapping, and complete
+    /// in entry order; overlapping render callbacks are unsupported.
+    std::uint64_t begin_audio_page_read() const noexcept {
+        return published_page_retirement_epoch_.load(std::memory_order_acquire);
+    }
+
+    /// RT-safe page-lifetime barrier completion. The callback must publish only
+    /// the exact epoch captured by begin_audio_page_read(), after its last page
+    /// access. Audio callbacks are single-threaded and complete in entry order.
+    void complete_audio_page_read(std::uint64_t epoch) noexcept {
+        completed_page_retirement_epoch_.store(epoch, std::memory_order_release);
+    }
 
     /// Updates the generation currently allowed to hold page views and the last
     /// generation whose audio callback has completed. Values are monotonic. A
@@ -839,6 +858,8 @@ public:
     }
 
 private:
+    friend struct SampleStreamCacheServiceTestAccess;
+
     struct SlotRecord {
         std::uint64_t publish_sequence = 0;
         std::uint64_t fill_serial = 0;
@@ -1024,6 +1045,8 @@ private:
 
     PageReservation reserve_page(Source& source,
                                  std::uint64_t reservation_serial) noexcept {
+        const auto completed_page_retirement_epoch =
+            completed_page_retirement_epoch_.load(std::memory_order_acquire);
         for (std::uint32_t page = 0; page < source.window.page_count(); ++page) {
             if (source.window.page_state(page) == SampleStreamPageState::Empty &&
                 source.window.begin_fill_page(page)) {
@@ -1042,7 +1065,8 @@ private:
             }
             has_retired_page = true;
             if (state == SampleStreamPageState::Retired &&
-                source.window.begin_fill_page(page, completed_audio_generation_)) {
+                source.window.begin_fill_page(
+                    page, completed_page_retirement_epoch)) {
                 source.slots[page] = {};
                 source.slots[page].fill_serial = reservation_serial;
                 return {PageReservationStatus::Reserved, page, true};
@@ -1052,7 +1076,8 @@ private:
             return {PageReservationStatus::WaitingForGeneration, 0, false};
         }
 
-        if (active_audio_generation_ == 0) return {};
+        if (active_audio_generation_ == 0 || next_page_retirement_epoch_ == 0)
+            return {};
 
         std::optional<std::uint32_t> victim;
         for (std::uint32_t page = 0; page < source.window.page_count(); ++page) {
@@ -1063,10 +1088,16 @@ private:
                 victim = page;
             }
         }
-        if (!victim ||
-            !source.window.retire_page(*victim, active_audio_generation_)) {
+        if (!victim) return {};
+        const auto retirement_epoch = next_page_retirement_epoch_++;
+        if (!source.window.retire_page(*victim, retirement_epoch)) {
             return {};
         }
+        // Publish only after Ready -> Retired. A callback that entered before
+        // retirement captured the previous epoch and cannot release this page;
+        // at least one callback entering after retirement must complete first.
+        published_page_retirement_epoch_.store(retirement_epoch,
+                                                std::memory_order_release);
         return {PageReservationStatus::RetiredVictim, *victim, false};
     }
 
@@ -1101,6 +1132,12 @@ private:
     SampleMemoryGovernorHandle memory_governor_;
     std::uint64_t active_audio_generation_ = 0;
     std::uint64_t completed_audio_generation_ = 0;
+    // Written in opposite directions by the service and audio threads. Keep
+    // each endpoint on its own cache line so the per-block load does not share
+    // ownership with the infrequent retirement/completion store.
+    alignas(64) std::atomic<std::uint64_t> published_page_retirement_epoch_{0};
+    alignas(64) std::atomic<std::uint64_t> completed_page_retirement_epoch_{0};
+    std::uint64_t next_page_retirement_epoch_ = 1;
     std::uint64_t next_registration_epoch_ = 1;
     std::uint64_t next_reservation_serial_ = 1;
     std::uint32_t maximum_async_reservations_per_source_ = 1;

@@ -76,7 +76,7 @@ inline std::vector<double> render_interpolated_tone(
         output_frames, block_frames);
 }
 
-inline const char* sample_interpolation_policy_name(
+inline const char* sample_interpolation_policy_cli_id(
     pulp::audio::SampleInterpolationPolicy policy) noexcept {
     using Policy = pulp::audio::SampleInterpolationPolicy;
     switch (policy) {

@@ -215,6 +215,14 @@ public:
         return cache_.update_audio_generations(active, completed);
     }
 
+    std::uint64_t begin_audio_page_read() const noexcept {
+        return cache_.begin_audio_page_read();
+    }
+
+    void complete_audio_page_read(std::uint64_t epoch) noexcept {
+        cache_.complete_audio_page_read(epoch);
+    }
+
     SampleStreamSourceRetireStatus retire_source_after_asset_unpublish(
         SampleStreamSourceToken source) noexcept {
         const auto status = cache_.retire_source_after_asset_unpublish(source);
