@@ -575,6 +575,22 @@ does not contain crashes in deeper plug-in code.
   thread, don't recompute per block.
 - Removing a node invalidates its `NodeId`. Connections referencing a
   removed node are pruned automatically.
+- For fail-closed structural publication while audio remains live, use
+  `begin_prepared_topology_edit()` instead of mutating the owner eagerly. Build
+  the complete candidate through its `PreparedTopologyEdit`, call
+  `prepare(sample_rate, max_block_size)`, verify
+  `routed_execution_ready(max_block_size)` when the caller holds a routed-only
+  lease, then `commit()`. A failed mutation poisons the one-shot edit, and
+  destroying it before commit rolls back topology, private connection IDs,
+  next IDs, the custom registry, routing flags, and the compiled snapshot.
+  Existing `PluginSlot`s are never re-prepared off-side; dimension changes are
+  accepted only without plugin nodes and when every retained custom type has
+  neither `prepare` nor `release`. New edit-owned custom instances may be
+  prepared. Unchanged PDC rings carry by private connection identity plus equal
+  shape in the same execution domain; removed rings retire, while new,
+  reshaped, or reconnected rings start fresh. Preserve connection identity for
+  unchanged owned routes and prune unused generated custom types in the same
+  edit so registry churn stays bounded.
 - Per-node CPU load: `process()` wraps each node's work in a persistent
   per-node `audio::AudioProcessLoadMeasurer` (keyed by `NodeId` in
   `node_load_`), read via `node_loads()`. The measurers live on the
