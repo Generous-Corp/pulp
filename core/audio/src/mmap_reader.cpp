@@ -1,4 +1,5 @@
 #include "aiff_parser.hpp"
+#include "sample_mip_sidecar_internal.hpp"
 #include <pulp/audio/format_registry.hpp>
 #include <pulp/audio/mmap_reader.hpp>
 
@@ -10,6 +11,7 @@
 #include <filesystem>
 #include <istream>
 #include <memory>
+#include <mutex>
 #include <streambuf>
 #include <vector>
 
@@ -59,6 +61,7 @@ class MappedStreamBuf : public std::streambuf {
 // uncompressed AIFF uses its parsed byte layout directly. Other formats fall
 // back to a one-time whole-file decode cached in `fallback`.
 struct MemoryMappedAudioReader::RangedState {
+    std::mutex mutex;
     MappedStreamBuf buf;
     std::shared_ptr<std::istream> stream;
     std::unique_ptr<choc::audio::AudioFileReader> reader;
@@ -72,6 +75,22 @@ struct MemoryMappedAudioReader::RangedState {
 
     RangedState(const char* base, std::size_t size) : buf(base, size) {
         stream = std::make_shared<std::istream>(&buf);
+    }
+};
+
+struct MemoryMappedAudioReader::BackingState {
+    runtime::MemoryMappedFile original;
+    runtime::MemoryMappedFile snapshot;
+    std::filesystem::path directory;
+    std::filesystem::path snapshot_path;
+
+    ~BackingState() {
+        snapshot.close();
+        original.close();
+        if (!directory.empty()) {
+            std::error_code ignored;
+            std::filesystem::remove_all(directory, ignored);
+        }
     }
 };
 
@@ -99,21 +118,54 @@ bool MemoryMappedAudioReader::open(std::string_view path, std::size_t maximum_ma
         return false;
     }
 
-    if (!mmap_.open(path, runtime::MapMode::ReadOnly, maximum_mapped_bytes))
+    auto backing = std::make_unique<BackingState>();
+    if (!backing->original.open(path, runtime::MapMode::ReadOnly, maximum_mapped_bytes))
         return false;
+
+    const auto source_identity = backing->original.opened_file_identity();
+    std::error_code temp_error;
+    const auto temp_parent = std::filesystem::temp_directory_path(temp_error);
+    if (temp_error || !source_identity.valid) {
+        close();
+        return false;
+    }
+    backing->directory = sample_mip_detail::unique_temporary_directory(temp_parent);
+    if (backing->directory.empty()) {
+        close();
+        return false;
+    }
+    backing->snapshot_path = backing->directory / ("source" + extension);
+    const bool copied =
+        backing->original.copy_contents_to_new_file(backing->snapshot_path.string());
+    std::error_code size_error;
+    const auto copied_size = std::filesystem::file_size(backing->snapshot_path, size_error);
+    if (!copied || size_error || copied_size != backing->original.size() ||
+        backing->original.opened_file_identity() != source_identity ||
+        !backing->original.path_refers_to_open_file(path_)) {
+        close();
+        return false;
+    }
+    if (!backing->snapshot.open_no_follow(backing->snapshot_path.string(),
+                                          runtime::MapMode::ReadOnly,
+                                          maximum_mapped_bytes)) {
+        close();
+        return false;
+    }
+    backing_ = std::move(backing);
 
     // Build a ranged decoder over the mapped bytes. WAV delegates requested
     // frames to choc; uncompressed AIFF records the validated PCM byte layout.
     // Other formats fall back to a one-time whole-file decode.
-    if (mmap_.data() != nullptr && mmap_.size() > 0) {
-        ranged_ = std::make_unique<RangedState>(reinterpret_cast<const char*>(mmap_.data()),
-                                                mmap_.size());
+    if (backing_->snapshot.data() != nullptr && backing_->snapshot.size() > 0) {
+        ranged_ = std::make_unique<RangedState>(
+            reinterpret_cast<const char*>(backing_->snapshot.data()), backing_->snapshot.size());
         if (extension == ".wav" || extension == ".wave") {
             choc::audio::AudioFileFormatList formats;
             formats.addFormat<choc::audio::WAVAudioFileFormat<false>>();
             ranged_->reader = formats.createReader(ranged_->stream);
         } else if (extension == ".aif" || extension == ".aiff" || extension == ".aifc") {
-            ranged_->aiff = detail::parse_aiff_layout(*ranged_->stream, mmap_.size(), true);
+            ranged_->aiff =
+                detail::parse_aiff_layout(*ranged_->stream, backing_->snapshot.size(), true);
         }
     }
     if (ranged_ && ranged_->reader) {
@@ -131,7 +183,7 @@ bool MemoryMappedAudioReader::open(std::string_view path, std::size_t maximum_ma
     } else if (ranged_ && ranged_->aiff) {
         info_ = ranged_->aiff->info;
     } else {
-        auto file_info = registered_reader->read_info(path_);
+        auto file_info = registered_reader->read_info(backing_->snapshot_path.string());
         if (!file_info) {
             close();
             return false;
@@ -143,7 +195,7 @@ bool MemoryMappedAudioReader::open(std::string_view path, std::size_t maximum_ma
 
 void MemoryMappedAudioReader::close() {
     ranged_.reset(); // release the reader/stream before unmapping the bytes
-    mmap_.close();
+    backing_.reset();
     info_ = {};
     path_.clear();
 }
@@ -167,6 +219,9 @@ bool MemoryMappedAudioReader::read_frames_impl(float** dest_channels, uint32_t n
                                                bool allow_whole_file_fallback) {
     if (!is_open())
         return false;
+    std::unique_lock<std::mutex> read_lock;
+    if (ranged_)
+        read_lock = std::unique_lock<std::mutex>(ranged_->mutex);
     if (num_channels == 0 || num_frames == 0)
         return true;
     if (dest_channels == nullptr)
@@ -191,7 +246,7 @@ bool MemoryMappedAudioReader::read_frames_impl(float** dest_channels, uint32_t n
     if (supports_ranged_read()) {
         if (ranged_->aiff) {
             const auto& layout = *ranged_->aiff;
-            const auto* sample_data = mmap_.data() + layout.sample_data_offset;
+            const auto* sample_data = backing_->snapshot.data() + layout.sample_data_offset;
             for (uint64_t frame = 0; frame < count; ++frame) {
                 const auto* source_frame =
                     sample_data + static_cast<size_t>(start + frame) * layout.bytes_per_frame;
@@ -238,12 +293,8 @@ bool MemoryMappedAudioReader::read_frames_impl(float** dest_channels, uint32_t n
         return false;
 
     // Fallback: decode the whole file once, cache it, and serve ranges from it.
-    if (!ranged_) {
-        ranged_ = std::make_unique<RangedState>(reinterpret_cast<const char*>(mmap_.data()),
-                                                mmap_.size());
-    }
     if (!ranged_->fallback) {
-        ranged_->fallback = FormatRegistry::instance().read(path_);
+        ranged_->fallback = FormatRegistry::instance().read(backing_->snapshot_path.string());
         if (!ranged_->fallback)
             return false;
     }
@@ -269,7 +320,40 @@ bool MemoryMappedAudioReader::read_frames_impl(float** dest_channels, uint32_t n
 std::optional<AudioFileData> MemoryMappedAudioReader::read_all() {
     if (!is_open())
         return std::nullopt;
-    return FormatRegistry::instance().read(path_);
+    std::unique_lock<std::mutex> read_lock;
+    if (ranged_)
+        read_lock = std::unique_lock<std::mutex>(ranged_->mutex);
+    return FormatRegistry::instance().read(backing_->snapshot_path.string());
+}
+
+bool MemoryMappedAudioReader::is_open() const {
+    return backing_ && backing_->snapshot.is_open();
+}
+
+const uint8_t* MemoryMappedAudioReader::data() const {
+    return is_open() ? backing_->snapshot.data() : nullptr;
+}
+
+size_t MemoryMappedAudioReader::size() const {
+    return is_open() ? backing_->snapshot.size() : 0;
+}
+
+bool MemoryMappedAudioReader::copy_access_policy_to(std::string_view destination) const noexcept {
+    return backing_ && backing_->original.copy_access_policy_to(destination);
+}
+
+runtime::AccessPolicyTarget MemoryMappedAudioReader::prepare_access_policy_target(
+    std::string_view destination) const noexcept {
+    return backing_ ? backing_->original.prepare_access_policy_target(destination)
+                    : runtime::AccessPolicyTarget{};
+}
+
+bool MemoryMappedAudioReader::path_refers_to_open_file(std::string_view path) const noexcept {
+    return backing_ && backing_->original.path_refers_to_open_file(path);
+}
+
+runtime::FileIdentity MemoryMappedAudioReader::opened_file_identity() const noexcept {
+    return backing_ ? backing_->original.opened_file_identity() : runtime::FileIdentity{};
 }
 
 } // namespace pulp::audio

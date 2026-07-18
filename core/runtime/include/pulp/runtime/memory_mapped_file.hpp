@@ -98,6 +98,11 @@ class MemoryMappedFile {
     bool path_refers_to_open_file(std::string_view path) const noexcept;
     FileIdentity opened_file_identity() const noexcept;
 
+    // Copy exactly the bytes captured by the retained source handle into a new
+    // regular file. The destination must not already exist. This avoids
+    // reopening a mutable source pathname while establishing a stable snapshot.
+    bool copy_contents_to_new_file(std::string_view destination) const noexcept;
+
     // No copy
     MemoryMappedFile(const MemoryMappedFile&) = delete;
     MemoryMappedFile& operator=(const MemoryMappedFile&) = delete;
