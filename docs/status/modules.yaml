@@ -21,7 +21,7 @@ modules:
     docs: reference/modules.md#events
 
   - name: audio
-    summary: Multi-platform device I/O (CoreAudio, WASAPI, ALSA, JACK, Web Audio), read WAV/FLAC/MP3/OGG/AIFF/AAC, write WAV/AIFF, streaming writer, surround (5.1/7.1/Atmos), offline processing, system volume
+    summary: Multi-platform device I/O (CoreAudio, WASAPI, ALSA, JACK, Web Audio), portable WAV/FLAC/MP3/OGG/AIFF reads, macOS CoreAudio AAC/ALAC/CAF reads, WAV/AIFF plus optional codec writers, streaming writer, surround (5.1/7.1/Atmos), offline processing, system volume
     status: usable
     dependencies: [runtime]
     docs: reference/modules.md#audio
