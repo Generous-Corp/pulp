@@ -135,6 +135,10 @@ decode scratch bytes = 2 channels * page_frames * 2 workers * 8 jobs/source * si
 `source_capacity` is six (two publication bundles with a base plus at most two
 mip members), and `cache_pages_per_source` is 128 (eight voices times the
 16-page maximum block footprint).
+Those six physical slot/member identities are stable across replacement loads;
+reuse advances their non-zero generations, so the service's stale-token history
+does not grow with the number of files loaded. Source or selection generation
+exhaustion fails closed rather than publishing the reserved zero value.
 Each registered source or mip member receives a shared page budget sized for
 the bounded aggregate demand footprint of eight independently positioned
 voices; voices do not own duplicate caches. Resident sample and resident-mip
