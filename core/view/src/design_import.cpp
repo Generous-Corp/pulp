@@ -1867,10 +1867,20 @@ DesignIR parse_stitch_html(const std::string& html) {
     auto begin = std::sregex_iterator(html.begin(), html.end(), tag_re);
     auto end = std::sregex_iterator();
 
+    // Non-visible elements carry raw code / metadata, not rendered text: a
+    // `<script>` body (e.g. a Stitch `tailwind.config = {...}` block or a Claude
+    // bundler placeholder) or a `<style>` sheet is NOT UI text, and emitting it
+    // as a label paints raw JavaScript/CSS into the imported design. The regex
+    // matches any `<tag>...</tag>`, so filter these element kinds explicitly.
+    static const std::unordered_set<std::string> kNonVisibleTags = {
+        "script", "style", "noscript", "template",
+        "head", "title", "meta", "link", "base"};
+
     for (auto it = begin; it != end; ++it) {
         std::string tag = (*it)[1].str();
         std::string content = (*it)[2].str();
         if (content.empty()) continue;
+        if (kNonVisibleTags.count(tag)) continue;
 
         IRNode child;
         child.type = "text";

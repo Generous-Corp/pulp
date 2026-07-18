@@ -353,6 +353,19 @@ background, padding, border, and radius. Resolving it means extracting
 `apply_v0_jsx_attribute`; treat it as a focused parser change with its own tests,
 not a one-liner.
 
+**Gotcha - the HTML regex fallback (`parse_stitch_html`, shared by the claude
+lane via `parse_claude_html`) must skip non-visible elements.** Its
+`<([a-z][a-z0-9]*)[^>]*>([^<]*)</\1>` regex matches ANY tag, so a `<script>` body
+(a Stitch `tailwind.config = {...}` block, a Claude bundler placeholder) or a
+`<style>` sheet became a visible text LABEL — raw JS/CSS painted into the
+imported UI. The fix filters a `kNonVisibleTags` set
+(script/style/noscript/template/head/title/meta/link/base). When you touch this
+fallback, verify with a real fixture: import
+`test/fixtures/imports/stitch/2025.04/code.html` and confirm the element count
+drops (the `<script>` label is gone) while the visible `<div>` text survives.
+Note this is the LOSSY fallback — a JSON-IR or runtime-DOM claude/stitch input
+never reaches it; it fires only on raw non-JSON HTML.
+
 ### Design contract (`pulp design compile`) — the token/widget allowlist
 
 Before generating or hand-writing a UI, compile the **design contract**: the
