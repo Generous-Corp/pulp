@@ -84,4 +84,14 @@ inline void close_audio_device_after_workgroup_release(
     device.close();
 }
 
+/// Off-RT AU resource teardown. Publish explicit render-context removal and
+/// wait until every auxiliary worker has left the host-owned workgroup before
+/// Processor::release() tears down the render graph.
+inline void clear_audio_workgroup_after_render_resources(
+    AudioWorkgroupClient* client) noexcept {
+    if (!client) return;
+    client->set_audio_workgroup_from_render_context(nullptr);
+    client->wait_for_audio_workgroup_update();
+}
+
 } // namespace pulp::format

@@ -2342,11 +2342,11 @@ TEST_CASE("AU v3 render context observer forwards workgroup changes and removal"
         REQUIRE(processor->audio_workgroup_prepares.load(
                     std::memory_order_relaxed) == 1);
 
-        observer(nullptr);
+        [unit deallocateRenderResources];
         REQUIRE(processor->audio_workgroup.load(std::memory_order_acquire) == nullptr);
         REQUIRE(processor->audio_workgroup_updates.load(std::memory_order_relaxed) == 2);
-        REQUIRE(processor->audio_workgroup_prepares.load(
-                    std::memory_order_relaxed) == 2);
+        REQUIRE(processor->audio_workgroup_waits.load(
+                    std::memory_order_relaxed) == 1);
         [unit release];
     }
     pulp::format::set_host_quirk_policy(std::nullopt);

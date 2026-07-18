@@ -532,7 +532,20 @@ void CoreAudioDevice::switch_to_default_output() {
         workgroup_change_callback_(
             reinterpret_cast<void*>(workgroup_reference_.get()));
     }
-    if (was_running) AudioOutputUnitStart(audio_unit_);
+    if (was_running) {
+        const OSStatus start_status = AudioOutputUnitStart(audio_unit_);
+        if (!update_coreaudio_running_after_restart(start_status, is_running_)) {
+            // The replacement unit never entered its callback lifetime. Drain
+            // auxiliary workers from the workgroup published before start so
+            // public running state and scheduling membership stay coherent.
+            fallback_priority_configured_.store(false, std::memory_order_release);
+            if (workgroup_change_callback_) workgroup_change_callback_(nullptr);
+            callback_ = nullptr;
+            runtime::log_warn(
+                "CoreAudio: default-output switch could not restart ({})",
+                static_cast<int>(start_status));
+        }
+    }
 }
 
 void CoreAudioDevice::set_workgroup_change_callback(

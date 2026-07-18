@@ -344,6 +344,18 @@ TEST_CASE("Device close waits for borrowed workgroup release acknowledgment",
     REQUIRE(client.handle.load(std::memory_order_acquire) == nullptr);
 }
 
+TEST_CASE("AU render-resource teardown drains the borrowed workgroup",
+          "[audio][workgroup][wiring][lifetime]") {
+    WorkgroupClient client;
+    client.set_audio_workgroup(reinterpret_cast<void*>(std::uintptr_t{0x6061}));
+
+    pulp::format::clear_audio_workgroup_after_render_resources(&client);
+
+    REQUIRE(client.handle.load(std::memory_order_acquire) == nullptr);
+    REQUIRE(client.saw_null_during_wait.load(std::memory_order_acquire));
+    REQUIRE(client.wait_calls.load(std::memory_order_relaxed) == 1);
+}
+
 TEST_CASE("Device close redrains a workgroup rebound by an in-flight switch",
           "[audio][workgroup][wiring][lifetime][threads]") {
     ConcurrentSwitchDevice device;

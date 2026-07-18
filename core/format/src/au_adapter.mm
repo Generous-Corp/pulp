@@ -786,6 +786,8 @@ struct ScopedAuV3HostWriting {
 }
 
 - (void)deallocateRenderResources {
+    pulp::format::clear_audio_workgroup_after_render_resources(
+        _bridge.audio_workgroup_client);
     if (_bridge.processor) _bridge.processor->release();
     // Drop per-note expression state so a re-allocation does not route a stale
     // noteId to a voice that no longer exists (mirrors VST3's setActive(false)).

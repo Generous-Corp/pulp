@@ -22,6 +22,15 @@ constexpr bool coreaudio_stop_allows_device_switch(OSStatus status) noexcept {
     return status == noErr;
 }
 
+/// A live-device retarget is running only after the replacement AudioUnit
+/// restart succeeds. The listener thread owns `running` while holding the
+/// device switch mutex.
+constexpr bool update_coreaudio_running_after_restart(
+    OSStatus status, bool& running) noexcept {
+    running = status == noErr;
+    return running;
+}
+
 template <typename ConfigureFn>
 bool configure_coreaudio_fallback_priority_once(
     std::atomic<bool>& configured, ConfigureFn&& configure) noexcept {

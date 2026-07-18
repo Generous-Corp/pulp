@@ -937,18 +937,24 @@ checks whether the Processor also implements the separate
 node-ABI stability). The observer atomically forwards
 `AudioUnitRenderContext::workgroup`, including a null context/workgroup for
 removal. Apple invokes the block on the realtime render thread immediately
-before a changed-context render, so the callback must never allocate, lock, or
-join threads. The renderer's worker pool publishes a generation; each worker
-performs its own leave/join and stays out of dispatched batches until current.
-A failed non-null join leaves that worker's generation stale, so it retries and
-the renderer continues inline. Do not wait for worker acknowledgment in this
-observer: unlike standalone device close/switch, this callback is realtime and
-must remain publication-only.
+before a changed-context render and requires the plug-in to prepare auxiliary
+threads to leave the preceding workgroup and join the new one. The adapter
+therefore publishes a generation and completes the worker pool's
+full-participant acknowledgment barrier before returning. The barrier is
+allocation-free and lock-free; do not replace it with a mutex, condition
+variable, scheduler yield, thread join, or reference-count operation. A failed
+non-null join is acknowledged as a completed leave of the old context and keeps
+the renderer inline for the new publication.
 
 Do not retain the borrowed OS handle in the adapter or call `os_workgroup_join`
 from the observer on behalf of another thread. A SequenceProcessor opts in by
 deriving from `AudioWorkgroupClient`; ordinary processors pay only the cached
 null capability pointer and the observer is a no-op.
+
+`deallocateRenderResources` runs off the realtime path. It publishes explicit
+render-context removal and waits for every auxiliary worker to leave before
+calling `Processor::release()`, so a persistent graph pool cannot remain joined
+to a host-owned workgroup after its render resources are gone.
 
 ### `tailTime` is in **seconds**, not samples
 

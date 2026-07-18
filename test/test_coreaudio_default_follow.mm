@@ -137,6 +137,18 @@ TEST_CASE("CoreAudio failed stop preserves old device and workgroup",
     STATIC_REQUIRE(pulp::audio::mac::coreaudio_stop_allows_device_switch(noErr));
 }
 
+TEST_CASE("CoreAudio restart status controls running state",
+          "[audio][coreaudio][workgroup][lifetime]") {
+    bool running = true;
+    CHECK_FALSE(pulp::audio::mac::update_coreaudio_running_after_restart(
+        kAudio_ParamError, running));
+    CHECK_FALSE(running);
+
+    CHECK(pulp::audio::mac::update_coreaudio_running_after_restart(
+        noErr, running));
+    CHECK(running);
+}
+
 TEST_CASE("CoreAudio fallback priority retries failure and resets per lifetime",
           "[audio][coreaudio][workgroup][rt-priority]") {
     std::atomic<bool> configured{false};
