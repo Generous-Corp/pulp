@@ -11,6 +11,7 @@
 #include <pulp/view/theme_editor.hpp>
 #include <pulp/view/graph_scale.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/continuous_frames.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/signal/frequency_response.hpp>
 
@@ -260,6 +261,178 @@ TEST_CASE("EqCurveView analyzer renders full-height (headless PNG)",
 
     const bool ok = render_to_file(eq, 900, 400, "/tmp/eq-analyzer-fullheight.png", 2.0f);
     REQUIRE(ok);
+}
+
+// ── EqCurveView: analyzer default-on + continuous-frame gating ───────────────
+//
+// The analyzer is analyzer-CAPABLE by default (enabled), so a plugin that binds
+// a spectrum sees it immediately. But a default-on widget with NO data must not
+// draw an overlay nor spin the render loop: analyzer_animating() (and therefore
+// needs_continuous_frames) stays false until real spectrum data is present.
+
+TEST_CASE("EqCurveView is analyzer-enabled by default and gates frames on data",
+          "[view][eq_curve][analyzer]") {
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 400, 300});
+
+    // Default: analyzer-capable, drag-to-zoom active, but idle (no data yet).
+    REQUIRE(eq.analyzer_enabled());
+    REQUIRE(eq.analyzer_scale_draggable());
+    REQUIRE_FALSE(eq.analyzer_animating());
+    REQUIRE_FALSE(needs_continuous_frames(&eq));
+
+    // Binding a spectrum makes it animate (and the widget joins continuous frames).
+    std::vector<float> mags(128, -40.0f);
+    eq.set_spectrum(mags.data(), mags.size());
+    REQUIRE(eq.analyzer_animating());
+    REQUIRE(needs_continuous_frames(&eq));
+
+    // Disabling the analyzer parks it again even with stale data present.
+    eq.set_analyzer_enabled(false);
+    REQUIRE_FALSE(eq.analyzer_enabled());
+    REQUIRE_FALSE(eq.analyzer_animating());
+    REQUIRE_FALSE(needs_continuous_frames(&eq));
+
+    // A disabled analyzer draws no overlay even though smoothed data remains: the
+    // envelope contributes one gradient fill, so the enabled paint records more
+    // gradient commands than the disabled one (bands with no gain here → the
+    // envelope is the only gradient in play).
+    eq.set_bands({{1000.0f, 0.0f, 1.0f, EqCurveView::FilterType::low_pass, true}});
+    eq.set_spectrum(mags.data(), mags.size());
+    eq.set_analyzer_enabled(true);
+    RecordingCanvas on_canvas;
+    eq.paint(on_canvas);
+    eq.set_analyzer_enabled(false);
+    RecordingCanvas off_canvas;
+    eq.paint(off_canvas);
+    REQUIRE(on_canvas.count(DrawCommand::Type::set_fill_gradient_linear) >
+            off_canvas.count(DrawCommand::Type::set_fill_gradient_linear));
+}
+
+// ── EqCurveView: drag the left dB gutter to zoom the analyzer range ───────────
+//
+// A vertical drag in the narrow left gutter (over the dB labels) rescales the
+// analyzer dBFS range: DOWN lowers/expands the floor toward −100 (zoom out), UP
+// raises it toward −40 (zoom in). top_db stays pinned at 0. The range is clamped
+// to top ≤ +20, bottom ≥ −100, span ≥ 20 dB. A band-dot press always wins over
+// the gutter, so band dragging is never hijacked.
+
+TEST_CASE("EqCurveView left-gutter drag zooms the analyzer floor",
+          "[view][eq_curve][analyzer]") {
+    EqCurveView eq;
+    eq.set_sample_rate(48000.0f);
+    eq.set_frequency_range(20.0f, 24000.0f);
+    eq.set_gain_range(-12.0f, 12.0f);
+    eq.set_bounds({0, 0, 900, 400});
+    // A mid-frequency peak: its dot sits at x ≈ 496, well clear of the ~28 px
+    // left gutter, so a gutter press cannot accidentally grab it.
+    eq.set_bands({{1000.0f, 6.0f, 1.0f, EqCurveView::FilterType::peak, true}});
+    const auto before = eq.bands()[0];
+
+    // Default range.
+    REQUIRE_THAT(eq.analyzer_top_db(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(eq.analyzer_bottom_db(), WithinAbs(-60.0f, 0.001f));
+
+    SECTION("drag DOWN lowers the floor (zoom out) without moving the band") {
+        eq.on_mouse_down({10.0f, 200.0f});   // empty press inside the left gutter
+        eq.on_mouse_drag({10.0f, 300.0f});   // +100 px down
+        eq.on_mouse_up({10.0f, 300.0f});
+        // −60 − 100*0.35 = −95.
+        REQUIRE_THAT(eq.analyzer_bottom_db(), WithinAbs(-95.0f, 0.5f));
+        REQUIRE_THAT(eq.analyzer_top_db(), WithinAbs(0.0f, 0.001f));  // top pinned
+        // The band is untouched.
+        REQUIRE_THAT(eq.bands()[0].frequency, WithinAbs(before.frequency, 0.001f));
+        REQUIRE_THAT(eq.bands()[0].gain_db, WithinAbs(before.gain_db, 0.001f));
+    }
+
+    SECTION("drag UP raises the floor (zoom in)") {
+        eq.on_mouse_down({10.0f, 300.0f});
+        eq.on_mouse_drag({10.0f, 200.0f});   // −100 px up
+        eq.on_mouse_up({10.0f, 200.0f});
+        // −60 + 100*0.35 = −25.
+        REQUIRE_THAT(eq.analyzer_bottom_db(), WithinAbs(-25.0f, 0.5f));
+    }
+
+    SECTION("the floor clamps at −100 (zoom out) and keeps the min span (zoom in)") {
+        eq.on_mouse_down({10.0f, 10.0f});
+        eq.on_mouse_drag({10.0f, 5000.0f});  // far past the floor
+        eq.on_mouse_up({10.0f, 5000.0f});
+        REQUIRE_THAT(eq.analyzer_bottom_db(), WithinAbs(-100.0f, 0.001f));
+
+        eq.on_mouse_down({10.0f, 390.0f});
+        eq.on_mouse_drag({10.0f, -5000.0f}); // far above the ceiling
+        eq.on_mouse_up({10.0f, -5000.0f});
+        // top (0) − min span (20) = −20; never inverts / collapses.
+        REQUIRE_THAT(eq.analyzer_bottom_db(), WithinAbs(-20.0f, 0.001f));
+        REQUIRE((eq.analyzer_top_db() - eq.analyzer_bottom_db()) >= 20.0f);
+        REQUIRE(eq.analyzer_top_db() <= 20.0f);
+    }
+
+    SECTION("a dot over the gutter still drags the band, not the scale") {
+        // A 20 Hz band's dot sits at the very left edge (x ≈ 0), inside the
+        // gutter — pressing it must grab the dot, not start a zoom.
+        eq.set_bands({{20.0f, 0.0f, 1.0f, EqCurveView::FilterType::peak, true}});
+        const float hy = eq.gain_scale().to_y(0.0f);  // dot at 0 dB
+        eq.on_mouse_down({2.0f, hy});
+        eq.on_mouse_drag({300.0f, hy - 40.0f});
+        eq.on_mouse_up({300.0f, hy - 40.0f});
+        // The analyzer range is untouched; the band moved instead.
+        REQUIRE_THAT(eq.analyzer_bottom_db(), WithinAbs(-60.0f, 0.001f));
+        REQUIRE(eq.bands()[0].frequency > 20.0f);
+    }
+}
+
+TEST_CASE("EqCurveView analyzer scale-drag can be disabled",
+          "[view][eq_curve][analyzer]") {
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 900, 400});
+    eq.set_analyzer_scale_draggable(false);
+    eq.on_mouse_down({10.0f, 100.0f});
+    eq.on_mouse_drag({10.0f, 300.0f});
+    eq.on_mouse_up({10.0f, 300.0f});
+    // No gutter drag happened → default range intact.
+    REQUIRE_THAT(eq.analyzer_bottom_db(), WithinAbs(-60.0f, 0.001f));
+}
+
+// Headless PNG proof: analyzer on-by-default showing the spectrum, and a
+// zoomed-in state after a simulated left-gutter drag. Opt-in ([.render] + env),
+// writes /tmp/eq-analyzer-default.png and /tmp/eq-analyzer-zoom.png.
+TEST_CASE("EqCurveView analyzer default-on + zoom render (headless PNG)",
+          "[view][eq_curve][analyzer][.render]") {
+    if (std::getenv("PULP_EQ_RENDER_PNG") == nullptr) return;
+
+    auto make_eq = [] {
+        auto eq = std::make_unique<EqCurveView>();
+        eq->set_sample_rate(48000.0f);
+        eq->set_frequency_range(20.0f, 24000.0f);
+        eq->set_gain_range(-12.0f, 12.0f);
+        eq->set_bounds({0, 0, 900, 400});
+        eq->set_bands({
+            {80.0f, 3.0f, 0.7f, EqCurveView::FilterType::low_shelf, true},
+            {240.0f, -4.5f, 1.4f, EqCurveView::FilterType::peak, true},
+            {1000.0f, 6.0f, 2.4f, EqCurveView::FilterType::peak, true},
+            {3200.0f, 2.0f, 1.2f, EqCurveView::FilterType::peak, true},
+            {6400.0f, -3.0f, 1.6f, EqCurveView::FilterType::peak, true},
+            {12000.0f, 4.0f, 0.7f, EqCurveView::FilterType::high_shelf, true},
+        });
+        std::vector<float> mags(1025, -42.0f);
+        for (std::size_t i = 8; i < 48; ++i) mags[i] = -18.0f;
+        eq->set_spectrum(mags.data(), mags.size());
+        return eq;
+    };
+
+    // 1) Analyzer on by default (no set_analyzer_enabled call needed).
+    auto def = make_eq();
+    REQUIRE(def->analyzer_enabled());
+    REQUIRE(render_to_file(*def, 900, 400, "/tmp/eq-analyzer-default.png", 2.0f));
+
+    // 2) Zoomed in: a simulated upward gutter drag raises the floor toward −40.
+    auto zoom = make_eq();
+    zoom->on_mouse_down({12.0f, 320.0f});
+    zoom->on_mouse_drag({12.0f, 260.0f});  // +21 dB toward the floor (zoom in)
+    zoom->on_mouse_up({12.0f, 260.0f});
+    REQUIRE(zoom->analyzer_bottom_db() > -60.0f);
+    REQUIRE(render_to_file(*zoom, 900, 400, "/tmp/eq-analyzer-zoom.png", 2.0f));
 }
 
 // ── EqCurveView: the drawn curve ────────────────────────────────────────────

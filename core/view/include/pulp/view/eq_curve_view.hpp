@@ -134,6 +134,31 @@ public:
     void set_spectrum(const float* magnitudes_db, size_t bin_count);
     void clear_spectrum();
 
+    // Analyzer-capable by DEFAULT (on), so the widget shows a bound spectrum out
+    // of the box. When on, a bound spectrum is drawn and the widget joins the
+    // shared continuous-frame set WHILE data is present; a widget with no spectrum
+    // simply draws nothing (and does not spin frames). When off, no overlay is
+    // drawn even if stale smoothed data remains. A plugin can turn it off.
+    void set_analyzer_enabled(bool on);
+    bool analyzer_enabled() const { return analyzer_enabled_; }
+
+    // True only while the analyzer should drive per-vsync repaints: enabled AND
+    // spectrum data present. `needs_continuous_frames()` consults this, so a
+    // default-on but silent/no-signal editor with NO bound spectrum stays idle
+    // instead of compositing a static frame every tick. Mirrors hover_animating().
+    bool analyzer_animating() const {
+        return analyzer_enabled_ && !spectrum_smoothed_.empty();
+    }
+
+    // Drag the LEFT dB-scale gutter to zoom the analyzer dBFS range, Logic-style
+    // (drag DOWN → lower/expand the floor toward −100 dBFS = zoom OUT; drag UP →
+    // raise the floor toward −40 dBFS = zoom IN). Scoped to a narrow left gutter
+    // over the dB labels so it never conflicts with band-dot dragging (a dot hit
+    // always wins). On by default (active whenever the analyzer is used); a plugin
+    // can disable it. The range is clamped to top ≤ +20, bottom ≥ −100, span ≥ 20.
+    void set_analyzer_scale_draggable(bool on) { analyzer_scale_draggable_ = on; }
+    bool analyzer_scale_draggable() const { return analyzer_scale_draggable_; }
+
     // ── Analyzer dBFS scale ─────────────────────────────────────────────────
     // The spectrum overlay is drawn on its OWN dBFS scale spanning the FULL
     // plotting height, decoupled from the ±gain axis the EQ curve/dots use.
@@ -257,6 +282,17 @@ private:
     float analyzer_top_db_ = 0.0f;
     float analyzer_bottom_db_ = -60.0f;
 
+    // Analyzer state. Enabled (analyzer-capable) by default; the drag-to-zoom
+    // gutter is active whenever the analyzer is used.
+    bool analyzer_enabled_ = true;
+    bool analyzer_scale_draggable_ = true;
+    // Left dB-gutter drag-to-zoom transient state.
+    bool gutter_hover_ = false;        // pointer over the gutter (affordance)
+    bool analyzer_drag_active_ = false;
+    float analyzer_drag_start_y_ = 0.0f;
+    float analyzer_drag_start_top_ = 0.0f;
+    float analyzer_drag_start_bottom_ = 0.0f;
+
     // ── StateStore binding state ────────────────────────────────────────────
     pulp::state::StateStore* store_ = nullptr;
     std::vector<BandParamIds> band_params_;
@@ -274,6 +310,9 @@ private:
     float db_to_y(float db) const;
     float y_to_db(float y) const;
     int hit_test_band(Point pos) const;
+    // True when `pos` falls in the narrow left dB-scale gutter (the drag-to-zoom
+    // zone over the dB labels), within the plotting height.
+    bool point_in_analyzer_gutter(Point pos) const;
 
     // StateStore helpers. store_set brackets the write with the echo guard;
     // store_begin/store_end forward gesture boundaries (no value write).

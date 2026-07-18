@@ -16,6 +16,18 @@ namespace {
 // widget widths; the curve is redrawn as a polyline through them.
 constexpr size_t curve_resolution = 256;
 
+// ── Left dB-gutter drag-to-zoom (analyzer range) ─────────────────────────────
+// Width of the interactive gutter on the LEFT edge, over the dB axis labels.
+// Narrow enough that the plot interior (and the band dots) are never captured.
+constexpr float kAnalyzerGutterWidth = 28.0f;
+// Vertical drag sensitivity: dBFS of floor movement per pixel. ~0.35 sweeps the
+// full −40…−100 band in a comfortable ~170 px pull.
+constexpr float kAnalyzerDragGain = 0.35f;
+// Range clamps enforced during the drag so it can never invert or collapse.
+constexpr float kAnalyzerTopMax = 20.0f;      // top_db ceiling (+20 dBFS)
+constexpr float kAnalyzerBottomMin = -100.0f; // bottom_db floor (−100 dBFS)
+constexpr float kAnalyzerMinSpan = 20.0f;     // minimum visible span (dB)
+
 // Bands whose gain parameter does nothing. A low-pass has no gain to set — its
 // handle rides the 0 dB line and only frequency (and Q) are draggable.
 bool band_has_gain(EqCurveView::FilterType type) {
@@ -196,6 +208,23 @@ void EqCurveView::set_spectrum(const float* magnitudes_db, size_t bin_count) {
 void EqCurveView::clear_spectrum() {
     spectrum_.clear();
     spectrum_smoothed_.clear();
+}
+
+void EqCurveView::set_analyzer_enabled(bool on) {
+    if (analyzer_enabled_ == on) return;
+    analyzer_enabled_ = on;
+    // Do not clear the spectrum here — a caller may toggle the overlay off and
+    // back on without re-feeding. The paint path gates on analyzer_enabled_, and
+    // analyzer_animating() (which needs_continuous_frames consults) reads the
+    // same flag, so a disabled analyzer neither draws nor spins frames.
+    request_repaint();
+}
+
+bool EqCurveView::point_in_analyzer_gutter(Point pos) const {
+    const auto b = local_bounds();
+    const float plot_top = b.y + std::min(content_top_pad_, b.height);
+    return pos.x >= b.x && pos.x <= b.x + kAnalyzerGutterWidth &&
+           pos.y >= plot_top && pos.y <= b.y + b.height;
 }
 
 // ── Analyzer dBFS scale ─────────────────────────────────────────────────────
@@ -382,7 +411,7 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
     // contour instead of a picket fence, then rendered as (d) a soft vertical
     // gradient fill (dense at the top, fading to nothing at 0 dB) beneath a thin
     // brighter top stroke.
-    if (!spectrum_smoothed_.empty() && b.width >= 4.0f) {
+    if (analyzer_enabled_ && !spectrum_smoothed_.empty() && b.width >= 4.0f) {
         const auto columns = static_cast<size_t>(b.width);
         spectrum_db_.resize(columns);
         resample_spectrum_log(spectrum_smoothed_, sample_rate_, freq_axis, spectrum_db_);
@@ -487,6 +516,29 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
         }
     }
 
+    // Left dB-scale drag handle — a subtle vertical grip at the right edge of the
+    // gutter, hinting that the dB scale can be dragged to zoom the analyzer range
+    // (Logic-style). Drawn faint at rest and brighter while the pointer hovers the
+    // gutter or a zoom drag is in flight. Only shown when the analyzer is used and
+    // the gutter drag is enabled; a plugin that disables either gets no handle.
+    if (analyzer_scale_draggable_ && analyzer_enabled_) {
+        const float plot_top = b.y + std::min(content_top_pad_, b.height);
+        const float plot_bottom = b.y + b.height;
+        const float gx = b.x + kAnalyzerGutterWidth - 3.0f;
+        const float gcy = (plot_top + plot_bottom) * 0.5f;
+        const float half = 14.0f;
+        const Color grip = Color::rgba8(0x64, 0xaf, 0xeb);  // analyzer accent
+        const float a = (gutter_hover_ || analyzer_drag_active_) ? 0.55f : 0.20f;
+        canvas.set_stroke_color(with_alpha(grip, a));
+        canvas.set_line_width(2.0f);
+        canvas.set_line_cap(canvas::LineCap::round);
+        canvas.stroke_line(gx, gcy - half, gx, gcy + half);
+        // Two short grip ticks for texture.
+        canvas.set_line_width(1.5f);
+        canvas.stroke_line(gx - 4.0f, gcy - 5.0f, gx + 4.0f, gcy - 5.0f);
+        canvas.stroke_line(gx - 4.0f, gcy + 5.0f, gx + 4.0f, gcy + 5.0f);
+    }
+
     // Band handles — filled in the band's color, white ring, drawn last so they
     // sit above every curve. The active band (dragged, or hovered) grows.
     const int active_band = dragging_band_ >= 0 ? dragging_band_ : hovered_band_;
@@ -572,6 +624,18 @@ void EqCurveView::on_mouse_down(Point pos) {
         return;
     }
     int hit = hit_test_band(pos);
+    // Left dB-gutter drag zooms the analyzer range. A grabbed dot ALWAYS wins
+    // (hit >= 0), so a low-frequency handle sitting over the gutter still drags
+    // the band; only an empty press inside the narrow gutter starts a zoom drag.
+    if (hit < 0 && analyzer_scale_draggable_ && analyzer_enabled_ &&
+        point_in_analyzer_gutter(pos)) {
+        analyzer_drag_active_ = true;
+        analyzer_drag_start_y_ = pos.y;
+        analyzer_drag_start_top_ = analyzer_top_db_;
+        analyzer_drag_start_bottom_ = analyzer_bottom_db_;
+        request_repaint();
+        return;
+    }
     selected_band_ = hit;
     if (hit >= 0) {
         dragging_band_ = hit;
@@ -594,6 +658,21 @@ void EqCurveView::on_mouse_down(Point pos) {
 }
 
 void EqCurveView::on_mouse_drag(Point pos) {
+    // Left dB-gutter zoom drag: rescale the analyzer dBFS range. Dragging DOWN
+    // (dy > 0) lowers/expands the floor toward −100 dBFS (zoom OUT, more range);
+    // dragging UP raises the floor toward −40 dBFS (zoom IN, spectrum fills more).
+    // top_db is pinned at its press value (0 by default). Clamped so the range
+    // can never invert (top ≤ +20), fall past the floor (bottom ≥ −100), or
+    // collapse below the minimum span (≥ 20 dB).
+    if (analyzer_drag_active_) {
+        const float dy = pos.y - analyzer_drag_start_y_;
+        float new_top = std::min(analyzer_drag_start_top_, kAnalyzerTopMax);
+        float new_bottom = analyzer_drag_start_bottom_ - dy * kAnalyzerDragGain;
+        new_bottom = std::clamp(new_bottom, kAnalyzerBottomMin, new_top - kAnalyzerMinSpan);
+        set_analyzer_range(new_top, new_bottom);
+        request_repaint();
+        return;
+    }
     if (dragging_band_ >= 0 && dragging_band_ < static_cast<int>(bands_.size())) {
         auto& band = bands_[static_cast<size_t>(dragging_band_)];
         band.frequency = std::clamp(x_to_freq(pos.x), min_freq_, max_freq_);
@@ -720,12 +799,29 @@ void EqCurveView::on_gesture_event(const GestureEvent& event) {
 
 void EqCurveView::on_hover_move(Point local_pos) {
     if (dragging_band_ < 0) hovered_band_ = hit_test_band(local_pos);
+    // Left dB-gutter affordance: an ns-resize cursor + a brighter grip when the
+    // pointer is over the drag zone AND not over a dot (a dot's own gesture wins).
+    const bool in_gutter = analyzer_scale_draggable_ && analyzer_enabled_ &&
+                           hovered_band_ < 0 && point_in_analyzer_gutter(local_pos);
+    if (in_gutter != gutter_hover_) {
+        gutter_hover_ = in_gutter;
+        request_repaint();
+    }
+    set_cursor(in_gutter ? CursorStyle::vertical_resize : CursorStyle::default_);
 }
 
-void EqCurveView::on_mouse_leave() { hovered_band_ = -1; }
+void EqCurveView::on_mouse_leave() {
+    hovered_band_ = -1;
+    if (gutter_hover_) {
+        gutter_hover_ = false;
+        request_repaint();
+    }
+}
 
 void EqCurveView::on_mouse_up(Point pos) {
     (void)pos;
+    // End any in-flight left-gutter zoom drag (harmless when none is active).
+    analyzer_drag_active_ = false;
     // Direction A: close whatever gesture(s) the drag opened. store_end no-ops on
     // a zero id, so a non-drag release (no open gesture) is harmless.
     store_end(drag_freq_gesture_);
