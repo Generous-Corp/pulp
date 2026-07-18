@@ -564,6 +564,13 @@ public:
         std::function<std::unique_ptr<PluginSlot>(const PluginInfo&)>;
     void set_live_swap_plugin_loader_for_test(PluginLoaderForTest loader);
 
+    // Test seam for the non-zero MIDI-ingress publication sequence. The value
+    // becomes the predecessor consumed by the next inject_midi() call.
+    bool seed_midi_input_sequence_for_test(NodeId midi_input_node,
+                                           std::uint64_t predecessor) noexcept;
+    std::uint64_t midi_input_sequence_for_test(
+        NodeId midi_input_node) const noexcept;
+
     // Prepare-time topology bounds. Hosts that accept generated or user-built
     // graphs can lower these before prepare() so oversized graphs fail before
     // snapshot allocation or plugin prepare.

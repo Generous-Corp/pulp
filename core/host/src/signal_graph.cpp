@@ -31,6 +31,25 @@
 namespace pulp::host {
 namespace {
 
+std::uint64_t next_nonzero_mailbox_sequence(
+    std::atomic<std::uint64_t>& counter) noexcept {
+    auto current = counter.load(std::memory_order_relaxed);
+    for (;;) {
+        const auto next = current == std::numeric_limits<std::uint64_t>::max()
+                              ? std::uint64_t{1}
+                              : current + 1;
+        // The mailbox's single-writer contract means contention is not expected;
+        // CAS keeps the test seam and any accidental observer from losing an
+        // update. Relaxed is sufficient because this atomic carries identity
+        // only; TripleBuffer's release/acquire flag publishes the payload.
+        if (counter.compare_exchange_weak(current, next,
+                                          std::memory_order_relaxed,
+                                          std::memory_order_relaxed)) {
+            return next;
+        }
+    }
+}
+
 bool parameter_allows_modulation(const HostParamInfo& p,
                                  uint32_t param_id,
                                  state::ParamRate required_rate,
@@ -657,8 +676,7 @@ bool SignalGraph::inject_midi(NodeId id,
     }
 
     auto& mailbox = *it->second.midi_input_mailbox;
-    const uint64_t sequence =
-        mailbox.next_sequence.fetch_add(1, std::memory_order_relaxed) + 1;
+    const uint64_t sequence = next_nonzero_mailbox_sequence(mailbox.next_sequence);
     const bool copied_all = mailbox.writer_scratch.set_from_midi(events, sequence);
     mailbox.published.write(mailbox.writer_scratch);
     return copied_all;
@@ -685,11 +703,41 @@ bool SignalGraph::inject_parameter_events(
 
     auto& mailbox = *runtime_it->second.parameter_input_mailbox;
     const std::uint64_t sequence =
-        mailbox.next_sequence.fetch_add(1, std::memory_order_relaxed) + 1;
+        next_nonzero_mailbox_sequence(mailbox.next_sequence);
     const bool copied_all =
         mailbox.writer_scratch.set_from_queue(events, sequence);
     mailbox.published.write(mailbox.writer_scratch);
     return copied_all;
+}
+
+bool SignalGraph::seed_midi_input_sequence_for_test(
+    NodeId id, std::uint64_t predecessor) noexcept {
+    auto read_guard = live_slot_.read();
+    auto* cg = read_guard.get();
+    if (!cg) return false;
+    auto runtime_it = cg->runtime.find(id);
+    const auto shape_it = cg->shapes.find(id);
+    if (runtime_it == cg->runtime.end() || shape_it == cg->shapes.end()
+        || shape_it->second.type != NodeType::MidiInput
+        || !runtime_it->second.midi_input_mailbox) {
+        return false;
+    }
+    runtime_it->second.midi_input_mailbox->next_sequence.store(
+        predecessor, std::memory_order_relaxed);
+    return true;
+}
+
+std::uint64_t SignalGraph::midi_input_sequence_for_test(NodeId id) const noexcept {
+    auto read_guard = live_slot_.read();
+    auto* cg = read_guard.get();
+    if (!cg) return 0;
+    const auto runtime_it = cg->runtime.find(id);
+    if (runtime_it == cg->runtime.end()
+        || !runtime_it->second.midi_input_mailbox) {
+        return 0;
+    }
+    return runtime_it->second.midi_input_mailbox->next_sequence.load(
+        std::memory_order_relaxed);
 }
 
 std::uint64_t SignalGraph::append_parameter_mailbox_events_(
