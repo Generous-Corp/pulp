@@ -165,6 +165,40 @@ Clock-driven note-on rejection increments heritage
 streamed voice increments heritage `rate_automation_rejections`. Those counters
 are distinct from the legacy aggregate-rate counters in `stream_stats()`.
 
+## Control and inspection API
+
+The example exposes typed control-plane results rather than collapsing load,
+prepare, codec, or sidecar failures into booleans. Call these methods while the
+audio callback is stopped unless the method is explicitly an inspection
+snapshot:
+
+| API | Purpose |
+|-----|---------|
+| `set_config(PulpSamplerConfig)` / `config()` | Set or inspect the pre-prepare streaming-memory budget; configuration changes are rejected after prepare |
+| `prepare_result()` | Inspect typed prepare status, exceeded resource limit, and required/configured streaming bytes |
+| `load_sample_file_result(path)` / `last_load_result()` | Load a strict ranged asset and inspect codec capability, sidecar status, channel/rate/frame metadata, preload, memory request, mip count, and selection generation |
+| `has_sample()` / `sample_length()` | Inspect whether a source is published and its saturated integer frame length |
+| `stream_stats()` | Read detailed starvation, decode, admission, memory, and source/page lifecycle counters |
+| `diagnostics()` | Read one coherent prepare/load/preload/envelope/heritage/memory snapshot |
+| `set_heritage_profile(profile)` / `disable_heritage()` | Replace or disable synthetic heritage processing and its latency contract |
+| `heritage_diagnostics()` | Inspect profile identity, clock/rate state, reported latency, failures, and admission counters |
+
+For example, return to the transparent zero-latency sampler path while stopped:
+
+```cpp
+if (processor.disable_heritage() !=
+    pulp::examples::PulpSamplerHeritageStatus::Disabled) {
+    // Inspect processor.heritage_diagnostics() before resuming audio.
+}
+```
+
+`PulpSamplerPrepareStatus`, `PulpSamplerLoadStatus`,
+`PulpSamplerCodecCapability`, `PulpSamplerSidecarStatus`, and
+`PulpSamplerHeritageStatus` all have stable string-name helpers in
+`sampler_api.hpp`. A built `.pulpmip` sidecar does not override runtime source
+admission: PulpSampler still requires one or two channels and a source rate no
+greater than 192 kHz.
+
 ## Synthetic heritage processing
 
 An optional typed profile applies ordered, independently bypassable stages for
