@@ -126,7 +126,7 @@ void WidgetBridge::register_pointer_event_api() {
         }
         auto it = widgets_.find(id);
         if (it != widgets_.end()) {
-            auto* w = it->second;
+            auto* w = it->second.view;
             auto alive = callback_alive_;
             auto* engine = &engine_;
             auto previous_pointer = w->on_pointer_event;
@@ -498,7 +498,7 @@ void WidgetBridge::register_wheel_event_api() {
         }
         auto it = widgets_.find(id);
         if (it != widgets_.end()) {
-            auto* w = it->second;
+            auto* w = it->second.view;
             auto alive = callback_alive_;
             auto* engine = &engine_;
             auto previous_pointer = w->on_pointer_event;
