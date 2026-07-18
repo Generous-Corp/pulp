@@ -486,6 +486,16 @@ harness or `ctest`.
   `engine [--input <wav>] --character <c>` (validate the REAL stretch engine, reference-free
   on a dry input), `engine-baseline` (regression gate: did an engine change make it worse?),
   `corpus list|add` (versioned, license-guarded corpus).
+- **`corpus.seed()`** ships FIVE synthetic families, not just the two stretch-oriented ones:
+  `synthetic_drumbreak` / `synthetic_tonalpad` (time-stretch / tonal) plus three oscillator
+  families (`family: "oscillator"`, `material_class: "synth"`) built from `osc_fixtures.py`'s
+  corpus-render helpers (`render_static_shapes`, `render_sync_sweep`, `render_tzfm_grid`) —
+  `synthetic_osc_static_shapes` (sine/saw/square/triangle at a few pitches), `synthetic_osc_sync_sweep`
+  (`hard_synced_saw` swept across master frequencies), `synthetic_osc_tzfm_grid` (`tzfm_sine` over a
+  mod-rate/index grid). They gate on the SAME `regression_net` ratchet as any other family — no
+  bespoke oscillator ratchet — typically via the `added-hf` axis (aliasing reads as added HF energy)
+  and `dsp.null_residual_db`'s bit-identical clamp (`-160.0`) for the determinism check. See
+  `tests/test_corpus_osc.py`.
 - Aligns a candidate to a reference (onset-map + local cross-correlation), runs the
   detectors (`transient_sharpness`, `spectral_centroid`, `hf_fizz`, `spectral_flux`, `hnr` —
   tonal noise/roughness via autocorrelation HNR; plus the standalone `stereo_width` for
