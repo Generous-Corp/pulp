@@ -444,6 +444,29 @@ struct PulpSamplerTestAccess {
         return processor.streaming_->service_.cache_stats().source_count;
     }
 
+    static audio::SampleStreamCacheServiceStats
+    stream_cache_stats(const PulpSamplerProcessor& processor) {
+        return processor.streaming_->service_.cache_stats();
+    }
+
+    static std::size_t stream_source_identity_capacity() noexcept {
+        return SamplerStreamingRuntime::kSourceCapacity;
+    }
+
+    static std::optional<audio::SampleStreamSourceToken>
+    take_stream_source_token(PulpSamplerProcessor& processor,
+                             std::size_t identity_index) noexcept {
+        return processor.streaming_->take_source_token(identity_index);
+    }
+
+    static void set_next_stream_source_generation(
+        PulpSamplerProcessor& processor,
+        std::size_t identity_index,
+        std::uint64_t generation) noexcept {
+        if (identity_index < processor.streaming_->next_source_generations_.size())
+            processor.streaming_->next_source_generations_[identity_index] = generation;
+    }
+
     static bool service_contains_source(const PulpSamplerProcessor& processor,
                                         audio::SampleStreamSourceToken source) {
         return processor.streaming_->service_.cache_service().contains_source(source);

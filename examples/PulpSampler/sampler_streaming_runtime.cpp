@@ -87,6 +87,7 @@ SamplerStreamingRuntime::prepare_checked(float host_sample_rate,
     reverse_prewarm_timeout_for_test_ = std::chrono::milliseconds{0};
 #endif
     unpublished_rollbacks_.fill({});
+    next_source_generations_.fill(1);
     published_source_.write({});
     file_request_result_ = {};
 
@@ -104,6 +105,7 @@ SamplerStreamingRuntime::prepare_checked(float host_sample_rate,
         .cache =
             {
                 .scheduler_capacity = kCommandCapacity,
+                .source_identity_capacity = kSourceCapacity,
                 .page_memory_budget_bytes = 0,
                 .memory_governor = memory_governor_.handle(),
             },
@@ -188,6 +190,7 @@ void SamplerStreamingRuntime::release() noexcept {
     decode_failure_events_.store(service_.decode_telemetry().decode_errors,
                                  std::memory_order_relaxed);
     unpublished_rollbacks_.fill({});
+    next_source_generations_.fill(0);
 #if defined(PULP_SAMPLER_TEST_HOOKS)
     unpublished_rollback_count_for_test_.store(0, std::memory_order_relaxed);
 #endif
@@ -207,6 +210,23 @@ void SamplerStreamingRuntime::release() noexcept {
         file_request_prepared_.reset();
     }
     (void)memory_governor_.release();
+}
+
+std::optional<audio::SampleStreamSourceToken>
+SamplerStreamingRuntime::take_source_token(std::size_t identity_index) noexcept {
+    if (identity_index >= next_source_generations_.size())
+        return std::nullopt;
+    auto& next_generation = next_source_generations_[identity_index];
+    if (next_generation == 0)
+        return std::nullopt;
+    const audio::SampleStreamSourceToken token{
+        static_cast<std::uint64_t>(identity_index) + 1,
+        next_generation,
+    };
+    next_generation = next_generation == std::numeric_limits<std::uint64_t>::max()
+                          ? 0
+                          : next_generation + 1;
+    return token;
 }
 
 bool SamplerStreamingRuntime::republish_resident(const SamplerPublishedSource& retained) noexcept {

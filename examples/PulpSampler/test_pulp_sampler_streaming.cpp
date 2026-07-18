@@ -839,3 +839,57 @@ TEST_CASE("PulpSampler shutdown rejects an in-flight prewarm admission", "[sampl
     REQUIRE(released_memory.current_page_bytes == 0);
     REQUIRE(released_memory.current_total_bytes == 0);
 }
+
+TEST_CASE("PulpSampler reuses bounded stream identities without ABA",
+          "[sampler][stream][generation][capacity]") {
+    TempSamplerWav wav("stream_identity_churn", 24000, 0.5f);
+    SamplerFixture fixture;
+    SamplerProcessBlock block;
+    std::set<std::pair<std::uint64_t, std::uint64_t>> observed_tokens;
+    std::set<std::uint64_t> observed_ids;
+
+    constexpr std::size_t churn_count = 64;
+    for (std::size_t iteration = 0; iteration < churn_count; ++iteration) {
+        REQUIRE(fixture.proc->load_sample_file(wav.path));
+        const auto token =
+            PulpSamplerTestAccess::published_stream_source(*fixture.proc);
+        REQUIRE(token.source_id != 0);
+        REQUIRE(token.source_id <=
+                PulpSamplerTestAccess::stream_source_identity_capacity());
+        REQUIRE(token.source_generation != 0);
+        REQUIRE(observed_tokens.emplace(token.source_id,
+                                        token.source_generation).second);
+        observed_ids.insert(token.source_id);
+
+        block.run(*fixture.proc);
+        REQUIRE(wait_for_condition([&] {
+            return PulpSamplerTestAccess::physical_stream_source_count(
+                       *fixture.proc) == 1;
+        }));
+    }
+
+    REQUIRE(observed_ids.size() == 2);
+    const auto cache = PulpSamplerTestAccess::stream_cache_stats(*fixture.proc);
+    REQUIRE(cache.source_identity_count == observed_ids.size());
+    REQUIRE(cache.source_identity_capacity ==
+            PulpSamplerTestAccess::stream_source_identity_capacity());
+    REQUIRE(cache.source_identity_capacity_rejections == 0);
+}
+
+TEST_CASE("PulpSampler stream identity generation wrap fails closed",
+          "[sampler][stream][generation][capacity][overflow]") {
+    SamplerFixture fixture;
+    constexpr std::size_t identity_index = 0;
+    constexpr auto maximum_generation =
+        std::numeric_limits<std::uint64_t>::max();
+    PulpSamplerTestAccess::set_next_stream_source_generation(
+        *fixture.proc, identity_index, maximum_generation);
+
+    const auto final = PulpSamplerTestAccess::take_stream_source_token(
+        *fixture.proc, identity_index);
+    REQUIRE(final.has_value());
+    REQUIRE(final->source_id == identity_index + 1);
+    REQUIRE(final->source_generation == maximum_generation);
+    REQUIRE_FALSE(PulpSamplerTestAccess::take_stream_source_token(
+        *fixture.proc, identity_index).has_value());
+}

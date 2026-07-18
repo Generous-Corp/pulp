@@ -378,6 +378,9 @@ class SamplerStreamingRuntime {
     audio::SampleStreamAsyncService<> service_;
     CommandInbox commands_;
     std::array<std::unique_ptr<StreamedSlot>, kBundleSlotCount> slots_{};
+    // Slot/member identities are stable and bounded. Reuse advances only the
+    // generation so stale tokens can never alias a replacement source.
+    std::array<std::uint64_t, kSourceCapacity> next_source_generations_{};
     std::array<audio::SampleStreamSourceToken, kSourceCapacity> unpublished_rollbacks_{};
     std::thread service_thread_;
     std::atomic<bool> service_running_{false};
@@ -411,7 +414,6 @@ class SamplerStreamingRuntime {
     std::uint32_t maximum_host_block_frames_ = 512;
     std::uint64_t page_frames_ = kDefaultPageFrames;
     std::uint64_t selection_generation_ = 0;
-    std::uint64_t next_source_id_ = 1;
     std::uint64_t next_asset_id_ = 1;
     std::mutex source_load_mutex_;
     std::mutex file_request_mutex_;
@@ -434,6 +436,9 @@ class SamplerStreamingRuntime {
     dispatch_made_owner_progress(const audio::SampleStreamAsyncDispatchResult& dispatched) noexcept;
 
     void process_file_request() noexcept;
+
+    std::optional<audio::SampleStreamSourceToken>
+    take_source_token(std::size_t identity_index) noexcept;
 
     PulpSamplerLoadResult submit_staged_file(StagedStreamedFile staged);
 

@@ -390,6 +390,49 @@ TEST_CASE("Sample stream cache keeps retiring sources alive through the audio wa
     REQUIRE(service.add_source(replacement, reader).added());
 }
 
+TEST_CASE("Sample stream cache bounds source identity history under churn",
+          "[audio][sampler][stream-service][generation][capacity]") {
+    SampleStreamCacheService invalid;
+    REQUIRE_FALSE(invalid.prepare({.scheduler_capacity = 4,
+                                   .source_identity_capacity = 0,
+                                   .page_memory_budget_bytes = 32}));
+
+    SampleStreamCacheService service;
+    REQUIRE(service.prepare({.scheduler_capacity = 4,
+                             .source_identity_capacity = 2,
+                             .page_memory_budget_bytes = 32}));
+    auto reader = [](std::uint64_t, pulp::audio::BufferView<float>,
+                     std::uint64_t frames) { return frames; };
+
+    constexpr std::uint64_t churn_count = 10000;
+    for (std::uint64_t generation = 1; generation <= churn_count; ++generation) {
+        const auto added = service.add_source(source_config(11, generation), reader);
+        REQUIRE(added.added());
+        REQUIRE(service.discard_unpublished_source(added.view.token));
+    }
+    REQUIRE(service.stats().source_count == 0);
+    REQUIRE(service.stats().source_identity_count == 1);
+    REQUIRE(service.stats().source_identity_capacity == 2);
+
+    const auto second = service.add_source(source_config(12, 1), reader);
+    REQUIRE(second.added());
+    REQUIRE(service.discard_unpublished_source(second.view.token));
+    REQUIRE(service.stats().source_identity_count == 2);
+
+    REQUIRE(service.add_source(source_config(13, 1), reader).status ==
+            SampleStreamSourceAddStatus::SourceIdentityCapacityExceeded);
+    REQUIRE(service.stats().source_identity_capacity_rejections == 1);
+    REQUIRE(service.stats().reserved_page_bytes == 0);
+
+    REQUIRE(service.add_source(source_config(11, churn_count), reader).status ==
+            SampleStreamSourceAddStatus::StaleGeneration);
+    const auto replacement =
+        service.add_source(source_config(11, churn_count + 1), reader);
+    REQUIRE(replacement.added());
+    REQUIRE(service.discard_unpublished_source(replacement.view.token));
+    REQUIRE(service.stats().source_identity_count == 2);
+}
+
 TEST_CASE("Sample stream cache retains demand while every page slot is busy",
           "[audio][sampler][stream-service][pressure]") {
     SampleStreamCacheService service;

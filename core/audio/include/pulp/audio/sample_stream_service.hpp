@@ -27,6 +27,10 @@ struct SampleStreamRequesterToken {
 
 struct SampleStreamCacheServiceConfig {
     std::size_t scheduler_capacity = 0;
+    /// Maximum number of distinct source IDs whose highest generation is
+    /// retained for ABA rejection. Once full, new IDs fail closed; an existing
+    /// ID may continue with a strictly newer non-zero generation.
+    std::size_t source_identity_capacity = 1024;
     /// Maximum number of independently leased Filling pages for one source.
     std::uint32_t maximum_async_reservations_per_source = 1;
     /// Page-only cap used when memory_governor is empty. Ignored in shared
@@ -222,6 +226,7 @@ enum class SampleStreamSourceAddStatus : std::uint8_t {
     InvalidConfig,
     DuplicateSource,
     StaleGeneration,
+    SourceIdentityCapacityExceeded,
     BudgetExceeded,
     AllocationFailed,
 };
@@ -295,6 +300,9 @@ struct SampleStreamCacheServiceStats {
     SampleMemoryGovernorStats memory{};
     std::uint64_t reserved_page_bytes = 0;
     std::uint64_t source_count = 0;
+    std::uint64_t source_identity_count = 0;
+    std::uint64_t source_identity_capacity = 0;
+    std::uint64_t source_identity_capacity_rejections = 0;
     std::uint64_t sources_retire_scheduled = 0;
     std::uint64_t sources_collected = 0;
     std::uint64_t decode_calls = 0;
@@ -491,6 +499,7 @@ private:
     std::uint64_t next_page_retirement_epoch_ = 1;
     std::uint64_t next_registration_epoch_ = 1;
     std::uint64_t next_reservation_serial_ = 1;
+    std::size_t source_identity_capacity_ = 0;
     std::uint32_t maximum_async_reservations_per_source_ = 1;
     bool prepared_ = false;
     SampleStreamCacheServiceStats stats_{};

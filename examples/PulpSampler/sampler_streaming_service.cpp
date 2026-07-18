@@ -349,9 +349,11 @@ SamplerStreamingRuntime::stage_streamed_file(std::string_view path) {
 PulpSamplerLoadStatus
 SamplerStreamingRuntime::publish_streamed_file(PreparedStreamedFile& prepared) {
     StreamedSlot* slot = nullptr;
-    for (auto& candidate : slots_) {
-        if (candidate && !candidate->occupied) {
-            slot = candidate.get();
+    std::size_t slot_index = slots_.size();
+    for (std::size_t index = 0; index < slots_.size(); ++index) {
+        if (slots_[index] && !slots_[index]->occupied) {
+            slot = slots_[index].get();
+            slot_index = index;
             break;
         }
     }
@@ -427,10 +429,15 @@ SamplerStreamingRuntime::publish_streamed_file(PreparedStreamedFile& prepared) {
                 return reader(start, destination, frames, stop_token);
             };
 #endif
-            const audio::SampleStreamSourceToken source{next_source_id_++, 1};
+            const auto source = take_source_token(
+                slot_index * kMaximumBundleMembers + member);
+            if (!source) {
+                discard_unpublished_slot(*slot);
+                return PulpSamplerLoadStatus::SourceRegistrationFailed;
+            }
             const auto added = service_.add_source(
                 {
-                    .token = source,
+                    .token = *source,
                     .channels = files[member].channels,
                     .total_frames = files[member].total_frames,
                     .page_frames = page_frames_,
@@ -442,7 +449,7 @@ SamplerStreamingRuntime::publish_streamed_file(PreparedStreamedFile& prepared) {
                 return PulpSamplerLoadStatus::SourceRegistrationFailed;
             }
             auto& owned = slot->members[member];
-            owned.source = source;
+            owned.source = *source;
             owned.present = true;
             stream_views[member] = added.view;
         }
