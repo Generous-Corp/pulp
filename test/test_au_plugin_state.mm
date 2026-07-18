@@ -7,6 +7,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/au_v2_adapter.hpp>
 #include <pulp/format/au_v2_instrument.hpp>
+#include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/host_type.hpp>
 #include <pulp/format/processor.hpp>
@@ -18,6 +19,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <cmath>
@@ -40,7 +42,8 @@ int g_pending_au_tail_samples = 0;
 // paths.
 bool g_au_mpe_declare = true;
 
-class TestAUEffectProcessor : public pulp::format::Processor {
+class TestAUEffectProcessor : public pulp::format::Processor,
+                              public pulp::format::AudioWorkgroupClient {
 public:
     TestAUEffectProcessor() { g_last_effect_processor = this; }
 
@@ -120,6 +123,15 @@ public:
         return true;
     }
 
+    void set_audio_workgroup(void* value) noexcept override {
+        audio_workgroup.store(value, std::memory_order_release);
+        audio_workgroup_updates.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void wait_for_audio_workgroup_update() noexcept override {
+        audio_workgroup_waits.fetch_add(1, std::memory_order_relaxed);
+    }
+
     std::string plugin_state;
     int process_count = 0;
     int process_buffers_count = 0;
@@ -135,6 +147,9 @@ public:
     std::size_t last_process_buffers_sidechain_channels = 0;
     float last_process_buffers_sidechain_first_sample = 0.0f;
     std::vector<pulp::state::ParameterEvent> last_param_events;
+    std::atomic<void*> audio_workgroup{nullptr};
+    std::atomic<int> audio_workgroup_updates{0};
+    std::atomic<int> audio_workgroup_waits{0};
 };
 
 class TestAUInstrumentProcessor : public pulp::format::Processor {
@@ -1772,6 +1787,44 @@ TEST_CASE("AU v3 synthesizes a Bypass param when the plugin declares none (P3b)"
 // audit row for an override.
 // ─────────────────────────────────────────────────────────────────────────
 
+TEST_CASE("AU v3 render context observer forwards workgroup changes and removal",
+          "[au][auv3][workgroup][rt-safety]") {
+    pulp::format::set_host_quirk_policy(pulp::format::kQuirkFilterOff);
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstE';
+        desc.componentManufacturer = 'Plup';
+
+        ScopedFactoryRegistration registration(create_effect_processor);
+        NSError* err = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&err];
+        REQUIRE(unit != nil);
+        REQUIRE(err == nil);
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+
+        AURenderContextObserver observer = unit.renderContextObserver;
+        REQUIRE(observer != nil);
+
+        AudioUnitRenderContext context{};
+        context.workgroup = reinterpret_cast<os_workgroup_t>(std::uintptr_t{0x7070});
+        observer(&context);
+        REQUIRE(processor->audio_workgroup.load(std::memory_order_acquire) ==
+                reinterpret_cast<void*>(context.workgroup));
+        REQUIRE(processor->audio_workgroup_updates.load(std::memory_order_relaxed) == 1);
+
+        observer(nullptr);
+        REQUIRE(processor->audio_workgroup.load(std::memory_order_acquire) == nullptr);
+        REQUIRE(processor->audio_workgroup_updates.load(std::memory_order_relaxed) == 2);
+        [unit release];
+    }
+    pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
 TEST_CASE("AU v3 per-method audit invariants",
           "[au][auv3][audit][item-3.1]") {
     // Pin the test processor's own 1-parameter tree — disable bypass
@@ -1800,6 +1853,7 @@ TEST_CASE("AU v3 per-method audit invariants",
         // what hosts assume about Pulp plugins at scan time.
         REQUIRE([unit supportsUserPresets] == NO);
         REQUIRE([unit canProcessInPlace] == YES);
+        REQUIRE(unit.renderContextObserver != nil);
 
         // Bus topology — effect processor declares 1 input bus + 1 output
         // bus, no sidechain. The adapter must mirror that 1:1 so the host

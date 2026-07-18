@@ -124,6 +124,7 @@ void CoreAudioDevice::query_callback_workgroup() {
 }
 
 bool CoreAudioDevice::open(const DeviceConfig& config) {
+    workgroup_changes_quiesced_ = false;
     config_ = config;
     // AUHAL bus 0 is output, bus 1 is input. An input-only open (input channels
     // requested, output channels zero) must disable output IO and drive the unit
@@ -486,6 +487,17 @@ void CoreAudioDevice::switch_to_default_output() {
 
     const bool was_running = is_running_;
     if (was_running) AudioOutputUnitStop(audio_unit_);
+
+    // The old device owns its callback workgroup. Stop rendering, make every
+    // auxiliary worker leave it, and wait for that acknowledgment before
+    // CurrentDevice can invalidate the borrowed handle.
+    if (workgroup_change_callback_) workgroup_change_callback_(nullptr);
+    wg_join_.leave();
+    wg_joined_.store(false, std::memory_order_release);
+#if defined(__APPLE__)
+    workgroup_ = nullptr;
+#endif
+
     OSStatus st = AudioUnitSetProperty(audio_unit_,
         kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
         &new_default, sizeof(new_default));
@@ -497,7 +509,26 @@ void CoreAudioDevice::switch_to_default_output() {
         runtime::log_warn("CoreAudio: could not follow to new default output ({})",
             static_cast<int>(st));
     }
+
+    // Re-query even on a failed switch: device_id_ still names the old device,
+    // whose workgroup was deliberately removed above. Arm both the callback
+    // thread and auxiliary clients before rendering resumes.
+    query_callback_workgroup();
+#if defined(__APPLE__)
+    wg_join_.set_workgroup(workgroup_);
+#endif
+    if (workgroup_change_callback_) {
+        workgroup_change_callback_(reinterpret_cast<void*>(workgroup_));
+    }
     if (was_running) AudioOutputUnitStart(audio_unit_);
+}
+
+void CoreAudioDevice::set_workgroup_change_callback(
+    WorkgroupChangeCallback callback) {
+    std::lock_guard<std::mutex> lock(switch_mutex_);
+    if (!workgroup_changes_quiesced_) {
+        workgroup_change_callback_ = std::move(callback);
+    }
 }
 
 OSStatus CoreAudioDevice::default_output_changed_listener(
@@ -506,9 +537,11 @@ OSStatus CoreAudioDevice::default_output_changed_listener(
     return noErr;
 }
 
-void CoreAudioDevice::close() {
+void CoreAudioDevice::quiesce_workgroup_changes() {
     // Stop new default-change callbacks from firing, then take switch_mutex_ so any
-    // in-flight switch_to_default_output() finishes before we dispose the unit.
+    // in-flight switch_to_default_output() finishes. That switch may have rebound
+    // a replacement workgroup after an earlier external drain, so publish null
+    // once more while holding the serialization boundary before close can proceed.
     if (default_output_listener_installed_) {
         AudioObjectPropertyAddress def_prop{};
         def_prop.mSelector = kAudioHardwarePropertyDefaultOutputDevice;
@@ -518,6 +551,16 @@ void CoreAudioDevice::close() {
             kAudioObjectSystemObject, &def_prop, default_output_changed_listener, this);
         default_output_listener_installed_ = false;
     }
+    std::lock_guard<std::mutex> switch_lock(switch_mutex_);
+    workgroup_changes_quiesced_ = true;
+    if (workgroup_change_callback_) workgroup_change_callback_(nullptr);
+    workgroup_change_callback_ = nullptr;
+}
+
+void CoreAudioDevice::close() {
+    // Direct device users receive the same borrowed-handle guarantee as the
+    // standalone helper. This is idempotent when the helper already quiesced it.
+    quiesce_workgroup_changes();
     std::lock_guard<std::mutex> switch_lock(switch_mutex_);
 
     // Tear the callback path down first. AudioUnitUninitialize blocks

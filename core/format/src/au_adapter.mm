@@ -30,6 +30,7 @@
 //  │ setShouldBypassEffect:                   │ void      │ main + audio │ NO (RT-safe) │
 //  │ allocateRenderResourcesAndReturnError:   │ BOOL      │ main         │ YES (init)   │
 //  │ deallocateRenderResources                │ void      │ main         │ YES (release)│
+//  │ renderContextObserver                    │ block     │ AUDIO        │ NO (body)    │
 //  │ internalRenderBlock                      │ block     │ main         │ YES (block)  │
 //  │   └─ render block body                   │ OSStatus  │ AUDIO        │ NO           │
 //  │ fullState                                │ NSDict    │ main         │ YES (serdes) │
@@ -55,6 +56,7 @@
 #import <CoreAudioKit/CoreAudioKit.h>
 #import <mach/mach_time.h>
 #include <pulp/events/plugin_main_thread.hpp>
+#include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/plugin_state_io.hpp>
@@ -103,6 +105,7 @@ struct AUBridge {
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
     std::unique_ptr<Processor> processor;
+    AudioWorkgroupClient* audio_workgroup_client = nullptr;
     double sample_rate = 48000.0;
     AUAudioFrameCount max_frames = 512;
     int input_channels = 0;
@@ -349,6 +352,8 @@ struct ScopedAuV3HostWriting {
     }
     _bridge.processor->set_state_store(&_bridge.store);
     _bridge.processor->define_parameters(_bridge.store);
+    _bridge.audio_workgroup_client =
+        dynamic_cast<pulp::format::AudioWorkgroupClient*>(_bridge.processor.get());
 
     // Resolve host accommodations once via the runtime policy
     // (PULP_HOST_QUIRKS env / set_host_quirk_policy API).
@@ -485,6 +490,24 @@ struct ScopedAuV3HostWriting {
 
 - (BOOL)supportsUserPresets { return NO; }
 - (BOOL)canProcessInPlace { return YES; }
+
+- (AURenderContextObserver)renderContextObserver {
+    auto* bridge = &_bridge;
+    AURenderContextObserver observer = ^(const AudioUnitRenderContext *context) {
+        // The OS calls this on the realtime render thread immediately before a
+        // render whose workgroup changed. Publication is atomic; auxiliary
+        // workers perform their own leave/join before taking another batch.
+        if (bridge->audio_workgroup_client) {
+            bridge->audio_workgroup_client->set_audio_workgroup(
+                context ? reinterpret_cast<void*>(context->workgroup) : nullptr);
+        }
+    };
+#if __has_feature(objc_arc)
+    return [observer copy];
+#else
+    return [[observer copy] autorelease];
+#endif
+}
 
 - (AUParameterTree *)parameterTree {
     // Built once and retained: the host observes THESE AUParameter objects, so a

@@ -1,4 +1,5 @@
 #include <pulp/format/standalone.hpp>
+#include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/detail/delayed_action.hpp>
 #include <pulp/format/detail/screenshot_capture.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -479,6 +480,13 @@ bool StandaloneApp::start() {
     if (!audio_device_->open(audio_config)) {
         runtime::log_error("Standalone: failed to open audio device");
         return false;
+    }
+
+    // CoreAudio exposes its IO-thread workgroup only after open(). An embedded
+    // parallel renderer (notably SequenceProcessor) receives it before prepare
+    // starts auxiliary workers, without widening Processor's node ABI.
+    if (auto* client = dynamic_cast<AudioWorkgroupClient*>(processor_.get())) {
+        bind_audio_device_workgroup(*client, audio_device_.get());
     }
 
     // Only remember a CONCRETE device id when the user explicitly pinned one. For
@@ -1012,7 +1020,10 @@ void StandaloneApp::stop_audio_keep_processor() {
     }
     if (audio_device_) {
         audio_device_->stop();
-        audio_device_->close();
+        auto* client = processor_
+            ? dynamic_cast<AudioWorkgroupClient*>(processor_.get())
+            : nullptr;
+        close_audio_device_after_workgroup_release(client, *audio_device_);
         audio_device_.reset();
     }
 }

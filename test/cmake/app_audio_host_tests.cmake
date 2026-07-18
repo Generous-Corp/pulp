@@ -101,7 +101,7 @@ pulp_add_test_suite(pulp-test-workgroup LIBRARIES pulp::audio)
 # AudioWorkgroup ↔ AudioDevice wiring.
 pulp_add_test_suite(pulp-test-audio-workgroup-wiring
     SOURCES test_audio_workgroup_wiring.cpp
-    LIBRARIES pulp::audio)
+    LIBRARIES pulp::audio pulp::format)
 
 # CoreAudio follow-default output-device live switch (macOS only).
 if(APPLE AND NOT PULP_IOS)
