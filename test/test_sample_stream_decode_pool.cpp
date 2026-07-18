@@ -30,6 +30,8 @@ namespace {
 
 class ReaderGate {
 public:
+    ~ReaderGate() { allow(); }
+
     std::uint64_t read(std::uint64_t start,
                        pulp::audio::BufferView<float> destination,
                        std::uint64_t frames) {
@@ -49,9 +51,10 @@ public:
         return frames;
     }
 
-    void wait_until_entered() {
+    bool wait_until_entered(
+        std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
         std::unique_lock lock(mutex_);
-        changed_.wait(lock, [&] { return entered_; });
+        return changed_.wait_for(lock, timeout, [&] { return entered_; });
     }
 
     void allow() {
@@ -77,6 +80,8 @@ private:
 
 class ConcurrencyGate {
 public:
+    ~ConcurrencyGate() { allow(); }
+
     std::uint64_t read(std::uint64_t start,
                        pulp::audio::BufferView<float> destination,
                        std::uint64_t frames) {
@@ -95,9 +100,12 @@ public:
         return frames;
     }
 
-    void wait_for_entries(std::uint32_t count) {
+    bool wait_for_entries(
+        std::uint32_t count,
+        std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
         std::unique_lock lock(mutex_);
-        changed_.wait(lock, [&] { return entered_ >= count; });
+        return changed_.wait_for(lock, timeout,
+                                 [&] { return entered_ >= count; });
     }
 
     void allow() {
@@ -157,7 +165,7 @@ TEST_CASE("Sample stream decode pool bounds queued work behind an active reader"
     REQUIRE(pool.submit({.source = {1, 1},
                          .reservation_serial = 10,
                          .frame_count = 4}) == SampleStreamDecodeSubmitStatus::Queued);
-    gate.wait_until_entered();
+    REQUIRE(gate.wait_until_entered());
     REQUIRE(pool.submit({.source = {1, 1},
                          .reservation_serial = 11,
                          .frame_count = 4}) ==
@@ -245,7 +253,7 @@ TEST_CASE("Sample stream decode pool bounds cross-source concurrency by workers"
     REQUIRE(pool.submit({.source = {51, 1},
                          .reservation_serial = 1,
                          .frame_count = 4}) == SampleStreamDecodeSubmitStatus::Queued);
-    gate.wait_for_entries(2);
+    REQUIRE(gate.wait_for_entries(2));
     REQUIRE(pool.submit({.source = {52, 1},
                          .reservation_serial = 1,
                          .frame_count = 4}) == SampleStreamDecodeSubmitStatus::Queued);
@@ -331,7 +339,7 @@ TEST_CASE("Sample stream decode pool joins a blocked legacy reader before teardo
     REQUIRE(pool.submit({.source = {20, 1},
                          .reservation_serial = 1,
                          .frame_count = 4}) == SampleStreamDecodeSubmitStatus::Queued);
-    gate.wait_until_entered();
+    REQUIRE(gate.wait_until_entered());
 
     std::latch teardown_started(1);
     std::atomic<bool> teardown_returned{false};
@@ -385,7 +393,8 @@ TEST_CASE("Sample stream decode pool requests cooperative reader stop",
                          .frame_count = 4}) == SampleStreamDecodeSubmitStatus::Queued);
     {
         std::unique_lock lock(mutex);
-        changed.wait(lock, [&] { return entered; });
+        REQUIRE(changed.wait_for(lock, std::chrono::seconds(2),
+                                 [&] { return entered; }));
     }
     pool.release();
     REQUIRE(observed_stop);
@@ -427,7 +436,8 @@ TEST_CASE("Sample stream decode pool cancellation stops active cooperative I/O",
                          .frame_count = 4}) == SampleStreamDecodeSubmitStatus::Queued);
     {
         std::unique_lock lock(mutex);
-        changed.wait(lock, [&] { return entered; });
+        REQUIRE(changed.wait_for(lock, std::chrono::seconds(2),
+                                 [&] { return entered; }));
     }
     REQUIRE(pool.cancel_source({31, 1}) == SampleStreamDecodeCancelStatus::Canceled);
     auto completion = pool.wait_pop_completion(0);
@@ -596,7 +606,7 @@ TEST_CASE("Sample stream decode pool cancellation drains every serial reservatio
                              .frame_count = 4}) ==
                 SampleStreamDecodeSubmitStatus::Queued);
     }
-    gate.wait_until_entered();
+    REQUIRE(gate.wait_until_entered());
     REQUIRE(pool.cancel_source({81, 1}) == SampleStreamDecodeCancelStatus::Canceled);
     gate.allow();
 

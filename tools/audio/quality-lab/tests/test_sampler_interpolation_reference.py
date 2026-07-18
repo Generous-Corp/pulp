@@ -5,6 +5,8 @@ then constructs its reference with Quality Lab's separate 64-lobe Kaiser-beta13
 numpy resampler.  The implementations share neither coefficients nor phase
 tables.  The configured gate fails when the opt-in C++ artifact or its explicit
 ``PULP_SAMPLER_RENDER_WAV`` path is unavailable; it never skips this evidence.
+Ordinary Quality Lab collection skips this dependency-bearing module when that
+artifact has not been configured.
 """
 from __future__ import annotations
 
@@ -25,23 +27,30 @@ OUTPUT_CYCLES = 521.0 / 16384.0
 EDGE_TRIM = 256
 
 
-def _required_tool() -> Path:
+def _configured_tool() -> Path | None:
     override = os.environ.get("PULP_SAMPLER_RENDER_WAV")
     if not override:
-        raise RuntimeError(
-            "PULP_SAMPLER_RENDER_WAV is required; the configured Quality Lab "
-            "gate must name the exact production renderer artifact"
-        )
+        if os.environ.get("PULP_SAMPLER_AQL_REQUIRED") == "1":
+            raise RuntimeError(
+                "PULP_SAMPLER_RENDER_WAV is required; the configured Quality Lab "
+                "gate must name the exact production renderer artifact"
+            )
+        return None
     path = Path(override)
     if not path.is_file():
         raise RuntimeError(f"sampler renderer is unavailable: {path}")
     return path
 
 
-TOOL = _required_tool()
+TOOL = _configured_tool()
+pytestmark = pytest.mark.skipif(
+    TOOL is None,
+    reason="sampler renderer is not configured outside the opt-in CMake gate",
+)
 
 
 def _render(tmp_path: Path, ratio: float) -> tuple[np.ndarray, np.ndarray]:
+    assert TOOL is not None
     source_path = tmp_path / f"source-{ratio}.wav"
     candidate_path = tmp_path / f"candidate-{ratio}.wav"
     source_frequency = OUTPUT_CYCLES / ratio
