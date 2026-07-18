@@ -3,6 +3,7 @@
 # ProcessContext.
 pulp_add_test_suite(pulp-test-transport-quantizer LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-timebase LIBRARIES pulp::timebase TIMEOUT 60)
+pulp_add_test_suite(pulp-test-timeline-model LIBRARIES pulp::timeline)
 
 # Sample asset drop target adapter over cheap extension classification.
 pulp_add_test_suite(pulp-test-sample-asset-drop-target LIBRARIES pulp::view)
