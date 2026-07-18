@@ -87,8 +87,8 @@
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",
-      "max_loc": 2690,
-      "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing). Raised 2752->2770 for the two set_native_child_view_clip overrides (CPU + GPU WindowHost) that forward to the shared mac_geometry clip helper (R1 NativeViewHost). Lowered after the three hand-rolled CVDisplayLink drivers collapsed onto the shared MacDisplayLinkDriver."
+      "max_loc": 2551,
+      "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing). Raised 2752->2770 for the two set_native_child_view_clip overrides (CPU + GPU WindowHost) that forward to the shared mac_geometry clip helper (R1 NativeViewHost). Lowered after the three hand-rolled CVDisplayLink drivers collapsed onto the shared MacDisplayLinkDriver. Lowered 2690->2551 (S33) after the CPU + GPU hosts' duplicated NSWindow construction/positioning/teardown collapsed onto shared mac_geometry helpers (create_configured_window / position_window_beside / detach_and_close_window) and scrollWheel routing moved to portable pulp::view::deliver_mouse_wheel (S31)."
     },
     {
       "path": "core/view/src/design_import.cpp",
