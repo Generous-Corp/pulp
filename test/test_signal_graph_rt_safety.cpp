@@ -18,6 +18,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/midi/buffer.hpp>
+#include <pulp/midi/ump_buffer.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -175,6 +176,10 @@ TEST_CASE("SignalGraph process() with injected MIDI stays RT-safe",
     note.sample_offset = 8;
     injected.add(note);
     injected.add(pulp::midi::MidiEvent::cc(0, 1, 64));
+    injected.add_sysex({0xF0, 0x7D, 0x01, 0xF7}, 12);
+    pulp::midi::UmpBuffer injected_ump;
+    injected_ump.add(pulp::midi::UmpPacket::note_on_2(0, 0, 64, 0x8000), 16);
+    injected.attach_ump(&injected_ump);
 
     StereoBlock in(kFrames, 0.0f);
     StereoBlock out(kFrames, 0.0f);
@@ -184,17 +189,13 @@ TEST_CASE("SignalGraph process() with injected MIDI stays RT-safe",
     // Warm up with an empty mailbox, OUTSIDE the probe.
     graph.process(out_view, in_view, static_cast<int>(kFrames));
 
-    // inject_midi() runs on the control/UI thread and publishes into the
-    // graph's TripleBuffer mailbox. Inject immediately before the probed block
-    // (with no intervening process()) so the measured block actually carries
-    // and drains the events — process() clears the MIDI input scratch each
-    // block, so a warm-up process() between inject and measure would consume
-    // them and make this assertion vacuous.
-    REQUIRE(graph.inject_midi(midi_in, injected));
-
     std::size_t allocation_count = 0;
     {
         pulp::test::ScopedRtProcessProbe probe;
+        // A single producer may inject on the audio thread immediately before
+        // process(). The fixed event, SysEx, and UMP mailbox storage must keep
+        // both operations allocation- and lock-free.
+        REQUIRE(graph.inject_midi(midi_in, injected));
         graph.process(out_view, in_view, static_cast<int>(kFrames));
         allocation_count = probe.allocation_count();
     }

@@ -51,9 +51,16 @@ Four connection variants cover the non-audio-passthrough cases:
 
 - `connect_midi(from, to)` routes `MidiBuffer` events between node-scoped
   MIDI in/out buffers (ports are ignored). Participates in cycle
-  detection the same way audio edges do. `inject_midi(node, buf)` loads
-  a `MidiInput`'s output before a block; `extract_midi(node, &out)`
-  reads the latest `MidiOutput` input snapshot after a block. MIDI edges
+  detection the same way audio edges do. `inject_midi(node, buf)` publishes
+  the latest block to a `MidiInput` before processing; one designated writer
+  may call it from a control producer or from the audio callback immediately
+  before `process()`. The publication is consumed once and follows a preserved
+  `MidiInput` node ID across a gap-free swap. A `false` return still publishes
+  the fixed-capacity prefix. `extract_midi(node, &out)` reads the latest
+  `MidiOutput` input snapshot after a block. Ingress-only MIDI graphs may swap
+  gap-free; a graph containing `MidiOutput` returns `NeedsEagerPrepare` while
+  keeping the old snapshot readable so pending egress can be drained before
+  ordinary `prepare()`. MIDI edges
   preserve the full logical block: short MIDI events, SysEx sidecars, and an
   attached `UmpBuffer`. MPE is derived from those events rather than stored as a
   separate graph-owned sidecar, so route MIDI 1.0 MPE channel messages or MIDI
