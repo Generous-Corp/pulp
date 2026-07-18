@@ -118,6 +118,24 @@ TEST_CASE("Knob with format function shows value text", "[view][widget]") {
     REQUIRE(canvas.count(DrawCommand::Type::fill_text) >= 1);
 }
 
+TEST_CASE("Knob can hide formatted paint without hiding its accessible value",
+          "[view][widget][accessibility]") {
+    Knob knob;
+    knob.set_bounds({0, 0, 48, 48});
+    knob.set_value(0.75f);
+    knob.set_format([](float v) {
+        return std::to_string(static_cast<int>(v * 100)) + "%";
+    });
+    knob.set_show_value(false);
+
+    RecordingCanvas canvas;
+    knob.paint(canvas);
+
+    CHECK_FALSE(knob.show_value());
+    CHECK(canvas.count(DrawCommand::Type::fill_text) == 0);
+    CHECK(knob.get_value_string() == "75%");
+}
+
 TEST_CASE("Knob silver style draws the rotating indicator notch", "[view][widget][silver]") {
     // Pins the silver path after the indicator notch was factored into the
     // shared draw_knob_indicator_notch helper: exactly the two notch strokes

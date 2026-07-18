@@ -11,9 +11,27 @@ namespace pulp::view {
 namespace {
 
 constexpr float kTileWidth = 82.0f;
-constexpr float kTileHeight = 96.0f;
+constexpr float kTileHeight = 112.0f;
 constexpr float kTileGap = 14.0f;
 constexpr float kMaxGridWidth = 760.0f;
+
+std::string format_parameter_value(const state::ParamInfo& param, float norm) {
+    float val = param.range.denormalize(norm);
+    // Normalization round-off can turn an exact plain zero into a tiny negative
+    // value. Do not expose that implementation detail as "-0.00" in the UI.
+    if (std::abs(val) < 0.0005f) val = 0.0f;
+    std::ostringstream ss;
+    if (std::abs(val) >= 100) ss << std::fixed << std::setprecision(0);
+    else if (std::abs(val) >= 10) ss << std::fixed << std::setprecision(1);
+    else                         ss << std::fixed << std::setprecision(2);
+    ss << val;
+    if (!param.unit.empty()) ss << " " << param.unit;
+    return ss.str();
+}
+
+std::string value_label_id(state::ParamID id) {
+    return "__auto_ui_value_" + std::to_string(id);
+}
 
 class AutoUiBody final : public ScrollView {
 public:
@@ -115,8 +133,9 @@ private:
 //   └── body: vertical ScrollView, flex_grow=1
 //        └── grid: row, flex_wrap=wrap, justify=center, align_items=center,
 //                  align_content=center, max_width=760
-//             └── tile per param (column, fixed 82x96, no shrink)
-//                  └── Knob 64x64  OR  Toggle 54x30
+//             └── tile per param (column, fixed 82x112, no shrink)
+//                  ├── Knob 64x64 + parameter/value rows below it
+//                  └── OR Toggle 54x30 (with its own label)
 //
 // Properties of the new shape:
 //   - 1 param → centered single tile
@@ -131,17 +150,6 @@ private:
 // hint is a separate feature if Pulp wants smarter defaults later.
 
 std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
-    auto format_value = [](const state::ParamInfo& param, float norm) {
-        float val = param.range.denormalize(norm);
-        std::ostringstream ss;
-        if (std::abs(val) >= 100) ss << std::fixed << std::setprecision(0);
-        else if (std::abs(val) >= 10) ss << std::fixed << std::setprecision(1);
-        else                          ss << std::fixed << std::setprecision(2);
-        ss << val;
-        if (!param.unit.empty()) ss << " " << param.unit;
-        return ss.str();
-    };
-
     auto root = std::make_unique<View>();
     root->flex().direction = FlexDirection::column;
     root->flex().padding = 14;
@@ -169,7 +177,7 @@ std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
         tile->flex().direction = FlexDirection::column;
         tile->flex().align_items = FlexAlign::center;
         tile->flex().justify_content = FlexJustify::center;
-        tile->flex().gap = 6;
+        tile->flex().gap = 3;
         tile->flex().preferred_width = kTileWidth;
         tile->flex().preferred_height = kTileHeight;
         tile->flex().flex_shrink = 0;
@@ -193,18 +201,36 @@ std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
             auto knob = std::make_unique<Knob>();
             knob->set_id(param.name);
             knob->set_label(param.name);
+            // AutoUi owns separate label/value rows below the dial. Keep the
+            // knob's visible internal text off so neither string rides over the
+            // control artwork; set_label above still supplies its accessible name.
+            knob->set_show_label(false);
+            knob->set_show_value(false);
             knob->set_value(store.get_normalized(param.id));
             knob->on_change = [&store, id = param.id](float norm) {
                 store.set_normalized(id, norm);
             };
-            // Capture the per-param formatter by value so each knob owns
-            // its own closure (params is a temporary).
-            knob->set_format([param, format_value](float norm) {
-                return format_value(param, norm);
+            // Keep the physical-unit formatter on the Knob even though AutoUi
+            // paints that value in its own row. AccessibilityValueInterface uses
+            // the formatter for the value announced by platform assistive tech.
+            knob->set_format([param](float norm) {
+                return format_parameter_value(param, norm);
             });
             knob->flex().preferred_height = 64;
             knob->flex().preferred_width = 64;
             tile->add_child(std::move(knob));
+
+            auto label = std::make_unique<Label>(param.name);
+            label->set_font_size(10.0f);
+            label->flex().preferred_height = 13.0f;
+            tile->add_child(std::move(label));
+
+            auto value = std::make_unique<Label>(format_parameter_value(
+                param, store.get_normalized(param.id)));
+            value->set_id(value_label_id(param.id));
+            value->set_font_size(10.0f);
+            value->flex().preferred_height = 13.0f;
+            tile->add_child(std::move(value));
         }
 
         return tile;
@@ -307,6 +333,10 @@ void AutoUi::sync(View& root, state::StateStore& store) {
                     toggle->set_on(norm > 0.5f);
                 else if (auto* fader = dynamic_cast<Fader*>(&view))
                     fader->set_value(norm);
+            } else if (view.id() == value_label_id(param.id)) {
+                if (auto* label = dynamic_cast<Label*>(&view))
+                    label->set_text(format_parameter_value(
+                        param, store.get_normalized(param.id)));
             }
             for (size_t i = 0; i < view.child_count(); ++i)
                 visit(*view.child_at(i));
