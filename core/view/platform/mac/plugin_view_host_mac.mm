@@ -391,47 +391,14 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
 void pulp_plugin_wheel(pulp::view::View* root, pulp::view::Point pt, NSEvent* event) {
   try {
     if (!root) return;
-    // An open dropdown consumes the wheel to scroll its (clamped) item list,
-    // ahead of any enclosing ScrollView (whose scroll would close it).
-    if (pulp_plugin_route_to_open_popup(
-            root, pt, [&](pulp::view::MouseEvent& me) {
-                me.is_wheel = true;
-                me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
-                me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
-            })) return;
-    auto* target = root->hit_test(pt);
-    if (!target) {
-        if (auto* scroll = pulp::view::find_wheel_scroll_view_at(*root, pt)) {
-            pulp::view::MouseEvent me;
-            me.position = pt;
-            me.window_position = pt;
-            me.is_wheel = true;
-            me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
-            me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
-            scroll->on_mouse_event(me);
-            scroll->layout_children();
-        }
-        return;
-    }
-    pulp::view::MouseEvent me;
-    me.position = pt;
-    me.window_position = pt;
-    me.is_wheel = true;
-    me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
-    me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
-    if (target->wants_wheel_value()) {
-        target->on_wheel(me.scroll_delta_y);
-        return;
-    }
-    for (auto* v = target; v; v = v->parent()) {
-        if (v->wants_wheel_scroll()) {
-            v->on_mouse_event(me);
-            v->layout_children();
-            return;
-        }
-        if (v->on_pointer_event) v->on_mouse_event(me);
-    }
-    target->on_mouse_event(me);
+    // Routing (popup bypass, empty-pane scroll fallback, value-widget step, W3C
+    // wheel bubble) lives in the portable pulp::view::deliver_mouse_wheel shared
+    // with the standalone window host — see pointer_dispatch.hpp for the
+    // precedence contract. The embedded plugin host drives its own CVDisplayLink
+    // frame pump, so no request_repaint hook is needed (empty = no-op).
+    pulp::view::deliver_mouse_wheel(
+        *root, pt, static_cast<float>(event.scrollingDeltaX),
+        static_cast<float>(-event.scrollingDeltaY), /*host=*/{});
   } catch (const std::exception& e) {
     std::fprintf(stderr, "[plugin-view-host] scrollWheel handler threw: %s\n", e.what());
   } catch (...) {

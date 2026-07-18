@@ -376,85 +376,17 @@ static void install_app_menu(NSString* appName) {
     if (!self.rootView) return;
     auto pt = [self localPoint:event];
 
-    // An open ComboBox popup consumes the wheel to scroll its (clamped) item
-    // list, ahead of any enclosing ScrollView (whose scroll would close it).
-    if ([self routeToOpenComboPopup:pt configure:^(pulp::view::MouseEvent& me) {
-            me.is_wheel = true;
-            me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
-            me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
-        }]) return;
-
-    auto* target = self.rootView->hit_test(pt);
-    if (!target) {
-        // Hovering over empty background inside a scroll pane returns no hit
-        // because there is no hit-testable child under the point. Route it to
-        // the scroll container the cursor is over so scrolling works anywhere in
-        // the pane without a click first.
-        if (auto* scroll = pulp::view::find_wheel_scroll_view_at(*self.rootView, pt)) {
-            pulp::view::MouseEvent me;
-            me.position = pt;
-            me.window_position = pt;
-            me.is_wheel = true;
-            me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
-            me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
-            scroll->on_mouse_event(me);
-            scroll->layout_children();
-            [self setNeedsDisplay:YES];
-        }
-        return;
-    }
-
-    pulp::view::MouseEvent me;
-    me.position = pt;
-    // Set window_position so the WidgetBridge wheel registrar can emit
-    // valid clientX/clientY — without this JSX `onWheel` handlers that
-    // do `e.clientX - rect.left` (e.g. anchor-frequency for trackpad
-    // zoom) get 0 - rect.left and the wrong frequency anchor.
-    me.window_position = pt;
-    me.is_wheel = true;
-    me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
-    me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
-
-    // Value widgets (knob / fader / slider / stepper / pan) under the cursor
-    // consume the wheel to adjust their value, taking precedence over an
-    // enclosing ScrollView — so "hover + scroll" tweaks the control rather than
-    // scrolling the page.
-    if (target->wants_wheel_value()) {
-        target->on_wheel(me.scroll_delta_y);
-        [self setNeedsDisplay:YES];
-        return;
-    }
-
-    // Walk up from target to find nearest native scroll container.
-    // W3C wheel bubble: dispatch to every ancestor with on_pointer_event
-    // set. Each handler self-filters on me.is_wheel:
-    //   - registerPointer's lambda short-circuits when is_wheel == true
-    //     (returns early without dispatching pointerdown/up/move/cancel)
-    //   - registerWheel's lambda short-circuits when is_wheel == false
-    // So a view that registered both gets both halves; a view that
-    // registered only one ignores the other. The PRIOR "stop at first
-    // ancestor with on_pointer_event" approach (from c29fa49f) was
-    // wrong because it stopped at the canvas child that registered
-    // ONLY pointer events — the wheel event never reached the
-    // ancestor wrap-div that registered the zoom handler. ScrollView
-    // ancestor still takes precedence.
-    auto* v = target;
-    while (v) {
-        if (v->wants_wheel_scroll()) {
-            v->on_mouse_event(me);
-            v->layout_children();
-            [self setNeedsDisplay:YES];
-            return;
-        }
-        if (v->on_pointer_event) {
-            v->on_mouse_event(me);
-        }
-        v = v->parent();
-    }
-    // No ancestor handled the wheel — deliver to the deepest hit so any
-    // default behavior still runs.
-    target->on_mouse_event(me);
-    [self setNeedsDisplay:YES];
+    // Routing (popup bypass, empty-pane scroll fallback, value-widget step, W3C
+    // wheel bubble) lives in the portable pulp::view::deliver_mouse_wheel shared
+    // with the embedded plugin host — see pointer_dispatch.hpp for the
+    // precedence contract. This host repaints on demand, so it wires
+    // request_repaint to -setNeedsDisplay: (the plugin host relies on its frame
+    // pump and passes a no-op).
+    pulp::view::WheelHost host;
+    host.request_repaint = [self] { [self setNeedsDisplay:YES]; };
+    pulp::view::deliver_mouse_wheel(
+        *self.rootView, pt, static_cast<float>(event.scrollingDeltaX),
+        static_cast<float>(-event.scrollingDeltaY), host);
 }
 
 - (void)mouseDown:(NSEvent*)event {
@@ -1544,17 +1476,11 @@ public:
         @autoreleasepool {
             root_.set_frame_clock(&frame_clock_);
             NSRect frame = NSMakeRect(100, 100, options.width, options.height);
-            NSWindowStyleMask style = NSWindowStyleMaskTitled
-                | NSWindowStyleMaskClosable
-                | NSWindowStyleMaskMiniaturizable;
-            if (options.resizable)
-                style |= NSWindowStyleMaskResizable;
 
-            window_ = [[NSWindow alloc] initWithContentRect:frame
-                                        styleMask:style
-                                        backing:NSBackingStoreBuffered
-                                        defer:NO];
-            [window_ setReleasedWhenClosed:NO];
+            // Shared NSWindow construction (style, released-when-closed,
+            // title, window-type config, content min-size) — see
+            // create_configured_window; identical for the GPU host.
+            window_ = create_configured_window(options);
 
             // NSWindow's default backgroundColor is
             // [NSColor windowBackgroundColor] which is white in macOS
@@ -1563,15 +1489,8 @@ public:
             // Set the window backgroundColor to match PulpView's clear color
             // so any compositing race / partial-paint window shows dark, not
             // white. Belt-and-suspenders alongside PulpView isOpaque=YES.
+            // CPU-host-specific: the GPU host clears via its Metal frame.
             [window_ setBackgroundColor:pulp::view::mac_host::ns_host_clear_color()];
-
-            [window_ setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
-
-            // Apply multi-window type configuration.
-            configure_window_type(window_, options);
-
-            if (options.min_width > 0 || options.min_height > 0)
-                [window_ setContentMinSize:NSMakeSize(options.min_width, options.min_height)];
 
             options_initially_hidden_ = options.initially_hidden;
 
@@ -1642,9 +1561,7 @@ public:
         // windowShouldClose:/onClose during teardown; releasedWhenClosed=NO so
         // our ARC strong ref controls the final dealloc.
         delegate_.onClose = nil;
-        [window_ setDelegate:nil];
-        [window_ setReleasedWhenClosed:NO];
-        [window_ close];
+        detach_and_close_window(window_);
         root_.set_window_host(nullptr);
         root_.set_frame_clock(nullptr);
     }
@@ -1657,29 +1574,7 @@ public:
     void position_beside(WindowHost* other) override {
         if (!other) return;
         auto* other_nswin = (__bridge NSWindow*)(other->native_window_handle());
-        if (!other_nswin || !window_) return;
-
-        auto other_frame = [other_nswin frame];
-        auto screen_frame = [[other_nswin screen] visibleFrame];
-        auto my_size = [window_ frame].size;
-
-        // Align top of inspector with top of other window (macOS uses bottom-left origin)
-        CGFloat target_y = other_frame.origin.y + other_frame.size.height - my_size.height;
-        // Clamp vertically to screen bounds
-        CGFloat screen_bottom = screen_frame.origin.y;
-        CGFloat screen_top = screen_frame.origin.y + screen_frame.size.height;
-        if (target_y + my_size.height > screen_top) target_y = screen_top - my_size.height;
-        if (target_y < screen_bottom) target_y = screen_bottom;
-
-        // Try right side first
-        CGFloat right_x = other_frame.origin.x + other_frame.size.width + 8;
-        if (right_x + my_size.width <= screen_frame.origin.x + screen_frame.size.width) {
-            [window_ setFrameOrigin:NSMakePoint(right_x, target_y)];
-        } else {
-            // Fall back to left side
-            CGFloat left_x = other_frame.origin.x - my_size.width - 8;
-            [window_ setFrameOrigin:NSMakePoint(std::max(left_x, screen_frame.origin.x), target_y)];
-        }
+        position_window_beside(window_, other_nswin);
     }
 
     void* native_window_handle() const override { return (__bridge void*) window_; }
@@ -1828,24 +1723,11 @@ public:
                 partial_rendering_debug_ = (env[0] == '1');
             }
             NSRect frame = NSMakeRect(100, 100, options.width, options.height);
-            NSWindowStyleMask style = NSWindowStyleMaskTitled
-                | NSWindowStyleMaskClosable
-                | NSWindowStyleMaskMiniaturizable;
-            if (options.resizable)
-                style |= NSWindowStyleMaskResizable;
 
-            window_ = [[NSWindow alloc] initWithContentRect:frame
-                                        styleMask:style
-                                        backing:NSBackingStoreBuffered
-                                        defer:NO];
-            [window_ setReleasedWhenClosed:NO];
-            [window_ setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
-
-            // Apply multi-window type configuration.
-            configure_window_type(window_, options);
-
-            if (options.min_width > 0 || options.min_height > 0)
-                [window_ setContentMinSize:NSMakeSize(options.min_width, options.min_height)];
+            // Shared NSWindow construction (style, released-when-closed,
+            // title, window-type config, content min-size) — see
+            // create_configured_window; identical for the CPU host.
+            window_ = create_configured_window(options);
 
             options_initially_hidden_ = options.initially_hidden;
 
@@ -1893,9 +1775,7 @@ public:
         // strong ref controls the final dealloc.
         delegate_.onClose = nil;
         delegate_.onResize = nil;
-        [window_ setDelegate:nil];
-        [window_ setReleasedWhenClosed:NO];
-        [window_ close];
+        detach_and_close_window(window_);
 
         skia_surface_.reset();
         gpu_surface_.reset();
@@ -1950,26 +1830,7 @@ public:
     void position_beside(WindowHost* other) override {
         if (!other) return;
         auto* other_nswin = (__bridge NSWindow*)(other->native_window_handle());
-        if (!other_nswin || !window_) return;
-        auto other_frame = [other_nswin frame];
-        auto screen_frame = [[other_nswin screen] visibleFrame];
-        auto my_size = [window_ frame].size;
-
-        // Align top of inspector with top of other window (macOS uses bottom-left origin)
-        CGFloat target_y = other_frame.origin.y + other_frame.size.height - my_size.height;
-        // Clamp vertically to screen bounds
-        CGFloat screen_bottom = screen_frame.origin.y;
-        CGFloat screen_top = screen_frame.origin.y + screen_frame.size.height;
-        if (target_y + my_size.height > screen_top) target_y = screen_top - my_size.height;
-        if (target_y < screen_bottom) target_y = screen_bottom;
-
-        CGFloat right_x = other_frame.origin.x + other_frame.size.width + 8;
-        if (right_x + my_size.width <= screen_frame.origin.x + screen_frame.size.width) {
-            [window_ setFrameOrigin:NSMakePoint(right_x, target_y)];
-        } else {
-            CGFloat left_x = other_frame.origin.x - my_size.width - 8;
-            [window_ setFrameOrigin:NSMakePoint(std::max(left_x, screen_frame.origin.x), target_y)];
-        }
+        position_window_beside(window_, other_nswin);
     }
 
     void* native_window_handle() const override { return (__bridge void*) window_; }

@@ -8,6 +8,8 @@
 
 #include <pulp/view/view.hpp>
 
+#include <functional>
+
 namespace pulp::view {
 
 /// Convert `root_pos` (root-local, i.e. window space) into `target`'s
@@ -47,5 +49,42 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
                         uint16_t modifiers, int click_count = 1,
                         PointerType pointer_type = PointerType::mouse,
                         float pressure = 0.5f);
+
+/// Host hooks the portable wheel router calls back into. Kept as a struct so
+/// a new hook can be threaded in without re-touching every call site.
+struct WheelHost {
+    /// Invoked after a wheel event mutates the tree (a scroll pane scrolled, a
+    /// value widget stepped, a combo popup scrolled) so the host can schedule a
+    /// repaint. The standalone window host wires this to `-setNeedsDisplay:`;
+    /// the plugin host drives its own CVDisplayLink frame pump and passes an
+    /// empty callback (no-op). Empty is always safe.
+    std::function<void()> request_repaint;
+};
+
+/// Route one wheel/scroll tick to the view tree rooted at `root`.
+///
+/// This is the mouse-wheel verb shared by the macOS standalone and plugin
+/// hosts. Before it existed the identical routing lived inline in both, and
+/// drifted. The precedence, asserted by test_pointer_dispatch.cpp, is:
+///   1. an open ComboBox popup whose (flip/scroll/clamp-aware) rect contains
+///      `root_pt` consumes the wheel to scroll its item list;
+///   2. with no hit-testable view under the point, the nearest wheel-scroll
+///      container under the cursor scrolls (so an empty scroll-pane background
+///      still scrolls without a click first);
+///   3. a value widget under the cursor (`wants_wheel_value`) steps its value,
+///      taking precedence over any enclosing ScrollView;
+///   4. otherwise the wheel bubbles up: the nearest `wants_wheel_scroll`
+///      ancestor scrolls and stops the walk, while each ancestor that
+///      registered `on_pointer_event` also receives the event (W3C wheel
+///      bubble; handlers self-filter on `MouseEvent::is_wheel`);
+///   5. with no consumer, the deepest hit receives the event for any default.
+///
+/// `root_pt` is in root-view space (design-viewport inverse already applied by
+/// the host). `scroll_delta_y` is Pulp-convention (already negated from
+/// NSEvent's bottom-up `scrollingDeltaY`). `host.request_repaint` fires once
+/// after any terminal dispatch that mutated the tree.
+void deliver_mouse_wheel(View& root, Point root_pt,
+                         float scroll_delta_x, float scroll_delta_y,
+                         const WheelHost& host);
 
 }  // namespace pulp::view

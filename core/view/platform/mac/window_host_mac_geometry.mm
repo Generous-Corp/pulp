@@ -339,6 +339,62 @@ void configure_window_type(NSWindow* window, const pulp::view::WindowOptions& op
     }
 }
 
+NSWindow* create_configured_window(const pulp::view::WindowOptions& options) {
+    NSRect frame = NSMakeRect(100, 100, options.width, options.height);
+    NSWindowStyleMask style = NSWindowStyleMaskTitled
+        | NSWindowStyleMaskClosable
+        | NSWindowStyleMaskMiniaturizable;
+    if (options.resizable)
+        style |= NSWindowStyleMaskResizable;
+
+    NSWindow* window = [[NSWindow alloc] initWithContentRect:frame
+                                        styleMask:style
+                                        backing:NSBackingStoreBuffered
+                                        defer:NO];
+    [window setReleasedWhenClosed:NO];
+    [window setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
+
+    // Apply multi-window type configuration.
+    configure_window_type(window, options);
+
+    if (options.min_width > 0 || options.min_height > 0)
+        [window setContentMinSize:NSMakeSize(options.min_width, options.min_height)];
+
+    return window;
+}
+
+void position_window_beside(NSWindow* window, NSWindow* other_window) {
+    if (!window || !other_window) return;
+
+    auto other_frame = [other_window frame];
+    auto screen_frame = [[other_window screen] visibleFrame];
+    auto my_size = [window frame].size;
+
+    // Align top of this window with the top of the other (macOS origin is
+    // bottom-left), then clamp vertically to the screen.
+    CGFloat target_y = other_frame.origin.y + other_frame.size.height - my_size.height;
+    CGFloat screen_bottom = screen_frame.origin.y;
+    CGFloat screen_top = screen_frame.origin.y + screen_frame.size.height;
+    if (target_y + my_size.height > screen_top) target_y = screen_top - my_size.height;
+    if (target_y < screen_bottom) target_y = screen_bottom;
+
+    // Try the right side first; fall back to the left when it would overflow.
+    CGFloat right_x = other_frame.origin.x + other_frame.size.width + 8;
+    if (right_x + my_size.width <= screen_frame.origin.x + screen_frame.size.width) {
+        [window setFrameOrigin:NSMakePoint(right_x, target_y)];
+    } else {
+        CGFloat left_x = other_frame.origin.x - my_size.width - 8;
+        [window setFrameOrigin:NSMakePoint(std::max(left_x, screen_frame.origin.x), target_y)];
+    }
+}
+
+void detach_and_close_window(NSWindow* window) {
+    if (!window) return;
+    [window setDelegate:nil];
+    [window setReleasedWhenClosed:NO];
+    [window close];
+}
+
 NSRect child_view_frame_in_host(NSView* container,
                                 float x,
                                 float y,

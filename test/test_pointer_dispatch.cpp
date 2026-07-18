@@ -295,3 +295,177 @@ TEST_CASE("deliver_mouse_drag is inert for a target that left the tree",
     deliver_mouse_drag(root, spy, {130, 70}, kModShift);
     CHECK(spy->log.empty());                  // no channel fires; no deref hazard
 }
+
+// ── Wheel routing (deliver_mouse_wheel) ──────────────────────────────────────
+//
+// The precedence (popup → empty-pane scroll → value widget → W3C wheel bubble →
+// deepest hit) previously lived inline in BOTH macOS hosts and drifted. It is
+// now the portable pulp::view::deliver_mouse_wheel — see pointer_dispatch.hpp.
+
+namespace {
+
+// Adjusts its VALUE on a wheel over it (knob/fader idiom): takes precedence
+// over any enclosing scroll container.
+class WheelValueSpy : public View {
+public:
+    bool wants_wheel_value() const override { return true; }
+    void on_wheel(float dy) override { ++hits; last_delta = dy; }
+    int hits = 0;
+    float last_delta = 0.0f;
+};
+
+// A scroll container: consumes the wheel and terminates the ancestor walk.
+class WheelScrollSpy : public View {
+public:
+    bool wants_wheel_scroll() const override { return true; }
+    void on_mouse_event(const MouseEvent& e) override {
+        ++hits;
+        last = e;
+    }
+    int hits = 0;
+    MouseEvent last{};
+};
+
+// Registers a JS-style pointer handler; the W3C wheel bubble delivers the wheel
+// event to it (it self-filters on is_wheel, like registerWheel does).
+class WheelPointerSpy : public View {
+public:
+    WheelPointerSpy() {
+        on_pointer_event = [this](const MouseEvent& e) {
+            if (e.is_wheel) {
+                ++wheel_events;
+                last = e;
+            }
+        };
+    }
+    int wheel_events = 0;
+    MouseEvent last{};
+};
+
+// Counts terminal wheel dispatches so the request_repaint contract is asserted.
+pulp::view::WheelHost counting_host(int& counter) {
+    pulp::view::WheelHost h;
+    h.request_repaint = [&counter] { ++counter; };
+    return h;
+}
+
+}  // namespace
+
+TEST_CASE("deliver_mouse_wheel steps a value widget under the cursor",
+          "[view][input][wheel]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<WheelValueSpy>();
+    WheelValueSpy* spy = child.get();
+    spy->set_bounds({100, 50, 120, 80});
+    root.add_child(std::move(child));
+
+    int repaints = 0;
+    deliver_mouse_wheel(root, {130, 70}, /*dx=*/0.0f, /*dy=*/3.0f, counting_host(repaints));
+
+    // The value widget consumed the wheel (its on_wheel got the Pulp-convention
+    // delta_y) and the host was asked to repaint exactly once.
+    CHECK(spy->hits == 1);
+    CHECK_THAT(spy->last_delta, WithinAbs(3.0f, 0.01f));
+    CHECK(repaints == 1);
+}
+
+TEST_CASE("deliver_mouse_wheel routes to a wheel-scroll ancestor and stops",
+          "[view][input][wheel]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto scroller = std::make_unique<WheelScrollSpy>();
+    WheelScrollSpy* spy = scroller.get();
+    spy->set_bounds({0, 0, 400, 300});
+    root.add_child(std::move(scroller));
+
+    int repaints = 0;
+    deliver_mouse_wheel(root, {130, 70}, /*dx=*/0.0f, /*dy=*/-2.0f, counting_host(repaints));
+
+    REQUIRE(spy->hits == 1);
+    CHECK(spy->last.is_wheel);
+    CHECK_THAT(spy->last.scroll_delta_y, WithinAbs(-2.0f, 0.01f));
+    CHECK(repaints == 1);
+}
+
+TEST_CASE("deliver_mouse_wheel bubbles to a pointer ancestor, then the deepest hit",
+          "[view][input][wheel]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto wrapper = std::make_unique<WheelPointerSpy>();
+    WheelPointerSpy* wrap = wrapper.get();
+    wrap->set_bounds({50, 40, 300, 200});
+
+    auto leaf = std::make_unique<View>();
+    View* leafp = leaf.get();
+    leafp->set_bounds({10, 10, 100, 100});   // hit target inside the wrapper
+    wrap->add_child(std::move(leaf));
+    root.add_child(std::move(wrapper));
+
+    int repaints = 0;
+    // Point (70,60) is inside leaf; neither leaf nor root handle the wheel, so
+    // it bubbles up to the pointer-registered wrapper.
+    deliver_mouse_wheel(root, {70, 60}, /*dx=*/0.0f, /*dy=*/1.0f, counting_host(repaints));
+
+    CHECK(wrap->wheel_events == 1);          // W3C wheel bubble reached the wrapper
+    CHECK(wrap->last.is_wheel);
+    CHECK(repaints == 1);                     // one terminal dispatch to the deepest hit
+}
+
+TEST_CASE("deliver_mouse_wheel scrolls an open ComboBox popup ahead of the tree",
+          "[view][input][wheel][combo]") {
+    // The dropdown paints as an overlay with no view backing, so a plain
+    // hit_test lands on the sibling underneath. The popup bypass must route the
+    // wheel to the open menu — mirrors the mac host's active_popup_ path.
+    View root;
+    root.set_bounds({0, 0, 200, 100});        // short window → menu clamps + scrolls
+    auto owned = std::make_unique<ComboBox>();
+    ComboBox* combo = owned.get();
+    combo->set_bounds({0, 0, 120, 24});
+    std::vector<std::string> items;
+    for (int i = 0; i < 12; ++i) items.push_back("Item" + std::to_string(i));
+    combo->set_items(items);
+    combo->set_selected(0);
+    root.add_child(std::move(owned));
+
+    MouseEvent open_click;
+    open_click.position = {60, 12};
+    open_click.is_down = true;
+    combo->on_mouse_event(open_click);        // opens the menu, sets active_popup_
+    REQUIRE(combo->is_open());
+
+    float x = 0, y = 0, w = 0, h = 0;
+    REQUIRE(combo->dropdown_window_rect(x, y, w, h));
+
+    int repaints = 0;
+    // Wheel down over the middle of the open menu several times.
+    for (int k = 0; k < 6; ++k) {
+        deliver_mouse_wheel(root, {x + w / 2, y + h / 2}, 0.0f, 1.0f, counting_host(repaints));
+        REQUIRE(combo->is_open());            // the wheel must not close the menu
+    }
+    CHECK(repaints == 6);                      // every tick routed to the popup + repainted
+
+    // The scroll revealed clipped items: clicking the first visible row now
+    // selects an item beyond the first page.
+    combo->dropdown_window_rect(x, y, w, h);
+    MouseEvent pick;
+    pick.position = {60, y + 12.0f};
+    pick.is_down = true;
+    combo->on_mouse_event(pick);
+    CHECK(combo->selected() > 0);
+}
+
+TEST_CASE("deliver_mouse_wheel with an empty host repaint hook is a no-op-safe",
+          "[view][input][wheel]") {
+    // The plugin host passes an empty WheelHost (its frame pump handles repaint).
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<WheelValueSpy>();
+    WheelValueSpy* spy = child.get();
+    spy->set_bounds({0, 0, 400, 300});
+    root.add_child(std::move(child));
+
+    deliver_mouse_wheel(root, {10, 10}, 0.0f, 1.0f, /*host=*/{});
+    CHECK(spy->hits == 1);                     // routing still happens; no repaint hook to call
+}
