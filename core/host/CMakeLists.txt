@@ -28,9 +28,10 @@ target_sources(pulp-host PRIVATE
     src/anticipation_partition.cpp
     src/anticipation_subgraph.cpp
     src/anticipation_lane.cpp
+    src/timeline_graph_binding.cpp
 )
 
-target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::runtime pulp::state)
+target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::playback pulp::runtime pulp::state)
 target_link_libraries(pulp-host PUBLIC pulp::native-components)
 target_link_libraries(pulp-host PRIVATE pulp::platform)
 # node_pack.cpp dlopen()s signed node packs (desktop + Android). iOS never builds

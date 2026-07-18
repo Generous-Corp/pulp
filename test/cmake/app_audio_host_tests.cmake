@@ -504,6 +504,13 @@ target_sources(pulp-test-host-signal-graph PRIVATE
 target_link_libraries(pulp-test-host-signal-graph PRIVATE pulp::host Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-host-signal-graph)
 
+pulp_add_test_suite(pulp-test-timeline-graph-binding
+    SOURCES test_timeline_graph_binding.cpp
+        $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+        $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::host pulp::native-components ${CMAKE_DL_LIBS}
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+
 # NativeHandleVisitor pure-header pattern test. No plugin loading
 # required; uses lightweight mock slots to exercise dispatch.
 add_executable(pulp-test-native-handle-visitor test_native_handle_visitor.cpp)

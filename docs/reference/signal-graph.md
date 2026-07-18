@@ -388,6 +388,29 @@ silently interpreted as current data.
 - **Load** (`PluginSlot::load`) runs on a worker thread; the returned
   slot is handed to the graph only after it's fully loaded.
 
+## Timeline playback adapter
+
+`TimelineGraphPlaybackBinding` lowers each phase-1 timeline track to a stable,
+transport-sensitive `CustomNodeType` audio source plus a stable `MidiInput`.
+The binding retains SignalGraph NodeIds by timeline `ItemId`; ordinary
+`PlaybackProgramStore` publications update renderer programs without replacing
+nodes or writing opaque custom-node state. Arrangement notes remain an engine
+transport-tick lane and enter the graph through `inject_midi()`.
+
+Timeline-owned nodes consume the callback's exact `TransportSnapshot`, including
+all loop-split ranges, from the binding's block-wide pin. The existing
+SignalGraph format ABI still carries one `ProcessContext`, so ordinary downstream
+plugins see the first range's projection on a split block. Phase 1 treats that as
+an adapter boundary: downstream nodes may process the rendered audio, but must
+not reconstruct timeline material from that lossy projection.
+
+Admission checks the candidate's configured SignalGraph limits and the exact
+canonical routed-plan limits independently: node count, connection count,
+per-node ports, and total audio-plus-event ports all produce structured
+actual-versus-limit diagnostics. Topology eligibility is checked only after
+those capacity axes, so an oversized timeline route cannot silently fall back
+to the reference walk.
+
 ## Baking a graph to a shippable artifact
 
 A live `SignalGraph` is editable and carries per-node overhead. Once a graph is
