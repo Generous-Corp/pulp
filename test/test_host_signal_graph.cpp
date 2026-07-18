@@ -4853,6 +4853,55 @@ private:
     std::atomic<int>* release_calls_ = nullptr;
     PluginInfo info_;
 };
+
+class PreparedEditDimensionPlugin final : public PluginSlot {
+public:
+    PreparedEditDimensionPlugin() {
+        info_.name = "PreparedEditDimensionPlugin";
+        info_.num_inputs = 1;
+        info_.num_outputs = 1;
+    }
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double sample_rate, int max_block_size) override {
+        if (fail_sample_rate.load(std::memory_order_relaxed) == sample_rate)
+            return false;
+        prepared_sample_rate.store(sample_rate, std::memory_order_relaxed);
+        prepared_max_block.store(max_block_size, std::memory_order_relaxed);
+        level_.store(sample_rate == 48'000.0 && max_block_size == 64 ? 1.0f : 2.0f,
+                     std::memory_order_relaxed);
+        return true;
+    }
+    void release() override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const ParameterEventQueue&, int frames) override {
+        const float level = level_.load(std::memory_order_relaxed);
+        for (int i = 0; i < frames; ++i)
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i] * level;
+    }
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(uint32_t) const override { return 0.0f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return true; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+
+    std::atomic<double> prepared_sample_rate{0.0};
+    std::atomic<int> prepared_max_block{0};
+    std::atomic<double> fail_sample_rate{0.0};
+
+private:
+    std::atomic<float> level_{0.0f};
+    PluginInfo info_;
+};
 } // namespace
 
 TEST_CASE("SignalGraph prepared edit first prepare failure is a full rollback",
@@ -5088,6 +5137,163 @@ TEST_CASE("SignalGraph prepared edit changes dimensions only for lifecycle-free 
     graph.process(out, in, 16);
     REQUIRE(std::all_of(rendered.begin(), rendered.end(),
                         [](float sample) { return sample == 0.5f; }));
+}
+
+TEST_CASE("SignalGraph quiesced prepared edit restores retained lifecycles on every exit",
+          "[host][graph][prepared-edit][dimensions]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    auto plugin = std::make_unique<PreparedEditDimensionPlugin>();
+    auto* plugin_ptr = plugin.get();
+    const auto plugin_node =
+        graph.add_plugin_node(std::move(plugin), 1, 1, "dimension plugin");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, plugin_node, 0));
+    REQUIRE(graph.connect(plugin_node, 0, output, 0));
+    REQUIRE(graph.prepare(48'000.0, 64));
+
+    const auto render = [&] {
+        std::array<float, 64> source{};
+        source.fill(1.0f);
+        std::array<float, 64> rendered{};
+        const float* source_ptrs[] = {source.data()};
+        float* rendered_ptrs[] = {rendered.data()};
+        pulp::audio::BufferView<const float> in(source_ptrs, 1, source.size());
+        pulp::audio::BufferView<float> out(rendered_ptrs, 1, rendered.size());
+        graph.process(out, in, 64);
+        return rendered;
+    };
+
+    SECTION("abandon after successful candidate prepare restores the base dimensions") {
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->prepare_quiesced(44'100.0, 128) == Result::Prepared);
+        REQUIRE(plugin_ptr->prepared_sample_rate.load(std::memory_order_relaxed) == 44'100.0);
+        REQUIRE(plugin_ptr->prepared_max_block.load(std::memory_order_relaxed) == 128);
+        edit.reset();
+
+        REQUIRE(plugin_ptr->prepared_sample_rate.load(std::memory_order_relaxed) == 48'000.0);
+        REQUIRE(plugin_ptr->prepared_max_block.load(std::memory_order_relaxed) == 64);
+        const auto rendered = render();
+        REQUIRE(std::all_of(rendered.begin(), rendered.end(),
+                            [](float sample) { return sample == 1.0f; }));
+    }
+
+    SECTION("commit rejection restores before returning") {
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->prepare_quiesced(44'100.0, 128) == Result::Prepared);
+        graph.begin_swap_edit();
+        REQUIRE(edit->commit() == Result::StaleBase);
+        REQUIRE(plugin_ptr->prepared_sample_rate.load(std::memory_order_relaxed) == 48'000.0);
+        REQUIRE(plugin_ptr->prepared_max_block.load(std::memory_order_relaxed) == 64);
+        const auto rendered = render();
+        REQUIRE(std::all_of(rendered.begin(), rendered.end(),
+                            [](float sample) { return sample == 1.0f; }));
+        graph.abort_swap_edit();
+    }
+
+    SECTION("failed restoration revokes the owner publication") {
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->prepare_quiesced(44'100.0, 128) == Result::Prepared);
+        plugin_ptr->fail_sample_rate.store(48'000.0, std::memory_order_relaxed);
+        edit.reset();
+        REQUIRE_FALSE(graph.is_prepared());
+        const auto rendered = render();
+        REQUIRE(std::all_of(rendered.begin(), rendered.end(),
+                            [](float sample) { return sample == 0.0f; }));
+    }
+}
+
+TEST_CASE("SignalGraph quiesced abandonment restores retained custom lifecycle dimensions",
+          "[host][graph][prepared-edit][dimensions]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    std::atomic<double> prepared_sample_rate{0.0};
+    std::atomic<int> prepared_max_block{0};
+    SignalGraph graph;
+    auto type = make_prepared_edit_level_type("pulp.test.prepared.custom-dimensions", 1.0f);
+    type.prepare = [&](void*, double sample_rate, int max_block_size) {
+        prepared_sample_rate.store(sample_rate, std::memory_order_relaxed);
+        prepared_max_block.store(max_block_size, std::memory_order_relaxed);
+    };
+    REQUIRE(graph.register_custom_node_type(std::move(type)));
+    const auto custom = graph.add_custom_node("pulp.test.prepared.custom-dimensions");
+    REQUIRE(custom != 0);
+    REQUIRE(graph.prepare(48'000.0, 64));
+
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit->prepare_quiesced(44'100.0, 128) == Result::Prepared);
+    REQUIRE(prepared_sample_rate.load(std::memory_order_relaxed) == 44'100.0);
+    REQUIRE(prepared_max_block.load(std::memory_order_relaxed) == 128);
+    edit.reset();
+
+    REQUIRE(prepared_sample_rate.load(std::memory_order_relaxed) == 48'000.0);
+    REQUIRE(prepared_max_block.load(std::memory_order_relaxed) == 64);
+    REQUIRE(graph.is_prepared());
+}
+
+TEST_CASE("SignalGraph quiesced abandonment restores an unprepared base lifecycle",
+          "[host][graph][prepared-edit][dimensions]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+
+    SECTION("retained plugins return to released state") {
+        std::atomic<int> prepares{0};
+        std::atomic<int> releases{0};
+        SignalGraph graph;
+        REQUIRE(graph.add_plugin_node(
+                    std::make_unique<PreparedEditCountingPlugin>(prepares, &releases),
+                    1, 1, "plugin") != 0);
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->prepare_quiesced(44'100.0, 128) == Result::Prepared);
+        REQUIRE(prepares.load(std::memory_order_relaxed) == 1);
+        edit.reset();
+        REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+        REQUIRE_FALSE(graph.is_prepared());
+    }
+
+    SECTION("retained custom instances return to released state") {
+        bool throw_prepare = true;
+        std::atomic<int> releases{0};
+        SignalGraph graph;
+        auto type = make_prepared_edit_level_type("pulp.test.prepared.unprepared-custom", 1.0f);
+        type.prepare = [&](void*, double, int) {
+            if (throw_prepare)
+                throw std::runtime_error("prepare");
+        };
+        type.release = [&](void*) { releases.fetch_add(1, std::memory_order_relaxed); };
+        REQUIRE(graph.register_custom_node_type(std::move(type)));
+        REQUIRE(graph.add_custom_node("pulp.test.prepared.unprepared-custom") != 0);
+        REQUIRE_THROWS(graph.prepare(48'000.0, 64));
+        REQUIRE_FALSE(graph.is_prepared());
+
+        throw_prepare = false;
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->prepare_quiesced(44'100.0, 128) == Result::Prepared);
+        edit.reset();
+        REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+        REQUIRE_FALSE(graph.is_prepared());
+    }
+
+    SECTION("candidate-created instances on baseline nodes are released once") {
+        std::atomic<int> creates{0};
+        std::atomic<int> releases{0};
+        std::atomic<int> destroys{0};
+        SignalGraph graph;
+        auto type = make_prepared_edit_level_type(
+            "pulp.test.prepared.unprepared-baseline-custom", 1.0f,
+            &creates, nullptr, &destroys);
+        type.release = [&](void*) { releases.fetch_add(1, std::memory_order_relaxed); };
+        REQUIRE(graph.register_custom_node_type(std::move(type)));
+        REQUIRE(graph.add_custom_node(
+                    "pulp.test.prepared.unprepared-baseline-custom") != 0);
+
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->prepare_quiesced(44'100.0, 128) == Result::Prepared);
+        edit.reset();
+        REQUIRE(creates.load(std::memory_order_relaxed) == 1);
+        REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+        REQUIRE(destroys.load(std::memory_order_relaxed) == 1);
+        REQUIRE_FALSE(graph.is_prepared());
+    }
 }
 
 TEST_CASE("SignalGraph prepared edit surface is fail closed and releases abandoned instances",

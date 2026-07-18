@@ -541,9 +541,28 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare_impl(
     if (prepared != SignalGraph::PreparedTopologyEdit::Result::Prepared)
         return reject(TimelineGraphAdmissionCode::GraphPrepareFailed,
                       static_cast<std::uint64_t>(prepared));
-    if (!edit->routed_execution_ready(maximum_block_size))
+    if (!edit->routed_execution_ready(maximum_block_size)) {
+        edit.reset();
+        if (!graph_.is_prepared())
+            state_.publish_prepared({});
         return reject(TimelineGraphAdmissionCode::RoutedPlanRejected);
-    const auto committed = edit->commit();
+    }
+    if (before_graph_commit_hook_for_test_ != nullptr)
+        before_graph_commit_hook_for_test_(before_graph_commit_context_for_test_);
+    SignalGraph::PreparedTopologyEdit::Result committed;
+    try {
+        committed = edit->commit();
+    } catch (...) {
+        edit.reset();
+        if (!graph_.is_prepared())
+            state_.publish_prepared({});
+        throw;
+    }
+    if (committed == SignalGraph::PreparedTopologyEdit::Result::QuiescedRollbackFailed) {
+        state_.publish_prepared({});
+        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed,
+                      static_cast<std::uint64_t>(committed));
+    }
     if (committed != SignalGraph::PreparedTopologyEdit::Result::Committed)
         return reject(TimelineGraphAdmissionCode::GraphPrepareFailed,
                       static_cast<std::uint64_t>(committed));

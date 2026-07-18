@@ -116,7 +116,8 @@ class TimelineGraphPlaybackBinding {
     /// transaction and pins canonical routed execution. Existing nodes for
     /// unchanged track IDs retain their SignalGraph NodeIds across calls. A
     /// failed mutation, prepare, routed admission, or commit leaves both the
-    /// live graph and the binding's last published state untouched.
+    /// live graph and the binding's last published state untouched unless a
+    /// quiesced lifecycle rollback fails, in which case both revoke publication.
     TimelineGraphAdmission prepare(const playback::PlaybackProgram& program,
                                    std::span<const TimelineTrackGraphRoute> routes,
                                    const TimelineGraphBindingConfig& config, double sample_rate,
@@ -144,6 +145,11 @@ class TimelineGraphPlaybackBinding {
         before_binding_publish_hook_for_test_ = hook;
         before_binding_publish_context_for_test_ = context;
     }
+    void set_before_graph_commit_hook_for_test(
+        BeforeBindingPublishHookForTest hook, void* context = nullptr) noexcept {
+        before_graph_commit_hook_for_test_ = hook;
+        before_graph_commit_context_for_test_ = context;
+    }
 
     TimelineGraphProcessResult process(audio::BufferView<float>& output,
                                        const audio::BufferView<const float>& input,
@@ -169,6 +175,8 @@ class TimelineGraphPlaybackBinding {
     std::uint64_t binding_instance_id_ = 0;
     BeforeBindingPublishHookForTest before_binding_publish_hook_for_test_ = nullptr;
     void* before_binding_publish_context_for_test_ = nullptr;
+    BeforeBindingPublishHookForTest before_graph_commit_hook_for_test_ = nullptr;
+    void* before_graph_commit_context_for_test_ = nullptr;
 };
 
 using TimelineGraphBinding = TimelineGraphPlaybackBinding;
