@@ -241,12 +241,13 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
             }
             case FilterChainEntry::Kind::contrast: {
                 // Per CSS — c=amount, slope=c, intercept=0.5*(1-c).
-                // SkColorFilters::Matrix expects the translation column in
-                // 0..255 space, so the bias term is multiplied by 255 to land
-                // at mid-gray for contrast(0). The slope multipliers stay
-                // normalized.
+                // SkColorFilters::Matrix's translation column is NORMALIZED
+                // [0,1] (not 0..255 — verified by pixel readback here and in the
+                // bloom path), so the bias is 0.5*(1-c). contrast(0) → 0.5 on
+                // every channel = mid-gray. (A prior *255 scale blew this out to
+                // white, masked by a [!mayfail] tag.)
                 const float c = f.amount;
-                const float t = 0.5f * (1.0f - c) * 255.0f;
+                const float t = 0.5f * (1.0f - c);
                 float m[20] = {
                     c, 0, 0, 0, t,
                     0, c, 0, 0, t,
@@ -290,12 +291,14 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
             }
             case FilterChainEntry::Kind::invert: {
                 // Per CSS spec — amount=1 fully inverts, amount=0 is identity.
-                // SkColorFilters::Matrix expects the translation column in
-                // 0..255 space, so the bias term `a` is multiplied by 255 to
-                // map black->white at invert(1).
+                // SkColorFilters::Matrix's translation column is NORMALIZED
+                // [0,1], so the bias is `a` (not a*255). invert(1): k=-1, t=1 →
+                // black(0)→1=white, white(1)→-1+1=0=black. (A prior *255 scale
+                // left white uninverted; black→white worked only by clamp
+                // accident, which is why the [!mayfail] black-only test passed.)
                 const float a = std::min(std::max(f.amount, 0.0f), 1.0f);
                 const float k = 1.0f - 2.0f * a;
-                const float t = a * 255.0f;
+                const float t = a;
                 float m[20] = {
                     k, 0, 0, 0, t,
                     0, k, 0, 0, t,

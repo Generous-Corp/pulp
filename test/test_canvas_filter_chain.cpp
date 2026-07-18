@@ -45,7 +45,8 @@ using namespace pulp::canvas;
 // source-order position so subsequent filters (drop-shadow) see the
 // reduced alpha as their input.
 TEST_CASE("SkiaCanvas filter chain: contrast(0) renders ~mid-gray",
-          "[canvas][skia][filter-chain][!mayfail]") {
+          "[canvas][skia][filter-chain]") {  // was [!mayfail]: the 255x-bias bug
+                                             // rendered white; now enforced.
     constexpr int kW = 16;
     constexpr int kH = 16;
     SkImageInfo info = SkImageInfo::Make(kW, kH, kN32_SkColorType,
@@ -109,11 +110,47 @@ TEST_CASE("SkiaCanvas filter chain: invert(1) maps black to white",
     SkPixmap pm;
     REQUIRE(surface->peekPixels(&pm));
     SkColor c = pm.getColor(kW / 2, kH / 2);
-    // invert(1) on black = white. The bias must be 255, not normalized
-    // 0..1, or the output stays near black.
+    // invert(1) on black = white (t=1 normalized: -1*0 + 1 = 1). NOTE: this
+    // black-only case passes under BOTH the correct [0,1] bias and the old
+    // 255x-scaled bias (both clamp to white), which is exactly why it never
+    // caught the bias bug — the white->black test below is the one that does.
     REQUIRE(SkColorGetR(c) >= 250);
     REQUIRE(SkColorGetG(c) >= 250);
     REQUIRE(SkColorGetB(c) >= 250);
+}
+
+// The smoking-gun for the bias bug: invert(1) on WHITE must render BLACK
+// (k=-1, normalized bias 1 → -1 + 1 = 0). The prior 255x-scaled bias computed
+// -1 + 255 → clamp to white, i.e. white stayed uninverted. Pixel-readback,
+// mirroring the bloom test's rigor.
+TEST_CASE("SkiaCanvas filter chain: invert(1) maps white to black",
+          "[canvas][skia][filter-chain]") {
+    constexpr int kW = 16;
+    constexpr int kH = 16;
+    SkImageInfo info = SkImageInfo::Make(kW, kH, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    auto* sk_canvas = surface->getCanvas();
+    sk_canvas->clear(SK_ColorWHITE);
+    SkiaCanvas canvas(sk_canvas);
+
+    Canvas::FilterChainEntry invert{};
+    invert.kind = Canvas::FilterChainEntry::Kind::invert;
+    invert.amount = 1.0f;
+
+    canvas.save_layer_with_filters(0, 0, kW, kH, 1.0f, &invert, 1);
+    canvas.set_fill_color(Color::rgba(1.0f, 1.0f, 1.0f, 1.0f));  // white input
+    canvas.fill_rect(0, 0, kW, kH);
+    canvas.restore();
+
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    SkColor c = pm.getColor(kW / 2, kH / 2);
+    REQUIRE(SkColorGetR(c) <= 8);
+    REQUIRE(SkColorGetG(c) <= 8);
+    REQUIRE(SkColorGetB(c) <= 8);
 }
 
 TEST_CASE("SkiaCanvas filter chain: opacity ordering changes pixel output "
@@ -184,6 +221,13 @@ TEST_CASE("SkiaCanvas filter chain: opacity ordering changes pixel output "
 // Regression test: `parse_filter_chain("drop-shadow(dx dy blur color)")`
 // must return non-null and the resulting SkImageFilter must produce a
 // visible offset shadow when rendered through SkiaCanvas::set_filter().
+//
+// Kept [!mayfail]: this fails for a reason UNRELATED to the color-matrix bias
+// fix — the drop-shadow filter is created (the getImageFilter() assertion
+// passes) but no darkened pixel appears at the expected shadow offset (28,28),
+// i.e. the set_filter/apply_filter drop-shadow render/position path, not the
+// contrast/invert bias. Left masked so this closeout doesn't silently flip a
+// test that is red for a separate, unaddressed reason.
 TEST_CASE("SkiaCanvas set_filter parses drop-shadow and renders shadow",
           "[canvas][skia][filter-chain][drop-shadow][!mayfail]") {
     constexpr int kW = 32;
@@ -271,10 +315,14 @@ TEST_CASE("SkiaCanvas set_filter non-existent filter returns null",
 // drifting in the production switch (or vice versa) the tests fail.
 namespace {
 
-// Apply a 4x5 SkColorMatrix-style row-major matrix to a (R,G,B,A) tuple
-// in 0..255 space and return the post-clamp output channel as a uint8.
-// Matches what SkColorFilters::Matrix does internally for sRGB/8-bit
-// inputs: out = M * [R,G,B,A,1] then clamp to [0,255].
+// Apply a 4x5 SkColorMatrix-style row-major matrix to a (R,G,B,A) tuple in
+// 0..255 space and return the post-clamp output channel as a uint8. Models what
+// SkColorFilters::Matrix ACTUALLY does: RGBA multipliers act on the channel
+// value, but the TRANSLATION column (m[4],9,14,19) is NORMALIZED [0,1] — Skia
+// scales it by 255 for 8-bit output. (A prior version added the bias directly
+// in 0..255 space; combined with the production code's 255x-scaled bias it was
+// self-consistent but modeled the WRONG convention, which is exactly why the
+// [!mayfail] raster contrast test disagreed with these unit tests.)
 struct Px { float r, g, b, a; };  // 0..255
 
 Px apply_matrix(const float m[20], Px in) {
@@ -284,17 +332,17 @@ Px apply_matrix(const float m[20], Px in) {
         return v;
     };
     Px out;
-    out.r = clamp(m[ 0]*in.r + m[ 1]*in.g + m[ 2]*in.b + m[ 3]*in.a + m[ 4]);
-    out.g = clamp(m[ 5]*in.r + m[ 6]*in.g + m[ 7]*in.b + m[ 8]*in.a + m[ 9]);
-    out.b = clamp(m[10]*in.r + m[11]*in.g + m[12]*in.b + m[13]*in.a + m[14]);
-    out.a = clamp(m[15]*in.r + m[16]*in.g + m[17]*in.b + m[18]*in.a + m[19]);
+    out.r = clamp(m[ 0]*in.r + m[ 1]*in.g + m[ 2]*in.b + m[ 3]*in.a + m[ 4]*255.0f);
+    out.g = clamp(m[ 5]*in.r + m[ 6]*in.g + m[ 7]*in.b + m[ 8]*in.a + m[ 9]*255.0f);
+    out.b = clamp(m[10]*in.r + m[11]*in.g + m[12]*in.b + m[13]*in.a + m[14]*255.0f);
+    out.a = clamp(m[15]*in.r + m[16]*in.g + m[17]*in.b + m[18]*in.a + m[19]*255.0f);
     return out;
 }
 
-// Mirrors the contrast(c) matrix construction in
-// core/canvas/src/skia_canvas.cpp: `t` is an 8-bit-space bias.
+// Mirrors the contrast(c) matrix construction in skia_canvas_opacity.cpp: the
+// bias is NORMALIZED [0,1] (0.5*(1-c)), not 8-bit.
 void build_contrast_matrix(float c, float m[20]) {
-    const float t = 0.5f * (1.0f - c) * 255.0f;
+    const float t = 0.5f * (1.0f - c);
     float src[20] = {
         c, 0, 0, 0, t,
         0, c, 0, 0, t,
@@ -304,11 +352,11 @@ void build_contrast_matrix(float c, float m[20]) {
     for (int i = 0; i < 20; ++i) m[i] = src[i];
 }
 
-// Mirrors the invert(amount) matrix construction.
+// Mirrors the invert(amount) matrix construction: normalized [0,1] bias `a`.
 void build_invert_matrix(float amount, float m[20]) {
     const float a = amount < 0.0f ? 0.0f : (amount > 1.0f ? 1.0f : amount);
     const float k = 1.0f - 2.0f * a;
-    const float t = a * 255.0f;
+    const float t = a;
     float src[20] = {
         k, 0, 0, 0, t,
         0, k, 0, 0, t,
@@ -353,7 +401,8 @@ TEST_CASE("Filter chain: contrast(0) bias lands at mid-gray (~128)",
     REQUIRE(orr.r == Catch::Approx(127.5f).margin(0.5f));
     REQUIRE(orr.g == Catch::Approx(127.5f).margin(0.5f));
     REQUIRE(orr.b == Catch::Approx(127.5f).margin(0.5f));
-    // A normalized 0..1 bias would produce ~0 on every channel, not 128.
+    // The normalized [0,1] bias 0.5, scaled to 8-bit by apply_matrix, lands at
+    // 127.5 — matching what real Skia renders (see the raster contrast test).
 }
 
 TEST_CASE("Filter chain: invert(1) maps black->white via the matrix",
@@ -368,12 +417,12 @@ TEST_CASE("Filter chain: invert(1) maps black->white via the matrix",
     REQUIRE(ob.r == Catch::Approx(255.0f).margin(0.5f));
     REQUIRE(ob.g == Catch::Approx(255.0f).margin(0.5f));
     REQUIRE(ob.b == Catch::Approx(255.0f).margin(0.5f));
-    // white -> black (k=-1 => -255 + 255 = 0)
+    // white -> black (k=-1, normalized bias 1 → 8-bit 255: -255 + 255 = 0)
     REQUIRE(ow.r == Catch::Approx(0.0f).margin(0.5f));
     REQUIRE(ow.g == Catch::Approx(0.0f).margin(0.5f));
     REQUIRE(ow.b == Catch::Approx(0.0f).margin(0.5f));
-    // A normalized 0..1 bias would produce ~1 on every channel,
-    // effectively still black after clamp to 8-bit.
+    // The [0,1] bias is what real Skia uses; the 255x-scaled bias the production
+    // code previously carried left white UNINVERTED (255) — see the raster test.
 }
 
 TEST_CASE("Filter chain: invert(0) is identity",
