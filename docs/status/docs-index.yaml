@@ -297,7 +297,7 @@ docs:
   - slug: example-pulp-sampler
     path: examples/pulp-sampler.md
     kind: guide
-    summary: PulpSampler - sample-buffer sampler with MIDI, ADSR, and pitch control
+    summary: PulpSampler - eight-voice sampler with bounded streaming, loops, interpolation, mips, and synthetic heritage processing
   - slug: example-pulp-pluck
     path: examples/pulp-pluck.md
     kind: guide
