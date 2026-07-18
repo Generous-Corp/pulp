@@ -532,10 +532,42 @@ void View::paint_all(canvas::Canvas& canvas) {
                                               left_over, top_over});
           }
         }
+        const float clip_w = bounds_.width, clip_h = bounds_.height;
+        // A uniform radius (setCornerRadius "All" -> set_border_radius) lives in
+        // corner_radius_, read by effective_corner_radius; the per-corner setters
+        // fill corner_radii_[]. The rounded clip has to honour BOTH, else a card
+        // rounded via the common uniform path clips square. Take the larger of
+        // each per-corner value and the uniform base, matching how a background
+        // painted with either path rounds.
+        const float uni_r = effective_corner_radius(clip_w, clip_h);
+        float ctl = std::max(effective_corner_radius_tl(clip_w, clip_h), uni_r);
+        float ctr = std::max(effective_corner_radius_tr(clip_w, clip_h), uni_r);
+        float cbl = std::max(effective_corner_radius_bl(clip_w, clip_h), uni_r);
+        float cbr = std::max(effective_corner_radius_br(clip_w, clip_h), uni_r);
+        const bool rounded_clip =
+            marker_pad <= 0.0f &&
+            (ctl > 0.5f || ctr > 0.5f || cbl > 0.5f || cbr > 0.5f);
         if (marker_pad > 0.0f) {
             canvas.clip_rect(-marker_pad, -marker_pad,
                              bounds_.width  + 2.0f * marker_pad,
                              bounds_.height + 2.0f * marker_pad);
+        } else if (rounded_clip) {
+            // A rounded frame must clip to its ROUNDED box, not a square: CSS
+            // overflow:hidden with border-radius clips to the rounded border box,
+            // so a square clip saws the corners off (an imported card lost its
+            // rounded top and bottom once it opted into clip). Clip to the same
+            // rounded rect the background paints. Each radius is clamped to half
+            // the shorter side so a large radius cannot self-cross the path.
+            const float m = 0.5f * std::min(clip_w, clip_h);
+            ctl = std::min(ctl, m); ctr = std::min(ctr, m);
+            cbl = std::min(cbl, m); cbr = std::min(cbr, m);
+            std::ostringstream d;
+            d << "M " << ctl << " 0"
+              << " H " << (clip_w - ctr) << " A " << ctr << " " << ctr << " 0 0 1 " << clip_w << " " << ctr
+              << " V " << (clip_h - cbr) << " A " << cbr << " " << cbr << " 0 0 1 " << (clip_w - cbr) << " " << clip_h
+              << " H " << cbl << " A " << cbl << " " << cbl << " 0 0 1 0 " << (clip_h - cbl)
+              << " V " << ctl << " A " << ctl << " " << ctl << " 0 0 1 " << ctl << " 0 Z";
+            canvas.clip_path_svg(d.str());
         } else {
             canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
         }

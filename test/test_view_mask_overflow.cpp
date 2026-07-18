@@ -167,6 +167,31 @@ TEST_CASE("View::paint_all does NOT route through save_layer_with_mask when mask
     REQUIRE(canvas.mask_calls.empty());
 }
 
+TEST_CASE("overflow:hidden on a rounded frame clips to the rounded box, not a square",
+          "[view][overflow]") {
+    // CSS overflow:hidden clips to the ROUNDED border box. A square clip saws
+    // the rounded corners off a clipped card — the imported mixer channel strips
+    // (border-radius + clip content) rendered with hard square corners until the
+    // overflow clip honoured the radius. A uniform radius (set_border_radius) and
+    // the per-corner setters must both trigger the rounded clip.
+    pulp::view::View rounded;
+    rounded.set_bounds({0, 0, 62, 235});
+    rounded.set_overflow(pulp::view::View::Overflow::hidden);
+    rounded.set_border_radius(8);  // uniform, the common setCornerRadius("All") path
+    pulp::canvas::RecordingCanvas rc;
+    rounded.paint_all(rc);
+    REQUIRE(rc.count(pulp::canvas::DrawCommand::Type::clip_path_svg) >= 1);
+
+    // No radius: the overflow clip stays a plain square clip_rect.
+    pulp::view::View square;
+    square.set_bounds({0, 0, 62, 235});
+    square.set_overflow(pulp::view::View::Overflow::hidden);
+    pulp::canvas::RecordingCanvas rc2;
+    square.paint_all(rc2);
+    REQUIRE(rc2.count(pulp::canvas::DrawCommand::Type::clip_path_svg) == 0);
+    REQUIRE(rc2.count(pulp::canvas::DrawCommand::Type::clip_rect) >= 1);
+}
+
 TEST_CASE("View::paint_all does NOT route through save_layer_with_mask when mask-image is 'none'",
           "[view][mask-image]") {
     pulp::view::View v;
