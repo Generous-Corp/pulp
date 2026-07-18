@@ -25,8 +25,9 @@
         "experimental/pulp-rs/tests/**/*.rs",
         "tools/cli/**/*.cpp",
         "tools/cli/**/*.hpp",
-        "tools/cli/**/*.h",
-        "tools/import-design/**/*.cpp",
+    "tools/cli/**/*.h",
+    "tools/audio/host-probe/**",
+    "tools/import-design/**/*.cpp",
         "tools/import-design/**/*.hpp",
         "tools/import-design/**/*.h"
       ],
