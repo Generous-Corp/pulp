@@ -57,6 +57,10 @@ std::string custom_type_id(std::uint64_t binding_instance_id, timeline::ItemId i
            std::to_string(id.value);
 }
 
+double sample_rate_double(timebase::RationalRate rate) noexcept {
+    return static_cast<double>(rate.as_long_double());
+}
+
 } // namespace
 
 struct detail::TimelineGraphSharedBlockState {
@@ -124,10 +128,13 @@ TimelineGraphPlaybackBinding::TimelineGraphPlaybackBinding(
     SignalGraph& graph, const playback::PlaybackProgramStore& store)
     : graph_(graph), store_(store),
       shared_(std::make_shared<detail::TimelineGraphSharedBlockState>()),
-      binding_instance_id_(next_binding_instance_id.fetch_add(1, std::memory_order_relaxed)) {}
+      binding_instance_id_(next_binding_instance_id.fetch_add(1, std::memory_order_relaxed)) {
+    graph_.acquire_routed_only_execution();
+}
 
 TimelineGraphPlaybackBinding::~TimelineGraphPlaybackBinding() {
     remove_all_owned_nodes();
+    graph_.release_routed_only_execution();
 }
 
 void TimelineGraphPlaybackBinding::remove_all_owned_nodes() noexcept {
@@ -139,7 +146,7 @@ void TimelineGraphPlaybackBinding::remove_all_owned_nodes() noexcept {
     }
     tracks_.clear();
     prepared_track_ids_.clear();
-    prepared_sample_rate_ = {0, 1};
+    prepared_sample_rate_ = 0.0;
     prepared_max_block_size_ = 0;
     prepared_ = false;
 }
@@ -312,9 +319,8 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::preflight(
 TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare(
     const playback::PlaybackProgram& program, std::span<const TimelineTrackGraphRoute> routes,
     const TimelineGraphBindingConfig& config, double sample_rate, int maximum_block_size) {
-    if (!std::isfinite(sample_rate) || sample_rate <= 0.0 ||
-        static_cast<long double>(sample_rate) !=
-            program.tempo_map().sample_rate().as_long_double())
+    const double program_sample_rate = sample_rate_double(program.tempo_map().sample_rate());
+    if (!std::isfinite(sample_rate) || sample_rate <= 0.0 || sample_rate != program_sample_rate)
         return reject(TimelineGraphAdmissionCode::SampleRateMismatch);
     const auto admission = preflight(program, routes, config, maximum_block_size);
     if (!admission)
@@ -422,14 +428,14 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare(
     graph_.set_canonical_executor_routing_enabled(true);
     if (!graph_.prepare(sample_rate, maximum_block_size))
         return reject(TimelineGraphAdmissionCode::GraphPrepareFailed);
-    if (!signal_graph_executor_eligible(graph_))
-        return reject(TimelineGraphAdmissionCode::RoutedTopologyIneligible);
+    if (!graph_.routed_execution_status(maximum_block_size).strict_routed_ready())
+        return reject(TimelineGraphAdmissionCode::RoutedPlanRejected);
     config_ = config;
     prepared_track_ids_.clear();
     prepared_track_ids_.reserve(tracks_.size());
     for (const auto& track : tracks_)
         prepared_track_ids_.push_back(track->id);
-    prepared_sample_rate_ = program.tempo_map().sample_rate().normalized();
+    prepared_sample_rate_ = program_sample_rate;
     prepared_max_block_size_ = static_cast<std::uint32_t>(maximum_block_size);
     prepared_ = true;
     return {};
@@ -465,11 +471,11 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
         output.clear();
         return result;
     }
-    if (block.program()->tempo_map().sample_rate().normalized() != prepared_sample_rate_) {
+    if (sample_rate_double(block.program()->tempo_map().sample_rate()) != prepared_sample_rate_) {
         result.code = TimelineGraphProcessCode::InvalidTransport;
         return result;
     }
-    if (transport.sample_rate.normalized() != prepared_sample_rate_ ||
+    if (sample_rate_double(transport.sample_rate) != prepared_sample_rate_ ||
         transport.tempo_map != &block.program()->tempo_map() ||
         transport.frame_count != output.num_samples() || transport.range_count == 0) {
         result.code = TimelineGraphProcessCode::InvalidTransport;
@@ -486,7 +492,6 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
             return result;
         }
     }
-
     for (const auto& track : tracks_) {
         const auto note_result = track->note_renderer->process(block, transport);
         result.emitted_note_events += note_result.emitted_events;
@@ -497,7 +502,10 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
             return result;
         }
         if (!graph_.inject_midi(track->midi_node, track->note_renderer->events())) {
-            result.code = TimelineGraphProcessCode::MidiInjectionFailed;
+            // Admission bounds every note stream to the graph mailbox's exact
+            // capacity, so a failed injection here means the prepared live
+            // snapshot (and therefore the admitted routed path) disappeared.
+            result.code = TimelineGraphProcessCode::RoutedDispatchFailed;
             output.clear();
             return result;
         }
@@ -519,10 +527,15 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
     // the stack-owned `block` pin and caller-owned exact snapshot remain alive
     // for every custom-node callback, including all parallel workers. Clear the
     // shared pointers only after that barrier has returned.
+    const auto routed_failures_before = graph_.routed_only_execution_failures();
     graph_.process(output, input, static_cast<int>(transport.frame_count), context);
+    const bool routed_dispatch_failed =
+        graph_.routed_only_execution_failures() != routed_failures_before;
     shared_->block.store(nullptr, std::memory_order_release);
     shared_->transport.store(nullptr, std::memory_order_release);
-    result.code = shared_->audio_code.load(std::memory_order_relaxed);
+    result.code = routed_dispatch_failed
+                      ? TimelineGraphProcessCode::RoutedDispatchFailed
+                      : shared_->audio_code.load(std::memory_order_relaxed);
     return result;
 }
 

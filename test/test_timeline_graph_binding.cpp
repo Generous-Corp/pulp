@@ -10,7 +10,9 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -223,6 +225,7 @@ TEST_CASE("timeline graph binding matches direct audio across varied blocks") {
     const std::array routes{TimelineTrackGraphRoute{{10}, output_node, 0, 0},
                             TimelineTrackGraphRoute{{11}, output_node, 0, 0}};
     REQUIRE(binding.prepare(*pinned, routes, config(), 48'000.0, 1024));
+    REQUIRE(graph.routed_execution_status(1024).strict_routed_ready());
     const auto stable_node = binding.audio_node_for({10});
     const auto second_stable_node = binding.audio_node_for({11});
     REQUIRE(stable_node != 0);
@@ -592,6 +595,86 @@ TEST_CASE("timeline graph binding validates sample rate at prepare and publicati
     REQUIRE(output.storage[0] == std::vector<float>(32, 7.0f));
     REQUIRE(binding.prepare(*changed, routes, config(1), 44'100.0, 64));
     REQUIRE(binding.process(output_view, input.const_view(), snapshot(*changed, 32)));
+}
+
+TEST_CASE("timeline graph binding compares fractional rates in its double API domain") {
+    const auto map = tempo_map({48'000, 1'001});
+    const double projected_rate = static_cast<double>(map->sample_rate().as_long_double());
+    ProgramHarness programs;
+    programs.publish(note_project(*map), map, take(DecodedAudioAssetPool::create({})), 1);
+    auto pinned = programs.store.read();
+    SignalGraph graph;
+    const auto output_node = graph.add_output_node(1);
+    TimelineGraphPlaybackBinding binding(graph, programs.store);
+    const std::array routes{TimelineTrackGraphRoute{{10}, output_node, 0, 0}};
+
+    REQUIRE(binding.prepare(*pinned, routes, config(1), projected_rate, 64));
+    REQUIRE(binding.prepare(*pinned, routes, config(1),
+                            std::nextafter(projected_rate,
+                                           std::numeric_limits<double>::infinity()),
+                            64)
+                .code == TimelineGraphAdmissionCode::SampleRateMismatch);
+    Buffer input(1, 32);
+    Buffer output(1, 32);
+    auto output_view = output.view();
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*pinned, 32)));
+}
+
+TEST_CASE("SignalGraph routed status rejects a build-invalid live snapshot") {
+    SignalGraph graph;
+    graph.set_canonical_executor_routing_enabled(true);
+    const auto input_node = graph.add_input_node(1);
+    const auto output_node = graph.add_output_node(1);
+    REQUIRE(graph.connect(input_node, 0, output_node, 0));
+    for (std::size_t index = 0; index < 510; ++index)
+        REQUIRE(graph.add_gain_node() != 0);
+
+    graph.acquire_routed_only_execution();
+    REQUIRE(graph.prepare(48'000.0, 64));
+    const auto exact = graph.routed_execution_status(64);
+    REQUIRE(exact.serial_snapshot_valid);
+    REQUIRE(exact.serial_pool_fits);
+    REQUIRE(exact.strict_routed_ready());
+
+    REQUIRE(graph.add_gain_node() != 0);
+    REQUIRE(graph.prepare(48'000.0, 64));
+    const auto above_bound = graph.routed_execution_status(64);
+    REQUIRE(above_bound.prepared);
+    REQUIRE_FALSE(above_bound.serial_snapshot_valid);
+    REQUIRE_FALSE(above_bound.strict_routed_ready());
+    REQUIRE_FALSE(above_bound.reference_walk_permitted);
+
+    Buffer input(1, 32, 1.0f);
+    Buffer output(1, 32, 7.0f);
+    auto output_view = output.view();
+    graph.process(output_view, input.const_view(), 32);
+    REQUIRE(output.storage[0] == std::vector<float>(32, 0.0f));
+    REQUIRE(graph.routed_only_execution_failures() == 1);
+
+    graph.release_routed_only_execution();
+    graph.process(output_view, input.const_view(), 32);
+    REQUIRE(output.storage[0] == std::vector<float>(32, 1.0f));
+}
+
+TEST_CASE("timeline graph binding reports loss of its prepared routed snapshot") {
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    programs.publish(audio_project(1.0f, 128), map,
+                     asset_pool(std::vector<float>(128, 1.0f)), 1);
+    auto pinned = programs.store.read();
+    SignalGraph graph;
+    const auto output_node = graph.add_output_node(1);
+    TimelineGraphPlaybackBinding binding(graph, programs.store);
+    const std::array routes{TimelineTrackGraphRoute{{10}, output_node, 0, 0}};
+    REQUIRE(binding.prepare(*pinned, routes, config(1), 48'000.0, 64));
+
+    REQUIRE(graph.add_gain_node() != 0);
+    Buffer input(1, 32);
+    Buffer output(1, 32, 7.0f);
+    auto output_view = output.view();
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*pinned, 32)).code ==
+            TimelineGraphProcessCode::RoutedDispatchFailed);
+    REQUIRE(output.storage[0] == std::vector<float>(32, 0.0f));
 }
 
 TEST_CASE("timeline graph binding rejects MIDI capacity before graph mutation") {

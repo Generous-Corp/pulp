@@ -402,10 +402,14 @@ canonical executor's authoritative routed-plan limits independently: node count,
 connection count, per-node ports, and total audio-plus-event ports all produce
 structured actual-versus-limit diagnostics. Per-track note capacity is capped at
 the graph MIDI handoff's 1024-event storage before graph mutation. Prepared and
-live program sample rates must match, and live publications may reorder the same
-track IDs but must be re-prepared after adding or removing tracks. Topology
+live program sample rates must match the `prepare()` API's `double` projection,
+including fractional rational rates. Live publications may reorder the same track
+IDs but must be re-prepared after adding or removing tracks. After prepare, the
+binding verifies the live compiled snapshot's routed-path validity and fixed pool
+fit. While a binding is alive, SignalGraph will clear a block that cannot use a
+prepared routed path instead of silently entering the reference walk. Topology
 eligibility is checked only after the capacity axes, so an oversized timeline
-route cannot silently fall back to the reference walk.
+route cannot be mistaken for an admitted routed snapshot.
 
 ## Baking a graph to a shippable artifact
 

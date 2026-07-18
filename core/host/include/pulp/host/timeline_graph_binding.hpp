@@ -79,6 +79,7 @@ enum class TimelineGraphProcessCode : std::uint8_t {
     CapacityExceeded,
     InputShapeMismatch,
     TopologyChanged,
+    RoutedDispatchFailed,
 };
 
 struct TimelineGraphProcessResult {
@@ -137,7 +138,7 @@ class TimelineGraphPlaybackBinding {
     TimelineGraphBindingConfig config_{};
     std::vector<timeline::ItemId> prepared_track_ids_;
     std::uint64_t binding_instance_id_ = 0;
-    timebase::RationalRate prepared_sample_rate_{0, 1};
+    double prepared_sample_rate_ = 0.0;
     std::uint32_t prepared_max_block_size_ = 0;
     bool prepared_ = false;
 };

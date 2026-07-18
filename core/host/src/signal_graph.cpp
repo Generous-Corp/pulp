@@ -976,6 +976,47 @@ std::shared_ptr<const void> SignalGraph::live_snapshot_handle() const noexcept {
     return live_slot_.live();  // aliases the live CompiledGraph as an opaque keepalive
 }
 
+SignalGraph::RoutedExecutionStatus
+SignalGraph::routed_execution_status(int block_size) const noexcept {
+    RoutedExecutionStatus status;
+    const auto live = live_slot_.live();
+    if (!live || block_size <= 0)
+        return status;
+
+    status.prepared = true;
+    status.serial_snapshot_valid = live->routed.serial.valid;
+    status.serial_pool_fits =
+        live->routed.serial.valid &&
+        live->routed.serial.pool.fits(live->routed.serial.snapshot,
+                                      static_cast<std::uint32_t>(block_size));
+    status.parallel_snapshot_valid = live->routed.parallel.valid;
+    status.parallel_pool_fits =
+        live->routed.parallel.valid &&
+        live->routed.parallel.pool.fits(live->routed.parallel.snapshot,
+                                        static_cast<std::uint32_t>(block_size));
+    status.worker_pool_running = worker_pool_.running();
+    status.reference_walk_permitted =
+        routed_only_execution_owners_.load(std::memory_order_relaxed) == 0;
+
+    switch (live->pdc_execution_domain) {
+    case PdcExecutionDomain::Legacy:
+        break;
+    case PdcExecutionDomain::RoutedSerial:
+        status.serial_selected = true;
+        break;
+    case PdcExecutionDomain::RoutedParallel:
+        status.parallel_selected = true;
+        break;
+    case PdcExecutionDomain::Dynamic:
+        status.serial_selected =
+            canonical_executor_routing_enabled_.load(std::memory_order_relaxed);
+        status.parallel_selected =
+            parallel_routing_enabled_.load(std::memory_order_relaxed);
+        break;
+    }
+    return status;
+}
+
 pulp::audio::AudioProcessLoadSnapshot SignalGraph::graph_load() const {
     return graph_load_ ? graph_load_->snapshot() : pulp::audio::AudioProcessLoadSnapshot{};
 }
@@ -2223,6 +2264,8 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
         for (std::size_t c = 0; c < output.num_channels(); ++c)
             std::memset(output.channel_ptr(c), 0,
                         sizeof(float) * static_cast<size_t>(num_samples));
+        if (routed_only_execution_owners_.load(std::memory_order_relaxed) != 0)
+            routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
         return;
     }
 
@@ -2495,7 +2538,8 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                 routed_eligible_dispatch_failed = true;  // eligible but did not route
             }
 
-            if (routed_eligible_dispatch_failed) {
+            if (routed_eligible_dispatch_failed &&
+                routed_only_execution_owners_.load(std::memory_order_relaxed) == 0) {
                 const std::uint64_t prev =
                     routed_walk_fallbacks_.fetch_add(1, std::memory_order_relaxed);
                 (void)prev;
@@ -2511,6 +2555,12 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
             }
         }
         // Any setup failure / disabled path falls through to the legacy walk.
+    }
+
+    if (routed_only_execution_owners_.load(std::memory_order_relaxed) != 0) {
+        output.clear();
+        routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
+        return;
     }
 
     // No routed path took this block — run the legacy serial reference walk,
