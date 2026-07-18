@@ -5,6 +5,7 @@
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/note_renderer.hpp>
+#include <pulp/runtime/slot.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -17,6 +18,7 @@ namespace pulp::host {
 namespace detail {
 struct TimelineGraphSharedBlockState;
 struct TimelineGraphBoundTrack;
+struct TimelineGraphBindingState;
 } // namespace detail
 
 /// One phase-1 track's lowering into the desktop SignalGraph adapter.
@@ -110,9 +112,11 @@ class TimelineGraphPlaybackBinding {
                                      const TimelineGraphBindingConfig& config,
                                      int maximum_block_size) const;
 
-    /// Reconciles stable ItemId-keyed nodes, pins canonical routed execution,
-    /// and prepares the graph. Existing nodes for unchanged track IDs retain
-    /// their SignalGraph NodeIds across calls.
+    /// Reconciles stable ItemId-keyed nodes through an isolated prepared graph
+    /// transaction and pins canonical routed execution. Existing nodes for
+    /// unchanged track IDs retain their SignalGraph NodeIds across calls. A
+    /// failed mutation, prepare, routed admission, or commit leaves both the
+    /// live graph and the binding's last published state untouched.
     TimelineGraphAdmission prepare(const playback::PlaybackProgram& program,
                                    std::span<const TimelineTrackGraphRoute> routes,
                                    const TimelineGraphBindingConfig& config, double sample_rate,
@@ -134,13 +138,8 @@ class TimelineGraphPlaybackBinding {
     const playback::PlaybackProgramStore& store_;
     playback::PlaybackProgramBlockLatch latch_;
     std::shared_ptr<detail::TimelineGraphSharedBlockState> shared_;
-    std::vector<std::unique_ptr<detail::TimelineGraphBoundTrack>> tracks_;
-    TimelineGraphBindingConfig config_{};
-    std::vector<timeline::ItemId> prepared_track_ids_;
+    runtime::Slot<const detail::TimelineGraphBindingState> state_;
     std::uint64_t binding_instance_id_ = 0;
-    double prepared_sample_rate_ = 0.0;
-    std::uint32_t prepared_max_block_size_ = 0;
-    bool prepared_ = false;
 };
 
 using TimelineGraphBinding = TimelineGraphPlaybackBinding;

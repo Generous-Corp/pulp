@@ -9,11 +9,14 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <thread>
 #include <vector>
 
 using namespace pulp;
@@ -179,6 +182,90 @@ struct Buffer {
     std::vector<std::vector<float>> storage;
     std::vector<float*> pointers;
     std::vector<const float*> const_pointers;
+};
+
+class ReportedLatencySilence final : public PluginSlot {
+  public:
+    ReportedLatencySilence() {
+        info_.name = "timeline PDC anchor";
+        info_.unique_id = "pulp.test.timeline-pdc-anchor";
+        info_.format = PluginFormat::CLAP;
+        info_.is_effect = true;
+        info_.num_inputs = 1;
+        info_.num_outputs = 1;
+    }
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    void process(audio::BufferView<float>& output,
+                 const audio::BufferView<const float>&,
+                 const midi::MidiBuffer&, midi::MidiBuffer&,
+                 const ParameterEventQueue&, int frames) override {
+        for (std::size_t channel = 0; channel < output.num_channels(); ++channel)
+            std::memset(output.channel_ptr(channel), 0,
+                        sizeof(float) * static_cast<std::size_t>(frames));
+    }
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    void set_parameter(std::uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<std::uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
+    int latency_samples() const override { return 2; }
+    int tail_samples() const override { return 0; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+
+  private:
+    PluginInfo info_;
+};
+
+class MidiCountingSlot final : public PluginSlot {
+  public:
+    MidiCountingSlot() {
+        info_.name = "timeline MIDI counter";
+        info_.unique_id = "pulp.test.timeline-midi-counter";
+        info_.format = PluginFormat::CLAP;
+        info_.is_effect = true;
+        info_.num_inputs = 1;
+        info_.num_outputs = 1;
+    }
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    void process(audio::BufferView<float>& output,
+                 const audio::BufferView<const float>&,
+                 const midi::MidiBuffer& events, midi::MidiBuffer&,
+                 const ParameterEventQueue&, int) override {
+        last_event_count = events.size();
+        for (std::size_t index = 0;
+             index < std::min(events.size(), last_offsets.size()); ++index) {
+            last_offsets[index] = events[index].sample_offset;
+        }
+        output.clear();
+    }
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    void set_parameter(std::uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<std::uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+
+    std::size_t last_event_count = 0;
+    std::array<std::uint32_t, 8> last_offsets{};
+
+  private:
+    PluginInfo info_;
 };
 
 TransportSnapshot snapshot(const PlaybackProgram& program, std::uint32_t frames,
@@ -393,9 +480,14 @@ TEST_CASE("timeline graph binding injects separately rendered notes") {
     auto pinned = programs.store.read();
     SignalGraph graph;
     const auto output_node = graph.add_output_node(1);
-    const auto midi_output = graph.add_midi_output_node();
+    auto counter = std::make_unique<MidiCountingSlot>();
+    auto* counter_ptr = counter.get();
+    const auto midi_destination = graph.add_plugin_node(
+        std::move(counter), 1, 1, "note recorder");
+    REQUIRE(graph.prepare(48'000.0, 128));
     TimelineGraphPlaybackBinding binding(graph, programs.store);
-    const std::array routes{TimelineTrackGraphRoute{{10}, output_node, 0, midi_output}};
+    const std::array routes{
+        TimelineTrackGraphRoute{{10}, output_node, 0, midi_destination}};
     REQUIRE(binding.prepare(*pinned, routes, config(1), 48'000.0, 128));
 
     Buffer input(1, 64);
@@ -404,16 +496,9 @@ TEST_CASE("timeline graph binding injects separately rendered notes") {
     const auto result = binding.process(output_view, input.const_view(), snapshot(*pinned, 64));
     REQUIRE(result);
     REQUIRE(result.emitted_note_events == 2);
-    midi::MidiBuffer events;
-    events.reserve(8);
-    midi::UmpBuffer ump_events;
-    ump_events.reserve(8);
-    events.attach_ump(&ump_events);
-    REQUIRE(graph.extract_midi(midi_output, events));
-    REQUIRE(events.size() == 2);
-    REQUIRE(ump_events.size() == 2);
-    REQUIRE(events[0].sample_offset == 5);
-    REQUIRE(events[1].sample_offset == 20);
+    REQUIRE(counter_ptr->last_event_count == 2);
+    REQUIRE(counter_ptr->last_offsets[0] == 5);
+    REQUIRE(counter_ptr->last_offsets[1] == 20);
     REQUIRE(graph.routed_walk_fallbacks() == 0);
 }
 
@@ -807,4 +892,202 @@ TEST_CASE("timeline graph binding can churn the same ItemId without registry ret
         REQUIRE(binding.process(output_view, input.const_view(), snapshot(*pinned, 32)));
     }
     REQUIRE(graph.nodes().size() == 1);
+}
+
+TEST_CASE("timeline graph binding carries renderer and pending MIDI across reprepare") {
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    programs.publish(audio_project(1.0f, 128), map,
+                     asset_pool(std::vector<float>(128, 1.0f)), 1);
+    auto program = programs.store.read();
+
+    SignalGraph graph;
+    const auto output_node = graph.add_output_node(1);
+    auto counter = std::make_unique<MidiCountingSlot>();
+    auto* counter_ptr = counter.get();
+    const auto midi_destination = graph.add_plugin_node(
+        std::move(counter), 1, 1, "MIDI counter");
+    REQUIRE(graph.prepare(48'000.0, 32));
+    TimelineGraphPlaybackBinding binding(graph, programs.store);
+    const std::array routes{
+        TimelineTrackGraphRoute{{10}, output_node, 0, midi_destination}};
+    REQUIRE(binding.prepare(*program, routes, config(1), 48'000.0, 32));
+
+    Buffer input(1, 32);
+    Buffer output(1, 32);
+    auto output_view = output.view();
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*program, 32)));
+    const auto stable_audio = binding.audio_node_for({10});
+    const auto stable_midi = binding.midi_input_node_for({10});
+    const auto carry = binding.renderer_state_for({10});
+    REQUIRE(carry.valid);
+
+    midi::MidiBuffer pending;
+    pending.reserve(1);
+    pending.add(midi::MidiEvent::note_on(0, 64, 100));
+    REQUIRE(graph.inject_midi(stable_midi, pending));
+    REQUIRE(binding.prepare(*program, routes, config(1), 48'000.0, 32));
+    REQUIRE(binding.audio_node_for({10}) == stable_audio);
+    REQUIRE(binding.midi_input_node_for({10}) == stable_midi);
+    const auto carried = binding.renderer_state_for({10});
+    REQUIRE(carried.valid == carry.valid);
+    REQUIRE(carried.key == carry.key);
+    REQUIRE(carried.event_cursor == carry.event_cursor);
+    REQUIRE(carried.source_sample == carry.source_sample);
+    REQUIRE(carried.timeline_tick == carry.timeline_tick);
+    REQUIRE(carried.loop_iteration == carry.loop_iteration);
+
+    // Drive the graph directly so the binding does not publish a newer empty
+    // note batch over the deliberately pending ingress publication.
+    graph.process(output_view, input.const_view(), 32);
+    REQUIRE(counter_ptr->last_event_count == 1);
+    graph.process(output_view, input.const_view(), 32);
+    REQUIRE(counter_ptr->last_event_count == 0);
+}
+
+TEST_CASE("timeline graph binding transactionally adds and removes PDC tracks") {
+    const auto map = tempo_map();
+    auto assets = asset_pool(std::vector<float>(128, 1.0f));
+    ProgramHarness programs;
+    programs.publish(audio_project(1.0f, 128), map, assets, 1);
+
+    SignalGraph graph;
+    CustomNodeType unrelated;
+    unrelated.type_id = "pulp.test.timeline-unrelated-unused";
+    unrelated.num_output_ports = 1;
+    unrelated.process = [](audio::BufferView<float>& output,
+                           const audio::BufferView<const float>&, int) {
+        output.clear();
+    };
+    REQUIRE(graph.register_custom_node_type(std::move(unrelated)));
+    const auto input_node = graph.add_input_node(1);
+    const auto latency_node = graph.add_plugin_node(
+        std::make_unique<ReportedLatencySilence>(), 1, 1, "PDC anchor");
+    const auto output_node = graph.add_output_node(1);
+    REQUIRE(graph.connect(input_node, 0, latency_node, 0));
+    REQUIRE(graph.connect(latency_node, 0, output_node, 0));
+    REQUIRE(graph.prepare(48'000.0, 4));
+    REQUIRE(graph.custom_node_type_count() == 1);
+
+    std::shared_ptr<const void> pinned_old_snapshot;
+    {
+        TimelineGraphPlaybackBinding binding(graph, programs.store);
+        const std::array one_route{
+            TimelineTrackGraphRoute{{10}, output_node, 0, 0}};
+        auto one = programs.store.read();
+        REQUIRE(binding.prepare(*one, one_route, config(1), 48'000.0, 4));
+        const auto stable_audio = binding.audio_node_for({10});
+        const auto stable_midi = binding.midi_input_node_for({10});
+        REQUIRE(graph.custom_node_type_count() == 2);
+
+        Buffer input(1, 4);
+        Buffer output(1, 4);
+        auto output_view = output.view();
+        REQUIRE(binding.process(output_view, input.const_view(), snapshot(*one, 4, 0)));
+        REQUIRE(output.storage[0] == std::vector<float>{0.0f, 0.0f, 1.0f, 1.0f});
+
+        programs.publish(parallel_audio_project(128), map, assets, 2);
+        auto two = programs.store.read();
+        const std::array two_routes{
+            TimelineTrackGraphRoute{{10}, output_node, 0, 0},
+            TimelineTrackGraphRoute{{11}, output_node, 0, 0}};
+        REQUIRE(binding.prepare(*two, two_routes, config(1), 48'000.0, 4));
+        REQUIRE(binding.audio_node_for({10}) == stable_audio);
+        REQUIRE(binding.midi_input_node_for({10}) == stable_midi);
+        REQUIRE(graph.custom_node_type_count() == 3);
+        REQUIRE(binding.process(output_view, input.const_view(), snapshot(*two, 4, 4)));
+        REQUIRE(output.storage[0] == std::vector<float>{1.0f, 1.0f, 1.5f, 1.5f});
+
+        programs.publish(audio_project(1.0f, 128), map, assets, 3);
+        auto one_again = programs.store.read();
+        REQUIRE(binding.prepare(*one_again, one_route, config(1), 48'000.0, 4));
+        REQUIRE(binding.audio_node_for({10}) == stable_audio);
+        REQUIRE(binding.midi_input_node_for({10}) == stable_midi);
+        REQUIRE(binding.audio_node_for({11}) == 0);
+        REQUIRE(graph.custom_node_type_count() == 2);
+        REQUIRE(binding.process(output_view, input.const_view(),
+                                snapshot(*one_again, 4, 8)));
+        REQUIRE(output.storage[0] == std::vector<float>{1.0f, 1.0f, 1.0f, 1.0f});
+        pinned_old_snapshot = graph.live_snapshot_handle();
+    }
+
+    REQUIRE(graph.nodes().size() == 3);
+    REQUIRE(graph.custom_node_type_count() == 1);
+    pinned_old_snapshot.reset();
+}
+
+TEST_CASE("timeline graph binding publishes coherent state during live reprepare") {
+    const auto map = tempo_map();
+    constexpr std::size_t kFrames = 128;
+    ProgramHarness programs;
+    programs.publish(audio_project(1.0f, kFrames), map,
+                     asset_pool(std::vector<float>(kFrames, 1.0f)), 1);
+    auto program = programs.store.read();
+
+    SignalGraph graph;
+    const auto gain_one = graph.add_gain_node("one");
+    const auto gain_two = graph.add_gain_node("two");
+    const auto output_node = graph.add_output_node(1);
+    REQUIRE(graph.set_node_gain(gain_one, 1.0f));
+    REQUIRE(graph.set_node_gain(gain_two, 2.0f));
+    REQUIRE(graph.connect(gain_one, 0, output_node, 0));
+    REQUIRE(graph.connect(gain_two, 0, output_node, 0));
+    TimelineGraphPlaybackBinding binding(graph, programs.store);
+    const std::array route_one{
+        TimelineTrackGraphRoute{{10}, gain_one, 0, 0}};
+    const std::array route_two{
+        TimelineTrackGraphRoute{{10}, gain_two, 0, 0}};
+    REQUIRE(binding.prepare(*program, route_one, config(1), 48'000.0, 32));
+
+    std::atomic<bool> stop{false};
+    std::atomic<std::uint64_t> one_blocks{0};
+    std::atomic<std::uint64_t> two_blocks{0};
+    std::atomic<std::uint64_t> invalid_blocks{0};
+    std::atomic<std::size_t> allocations{1};
+    std::thread audio_thread([&] {
+        Buffer input(1, 32);
+        Buffer output(1, 32);
+        auto output_view = output.view();
+        test::ScopedRtProcessProbe probe;
+        while (!stop.load(std::memory_order_acquire)) {
+            auto transport = snapshot(*program, 32, 0);
+            transport.ranges[0].discontinuity = true;
+            const auto result = binding.process(output_view, input.const_view(),
+                                                transport);
+            if (!result) {
+                invalid_blocks.fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
+            const float first = output.storage[0][0];
+            const bool coherent = std::all_of(
+                output.storage[0].begin(), output.storage[0].end(),
+                [first](float sample) { return sample == first; });
+            if (!coherent) {
+                invalid_blocks.fetch_add(1, std::memory_order_relaxed);
+            } else if (first == 1.0f) {
+                one_blocks.fetch_add(1, std::memory_order_relaxed);
+            } else if (first == 2.0f) {
+                two_blocks.fetch_add(1, std::memory_order_relaxed);
+            } else {
+                invalid_blocks.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+        allocations.store(probe.allocation_count(), std::memory_order_relaxed);
+    });
+
+    for (int iteration = 0; iteration < 64; ++iteration) {
+        const auto& route = (iteration & 1) == 0 ? route_two : route_one;
+        REQUIRE(binding.prepare(*program, route, config(1), 48'000.0, 32));
+    }
+    for (int spin = 0;
+         spin < 10'000 && two_blocks.load(std::memory_order_relaxed) == 0; ++spin) {
+        std::this_thread::yield();
+    }
+    stop.store(true, std::memory_order_release);
+    audio_thread.join();
+
+    REQUIRE(one_blocks.load(std::memory_order_relaxed) > 0);
+    REQUIRE(two_blocks.load(std::memory_order_relaxed) > 0);
+    REQUIRE(invalid_blocks.load(std::memory_order_relaxed) == 0);
+    REQUIRE(allocations.load(std::memory_order_relaxed) == 0);
 }
