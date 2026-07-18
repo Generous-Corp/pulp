@@ -37,7 +37,10 @@ gates:
   two-leg SRC, deterministic RNG policies, bounded runtime RNG-state capture,
   example integration, latency reporting, fail-closed diagnostics, and an
   independent Audio Quality Lab reference/negative-control gate are present.
-  The example also has a strict versioned profile/runtime state envelope.
+  The example's strict versioned profile/runtime envelope is wired through
+  outer plugin state. Callback-end `SeqLock` publication supplies same-rate RNG
+  continuation before the next session's first callback; host-rate changes
+  preserve the profile but reset runtime state and DSP transients.
 - S7 remains intentionally unshipped. There are no named hardware profiles or
   capture-matched claims; those still require the research, provenance,
   measurement, listening, and clean-room gates below.
@@ -45,10 +48,9 @@ gates:
   limitations. The example's API records define configuration, prepare/load,
   preload, envelope, heritage, and combined diagnostics, but the processor
   currently forwards only boolean file load, stream stats, heritage controls,
-  heritage diagnostics, and latency. At this checkpoint the streaming-memory
-  configuration and combined diagnostics are not wired through the processor,
-  and plugin-state integration of the tested heritage state envelope remains
-  in flight.
+  heritage diagnostics, latency, and heritage plugin state. The
+  streaming-memory configuration and combined diagnostics are not yet wired
+  through the processor.
 
 Quality Lab remains supplementary to exact transport, telemetry, lifetime,
 allocation, and current artifact-verification gates.
