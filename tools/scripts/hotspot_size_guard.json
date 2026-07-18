@@ -172,7 +172,7 @@
     },
     {
       "path": "core/view/src/widgets.cpp",
-      "max_loc": 2096,
+      "max_loc": 1884,
       "note": "Core widget implementations hotspot; split further before growing"
     },
     {

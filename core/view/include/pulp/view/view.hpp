@@ -1378,14 +1378,17 @@ public:
         std::string direction = "normal";
         std::string fill_mode;
     };
-    StagedAnimation& staged_animation() { return staged_animation_; }
-    const StagedAnimation& staged_animation() const { return staged_animation_; }
+    StagedAnimation& staged_animation() { return style_extras().staged_animation; }
+    const StagedAnimation& staged_animation() const {
+        static const StagedAnimation kEmpty;
+        return style_extras_ ? style_extras_->staged_animation : kEmpty;
+    }
 
     /// CSS backdrop-filter: blur(px) — frosted-glass blur applied to whatever
     /// is behind this View when it paints. Zero == no backdrop
     /// filter. Skia maps to `saveLayer(SaveLayerRec{ .fBackdrop = Blur })`.
-    void set_backdrop_blur(float radius) { backdrop_blur_ = radius; }
-    float backdrop_blur() const { return backdrop_blur_; }
+    void set_backdrop_blur(float radius) { style_extras().backdrop_blur = radius; }
+    float backdrop_blur() const { return style_extras_ ? style_extras_->backdrop_blur : 0.0f; }
 
     /// CSS `clip-path: path("...")`. Stores an SVG-path-d string; paint_all()
     /// installs it as a canvas clip via
@@ -1393,28 +1396,40 @@ public:
     /// clears the slot. URL refs (`url(#id)`) and named shape forms
     /// (`circle()`, `inset()`, `polygon()`) are deferred — only the
     /// `path("...")` form is honored today.
-    void set_clip_path(const std::string& svg_path_d) { clip_path_ = svg_path_d; }
-    const std::string& clip_path() const { return clip_path_; }
-    bool has_clip_path() const { return !clip_path_.empty(); }
+    void set_clip_path(const std::string& svg_path_d) { style_extras().clip_path = svg_path_d; }
+    const std::string& clip_path() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->clip_path : kEmpty;
+    }
+    bool has_clip_path() const { return style_extras_ && !style_extras_->clip_path.empty(); }
 
     /// CSS `mask-image: ...`. View opens a masked compositing layer when this
     /// slot is set to a non-`none` value. Backends without mask support route
     /// through the default save_layer path and preserve the value for bridge
     /// round-tripping.
-    void set_mask_image(const std::string& value) { mask_image_ = value; }
-    const std::string& mask_image() const { return mask_image_; }
+    void set_mask_image(const std::string& value) { style_extras().mask_image = value; }
+    const std::string& mask_image() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->mask_image : kEmpty;
+    }
 
     /// CSS `mask` shorthand. Stored verbatim alongside `mask_image_`; the
     /// longhand fan-out in the JS shim populates the image slot from this
     /// string.
-    void set_mask(const std::string& value) { mask_ = value; }
-    const std::string& mask() const { return mask_; }
+    void set_mask(const std::string& value) { style_extras().mask = value; }
+    const std::string& mask() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->mask : kEmpty;
+    }
 
     /// CSS `mask-size` (pairs with mask-image). Stored alongside mask_image_
     /// and passed to the canvas mask layer. Honored values: `auto` (default),
     /// `cover`, `contain`, `<length>`, `<length> <length>`.
-    void set_mask_size(const std::string& value) { mask_size_ = value; }
-    const std::string& mask_size() const { return mask_size_; }
+    void set_mask_size(const std::string& value) { style_extras().mask_size = value; }
+    const std::string& mask_size() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->mask_size : kEmpty;
+    }
 
     /// CSS `appearance` — controls native form-widget rendering.
     /// Pulp paints all widgets custom (no native form widgets), so
@@ -1423,23 +1438,32 @@ public:
     /// The slot exists so authors who set `appearance: none` for
     /// reset-style consistency see a no-op (not an unsupported drop)
     /// and the value round-trips through CSSStyleDeclaration.
-    void set_appearance(const std::string& value) { appearance_ = value; }
-    const std::string& appearance() const { return appearance_; }
+    void set_appearance(const std::string& value) { style_extras().appearance = value; }
+    const std::string& appearance() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->appearance : kEmpty;
+    }
 
     /// CSS `object-fit` — controls how an `<img>` content's intrinsic size is
     /// fitted into its layout box. ImageView consumes this slot at paint time
     /// when the backend can measure the decoded image's natural size; otherwise
     /// it falls back to `fill` and stretches to bounds. Honored values:
     /// `fill` (default), `contain`, `cover`, `none`, and `scale-down`.
-    void set_object_fit(const std::string& value) { object_fit_ = value; }
-    const std::string& object_fit() const { return object_fit_; }
+    void set_object_fit(const std::string& value) { style_extras().object_fit = value; }
+    const std::string& object_fit() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->object_fit : kEmpty;
+    }
 
     /// CSS `object-position` — alignment of the object inside its
     /// content box when object-fit leaves blank space (e.g. `contain`
     /// in a wider box). ImageView consumes it alongside `object-fit` at paint
     /// time when a measurable image is available.
-    void set_object_position(const std::string& value) { object_position_ = value; }
-    const std::string& object_position() const { return object_position_; }
+    void set_object_position(const std::string& value) { style_extras().object_position = value; }
+    const std::string& object_position() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->object_position : kEmpty;
+    }
 
     /// CSS background sub-properties. These slots store the keyword for
     /// round-tripping; paint impact is partial — see notes:
@@ -1451,22 +1475,37 @@ public:
     ///     Catalog: partial.
     ///   • background-origin: relevant only for repeating gradients (which
     ///     we don't paint per-tile). Catalog: noop.
-    void set_background_attachment(std::string kw) { background_attachment_ = std::move(kw); }
-    const std::string& background_attachment() const { return background_attachment_; }
-    void set_background_clip(std::string kw)       { background_clip_ = std::move(kw); }
-    const std::string& background_clip() const     { return background_clip_; }
-    void set_background_origin(std::string kw)     { background_origin_ = std::move(kw); }
-    const std::string& background_origin() const   { return background_origin_; }
+    void set_background_attachment(std::string kw) { style_extras().background_attachment = std::move(kw); }
+    const std::string& background_attachment() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->background_attachment : kEmpty;
+    }
+    void set_background_clip(std::string kw)       { style_extras().background_clip = std::move(kw); }
+    const std::string& background_clip() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->background_clip : kEmpty;
+    }
+    void set_background_origin(std::string kw)     { style_extras().background_origin = std::move(kw); }
+    const std::string& background_origin() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->background_origin : kEmpty;
+    }
 
     /// CSS background-position / background-size. Both are storage-only slots
     /// today: Pulp's solid-bg paint path doesn't honor position or size offsets
     /// (these only matter for url()/image-set() raster backgrounds). Storing
     /// the keyword keeps the round-trip honest so the image pipeline can honor
     /// the existing value without a JS-side change.
-    void set_background_position(std::string kw)   { background_position_ = std::move(kw); }
-    const std::string& background_position() const { return background_position_; }
-    void set_background_size(std::string kw)       { background_size_ = std::move(kw); }
-    const std::string& background_size() const     { return background_size_; }
+    void set_background_position(std::string kw)   { style_extras().background_position = std::move(kw); }
+    const std::string& background_position() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->background_position : kEmpty;
+    }
+    void set_background_size(std::string kw)       { style_extras().background_size = std::move(kw); }
+    const std::string& background_size() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->background_size : kEmpty;
+    }
 
     // Storage-only slots for CSS properties that the bridge accepts but View
     // does not fully consume. Each slot is round-trippable so harness tests can
@@ -1888,27 +1927,37 @@ private:
     bool has_transform_matrix_ = false;
     float filter_blur_ = 0;
     std::vector<FilterOp> filter_chain_{};
-    float backdrop_blur_ = 0;
-    // CSS clip-path / mask storage. Paint-time consumption for clip_path_ via
-    // Canvas::clip_path_svg (SkPath::FromSVGString on Skia, no-op fallback
-    // elsewhere). mask_image_ / mask_ are consumed by mask-capable backends and
-    // round-trip through storage elsewhere.
-    std::string clip_path_;
-    std::string mask_image_;
-    std::string mask_;
-    std::string mask_size_;     // CSS mask-size paired with mask_image_
-    std::string appearance_;    // CSS appearance — storage-only no-op for Pulp custom widgets
-    std::string object_fit_;      // CSS object-fit consumed by ImageView paint
-    std::string object_position_; // CSS object-position paired with object-fit
+    // CSS-compat storage-only style slots, lazily allocated. Native View
+    // trees never set these, so keeping them behind a pointer avoids ~14
+    // empty std::strings + floats per View instance. Allocated on first
+    // write via style_extras(); readers fall back to defaults when null.
+    // Paint-time consumption: clip_path via Canvas::clip_path_svg
+    // (SkPath::FromSVGString on Skia, no-op fallback elsewhere); mask_image /
+    // mask via mask-capable backends; the rest round-trip through storage.
+    struct ViewStyleExtras {
+        StagedAnimation staged_animation{};
+        float backdrop_blur = 0.0f;
+        std::string clip_path;
+        std::string mask_image;
+        std::string mask;
+        std::string mask_size;     // CSS mask-size paired with mask_image
+        std::string appearance;    // CSS appearance — storage-only no-op for Pulp custom widgets
+        std::string object_fit;      // CSS object-fit consumed by ImageView paint
+        std::string object_position; // CSS object-position paired with object-fit
+        std::string background_attachment;  // noop today
+        std::string background_clip;        // partial (text deferred)
+        std::string background_origin;      // noop today
+        std::string background_position;    // storage-only (raster bg deferred)
+        std::string background_size;        // storage-only (raster bg deferred)
+    };
+    std::unique_ptr<ViewStyleExtras> style_extras_;
+    ViewStyleExtras& style_extras() {
+        if (!style_extras_) style_extras_ = std::make_unique<ViewStyleExtras>();
+        return *style_extras_;
+    }
     /// Transition specs + active animations.
     std::vector<TransitionSpec> transitions_{};
     std::vector<CssAnimation> active_animations_{};
-    StagedAnimation staged_animation_{};
-    std::string background_attachment_;  // noop today
-    std::string background_clip_;        // partial (text deferred)
-    std::string background_origin_;      // noop today
-    std::string background_position_;    // storage-only (raster bg deferred)
-    std::string background_size_;        // storage-only (raster bg deferred)
 
     // Storage-only catalog slots.
     float       text_indent_ = 0.0f;       // partial (paint deferred)
