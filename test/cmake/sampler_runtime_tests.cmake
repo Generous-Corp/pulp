@@ -63,10 +63,12 @@ pulp_add_test_suite(pulp-test-sample-stream-service
     LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-stream-async-service
     SOURCES test_sample_stream_async_service.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::audio)
+    LIBRARIES pulp::audio
+    TIMEOUT 30)
 pulp_add_test_suite(pulp-test-sample-stream-decode-pool
     SOURCES test_sample_stream_decode_pool.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::audio)
+    LIBRARIES pulp::audio
+    TIMEOUT 30)
 pulp_add_test_suite(pulp-test-sample-stream-voice-reader
     SOURCES test_sample_stream_voice_reader.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)

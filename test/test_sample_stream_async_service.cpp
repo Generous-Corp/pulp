@@ -2,6 +2,8 @@
 
 #include <pulp/audio/sample_stream_async_service.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
@@ -22,6 +24,8 @@ namespace {
 
 class DecodeGate {
 public:
+    ~DecodeGate() { allow(); }
+
     std::uint64_t read(std::uint64_t start,
                        pulp::audio::BufferView<float> destination,
                        std::uint64_t frames) {
@@ -36,9 +40,10 @@ public:
         return frames;
     }
 
-    void wait_until_entered() {
+    bool wait_until_entered(
+        std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
         std::unique_lock lock(mutex_);
-        changed_.wait(lock, [&] { return entered_; });
+        return changed_.wait_for(lock, timeout, [&] { return entered_; });
     }
 
     void allow() {
@@ -59,15 +64,18 @@ private:
 struct QueueFullDispatchCutpoint {
     static inline DecodeGate* release_gate = nullptr;
     static inline DecodeGate* entered_gate = nullptr;
+    static inline std::atomic<bool> timed_out = false;
 
     static void after_queue_full_before_reserve() noexcept {
         if (release_gate != nullptr) release_gate->allow();
-        if (entered_gate != nullptr) entered_gate->wait_until_entered();
+        if (entered_gate != nullptr && !entered_gate->wait_until_entered())
+            timed_out.store(true, std::memory_order_release);
     }
 
     class Scope {
     public:
         Scope(DecodeGate& release, DecodeGate& entered) noexcept {
+            timed_out.store(false, std::memory_order_relaxed);
             release_gate = &release;
             entered_gate = &entered;
         }
@@ -152,7 +160,7 @@ TEST_CASE("Async stream service drains canceled work before generation replaceme
     REQUIRE(added_a.added());
     REQUIRE(service.request_page(demand(1, 0)) == SampleStreamScheduleStatus::Inserted);
     REQUIRE(service.dispatch_once().status == SampleStreamAsyncDispatchStatus::Queued);
-    gate.wait_until_entered();
+    REQUIRE(gate.wait_until_entered());
 
     REQUIRE(service.request_page(demand(1, 1)) == SampleStreamScheduleStatus::Inserted);
     const auto duplicate_dispatch = service.dispatch_once();
@@ -312,7 +320,7 @@ TEST_CASE("Async dispatch retains queue-full tickets without blocking free worke
     REQUIRE(service.request_page(demand(1, 0, 10)) ==
             SampleStreamScheduleStatus::Inserted);
     REQUIRE(service.dispatch_once().status == SampleStreamAsyncDispatchStatus::Queued);
-    gate.wait_until_entered();
+    REQUIRE(gate.wait_until_entered());
     REQUIRE(service.request_page(demand(1, 0, 12)) ==
             SampleStreamScheduleStatus::Inserted);
     REQUIRE(service.dispatch_once().status == SampleStreamAsyncDispatchStatus::Queued);
@@ -541,7 +549,7 @@ TEST_CASE("Async retry preserves same-source serial order across a reused record
     REQUIRE(service.request_page(demand(1, 0, 100)) ==
             SampleStreamScheduleStatus::Inserted);
     REQUIRE(service.dispatch_once().status == SampleStreamAsyncDispatchStatus::Queued);
-    active_gate.wait_until_entered();
+    REQUIRE(active_gate.wait_until_entered());
     REQUIRE(service.request_page(demand(1, 0, 102)) ==
             SampleStreamScheduleStatus::Inserted);
     REQUIRE(service.dispatch_once().status == SampleStreamAsyncDispatchStatus::Queued);
@@ -564,6 +572,8 @@ TEST_CASE("Async retry preserves same-source serial order across a reused record
         QueueFullDispatchCutpoint::Scope cutpoint(active_gate, queued_gate);
         return service.dispatch_once();
     }();
+    REQUIRE_FALSE(QueueFullDispatchCutpoint::timed_out.load(
+        std::memory_order_acquire));
     REQUIRE(retained_later.submit_status ==
             pulp::audio::SampleStreamDecodeSubmitStatus::QueueFull);
 
