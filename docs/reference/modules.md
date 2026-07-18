@@ -803,9 +803,19 @@ before allocator state changes. `NoteContent` is a flat POD array sorted by
 `(start, ItemId)`. Fallible construction uses
 `pulp::runtime::Result` and reports `ModelError` without exceptions.
 
-This initial surface intentionally excludes commands, undo, journals,
-persistence, publication, playback, automation, launch slots, takes, nesting,
-devices, routing, and UI.
+`assets.hpp` separates durable SHA-256 content identity from optional resolution
+hints and alternate representations. `schema_registry.hpp` provides an explicit
+immutable registry with typed extension codecs and bounded per-version
+migrations. `serialize.hpp` reads and writes deterministic JSON snapshots:
+64-bit values are canonical decimal strings, malformed or oversized input is
+rejected under `DecodeLimits`, and unknown extension envelopes retain their
+exact validated bytes for lossless re-save. `SerializedSnapshot` flags those
+opaque objects so callers can surface compatibility risk. This is snapshot JSON
+only; it does not read or write ZIP/package containers.
+
+This initial surface intentionally excludes commands, undo, journals, package
+I/O, publication, playback, automation, launch slots, takes, nesting, devices,
+routing, and UI.
 
 ## playback
 

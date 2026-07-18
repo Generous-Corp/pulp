@@ -23,13 +23,21 @@ pulp_add_test_suite(pulp-test-timeline-commands LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-journal LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-undo LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-schema-registry LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-persistence LIBRARIES pulp::timeline)
+target_compile_definitions(pulp-test-timeline-persistence PRIVATE
+    PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 
 add_library(pulp-test-timeline-no-exceptions OBJECT
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/assets.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/command.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/document_session.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/identity_directory.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/journal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/model.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_registry.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/undo.cpp)
 target_link_libraries(pulp-test-timeline-no-exceptions PRIVATE
