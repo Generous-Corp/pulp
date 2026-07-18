@@ -144,8 +144,12 @@ add_executable(pulp-test-matrix-synth test_matrix_synth.cpp)
 target_link_libraries(pulp-test-matrix-synth PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
 target_include_directories(pulp-test-matrix-synth PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpSynth)
 catch_discover_tests(pulp-test-matrix-synth)
-add_executable(pulp-test-matrix-sampler test_matrix_sampler.cpp)
-target_link_libraries(pulp-test-matrix-sampler PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
+include(${CMAKE_SOURCE_DIR}/examples/PulpSampler/pulp_sampler_sources.cmake)
+add_executable(pulp-test-matrix-sampler
+    test_matrix_sampler.cpp
+    ${PULP_SAMPLER_IMPLEMENTATION})
+target_link_libraries(pulp-test-matrix-sampler PRIVATE
+    pulp::format pulp::audio pulp::signal Catch2::Catch2WithMain)
 target_include_directories(pulp-test-matrix-sampler PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpSampler)
 catch_discover_tests(pulp-test-matrix-sampler)
 # Harness support lib: Processor-driven helpers; file-analysis lives in pulp::audio-analysis (tools/audio/analysis). See test/support/README.md.
