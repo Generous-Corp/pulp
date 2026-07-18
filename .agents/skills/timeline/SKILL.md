@@ -1,6 +1,6 @@
 ---
 name: timeline
-description: Pulp immutable timeline document model path-copy track indexes musical and absolute anchors media references sorted note content and scoped two-pass remapping.
+description: Pulp immutable timeline document model, typed clip commands, atomic transactions, bounded journal, and inverse-command undo.
 ---
 
 # Timeline document model
@@ -36,16 +36,38 @@ invariants.
   cross-track collisions, clips, and note events.
 - Fallible public APIs return `pulp::runtime::Result`; do not throw.
 
+## Editing contracts
+
+- `InsertClip`, `RemoveClip`, `MoveClip`, and `SetNoteVelocity` are the bounded
+  Phase-1 mutation vocabulary. `reduce_transaction()` is pure: it returns a new
+  snapshot, exact canonical dirty set, and reverse-ordered inverse commands.
+- `DocumentSession` is the sole authoritative writer. Multiple control-thread
+  callers serialize through it; readers atomically pin immutable snapshots.
+  Every transaction declares its expected revision. Stale revisions and typed
+  value/owner preconditions reject the whole transaction without publication.
+- Command and transaction IDs are writer-scoped monotonic idempotency keys.
+  `UndoGroupId` is the separate, explicit gesture-coalescing identity; different
+  writers never coalesce.
+- Project identity lookup is a persistent AVL directory. Deletion tombstones
+  IDs forever; inverse insertion may reactivate the exact identity and parent
+  chain. Never scan the whole project or reuse an ID to implement undo.
+- The in-memory command journal is bounded and fail-closed. A full journal
+  rejects before publication; it never ring-evicts committed entries.
+  `checkpoint()` truncates only a caller-confirmed durable prefix.
+- Undo and redo submit fresh ordinary transactions. They append to the journal;
+  they do not delete or rewrite history.
+
 ## Scope boundary
 
-The initial model does not own commands, undo, journals, persistence,
-publication, playback, automation, launch slots, takes, nesting, devices,
-routing, or UI. Add those in their scheduled slices instead of widening the
-foundation types opportunistically.
+This slice does not own persistence/schema codecs, a durable `JournalSink`,
+playback, automation, launch slots, takes, nesting, devices, routing, audio,
+format adapters, or UI. Add those in their scheduled slices instead of widening
+the command core opportunistically.
 
 ## Validation
 
-Build and run `pulp-test-timeline-model` in Release and UBSan configurations.
+Build and run `pulp-test-timeline-model` plus the commands, transactions,
+journal, and undo suites in Release and UBSan configurations.
 Keep the 10k-clip edit test proving bounded node creation, subtree sharing, and
 reclamation; a vector rebuild is not an acceptable persistent-index substitute.
 Also verify installed-header consumption and that timeline translation units do

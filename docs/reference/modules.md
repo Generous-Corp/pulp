@@ -721,13 +721,20 @@ wrap. `MeterMap` is intentionally deferred to the timeline engine.
 
 ## timeline
 
-Immutable document-model foundations for musical timelines. `Project`,
+Immutable document-model foundations and a bounded typed editing core for musical timelines. `Project`,
 `Sequence`, `Track`, and `Clip` are cheap copyable snapshots whose construction
 factories validate identities, ranges, references, and non-overlapping sparse
 arrangement lanes. Tracks retain persistent AVL indexes for both
 `(anchor, start, ItemId)` timeline order and `ItemId` lookup. `replace_clip()`
 path-copies only affected search paths while older snapshots share untouched
 subtrees.
+
+`InsertClip`, `RemoveClip`, `MoveClip`, and `SetNoteVelocity` apply only through
+atomic transactions. `DocumentSession` serializes multiple control-thread
+writers, publishes pinned immutable snapshots, rejects stale revisions and
+typed precondition failures without partial application, and records a precise
+dirty set. Its bounded journal rejects when full rather than losing replay
+history; inverse-command undo/redo append ordinary new transactions.
 
 **Link:** `pulp::timeline` · **Include prefix:** `<pulp/timeline/...>`
 

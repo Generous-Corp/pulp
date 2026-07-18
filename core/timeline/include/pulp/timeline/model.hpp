@@ -44,6 +44,9 @@ enum class ModelErrorCode : std::uint8_t {
     NextItemIdNotMonotonic,
     MixedTimeAnchors,
     IncompatibleSampleRate,
+    MissingItem,
+    IdentityConflict,
+    InvalidIdentityTransition,
 };
 
 struct ModelError {
@@ -57,7 +60,9 @@ class ItemIdAllocator {
     explicit constexpr ItemIdAllocator(std::uint64_t next = 1) noexcept : next_(next) {}
 
     runtime::Result<ItemId, ModelError> allocate() noexcept;
-    constexpr std::uint64_t next_value() const noexcept { return next_; }
+    constexpr std::uint64_t next_value() const noexcept {
+        return next_;
+    }
 
   private:
     std::uint64_t next_ = 1;
@@ -110,8 +115,11 @@ struct NoteEvent {
 class NoteContent {
   public:
     static runtime::Result<NoteContent, ModelError> create(std::vector<NoteEvent> notes);
+    runtime::Result<NoteContent, ModelError> replace_note(NoteEvent note) const;
 
-    std::span<const NoteEvent> notes() const noexcept { return *notes_; }
+    std::span<const NoteEvent> notes() const noexcept {
+        return *notes_;
+    }
 
   private:
     explicit NoteContent(std::shared_ptr<const std::vector<NoteEvent>> notes)
@@ -142,6 +150,8 @@ class Clip {
     timebase::RationalRate absolute_sample_rate() const noexcept;
     timebase::SamplePosition absolute_end() const noexcept;
     const ClipContent& content() const noexcept;
+    runtime::Result<Clip, ModelError> with_time_range(ClipTimeRange range) const;
+    runtime::Result<Clip, ModelError> with_content(ClipContent content) const;
 
   private:
     struct Data;
@@ -179,11 +189,19 @@ class Track {
             std::size_t index_ = 0;
         };
 
-        std::size_t size() const noexcept { return size_; }
-        bool empty() const noexcept { return size_ == 0; }
+        std::size_t size() const noexcept {
+            return size_;
+        }
+        bool empty() const noexcept {
+            return size_ == 0;
+        }
         const Clip& operator[](std::size_t index) const noexcept;
-        Iterator begin() const noexcept { return Iterator(root_, 0); }
-        Iterator end() const noexcept { return Iterator(root_, size_); }
+        Iterator begin() const noexcept {
+            return Iterator(root_, 0);
+        }
+        Iterator end() const noexcept {
+            return Iterator(root_, size_);
+        }
 
       private:
         friend class Track;
@@ -195,6 +213,8 @@ class Track {
 
     static runtime::Result<Track, ModelError> create(ItemId id, std::string name,
                                                      std::vector<Clip> clips);
+    runtime::Result<Track, ModelError> insert_clip(Clip clip) const;
+    runtime::Result<Track, ModelError> erase_clip(ItemId id) const;
     // Replaces one clip by identity with O(log n) path-copy updates. The old
     // Track remains valid and unchanged; untouched index subtrees are shared.
     runtime::Result<Track, ModelError> replace_clip(Clip replacement) const;
@@ -206,6 +226,7 @@ class Track {
     // Binary-searches the persistent ID index. Returned storage is snapshot-owned.
     const Clip* find_clip(ItemId id) const noexcept;
     std::size_t shared_index_nodes_with(const Track& other) const;
+    bool shares_storage_with(const Track& other) const noexcept;
     static TrackIndexStats index_stats() noexcept;
 
   private:
@@ -229,6 +250,8 @@ class Sequence {
     std::optional<AbsoluteTimelineDuration> absolute_duration() const noexcept;
     std::span<const Track> tracks() const noexcept;
     const Track* find_track(ItemId id) const noexcept;
+    runtime::Result<Sequence, ModelError> replace_track(Track track) const;
+    bool shares_storage_with(const Sequence& other) const noexcept;
 
   private:
     struct Data;
@@ -245,6 +268,29 @@ struct ProjectInput {
     std::vector<Sequence> sequences;
 };
 
+enum class ItemKind : std::uint8_t { Project, Asset, Sequence, Track, Clip, Note };
+
+struct ItemLocation {
+    ItemKind kind = ItemKind::Project;
+    ItemId sequence_id;
+    ItemId track_id;
+    ItemId clip_id;
+    bool active = false;
+};
+
+enum class IdentityMutationKind : std::uint8_t { Insert, Deactivate, Reactivate };
+
+struct IdentityMutation {
+    IdentityMutationKind mutation = IdentityMutationKind::Insert;
+    ItemId item;
+    ItemLocation location;
+};
+
+struct ProjectIdentityStats {
+    std::uint64_t live_nodes = 0;
+    std::uint64_t nodes_created = 0;
+};
+
 class Project {
   public:
     static runtime::Result<Project, ModelError> create(ProjectInput input);
@@ -257,17 +303,29 @@ class Project {
     std::span<const Sequence> sequences() const noexcept;
     const MediaAsset* find_asset(ItemId id) const noexcept;
     const Sequence* find_sequence(ItemId id) const noexcept;
-    ItemIdAllocator item_id_allocator() const noexcept { return ItemIdAllocator(next_item_id()); }
+    std::optional<ItemLocation> locate(ItemId id) const noexcept;
+    std::size_t shared_identity_nodes_with(const Project& other) const;
+    bool shares_storage_with(const Project& other) const noexcept;
+    static ProjectIdentityStats identity_stats() noexcept;
+    ItemIdAllocator item_id_allocator() const noexcept {
+        return ItemIdAllocator(next_item_id());
+    }
 
   private:
+    friend struct ProjectEditAccess;
     struct Data;
+    runtime::Result<Project, ModelError>
+    replace_sequence(Sequence sequence, std::span<const IdentityMutation> identities = {},
+                     std::optional<std::uint64_t> next_item_id = std::nullopt) const;
     explicit Project(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
     std::shared_ptr<const Data> data_;
 };
 
 class IdRemapTable {
   public:
-    std::span<const std::pair<ItemId, ItemId>> entries() const noexcept { return entries_; }
+    std::span<const std::pair<ItemId, ItemId>> entries() const noexcept {
+        return entries_;
+    }
     std::optional<ItemId> find(ItemId old_id) const noexcept;
 
   private:
@@ -285,19 +343,25 @@ struct ExternalIdFixup {
     runtime::Result<ItemId, ModelError> apply(ItemId id) const noexcept;
 };
 
-struct RemappedClip { Clip clip; IdRemapTable ids; };
-struct RemappedTrack { Track track; IdRemapTable ids; };
-struct RemappedSequence { Sequence sequence; IdRemapTable ids; };
+struct RemappedClip {
+    Clip clip;
+    IdRemapTable ids;
+};
+struct RemappedTrack {
+    Track track;
+    IdRemapTable ids;
+};
+struct RemappedSequence {
+    Sequence sequence;
+    IdRemapTable ids;
+};
 
-runtime::Result<RemappedClip, ModelError> remap_ids(const Clip& clip,
-                                                    ItemIdAllocator& allocator,
+runtime::Result<RemappedClip, ModelError> remap_ids(const Clip& clip, ItemIdAllocator& allocator,
                                                     ExternalIdFixup external = {});
-runtime::Result<RemappedTrack, ModelError> remap_ids(const Track& track,
-                                                     ItemIdAllocator& allocator,
+runtime::Result<RemappedTrack, ModelError> remap_ids(const Track& track, ItemIdAllocator& allocator,
                                                      ExternalIdFixup external = {});
-runtime::Result<RemappedSequence, ModelError> remap_ids(const Sequence& sequence,
-                                                        ItemIdAllocator& allocator,
-                                                        ExternalIdFixup external = {});
+runtime::Result<RemappedSequence, ModelError>
+remap_ids(const Sequence& sequence, ItemIdAllocator& allocator, ExternalIdFixup external = {});
 
 struct RemappedProject {
     Project project;
@@ -311,8 +375,7 @@ runtime::Result<RemappedProject, ModelError> remap_ids(const Project& project,
 
 } // namespace pulp::timeline
 
-template <>
-struct std::hash<pulp::timeline::ItemId> {
+template <> struct std::hash<pulp::timeline::ItemId> {
     std::size_t operator()(pulp::timeline::ItemId id) const noexcept {
         return std::hash<std::uint64_t>{}(id.value);
     }
