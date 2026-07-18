@@ -1583,20 +1583,26 @@ The `validate` subcommands are the offline analysis CLI over captured audio. The
 
 `sampler-mip build` is an offline asset-production command for strict ranged
 WAV and uncompressed AIFF/AIFF-C sources. It rejects inputs or decoded outputs
-above its explicit byte limits, produces one or two octave levels with the same
+above its explicit byte limits and fully decodes the admitted source in memory.
+It produces one or two octave levels with the same
 140 dB Kaiser-window decimator used by the resident sampler path, and writes
 float32 WAV payloads whose filenames include both the source and payload
 SHA-256 identities. Payloads are published first; the `.pulpmip` manifest is
 published last by an atomic same-directory rename and reloaded before success
-is reported. Use `--max-source-bytes` and `--max-output-bytes` to lower the
-default 512 MiB safety limits.
+is reported. The manifest and float32 payloads live beside the source; a
+successful replacement garbage-collects payloads owned only by the prior
+manifest. Use `--max-source-bytes` and `--max-output-bytes` to lower the default
+512 MiB safety limits.
 
 With `--json`, stdout is one object containing `ok`, `source`, `manifest`, and
 the `payloads` array; failures also include `error`. Success exits 0 and any
 parse, admission, build, publication, or self-verification failure exits 1.
 Building a valid sidecar does not relax PulpSampler's runtime admission policy:
 the source must still have one or two channels and a sample rate no greater
-than 192 kHz.
+than 192 kHz. At playback, only Hermite/Lagrange forward one-shots at an exact
+positive-octave ratio may select an available mip. Loop, reverse, non-exact, and
+missing-level cases stay on the base source and use the normal interpolation or
+ratio-tracking-sinc policy.
 
 `plugin-inspect` and `render` load arbitrary vendor code only in disposable child processes with bounded timeouts. This is crash/hang containment, not a security sandbox for malicious software. `plugin-inspect` is the discovery step; its parameter IDs and plain-domain ranges feed `render`.
 
