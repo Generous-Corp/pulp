@@ -320,29 +320,100 @@ substitute for the configured Audio Quality Lab gates.
 ### Focused Release and sanitizers
 
 ```bash
+sampler_targets=(
+  pulp-sampler-test
+  pulp-test-audio-file
+  pulp-test-mmap-reader-ranged
+  pulp-test-streaming-sample-source
+  pulp-test-loop-rendering
+  pulp-test-sampler-stream-parity
+  pulp-test-sampler-loop-oracle
+  pulp-test-sampler-loop-cursor-parity
+  pulp-test-sampler-paged-loop-oracle
+  pulp-test-sample-stream-service
+  pulp-test-sample-stream-async-service
+  pulp-test-sample-stream-decode-pool
+  pulp-test-sample-stream-voice-reader
+  pulp-test-sample-stream-loop-voice-reader
+  pulp-test-sample-sinc-kernel
+  pulp-test-sample-asset
+  pulp-test-sample-memory-governor
+  pulp-test-sample-heritage
+  pulp-test-sample-heritage-json
+  pulp-test-sample-starvation-envelope
+  pulp-test-sample-interpolation-quality
+)
+
+sampler_binaries=(
+  examples/PulpSampler/pulp-sampler-test
+  test/pulp-test-audio-file
+  test/pulp-test-mmap-reader-ranged
+  test/pulp-test-streaming-sample-source
+  test/pulp-test-loop-rendering
+  test/pulp-test-sampler-stream-parity
+  test/pulp-test-sampler-loop-oracle
+  test/pulp-test-sampler-loop-cursor-parity
+  test/pulp-test-sampler-paged-loop-oracle
+  test/pulp-test-sample-stream-service
+  test/pulp-test-sample-stream-async-service
+  test/pulp-test-sample-stream-decode-pool
+  test/pulp-test-sample-stream-voice-reader
+  test/pulp-test-sample-stream-loop-voice-reader
+  test/pulp-test-sample-sinc-kernel
+  test/pulp-test-sample-asset
+  test/pulp-test-sample-memory-governor
+  test/pulp-test-sample-heritage
+  test/pulp-test-sample-heritage-json
+  test/pulp-test-sample-starvation-envelope
+  test/pulp-test-sample-interpolation-quality
+)
+
 cmake -S . -B build-sampler-release -DCMAKE_BUILD_TYPE=Release \
   -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_ENABLE_GPU=OFF
 tools/ci/governed-build.sh cmake --build build-sampler-release \
-  --target pulp-sampler-test
-./build-sampler-release/examples/PulpSampler/pulp-sampler-test
+  --target "${sampler_targets[@]}"
+for binary in "${sampler_binaries[@]}"; do
+  "./build-sampler-release/$binary"
+done
 
 cmake -S . -B build-sampler-asan -DCMAKE_BUILD_TYPE=Release \
   -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_ENABLE_GPU=OFF \
   -DPULP_TEXT_SHAPING=OFF \
   -DPULP_SANITIZER=address
 tools/ci/governed-build.sh cmake --build build-sampler-asan \
-  --target pulp-sampler-test
-ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 \
-  ./build-sampler-asan/examples/PulpSampler/pulp-sampler-test
+  --target "${sampler_targets[@]}"
+for binary in "${sampler_binaries[@]}"; do
+  ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 \
+    "./build-sampler-asan/$binary"
+done
 
 cmake -S . -B build-sampler-tsan -DCMAKE_BUILD_TYPE=Release \
   -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_ENABLE_GPU=OFF \
   -DPULP_TEXT_SHAPING=OFF \
   -DPULP_SANITIZER=thread
 tools/ci/governed-build.sh cmake --build build-sampler-tsan \
-  --target pulp-sampler-test
-TSAN_OPTIONS=halt_on_error=1 \
-  ./build-sampler-tsan/examples/PulpSampler/pulp-sampler-test
+  --target "${sampler_targets[@]}"
+for binary in "${sampler_binaries[@]}"; do
+  TSAN_OPTIONS=halt_on_error=1 \
+    "./build-sampler-tsan/$binary"
+done
+```
+
+The decode-pool concurrency regression must also pass in the configuration that
+previously exposed the stall: Debug with coverage enabled. The 30-second CTest
+timeout turns a recurrence into a bounded failure rather than a wedged landing
+job.
+
+```bash
+cmake -S . -B build-sampler-coverage -DCMAKE_BUILD_TYPE=Debug \
+  -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON \
+  -DPULP_ENABLE_GPU=OFF -DPULP_TEXT_SHAPING=OFF \
+  -DPULP_ENABLE_COVERAGE=ON
+tools/ci/governed-build.sh cmake --build build-sampler-coverage \
+  --target pulp-test-sample-stream-decode-pool
+ctest --test-dir build-sampler-coverage \
+  -R '^Sample stream decode pool bounds cross-source concurrency by workers$' \
+  --timeout 30 --output-on-failure
 ```
 
 ### Full Release and audio harness
@@ -363,6 +434,42 @@ tools/ci/governed-build.sh ctest --test-dir build-final-release \
   -R 'audio|golden|render|contract|doctor' --output-on-failure
 ```
 
+The generic harness does not exercise the sampler renderer. Preserve its
+block-partition invariant as a sampler-specific null gate, with a same-length
+wrong-ratio negative control that proves the gate can fail:
+
+```bash
+mkdir -p build-final-evidence/sampler
+./build-final-aql/test/pulp-sampler-render-wav \
+  --source-out build-final-evidence/sampler/source-block-1.wav \
+  --candidate-out build-final-evidence/sampler/ratio-sinc-block-1.wav \
+  --policy ratio-sinc --ratio 1.5 --source-frequency 0.0211995442708333 \
+  --frames 16385 --block-size 1
+./build-final-aql/test/pulp-sampler-render-wav \
+  --source-out build-final-evidence/sampler/source-block-257.wav \
+  --candidate-out build-final-evidence/sampler/ratio-sinc-block-257.wav \
+  --policy ratio-sinc --ratio 1.5 --source-frequency 0.0211995442708333 \
+  --frames 16385 --block-size 257
+./build-final-aql/test/pulp-sampler-render-wav \
+  --source-out build-final-evidence/sampler/source-wrong-ratio.wav \
+  --candidate-out build-final-evidence/sampler/ratio-sinc-wrong-ratio.wav \
+  --policy ratio-sinc --ratio 1.25 --source-frequency 0.0211995442708333 \
+  --frames 16385 --block-size 257
+
+# Positive control: block partitioning must null at the stock tolerance.
+./build-final-release/tools/cli/pulp-cpp audio validate compare \
+  build-final-evidence/sampler/ratio-sinc-block-1.wav \
+  build-final-evidence/sampler/ratio-sinc-block-257.wav --mode null
+
+# Negative control: same frame count, intentionally wrong playback ratio.
+if ./build-final-release/tools/cli/pulp-cpp audio validate compare \
+  build-final-evidence/sampler/ratio-sinc-block-1.wav \
+  build-final-evidence/sampler/ratio-sinc-wrong-ratio.wav --mode null; then
+  echo 'sampler wrong-ratio negative control unexpectedly passed' >&2
+  exit 1
+fi
+```
+
 ### Audio Quality Lab, CLI, and benchmark evidence
 
 ```bash
@@ -377,6 +484,97 @@ tools/ci/governed-build.sh cmake --build build-final-aql --target \
   pulp-sampler-render-wav pulp-sampler-heritage-render-wav
 tools/ci/governed-build.sh ctest --test-dir build-final-aql \
   -R '^sampler-(quality-lab|heritage-quality-lab)-' --output-on-failure
+```
+
+The configured renderer-dependent tests remain the normative spectral and
+heritage oracles. In addition, record one advisory report for every named AQL
+axis. Four sustained-material axes use a high-frequency sampler render.
+Transient integrity uses a train assembled from repeated sampler heritage
+impulse renders, because that axis intentionally refuses material with too few
+onsets. The stereo axis uses a declared deterministic right-channel delay
+around the sampler-exported mono signal because this test renderer is mono; it
+proves preservation of that stereo mapping, not independent stereo-voice
+rendering.
+
+```bash
+./build-final-aql/test/pulp-sampler-render-wav \
+  --source-out build-final-evidence/sampler/aql-tone-source-1.wav \
+  --candidate-out build-final-evidence/sampler/aql-tone-block-1.wav \
+  --policy ratio-sinc --ratio 1.5 --source-frequency 0.1875 \
+  --frames 16385 --block-size 1
+./build-final-aql/test/pulp-sampler-render-wav \
+  --source-out build-final-evidence/sampler/aql-tone-source-257.wav \
+  --candidate-out build-final-evidence/sampler/aql-tone-block-257.wav \
+  --policy ratio-sinc --ratio 1.5 --source-frequency 0.1875 \
+  --frames 16385 --block-size 257
+
+for profile in tonal-balance added-hf noise-roughness graininess; do
+  .venv-aql/bin/python -m quality_lab.cli compare \
+    build-final-evidence/sampler/aql-tone-block-1.wav \
+    build-final-evidence/sampler/aql-tone-block-257.wav \
+    --profile "$profile" --reference-role golden \
+    --json "build-final-evidence/sampler/aql-$profile.json"
+done
+
+./build-final-aql/test/pulp-sampler-heritage-render-wav \
+  --source-out build-final-evidence/sampler/aql-impulse-source-64.wav \
+  --candidate-out build-final-evidence/sampler/aql-impulse-block-64.wav \
+  --input-ratio 0.75 --return-ratio 1.5 --impulse-index 2048 \
+  --frames 8192 --block-size 64
+./build-final-aql/test/pulp-sampler-heritage-render-wav \
+  --source-out build-final-evidence/sampler/aql-impulse-source-257.wav \
+  --candidate-out build-final-evidence/sampler/aql-impulse-block-257.wav \
+  --input-ratio 0.75 --return-ratio 1.5 --impulse-index 2048 \
+  --frames 8192 --block-size 257
+.venv-aql/bin/python - <<'PY'
+from pathlib import Path
+import numpy as np
+import soundfile as sf
+
+root = Path("build-final-evidence/sampler")
+for block in (1, 257):
+    mono, rate = sf.read(root / f"aql-tone-block-{block}.wav", dtype="float32")
+    right = np.zeros_like(mono)
+    right[17:] = mono[:-17] * np.float32(0.8)
+    sf.write(root / f"aql-stereo-block-{block}.wav",
+             np.column_stack((mono, right)), rate, subtype="FLOAT")
+for block in (64, 257):
+    impulse, rate = sf.read(root / f"aql-impulse-block-{block}.wav",
+                            dtype="float32")
+    sf.write(root / f"aql-transient-train-{block}.wav",
+             np.tile(impulse, 4), rate, subtype="FLOAT")
+PY
+.venv-aql/bin/python -m quality_lab.cli compare \
+  build-final-evidence/sampler/aql-stereo-block-1.wav \
+  build-final-evidence/sampler/aql-stereo-block-257.wav \
+  --profile stereo-width --reference-role golden \
+  --json build-final-evidence/sampler/aql-stereo-width.json
+.venv-aql/bin/python -m quality_lab.cli compare \
+  build-final-evidence/sampler/aql-transient-train-64.wav \
+  build-final-evidence/sampler/aql-transient-train-257.wav \
+  --profile transient-integrity --reference-role golden \
+  --json build-final-evidence/sampler/aql-transient-integrity.json
+
+.venv-aql/bin/python - <<'PY'
+import json
+from pathlib import Path
+
+root = Path("build-final-evidence/sampler")
+profiles = (
+    "tonal-balance", "added-hf", "noise-roughness", "graininess",
+    "stereo-width", "transient-integrity",
+)
+for profile in profiles:
+    report = json.loads((root / f"aql-{profile}.json").read_text())
+    assert report["schema"] == "quality_lab.compare.v1", profile
+    assert report["verdict"] == "no_material_change_detected", profile
+    assert report["measurements"][0]["applicable"] is True, profile
+PY
+
+# CLI and benchmark evidence continue after the six applicable AQL reports.
+```
+
+```bash
 
 tools/ci/governed-build.sh cmake --build build-final-release --target \
   pulp-cli pulp-test-cli-shellout
