@@ -34,7 +34,41 @@ namespace pulp::examples {
 struct PulpSamplerTestAccess {
     static PulpSamplerLoadResult load_sample_file_result(
         PulpSamplerProcessor& processor, std::string_view path) {
-        return processor.streaming_.load_sample_file_result(path);
+        return processor.streaming_->load_sample_file_result(path);
+    }
+
+    static void fail_next_service_prepare(PulpSamplerProcessor& processor) {
+        processor.streaming_->fail_next_service_prepare_for_test_.store(
+            true, std::memory_order_release);
+    }
+
+    static void fail_next_prepare_allocation(PulpSamplerProcessor& processor) {
+        processor.streaming_->fail_next_prepare_allocation_for_test_.store(
+            true, std::memory_order_release);
+    }
+
+    static bool fully_released(const PulpSamplerProcessor& processor) {
+        const auto stats = processor.streaming_->stats();
+        return !processor.prepared_ &&
+               processor.streaming_->published_source().kind ==
+                   SamplerPublishedSourceKind::None &&
+               stats.total_memory_capacity_bytes == 0 &&
+               stats.current_total_memory_bytes == 0;
+    }
+
+    static void seed_and_harvest_envelope(PulpSamplerProcessor& processor,
+                                          std::uint64_t starved_frames) {
+        for (auto& voice : processor.voices_) {
+            if (!voice.active || !voice.streamed) continue;
+            voice.stream_reader.mark_held_starvation(
+                static_cast<std::uint32_t>(starved_frames));
+            processor.reset_voice(voice);
+            return;
+        }
+    }
+
+    static void publish_envelope(PulpSamplerProcessor& processor) {
+        processor.publish_envelope_diagnostics();
     }
 
     static audio::SampleStreamSourceToken
@@ -822,6 +856,113 @@ TEST_CASE("PulpSampler descriptor", "[sampler]") {
     REQUIRE(d.accepts_midi);
     REQUIRE(d.input_buses.empty());
     REQUIRE(d.output_buses.size() == 1);
+}
+
+TEST_CASE("PulpSampler checked prepare reports every public failure and rolls back",
+          "[sampler][api][prepare]") {
+    auto prepare = [](PulpSamplerProcessor& processor,
+                      format::PrepareContext context = {}) {
+        context.input_channels = 0;
+        context.output_channels = 2;
+        processor.prepare(context);
+    };
+
+    SECTION("invalid host") {
+        PulpSamplerProcessor processor;
+        format::PrepareContext context;
+        context.sample_rate = 0.0;
+        prepare(processor, context);
+        REQUIRE(processor.prepare_result().status ==
+                PulpSamplerPrepareStatus::InvalidHostConfiguration);
+        REQUIRE(PulpSamplerTestAccess::fully_released(processor));
+    }
+    SECTION("resource limit") {
+        PulpSamplerProcessor processor;
+        format::PrepareContext context;
+        context.resource_limits.max_voices = PulpSamplerProcessor::kMaxVoices - 1;
+        prepare(processor, context);
+        REQUIRE(processor.prepare_result().status ==
+                PulpSamplerPrepareStatus::ResourceLimitExceeded);
+        REQUIRE(processor.prepare_result().exceeded_limit ==
+                format::PrepareResourceLimit::Voices);
+        REQUIRE(PulpSamplerTestAccess::fully_released(processor));
+    }
+    SECTION("memory budget") {
+        const auto estimate = SamplerStreamingRuntime::estimate_prepare(48000.0f, 512);
+        PulpSamplerProcessor processor({estimate.required_streaming_memory_bytes - 1});
+        prepare(processor);
+        REQUIRE(processor.prepare_result().status ==
+                PulpSamplerPrepareStatus::StreamingMemoryBudgetTooSmall);
+        REQUIRE(PulpSamplerTestAccess::fully_released(processor));
+    }
+    SECTION("service unavailable") {
+        PulpSamplerProcessor processor;
+        PulpSamplerTestAccess::fail_next_service_prepare(processor);
+        prepare(processor);
+        REQUIRE(processor.prepare_result().status ==
+                PulpSamplerPrepareStatus::StreamingServiceUnavailable);
+        REQUIRE(PulpSamplerTestAccess::fully_released(processor));
+    }
+    SECTION("allocation failure") {
+        PulpSamplerProcessor processor;
+        PulpSamplerTestAccess::fail_next_prepare_allocation(processor);
+        prepare(processor);
+        REQUIRE(processor.prepare_result().status ==
+                PulpSamplerPrepareStatus::AllocationFailure);
+        REQUIRE(PulpSamplerTestAccess::fully_released(processor));
+    }
+}
+
+TEST_CASE("PulpSampler public config load and diagnostics are coherent",
+          "[sampler][api][diagnostics]") {
+    const auto derived = SamplerStreamingRuntime::estimate_prepare(48000.0f, 512);
+    const auto configured = derived.required_streaming_memory_bytes + 4096;
+    PulpSamplerProcessor processor;
+    REQUIRE(processor.set_config({configured}));
+    format::PrepareContext context;
+    context.sample_rate = 48000.0;
+    context.max_buffer_size = 512;
+    context.input_channels = 0;
+    context.output_channels = 2;
+    const auto estimate = processor.estimate_prepare_resources(context);
+    REQUIRE(estimate.persistent_bytes == configured);
+    processor.prepare(context);
+    REQUIRE(processor.prepare_result().prepared());
+    REQUIRE_FALSE(processor.set_config({configured + 1}));
+    const auto prepared = processor.prepare_result();
+    REQUIRE(prepared.required_streaming_memory_bytes ==
+            derived.required_streaming_memory_bytes);
+    REQUIRE(prepared.configured_streaming_memory_bytes == configured);
+    const auto before = processor.diagnostics();
+    REQUIRE(before.streaming_memory_capacity_bytes == configured);
+    REQUIRE(before.current_streaming_memory_bytes <= configured);
+    REQUIRE(before.peak_streaming_memory_bytes <= configured);
+
+    TempSamplerWav wav("public_api", 100000, 0.25f, 48000);
+    const auto loaded = processor.load_sample_file_result(wav.path);
+    REQUIRE(loaded.loaded());
+    REQUIRE(processor.last_load_result().status == PulpSamplerLoadStatus::Ok);
+    const auto diagnostics = processor.diagnostics();
+    REQUIRE(diagnostics.last_load.loaded());
+    REQUIRE(diagnostics.preload.sufficient());
+    REQUIRE(diagnostics.preload.page_frames > 0);
+    REQUIRE(diagnostics.streaming_memory_capacity_bytes == configured);
+}
+
+TEST_CASE("PulpSampler envelope lifetime survives voice reset without double count",
+          "[sampler][api][diagnostics][envelope]") {
+    TempSamplerWav wav("envelope_lifetime", 100000, 0.25f);
+    SamplerFixture fixture;
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    block.run(*fixture.proc);
+    PulpSamplerTestAccess::seed_and_harvest_envelope(*fixture.proc, 37);
+    PulpSamplerTestAccess::publish_envelope(*fixture.proc);
+    const auto first = fixture.proc->diagnostics().envelope.lifetime.starved_frames;
+    REQUIRE(first == 37);
+    PulpSamplerTestAccess::publish_envelope(*fixture.proc);
+    REQUIRE(fixture.proc->diagnostics().envelope.lifetime.starved_frames == first);
 }
 
 TEST_CASE("PulpSampler has 9 parameters", "[sampler]") {
