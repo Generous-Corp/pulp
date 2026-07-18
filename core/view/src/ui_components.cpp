@@ -1190,15 +1190,28 @@ View* ScrollView::hit_test(Point local_point) {
             Point child_point = {local_point.x + sx - child->bounds().x,
                                  local_point.y + sy - child->bounds().y};
 
-            // overflow:visible: expand hit area symmetrically on all four
-            // sides for popovers that extend in any direction (pulp #1148).
+            // overflow:visible: expand the hit area to the child's TRUE painted
+            // extent — the bounding box of the child plus every descendant
+            // reachable through an unbroken overflow:visible chain — so a
+            // popover that paints outside its own box stays clickable in any
+            // direction (pulp #1148). accumulate_overflow_extent is the same
+            // math View::overlay_contains uses, keyed off actual painted pixels
+            // rather than a blanket ±500px margin that also inflated the hit
+            // area around popovers that don't overflow at all.
             bool in_bounds = child->local_bounds().contains(child_point);
             if (!in_bounds && child->overflow() == Overflow::visible) {
                 auto lb = child->local_bounds();
-                in_bounds = child_point.x >= lb.x - 500 &&
-                            child_point.x <= lb.x + lb.width + 500 &&
-                            child_point.y >= lb.y - 500 &&
-                            child_point.y <= lb.y + lb.height + 500;
+                // Child-local extents: seed with the child's own box, then let
+                // accumulate walk its overflow:visible subtree. Passing
+                // -child->bounds() as the parent origin places the child at the
+                // local origin so the extents share child_point's frame.
+                float min_x = lb.x, min_y = lb.y;
+                float max_x = lb.x + lb.width, max_y = lb.y + lb.height;
+                accumulate_overflow_extent(child, -child->bounds().x,
+                                           -child->bounds().y,
+                                           min_x, min_y, max_x, max_y);
+                in_bounds = child_point.x >= min_x && child_point.x <= max_x &&
+                            child_point.y >= min_y && child_point.y <= max_y;
             }
 
             if (in_bounds) {

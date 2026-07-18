@@ -390,6 +390,77 @@ TEST_CASE("View::paint_all emits clip_rect when overflow is explicitly hidden",
     REQUIRE(saw_bounds_clip);
 }
 
+// ── Circle-marker clip tolerance (import-only opt-in) ───────────────────
+// An imported design can place a circular value-marker (an XY-pad-style dot)
+// as a position:absolute child of an overflow:hidden container; at edge values
+// half the dot sits outside the content box. The importer opts the container
+// into set_clip_marker_tolerance() so paint_all expands the clip just enough to
+// admit the marker. Native/authored trees leave the flag off and clip strictly.
+
+TEST_CASE("Clip-marker tolerance is off by default: overflow:hidden clips strictly",
+          "[view][clip-marker]") {
+    using namespace pulp::canvas;
+    View parent;
+    parent.set_bounds({0, 0, 100, 100});
+    parent.set_overflow(View::Overflow::hidden);
+    REQUIRE_FALSE(parent.clip_marker_tolerance());
+
+    auto dot = std::make_unique<View>();
+    dot->set_bounds({90, 40, 20, 20});   // circle extends 10px past right edge
+    dot->set_position(View::Position::absolute);
+    dot->set_border_radius(10);          // radius == half min-dim → circular
+    parent.add_child(std::move(dot));
+
+    RecordingCanvas rc;
+    parent.paint_all(rc);
+
+    // The clip stays at the exact content bounds; the marker is not admitted.
+    bool saw_exact_clip = false;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::clip_rect &&
+            cmd.f[0] == 0.0f && cmd.f[1] == 0.0f &&
+            cmd.f[2] == 100.0f && cmd.f[3] == 100.0f) {
+            saw_exact_clip = true;
+        }
+        // An expanded clip would signal the heuristic fired without opt-in.
+        if (cmd.type == DrawCommand::Type::clip_rect) {
+            REQUIRE(cmd.f[0] >= 0.0f);
+            REQUIRE(cmd.f[1] >= 0.0f);
+        }
+    }
+    REQUIRE(saw_exact_clip);
+}
+
+TEST_CASE("Clip-marker tolerance expands the clip to admit a circle marker",
+          "[view][clip-marker]") {
+    using namespace pulp::canvas;
+    View parent;
+    parent.set_bounds({0, 0, 100, 100});
+    parent.set_overflow(View::Overflow::hidden);
+    parent.set_clip_marker_tolerance(true);
+
+    auto dot = std::make_unique<View>();
+    dot->set_bounds({90, 40, 20, 20});   // circle extends 10px past right edge
+    dot->set_position(View::Position::absolute);
+    dot->set_border_radius(10);
+    parent.add_child(std::move(dot));
+
+    RecordingCanvas rc;
+    parent.paint_all(rc);
+
+    // The marker extends 10px past the right edge, so the clip expands by 10px
+    // symmetrically: origin (-10,-10), size (120,120).
+    bool saw_expanded_clip = false;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::clip_rect &&
+            cmd.f[0] == -10.0f && cmd.f[1] == -10.0f &&
+            cmd.f[2] == 120.0f && cmd.f[3] == 120.0f) {
+            saw_expanded_clip = true;
+        }
+    }
+    REQUIRE(saw_expanded_clip);
+}
+
 TEST_CASE("Absolute child positioned outside parent's bounds still paints",
           "[view][z-index]") {
     // Spectr bandsMenu repro: 24px-tall parent with a popover-like child

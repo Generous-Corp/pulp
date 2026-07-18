@@ -3933,3 +3933,22 @@ place, rather than surfacing later as one target's fidelity drift.
 
 `design_ir_helpers.hpp` is private to `core/view/src/` and is not part of the installed SDK
 surface — do not reference it from a public header.
+
+## Importer accommodations are opt-in, not universal
+
+Two point-in-time import fixes used to run in the core paint / hit paths for
+*every* tree. They are now CSS-faithful by default and the materializer opts in
+only where the accommodation is wanted — so imports keep their behavior while
+native/authored trees clip strictly per CSS and pay nothing for the scan:
+
+- **Circle-marker clip tolerance** (`View::set_clip_marker_tolerance()`, default
+  OFF). Expands an `overflow:hidden`/`scroll` container's clip so an
+  XY-pad-style value dot sitting at an edge value is not cropped. The native
+  materializer turns it on for the clipping containers it materializes; the
+  per-frame `O(children)` marker scan only runs when it is on. If an imported
+  circular marker is being clipped, verify the container actually got
+  `set_clip_marker_tolerance(true)` — a hand-built tree will not have it.
+- **ScrollView `overflow:visible` hit inflation** — the old hard-coded ±500px
+  hit expansion is gone; the hit area now follows the real overflow geometry.
+  A tree relying on the old blanket inflation for off-bounds hit-testing must
+  size its interactive children honestly instead.

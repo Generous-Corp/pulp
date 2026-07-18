@@ -1237,7 +1237,16 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (style.letter_spacing) view.set_inheritable_letter_spacing(*style.letter_spacing);
     if (style.text_align) view.set_inheritable_text_align(static_cast<int>(parse_label_align(*style.text_align)));
     if (style.overflow) {
-        if (auto overflow = parse_overflow(*style.overflow)) view.set_overflow(*overflow);
+        if (auto overflow = parse_overflow(*style.overflow)) {
+            view.set_overflow(*overflow);
+            // Imported clipping containers opt into circle-marker clip
+            // tolerance so an XY-pad-style value dot positioned at an edge value
+            // is admitted rather than chopped by the strict clip. Native trees
+            // leave this off (default) and clip strictly.
+            if (*overflow == View::Overflow::hidden ||
+                *overflow == View::Overflow::scroll)
+                view.set_clip_marker_tolerance(true);
+        }
     }
     if (style.position) {
         if (auto position = parse_position(*style.position)) view.set_position(*position);
