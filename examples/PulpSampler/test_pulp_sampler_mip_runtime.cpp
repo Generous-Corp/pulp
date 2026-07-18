@@ -317,6 +317,7 @@ TEST_CASE("PulpSampler keeps extreme resident notes audible when sinc coverage e
 
     REQUIRE(PulpSamplerTestAccess::active_resident_interpolation(*fixture.proc) ==
             audio::SampleInterpolationPolicy::CubicHermite);
+    REQUIRE(fixture.proc->diagnostics().interpolation.sinc_fallback_selections > 0);
     const auto peak =
         *std::max_element(block.left.begin(), block.left.end(),
                           [](float left, float right) { return std::abs(left) < std::abs(right); });

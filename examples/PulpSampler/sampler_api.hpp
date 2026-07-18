@@ -239,6 +239,13 @@ struct PulpSamplerEnvelopeDiagnostics {
     audio::SampleStarvationEnvelopeStats lifetime{};
 };
 
+/// Lifetime count of render selections where the requested ratio-tracking sinc
+/// table did not cover the playback ratio and Cubic Hermite kept the voice
+/// audible.
+struct PulpSamplerInterpolationDiagnostics {
+    std::uint64_t sinc_fallback_selections = 0;
+};
+
 enum class PulpSamplerHeritageStatus : std::uint8_t {
     Disabled,
     PendingPrepare,
@@ -313,6 +320,7 @@ struct PulpSamplerDiagnostics {
     PulpSamplerLoadResult last_load{};
     PulpSamplerPreloadPolicy preload{};
     PulpSamplerEnvelopeDiagnostics envelope{};
+    PulpSamplerInterpolationDiagnostics interpolation{};
     PulpSamplerHeritageDiagnostics heritage{};
     std::uint64_t streaming_memory_capacity_bytes = 0;
     std::uint64_t current_streaming_memory_bytes = 0;
@@ -324,6 +332,7 @@ static_assert(std::is_trivially_copyable_v<PulpSamplerPrepareResult>);
 static_assert(std::is_trivially_copyable_v<PulpSamplerLoadResult>);
 static_assert(std::is_trivially_copyable_v<PulpSamplerPreloadPolicy>);
 static_assert(std::is_trivially_copyable_v<PulpSamplerEnvelopeDiagnostics>);
+static_assert(std::is_trivially_copyable_v<PulpSamplerInterpolationDiagnostics>);
 static_assert(std::is_trivially_copyable_v<PulpSamplerHeritageDiagnostics>);
 static_assert(std::is_trivially_copyable_v<PulpSamplerDiagnostics>);
 

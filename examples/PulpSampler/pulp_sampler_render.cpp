@@ -47,6 +47,7 @@ void PulpSamplerProcessor::process(audio::BufferView<float>& output,
     streaming_->complete_audio_callback(audio_generation);
     publish_heritage_runtime_snapshot();
     publish_envelope_diagnostics();
+    publish_interpolation_diagnostics();
 }
 
 bool PulpSamplerProcessor::published_source_valid(
@@ -161,11 +162,12 @@ const SamplerStreamMipLevelView* PulpSamplerProcessor::select_streamed_mip(
 
 audio::PreparedSampleInterpolation
 PulpSamplerProcessor::prepared_interpolation(audio::SampleInterpolationPolicy policy,
-                                             double source_frames_per_output) const noexcept {
+                                             double source_frames_per_output) noexcept {
     audio::PreparedSampleInterpolation interpolation{.policy = policy};
     if (policy == audio::SampleInterpolationPolicy::RatioTrackingSinc) {
         interpolation.sinc = sinc_bank_->view().select(source_frames_per_output);
         if (!interpolation.sinc.valid()) {
+            sinc_fallback_selections_ = saturated_add(sinc_fallback_selections_, 1);
             interpolation = {.policy = audio::SampleInterpolationPolicy::CubicHermite};
         }
     }
@@ -173,7 +175,7 @@ PulpSamplerProcessor::prepared_interpolation(audio::SampleInterpolationPolicy po
 }
 
 audio::PreparedSampleInterpolation PulpSamplerProcessor::prepared_rate_safe_interpolation(
-    audio::SampleInterpolationPolicy policy, double source_frames_per_output) const noexcept {
+    audio::SampleInterpolationPolicy policy, double source_frames_per_output) noexcept {
     if (polynomial_mip_policy(policy) && source_frames_per_output > 1.0) {
         policy = audio::SampleInterpolationPolicy::RatioTrackingSinc;
     }

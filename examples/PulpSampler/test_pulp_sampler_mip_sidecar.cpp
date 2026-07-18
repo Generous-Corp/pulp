@@ -734,16 +734,19 @@ TEST_CASE("Mip rebuild construction keeps the previous sidecar readable",
 
     std::uint32_t successful_loads = 0;
     std::uint32_t invalid_loads = 0;
+    auto first_invalid_status = SamplerStreamMipSidecarStatus::Valid;
     while (!finished.load(std::memory_order_acquire)) {
         const auto loaded =
             load_sampler_stream_mip_sidecar(source.path, opened.reader, opened.retained);
         if (loaded.status != SamplerStreamMipSidecarStatus::Valid) {
+            first_invalid_status = loaded.status;
             ++invalid_loads;
             break;
         }
         ++successful_loads;
     }
     builder.join();
+    INFO("sidecar status=" << static_cast<unsigned>(first_invalid_status));
     REQUIRE(invalid_loads == 0);
     REQUIRE(successful_loads > 0);
     for (const auto& rebuilt : rebuilds) {

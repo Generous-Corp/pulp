@@ -347,6 +347,19 @@ SampleMipBuildResult build_sample_mip_sidecar(std::string_view source_path,
         return result;
     }
     PublishedPayloadRollback published_payloads;
+    runtime::InterProcessLock publication_lock(
+        sample_mip_publication_lock_name(source_path, opened_source_identity));
+    const auto lock_publication = [&] {
+        if (publication_lock.is_locked())
+            return true;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (!publication_lock.try_lock()) {
+            if (std::chrono::steady_clock::now() >= deadline)
+                return false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return true;
+    };
     std::vector<std::string> payload_paths;
     std::vector<ManifestLevel> manifest_levels;
     std::uint64_t output_bytes = 0;
@@ -433,6 +446,10 @@ SampleMipBuildResult build_sample_mip_sidecar(std::string_view source_path,
         }
         if (!temporary.valid()) {
             result.error = "private mip staging directory changed identity";
+            break;
+        }
+        if (!lock_publication()) {
+            result.error = "timed out waiting to publish the mip sidecar";
             break;
         }
         published_payloads.prepare(final_path);
@@ -526,16 +543,6 @@ SampleMipBuildResult build_sample_mip_sidecar(std::string_view source_path,
     if (!manifest_policy || !manifest_policy.sync()) {
         result.error = "failed to apply the source access policy to the mip manifest";
         return result;
-    }
-    runtime::InterProcessLock publication_lock(
-        sample_mip_publication_lock_name(source_path, opened_source_identity));
-    const auto publication_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    while (!publication_lock.try_lock()) {
-        if (std::chrono::steady_clock::now() >= publication_deadline) {
-            result.error = "timed out waiting to publish the mip sidecar";
-            return result;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     const auto previous_manifest = manifest_temporary.path / "previous.pulpmip";
     runtime::AccessPolicyTarget previous_policy;

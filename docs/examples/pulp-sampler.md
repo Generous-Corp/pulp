@@ -43,8 +43,10 @@ provide at most two levels. Loop, reverse, non-exact, and missing-level playback
 stays on the base asset. When a polynomial policy would consume the selected or
 base source above 1x, it is promoted to ratio-tracking sinc. If the sinc bank
 has no prepared table for that ratio, playback falls back to Hermite instead of
-dropping the voice. Down-pitched fractional ratios do not require that
-anti-alias promotion.
+dropping the voice. The coherent `diagnostics()` snapshot exposes the lifetime
+number of these selections as `interpolation.sinc_fallback_selections`, so
+quality degradation is observable. Down-pitched fractional ratios do not
+require that anti-alias promotion.
 
 ## Loading samples
 
@@ -198,7 +200,7 @@ thread.
 | `load_sample_file_result(path)` / `last_load_result()` | Load a strict ranged asset and inspect codec capability, sidecar status, channel/rate/frame metadata, preload, memory request, mip count, and selection generation |
 | `has_sample()` / `sample_length()` | Inspect whether a source is published and its saturated integer frame length |
 | `stream_stats()` | Read detailed starvation, decode, admission, memory, and source/page lifecycle counters |
-| `diagnostics()` | Read one coherent prepare/load/preload/envelope/heritage/memory snapshot |
+| `diagnostics()` | Read one coherent prepare/load/preload/envelope/interpolation/heritage/memory snapshot, including sinc fallback selections |
 | `set_heritage_profile(profile)` / `disable_heritage()` | Replace or disable synthetic heritage processing and its latency contract |
 | `heritage_diagnostics()` | Inspect profile identity, clock/rate state, reported latency, failures, and admission counters |
 

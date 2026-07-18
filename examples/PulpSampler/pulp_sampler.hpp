@@ -188,6 +188,8 @@ class PulpSamplerProcessor : public format::Processor {
 
     void publish_envelope_diagnostics() noexcept;
 
+    void publish_interpolation_diagnostics() noexcept;
+
     void fail_prepare(PulpSamplerPrepareResult result) noexcept;
 
     SamplerSourcePublicationOwner source_publication_;
@@ -199,6 +201,9 @@ class PulpSamplerProcessor : public format::Processor {
     runtime::SeqLock<PulpSamplerEnvelopeDiagnostics> envelope_snapshot_{};
     std::atomic<bool> envelope_snapshot_available_{false};
     audio::SampleStarvationEnvelopeStats envelope_lifetime_{};
+    runtime::SeqLock<PulpSamplerInterpolationDiagnostics> interpolation_snapshot_{};
+    std::atomic<bool> interpolation_snapshot_available_{false};
+    std::uint64_t sinc_fallback_selections_ = 0;
     PulpSamplerConfig config_{};
     runtime::SeqLock<PulpSamplerPrepareResult> prepare_result_{};
     runtime::SeqLock<PulpSamplerLoadResult> last_load_result_{};
@@ -282,11 +287,11 @@ class PulpSamplerProcessor : public format::Processor {
 
     audio::PreparedSampleInterpolation
     prepared_interpolation(audio::SampleInterpolationPolicy policy,
-                           double source_frames_per_output) const noexcept;
+                           double source_frames_per_output) noexcept;
 
     audio::PreparedSampleInterpolation
     prepared_rate_safe_interpolation(audio::SampleInterpolationPolicy policy,
-                                     double source_frames_per_output) const noexcept;
+                                     double source_frames_per_output) noexcept;
 
     StreamRateContract stream_rate_contract(const audio::SampleAssetView& candidate,
                                             double candidate_source_frames_per_output,

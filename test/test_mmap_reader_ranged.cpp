@@ -56,8 +56,50 @@ AudioFileData make_test_audio(std::uint64_t frames, float offset = 0.0f) {
     return data;
 }
 
-#ifndef _WIN32
 enum class SourceMutation { none, overwrite_same_size, truncate };
+
+int run_retained_source_in_process(SourceMutation mutation) {
+    constexpr std::uint64_t total_frames = 32768;
+    constexpr std::uint64_t read_start = 12000;
+    const std::string path = temp_wav(".wav");
+    if (!write_wav_file(path, make_test_audio(total_frames)))
+        return 80;
+
+    MemoryMappedAudioReader reader;
+    if (!reader.open(path)) {
+        std::remove(path.c_str());
+        return 81;
+    }
+
+    bool mutated = true;
+    if (mutation == SourceMutation::overwrite_same_size) {
+        mutated = write_wav_file(path, make_test_audio(total_frames, 0.5f));
+    } else if (mutation == SourceMutation::truncate) {
+        std::error_code resize_error;
+        std::filesystem::resize_file(path, 0, resize_error);
+        mutated = !resize_error;
+    }
+    if (!mutated) {
+        std::remove(path.c_str());
+        return 82;
+    }
+
+    std::vector<float> left(512, 0.0f), right(512, 0.0f);
+    float* destinations[2] = {left.data(), right.data()};
+    const bool read =
+        reader.read_frames_ranged_only(destinations, 2, read_start, left.size());
+    std::remove(path.c_str());
+    if (!read)
+        return 83;
+    for (std::uint64_t frame = 0; frame < left.size(); ++frame) {
+        if (!approx(left[frame], expected_sample(read_start + frame, 0)) ||
+            !approx(right[frame], expected_sample(read_start + frame, 1)))
+            return 84;
+    }
+    return 0;
+}
+
+#ifndef _WIN32
 
 int run_retained_source_subprocess(SourceMutation mutation) {
     constexpr std::uint64_t total_frames = 32768;
@@ -125,6 +167,21 @@ int run_retained_source_subprocess(SourceMutation mutation) {
 #endif
 
 }  // namespace
+
+TEST_CASE("MemoryMappedAudioReader retained source in-process control",
+          "[audio][mmap][ranged][in-process]") {
+    REQUIRE(run_retained_source_in_process(SourceMutation::none) == 0);
+}
+
+TEST_CASE("MemoryMappedAudioReader retains immutable content after in-process overwrite",
+          "[audio][mmap][ranged][in-process]") {
+    REQUIRE(run_retained_source_in_process(SourceMutation::overwrite_same_size) == 0);
+}
+
+TEST_CASE("MemoryMappedAudioReader survives in-process source truncation",
+          "[audio][mmap][ranged][in-process]") {
+    REQUIRE(run_retained_source_in_process(SourceMutation::truncate) == 0);
+}
 
 TEST_CASE("MemoryMappedAudioReader ranged read of a WAV", "[audio][mmap][ranged]") {
     const std::uint32_t channels = 2;

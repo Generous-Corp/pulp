@@ -169,7 +169,7 @@ bool MemoryMappedFile::open_impl(std::string_view path, MapMode mode, std::size_
     DWORD access = (mode == MapMode::ReadWrite) ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ;
     DWORD share = FILE_SHARE_READ;
     if (mode == MapMode::ReadOnly)
-        share |= FILE_SHARE_DELETE;
+        share |= FILE_SHARE_WRITE | FILE_SHARE_DELETE;
     std::string path_str(path);
 
     const DWORD attributes = FILE_ATTRIBUTE_NORMAL |

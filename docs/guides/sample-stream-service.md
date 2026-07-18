@@ -111,7 +111,10 @@ policy across resident and paged playback. The sinc tier uses immutable,
 off-callback Kaiser tables whose cutoff narrows with source consumption and
 blends adjacent cutoff tables during modulation. If a resident playback ratio
 exceeds the prepared table range, `PulpSampler` falls back to cubic Hermite
-instead of dropping the voice. Each phase row is normalized for DC unity, and
+instead of dropping the voice. Inspect
+`PulpSamplerDiagnostics::interpolation.sinc_fallback_selections` to detect how
+often rendering selected that fallback since the current prepare. Each phase
+row is normalized for DC unity, and
 the streamed preload contract must cover the selected kernel's complete tap
 guard. Persisted streamed octave mips are loaded from strict `.pulpmip`
 sidecars, and the voice reader applies a 64-frame equal-power fade to silence

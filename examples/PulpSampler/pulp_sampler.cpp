@@ -270,6 +270,8 @@ PulpSamplerDiagnostics PulpSamplerProcessor::diagnostics() const noexcept {
         };
         if (envelope_snapshot_available_.load(std::memory_order_acquire))
             result.envelope = envelope_snapshot_.read();
+        if (interpolation_snapshot_available_.load(std::memory_order_acquire))
+            result.interpolation = interpolation_snapshot_.read();
         diagnostics_snapshot_.write(result);
         return diagnostics_snapshot_.read();
     } catch (...) {
@@ -396,6 +398,8 @@ void PulpSamplerProcessor::prepare_transaction(const format::PrepareContext& ctx
     last_load_result_.write({});
     envelope_lifetime_ = {};
     envelope_snapshot_available_.store(false, std::memory_order_release);
+    sinc_fallback_selections_ = 0;
+    interpolation_snapshot_available_.store(false, std::memory_order_release);
     const auto narrowed_rate = static_cast<float>(ctx.sample_rate);
     if (!std::isfinite(ctx.sample_rate) || ctx.sample_rate <= 0.0 ||
         !std::isfinite(narrowed_rate) || narrowed_rate <= 0.0f || ctx.max_buffer_size <= 0 ||
@@ -494,6 +498,7 @@ void PulpSamplerProcessor::release() {
     prepare_result_.write({});
     last_load_result_.write({});
     envelope_snapshot_available_.store(false, std::memory_order_release);
+    interpolation_snapshot_available_.store(false, std::memory_order_release);
 }
 
 bool PulpSamplerProcessor::heritage_ready(PulpSamplerHeritageStatus status) noexcept {
@@ -680,6 +685,12 @@ void PulpSamplerProcessor::publish_envelope_diagnostics() noexcept {
     }
     envelope_snapshot_.write(result);
     envelope_snapshot_available_.store(true, std::memory_order_release);
+}
+
+void PulpSamplerProcessor::publish_interpolation_diagnostics() noexcept {
+    interpolation_snapshot_.write(
+        {.sinc_fallback_selections = sinc_fallback_selections_});
+    interpolation_snapshot_available_.store(true, std::memory_order_release);
 }
 
 void PulpSamplerProcessor::fail_prepare(PulpSamplerPrepareResult result) noexcept {
