@@ -38,13 +38,11 @@ struct PulpSamplerTestAccess {
     }
 
     static void fail_next_service_prepare(PulpSamplerProcessor& processor) {
-        processor.streaming_->fail_next_service_prepare_for_test_.store(
-            true, std::memory_order_release);
+        processor.fail_next_stream_service_prepare_for_test_ = true;
     }
 
     static void fail_next_prepare_allocation(PulpSamplerProcessor& processor) {
-        processor.streaming_->fail_next_prepare_allocation_for_test_.store(
-            true, std::memory_order_release);
+        processor.fail_next_stream_slot_allocation_for_test_ = true;
     }
 
     static bool fully_released(const PulpSamplerProcessor& processor) {
@@ -53,7 +51,26 @@ struct PulpSamplerTestAccess {
                processor.streaming_->published_source().kind ==
                    SamplerPublishedSourceKind::None &&
                stats.total_memory_capacity_bytes == 0 &&
-               stats.current_total_memory_bytes == 0;
+               stats.current_total_memory_bytes == 0 &&
+               processor.streaming_->fully_released_for_test() &&
+               processor.source_publication_.fully_released_for_test() &&
+               !processor.sinc_bank_->view().valid() &&
+               processor.heritage_.processing_released_for_test() &&
+               std::all_of(processor.voice_scratch_.begin(),
+                           processor.voice_scratch_.end(),
+                           [](const auto& scratch) { return scratch.empty(); });
+    }
+
+    static void fail_next_thread_start(PulpSamplerProcessor& processor) {
+        processor.fail_next_stream_thread_start_for_test_ = true;
+    }
+
+    static void fail_next_resident_prepare(PulpSamplerProcessor& processor) {
+        processor.source_publication_.fail_next_resident_prepare_for_test();
+    }
+
+    static void fail_next_mip_prepare(PulpSamplerProcessor& processor) {
+        processor.source_publication_.fail_next_mip_prepare_for_test();
     }
 
     static void seed_and_harvest_envelope(PulpSamplerProcessor& processor,
@@ -69,6 +86,22 @@ struct PulpSamplerTestAccess {
 
     static void publish_envelope(PulpSamplerProcessor& processor) {
         processor.publish_envelope_diagnostics();
+    }
+
+    static std::size_t mark_all_streamed_voices(
+        PulpSamplerProcessor& processor, std::uint32_t frames) {
+        std::size_t count = 0;
+        for (auto& voice : processor.voices_) {
+            if (!voice.active || !voice.streamed) continue;
+            voice.stream_reader.mark_held_starvation(frames);
+            ++count;
+        }
+        return count;
+    }
+
+    static void set_envelope_lifetime_starved(
+        PulpSamplerProcessor& processor, std::uint64_t frames) {
+        processor.envelope_lifetime_.starved_frames = frames;
     }
 
     static audio::SampleStreamSourceToken
@@ -911,6 +944,120 @@ TEST_CASE("PulpSampler checked prepare reports every public failure and rolls ba
                 PulpSamplerPrepareStatus::AllocationFailure);
         REQUIRE(PulpSamplerTestAccess::fully_released(processor));
     }
+    SECTION("thread startup failure retries cleanly") {
+        PulpSamplerProcessor processor;
+        PulpSamplerTestAccess::fail_next_thread_start(processor);
+        prepare(processor);
+        REQUIRE(processor.prepare_result().status ==
+                PulpSamplerPrepareStatus::AllocationFailure);
+        REQUIRE(PulpSamplerTestAccess::fully_released(processor));
+        prepare(processor);
+        REQUIRE(processor.prepare_result().prepared());
+    }
+    SECTION("resident bank failure retries cleanly") {
+        PulpSamplerProcessor processor;
+        PulpSamplerTestAccess::fail_next_resident_prepare(processor);
+        prepare(processor);
+        REQUIRE(processor.prepare_result().status ==
+                PulpSamplerPrepareStatus::AllocationFailure);
+        REQUIRE(PulpSamplerTestAccess::fully_released(processor));
+        prepare(processor);
+        REQUIRE(processor.prepare_result().prepared());
+    }
+    SECTION("mip coefficient failure retries cleanly") {
+        PulpSamplerProcessor processor;
+        PulpSamplerTestAccess::fail_next_mip_prepare(processor);
+        prepare(processor);
+        REQUIRE(processor.prepare_result().status ==
+                PulpSamplerPrepareStatus::AllocationFailure);
+        REQUIRE(PulpSamplerTestAccess::fully_released(processor));
+        prepare(processor);
+        REQUIRE(processor.prepare_result().prepared());
+    }
+}
+
+TEST_CASE("PulpSampler resource estimates enforce exact checked limits",
+          "[sampler][api][prepare][resources]") {
+    format::PrepareContext context;
+    context.sample_rate = 48000.0;
+    context.max_buffer_size = 512;
+    context.input_channels = 0;
+    context.output_channels = 2;
+    PulpSamplerProcessor reference;
+    const auto usage = reference.estimate_prepare_resources(context);
+    REQUIRE(usage.persistent_bytes > 46'080'000u);
+    REQUIRE(usage.block_scratch_bytes ==
+            512u * PulpSamplerProcessor::kMaxOutputChannels * sizeof(float));
+    REQUIRE(usage.total_bytes() >= usage.persistent_bytes);
+
+    auto require_limit = [&](format::PrepareResourceLimit expected,
+                             auto set_limit) {
+        PulpSamplerProcessor exact;
+        auto exact_context = context;
+        set_limit(exact_context, false);
+        exact.prepare(exact_context);
+        REQUIRE(exact.prepare_result().prepared());
+        PulpSamplerProcessor under;
+        auto under_context = context;
+        set_limit(under_context, true);
+        under.prepare(under_context);
+        REQUIRE(under.prepare_result().status ==
+                PulpSamplerPrepareStatus::ResourceLimitExceeded);
+        REQUIRE(under.prepare_result().exceeded_limit == expected);
+        REQUIRE(PulpSamplerTestAccess::fully_released(under));
+    };
+    require_limit(format::PrepareResourceLimit::PersistentBytes,
+                  [&](auto& value, bool under) {
+        value.resource_limits.max_persistent_bytes =
+            usage.persistent_bytes - static_cast<std::size_t>(under);
+    });
+    require_limit(format::PrepareResourceLimit::BlockScratchBytes,
+                  [&](auto& value, bool under) {
+        value.resource_limits.max_block_scratch_bytes =
+            usage.block_scratch_bytes - static_cast<std::size_t>(under);
+    });
+    require_limit(format::PrepareResourceLimit::TotalBytes,
+                  [&](auto& value, bool under) {
+        value.resource_limits.max_total_bytes =
+            usage.total_bytes() - static_cast<std::size_t>(under);
+    });
+
+    PulpSamplerProcessor below_resident;
+    auto below_context = context;
+    below_context.resource_limits.max_persistent_bytes = 46'079'999u;
+    below_resident.prepare(below_context);
+    REQUIRE(below_resident.prepare_result().status ==
+            PulpSamplerPrepareStatus::ResourceLimitExceeded);
+
+    PulpSamplerProcessor unlimited({std::numeric_limits<std::uint64_t>::max()});
+    const auto saturated = unlimited.estimate_prepare_resources(context);
+    REQUIRE(saturated.persistent_bytes ==
+            std::numeric_limits<std::size_t>::max());
+    REQUIRE(saturated.total_bytes() ==
+            std::numeric_limits<std::size_t>::max());
+    unlimited.prepare(context);
+    REQUIRE(unlimited.prepare_result().prepared());
+}
+
+TEST_CASE("PulpSampler rejects host rates that cannot narrow to float",
+          "[sampler][api][prepare]") {
+    const double invalid_rates[] = {
+        std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::infinity(),
+        std::numeric_limits<double>::max(),
+        std::numeric_limits<double>::denorm_min(),
+    };
+    for (const auto rate : invalid_rates) {
+        PulpSamplerProcessor processor;
+        format::PrepareContext context;
+        context.sample_rate = rate;
+        context.input_channels = 0;
+        context.output_channels = 2;
+        processor.prepare(context);
+        REQUIRE(processor.prepare_result().status ==
+                PulpSamplerPrepareStatus::InvalidHostConfiguration);
+        REQUIRE(PulpSamplerTestAccess::fully_released(processor));
+    }
 }
 
 TEST_CASE("PulpSampler public config load and diagnostics are coherent",
@@ -925,7 +1072,7 @@ TEST_CASE("PulpSampler public config load and diagnostics are coherent",
     context.input_channels = 0;
     context.output_channels = 2;
     const auto estimate = processor.estimate_prepare_resources(context);
-    REQUIRE(estimate.persistent_bytes == configured);
+    REQUIRE(estimate.persistent_bytes > configured);
     processor.prepare(context);
     REQUIRE(processor.prepare_result().prepared());
     REQUIRE_FALSE(processor.set_config({configured + 1}));
@@ -963,6 +1110,101 @@ TEST_CASE("PulpSampler envelope lifetime survives voice reset without double cou
     REQUIRE(first == 37);
     PulpSamplerTestAccess::publish_envelope(*fixture.proc);
     REQUIRE(fixture.proc->diagnostics().envelope.lifetime.starved_frames == first);
+}
+
+TEST_CASE("PulpSampler diagnostics polling stays generation coherent during load",
+          "[sampler][api][diagnostics][thread]") {
+    TempSamplerWav wav("diagnostics_concurrent", 100000, 0.25f);
+    SamplerFixture fixture;
+    std::atomic<bool> finished{false};
+    PulpSamplerLoadResult loaded;
+    std::thread loader([&] {
+        loaded = fixture.proc->load_sample_file_result(wav.path);
+        finished.store(true, std::memory_order_release);
+    });
+    while (!finished.load(std::memory_order_acquire)) {
+        const auto snapshot = fixture.proc->diagnostics();
+        REQUIRE((snapshot.snapshot_epoch & 1u) == 0);
+        if (snapshot.last_load.loaded()) {
+            REQUIRE(snapshot.last_load.selection_generation ==
+                    snapshot.preload.selection_generation);
+        }
+    }
+    loader.join();
+    REQUIRE(loaded.loaded());
+    const auto snapshot = fixture.proc->diagnostics();
+    REQUIRE(snapshot.last_load.selection_generation != 0);
+    REQUIRE(snapshot.last_load.selection_generation ==
+            snapshot.preload.selection_generation);
+}
+
+TEST_CASE("PulpSampler envelope diagnostics aggregate live voices and saturate",
+          "[sampler][api][diagnostics][envelope]") {
+    TempSamplerWav wav("envelope_aggregate", 100000, 0.25f);
+    SamplerFixture fixture;
+    REQUIRE(fixture.proc->load_sample_file(wav.path));
+    SamplerProcessBlock block;
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    block.midi_in.add(midi::MidiEvent::note_on(0, 64, 127));
+    block.run(*fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::mark_all_streamed_voices(*fixture.proc, 11) == 2);
+    PulpSamplerTestAccess::publish_envelope(*fixture.proc);
+    auto envelope = fixture.proc->diagnostics().envelope;
+    REQUIRE(envelope.active_streamed_voices == 2);
+    REQUIRE(envelope.ready_voices + envelope.fading_out_voices +
+                envelope.silent_voices + envelope.recovering_voices == 2);
+    REQUIRE(envelope.lifetime.starved_frames == 22);
+
+    PulpSamplerTestAccess::set_envelope_lifetime_starved(
+        *fixture.proc, std::numeric_limits<std::uint64_t>::max() - 5);
+    PulpSamplerTestAccess::seed_and_harvest_envelope(*fixture.proc, 11);
+    PulpSamplerTestAccess::publish_envelope(*fixture.proc);
+    REQUIRE(fixture.proc->diagnostics().envelope.lifetime.starved_frames ==
+            std::numeric_limits<std::uint64_t>::max());
+}
+
+TEST_CASE("PulpSampler envelope lifetime survives natural EOS contract reset and steal",
+          "[sampler][api][diagnostics][envelope]") {
+    SECTION("natural EOS") {
+        TempSamplerWav wav("envelope_eos", 4096, 0.25f);
+        SamplerFixture fixture;
+        REQUIRE(fixture.proc->load_sample_file(wav.path));
+        SamplerProcessBlock block;
+        block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+        block.run(*fixture.proc);
+        REQUIRE(PulpSamplerTestAccess::mark_all_streamed_voices(*fixture.proc, 7) == 1);
+        block.midi_in.clear();
+        for (int index = 0; index < 20; ++index) block.run(*fixture.proc);
+        REQUIRE(fixture.proc->diagnostics().envelope.lifetime.starved_frames >= 7);
+    }
+    SECTION("contract rejection") {
+        TempSamplerWav wav("envelope_contract", 100000, 0.25f);
+        SamplerFixture fixture;
+        REQUIRE(fixture.proc->load_sample_file(wav.path));
+        SamplerProcessBlock block;
+        block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+        block.run(*fixture.proc);
+        REQUIRE(PulpSamplerTestAccess::mark_all_streamed_voices(*fixture.proc, 9) == 1);
+        REQUIRE(PulpSamplerTestAccess::invalidate_active_stream_preload_contract(
+            *fixture.proc));
+        block.midi_in.clear();
+        block.run(*fixture.proc);
+        REQUIRE(fixture.proc->diagnostics().envelope.lifetime.starved_frames >= 9);
+    }
+    SECTION("steal") {
+        TempSamplerWav wav("envelope_steal", 100000, 0.25f);
+        SamplerFixture fixture;
+        REQUIRE(fixture.proc->load_sample_file(wav.path));
+        SamplerProcessBlock block;
+        for (int note = 60; note < 68; ++note)
+            block.midi_in.add(midi::MidiEvent::note_on(0, note, 127));
+        block.run(*fixture.proc);
+        REQUIRE(PulpSamplerTestAccess::mark_all_streamed_voices(*fixture.proc, 1) == 8);
+        block.midi_in.clear();
+        block.midi_in.add(midi::MidiEvent::note_on(0, 72, 127));
+        block.run(*fixture.proc);
+        REQUIRE(fixture.proc->diagnostics().envelope.lifetime.starved_frames >= 1);
+    }
 }
 
 TEST_CASE("PulpSampler has 9 parameters", "[sampler]") {

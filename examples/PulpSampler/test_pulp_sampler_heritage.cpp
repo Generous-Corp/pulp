@@ -896,6 +896,79 @@ TEST_CASE("PulpSampler state restored before prepare reaches first callback",
             saved.state.runtime_state.rng_states[0].random_state);
 }
 
+TEST_CASE("PulpSampler downstream prepare failure preserves pending RNG for retry",
+          "[audio][sampler][heritage][state][failure]") {
+    const auto profile = continued_noise_profile();
+    HeritageFixture source(64, &profile);
+    constexpr std::array block{std::size_t{64}};
+    (void) render(source, block);
+    const auto saved_bytes = source.processor.serialize_plugin_state();
+    const auto saved = parse_sampler_heritage_state(saved_bytes);
+    REQUIRE(saved.valid());
+    REQUIRE(saved.state.has_runtime_state);
+
+    auto initialize = [&](PulpSamplerProcessor& processor,
+                          state::StateStore& store) {
+        processor.set_state_store(&store);
+        processor.define_parameters(store);
+        REQUIRE(processor.deserialize_plugin_state(saved_bytes));
+    };
+    auto prepare = [](PulpSamplerProcessor& processor) {
+        format::PrepareContext context;
+        context.sample_rate = 48000.0;
+        context.max_buffer_size = 64;
+        context.input_channels = 0;
+        context.output_channels = 2;
+        processor.prepare(context);
+    };
+    auto advance = [](PulpSamplerProcessor& processor) {
+        std::array<float, 64> left{}, right{};
+        float* outputs[]{left.data(), right.data()};
+        const float* inputs[]{nullptr, nullptr};
+        audio::BufferView<float> output(outputs, 2, left.size());
+        audio::BufferView<const float> input(inputs, 0, left.size());
+        midi::MidiBuffer midi_in, midi_out;
+        format::ProcessContext context{48000.0, 64};
+        processor.process(output, input, midi_in, midi_out, context);
+    };
+
+    state::StateStore retry_store;
+    PulpSamplerProcessor retry;
+    initialize(retry, retry_store);
+    PulpSamplerHeritageTestAccess::fail_next_stream_domain_prepare(retry);
+    prepare(retry);
+    REQUIRE(retry.prepare_result().status ==
+            PulpSamplerPrepareStatus::AllocationFailure);
+    auto after_failure = parse_sampler_heritage_state(
+        retry.serialize_plugin_state());
+    REQUIRE(after_failure.valid());
+    REQUIRE(after_failure.state.has_runtime_state);
+    REQUIRE(after_failure.state.runtime_state.rng_states[0].random_state ==
+            saved.state.runtime_state.rng_states[0].random_state);
+
+    prepare(retry);
+    REQUIRE(retry.prepare_result().prepared());
+    const auto immediate = parse_sampler_heritage_state(
+        retry.serialize_plugin_state());
+    REQUIRE(immediate.state.runtime_state.rng_states[0].random_state ==
+            saved.state.runtime_state.rng_states[0].random_state);
+    advance(retry);
+    const auto retry_advanced = parse_sampler_heritage_state(
+        retry.serialize_plugin_state());
+
+    state::StateStore direct_store;
+    PulpSamplerProcessor direct;
+    initialize(direct, direct_store);
+    prepare(direct);
+    advance(direct);
+    const auto direct_advanced = parse_sampler_heritage_state(
+        direct.serialize_plugin_state());
+    REQUIRE(retry_advanced.state.runtime_state.rng_states[0].random_state ==
+            direct_advanced.state.runtime_state.rng_states[0].random_state);
+    REQUIRE(retry_advanced.state.runtime_state.rng_states[0].random_state !=
+            saved.state.runtime_state.rng_states[0].random_state);
+}
+
 TEST_CASE("PulpSampler outer state resets RNG when host rate changes",
           "[audio][sampler][heritage][state]") {
     const auto profile = continued_noise_profile();

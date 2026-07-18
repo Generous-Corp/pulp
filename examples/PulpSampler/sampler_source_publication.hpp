@@ -16,8 +16,35 @@ class SamplerSourcePublicationOwner {
 public:
     bool prepare() {
         release();
-        return sample_store_.prepare() && mip_store_.prepare();
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        if (fail_next_resident_prepare_for_test_) {
+            fail_next_resident_prepare_for_test_ = false;
+            return false;
+        }
+#endif
+        if (!sample_store_.prepare()) return false;
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        if (fail_next_mip_prepare_for_test_) {
+            fail_next_mip_prepare_for_test_ = false;
+            release();
+            return false;
+        }
+#endif
+        if (!mip_store_.prepare()) {
+            release();
+            return false;
+        }
+        return true;
     }
+
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+    void fail_next_resident_prepare_for_test() noexcept {
+        fail_next_resident_prepare_for_test_ = true;
+    }
+    void fail_next_mip_prepare_for_test() noexcept {
+        fail_next_mip_prepare_for_test_ = true;
+    }
+#endif
 
     void release() noexcept {
         sample_store_.release();
@@ -65,6 +92,12 @@ public:
     SamplerSampleStore& sample_store() noexcept { return sample_store_; }
     const SamplerSampleStore& sample_store() const noexcept { return sample_store_; }
 
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+    bool fully_released_for_test() const noexcept {
+        return !sample_store_.prepared() && !mip_store_.prepared();
+    }
+#endif
+
     template<std::size_t VoiceCount>
     void acknowledge_audio(const SamplerPublishedSource& published,
                            const SamplerVoice (&voices)[VoiceCount],
@@ -99,6 +132,10 @@ public:
     }
 
 private:
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+    bool fail_next_resident_prepare_for_test_ = false;
+    bool fail_next_mip_prepare_for_test_ = false;
+#endif
     SamplerSampleStore sample_store_;
     SamplerResidentMipStore mip_store_;
     std::atomic<std::uint64_t> audio_sample_generation_{0};
