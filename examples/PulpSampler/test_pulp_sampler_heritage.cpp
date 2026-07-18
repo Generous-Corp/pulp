@@ -2,6 +2,7 @@
 #include "rt_allocation_probe.hpp"
 
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/format/plugin_state_io.hpp>
 
 #include <algorithm>
 #include <array>
@@ -50,6 +51,19 @@ audio::SampleHeritageProfile two_leg_profile() {
     };
 }
 
+audio::SampleHeritageProfile continued_noise_profile() {
+    return {
+        .schema_version = audio::kSampleHeritageProfileSchemaVersion,
+        .profile_id = "neutral.sampler-state-v2",
+        .host_sample_rate = 48000.0,
+        .stages = {{false,
+                    audio::SampleHeritageNoiseStage{
+                        0.01f, 0x12345678u,
+                        audio::SampleHeritageSeedPolicy::
+                            ContinueSerializedState}}},
+    };
+}
+
 std::vector<float> make_sine(std::size_t frames,
                              double frequency = 440.0,
                              double sample_rate = 48000.0) {
@@ -67,10 +81,13 @@ struct HeritageFixture {
     state::StateStore store;
     PulpSamplerProcessor processor;
     std::uint32_t maximum_block_frames = 0;
+    double sample_rate = 48000.0;
 
     HeritageFixture(std::uint32_t maximum_frames,
-                    const audio::SampleHeritageProfile* profile = nullptr)
-        : maximum_block_frames(maximum_frames) {
+                    const audio::SampleHeritageProfile* profile = nullptr,
+                    double prepared_sample_rate = 48000.0)
+        : maximum_block_frames(maximum_frames),
+          sample_rate(prepared_sample_rate) {
         processor.set_state_store(&store);
         processor.define_parameters(store);
         store.set_value(kSamplerAttack, 0.0f);
@@ -81,7 +98,7 @@ struct HeritageFixture {
                     PulpSamplerHeritageStatus::PendingPrepare);
         }
         format::PrepareContext context;
-        context.sample_rate = 48000.0;
+        context.sample_rate = sample_rate;
         context.max_buffer_size = static_cast<int>(maximum_frames);
         context.input_channels = 0;
         context.output_channels = 2;
@@ -118,7 +135,8 @@ std::vector<float> render(HeritageFixture& fixture,
             midi_in.add(event);
             note_sent = true;
         }
-        format::ProcessContext context{48000.0, static_cast<int>(frames)};
+        format::ProcessContext context{fixture.sample_rate,
+                                       static_cast<int>(frames)};
         fixture.processor.process(output, input, midi_in, midi_out, context);
         result.insert(result.end(), left.begin(), left.end());
         absolute_frame += frames;
@@ -308,6 +326,113 @@ TEST_CASE("PulpSampler heritage render-plan failure latches silence",
     const auto diagnostics = fixture.processor.heritage_diagnostics();
     REQUIRE(diagnostics.status == PulpSamplerHeritageStatus::RenderPlanFailed);
     REQUIRE(diagnostics.render_plan_failures == 1);
+}
+
+TEST_CASE("PulpSampler outer state round-trip resumes heritage RNG",
+          "[audio][sampler][heritage][state]") {
+    const auto profile = continued_noise_profile();
+    HeritageFixture source(64, &profile);
+    source.store.set_value(kSamplerGain, -9.0f);
+    constexpr std::array block{std::size_t{64}};
+    (void) render(source, block);
+
+    const auto before = parse_sampler_heritage_state(
+        source.processor.serialize_plugin_state());
+    REQUIRE(before.valid());
+    REQUIRE(before.state.has_runtime_state);
+    REQUIRE(before.state.runtime_state.rng_state_count == 1);
+    const auto saved_rng =
+        before.state.runtime_state.rng_states[0].random_state;
+
+    const auto envelope =
+        format::plugin_state_io::serialize(source.store, source.processor);
+    HeritageFixture restored(64);
+    REQUIRE(format::plugin_state_io::deserialize(
+        envelope, restored.store, restored.processor));
+    REQUIRE(restored.store.get_value(kSamplerGain) == -9.0f);
+    const auto diagnostics = restored.processor.heritage_diagnostics();
+    REQUIRE(diagnostics.status == PulpSamplerHeritageStatus::Ready);
+    REQUIRE(diagnostics.runtime_state_status ==
+            audio::SampleHeritageRuntimeStateStatus::Ok);
+
+    // The restored snapshot remains serializable before the first callback.
+    const auto immediate = parse_sampler_heritage_state(
+        restored.processor.serialize_plugin_state());
+    REQUIRE(immediate.valid());
+    REQUIRE(immediate.state.has_runtime_state);
+    REQUIRE(immediate.state.runtime_state.rng_states[0].random_state ==
+            saved_rng);
+
+    // Callback-end publication atomically replaces it with the advanced RNG.
+    (void) render(restored, block);
+    const auto advanced = parse_sampler_heritage_state(
+        restored.processor.serialize_plugin_state());
+    REQUIRE(advanced.valid());
+    REQUIRE(advanced.state.has_runtime_state);
+    REQUIRE(advanced.state.runtime_state.rng_states[0].random_state !=
+            saved_rng);
+}
+
+TEST_CASE("PulpSampler state restored before prepare reaches first callback",
+          "[audio][sampler][heritage][state]") {
+    const auto profile = continued_noise_profile();
+    HeritageFixture source(64, &profile);
+    constexpr std::array block{std::size_t{64}};
+    (void) render(source, block);
+    const auto saved = parse_sampler_heritage_state(
+        source.processor.serialize_plugin_state());
+    REQUIRE(saved.valid());
+    REQUIRE(saved.state.has_runtime_state);
+
+    state::StateStore store;
+    PulpSamplerProcessor restored;
+    restored.set_state_store(&store);
+    restored.define_parameters(store);
+    REQUIRE(restored.deserialize_plugin_state(
+        source.processor.serialize_plugin_state()));
+    format::PrepareContext context;
+    context.sample_rate = 48000.0;
+    context.max_buffer_size = 64;
+    context.input_channels = 0;
+    context.output_channels = 2;
+    restored.prepare(context);
+
+    const auto diagnostics = restored.heritage_diagnostics();
+    REQUIRE(diagnostics.status == PulpSamplerHeritageStatus::Ready);
+    REQUIRE(diagnostics.runtime_state_status ==
+            audio::SampleHeritageRuntimeStateStatus::Ok);
+    const auto immediate = parse_sampler_heritage_state(
+        restored.serialize_plugin_state());
+    REQUIRE(immediate.valid());
+    REQUIRE(immediate.state.has_runtime_state);
+    REQUIRE(immediate.state.runtime_state.rng_states[0].random_state ==
+            saved.state.runtime_state.rng_states[0].random_state);
+}
+
+TEST_CASE("PulpSampler outer state resets RNG when host rate changes",
+          "[audio][sampler][heritage][state]") {
+    const auto profile = continued_noise_profile();
+    HeritageFixture source(64, &profile);
+    constexpr std::array block{std::size_t{64}};
+    (void) render(source, block);
+    const auto envelope =
+        format::plugin_state_io::serialize(source.store, source.processor);
+
+    HeritageFixture restored(64, nullptr, 44100.0);
+    REQUIRE(format::plugin_state_io::deserialize(
+        envelope, restored.store, restored.processor));
+    const auto diagnostics = restored.processor.heritage_diagnostics();
+    REQUIRE(diagnostics.status ==
+            PulpSamplerHeritageStatus::ReadyRuntimeResetForHostRate);
+    REQUIRE(diagnostics.runtime_state_status ==
+            audio::SampleHeritageRuntimeStateStatus::NotPrepared);
+
+    const auto reset = parse_sampler_heritage_state(
+        restored.processor.serialize_plugin_state());
+    REQUIRE(reset.valid());
+    REQUIRE(reset.state.enabled);
+    REQUIRE_FALSE(reset.state.has_runtime_state);
+    REQUIRE(reset.state.profile.host_sample_rate == 48000.0);
 }
 
 TEST_CASE("Prepared PulpSampler heritage callbacks allocate nothing",

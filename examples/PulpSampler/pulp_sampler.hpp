@@ -6,6 +6,7 @@
 
 #include "sampler_source_publication.hpp"
 #include "sampler_heritage_runtime.hpp"
+#include "sampler_heritage_state.hpp"
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/loop_renderer.hpp>
@@ -13,6 +14,7 @@
 #include <pulp/audio/sample_key_map.hpp>
 #include <pulp/audio/sample_slot_bank.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/runtime/seqlock.hpp>
 #include <pulp/signal/adsr.hpp>
 
 #include <algorithm>
@@ -22,7 +24,9 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <span>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace pulp::examples {
@@ -88,6 +92,78 @@ public:
             .unit = "", .range = {0, 5, 2, 1}});
     }
 
+    std::vector<std::uint8_t> serialize_plugin_state() const override {
+        SamplerHeritagePersistentState state;
+        state.enabled = heritage_.configured();
+        if (!state.enabled) return {};
+        state.profile = heritage_.configured_profile();
+
+        if (callback_runtime_snapshot_available_.load(
+                std::memory_order_acquire)) {
+            const auto published = callback_runtime_snapshot_.read();
+            state.has_runtime_state = published.valid;
+            state.runtime_state = published.state;
+        } else if (restored_runtime_state_available_) {
+            state.has_runtime_state = true;
+            state.runtime_state = restored_runtime_state_;
+        }
+        auto written = write_sampler_heritage_state(state);
+        if (!written.valid() && state.has_runtime_state) {
+            // A bad continuation snapshot must not make the strict outer state
+            // envelope silently look like "heritage disabled". Preserve the
+            // validated profile and reset only the optional RNG continuation.
+            state.has_runtime_state = false;
+            written = write_sampler_heritage_state(state);
+        }
+        return written.valid() ? written.bytes : std::vector<std::uint8_t>{};
+    }
+
+    bool deserialize_plugin_state(
+        std::span<const std::uint8_t> bytes) override {
+        const auto parsed = parse_sampler_heritage_state(bytes);
+        if (!parsed.valid()) return false;
+
+        const auto previous_latency = latency_samples();
+        if (!parsed.state.enabled) {
+            reset_all_voices();
+            heritage_.disable();
+            clear_heritage_runtime_persistence();
+            if (latency_samples() != previous_latency) flag_latency_changed();
+            return true;
+        }
+
+        const auto* runtime_state = parsed.state.has_runtime_state
+            ? &parsed.state.runtime_state
+            : nullptr;
+        if (prepared_) {
+            const auto result = heritage_.replace_prepared(
+                parsed.state.profile, host_sample_rate_,
+                prepared_output_channels_, max_block_frames_, runtime_state);
+            if (!heritage_ready(result)) return false;
+            reset_all_voices();
+            clear_heritage_runtime_persistence();
+            if (result == PulpSamplerHeritageStatus::Ready &&
+                runtime_state != nullptr) {
+                restored_runtime_state_ = *runtime_state;
+                restored_runtime_state_available_ = true;
+            }
+            if (latency_samples() != previous_latency) flag_latency_changed();
+            return true;
+        }
+
+        const auto configured = heritage_.configure(parsed.state.profile);
+        if (configured != PulpSamplerHeritageStatus::PendingPrepare) return false;
+        reset_all_voices();
+        clear_heritage_runtime_persistence();
+        if (runtime_state != nullptr) {
+            pending_runtime_state_ = *runtime_state;
+            pending_runtime_state_available_ = true;
+            restored_runtime_state_ = *runtime_state;
+            restored_runtime_state_available_ = true;
+        }
+        return true;
+    }
+
     /// Load a mono sample buffer. Call off the audio thread after prepare().
     bool load_sample(const float* data, int num_samples, float sample_rate) {
         return source_publication_.load_mono(
@@ -140,6 +216,7 @@ public:
                 return result;
             }
             reset_all_voices();
+            clear_heritage_runtime_persistence();
             if (latency_samples() != previous_latency) flag_latency_changed();
             return result;
         }
@@ -149,6 +226,7 @@ public:
             return configured;
         }
         reset_all_voices();
+        clear_heritage_runtime_persistence();
         return configured;
     }
 
@@ -158,6 +236,7 @@ public:
         const auto previous_latency = latency_samples();
         reset_all_voices();
         heritage_.disable();
+        clear_heritage_runtime_persistence();
         if (latency_samples() != previous_latency) flag_latency_changed();
     }
 
@@ -193,9 +272,24 @@ public:
         streaming_.prepare(host_sample_rate_, max_block_frames_);
         source_publication_.acknowledge_audio(
             streaming_.published_source(), voices_, streaming_);
+        callback_runtime_snapshot_available_.store(false,
+                                                   std::memory_order_release);
+        restored_runtime_state_available_ = false;
         if (heritage_.configured()) {
-            (void) heritage_.prepare(host_sample_rate_, prepared_output_channels_,
-                                     max_block_frames_);
+            const auto* runtime_state = pending_runtime_state_available_
+                ? &pending_runtime_state_
+                : nullptr;
+            const auto result = heritage_.prepare(
+                host_sample_rate_, prepared_output_channels_, max_block_frames_,
+                runtime_state);
+            if (heritage_ready(result)) {
+                if (result == PulpSamplerHeritageStatus::Ready &&
+                    runtime_state != nullptr) {
+                    restored_runtime_state_ = *runtime_state;
+                    restored_runtime_state_available_ = true;
+                }
+                pending_runtime_state_available_ = false;
+            }
         }
         prepared_ = true;
         if (latency_samples() != previous_latency) flag_latency_changed();
@@ -257,6 +351,7 @@ public:
         source_publication_.acknowledge_audio(published, voices_, streaming_);
         flush_pending_cancellations();
         streaming_.complete_audio_callback(audio_generation);
+        publish_heritage_runtime_snapshot();
     }
 
 private:
@@ -278,9 +373,46 @@ private:
         bool valid = false;
     };
 
+    struct PublishedHeritageRuntimeState {
+        audio::SampleHeritageRuntimeState state{};
+        bool valid = false;
+    };
+
+    static_assert(std::is_trivially_copyable_v<PublishedHeritageRuntimeState>);
+
+    static bool heritage_ready(PulpSamplerHeritageStatus status) noexcept {
+        return status == PulpSamplerHeritageStatus::Ready ||
+               status ==
+                   PulpSamplerHeritageStatus::ReadyRuntimeResetForHostRate;
+    }
+
+    void clear_heritage_runtime_persistence() noexcept {
+        callback_runtime_snapshot_available_.store(false,
+                                                   std::memory_order_release);
+        restored_runtime_state_available_ = false;
+        pending_runtime_state_available_ = false;
+    }
+
+    void publish_heritage_runtime_snapshot() noexcept {
+        const auto captured = heritage_.capture_runtime_state();
+        PublishedHeritageRuntimeState published;
+        published.valid = captured.valid();
+        if (published.valid) published.state = captured.state;
+        callback_runtime_snapshot_.write(published);
+        callback_runtime_snapshot_available_.store(published.valid,
+                                                   std::memory_order_release);
+    }
+
     SamplerSourcePublicationOwner source_publication_;
     SamplerStreamingRuntime streaming_;
     SamplerHeritageRuntime heritage_;
+    runtime::SeqLock<PublishedHeritageRuntimeState>
+        callback_runtime_snapshot_{};
+    std::atomic<bool> callback_runtime_snapshot_available_{false};
+    audio::SampleHeritageRuntimeState restored_runtime_state_{};
+    audio::SampleHeritageRuntimeState pending_runtime_state_{};
+    bool restored_runtime_state_available_ = false;
+    bool pending_runtime_state_available_ = false;
     audio::SampleSincKernelBank sinc_bank_;
     audio::SampleKeyMap key_map_;
     std::array<std::vector<float>, kMaxOutputChannels> voice_scratch_{};
