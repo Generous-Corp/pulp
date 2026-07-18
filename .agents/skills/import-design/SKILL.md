@@ -366,6 +366,24 @@ drops (the `<script>` label is gone) while the visible `<div>` text survives.
 Note this is the LOSSY fallback — a JSON-IR or runtime-DOM claude/stitch input
 never reaches it; it fires only on raw non-JSON HTML.
 
+**Gotcha - `.fig` layer rotation was dropped, so a rotated needle rendered as an
+axis-aligned stub.** `scene.mjs`'s `styleFor` took only the translation column
+(`m02`/`m12`) of a node's affine transform and threw away the rotation
+(`m00/m01/m10/m11`). A knob's value needle — a thin ROUNDED_RECTANGLE rotated to
+the value angle — then imported as a vertical bar floating off-centre instead of
+a radial pointer (reported on TRIAZ "Rnd Pan"). The fix extracts
+`atan2(m10, m00)`, emits `transform: rotate(<deg>deg)`, and **compensates
+left/top for the renderer's centre transform-origin** (Figma rotates about the
+layer origin; the view rotates about centre) — so NO `setTransformOrigin` is
+emitted and CSS-lane `rotate()` (which is also centre-pivot) stays correct. The
+native codegen lowers `transform: rotate()` to `setRotation` in the shared
+`emit_js_visual_overrides`. CRITICAL scope: only box-model nodes get this — a
+`VECTOR_LIKE` node bakes its rotation into `path_data`, so re-applying it would
+double-rotate the glyph (guard with `!VECTOR_LIKE.has(node.type)`; verify a
+rotated icon like the "Reverse" ↩ button is byte-identical before/after). Covered
+by `[rotation]` in `test_design_import_codegen.cpp` + a decoder test in
+`fig/fig.test.mjs`.
+
 ### Design contract (`pulp design compile`) — the token/widget allowlist
 
 Before generating or hand-writing a UI, compile the **design contract**: the

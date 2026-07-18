@@ -668,6 +668,22 @@ static void emit_js_visual_overrides(const NativeEmit& e, const std::string& tar
     if (st.mask_size && !st.mask_size->empty())
         ss << ind << "setMaskSize('" << target_id << "', '"
            << js_single_quote_escape(*st.mask_size) << "');\n";
+    // A rotation baked into the CSS transform lowers to setRotation. The .fig
+    // decoder emits `rotate(<deg>deg)` for a layer whose affine transform
+    // carried a rotation — a knob's value needle is a thin rect rotated to the
+    // value angle; without this it rendered as an axis-aligned stub floating
+    // off-center instead of a radial pointer. transform-origin stays the
+    // renderer default (center); the decoder already compensated left/top for
+    // that pivot, so no setTransformOrigin is emitted here (a CSS-lane
+    // rotate() also rotates about center, so this stays correct there too).
+    if (st.transform && !st.transform->empty()) {
+        const auto rp = st.transform->find("rotate(");
+        if (rp != std::string::npos) {
+            const float deg = std::strtof(st.transform->c_str() + rp + 7, nullptr);
+            if (deg != 0.0f)
+                ss << ind << "setRotation('" << target_id << "', " << deg << ");\n";
+        }
+    }
     // A shadow is a visual override like any other here, and it belongs on
     // EVERY kind of node — not just frames. Before this lived here, a shadow
     // painted only on frames: a design whose 44 knob bases are ellipses had

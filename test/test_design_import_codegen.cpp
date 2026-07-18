@@ -528,6 +528,48 @@ TEST_CASE("generate_pulp_cpp preserves extracted interactive-descendant wrappers
     REQUIRE(count_occurrences(result.source, "->set_pointer_events(pulp::view::View::PointerEvents::box_none);") == 1);
 }
 
+TEST_CASE("a layer rotation lowers to setRotation, not a dropped needle",
+          "[view][import][rotation]") {
+    // A knob's value needle is a thin rect the .fig lane rotates to the value
+    // angle; the decoder lowers that to `transform: rotate(<deg>deg)`. Without
+    // this emit the rotation was dropped and the needle rendered as an
+    // axis-aligned stub floating off-center instead of a radial pointer.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "root";
+
+    IRNode needle;
+    needle.type = "frame";
+    needle.name = "knob_indicator";
+    needle.style.width = 2.0f;
+    needle.style.height = 10.0f;
+    needle.style.background_color = "#f56161d9";
+    needle.style.transform = "rotate(43.40deg)";
+    ir.root.children.push_back(needle);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    opts.include_comments = false;
+    const auto js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("setRotation('") != std::string::npos);
+    REQUIRE(js.find("43.4") != std::string::npos);
+
+    // A node with no rotation must NOT emit setRotation.
+    DesignIR plain;
+    plain.source = DesignSource::figma;
+    plain.root.type = "frame";
+    IRNode flat;
+    flat.type = "frame";
+    flat.name = "flat";
+    flat.style.width = 2.0f;
+    flat.style.height = 10.0f;
+    flat.style.background_color = "#f56161d9";
+    plain.root.children.push_back(flat);
+    REQUIRE(generate_pulp_js(plain, opts).find("setRotation('") == std::string::npos);
+}
+
 TEST_CASE("a knob emits a value-driven arc, not a parked plain ring",
           "[view][import][knob]") {
     // .fig visual-open 6.2: some big knobs looked like a plain ring instead of a
