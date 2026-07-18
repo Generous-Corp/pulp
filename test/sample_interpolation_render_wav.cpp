@@ -1,7 +1,9 @@
 #include "support/sample_interpolation_render.hpp"
 
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/audio/loop_renderer.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -9,11 +11,57 @@
 #include <exception>
 #include <numbers>
 #include <optional>
+#include <span>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
 using Policy = pulp::audio::SampleInterpolationPolicy;
+
+std::vector<float> render_production_loop(
+    Policy policy, double ratio, std::span<const float> source,
+    std::size_t output_frames, std::size_t block_frames) {
+    pulp::audio::SampleSincKernelBank sinc_bank;
+    if (!sinc_bank.build_dense_for_maximum_consumption(4.0))
+        throw std::runtime_error("could not build sampler sinc bank");
+
+    pulp::audio::PreparedSampleInterpolation interpolation{.policy = policy};
+    if (policy == Policy::RatioTrackingSinc)
+        interpolation.sinc = sinc_bank.view().select(ratio);
+    if (!interpolation.valid())
+        throw std::runtime_error("interpolation is not valid for ratio");
+
+    pulp::audio::LoopRegion region;
+    region.start_frame = 0;
+    region.end_frame = source.size();
+    region.source_sample_rate = 48000.0;
+    region.playback_mode = pulp::audio::LoopPlaybackMode::OneShot;
+    region.interpolation = pulp::audio::LoopInterpolationMode::Linear;
+
+    pulp::audio::LoopRenderer renderer;
+    if (!renderer.set_region(region, source.size()) ||
+        !renderer.set_interpolation(interpolation)) {
+        throw std::runtime_error("could not prepare production loop renderer");
+    }
+    renderer.set_playback_rate(ratio);
+    renderer.start();
+
+    const float* source_pointer = source.data();
+    const pulp::audio::BufferView<const float> source_view(
+        &source_pointer, 1, source.size());
+    std::vector<float> output(output_frames, 0.0f);
+    for (std::size_t start = 0; start < output_frames; start += block_frames) {
+        const auto count = std::min(block_frames, output_frames - start);
+        float* output_pointer = output.data() + start;
+        pulp::audio::BufferView<float> output_view(&output_pointer, 1, count);
+        const auto rendered = renderer.render(source_view, output_view, count);
+        if (rendered.rendered_frames != count)
+            throw std::runtime_error("production loop renderer ended early");
+    }
+    return output;
+}
 
 std::optional<Policy> parse_policy(const char* text) {
     for (const auto policy : {Policy::Hold, Policy::Nearest, Policy::Linear,
@@ -111,9 +159,6 @@ int main(int argc, char** argv) {
     }
 
     try {
-        const auto rendered = pulp::test::audio::render_interpolated_tone(
-            policy, ratio, source_frequency, static_cast<std::size_t>(frames),
-            static_cast<std::size_t>(block_size));
         pulp::audio::AudioFileData source;
         source.sample_rate = 48000;
         source.channels.resize(1);
@@ -121,14 +166,14 @@ int main(int argc, char** argv) {
         pulp::audio::AudioFileData candidate;
         candidate.sample_rate = 48000;
         candidate.channels.resize(1);
-        candidate.channels[0].resize(rendered.size());
         for (int i = 0; i < source_frames; ++i) {
             source.channels[0][static_cast<std::size_t>(i)] = static_cast<float>(
                 pulp::test::audio::kSamplerQualityAmplitude *
                 std::sin(2.0 * std::numbers::pi * source_frequency * i));
         }
-        for (std::size_t i = 0; i < rendered.size(); ++i)
-            candidate.channels[0][i] = static_cast<float>(rendered[i]);
+        candidate.channels[0] = render_production_loop(
+            policy, ratio, source.channels[0], static_cast<std::size_t>(frames),
+            static_cast<std::size_t>(block_size));
 
         if (!pulp::audio::write_wav_file(
                 source_out, source, pulp::audio::WavBitDepth::Float32) ||

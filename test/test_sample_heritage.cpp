@@ -4,10 +4,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <numbers>
 #include <vector>
 
 namespace {
@@ -51,6 +53,18 @@ std::array<float, 16> render_noise(std::uint64_t seed) {
     std::array<float, 16> rendered{};
     std::copy(output.channel(0).begin(), output.channel(0).end(), rendered.begin());
     return rendered;
+}
+
+std::uint64_t oracle_next_random(std::uint64_t& state) {
+    state ^= state >> 12;
+    state ^= state << 25;
+    state ^= state >> 27;
+    return state * UINT64_C(2685821657736338717);
+}
+
+float oracle_bipolar_random(std::uint64_t& state) {
+    const auto bits = static_cast<std::uint32_t>(oracle_next_random(state) >> 40);
+    return static_cast<float>(bits) * (2.0f / 16777215.0f) - 1.0f;
 }
 
 SampleHeritageProfile rate_profile(double host_rate = 48000.0,
@@ -388,11 +402,53 @@ TEST_CASE("Every synthetic heritage stage runs independently",
 
     REQUIRE(render({false, SampleHeritageMachineDomainStage{48000.0}}) == input);
     REQUIRE(render({false, SampleHeritageClockPitchStage{1.0}}) == input);
-    REQUIRE(render({false, SampleHeritageQuantizationStage{8, 0.0f, 0}}) != input);
-    REQUIRE(render({false, SampleHeritageDacHoldStage{2}}) != input);
-    REQUIRE(render({false, SampleHeritageReconstructionFilterStage{12000.0}}) != input);
-    REQUIRE(render({false, SampleHeritageNoiseStage{0.01f, 0x1234u}}) != input);
-    REQUIRE(render({false, SampleHeritageOutputStage{0.5f}}) != input);
+
+    const std::array<float, 4> quantized{
+        16.0f / 128.0f, 51.0f / 128.0f,
+        -26.0f / 128.0f, 102.0f / 128.0f,
+    };
+    REQUIRE(render({false, SampleHeritageQuantizationStage{8, 0.0f, 0}}) ==
+            quantized);
+
+    std::uint64_t quantizer_state = 0x1234u;
+    std::array<float, 4> dithered_quantized{};
+    for (std::size_t index = 0; index < input.size(); ++index) {
+        const auto dither = oracle_bipolar_random(quantizer_state) * 0.5f;
+        dithered_quantized[index] =
+            std::round(std::clamp(input[index], -1.0f, 127.0f / 128.0f) *
+                           128.0f +
+                       dither) /
+            128.0f;
+    }
+    REQUIRE(render({false, SampleHeritageQuantizationStage{8, 0.5f, 0x1234u}}) ==
+            dithered_quantized);
+
+    const std::array<float, 4> held{input[0], input[0], input[2], input[2]};
+    REQUIRE(render({false, SampleHeritageDacHoldStage{2}}) == held);
+
+    const auto pole = static_cast<float>(
+        std::exp(-2.0 * std::numbers::pi * 12000.0 / 48000.0));
+    std::array<float, 4> filtered{};
+    float previous = 0.0f;
+    for (std::size_t index = 0; index < input.size(); ++index) {
+        previous = (1.0f - pole) * input[index] + pole * previous;
+        filtered[index] = previous;
+    }
+    REQUIRE(render({false, SampleHeritageReconstructionFilterStage{12000.0}}) ==
+            filtered);
+
+    std::uint64_t noise_state = 0x1234u;
+    std::array<float, 4> noisy{};
+    for (std::size_t index = 0; index < input.size(); ++index) {
+        noisy[index] = input[index] +
+                       oracle_bipolar_random(noise_state) * 0.01f;
+    }
+    REQUIRE(render({false, SampleHeritageNoiseStage{0.01f, 0x1234u}}) == noisy);
+
+    std::array<float, 4> scaled{};
+    for (std::size_t index = 0; index < input.size(); ++index)
+        scaled[index] = input[index] * 0.5f;
+    REQUIRE(render({false, SampleHeritageOutputStage{0.5f}}) == scaled);
 }
 
 TEST_CASE("Heritage causal two-leg SRC is bitwise partition invariant",

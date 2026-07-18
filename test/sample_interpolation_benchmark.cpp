@@ -92,14 +92,14 @@ Timing measure_epoch(const pulp::audio::PreparedSampleInterpolation& interpolati
     std::vector<double> samples;
     samples.reserve(kTrials);
     for (int trial = 0; trial < kTrials; ++trial) {
-        double batch_minimum = std::numeric_limits<double>::infinity();
+        std::array<double, kRepetitionsPerBatch> repetitions{};
         for (int repetition = 0; repetition < kRepetitionsPerBatch; ++repetition) {
-            batch_minimum = std::min(
-                batch_minimum,
+            repetitions[static_cast<std::size_t>(repetition)] =
                 run_once(interpolation, ratio, voices, kFramesPerTrial) /
-                    static_cast<double>(kFramesPerTrial));
+                static_cast<double>(kFramesPerTrial);
         }
-        samples.push_back(batch_minimum);
+        std::sort(repetitions.begin(), repetitions.end());
+        samples.push_back(repetitions[repetitions.size() / 2]);
     }
     std::sort(samples.begin(), samples.end());
     const auto median = samples[samples.size() / 2];
@@ -114,13 +114,14 @@ Timing measure_epoch(const pulp::audio::PreparedSampleInterpolation& interpolati
 
 Timing measure(const pulp::audio::PreparedSampleInterpolation& interpolation,
                double ratio, int voices) {
-    auto best = measure_epoch(interpolation, ratio, voices);
-    for (int epoch = 1; epoch < kMeasurementEpochs; ++epoch) {
-        const auto candidate = measure_epoch(interpolation, ratio, voices);
-        if (candidate.p95_ns_per_frame < best.p95_ns_per_frame)
-            best = candidate;
-    }
-    return best;
+    std::array<Timing, kMeasurementEpochs> epochs{};
+    for (auto& epoch : epochs)
+        epoch = measure_epoch(interpolation, ratio, voices);
+    std::sort(epochs.begin(), epochs.end(), [](const Timing& left,
+                                                const Timing& right) {
+        return left.p95_ns_per_frame < right.p95_ns_per_frame;
+    });
+    return epochs[epochs.size() / 2];
 }
 
 } // namespace
@@ -209,9 +210,9 @@ int main(int argc, char** argv) {
               << "\"measurement\":{\"frames_per_trial\":" << kFramesPerTrial
               << ",\"trials\":" << kTrials
               << ",\"repetitions_per_batch\":" << kRepetitionsPerBatch
-              << ",\"sample_policy\":\"minimum-per-batch\""
+              << ",\"sample_policy\":\"median-per-batch\""
               << ",\"epochs\":" << kMeasurementEpochs
-              << ",\"epoch_policy\":\"minimum-p95-epoch\""
+              << ",\"epoch_policy\":\"median-p95-epoch\""
               << ",\"statistics\":[\"median\",\"p95\"]},"
               << "\"acceptance\":{\"interpretation\":"
               << std::quoted("P95 interpolation-evaluator cost only; excludes sampler streaming, cache, envelopes, mixing, and host overhead")

@@ -171,12 +171,12 @@ def validate(
             errors.append("measurement.trials must be 31")
         if measurement.get("repetitions_per_batch") != 5:
             errors.append("measurement.repetitions_per_batch must be 5")
-        if measurement.get("sample_policy") != "minimum-per-batch":
-            errors.append("measurement.sample_policy must be minimum-per-batch")
+        if measurement.get("sample_policy") != "median-per-batch":
+            errors.append("measurement.sample_policy must be median-per-batch")
         if measurement.get("epochs") != 3:
             errors.append("measurement.epochs must be 3")
-        if measurement.get("epoch_policy") != "minimum-p95-epoch":
-            errors.append("measurement.epoch_policy must be minimum-p95-epoch")
+        if measurement.get("epoch_policy") != "median-p95-epoch":
+            errors.append("measurement.epoch_policy must be median-p95-epoch")
         if measurement.get("statistics") != ["median", "p95"]:
             errors.append("measurement.statistics must be [median, p95]")
 

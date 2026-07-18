@@ -386,7 +386,7 @@ TEST_CASE("PulpSampler sinc follows independent continuous pitch modulation cont
     constexpr std::array<double, 5> modulation_rates = {
         5.0, 20.0, 50.0, 100.0, 200.0,
     };
-    constexpr std::array<std::size_t, 3> blocks = {1, 16, 64};
+    constexpr std::array<std::size_t, 4> blocks = {1, 17, 64, 257};
     // Mutation sentinels pin the production-driving trajectory independently
     // of the rendered-audio oracle. These catch a frozen value, wrong depth,
     // wrong waveform phase, or wrong rate scaling before a shared-mode error
@@ -438,8 +438,12 @@ TEST_CASE("PulpSampler sinc follows independent continuous pitch modulation cont
             CHECK(sampler_modulation_residual_db(
                       production[0], production[index]) > -20.0);
         }
-        CHECK(sampler_modulation_residual_db(
-                  production[1], production[2]) > -20.0);
+        for (std::size_t first = 1; first < production.size(); ++first) {
+            for (std::size_t second = first + 1; second < production.size(); ++second) {
+                CHECK(sampler_modulation_residual_db(
+                          production[first], production[second]) > -20.0);
+            }
+        }
     }
 }
 
