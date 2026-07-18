@@ -347,8 +347,17 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
     // compiled against an older generation is rejected (a re-register rebinds
     // callbacks to instances the old factory produced).
     ++custom_registry_generation_;
-    if (affects_existing_nodes) invalidate_live_locked_();
+    if (affects_existing_nodes) {
+        invalidate_live_locked_();
+    } else {
+        ++authoring_generation_;
+    }
     return true;
+}
+
+std::size_t SignalGraph::custom_node_type_count() const {
+    GraphMutationLock mutation_lock(*this);
+    return custom_node_types_.size();
 }
 
 const CustomNodeType* SignalGraph::custom_node_type(std::string_view type_id) const {
@@ -1120,6 +1129,7 @@ SignalGraph::evaluate_optional_runtime_budget(
 
 void SignalGraph::invalidate_live_locked_() {
     assert_graph_mutation_locked_();
+    ++authoring_generation_;
     // During a swap-edit the OWNER thread's allow-set mutations must NOT
     // silence the live snapshot — it keeps playing the old compiled graph until
     // prepare_swap() atomically publishes the new one. Any other caller (a second
@@ -1284,17 +1294,13 @@ bool SignalGraph::build_routing_snapshot_locked_(
                 auto it = cg.plugins.find(id);
                 return it == cg.plugins.end() ? nullptr : it->second.get();
             },
-        // Each node's persistent CPU-load measurer, so routed execution reports
-        // the same node_loads() telemetry as the legacy walk. The measurers are
-        // insert-only and persist across snapshots; node_load_ was populated
-        // earlier in compile_. Lock the map's structure mutex (compile_ does not
-        // hold it) — a concurrent UI-thread node_loads() poll iterates under the
-        // same lock.
+        // The legacy runtime and routed binding must point at the exact same
+        // measurer. Resolve from this candidate snapshot rather than consulting
+        // an authoring-side map a second time (important for off-side edits).
         .load_for =
-            [this](NodeId id) -> audio::AudioProcessLoadMeasurer* {
-                std::lock_guard<std::mutex> node_load_lock(node_load_mu_);
-                auto it = node_load_.find(id);
-                return it == node_load_.end() ? nullptr : it->second.get();
+            [&cg](NodeId id) -> audio::AudioProcessLoadMeasurer* {
+                auto it = cg.runtime.find(id);
+                return it == cg.runtime.end() ? nullptr : it->second.load;
             },
         .custom_for =
             [&cg](NodeId id) -> const CustomNodeProcessFn* {
@@ -1377,7 +1383,15 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         // node_load_ only grows here, so the raw measurer pointer handed to the
         // audio thread via NodeRuntime::load stays valid across snapshot swaps.
         // Locked against a concurrent node_loads() poll on the UI thread.
-        {
+        if (prepared_edit_origin_ != nullptr) {
+            std::lock_guard<std::mutex> origin_load_lock(
+                prepared_edit_origin_->node_load_mu_);
+            const auto existing = prepared_edit_origin_->node_load_.find(n.id);
+            if (existing != prepared_edit_origin_->node_load_.end()) {
+                rt.load = existing->second.get();
+            }
+        }
+        if (rt.load == nullptr) {
             std::lock_guard<std::mutex> node_load_lock(node_load_mu_);
             auto& load_slot = node_load_[n.id];
             if (!load_slot) {
@@ -1702,7 +1716,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                          cg->routed.parallel.snapshot.buffer_assignment()
                              .connection_delay_samples);
             }
-            if (ok) {
+            if (ok && prepared_edit_origin_ == nullptr) {
                 // Start the persistent worker pool off the audio thread, ONCE.
                 // Hardware concurrency capped to a sane bound; participant 0 is
                 // the audio thread, so the pool spawns worker_count - 1 threads.
@@ -1997,6 +2011,7 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
     // mutex — set_node_gain() — releases the mutex before pinning, so this lock can
     // never invert order with the reader-drain handshake.
     GraphMutationLock mutation_lock(*this);
+    ++authoring_generation_;
 
     cancel_swap_edit_locked_();
 
@@ -2170,6 +2185,7 @@ void SignalGraph::release() {
     // the pure-snapshot readers (inject_midi / extract_midi / node_latency_samples)
     // never take this mutex at all.
     GraphMutationLock mutation_lock(*this);
+    ++authoring_generation_;
 
     cancel_swap_edit_locked_();
 
@@ -2379,10 +2395,11 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                         }
                         const auto& injected =
                             rt_it->second.midi_input_mailbox->published.read();
+                        const auto sequence_seen =
+                            rt_it->second.midi_input_mailbox->sequence_seen.load(
+                                std::memory_order_relaxed);
                         if (injected.sequence != 0 &&
-                            injected.sequence !=
-                                rt_it->second.midi_input_mailbox->sequence_seen.load(
-                                    std::memory_order_relaxed)) {
+                            injected.sequence != sequence_seen) {
                             cg->routed.midi.set_out_incomplete(
                                 mi.plan_index, !injected.copy_to_midi(*out_buf));
                             mi.pending_seq = injected.sequence;
@@ -2397,7 +2414,8 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                     for (const auto& mi : cg->routed.midi_inputs) {
                         if (mi.pending_seq == 0) continue;
                         auto rt_it = cg->runtime.find(mi.id);
-                        if (rt_it != cg->runtime.end()) {
+                        if (rt_it != cg->runtime.end() &&
+                            rt_it->second.midi_input_mailbox) {
                             rt_it->second.midi_input_mailbox->sequence_seen.store(
                                 mi.pending_seq, std::memory_order_relaxed);
                         }
@@ -2598,6 +2616,7 @@ bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
         auto* n = node_mut_locked_(id);
         if (!n) return false;
         n->gain = linear_gain;
+        ++authoring_generation_;
     }
     // Pin the live snapshot around the load + the per-runtime gain store: this
     // UI-thread-owned API is not the prepare/release thread, so without the

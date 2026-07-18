@@ -36,6 +36,7 @@
 #include <mutex>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <string>
 #include <string_view>
 #include <cstdint>
@@ -288,6 +289,8 @@ struct GraphNode {
 
 class SignalGraph {
 public:
+    class PreparedTopologyEdit;
+
     struct GraphLimits {
         std::size_t max_nodes = 4096;
         std::size_t max_connections = 16384;
@@ -515,6 +518,13 @@ public:
 
     // Lifecycle
     bool prepare(double sample_rate, int max_block_size);
+
+    // Begin an isolated topology transaction. The returned edit owns a private
+    // authoring graph and custom-type registry; its mutations never invalidate
+    // this graph's live snapshot. prepare() compiles that candidate off-side and
+    // commit() installs the authoring graph and compiled snapshot together.
+    // Destroying an uncommitted edit is a complete rollback.
+    std::unique_ptr<PreparedTopologyEdit> begin_prepared_topology_edit();
 
     // Live swap transaction outcomes.
     enum class SwapResult {
@@ -898,6 +908,10 @@ public:
     // the node is not a Plugin or has no slot).
     float get_node_parameter(NodeId id, uint32_t param_id) const;
 
+    // Control-thread diagnostic for transactional registry-GC tests and hosts
+    // that generate short-lived custom types.
+    std::size_t custom_node_type_count() const;
+
 private:
     struct MidiBlockSnapshot {
         MidiBlockSnapshot();
@@ -1247,6 +1261,9 @@ private:
     // the custom registry changed (M6 — prevents binding new callbacks to
     // instances the old factory built). Guarded by graph_mutation_mutex_.
     std::uint64_t custom_registry_generation_{0};
+    // Invalidates an outstanding PreparedTopologyEdit when any direct authoring
+    // or lifecycle operation touches this graph. Guarded by graph_mutation_mutex_.
+    std::uint64_t authoring_generation_{0};
     NodeId next_id_ = 1;
     GraphLimits limits_;
 
@@ -1321,6 +1338,11 @@ private:
     // (see CompiledGraph::routing_*_parallel).
     std::atomic<bool> parallel_routing_enabled_{false};
     std::atomic<bool> anticipation_enabled_{false};
+
+    // Non-null only on the private shadow graph owned by PreparedTopologyEdit.
+    // compile_ uses the origin's persistent load measurers for unchanged nodes
+    // and keeps newly allocated measurers local until commit transfers them.
+    SignalGraph* prepared_edit_origin_{nullptr};
 
     // 2.2b swap-edit transaction state (guarded by graph_mutation_mutex_).
     // in_swap_edit_ is set between begin_swap_edit() and prepare_swap()/
@@ -1611,6 +1633,127 @@ private:
                                        const std::vector<Connection>& connections,
                                        const std::unordered_map<NodeId, PreparedPluginMetadata>&
                                            plugin_meta);
+};
+
+// Isolated, fail-closed authoring transaction for topology-producing clients.
+// This deliberately exposes only nodes that SignalGraph itself owns and can
+// prepare off-side. External PluginSlot creation/replacement remains on the
+// eager/live-plugin paths; a candidate containing a plugin that would need
+// prepare() is rejected before any callback or owner mutation.
+class SignalGraph::PreparedTopologyEdit {
+public:
+    enum class Result : std::uint8_t {
+        Prepared,
+        Committed,
+        InvalidMutation,
+        StaleBase,
+        PreflightFailed,
+        ExternalPluginReprepareRequired,
+        MidiOutputDrainRequired,
+        ExistingCustomReprepareRequired,
+        CustomRegistryConflict,
+        CustomInstanceCreateFailed,
+        CustomStateRestoreFailed,
+        CompileFailed,
+        RuntimeAdoptionFailed,
+        ParallelWorkerStartFailed,
+        NotPrepared,
+        AlreadyCommitted,
+    };
+
+    ~PreparedTopologyEdit();
+    PreparedTopologyEdit(const PreparedTopologyEdit&) = delete;
+    PreparedTopologyEdit& operator=(const PreparedTopologyEdit&) = delete;
+
+    bool register_custom_node_type(CustomNodeType type);
+    bool unregister_custom_node_type(std::string_view type_id, int version);
+    std::size_t prune_unused_custom_node_types();
+    std::size_t custom_node_type_count() const;
+
+    NodeId add_input_node(int channels, const std::string& name = "Input");
+    NodeId add_output_node(int channels, const std::string& name = "Output");
+    NodeId add_gain_node(const std::string& name = "Gain");
+    NodeId add_midi_input_node(const std::string& name = "MIDI In");
+    NodeId add_midi_output_node(const std::string& name = "MIDI Out");
+    NodeId add_custom_node(std::string_view type_id,
+                           const std::string& name = {});
+    NodeId add_custom_node(std::string_view type_id,
+                           int version,
+                           const std::string& name = {});
+    NodeId add_unresolved_custom_node(std::string_view type_id,
+                                      int version,
+                                      int num_inputs,
+                                      int num_outputs,
+                                      const std::string& name);
+    bool remove_node(NodeId id);
+    bool connect(NodeId source, PortIndex source_port,
+                 NodeId dest, PortIndex dest_port);
+    bool connect_feedback(NodeId source, PortIndex source_port,
+                          NodeId dest, PortIndex dest_port);
+    bool connect_midi(NodeId source, NodeId dest);
+    bool disconnect(NodeId source, PortIndex source_port,
+                    NodeId dest, PortIndex dest_port);
+    bool set_node_gain(NodeId id, float linear_gain);
+
+    void set_canonical_executor_routing_enabled(bool enabled) noexcept;
+    void set_parallel_routing_enabled(bool enabled) noexcept;
+    void set_anticipation_enabled(bool enabled) noexcept;
+
+    const GraphNode* node(NodeId id) const;
+    const std::vector<GraphNode>& nodes() const;
+    const std::vector<Connection>& connections() const;
+    // Candidate-side half of routed-only admission. Valid after prepare();
+    // checks the selected execution domain, snapshot validity, and exact pool
+    // fit without requiring the candidate to start parallel workers.
+    bool routed_execution_ready(int block_size) const noexcept;
+
+    Result prepare(double sample_rate, int max_block_size);
+    Result commit();
+    Result last_result() const noexcept { return last_result_; }
+
+private:
+    friend class SignalGraph;
+    explicit PreparedTopologyEdit(SignalGraph& owner);
+    bool base_is_current_locked_() const;
+    bool is_new_node_(NodeId id) const;
+    void release_new_custom_instances_() noexcept;
+    template <typename Fn>
+    NodeId add_node_(Fn&& fn) {
+        if (mutation_failed_ || committed_ || prepare_attempted_) {
+            mutation_failed_ = true;
+            return 0;
+        }
+        const NodeId id = fn();
+        if (id == 0) mutation_failed_ = true;
+        return id;
+    }
+    template <typename Fn>
+    bool mutate_(Fn&& fn) {
+        if (mutation_failed_ || committed_ || prepare_attempted_) {
+            mutation_failed_ = true;
+            return false;
+        }
+        const bool ok = fn();
+        if (!ok) mutation_failed_ = true;
+        return ok;
+    }
+
+    SignalGraph* owner_ = nullptr;
+    std::unique_ptr<SignalGraph> candidate_;
+    std::shared_ptr<SignalGraph::CompiledGraph> prepared_snapshot_;
+    std::unordered_set<NodeId> baseline_node_ids_;
+    std::unordered_set<std::string> baseline_registry_keys_;
+    std::unordered_set<std::string> replaced_registry_keys_;
+    std::vector<NodeId> prepared_new_custom_ids_;
+    std::uint64_t base_authoring_generation_ = 0;
+    std::shared_ptr<SignalGraph::CompiledGraph> base_live_;
+    bool base_canonical_routing_ = false;
+    bool base_parallel_routing_ = false;
+    bool base_anticipation_ = false;
+    bool mutation_failed_ = false;
+    bool prepare_attempted_ = false;
+    bool committed_ = false;
+    Result last_result_ = Result::NotPrepared;
 };
 
 // Drag-add helper.
