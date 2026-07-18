@@ -132,8 +132,8 @@
     },
     {
       "path": "tools/cli/kit_commands.cpp",
-      "max_loc": 3883,
-      "note": "kit/package trust-boundary monolith; split per tools/cli/KIT_COMMANDS_MODULE_MAP.md; JSON escaping shared from tools/cli/json_writer.hpp; archive-safety path checks shared from tools/cli/cli_fs_util.hpp"
+      "max_loc": 3056,
+      "note": "kit/package trust-boundary monolith; split per tools/cli/KIT_COMMANDS_MODULE_MAP.md (step 1: manifest validation extracted to kit_manifest_validation.{hpp,cpp}, shared JSON accessors to kit_json_helpers.hpp); JSON escaping shared from tools/cli/json_writer.hpp; archive-safety path checks shared from tools/cli/cli_fs_util.hpp"
     },
     {
       "path": "inspect/src/inspector_overlay.cpp",
