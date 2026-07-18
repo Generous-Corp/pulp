@@ -15,7 +15,7 @@ every plugin-format adapter.
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
   -DPULP_BUILD_EXAMPLES=ON
-cmake --build build --target PulpSampler_CLAP -j
+tools/ci/governed-build.sh cmake --build build --target PulpSampler_CLAP
 ```
 
 The bundle is written under `build/CLAP/`. The processor accepts MIDI and has a
@@ -52,6 +52,12 @@ bool mono_ok = processor.load_sample(mono, frame_count, sample_rate);
 bool stereo_ok = processor.load_sample_stereo(
     interleaved_stereo, frame_count, sample_rate);
 bool file_ok = processor.load_sample_file("samples/kick.wav");
+
+auto file = processor.load_sample_file_result("samples/piano.wav");
+if (!file.loaded()) {
+    std::cerr << pulp::examples::pulp_sampler_load_status_name(file.status)
+              << '\n';
+}
 ```
 
 The file path admits only true ranged readers: WAV and uncompressed
@@ -66,11 +72,12 @@ host block size, interpolation guard, loop guard, and source rate. Streamed
 playback admits an effective consumption ratio of at most 4x: the note/key-map
 pitch ratio multiplied by the active heritage clock ratio.
 
-`PulpSamplerProcessor::load_sample_file()` currently returns only `bool`.
-`SamplerStreamingRuntime::load_sample_file_result()` and the trivially copyable
-records in `sampler_api.hpp` already distinguish codec capability, sidecar
-status, preload sizes, memory demand, and precise failure status, but that
-detailed result is not yet forwarded by the processor's public helper.
+`PulpSamplerProcessor::load_sample_file()` is the boolean convenience form.
+Use `load_sample_file_result()` when the caller needs the codec capability,
+sidecar status, preload sizes, memory demand, selection generation, or precise
+failure status. `last_load_result()` returns the most recent file-load attempt
+result. Concurrent control-plane operations are serialized; a failed
+replacement leaves the previously published source and its generation usable.
 
 Build one or two persisted streamed mip levels next to a source with:
 
@@ -88,11 +95,35 @@ result; it never replaces the base source.
 The callback owns voice state and pushes bounded demand/cancellation commands.
 One non-audio owner thread mutates file, source, and cache state; two decode
 workers perform bounded page reads. The callback does not allocate, wait, open
-files, or invoke a decoder.
+files, or invoke a decoder. See the [shared sample-stream service](../guides/sample-stream-service.md)
+for the multi-voice cache and worker contract, and the narrower
+[sequential streaming source](../guides/streaming-sample-source.md) for the
+preload-plus-ring primitive.
 
-The current example derives its memory capacity during prepare; the
-`PulpSamplerConfig::streaming_memory_budget_bytes` record is not wired into the
-processor yet. The principal prepared storage is:
+The example derives its default memory capacity during prepare. To impose a
+smaller non-zero streaming cap, supply `PulpSamplerConfig` at construction or
+through `set_config()` before prepare:
+
+```cpp
+pulp::examples::PulpSamplerConfig config{
+    .streaming_memory_budget_bytes = 64ull * 1024ull * 1024ull,
+};
+pulp::examples::PulpSamplerProcessor processor(config);
+
+// After the host calls prepare():
+const auto prepared = processor.prepare_result();
+if (!prepared.prepared()) {
+    std::cerr << pulp::examples::pulp_sampler_prepare_status_name(prepared.status)
+              << '\n';
+}
+```
+
+Zero selects the certified derived default. `set_config()` fails after a
+successful prepare, and an undersized cap fails transactionally with
+`StreamingMemoryBudgetTooSmall`. The general prepare-resource estimate also
+accounts for resident-bank, interpolation, heritage, voice, and service
+storage; the streaming cap does not pretend to cover those separate owners.
+The principal streamed storage is:
 
 ```text
 page bytes = 2 channels * page_frames * source_capacity * cache_pages_per_source * sizeof(float)
@@ -114,9 +145,13 @@ equal-power fade to silence; recovery uses a 64-frame fade from silence.
 `stream_stats()` separates service starvation, starved output frames, decode
 failure, invalid preload contract, stale generation, normal end of source,
 invalid render contract, memory high-water marks, and source/page lifecycle
-counters. The richer envelope and combined diagnostic records in
-`sampler_api.hpp` are stable inspection shapes, but the processor does not yet
-return the top-level `PulpSamplerDiagnostics` snapshot.
+counters. `diagnostics()` returns the top-level `PulpSamplerDiagnostics`
+snapshot with the last prepare and load results, the matching preload policy,
+callback-published starvation-envelope state, heritage status, and streaming
+memory capacity/current/peak values. Its `snapshot_epoch` advances with each
+coherent diagnostic publication; a successful load's `selection_generation`
+matches the preload record from the same source publication. These inspection
+APIs are for a control or diagnostic thread, never the audio callback.
 
 The stream service also enforces aggregate decode throughput. For active voices
 sharing one source it computes:
@@ -187,7 +222,7 @@ Focused sampler tests:
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
   -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON
-cmake --build build --target pulp-sampler-test -j
+tools/ci/governed-build.sh cmake --build build --target pulp-sampler-test
 ./build/examples/PulpSampler/pulp-sampler-test
 ```
 
@@ -203,8 +238,8 @@ cmake -S . -B build-aql -DCMAKE_BUILD_TYPE=Release \
   -DPULP_BUILD_TESTS=ON \
   -DPULP_AUDIO_QUALITY_LAB_GATE=ON \
   -DPULP_AUDIO_QUALITY_LAB_PYTHON="$PWD/.venv-aql/bin/python"
-cmake --build build-aql \
-  --target pulp-sampler-render-wav pulp-sampler-heritage-render-wav -j
+tools/ci/governed-build.sh cmake --build build-aql \
+  --target pulp-sampler-render-wav pulp-sampler-heritage-render-wav
 ctest --test-dir build-aql \
   -R '^sampler-(quality-lab|heritage-quality-lab)-' \
   --output-on-failure
@@ -218,9 +253,7 @@ integration commits do not make it stale when the verifier's content-addressed
 interpolation source bundle remains unchanged; the current source-only verifier
 passes that exact digest.
 
-## Current gaps
+## Current gap
 
-- Wire configuration, prepare/load results, preload policy, envelope state, and
-  the combined diagnostic record through `PulpSamplerProcessor`.
 - Named machine profiles remain intentionally unshipped until research,
   provenance, capture, and listening gates are satisfied.
