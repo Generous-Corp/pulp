@@ -14,9 +14,10 @@ next_program_generation(ProgramGeneration current) noexcept {
 
 TrackProgram::TrackProgram(timeline::ItemId id, ProgramGeneration generation,
                            ProviderSelectorProgram provider, RendererStatePolicy state_policy,
-                           std::vector<timeline::ItemId> clip_ids) noexcept
+                           std::vector<timeline::ItemId> clip_ids,
+                           std::vector<NoteProgramEvent> note_events) noexcept
     : id_(id), generation_(generation), provider_(provider), state_policy_(state_policy),
-      clip_ids_(std::move(clip_ids)) {}
+      clip_ids_(std::move(clip_ids)), note_events_(std::move(note_events)) {}
 
 PlaybackProgram::PlaybackProgram(
     ProgramGeneration generation, std::uint64_t document_revision,

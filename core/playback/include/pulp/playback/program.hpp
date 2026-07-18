@@ -49,6 +49,32 @@ struct ProviderSelectorProgram {
 
 enum class RendererStatePolicy : std::uint8_t { Stateless, CarryByItemId };
 
+enum class NoteProgramEventKind : std::uint8_t { Off, On };
+
+/// Immutable arrangement-note event lowered by the program compiler. Musical
+/// ticks remain available for diagnostics and state snapshots, while the
+/// sample position is authoritative for half-open block scheduling against the
+/// exact CompiledTempoMap used to build the owning PlaybackProgram.
+struct NoteProgramEvent {
+    timebase::SamplePosition sample;
+    timebase::TickPosition tick;
+    timeline::ItemId clip_id;
+    timeline::ItemId note_id;
+    std::uint16_t velocity = 0xffff;
+    std::uint8_t pitch = 60;
+    std::uint8_t channel = 0;
+    NoteProgramEventKind kind = NoteProgramEventKind::On;
+    constexpr auto operator<=>(const NoteProgramEvent&) const = default;
+};
+
+constexpr bool note_program_event_less(const NoteProgramEvent& lhs,
+                                       const NoteProgramEvent& rhs) noexcept {
+    if (lhs.sample != rhs.sample) return lhs.sample < rhs.sample;
+    if (lhs.kind != rhs.kind) return lhs.kind < rhs.kind; // note-offs first
+    if (lhs.clip_id != rhs.clip_id) return lhs.clip_id < rhs.clip_id;
+    return lhs.note_id < rhs.note_id;
+}
+
 class TrackProgram {
   public:
     timeline::ItemId id() const noexcept { return id_; }
@@ -56,18 +82,23 @@ class TrackProgram {
     ProviderSelectorProgram provider() const noexcept { return provider_; }
     RendererStatePolicy state_policy() const noexcept { return state_policy_; }
     std::span<const timeline::ItemId> ordered_clip_ids() const noexcept { return clip_ids_; }
+    std::span<const NoteProgramEvent> arrangement_note_events() const noexcept {
+        return note_events_;
+    }
 
   private:
     friend class ProgramCompilerTask;
     TrackProgram(timeline::ItemId id, ProgramGeneration generation,
                  ProviderSelectorProgram provider, RendererStatePolicy state_policy,
-                 std::vector<timeline::ItemId> clip_ids) noexcept;
+                 std::vector<timeline::ItemId> clip_ids,
+                 std::vector<NoteProgramEvent> note_events) noexcept;
 
     timeline::ItemId id_;
     ProgramGeneration generation_ = 0;
     ProviderSelectorProgram provider_;
     RendererStatePolicy state_policy_ = RendererStatePolicy::CarryByItemId;
     std::vector<timeline::ItemId> clip_ids_;
+    std::vector<NoteProgramEvent> note_events_;
 };
 
 class PlaybackProgram {

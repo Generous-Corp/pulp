@@ -15,7 +15,15 @@ class ProgramCompilerTask final : public CompileTask {
     CompileTaskStatus run_slice(const CompileSliceBudget& budget) noexcept override;
 
   private:
-    enum class Stage { Capture, CompileTracks, Link, Validate, Publish };
+    enum class Stage {
+        Capture,
+        CompileTracks,
+        SortTrackNotes,
+        FinalizeTrack,
+        Link,
+        Validate,
+        Publish,
+    };
     CompileTaskStatus fail(CompileError error) noexcept;
 
     std::shared_ptr<PlaybackProgramCompilerCore> core_;
@@ -26,7 +34,19 @@ class ProgramCompilerTask final : public CompileTask {
     bool all_dirty_ = false;
     std::size_t track_index_ = 0;
     std::size_t clip_index_ = 0;
+    std::size_t note_index_ = 0;
+    bool clip_started_ = false;
     std::vector<timeline::ItemId> current_clip_ids_;
+    std::vector<NoteProgramEvent> current_note_events_;
+    std::vector<NoteProgramEvent> note_merge_buffer_;
+    std::size_t note_merge_width_ = 1;
+    std::size_t note_merge_left_ = 0;
+    std::size_t note_merge_mid_ = 0;
+    std::size_t note_merge_right_ = 0;
+    std::size_t note_merge_i_ = 0;
+    std::size_t note_merge_j_ = 0;
+    bool note_merge_pair_active_ = false;
+    bool clearing_note_merge_source_ = false;
     std::vector<std::shared_ptr<const TrackProgram>> tracks_;
     std::vector<std::shared_ptr<const TrackProgram>> merge_buffer_;
     std::size_t merge_width_ = 1;
@@ -39,6 +59,7 @@ class ProgramCompilerTask final : public CompileTask {
     bool clearing_merge_source_ = false;
     std::size_t validation_track_ = 0;
     std::size_t validation_clip_ = 0;
+    std::size_t validation_note_ = 0;
 };
 
 struct PlaybackProgramCompilerCore :
@@ -174,44 +195,137 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 ++work;
                 continue;
             }
-            if (clip_index_ == 0) current_clip_ids_.reserve(track.clips().size());
-            while (clip_index_ < track.clips().size() && work < budget.max_work_units &&
-                   std::chrono::steady_clock::now() < budget.deadline) {
-                current_clip_ids_.push_back(track.clips()[clip_index_++].id());
-                ++work;
+            if (clip_index_ == 0 && !clip_started_) {
+                current_clip_ids_.reserve(track.clips().size());
             }
             if (clip_index_ == track.clips().size()) {
-                if (work >= budget.max_work_units ||
-                    std::chrono::steady_clock::now() >= budget.deadline)
-                    return CompileTaskStatus::Pending;
-                ProviderSelectorProgram provider;
-                RendererStatePolicy state_policy = RendererStatePolicy::CarryByItemId;
-                const auto& live = core_->store.live();
-                if (live && live->project_id() == request_->project->id() &&
-                    live->sequence_id() == request_->sequence_id) {
-                    if (const auto* prior = live->find_track(track.id())) {
-                        provider = prior->provider();
-                        state_policy = prior->state_policy();
-                    }
+                if (current_note_events_.size() > 1) {
+                    note_merge_width_ = 1;
+                    note_merge_left_ = 0;
+                    note_merge_pair_active_ = false;
+                    clearing_note_merge_source_ = false;
+                    stage_ = Stage::SortTrackNotes;
+                } else {
+                    stage_ = Stage::FinalizeTrack;
                 }
-                const auto policy = std::lower_bound(
-                    request_->track_policies.begin(), request_->track_policies.end(), track.id(),
-                    [](const TrackCompilePolicy& value, timeline::ItemId id) {
-                        return value.track_id < id;
-                    });
-                if (policy != request_->track_policies.end() && policy->track_id == track.id()) {
-                    provider = policy->provider;
-                    state_policy = policy->state_policy;
-                }
-                tracks_.push_back(std::shared_ptr<const TrackProgram>(new TrackProgram(
-                    track.id(), generation_, provider, state_policy,
-                    std::move(current_clip_ids_))));
-                core_->track_completed();
-                current_clip_ids_.clear();
-                clip_index_ = 0;
-                ++track_index_;
-                ++work;
+                continue;
             }
+
+            const auto& clip = track.clips()[clip_index_];
+            if (!clip_started_) {
+                current_clip_ids_.push_back(clip.id());
+                clip_started_ = true;
+            }
+            const auto* notes = std::get_if<timeline::NoteContent>(&clip.content());
+            if (!notes || note_index_ == notes->notes().size()) {
+                note_index_ = 0;
+                clip_started_ = false;
+                ++clip_index_;
+                ++work;
+                continue;
+            }
+            if (clip.time_anchor() != timeline::ClipTimeAnchor::Musical)
+                return fail({CompileErrorCode::InvalidStructure, clip.id(),
+                             request_->document_revision});
+            const auto& note = notes->notes()[note_index_++];
+            const auto note_end = note.start + note.duration;
+            if (note.start.value < 0 || note_end > timebase::TickPosition{clip.duration().value})
+                return fail({CompileErrorCode::InvalidStructure, note.id,
+                             request_->document_revision});
+            const auto start_tick = clip.start() + timebase::TickDuration{note.start.value};
+            const auto end_tick = clip.start() + timebase::TickDuration{note_end.value};
+            const auto start_sample = request_->tempo_map->ticks_to_samples(start_tick);
+            const auto end_sample = request_->tempo_map->ticks_to_samples(end_tick);
+            if (end_sample <= start_sample)
+                return fail({CompileErrorCode::InvalidStructure, note.id,
+                             request_->document_revision});
+            current_note_events_.push_back({start_sample, start_tick, clip.id(), note.id,
+                                            note.velocity, note.pitch, note.channel,
+                                            NoteProgramEventKind::On});
+            current_note_events_.push_back({end_sample, end_tick, clip.id(), note.id,
+                                            note.velocity, note.pitch, note.channel,
+                                            NoteProgramEventKind::Off});
+            ++work;
+            continue;
+        }
+        if (stage_ == Stage::SortTrackNotes) {
+            if (current_note_events_.size() <= 1 ||
+                note_merge_width_ >= current_note_events_.size()) {
+                stage_ = Stage::FinalizeTrack;
+                continue;
+            }
+            if (clearing_note_merge_source_) {
+                note_merge_buffer_.pop_back();
+                ++work;
+                if (note_merge_buffer_.empty()) {
+                    clearing_note_merge_source_ = false;
+                    note_merge_width_ *= 2;
+                    note_merge_left_ = 0;
+                }
+                continue;
+            }
+            if (note_merge_left_ >= current_note_events_.size()) {
+                current_note_events_.swap(note_merge_buffer_);
+                clearing_note_merge_source_ = true;
+                continue;
+            }
+            if (!note_merge_pair_active_) {
+                note_merge_mid_ = std::min(note_merge_left_ + note_merge_width_,
+                                           current_note_events_.size());
+                note_merge_right_ = std::min(note_merge_left_ + 2 * note_merge_width_,
+                                             current_note_events_.size());
+                note_merge_i_ = note_merge_left_;
+                note_merge_j_ = note_merge_mid_;
+                note_merge_pair_active_ = true;
+            }
+            if (note_merge_i_ < note_merge_mid_ &&
+                (note_merge_j_ >= note_merge_right_ ||
+                 !note_program_event_less(current_note_events_[note_merge_j_],
+                                          current_note_events_[note_merge_i_])))
+                note_merge_buffer_.push_back(current_note_events_[note_merge_i_++]);
+            else
+                note_merge_buffer_.push_back(current_note_events_[note_merge_j_++]);
+            ++work;
+            if (note_merge_i_ == note_merge_mid_ && note_merge_j_ == note_merge_right_) {
+                note_merge_left_ = note_merge_right_;
+                note_merge_pair_active_ = false;
+            }
+            continue;
+        }
+        if (stage_ == Stage::FinalizeTrack) {
+            const auto& track = sequence_->tracks()[track_index_];
+            ProviderSelectorProgram provider;
+            RendererStatePolicy state_policy = RendererStatePolicy::CarryByItemId;
+            const auto& live = core_->store.live();
+            if (live && live->project_id() == request_->project->id() &&
+                live->sequence_id() == request_->sequence_id) {
+                if (const auto* prior = live->find_track(track.id())) {
+                    provider = prior->provider();
+                    state_policy = prior->state_policy();
+                }
+            }
+            const auto policy = std::lower_bound(
+                request_->track_policies.begin(), request_->track_policies.end(), track.id(),
+                [](const TrackCompilePolicy& value, timeline::ItemId id) {
+                    return value.track_id < id;
+                });
+            if (policy != request_->track_policies.end() && policy->track_id == track.id()) {
+                provider = policy->provider;
+                state_policy = policy->state_policy;
+            }
+            tracks_.push_back(std::shared_ptr<const TrackProgram>(new TrackProgram(
+                track.id(), generation_, provider, state_policy,
+                std::move(current_clip_ids_), std::move(current_note_events_))));
+            core_->track_completed();
+            current_clip_ids_.clear();
+            current_note_events_.clear();
+            note_merge_buffer_.clear();
+            clip_index_ = 0;
+            note_index_ = 0;
+            clip_started_ = false;
+            ++track_index_;
+            ++work;
+            stage_ = Stage::CompileTracks;
             continue;
         }
         if (stage_ == Stage::Link) {
@@ -271,8 +385,25 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 if (!id.valid())
                     return fail({CompileErrorCode::InvalidStructure, id,
                                  request_->document_revision});
+                continue;
+            }
+            const auto notes = track->arrangement_note_events();
+            if (validation_note_ < notes.size()) {
+                const auto& event = notes[validation_note_];
+                const bool malformed = !event.clip_id.valid() || !event.note_id.valid() ||
+                    event.pitch > 127 || event.channel > 15 ||
+                    static_cast<unsigned>(event.kind) >
+                        static_cast<unsigned>(NoteProgramEventKind::On) ||
+                    (validation_note_ != 0 &&
+                     note_program_event_less(event, notes[validation_note_ - 1]));
+                ++validation_note_;
+                ++work;
+                if (malformed)
+                    return fail({CompileErrorCode::InvalidStructure, event.note_id,
+                                 request_->document_revision});
             } else {
                 validation_clip_ = 0;
+                validation_note_ = 0;
                 ++validation_track_;
                 ++work;
             }
