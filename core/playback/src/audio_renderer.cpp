@@ -398,9 +398,10 @@ AudioRenderStatus ArrangementAudioTrackRenderer::process(const PlaybackProgramBl
 
     const auto view = shell_.begin_block(block);
     if (!view.program) {
+        if (view.adoption == ShellAdoptionResult::Rejected)
+            return AudioRenderStatus::InvalidProgram;
         output.clear();
-        return view.adoption == ShellAdoptionResult::Rejected ? AudioRenderStatus::InvalidProgram
-                                                              : AudioRenderStatus::Silent;
+        return AudioRenderStatus::Silent;
     }
     const auto& program = *block.program();
     const auto& compiled_limits = program.audio_limits();
@@ -412,22 +413,24 @@ AudioRenderStatus ArrangementAudioTrackRenderer::process(const PlaybackProgramBl
     if (output.num_channels() > limits.max_channels ||
         output.num_samples() > limits.max_block_frames)
         return AudioRenderStatus::CapacityExceeded;
+    const auto provider = view.program->provider();
+    const auto* audio_program = view.program->audio_program();
+    const bool arrangement_selected = provider.selected == ProviderKind::Arrangement &&
+                                      provider.available(ProviderKind::Arrangement);
+    if (transport.is_playing && arrangement_selected && audio_program != nullptr) {
+        if (audio_program->id() != view.program->id())
+            return AudioRenderStatus::InvalidProgram;
+        if (audio_program->clips().size() > limits.max_clips)
+            return AudioRenderStatus::CapacityExceeded;
+    }
     if (!valid_transport(transport, output.num_samples(), program.tempo_map(), limits)) {
         output.clear();
         return AudioRenderStatus::InvalidTransport;
     }
     output.clear();
 
-    const auto provider = view.program->provider();
-    const auto* audio_program = view.program->audio_program();
-    const bool arrangement_selected = provider.selected == ProviderKind::Arrangement &&
-                                      provider.available(ProviderKind::Arrangement);
     AudioRenderStatus status = AudioRenderStatus::Silent;
     if (transport.is_playing && arrangement_selected && audio_program != nullptr) {
-        if (audio_program->id() != view.program->id())
-            return AudioRenderStatus::InvalidProgram;
-        if (audio_program->clips().size() > limits.max_clips)
-            return AudioRenderStatus::CapacityExceeded;
         for (std::uint8_t index = 0; index < transport.range_count; ++index)
             render_track(*audio_program, transport.ranges[index], output);
         if (!audio_program->clips().empty())

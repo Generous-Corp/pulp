@@ -392,16 +392,20 @@ transport-tick lane and enter the graph through `inject_midi()`.
 Timeline-owned nodes consume the callback's exact `TransportSnapshot`, including
 all loop-split ranges, from the binding's block-wide pin. The existing
 SignalGraph format ABI still carries one `ProcessContext`, so ordinary downstream
-plugins see the first range's projection on a split block. Phase 1 treats that as
-an adapter boundary: downstream nodes may process the rendered audio, but must
-not reconstruct timeline material from that lossy projection.
+plugins receive callback-wide `num_samples` and a transport-jump flag if any
+constituent range is discontinuous. Timeline nodes use the exact ranges when
+rendering; downstream nodes use the callback-wide context when processing the
+rendered audio.
 
-Admission checks the candidate's configured SignalGraph limits and the exact
-canonical routed-plan limits independently: node count, connection count,
-per-node ports, and total audio-plus-event ports all produce structured
-actual-versus-limit diagnostics. Topology eligibility is checked only after
-those capacity axes, so an oversized timeline route cannot silently fall back
-to the reference walk.
+Admission checks the candidate's configured SignalGraph authoring limits and the
+canonical executor's authoritative routed-plan limits independently: node count,
+connection count, per-node ports, and total audio-plus-event ports all produce
+structured actual-versus-limit diagnostics. Per-track note capacity is capped at
+the graph MIDI handoff's 1024-event storage before graph mutation. Prepared and
+live program sample rates must match, and live publications may reorder the same
+track IDs but must be re-prepared after adding or removing tracks. Topology
+eligibility is checked only after the capacity axes, so an oversized timeline
+route cannot silently fall back to the reference walk.
 
 ## Baking a graph to a shippable artifact
 

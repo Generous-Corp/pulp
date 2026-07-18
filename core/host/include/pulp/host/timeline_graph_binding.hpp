@@ -32,9 +32,8 @@ struct TimelineTrackGraphRoute {
 
 struct TimelineGraphBindingConfig {
     std::uint32_t audio_channels = 2;
-    std::size_t maximum_note_events_per_track_per_block = 2048;
+    std::size_t maximum_note_events_per_track_per_block = 1024;
     playback::AudioRendererLimits audio_limits{};
-    graph::GraphRuntimeLimits routed_limits{};
 };
 
 enum class TimelineGraphAdmissionCode : std::uint8_t {
@@ -52,6 +51,8 @@ enum class TimelineGraphAdmissionCode : std::uint8_t {
     RoutedTopologyIneligible,
     GraphMutationFailed,
     GraphPrepareFailed,
+    SampleRateMismatch,
+    NoteCapacityExceeded,
 };
 
 /// Structured admission result. Capacity failures always report the exact
@@ -76,6 +77,8 @@ enum class TimelineGraphProcessCode : std::uint8_t {
     MidiInjectionFailed,
     AudioRenderFailed,
     CapacityExceeded,
+    InputShapeMismatch,
+    TopologyChanged,
 };
 
 struct TimelineGraphProcessResult {
@@ -94,6 +97,7 @@ class TimelineGraphPlaybackBinding {
   public:
     static constexpr audio::RtSafetyClass process_rt_safety_class =
         audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
+    static constexpr std::size_t maximum_graph_midi_events_per_block = 1024;
 
     TimelineGraphPlaybackBinding(SignalGraph& graph, const playback::PlaybackProgramStore& store);
     ~TimelineGraphPlaybackBinding();
@@ -131,6 +135,9 @@ class TimelineGraphPlaybackBinding {
     std::shared_ptr<detail::TimelineGraphSharedBlockState> shared_;
     std::vector<std::unique_ptr<detail::TimelineGraphBoundTrack>> tracks_;
     TimelineGraphBindingConfig config_{};
+    std::vector<timeline::ItemId> prepared_track_ids_;
+    std::uint64_t binding_instance_id_ = 0;
+    timebase::RationalRate prepared_sample_rate_{0, 1};
     std::uint32_t prepared_max_block_size_ = 0;
     bool prepared_ = false;
 };
