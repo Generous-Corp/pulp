@@ -229,6 +229,20 @@ if(PULP_HAS_VST3)
     catch_discover_tests(pulp-test-vst3-state-sync)
 endif()
 
+if(PULP_HAS_VST3)
+    # Host-side VST3 editor (IPlugView) negotiation seam
+    # (pulp::host::detail::vst3_editor.hpp). The fake IPlugView inherits the SDK
+    # CPluginView (in the vst3-sdk lib) and the fake controller inherits
+    # EditController; vsteditcontroller.cpp is compiled in directly.
+    add_executable(pulp-test-vst3-editor
+        test_vst3_editor.cpp
+        ${VST3_SDK_DIR}/public.sdk/source/vst/vsteditcontroller.cpp
+    )
+    target_link_libraries(pulp-test-vst3-editor
+        PRIVATE pulp::host vst3-sdk Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-vst3-editor)
+endif()
+
 if(PULP_HAS_CLAP)
     # Adapter-vs-direct audio null: renders one deterministic Processor through
     # HeadlessHost and through the real CLAP adapter and requires the bits to
