@@ -695,6 +695,18 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
             return kResultFalse;
         }
 
+        // An explicit layout list is an exact host-facing contract. Do not
+        // widen it through the legacy unsupported-layout silence quirk: hosts
+        // may cache an accepted arrangement and later instantiate the plugin
+        // under a layout its descriptor never promised.
+        if (!desc.supported_bus_layouts.empty()) {
+            runtime::log_info(
+                "VST3 setBusArrangements: rejected layout outside explicit "
+                "supported_bus_layouts ({} in / {} out buses)",
+                numIns, numOuts);
+            return kResultFalse;
+        }
+
         // The arrangement is not expressible as mono/stereo, such as 5.1,
         // but the host policy can request graceful silence instead of
         // rejection. process() clamps the processor's views to prepared
@@ -1126,6 +1138,81 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // back as clean silence rather than garbage.
     const int32 original_num_samples = num_samples;
     num_samples = clamp_block_to_prepared_max(num_samples, max_block_size_);
+
+    // VST3 requires ProcessData to carry one AudioBusBuffers entry for every
+    // component bus, regardless of activation state. Validate that exact
+    // topology before publishing any host storage to the Processor. A
+    // malformed block fails closed: every writable output is zeroed and DSP is
+    // skipped, preventing a Processor prepared for one layout from indexing a
+    // different one supplied at render time.
+    const auto zero_host_outputs = [&] {
+        if (!data.outputs) return;
+        for (int32 b = 0; b < data.numOutputs; ++b) {
+            auto& bus = data.outputs[b];
+            for (int32 ch = 0; ch < bus.numChannels; ++ch) {
+                if (host_f64 && bus.channelBuffers64 && bus.channelBuffers64[ch]) {
+                    zero_f64(bus.channelBuffers64[ch], original_num_samples);
+                } else if (!host_f64 && bus.channelBuffers32 && bus.channelBuffers32[ch]) {
+                    std::memset(bus.channelBuffers32[ch], 0,
+                                sizeof(float) * original_num_samples);
+                }
+            }
+            bus.silenceFlags = bus.numChannels >= 64
+                ? ~Steinberg::uint64{0}
+                : (bus.numChannels > 0
+                       ? (Steinberg::uint64{1} << bus.numChannels) - 1
+                       : 0);
+        }
+    };
+    const auto host_bus_is_valid = [&](const AudioBusBuffers& host_bus,
+                                       AudioBus* declared_bus) {
+        if (!declared_bus) return false;
+        const int expected_channels = static_cast<int>(
+            SpeakerArr::getChannelCount(declared_bus->getArrangement()));
+        // A zero-channel buffer represents an inactive bus. Otherwise it is
+        // active and must match the negotiated arrangement with complete
+        // per-channel storage.
+        if (host_bus.numChannels == 0) return true;
+        if (host_bus.numChannels != expected_channels) return false;
+        if (host_f64) {
+            if (!host_bus.channelBuffers64) return false;
+            for (int32 ch = 0; ch < host_bus.numChannels; ++ch)
+                if (!host_bus.channelBuffers64[ch]) return false;
+        } else {
+            if (!host_bus.channelBuffers32) return false;
+            for (int32 ch = 0; ch < host_bus.numChannels; ++ch)
+                if (!host_bus.channelBuffers32[ch]) return false;
+        }
+        return true;
+    };
+    bool malformed_layout =
+        data.numInputs != static_cast<int32>(audioInputs.size()) ||
+        data.numOutputs != static_cast<int32>(audioOutputs.size()) ||
+        (data.numInputs > 0 && !data.inputs) ||
+        (data.numOutputs > 0 && !data.outputs);
+    if (!malformed_layout) {
+        for (int32 b = 0; b < data.numInputs; ++b) {
+            if (!host_bus_is_valid(
+                    data.inputs[b], FCast<AudioBus>(audioInputs.at(b)))) {
+                malformed_layout = true;
+                break;
+            }
+        }
+    }
+    if (!malformed_layout) {
+        for (int32 b = 0; b < data.numOutputs; ++b) {
+            if (!host_bus_is_valid(
+                    data.outputs[b], FCast<AudioBus>(audioOutputs.at(b)))) {
+                malformed_layout = true;
+                break;
+            }
+        }
+    }
+    if (malformed_layout) {
+        zero_host_outputs();
+        processor_->set_sidechain(nullptr);
+        return kResultOk;
+    }
 
     // Bus 0 routes to main input/output; bus 1 routes to
     // Processor::set_sidechain(). Additional input buses beyond index 1

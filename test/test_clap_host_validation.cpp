@@ -65,6 +65,8 @@ constexpr state::ParamID kParamCutoff = 1002;
 
 class HostValidationProcessor : public Processor {
 public:
+    HostValidationProcessor() { last_instance = this; }
+
     PluginDescriptor descriptor() const override {
         PluginDescriptor d;
         d.name = kPluginName;
@@ -93,6 +95,18 @@ public:
                  const audio::BufferView<const float>&,
                  midi::MidiBuffer&, midi::MidiBuffer&,
                  const ProcessContext&) override {}
+
+    std::vector<uint8_t> serialize_plugin_state() const override {
+        return {opaque_state.begin(), opaque_state.end()};
+    }
+
+    bool deserialize_plugin_state(std::span<const uint8_t> data) override {
+        opaque_state.assign(data.begin(), data.end());
+        return true;
+    }
+
+    inline static HostValidationProcessor* last_instance = nullptr;
+    std::string opaque_state;
 };
 
 std::unique_ptr<Processor> make_host_validation() {
@@ -310,8 +324,8 @@ TEST_CASE("CLAP non-core event namespace is ignored",
     REQUIRE_THAT(static_cast<double>(after), WithinAbs(6.0, 1e-6));
 }
 
-TEST_CASE("CLAP plugin state save → load → save is byte-equivalent",
-          "[clap][host-validation][state][issue-3-4]") {
+TEST_CASE("CLAP lifecycle churn preserves byte-equivalent plugin state",
+          "[clap][host-validation][lifecycle][churn][state][issue-3-4]") {
     // Drive the state extension through the entry-level factory path —
     // that's the only path that registers CLAP_EXT_STATE on the plugin
     // handle (it lives in clap_entry.hpp, NOT in clap_adapter.cpp's
@@ -323,63 +337,77 @@ TEST_CASE("CLAP plugin state save → load → save is byte-equivalent",
     auto* desc = factory->get_plugin_descriptor(factory, 0);
     REQUIRE(desc != nullptr);
 
-    const clap_plugin_t* p1 = factory->create_plugin(factory, nullptr, desc->id);
-    REQUIRE(p1 != nullptr);
-    REQUIRE(p1->init(p1));
+    for (int cycle = 0; cycle < 200; ++cycle) {
+        const double saved_gain = -24.0 + static_cast<double>(cycle % 48);
+        const std::string saved_payload = "cycle=" + std::to_string(cycle);
 
-    auto* state_ext = static_cast<const clap_plugin_state_t*>(
-        p1->get_extension(p1, CLAP_EXT_STATE));
-    REQUIRE(state_ext != nullptr);
+        const clap_plugin_t* p1 = factory->create_plugin(factory, nullptr, desc->id);
+        REQUIRE(p1 != nullptr);
+        REQUIRE(p1->init(p1));
+        auto* saver_processor = HostValidationProcessor::last_instance;
+        REQUIRE(saver_processor != nullptr);
+        saver_processor->opaque_state = saved_payload;
 
-    // Mutate a parameter the host would care about.
-    auto* params1 = static_cast<const clap_plugin_params_t*>(
-        p1->get_extension(p1, CLAP_EXT_PARAMS));
-    REQUIRE(params1 != nullptr);
-    // params extension's flush() handles a single PARAM_VALUE write the
-    // same way clap_process does. We use the in-process adapter handle
-    // directly to set the param via its public surface.
-    {
-        clap_event_param_value_t ev{};
-        ev.header = make_hdr(sizeof(ev), CLAP_EVENT_PARAM_VALUE);
-        ev.param_id = kParamGain;
-        ev.value = 12.5;
-        OneEventInput in(ev);
-        clap_output_events_t out{};
-        out.ctx = nullptr;
-        out.try_push = [](const clap_output_events_t*, const clap_event_header_t*) { return true; };
-        params1->flush(p1, &in.vt, &out);
+        auto* state_ext = static_cast<const clap_plugin_state_t*>(
+            p1->get_extension(p1, CLAP_EXT_STATE));
+        REQUIRE(state_ext != nullptr);
+        auto* params1 = static_cast<const clap_plugin_params_t*>(
+            p1->get_extension(p1, CLAP_EXT_PARAMS));
+        REQUIRE(params1 != nullptr);
+        {
+            clap_event_param_value_t ev{};
+            ev.header = make_hdr(sizeof(ev), CLAP_EVENT_PARAM_VALUE);
+            ev.param_id = kParamGain;
+            ev.value = saved_gain;
+            OneEventInput in(ev);
+            clap_output_events_t out{};
+            out.try_push = [](const clap_output_events_t*, const clap_event_header_t*) {
+                return true;
+            };
+            params1->flush(p1, &in.vt, &out);
+        }
+
+        MemStream out1;
+        clap_ostream_t os1{};
+        os1.ctx = &out1;
+        os1.write = mem_write;
+        REQUIRE(state_ext->save(p1, &os1));
+        REQUIRE_FALSE(out1.bytes.empty());
+        p1->destroy(p1);
+
+        // Restore only after the source instance is destroyed. This is the
+        // project-recall lifecycle ordering used by hosts between sessions.
+        const clap_plugin_t* p2 = factory->create_plugin(factory, nullptr, desc->id);
+        REQUIRE(p2 != nullptr);
+        REQUIRE(p2->init(p2));
+        auto* loader_processor = HostValidationProcessor::last_instance;
+        REQUIRE(loader_processor != nullptr);
+        auto* state2 = static_cast<const clap_plugin_state_t*>(
+            p2->get_extension(p2, CLAP_EXT_STATE));
+        REQUIRE(state2 != nullptr);
+
+        MemStream in_stream;
+        in_stream.bytes = out1.bytes;
+        clap_istream_t is{};
+        is.ctx = &in_stream;
+        is.read = mem_read;
+        REQUIRE(state2->load(p2, &is));
+        REQUIRE(loader_processor->opaque_state == saved_payload);
+
+        auto* params2 = static_cast<const clap_plugin_params_t*>(
+            p2->get_extension(p2, CLAP_EXT_PARAMS));
+        REQUIRE(params2 != nullptr);
+        double restored_gain = 0.0;
+        REQUIRE(params2->get_value(p2, kParamGain, &restored_gain));
+        REQUIRE_THAT(restored_gain, WithinAbs(saved_gain, 1e-6));
+
+        MemStream out2;
+        clap_ostream_t os2{};
+        os2.ctx = &out2;
+        os2.write = mem_write;
+        REQUIRE(state2->save(p2, &os2));
+        REQUIRE(out2.bytes == out1.bytes);
+        p2->destroy(p2);
     }
-
-    MemStream out1;
-    clap_ostream_t os1{};
-    os1.ctx = &out1;
-    os1.write = mem_write;
-    REQUIRE(state_ext->save(p1, &os1));
-    REQUIRE_FALSE(out1.bytes.empty());
-
-    // Load into a second instance; saving must produce the same bytes.
-    const clap_plugin_t* p2 = factory->create_plugin(factory, nullptr, desc->id);
-    REQUIRE(p2 != nullptr);
-    REQUIRE(p2->init(p2));
-    auto* state2 = static_cast<const clap_plugin_state_t*>(
-        p2->get_extension(p2, CLAP_EXT_STATE));
-    REQUIRE(state2 != nullptr);
-
-    MemStream in_stream;
-    in_stream.bytes = out1.bytes;
-    clap_istream_t is{};
-    is.ctx = &in_stream;
-    is.read = mem_read;
-    REQUIRE(state2->load(p2, &is));
-
-    MemStream out2;
-    clap_ostream_t os2{};
-    os2.ctx = &out2;
-    os2.write = mem_write;
-    REQUIRE(state2->save(p2, &os2));
-    REQUIRE(out2.bytes == out1.bytes);
-
-    p1->destroy(p1);
-    p2->destroy(p2);
     clap_entry.deinit();
 }
