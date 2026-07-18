@@ -13,18 +13,19 @@
 #include <limits>
 #include <sstream>
 
-#include <pulp/tools/audio/excerpt_service.hpp>
-#include <pulp/tools/audio/model_store.hpp>
-#include <pulp/tools/audio/service.hpp>
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/audio_scope.hpp>
 #include <pulp/audio/audio_scope_json.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/render/headless_surface.hpp>
+#include <pulp/tools/audio/excerpt_service.hpp>
+#include <pulp/tools/audio/model_store.hpp>
+#include <pulp/tools/audio/service.hpp>
 
 #include "cmd_audio_compare.hpp"
 #include "cmd_audio_plugin_inspect.hpp"
 #include "cmd_audio_render.hpp"
+#include "cmd_audio_sampler_mip.hpp"
 #include "cmd_audio_validate.hpp"
 
 // Parsing helpers (defined in cli_common.cpp, not in header since they are only
@@ -40,19 +41,26 @@ static void print_audio_usage() {
     std::cout << "  pulp audio model activate <model-id> [--json]\n";
     std::cout << "  pulp audio excerpt-find --text <query> --input <path> [options]\n";
     std::cout << "  pulp audio read-bundle <path> [--json]\n";
-    std::cout << "  pulp audio scope [target] --frames 90 --window 2048 --trigger rising-zero --channel 0 [--json <path>]\n";
-    std::cout << "  pulp audio scope --input-wav <path> --window 2048 --trigger rising-zero --channel 0 [--json <path>] [--png <path>]\n";
+    std::cout << "  pulp audio scope [target] --frames 90 --window 2048 --trigger rising-zero "
+                 "--channel 0 [--json <path>]\n";
+    std::cout << "  pulp audio scope --input-wav <path> --window 2048 --trigger rising-zero "
+                 "--channel 0 [--json <path>] [--png <path>]\n";
     std::cout << "  pulp audio validate <verb> ...   (summarize|doctor|compare|assert)\n";
-    std::cout << "  pulp audio compare <reference.wav> <candidate.wav> [--profile <axis>] [--reference-role <peer|golden>] [--threshold <t>] [--json <path>]\n";
-    std::cout << "  pulp audio render --plugin <bundle> --out <file.wav> (--duration-ms <n> | --duration-frames <n>) [options]\n";
-    std::cout << "  pulp audio plugin-inspect --plugin <bundle> [--format <fmt>] [--id <id>]  # JSON\n";
+    std::cout << "  pulp audio compare <reference.wav> <candidate.wav> [--profile <axis>] "
+                 "[--reference-role <peer|golden>] [--threshold <t>] [--json <path>]\n";
+    std::cout << "  pulp audio render --plugin <bundle> --out <file.wav> (--duration-ms <n> | "
+                 "--duration-frames <n>) [options]\n";
+    std::cout
+        << "  pulp audio plugin-inspect --plugin <bundle> [--format <fmt>] [--id <id>]  # JSON\n";
+    std::cout << "  pulp audio sampler-mip build <source> [--levels <1|2>] [--json]\n";
 }
 
 namespace {
 
 bool parse_positive_int_arg(const std::string& text, const char* flag, int& out) {
     std::size_t parsed = 0;
-    if (!parse_size_arg(text, flag, parsed)) return false;
+    if (!parse_size_arg(text, flag, parsed))
+        return false;
     if (parsed == 0 || parsed > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
         std::cerr << "Error: " << flag << " must be a positive integer\n";
         return false;
@@ -63,7 +71,8 @@ bool parse_positive_int_arg(const std::string& text, const char* flag, int& out)
 
 bool parse_nonnegative_int_arg(const std::string& text, const char* flag, int& out) {
     std::size_t parsed = 0;
-    if (!parse_size_arg(text, flag, parsed)) return false;
+    if (!parse_size_arg(text, flag, parsed))
+        return false;
     if (parsed > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
         std::cerr << "Error: " << flag << " is too large\n";
         return false;
@@ -73,13 +82,14 @@ bool parse_nonnegative_int_arg(const std::string& text, const char* flag, int& o
 }
 
 bool valid_scope_trigger(const std::string& trigger) {
-    return trigger == "none" || trigger == "off" || trigger == "raw"
-        || trigger == "rising-zero" || trigger == "rising_zero";
+    return trigger == "none" || trigger == "off" || trigger == "raw" || trigger == "rising-zero" ||
+           trigger == "rising_zero";
 }
 
 bool ensure_parent_dir(const fs::path& path) {
     const auto parent = path.parent_path();
-    if (parent.empty()) return true;
+    if (parent.empty())
+        return true;
     std::error_code ec;
     fs::create_directories(parent, ec);
     if (ec) {
@@ -91,24 +101,26 @@ bool ensure_parent_dir(const fs::path& path) {
 
 std::string read_text_file_or_empty(const fs::path& path) {
     std::ifstream file(path);
-    if (!file.is_open()) return {};
+    if (!file.is_open())
+        return {};
     std::stringstream buffer;
     buffer << file.rdbuf();
     return buffer.str();
 }
 
 bool write_binary_file(const fs::path& path, const std::vector<std::uint8_t>& bytes) {
-    if (!ensure_parent_dir(path)) return false;
+    if (!ensure_parent_dir(path))
+        return false;
     std::ofstream out(path, std::ios::binary);
-    if (!out.is_open()) return false;
+    if (!out.is_open())
+        return false;
     out.write(reinterpret_cast<const char*>(bytes.data()),
               static_cast<std::streamsize>(bytes.size()));
     return out.good();
 }
 
-std::vector<std::uint8_t> render_scope_png(
-    const pulp::audio::AudioScopeAcquisition& acquisition,
-    std::string* error_out) {
+std::vector<std::uint8_t> render_scope_png(const pulp::audio::AudioScopeAcquisition& acquisition,
+                                           std::string* error_out) {
     constexpr std::uint32_t width = 900;
     constexpr std::uint32_t height = 360;
     pulp::render::HeadlessSurface::Rgba rgba;
@@ -116,14 +128,12 @@ std::vector<std::uint8_t> render_scope_png(
     rgba.height = height;
     rgba.pixels.assign(static_cast<std::size_t>(width) * height * 4, 0);
 
-    auto put = [&](int x, int y, std::uint8_t r, std::uint8_t g,
-                   std::uint8_t b, std::uint8_t a = 255) {
-        if (x < 0 || y < 0 || x >= static_cast<int>(width) ||
-            y >= static_cast<int>(height)) {
+    auto put = [&](int x, int y, std::uint8_t r, std::uint8_t g, std::uint8_t b,
+                   std::uint8_t a = 255) {
+        if (x < 0 || y < 0 || x >= static_cast<int>(width) || y >= static_cast<int>(height)) {
             return;
         }
-        const auto idx = (static_cast<std::size_t>(y) * width +
-                          static_cast<std::size_t>(x)) * 4;
+        const auto idx = (static_cast<std::size_t>(y) * width + static_cast<std::size_t>(x)) * 4;
         rgba.pixels[idx + 0] = r;
         rgba.pixels[idx + 1] = g;
         rgba.pixels[idx + 2] = b;
@@ -146,15 +156,12 @@ std::vector<std::uint8_t> render_scope_png(
     const auto& samples = acquisition.samples;
     if (samples.size() >= 2) {
         auto point = [&](std::size_t i) {
-            const float x = static_cast<float>(i) /
-                static_cast<float>(samples.size() - 1);
+            const float x = static_cast<float>(i) / static_cast<float>(samples.size() - 1);
             const float s = std::clamp(samples[i], -1.0f, 1.0f);
             return std::pair<int, int>{
                 static_cast<int>(std::round(x * static_cast<float>(width - 1))),
-                static_cast<int>(std::round(
-                    static_cast<float>(height) * 0.5f -
-                    s * static_cast<float>(height) * 0.42f))
-            };
+                static_cast<int>(std::round(static_cast<float>(height) * 0.5f -
+                                            s * static_cast<float>(height) * 0.42f))};
         };
         auto [prev_x, prev_y] = point(0);
         for (std::size_t i = 1; i < samples.size(); ++i) {
@@ -169,10 +176,17 @@ std::vector<std::uint8_t> render_scope_png(
             while (true) {
                 put(x, y, 90, 200, 140);
                 put(x, y + 1, 70, 170, 120);
-                if (x == next_x && y == next_y) break;
+                if (x == next_x && y == next_y)
+                    break;
                 const int e2 = 2 * err;
-                if (e2 >= dy) { err += dy; x += sx; }
-                if (e2 <= dx) { err += dx; y += sy; }
+                if (e2 >= dy) {
+                    err += dy;
+                    x += sx;
+                }
+                if (e2 <= dx) {
+                    err += dx;
+                    y += sy;
+                }
             }
             prev_x = next_x;
             prev_y = next_y;
@@ -182,11 +196,8 @@ std::vector<std::uint8_t> render_scope_png(
     return pulp::render::HeadlessSurface::encode_png(rgba, error_out);
 }
 
-int cmd_audio_scope_offline(const fs::path& input_wav,
-                            const fs::path& json_path,
-                            const fs::path& png_path,
-                            int window,
-                            int channel,
+int cmd_audio_scope_offline(const fs::path& input_wav, const fs::path& json_path,
+                            const fs::path& png_path, int window, int channel,
                             const std::string& trigger) {
     auto data = pulp::audio::read_audio_file(input_wav.string());
     if (!data || data->empty()) {
@@ -199,8 +210,8 @@ int cmd_audio_scope_offline(const fs::path& input_wav,
     for (const auto& ch : data->channels)
         ptrs.push_back(ch.data());
 
-    pulp::audio::BufferView<const float> view(
-        ptrs.data(), ptrs.size(), static_cast<std::size_t>(data->num_frames()));
+    pulp::audio::BufferView<const float> view(ptrs.data(), ptrs.size(),
+                                              static_cast<std::size_t>(data->num_frames()));
 
     pulp::audio::AudioScopeTriggerMode trigger_mode =
         pulp::audio::AudioScopeTriggerMode::kRisingZero;
@@ -229,7 +240,8 @@ int cmd_audio_scope_offline(const fs::path& input_wav,
 
     const std::string json = pulp::audio::audio_scope_result_to_json(result, true);
     if (!json_path.empty()) {
-        if (!ensure_parent_dir(json_path)) return 1;
+        if (!ensure_parent_dir(json_path))
+            return 1;
         std::ofstream out(json_path);
         if (!out.is_open()) {
             std::cerr << "Error: failed to write JSON " << json_path << "\n";
@@ -249,7 +261,8 @@ int cmd_audio_scope_offline(const fs::path& input_wav,
         auto png = render_scope_png(result.acquisition, &png_error);
         if (png.empty()) {
             std::cerr << "Error: failed to encode scope PNG";
-            if (!png_error.empty()) std::cerr << ": " << png_error;
+            if (!png_error.empty())
+                std::cerr << ": " << png_error;
             std::cerr << "\n";
             return 1;
         }
@@ -298,13 +311,16 @@ int cmd_audio_scope(const std::vector<std::string>& args) {
 
         if (arg == "--frames") {
             auto* value = require_value("--frames");
-            if (!value || !parse_positive_int_arg(*value, "--frames", frames)) return 1;
+            if (!value || !parse_positive_int_arg(*value, "--frames", frames))
+                return 1;
         } else if (arg == "--window") {
             auto* value = require_value("--window");
-            if (!value || !parse_positive_int_arg(*value, "--window", window)) return 1;
+            if (!value || !parse_positive_int_arg(*value, "--window", window))
+                return 1;
         } else if (arg == "--trigger") {
             auto* value = require_value("--trigger");
-            if (!value) return 1;
+            if (!value)
+                return 1;
             trigger = *value;
             if (!valid_scope_trigger(trigger)) {
                 std::cerr << "Error: --trigger must be one of none, raw, off, rising-zero\n";
@@ -312,7 +328,8 @@ int cmd_audio_scope(const std::vector<std::string>& args) {
             }
         } else if (arg == "--channel") {
             auto* value = require_value("--channel");
-            if (!value || !parse_nonnegative_int_arg(*value, "--channel", channel)) return 1;
+            if (!value || !parse_nonnegative_int_arg(*value, "--channel", channel))
+                return 1;
         } else if (arg == "--json") {
             auto* value = require_value("--json");
             if (!value || value->empty()) {
@@ -353,8 +370,7 @@ int cmd_audio_scope(const std::vector<std::string>& args) {
             std::cerr << "Error: --input-wav cannot be combined with a live target.\n";
             return 1;
         }
-        return cmd_audio_scope_offline(input_wav, json_path, png_path,
-                                       window, channel, trigger);
+        return cmd_audio_scope_offline(input_wav, json_path, png_path, window, channel, trigger);
     }
 
     if (!png_path.empty()) {
@@ -367,9 +383,9 @@ int cmd_audio_scope(const std::vector<std::string>& args) {
     fs::path temp_dir;
     if (output_path.empty()) {
         temp_output = true;
-        temp_dir = fs::temp_directory_path()
-            / ("pulp-audio-scope-" + std::to_string(
-                std::chrono::steady_clock::now().time_since_epoch().count()));
+        temp_dir = fs::temp_directory_path() /
+                   ("pulp-audio-scope-" +
+                    std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         std::error_code ec;
         fs::create_directories(temp_dir, ec);
         if (ec) {
@@ -380,7 +396,8 @@ int cmd_audio_scope(const std::vector<std::string>& args) {
     }
 
     std::string cmd = shell_quote(current_executable_path()) + " run";
-    if (!target.empty()) cmd += " " + shell_quote(target);
+    if (!target.empty())
+        cmd += " " + shell_quote(target);
     cmd += " --audio-scope-json " + shell_quote(output_path);
     cmd += " --audio-scope-window " + std::to_string(window);
     cmd += " --audio-scope-trigger " + shell_quote(trigger);
@@ -396,7 +413,8 @@ int cmd_audio_scope(const std::vector<std::string>& args) {
     if (rc != 0) {
         if (temp_output) {
             auto log = read_text_file_or_empty(log_path);
-            if (!log.empty()) std::cerr << log << "\n";
+            if (!log.empty())
+                std::cerr << log << "\n";
         }
         if (temp_output) {
             std::error_code ec;
@@ -418,7 +436,7 @@ int cmd_audio_scope(const std::vector<std::string>& args) {
     return 0;
 }
 
-}  // namespace
+} // namespace
 
 int cmd_audio(const std::vector<std::string>& args) {
     if (args.empty()) {
@@ -454,6 +472,10 @@ int cmd_audio(const std::vector<std::string>& args) {
         return cmd_audio_compare({args.begin() + 1, args.end()});
     }
 
+    if (args[0] == "sampler-mip") {
+        return cmd_audio_sampler_mip({args.begin() + 1, args.end()});
+    }
+
     if (args[0] == "model") {
         if (args.size() < 2) {
             std::cerr << "Unknown audio model subcommand.\n";
@@ -464,7 +486,8 @@ int cmd_audio(const std::vector<std::string>& args) {
         if (args[1] == "list") {
             bool json_output = false;
             for (std::size_t i = 2; i < args.size(); ++i) {
-                if (args[i] == "--json") json_output = true;
+                if (args[i] == "--json")
+                    json_output = true;
                 else {
                     std::cerr << "Unknown option: " << args[i] << "\n";
                     return 1;
@@ -479,16 +502,18 @@ int cmd_audio(const std::vector<std::string>& args) {
 
             std::cout << "Audio Models\n";
             std::cout << "============\n";
-            std::cout << "Active: " << (result.active_model_id.empty() ? "(none)" : result.active_model_id) << "\n";
+            std::cout << "Active: "
+                      << (result.active_model_id.empty() ? "(none)" : result.active_model_id)
+                      << "\n";
             for (const auto& item : result.models) {
-                std::cout << (item.active ? "* " : "  ")
-                          << item.model.model_id
-                          << " [" << item.status << "]"
+                std::cout << (item.active ? "* " : "  ") << item.model.model_id << " ["
+                          << item.status << "]"
                           << " backend=" << item.model.backend;
                 if (!item.model.task_tags.empty()) {
                     std::cout << " tags=";
                     for (std::size_t i = 0; i < item.model.task_tags.size(); ++i) {
-                        if (i > 0) std::cout << ",";
+                        if (i > 0)
+                            std::cout << ",";
                         std::cout << item.model.task_tags[i];
                     }
                 }
@@ -511,8 +536,10 @@ int cmd_audio(const std::vector<std::string>& args) {
             std::string model_id;
             bool json_output = false;
             for (std::size_t i = 2; i < args.size(); ++i) {
-                if (args[i] == "--json") json_output = true;
-                else if (model_id.empty()) model_id = args[i];
+                if (args[i] == "--json")
+                    json_output = true;
+                else if (model_id.empty())
+                    model_id = args[i];
                 else {
                     std::cerr << "Unknown argument: " << args[i] << "\n";
                     return 1;
@@ -543,7 +570,8 @@ int cmd_audio(const std::vector<std::string>& args) {
 
         bool json_output = false;
         for (std::size_t i = 2; i < args.size(); ++i) {
-            if (args[i] == "--json") json_output = true;
+            if (args[i] == "--json")
+                json_output = true;
             else {
                 std::cerr << "Unknown option: " << args[i] << "\n";
                 return 1;
@@ -558,13 +586,18 @@ int cmd_audio(const std::vector<std::string>& args) {
 
         std::cout << "Audio Model Status\n";
         std::cout << "==================\n";
-        std::cout << "State file: " << (status.state_path.empty() ? "(unresolved)" : status.state_path.string()) << "\n";
+        std::cout << "State file: "
+                  << (status.state_path.empty() ? "(unresolved)" : status.state_path.string())
+                  << "\n";
         std::cout << "State file found: " << (status.state_file_found ? "yes" : "no") << "\n";
         std::cout << "Configured model: "
-                  << (status.configured_model_id.empty() ? "(none)" : status.configured_model_id) << "\n";
+                  << (status.configured_model_id.empty() ? "(none)" : status.configured_model_id)
+                  << "\n";
         std::cout << "Backend: " << (status.backend.empty() ? "(unknown)" : status.backend) << "\n";
         std::cout << "Resolved checkpoint: "
-                  << (status.resolved_checkpoint_path.empty() ? "(none)" : status.resolved_checkpoint_path.string())
+                  << (status.resolved_checkpoint_path.empty()
+                          ? "(none)"
+                          : status.resolved_checkpoint_path.string())
                   << "\n";
         std::cout << "Loadable: " << (status.loadable() ? "yes" : "no") << "\n";
         std::cout << "Message: " << status.message << "\n";
@@ -587,25 +620,31 @@ int cmd_audio(const std::vector<std::string>& args) {
 
             if (arg == "--text") {
                 auto* value = require_value("--text");
-                if (!value) return 1;
+                if (!value)
+                    return 1;
                 request.text = *value;
             } else if (arg == "--input") {
                 auto* value = require_value("--input");
-                if (!value) return 1;
+                if (!value)
+                    return 1;
                 request.input_path = *value;
             } else if (arg == "--model") {
                 auto* value = require_value("--model");
-                if (!value) return 1;
+                if (!value)
+                    return 1;
                 request.model_id = *value;
             } else if (arg == "--recursive") {
                 request.recursive = true;
             } else if (arg == "--top") {
                 auto* value = require_value("--top");
-                if (!value) return 1;
-                if (!parse_size_arg(*value, "--top", request.top_k)) return 1;
+                if (!value)
+                    return 1;
+                if (!parse_size_arg(*value, "--top", request.top_k))
+                    return 1;
             } else if (arg == "--window-ms") {
                 auto* value = require_value("--window-ms");
-                if (!value) return 1;
+                if (!value)
+                    return 1;
                 uint64_t v = 0;
                 // reuse parse logic inline
                 errno = 0;
@@ -618,7 +657,8 @@ int cmd_audio(const std::vector<std::string>& args) {
                 request.window_ms = v;
             } else if (arg == "--hop-ms") {
                 auto* value = require_value("--hop-ms");
-                if (!value) return 1;
+                if (!value)
+                    return 1;
                 uint64_t v = 0;
                 errno = 0;
                 char* end = nullptr;
@@ -630,15 +670,21 @@ int cmd_audio(const std::vector<std::string>& args) {
                 request.hop_ms = v;
             } else if (arg == "--min-score") {
                 auto* value = require_value("--min-score");
-                if (!value) return 1;
-                if (!parse_double_arg(*value, "--min-score", request.min_score)) return 1;
+                if (!value)
+                    return 1;
+                if (!parse_double_arg(*value, "--min-score", request.min_score))
+                    return 1;
             } else if (arg == "--max-candidates-per-file") {
                 auto* value = require_value("--max-candidates-per-file");
-                if (!value) return 1;
-                if (!parse_size_arg(*value, "--max-candidates-per-file", request.max_candidates_per_file)) return 1;
+                if (!value)
+                    return 1;
+                if (!parse_size_arg(*value, "--max-candidates-per-file",
+                                    request.max_candidates_per_file))
+                    return 1;
             } else if (arg == "--bundle-out") {
                 auto* value = require_value("--bundle-out");
-                if (!value) return 1;
+                if (!value)
+                    return 1;
                 request.bundle_out = *value;
             } else if (arg == "--json") {
                 json_output = true;
@@ -671,10 +717,9 @@ int cmd_audio(const std::vector<std::string>& args) {
         std::cout << "Backend: " << result.backend << " (WAV-first deterministic stub)\n";
         std::cout << "Scanned files: " << result.scanned_file_count << "\n";
         for (const auto& item : result.results) {
-            std::cout << "  #" << item.rank
-                      << " score=" << std::fixed << std::setprecision(4) << item.score
-                      << " source=" << item.source_file
-                      << " [" << item.start_ms << "ms, " << item.end_ms << "ms]"
+            std::cout << "  #" << item.rank << " score=" << std::fixed << std::setprecision(4)
+                      << item.score << " source=" << item.source_file << " [" << item.start_ms
+                      << "ms, " << item.end_ms << "ms]"
                       << "\n";
         }
         return 0;
@@ -718,16 +763,17 @@ int cmd_audio(const std::vector<std::string>& args) {
         std::cout << "Bundle: " << bundle.bundle_path.string() << "\n";
         std::cout << "Tool: " << (bundle.tool.empty() ? "(unknown)" : bundle.tool) << "\n";
         std::cout << "Requested model: "
-                  << (bundle.requested_model_id.empty() ? "(unknown)" : bundle.requested_model_id) << "\n";
+                  << (bundle.requested_model_id.empty() ? "(unknown)" : bundle.requested_model_id)
+                  << "\n";
         std::cout << "Loaded model: "
-                  << (bundle.loaded_model_id.empty() ? "(unknown)" : bundle.loaded_model_id) << "\n";
+                  << (bundle.loaded_model_id.empty() ? "(unknown)" : bundle.loaded_model_id)
+                  << "\n";
         std::cout << "Backend: " << (bundle.backend.empty() ? "(unknown)" : bundle.backend) << "\n";
         std::cout << "Results: " << bundle.result_count << "\n";
         for (const auto& item : bundle.results) {
-            std::cout << "  #" << item.rank
-                      << " score=" << std::fixed << std::setprecision(4) << item.score
-                      << " source=" << item.source_file
-                      << " [" << item.start_ms << "ms, " << item.end_ms << "ms]"
+            std::cout << "  #" << item.rank << " score=" << std::fixed << std::setprecision(4)
+                      << item.score << " source=" << item.source_file << " [" << item.start_ms
+                      << "ms, " << item.end_ms << "ms]"
                       << "\n";
         }
         return 0;

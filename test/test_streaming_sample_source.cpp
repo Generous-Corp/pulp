@@ -562,9 +562,13 @@ TEST_CASE("StreamingSampleSource underruns are silent and counted, never a crash
 
 TEST_CASE("make_memory_mapped_frame_reader fails gracefully on a bad path",
           "[audio][streaming][issue-streaming]") {
-    auto fr = pulp::audio::make_memory_mapped_frame_reader("/no/such/file.wav");
+    auto retained = std::make_shared<pulp::audio::MemoryMappedAudioReader>();
+    REQUIRE(retained);
+    auto fr = pulp::audio::make_memory_mapped_frame_reader(
+        "/no/such/file.wav", false, false, std::numeric_limits<std::uint64_t>::max(), &retained);
     REQUIRE_FALSE(fr.valid);
     REQUIRE_FALSE(fr.supports_ranged_read);
+    REQUIRE_FALSE(retained);
 }
 
 TEST_CASE("StreamingSampleSource streams a real WAV file from disk",

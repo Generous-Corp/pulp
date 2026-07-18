@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -49,21 +50,28 @@ struct FileFrameReader {
 /// reported rather than falling back to a whole-file decode. On failure returns
 /// a FileFrameReader with valid == false. Control thread only.
 inline FileFrameReader make_memory_mapped_frame_reader(
-    std::string_view path,
-    bool require_ranged_read = false,
-    bool compute_content_identity = false) {
+    std::string_view path, bool require_ranged_read = false, bool compute_content_identity = false,
+    std::uint64_t maximum_mapped_bytes = std::numeric_limits<std::uint64_t>::max(),
+    std::shared_ptr<MemoryMappedAudioReader>* retained_reader = nullptr) {
     FileFrameReader result;
+    if (retained_reader != nullptr)
+        retained_reader->reset();
 
     auto mapped = std::make_shared<MemoryMappedAudioReader>();
-    if (!mapped->open(path)) {
-        return result;  // valid == false
+    const auto mapped_limit = static_cast<std::size_t>(
+        std::min<std::uint64_t>(maximum_mapped_bytes, std::numeric_limits<std::size_t>::max()));
+    if (!mapped->open(path, mapped_limit)) {
+        return result; // valid == false
+    }
+    if (mapped->size() > maximum_mapped_bytes) {
+        return result;
     }
 
     const auto& info = mapped->info();
     const std::uint32_t channels = info.num_channels;
     const std::uint64_t total = info.num_frames;
     if (channels == 0 || total == 0) {
-        return result;  // unusable file
+        return result; // unusable file
     }
 
     result.channels = channels;
@@ -71,35 +79,38 @@ inline FileFrameReader make_memory_mapped_frame_reader(
     result.sample_rate = info.sample_rate;
     if (compute_content_identity) {
         const auto digest = runtime::sha256(mapped->data(), mapped->size());
-        if (digest.size() != result.content_sha256.size()) return {};
+        if (digest.size() != result.content_sha256.size())
+            return {};
         std::copy(digest.begin(), digest.end(), result.content_sha256.begin());
         result.mapped_byte_size = mapped->size();
         result.has_content_identity = true;
     }
     result.supports_ranged_read = mapped->supports_ranged_read();
-    if (require_ranged_read && !result.supports_ranged_read) return result;
-    result.binding.stop_mode = result.supports_ranged_read
-        ? FrameReaderStopMode::Cooperative
-        : FrameReaderStopMode::JoinOnly;
-    result.binding.read = [mapped = std::move(mapped), channels, total,
-                           require_ranged_read,
+    if (require_ranged_read && !result.supports_ranged_read)
+        return result;
+    result.binding.stop_mode = result.supports_ranged_read ? FrameReaderStopMode::Cooperative
+                                                           : FrameReaderStopMode::JoinOnly;
+    if (retained_reader != nullptr)
+        *retained_reader = mapped;
+    result.binding.read = [mapped = std::move(mapped), channels, total, require_ranged_read,
                            destinations = std::vector<float*>(channels)](
-                                               std::uint64_t start_frame,
-                                               BufferView<float> dest,
-                                               std::uint64_t frames,
-                                               std::stop_token stop_token)
-        mutable -> std::uint64_t {
+                              std::uint64_t start_frame, BufferView<float> dest,
+                              std::uint64_t frames,
+                              std::stop_token stop_token) mutable -> std::uint64_t {
         constexpr std::uint64_t kStopCheckFrames = 16384;
-        if (start_frame >= total) return 0;
+        if (start_frame >= total)
+            return 0;
         const std::uint64_t n = std::min({
             frames,
             total - start_frame,
             static_cast<std::uint64_t>(dest.num_samples()),
         });
-        if (n == 0) return 0;
-        const std::uint32_t use_ch = std::min<std::uint32_t>(
-            channels, static_cast<std::uint32_t>(dest.num_channels()));
-        if (use_ch == 0) return 0;
+        if (n == 0)
+            return 0;
+        const std::uint32_t use_ch =
+            std::min<std::uint32_t>(channels, static_cast<std::uint32_t>(dest.num_channels()));
+        if (use_ch == 0)
+            return 0;
 
         std::uint64_t produced = 0;
         while (produced < n && !stop_token.stop_requested()) {
@@ -108,14 +119,11 @@ inline FileFrameReader make_memory_mapped_frame_reader(
                 destinations[ch] = dest.channel_ptr(ch) + produced;
             }
             const auto read = require_ranged_read
-                ? mapped->read_frames_ranged_only(destinations.data(),
-                                                  use_ch,
-                                                  start_frame + produced,
-                                                  chunk)
-                : mapped->read_frames(destinations.data(),
-                                      use_ch,
-                                      start_frame + produced,
-                                      chunk);
+                                  ? mapped->read_frames_ranged_only(destinations.data(), use_ch,
+
+                                                                    start_frame + produced, chunk)
+                                  : mapped->read_frames(destinations.data(), use_ch,
+                                                        start_frame + produced, chunk);
             if (!read) {
                 return produced;
             }
@@ -124,8 +132,7 @@ inline FileFrameReader make_memory_mapped_frame_reader(
         return produced;
     };
     const auto stoppable = result.binding.read;
-    result.reader = [stoppable](std::uint64_t start_frame,
-                                BufferView<float> destination,
+    result.reader = [stoppable](std::uint64_t start_frame, BufferView<float> destination,
                                 std::uint64_t frames) mutable {
         return stoppable(start_frame, destination, frames, {});
     };
@@ -133,4 +140,4 @@ inline FileFrameReader make_memory_mapped_frame_reader(
     return result;
 }
 
-}  // namespace pulp::audio
+} // namespace pulp::audio

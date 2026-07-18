@@ -2544,6 +2544,17 @@ that layer. Catching every `std::exception` would relabel a genuine bug, or a
 Surface the analyzer's own message verbatim. It already names the input problem
 and the fix ("use a shorter fft_length"); a vaguer wrapper is strictly worse.
 
+## `audio sampler-mip` is the production sidecar builder
+
+`pulp audio sampler-mip build <source>` owns streamed-sampler mip production.
+Keep its reusable format, loader, and builder in `pulp::audio`; the CLI is only
+argument parsing and reporting. Payload filenames must include both source and
+payload SHA-256 identities. Publish payloads before the manifest, replace the
+same-directory manifest by atomic rename, and self-verify through the production
+loader before returning success. Mirror flag changes in
+`docs/status/cli-commands.yaml`, `docs/reference/cli.md`, and the audio-harness
+skill. This nested audio verb intentionally has no slash-command or MCP mirror.
+
 **A test for this must tell a refusal from a crash.** An uncaught exception dies
 with exit -1 while libc++abi prints the message on stderr anyway — so a test
 asserting only "nonzero exit and the message is present" passes on the crash and
