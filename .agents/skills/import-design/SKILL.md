@@ -310,6 +310,33 @@ commit stayed green on bare-metal). If you touch `make_synthetic_fig.mjs`,
 regenerate the fixture from the canonical toolchain, but keep the comparison at
 the decoded layer.
 
+**Gotcha - old-style instance swap lives in `overriddenSymbolID`, not
+componentPropAssignments.** A file that predates component properties swaps a
+nested instance's component with a `symbolOverrides` entry carrying
+`overriddenSymbolID` — there are no `componentPropAssignments` /
+`componentPropertyReferences` anywhere, so searching for the modern swap
+machinery concludes "no swap" while every channel's icon IS swapped.
+`expandInstance` (scene.mjs) honors the field: applyOverrideEntry's generic
+copy lands it on the clone, and the expansion re-points at that master when it
+resolves in-file (falling back to the authored `symbolData.symbolID` plus an
+`external-component` diagnostic when it doesn't). Deeper override paths keep
+resolving after the swap because the swap target's children carry the matching
+`overrideKey`s. Symptom when broken: N siblings render identical component
+content under N correct per-instance text overrides (sixteen mixer channels,
+one kick-drum icon).
+
+**Gotcha - Figma "Clip content" is `frameMaskDisabled` (inverted), and groups
+never clip.** The `.fig` decoder emits `style.overflow = 'clip'` for a
+FRAME/SYMBOL/INSTANCE with `frameMaskDisabled: false` unless the node is a
+GROUP (`resizeToFit: true` — groups store the flag but ignore it). The REST
+lane's equivalent is `clipsContent → overflow`. The native JS codegen lowers a
+non-default `style.overflow` to `setOverflow(id, 'clip')` (bridge maps clip →
+`View::Overflow::hidden`); `visible` is the View default and is deliberately
+not emitted. This matters for expanded instances: a master whose decoration
+overhangs its symbol bounds renders clipped in Figma, so an unclipped import
+paints the overhang over whatever sits below the instance (a channel strip's
+noise card ran 19px past its 235px symbol and buried the transport's step row).
+
 **Gotcha - a Figma slider stores a value-driven fill position that can detach
 from the thumb.** A slider component (track + progress fill + round thumb) keeps
 the fill's x/width per-instance; Figma's LIVE component render recomputes the

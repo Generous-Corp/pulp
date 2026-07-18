@@ -1039,6 +1039,18 @@ export function materializeFrame(scene, frame, ctx) {
         pushDiag('asset-missing', node, `image hash ${hash || '?'} not in bundle`);
       }
     }
+    // Figma clips a container's content to its bounds unless the designer
+    // unchecks "Clip content" (`frameMaskDisabled: true`). A GROUP is stored as
+    // a frame with `resizeToFit`, and a group never clips regardless of the
+    // flag. Matching that matters most for expanded instances: a master whose
+    // decoration overhangs its symbol bounds (a channel strip's 238px noise
+    // card inside a 235px symbol) renders clipped in Figma, so an unclipped
+    // import paints the overhang over whatever sits below the instance — a
+    // mixer's cards buried the transport's step row.
+    if ((node.type === 'FRAME' || node.type === 'SYMBOL' || node.type === 'INSTANCE')
+        && node.frameMaskDisabled === false && node.resizeToFit !== true) {
+      style.overflow = 'clip';
+    }
     const radius = cornerRadius(node);
     if (radius !== null) style.border_radius = radius;
     else {
@@ -1229,7 +1241,25 @@ export function materializeFrame(scene, frame, ctx) {
   const expandStack = [];
 
   function expandInstance(inst) {
-    const masterKey = guidKey(inst.symbolData?.symbolID);
+    // An instance swap is an override like any other: the entry carries
+    // `overriddenSymbolID`, applyOverrideEntry copies it onto the clone, and it
+    // re-points the WHOLE expansion at a different master. Files that predate
+    // component properties have no componentPropAssignments at all, so this
+    // field is the only record of the swap — reading just the authored
+    // symbolID expands every sibling from one shared master, which painted all
+    // sixteen mixer channels with the same instrument icon under sixteen
+    // correct labels. Deeper override paths keep resolving after the swap
+    // because the swapped master's children carry the matching overrideKeys.
+    const authoredKey = guidKey(inst.symbolData?.symbolID);
+    const swappedKey = guidKey(inst.overriddenSymbolID);
+    let masterKey = authoredKey;
+    if (swappedKey && swappedKey !== authoredKey) {
+      if (scene.byGuid.has(swappedKey)) masterKey = swappedKey;
+      else {
+        pushDiag('external-component', inst,
+          `swapped master ${swappedKey} not in file; expanding authored master instead`);
+      }
+    }
     const master = masterKey ? scene.byGuid.get(masterKey) : null;
     if (!master) {
       if (masterKey) {

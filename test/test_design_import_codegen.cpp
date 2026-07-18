@@ -2325,6 +2325,34 @@ TEST_CASE("native codegen keeps one call when every corner agrees",
     REQUIRE(js.find("'All', 6") != std::string::npos);
 }
 
+TEST_CASE("native codegen clips a container that declares overflow and leaves the default open",
+          "[view][import][visual-overrides]") {
+    // `overflow: clip` is how a decoder says "Figma clips this container's
+    // content" — a component master whose decoration overhangs its bounds
+    // renders clipped in Figma, so dropping the key painted the overhang over
+    // whatever sat below the instance. `visible` is the View default and must
+    // NOT emit a call: an explicit setOverflow('visible') would be noise on
+    // nearly every node.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Card";
+    ir.root.style.width = 60.0f;
+    ir.root.style.height = 235.0f;
+    ir.root.style.overflow = "clip";
+    IRNode open;
+    open.type = "frame";
+    open.name = "Open";
+    open.style.width = 20.0f;
+    open.style.height = 20.0f;
+    open.style.overflow = "visible";
+    ir.root.children.push_back(open);
+
+    const auto js = native_js(ir);
+    REQUIRE(count_occurrences(js, "setOverflow(") == 1);
+    REQUIRE(js.find("setOverflow('root', 'clip')") != std::string::npos);
+}
+
 TEST_CASE("native codegen fades a text node — the branch that had no setOpacity",
           "[view][import][visual-overrides]") {
     DesignIR ir;
