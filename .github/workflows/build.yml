@@ -93,7 +93,9 @@ jobs:
           #      toggled per-platform in the Shipyard GUI.
           #   3. unset → '' → resolver falls through to github-hosted (default).
           # Windows is deliberately different: the required PR leg is the
-          # authoritative x64 gate and must stay on windows-latest by default.
+          # authoritative x64 functional gate and stays on the stable VS 2022
+          # image. The separate MSVC release-path gate tracks windows-latest,
+          # so new-toolchain compile regressions still block before release.
           # Local QEMU Windows is ARM64; it can smoke Windows-on-ARM behavior, but
           # it is not an Intel Windows replacement. Use a workflow_dispatch input
           # only for explicit one-off experiments.
@@ -445,12 +447,14 @@ jobs:
           # Windows routes through the provider resolver, but it does NOT read
           # PULP_LOCAL_WINDOWS_RUNS_ON_JSON on PRs. That local lane is currently
           # Windows ARM64 on QEMU, useful as a smoke target but not an x64 gate.
-          # Keep windows-latest as the default authoritative x64 compatibility
-          # signal until a dedicated local x64 lane is proven.
+          # Keep functional tests on the stable VS 2022 image. windows-latest
+          # can change compiler and CRT generations in place; the dedicated
+          # release-path gate below covers that moving toolchain without making
+          # the authoritative runtime suite depend on an unpinned image.
           windows_runs_on = run([
               "--target-name", "Windows (x64)",
               "--mode", "provider",
-              "--github-hosted-label", "windows-latest",
+              "--github-hosted-label", "windows-2022",
               "--explicit-env", "EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON",
               "--namespace-env", "NAMESPACE_WINDOWS_RUNS_ON_JSON",
               "--namespace-setting-name", "PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON",
