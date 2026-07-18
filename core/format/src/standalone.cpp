@@ -746,7 +746,10 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
             if (scripted_ui_ptr) scripted_ui_ptr->poll();
             if (settings_ptr) settings_ptr->poll();
             if (inspector_ptr->is_active()) {
-                view::View::overlay_queue().push_back({
+                // Enqueue on the window root's own queue (S11): paint_overlays
+                // drains the painting root's queue, and inspector_host IS that
+                // root, so the inspector overlay paints exactly once.
+                inspector_host->interaction().overlay_queue.push_back({
                     [inspector_ptr](canvas::Canvas& canvas) {
                         inspector_ptr->paint(canvas);
                     },
@@ -759,7 +762,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         pre_screenshot_idle = [settings_ptr, inspector_ptr, inspector_host] {
             if (settings_ptr) settings_ptr->poll();
             if (inspector_ptr->is_active()) {
-                view::View::overlay_queue().push_back({
+                inspector_host->interaction().overlay_queue.push_back({
                     [inspector_ptr](canvas::Canvas& canvas) {
                         inspector_ptr->paint(canvas);
                     },

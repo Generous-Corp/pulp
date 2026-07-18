@@ -51,13 +51,15 @@ public:
         set_access_role(AccessRole::combo_box);
     }
 
-    // pulp #1818 — clear the static `active_popup_` slot if this dying
-    // ComboBox holds it. Without this, an unmounted React dropdown leaves
-    // a dangling pointer that the platform window host dereferences on
-    // the next mouseDown (PAC failure on the vtable load — exact crash
-    // signature in the issue). Pattern matches `~View()` for `active_overlay_`
-    // and `focused_input_`.
+    // pulp #1818 — clear the popup slot if this dying ComboBox holds it.
+    // Without this, an unmounted React dropdown leaves a dangling pointer that
+    // the platform window host dereferences on the next mouseDown (PAC failure
+    // on the vtable load — exact crash signature in the issue). Clears BOTH the
+    // root-owned slot (S11, non-allocating) and the process-global shim mirror.
+    // Pattern matches `~View()` for `active_overlay_` / `focused_input_`.
     ~ComboBox() override {
+        if (RootInteractionState* s = existing_interaction(); s && s->active_popup == this)
+            s->active_popup = nullptr;
         if (active_popup_ == this) active_popup_ = nullptr;
     }
 

@@ -1620,3 +1620,17 @@ NOT named `parse_css_color`, because `css_gradient.hpp` already declares a *weak
 colors, no hsl). Naming them alike makes `std::string` call sites silently bind to the weaker
 overload and regress named/hsl handling. Keep the names distinct until the two parsers are
 deliberately converged.
+
+**Per-root interaction state (multi-editor isolation):** focus, active-overlay,
+ComboBox popup, and the overlay paint queue live in a `RootInteractionState`
+owned by the tree root, reached with `View::interaction()` (walks `tree_root()`
+and lazily allocates). That is the source of truth — two editors in one host
+process (the shared-AUHostingService case) each get their own block and no
+longer share focus/popup state. The historical statics `View::focused_input_`
+and `View::active_overlay_` remain as **shim mirrors** reflecting the
+last-acted slot process-wide; read them only for back-compat, never to reason
+about which editor owns focus — use `view->interaction()`. Detached widgets
+(no parent, no children) intentionally share one `fallback_interaction()`
+block. When enqueuing overlays from host code, push onto the *painting root's*
+`interaction().overlay_queue`, not a process-global queue, or the overlay
+paints on the wrong editor (see `standalone.cpp`).
