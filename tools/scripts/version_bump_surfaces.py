@@ -80,6 +80,15 @@ class Config:
     surfaces: list[Surface]
     generated_globs: list[str]
     trailer_version_bump: str
+    # Post-merge assignment (Model B): PRs touch NO version files; the
+    # single-writer version-at-land bot infers the level from the same heuristic
+    # and assigns it on merge. When true, `--mode=apply` is a no-op and the PR
+    # gate stops requiring a file bump for a touched surface (the bot handles it)
+    # — but a fix/feat the heuristic scores `none` on EVERY surface still hard-
+    # fails, or it would merge into a silent no-op and never ship. Optional
+    # `Version-Bump:` trailers still override the heuristic. See
+    # docs/guides/version-at-land-cutover.md.
+    post_merge_assignment: bool = False
 
 
 @dataclass
@@ -114,6 +123,7 @@ def load_config(path: Path) -> Config:
         surfaces=surfaces,
         generated_globs=data.get("generated_globs", []) or [],
         trailer_version_bump=trailers.get("version_bump", "Version-Bump"),
+        post_merge_assignment=bool(data.get("post_merge_assignment", False)),
     )
 
 

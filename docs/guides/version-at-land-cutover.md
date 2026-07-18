@@ -2,12 +2,28 @@
 
 > **STATUS: FLIPPED LIVE — 2026-07-17.** `version-at-land.yml` runs `--push`;
 > `version-skill-check.yml` accepts intent trailers; `auto-release.yml`'s
-> stranded detector exports `PULP_ACCEPT_INTENT_TRAILERS=1`. The remaining
-> follow-up is switching `shipyard pr` to EMIT `Version-Bump:` trailers instead
-> of writing version files (until then a file-bump at the heuristic version
-> no-ops safely through the bot, so no double-bump — the treadmill just isn't
-> fully dead for brand-new PRs). Rollback = revert this trio to dry-run, but
-> recover any outstanding pending intent FIRST (see Rollback).
+> stranded detector exports `PULP_ACCEPT_INTENT_TRAILERS=1`.
+>
+> **MODEL B (post-merge assignment) — the chosen finish.** `versioning.json` sets
+> `"post_merge_assignment": true`, so **PRs touch NO version files at all**:
+> `version_bump_check.py --mode=apply` is a verified no-op (so `shipyard pr`
+> produces a version-file-free PR), the PR gate stops requiring a file bump for a
+> touched surface, and the version-at-land bot **infers the level from the same
+> heuristic** and assigns it on merge. This kills the version-cell conflict class
+> outright (batch-mates can never race on the version line) and needs **no
+> Shipyard feature** — the "shipyard emits trailers" path is NOT needed. `Version-Bump:`
+> trailers remain OPTIONAL overrides for heuristic-underweighted cases. The one
+> retained guard: a `fix:`/`feat:` the heuristic scores `none` on EVERY surface
+> still HARD-FAILS (re-title, add an intent trailer, or `Version-Bump: skip
+> reason="…"`) — else it would merge into a silent bot no-op and never ship.
+>
+> **New semantic (state it, don't file it as a bug):** the bot assigns ONE
+> version per surface per drain, so a queue batch of three sdk fixes yields ONE
+> sdk release covering all three. Versions are per-drain, not per-fix.
+>
+> Rollback = set `post_merge_assignment` back to `false` (PRs file-bump again) and
+> revert the `--push`/gate/detector trio to dry-run, recovering any outstanding
+> pending intent FIRST (see Rollback).
 >
 > **Bot liveness (2026-07-17):** version-at-land also runs on a `*/15` `schedule`
 > with an EVENT-SCOPED concurrency group (`version-at-land-${{ github.event_name }}`).
