@@ -93,7 +93,9 @@ public:
         std::size_t channel_count,
         std::size_t maximum_output_frames,
         const audio::SampleHeritageRuntimeState*
-            runtime_state = nullptr) noexcept {
+            runtime_state,
+        double required_stream_output_sample_rate,
+        std::size_t required_stream_block_frames) noexcept {
         const auto validation = audio::validate_sample_heritage_profile(profile);
         if (!validation.valid()) return PulpSamplerHeritageStatus::InvalidProfile;
 
@@ -104,6 +106,18 @@ public:
         if (result != PulpSamplerHeritageStatus::Ready &&
             result != PulpSamplerHeritageStatus::ReadyRuntimeResetForHostRate) {
             return result;
+        }
+        const auto candidate_clock = candidate.all_stages_bypassed
+            ? 1.0
+            : candidate.engine->clock_ratio();
+        const auto candidate_stream_rate = static_cast<float>(
+            host_sample_rate * candidate_clock);
+        const auto candidate_stream_frames = candidate.all_stages_bypassed
+            ? maximum_output_frames
+            : candidate.maximum_input_frames;
+        if (candidate_stream_rate != required_stream_output_sample_rate ||
+            candidate_stream_frames != required_stream_block_frames) {
+            return PulpSamplerHeritageStatus::StreamDomainRebindRequired;
         }
         publish_candidate(std::move(candidate), result);
         return result;
@@ -144,6 +158,14 @@ public:
         result.stages.assign(configured_.stages.begin(),
                              configured_.stages.begin() + configured_.stage_count);
         return result;
+    }
+    double active_clock_ratio() const noexcept {
+        return prepared_ && !all_stages_bypassed_
+            ? engine_->clock_ratio()
+            : 1.0;
+    }
+    std::size_t maximum_input_frames() const noexcept {
+        return prepared_ && !all_stages_bypassed_ ? maximum_input_frames_ : 0;
     }
     int latency_samples() const noexcept {
         return reported_latency_frames_ >
@@ -197,6 +219,14 @@ public:
         return engine_->capture_runtime_state();
     }
 
+    void record_rate_admission_rejection() noexcept {
+        rate_admission_rejections_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void record_rate_automation_rejection() noexcept {
+        rate_automation_rejections_.fetch_add(1, std::memory_order_relaxed);
+    }
+
     PulpSamplerHeritageDiagnostics diagnostics() const noexcept {
         PulpSamplerHeritageDiagnostics result;
         result.status = status_.load(std::memory_order_relaxed);
@@ -207,6 +237,10 @@ public:
         result.render_plan_failures =
             render_plan_failures_.load(std::memory_order_relaxed);
         result.render_failures = render_failures_.load(std::memory_order_relaxed);
+        result.rate_admission_rejections =
+            rate_admission_rejections_.load(std::memory_order_relaxed);
+        result.rate_automation_rejections =
+            rate_automation_rejections_.load(std::memory_order_relaxed);
         if (!configured_valid_) return result;
         std::copy(configured_.profile_id.begin(), configured_.profile_id.end(),
                   result.profile_id.begin());
@@ -363,6 +397,8 @@ private:
     std::atomic<std::uint64_t> render_failures_{0};
     std::atomic<audio::SampleHeritageRuntimeStateStatus> runtime_state_status_{
         audio::SampleHeritageRuntimeStateStatus::NotPrepared};
+    std::atomic<std::uint64_t> rate_admission_rejections_{0};
+    std::atomic<std::uint64_t> rate_automation_rejections_{0};
     audio::SampleHeritageProfileStatus profile_status_ =
         audio::SampleHeritageProfileStatus::Ok;
     std::size_t channel_count_ = 0;

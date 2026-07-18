@@ -125,11 +125,7 @@ public:
 
         const auto previous_latency = latency_samples();
         if (!parsed.state.enabled) {
-            reset_all_voices();
-            heritage_.disable();
-            clear_heritage_runtime_persistence();
-            if (latency_samples() != previous_latency) flag_latency_changed();
-            return true;
+            return disable_heritage() == PulpSamplerHeritageStatus::Disabled;
         }
 
         const auto* runtime_state = parsed.state.has_runtime_state
@@ -138,7 +134,8 @@ public:
         if (prepared_) {
             const auto result = heritage_.replace_prepared(
                 parsed.state.profile, host_sample_rate_,
-                prepared_output_channels_, max_block_frames_, runtime_state);
+                prepared_output_channels_, max_block_frames_, runtime_state,
+                stream_output_sample_rate_, maximum_stream_block_frames_);
             if (!heritage_ready(result)) return false;
             reset_all_voices();
             clear_heritage_runtime_persistence();
@@ -209,7 +206,8 @@ public:
         if (prepared_) {
             const auto result = heritage_.replace_prepared(
                 profile, host_sample_rate_, prepared_output_channels_,
-                max_block_frames_);
+                max_block_frames_, nullptr, stream_output_sample_rate_,
+                maximum_stream_block_frames_);
             if (result != PulpSamplerHeritageStatus::Ready &&
                 result !=
                     PulpSamplerHeritageStatus::ReadyRuntimeResetForHostRate) {
@@ -231,13 +229,22 @@ public:
     }
 
     /// Disables heritage processing while audio is stopped. Like profile
-    /// replacement, this must not race process().
-    void disable_heritage() noexcept {
+    /// replacement, this must not race process(). A prepared clock-domain
+    /// change requires release/configure/prepare so stream contracts stay
+    /// atomic.
+    PulpSamplerHeritageStatus disable_heritage() noexcept {
+        const auto domain_changes =
+            stream_output_sample_rate_ != host_sample_rate_ ||
+            maximum_stream_block_frames_ != max_block_frames_;
+        if (prepared_ && domain_changes) {
+            return PulpSamplerHeritageStatus::StreamDomainRebindRequired;
+        }
         const auto previous_latency = latency_samples();
         reset_all_voices();
         heritage_.disable();
         clear_heritage_runtime_persistence();
         if (latency_samples() != previous_latency) flag_latency_changed();
+        return PulpSamplerHeritageStatus::Disabled;
     }
 
     PulpSamplerHeritageDiagnostics heritage_diagnostics() const noexcept {
@@ -256,22 +263,6 @@ public:
             voice_scratch_[ch].assign(max_block_frames_, 0.0f);
         }
         source_publication_.prepare();
-        const auto maximum_source_frames_per_output =
-            SamplerStreamingRuntime::maximum_pitch_ratio() *
-            SamplerStreamingRuntime::maximum_source_sample_rate() /
-            static_cast<double>(host_sample_rate_);
-        sinc_bank_.build_dense_for_maximum_consumption(
-            maximum_source_frames_per_output);
-        for (auto& voice : voices_) voice.reset();
-        for (auto& generation : requester_generations_) generation = 0;
-        for (auto& cancellation : pending_cancellations_) cancellation = {};
-#if defined(PULP_SAMPLER_TEST_HOOKS)
-        retire_reverse_attack_after_horizon_for_test_ = false;
-        stream_rate_capacity_override_for_test_ = 0.0;
-#endif
-        streaming_.prepare(host_sample_rate_, max_block_frames_);
-        source_publication_.acknowledge_audio(
-            streaming_.published_source(), voices_, streaming_);
         callback_runtime_snapshot_available_.store(false,
                                                    std::memory_order_release);
         restored_runtime_state_available_ = false;
@@ -291,6 +282,16 @@ public:
                 pending_runtime_state_available_ = false;
             }
         }
+        prepare_stream_domain();
+        for (auto& voice : voices_) voice.reset();
+        for (auto& generation : requester_generations_) generation = 0;
+        for (auto& cancellation : pending_cancellations_) cancellation = {};
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+        retire_reverse_attack_after_horizon_for_test_ = false;
+        stream_rate_capacity_override_for_test_ = 0.0;
+#endif
+        source_publication_.acknowledge_audio(
+            streaming_.published_source(), voices_, streaming_);
         prepared_ = true;
         if (latency_samples() != previous_latency) flag_latency_changed();
     }
@@ -368,6 +369,12 @@ private:
             audio::SampleInterpolationPolicy::Linear;
     };
 
+    enum class StreamRateContract : std::uint8_t {
+        Allowed,
+        LegacyRejected,
+        HeritageRejected,
+    };
+
     struct PendingCancellation {
         audio::SampleStreamRequesterToken requester{};
         bool valid = false;
@@ -418,7 +425,9 @@ private:
     std::array<std::vector<float>, kMaxOutputChannels> voice_scratch_{};
     std::array<float*, kMaxOutputChannels> voice_scratch_ptrs_{};
     float host_sample_rate_ = 44100.0f;
+    double stream_output_sample_rate_ = 44100.0;
     std::uint32_t max_block_frames_ = 512;
+    std::uint32_t maximum_stream_block_frames_ = 512;
     std::uint32_t prepared_output_channels_ = 2;
     bool prepared_ = false;
     SamplerVoice voices_[kMaxVoices]{};
@@ -468,6 +477,26 @@ private:
         for (std::size_t channel = 0; channel < output.num_channels(); ++channel) {
             std::fill_n(output.channel_ptr(channel) + start_frame, frames, 0.0f);
         }
+    }
+
+    void prepare_stream_domain() {
+        stream_output_sample_rate_ = static_cast<float>(
+            static_cast<double>(host_sample_rate_) *
+            heritage_.active_clock_ratio());
+        const auto heritage_input_capacity = heritage_.maximum_input_frames();
+        maximum_stream_block_frames_ = heritage_input_capacity == 0
+            ? max_block_frames_
+            : static_cast<std::uint32_t>(heritage_input_capacity);
+        sinc_bank_.release();
+        const auto maximum_source_frames_per_output =
+            SamplerStreamingRuntime::maximum_pitch_ratio() *
+            SamplerStreamingRuntime::maximum_source_sample_rate() /
+            stream_output_sample_rate_;
+        sinc_bank_.build_dense_for_maximum_consumption(
+            maximum_source_frames_per_output);
+        (void) streaming_.prepare(
+            static_cast<float>(stream_output_sample_rate_),
+            maximum_stream_block_frames_);
     }
 
     audio::LoopRegion make_region(std::uint64_t frames,
@@ -574,7 +603,7 @@ private:
         return prepared_interpolation(policy, source_frames_per_output);
     }
 
-    bool stream_rate_contract_allows(
+    StreamRateContract stream_rate_contract(
         const audio::SampleAssetView& candidate,
         double candidate_source_frames_per_output,
         const RenderParams& params,
@@ -585,9 +614,9 @@ private:
         // rejection.
         if (!candidate.has_stream_source || candidate.stream_source.page_frames == 0 ||
             !(candidate_source_frames_per_output > 0.0)) {
-            return false;
+            return StreamRateContract::LegacyRejected;
         }
-        double aggregate_frames_per_second =
+        double legacy_frames_per_second =
             candidate_source_frames_per_output * host_sample_rate_;
         for (std::size_t index = 0; index < kMaxVoices; ++index) {
             if (index == replaced_voice) continue;
@@ -602,7 +631,7 @@ private:
             }
             const auto ratio = key_map_.pitch_ratio_for_note(
                 voice.note, params.pitch_semitones);
-            aggregate_frames_per_second +=
+            legacy_frames_per_second +=
                 ratio * voice.streamed_asset.sample_rate;
         }
         auto certified_frames_per_second =
@@ -612,8 +641,31 @@ private:
         if (stream_rate_capacity_override_for_test_ > 0.0)
             certified_frames_per_second = stream_rate_capacity_override_for_test_;
 #endif
-        return std::isfinite(aggregate_frames_per_second) &&
-               aggregate_frames_per_second <= certified_frames_per_second;
+        if (!std::isfinite(legacy_frames_per_second))
+            return StreamRateContract::LegacyRejected;
+        const auto effective_frames_per_second =
+            legacy_frames_per_second * heritage_.active_clock_ratio();
+        if (std::isfinite(effective_frames_per_second) &&
+            effective_frames_per_second <= certified_frames_per_second) {
+            return StreamRateContract::Allowed;
+        }
+        return legacy_frames_per_second <= certified_frames_per_second
+            ? StreamRateContract::HeritageRejected
+            : StreamRateContract::LegacyRejected;
+    }
+
+    StreamRateContract pitch_rate_contract(double pitch_ratio) const noexcept {
+        if (!(pitch_ratio > 0.0) || !std::isfinite(pitch_ratio))
+            return StreamRateContract::LegacyRejected;
+        const auto effective_ratio =
+            pitch_ratio * heritage_.active_clock_ratio();
+        if (std::isfinite(effective_ratio) &&
+            effective_ratio <= SamplerStreamingRuntime::maximum_pitch_ratio()) {
+            return StreamRateContract::Allowed;
+        }
+        return pitch_ratio <= SamplerStreamingRuntime::maximum_pitch_ratio()
+            ? StreamRateContract::HeritageRejected
+            : StreamRateContract::LegacyRejected;
     }
 
     void render_output_segment(audio::BufferView<float>& output,
@@ -761,26 +813,40 @@ private:
                                const RenderParams& params) noexcept {
         const auto pitch_ratio = key_map_.pitch_ratio_for_note(
             voice.note, params.pitch_semitones);
-        if (!(pitch_ratio > 0.0) ||
-            pitch_ratio > SamplerStreamingRuntime::maximum_pitch_ratio()) {
+        const auto pitch_contract = pitch_rate_contract(pitch_ratio);
+        if (pitch_contract == StreamRateContract::LegacyRejected) {
             streaming_.record_voice_outcome(
                 audio::SampleStreamVoiceOutcomeClass::InvalidRenderContract);
             queue_voice_cancellation(voice_index, voice.requester);
             voice.reset();
             return;
         }
-        const auto source_frames_per_output =
+        const auto requested_source_frames_per_output =
             pitch_ratio * static_cast<double>(voice.streamed_asset.sample_rate) /
             static_cast<double>(host_sample_rate_);
+        auto source_frames_per_output = requested_source_frames_per_output;
         if (!voice.stream_contract_fade_pending &&
-            !stream_rate_contract_allows(voice.streamed_asset,
-                                         source_frames_per_output,
-                                         params,
-                                         voice_index,
-                                         true)) {
-            streaming_.record_aggregate_rate_automation_rejection();
+            pitch_contract == StreamRateContract::HeritageRejected) {
+            heritage_.record_rate_automation_rejection();
             voice.stream_contract_fade_pending = true;
             voice.stream_contract_fade_position = 0;
+            source_frames_per_output = voice.stream_playback_rate;
+        } else if (!voice.stream_contract_fade_pending) {
+            const auto aggregate_contract = stream_rate_contract(
+                voice.streamed_asset, source_frames_per_output, params,
+                voice_index, true);
+            if (aggregate_contract != StreamRateContract::Allowed) {
+                if (aggregate_contract ==
+                    StreamRateContract::HeritageRejected) {
+                    heritage_.record_rate_automation_rejection();
+                } else {
+                    streaming_.record_aggregate_rate_automation_rejection();
+                }
+                voice.stream_contract_fade_pending = true;
+                voice.stream_contract_fade_position = 0;
+            }
+        } else if (pitch_contract == StreamRateContract::HeritageRejected) {
+            source_frames_per_output = voice.stream_playback_rate;
         }
         const auto interpolation = prepared_rate_safe_interpolation(
             params.interpolation, source_frames_per_output);
@@ -838,7 +904,7 @@ private:
         enqueue_stream_lookahead(voice, frames, source_frames_per_output);
         auto plan = voice.stream_reader.plan_block(voice.streamed_asset,
                                                    frames,
-                                                   host_sample_rate_);
+                                                   stream_output_sample_rate_);
         if (plan.supply == audio::SampleStreamVoiceSupply::InvalidContract ||
             plan.supply == audio::SampleStreamVoiceSupply::StaleGeneration) {
             streaming_.record_voice_outcome(
@@ -956,7 +1022,7 @@ private:
                 .page_index = page,
                 .resident_source_frames = tail_frame - (page_end - 1),
                 .consumption_frames_per_second =
-                    source_frames_per_output * host_sample_rate_,
+                    source_frames_per_output * stream_output_sample_rate_,
                 .demand_class = audio::SampleStreamDemandClass::Attack,
             });
         }
@@ -1038,14 +1104,16 @@ private:
             !voice.streamed_asset.has_preload_contract) {
             return;
         }
-        const auto planning_frames = std::max(frames, max_block_frames_);
+        const auto planning_frames =
+            std::max(frames, maximum_stream_block_frames_);
         const auto& contract = voice.streamed_asset.preload_contract;
         const auto latency_seconds = contract.certified_io_latency_seconds +
             contract.scheduler_margin_seconds + contract.decoder_latency_seconds;
         const auto plan_advance =
             static_cast<double>(planning_frames) * source_frames_per_output;
         const auto contract_lead =
-            latency_seconds * source_frames_per_output * host_sample_rate_ +
+            latency_seconds * source_frames_per_output *
+                stream_output_sample_rate_ +
             plan_advance + source_frames_per_output;
         const auto resident_horizon = voice.streamed_asset.preload_frames > 0
             ? static_cast<double>(voice.streamed_asset.preload_frames - 1)
@@ -1081,7 +1149,7 @@ private:
             auto plan = voice.lookahead_reader.plan_block(
                 voice.streamed_asset,
                 planning_frames,
-                host_sample_rate_,
+                stream_output_sample_rate_,
                 audio::SampleStreamDemandClass::Sustain);
             if (plan.supply != audio::SampleStreamVoiceSupply::Ready) return;
             const auto queued = voice.lookahead_reader.enqueue_demands(
@@ -1149,7 +1217,7 @@ private:
                     .resident_source_frames =
                         stream_lead_source_frames(distance),
                     .consumption_frames_per_second =
-                        source_frames_per_output * host_sample_rate_,
+                        source_frames_per_output * stream_output_sample_rate_,
                     .demand_class = audio::SampleStreamDemandClass::Attack,
                 }) != audio::SampleStreamCommandPushStatus::Enqueued) {
                 return;
@@ -1186,9 +1254,12 @@ private:
         if (source.kind == SamplerPublishedSourceKind::Streamed) {
             const auto pitch_ratio = key_map_.pitch_ratio_for_note(
                 note, params.pitch_semitones);
-            if (!(pitch_ratio > 0.0) ||
-                pitch_ratio > SamplerStreamingRuntime::maximum_pitch_ratio())
+            const auto pitch_contract = pitch_rate_contract(pitch_ratio);
+            if (pitch_contract != StreamRateContract::Allowed) {
+                if (pitch_contract == StreamRateContract::HeritageRejected)
+                    heritage_.record_rate_admission_rejection();
                 return;
+            }
             auto& requester_generation = requester_generations_[target_index];
             if (++requester_generation == 0) ++requester_generation;
             const auto base_source_frames_per_output =
@@ -1203,12 +1274,16 @@ private:
             const auto source_frames_per_output =
                 pitch_ratio * selected.sample_rate /
                 static_cast<double>(host_sample_rate_);
-            if (!stream_rate_contract_allows(selected,
-                                             source_frames_per_output,
-                                             params,
-                                             target_index,
-                                             false)) {
-                streaming_.record_aggregate_rate_admission_rejection();
+            const auto aggregate_contract = stream_rate_contract(
+                selected, source_frames_per_output, params, target_index,
+                false);
+            if (aggregate_contract != StreamRateContract::Allowed) {
+                if (aggregate_contract ==
+                    StreamRateContract::HeritageRejected) {
+                    heritage_.record_rate_admission_rejection();
+                } else {
+                    streaming_.record_aggregate_rate_admission_rejection();
+                }
                 return;
             }
             if (target->streamed) {
