@@ -59,14 +59,20 @@ if(NOT TARGET Pulp::timebase)
     message(FATAL_ERROR
         "Pulp SDK smoke: installed SDK does not expose Pulp::timebase")
 endif()
+get_target_property(_pulp_timebase_features Pulp::timebase INTERFACE_COMPILE_FEATURES)
+if(NOT "cxx_std_20" IN_LIST _pulp_timebase_features)
+    message(FATAL_ERROR
+        "Pulp SDK smoke: Pulp::timebase does not propagate cxx_std_20")
+endif()
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/timebase_export_probe.cpp"
 "#include <pulp/timebase/compiled_tempo_map.hpp>\n"
 "\n"
 "int main() {\n"
 "    const pulp::timebase::TempoPoint point{{0}, 120.0};\n"
-"    const pulp::timebase::CompiledTempoMap map(\n"
+"    auto compiled = pulp::timebase::CompiledTempoMap::compile(\n"
 "        std::span<const pulp::timebase::TempoPoint>(&point, 1), {48'000, 1});\n"
-"    return map.ticks_to_samples({pulp::timebase::kTicksPerQuarter}).value == 24'000\n"
+"    return compiled && compiled->ticks_to_samples(\n"
+"        {pulp::timebase::kTicksPerQuarter}).value == 24'000\n"
 "        ? 0 : 1;\n"
 "}\n")
 add_executable(PulpSDKSmokeTimebaseProbe
@@ -86,7 +92,9 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/playback_export_probe.cpp"
 "\n"
 "int main() {\n"
 "    const std::array points{pulp::timebase::TempoPoint{{0}, 120.0}};\n"
-"    const pulp::timebase::CompiledTempoMap map(points, {48'000, 1});\n"
+"    auto compiled = pulp::timebase::CompiledTempoMap::compile(points, {48'000, 1});\n"
+"    if (!compiled) return 1;\n"
+"    const auto& map = compiled.value();\n"
 "    pulp::playback::PlaybackProgramStore program_store;\n"
 "    pulp::playback::DeferredCompileExecutor compile_executor;\n"
 "    pulp::playback::PlaybackProgramCompiler compiler(\n"

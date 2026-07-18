@@ -4,7 +4,6 @@
 #include <cmath>
 #include <limits>
 #include <numeric>
-#include <stdexcept>
 
 namespace pulp::timebase {
 namespace {
@@ -48,53 +47,64 @@ bool valid_bpm(double bpm) noexcept {
 
 } // namespace
 
-CompiledTempoMap::CompiledTempoMap(std::span<const TempoPoint> points, RationalRate sample_rate)
-    : sample_rate_(sample_rate.normalized()) {
-    if (!sample_rate_.valid() || sample_rate_.as_long_double() > kMaximumSampleRate) {
-        throw std::invalid_argument("CompiledTempoMap requires a sample rate in (0, 768000]");
+runtime::Result<TempoMap, TempoMapError>
+TempoMap::create(std::span<const TempoPoint> points) noexcept {
+    if (points.empty())
+        return runtime::Err(TempoMapError::Empty);
+    if (points.front().tick.value != 0)
+        return runtime::Err(TempoMapError::MissingTickZero);
+    for (std::size_t index = 0; index < points.size(); ++index) {
+        if (!valid_bpm(points[index].bpm))
+            return runtime::Err(TempoMapError::InvalidBpm);
+        if (points[index].curve_to_next != TempoCurve::Constant &&
+            points[index].curve_to_next != TempoCurve::LinearInTicks)
+            return runtime::Err(TempoMapError::InvalidCurve);
+        if (index > 0 && points[index].tick.value <= points[index - 1].tick.value)
+            return runtime::Err(TempoMapError::UnorderedPoints);
     }
-    if (points.empty() || points.front().tick.value != 0) {
-        throw std::invalid_argument("CompiledTempoMap requires a tempo point at tick zero");
-    }
+    if (points.back().curve_to_next != TempoCurve::Constant)
+        return runtime::Err(TempoMapError::InvalidFinalCurve);
+    return runtime::Ok(TempoMap(std::vector<TempoPoint>(points.begin(), points.end())));
+}
 
-    segments_.reserve(points.size());
+runtime::Result<CompiledTempoMap, TempoMapError>
+CompiledTempoMap::compile(std::span<const TempoPoint> points,
+                          RationalRate sample_rate) noexcept {
+    auto editable = TempoMap::create(points);
+    if (!editable)
+        return runtime::Err(editable.error());
+    const auto normalized_rate = sample_rate.normalized();
+    if (!normalized_rate.valid() || normalized_rate.as_long_double() > kMaximumSampleRate)
+        return runtime::Err(TempoMapError::InvalidSampleRate);
+
+    std::vector<Segment> segments;
+    segments.reserve(points.size());
+    CompiledTempoMap calculator(normalized_rate, {});
     SamplePosition anchor{};
     for (std::size_t index = 0; index < points.size(); ++index) {
         const auto& point = points[index];
-        if (!valid_bpm(point.bpm)) {
-            throw std::invalid_argument("tempo BPM must be finite and in [1, 1000]");
-        }
-        if (index > 0 && point.tick.value <= points[index - 1].tick.value) {
-            throw std::invalid_argument("tempo points must have strictly increasing ticks");
-        }
-
         const auto has_next = index + 1 < points.size();
         const auto end_tick = has_next ? points[index + 1].tick
                                        : TickPosition{std::numeric_limits<std::int64_t>::max()};
         const auto end_bpm = has_next && point.curve_to_next == TempoCurve::LinearInTicks
                                  ? points[index + 1].bpm
                                  : point.bpm;
-        if (!valid_bpm(end_bpm)) {
-            throw std::invalid_argument("tempo ramp endpoint BPM must be finite and in [1, 1000]");
-        }
-
-        segments_.push_back({point.tick, end_tick, anchor, point.bpm, end_bpm,
-                             has_next ? point.curve_to_next : TempoCurve::Constant});
+        segments.push_back({point.tick, end_tick, anchor, point.bpm, end_bpm,
+                            has_next ? point.curve_to_next : TempoCurve::Constant});
         if (has_next) {
             const auto delta = end_tick.value - point.tick.value;
-            const auto duration = samples_from_segment_start(segments_.back(), delta);
+            const auto duration = calculator.samples_from_segment_start(segments.back(), delta);
             if (!std::isfinite(duration) || duration < 0.0L ||
-                duration >= kInt64MaximumRoundingBoundary) {
-                throw std::invalid_argument("tempo map duration exceeds SamplePosition range");
-            }
+                duration >= kInt64MaximumRoundingBoundary)
+                return runtime::Err(TempoMapError::SampleRangeExceeded);
             const auto rounded_duration = static_cast<std::int64_t>(std::llround(duration));
             if (anchor.value >
-                std::numeric_limits<std::int64_t>::max() - rounded_duration) {
-                throw std::invalid_argument("tempo map duration exceeds SamplePosition range");
-            }
+                std::numeric_limits<std::int64_t>::max() - rounded_duration)
+                return runtime::Err(TempoMapError::SampleRangeExceeded);
             anchor.value += rounded_duration;
         }
     }
+    return runtime::Ok(CompiledTempoMap(normalized_rate, std::move(segments)));
 }
 
 long double CompiledTempoMap::samples_from_segment_start(const Segment& segment,
@@ -150,7 +160,17 @@ std::size_t CompiledTempoMap::segment_for_sample(SamplePosition sample) const no
 }
 
 SamplePosition CompiledTempoMap::ticks_to_samples(TickPosition tick) const noexcept {
-    const auto& segment = segments_[segment_for_tick(tick)];
+    return ticks_to_samples_in_segment(tick, segment_for_tick(tick));
+}
+
+SamplePosition CompiledTempoMap::ticks_to_samples_in_segment(
+    TickPosition tick, std::size_t segment_index) const noexcept {
+    while (segment_index + 1 < segments_.size() &&
+           tick >= segments_[segment_index + 1].start_tick)
+        ++segment_index;
+    while (segment_index > 0 && tick < segments_[segment_index].start_tick)
+        --segment_index;
+    const auto& segment = segments_[segment_index];
     const auto delta = tick.value - segment.start_tick.value;
     const auto offset = rounded_and_clamped(samples_from_segment_start(segment, delta));
     return {saturating_add(segment.start_sample.value, offset)};
@@ -179,6 +199,11 @@ TickPosition CompiledTempoMap::samples_to_ticks(SamplePosition sample) const noe
 
 SampleToTickResult CompiledTempoMap::resolve_sample(SamplePosition sample) const noexcept {
     const auto segment_index = segment_for_sample(sample);
+    return resolve_sample_in_segment(sample, segment_index);
+}
+
+SampleToTickResult CompiledTempoMap::resolve_sample_in_segment(
+    SamplePosition sample, std::size_t segment_index) const noexcept {
     const auto& segment = segments_[segment_index];
     const auto delta_samples = static_cast<long double>(sample.value) -
                                static_cast<long double>(segment.start_sample.value);
@@ -192,7 +217,7 @@ SampleToTickResult CompiledTempoMap::resolve_sample(SamplePosition sample) const
     auto low = estimate.value;
     auto high = estimate.value;
     std::int64_t step = 1;
-    while (ticks_to_samples({low}).value >= sample.value) {
+    while (ticks_to_samples_in_segment({low}, segment_index).value >= sample.value) {
         high = low;
         if (low == std::numeric_limits<std::int64_t>::min())
             break;
@@ -204,7 +229,7 @@ SampleToTickResult CompiledTempoMap::resolve_sample(SamplePosition sample) const
         step = std::min<std::int64_t>(step * 2, std::numeric_limits<std::int64_t>::max() / 2);
     }
     step = 1;
-    while (ticks_to_samples({high}).value < sample.value) {
+    while (ticks_to_samples_in_segment({high}, segment_index).value < sample.value) {
         low = high;
         if (high == std::numeric_limits<std::int64_t>::max())
             break;
@@ -217,14 +242,15 @@ SampleToTickResult CompiledTempoMap::resolve_sample(SamplePosition sample) const
     }
     while (integer_distance(low, high) > 1) {
         const auto midpoint = std::midpoint(low, high);
-        if (ticks_to_samples({midpoint}).value < sample.value) {
+        if (ticks_to_samples_in_segment({midpoint}, segment_index).value < sample.value) {
             low = midpoint;
         } else {
             high = midpoint;
         }
     }
-    const TickPosition upper_tick{ticks_to_samples({low}).value >= sample.value ? low : high};
-    const auto upper_sample = ticks_to_samples(upper_tick);
+    const TickPosition upper_tick{
+        ticks_to_samples_in_segment({low}, segment_index).value >= sample.value ? low : high};
+    const auto upper_sample = ticks_to_samples_in_segment(upper_tick, segment_index);
     if (upper_sample == sample) {
         return {upper_tick, upper_sample, 0, true};
     }
@@ -232,13 +258,61 @@ SampleToTickResult CompiledTempoMap::resolve_sample(SamplePosition sample) const
     const TickPosition lower_tick{upper_tick.value == std::numeric_limits<std::int64_t>::min()
                                       ? upper_tick.value
                                       : upper_tick.value - 1};
-    const auto lower_sample = ticks_to_samples(lower_tick);
+    const auto lower_sample = ticks_to_samples_in_segment(lower_tick, segment_index);
     const auto lower_error = integer_distance(sample.value, lower_sample.value);
     const auto upper_error = integer_distance(upper_sample.value, sample.value);
     if (lower_error <= upper_error) {
         return {lower_tick, lower_sample, lower_error, false};
     }
     return {upper_tick, upper_sample, upper_error, false};
+}
+
+void TempoCursor::reset(const CompiledTempoMap& map) noexcept {
+    map_ = &map;
+    segment_index_ = 0;
+    sample_ = {};
+    positioned_ = false;
+}
+
+SampleToTickResult TempoCursor::seek(SamplePosition sample) noexcept {
+    if (map_ == nullptr)
+        return {{}, {}, integer_distance(sample.value, 0), sample.value == 0};
+    segment_index_ = map_->segment_for_sample(sample);
+    sample_ = sample;
+    positioned_ = true;
+    return map_->resolve_sample_in_segment(sample, segment_index_);
+}
+
+SampleToTickResult TempoCursor::advance(SamplePosition sample) noexcept {
+    if (map_ == nullptr)
+        return {{}, {}, integer_distance(sample.value, 0), sample.value == 0};
+    if (!positioned_ || sample < sample_)
+        return seek(sample);
+    while (segment_index_ + 1 < map_->segments_.size() &&
+           sample >= map_->segments_[segment_index_ + 1].start_sample)
+        ++segment_index_;
+    sample_ = sample;
+    return map_->resolve_sample_in_segment(sample, segment_index_);
+}
+
+double TempoCursor::tempo_at_tick(TickPosition tick) noexcept {
+    if (map_ == nullptr)
+        return 120.0;
+    while (segment_index_ + 1 < map_->segments_.size() &&
+           tick >= map_->segments_[segment_index_ + 1].start_tick)
+        ++segment_index_;
+    while (segment_index_ > 0 && tick < map_->segments_[segment_index_].start_tick)
+        --segment_index_;
+    const auto& segment = map_->segments_[segment_index_];
+    if (tick < segment.start_tick || segment.curve == TempoCurve::Constant ||
+        segment.start_bpm == segment.end_bpm || segment.end_tick == segment.start_tick)
+        return segment.start_bpm;
+    const auto offset = static_cast<long double>(tick.value - segment.start_tick.value);
+    const auto length = static_cast<long double>(segment.end_tick.value - segment.start_tick.value);
+    const auto fraction = std::clamp(offset / length, 0.0L, 1.0L);
+    return static_cast<double>(static_cast<long double>(segment.start_bpm) +
+                               fraction * (static_cast<long double>(segment.end_bpm) -
+                                           static_cast<long double>(segment.start_bpm)));
 }
 
 } // namespace pulp::timebase

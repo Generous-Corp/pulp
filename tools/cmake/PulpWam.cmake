@@ -49,6 +49,7 @@ endif()
 set(_PULP_WAM_INCLUDES
     ${_PULP_WAM_ROOT}/core/platform/include
     ${_PULP_WAM_ROOT}/core/runtime/include
+    ${_PULP_WAM_ROOT}/core/timebase/include
     ${_PULP_WAM_ROOT}/core/state/include
     ${_PULP_WAM_ROOT}/core/audio/include
     ${_PULP_WAM_ROOT}/core/midi/include
@@ -68,6 +69,8 @@ set(_PULP_WAM_INCLUDES
 # (one global WamChainBridge) — the two define the SAME C symbols and must never
 # be linked together. Both compile against wam_adapter.cpp, which lives here.
 set(_PULP_WAM_CORE_SOURCES
+    ${_PULP_WAM_ROOT}/core/timebase/src/compiled_meter_map.cpp
+    ${_PULP_WAM_ROOT}/core/timebase/src/compiled_tempo_map.cpp
     ${_PULP_WAM_ROOT}/core/audio/src/wav_decoder.cpp
     ${_PULP_WAM_ROOT}/core/runtime/src/runtime.cpp
     ${_PULP_WAM_ROOT}/core/runtime/src/identity.cpp

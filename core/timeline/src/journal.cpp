@@ -55,6 +55,7 @@ bool same_project(const Project& lhs, const Project& rhs) noexcept {
     if (lhs.id() != rhs.id() || lhs.name() != rhs.name() ||
         lhs.next_item_id() != rhs.next_item_id() ||
         lhs.root_sequence_id() != rhs.root_sequence_id() ||
+        lhs.tempo_map() != rhs.tempo_map() || lhs.meter_map() != rhs.meter_map() ||
         lhs.assets().size() != rhs.assets().size() ||
         lhs.sequences().size() != rhs.sequences().size())
         return false;

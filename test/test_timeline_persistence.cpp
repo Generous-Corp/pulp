@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -250,6 +251,38 @@ TEST_CASE("Timeline snapshots round trip canonically with durable asset identity
     REQUIRE(second.value().json == first.value().json);
 }
 
+TEST_CASE("Timeline schema-v1 owns and canonically replays editable tempo and meter maps") {
+    auto clip = take(Clip::create({4}, {0}, {100}, EmptyContent{}));
+    auto track = take(Track::create({3}, "track", {clip}));
+    auto sequence = take(Sequence::create({2}, "sequence", TickDuration{100}, {track}));
+    const std::array tempo_points{
+        TempoPoint{{0}, 90.0, TempoCurve::LinearInTicks},
+        TempoPoint{{4 * kTicksPerQuarter}, 135.0, TempoCurve::Constant},
+    };
+    const std::array meter_points{
+        MeterPoint{{0}, {4, 4}},
+        MeterPoint{{8 * kTicksPerQuarter}, {3, 4}},
+    };
+    auto project = take(Project::create(ProjectInput{
+        {1}, "maps", 5, {2}, {}, {sequence}, take(TempoMap::create(tempo_points)),
+        take(MeterMap::create(meter_points))}));
+    const auto registry = builtins();
+    const auto encoded = take(serialize_project(project, registry));
+    REQUIRE(encoded.json.find("\"tempo_map\"") != std::string::npos);
+    REQUIRE(encoded.json.find("\"meter_map\"") != std::string::npos);
+    const auto decoded = take(deserialize_project(encoded.json, registry));
+    REQUIRE(decoded.tempo_map() == project.tempo_map());
+    REQUIRE(decoded.meter_map() == project.meter_map());
+    REQUIRE(take(serialize_project(decoded, registry)).json == encoded.json);
+
+    auto malformed = encoded.json;
+    const auto denominator = malformed.find("\"denominator\":4");
+    REQUIRE(denominator != std::string::npos);
+    malformed.replace(denominator, std::string("\"denominator\":4").size(),
+                      "\"denominator\":3");
+    REQUIRE_FALSE(deserialize_project(malformed, registry));
+}
+
 TEST_CASE("Timeline snapshots preserve clip gain and fades while old payloads default them") {
     const auto registry = builtins();
     const ClipPlaybackProperties playback{0.375f, 12, 24};
@@ -290,6 +323,8 @@ TEST_CASE("Timeline version-one fixture remains readable and canonical") {
     auto decoded = deserialize_project(fixture, builtins());
     REQUIRE(decoded.has_value());
     REQUIRE(decoded.value().name() == "fixture");
+    REQUIRE(decoded.value().tempo_map() == TempoMap{});
+    REQUIRE(decoded.value().meter_map() == MeterMap{});
     auto encoded = serialize_project(decoded.value(), builtins());
     REQUIRE(encoded.has_value());
     REQUIRE(encoded.value().json.find("\"identities\":[") != std::string::npos);

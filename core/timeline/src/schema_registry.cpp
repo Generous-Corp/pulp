@@ -256,10 +256,12 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                               {{"assets", SchemaValueKind::Array},
                                {"id", SchemaValueKind::U64String},
                                {"identities", SchemaValueKind::Array, false},
+                               {"meter_map", SchemaValueKind::Array, false},
                                {"name", SchemaValueKind::String},
                                {"next_item_id", SchemaValueKind::U64String},
                                {"root_sequence_id", SchemaValueKind::U64String},
-                               {"sequences", SchemaValueKind::Array}}));
+                               {"sequences", SchemaValueKind::Array},
+                               {"tempo_map", SchemaValueKind::Array, false}}));
     schemas.push_back(builtin("pulp.timeline.asset", SchemaDomain::Document,
                               {{"content_hash", SchemaValueKind::String},
                                {"frame_count", SchemaValueKind::U64String},

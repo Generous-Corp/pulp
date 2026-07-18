@@ -2,6 +2,7 @@
 #include <pulp/playback/stable_renderer_shell.hpp>
 
 #include "harness/scoped_rt_process_probe.hpp"
+#include "timebase_test_helpers.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -66,7 +67,7 @@ std::shared_ptr<const Project> make_many_track_project(std::size_t track_count) 
 
 std::shared_ptr<const CompiledTempoMap> tempo_map() {
     const std::array points{TempoPoint{{0}, 120.0}};
-    return std::make_shared<const CompiledTempoMap>(points, RationalRate{48'000, 1});
+    return shared_compiled_tempo_map(points, RationalRate{48'000, 1});
 }
 
 void drain(DeferredCompileExecutor& executor, PlaybackProgramCompiler& compiler) {
