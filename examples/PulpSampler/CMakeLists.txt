@@ -26,6 +26,7 @@ if(PULP_BUILD_TESTS)
         test_pulp_sampler.cpp
         test_pulp_sampler_heritage.cpp
         test_sampler_api.cpp
+        ${PROJECT_SOURCE_DIR}/test/support/sampler_parity.cpp
         ${PROJECT_SOURCE_DIR}/test/harness/rt_allocation_probe.cpp)
     target_link_libraries(pulp-sampler-test PRIVATE pulp::format pulp::audio pulp::signal Catch2::Catch2WithMain)
     target_compile_definitions(pulp-sampler-test PRIVATE PULP_SAMPLER_TEST_HOOKS=1)
