@@ -435,6 +435,15 @@ so the host records the settle. Input param events are applied to the
 store before the bypass check, so a host-raised trigger is observed-then-
 settled within the same block whether or not the plugin is bypassed.
 
+CLAP requires every parameter carrying `CLAP_PARAM_IS_BYPASS` to carry
+`CLAP_PARAM_IS_STEPPED` too. Do not infer this only from `range.step`:
+Pulp's discrete semantics come from `ParamKind`, and a designated bypass may
+arrive without a discrete kind. `params_get_info` therefore adds STEPPED for
+either a discrete parameter or a bypass. A host-quirk synthesized Bypass must
+also declare `ParamKind::Toggle`, so the shared state model and every format
+agree that it is a two-state control. The external `clap-validator` catches
+this contract across otherwise healthy plugins.
+
 ### Latency / tail change notifications
 
 A Processor flags a mid-render latency or tail change via

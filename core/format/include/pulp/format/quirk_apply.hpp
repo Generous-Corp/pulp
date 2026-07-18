@@ -48,6 +48,7 @@ inline bool maybe_synthesize_bypass(state::StateStore& store, const HostQuirks& 
     info.id = kSynthesizedBypassParamId;
     info.name = "Bypass";
     info.range = {0.0f, 1.0f, 0.0f, 1.0f};  // boolean: step 1 → two states
+    info.kind = state::ParamKind::Toggle;
     store.add_parameter(info);
     return true;
 }
