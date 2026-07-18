@@ -187,6 +187,15 @@ if(APPLE)
     target_include_directories(pulp-test-clap-hosted-editor PRIVATE ${PULP_ROOT_DIR}/core/host/src)
     catch_discover_tests(pulp-test-clap-hosted-editor)
 
+    # editor_container_adopt_view: the AU-style path where the plug-in RETURNS
+    # a view (Cocoa UI) that the host adopts into the shared container, vs the
+    # CLAP/VST3 parent-consuming path. Real NSViews.
+    add_executable(pulp-test-hosted-editor-container-adopt
+        test_hosted_editor_container_adopt.mm)
+    target_link_libraries(pulp-test-hosted-editor-container-adopt
+        PRIVATE pulp::host Catch2::Catch2WithMain "-framework AppKit")
+    catch_discover_tests(pulp-test-hosted-editor-container-adopt)
+
     # Proves the editor lifecycle is inaudible: a tone-emitting fake plugin
     # renders while the editor opens/resizes/closes, and the audio-analysis
     # metrics catch any dropout, NaN, or clip the editor path introduces.
