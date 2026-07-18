@@ -16,6 +16,7 @@
 #include <pulp/view/view.hpp>
 
 #include <array>
+#include <limits>
 
 using namespace pulp::format;
 using Catch::Matchers::WithinAbs;
@@ -760,6 +761,18 @@ TEST_CASE("Processor prepare resource estimates can be checked against host limi
     context.resource_limits.max_voices = 4;
     REQUIRE(p.check_prepare_resource_limits(context) ==
             PrepareResourceLimit::Voices);
+}
+
+TEST_CASE("Prepare resource totals saturate instead of wrapping",
+          "[format][processor-defaults][prepare-budget]") {
+    PrepareResourceUsage usage;
+    usage.persistent_bytes = std::numeric_limits<std::size_t>::max() - 4;
+    usage.block_scratch_bytes = 8;
+    REQUIRE(usage.total_bytes() == std::numeric_limits<std::size_t>::max());
+    PrepareResourceLimits limits;
+    limits.max_total_bytes = std::numeric_limits<std::size_t>::max() - 1;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::TotalBytes);
 }
 
 TEST_CASE("Processor memory pressure can shrink rebuildable prepare caches",

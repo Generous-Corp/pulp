@@ -17,6 +17,22 @@ struct SampleStreamAsyncServiceConfig {
     SampleStreamDecodePoolConfig decode{};
 };
 
+enum class SampleStreamAsyncPrepareStatus : std::uint8_t {
+    Ok,
+    InvalidConfiguration,
+    CachePrepareFailed,
+    DecodePrepareFailed,
+    MetadataAllocationFailed,
+};
+
+struct SampleStreamAsyncPrepareResult {
+    SampleStreamAsyncPrepareStatus status =
+        SampleStreamAsyncPrepareStatus::InvalidConfiguration;
+    constexpr bool prepared() const noexcept {
+        return status == SampleStreamAsyncPrepareStatus::Ok;
+    }
+};
+
 enum class SampleStreamAsyncDispatchStatus : std::uint8_t {
     Queued,
     Idle,
@@ -69,14 +85,23 @@ public:
     SampleStreamAsyncService& operator=(const SampleStreamAsyncService&) = delete;
 
     bool prepare(const SampleStreamAsyncServiceConfig& config) {
+        return prepare_checked(config).prepared();
+    }
+
+    SampleStreamAsyncPrepareResult prepare_checked(
+        const SampleStreamAsyncServiceConfig& config) {
         release();
-        if (config.decode.source_capacity == 0 ||
+        if (config.cache.scheduler_capacity == 0 ||
+            config.decode.worker_count == 0 ||
+            config.decode.source_capacity == 0 ||
+            config.decode.maximum_channels == 0 ||
+            config.decode.maximum_frames_per_job == 0 ||
             config.decode.maximum_outstanding_jobs_per_source == 0 ||
             config.decode.source_capacity >
                 std::numeric_limits<std::size_t>::max() /
                     config.decode.maximum_outstanding_jobs_per_source) {
             release();
-            return false;
+            return {SampleStreamAsyncPrepareStatus::InvalidConfiguration};
         }
         const auto record_capacity =
             static_cast<std::size_t>(config.decode.source_capacity) *
@@ -84,21 +109,25 @@ public:
         auto cache_config = config.cache;
         cache_config.maximum_async_reservations_per_source =
             config.decode.maximum_outstanding_jobs_per_source;
-        if (!cache_.prepare(cache_config) || !decode_.prepare(config.decode)) {
+        if (!cache_.prepare(cache_config)) {
             release();
-            return false;
+            return {SampleStreamAsyncPrepareStatus::CachePrepareFailed};
+        }
+        if (!decode_.prepare(config.decode)) {
+            release();
+            return {SampleStreamAsyncPrepareStatus::DecodePrepareFailed};
         }
         try {
             records_.resize(record_capacity);
             retirements_.reserve(config.decode.source_capacity);
         } catch (...) {
             release();
-            return false;
+            return {SampleStreamAsyncPrepareStatus::MetadataAllocationFailed};
         }
         prepared_ = true;
         telemetry_ = {};
         active_record_count_ = 0;
-        return true;
+        return {SampleStreamAsyncPrepareStatus::Ok};
     }
 
     void release() noexcept {
