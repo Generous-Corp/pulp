@@ -42,7 +42,7 @@ set(PULP_SDK_SMOKE_REQUIRE_FORMATS ""
 find_package(Pulp REQUIRED CONFIG)
 
 foreach(_pulp_alias_target
-        dsl events format host signal state view standalone gpu-audio)
+        audio dsl events format host signal state view standalone gpu-audio)
     if(TARGET "Pulp::${_pulp_alias_target}"
        AND NOT TARGET "pulp::${_pulp_alias_target}")
         message(FATAL_ERROR
@@ -54,6 +54,21 @@ foreach(_pulp_alias_target
     endif()
 endforeach()
 unset(_pulp_alias_target)
+
+# Raw-byte WAV decoder export probe. Browser and storage-backed consumers
+# receive media bytes rather than native paths, so the installed SDK must
+# expose and link this no-file-I/O surface through Pulp::audio.
+if(TARGET Pulp::audio)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/wav_decoder_export_probe.cpp"
+"#include <pulp/audio/wav_decoder.hpp>\n"
+"\n"
+"int main() {\n"
+"    return pulp::audio::decode_wav({}).has_value() ? 1 : 0;\n"
+"}\n")
+    add_executable(PulpSDKSmokeWavDecoderProbe
+        "${CMAKE_CURRENT_BINARY_DIR}/wav_decoder_export_probe.cpp")
+    target_link_libraries(PulpSDKSmokeWavDecoderProbe PRIVATE Pulp::audio)
+endif()
 
 # Installed host/state/dsl header + link probe. These targets were exported
 # before all of their public headers were reliably copied into the SDK, so a

@@ -90,6 +90,7 @@ set(_PULP_WCLAP_INCLUDES
     ${_PULP_WCLAP_ROOT}/core/events/include
     ${_PULP_WCLAP_ROOT}/core/format/include
     ${_PULP_WCLAP_ROOT}/core/signal/include
+    ${_PULP_WCLAP_ROOT}/external/dr_libs
     ${PULP_WCLAP_CHOC_INCLUDE}
     ${PULP_WCLAP_CLAP_INCLUDE}
 )
@@ -97,6 +98,7 @@ set(_PULP_WCLAP_INCLUDES
 # Portable DSP + CLAP-adapter subset — compiled once into an OBJECT library and
 # shared across every WebCLAP plugin target.
 set(_PULP_WCLAP_CORE_SOURCES
+    ${_PULP_WCLAP_ROOT}/core/audio/src/wav_decoder.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_adapter.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_remote_controls.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/processor_f64.cpp
