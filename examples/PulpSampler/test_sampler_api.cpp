@@ -1,13 +1,61 @@
 #include "sampler_api.hpp"
+#include "sampler_streaming_runtime.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/audio/audio_file.hpp>
+
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <stdexcept>
+#include <string>
 #include <string_view>
+#include <utility>
 
 using namespace pulp;
+
+namespace {
+
+struct TemporarySamplerApiFiles {
+    std::filesystem::path source;
+
+    explicit TemporarySamplerApiFiles(std::filesystem::path source_path)
+        : source(std::move(source_path)) {}
+    TemporarySamplerApiFiles(TemporarySamplerApiFiles&& other) noexcept
+        : source(std::exchange(other.source, {})) {}
+    TemporarySamplerApiFiles& operator=(TemporarySamplerApiFiles&&) = delete;
+    TemporarySamplerApiFiles(const TemporarySamplerApiFiles&) = delete;
+    TemporarySamplerApiFiles& operator=(const TemporarySamplerApiFiles&) = delete;
+
+    ~TemporarySamplerApiFiles() {
+        if (source.empty()) return;
+        std::error_code ignored;
+        std::filesystem::remove(source, ignored);
+        std::filesystem::remove(source.string() + ".pulpmip", ignored);
+    }
+};
+
+TemporarySamplerApiFiles make_sampler_api_wav() {
+    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+    TemporarySamplerApiFiles files{
+        std::filesystem::temp_directory_path() /
+        ("pulp-sampler-api-" + std::to_string(nonce) + ".wav")};
+    audio::AudioFileData audio;
+    audio.sample_rate = 48000;
+    audio.channels.resize(1);
+    audio.channels[0].assign(4096, 0.25f);
+    if (!audio::write_wav_file(files.source.string(), audio,
+                               audio::WavBitDepth::Float32)) {
+        throw std::runtime_error("failed to create sampler API fixture");
+    }
+    return files;
+}
+
+}  // namespace
 
 static_assert(static_cast<std::uint8_t>(audio::SampleInterpolationPolicy::Hold) == 0);
 static_assert(static_cast<std::uint8_t>(audio::SampleInterpolationPolicy::Nearest) == 1);
@@ -91,4 +139,57 @@ TEST_CASE("PulpSampler public result helpers expose bounded fixed names",
     constexpr std::string_view profile = "neutral.synthetic-v1";
     std::copy(profile.begin(), profile.end(), heritage.profile_id.begin());
     REQUIRE(heritage.profile() == profile);
+}
+
+TEST_CASE("Sampler streaming runtime propagates detailed file admission results",
+          "[audio][sampler][api][stream]") {
+    auto files = make_sampler_api_wav();
+    {
+        std::ofstream invalid_sidecar(files.source.string() + ".pulpmip");
+        REQUIRE(invalid_sidecar.good());
+        invalid_sidecar << "not a valid sampler mip manifest";
+    }
+
+    examples::SamplerStreamingRuntime runtime;
+    REQUIRE(runtime.load_sample_file_result("").status ==
+            examples::PulpSamplerLoadStatus::EmptyPath);
+    REQUIRE(runtime.load_sample_file_result(files.source.string()).status ==
+            examples::PulpSamplerLoadStatus::NotPrepared);
+    REQUIRE(runtime.prepare(48000.0f, 64));
+
+    const auto loaded = runtime.load_sample_file_result(files.source.string());
+    REQUIRE(loaded.loaded());
+    REQUIRE(loaded.codec_capability ==
+            examples::PulpSamplerCodecCapability::Ranged);
+    REQUIRE_FALSE(loaded.codec().empty());
+    REQUIRE(loaded.channels == 1);
+    REQUIRE(loaded.sample_rate == 48000);
+    REQUIRE(loaded.total_frames == 4096);
+    REQUIRE(loaded.required_preload_frames > 0);
+    REQUIRE(loaded.configured_preload_frames == loaded.total_frames);
+    REQUIRE(loaded.requested_streaming_memory_bytes >=
+            loaded.configured_preload_frames * sizeof(float));
+    REQUIRE(loaded.sidecar_status ==
+            examples::PulpSamplerSidecarStatus::IgnoredInvalid);
+    REQUIRE(loaded.sidecar_level_count == 0);
+
+    const auto published_before_failure = runtime.published_source();
+    const auto unsupported = runtime.load_sample_file_result(
+        files.source.string() + ".unsupported");
+    REQUIRE(unsupported.status ==
+            examples::PulpSamplerLoadStatus::UnsupportedCodec);
+    const auto missing_wav = files.source.parent_path() /
+        (files.source.stem().string() + "-missing.wav");
+    const auto failed = runtime.load_sample_file_result(
+        missing_wav.string());
+    REQUIRE(failed.status == examples::PulpSamplerLoadStatus::OpenFailed);
+    const auto published_after_failure = runtime.published_source();
+    REQUIRE(published_after_failure.kind == published_before_failure.kind);
+    REQUIRE(published_after_failure.selection_generation ==
+            published_before_failure.selection_generation);
+    REQUIRE(published_after_failure.streamed.asset.asset_id ==
+            published_before_failure.streamed.asset.asset_id);
+    REQUIRE(published_after_failure.streamed.asset.asset_generation ==
+            published_before_failure.streamed.asset.asset_generation);
+    REQUIRE_FALSE(runtime.load_sample_file(missing_wav.string()));
 }
