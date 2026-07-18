@@ -187,6 +187,7 @@ struct PulpSamplerLoadResult {
     std::uint64_t configured_preload_frames = 0;
     std::uint64_t requested_streaming_memory_bytes = 0;
     std::uint32_t sidecar_level_count = 0;
+    std::uint64_t selection_generation = 0;
 
     constexpr bool loaded() const noexcept {
         return status == PulpSamplerLoadStatus::Ok;
@@ -203,6 +204,7 @@ struct PulpSamplerLoadResult {
 /// and page geometry. This is an inspection record, not permission to mutate
 /// latency claims at runtime.
 struct PulpSamplerPreloadPolicy {
+    std::uint64_t selection_generation = 0;
     double source_sample_rate = 0.0;
     double host_sample_rate = 0.0;
     double maximum_playback_ratio = 4.0;
@@ -303,6 +305,7 @@ struct PulpSamplerHeritageDiagnostics {
 /// PulpSamplerStreamStats; integration can return both without duplicating or
 /// renaming that established surface.
 struct PulpSamplerDiagnostics {
+    std::uint64_t snapshot_epoch = 0;
     PulpSamplerPrepareResult prepare{};
     PulpSamplerLoadResult last_load{};
     PulpSamplerPreloadPolicy preload{};

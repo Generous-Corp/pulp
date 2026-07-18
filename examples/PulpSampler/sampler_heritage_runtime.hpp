@@ -189,6 +189,11 @@ public:
     std::size_t maximum_input_frames() const noexcept {
         return prepared_ && !all_stages_bypassed_ ? maximum_input_frames_ : 0;
     }
+#if defined(PULP_SAMPLER_TEST_HOOKS)
+    bool processing_released_for_test() const noexcept {
+        return !prepared_ && dry_storage_.empty() && maximum_input_frames_ == 0;
+    }
+#endif
     int latency_samples() const noexcept {
         return reported_latency_frames_ >
                 static_cast<std::uint32_t>(std::numeric_limits<int>::max())
