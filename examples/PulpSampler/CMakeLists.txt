@@ -23,8 +23,15 @@ endif()
 # Test
 if(PULP_BUILD_TESTS)
     add_executable(pulp-sampler-test
-        test_pulp_sampler.cpp
-        test_pulp_sampler_heritage.cpp
+        test_pulp_sampler_contract.cpp
+        test_pulp_sampler_mip_sidecar.cpp
+        test_pulp_sampler_mip_runtime.cpp
+        test_pulp_sampler_resident_rt.cpp
+        test_pulp_sampler_streaming.cpp
+        test_pulp_sampler_streaming_admission_rt.cpp
+        test_pulp_sampler_heritage_render_clock.cpp
+        test_pulp_sampler_heritage_stream_domain.cpp
+        test_pulp_sampler_heritage_state_failure_rt.cpp
         test_sampler_api.cpp
         ${PROJECT_SOURCE_DIR}/test/support/sampler_parity.cpp
         ${PROJECT_SOURCE_DIR}/test/harness/rt_allocation_probe.cpp)
