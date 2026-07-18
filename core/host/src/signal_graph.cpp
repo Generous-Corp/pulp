@@ -2069,6 +2069,12 @@ bool SignalGraph::preflight_locked_(int max_block_size) {
 }
 
 bool SignalGraph::prepare(double sample_rate, int max_block_size) {
+    return prepare_impl_(sample_rate, max_block_size, nullptr);
+}
+
+bool SignalGraph::prepare_impl_(
+    double sample_rate, int max_block_size,
+    const PrepareLifecycleObserver* lifecycle_observer) {
     // Serialize the ENTIRE prepare against concurrent control-thread mutators
     // (set_node_gain / add_*/remove_node, which all run on the UI thread). The
     // lock covers two distinct shared surfaces:
@@ -2109,6 +2115,11 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
     prepared_plugin_meta_.clear();
     for (auto& n : nodes_) {
         if (n.plugin) {
+            if (lifecycle_observer != nullptr &&
+                lifecycle_observer->plugin_will_prepare != nullptr) {
+                lifecycle_observer->plugin_will_prepare(
+                    lifecycle_observer->context, n.plugin.get());
+            }
             if (!n.plugin->prepare(sample_rate, max_block_size)) {
                 runtime::log_error("SignalGraph: failed to prepare plugin '{}'", n.name);
                 return false;
@@ -2140,6 +2151,11 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
                 n.custom_state_pending = false;
             }
             if (type->prepare) {
+                if (lifecycle_observer != nullptr &&
+                    lifecycle_observer->custom_will_prepare != nullptr) {
+                    lifecycle_observer->custom_will_prepare(
+                        lifecycle_observer->context, n.custom_instance.get());
+                }
                 type->prepare(n.custom_instance.get(), sample_rate, max_block_size);
             }
         }

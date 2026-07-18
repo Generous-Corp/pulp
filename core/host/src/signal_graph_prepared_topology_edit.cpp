@@ -112,6 +112,8 @@ bool SignalGraph::PreparedTopologyEdit::rollback_quiesced_lifecycles_locked_() n
     bool restored = true;
     if (base_live_ != nullptr) {
         for (const auto& retained : quiesced_plugins_) {
+            if (!retained.touched)
+                continue;
             try {
                 if (!retained.plugin->prepare(base_live_->sample_rate,
                                               base_live_->max_block_size)) {
@@ -122,6 +124,8 @@ bool SignalGraph::PreparedTopologyEdit::rollback_quiesced_lifecycles_locked_() n
             }
         }
         for (const auto& retained : quiesced_customs_) {
+            if (!retained.touched)
+                continue;
             if (!retained.prepare)
                 continue;
             try {
@@ -132,9 +136,12 @@ bool SignalGraph::PreparedTopologyEdit::rollback_quiesced_lifecycles_locked_() n
             }
         }
     } else {
-        // The base graph had no prepared lifecycle. Undo candidate preparation
-        // by returning every retained object to its released state.
+        // The base graph had no prepared lifecycle. Undo only candidate prepare
+        // callbacks that were entered; untouched retained objects were never
+        // acquired and must not receive a release callback.
         for (const auto& retained : quiesced_plugins_) {
+            if (!retained.touched)
+                continue;
             try {
                 retained.plugin->release();
             } catch (...) {
@@ -142,6 +149,8 @@ bool SignalGraph::PreparedTopologyEdit::rollback_quiesced_lifecycles_locked_() n
             }
         }
         for (const auto& retained : quiesced_customs_) {
+            if (!retained.touched)
+                continue;
             if (!retained.release) {
                 restored = false;
                 continue;
@@ -680,7 +689,7 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
         if (is_new_node_(node.id))
             continue;
         if (node.plugin) {
-            quiesced_plugins_.push_back({node.plugin});
+            quiesced_plugins_.push_back({node.plugin, false});
             continue;
         }
         if (node.type != NodeType::Custom || !node.custom_instance)
@@ -702,15 +711,38 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
             owner_node->custom_type_id, owner_node->custom_type_version);
         if (candidate_type != nullptr && candidate_type->prepare && owner_type != nullptr) {
             quiesced_customs_.push_back(
-                {node.custom_instance, owner_type->prepare, owner_type->release});
+                {node.custom_instance, owner_type->prepare, owner_type->release,
+                 false});
         }
     }
     quiesced_lifecycles_dirty_ =
         !quiesced_plugins_.empty() || !quiesced_customs_.empty();
 
     bool candidate_prepared = false;
+    const SignalGraph::PrepareLifecycleObserver lifecycle_observer{
+        this,
+        [](void* context, PluginSlot* plugin) noexcept {
+            auto& edit = *static_cast<PreparedTopologyEdit*>(context);
+            for (auto& retained : edit.quiesced_plugins_) {
+                if (retained.plugin.get() == plugin && !retained.touched) {
+                    retained.touched = true;
+                    return;
+                }
+            }
+        },
+        [](void* context, void* instance) noexcept {
+            auto& edit = *static_cast<PreparedTopologyEdit*>(context);
+            for (auto& retained : edit.quiesced_customs_) {
+                if (retained.instance.get() == instance && !retained.touched) {
+                    retained.touched = true;
+                    return;
+                }
+            }
+        },
+    };
     try {
-        candidate_prepared = candidate_->prepare(sample_rate, max_block_size);
+        candidate_prepared = candidate_->prepare_impl_(
+            sample_rate, max_block_size, &lifecycle_observer);
     } catch (...) {
         candidate_prepared = false;
     }

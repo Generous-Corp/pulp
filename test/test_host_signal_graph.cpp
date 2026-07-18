@@ -4971,8 +4971,10 @@ CustomNodeType make_prepared_edit_level_type(
 class PreparedEditCountingPlugin final : public PluginSlot {
 public:
     explicit PreparedEditCountingPlugin(std::atomic<int>& prepare_calls,
-                                        std::atomic<int>* release_calls = nullptr)
-        : prepare_calls_(prepare_calls), release_calls_(release_calls) {
+                                        std::atomic<int>* release_calls = nullptr,
+                                        bool prepare_result = true)
+        : prepare_calls_(prepare_calls), release_calls_(release_calls),
+          prepare_result_(prepare_result) {
         info_.name = "PreparedEditCountingPlugin";
         info_.num_inputs = 1;
         info_.num_outputs = 1;
@@ -4981,7 +4983,7 @@ public:
     bool is_loaded() const override { return true; }
     bool prepare(double, int) override {
         prepare_calls_.fetch_add(1, std::memory_order_relaxed);
-        return true;
+        return prepare_result_;
     }
     void release() override {
         if (release_calls_)
@@ -5011,6 +5013,7 @@ public:
 private:
     std::atomic<int>& prepare_calls_;
     std::atomic<int>* release_calls_ = nullptr;
+    bool prepare_result_ = true;
     PluginInfo info_;
 };
 
@@ -5453,6 +5456,109 @@ TEST_CASE("SignalGraph quiesced abandonment restores an unprepared base lifecycl
         REQUIRE(releases.load(std::memory_order_relaxed) == 1);
         REQUIRE(destroys.load(std::memory_order_relaxed) == 1);
         REQUIRE_FALSE(graph.is_prepared());
+    }
+}
+
+TEST_CASE("SignalGraph quiesced rollback balances only entered lifecycle callbacks",
+          "[host][graph][prepared-edit][dimensions]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+
+    SECTION("preflight rejection leaves every retained lifecycle untouched") {
+        std::array<std::atomic<int>, 2> prepares{};
+        std::array<std::atomic<int>, 2> releases{};
+        SignalGraph graph;
+        REQUIRE(graph.add_plugin_node(
+                    std::make_unique<PreparedEditCountingPlugin>(
+                        prepares[0], &releases[0]),
+                    1, 1, "first") != 0);
+        REQUIRE(graph.add_plugin_node(
+                    std::make_unique<PreparedEditCountingPlugin>(
+                        prepares[1], &releases[1]),
+                    1, 1, "second") != 0);
+        auto limits = graph.limits();
+        limits.max_block_size = 64;
+        graph.set_limits(limits);
+
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->prepare_quiesced(44'100.0, 128) ==
+                Result::ExternalPluginReprepareRequired);
+        edit.reset();
+
+        for (std::size_t i = 0; i < prepares.size(); ++i) {
+            REQUIRE(prepares[i].load(std::memory_order_relaxed) == 0);
+            REQUIRE(releases[i].load(std::memory_order_relaxed) == 0);
+        }
+    }
+
+    SECTION("plugin failure releases entered plugins and leaves later plugins untouched") {
+        std::array<std::atomic<int>, 3> prepares{};
+        std::array<std::atomic<int>, 3> releases{};
+        SignalGraph graph;
+        REQUIRE(graph.add_plugin_node(
+                    std::make_unique<PreparedEditCountingPlugin>(
+                        prepares[0], &releases[0], true),
+                    1, 1, "successful first") != 0);
+        REQUIRE(graph.add_plugin_node(
+                    std::make_unique<PreparedEditCountingPlugin>(
+                        prepares[1], &releases[1], false),
+                    1, 1, "failing second") != 0);
+        REQUIRE(graph.add_plugin_node(
+                    std::make_unique<PreparedEditCountingPlugin>(
+                        prepares[2], &releases[2], true),
+                    1, 1, "untouched third") != 0);
+
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->prepare_quiesced(44'100.0, 128) ==
+                Result::ExternalPluginReprepareRequired);
+        edit.reset();
+
+        REQUIRE(prepares[0].load(std::memory_order_relaxed) == 1);
+        REQUIRE(prepares[1].load(std::memory_order_relaxed) == 1);
+        REQUIRE(prepares[2].load(std::memory_order_relaxed) == 0);
+        REQUIRE(releases[0].load(std::memory_order_relaxed) == 1);
+        REQUIRE(releases[1].load(std::memory_order_relaxed) == 1);
+        REQUIRE(releases[2].load(std::memory_order_relaxed) == 0);
+    }
+
+    SECTION("custom throw releases entered customs and leaves later customs untouched") {
+        std::array<std::atomic<int>, 3> prepares{};
+        std::array<std::atomic<int>, 3> releases{};
+        bool throw_second = false;
+        SignalGraph graph;
+        for (std::size_t i = 0; i < prepares.size(); ++i) {
+            auto type = make_prepared_edit_level_type(
+                "pulp.test.prepared.touch." + std::to_string(i), 1.0f);
+            type.prepare = [&, i](void*, double, int) {
+                prepares[i].fetch_add(1, std::memory_order_relaxed);
+                if (throw_second && i == 1)
+                    throw std::runtime_error("prepare");
+            };
+            type.release = [&, i](void*) {
+                releases[i].fetch_add(1, std::memory_order_relaxed);
+            };
+            REQUIRE(graph.register_custom_node_type(std::move(type)));
+            REQUIRE(graph.add_custom_node(
+                        "pulp.test.prepared.touch." + std::to_string(i)) != 0);
+        }
+        REQUIRE(graph.prepare(48'000.0, 64));
+        graph.release();
+        for (std::size_t i = 0; i < prepares.size(); ++i) {
+            prepares[i].store(0, std::memory_order_relaxed);
+            releases[i].store(0, std::memory_order_relaxed);
+        }
+        throw_second = true;
+
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->prepare_quiesced(44'100.0, 128) ==
+                Result::ExternalPluginReprepareRequired);
+        edit.reset();
+
+        REQUIRE(prepares[0].load(std::memory_order_relaxed) == 1);
+        REQUIRE(prepares[1].load(std::memory_order_relaxed) == 1);
+        REQUIRE(prepares[2].load(std::memory_order_relaxed) == 0);
+        REQUIRE(releases[0].load(std::memory_order_relaxed) == 1);
+        REQUIRE(releases[1].load(std::memory_order_relaxed) == 1);
+        REQUIRE(releases[2].load(std::memory_order_relaxed) == 0);
     }
 }
 
