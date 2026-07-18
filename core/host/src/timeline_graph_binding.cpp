@@ -20,7 +20,7 @@ TimelineGraphAdmission reject(TimelineGraphAdmissionCode code, std::uint64_t act
     return {code, actual, limit, item, node};
 }
 
-bool owns_node(std::span<const std::unique_ptr<detail::TimelineGraphBoundTrack>> tracks,
+bool owns_node(std::span<const std::shared_ptr<detail::TimelineGraphBoundTrack>> tracks,
                NodeId id) noexcept;
 
 graph::GraphRuntimeNodeKind runtime_kind(NodeType type) noexcept {
@@ -108,14 +108,21 @@ struct detail::TimelineGraphBoundTrack {
     timeline::ItemId id;
     NodeId audio_node = 0;
     NodeId midi_node = 0;
-    TimelineTrackGraphRoute route;
     std::shared_ptr<playback::ArrangementAudioTrackRenderer> audio_renderer;
     std::unique_ptr<playback::ArrangementNoteRenderer> note_renderer;
 };
 
+struct detail::TimelineGraphBindingState {
+    std::vector<std::shared_ptr<TimelineGraphBoundTrack>> tracks;
+    TimelineGraphBindingConfig config;
+    std::vector<timeline::ItemId> prepared_track_ids;
+    double prepared_sample_rate = 0.0;
+    std::uint32_t prepared_max_block_size = 0;
+};
+
 namespace {
 
-bool owns_node(std::span<const std::unique_ptr<detail::TimelineGraphBoundTrack>> tracks,
+bool owns_node(std::span<const std::shared_ptr<detail::TimelineGraphBoundTrack>> tracks,
                NodeId id) noexcept {
     return std::any_of(tracks.begin(), tracks.end(), [id](const auto& track) {
         return track->audio_node == id || track->midi_node == id;
@@ -138,29 +145,55 @@ TimelineGraphPlaybackBinding::~TimelineGraphPlaybackBinding() {
 }
 
 void TimelineGraphPlaybackBinding::remove_all_owned_nodes() noexcept {
-    for (const auto& track : tracks_) {
-        if (track->audio_node != 0)
-            (void)graph_.remove_node(track->audio_node);
-        if (track->midi_node != 0)
-            (void)graph_.remove_node(track->midi_node);
+    const auto current = state_.live();
+    if (!current) return;
+    bool publication_prepared = false;
+    try {
+        state_.prepare_publish();
+        publication_prepared = true;
+        auto edit = graph_.begin_prepared_topology_edit();
+        bool mutated = true;
+        for (const auto& track : current->tracks) {
+            if (edit->node(track->audio_node) != nullptr)
+                mutated = edit->remove_node(track->audio_node) && mutated;
+            if (edit->node(track->midi_node) != nullptr)
+                mutated = edit->remove_node(track->midi_node) && mutated;
+        }
+        for (const auto& track : current->tracks) {
+            mutated = edit->unregister_custom_node_type(
+                          custom_type_id(binding_instance_id_, track->id), 1) &&
+                      mutated;
+        }
+        if (mutated &&
+            edit->prepare(current->prepared_sample_rate,
+                          static_cast<int>(current->prepared_max_block_size)) ==
+                SignalGraph::PreparedTopologyEdit::Result::Prepared &&
+            edit->routed_execution_ready(
+                static_cast<int>(current->prepared_max_block_size)) &&
+            edit->commit() ==
+                SignalGraph::PreparedTopologyEdit::Result::Committed) {
+            state_.publish_prepared({});
+            return;
+        }
+    } catch (...) {
+        // Destruction is fail-closed. Custom instances keep the shared renderer
+        // and block state alive if an independently-mutated graph makes the
+        // best-effort transactional detach stale.
     }
-    tracks_.clear();
-    prepared_track_ids_.clear();
-    prepared_sample_rate_ = 0.0;
-    prepared_max_block_size_ = 0;
-    prepared_ = false;
+    if (publication_prepared) state_.publish_prepared({});
 }
 
 TimelineGraphAdmission TimelineGraphPlaybackBinding::preflight(
     const playback::PlaybackProgram& program, std::span<const TimelineTrackGraphRoute> routes,
     const TimelineGraphBindingConfig& config, int maximum_block_size) const {
+    auto current = state_.read();
     if (config.audio_channels == 0 || config.maximum_note_events_per_track_per_block == 0 ||
         config.audio_channels > config.audio_limits.max_channels || maximum_block_size <= 0 ||
         static_cast<std::uint64_t>(maximum_block_size) > config.audio_limits.max_block_frames ||
-        (prepared_ && (config.audio_channels != config_.audio_channels ||
-                       config.audio_limits != config_.audio_limits ||
+        (current && (config.audio_channels != current->config.audio_channels ||
+                     config.audio_limits != current->config.audio_limits ||
                        config.maximum_note_events_per_track_per_block !=
-                           config_.maximum_note_events_per_track_per_block)))
+                           current->config.maximum_note_events_per_track_per_block)))
         return reject(TimelineGraphAdmissionCode::InvalidConfiguration);
     if (config.maximum_note_events_per_track_per_block > maximum_graph_midi_events_per_block)
         return reject(TimelineGraphAdmissionCode::NoteCapacityExceeded,
@@ -199,13 +232,13 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::preflight(
     std::vector<GraphNode> nodes;
     nodes.reserve(graph_.nodes().size() + routes.size() * 2u);
     for (const auto& node : graph_.nodes())
-        if (!owns_node(tracks_, node.id))
+        if (!current || !owns_node(current->tracks, node.id))
             nodes.push_back(node);
     std::vector<Connection> connections;
     connections.reserve(graph_.connections().size() + routes.size() * (config.audio_channels + 1u));
     for (const auto& connection : graph_.connections())
-        if (!owns_node(tracks_, connection.source_node) &&
-            !owns_node(tracks_, connection.dest_node))
+        if ((!current || !owns_node(current->tracks, connection.source_node)) &&
+            (!current || !owns_node(current->tracks, connection.dest_node)))
             connections.push_back(connection);
 
     NodeId synthetic = 1;
@@ -330,21 +363,43 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare(
     std::sort(ordered.begin(), ordered.end(),
               [](const auto& lhs, const auto& rhs) { return lhs.track_id < rhs.track_id; });
 
-    // Remove vanished tracks. Unchanged ItemIds retain their node objects and
-    // therefore their SignalGraph NodeIds and renderer execution state.
-    for (std::size_t index = tracks_.size(); index-- > 0;) {
-        if (std::none_of(ordered.begin(), ordered.end(),
-                         [&](const auto& route) { return route.track_id == tracks_[index]->id; })) {
-            (void)graph_.remove_node(tracks_[index]->audio_node);
-            (void)graph_.remove_node(tracks_[index]->midi_node);
-            tracks_.erase(tracks_.begin() + static_cast<std::ptrdiff_t>(index));
+    auto previous = state_.read();
+    auto next = std::make_shared<detail::TimelineGraphBindingState>();
+    next->config = config;
+    next->prepared_sample_rate = program_sample_rate;
+    next->prepared_max_block_size = static_cast<std::uint32_t>(maximum_block_size);
+    next->tracks.reserve(ordered.size());
+    next->prepared_track_ids.reserve(ordered.size());
+
+    // Make the post-commit state publication non-allocating before the graph
+    // transaction begins. If this throws, neither graph nor binding changed.
+    state_.prepare_publish();
+    auto edit = graph_.begin_prepared_topology_edit();
+    if (previous) {
+        for (const auto& track : previous->tracks) {
+            if (std::none_of(ordered.begin(), ordered.end(), [&](const auto& route) {
+                    return route.track_id == track->id;
+                })) {
+                if (!edit->remove_node(track->audio_node) ||
+                    !edit->remove_node(track->midi_node) ||
+                    !edit->unregister_custom_node_type(
+                        custom_type_id(binding_instance_id_, track->id), 1)) {
+                    return reject(TimelineGraphAdmissionCode::GraphMutationFailed, 0, 0,
+                                  track->id);
+                }
+            }
         }
     }
 
     for (const auto& route : ordered) {
-        auto found = std::find_if(tracks_.begin(), tracks_.end(),
-                                  [&](const auto& track) { return track->id == route.track_id; });
-        if (found == tracks_.end()) {
+        std::shared_ptr<detail::TimelineGraphBoundTrack> track;
+        if (previous) {
+            const auto found = std::find_if(
+                previous->tracks.begin(), previous->tracks.end(),
+                [&](const auto& candidate) { return candidate->id == route.track_id; });
+            if (found != previous->tracks.end()) track = *found;
+        }
+        if (!track) {
             const auto type_id = custom_type_id(binding_instance_id_, route.track_id);
             std::weak_ptr<detail::TimelineGraphSharedBlockState> shared = shared_;
             const auto track_id = route.track_id;
@@ -375,69 +430,103 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare(
                                                  const format::ProcessContext&) {
                 static_cast<AudioNodeInstance*>(value)->process(output);
             };
-            if (!graph_.register_custom_node_type(std::move(type)))
-                return reject(TimelineGraphAdmissionCode::GraphMutationFailed, 0, 0,
-                              route.track_id);
-            auto track = std::make_unique<detail::TimelineGraphBoundTrack>();
+            track = std::make_shared<detail::TimelineGraphBoundTrack>();
             track->id = route.track_id;
-            track->audio_node = graph_.add_custom_node(type_id);
-            track->midi_node = graph_.add_midi_input_node("Timeline MIDI track " +
-                                                          std::to_string(route.track_id.value));
             track->audio_renderer = std::move(audio_renderer);
             track->note_renderer =
                 std::make_unique<playback::ArrangementNoteRenderer>(route.track_id);
-            if (track->audio_node == 0 || track->midi_node == 0 ||
-                !track->note_renderer->prepare(config.maximum_note_events_per_track_per_block)) {
-                if (track->audio_node != 0)
-                    (void)graph_.remove_node(track->audio_node);
-                if (track->midi_node != 0)
-                    (void)graph_.remove_node(track->midi_node);
+            if (!track->note_renderer->prepare(
+                    config.maximum_note_events_per_track_per_block) ||
+                !edit->register_custom_node_type(std::move(type))) {
                 return reject(TimelineGraphAdmissionCode::GraphMutationFailed, 0, 0,
                               route.track_id);
             }
-            tracks_.push_back(std::move(track));
-            found = std::prev(tracks_.end());
+            track->audio_node = edit->add_custom_node(type_id);
+            track->midi_node = edit->add_midi_input_node(
+                "Timeline MIDI track " + std::to_string(route.track_id.value));
+            if (track->audio_node == 0 || track->midi_node == 0) {
+                return reject(TimelineGraphAdmissionCode::GraphMutationFailed, 0, 0,
+                              route.track_id);
+            }
         }
 
-        auto& track = **found;
-        // Reconcile only binding-owned edges. Program publications never touch
-        // graph topology or custom-node state.
-        for (const auto& connection : std::vector<Connection>(graph_.connections())) {
-            if (connection.source_node == track.audio_node ||
-                connection.source_node == track.midi_node) {
-                (void)graph_.disconnect(connection.source_node, connection.source_port,
-                                        connection.dest_node, connection.dest_port);
+        // Reconcile only edges whose source is binding-owned. Keeping every
+        // already-equal edge intact preserves its private connection identity,
+        // which lets the prepared transaction carry its PDC ring exactly.
+        for (const auto& connection : std::vector<Connection>(edit->connections())) {
+            bool desired = false;
+            if (connection.source_node == track->audio_node && !connection.midi &&
+                !connection.feedback && !connection.automation &&
+                !connection.audio_rate_modulation && !connection.sidechain &&
+                connection.source_port < config.audio_channels) {
+                desired = connection.dest_node == route.audio_destination &&
+                          connection.dest_port == static_cast<PortIndex>(
+                              route.audio_destination_first_port + connection.source_port);
+            } else if (connection.source_node == track->midi_node && connection.midi) {
+                desired = route.midi_destination != 0 &&
+                          connection.dest_node == route.midi_destination;
+            } else if (connection.source_node != track->audio_node &&
+                       connection.source_node != track->midi_node) {
+                continue;
+            }
+            if (!desired &&
+                !edit->disconnect(connection.source_node, connection.source_port,
+                                  connection.dest_node, connection.dest_port)) {
+                return reject(TimelineGraphAdmissionCode::GraphMutationFailed, 0, 0,
+                              route.track_id, connection.source_node);
             }
         }
         for (std::uint32_t channel = 0; channel < config.audio_channels; ++channel) {
-            if (!graph_.connect(
-                    track.audio_node, static_cast<PortIndex>(channel), route.audio_destination,
-                    static_cast<PortIndex>(route.audio_destination_first_port + channel)))
+            const auto source_port = static_cast<PortIndex>(channel);
+            const auto dest_port = static_cast<PortIndex>(
+                route.audio_destination_first_port + channel);
+            const bool exists = std::any_of(
+                edit->connections().begin(), edit->connections().end(),
+                [&](const Connection& connection) {
+                    return connection.source_node == track->audio_node &&
+                           connection.source_port == source_port &&
+                           connection.dest_node == route.audio_destination &&
+                           connection.dest_port == dest_port && !connection.midi &&
+                           !connection.feedback && !connection.automation &&
+                           !connection.audio_rate_modulation && !connection.sidechain;
+                });
+            if (!exists &&
+                !edit->connect(track->audio_node, source_port,
+                               route.audio_destination, dest_port))
                 return reject(TimelineGraphAdmissionCode::GraphMutationFailed, channel, 0,
-                              route.track_id, track.audio_node);
+                              route.track_id, track->audio_node);
         }
-        if (route.midi_destination != 0 &&
-            !graph_.connect_midi(track.midi_node, route.midi_destination))
-            return reject(TimelineGraphAdmissionCode::GraphMutationFailed, 0, 0, route.track_id,
-                          track.midi_node);
-        track.route = route;
+        const bool midi_exists = route.midi_destination != 0 && std::any_of(
+            edit->connections().begin(), edit->connections().end(),
+            [&](const Connection& connection) {
+                return connection.source_node == track->midi_node && connection.midi &&
+                       connection.dest_node == route.midi_destination;
+            });
+        if (route.midi_destination != 0 && !midi_exists &&
+            !edit->connect_midi(track->midi_node, route.midi_destination))
+            return reject(TimelineGraphAdmissionCode::GraphMutationFailed, 0, 0,
+                          route.track_id, track->midi_node);
+        next->tracks.push_back(std::move(track));
+        next->prepared_track_ids.push_back(route.track_id);
     }
 
-    std::sort(tracks_.begin(), tracks_.end(),
-              [](const auto& lhs, const auto& rhs) { return lhs->id < rhs->id; });
-    graph_.set_canonical_executor_routing_enabled(true);
-    if (!graph_.prepare(sample_rate, maximum_block_size))
-        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed);
-    if (!graph_.routed_execution_status(maximum_block_size).strict_routed_ready())
+    edit->set_canonical_executor_routing_enabled(true);
+    const auto prepared = edit->prepare(sample_rate, maximum_block_size);
+    if (prepared != SignalGraph::PreparedTopologyEdit::Result::Prepared)
+        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed,
+                      static_cast<std::uint64_t>(prepared));
+    if (!edit->routed_execution_ready(maximum_block_size))
         return reject(TimelineGraphAdmissionCode::RoutedPlanRejected);
-    config_ = config;
-    prepared_track_ids_.clear();
-    prepared_track_ids_.reserve(tracks_.size());
-    for (const auto& track : tracks_)
-        prepared_track_ids_.push_back(track->id);
-    prepared_sample_rate_ = program_sample_rate;
-    prepared_max_block_size_ = static_cast<std::uint32_t>(maximum_block_size);
-    prepared_ = true;
+    const auto committed = edit->commit();
+    if (committed != SignalGraph::PreparedTopologyEdit::Result::Committed)
+        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed,
+                      static_cast<std::uint64_t>(committed));
+
+    // Publish only after the graph transaction commits. An in-flight audio
+    // block keeps its prior immutable state pinned; Slot reclaims it later on
+    // this control thread, never in process().
+    state_.publish_prepared(std::shared_ptr<const detail::TimelineGraphBindingState>(
+        std::move(next)));
     return {};
 }
 
@@ -447,16 +536,17 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
                                       const playback::TransportSnapshot& transport) noexcept {
     runtime::ScopedNoAlloc no_alloc;
     TimelineGraphProcessResult result;
-    if (!prepared_) {
+    auto state = state_.read();
+    if (!state) {
         result.code = TimelineGraphProcessCode::MissingProgram;
         return result;
     }
     // Bound every later fail-closed clear before it can touch caller memory.
     // Capacity rejection itself preserves the buffer exactly.
-    if (output.empty() || output.num_channels() != config_.audio_channels ||
-        output.num_channels() > config_.audio_limits.max_channels ||
-        output.num_samples() > config_.audio_limits.max_block_frames ||
-        output.num_samples() > prepared_max_block_size_) {
+    if (output.empty() || output.num_channels() != state->config.audio_channels ||
+        output.num_channels() > state->config.audio_limits.max_channels ||
+        output.num_samples() > state->config.audio_limits.max_block_frames ||
+        output.num_samples() > state->prepared_max_block_size) {
         result.code = TimelineGraphProcessCode::CapacityExceeded;
         return result;
     }
@@ -471,28 +561,29 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
         output.clear();
         return result;
     }
-    if (sample_rate_double(block.program()->tempo_map().sample_rate()) != prepared_sample_rate_) {
+    if (sample_rate_double(block.program()->tempo_map().sample_rate()) !=
+        state->prepared_sample_rate) {
         result.code = TimelineGraphProcessCode::InvalidTransport;
         return result;
     }
-    if (sample_rate_double(transport.sample_rate) != prepared_sample_rate_ ||
+    if (sample_rate_double(transport.sample_rate) != state->prepared_sample_rate ||
         transport.tempo_map != &block.program()->tempo_map() ||
         transport.frame_count != output.num_samples() || transport.range_count == 0) {
         result.code = TimelineGraphProcessCode::InvalidTransport;
         output.clear();
         return result;
     }
-    if (block.program()->tracks().size() != prepared_track_ids_.size()) {
+    if (block.program()->tracks().size() != state->prepared_track_ids.size()) {
         result.code = TimelineGraphProcessCode::TopologyChanged;
         return result;
     }
-    for (const auto id : prepared_track_ids_) {
+    for (const auto id : state->prepared_track_ids) {
         if (block.program()->find_track(id) == nullptr) {
             result.code = TimelineGraphProcessCode::TopologyChanged;
             return result;
         }
     }
-    for (const auto& track : tracks_) {
+    for (const auto& track : state->tracks) {
         const auto note_result = track->note_renderer->process(block, transport);
         result.emitted_note_events += note_result.emitted_events;
         result.dropped_note_events += note_result.dropped_events;
@@ -540,30 +631,38 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
 }
 
 NodeId TimelineGraphPlaybackBinding::audio_node_for(timeline::ItemId track_id) const noexcept {
-    const auto found = std::find_if(tracks_.begin(), tracks_.end(),
+    auto state = state_.read();
+    if (!state) return 0;
+    const auto found = std::find_if(state->tracks.begin(), state->tracks.end(),
                                     [&](const auto& track) { return track->id == track_id; });
-    return found == tracks_.end() ? 0 : (*found)->audio_node;
+    return found == state->tracks.end() ? 0 : (*found)->audio_node;
 }
 
 NodeId TimelineGraphPlaybackBinding::midi_input_node_for(timeline::ItemId track_id) const noexcept {
-    const auto found = std::find_if(tracks_.begin(), tracks_.end(),
+    auto state = state_.read();
+    if (!state) return 0;
+    const auto found = std::find_if(state->tracks.begin(), state->tracks.end(),
                                     [&](const auto& track) { return track->id == track_id; });
-    return found == tracks_.end() ? 0 : (*found)->midi_node;
+    return found == state->tracks.end() ? 0 : (*found)->midi_node;
 }
 
 playback::RendererProgramKey
 TimelineGraphPlaybackBinding::renderer_key_for(timeline::ItemId track_id) const noexcept {
-    const auto found = std::find_if(tracks_.begin(), tracks_.end(),
+    auto state = state_.read();
+    if (!state) return {};
+    const auto found = std::find_if(state->tracks.begin(), state->tracks.end(),
                                     [&](const auto& track) { return track->id == track_id; });
-    return found == tracks_.end() ? playback::RendererProgramKey{}
+    return found == state->tracks.end() ? playback::RendererProgramKey{}
                                   : (*found)->audio_renderer->active_key();
 }
 
 playback::RendererCarryState
 TimelineGraphPlaybackBinding::renderer_state_for(timeline::ItemId track_id) const noexcept {
-    const auto found = std::find_if(tracks_.begin(), tracks_.end(),
+    auto state = state_.read();
+    if (!state) return {};
+    const auto found = std::find_if(state->tracks.begin(), state->tracks.end(),
                                     [&](const auto& track) { return track->id == track_id; });
-    return found == tracks_.end() ? playback::RendererCarryState{}
+    return found == state->tracks.end() ? playback::RendererCarryState{}
                                   : (*found)->audio_renderer->state_snapshot();
 }
 
