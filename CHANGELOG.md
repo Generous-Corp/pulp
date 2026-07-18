@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07000"></a>
+## [0.700.0] - 2026-07-18
+
+- test(design-import): lock knob value-arc against a parked plain ring (6.2) ([#6264](https://github.com/danielraffel/pulp/pull/6264))
+- test(design-import): Claude DOM inline border/gradient/shadow reach codegen ([#6259](https://github.com/danielraffel/pulp/pull/6259))
+
 <a id="v06990"></a>
 ## [0.699.0] - 2026-07-18
 
@@ -6550,6 +6556,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.700.0]: https://github.com/danielraffel/pulp/releases/tag/v0.700.0
 [0.699.0]: https://github.com/danielraffel/pulp/releases/tag/v0.699.0
 [0.698.1]: https://github.com/danielraffel/pulp/releases/tag/v0.698.1
 [0.698.0]: https://github.com/danielraffel/pulp/releases/tag/v0.698.0
