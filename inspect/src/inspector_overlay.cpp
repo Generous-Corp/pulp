@@ -440,6 +440,21 @@ void InspectorOverlay::track_raw_history_view(View* v) {
     raw_history_views_.push_back(v);
 }
 
+// Capture a gesture undo target. Anchored when the gate holds AND the view
+// carries a non-empty anchor id — that path re-finds the CURRENT live view via
+// resolve_anchor() at replay, surviving a subtree rebuild. Otherwise the raw
+// pointer is captured and TRACKED so the rebuild seam clears the history before
+// a dangling closure runs.
+InspectorOverlay::GestureUndoTarget
+InspectorOverlay::capture_undo_target(View* v, bool anchored_gate) {
+    GestureUndoTarget t;
+    t.raw = v;
+    t.anchor = v ? v->anchor_id() : std::string{};
+    t.anchored = anchored_gate && !t.anchor.empty();
+    if (!t.anchored) track_raw_history_view(v);
+    return t;
+}
+
 // True if any tracked raw-pointer view has left the tree
 // (so its captured closures would deref freed memory). Pointer-compare only —
 // never dereferences a tracked pointer.
@@ -700,29 +715,30 @@ bool InspectorOverlay::commit_text_edit() {
         }
         if (edit_history_) {
             auto* self = this;
-            // For anchored targets the closures re-find the
-            // live view by anchor at replay time (resolve_anchor → nullptr no-op
-            // if a subtree rebuild freed it), so Cmd+Z after a live React rebuild
-            // never derefs a dangling raw pointer. For UN-anchored targets there
-            // is no anchor to re-find by, so we keep the raw `tgt` capture but
-            // TRACK it; rebuild_flat_tree() clears the history if that view ever
-            // leaves the tree, before these closures can run against freed memory.
-            if (!anchored) track_raw_history_view(tgt);
+            // Resolve the live target at replay time: for anchored targets by
+            // stable anchor (resolve_anchor → nullptr no-op if a subtree rebuild
+            // freed it), so Cmd+Z after a live React rebuild never derefs a
+            // dangling raw pointer; for UN-anchored targets the tracked raw
+            // pointer, cleared by rebuild_flat_tree() if the view leaves the
+            // tree. `anchored` here stays TweakStore-tied so the tweak
+            // apply/restore keeps its exact gating.
+            GestureUndoTarget target =
+                capture_undo_target(tgt, /*anchored_gate=*/tweak_store_ != nullptr);
             edit_history_->perform(
-                [self, tgt, anchor, path, new_text, anchored]() {
-                    View* live = anchored ? self->resolve_anchor(anchor) : tgt;
+                [self, target, anchor, path, new_text]() {
+                    View* live = target.resolve(*self);
                     if (!live) return;  // freed/un-resolvable → graceful no-op
                     set_editable_text_of(live, new_text);
-                    if (anchored && self->tweak_store_)
+                    if (target.anchored && self->tweak_store_)
                         self->tweak_store_->apply_tweak(
                             anchor, path,
                             choc::value::createString(new_text),
                             "inspector-text-edit");
                 },
-                [self, tgt, anchor, path, old_text, prior_val, anchored]() {
-                    View* live = anchored ? self->resolve_anchor(anchor) : tgt;
+                [self, target, anchor, path, old_text, prior_val]() {
+                    View* live = target.resolve(*self);
                     if (live) set_editable_text_of(live, old_text);
-                    if (!(anchored && self->tweak_store_)) return;
+                    if (!(target.anchored && self->tweak_store_)) return;
                     if (prior_val.has_value())
                         self->tweak_store_->apply_tweak(
                             anchor, path, *prior_val, "inspector-undo");
@@ -1976,15 +1992,22 @@ std::optional<bool> InspectorOverlay::mouse_active_resize(const MouseGesture& g)
                 std::vector<PriorTweak> after_tweaks =
                     snapshot_tweaks(anchor, {"layout.width", "layout.height",
                                              "transform.scale"});
+                // Resolve the live target by anchor at replay time (falling back
+                // to a tracked raw pointer when un-anchored) so undo after a live
+                // SUBTREE rebuild reverts the CURRENT view / no-ops instead of
+                // dereferencing the freed capture.
+                GestureUndoTarget target = capture_undo_target(tgt);
                 auto* self = this;
                 edit_history_->perform(
-                    [self, tgt, anchor, after, after_tweaks]() {
-                        self->restore_layout(tgt, after);
+                    [self, target, anchor, after, after_tweaks]() {
+                        if (View* live = target.resolve(*self))
+                            self->restore_layout(live, after);
                         self->restore_tweaks(anchor, after_tweaks,
                                              "inspector-drag-handle");
                     },
-                    [self, tgt, anchor, before, before_tweaks]() {
-                        self->restore_layout(tgt, before);
+                    [self, target, anchor, before, before_tweaks]() {
+                        if (View* live = target.resolve(*self))
+                            self->restore_layout(live, before);
                         self->restore_tweaks(anchor, before_tweaks,
                                              "inspector-undo");
                     },
@@ -2182,15 +2205,21 @@ std::optional<bool> InspectorOverlay::mouse_active_move(const MouseGesture& g) {
                     std::vector<PriorTweak> after_tweaks = snapshot_tweaks(
                         anchor,
                         {"layout.position", "layout.left", "layout.top"});
+                    // Resolve by anchor at replay (raw fallback tracked) so undo
+                    // after a live SUBTREE rebuild reverts the CURRENT view /
+                    // no-ops instead of dereferencing the freed capture.
+                    GestureUndoTarget target = capture_undo_target(tgt);
                     auto* self = this;
                     edit_history_->perform(
-                        [self, tgt, anchor, after, after_tweaks]() {
-                            self->restore_layout(tgt, after);
+                        [self, target, anchor, after, after_tweaks]() {
+                            if (View* live = target.resolve(*self))
+                                self->restore_layout(live, after);
                             self->restore_tweaks(anchor, after_tweaks,
                                                  "inspector-drag-move");
                         },
-                        [self, tgt, anchor, before, before_tweaks]() {
-                            self->restore_layout(tgt, before);
+                        [self, target, anchor, before, before_tweaks]() {
+                            if (View* live = target.resolve(*self))
+                                self->restore_layout(live, before);
                             self->restore_tweaks(anchor, before_tweaks,
                                                  "inspector-undo");
                         },
@@ -2273,52 +2302,45 @@ std::optional<bool> InspectorOverlay::mouse_active_move(const MouseGesture& g) {
                     // rebuild_flat_tree clears the history if it leaves the tree)
                     // when a participant carries no anchor. A child that can't be
                     // resolved → graceful no-op.
-                    const bool child_anchored = !child_anchor.empty();
-                    const bool new_parent_anchored = !new_parent_anchor.empty();
-                    const bool old_parent_anchored = !old_parent_anchor.empty();
-                    if (!child_anchored) track_raw_history_view(tgt);
-                    if (!new_parent_anchored) track_raw_history_view(after_parent);
-                    if (!old_parent_anchored) track_raw_history_view(before_parent);
+                    // Each participant (child, new parent, old parent) resolves
+                    // through the shared gesture-undo recorder: by stable anchor
+                    // at replay when anchored, else a TRACKED raw pointer that the
+                    // rebuild seam clears. A child that can't be resolved →
+                    // graceful no-op. `*_t.anchor` carries the same stable anchor
+                    // the source-emit sink needs.
+                    GestureUndoTarget child_t = capture_undo_target(tgt);
+                    GestureUndoTarget after_t = capture_undo_target(after_parent);
+                    GestureUndoTarget before_t = capture_undo_target(before_parent);
                     // do_fn re-applies the AFTER tree state; undo_fn restores
                     // BEFORE. reparent_to is the structural primitive (no-op
                     // when parent unchanged), order is rewritten directly.
                     edit_history_->perform(
-                        [self, tgt, after_parent, after_index, after_order,
-                         emit_source_reparent, child_anchor, new_parent_anchor,
-                         new_insert_after_anchor,
-                         child_anchored, new_parent_anchored]() {
-                            View* child = child_anchored
-                                ? self->resolve_anchor(child_anchor) : tgt;
+                        [self, child_t, after_t, after_index, after_order,
+                         emit_source_reparent, new_insert_after_anchor]() {
+                            View* child = child_t.resolve(*self);
                             if (!child) return;  // freed → graceful no-op
-                            View* np = new_parent_anchored
-                                ? self->resolve_anchor(new_parent_anchor)
-                                : after_parent;
+                            View* np = after_t.resolve(*self);
                             self->reparent_view(child, np, after_index);
                             child->flex().order = after_order;
                             if (np) np->invalidate_layout();
                             child->invalidate_layout();
                             if (emit_source_reparent && self->reparent_source_sink_)
                                 self->reparent_source_sink_(
-                                    {child_anchor, new_parent_anchor,
+                                    {child_t.anchor, after_t.anchor,
                                      new_insert_after_anchor});
                         },
-                        [self, tgt, before_parent, before_index, before_order,
-                         emit_source_reparent, child_anchor, old_parent_anchor,
-                         old_insert_after_anchor,
-                         child_anchored, old_parent_anchored]() {
-                            View* child = child_anchored
-                                ? self->resolve_anchor(child_anchor) : tgt;
+                        [self, child_t, before_t, before_index, before_order,
+                         emit_source_reparent, old_insert_after_anchor]() {
+                            View* child = child_t.resolve(*self);
                             if (!child) return;  // freed → graceful no-op
-                            View* op = old_parent_anchored
-                                ? self->resolve_anchor(old_parent_anchor)
-                                : before_parent;
+                            View* op = before_t.resolve(*self);
                             self->reparent_view(child, op, before_index);
                             child->flex().order = before_order;
                             if (op) op->invalidate_layout();
                             child->invalidate_layout();
                             if (emit_source_reparent && self->reparent_source_sink_)
                                 self->reparent_source_sink_(
-                                    {child_anchor, old_parent_anchor,
+                                    {child_t.anchor, before_t.anchor,
                                      old_insert_after_anchor});
                         },
                         "move-reflow");
