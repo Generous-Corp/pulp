@@ -60,6 +60,31 @@ bool id_less(const Clip& lhs, const Clip& rhs) noexcept {
 
 } // namespace
 
+bool SchemaIdentity::valid() const noexcept {
+    if (version == 0 || type_name.empty() || type_name.size() > 128)
+        return false;
+    bool segment_start = true;
+    bool saw_dot = false;
+    for (const auto raw : type_name) {
+        const auto value = static_cast<unsigned char>(raw);
+        if (value == '.') {
+            if (segment_start)
+                return false;
+            segment_start = true;
+            saw_dot = true;
+            continue;
+        }
+        const bool lower = value >= 'a' && value <= 'z';
+        const bool digit = value >= '0' && value <= '9';
+        if (segment_start && !lower)
+            return false;
+        if (!segment_start && !lower && !digit && value != '_')
+            return false;
+        segment_start = false;
+    }
+    return saw_dot && !segment_start;
+}
+
 runtime::Result<ItemId, ModelError> ItemIdAllocator::allocate() noexcept {
     if (next_ == 0 || next_ == std::numeric_limits<std::uint64_t>::max())
         return fail<ItemId>(ModelErrorCode::ItemIdExhausted);
@@ -97,6 +122,23 @@ runtime::Result<NoteContent, ModelError> NoteContent::replace_note(NoteEvent not
         return fail<NoteContent>(ModelErrorCode::MissingItem, note.id);
     *found = note;
     return create(std::move(replacement));
+}
+
+runtime::Result<RegisteredContent, ModelError>
+RegisteredContent::create_no_owned_ids(SchemaIdentity schema,
+                                       std::shared_ptr<const void> value) {
+    if (!schema.valid() || !value)
+        return fail<RegisteredContent>(ModelErrorCode::InvalidSchemaIdentity);
+    return runtime::Result<RegisteredContent, ModelError>(
+        runtime::Ok(RegisteredContent(std::move(schema), std::move(value))));
+}
+
+runtime::Result<OpaqueContent, ModelError>
+OpaqueContent::create(SchemaIdentity schema, std::string raw_json) {
+    if (!schema.valid() || raw_json.empty())
+        return fail<OpaqueContent>(ModelErrorCode::InvalidSchemaIdentity);
+    return runtime::Result<OpaqueContent, ModelError>(
+        runtime::Ok(OpaqueContent(std::move(schema), std::move(raw_json))));
 }
 
 struct Clip::Data {
@@ -677,11 +719,35 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
         return fail<Project>(ModelErrorCode::InvalidItemId, input.id);
     std::vector<ItemId> all_ids{input.id};
     std::uint64_t maximum_id = input.id.value;
-    for (const auto& asset : input.assets) {
+    for (auto& asset : input.assets) {
         if (!asset.id.valid())
             return fail<Project>(ModelErrorCode::InvalidItemId, asset.id);
         if (!asset.sample_rate.valid())
             return fail<Project>(ModelErrorCode::InvalidSampleRate, asset.id);
+        if (!asset.content_hash.valid())
+            return fail<Project>(ModelErrorCode::InvalidContentHash, asset.id);
+        for (const auto& locator : asset.locators)
+            if (locator.hint.empty())
+                return fail<Project>(ModelErrorCode::InvalidAssetLocator, asset.id);
+        std::vector<std::string_view> roles;
+        roles.reserve(asset.representations.size());
+        for (const auto& representation : asset.representations) {
+            if (!representation.content_hash.valid())
+                return fail<Project>(ModelErrorCode::InvalidContentHash, asset.id);
+            if (representation.role.empty())
+                return fail<Project>(ModelErrorCode::InvalidAssetLocator, asset.id);
+            roles.push_back(representation.role);
+            for (const auto& locator : representation.locators)
+                if (locator.hint.empty())
+                    return fail<Project>(ModelErrorCode::InvalidAssetLocator, asset.id);
+        }
+        std::sort(roles.begin(), roles.end());
+        if (std::adjacent_find(roles.begin(), roles.end()) != roles.end())
+            return fail<Project>(ModelErrorCode::DuplicateAssetRepresentation, asset.id);
+        std::sort(asset.representations.begin(), asset.representations.end(),
+                  [](const AssetRepresentation& lhs, const AssetRepresentation& rhs) {
+                      return lhs.role < rhs.role;
+                  });
         all_ids.push_back(asset.id);
         maximum_id = std::max(maximum_id, asset.id.value);
     }
@@ -920,6 +986,8 @@ void append_clip_ids(const Clip& clip, std::vector<ItemId>& ids) {
 }
 
 std::optional<ModelError> preflight(const Clip& clip) {
+    if (std::holds_alternative<OpaqueContent>(clip.content()))
+        return ModelError{ModelErrorCode::OpaqueContentCannotRemap, clip.id(), {}};
     std::vector<ItemId> ids;
     append_clip_ids(clip, ids);
     return validate_owned_ids(std::move(ids));
@@ -1085,6 +1153,12 @@ remap_ids(const Sequence& sequence, ItemIdAllocator& allocator, ExternalIdFixup 
 
 runtime::Result<RemappedProject, ModelError> remap_ids(const Project& project,
                                                        std::uint64_t first_id) {
+    for (const auto& sequence : project.sequences())
+        for (const auto& track : sequence.tracks())
+            for (const auto& clip : track.clips())
+                if (std::holds_alternative<OpaqueContent>(clip.content()))
+                    return fail<RemappedProject>(ModelErrorCode::OpaqueContentCannotRemap,
+                                                 clip.id());
     ItemIdAllocator allocator(first_id);
     IdRemapTable table;
     std::optional<ModelError> error = allocate_owned(table, allocator, project.id());

@@ -26,7 +26,12 @@ using namespace pulp::timebase;
 
 namespace {
 
-template <typename T> T take_value(pulp::runtime::Result<T, ModelError> result) {
+ContentHash content_hash(char digit = 'a') {
+    return *ContentHash::from_hex(std::string(64, digit));
+}
+
+template <typename T>
+T take_value(pulp::runtime::Result<T, ModelError> result) {
     REQUIRE(result.has_value());
     return std::move(result).value();
 }
@@ -52,8 +57,11 @@ Project make_project() {
     auto media_clip = clip({4}, 0, 100, MediaRef{{2}, {25}, 100});
     auto track = take_value(Track::create({6}, "track", {note_clip, media_clip}));
     auto sequence = take_value(Sequence::create({3}, "sequence", TickDuration{400}, {track}));
-    return take_value(Project::create(ProjectInput{
-        {1}, "project", 9, {3}, {{{2}, "audio.wav", 1'000, {48'000, 1}}}, {sequence}}));
+    return take_value(Project::create(ProjectInput{{1}, "project", 9, {3},
+                                                    {{{2}, "audio.wav", 1'000, {48'000, 1},
+                                                      content_hash(), AssetStoragePolicy::External,
+                                                       {}, {}}},
+                                                     {sequence}}));
 }
 
 } // namespace
@@ -107,8 +115,11 @@ TEST_CASE("Timeline construction rejects invalid ranges identities and reference
     auto range_track = take_value(Track::create({5}, "track", {out_of_asset}));
     auto range_sequence =
         take_value(Sequence::create({3}, "sequence", TickDuration{100}, {range_track}));
-    auto invalid_range = Project::create(ProjectInput{
-        {1}, "project", 6, {3}, {{{2}, "short.wav", 100, {48'000, 1}}}, {range_sequence}});
+    auto invalid_range = Project::create(
+        ProjectInput{{1}, "project", 6, {3},
+                     {{{2}, "short.wav", 100, {48'000, 1}, content_hash(),
+                        AssetStoragePolicy::External, {}, {}}},
+                      {range_sequence}});
     REQUIRE_FALSE(invalid_range.has_value());
     REQUIRE(invalid_range.error().code == ModelErrorCode::InvalidMediaRange);
 
@@ -129,6 +140,53 @@ TEST_CASE("Timeline construction rejects invalid ranges identities and reference
                      {take_value(Sequence::create({3}, "sequence", TickDuration{0}, {}))}});
     REQUIRE_FALSE(nonmonotonic.has_value());
     REQUIRE(nonmonotonic.error().code == ModelErrorCode::NextItemIdNotMonotonic);
+}
+
+TEST_CASE("Timeline assets separate content identity from resolution hints") {
+    MediaAsset asset{{2}, "audio", 1'000, {48'000, 1}, content_hash('b'),
+                     AssetStoragePolicy::PreferEmbedded,
+                     {{AssetLocatorKind::ExternalUri, "file:///music/audio.wav"}},
+                     {{"proxy", content_hash('c'), AssetStoragePolicy::Embedded,
+                       {{AssetLocatorKind::PackageRelative, "media/proxy.wav"}}}}};
+    auto sequence = take_value(Sequence::create({3}, "sequence", TickDuration{100}, {}));
+    auto project = Project::create(ProjectInput{{1}, "project", 4, {3}, {asset}, {sequence}});
+    REQUIRE(project.has_value());
+    REQUIRE(project.value().assets()[0].content_hash == content_hash('b'));
+    REQUIRE(project.value().assets()[0].representations[0].role == "proxy");
+
+    asset.locators[0].hint.clear();
+    auto bad_locator = Project::create(ProjectInput{{1}, "project", 4, {3}, {asset}, {sequence}});
+    REQUIRE_FALSE(bad_locator.has_value());
+    REQUIRE(bad_locator.error().code == ModelErrorCode::InvalidAssetLocator);
+
+    asset.locators = {};
+    asset.representations.push_back(asset.representations.front());
+    auto duplicate = Project::create(ProjectInput{{1}, "project", 4, {3}, {asset}, {sequence}});
+    REQUIRE_FALSE(duplicate.has_value());
+    REQUIRE(duplicate.error().code == ModelErrorCode::DuplicateAssetRepresentation);
+}
+
+TEST_CASE("Timeline registered content remaps while opaque content fails closed") {
+    const auto registered = take_value(RegisteredContent::create_no_owned_ids(
+        {"vendor.timeline.generator", 1}, std::make_shared<const int>(42)));
+    const auto registered_clip = clip({10}, 0, 100, registered);
+    ItemIdAllocator allocator(100);
+    auto registered_remap = remap_ids(registered_clip, allocator);
+    REQUIRE(registered_remap.has_value());
+    const auto& remapped_registered =
+        std::get<RegisteredContent>(registered_remap.value().clip.content());
+    REQUIRE(*remapped_registered.value_as<int>() == 42);
+    REQUIRE(allocator.next_value() == 101);
+
+    const auto opaque = take_value(OpaqueContent::create(
+        {"vendor.timeline.future", 7},
+        R"({"data":{"owned_id":"999"},"type_name":"vendor.timeline.future","version":7})"));
+    const auto opaque_clip = clip({11}, 0, 100, opaque);
+    const auto before = allocator.next_value();
+    auto opaque_remap = remap_ids(opaque_clip, allocator);
+    REQUIRE_FALSE(opaque_remap.has_value());
+    REQUIRE(opaque_remap.error().code == ModelErrorCode::OpaqueContentCannotRemap);
+    REQUIRE(allocator.next_value() == before);
 }
 
 TEST_CASE("Timeline ID allocation is monotonic and fails closed at exhaustion") {
