@@ -1,4 +1,5 @@
 #include "sampler_api.hpp"
+#include "sampler_heritage_state.hpp"
 #include "sampler_streaming_runtime.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -11,10 +12,12 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 using namespace pulp;
 
@@ -53,6 +56,62 @@ TemporarySamplerApiFiles make_sampler_api_wav() {
         throw std::runtime_error("failed to create sampler API fixture");
     }
     return files;
+}
+
+audio::SampleHeritageProfile sampler_state_profile() {
+    return {
+        .schema_version = audio::kSampleHeritageProfileSchemaVersion,
+        .profile_id = "neutral.sampler-state-v1",
+        .host_sample_rate = 48000.0,
+        .stages = {
+            {false, audio::SampleHeritageQuantizationStage{
+                        12, 0.5f, 0x1234,
+                        audio::SampleHeritageSeedPolicy::ContinueSerializedState}},
+            {false, audio::SampleHeritageNoiseStage{
+                        0.01f, 0x5678,
+                        audio::SampleHeritageSeedPolicy::ContinueSerializedState}},
+        },
+    };
+}
+
+audio::SampleHeritageRuntimeState sampler_runtime_state(
+    const audio::SampleHeritageProfile& profile) {
+    const auto prepared = audio::validate_sample_heritage_profile(profile);
+    if (!prepared.valid()) throw std::runtime_error("invalid heritage fixture");
+    audio::SampleHeritageRuntimeState state;
+    state.profile_schema_version = prepared.profile.schema_version;
+    std::copy(prepared.profile.id().begin(), prepared.profile.id().end(),
+              state.profile_id.begin());
+    state.profile_digest = prepared.profile.profile_digest;
+    state.rng_state_count = 2;
+    state.rng_states[0] = {
+        0, audio::SampleHeritageRuntimeRngStageType::Quantization, 0xabcdef};
+    state.rng_states[1] = {
+        1, audio::SampleHeritageRuntimeRngStageType::Noise, 0xfedcba};
+    return state;
+}
+
+void write_u32(std::vector<std::uint8_t>& bytes, std::size_t offset,
+               std::uint32_t value) {
+    bytes[offset] = static_cast<std::uint8_t>(value);
+    bytes[offset + 1] = static_cast<std::uint8_t>(value >> 8);
+    bytes[offset + 2] = static_cast<std::uint8_t>(value >> 16);
+    bytes[offset + 3] = static_cast<std::uint8_t>(value >> 24);
+}
+
+std::vector<std::uint8_t> sampler_state_envelope(std::string_view profile_json,
+                                                  std::string_view runtime_json) {
+    std::vector<std::uint8_t> bytes(examples::kSamplerHeritageStateHeaderBytes);
+    write_u32(bytes, 0, examples::kSamplerHeritageStateMagic);
+    bytes[4] = static_cast<std::uint8_t>(examples::kSamplerHeritageStateVersion);
+    bytes[6] = runtime_json.empty()
+        ? 0
+        : static_cast<std::uint8_t>(examples::kSamplerHeritageStateHasRuntime);
+    write_u32(bytes, 8, static_cast<std::uint32_t>(profile_json.size()));
+    write_u32(bytes, 12, static_cast<std::uint32_t>(runtime_json.size()));
+    bytes.insert(bytes.end(), profile_json.begin(), profile_json.end());
+    bytes.insert(bytes.end(), runtime_json.begin(), runtime_json.end());
+    return bytes;
 }
 
 }  // namespace
@@ -139,6 +198,185 @@ TEST_CASE("PulpSampler public result helpers expose bounded fixed names",
     constexpr std::string_view profile = "neutral.synthetic-v1";
     std::copy(profile.begin(), profile.end(), heritage.profile_id.begin());
     REQUIRE(heritage.profile() == profile);
+}
+
+TEST_CASE("PulpSampler heritage state round-trips canonical profile and RNG state",
+          "[audio][sampler][api][heritage-state]") {
+    examples::SamplerHeritagePersistentState source;
+    source.enabled = true;
+    source.profile = sampler_state_profile();
+    source.has_runtime_state = true;
+    source.runtime_state = sampler_runtime_state(source.profile);
+
+    const auto written = examples::write_sampler_heritage_state(source);
+    REQUIRE(written.valid());
+    REQUIRE(written.bytes.size() > examples::kSamplerHeritageStateHeaderBytes);
+    REQUIRE(written.bytes[0] == 'P');
+    REQUIRE(written.bytes[1] == 'S');
+    REQUIRE(written.bytes[2] == 'H');
+    REQUIRE(written.bytes[3] == 'S');
+
+    const auto parsed = examples::parse_sampler_heritage_state(written.bytes);
+    REQUIRE(parsed.valid());
+    REQUIRE(parsed.state.enabled);
+    REQUIRE(parsed.state.has_runtime_state);
+    REQUIRE(parsed.state.profile.profile_id == source.profile.profile_id);
+    REQUIRE(parsed.state.runtime_state.profile_digest ==
+            source.runtime_state.profile_digest);
+    REQUIRE(parsed.state.runtime_state.rng_state_count == 2);
+    REQUIRE(parsed.state.runtime_state.rng_states[1].random_state == 0xfedcba);
+    REQUIRE(examples::write_sampler_heritage_state(parsed.state).bytes ==
+            written.bytes);
+}
+
+TEST_CASE("PulpSampler empty legacy heritage state restores disabled defaults",
+          "[audio][sampler][api][heritage-state]") {
+    const auto parsed = examples::parse_sampler_heritage_state({});
+    REQUIRE(parsed.valid());
+    REQUIRE_FALSE(parsed.state.enabled);
+    REQUIRE_FALSE(parsed.state.has_runtime_state);
+
+    examples::SamplerHeritagePersistentState disabled;
+    const auto written = examples::write_sampler_heritage_state(disabled);
+    REQUIRE(written.valid());
+    REQUIRE(written.bytes.empty());
+}
+
+TEST_CASE("PulpSampler heritage envelope rejects malformed boundaries atomically",
+          "[audio][sampler][api][heritage-state]") {
+    examples::SamplerHeritagePersistentState source;
+    source.enabled = true;
+    source.profile = sampler_state_profile();
+    const auto valid = examples::write_sampler_heritage_state(source).bytes;
+    REQUIRE_FALSE(valid.empty());
+
+    auto require_rejected = [](const std::vector<std::uint8_t>& bytes,
+                               examples::SamplerHeritageStateStatus status) {
+        const auto parsed = examples::parse_sampler_heritage_state(bytes);
+        REQUIRE(parsed.status == status);
+        REQUIRE_FALSE(parsed.state.enabled);
+        REQUIRE_FALSE(parsed.state.has_runtime_state);
+        REQUIRE(parsed.state.profile.profile_id.empty());
+    };
+
+    auto bad_magic = valid;
+    bad_magic[0] ^= 0xff;
+    require_rejected(bad_magic, examples::SamplerHeritageStateStatus::BadMagic);
+
+    auto bad_version = valid;
+    bad_version[4] = 2;
+    require_rejected(bad_version,
+                     examples::SamplerHeritageStateStatus::UnsupportedVersion);
+
+    auto bad_flags = valid;
+    bad_flags[6] = 0x80;
+    require_rejected(bad_flags,
+                     examples::SamplerHeritageStateStatus::UnsupportedFlags);
+
+    require_rejected(std::vector<std::uint8_t>(valid.begin(), valid.begin() + 15),
+                     examples::SamplerHeritageStateStatus::Truncated);
+    auto truncated = valid;
+    truncated.pop_back();
+    require_rejected(truncated, examples::SamplerHeritageStateStatus::Truncated);
+
+    auto overflow = valid;
+    write_u32(overflow, 8, std::numeric_limits<std::uint32_t>::max());
+    require_rejected(overflow,
+                     examples::SamplerHeritageStateStatus::LengthOutOfRange);
+
+    auto trailing = valid;
+    trailing.push_back(0);
+    require_rejected(trailing, examples::SamplerHeritageStateStatus::TrailingBytes);
+
+    auto flag_length_disagree = valid;
+    flag_length_disagree[6] = examples::kSamplerHeritageStateHasRuntime;
+    require_rejected(flag_length_disagree,
+                     examples::SamplerHeritageStateStatus::LengthOutOfRange);
+}
+
+TEST_CASE("PulpSampler heritage state requires valid canonical JSON",
+          "[audio][sampler][api][heritage-state]") {
+    examples::SamplerHeritagePersistentState source;
+    source.enabled = true;
+    source.profile = sampler_state_profile();
+    auto valid = examples::write_sampler_heritage_state(source).bytes;
+    REQUIRE_FALSE(valid.empty());
+
+    auto invalid = valid;
+    invalid[examples::kSamplerHeritageStateHeaderBytes] = '!';
+    REQUIRE(examples::parse_sampler_heritage_state(invalid).status ==
+            examples::SamplerHeritageStateStatus::InvalidProfileJson);
+
+    auto noncanonical = valid;
+    noncanonical.insert(noncanonical.begin() +
+                            examples::kSamplerHeritageStateHeaderBytes,
+                        ' ');
+    write_u32(noncanonical, 8,
+              static_cast<std::uint32_t>(noncanonical.size() -
+                                         examples::kSamplerHeritageStateHeaderBytes));
+    REQUIRE(examples::parse_sampler_heritage_state(noncanonical).status ==
+            examples::SamplerHeritageStateStatus::NonCanonicalProfileJson);
+}
+
+TEST_CASE("PulpSampler heritage state rejects runtime identity and layout mismatch",
+          "[audio][sampler][api][heritage-state]") {
+    examples::SamplerHeritagePersistentState source;
+    source.enabled = true;
+    source.profile = sampler_state_profile();
+    source.has_runtime_state = true;
+    source.runtime_state = sampler_runtime_state(source.profile);
+
+    auto wrong_digest = source;
+    wrong_digest.runtime_state.profile_digest[0] ^= 0xff;
+    REQUIRE(examples::write_sampler_heritage_state(wrong_digest).status ==
+            examples::SamplerHeritageStateStatus::RuntimeProfileMismatch);
+    REQUIRE(examples::write_sampler_heritage_state(wrong_digest).bytes.empty());
+
+    auto wrong_layout = source;
+    wrong_layout.runtime_state.rng_states[1].stage_index = 0;
+    REQUIRE(examples::write_sampler_heritage_state(wrong_layout).status ==
+            examples::SamplerHeritageStateStatus::RuntimeStageLayoutMismatch);
+    REQUIRE(examples::write_sampler_heritage_state(wrong_layout).bytes.empty());
+
+    auto invalid_runtime = source;
+    invalid_runtime.runtime_state.rng_states[0].random_state = 0;
+    REQUIRE(examples::write_sampler_heritage_state(invalid_runtime).status ==
+            examples::SamplerHeritageStateStatus::InvalidRuntimeJson);
+    REQUIRE(examples::write_sampler_heritage_state(invalid_runtime).bytes.empty());
+
+    const auto profile_json =
+        audio::write_sample_heritage_profile_json(source.profile);
+    REQUIRE(profile_json.valid());
+
+    const auto valid_runtime_json =
+        audio::write_sample_heritage_runtime_state_json(source.runtime_state);
+    REQUIRE(valid_runtime_json.valid());
+    auto invalid_runtime_envelope = sampler_state_envelope(
+        profile_json.json, valid_runtime_json.json);
+    const auto profile_size = profile_json.json.size();
+    invalid_runtime_envelope[examples::kSamplerHeritageStateHeaderBytes +
+                             profile_size] = '!';
+    REQUIRE(examples::parse_sampler_heritage_state(invalid_runtime_envelope).status ==
+            examples::SamplerHeritageStateStatus::InvalidRuntimeJson);
+
+    auto mismatched_runtime = source.runtime_state;
+    mismatched_runtime.profile_digest[0] ^= 0xff;
+    const auto mismatch_json =
+        audio::write_sample_heritage_runtime_state_json(mismatched_runtime);
+    REQUIRE(mismatch_json.valid());
+    REQUIRE(examples::parse_sampler_heritage_state(
+                sampler_state_envelope(profile_json.json, mismatch_json.json)).status ==
+            examples::SamplerHeritageStateStatus::RuntimeProfileMismatch);
+
+    auto mismatched_layout = source.runtime_state;
+    mismatched_layout.rng_states[0].stage_type =
+        audio::SampleHeritageRuntimeRngStageType::Noise;
+    const auto layout_json =
+        audio::write_sample_heritage_runtime_state_json(mismatched_layout);
+    REQUIRE(layout_json.valid());
+    REQUIRE(examples::parse_sampler_heritage_state(
+                sampler_state_envelope(profile_json.json, layout_json.json)).status ==
+            examples::SamplerHeritageStateStatus::RuntimeStageLayoutMismatch);
 }
 
 TEST_CASE("Sampler streaming runtime propagates detailed file admission results",
