@@ -176,8 +176,14 @@ All signal processors live in the `signal` module. Each is a standalone, statele
 | FFT | usable | [signal](modules.md#signal) | |
 | Windowing functions | usable | [signal](modules.md#signal) | |
 | SmoothedValue | usable | [signal](modules.md#signal) | |
+| Modal synthesis bank + strike/pickup weighting | usable | [signal](modules.md#signal) | modal specification fixtures |
+| Versioned modal-spec JSON loading and validation | usable | [signal](modules.md#signal) | modal specification fixtures |
+| Circuit-derived bridged-T resonator | usable | [signal](modules.md#signal) | |
+| Band-limited square-oscillator bank | usable | [signal](modules.md#signal) | |
 
-Key headers: all under `pulp/signal/` -- e.g., `pulp/signal/compressor.hpp`, `pulp/signal/osc/va.hpp`
+Key headers: all under `pulp/signal/` -- e.g., `pulp/signal/compressor.hpp`,
+`pulp/signal/modal_bank.hpp`, `pulp/signal/modal_spec.hpp`,
+`pulp/signal/bridged_t_resonator.hpp`, `pulp/signal/osc/va.hpp`
 
 Oscillators live in `pulp/signal/osc/`: a phase accumulator, the polyBLEP/BLAMP
 kernels, and the virtual-analog shapes built from them, with hard sync and

@@ -149,7 +149,7 @@ target_link_libraries(pulp-test-matrix-sampler PRIVATE pulp::format pulp::signal
 target_include_directories(pulp-test-matrix-sampler PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpSampler)
 catch_discover_tests(pulp-test-matrix-sampler)
 # Harness support lib: Processor-driven helpers; file-analysis lives in pulp::audio-analysis (tools/audio/analysis). See test/support/README.md.
-add_library(pulp-audio-test-support STATIC support/audio_signal_generators.cpp support/render_scenario.cpp support/audio_contracts.cpp support/audio_doctor.cpp support/wav_bridge.cpp support/osc_wav_scenario.cpp)
+add_library(pulp-audio-test-support STATIC support/audio_signal_generators.cpp support/render_scenario.cpp support/audio_contracts.cpp support/audio_doctor.cpp support/wav_bridge.cpp support/osc_wav_scenario.cpp support/modal_analysis.cpp)
 target_link_libraries(pulp-audio-test-support PUBLIC pulp::format pulp::signal pulp::audio-analysis pulp::audio)
 add_executable(pulp-test-golden test_golden_audio.cpp)
 target_link_libraries(pulp-test-golden PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
@@ -256,6 +256,12 @@ if(PULP_HAS_CLAP)
     target_compile_definitions(pulp-test-adapter-audio-parity PRIVATE PULP_CLAP_GUI=1)
     catch_discover_tests(pulp-test-adapter-audio-parity)
 endif()
+
+# Mode-estimator calibration: renders known modes and measures them back, so its
+# fixtures are source-owned and it needs no example plugin.
+add_executable(pulp-test-modal-analysis test_modal_analysis.cpp)
+target_link_libraries(pulp-test-modal-analysis PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-modal-analysis PROPERTIES TIMEOUT 300)
 # Measured-versus-reported latency. Its fixture is a source-owned delay line, so
 # it needs no example plugin.
 add_executable(pulp-test-latency-contract test_latency_contract.cpp)
