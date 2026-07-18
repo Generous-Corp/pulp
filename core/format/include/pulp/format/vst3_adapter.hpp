@@ -34,6 +34,7 @@
 #include <pulp/midi/mpe_voice_tracker.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/signal/delay_line.hpp>
+#include <pulp/runtime/alive_token.hpp>
 
 #include <array>
 #include <atomic>
@@ -187,6 +188,9 @@ private:
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
+    // Declared after processor_ so reverse member destruction retires retained
+    // editor handles before either referenced object is released.
+    runtime::AliveToken owner_alive_;
 
     // Working buffers
     std::vector<float*> input_ptrs_;

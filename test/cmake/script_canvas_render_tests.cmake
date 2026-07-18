@@ -9,6 +9,10 @@ pulp_add_test_suite(pulp-test-auto-ui LIBRARIES pulp::view)
 
 # ViewBridge lifecycle tests
 pulp_add_test_suite(pulp-test-view-bridge LIBRARIES pulp::format)
+catch_discover_tests(pulp-test-view-bridge
+    TEST_SPEC "[lifecycle]"
+    TEST_PREFIX "lifecycle::"
+    PROPERTIES LABELS lifecycle)
 
 # Remote View Protocol loopback tests.
 pulp_add_test_suite(pulp-test-remote-view LIBRARIES pulp::format pulp::runtime)

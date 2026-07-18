@@ -142,6 +142,10 @@ if(APPLE AND NOT PULP_IOS)
 endif()
 target_link_libraries(pulp-test-view-host-bridge PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-view-host-bridge)
+catch_discover_tests(pulp-test-view-host-bridge
+    TEST_SPEC "[lifecycle]"
+    TEST_PREFIX "lifecycle::"
+    PROPERTIES LABELS lifecycle)
 # Scan blacklist
 add_executable(pulp-test-scan-blacklist test_scan_blacklist.cpp)
 target_link_libraries(pulp-test-scan-blacklist PRIVATE pulp::host Catch2::Catch2WithMain)

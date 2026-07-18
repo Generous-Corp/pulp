@@ -355,6 +355,146 @@ OSStatus auv2_test_transport_state(void* user_data,
 
 } // namespace
 
+TEST_CASE("AU adapters retire editor owner tokens before processor/store teardown",
+          "[au][editor][crash][owner-lifetime][lifecycle]") {
+    ScopedFactoryRegistration registration(create_effect_processor);
+
+    SECTION("AU v2 Cocoa editor context") {
+        pulp::runtime::AliveToken::Handle owner_alive;
+        {
+            pulp::format::au::PulpAUEffect effect(nullptr);
+            pulp::format::au::PulpEditorContext ctx{};
+            REQUIRE(effect.GetProperty(pulp::format::au::kPulpEditorContextProperty,
+                                       kAudioUnitScope_Global, 0, &ctx) == noErr);
+            REQUIRE(ctx.processor != nullptr);
+            REQUIRE(ctx.store != nullptr);
+            owner_alive = ctx.owner_alive;
+            REQUIRE(pulp::runtime::AliveToken::is_alive(owner_alive));
+        }
+        REQUIRE_FALSE(pulp::runtime::AliveToken::is_alive(owner_alive));
+    }
+
+    SECTION("AU v3 retained view-controller handle") {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstE';
+        desc.componentManufacturer = 'Plup';
+        NSError* error = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&error];
+        REQUIRE(unit != nil);
+        REQUIRE(error == nil);
+        auto owner_alive = [unit pulpOwnerAlive];
+        REQUIRE(pulp::runtime::AliveToken::is_alive(owner_alive));
+        [unit release];
+        REQUIRE_FALSE(pulp::runtime::AliveToken::is_alive(owner_alive));
+    }
+}
+
+TEST_CASE("AU adapters survive repeated allocate render deallocate destroy cycles",
+          "[au][lifecycle][churn]") {
+    ScopedFactoryRegistration registration(create_effect_processor);
+
+    SECTION("AU v2 initialize and cleanup") {
+        constexpr UInt32 kFrames = 64;
+        AudioStreamBasicDescription format{};
+        format.mSampleRate = 48000.0;
+        format.mFormatID = kAudioFormatLinearPCM;
+        format.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked |
+                              kAudioFormatFlagIsNonInterleaved;
+        format.mBytesPerPacket = sizeof(float);
+        format.mFramesPerPacket = 1;
+        format.mBytesPerFrame = sizeof(float);
+        format.mChannelsPerFrame = 2;
+        format.mBitsPerChannel = 32;
+
+        struct StereoBufferList {
+            AudioBufferList list;
+            AudioBuffer extra[1];
+        };
+        for (int cycle = 0; cycle < 200; ++cycle) {
+            pulp::format::au::PulpAUEffect effect(nullptr);
+            // Direct construction bypasses AUBase's component dispatch, so
+            // mirror the SDK host sequence explicitly before rendering.
+            effect.CreateElements();
+            REQUIRE(effect.Input(0).SetStreamFormat(format) == noErr);
+            REQUIRE(effect.Output(0).SetStreamFormat(format) == noErr);
+            UInt32 max_frames = kFrames;
+            REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                               kAudioUnitScope_Global, 0,
+                                               &max_frames, sizeof(max_frames)) == noErr);
+            REQUIRE(effect.DoInitialize() == noErr);
+
+            float in_l[kFrames] = {};
+            float in_r[kFrames] = {};
+            float out_l[kFrames] = {};
+            float out_r[kFrames] = {};
+            StereoBufferList input{};
+            input.list.mNumberBuffers = 2;
+            input.list.mBuffers[0] = {1, kFrames * sizeof(float), in_l};
+            input.list.mBuffers[1] = {1, kFrames * sizeof(float), in_r};
+            StereoBufferList output{};
+            output.list.mNumberBuffers = 2;
+            output.list.mBuffers[0] = {1, kFrames * sizeof(float), out_l};
+            output.list.mBuffers[1] = {1, kFrames * sizeof(float), out_r};
+            AudioUnitRenderActionFlags flags = 0;
+            const UInt32 frames = cycle % 2 == 0 ? 32 : kFrames;
+            REQUIRE(effect.ProcessBufferLists(
+                        flags, input.list, output.list, frames) == noErr);
+            effect.DoCleanup();
+        }
+    }
+
+    SECTION("AU v3 allocate, render, deallocate, release") {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstE';
+        desc.componentManufacturer = 'Plup';
+        constexpr UInt32 kFrames = 64;
+
+        for (int cycle = 0; cycle < 200; ++cycle) {
+            @autoreleasepool {
+                NSError* error = nil;
+                PulpAudioUnit* unit =
+                    [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                               options:0
+                                                                 error:&error];
+                REQUIRE(unit != nil);
+                REQUIRE(error == nil);
+                unit.maximumFramesToRender = kFrames;
+                NSError* allocate_error = nil;
+                REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+                REQUIRE(allocate_error == nil);
+
+                float left[kFrames] = {};
+                float right[kFrames] = {};
+                struct StereoBufferList {
+                    AudioBufferList list;
+                    AudioBuffer extra[1];
+                } output{};
+                output.list.mNumberBuffers = 2;
+                const UInt32 frames = cycle % 2 == 0 ? 32 : kFrames;
+                const auto bytes = static_cast<UInt32>(frames * sizeof(float));
+                output.list.mBuffers[0] = {1, bytes, left};
+                output.list.mBuffers[1] = {1, bytes, right};
+
+                AudioUnitRenderActionFlags flags = 0;
+                AudioTimeStamp timestamp{};
+                timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+                timestamp.mSampleTime = cycle * kFrames;
+                AUInternalRenderBlock block = [unit internalRenderBlock];
+                REQUIRE(block != nil);
+                REQUIRE(block(&flags, &timestamp, frames, 0, &output.list, nil, nil) == noErr);
+
+                [unit deallocateRenderResources];
+                [unit release];
+            }
+        }
+    }
+}
+
 TEST_CASE("AU v2 effect SaveState/RestoreState round-trips plugin-owned payload",
           "[au][auv2][state]") {
     ScopedFactoryRegistration registration(create_effect_processor);
