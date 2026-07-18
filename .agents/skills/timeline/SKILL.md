@@ -1,6 +1,6 @@
 ---
 name: timeline
-description: Pulp immutable timeline document model, typed clip commands, atomic transactions, bounded journal, and inverse-command undo.
+description: Pulp immutable timeline model, typed command transactions, bounded journal and undo, durable assets, schema registry, and exact JSON persistence.
 ---
 
 # Timeline document model
@@ -28,6 +28,26 @@ invariants.
   are positive, pitch is MIDI 0-127, and channel is 0-15.
 - `MediaRef` ranges are checked locally for overflow and against their asset at
   project construction.
+- A media asset's SHA-256 `ContentHash` is its durable identity. Locators are
+  optional late-resolution hints; representations have distinct hashes and
+  unique roles. Missing local media is valid document state.
+- Persistence uses canonical JSON envelopes with `data`, `type_name`, and
+  integer `version`. All 64-bit IDs, positions, counts, durations, and rate
+  components are canonical decimal JSON strings; never encode them as JSON
+  numbers or floating point.
+- Build a `SchemaRegistry` explicitly with `SchemaRegistryBuilder`; there is no
+  global mutable registry. Registered content codecs are typed, `noexcept`, and
+  own no hidden `ItemId`s in Phase 1. Migration callbacks must return and verify
+  each complete intermediate envelope.
+- Unknown or future extension content is retained as exact validated envelope
+  bytes. Saving may splice those bytes unchanged and reports
+  `has_opaque_objects`; ID remapping must fail closed for any opaque subtree.
+- Decode through `DecodeLimits`. Keep input size, depth, value/member/array and
+  domain object limits enforced before growth. Duplicate object keys, malformed
+  UTF-8/surrogates, noncanonical wide integers, and non-normalized rates fail.
+- `serialize_project()` and `deserialize_project()` do not implement a ZIP or
+  package container. Asset locators describe possible package-relative bytes,
+  but container I/O belongs to a later slice.
 - Project and subtree remapping are two-pass: allocate all owned IDs first, then
   rebuild the snapshot and fix references. `MediaRef::asset_id` is external to
   Clip/Track/Sequence remaps and is translated by `ExternalIdFixup`; failure is
@@ -68,16 +88,18 @@ invariants.
 
 ## Scope boundary
 
-This slice does not own persistence/schema codecs, a durable `JournalSink`,
-playback, automation, launch slots, takes, nesting, devices, routing, audio,
-format adapters, or UI. Add those in their scheduled slices instead of widening
-the command core opportunistically.
+This slice does not own a durable `JournalSink`, package/container I/O,
+publication, playback, automation, launch slots, takes, nesting, devices,
+routing, audio, format adapters, or UI. Add those in their scheduled slices
+instead of widening the command and persistence core opportunistically.
 
 ## Validation
 
-Build and run `pulp-test-timeline-model` plus the commands, transactions,
-journal, and undo suites in Release and UBSan configurations.
+Build and run `pulp-test-timeline-model`, the commands, transactions, journal,
+and undo suites, plus `pulp-test-timeline-schema-registry` and
+`pulp-test-timeline-persistence` in Release and UBSan configurations.
 Keep the 10k-clip edit test proving bounded node creation, subtree sharing, and
 reclamation; a vector rebuild is not an acceptable persistent-index substitute.
-Also verify installed-header consumption and that timeline translation units do
-not include or link `pulp::format`, `pulp::host`, or `pulp::view`.
+Also verify installed-header consumption, `-fno-exceptions -fno-rtti`, and that
+timeline translation units do not include or link `pulp::format`, `pulp::host`,
+or `pulp::view`.

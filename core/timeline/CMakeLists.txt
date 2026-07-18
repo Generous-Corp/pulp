@@ -7,6 +7,9 @@ add_library(pulp-timeline
     src/model.cpp
     src/transaction.cpp
     src/undo.cpp
+    src/schema_json.cpp
+    src/schema_registry.cpp
+    src/serialize.cpp
 )
 add_library(pulp::timeline ALIAS pulp-timeline)
 
@@ -21,3 +24,7 @@ target_link_libraries(pulp-timeline
         pulp::runtime
         pulp::timebase
 )
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(pulp-timeline PRIVATE -fno-exceptions -fno-rtti)
+endif()
