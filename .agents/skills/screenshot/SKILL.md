@@ -49,24 +49,38 @@ below. The image-compositing rule still applies to the raster backends.
 
 | Backend | Composites file-backed images? | Use when |
 |---------|-------------------------------|----------|
-| `skia` | **Yes** | Default for anything real — designs with assets (Figma/Pencil imports), icons, photos |
-| `coregraphics` (macOS default of `default_backend`) | **No** | Vector-only UIs, or when you specifically want the CG path |
-| `default_backend` | macOS → CoreGraphics, else provider | Avoid for asset-heavy UIs |
+| `skia` | **Yes** | Default for anything real — designs with assets (Figma/Pencil imports), icons, photos; the fidelity reference |
+| `coregraphics` (macOS default of `default_backend`) | **Yes, as of #6223** | Vector-only UIs, or when you specifically want the CG raster path |
+| `default_backend` | macOS → CoreGraphics, else provider | Fine for images now; still prefer `skia` for import fidelity |
 
-**Why it matters (the trap):** `ImageView::paint`
-(`core/view/src/widgets/visualizers.cpp`) decodes images on-paint via the
-canvas's `draw_image_from_file` / `measure_image_from_file` primitive.
-`SkiaCanvas` implements it; the **CoreGraphics canvas does not**. On the CG
-path every `ImageView` falls back to drawing its **filename as placeholder
-text** — so an asset-rich import renders as empty boxes with `*.png` strings
-scattered across it. That looks like "missing images / broken importer," but
-the import is fine — it's the backend. Vector widgets (knobs, faders drawn via
-canvas primitives) render on both backends, which makes the CG render
-*partially* right and even more misleading.
+**History (the trap — fixed #6223 S34):** `ImageView::paint` decodes images
+on-paint via the canvas's `draw_image_from_file` / `measure_image_from_file`
+primitive. `SkiaCanvas` always implemented it; the **CoreGraphics canvas did
+not**, so every `ImageView` on the CG path fell back to drawing its **filename
+as placeholder text** — an asset-rich import rendered as empty boxes with
+`*.png` strings scattered across it. That looked like "missing images / broken
+importer," but the import was fine — it was the backend. `#6223 S34` wired the
+existing ImageIO decoder (`cg_decode_image_from_path_or_data`) into
+`CoreGraphicsCanvas::draw_image_from_file{,_rect}` /
+`draw_image_from_data{,_rect}` / `measure_image_from_file`, so **CG now
+composites file-backed images** (right-side-up; the decoded CGImage is drawn
+straight into the flipped canvas CTM — no counter-flip, unlike the
+bottom-up conic-gradient bitmap). `Canvas::supports_image_draw()` (default
+false; `SkiaCanvas` + `CoreGraphicsCanvas` return true) is the capability query
+headless tooling can consult to warn instead of rendering unfaithfully.
 
-Confirmed 2026-06-02 on the ELYSIUM Figma import: CoreGraphics → empty vessel
-boxes + filename text; Skia → the gradient beakers/knobs/curves all composite
-and the montage matches the Figma reference.
+**Still prefer Skia for import fidelity.** CG compositing works, but its raster
+of gradients / anti-aliasing / sub-pixel placement differs from the live GPU
+(Skia/Graphite) compositor an import ultimately runs on. Skia raster matches
+that path far more closely, so it stays the fidelity reference for
+`pulp import-design --validate` and montage comparisons. Behaviorally, expect
+old CoreGraphics screenshot baselines of asset-bearing views to **shift** now
+that images actually render (filename text → real pixels).
+
+Confirmed 2026-06-02 on the ELYSIUM Figma import (pre-#6223): CoreGraphics →
+empty vessel boxes + filename text; Skia → the gradient beakers/knobs/curves
+all composite and the montage matches the Figma reference. Post-#6223 both
+backends composite the images; Skia still wins on gradient/AA fidelity.
 
 ## Imported-design validation
 
@@ -201,8 +215,10 @@ session only).
   (`PULP_HAS_SKIA` FALSE → `MacWindowHost`, not `MacGpuWindowHost`). Verify the
   binary contains `MacGpuWindowHost` before trusting a live capture (see the
   `import-design` skill's GPU-host gotcha).
-- Never show the user a CoreGraphics render of an asset-rich design and call it
-  the import result — re-render with Skia first.
+- Don't call a CoreGraphics render of an asset-rich design the import result —
+  re-render with Skia first. Post-#6223 CG does composite the images, but its
+  gradient/AA raster still differs from the live GPU compositor an import runs
+  on; Skia is the fidelity reference.
 - **A non-empty PNG is not a passing render.** `ScreenshotStats::passes_content_floor`
   (`core/view/include/pulp/view/screenshot_compare.hpp`) is the oracle that catches
   the blank/near-blank-frame bug a raw "file written" check misses: it gates on a
