@@ -17,6 +17,23 @@ static_assert(!std::is_copy_constructible_v<WriterToken>);
 static_assert(!std::is_copy_assignable_v<WriterToken>);
 static_assert(std::is_move_constructible_v<WriterToken>);
 
+TEST_CASE("Map command failure leaves session revision journal and snapshot atomic") {
+    const auto initial = make_project();
+    auto session = std::move(DocumentSession::create(initial)).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto tx = session_transaction(
+        writer, {},
+        {SetTempoMap{initial.tempo_map(), make_tempo_map(88.0)},
+         SetMeterMap{make_meter_map({7, 8}), make_meter_map({3, 4})}});
+    auto rejected = session->submit(writer, std::move(tx));
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::ExpectedValueMismatch);
+    REQUIRE(session->revision() == DocumentRevision{});
+    REQUIRE(session->journal().entries().empty());
+    REQUIRE(session->snapshot()->tempo_map() == initial.tempo_map());
+    REQUIRE(session->snapshot()->meter_map() == initial.meter_map());
+}
+
 TEST_CASE("Timeline transaction rejection is atomic at every command position") {
     const auto original = make_project();
     const auto range = clip(original).time_range();

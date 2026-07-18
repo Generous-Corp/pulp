@@ -42,6 +42,12 @@ std::size_t saturated_add(std::size_t lhs, std::size_t rhs) noexcept {
                : lhs + rhs;
 }
 
+std::size_t saturated_multiply(std::size_t lhs, std::size_t rhs) noexcept {
+    return lhs != 0 && rhs > std::numeric_limits<std::size_t>::max() / lhs
+               ? std::numeric_limits<std::size_t>::max()
+               : lhs * rhs;
+}
+
 std::size_t clip_retained_size(const Clip& clip) noexcept {
     auto size = sizeof(Clip);
     if (const auto* notes = std::get_if<NoteContent>(&clip.content()))
@@ -97,10 +103,12 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                        left.clip_id == right.clip_id && left.note_id == right.note_id &&
                        left.expected_velocity == right.expected_velocity &&
                        left.replacement_velocity == right.replacement_velocity;
-            } else {
+            } else if constexpr (std::is_same_v<T, SetClipPlaybackProperties>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.expected == right.expected &&
                        left.replacement == right.replacement;
+            } else {
+                return left.expected == right.expected && left.replacement == right.replacement;
             }
         },
         lhs);
@@ -125,6 +133,18 @@ std::size_t retained_size(const Command& command) noexcept {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, InsertClip>)
                 return saturated_add(sizeof(T), clip_retained_size(value.clip));
+            if constexpr (std::is_same_v<T, SetTempoMap>)
+                return saturated_add(sizeof(T),
+                                     saturated_multiply(
+                                         saturated_add(value.expected.points().size(),
+                                                       value.replacement.points().size()),
+                                         sizeof(timebase::TempoPoint)));
+            if constexpr (std::is_same_v<T, SetMeterMap>)
+                return saturated_add(sizeof(T),
+                                     saturated_multiply(
+                                         saturated_add(value.expected.points().size(),
+                                                       value.replacement.points().size()),
+                                         sizeof(timebase::MeterPoint)));
             return sizeof(T);
         },
         command);

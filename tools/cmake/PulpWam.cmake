@@ -50,6 +50,8 @@ set(_PULP_WAM_INCLUDES
     ${_PULP_WAM_ROOT}/core/platform/include
     ${_PULP_WAM_ROOT}/core/runtime/include
     ${_PULP_WAM_ROOT}/core/timebase/include
+    ${_PULP_WAM_ROOT}/core/timeline/include
+    ${_PULP_WAM_ROOT}/core/playback/include
     ${_PULP_WAM_ROOT}/core/state/include
     ${_PULP_WAM_ROOT}/core/audio/include
     ${_PULP_WAM_ROOT}/core/midi/include
@@ -71,6 +73,24 @@ set(_PULP_WAM_INCLUDES
 set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/timebase/src/compiled_meter_map.cpp
     ${_PULP_WAM_ROOT}/core/timebase/src/compiled_tempo_map.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/assets.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/command.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/document_session.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/identity_directory.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/journal.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/model.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/schema_json.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/schema_registry.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/serialize.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/transaction.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/undo.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/audio_renderer.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/compile_executor.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/note_renderer.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/program.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/program_compiler.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/stable_renderer_shell.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/transport.cpp
     ${_PULP_WAM_ROOT}/core/audio/src/wav_decoder.cpp
     ${_PULP_WAM_ROOT}/core/runtime/src/runtime.cpp
     ${_PULP_WAM_ROOT}/core/runtime/src/identity.cpp
@@ -89,6 +109,7 @@ set(_PULP_WAM_SINGLE_ENTRY ${_PULP_WAM_ROOT}/core/format/src/wasm/wam_entry.cpp)
 set(_PULP_WAM_CHAIN_ENTRY  ${_PULP_WAM_ROOT}/core/format/src/wasm/wam_chain_entry.cpp)
 
 add_library(pulp-wam-dsp OBJECT ${_PULP_WAM_CORE_SOURCES})
+target_compile_features(pulp-wam-dsp PUBLIC cxx_std_20)
 target_include_directories(pulp-wam-dsp PUBLIC ${_PULP_WAM_INCLUDES})
 # PULP_WASM / PULP_HEADLESS are FACTS about this lane, not per-target options:
 # this file hard-returns unless EMSCRIPTEN (see the guard above), and a WAM
@@ -99,7 +120,8 @@ target_include_directories(pulp-wam-dsp PUBLIC ${_PULP_WAM_INCLUDES})
 # Keeping them symmetric with the WebCLAP lane is what makes "same header,
 # bit-identical DSP across WAM and WebCLAP" true by construction instead of by
 # convention.
-target_compile_definitions(pulp-wam-dsp PUBLIC PULP_WASM=1 PULP_HEADLESS=1)
+target_compile_definitions(pulp-wam-dsp PUBLIC
+    PULP_WASM=1 PULP_HEADLESS=1 PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1)
 target_compile_options(pulp-wam-dsp PRIVATE -fno-exceptions -fno-rtti -O2)
 
 # The wam_* C symbols every plugin entry point exports.

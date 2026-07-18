@@ -68,6 +68,8 @@ class CompiledMeterMap {
     static runtime::Result<CompiledMeterMap, MeterMapError>
     compile(std::span<const MeterPoint> points) noexcept;
 
+    // Total over the signed 64-bit domain. Representable conversions are exact;
+    // results outside TickPosition/BarPosition clamp to the nearest endpoint.
     BarTickPosition tick_to_bar(TickPosition tick) const noexcept;
     TickPosition bar_to_tick(BarPosition bar, TickDuration tick_in_bar = {}) const noexcept;
     MeterSignature meter_at_tick(TickPosition tick) const noexcept;

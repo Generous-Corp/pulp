@@ -257,6 +257,50 @@ TEST_CASE("CompiledMeterMap converts exact zero-based bars ticks and discontinui
     REQUIRE(rejected.error() == MeterMapError::ChangeNotOnBarBoundary);
 }
 
+TEST_CASE("CompiledMeterMap is total and exact at the signed 64-bit boundaries") {
+    constexpr auto minimum = std::numeric_limits<std::int64_t>::min();
+    constexpr auto maximum = std::numeric_limits<std::int64_t>::max();
+    constexpr auto per_bar = 4 * kTicksPerQuarter;
+    const std::array points{MeterPoint{{0}, {4, 4}}};
+    const auto compiled = CompiledMeterMap::compile(points);
+    REQUIRE(compiled);
+    const auto& map = compiled.value();
+
+    auto minimum_bar = minimum / per_bar;
+    auto minimum_remainder = minimum % per_bar;
+    if (minimum_remainder < 0) {
+        --minimum_bar;
+        minimum_remainder += per_bar;
+    }
+    const auto maximum_bar = maximum / per_bar;
+    const auto maximum_remainder = maximum % per_bar;
+    REQUIRE(map.tick_to_bar({minimum}) ==
+            BarTickPosition{{minimum_bar}, {minimum_remainder}});
+    REQUIRE(map.tick_to_bar({maximum}) ==
+            BarTickPosition{{maximum_bar}, {maximum_remainder}});
+    REQUIRE(map.bar_to_tick({minimum_bar}, {minimum_remainder}) == TickPosition{minimum});
+    REQUIRE(map.bar_to_tick({maximum_bar}, {maximum_remainder}) == TickPosition{maximum});
+    REQUIRE(map.bar_to_tick({minimum}) == TickPosition{minimum});
+    REQUIRE(map.bar_to_tick({maximum}) == TickPosition{maximum});
+    REQUIRE(map.bar_to_tick({1}, {minimum}) == TickPosition{minimum + per_bar});
+    const std::array<std::int64_t, 11> boundary_ticks{
+        minimum, minimum + 1, -per_bar - 1, -per_bar, -1, 0,
+        1,       per_bar - 1, per_bar, maximum - 1, maximum};
+    for (const auto tick : boundary_ticks) {
+        const auto position = map.tick_to_bar({tick});
+        REQUIRE(position.tick_in_bar.value >= 0);
+        REQUIRE(position.tick_in_bar.value < per_bar);
+        REQUIRE(map.bar_to_tick(position.bar, position.tick_in_bar) == TickPosition{tick});
+    }
+
+    const std::array changed_points{
+        MeterPoint{{0}, {4, 4}}, MeterPoint{{per_bar}, {3, 4}}};
+    const auto changed = CompiledMeterMap::compile(changed_points);
+    REQUIRE(changed);
+    REQUIRE(changed->bar_to_tick({1}, {minimum}) == TickPosition{minimum + per_bar});
+    REQUIRE(changed->bar_to_tick({maximum}, {minimum}) == TickPosition{maximum});
+}
+
 TEST_CASE("TempoCursor matches cold lookup across ramps boundaries and discontinuities") {
     const std::array points{
         TempoPoint{{0}, 60.0, TempoCurve::LinearInTicks},

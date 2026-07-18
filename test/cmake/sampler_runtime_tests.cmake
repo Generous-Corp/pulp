@@ -34,6 +34,13 @@ pulp_add_test_suite(pulp-test-timeline-persistence LIBRARIES pulp::timeline)
 target_compile_definitions(pulp-test-timeline-persistence PRIVATE
     PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 
+if(Python3_Interpreter_FOUND)
+    add_test(NAME web-timeline-source-closure
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/web_timeline_source_closure_check.py
+            --root ${CMAKE_SOURCE_DIR})
+endif()
+
 add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/assets.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/command.cpp

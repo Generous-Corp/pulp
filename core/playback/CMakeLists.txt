@@ -32,9 +32,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "WASI" OR
         PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1)
 endif()
 
-# Compile the new portable program lane exactly as threadless WebAssembly
-# consumers do. This object target is a compile-only gate: it deliberately
-# excludes transport (whose tempo-map construction belongs off the RT lane).
+# Compile the complete portable playback lane exactly as threadless WebAssembly
+# consumers do. This object target is the native compile-only mirror of the
+# curated WAM/WebCLAP closure.
 if(PULP_BUILD_TESTS AND NOT MSVC)
     add_library(timeline-program-threadless-no-exceptions-check OBJECT
         src/audio_renderer.cpp
@@ -43,6 +43,7 @@ if(PULP_BUILD_TESTS AND NOT MSVC)
         src/program.cpp
         src/program_compiler.cpp
         src/stable_renderer_shell.cpp
+        src/transport.cpp
     )
     target_compile_features(timeline-program-threadless-no-exceptions-check PRIVATE cxx_std_20)
     target_include_directories(timeline-program-threadless-no-exceptions-check PRIVATE

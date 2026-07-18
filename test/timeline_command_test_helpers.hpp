@@ -2,6 +2,7 @@
 
 #include <pulp/timeline/document_session.hpp>
 
+#include <array>
 #include <cassert>
 
 namespace timeline_test {
@@ -34,6 +35,20 @@ inline Project make_project() {
     auto project = Project::create({{1}, "project", 7, {3}, {}, {std::move(sequence).value()}});
     assert(project);
     return std::move(project).value();
+}
+
+inline TempoMap make_tempo_map(double bpm) {
+    const std::array points{TempoPoint{{0}, bpm, TempoCurve::Constant}};
+    auto map = TempoMap::create(points);
+    assert(map);
+    return std::move(map).value();
+}
+
+inline MeterMap make_meter_map(MeterSignature signature) {
+    const std::array points{MeterPoint{{0}, signature}};
+    auto map = MeterMap::create(points);
+    assert(map);
+    return std::move(map).value();
 }
 
 inline const Clip& clip(const Project& project, ItemId id = {5}) {

@@ -4,6 +4,40 @@
 
 using namespace timeline_test;
 
+TEST_CASE("Tempo and meter commands path-copy atomically and produce exact inverses") {
+    const auto original = make_project();
+    const auto tempo = make_tempo_map(90.0);
+    const auto meter = make_meter_map({7, 8});
+    auto edit = transaction({1}, 1, 1, {},
+                            {SetTempoMap{original.tempo_map(), tempo},
+                             SetMeterMap{original.meter_map(), meter}});
+    auto changed = reduce_transaction(original, edit);
+    REQUIRE(changed);
+    REQUIRE(changed->project.tempo_map() == tempo);
+    REQUIRE(changed->project.meter_map() == meter);
+    REQUIRE(original.tempo_map() == TempoMap{});
+    REQUIRE(original.meter_map() == MeterMap{});
+    REQUIRE(changed->dirty.items().size() == 1);
+    REQUIRE(changed->dirty.items()[0].item == original.id());
+    REQUIRE(changed->dirty.items()[0].flags == DirtyFlags::Timing);
+
+    auto inverse = transaction({1}, 2, 3, {}, changed->inverses);
+    auto restored = reduce_transaction(changed->project, inverse);
+    REQUIRE(restored);
+    REQUIRE(restored->project.tempo_map() == original.tempo_map());
+    REQUIRE(restored->project.meter_map() == original.meter_map());
+
+    auto atomic_failure = transaction(
+        {1}, 3, 5, {},
+        {SetTempoMap{original.tempo_map(), tempo},
+         SetMeterMap{meter, make_meter_map({3, 4})}});
+    auto rejected = reduce_transaction(original, atomic_failure);
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::ExpectedValueMismatch);
+    REQUIRE(original.tempo_map() == TempoMap{});
+    REQUIRE(original.meter_map() == MeterMap{});
+}
+
 TEST_CASE("Timeline commands apply and invert without mutating the source") {
     const auto original = make_project();
     const auto inserted = make_note_clip({7}, {8}, 2 * kTicksPerQuarter, 2222);
