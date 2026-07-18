@@ -533,7 +533,12 @@ does not contain crashes in deeper plug-in code.
   shape in the same execution domain; removed rings retire, while new,
   reshaped, or reconnected rings start fresh. Preserve connection identity for
   unchanged owned routes and prune unused generated custom types in the same
-  edit so registry churn stays bounded.
+  edit so registry churn stays bounded. `MidiInput` ingress may carry through
+  its shared sequence mailbox, but `MidiOutput` egress is snapshot-local so an
+  old snapshot can expose its pending output exactly once. A prepared edit
+  returns `MidiOutputSnapshotLocalRequired` before callbacks whenever either
+  the live or candidate graph contains a `MidiOutput`; do not adopt or share
+  that output mailbox.
 - Per-node CPU load: `process()` wraps each node's work in a persistent
   per-node `audio::AudioProcessLoadMeasurer` (keyed by `NodeId` in
   `node_load_`), read via `node_loads()`. The measurers live on the

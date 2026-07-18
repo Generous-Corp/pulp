@@ -5200,20 +5200,74 @@ TEST_CASE("SignalGraph prepared edit rejects external plugin reprepare before mu
     REQUIRE(graph.is_prepared());
 }
 
-TEST_CASE("SignalGraph prepared edit adopts only unchanged PDC intersection and pending MIDI",
-          "[host][graph][prepared-edit][pdc][midi]") {
+TEST_CASE("SignalGraph prepared edit rejects snapshot-local MIDI output before mutation",
+          "[host][graph][prepared-edit][midi-output]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    SignalGraph graph;
+
+    SECTION("candidate-only MIDI output is rejected without consuming an ID") {
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->add_midi_output_node("candidate output") == 1);
+        REQUIRE(edit->prepare(48000.0, 8)
+                == Result::MidiOutputSnapshotLocalRequired);
+        edit.reset();
+        REQUIRE(graph.nodes().empty());
+        REQUIRE_FALSE(graph.is_prepared());
+        REQUIRE(graph.add_input_node(1, "owner input") == 1);
+    }
+
+    SECTION("live pending note-off remains on the old snapshot and drains once") {
+        const auto midi_input = graph.add_midi_input_node("midi input");
+        const auto midi_output = graph.add_midi_output_node("midi output");
+        REQUIRE(graph.connect_midi(midi_input, midi_output));
+        REQUIRE(graph.prepare(48000.0, 8));
+
+        pulp::midi::MidiBuffer pending;
+        pending.reserve(1);
+        pending.add(pulp::midi::MidiEvent::note_off(0, 64, 0));
+        REQUIRE(graph.inject_midi(midi_input, pending));
+        float input_sample = 0.0f;
+        float output_sample = 0.0f;
+        const float* input_ptrs[] = {&input_sample};
+        float* output_ptrs[] = {&output_sample};
+        pulp::audio::BufferView<const float> in(input_ptrs, 0, 8);
+        pulp::audio::BufferView<float> out(output_ptrs, 0, 8);
+        graph.process(out, in, 8);
+
+        const auto graph_before = GraphSerializer::to_json(graph);
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->remove_node(midi_output));
+        REQUIRE(edit->prepare(48000.0, 8)
+                == Result::MidiOutputSnapshotLocalRequired);
+        edit.reset();
+        REQUIRE(GraphSerializer::to_json(graph) == graph_before);
+        REQUIRE(graph.nodes().size() == 2);
+        REQUIRE(graph.connections().size() == 1);
+        REQUIRE(graph.is_prepared());
+
+        pulp::midi::MidiBuffer arrived;
+        arrived.reserve(1);
+        REQUIRE(graph.extract_midi(midi_output, arrived));
+        REQUIRE(arrived.size() == 1);
+        REQUIRE(arrived[0].is_note_off());
+        arrived.clear();
+        graph.process(out, in, 8);
+        REQUIRE(graph.extract_midi(midi_output, arrived));
+        REQUIRE(arrived.empty());
+    }
+}
+
+TEST_CASE("SignalGraph prepared edit adopts only unchanged PDC intersection",
+          "[host][graph][prepared-edit][pdc]") {
     using Result = SignalGraph::PreparedTopologyEdit::Result;
     SignalGraph graph;
     const auto input = graph.add_input_node(1, "input");
     const auto latency = graph.add_plugin_node(
         std::make_unique<MockLatencyPlugin>(2, 1), 1, 1, "latency");
     const auto output = graph.add_output_node(1, "output");
-    const auto midi_input = graph.add_midi_input_node("midi input");
-    const auto midi_output = graph.add_midi_output_node("midi output");
     REQUIRE(graph.connect(input, 0, output, 0));
     REQUIRE(graph.connect(input, 0, latency, 0));
     REQUIRE(graph.connect(latency, 0, output, 0));
-    REQUIRE(graph.connect_midi(midi_input, midi_output));
     REQUIRE(graph.prepare(48000.0, 4));
     REQUIRE(graph.latency_samples() == 2);
 
@@ -5226,11 +5280,6 @@ TEST_CASE("SignalGraph prepared edit adopts only unchanged PDC intersection and 
     pulp::audio::BufferView<float> out(rendered_ptrs, 1, rendered.size());
     graph.process(out, in, 4); // prime the plugin and host delay histories
 
-    pulp::midi::MidiBuffer pending;
-    pending.reserve(1);
-    pending.add(pulp::midi::MidiEvent::note_on(0, 64, 100));
-    REQUIRE(graph.inject_midi(midi_input, pending));
-
     auto add = graph.begin_prepared_topology_edit();
     const auto gain = add->add_gain_node("new PDC branch");
     REQUIRE(add->connect(input, 0, gain, 0));
@@ -5239,21 +5288,16 @@ TEST_CASE("SignalGraph prepared edit adopts only unchanged PDC intersection and 
     REQUIRE(add->commit() == Result::Committed);
     REQUIRE(graph.is_prepared());
     REQUIRE(graph.latency_samples() == 2);
-    REQUIRE(graph.connections().size() == 6);
+    REQUIRE(graph.connections().size() == 5);
     graph.process(out, in, 4);
     // Existing direct-edge history and plugin state carry (2.0 throughout);
     // the newly delayed gain branch starts at zero and reaches 1.0 after two.
     REQUIRE(rendered == (std::array<float, 4>{2.0f, 2.0f, 3.0f, 3.0f}));
-    pulp::midi::MidiBuffer arrived;
-    arrived.reserve(1);
-    REQUIRE(graph.extract_midi(midi_output, arrived));
-    REQUIRE(arrived.size() == 1);
-
     auto remove = graph.begin_prepared_topology_edit();
     REQUIRE(remove->remove_node(gain));
     REQUIRE(remove->prepare(48000.0, 4) == Result::Prepared);
     REQUIRE(remove->commit() == Result::Committed);
-    REQUIRE(graph.connections().size() == 4);
+    REQUIRE(graph.connections().size() == 3);
     graph.process(out, in, 4);
     REQUIRE(rendered == (std::array<float, 4>{2.0f, 2.0f, 2.0f, 2.0f}));
 
@@ -5267,25 +5311,17 @@ TEST_CASE("SignalGraph prepared edit adopts only unchanged PDC intersection and 
     REQUIRE(rendered == (std::array<float, 4>{1.0f, 1.0f, 2.0f, 2.0f}));
 }
 
-TEST_CASE("SignalGraph prepared edit feedback rejection preserves live graph and pending MIDI",
-          "[host][graph][prepared-edit][feedback][midi]") {
+TEST_CASE("SignalGraph prepared edit feedback rejection preserves live graph",
+          "[host][graph][prepared-edit][feedback]") {
     using Result = SignalGraph::PreparedTopologyEdit::Result;
     SignalGraph graph;
     const auto input = graph.add_input_node(1, "input");
     const auto gain = graph.add_gain_node("gain");
     const auto output = graph.add_output_node(1, "output");
-    const auto midi_input = graph.add_midi_input_node("midi input");
-    const auto midi_output = graph.add_midi_output_node("midi output");
     REQUIRE(graph.connect(input, 0, gain, 0));
     REQUIRE(graph.connect(gain, 0, output, 0));
     REQUIRE(graph.connect_feedback(gain, 0, gain, 0));
-    REQUIRE(graph.connect_midi(midi_input, midi_output));
     REQUIRE(graph.prepare(48000.0, 4));
-
-    pulp::midi::MidiBuffer pending;
-    pending.reserve(1);
-    pending.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
-    REQUIRE(graph.inject_midi(midi_input, pending));
     const auto connections_before = graph.connections();
 
     auto edit = graph.begin_prepared_topology_edit();
@@ -5293,20 +5329,8 @@ TEST_CASE("SignalGraph prepared edit feedback rejection preserves live graph and
     REQUIRE(edit->prepare(48000.0, 4) == Result::RuntimeAdoptionFailed);
     edit.reset();
     REQUIRE(graph.connections() == connections_before);
-    REQUIRE(graph.nodes().size() == 5);
+    REQUIRE(graph.nodes().size() == 3);
     REQUIRE(graph.is_prepared());
-
-    std::array<float, 4> source{};
-    std::array<float, 4> rendered{};
-    const float* source_ptrs[] = {source.data()};
-    float* rendered_ptrs[] = {rendered.data()};
-    pulp::audio::BufferView<const float> in(source_ptrs, 1, source.size());
-    pulp::audio::BufferView<float> out(rendered_ptrs, 1, rendered.size());
-    graph.process(out, in, 4);
-    pulp::midi::MidiBuffer arrived;
-    arrived.reserve(1);
-    REQUIRE(graph.extract_midi(midi_output, arrived));
-    REQUIRE(arrived.size() == 1);
 }
 
 // ── GraphSerializer round-trip ───────────────────────────────────────────
