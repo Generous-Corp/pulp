@@ -637,7 +637,16 @@ does not contain crashes in deeper plug-in code.
   old snapshot can expose its pending output exactly once. A prepared edit
   returns `MidiOutputSnapshotLocalRequired` before callbacks whenever either
   the live or candidate graph contains a `MidiOutput`; do not adopt or share
-  that output mailbox.
+  that output mailbox. Baseline plugin removal, and baseline custom removal
+  when its registered type has `release`, are also explicit fail-closed
+  results: ordinary graph release remains the only lifecycle-callback owner.
+  Commit's exception boundary is before authoring mutation: preflight the
+  generic live `runtime::Slot` retirement capacity and reserve destination
+  `node_load_` buckets first. After every failure gate, transfer load measurers
+  with C++17 unordered-map node handles (matching integral hash/equality and
+  allocator), move the authoring containers, and call the Slot's noexcept
+  prepared publication. Never put an allocating `emplace` or ordinary
+  `Slot::publish` after that boundary.
 - Per-node CPU load: `process()` wraps each node's work in a persistent
   per-node `audio::AudioProcessLoadMeasurer` (keyed by `NodeId` in
   `node_load_`), read via `node_loads()`. The measurers live on the
