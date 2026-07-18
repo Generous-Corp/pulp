@@ -342,13 +342,22 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
     }
 
     GraphMutationLock candidate_lock(*candidate_);
+    const auto old_keepalive = owner_->live_slot_.live();
+    const auto* old = old_keepalive.get();
+    const bool candidate_has_midi_output =
+        std::any_of(candidate_->nodes_.begin(), candidate_->nodes_.end(),
+                    [](const GraphNode& node) { return node.type == NodeType::MidiOutput; });
+    const bool live_has_midi_output =
+        old != nullptr &&
+        std::any_of(old->shapes.begin(), old->shapes.end(),
+                    [](const auto& entry) { return entry.second.type == NodeType::MidiOutput; });
+    if (candidate_has_midi_output || live_has_midi_output) {
+        return last_result_ = Result::MidiOutputSnapshotLocalRequired;
+    }
     if (!candidate_->preflight_locked_(max_block_size) ||
         candidate_->processing_order().size() != candidate_->nodes_.size()) {
         return last_result_ = Result::PreflightFailed;
     }
-
-    const auto old_keepalive = owner_->live_slot_.live();
-    const auto* old = old_keepalive.get();
     const bool dimensions_changed = old != nullptr && (old->sample_rate != sample_rate ||
                                                        old->max_block_size != max_block_size);
     if (old != nullptr) {
@@ -457,9 +466,6 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             }
             if (rt.midi_input_mailbox && live_rt->second.midi_input_mailbox) {
                 rt.midi_input_mailbox = live_rt->second.midi_input_mailbox;
-            }
-            if (rt.midi_output_mailbox && live_rt->second.midi_output_mailbox) {
-                rt.midi_output_mailbox = live_rt->second.midi_output_mailbox;
             }
         }
         const auto rebind_parameter_sequence = [&](CompiledGraph::RoutedPath& path) {

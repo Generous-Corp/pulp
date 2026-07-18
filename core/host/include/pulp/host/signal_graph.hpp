@@ -1701,6 +1701,7 @@ public:
         InvalidMutation,
         StaleBase,
         PreflightFailed,
+        MidiOutputSnapshotLocalRequired,
         ExternalPluginReprepareRequired,
         ExistingCustomReprepareRequired,
         CustomRegistryConflict,
