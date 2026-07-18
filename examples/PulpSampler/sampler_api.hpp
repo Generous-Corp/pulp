@@ -246,6 +246,7 @@ enum class PulpSamplerHeritageStatus : std::uint8_t {
     RuntimeStateRejected,
     RenderPlanFailed,
     RenderFailed,
+    StreamDomainRebindRequired,
 };
 
 constexpr std::string_view pulp_sampler_heritage_status_name(
@@ -263,6 +264,8 @@ constexpr std::string_view pulp_sampler_heritage_status_name(
         case PulpSamplerHeritageStatus::PrepareFailed: return "prepare-failed";
         case PulpSamplerHeritageStatus::RuntimeStateRejected:
             return "runtime-state-rejected";
+        case PulpSamplerHeritageStatus::StreamDomainRebindRequired:
+            return "stream-domain-rebind-required";
         case PulpSamplerHeritageStatus::RenderPlanFailed:
             return "render-plan-failed";
         case PulpSamplerHeritageStatus::RenderFailed: return "render-failed";
