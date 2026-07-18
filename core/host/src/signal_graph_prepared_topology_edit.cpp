@@ -81,8 +81,12 @@ SignalGraph::PreparedTopologyEdit::PreparedTopologyEdit(SignalGraph& owner)
 
 SignalGraph::PreparedTopologyEdit::~PreparedTopologyEdit() {
     prepared_snapshot_.reset();
-    if (!committed_)
+    if (!committed_) {
+        GraphMutationLock owner_lock(*owner_);
+        (void)rollback_quiesced_lifecycles_locked_();
+        owner_lock.unlock();
         release_new_custom_instances_();
+    }
 }
 
 bool SignalGraph::PreparedTopologyEdit::base_is_current_locked_() const {
@@ -98,6 +102,71 @@ bool SignalGraph::PreparedTopologyEdit::base_is_current_locked_() const {
 
 bool SignalGraph::PreparedTopologyEdit::is_new_node_(NodeId id) const {
     return baseline_node_ids_.find(id) == baseline_node_ids_.end();
+}
+
+bool SignalGraph::PreparedTopologyEdit::rollback_quiesced_lifecycles_locked_() noexcept {
+    owner_->assert_graph_mutation_locked_();
+    if (!quiesced_lifecycles_dirty_)
+        return true;
+
+    bool restored = true;
+    if (base_live_ != nullptr) {
+        for (const auto& retained : quiesced_plugins_) {
+            try {
+                if (!retained.plugin->prepare(base_live_->sample_rate,
+                                              base_live_->max_block_size)) {
+                    restored = false;
+                }
+            } catch (...) {
+                restored = false;
+            }
+        }
+        for (const auto& retained : quiesced_customs_) {
+            if (!retained.prepare)
+                continue;
+            try {
+                retained.prepare(retained.instance.get(), base_live_->sample_rate,
+                                 base_live_->max_block_size);
+            } catch (...) {
+                restored = false;
+            }
+        }
+    } else {
+        // The base graph had no prepared lifecycle. Undo candidate preparation
+        // by returning every retained object to its released state.
+        for (const auto& retained : quiesced_plugins_) {
+            try {
+                retained.plugin->release();
+            } catch (...) {
+                restored = false;
+            }
+        }
+        for (const auto& retained : quiesced_customs_) {
+            if (!retained.release) {
+                restored = false;
+                continue;
+            }
+            try {
+                retained.release(retained.instance.get());
+            } catch (...) {
+                restored = false;
+            }
+        }
+    }
+
+    quiesced_lifecycles_dirty_ = false;
+    prepared_snapshot_.reset();
+
+    // A different live generation cannot safely keep running after its shared
+    // objects were restored to this edit's older base dimensions.
+    if (owner_->live_slot_.live() != base_live_)
+        restored = false;
+    if (!restored) {
+        owner_->live_slot_.unpublish();
+        owner_->total_latency_samples_.store(0, std::memory_order_relaxed);
+        owner_->clear_prepared_stats_locked_();
+    }
+    return restored;
 }
 
 void SignalGraph::PreparedTopologyEdit::release_new_custom_instances_() noexcept {
@@ -603,6 +672,42 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
     if (!base_is_current_locked_() || owner_->in_swap_edit_)
         return last_result_ = Result::StaleBase;
 
+    // Capture the exact retained objects and the owner's original custom
+    // lifecycle callbacks before candidate preparation mutates shared state.
+    quiesced_plugins_.clear();
+    quiesced_customs_.clear();
+    for (const auto& node : candidate_->nodes_) {
+        if (is_new_node_(node.id))
+            continue;
+        if (node.plugin) {
+            quiesced_plugins_.push_back({node.plugin});
+            continue;
+        }
+        if (node.type != NodeType::Custom || !node.custom_instance)
+            continue;
+        const auto owner_node = std::find_if(
+            owner_->nodes_.begin(), owner_->nodes_.end(),
+            [&](const GraphNode& current) {
+                return current.id == node.id && current.custom_instance == node.custom_instance;
+            });
+        if (owner_node == owner_->nodes_.end())
+            continue;
+        if (replaced_registry_keys_.count(
+                prepared_custom_key(node.custom_type_id, node.custom_type_version)) != 0) {
+            return last_result_ = Result::ExistingCustomReprepareRequired;
+        }
+        const auto* candidate_type = candidate_->custom_node_type(
+            node.custom_type_id, node.custom_type_version);
+        const auto* owner_type = owner_->custom_node_type(
+            owner_node->custom_type_id, owner_node->custom_type_version);
+        if (candidate_type != nullptr && candidate_type->prepare && owner_type != nullptr) {
+            quiesced_customs_.push_back(
+                {node.custom_instance, owner_type->prepare, owner_type->release});
+        }
+    }
+    quiesced_lifecycles_dirty_ =
+        !quiesced_plugins_.empty() || !quiesced_customs_.empty();
+
     bool candidate_prepared = false;
     try {
         candidate_prepared = candidate_->prepare(sample_rate, max_block_size);
@@ -616,60 +721,28 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
     // control-thread release callback.
     prepared_new_custom_ids_.clear();
     for (const auto& node : candidate_->nodes_) {
-        if (node.type == NodeType::Custom && is_new_node_(node.id) && node.custom_instance)
+        if (node.type != NodeType::Custom || !node.custom_instance)
+            continue;
+        const auto owner_node = std::find_if(
+            owner_->nodes_.begin(), owner_->nodes_.end(),
+            [&](const GraphNode& current) { return current.id == node.id; });
+        if (owner_node == owner_->nodes_.end() ||
+            owner_node->custom_instance != node.custom_instance) {
             prepared_new_custom_ids_.push_back(node.id);
+        }
     }
     if (!candidate_prepared) {
-        // Candidate preparation touches shared external plugin/custom instances.
-        // Restore every owner lifecycle object to the exact old dimensions before
-        // allowing the old compiled snapshot to resume. If restoration itself
-        // fails, revoke the owner's live publication: running the old snapshot
-        // against partially re-prepared instances would be undefined behavior.
-        bool restored = base_live_ == nullptr;
-        if (base_live_ != nullptr) {
-            restored = true;
-            try {
-                owner_->prepared_plugin_meta_.clear();
-                for (auto& node : owner_->nodes_) {
-                    if (!node.plugin)
-                        continue;
-                    if (!node.plugin->prepare(base_live_->sample_rate,
-                                              base_live_->max_block_size)) {
-                        restored = false;
-                        break;
-                    }
-                    owner_->prepared_plugin_meta_[node.id] = PreparedPluginMetadata{
-                        node.plugin->parameters(),
-                        std::max(0, node.plugin->latency_samples()),
-                        node.plugin->wants_transport()};
-                }
-                if (restored) {
-                    for (auto& node : owner_->nodes_) {
-                        if (node.type != NodeType::Custom || !node.custom_instance)
-                            continue;
-                        const auto* type = owner_->custom_node_type(
-                            node.custom_type_id, node.custom_type_version);
-                        if (type != nullptr && type->prepare)
-                            type->prepare(node.custom_instance.get(), base_live_->sample_rate,
-                                          base_live_->max_block_size);
-                    }
-                }
-            } catch (...) {
-                restored = false;
-            }
-        }
-        if (!restored) {
-            owner_->live_slot_.unpublish();
-            owner_->total_latency_samples_.store(0, std::memory_order_relaxed);
-            owner_->clear_prepared_stats_locked_();
+        if (!rollback_quiesced_lifecycles_locked_())
             return last_result_ = Result::QuiescedRollbackFailed;
-        }
         return last_result_ = Result::ExternalPluginReprepareRequired;
     }
 
     prepared_snapshot_ = candidate_->live_slot_.live();
-    if (!prepared_snapshot_)
+    if (!prepared_snapshot_) {
+        if (!rollback_quiesced_lifecycles_locked_())
+            return last_result_ = Result::QuiescedRollbackFailed;
         return last_result_ = Result::CompileFailed;
+    }
 
     return last_result_ = Result::Prepared;
 }
@@ -681,36 +754,48 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
         return last_result_ = Result::NotPrepared;
 
     GraphMutationLock owner_lock(*owner_);
+    const auto fail_before_commit = [&](Result result) {
+        if (!rollback_quiesced_lifecycles_locked_())
+            return last_result_ = Result::QuiescedRollbackFailed;
+        return last_result_ = result;
+    };
     if (!base_is_current_locked_() || owner_->in_swap_edit_) {
-        return last_result_ = Result::StaleBase;
+        return fail_before_commit(Result::StaleBase);
     }
 
     // Everything above the irreversible authoring move is an exception
     // boundary. Reserve both generic publication retirement and destination
     // load-map buckets now. After this point publication is noexcept and load
     // measurers move as allocation-free C++17 node handles.
-    {
-        std::scoped_lock load_locks(owner_->node_load_mu_, candidate_->node_load_mu_);
-        std::size_t incoming = 0;
-        for (const auto& [id, measurer] : candidate_->node_load_) {
-            if (measurer && owner_->node_load_.find(id) == owner_->node_load_.end())
-                ++incoming;
+    try {
+        {
+            std::scoped_lock load_locks(owner_->node_load_mu_, candidate_->node_load_mu_);
+            std::size_t incoming = 0;
+            for (const auto& [id, measurer] : candidate_->node_load_) {
+                if (measurer && owner_->node_load_.find(id) == owner_->node_load_.end())
+                    ++incoming;
+            }
+            owner_->node_load_.reserve(owner_->node_load_.size() + incoming);
         }
-        owner_->node_load_.reserve(owner_->node_load_.size() + incoming);
-    }
-    owner_->live_slot_.prepare_publish();
+        owner_->live_slot_.prepare_publish();
 
-    if (candidate_->parallel_routing_enabled_.load(std::memory_order_relaxed) &&
-        prepared_snapshot_->routed.parallel.valid && owner_->worker_pool_.worker_count() == 0) {
-        const unsigned hw = std::thread::hardware_concurrency();
-        const std::uint32_t workers = std::clamp<std::uint32_t>(hw == 0 ? 2 : hw, 2, 16);
-        if (!owner_->worker_pool_.start(workers)) {
-            return last_result_ = Result::ParallelWorkerStartFailed;
+        if (candidate_->parallel_routing_enabled_.load(std::memory_order_relaxed) &&
+            prepared_snapshot_->routed.parallel.valid &&
+            owner_->worker_pool_.worker_count() == 0) {
+            const unsigned hw = std::thread::hardware_concurrency();
+            const std::uint32_t workers =
+                std::clamp<std::uint32_t>(hw == 0 ? 2 : hw, 2, 16);
+            if (!owner_->worker_pool_.start(workers))
+                return fail_before_commit(Result::ParallelWorkerStartFailed);
         }
-    }
-    if (candidate_->parallel_routing_enabled_.load(std::memory_order_relaxed) &&
-        prepared_snapshot_->routed.parallel.valid && !owner_->worker_pool_.running()) {
-        return last_result_ = Result::ParallelWorkerStartFailed;
+        if (candidate_->parallel_routing_enabled_.load(std::memory_order_relaxed) &&
+            prepared_snapshot_->routed.parallel.valid && !owner_->worker_pool_.running()) {
+            return fail_before_commit(Result::ParallelWorkerStartFailed);
+        }
+    } catch (...) {
+        if (!rollback_quiesced_lifecycles_locked_())
+            return last_result_ = Result::QuiescedRollbackFailed;
+        throw;
     }
 
     // Transfer only load measurers allocated for genuinely new/reused IDs.
@@ -772,6 +857,9 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
     committed_snapshot_ = prepared_snapshot_;
     prepared_snapshot_.reset();
     prepared_new_custom_ids_.clear();
+    quiesced_lifecycles_dirty_ = false;
+    quiesced_plugins_.clear();
+    quiesced_customs_.clear();
     committed_ = true;
     return last_result_ = Result::Committed;
 }

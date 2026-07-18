@@ -656,11 +656,15 @@ does not contain crashes in deeper plug-in code.
   A caller that has stopped audio processing and anticipation may instead use
   `prepare_quiesced()` for a dimension change involving external plugins or
   retained custom instances. Candidate preparation can touch those shared
-  lifecycle objects, so failure must re-prepare *every* owner object at the old
-  dimensions before the old snapshot resumes. If that rollback fails, the graph
-  deliberately unpublishes and reports `QuiescedRollbackFailed`; never resume a
-  partially restored graph. New custom instances created before a later prepare
-  failure still require their control-thread `release` callback.
+  lifecycle objects, so *every non-commit exit* — candidate failure, routed
+  rejection, commit rejection, exception, or simple edit destruction — must
+  re-prepare every retained object at the old dimensions before the old snapshot
+  resumes. A successful candidate prepare is not ownership transfer; only a
+  successful commit cancels that rollback obligation. If restoration fails, the
+  graph deliberately unpublishes and reports `QuiescedRollbackFailed`; a coupled
+  binding must unpublish too. Never resume a partially restored graph. New custom
+  instances created before a later prepare failure still require their
+  control-thread `release` callback.
 - Per-node CPU load: `process()` wraps each node's work in a persistent
   per-node `audio::AudioProcessLoadMeasurer` (keyed by `NodeId` in
   `node_load_`), read via `node_loads()`. The measurers live on the

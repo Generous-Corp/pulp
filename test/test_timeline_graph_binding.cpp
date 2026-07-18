@@ -335,6 +335,18 @@ struct BindingPublishPause {
     std::atomic<bool> released{false};
 };
 
+struct BindingCommitFailure {
+    static void hook(void* context) noexcept {
+        auto& failure = *static_cast<BindingCommitFailure*>(context);
+        if (failure.fail_restore)
+            failure.plugin->fail_sample_rate.store(48'000.0, std::memory_order_relaxed);
+        failure.graph->begin_swap_edit();
+    }
+    SignalGraph* graph = nullptr;
+    DimensionTrackingSlot* plugin = nullptr;
+    bool fail_restore = false;
+};
+
 TransportSnapshot snapshot(const PlaybackProgram& program, std::uint32_t frames,
                            std::int64_t start = 0) {
     TransportSnapshot result;
@@ -1361,6 +1373,44 @@ TEST_CASE("timeline graph binding restores shared lifecycles after quiesced fail
     REQUIRE(binding.prepare_quiesced(*program32, routes, config(1), 32'000.0, 128).code ==
             TimelineGraphAdmissionCode::GraphPrepareFailed);
     std::fill(output.storage[0].begin(), output.storage[0].end(), 7.0f);
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*program48, 32)).code ==
+            TimelineGraphProcessCode::MissingProgram);
+    REQUIRE(output.storage[0] == std::vector<float>(32, 0.0f));
+}
+
+TEST_CASE("timeline graph binding revokes publication when commit rollback fails") {
+    auto map48 = tempo_map({48'000, 1});
+    auto assets = asset_pool(std::vector<float>(512, 1.0f));
+    ProgramHarness programs48;
+    programs48.publish(audio_project(1.0f, 512), map48, assets, 1);
+    auto program48 = programs48.store.read();
+
+    SignalGraph graph;
+    auto plugin = std::make_unique<DimensionTrackingSlot>();
+    auto* plugin_ptr = plugin.get();
+    const auto plugin_node =
+        graph.add_plugin_node(std::move(plugin), 1, 1, "dimension tracker");
+    const auto output_node = graph.add_output_node(1);
+    REQUIRE(graph.connect(plugin_node, 0, output_node, 0));
+    REQUIRE(graph.prepare(48'000.0, 64));
+    TimelineGraphPlaybackBinding binding(graph, programs48.store);
+    const std::array routes{TimelineTrackGraphRoute{{10}, plugin_node, 0, 0}};
+    REQUIRE(binding.prepare(*program48, routes, config(1), 48'000.0, 64));
+
+    auto map44 = tempo_map({44'100, 1});
+    ProgramHarness programs44;
+    programs44.publish(audio_project(1.0f, 512), map44, assets, 2);
+    auto program44 = programs44.store.read();
+    BindingCommitFailure failure{&graph, plugin_ptr, true};
+    binding.set_before_graph_commit_hook_for_test(&BindingCommitFailure::hook, &failure);
+    REQUIRE(binding.prepare_quiesced(*program44, routes, config(1), 44'100.0, 128).code ==
+            TimelineGraphAdmissionCode::GraphPrepareFailed);
+    REQUIRE_FALSE(graph.is_prepared());
+
+    Buffer input(1, 32);
+    Buffer output(1, 32);
+    std::fill(output.storage[0].begin(), output.storage[0].end(), 7.0f);
+    auto output_view = output.view();
     REQUIRE(binding.process(output_view, input.const_view(), snapshot(*program48, 32)).code ==
             TimelineGraphProcessCode::MissingProgram);
     REQUIRE(output.storage[0] == std::vector<float>(32, 0.0f));

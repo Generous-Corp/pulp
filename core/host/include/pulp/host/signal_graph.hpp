@@ -1806,8 +1806,9 @@ public:
     Result prepare(double sample_rate, int max_block_size);
     /// Quiesced dimension-changing prepare. No process(), MIDI injection, or
     /// anticipation pump may overlap this call. External plugins and retained
-    /// custom nodes are re-prepared on the private candidate; owner topology and
-    /// publication remain untouched if preparation fails.
+    /// custom nodes are re-prepared on the private candidate. Every exit other
+    /// than a successful commit restores retained lifecycles to the base
+    /// dimensions; a restoration failure revokes the owner publication.
     Result prepare_quiesced(double sample_rate, int max_block_size);
     Result commit();
     ExecutionSnapshot committed_execution_snapshot() const noexcept {
@@ -1820,7 +1821,16 @@ private:
     explicit PreparedTopologyEdit(SignalGraph& owner);
     bool base_is_current_locked_() const;
     bool is_new_node_(NodeId id) const;
+    bool rollback_quiesced_lifecycles_locked_() noexcept;
     void release_new_custom_instances_() noexcept;
+    struct QuiescedPluginLifecycle {
+        std::shared_ptr<PluginSlot> plugin;
+    };
+    struct QuiescedCustomLifecycle {
+        std::shared_ptr<void> instance;
+        std::function<void(void*, double, int)> prepare;
+        std::function<void(void*)> release;
+    };
     template <typename Fn>
     NodeId add_node_(Fn&& fn) {
         if (mutation_failed_ || committed_ || prepare_attempted_) {
@@ -1850,6 +1860,8 @@ private:
     std::unordered_set<std::string> baseline_registry_keys_;
     std::unordered_set<std::string> replaced_registry_keys_;
     std::vector<NodeId> prepared_new_custom_ids_;
+    std::vector<QuiescedPluginLifecycle> quiesced_plugins_;
+    std::vector<QuiescedCustomLifecycle> quiesced_customs_;
     std::uint64_t base_authoring_generation_ = 0;
     std::shared_ptr<SignalGraph::CompiledGraph> base_live_;
     bool base_canonical_routing_ = false;
@@ -1857,6 +1869,7 @@ private:
     bool base_anticipation_ = false;
     bool mutation_failed_ = false;
     bool prepare_attempted_ = false;
+    bool quiesced_lifecycles_dirty_ = false;
     bool committed_ = false;
     Result last_result_ = Result::NotPrepared;
 };
