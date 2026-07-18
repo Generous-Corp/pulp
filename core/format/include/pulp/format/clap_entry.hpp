@@ -349,9 +349,10 @@ inline bool params_get_info(const clap_plugin_t* plugin, uint32_t index, clap_pa
     info->max_value = p.range.max;
     info->default_value = p.range.default_value;
     info->flags = CLAP_PARAM_IS_AUTOMATABLE;
-    if (state::is_discrete_param(p))
+    const bool is_bypass = state::is_bypass_param(p);
+    if (state::is_discrete_param(p) || is_bypass)
         info->flags |= CLAP_PARAM_IS_STEPPED;
-    if (state::is_bypass_param(p)) info->flags |= CLAP_PARAM_IS_BYPASS;
+    if (is_bypass) info->flags |= CLAP_PARAM_IS_BYPASS;
     return true;
 }
 

@@ -676,6 +676,25 @@ TEST_CASE("CLAP params extension reports metadata and text conversions",
     pulp::format::set_host_quirk_policy(std::nullopt);
 }
 
+TEST_CASE("CLAP bypass parameters are always advertised as stepped",
+          "[clap][entry][params][bypass]") {
+    pulp::format::clap_adapter::PulpClapPlugin data;
+    pulp::state::ParamInfo bypass{
+        .id = 99,
+        .name = "Engine Active",
+        .range = {0.0f, 4.0f, 0.0f, 0.25f},
+    };
+    bypass.designation = pulp::state::ParamDesignation::Bypass;
+    data.store.add_parameter(std::move(bypass));
+
+    clap_plugin_t plugin{};
+    plugin.plugin_data = &data;
+    clap_param_info_t info{};
+    REQUIRE(pulp::format::clap_generic::params_get_info(&plugin, 0, &info));
+    REQUIRE((info.flags & CLAP_PARAM_IS_BYPASS) != 0);
+    REQUIRE((info.flags & CLAP_PARAM_IS_STEPPED) != 0);
+}
+
 TEST_CASE("CLAP text_to_value routes through ParamInfo::from_string",
           "[clap][entry][params][from-string]") {
     // The "Quality" param (id 4) declares a custom to_string/from_string pair

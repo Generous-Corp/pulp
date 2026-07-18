@@ -1456,6 +1456,7 @@ TEST_CASE("maybe_synthesize_bypass injects a Bypass param only when warranted",
                 REQUIRE(p.range.step >= 1.0f);
                 REQUIRE(p.range.min == 0.0f);
                 REQUIRE(p.range.max == 1.0f);
+                REQUIRE(p.kind == pulp::state::ParamKind::Toggle);
             }
         }
         REQUIRE(found);
