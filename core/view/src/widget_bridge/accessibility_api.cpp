@@ -9,8 +9,8 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_accessibility_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_accessibility_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setAccessibilityLabel / setAccessibilityRole are the bridge-side
     // entry points the html-compat layer calls when JS does
@@ -31,20 +31,20 @@ void WidgetBridge::register_accessibility_api() {
     // (unit-tested without a JS engine). Unknown / empty role clears the role
     // back to AccessRole::none.
     register_bridge_function(api, "setAccessibilityLabel",
-                             [this](choc::javascript::ArgumentList args) {
+                             [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto label = args.get<std::string>(1, "");
-        auto it = widgets_.find(id);
-        if (it != widgets_.end()) it->second->set_access_label(std::move(label));
+        auto it = self.widgets_.find(id);
+        if (it != self.widgets_.end()) it->second->set_access_label(std::move(label));
         return choc::value::Value();
     });
 
     register_bridge_function(api, "setAccessibilityRole",
-                             [this](choc::javascript::ArgumentList args) {
+                             [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto role = args.get<std::string>(1, "");
-        auto it = widgets_.find(id);
-        if (it == widgets_.end()) return choc::value::Value();
+        auto it = self.widgets_.find(id);
+        if (it == self.widgets_.end()) return choc::value::Value();
 
         // ARIA role token -> View::AccessRole. Single shared table so the
         // JS bridge, the widget defaults, and the platform mappings agree.
@@ -59,12 +59,12 @@ void WidgetBridge::register_accessibility_api() {
     // hands us so platform AT bridges can read it back verbatim.
     // Single bridge fn rather than four; `attr` selects the slot.
     register_bridge_function(api, "setAccessibilityState",
-                             [this](choc::javascript::ArgumentList args) {
+                             [&self](choc::javascript::ArgumentList args) {
         auto id    = args.get<std::string>(0, "");
         auto attr  = args.get<std::string>(1, "");
         auto value = args.get<std::string>(2, "");
-        auto it = widgets_.find(id);
-        if (it == widgets_.end()) return choc::value::Value();
+        auto it = self.widgets_.find(id);
+        if (it == self.widgets_.end()) return choc::value::Value();
         if      (attr == "pressed")  it->second->set_access_pressed(std::move(value));
         else if (attr == "checked")  it->second->set_access_checked(std::move(value));
         else if (attr == "disabled") it->second->set_access_disabled(std::move(value));

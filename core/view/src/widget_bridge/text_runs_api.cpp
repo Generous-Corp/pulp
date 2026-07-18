@@ -15,8 +15,8 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_text_runs_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_text_runs_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setTextRuns(id, [{start,end,fontWeight?,fontSize?,color?,fontStyle?,
     // letterSpacing?}, ...]) — per-range styled text. Builds a
@@ -24,9 +24,9 @@ void WidgetBridge::register_widget_text_runs_api() {
     // offsets) so single-line mixed text renders each run with its own style
     // (the native equivalent of the web nested-<span> path). The dominant style
     // is read from the Label (codegen emits the single-style setters first).
-    register_bridge_function(api, "setTextRuns", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setTextRuns", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto* l = dynamic_cast<Label*>(widget(id));
+        auto* l = dynamic_cast<Label*>(self.widget(id));
         if (!l || args.numArgs < 2 || !args[1] || !args[1]->isArray())
             return choc::value::Value();
         const std::string& text = l->text();

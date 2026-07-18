@@ -18,8 +18,8 @@ choc::value::Value shader_result(bool success, const std::string& error) {
 
 } // namespace
 
-void WidgetBridge::register_shader_widget_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // compileShader(sksl_code) -> {success: bool, error: string}
     // Validates SkSL shader code by actually compiling via SkRuntimeEffect.
@@ -38,11 +38,11 @@ void WidgetBridge::register_shader_widget_api() {
     // rect forever, which looks like a rendering bug rather than a shader
     // error. Every rejection path reports why — silently doing nothing was
     // the old behavior and it stranded callers.
-    register_bridge_function(api, "setWidgetShader", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setWidgetShader", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto sksl = args.get<std::string>(1, "");
 
-        auto* v = widget(id);
+        auto* v = self.widget(id);
         if (!v) return shader_result(false, "No widget with id '" + id + "'");
 
         auto* host = dynamic_cast<CustomShaderHost*>(v);
@@ -58,16 +58,16 @@ void WidgetBridge::register_shader_widget_api() {
         if (!error.empty()) return shader_result(false, error);
 
         host->set_custom_shader(std::move(sksl));
-        request_repaint();
+        self.request_repaint();
         return shader_result(true, "");
     });
 
     // clearWidgetShader(id) -> {success: bool, error: string}
     // Removes the custom shader and restores the default C++ paint path.
-    register_bridge_function(api, "clearWidgetShader", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "clearWidgetShader", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
 
-        auto* v = widget(id);
+        auto* v = self.widget(id);
         if (!v) return shader_result(false, "No widget with id '" + id + "'");
 
         auto* host = dynamic_cast<CustomShaderHost*>(v);
@@ -76,12 +76,12 @@ void WidgetBridge::register_shader_widget_api() {
                 false, "Widget '" + id + "' does not support custom shaders");
 
         host->clear_custom_shader();
-        request_repaint();
+        self.request_repaint();
         return shader_result(true, "");
     });
 }
 
-void WidgetBridge::register_shader_canvas_api() {
+void BridgeRegistrars::register_shader_canvas_api(WidgetBridge& self) {
     // `applyShader(canvasId, skslCode)` used to live here. It never compiled or
     // applied anything — it set a `shader.active` theme dimension and returned
     // success for any non-empty string, including un-compilable SkSL and ids

@@ -195,8 +195,8 @@ std::string base64_encode_blob(const std::vector<uint8_t>& data) {
 
 } // namespace
 
-void WidgetBridge::register_storage_key_value_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_storage_key_value_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // localStorage equivalent - file-based key-value in plugin data dir.
     register_bridge_function(api, "storageGetItem", [](choc::javascript::ArgumentList args) {
@@ -230,12 +230,12 @@ void WidgetBridge::register_storage_key_value_api() {
     });
 }
 
-void WidgetBridge::register_asset_loading_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_asset_loading_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
-    register_bridge_function(api, "__loadAssetSync__", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__loadAssetSync__", [&self](choc::javascript::ArgumentList args) {
         auto url = args.get<std::string>(0, "");
-        auto asset = load_bridge_asset(url, asset_roots_);
+        auto asset = load_bridge_asset(url, self.asset_roots_);
 
         auto result = choc::value::createObject("");
         result.addMember("ok", choc::value::createBool(asset.ok));
@@ -254,8 +254,8 @@ void WidgetBridge::register_asset_loading_api() {
     });
 }
 
-void WidgetBridge::register_font_assets_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_font_assets_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // Font loading: loadFont(path) -> success boolean.
     // This is an existence probe for web-compat callers; actual renderer font

@@ -7,21 +7,21 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_style_visibility_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_style_visibility_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setVisible(id, bool)
-    register_bridge_function(api, "setVisible", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setVisible", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto vis = args.get<double>(1, 1) > 0.5;
-        auto it = widgets_.find(id);
-        if (it != widgets_.end()) it->second->set_visible(vis);
+        auto it = self.widgets_.find(id);
+        if (it != self.widgets_.end()) it->second->set_visible(vis);
         return choc::value::Value();
     });
 }
 
-void WidgetBridge::register_widget_style_interaction_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_style_interaction_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setPointerEvents(id, "none"|"auto") - CSS pointer-events: skip in hit_test.
     // RN-shaped 4-valued pointerEvents:
@@ -32,10 +32,10 @@ void WidgetBridge::register_widget_style_interaction_api() {
     // Keep set_hit_testable() in sync for the binary cases for back-compat
     // with existing scripts, and route the four-valued enum via
     // View::set_pointer_events().
-    register_bridge_function(api, "setPointerEvents", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setPointerEvents", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto mode = args.get<std::string>(1, "auto");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         if (mode == "none") {
             v->set_hit_testable(false);
@@ -56,19 +56,19 @@ void WidgetBridge::register_widget_style_interaction_api() {
     // RN backfaceVisibility ("visible"|"hidden"). Stored on the View for
     // plumbing parity with @pulp/react. Pulp's transform model is currently
     // 2D-affine, so this is a no-op for painting today.
-    register_bridge_function(api, "setBackfaceVisibility", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBackfaceVisibility", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto mode = args.get<std::string>(1, "visible");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) v->set_backface_visible(mode != "hidden");
         return choc::value::Value();
     });
 
     // setVisibility(id, "visible"|"hidden") - hidden preserves layout space
-    register_bridge_function(api, "setVisibility", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setVisibility", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto vis = args.get<std::string>(1, "visible");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) {
             // visibility:hidden = still takes space but not painted
             // We use opacity 0 + still visible for layout
@@ -87,10 +87,10 @@ void WidgetBridge::register_widget_style_interaction_api() {
     // Label::set_multi_line side-effect stays in lock-step so existing
     // single-line Label paint paths, including ellipsis truncation,
     // keep working when only one of the flags is set.
-    register_bridge_function(api, "setWhiteSpace", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setWhiteSpace", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto ws = args.get<std::string>(1, "normal");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         // Map keyword to View::WhiteSpaceMode enum. The set_white_space_mode
         // setter also maintains the legacy
@@ -119,7 +119,7 @@ void WidgetBridge::register_widget_style_interaction_api() {
         // multi_line=true for `pre`. Long lines overflow horizontally
         // - a degraded but spec-correct behavior. Soft-wrap
         // suppression for `pre` is not wired yet.
-        if (auto* l = dynamic_cast<Label*>(widget(id))) {
+        if (auto* l = dynamic_cast<Label*>(self.widget(id))) {
             const bool wraps = (mode != M::nowrap);
             l->set_multi_line(wraps);
         }
@@ -130,10 +130,10 @@ void WidgetBridge::register_widget_style_interaction_api() {
     // user-select. Stores the keyword on View::user_select_ so widgets
     // that participate in selection can read it. Unknown keywords map to
     // the spec default (auto).
-    register_bridge_function(api, "setUserSelect", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setUserSelect", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto kw = args.get<std::string>(1, "auto");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         if      (kw == "none")    v->set_user_select(View::UserSelect::none);
         else if (kw == "text")    v->set_user_select(View::UserSelect::text);
