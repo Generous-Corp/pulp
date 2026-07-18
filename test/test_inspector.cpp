@@ -2539,6 +2539,150 @@ TEST_CASE("WYSIWYG anchored reparent undo no-ops after the moved view "
     REQUIRE(right_ptr->child_count() == 0);
 }
 
+// ── WYSIWYG — resize + move-float undo survive a live SUBTREE rebuild ────────
+//
+// The resize and drag-to-move-float commit sites historically captured a raw
+// `View* tgt` in their EditHistory closures, unlike the text-edit + reparent
+// sites which resolve their target by stable anchor at replay. A live React
+// SUBTREE rebuild (clear_edit_history() does NOT fire — it only covers ROOT
+// replacement) freed that raw pointer, so Cmd+Z after such a rebuild
+// dereferenced freed memory. Routing both sites through the shared
+// GestureUndoTarget recorder (S39a) resolves the live view by anchor at replay
+// (or a graceful no-op when it's gone), matching the text-edit / reparent
+// paths. These tests re-find the CURRENT live view by anchor and assert undo
+// reverts THAT view — on the pre-fix raw-pointer capture they would corrupt /
+// deref the freed original instead.
+
+TEST_CASE("WYSIWYG anchored resize undo resolves by anchor after a subtree "
+          "rebuild",
+          "[inspect][overlay][wysiwyg][undo][uaf][resize][issue-6223]") {
+    View root;
+    root.set_bounds({0, 0, 600, 400});
+    auto child = std::make_unique<View>();
+    child->set_anchor_id("figma:resize-1");
+    child->set_bounds({10, 10, 80, 40});
+    child->flex().preferred_width = 80;
+    child->flex().preferred_height = 40;
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    TweakStore store;
+    pulp::state::EditHistory history;
+    history.set_coalesce(false);
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+    overlay.set_edit_history(&history);
+    overlay.set_dragging_enabled(true);
+
+    // Select, then drive one resize gesture (press SE handle, drag, release).
+    MouseEvent click; click.position = {30, 30}; click.is_down = true;
+    overlay.handle_mouse_event(click);
+    REQUIRE(overlay.selected_view() == child_ptr);
+    MouseEvent press; press.position = {90, 50}; press.is_down = true;
+    REQUIRE(overlay.handle_mouse_event(press));
+    MouseEvent drag; drag.position = {140, 90}; drag.is_down = false;
+    REQUIRE(overlay.handle_mouse_event(drag));
+    MouseEvent release; release.position = {300, 300}; release.is_down = true;
+    overlay.handle_mouse_event(release);
+    REQUIRE(history.undo_count() == 1);
+
+    // Free the resized view and wire a NEW view with the SAME anchor but a
+    // DIFFERENT size — a live SUBTREE rebuild (clear_edit_history() NOT called).
+    {
+        auto removed = root.remove_child(child_ptr);  // frees old view here
+        (void)removed;
+    }
+    auto rebuilt = std::make_unique<View>();
+    rebuilt->set_anchor_id("figma:resize-1");
+    rebuilt->set_bounds({10, 10, 200, 100});
+    rebuilt->flex().preferred_width = 200;
+    rebuilt->flex().preferred_height = 100;
+    auto* rebuilt_ptr = rebuilt.get();
+    root.add_child(std::move(rebuilt));
+
+    // Paint runs the rebuild seam. The target was ANCHORED, so the history is
+    // NOT cleared. Undo re-finds the live view by anchor and restores the
+    // pre-resize size on THAT view — never the freed original.
+    pulp::canvas::RecordingCanvas canvas;
+    REQUIRE_NOTHROW(overlay.paint(canvas));
+    REQUIRE(history.can_undo());
+    REQUIRE_NOTHROW(history.undo());
+    REQUIRE(rebuilt_ptr->flex().preferred_width == Catch::Approx(80.0f));
+    REQUIRE(rebuilt_ptr->flex().preferred_height == Catch::Approx(40.0f));
+}
+
+TEST_CASE("WYSIWYG anchored move-float undo resolves by anchor after a "
+          "subtree rebuild",
+          "[inspect][overlay][wysiwyg][undo][uaf][move][issue-6223]") {
+    View root;
+    root.set_bounds({0, 0, 600, 400});
+    root.flex().direction = FlexDirection::row;
+    auto child = std::make_unique<View>();
+    child->set_anchor_id("figma:move-1");
+    child->flex().preferred_width = 80;
+    child->flex().preferred_height = 40;
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+    root.layout_children();
+
+    TweakStore store;
+    pulp::state::EditHistory history;
+    history.set_coalesce(false);
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+    overlay.set_edit_history(&history);
+    overlay.set_dragging_enabled(true);
+    overlay.set_selected_view(child_ptr);
+
+    // ⌘-drag the body → absolute-float move (the escape hatch): one undoable
+    // unit. The pre-move node is static_ with no explicit insets.
+    const Rect cb = child_ptr->bounds();
+    MouseEvent press;
+    press.position = {cb.x + 10, cb.y + 10};
+    press.is_down = true;
+    press.modifiers = kModCmd;
+    REQUIRE(overlay.handle_mouse_event(press));
+    MouseEvent drag;
+    drag.position = {cb.x + 120, cb.y + 60};
+    drag.is_down = false;
+    drag.modifiers = kModCmd;
+    REQUIRE(overlay.handle_mouse_event(drag));
+    MouseEvent release;
+    release.position = drag.position;
+    release.is_down = true;
+    release.modifiers = kModCmd;
+    overlay.handle_mouse_event(release);
+    REQUIRE(history.undo_count() == 1);
+    REQUIRE(child_ptr->position() == View::Position::absolute);
+
+    // Free the moved view; wire a replacement with the SAME anchor but a
+    // DISTINCT (absolute, far-offset) layout so undo's restore is observable.
+    {
+        auto removed = root.remove_child(child_ptr);  // frees old view here
+        (void)removed;
+    }
+    auto rebuilt = std::make_unique<View>();
+    rebuilt->set_anchor_id("figma:move-1");
+    rebuilt->flex().preferred_width = 80;
+    rebuilt->flex().preferred_height = 40;
+    rebuilt->set_position(View::Position::absolute);
+    rebuilt->set_left(999.0f);
+    rebuilt->set_top(999.0f);
+    auto* rebuilt_ptr = rebuilt.get();
+    root.add_child(std::move(rebuilt));
+
+    // Paint runs the rebuild seam. The target was ANCHORED, so history survives.
+    // Undo re-finds the live view by anchor and restores the pre-move position
+    // (static_) onto THAT view — never the freed original.
+    pulp::canvas::RecordingCanvas canvas;
+    REQUIRE_NOTHROW(overlay.paint(canvas));
+    REQUIRE(history.can_undo());
+    REQUIRE_NOTHROW(history.undo());
+    REQUIRE(rebuilt_ptr->position() == View::Position::static_);
+}
+
 TEST_CASE("InspectorWindow refreshes console performance and state tabs", "[inspect][window][issue-641]") {
     View inspected_root;
     inspected_root.set_id("root");
