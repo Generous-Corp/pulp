@@ -1,6 +1,7 @@
 #include "pulp_sampler.hpp"
 #include "rt_allocation_probe.hpp"
 #include "sampler_stream_mip_sidecar.hpp"
+#include "../../test/support/sampler_parity.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -14,10 +15,12 @@
 #include <limits>
 #include <numbers>
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/scope_guard.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <set>
+#include <span>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -29,6 +32,11 @@ using Catch::Matchers::WithinAbs;
 namespace pulp::examples {
 
 struct PulpSamplerTestAccess {
+    static PulpSamplerLoadResult load_sample_file_result(
+        PulpSamplerProcessor& processor, std::string_view path) {
+        return processor.streaming_.load_sample_file_result(path);
+    }
+
     static audio::SampleStreamSourceToken
     published_stream_source(const PulpSamplerProcessor& processor) {
         return processor.streaming_->published_source().streamed.source;
@@ -52,6 +60,53 @@ struct PulpSamplerTestAccess {
             }
         }
         return count;
+    }
+
+    static std::size_t active_voice_count(const PulpSamplerProcessor& processor) {
+        return static_cast<std::size_t>(std::count_if(
+            std::begin(processor.voices_), std::end(processor.voices_),
+            [](const SamplerVoice& voice) { return voice.active; }));
+    }
+
+    static std::array<double, PulpSamplerProcessor::kMaxVoices>
+    active_voice_positions(const PulpSamplerProcessor& processor) {
+        std::array<double, PulpSamplerProcessor::kMaxVoices> positions{};
+        positions.fill(-1.0);
+        for (std::size_t index = 0; index < positions.size(); ++index) {
+            const auto& voice = processor.voices_[index];
+            if (!voice.active) continue;
+            positions[index] = voice.streamed
+                ? voice.stream_reader.cursor().position()
+                : voice.renderer.position();
+        }
+        return positions;
+    }
+
+    static std::array<std::uint64_t, PulpSamplerProcessor::kMaxVoices>
+    requester_generations(const PulpSamplerProcessor& processor) {
+        return processor.requester_generations_;
+    }
+
+    static audio::SampleStarvationEnvelopeStats
+    active_stream_starvation_stats(const PulpSamplerProcessor& processor) {
+        for (const auto& voice : processor.voices_) {
+            if (voice.active && voice.streamed)
+                return voice.stream_reader.starvation_stats();
+        }
+        return {};
+    }
+
+    static audio::SampleStarvationMode
+    active_stream_starvation_mode(const PulpSamplerProcessor& processor) {
+        for (const auto& voice : processor.voices_) {
+            if (voice.active && voice.streamed)
+                return voice.stream_reader.starvation_mode();
+        }
+        return audio::SampleStarvationMode::Silent;
+    }
+
+    static void reset_voices(PulpSamplerProcessor& processor) {
+        processor.reset_all_voices();
     }
 
     static bool force_active_stream_rate_capacity(PulpSamplerProcessor& processor,
@@ -478,6 +533,39 @@ struct TempSamplerWav {
     }
 };
 
+struct TempSamplerFlac {
+    std::string path;
+
+    explicit TempSamplerFlac(const char* label) {
+        // A self-contained 32-frame, mono, 48 kHz, 16-bit silent FLAC. Keeping
+        // the encoded bytes in the test makes this capability check portable:
+        // no encoder executable or optional FLAC writer is needed at runtime.
+        constexpr std::string_view kTinyFlacBase64 =
+            "ZkxhQ4AAACIQABAAAAAMAAAMC7gA8AAAACA7XTx9IH433O7t0wHjXi5Y"
+            "//hqCAAfegAAAPkU";
+        const auto decoded = runtime::base64_decode(kTinyFlacBase64);
+        REQUIRE(decoded.has_value());
+
+        static std::atomic<std::uint64_t> sequence{0};
+        path = (std::filesystem::temp_directory_path() /
+                (std::string("pulp_sampler_") + label + "_" +
+                 std::to_string(
+                     std::chrono::steady_clock::now().time_since_epoch().count()) +
+                 "_" + std::to_string(sequence.fetch_add(1)) + ".flac"))
+                   .string();
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        REQUIRE(output.good());
+        output.write(reinterpret_cast<const char*>(decoded->data()),
+                     static_cast<std::streamsize>(decoded->size()));
+        REQUIRE(output.good());
+    }
+
+    ~TempSamplerFlac() {
+        std::error_code error;
+        std::filesystem::remove(path, error);
+    }
+};
+
 struct TempSamplerMipSidecar {
     std::string manifest_path;
     std::vector<std::string> payload_paths;
@@ -656,6 +744,75 @@ struct FileStageLoaderGuard {
             loader.join();
     }
 };
+
+namespace sampler_parity = pulp::test::sampler_parity;
+
+struct ProductionSamplerCapture {
+    audio::Buffer<float> output;
+    std::array<double, PulpSamplerProcessor::kMaxVoices> final_positions{};
+    std::array<std::uint64_t, PulpSamplerProcessor::kMaxVoices>
+        requester_generations{};
+    PulpSamplerStreamStats stream_stats{};
+};
+
+static void configure_parity_sampler(SamplerFixture& fixture) {
+    fixture.store.set_value(kSamplerGain, 0.0f);
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerRelease, 0.0f);
+    fixture.store.set_value(kSamplerPitch, 0.0f);
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+    fixture.store.set_value(kSamplerReverse, 0.0f);
+    fixture.store.set_value(kSamplerInterpolation, 0.0f);
+}
+
+static ProductionSamplerCapture render_production_sampler_schedule(
+    PulpSamplerProcessor& processor,
+    std::uint64_t total_frames,
+    std::span<const std::uint32_t> partition,
+    bool allow_stream_service) {
+    // Twelve note-ons guarantee four steals after filling the eight prepared
+    // voice slots. Their irregular offsets also cross several callback seams.
+    constexpr std::array<std::uint64_t, 12> note_frames = {
+        0, 53, 127, 241, 319, 509, 613, 767, 883, 977, 1109, 1261,
+    };
+    REQUIRE(total_frames > note_frames.back());
+    REQUIRE_FALSE(partition.empty());
+
+    ProductionSamplerCapture capture;
+    capture.output.resize(2, static_cast<std::size_t>(total_frames));
+    std::uint64_t offset = 0;
+    std::size_t partition_index = 0;
+    while (offset < total_frames) {
+        const auto frames = static_cast<std::uint32_t>(std::min<std::uint64_t>(
+            partition[partition_index], total_frames - offset));
+        SamplerProcessBlock block(frames);
+        for (const auto event_frame : note_frames) {
+            if (event_frame < offset || event_frame >= offset + frames) continue;
+            auto event = midi::MidiEvent::note_on(0, 60, 127);
+            event.sample_offset = static_cast<std::int32_t>(event_frame - offset);
+            block.midi_in.add(event);
+        }
+        block.run(processor);
+        for (std::size_t frame = 0; frame < frames; ++frame) {
+            capture.output.channel(0)[static_cast<std::size_t>(offset) + frame] =
+                block.left[frame];
+            capture.output.channel(1)[static_cast<std::size_t>(offset) + frame] =
+                block.right[frame];
+        }
+        if (allow_stream_service)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        offset += frames;
+        partition_index = (partition_index + 1) % partition.size();
+    }
+    capture.final_positions =
+        PulpSamplerTestAccess::active_voice_positions(processor);
+    capture.requester_generations =
+        PulpSamplerTestAccess::requester_generations(processor);
+    capture.stream_stats = processor.stream_stats();
+    return capture;
+}
 
 TEST_CASE("PulpSampler descriptor", "[sampler]") {
     PulpSamplerProcessor proc;
@@ -2767,6 +2924,183 @@ TEST_CASE("PulpSampler streams continuously across the preload boundary", "[samp
     for (std::uint64_t frame = preload - 8; frame < preload + 8; ++frame) {
         REQUIRE_THAT(rendered[static_cast<std::size_t>(frame)], WithinAbs(0.5f, 1e-6));
     }
+}
+
+TEST_CASE("PulpSampler reports decode-once FLAC rejection without replacing its source",
+          "[sampler][stream][codec][transaction]") {
+    TempSamplerWav published("codec_fallback_published", 24000, 0.375f);
+    TempSamplerFlac fallback("codec_fallback_rejected");
+    SamplerFixture fixture;
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    REQUIRE(fixture.proc->load_sample_file(published.path));
+
+    const auto source_before =
+        PulpSamplerTestAccess::published_stream_source(*fixture.proc);
+    const auto selection_before =
+        PulpSamplerTestAccess::published_selection_generation(*fixture.proc);
+    REQUIRE(source_before.source_id != 0);
+    REQUIRE(source_before.source_generation != 0);
+
+    const auto rejected = PulpSamplerTestAccess::load_sample_file_result(
+        *fixture.proc, fallback.path);
+    REQUIRE(rejected.status == PulpSamplerLoadStatus::DecodeOnceFallbackRejected);
+    REQUIRE(rejected.codec_capability ==
+            PulpSamplerCodecCapability::DecodeOnceFallback);
+    REQUIRE(rejected.codec() == "FLAC");
+    REQUIRE(rejected.channels == 1);
+    REQUIRE(rejected.sample_rate == 48000);
+    REQUIRE(rejected.total_frames == 32);
+
+    const auto source_after =
+        PulpSamplerTestAccess::published_stream_source(*fixture.proc);
+    REQUIRE(source_after.source_id == source_before.source_id);
+    REQUIRE(source_after.source_generation == source_before.source_generation);
+    REQUIRE(PulpSamplerTestAccess::published_selection_generation(*fixture.proc) ==
+            selection_before);
+    REQUIRE(fixture.proc->has_sample());
+    REQUIRE(fixture.proc->sample_length() == 24000);
+
+    SamplerProcessBlock block(64);
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    block.run(*fixture.proc);
+    REQUIRE(std::all_of(block.left.begin(), block.left.end(), [](float sample) {
+        return std::abs(sample - 0.375f) <= 1.0e-6f;
+    }));
+    REQUIRE(block.left == block.right);
+    REQUIRE(fixture.proc->stream_stats().starved_output_frames == 0);
+}
+
+TEST_CASE("PulpSampler resident and recovered streamed polyphony null through voice steals",
+          "[sampler][stream][parity][steal][recovery]") {
+    constexpr std::uint64_t source_frames = 48000;
+    const auto source = sampler_parity::make_deterministic_source(1, source_frames);
+    const std::vector<float> mono(source.channel(0).begin(), source.channel(0).end());
+    TempSamplerWav streamed_file("production_steal_parity", mono);
+
+    SamplerFixture resident_fixture;
+    SamplerFixture streamed_fixture;
+    configure_parity_sampler(resident_fixture);
+    configure_parity_sampler(streamed_fixture);
+    REQUIRE(resident_fixture.proc->load_sample(
+        mono.data(), static_cast<int>(mono.size()), 44100.0f));
+    REQUIRE(streamed_fixture.proc->load_sample_file(streamed_file.path));
+    const auto preload = streamed_fixture.proc->stream_stats().preload_frames;
+    REQUIRE(preload > 0);
+    REQUIRE(preload < source_frames);
+
+    // Force a real service starvation, then prove the production voice reader
+    // returns to Ready before using the recovered source for the null render.
+    PulpSamplerTestAccess::pause_stream_dispatch(*streamed_fixture.proc, true);
+    SamplerProcessBlock recovery_block(257);
+    recovery_block.midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    recovery_block.run(*streamed_fixture.proc);
+    recovery_block.midi_in.clear();
+    for (std::uint32_t callback = 0;
+         callback < 256 &&
+         streamed_fixture.proc->stream_stats().starved_output_frames == 0;
+         ++callback) {
+        recovery_block.run(*streamed_fixture.proc);
+    }
+    REQUIRE(streamed_fixture.proc->stream_stats().starved_output_frames > 0);
+    REQUIRE(PulpSamplerTestAccess::active_stream_starvation_stats(
+                *streamed_fixture.proc).starved_frames > 0);
+
+    PulpSamplerTestAccess::pause_stream_dispatch(*streamed_fixture.proc, false);
+    REQUIRE(wait_for_condition(
+        [&] {
+            recovery_block.run(*streamed_fixture.proc);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            const auto stats = PulpSamplerTestAccess::active_stream_starvation_stats(
+                *streamed_fixture.proc);
+            return stats.recovery_events > 0 &&
+                   PulpSamplerTestAccess::active_stream_starvation_mode(
+                       *streamed_fixture.proc) ==
+                       audio::SampleStarvationMode::Ready &&
+                   std::any_of(recovery_block.left.begin(), recovery_block.left.end(),
+                               [](float sample) { return sample != 0.0f; });
+        },
+        std::chrono::seconds(5)));
+    const auto recovered_envelope =
+        PulpSamplerTestAccess::active_stream_starvation_stats(*streamed_fixture.proc);
+    REQUIRE(recovered_envelope.starved_frames > 0);
+    REQUIRE(recovered_envelope.recovery_events > 0);
+    REQUIRE(PulpSamplerTestAccess::active_stream_starvation_mode(
+                *streamed_fixture.proc) == audio::SampleStarvationMode::Ready);
+
+    PulpSamplerTestAccess::reset_voices(*streamed_fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::active_voice_count(*streamed_fixture.proc) == 0);
+    REQUIRE(wait_for_condition(
+        [&] {
+            SamplerProcessBlock drain(1);
+            drain.run(*streamed_fixture.proc);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            return PulpSamplerTestAccess::stream_command_count(
+                       *streamed_fixture.proc) == 0;
+        }));
+    const auto streamed_generations_before =
+        PulpSamplerTestAccess::requester_generations(*streamed_fixture.proc);
+    const auto starvation_before_parity =
+        streamed_fixture.proc->stream_stats().starved_output_frames;
+
+    constexpr std::array<std::uint32_t, 9> partition = {
+        31, 127, 64, 257, 19, 509, 73, 211, 43,
+    };
+    const auto capture_frames = preload + 4096;
+    REQUIRE(capture_frames < source_frames);
+    const auto resident = render_production_sampler_schedule(
+        *resident_fixture.proc, capture_frames, partition, false);
+    const auto streamed = render_production_sampler_schedule(
+        *streamed_fixture.proc, capture_frames, partition, true);
+
+    REQUIRE(PulpSamplerTestAccess::active_voice_count(*resident_fixture.proc) ==
+            PulpSamplerProcessor::kMaxVoices);
+    REQUIRE(PulpSamplerTestAccess::active_voice_count(*streamed_fixture.proc) ==
+            PulpSamplerProcessor::kMaxVoices);
+    std::uint64_t admitted_streamed_starts = 0;
+    for (std::size_t index = 0; index < streamed.requester_generations.size(); ++index) {
+        const auto starts = streamed.requester_generations[index] -
+                            streamed_generations_before[index];
+        // Every prepared slot was occupied. The four starts beyond that full
+        // eight-voice set therefore required four production steal decisions.
+        REQUIRE(starts >= 1);
+        admitted_streamed_starts += starts;
+        REQUIRE(resident.final_positions[index] >= 0.0);
+        REQUIRE(streamed.final_positions[index] == resident.final_positions[index]);
+    }
+    REQUIRE(admitted_streamed_starts == 12);
+    REQUIRE(admitted_streamed_starts - PulpSamplerProcessor::kMaxVoices == 4);
+    // Slot zero was replaced after the voice set filled, so its younger cursor
+    // must trail an untouched voice. This independently proves the schedule
+    // did not merely submit twelve rejected note-ons.
+    REQUIRE(resident.final_positions[0] < resident.final_positions[4]);
+    REQUIRE(streamed.final_positions[0] < streamed.final_positions[4]);
+
+    const auto comparison = sampler_parity::compare_raw_float_bits(
+        resident.output, streamed.output);
+    REQUIRE(comparison.equal_nonvacuous());
+    float maximum_residual = 0.0f;
+    double residual_energy = 0.0;
+    for (std::size_t channel = 0; channel < resident.output.num_channels(); ++channel) {
+        for (std::size_t frame = 0; frame < resident.output.num_samples(); ++frame) {
+            const auto residual = resident.output.channel(channel)[frame] -
+                                  streamed.output.channel(channel)[frame];
+            maximum_residual = std::max(maximum_residual, std::abs(residual));
+            residual_energy += static_cast<double>(residual) * residual;
+        }
+    }
+    REQUIRE(maximum_residual == 0.0f);
+    REQUIRE(residual_energy == 0.0);
+
+    REQUIRE(streamed.stream_stats.starved_output_frames ==
+            starvation_before_parity);
+    REQUIRE(streamed.stream_stats.pages_published > 0);
+    REQUIRE(streamed.stream_stats.decode_failure_events == 0);
+    REQUIRE(streamed.stream_stats.invalid_preload_contract_events == 0);
+    REQUIRE(streamed.stream_stats.stale_generation_events == 0);
+    REQUIRE(streamed.stream_stats.normal_end_of_source_events == 0);
+    REQUIRE(streamed.stream_stats.invalid_render_contract_events == 0);
 }
 
 TEST_CASE("PulpSampler retunes streamed sinc across pitch modulation",
