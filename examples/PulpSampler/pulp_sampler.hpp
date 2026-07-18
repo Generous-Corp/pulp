@@ -50,6 +50,9 @@ public:
     static constexpr std::uint32_t kMaxSampleChannels = SamplerSampleStore::kMaxChannels;
     static constexpr std::uint32_t kMaxOutputChannels = 8;
 
+    explicit PulpSamplerProcessor(PulpSamplerConfig config = {})
+        : config_(config) {}
+
     ~PulpSamplerProcessor() override { release(); }
 
     format::PluginDescriptor descriptor() const override {
@@ -182,8 +185,28 @@ public:
 
     /// Load a true ranged WAV or uncompressed AIFF asset. The call may perform
     /// file I/O and wait for the sampler's non-audio owner thread.
+    PulpSamplerLoadResult load_sample_file_result(std::string_view path) {
+        last_load_result_ = streaming_->load_sample_file_result(path);
+        return last_load_result_;
+    }
+
     bool load_sample_file(std::string_view path) {
-        return streaming_->load_sample_file(path);
+        return load_sample_file_result(path).loaded();
+    }
+
+    PulpSamplerLoadResult last_load_result() const noexcept {
+        return last_load_result_;
+    }
+
+    bool set_config(PulpSamplerConfig config) noexcept {
+        if (prepared_) return false;
+        config_ = config;
+        return true;
+    }
+
+    PulpSamplerConfig config() const noexcept { return config_; }
+    PulpSamplerPrepareResult prepare_result() const noexcept {
+        return prepare_result_;
     }
 
     bool has_sample() const {
@@ -251,18 +274,87 @@ public:
         return heritage_.diagnostics();
     }
 
+    PulpSamplerDiagnostics diagnostics() const noexcept {
+        const auto stream = streaming_->stats();
+        PulpSamplerDiagnostics result{
+            .prepare = prepare_result_,
+            .last_load = last_load_result_,
+            .preload = streaming_->preload_policy(),
+            .heritage = heritage_.diagnostics(),
+            .streaming_memory_capacity_bytes = stream.total_memory_capacity_bytes,
+            .current_streaming_memory_bytes = stream.current_total_memory_bytes,
+            .peak_streaming_memory_bytes = stream.peak_total_memory_bytes,
+        };
+        if (envelope_snapshot_available_.load(std::memory_order_acquire))
+            result.envelope = envelope_snapshot_.read();
+        return result;
+    }
+
+    format::PrepareResourceUsage estimate_prepare_resources(
+        const format::PrepareContext& ctx) const override {
+        format::PrepareResourceUsage usage;
+        usage.block_size = std::max(0, ctx.max_buffer_size);
+        usage.input_channels = std::max(0, ctx.input_channels);
+        usage.output_channels = std::max(0, ctx.output_channels);
+        usage.voices = kMaxVoices;
+        if (!std::isfinite(ctx.sample_rate) || ctx.sample_rate <= 0.0 ||
+            ctx.max_buffer_size <= 0 || ctx.output_channels <= 0 ||
+            ctx.output_channels > static_cast<int>(kMaxOutputChannels))
+            return usage;
+        const auto streaming = SamplerStreamingRuntime::estimate_prepare(
+            static_cast<float>(ctx.sample_rate),
+            static_cast<std::uint32_t>(ctx.max_buffer_size),
+            config_.streaming_memory_budget_bytes);
+        usage.persistent_bytes = streaming.configured_streaming_memory_bytes >
+                std::numeric_limits<std::size_t>::max()
+            ? std::numeric_limits<std::size_t>::max()
+            : static_cast<std::size_t>(streaming.configured_streaming_memory_bytes);
+        const auto scratch_frames = static_cast<std::size_t>(ctx.max_buffer_size);
+        if (scratch_frames <= std::numeric_limits<std::size_t>::max() /
+                                  (kMaxOutputChannels * sizeof(float))) {
+            usage.block_scratch_bytes = scratch_frames * kMaxOutputChannels *
+                                        sizeof(float);
+        } else {
+            usage.block_scratch_bytes = std::numeric_limits<std::size_t>::max();
+        }
+        return usage;
+    }
+
     void prepare(const format::PrepareContext& ctx) override {
         const auto previous_latency = latency_samples();
         release();
-        host_sample_rate_ = static_cast<float>(ctx.sample_rate);
-        max_block_frames_ = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(ctx.max_buffer_size));
-        prepared_output_channels_ = std::clamp<std::uint32_t>(
-            static_cast<std::uint32_t>(ctx.output_channels), 1, kMaxOutputChannels);
-
-        for (std::uint32_t ch = 0; ch < kMaxOutputChannels; ++ch) {
-            voice_scratch_[ch].assign(max_block_frames_, 0.0f);
+        last_load_result_ = {};
+        envelope_lifetime_ = {};
+        envelope_snapshot_available_.store(false, std::memory_order_release);
+        if (!std::isfinite(ctx.sample_rate) || ctx.sample_rate <= 0.0 ||
+            ctx.max_buffer_size <= 0 || ctx.output_channels <= 0 ||
+            ctx.output_channels > static_cast<int>(kMaxOutputChannels) ||
+            ctx.input_channels < 0) {
+            prepare_result_.status =
+                PulpSamplerPrepareStatus::InvalidHostConfiguration;
+            return;
         }
-        source_publication_.prepare();
+        if (const auto exceeded = check_prepare_resource_limits(ctx);
+            exceeded != format::PrepareResourceLimit::None) {
+            prepare_result_.status = PulpSamplerPrepareStatus::ResourceLimitExceeded;
+            prepare_result_.exceeded_limit = exceeded;
+            return;
+        }
+        host_sample_rate_ = static_cast<float>(ctx.sample_rate);
+        max_block_frames_ = static_cast<std::uint32_t>(ctx.max_buffer_size);
+        prepared_output_channels_ = static_cast<std::uint32_t>(ctx.output_channels);
+
+        try {
+            for (std::uint32_t ch = 0; ch < kMaxOutputChannels; ++ch)
+                voice_scratch_[ch].assign(max_block_frames_, 0.0f);
+        } catch (...) {
+            fail_prepare({.status = PulpSamplerPrepareStatus::AllocationFailure});
+            return;
+        }
+        if (!source_publication_.prepare()) {
+            fail_prepare({.status = PulpSamplerPrepareStatus::AllocationFailure});
+            return;
+        }
         callback_runtime_snapshot_available_.store(false,
                                                    std::memory_order_release);
         restored_runtime_state_available_ = false;
@@ -274,7 +366,11 @@ public:
             const auto result = heritage_.prepare(
                 host_sample_rate_, prepared_output_channels_, max_block_frames_,
                 runtime_state, pending_runtime_host_sample_rate_);
-            if (heritage_ready(result)) {
+            if (!heritage_ready(result)) {
+                fail_prepare({.status =
+                    PulpSamplerPrepareStatus::HeritagePrepareFailed});
+                return;
+            } else {
                 if (result == PulpSamplerHeritageStatus::Ready &&
                     runtime_state != nullptr) {
                     restored_runtime_state_ = *runtime_state;
@@ -282,12 +378,14 @@ public:
                         pending_runtime_host_sample_rate_;
                     restored_runtime_state_available_ = true;
                 }
-                pending_runtime_state_available_ = false;
-                pending_runtime_host_sample_rate_ = 0.0;
             }
         }
-        prepare_stream_domain();
-        for (auto& voice : voices_) voice.reset();
+        const auto stream_result = prepare_stream_domain();
+        if (!stream_result.prepared()) {
+            fail_prepare(stream_result);
+            return;
+        }
+        for (auto& voice : voices_) reset_voice(voice);
         for (auto& generation : requester_generations_) generation = 0;
         for (auto& cancellation : pending_cancellations_) cancellation = {};
 #if defined(PULP_SAMPLER_TEST_HOOKS)
@@ -299,17 +397,22 @@ public:
         source_publication_.acknowledge_audio(
             streaming_->published_source(), voices_, *streaming_);
         prepared_ = true;
+        prepare_result_ = stream_result;
+        pending_runtime_state_available_ = false;
+        pending_runtime_host_sample_rate_ = 0.0;
         if (latency_samples() != previous_latency) flag_latency_changed();
     }
 
     void release() override {
-        for (auto& voice : voices_) voice.reset();
+        for (auto& voice : voices_) reset_voice(voice);
         for (auto& cancellation : pending_cancellations_) cancellation = {};
         streaming_->release();
         source_publication_.release();
         sinc_bank_->release();
         heritage_.release_processing();
         prepared_ = false;
+        prepare_result_ = {};
+        envelope_snapshot_available_.store(false, std::memory_order_release);
     }
 
     void process(
@@ -320,6 +423,7 @@ public:
         const format::ProcessContext&) override
     {
         clear_output(output);
+        if (!prepared_) return;
 
         const auto audio_generation = streaming_->begin_audio_callback();
         flush_pending_cancellations();
@@ -359,6 +463,7 @@ public:
         flush_pending_cancellations();
         streaming_->complete_audio_callback(audio_generation);
         publish_heritage_runtime_snapshot();
+        publish_envelope_diagnostics();
     }
 
 private:
@@ -425,7 +530,13 @@ private:
         };
     }
 
-    bool bind_stream_domain(StreamDomain domain) {
+    PulpSamplerPrepareResult bind_stream_domain_checked(
+        StreamDomain domain, std::uint64_t streaming_budget = 0) {
+        if (!std::isfinite(domain.sample_rate) || domain.sample_rate <= 0.0f ||
+            domain.maximum_block_frames == 0) {
+            return {.status =
+                PulpSamplerPrepareStatus::InvalidHostConfiguration};
+        }
         const auto maximum_source_frames_per_output =
             SamplerStreamingRuntime::maximum_pitch_ratio() *
             SamplerStreamingRuntime::maximum_source_sample_rate() /
@@ -433,7 +544,7 @@ private:
         auto candidate_sinc = std::make_unique<audio::SampleSincKernelBank>();
         if (!candidate_sinc->build_dense_for_maximum_consumption(
                 maximum_source_frames_per_output)) {
-            return false;
+            return {.status = PulpSamplerPrepareStatus::AllocationFailure};
         }
         auto candidate_streaming = std::make_unique<SamplerStreamingRuntime>();
 #if defined(PULP_SAMPLER_TEST_HOOKS)
@@ -442,30 +553,31 @@ private:
             candidate_streaming->fail_next_prepare_for_test();
         }
 #endif
-        if (!candidate_streaming->prepare(
-                domain.sample_rate, domain.maximum_block_frames)) {
-            return false;
-        }
+        auto result = candidate_streaming->prepare_checked(
+            domain.sample_rate, domain.maximum_block_frames, streaming_budget);
+        if (!result.prepared()) return result;
 #if defined(PULP_SAMPLER_TEST_HOOKS)
         if (fail_next_stream_domain_source_restore_for_test_) {
             fail_next_stream_domain_source_restore_for_test_ = false;
             candidate_streaming->fail_next_retained_source_publish_for_test();
         }
 #endif
-        if (!streaming_->clone_published_source_to(*candidate_streaming))
-            return false;
+        if (!streaming_->clone_published_source_to(*candidate_streaming)) {
+            result.status = PulpSamplerPrepareStatus::AllocationFailure;
+            return result;
+        }
         streaming_.swap(candidate_streaming);
         sinc_bank_.swap(candidate_sinc);
         stream_output_sample_rate_ = domain.sample_rate;
         maximum_stream_block_frames_ = domain.maximum_block_frames;
-        return true;
+        return result;
     }
 
     bool rebind_stream_domain(StreamDomain target) noexcept {
         const auto current = current_stream_domain();
         if (target == current) return true;
         try {
-            return bind_stream_domain(target);
+            return bind_stream_domain_checked(target).prepared();
         } catch (...) {
             return false;
         }
@@ -506,6 +618,64 @@ private:
                                                    std::memory_order_release);
     }
 
+    static std::uint64_t saturated_add(std::uint64_t left,
+                                       std::uint64_t right) noexcept {
+        return right > std::numeric_limits<std::uint64_t>::max() - left
+            ? std::numeric_limits<std::uint64_t>::max() : left + right;
+    }
+
+    static void add_envelope_stats(
+        audio::SampleStarvationEnvelopeStats& target,
+        const audio::SampleStarvationEnvelopeStats& source) noexcept {
+        target.predicted_events = saturated_add(target.predicted_events,
+                                                 source.predicted_events);
+        target.insufficient_lead_events = saturated_add(
+            target.insufficient_lead_events, source.insufficient_lead_events);
+        target.emergency_events = saturated_add(target.emergency_events,
+                                                 source.emergency_events);
+        target.starved_frames = saturated_add(target.starved_frames,
+                                               source.starved_frames);
+        target.recovery_events = saturated_add(target.recovery_events,
+                                                source.recovery_events);
+    }
+
+    void harvest_voice_envelope(const SamplerVoice& voice) noexcept {
+        if (voice.streamed)
+            add_envelope_stats(envelope_lifetime_,
+                               voice.stream_reader.starvation_stats());
+    }
+
+    void reset_voice(SamplerVoice& voice) noexcept {
+        harvest_voice_envelope(voice);
+        voice.reset();
+    }
+
+    void publish_envelope_diagnostics() noexcept {
+        PulpSamplerEnvelopeDiagnostics result;
+        result.lifetime = envelope_lifetime_;
+        for (const auto& voice : voices_) {
+            if (!voice.active || !voice.streamed) continue;
+            ++result.active_streamed_voices;
+            add_envelope_stats(result.lifetime,
+                               voice.stream_reader.starvation_stats());
+            switch (voice.stream_reader.starvation_mode()) {
+                case audio::SampleStarvationMode::Ready: ++result.ready_voices; break;
+                case audio::SampleStarvationMode::FadingOut:
+                    ++result.fading_out_voices; break;
+                case audio::SampleStarvationMode::Silent: ++result.silent_voices; break;
+                case audio::SampleStarvationMode::Recovering:
+                    ++result.recovering_voices; break;
+            }
+        }
+        envelope_snapshot_.write(result);
+        envelope_snapshot_available_.store(true, std::memory_order_release);
+    }
+
+    void fail_prepare(PulpSamplerPrepareResult result) noexcept {
+        release();
+        prepare_result_ = result;
+    }
+
     SamplerSourcePublicationOwner source_publication_;
     std::unique_ptr<SamplerStreamingRuntime> streaming_ =
         std::make_unique<SamplerStreamingRuntime>();
@@ -513,6 +683,12 @@ private:
     runtime::SeqLock<PublishedHeritageRuntimeState>
         callback_runtime_snapshot_{};
     std::atomic<bool> callback_runtime_snapshot_available_{false};
+    runtime::SeqLock<PulpSamplerEnvelopeDiagnostics> envelope_snapshot_{};
+    std::atomic<bool> envelope_snapshot_available_{false};
+    audio::SampleStarvationEnvelopeStats envelope_lifetime_{};
+    PulpSamplerConfig config_{};
+    PulpSamplerPrepareResult prepare_result_{};
+    PulpSamplerLoadResult last_load_result_{};
     audio::SampleHeritageRuntimeState restored_runtime_state_{};
     audio::SampleHeritageRuntimeState pending_runtime_state_{};
     double restored_runtime_host_sample_rate_ = 0.0;
@@ -583,14 +759,16 @@ private:
         }
     }
 
-    void prepare_stream_domain() {
+    PulpSamplerPrepareResult prepare_stream_domain() {
         const auto stream_sample_rate = static_cast<float>(
             static_cast<double>(host_sample_rate_) * heritage_.active_clock_ratio());
         const auto heritage_input_capacity = heritage_.maximum_input_frames();
         const auto stream_block_frames = heritage_input_capacity == 0
             ? max_block_frames_
             : static_cast<std::uint32_t>(heritage_input_capacity);
-        (void) bind_stream_domain({stream_sample_rate, stream_block_frames});
+        return bind_stream_domain_checked(
+            {stream_sample_rate, stream_block_frames},
+            config_.streaming_memory_budget_bytes);
     }
 
     audio::LoopRegion make_region(std::uint64_t frames,
@@ -852,7 +1030,7 @@ private:
                     if (!source_publication_.sample_store().populate_channel_ptrs(voice.sample,
                                                              sample_ptrs.data(),
                                                              sample_ptrs.size())) {
-                        voice.reset();
+                        reset_voice(voice);
                         continue;
                     }
                 }
@@ -869,7 +1047,7 @@ private:
                 if (!(source_frames_per_output > 0.0) ||
                     !interpolation.valid() ||
                     !voice.renderer.set_interpolation(interpolation)) {
-                    voice.reset();
+                    reset_voice(voice);
                     continue;
                 }
                 voice.renderer.set_playback_rate(source_frames_per_output);
@@ -893,7 +1071,7 @@ private:
                 }
 
                 if (voice_finished || !loop_result.active) {
-                    voice.reset();
+                    reset_voice(voice);
                 }
             }
             rendered += chunk;
@@ -914,7 +1092,7 @@ private:
             streaming_->record_voice_outcome(
                 audio::SampleStreamVoiceOutcomeClass::InvalidRenderContract);
             queue_voice_cancellation(voice_index, voice.requester);
-            voice.reset();
+            reset_voice(voice);
             return;
         }
         const auto requested_source_frames_per_output =
@@ -951,7 +1129,7 @@ private:
             streaming_->record_voice_outcome(
                 audio::SampleStreamVoiceOutcomeClass::InvalidRenderContract);
             queue_voice_cancellation(voice_index, voice.requester);
-            voice.reset();
+            reset_voice(voice);
             return;
         }
 
@@ -970,7 +1148,7 @@ private:
                 !voice.lookahead_reader.synchronize_cursor(
                     voice.streamed_asset, voice.stream_reader.cursor())) {
                 queue_voice_cancellation(voice_index, voice.requester);
-                voice.reset();
+                reset_voice(voice);
                 return;
             }
             voice.stream_playback_rate = source_frames_per_output;
@@ -1009,7 +1187,7 @@ private:
                     ? audio::SampleStreamVoiceOutcomeClass::StaleGeneration
                     : audio::SampleStreamVoiceOutcomeClass::InvalidPreloadContract);
             queue_voice_cancellation(voice_index, voice.requester);
-            voice.reset();
+            reset_voice(voice);
             return;
         }
         if (holding_stream_attack && !stream_plan_pages_ready(plan)) {
@@ -1033,7 +1211,7 @@ private:
         if (rendered.supply == audio::SampleStreamVoiceSupply::InvalidContract ||
             rendered.supply == audio::SampleStreamVoiceSupply::StaleGeneration) {
             queue_voice_cancellation(voice_index, voice.requester);
-            voice.reset();
+            reset_voice(voice);
             return;
         }
         voice.lookahead_lead_source_frames -=
@@ -1078,7 +1256,7 @@ private:
             rendered.supply == audio::SampleStreamVoiceSupply::EndOfSource ||
             !voice.stream_reader.active()) {
             queue_voice_cancellation(voice_index, voice.requester);
-            voice.reset();
+            reset_voice(voice);
         }
     }
 
@@ -1404,6 +1582,7 @@ private:
                                             selected.sample_rate,
                                             params.loop,
                                             params.reverse);
+            harvest_voice_envelope(*target);
             target->start_streamed(
                 note,
                 velocity,
@@ -1437,6 +1616,7 @@ private:
         const auto interpolation = prepared_rate_safe_interpolation(
             params.interpolation, speed);
         if (!interpolation.valid()) return;
+        harvest_voice_envelope(*target);
         target->start(note, velocity, speed, host_sample_rate_, sample, mip, region,
                       selected_frames, interpolation);
         target->selection_generation = source.selection_generation;
@@ -1479,7 +1659,7 @@ private:
             auto& voice = voices_[index];
             if (voice.active && voice.streamed)
                 queue_voice_cancellation(index, voice.requester);
-            voice.reset();
+            reset_voice(voice);
         }
         flush_pending_cancellations();
     }
