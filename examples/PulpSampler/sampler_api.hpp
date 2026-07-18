@@ -128,6 +128,7 @@ enum class PulpSamplerLoadStatus : std::uint8_t {
     PreloadReadFailed,
     SourceRegistrationFailed,
     ReversePrewarmTimedOut,
+    GenerationExhausted,
     PublishFailed,
     AllocationFailure,
     InternalFailure,
@@ -163,6 +164,8 @@ constexpr std::string_view pulp_sampler_load_status_name(
             return "source-registration-failed";
         case PulpSamplerLoadStatus::ReversePrewarmTimedOut:
             return "reverse-prewarm-timed-out";
+        case PulpSamplerLoadStatus::GenerationExhausted:
+            return "generation-exhausted";
         case PulpSamplerLoadStatus::PublishFailed: return "publish-failed";
         case PulpSamplerLoadStatus::AllocationFailure:
             return "allocation-failure";

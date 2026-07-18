@@ -510,8 +510,13 @@ SamplerStreamingRuntime::publish_streamed_file(PreparedStreamedFile& prepared) {
                 .octave = octaves[member],
             };
         }
+        const auto selection_generation = next_selection_generation();
+        if (!selection_generation) {
+            discard_unpublished_slot(*slot);
+            return PulpSamplerLoadStatus::GenerationExhausted;
+        }
         slot->member_count = member_count;
-        slot->selection_generation = ++selection_generation_;
+        slot->selection_generation = *selection_generation;
         slot->occupied = true;
         published_source_.write({
             .kind = SamplerPublishedSourceKind::Streamed,
