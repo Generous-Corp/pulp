@@ -8,7 +8,9 @@
 
 #include <pulp/view/view.hpp>
 
+#include <cstdint>
 #include <functional>
+#include <string>
 
 namespace pulp::view {
 
@@ -86,5 +88,79 @@ struct WheelHost {
 void deliver_mouse_wheel(View& root, Point root_pt,
                          float scroll_delta_x, float scroll_delta_y,
                          const WheelHost& host);
+
+/// Deliver a press to an already-resolved `target` (the host has done the
+/// hit_test, any combo/overlay pre-routing, and the focus protocol before
+/// calling in — those steps diverge per platform/host and stay host-side).
+///
+/// ── Delivery contract (asserted by test_pointer_dispatch.cpp) ─────────────
+/// The target receives, in this order:
+///   1. the MODERN channel — `on_mouse_event(MouseEvent)` with
+///      `phase == MousePhase::press`, carrying `modifiers` and `click_count`;
+///   2. the LEGACY channel — `on_mouse_down(Point)` (bare local point);
+///   3. when `bubble` is true, the W3C pointerdown bubble — every ancestor with
+///      an `on_pointer_event` handler receives a copy re-localized to its own
+///      space (a wrap-div around a canvas child that wins hit_test still sees
+///      the press).
+///
+/// Liveness is re-checked between every hop: a modern handler can unmount the
+/// tree (a React state flip that frees `target`), so no later channel derefs a
+/// freed view. Returns true when `target` is still in the tree after delivery,
+/// false when it was null on entry or unmounted during delivery — the caller
+/// clears its captured drag-target slot on false.
+///
+/// `bubble` defaults to true (the normal press path and the plugin host).
+/// The standalone host's overlay-click path passes false to preserve its
+/// historical no-bubble behavior; see the call site for the rationale.
+bool deliver_mouse_down(View& root, View* target, Point root_pt,
+                        uint16_t modifiers, int click_count = 1,
+                        bool bubble = true);
+
+/// Host hooks the portable mouse-up router calls back into. Like WheelHost,
+/// kept as a struct so the click-firing seam can gain hooks without re-touching
+/// every call site.
+struct MouseUpHost {
+    /// Invoked exactly when the release lands on the SAME view the press
+    /// captured (`released == target`, the click-suppression rule: a press on A
+    /// that releases over B is NOT a click). `click_handler` is the nearest
+    /// `on_click` up the chain from the press target (target inclusive),
+    /// resolved and captured BEFORE `on_mouse_up` runs so it survives the target
+    /// unmounting during up delivery; it may be empty. `clicked_id` / `modifiers`
+    /// carry the immediate hit's id and key state for an optional global-click
+    /// report.
+    ///
+    /// The standalone host defers this behind its `_deferredClickAlive` liveness
+    /// token and additionally fires `View::on_global_click`; the plugin host
+    /// invokes `click_handler` synchronously and ignores the global-click report
+    /// (it has no such path in a DAW editor). Empty is safe — the click is
+    /// simply dropped.
+    std::function<void(const std::function<void()>& click_handler,
+                       const std::string& clicked_id,
+                       uint16_t modifiers)>
+        fire_click;
+};
+
+/// Deliver a release for an in-flight gesture captured on `target`.
+///
+/// ── Delivery contract (asserted by test_pointer_dispatch.cpp) ─────────────
+///   1. resolve `released = root.hit_test(root_pt)` and capture the nearest
+///      `on_click` up from `target` BEFORE any delivery;
+///   2. the LEGACY channel — `on_mouse_up(Point)` (bare local point);
+///   3. the MODERN channel — `on_mouse_event(MouseEvent)` with
+///      `phase == MousePhase::release`;
+///   4. the W3C pointerup bubble to every `on_pointer_event` ancestor in its
+///      own space;
+///   5. if `released == target`, `host.fire_click(click_handler, id, modifiers)`
+///      — the same-target click-suppression rule.
+///
+/// Up is LEGACY-before-modern (opposite of drag) because that is the order both
+/// mac hosts have always delivered it. Liveness is re-checked before the modern
+/// and bubble derefs; the fire-click DECISION uses the captured pointers and
+/// runs regardless of an intervening unmount (the standalone token guards the
+/// deferred call, the plugin call is synchronous). No-op when `target` is null
+/// or not in the tree.
+void deliver_mouse_up(View& root, View* target, Point root_pt,
+                      uint16_t modifiers, int click_count,
+                      const MouseUpHost& host);
 
 }  // namespace pulp::view

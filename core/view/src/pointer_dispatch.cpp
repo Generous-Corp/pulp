@@ -109,6 +109,98 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
     }
 }
 
+bool deliver_mouse_down(View& root, View* target, Point root_pt,
+                        uint16_t modifiers, int click_count, bool bubble) {
+    if (!still_in_tree(target, &root)) return false;
+
+    const Point local = point_to_local(root_pt, target, &root);
+
+    // 1. Modern channel (press): the only channel carrying modifiers/click_count.
+    MouseEvent me;
+    me.position = local;
+    me.window_position = root_pt;
+    me.button = MouseButton::left;
+    me.modifiers = modifiers;
+    me.click_count = click_count;
+    me.is_down = true;
+    me.phase = MousePhase::press;
+    target->on_mouse_event(me);
+
+    // A modern handler may unmount the tree it was dispatched into. Re-validate
+    // before the legacy hop and the bubble so no channel derefs a freed view.
+    if (!still_in_tree(target, &root)) return false;
+
+    // 2. Legacy channel (bare Point). Kept for compatibility; deepest-wins.
+    target->on_mouse_down(local);
+    if (!still_in_tree(target, &root)) return false;
+
+    // 3. W3C pointerdown bubble: a wrap-div around a canvas child (which wins
+    // hit_test) never sees the press otherwise. Each ancestor gets a copy of the
+    // press re-localized to its own space.
+    if (bubble) {
+        for (auto* b = target->parent(); b; b = b->parent()) {
+            if (!b->on_pointer_event) continue;
+            MouseEvent bme = me;
+            bme.position = point_to_local(root_pt, b, &root);
+            b->on_pointer_event(bme);
+        }
+    }
+    return true;
+}
+
+void deliver_mouse_up(View& root, View* target, Point root_pt,
+                      uint16_t modifiers, int click_count,
+                      const MouseUpHost& host) {
+    if (!still_in_tree(target, &root)) return;
+
+    const Point local = point_to_local(root_pt, target, &root);
+
+    // Capture the click decision inputs BEFORE any delivery. `on_mouse_up` can
+    // unmount `target`; the deferred/standalone click still needs the handler,
+    // id, and the same-target verdict from before it ran.
+    View* released = root.hit_test(root_pt);
+    View* click_target = target;
+    while (click_target && !click_target->on_click) click_target = click_target->parent();
+    std::function<void()> click_handler =
+        click_target ? click_target->on_click : std::function<void()>{};
+    const std::string clicked_id = target->id();
+
+    // 1. Legacy channel (up is legacy-before-modern, unlike drag).
+    target->on_mouse_up(local);
+
+    // 2. Modern channel (release). Re-validate — on_mouse_up may have unmounted
+    // the target (a React flush on release), which would leave the modern deref
+    // and the bubble dangling.
+    if (still_in_tree(target, &root)) {
+        MouseEvent me;
+        me.position = local;
+        me.window_position = root_pt;
+        me.button = MouseButton::left;
+        me.modifiers = modifiers;
+        me.click_count = click_count;
+        me.is_down = false;
+        me.phase = MousePhase::release;
+        target->on_mouse_event(me);
+
+        // 3. W3C pointerup bubble (mirrors the pointerdown bubble).
+        if (still_in_tree(target, &root)) {
+            for (auto* b = target->parent(); b; b = b->parent()) {
+                if (!b->on_pointer_event) continue;
+                MouseEvent bme = me;
+                bme.position = point_to_local(root_pt, b, &root);
+                b->on_pointer_event(bme);
+            }
+        }
+    }
+
+    // 4. Same-target click suppression: fire only when the release landed on the
+    // press target. The decision uses the captured pointers (matches the host
+    // behavior of comparing the captured drag-target), independent of any
+    // unmount during delivery — the host's fire_click owns post-teardown safety.
+    if (released == target && host.fire_click)
+        host.fire_click(click_handler, clicked_id, modifiers);
+}
+
 void deliver_mouse_wheel(View& root, Point root_pt,
                          float scroll_delta_x, float scroll_delta_y,
                          const WheelHost& host) {

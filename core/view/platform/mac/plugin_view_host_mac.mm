@@ -227,7 +227,6 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
     pulp::view::ComboBox::notify_global_click(*drag_target);
     if (!*drag_target) return;
     using namespace pulp::view::mac_geometry;
-    auto local = to_local(pt, *drag_target, root);
     // Focus-change protocol — mirror the standalone host (window_host_mac.mm).
     // Claiming input focus alone (the old behavior) routed typing to the widget
     // but never set its VISUAL focus state, so an embedded text field showed no
@@ -242,7 +241,6 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
             prev = pulp_plugin_cancel_marked_text_and_revalidate(root, host, prev);
             *drag_target = root->hit_test(pt);
             if (!*drag_target) return;
-            local = to_local(pt, *drag_target, root);
             if (!prev) prev = pulp_focus_under_root(root);
         }
         if ((*drag_target)->focusable()) {
@@ -279,23 +277,17 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
         }
     }
 
-    pulp::view::MouseEvent me;
-    me.position = local;
-    me.window_position = pt;
-    me.button = pulp::view::MouseButton::left;
-    me.modifiers = modifiers_from_ns_flags(event.modifierFlags);
-    me.is_down = true;
-    me.phase = pulp::view::MousePhase::press;
-    me.click_count = static_cast<int>(event.clickCount);
-    (*drag_target)->on_mouse_event(me);
-    (*drag_target)->on_mouse_down(local);
-    // Bubble pointerdown to ancestors that registered on_pointer_event (React).
-    for (auto* b = (*drag_target)->parent(); b; b = b->parent()) {
-        if (!b->on_pointer_event) continue;
-        pulp::view::MouseEvent bme = me;
-        bme.position = to_local(pt, b, root);
-        b->on_pointer_event(bme);
-    }
+    // Delivery — modern press, legacy on_mouse_down, and the W3C pointerdown
+    // bubble to registerPointer ancestors — is the portable
+    // pulp::view::deliver_mouse_down, shared with the standalone host, with
+    // per-hop liveness re-checks (the plug-in path previously delivered the
+    // legacy channel without re-validating after the modern handler could have
+    // unmounted the target — a latent UAF the shared verb closes). Clear the
+    // captured target if a handler unmounted it mid-dispatch.
+    if (!pulp::view::deliver_mouse_down(*root, *drag_target, pt,
+                                        modifiers_from_ns_flags(event.modifierFlags),
+                                        static_cast<int>(event.clickCount)))
+        *drag_target = nullptr;
   } catch (const std::exception& e) {
     std::fprintf(stderr, "[plugin-view-host] mouseDown handler threw: %s\n", e.what());
   } catch (...) {
@@ -355,29 +347,20 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
     }
     if (!*drag_target) return;
     if (!view_is_in_tree(*drag_target, root)) { *drag_target = nullptr; return; }
-    auto local = to_local(pt, *drag_target, root);
-    auto* released = root->hit_test(pt);
-    pulp::view::View* click_target = *drag_target;
-    while (click_target && !click_target->on_click) click_target = click_target->parent();
-    auto click_handler = click_target ? click_target->on_click : std::function<void()>{};
-
-    (*drag_target)->on_mouse_up(local);
-    pulp::view::MouseEvent up;
-    up.position = local;
-    up.window_position = pt;
-    up.button = pulp::view::MouseButton::left;
-    up.modifiers = modifiers_from_ns_flags(event.modifierFlags);
-    up.is_down = false;
-    up.phase = pulp::view::MousePhase::release;
-    up.click_count = static_cast<int>(event.clickCount);
-    (*drag_target)->on_mouse_event(up);
-    for (auto* b = (*drag_target)->parent(); b; b = b->parent()) {
-        if (!b->on_pointer_event) continue;
-        pulp::view::MouseEvent bme = up;
-        bme.position = to_local(pt, b, root);
-        b->on_pointer_event(bme);
-    }
-    if (released == *drag_target && click_handler) click_handler();
+    // Routing — legacy up, modern release, the W3C pointerup bubble, and the
+    // same-target click-suppression decision — is the portable
+    // pulp::view::deliver_mouse_up, shared with the standalone host. The plug-in
+    // host fires the click SYNCHRONOUSLY (no deferred liveness token) and has no
+    // global-click report; both differences live entirely in this fire_click
+    // hook, so the routing stays identical across hosts.
+    pulp::view::MouseUpHost up_host;
+    up_host.fire_click = [](const std::function<void()>& click_handler,
+                            const std::string& /*clicked_id*/, uint16_t /*mods*/) {
+        if (click_handler) click_handler();
+    };
+    pulp::view::deliver_mouse_up(*root, *drag_target, pt,
+                                 modifiers_from_ns_flags(event.modifierFlags),
+                                 static_cast<int>(event.clickCount), up_host);
     *drag_target = nullptr;
   } catch (const std::exception& e) {
     std::fprintf(stderr, "[plugin-view-host] mouseUp handler threw: %s\n", e.what());
