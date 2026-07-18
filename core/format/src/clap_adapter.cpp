@@ -184,11 +184,10 @@ bool clap_init(const clap_plugin_t* plugin) {
 
     const auto caps = desc.effective_capabilities();
 
-    // Wire MPE sidecar when the plugin opts in.
-    self->mpe_enabled = caps.supports_mpe;
-    if (self->mpe_enabled) {
-        midi::bind_tracker_to_buffer(
-            self->mpe_tracker, self->mpe_buffer, self->mpe_current_sample_offset);
+    // Wire MPE sidecar when the plugin opts in. configure() binds the tracker's
+    // callbacks; the buffer is reserved + capacity-limited in activate().
+    self->mpe.configure(caps.supports_mpe);
+    if (self->mpe.enabled) {
         runtime::log_info("CLAP: MPE sidecar enabled for '{}'", desc.name);
     }
 
@@ -226,9 +225,8 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
                            kRealtimeMidiSysexPayloadCapacity);
     self->midi_in.set_realtime_capacity_limit(true);
     self->midi_out.set_realtime_capacity_limit(true);
-    self->mpe_buffer.reserve(kRealtimeMidiEventCapacity);
+    self->mpe.reserve(kRealtimeMidiEventCapacity);
     self->ump_buffer.reserve(kRealtimeMidiEventCapacity);
-    self->mpe_buffer.set_realtime_capacity_limit(true);
     self->ump_buffer.set_realtime_capacity_limit(true);
     self->param_snapshot.reserve(self->store.all_params().size());
     // Sized here, not on the audio thread: process() calls assign()/resize() to
@@ -456,7 +454,7 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                 // per-note expressions natively via the UMP sidecar;
                 // future work can extend that path.
                 const auto ev = load_event<clap_event_note_expression_t>(hdr);
-                if (!self->mpe_enabled) {
+                if (!self->mpe.enabled) {
                     if (!note_expression_drop_logged) {
                         runtime::log_debug(
                             "CLAP: dropping CLAP_EVENT_NOTE_EXPRESSION; "
@@ -620,16 +618,7 @@ static void clap_phase_prepare_sidecars(PulpClapPlugin* self,
     // the resulting expression buffer to the processor for the duration
     // of this process() call. Events stay sample-ordered because midi_in
     // is already in host delivery order.
-    if (self->mpe_enabled) {
-        self->mpe_buffer.clear();
-        for (const auto& ev : midi_in) {
-            self->mpe_current_sample_offset = ev.sample_offset;
-            self->mpe_tracker.process(ev);
-        }
-        self->processor->set_mpe_input(&self->mpe_buffer);
-    } else {
-        self->processor->set_mpe_input(nullptr);
-    }
+    self->mpe.run(*self->processor, midi_in);
 
     // UMP sidecar. The host can deliver three event streams in the same
     // block:

@@ -248,6 +248,21 @@ The AU v3 render block can't be driven in stock CI (needs a live host), so the
 bypass logic is covered by the shared `test_adapter_boundary_parity.cpp`
 `[bypass]` fixture the helper is exercised through.
 
+### MPE routing
+
+When a `Processor` declares `supports_mpe`, AU v3 feeds per-note expression the
+same way CLAP/VST3 do — via the shared `boundary::MpeSidecar` (in
+`adapter_boundary.hpp`), NOT a hand-rolled tracker. `AUBridge` owns one
+`boundary::MpeSidecar mpe;`; `configure()` it at init, `reserve()+reset()` in
+`allocateRenderResources`, `reset()` in `deallocateRenderResources`, and call
+`mpe.run(*processor, midi_in)` in the render block **right before**
+`processor->process()` and **after** the bypass early-return (a bypassed plugin
+gets no MPE). AU delivers MIDI already time-ordered, so pass it in host order
+(no sort) — matching CLAP. Non-MPE plugins get `set_mpe_input(nullptr)` each
+block. Unlike bypass, MPE routing IS unit-tested headlessly: the AU v3 MPE case
+in `test_au_plugin_state.mm` drives `internalRenderBlock` with a channel-wide
+MIDI list and asserts per-note NoteOn/PitchBend/Timbre/Pressure routing.
+
 ### State: `fullState` dictionary
 
 `fullState` wraps `store_.serialize()` bytes inside an `NSData` keyed

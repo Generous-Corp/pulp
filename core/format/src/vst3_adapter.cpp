@@ -261,7 +261,7 @@ int32 PLUGIN_API PulpVst3Processor::getNoteExpressionCount(
     // Per-note expression only makes sense for an MPE-aware instrument. A
     // plug-in that did not opt in declares zero types, so a host never offers
     // its tracks per-note lanes and process() does no MPE work.
-    if (!mpe_enabled_) return 0;
+    if (!mpe_.enabled) return 0;
     // Note expression is carried on the single event input bus (index 0). Any
     // other bus has no note-expression surface. The same type set applies to
     // every channel of that bus.
@@ -273,7 +273,7 @@ int32 PLUGIN_API PulpVst3Processor::getNoteExpressionCount(
 tresult PLUGIN_API PulpVst3Processor::getNoteExpressionInfo(
     int32 busIndex, int16 channel, int32 noteExpressionIndex,
     NoteExpressionTypeInfo& info /*out*/) {
-    if (!mpe_enabled_) return kResultFalse;
+    if (!mpe_.enabled) return kResultFalse;
     if (busIndex != 0) return kResultFalse;
     if (channel < 0 || channel >= detail::kVst3MidiChannels) return kResultFalse;
     if (noteExpressionIndex < 0 ||
@@ -311,7 +311,7 @@ tresult PLUGIN_API PulpVst3Processor::getNoteExpressionStringByValue(
     // Decline anything outside the surface the plug-in actually declares:
     // not MPE, wrong bus, a channel outside the event bus, or a type id that
     // is not one of the declared kNoteExprTypes.
-    if (!mpe_enabled_ || busIndex != 0) return kResultFalse;
+    if (!mpe_.enabled || busIndex != 0) return kResultFalse;
     if (channel < 0 || channel >= detail::kVst3MidiChannels) return kResultFalse;
     if (!is_declared_note_expr_type(id)) return kResultFalse;
 
@@ -333,7 +333,7 @@ tresult PLUGIN_API PulpVst3Processor::getNoteExpressionStringByValue(
 tresult PLUGIN_API PulpVst3Processor::getNoteExpressionValueByString(
     int32 busIndex, int16 channel, NoteExpressionTypeID id,
     const TChar* string /*in*/, NoteExpressionValue& valueNormalized /*out*/) {
-    if (!mpe_enabled_ || busIndex != 0 || string == nullptr) return kResultFalse;
+    if (!mpe_.enabled || busIndex != 0 || string == nullptr) return kResultFalse;
     if (channel < 0 || channel >= detail::kVst3MidiChannels) return kResultFalse;
     if (!is_declared_note_expr_type(id)) return kResultFalse;
 
@@ -501,15 +501,13 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     processor_->set_state_store(&store_);
     processor_->define_parameters(store_);
 
-    // Wire the MPE sidecar when the plug-in opts in. The tracker's callbacks
-    // append per-note expression deltas to mpe_buffer_; bind them once here on
-    // the host thread (never on the audio thread). The buffer is reserved +
-    // capacity-limited in setupProcessing(). mpe_enabled_ also gates the
-    // INoteExpressionController surface so a non-MPE plug-in advertises nothing.
-    mpe_enabled_ = desc.effective_capabilities().supports_mpe;
-    if (mpe_enabled_) {
-        midi::bind_tracker_to_buffer(
-            mpe_tracker_, mpe_buffer_, mpe_current_sample_offset_);
+    // Wire the MPE sidecar when the plug-in opts in. configure() binds the
+    // tracker's callbacks once here on the host thread (never on the audio
+    // thread); the buffer is reserved + capacity-limited in setupProcessing().
+    // mpe_.enabled also gates the INoteExpressionController surface so a non-MPE
+    // plug-in advertises nothing.
+    mpe_.configure(desc.effective_capabilities().supports_mpe);
+    if (mpe_.enabled) {
         runtime::log_info("VST3: MPE note-expression sidecar enabled for '{}'",
                           desc.name);
     }
@@ -923,9 +921,8 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     // timbre), so size the buffer at the same worst-case event ceiling as the
     // MIDI buffers and pin it to realtime-capacity mode. Reset the noteId map
     // and tracker so a fresh activation starts with no stale per-note state.
-    mpe_buffer_.reserve(kMaxEventsPerBlock);
-    mpe_buffer_.set_realtime_capacity_limit(true);
-    mpe_tracker_.reset();
+    mpe_.reserve(kMaxEventsPerBlock);
+    mpe_.reset();
     note_id_map_clear();
 
     // Size the per-channel dry-delay used by the bypass pass-through. The
@@ -1020,7 +1017,7 @@ tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
         processor_->release();
         // Drop any per-note expression state so a re-activation does not route
         // a stale noteId to a voice that no longer exists.
-        mpe_tracker_.reset();
+        mpe_.reset();
         note_id_map_clear();
     }
     // Activation transitions run on the main thread — flush any restart the
@@ -1453,7 +1450,7 @@ void PulpVst3Processor::process_decode_input_events(ProcessData& data) {
                     // routes to the right MPE voice. No-op when MPE is off or the
                     // host supplied no noteId (-1). A full table drops the
                     // mapping (RT-safe) and bumps the observable drop counter.
-                    if (mpe_enabled_) {
+                    if (mpe_.enabled) {
                         if (!note_id_map_insert(evt.noteOn.noteId, channel,
                                                 note)) {
                             note_expression_drops_.fetch_add(
@@ -1469,11 +1466,11 @@ void PulpVst3Processor::process_decode_input_events(ProcessData& data) {
                         static_cast<uint8_t>(evt.noteOff.velocity * 127.0f));
                     me.sample_offset = evt.sampleOffset;
                     midi_in_.add(me);
-                    if (mpe_enabled_) {
+                    if (mpe_.enabled) {
                         note_id_map_erase(evt.noteOff.noteId);
                     }
                 } else if (evt.type == Event::kNoteExpressionValueEvent &&
-                           mpe_enabled_) {
+                           mpe_.enabled) {
                     // Per-note expression. The event references the noteId of a
                     // live note-on; look up its (channel, note) and synthesize
                     // the channel-wide MIDI message the MpeVoiceTracker narrows
@@ -1888,16 +1885,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // buffer to the processor for the duration of this process() call. Events
     // stay sample-ordered because midi_in_ was just sorted. Mirrors the CLAP
     // adapter's set_mpe_input contract; clears per block, allocation-free.
-    if (mpe_enabled_) {
-        mpe_buffer_.clear();
-        for (const auto& ev : midi_in_) {
-            mpe_current_sample_offset_ = ev.sample_offset;
-            mpe_tracker_.process(ev);
-        }
-        processor_->set_mpe_input(&mpe_buffer_);
-    } else {
-        processor_->set_mpe_input(nullptr);
-    }
+    mpe_.run(*processor_, midi_in_);
 
     // Wrap the plugin call in a ScopedNoAlloc so debug hooks can flag a
     // plugin that allocates on the audio thread.
