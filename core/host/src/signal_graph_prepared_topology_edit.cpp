@@ -664,6 +664,12 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
         candidate_->transport_suppressed_for_anticipation_.load(std::memory_order_relaxed),
         std::memory_order_relaxed);
 
+    // The telemetry toggle is an independent control setting, so it does not
+    // stale a topology edit. Re-seed from the owner's authoritative
+    // desired value at the publication boundary instead of restoring the value
+    // captured when the candidate was created.
+    prepared_snapshot_->live_dsp_telemetry.set_enabled(
+        owner_->desired_live_dsp_telemetry_enabled_.load(std::memory_order_relaxed));
     owner_->live_slot_.publish_prepared(prepared_snapshot_);
     owner_->total_latency_samples_.store(prepared_snapshot_->total_latency_samples,
                                          std::memory_order_relaxed);

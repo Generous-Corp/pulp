@@ -5145,6 +5145,89 @@ TEST_CASE("SignalGraph prepared edit publishes pending ingress exactly once",
     }
 }
 
+TEST_CASE("SignalGraph prepared edit preserves a concurrent telemetry toggle",
+          "[host][graph][prepared-edit][telemetry]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    static_assert(noexcept(
+        std::declval<pulp::audio::LiveDspTelemetryStore&>().set_enabled(true)));
+
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    const auto gain = graph.add_gain_node("gain");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 8));
+    REQUIRE_FALSE(graph.live_dsp_telemetry_enabled());
+
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit->prepare(48000.0, 8) == Result::Prepared);
+    std::size_t toggle_allocations = 1;
+    {
+        pulp::test::RtAllocationProbe probe;
+        graph.set_live_dsp_telemetry_enabled(true);
+        toggle_allocations = probe.allocation_count();
+    }
+    REQUIRE(toggle_allocations == 0);
+    REQUIRE(edit->commit() == Result::Committed);
+
+    std::array<float, 8> source{};
+    source.fill(0.25f);
+    std::array<float, 8> rendered{};
+    const float* source_ptrs[] = {source.data()};
+    float* rendered_ptrs[] = {rendered.data()};
+    pulp::audio::BufferView<const float> in(source_ptrs, 1, source.size());
+    pulp::audio::BufferView<float> out(rendered_ptrs, 1, rendered.size());
+    graph.process(out, in, 8);
+
+    const auto telemetry = graph.poll_live_dsp_telemetry();
+    REQUIRE(graph.live_dsp_telemetry_enabled());
+    REQUIRE(telemetry.enabled);
+    REQUIRE(telemetry.blocks_written == 1);
+    REQUIRE(telemetry.blocks_drained == 1);
+
+    // The opposite linearization is equally coherent: a toggle after prepared
+    // publication updates the newly live snapshot, not the retired one.
+    graph.set_live_dsp_telemetry_enabled(false);
+    graph.process(out, in, 8);
+    const auto disabled_telemetry = graph.poll_live_dsp_telemetry();
+    REQUIRE_FALSE(graph.live_dsp_telemetry_enabled());
+    REQUIRE_FALSE(disabled_telemetry.enabled);
+    REQUIRE(disabled_telemetry.blocks_written == 1);
+    REQUIRE(disabled_telemetry.blocks_drained == 1);
+}
+
+TEST_CASE("SignalGraph prepared publication serializes telemetry toggle overlap",
+          "[host][graph][prepared-edit][telemetry][threading]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 8));
+
+    constexpr int kIterations = 64;
+    for (int i = 0; i < kIterations; ++i) {
+        graph.set_live_dsp_telemetry_enabled(false);
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->prepare(48000.0, 8) == Result::Prepared);
+
+        std::atomic<bool> start{false};
+        std::thread toggler([&] {
+            while (!start.load(std::memory_order_acquire))
+                std::this_thread::yield();
+            graph.set_live_dsp_telemetry_enabled(true);
+        });
+        start.store(true, std::memory_order_release);
+        REQUIRE(edit->commit() == Result::Committed);
+        toggler.join();
+
+        const auto telemetry = graph.poll_live_dsp_telemetry();
+        REQUIRE(graph.live_dsp_telemetry_enabled());
+        REQUIRE(telemetry.enabled);
+    }
+}
+
 TEST_CASE("SignalGraph prepared edit adopts only unchanged PDC intersection",
           "[host][graph][prepared-edit][pdc]") {
     using Result = SignalGraph::PreparedTopologyEdit::Result;
