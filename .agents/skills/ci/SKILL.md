@@ -233,6 +233,18 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    Editing a workflow under `.github/workflows/` therefore usually needs a matching
    guide edit; a genuinely doc-irrelevant change bypasses with a
    `Config-Doc: skip reason="..."` trailer on any commit in the range.
+2b1a. **Reaping a release tracker: SHA-keyed ones cannot be judged from the title.**
+   The watchdog opens two shapes of tracking issue, and they are reaped
+   differently. A *version-keyed* tracker ("release: stuck vX.Y.Z") names its
+   version in the title, so the reaper closes it as soon as that tag exists.
+   The *stranded fix/feat* detector instead opens one tracker per tip SHA and
+   the title carries only the short SHA — a tag existing says nothing about
+   whether that commit is in it. Reaping it requires parsing the issue BODY for
+   the full tip SHA and the uncovered surfaces, then closing only once a *later*
+   tag for **every** uncovered surface contains the commit
+   (`git tag --contains <sha>`) — i.e. consumers can actually reach the change.
+   Closing on "a tag appeared" would mark a still-unreleased change as shipped.
+
 2b2. **Hotspot growth?** The `hotspot-size` gate is now net-delta vs merge-base:
    it fails only if THIS PR grows a frozen hotspot past its reference size (main
    growing the same file is NOT your fault and passes). If you must grow one,

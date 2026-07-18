@@ -987,9 +987,19 @@ class StrandedReleaseTrackerWorkflow(unittest.TestCase):
         self.assertIn("Live release signal", self.auto_release)
 
     def test_reaper_neutralizes_sha_tracker_version_miss(self) -> None:
+        # A SHA-keyed tracker's title carries no semantic version, so the version
+        # grep matches nothing and exits 1. Under `set -euo pipefail` that would
+        # abort the whole daily sweep before the version trackers are reaped, so
+        # the miss must stay neutralized and take its own branch.
         self.assertIn("| head -1 || true)", self.watchdog_reaper)
         self.assertIn('if [ -z "$ver" ]; then', self.watchdog_reaper)
-        self.assertIn("Skipping SHA-keyed tracker", self.watchdog_reaper)
+        # That branch no longer just skips: it parses the body for the tip SHA
+        # and uncovered surfaces and decides from the tags that contain the
+        # commit. Anything it cannot establish leaves the tracker OPEN — closing
+        # blind would mark a still-unreleased change as shipped.
+        self.assertIn("reap_stranded_tracker.py parse", self.watchdog_reaper)
+        self.assertIn("reap_stranded_tracker.py decide", self.watchdog_reaper)
+        self.assertIn("leaving open", self.watchdog_reaper)
 
 
 class ReleaseCliLatestPointer(unittest.TestCase):
