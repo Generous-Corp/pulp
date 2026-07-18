@@ -357,6 +357,35 @@ TEST_CASE("gzip binary data round-trip", "[runtime][zip]") {
     REQUIRE(*decompressed == data);
 }
 
+// A small, highly compressible input can inflate to a huge output (a
+// "decompression bomb"). Decompression on untrusted paths (appcast feeds,
+// design-import bundles) must fail closed when the output would exceed the
+// cap, rather than force an unbounded allocation and OOM-kill the process.
+TEST_CASE("gzip_decompress bounds output against a decompression bomb",
+          "[runtime][zip][security]") {
+    // 4 MiB of a repeated byte compresses to a tiny gzip member but inflates
+    // back to 4 MiB — a modest stand-in for a real bomb, enough to sit above
+    // a small cap and below the generous default.
+    std::vector<uint8_t> payload(4u * 1024u * 1024u, 0x5a);
+    auto bomb = gzip_compress(payload.data(), payload.size());
+    REQUIRE(bomb.has_value());
+    REQUIRE(bomb->size() < payload.size());  // it really did compress
+
+    SECTION("a cap below the true output size rejects the bomb") {
+        auto out = gzip_decompress(bomb->data(), bomb->size(),
+                                   /*max_output=*/64u * 1024u);
+        REQUIRE_FALSE(out.has_value());  // fail closed, no multi-MB allocation
+    }
+
+    SECTION("a cap above the true output size still decompresses") {
+        auto out = gzip_decompress(bomb->data(), bomb->size(),
+                                   /*max_output=*/16u * 1024u * 1024u);
+        REQUIRE(out.has_value());
+        REQUIRE(out->size() == payload.size());
+        REQUIRE(*out == payload);
+    }
+}
+
 TEST_CASE("gzip_decompress_string preserves embedded NUL bytes",
           "[runtime][zip]") {
     const std::vector<uint8_t> original = {

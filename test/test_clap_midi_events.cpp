@@ -34,6 +34,8 @@
 #include <pulp/format/clap_entry.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/processor.hpp>
+#include <clap/ext/latency.h>
+#include <clap/ext/tail.h>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
@@ -3748,4 +3750,87 @@ TEST_CASE("CLAP requests a main-thread callback for a pending non-realtime tick"
     clap_adapter::clap_on_main_thread(&h.plugin.plugin);
     REQUIRE(g_clap_tick.ticks == 2);   // the hook fires unconditionally...
     REQUIRE(g_request_callback_count == 2);   // ...but nothing new was requested
+}
+
+namespace {
+
+// A processor that flags a latency or tail change from process() when asked.
+struct LatencyTailTrigger { bool latency = false; bool tail = false; };
+LatencyTailTrigger g_lat_trigger;
+int g_host_latency_changed = 0;
+int g_host_tail_changed = 0;
+
+class LatencyProcessor : public Processor {
+public:
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "LatencyCLAP";
+        d.manufacturer = "PulpTest";
+        d.bundle_id = "com.pulp.test.clap.latency";
+        d.version = "1.0.0";
+        return d;
+    }
+    void define_parameters(state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void process(audio::BufferView<float>&,
+                 const audio::BufferView<const float>&,
+                 midi::MidiBuffer&,
+                 midi::MidiBuffer&,
+                 const ProcessContext&) override {
+        if (g_lat_trigger.latency) { flag_latency_changed(); g_lat_trigger.latency = false; }
+        if (g_lat_trigger.tail)    { flag_tail_changed();    g_lat_trigger.tail = false; }
+    }
+};
+std::unique_ptr<Processor> make_latency() { return std::make_unique<LatencyProcessor>(); }
+
+void host_latency_changed(const clap_host_t*) { ++g_host_latency_changed; }
+void host_tail_changed(const clap_host_t*) { ++g_host_tail_changed; }
+const clap_host_latency_t g_host_latency_ext{host_latency_changed};
+const clap_host_tail_t g_host_tail_ext{host_tail_changed};
+const void* host_get_extension_caps(const clap_host_t*, const char* id) {
+    if (std::strcmp(id, CLAP_EXT_LATENCY) == 0) return &g_host_latency_ext;
+    if (std::strcmp(id, CLAP_EXT_TAIL) == 0) return &g_host_tail_ext;
+    return nullptr;
+}
+
+} // namespace
+
+// A latency or tail change must reach the host as clap_host_latency->changed()
+// / clap_host_tail->changed(), and only from the main thread (never from
+// process()), exactly once per edge. A silent regression here misaligns host
+// plugin-delay compensation — audibly smeared transients in any latency-
+// compensated session, with no error surfaced. The prior CLAP fake host
+// returned nullptr for every extension, so this delivery branch never ran.
+TEST_CASE("CLAP delivers latency/tail changed() to the host on the main thread",
+          "[clap][latency][tail][conformance]") {
+    g_lat_trigger = {};
+    g_host_latency_changed = 0;
+    g_host_tail_changed = 0;
+    g_request_callback_count = 0;
+
+    Harness h(make_latency);
+    clap_host_t host = make_fake_host();
+    host.get_extension = host_get_extension_caps;  // capturing latency/tail exts
+    h.plugin.host = &host;
+
+    InputEventList empty;
+
+    SECTION("latency change requests a callback then delivers changed() once") {
+        g_lat_trigger.latency = true;
+        REQUIRE(h.run(empty) != CLAP_PROCESS_ERROR);
+        REQUIRE(g_request_callback_count == 1);  // asked for the main thread
+        REQUIRE(g_host_latency_changed == 0);    // but not from process()
+        clap_adapter::clap_on_main_thread(&h.plugin.plugin);
+        REQUIRE(g_host_latency_changed == 1);    // delivered exactly once
+        REQUIRE(g_host_tail_changed == 0);
+    }
+
+    SECTION("tail change delivers tail changed() once") {
+        g_lat_trigger.tail = true;
+        REQUIRE(h.run(empty) != CLAP_PROCESS_ERROR);
+        REQUIRE(g_request_callback_count == 1);
+        clap_adapter::clap_on_main_thread(&h.plugin.plugin);
+        REQUIRE(g_host_tail_changed == 1);
+        REQUIRE(g_host_latency_changed == 0);
+    }
 }
