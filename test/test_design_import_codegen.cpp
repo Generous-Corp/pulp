@@ -2565,6 +2565,129 @@ TEST_CASE("native codegen paints a stroke declared as the CSS border shorthand",
     REQUIRE(js.find("setSvgStrokeWidth('") != std::string::npos);
 }
 
+namespace {
+
+// Build the TRIAZ slider triplet: a short wide container with a full-width dark
+// track, a shorter colored progress fill, and a round thumb. Callers tweak the
+// fill/thumb geometry per case.
+IRNode make_slider(float fill_x, float fill_w, float thumb_x) {
+    IRNode container;
+    container.type = "frame";
+    container.style.width = 60.0f;
+    container.style.height = 8.0f;
+
+    IRNode track;
+    track.type = "frame";
+    track.style.left = 0.0f;
+    track.style.top = 3.0f;
+    track.style.width = 60.0f;
+    track.style.height = 2.0f;
+    track.style.background_color = "#00000059";
+
+    IRNode fill;
+    fill.type = "frame";
+    fill.style.left = fill_x;
+    fill.style.top = 3.0f;
+    fill.style.width = fill_w;
+    fill.style.height = 2.0f;
+    fill.style.background_color = "#f56161d9";
+
+    IRNode thumb;
+    thumb.type = "ellipse";
+    thumb.style.left = thumb_x;
+    thumb.style.top = 0.0f;
+    thumb.style.width = 8.0f;
+    thumb.style.height = 8.0f;
+    thumb.style.background_color = "#f56161d9";
+
+    container.children = {track, fill, thumb};
+    return container;
+}
+
+}  // namespace
+
+TEST_CASE("a detached slider fill is reconnected to its thumb",
+          "[view][import][slider]") {
+    // The real TRIAZ geometry: thumb at [8,16], fill floating at [30,48] with a
+    // 14px gap between them. Faithfully rendering the stored fill draws a broken
+    // detached red bar; Figma's live component render keeps the fill on the
+    // thumb. Bridge the gap so the bar meets the handle.
+    IRNode slider = make_slider(/*fill_x=*/30.0f, /*fill_w=*/18.0f, /*thumb_x=*/8.0f);
+    reconnect_slider_fill(slider);
+
+    // Thumb center is 12; the fill's far edge (48) is preserved.
+    REQUIRE(slider.children[1].style.left == Catch::Approx(12.0f));
+    REQUIRE(slider.children[1].style.width == Catch::Approx(36.0f));
+    // Track and thumb are never moved.
+    REQUIRE(slider.children[0].style.left == Catch::Approx(0.0f));
+    REQUIRE(slider.children[0].style.width == Catch::Approx(60.0f));
+    REQUIRE(slider.children[2].style.left == Catch::Approx(8.0f));
+}
+
+TEST_CASE("slider reconnection bridges a gap on either side of the thumb",
+          "[view][import][slider]") {
+    // Fill entirely LEFT of the thumb: push its right edge to the thumb center.
+    IRNode left = make_slider(/*fill_x=*/0.0f, /*fill_w=*/10.0f, /*thumb_x=*/40.0f);
+    reconnect_slider_fill(left);
+    // Thumb center 44; fill keeps its left edge (0), width grows to 44.
+    REQUIRE(left.children[1].style.left == Catch::Approx(0.0f));
+    REQUIRE(left.children[1].style.width == Catch::Approx(44.0f));
+}
+
+TEST_CASE("slider reconnection leaves an already-connected fill untouched",
+          "[view][import][slider]") {
+    // Fill [10,30] overlaps thumb [8,16]: the stored geometry already reads as a
+    // connected bar, so it is faithful and must not be rewritten.
+    IRNode ok = make_slider(/*fill_x=*/10.0f, /*fill_w=*/20.0f, /*thumb_x=*/8.0f);
+    reconnect_slider_fill(ok);
+    REQUIRE(ok.children[1].style.left == Catch::Approx(10.0f));
+    REQUIRE(ok.children[1].style.width == Catch::Approx(20.0f));
+}
+
+TEST_CASE("slider reconnection ignores non-slider structures",
+          "[view][import][slider]") {
+    // A track-plus-thumb fader with no distinct colored fill (the TRIAZ "fx vol"
+    // faders) has nothing to bridge — leave it alone and never crash.
+    IRNode fader;
+    fader.type = "frame";
+    fader.style.width = 74.0f;
+    fader.style.height = 7.0f;
+    IRNode track;
+    track.type = "frame";
+    track.style.left = 0.0f; track.style.top = 3.0f;
+    track.style.width = 74.0f; track.style.height = 1.0f;
+    track.style.background_color = "#00000059";
+    IRNode thumb;
+    thumb.type = "ellipse";
+    thumb.style.left = 50.0f; thumb.style.top = 0.0f;
+    thumb.style.width = 7.0f; thumb.style.height = 7.0f;
+    thumb.style.background_color = "#aeafb1";
+    fader.children = {track, thumb};
+    reconnect_slider_fill(fader);
+    REQUIRE(fader.children[0].style.width == Catch::Approx(74.0f));
+    REQUIRE(fader.children[1].style.left == Catch::Approx(50.0f));
+
+    // A tall panel with three colored rects and no round thumb is not a slider:
+    // its detached "fill" is real content and must survive verbatim.
+    IRNode panel;
+    panel.type = "frame";
+    panel.style.width = 60.0f;
+    panel.style.height = 40.0f;  // not short: fails the wide-and-short gate
+    IRNode a, b, c;
+    for (auto* r : {&a, &b, &c}) {
+        r->type = "frame";
+        r->style.top = 0.0f; r->style.height = 10.0f;
+        r->style.background_color = "#123456";
+    }
+    a.style.left = 0.0f;  a.style.width = 60.0f;
+    b.style.left = 30.0f; b.style.width = 18.0f;
+    c.style.left = 8.0f;  c.style.width = 8.0f;
+    panel.children = {a, b, c};
+    reconnect_slider_fill(panel);
+    REQUIRE(panel.children[1].style.left == Catch::Approx(30.0f));
+    REQUIRE(panel.children[1].style.width == Catch::Approx(18.0f));
+}
+
 TEST_CASE("the border shorthand splits without losing a functional color",
           "[view][import][border]") {
     IRNode n;

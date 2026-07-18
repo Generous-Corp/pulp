@@ -322,6 +322,26 @@ void synthesize_primitive_paths(IRNode& root);
 /// what it meant more precisely than the shorthand can.
 void normalize_border_shorthand(IRNode& root);
 
+/// Reconnect a slider's progress fill to its thumb.
+///
+/// A Figma slider component stores three absolutely-positioned children — a
+/// full-width track, a short progress "fill", and a round thumb — and the fill's
+/// stored x/width is a per-instance, value-driven position. Figma's *live*
+/// component render recomputes the fill from the current value so it always
+/// touches the thumb, but the stored geometry in a `.fig` (or a REST/plugin
+/// export of one) does not: an instance can persist a fill that floats in a gap
+/// away from the thumb. Rendering that stored geometry faithfully reproduces a
+/// visually broken "detached red bar" that no design ever intended to show.
+///
+/// This pass detects the track+fill+thumb triplet structurally (never by layer
+/// name) and, ONLY when the fill and thumb are horizontally disjoint, extends
+/// the fill across the gap so it meets the thumb — the minimal edit that removes
+/// the detached-bar artifact without inventing a value. A fill that already
+/// touches or overlaps its thumb is left exactly as stored. Detection is tight
+/// (short wide container, near-full-width thin track, thin colored fill, round
+/// thumb) so non-slider rows are never rewritten.
+void reconnect_slider_fill(IRNode& root);
+
 /// Bind geometry-detected controls to host parameters from an out-of-band
 /// manifest that maps a Figma node id (`IRInteractiveElement::source_node_id`,
 /// stamped by the producer) to a host-param key. For each interactive element

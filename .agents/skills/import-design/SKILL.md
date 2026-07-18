@@ -310,6 +310,23 @@ commit stayed green on bare-metal). If you touch `make_synthetic_fig.mjs`,
 regenerate the fixture from the canonical toolchain, but keep the comparison at
 the decoded layer.
 
+**Gotcha - a Figma slider stores a value-driven fill position that can detach
+from the thumb.** A slider component (track + progress fill + round thumb) keeps
+the fill's x/width per-instance; Figma's LIVE component render recomputes the
+fill against the thumb at draw time, but the stored `.fig` (and REST/plugin
+exports of it) only carry the frozen geometry - so an instance can persist a fill
+that floats in a gap away from the thumb, and a faithful render draws a broken
+detached bar. `reconnect_slider_fill` (`core/view/src/design_import.cpp`, run in
+the native codegen arm BEFORE `synthesize_primitive_paths` bakes the width into
+`path_data`) detects the triplet STRUCTURALLY - short wide container,
+near-full-width thin track, shorter thin fill whose color differs from the track,
+round thumb whose height fills the bar; never by layer name - and bridges the
+fill to the thumb ONLY when they are horizontally disjoint. Do not "fix" a
+detached fill by inventing a slider value or by matching on names: the structural
+gap-bridge is the whole intervention, and a fill already touching its thumb (plus
+track+thumb-only faders and every non-slider row) is left exactly as stored.
+Covered by the `[slider]` cases in `test_design_import_codegen.cpp`.
+
 ### Design contract (`pulp design compile`) — the token/widget allowlist
 
 Before generating or hand-writing a UI, compile the **design contract**: the
