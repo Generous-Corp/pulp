@@ -31,5 +31,5 @@ if(PULP_BUILD_TESTS)
     target_include_directories(pulp-sampler-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${PROJECT_SOURCE_DIR}/test/harness)
-    catch_discover_tests(pulp-sampler-test)
+    catch_discover_tests(pulp-sampler-test PROPERTIES TIMEOUT 30)
 endif()

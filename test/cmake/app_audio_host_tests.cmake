@@ -232,7 +232,7 @@ if(PULP_AUDIO_QUALITY_LAB_GATE)
             PROPERTIES
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
                 ENVIRONMENT
-                    "PULP_SAMPLER_RENDER_WAV=$<TARGET_FILE:pulp-sampler-render-wav>;PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
+                    "PULP_SAMPLER_RENDER_WAV=$<TARGET_FILE:pulp-sampler-render-wav>;PULP_SAMPLER_AQL_REQUIRED=1;PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
                 LABELS "audio;sampler;quality-lab;dependency-gate"
                 TIMEOUT 120)
     endforeach()
