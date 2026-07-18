@@ -6,6 +6,8 @@
 
 #include <pulp/runtime/slot.hpp>
 
+#include "harness/scoped_rt_process_probe.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
@@ -89,6 +91,31 @@ TEST_CASE("Slot does not reclaim while a reader is pinned", "[runtime][slot]") {
     slot.reclaim_if_quiescent();
     REQUIRE(slot.retired_count() == 0);
     REQUIRE(Tracked::destroyed().load() == 1);
+}
+
+TEST_CASE("Slot prepared publish is nonthrowing after capacity preflight",
+          "[runtime][slot]") {
+    Tracked::reset();
+    Slot<Tracked> slot;
+    slot.publish(std::make_unique<Tracked>(1));
+    auto replacement = std::make_shared<Tracked>(2);
+    auto pin = slot.read();
+
+    slot.prepare_publish();
+    static_assert(noexcept(slot.publish_prepared(std::move(replacement))));
+    std::size_t allocations = 1;
+    {
+        pulp::test::ScopedRtProcessProbe probe;
+        slot.publish_prepared(std::move(replacement));
+        allocations = probe.allocation_count();
+    }
+
+    REQUIRE(allocations == 0);
+    REQUIRE(pin->value == 1);
+    REQUIRE(slot.retired_count() == 1);
+    REQUIRE(Tracked::destroyed().load() == 0);
+    auto current = slot.read();
+    REQUIRE(current->value == 2);
 }
 
 TEST_CASE("Slot reclaims on the publisher thread, never the reader", "[runtime][slot]") {

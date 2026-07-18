@@ -354,6 +354,28 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
     if (candidate_has_midi_output || live_has_midi_output) {
         return last_result_ = Result::MidiOutputSnapshotLocalRequired;
     }
+
+    // Removing a baseline external instance would make the owner-side node
+    // assignment below its lifecycle boundary. Prepared edits cannot wait for
+    // the retired audio snapshot and therefore fail closed; ordinary
+    // SignalGraph::release() remains the sole release-callback owner.
+    for (const auto& baseline : owner_->nodes_) {
+        const bool retained = std::any_of(
+            candidate_->nodes_.begin(), candidate_->nodes_.end(),
+            [&](const GraphNode& node) { return node.id == baseline.id; });
+        if (retained)
+            continue;
+        if (baseline.type == NodeType::Plugin) {
+            return last_result_ = Result::BaselinePluginRemovalRequiresRelease;
+        }
+        if (baseline.type == NodeType::Custom) {
+            const auto type = owner_->custom_node_types_.find(
+                prepared_custom_key(baseline.custom_type_id, baseline.custom_type_version));
+            if (type != owner_->custom_node_types_.end() && type->second.release) {
+                return last_result_ = Result::BaselineCustomRemovalRequiresRelease;
+            }
+        }
+    }
     if (!candidate_->preflight_locked_(max_block_size) ||
         candidate_->processing_order().size() != candidate_->nodes_.size()) {
         return last_result_ = Result::PreflightFailed;
@@ -570,6 +592,21 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
         return last_result_ = Result::StaleBase;
     }
 
+    // Everything above the irreversible authoring move is an exception
+    // boundary. Reserve both generic publication retirement and destination
+    // load-map buckets now. After this point publication is noexcept and load
+    // measurers move as allocation-free C++17 node handles.
+    {
+        std::scoped_lock load_locks(owner_->node_load_mu_, candidate_->node_load_mu_);
+        std::size_t incoming = 0;
+        for (const auto& [id, measurer] : candidate_->node_load_) {
+            if (measurer && owner_->node_load_.find(id) == owner_->node_load_.end())
+                ++incoming;
+        }
+        owner_->node_load_.reserve(owner_->node_load_.size() + incoming);
+    }
+    owner_->live_slot_.prepare_publish();
+
     if (candidate_->parallel_routing_enabled_.load(std::memory_order_relaxed) &&
         prepared_snapshot_->routed.parallel.valid && owner_->worker_pool_.worker_count() == 0) {
         const unsigned hw = std::thread::hardware_concurrency();
@@ -583,15 +620,24 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
         return last_result_ = Result::ParallelWorkerStartFailed;
     }
 
-    // Transfer only the load measurers allocated for genuinely new/reused IDs.
-    // unique_ptr movement preserves the addresses already captured by the
-    // candidate snapshot and routed bindings.
+    // Transfer only load measurers allocated for genuinely new/reused IDs.
+    // std::unordered_map<NodeId, unique_ptr<...>> uses the same default
+    // allocator, integral hash, and equality on both sides; destination buckets
+    // were reserved above. Extract/insert therefore transfers ownership and
+    // preserves the addresses captured by the compiled snapshot without an
+    // allocation after the exception boundary.
     {
         std::scoped_lock load_locks(owner_->node_load_mu_, candidate_->node_load_mu_);
-        for (auto& [id, measurer] : candidate_->node_load_) {
-            if (measurer && owner_->node_load_.find(id) == owner_->node_load_.end()) {
-                owner_->node_load_.emplace(id, std::move(measurer));
+        for (auto it = candidate_->node_load_.begin(); it != candidate_->node_load_.end();) {
+            if (!it->second || owner_->node_load_.find(it->first) != owner_->node_load_.end()) {
+                ++it;
+                continue;
             }
+            auto current = it++;
+            auto node = candidate_->node_load_.extract(current);
+            [[maybe_unused]] const auto inserted =
+                owner_->node_load_.insert(std::move(node));
+            assert(inserted.inserted);
         }
     }
 
@@ -618,7 +664,7 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
         candidate_->transport_suppressed_for_anticipation_.load(std::memory_order_relaxed),
         std::memory_order_relaxed);
 
-    owner_->live_slot_.publish(prepared_snapshot_);
+    owner_->live_slot_.publish_prepared(prepared_snapshot_);
     owner_->total_latency_samples_.store(prepared_snapshot_->total_latency_samples,
                                          std::memory_order_relaxed);
     owner_->publish_prepared_stats_locked_(*prepared_snapshot_);
