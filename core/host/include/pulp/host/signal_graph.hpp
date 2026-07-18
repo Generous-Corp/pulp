@@ -626,6 +626,7 @@ public:
     // a topology recompile (a new topology is a new timing baseline). Per-node
     // timing is recorded on the legacy reference-walk path (the default when routed
     // dispatch is off); routed-executor blocks still contribute graph-level timing.
+    // Control/UI thread only; serialized with snapshot publication.
     void set_live_dsp_telemetry_enabled(bool enabled);
     bool live_dsp_telemetry_enabled() const;
     // Drain the live snapshot's ring and return a copy of the latest summary.

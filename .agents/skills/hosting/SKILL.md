@@ -647,6 +647,12 @@ does not contain crashes in deeper plug-in code.
   allocator), move the authoring containers, and call the Slot's noexcept
   prepared publication. Never put an allocating `emplace` or ordinary
   `Slot::publish` after that boundary.
+  `set_live_dsp_telemetry_enabled()` is a control-thread operation serialized
+  by the graph mutation lock: a prepared commit re-seeds its snapshot from the
+  owner's authoritative desired toggle immediately before publication. Do not
+  move the toggle outside that lock or restore the candidate's creation-time
+  value; either change can update the retired snapshot while publishing stale
+  telemetry state.
 - Per-node CPU load: `process()` wraps each node's work in a persistent
   per-node `audio::AudioProcessLoadMeasurer` (keyed by `NodeId` in
   `node_load_`), read via `node_loads()`. The measurers live on the

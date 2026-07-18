@@ -1098,10 +1098,13 @@ pulp::audio::AudioProcessLoadSnapshot SignalGraph::graph_load() const {
 }
 
 void SignalGraph::set_live_dsp_telemetry_enabled(bool enabled) {
-    // Record the desired state so future recompiles seed their store from it, then
-    // flip the live snapshot's store immediately (atomic) so the toggle takes effect
-    // without waiting for a recompile. Pinning keeps the live snapshot alive for the
-    // store access; set_enabled touches only a relaxed atomic.
+    // Serialize the desired state + live reflection with snapshot publication.
+    // Otherwise a prepared transaction could read the new desired value while
+    // this call still updates the old snapshot, or publish a candidate seeded
+    // before this call. Pinning keeps the selected snapshot alive; the brief
+    // lock -> pin order is safe because release() must acquire this same lock
+    // before it can wait for readers.
+    GraphMutationLock mutation_lock(*this);
     desired_live_dsp_telemetry_enabled_.store(enabled, std::memory_order_relaxed);
     auto read_guard = live_slot_.read();
     if (auto* cg = read_guard.get()) {
