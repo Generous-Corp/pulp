@@ -958,7 +958,7 @@ private:
         bool midi_in_incomplete = false;
         bool midi_out_incomplete = false;
         std::shared_ptr<MidiInputMailbox> midi_input_mailbox;
-        std::shared_ptr<runtime::TripleBuffer<MidiBlockSnapshot>> midi_output_mailbox;
+        std::unique_ptr<runtime::TripleBuffer<MidiBlockSnapshot>> midi_output_mailbox;
 
         // Control/audio-thread parameter-event ingress for Plugin nodes. The
         // mailbox is single-writer/latest-wins like MIDI ingress; the sequence
@@ -1581,6 +1581,7 @@ public:
         InvalidMutation,
         StaleBase,
         PreflightFailed,
+        MidiOutputSnapshotLocalRequired,
         ExternalPluginReprepareRequired,
         ExistingCustomReprepareRequired,
         CustomRegistryConflict,

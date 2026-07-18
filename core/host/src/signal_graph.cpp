@@ -1349,7 +1349,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         }
         if (n.type == NodeType::MidiOutput) {
             runtime_it->second.midi_output_mailbox =
-                std::make_shared<runtime::TripleBuffer<MidiBlockSnapshot>>();
+                std::make_unique<runtime::TripleBuffer<MidiBlockSnapshot>>();
         }
         if (n.type == NodeType::Plugin && n.plugin) {
             // Keep mailbox identity across a live snapshot recompile so a
