@@ -8,6 +8,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06952"></a>
+## [0.695.2] - 2026-07-17
+
+- fix(import-design): read CSS gradients in the Claude lane, not just backgroundColor ([#6235](https://github.com/danielraffel/pulp/pull/6235))
+- fix(import-design): --validate render location + material-audit stroke-blindness ([#6240](https://github.com/danielraffel/pulp/pull/6240))
+- fix(osc): adversarial-review follow-ups (leakage-aware pitch floor, DCO/WT/VCO hardening) ([#6242](https://github.com/danielraffel/pulp/pull/6242))
+- ci(version): harden version-at-land before the --push flip ([#6237](https://github.com/danielraffel/pulp/pull/6237))
+- ci(version): version-at-land infra + correct bump derivation (combines #6195 + #6219) ([#6221](https://github.com/danielraffel/pulp/pull/6221))
+
 <a id="v06940"></a>
 ## [0.694.0] - 2026-07-17
 
@@ -6511,6 +6520,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.695.2]: https://github.com/danielraffel/pulp/releases/tag/v0.695.2
 [0.694.0]: https://github.com/danielraffel/pulp/releases/tag/v0.694.0
 [0.693.0]: https://github.com/danielraffel/pulp/releases/tag/v0.693.0
 [0.692.0]: https://github.com/danielraffel/pulp/releases/tag/v0.692.0
