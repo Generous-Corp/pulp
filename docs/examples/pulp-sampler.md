@@ -151,9 +151,13 @@ Runtime persistence captures only RNG continuation for quantization/noise
 stages that opt into `ContinueSerializedState`; it does not capture SRC phase
 or history, DAC-hold state, or reconstruction-filter transients. The example's
 `sampler_heritage_state.hpp` adds a strict, versioned envelope for the profile
-and optional runtime JSON. At this checkpoint that codec is tested but is not
-connected to `PulpSamplerProcessor`'s plugin-state serialization hooks, so host
-session recall must not be assumed from this revision.
+and optional runtime JSON, and `PulpSamplerProcessor` uses that envelope for its
+outer plugin state. At callback end, the processor publishes a bounded RNG
+continuation snapshot through a `SeqLock`; same-rate restore applies it before
+the first callback. Restoring at a different host rate keeps the profile but
+resets runtime state and reports `ReadyRuntimeResetForHostRate`. SRC history,
+DAC-hold state, and reconstruction-filter transients always restart rather than
+pretending to continue across a session restore.
 
 ## Verification
 
@@ -194,7 +198,6 @@ verification are required before using it as current performance evidence.
 
 - Wire configuration, prepare/load results, preload policy, envelope state, and
   the combined diagnostic record through `PulpSamplerProcessor`.
-- Complete and verify the in-flight heritage plugin-state wiring.
 - Recapture current interpolation performance evidence.
 - Named machine profiles remain intentionally unshipped until research,
   provenance, capture, and listening gates are satisfied.
