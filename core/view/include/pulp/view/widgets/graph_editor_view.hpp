@@ -19,7 +19,10 @@
 
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/hosted_editor_attachment.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <functional>
+#include <memory>
 #include <unordered_map>
 #include <string>
 
@@ -61,6 +64,29 @@ public:
 
     enum class EdgeKind { Audio, Midi, Automation, Feedback };
 
+    // ── Hosted plugin editors ───────────────────────────────────────
+    // Open a node's plugin editor, embedded via EditorAttachment. The provider
+    // supplies the WindowHost the editor attaches into — e.g. a floating editor
+    // window the app owns. Without a provider, or for a node with no plugin /
+    // no embeddable editor on this platform, open_node_editor() is a no-op that
+    // returns false. The attachment co-owns the node's PluginSlot, so an open
+    // editor stays valid even if the node is removed from the graph.
+    void set_editor_host_provider(std::function<WindowHost*(host::NodeId)> provider) {
+        editor_host_provider_ = std::move(provider);
+    }
+
+    /// Open the editor for `id` (no-op if already open). Returns true if an
+    /// editor is attached for the node afterwards.
+    bool open_node_editor(host::NodeId id);
+
+    /// Close the editor for `id`, detaching and destroying it. No-op if none.
+    void close_node_editor(host::NodeId id);
+
+    /// Whether an editor is currently open for `id`.
+    bool is_editor_open(host::NodeId id) const {
+        return open_editors_.find(id) != open_editors_.end();
+    }
+
 private:
     struct Pos { float x, y; };
 
@@ -99,6 +125,11 @@ private:
     // Last-seen modifier state from on_mouse_event, consumed in on_mouse_up
     // to pick the connect/connect_midi/connect_feedback variant.
     uint16_t last_modifiers_ = 0;
+
+    // Hosted plugin editors, keyed by node. Each EditorAttachment co-owns the
+    // node's PluginSlot for its lifetime.
+    std::function<WindowHost*(host::NodeId)> editor_host_provider_;
+    std::unordered_map<host::NodeId, std::unique_ptr<EditorAttachment>> open_editors_;
 };
 
 } // namespace pulp::view::widgets

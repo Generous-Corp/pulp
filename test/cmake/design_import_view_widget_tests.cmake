@@ -102,6 +102,8 @@ pulp_add_test_suite(pulp-test-ui-components LIBRARIES pulp::view)
 
 # GraphEditorView tests
 pulp_add_test_suite(pulp-test-graph-editor-view LIBRARIES pulp::view)
+# GraphEditorView opening a node's plugin editor (first EditorAttachment consumer)
+pulp_add_test_suite(pulp-test-graph-editor-open LIBRARIES pulp::view pulp::host)
 
 # Modal overlay + ContextMenu (view-drawn popup menu) tests
 pulp_add_test_suite(pulp-test-modal LIBRARIES pulp::view)
