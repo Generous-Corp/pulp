@@ -513,6 +513,19 @@ TEST_CASE("pulp audio sampler-mip builds and preserves a prior bounded bundle",
     REQUIRE(fs::is_regular_file(manifest));
     REQUIRE(sampler_mip_payloads_in(root).size() == 2);
 
+#if defined(PULP_SAMPLER_SIDECAR_PROBE_BINARY)
+    const auto runtime_probe = exec(
+        PULP_SAMPLER_SIDECAR_PROBE_BINARY,
+        {source.string(), "2"}, 30000);
+    REQUIRE_FALSE(runtime_probe.timed_out);
+    REQUIRE(runtime_probe.exit_code == 0);
+    REQUIRE(runtime_probe.stderr_output.empty());
+    REQUIRE(runtime_probe.stdout_output.find(
+                "PulpSampler loaded CLI sidecar levels=2") != std::string::npos);
+#else
+    FAIL("PulpSampler CLI sidecar probe was not configured");
+#endif
+
     fs::remove_all(root);
 }
 
