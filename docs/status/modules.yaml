@@ -9,9 +9,9 @@ modules:
     docs: reference/modules.md#playback
 
   - name: timebase
-    summary: Strong musical tick and sample positions, rational sample rates, immutable constant/ramped tempo maps, and shared transport quantization arithmetic
+    summary: Strong musical tick sample and bar positions editable tempo and meter maps compiled exact lookup and streaming transport cursors
     status: experimental
-    dependencies: []
+    dependencies: [runtime]
     docs: reference/modules.md#timebase
 
   - name: timeline

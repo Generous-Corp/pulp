@@ -13,6 +13,9 @@ invariants.
 - `Project`, `Sequence`, `Track`, and `Clip` are immutable snapshots. Validate
   once in their `create()` factories; reads must not repair, sort, or rebuild
   indexes.
+- `Project` owns its sample-rate-independent `TempoMap` and `MeterMap`. Every
+  path-copy rebuild, ID remap, journal comparison, and replay must preserve
+  both maps.
 - Every owned identity excludes zero and `UINT64_MAX`; the latter is the
   allocator's explicit exhausted sentinel. A project may store that sentinel
   after owning `UINT64_MAX - 1`; otherwise `next_item_id` is strictly larger
@@ -35,6 +38,9 @@ invariants.
   integer `version`. All 64-bit IDs, positions, counts, durations, and rate
   components are canonical decimal JSON strings; never encode them as JSON
   numbers or floating point.
+- Schema-v1 project persistence writes canonical `tempo_map` and `meter_map`
+  arrays. BPM is stored by exact IEEE-754 bits; older v1 snapshots without map
+  fields remain readable as 120 BPM and 4/4, then canonicalize on save.
 - Build a `SchemaRegistry` explicitly with `SchemaRegistryBuilder`; there is no
   global mutable registry. Registered content codecs are typed, `noexcept`, and
   own no hidden `ItemId`s in Phase 1. Migration callbacks must return and verify

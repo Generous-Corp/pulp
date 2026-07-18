@@ -207,6 +207,42 @@ bool write_rate(EncodeContext& context, timebase::RationalRate rate) {
            context.writer.u64(rate.numerator, true) && context.writer.character('}');
 }
 
+bool write_tempo_map(EncodeContext& context, const timebase::TempoMap& map) {
+    if (!context.writer.character('['))
+        return false;
+    for (std::size_t index = 0; index < map.points().size(); ++index) {
+        const auto& point = map.points()[index];
+        if ((index != 0 && !context.writer.character(',')) ||
+            !context.writer.append("{\"bpm_bits\":") ||
+            !context.writer.u64(std::bit_cast<std::uint64_t>(point.bpm), true) ||
+            !context.writer.append(",\"curve\":") ||
+            !context.writer.quoted(point.curve_to_next == timebase::TempoCurve::LinearInTicks
+                                       ? "linear_in_ticks"
+                                       : "constant") ||
+            !context.writer.append(",\"tick\":") ||
+            !context.writer.i64(point.tick.value, true) || !context.writer.character('}'))
+            return false;
+    }
+    return context.writer.character(']');
+}
+
+bool write_meter_map(EncodeContext& context, const timebase::MeterMap& map) {
+    if (!context.writer.character('['))
+        return false;
+    for (std::size_t index = 0; index < map.points().size(); ++index) {
+        const auto& point = map.points()[index];
+        if ((index != 0 && !context.writer.character(',')) ||
+            !context.writer.append("{\"denominator\":") ||
+            !context.writer.u64(static_cast<std::uint32_t>(point.signature.denominator)) ||
+            !context.writer.append(",\"numerator\":") ||
+            !context.writer.u64(static_cast<std::uint32_t>(point.signature.numerator)) ||
+            !context.writer.append(",\"tick\":") ||
+            !context.writer.i64(point.tick.value, true) || !context.writer.character('}'))
+            return false;
+    }
+    return context.writer.character(']');
+}
+
 bool write_locator(EncodeContext& context, const AssetLocator& locator) {
     return context.writer.append("{\"hint\":") && context.writer.quoted(locator.hint) &&
            context.writer.append(",\"kind\":") &&
@@ -457,6 +493,68 @@ runtime::Result<timebase::RationalRate, PersistenceError> decode_rate(const Json
         return fail<timebase::RationalRate>(PersistenceErrorCode::InvalidNumber, std::move(path),
                                             value.begin);
     return runtime::Result<timebase::RationalRate, PersistenceError>(runtime::Ok(rate));
+}
+
+runtime::Result<timebase::TempoMap, PersistenceError>
+decode_tempo_map(const JsonValue& value, std::string path) {
+    if (value.kind != JsonValue::Kind::Array)
+        return fail<timebase::TempoMap>(PersistenceErrorCode::UnexpectedType, std::move(path));
+    std::vector<timebase::TempoPoint> points;
+    points.reserve(value.array.size());
+    for (std::size_t index = 0; index < value.array.size(); ++index) {
+        const auto item_path = path + "/" + std::to_string(index);
+        auto bits = required(value.array[index], "bpm_bits", item_path);
+        auto curve = string_field(value.array[index], "curve", item_path);
+        auto tick = required(value.array[index], "tick", item_path);
+        if (!bits || !curve || !tick)
+            return fail<timebase::TempoMap>(PersistenceErrorCode::MissingField, item_path);
+        auto decoded_bits = parse_canonical_u64_string(*bits.value(), item_path + "/bpm_bits");
+        auto decoded_tick = parse_canonical_i64_string(*tick.value(), item_path + "/tick");
+        if (!decoded_bits || !decoded_tick)
+            return fail<timebase::TempoMap>(PersistenceErrorCode::InvalidNumber, item_path);
+        timebase::TempoCurve decoded_curve;
+        if (curve.value() == "constant")
+            decoded_curve = timebase::TempoCurve::Constant;
+        else if (curve.value() == "linear_in_ticks")
+            decoded_curve = timebase::TempoCurve::LinearInTicks;
+        else
+            return fail<timebase::TempoMap>(PersistenceErrorCode::InvalidSchema,
+                                            item_path + "/curve");
+        points.push_back({{decoded_tick.value()}, std::bit_cast<double>(decoded_bits.value()),
+                          decoded_curve});
+    }
+    auto created = timebase::TempoMap::create(points);
+    if (!created)
+        return fail<timebase::TempoMap>(PersistenceErrorCode::InvalidSchema, std::move(path));
+    return runtime::Ok(std::move(created).value());
+}
+
+runtime::Result<timebase::MeterMap, PersistenceError>
+decode_meter_map(const JsonValue& value, std::string path) {
+    if (value.kind != JsonValue::Kind::Array)
+        return fail<timebase::MeterMap>(PersistenceErrorCode::UnexpectedType, std::move(path));
+    std::vector<timebase::MeterPoint> points;
+    points.reserve(value.array.size());
+    for (std::size_t index = 0; index < value.array.size(); ++index) {
+        const auto item_path = path + "/" + std::to_string(index);
+        auto denominator = required(value.array[index], "denominator", item_path);
+        auto numerator = required(value.array[index], "numerator", item_path);
+        auto tick = required(value.array[index], "tick", item_path);
+        if (!denominator || !numerator || !tick)
+            return fail<timebase::MeterMap>(PersistenceErrorCode::MissingField, item_path);
+        auto d = parse_u32_number(*denominator.value(), item_path + "/denominator");
+        auto n = parse_u32_number(*numerator.value(), item_path + "/numerator");
+        auto t = parse_canonical_i64_string(*tick.value(), item_path + "/tick");
+        if (!d || !n || !t || d.value() > std::numeric_limits<std::int32_t>::max() ||
+            n.value() > std::numeric_limits<std::int32_t>::max())
+            return fail<timebase::MeterMap>(PersistenceErrorCode::InvalidNumber, item_path);
+        points.push_back({{t.value()}, {static_cast<std::int32_t>(n.value()),
+                                        static_cast<std::int32_t>(d.value())}});
+    }
+    auto created = timebase::MeterMap::create(points);
+    if (!created)
+        return fail<timebase::MeterMap>(PersistenceErrorCode::InvalidSchema, std::move(path));
+    return runtime::Ok(std::move(created).value());
 }
 
 runtime::Result<AssetStoragePolicy, PersistenceError> decode_storage(std::string_view value,
@@ -896,10 +994,12 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"assets", SchemaValueKind::Array},
         {"id", SchemaValueKind::U64String},
         {"identities", SchemaValueKind::Array, false},
+        {"meter_map", SchemaValueKind::Array, false},
         {"name", SchemaValueKind::String},
         {"next_item_id", SchemaValueKind::U64String},
         {"root_sequence_id", SchemaValueKind::U64String},
         {"sequences", SchemaValueKind::Array},
+        {"tempo_map", SchemaValueKind::Array, false},
     };
     static constexpr ExpectedField asset_fields[] = {
         {"content_hash", SchemaValueKind::String}, {"frame_count", SchemaValueKind::U64String},
@@ -1051,7 +1151,9 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
                 !context.writer.character('}'))
                 return false;
         }
-        if (!context.writer.append("],\"name\":") || !context.writer.quoted(project.name()) ||
+        if (!context.writer.append("],\"meter_map\":") ||
+            !write_meter_map(context, project.meter_map()) ||
+            !context.writer.append(",\"name\":") || !context.writer.quoted(project.name()) ||
             !context.writer.append(",\"next_item_id\":") ||
             !context.writer.u64(project.next_item_id(), true) ||
             !context.writer.append(",\"root_sequence_id\":") ||
@@ -1062,7 +1164,8 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
             if ((index != 0 && !context.writer.character(',')) ||
                 !write_sequence(context, project.sequences()[index]))
                 return false;
-        return context.writer.append("]}");
+        return context.writer.append("],\"tempo_map\":") &&
+               write_tempo_map(context, project.tempo_map()) && context.writer.character('}');
     });
     if (!wrote) {
         if (context.failure)
@@ -1098,6 +1201,8 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
     auto assets = required(*data.value(), "assets", "/data");
     auto sequences = required(*data.value(), "sequences", "/data");
     const auto* identities = data.value()->find("identities");
+    const auto* tempo_map_value = data.value()->find("tempo_map");
+    const auto* meter_map_value = data.value()->find("meter_map");
     if (!id || !name || !next || !root || !assets || !sequences ||
         assets.value()->kind != JsonValue::Kind::Array ||
         sequences.value()->kind != JsonValue::Kind::Array)
@@ -1159,12 +1264,28 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
                                            active_value.value()->boolean}});
         }
     }
+    timebase::TempoMap decoded_tempo_map;
+    if (tempo_map_value) {
+        auto decoded = decode_tempo_map(*tempo_map_value, "/data/tempo_map");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        decoded_tempo_map = std::move(decoded).value();
+    }
+    timebase::MeterMap decoded_meter_map;
+    if (meter_map_value) {
+        auto decoded = decode_meter_map(*meter_map_value, "/data/meter_map");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        decoded_meter_map = std::move(decoded).value();
+    }
     auto created = Project::create(ProjectInput{{decoded_id.value()},
                                                 std::move(name).value(),
                                                 decoded_next.value(),
                                                 {decoded_root.value()},
                                                 std::move(decoded_assets),
-                                                std::move(decoded_sequences)});
+                                                std::move(decoded_sequences),
+                                                std::move(decoded_tempo_map),
+                                                std::move(decoded_meter_map)});
     if (!created)
         return model_fail<Project>(created.error(), "/");
     if (identities) {

@@ -44,7 +44,7 @@ for its complete, authoritative guidance.
 | `motion` | Debug or validate Pulp animations / transitions / scroll behavior using the runtime motion-trace system. |
 | `mpe` | Build an MPE-aware Pulp synth — opt into MPE via PluginDescriptor, consume per-note pitch bend / pressure / timbre from MpeBuffer, and route voices through MpeVoiceAllocator without reinventing channel tracking. |
 | `packages` | Search, suggest, add, and browse third-party audio packages. |
-| `playback` | Pulp timeline transport, immutable compiled playback programs, bounded compile execution and arrangement note/audio rendering, block-level publication latches, stable shells, and ProcessContext projection. |
+| `playback` | Pulp timeline transport, immutable compiled playback programs, bounded arrangement audio rendering, block-level publication latches, stable shells, and ProcessContext projection. |
 | `pr-batching` | Decide whether several finished branches ship as ONE PR or stay separate. |
 | `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially for material (large / logic-bearing) PRs. |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`) — focus marker plus normal watch/rebuild loop, with AOT analyzer guidance and deferred ar-swap/PR-monitor playbook. |
@@ -58,7 +58,7 @@ for its complete, authoritative guidance.
 | `stretch` | Offline time-stretch / pitch / varispeed — character modes, fine-tune presets, A/B toolkit, and the honest quality state, so an agent can pick a mode, dial it in, and ship a plugin with it. |
 | `tart-ci` | Stand up a fast, cached, isolated, disposable macOS CI lane on Tart — layered golden VM images, ephemeral per-job GitHub Actions runners, host-mounted caches, and a reusable per-repo vm-image manifest. |
 | `threejs-bridge` | Build or iterate on Pulp's native Dawn-backed Three.js workflow using the real three.webgpu.js renderer, focused bridge tests, and native demo capture. |
-| `timebase` | Pulp musical/media time primitives, immutable compiled tempo maps, monotonic transport beats, exact sample anchors, corrected inverse conversion, and shared transport quantization arithmetic. |
+| `timebase` | Pulp musical/media time primitives, editable tempo and meter maps, immutable compiled lookup, streaming cursors, exact sample anchors, and shared transport quantization arithmetic. |
 | `timeline` | Pulp immutable timeline model, typed command transactions, bounded journal and undo, durable assets, schema registry, and exact JSON persistence. |
 | `trace-analysis` | The investigation harness for "why is this slow?" over a Pulp Perfetto trace (.pftrace). |
 | `trace-sql` | SQL discipline for querying Pulp Perfetto traces (.pftrace) with trace_processor — idempotent CREATE OR REPLACE PERFETTO views, GLOB not LIKE, dur = -1 incomplete-slice handling, EXTRACT_ARG for span args, joining on stable utid/upid, SPAN_JOIN PARTITIONED, and the draft→validate→execute loop. |

@@ -3,6 +3,7 @@
 #include <pulp/midi/block_ops.hpp>
 
 #include "harness/scoped_rt_process_probe.hpp"
+#include "timebase_test_helpers.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -30,7 +31,7 @@ T take(runtime::Result<T, E> result) {
 
 std::shared_ptr<const CompiledTempoMap> tempo_map() {
     const std::array points{TempoPoint{{0}, 120.0}};
-    return std::make_shared<const CompiledTempoMap>(points, RationalRate{48'000, 1});
+    return shared_compiled_tempo_map(points, RationalRate{48'000, 1});
 }
 
 TickPosition tick_at_sample(const CompiledTempoMap& map, std::int64_t sample) {

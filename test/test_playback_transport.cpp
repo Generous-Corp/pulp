@@ -2,6 +2,7 @@
 #include <pulp/playback/transport.hpp>
 
 #include "harness/scoped_rt_process_probe.hpp"
+#include "timebase_test_helpers.hpp"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -21,7 +22,7 @@ namespace {
 
 CompiledTempoMap constant_map() {
     const std::array points{TempoPoint{{0}, 120.0}};
-    return CompiledTempoMap(points, {48'000, 1});
+    return require_compiled_tempo_map(points, RationalRate{48'000, 1});
 }
 
 MasterTransportConfig config(std::uint32_t maximum = 1024) {
@@ -165,7 +166,7 @@ TEST_CASE("variable blocks equal one continuous block across a tempo ramp") {
         TempoPoint{{0}, 60.0, TempoCurve::LinearInTicks},
         TempoPoint{{2 * kTicksPerQuarter}, 180.0},
     };
-    const CompiledTempoMap map(points, {48'000, 1});
+    const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
     auto setup = config(2048);
     setup.initially_playing = true;
     MasterTransport partitioned;
@@ -186,7 +187,7 @@ TEST_CASE("tempo query and transport cross a ramp analytically") {
         TempoPoint{{0}, 60.0, TempoCurve::LinearInTicks},
         TempoPoint{{kTicksPerQuarter}, 180.0},
     };
-    const CompiledTempoMap map(points, {48'000, 1});
+    const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
     REQUIRE(map.tempo_at_tick({0}) == Catch::Approx(60.0));
     REQUIRE(map.tempo_at_tick({kTicksPerQuarter / 2}) == Catch::Approx(120.0));
     REQUIRE(map.tempo_at_tick({kTicksPerQuarter}) == Catch::Approx(180.0));
@@ -232,7 +233,7 @@ TEST_CASE("loop split ranges carry their own start tempo") {
         TempoPoint{{0}, 60.0},
         TempoPoint{{kTicksPerQuarter}, 180.0},
     };
-    const CompiledTempoMap map(points, {48'000, 1});
+    const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
     const LoopRegion loop{true, {0}, {2 * kTicksPerQuarter}};
     auto setup = config();
     setup.initially_playing = true;
@@ -373,7 +374,7 @@ TEST_CASE("change metadata matches first block and playhead diff semantics") {
         TempoPoint{{0}, 60.0},
         TempoPoint{{kTicksPerQuarter}, 180.0},
     };
-    const CompiledTempoMap map(points, {48'000, 1});
+    const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
     auto setup = config();
     setup.initially_playing = true;
     MasterTransport transport;

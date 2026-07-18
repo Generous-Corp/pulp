@@ -743,6 +743,8 @@ struct Project::Data {
     ItemId root_sequence_id;
     std::vector<MediaAsset> assets;
     std::vector<Sequence> sequences;
+    timebase::TempoMap tempo_map;
+    timebase::MeterMap meter_map;
     detail::IdentityDirectory identities;
 };
 
@@ -869,7 +871,8 @@ detail::ProjectStateAccess::restore_identities(Project project,
     project.data_ = std::make_shared<const Project::Data>(
         Project::Data{project.data_->id, project.data_->name, project.data_->next_item_id,
                       project.data_->root_sequence_id, project.data_->assets,
-                      project.data_->sequences, std::move(restored)});
+                      project.data_->sequences, project.data_->tempo_map,
+                      project.data_->meter_map, std::move(restored)});
     return runtime::Ok(std::move(project));
 }
 
@@ -985,7 +988,8 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
     }
     return runtime::Result<Project, ModelError>(runtime::Ok(Project(std::make_shared<const Data>(
         Data{input.id, std::move(input.name), input.next_item_id, input.root_sequence_id,
-             std::move(input.assets), std::move(input.sequences), std::move(identities)}))));
+             std::move(input.assets), std::move(input.sequences), std::move(input.tempo_map),
+             std::move(input.meter_map), std::move(identities)}))));
 }
 
 ItemId Project::id() const noexcept {
@@ -1005,6 +1009,12 @@ std::span<const MediaAsset> Project::assets() const noexcept {
 }
 std::span<const Sequence> Project::sequences() const noexcept {
     return data_->sequences;
+}
+const timebase::TempoMap& Project::tempo_map() const noexcept {
+    return data_->tempo_map;
+}
+const timebase::MeterMap& Project::meter_map() const noexcept {
+    return data_->meter_map;
 }
 const MediaAsset* Project::find_asset(ItemId id) const noexcept {
     const auto found =
@@ -1076,7 +1086,8 @@ Project::replace_sequence(Sequence sequence, std::span<const IdentityMutation> m
     sequences[static_cast<std::size_t>(found - data_->sequences.begin())] = std::move(sequence);
     return runtime::Result<Project, ModelError>(runtime::Ok(Project(std::make_shared<const Data>(
         Data{data_->id, data_->name, next, data_->root_sequence_id, data_->assets,
-             std::move(sequences), std::move(identities)}))));
+             std::move(sequences), data_->tempo_map, data_->meter_map,
+             std::move(identities)}))));
 }
 
 std::size_t Project::shared_identity_nodes_with(const Project& other) const {
@@ -1374,7 +1385,8 @@ runtime::Result<RemappedProject, ModelError> remap_ids(const Project& project,
     }
     auto rebuilt = Project::create(ProjectInput{
         *table.find(project.id()), project.name(), allocator.next_value(),
-        *table.find(project.root_sequence_id()), std::move(assets), std::move(sequences)});
+        *table.find(project.root_sequence_id()), std::move(assets), std::move(sequences),
+        project.tempo_map(), project.meter_map()});
     if (!rebuilt)
         return fail<RemappedProject>(rebuilt.error().code, rebuilt.error().item,
                                      rebuilt.error().related_item);

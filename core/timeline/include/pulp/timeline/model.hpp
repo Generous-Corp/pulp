@@ -1,6 +1,8 @@
 #pragma once
 
 #include <pulp/runtime/result.hpp>
+#include <pulp/timebase/compiled_meter_map.hpp>
+#include <pulp/timebase/compiled_tempo_map.hpp>
 #include <pulp/timebase/rational_time.hpp>
 #include <pulp/timebase/tick.hpp>
 #include <pulp/timeline/assets.hpp>
@@ -385,6 +387,8 @@ struct ProjectInput {
     ItemId root_sequence_id;
     std::vector<MediaAsset> assets;
     std::vector<Sequence> sequences;
+    timebase::TempoMap tempo_map{};
+    timebase::MeterMap meter_map{};
 };
 
 enum class ItemKind : std::uint8_t { Project, Asset, Sequence, Track, Clip, Note };
@@ -420,6 +424,8 @@ class Project {
     ItemId root_sequence_id() const noexcept;
     std::span<const MediaAsset> assets() const noexcept;
     std::span<const Sequence> sequences() const noexcept;
+    const timebase::TempoMap& tempo_map() const noexcept;
+    const timebase::MeterMap& meter_map() const noexcept;
     const MediaAsset* find_asset(ItemId id) const noexcept;
     const Sequence* find_sequence(ItemId id) const noexcept;
     std::optional<ItemLocation> locate(ItemId id) const noexcept;

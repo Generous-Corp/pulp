@@ -2,6 +2,7 @@
 
 #include <pulp/audio/rt_safety_contract.hpp>
 #include <pulp/runtime/seqlock.hpp>
+#include <pulp/timebase/compiled_meter_map.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
 
 #include <array>
@@ -19,11 +20,7 @@ enum class TransportError {
     InvalidFrameCount,
 };
 
-struct MeterSignature {
-    std::int32_t numerator = 4;
-    std::int32_t denominator = 4;
-    constexpr auto operator<=>(const MeterSignature&) const = default;
-};
+using MeterSignature = timebase::MeterSignature;
 
 struct LoopRegion {
     bool enabled = false;
@@ -111,6 +108,7 @@ class MasterTransport {
     runtime::SeqLock<DesiredState> desired_{};
     DesiredState control_state_{};
     const timebase::CompiledTempoMap* tempo_map_ = nullptr;
+    timebase::TempoCursor tempo_cursor_{};
     std::uint32_t max_buffer_size_ = 0;
 
     timebase::SamplePosition timeline_sample_{};

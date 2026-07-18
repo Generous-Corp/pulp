@@ -89,6 +89,7 @@ endif()
 set(_PULP_WCLAP_INCLUDES
     ${_PULP_WCLAP_ROOT}/core/platform/include
     ${_PULP_WCLAP_ROOT}/core/runtime/include
+    ${_PULP_WCLAP_ROOT}/core/timebase/include
     ${_PULP_WCLAP_ROOT}/core/state/include
     ${_PULP_WCLAP_ROOT}/core/audio/include
     ${_PULP_WCLAP_ROOT}/core/midi/include
@@ -103,6 +104,8 @@ set(_PULP_WCLAP_INCLUDES
 # Portable DSP + CLAP-adapter subset — compiled once into an OBJECT library and
 # shared across every WebCLAP plugin target.
 set(_PULP_WCLAP_CORE_SOURCES
+    ${_PULP_WCLAP_ROOT}/core/timebase/src/compiled_meter_map.cpp
+    ${_PULP_WCLAP_ROOT}/core/timebase/src/compiled_tempo_map.cpp
     ${_PULP_WCLAP_WAV_SOURCES}
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_adapter.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_remote_controls.cpp

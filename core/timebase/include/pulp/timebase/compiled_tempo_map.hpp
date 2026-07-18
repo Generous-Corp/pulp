@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulp/runtime/result.hpp>
 #include <pulp/timebase/rational_time.hpp>
 #include <pulp/timebase/tick.hpp>
 
@@ -18,6 +19,40 @@ struct TempoPoint {
     TickPosition tick;
     double bpm = 120.0;
     TempoCurve curve_to_next = TempoCurve::Constant;
+    constexpr auto operator<=>(const TempoPoint&) const = default;
+};
+
+enum class TempoMapError {
+    Empty,
+    MissingTickZero,
+    InvalidBpm,
+    InvalidCurve,
+    InvalidFinalCurve,
+    UnorderedPoints,
+    InvalidSampleRate,
+    SampleRangeExceeded,
+};
+
+// Editable, sample-rate-independent document value. Validation is shared with
+// compilation so malformed maps never reach the playback graph.
+class TempoMap {
+  public:
+    TempoMap() : points_{{{0}, 120.0, TempoCurve::Constant}} {}
+
+    static runtime::Result<TempoMap, TempoMapError>
+    create(std::span<const TempoPoint> points) noexcept;
+
+    runtime::Result<TempoMap, TempoMapError>
+    replacing_points(std::span<const TempoPoint> points) const noexcept {
+        return create(points);
+    }
+
+    std::span<const TempoPoint> points() const noexcept { return points_; }
+    constexpr auto operator<=>(const TempoMap&) const = default;
+
+  private:
+    explicit TempoMap(std::vector<TempoPoint> points) : points_(std::move(points)) {}
+    std::vector<TempoPoint> points_;
 };
 
 struct SampleToTickResult {
@@ -41,7 +76,12 @@ struct SampleToTickResult {
 // sample error.
 class CompiledTempoMap {
   public:
-    explicit CompiledTempoMap(std::span<const TempoPoint> points, RationalRate sample_rate);
+    static runtime::Result<CompiledTempoMap, TempoMapError>
+    compile(std::span<const TempoPoint> points, RationalRate sample_rate) noexcept;
+    static runtime::Result<CompiledTempoMap, TempoMapError>
+    compile(const TempoMap& map, RationalRate sample_rate) noexcept {
+        return compile(map.points(), sample_rate);
+    }
 
     TickPosition samples_to_ticks(SamplePosition sample) const noexcept;
     SampleToTickResult resolve_sample(SamplePosition sample) const noexcept;
@@ -56,6 +96,7 @@ class CompiledTempoMap {
     }
 
   private:
+    friend class TempoCursor;
     struct Segment {
         TickPosition start_tick;
         TickPosition end_tick;
@@ -71,9 +112,38 @@ class CompiledTempoMap {
                                          long double delta_samples) const noexcept;
     std::size_t segment_for_tick(TickPosition tick) const noexcept;
     std::size_t segment_for_sample(SamplePosition sample) const noexcept;
+    SamplePosition ticks_to_samples_in_segment(TickPosition tick,
+                                               std::size_t segment) const noexcept;
+    SampleToTickResult resolve_sample_in_segment(SamplePosition sample,
+                                                 std::size_t segment) const noexcept;
+
+    CompiledTempoMap(RationalRate sample_rate, std::vector<Segment> segments) noexcept
+        : sample_rate_(sample_rate), segments_(std::move(segments)) {}
 
     RationalRate sample_rate_;
     std::vector<Segment> segments_;
+};
+
+// Allocation-free streaming resolver. Forward segment changes are consumed
+// once, giving amortized O(1) segment selection for monotonic playback. A
+// backward sample is an explicit discontinuity and performs one cold seek.
+class TempoCursor {
+  public:
+    TempoCursor() = default;
+    explicit TempoCursor(const CompiledTempoMap& map) noexcept { reset(map); }
+
+    void reset(const CompiledTempoMap& map) noexcept;
+    SampleToTickResult seek(SamplePosition sample) noexcept;
+    SampleToTickResult advance(SamplePosition sample) noexcept;
+    double tempo_at_tick(TickPosition tick) noexcept;
+
+    std::size_t segment_index() const noexcept { return segment_index_; }
+
+  private:
+    const CompiledTempoMap* map_ = nullptr;
+    std::size_t segment_index_ = 0;
+    SamplePosition sample_{};
+    bool positioned_ = false;
 };
 
 } // namespace pulp::timebase

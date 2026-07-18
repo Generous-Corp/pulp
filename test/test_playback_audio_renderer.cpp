@@ -3,6 +3,7 @@
 #include <pulp/timeline/transaction.hpp>
 
 #include "harness/scoped_rt_process_probe.hpp"
+#include "timebase_test_helpers.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -36,7 +37,7 @@ audio_data(std::initializer_list<std::vector<float>> channels, std::uint32_t sam
 
 std::shared_ptr<const CompiledTempoMap> map_120() {
     const std::array points{TempoPoint{{0}, 120.0}};
-    return std::make_shared<const CompiledTempoMap>(points, RationalRate{48'000, 1});
+    return shared_compiled_tempo_map(points, RationalRate{48'000, 1});
 }
 
 Clip absolute_media_clip(std::uint64_t id, std::int64_t start, std::uint64_t duration,
@@ -395,7 +396,7 @@ TEST_CASE("audio renderer projects absolute anchors and source rates on reprepar
     REQUIRE_THAT(converted.storage[0].back(), WithinAbs(0.75f, 1e-7f));
 
     const std::array points{TempoPoint{{0}, 120.0}};
-    auto map_96 = std::make_shared<const CompiledTempoMap>(points, RationalRate{96'000, 1});
+    auto map_96 = shared_compiled_tempo_map(points, RationalRate{96'000, 1});
     CompiledFixture reprepared(project, map_96, pool({{3, data}}));
     auto next = reprepared.store.read();
     REQUIRE(next->find_track({10})->audio_program()->clips()[0].timeline_start == 960);
@@ -472,8 +473,7 @@ TEST_CASE("audio renderer requires exact transport and program tempo map identit
     auto project = project_with_tracks({track}, {{3, "tone", 8, {48'000, 1}}});
     const auto baseline = map_120();
     const std::array foreign_points{TempoPoint{{0}, 90.0}, TempoPoint{{kTicksPerQuarter}, 140.0}};
-    const auto foreign =
-        std::make_shared<const CompiledTempoMap>(foreign_points, RationalRate{48'000, 1});
+    const auto foreign = shared_compiled_tempo_map(foreign_points, RationalRate{48'000, 1});
     CompiledFixture compiled(project, baseline, pool({{3, data}}));
     auto program = compiled.store.read();
     auto mismatched = snapshot(*program, 8);

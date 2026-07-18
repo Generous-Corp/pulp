@@ -55,13 +55,15 @@ TransportError MasterTransport::prepare(const timebase::CompiledTempoMap& tempo_
         return loop_error;
     }
 
+    tempo_cursor_.reset(tempo_map);
     timeline_sample_ = tempo_map.ticks_to_samples(config.initial_position);
+    tempo_cursor_.seek(timeline_sample_);
     timeline_tick_ = config.initial_position;
     monotonic_ = {config.initial_position};
     previous_playing_ = false;
     previous_meter_ = config.meter;
     previous_loop_ = config.loop;
-    previous_tempo_bpm_ = tempo_map.tempo_at_tick(config.initial_position);
+    previous_tempo_bpm_ = tempo_cursor_.tempo_at_tick(config.initial_position);
     publish_desired();
     return TransportError::None;
 }
@@ -136,6 +138,7 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
     const bool seeked = desired.seek_generation != applied_seek_generation_;
     if (seeked) {
         timeline_sample_ = tempo_map_->ticks_to_samples(desired.position);
+        tempo_cursor_.seek(timeline_sample_);
         timeline_tick_ = desired.position;
         applied_seek_generation_ = desired.seek_generation;
         pending_discontinuity_ = true;
@@ -166,7 +169,7 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         range.timeline_sample_start = timeline_sample_;
         range.timeline_tick_start = timeline_tick_;
         range.monotonic_start = monotonic_;
-        range.tempo_bpm = tempo_map_->tempo_at_tick(range.timeline_tick_start);
+        range.tempo_bpm = tempo_cursor_.tempo_at_tick(range.timeline_tick_start);
         range.tempo_changed = index == 0
                                   ? !first_block_ &&
                                         range.tempo_bpm != previous_tempo_bpm_
@@ -177,7 +180,7 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
                 saturating_add(timeline_sample_.value, count)};
             range.timeline_tick_end = forced_end_tick != nullptr
                                           ? *forced_end_tick
-                                          : tempo_map_->samples_to_ticks(end_sample);
+                                          : tempo_cursor_.advance(end_sample).tick;
             if (range.timeline_tick_end < range.timeline_tick_start)
                 range.timeline_tick_end = range.timeline_tick_start;
             const auto duration = range.timeline_tick_end - range.timeline_tick_start;
@@ -205,6 +208,7 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         if (timeline_sample_.value >= loop_end.value) {
             timeline_sample_ = loop_start;
             timeline_tick_ = desired.loop.start;
+            tempo_cursor_.seek(loop_start);
             pending_discontinuity_ = true;
         }
 
@@ -224,11 +228,13 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         if (remaining > 0) {
             timeline_sample_ = loop_start;
             timeline_tick_ = desired.loop.start;
+            tempo_cursor_.seek(loop_start);
             make_range(snapshot.range_count, first_count, remaining, true);
             ++snapshot.range_count;
         } else if (timeline_sample_ == loop_end) {
             timeline_sample_ = loop_start;
             timeline_tick_ = desired.loop.start;
+            tempo_cursor_.seek(loop_start);
             pending_discontinuity_ = true;
         }
     }
@@ -244,6 +250,7 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
 
 void MasterTransport::reset() noexcept {
     tempo_map_ = nullptr;
+    tempo_cursor_ = {};
     max_buffer_size_ = 0;
     control_state_ = {};
     desired_.write(control_state_);
