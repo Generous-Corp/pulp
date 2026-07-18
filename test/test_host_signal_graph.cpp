@@ -2487,6 +2487,201 @@ TEST_CASE("SignalGraph MIDI ingress and egress mailboxes allocate only at prepar
     REQUIRE(out.size() == 1);
 }
 
+TEST_CASE("SignalGraph MIDI ingress is latest wins and consumed once",
+          "[host][graph][midi][mailbox]") {
+    SignalGraph graph;
+    const auto midi_in = graph.add_midi_input_node("keys");
+    const auto midi_out = graph.add_midi_output_node("thru");
+    REQUIRE(graph.connect_midi(midi_in, midi_out));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    pulp::midi::MidiBuffer first;
+    first.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
+    pulp::midi::MidiBuffer latest;
+    latest.add(pulp::midi::MidiEvent::note_on(0, 67, 100));
+    REQUIRE(graph.inject_midi(midi_in, first));
+    REQUIRE(graph.inject_midi(midi_in, latest));
+
+    float in_sample = 0.f, out_sample = 0.f;
+    const float* in_ptrs[1] = {&in_sample};
+    float* out_ptrs[1] = {&out_sample};
+    pulp::audio::BufferView<const float> in(in_ptrs, 0, 32);
+    pulp::audio::BufferView<float> out(out_ptrs, 0, 32);
+    graph.process(out, in, 32);
+
+    pulp::midi::MidiBuffer arrived;
+    REQUIRE(graph.extract_midi(midi_out, arrived));
+    REQUIRE(arrived.size() == 1);
+    CHECK(arrived[0].note() == 67);
+
+    graph.process(out, in, 32);
+    arrived.clear();
+    REQUIRE(graph.extract_midi(midi_out, arrived));
+    CHECK(arrived.empty());
+}
+
+TEST_CASE("SignalGraph MIDI ingress survives a gap free swap",
+          "[host][graph][midi][mailbox][live-swap]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    auto slot = std::make_unique<MidiForwarder>();
+    auto* probe = slot.get();
+    const auto plugin = graph.add_plugin_node(std::move(slot), 1, 1, "forwarder");
+    const auto gain = graph.add_gain_node("inserted");
+    const auto output = graph.add_output_node(1, "output");
+    const auto midi_in = graph.add_midi_input_node("keys");
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE(graph.connect_midi(midi_in, plugin));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    constexpr std::size_t event_capacity = ParameterEventQueue::kCapacity;
+    pulp::midi::MidiBuffer overflow;
+    for (std::size_t index = 0; index <= event_capacity; ++index) {
+        auto event = pulp::midi::MidiEvent::note_on(
+            0, static_cast<int>(index % 127), 100);
+        event.sample_offset = static_cast<int32_t>(index % 32);
+        overflow.add(event);
+    }
+    REQUIRE_FALSE(graph.inject_midi(midi_in, overflow));
+
+    // Publish the replacement snapshot between injection and process(). The
+    // stable MidiInput must carry the retained bounded prefix exactly once.
+    graph.begin_swap_edit();
+    REQUIRE(graph.disconnect(plugin, 0, output, 0));
+    REQUIRE(graph.connect(plugin, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.prepare_swap(48000.0, 32) == SignalGraph::SwapResult::Swapped);
+
+    std::array<float, 32> source{};
+    const float* input_ptrs[] = {source.data()};
+    std::array<float, 32> rendered{};
+    float* output_ptrs[] = {rendered.data()};
+    pulp::audio::BufferView<const float> in(input_ptrs, 1, source.size());
+    pulp::audio::BufferView<float> out(output_ptrs, 1, rendered.size());
+    graph.process(out, in, 32);
+
+    REQUIRE(probe->last_seen().size() == event_capacity);
+
+    graph.process(out, in, 32);
+    CHECK(probe->last_seen().empty());
+}
+
+TEST_CASE("SignalGraph preserves pending MIDI egress by rejecting a live swap",
+          "[host][graph][midi][mailbox][live-swap][egress]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    const auto plugin = graph.add_plugin_node(
+        std::make_unique<MidiForwarder>(), 1, 1, "forwarder");
+    const auto gain = graph.add_gain_node("inserted");
+    const auto output = graph.add_output_node(1, "output");
+    const auto midi_in = graph.add_midi_input_node("keys");
+    const auto midi_out = graph.add_midi_output_node("thru");
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE(graph.connect_midi(midi_in, plugin));
+    REQUIRE(graph.connect_midi(plugin, midi_out));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    pulp::midi::MidiBuffer events;
+    events.add(pulp::midi::MidiEvent::note_off(0, 60, 0));
+    REQUIRE(graph.inject_midi(midi_in, events));
+    std::array<float, 32> source{};
+    const float* input_ptrs[] = {source.data()};
+    std::array<float, 32> rendered{};
+    float* output_ptrs[] = {rendered.data()};
+    pulp::audio::BufferView<const float> in(input_ptrs, 1, source.size());
+    pulp::audio::BufferView<float> out(output_ptrs, 1, rendered.size());
+    graph.process(out, in, 32);
+
+    graph.begin_swap_edit();
+    REQUIRE(graph.disconnect(plugin, 0, output, 0));
+    REQUIRE(graph.connect(plugin, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.prepare_swap(48000.0, 32)
+            == SignalGraph::SwapResult::NeedsEagerPrepare);
+
+    pulp::midi::MidiBuffer arrived;
+    REQUIRE(graph.extract_midi(midi_out, arrived));
+    REQUIRE(arrived.size() == 1);
+    CHECK(arrived[0].is_note_off());
+    CHECK(arrived[0].note() == 60);
+
+    // The requested eager replacement adopts the authoring edits only after
+    // the pending old-snapshot egress was drained. Its fresh mailbox must not
+    // replay the note-off or retain a pointer into the retired snapshot.
+    REQUIRE(graph.prepare(48000.0, 32));
+    graph.process(out, in, 32);
+    arrived.clear();
+    REQUIRE(graph.extract_midi(midi_out, arrived));
+    CHECK(arrived.empty());
+}
+
+TEST_CASE("SignalGraph audio-thread MIDI ingress is race free during swaps",
+          "[host][graph][midi][mailbox][live-swap][race][tsan]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    const auto plugin = graph.add_plugin_node(
+        std::make_unique<MidiForwarder>(), 1, 1, "forwarder");
+    const auto gain = graph.add_gain_node("inserted");
+    const auto output = graph.add_output_node(1, "output");
+    const auto midi_in = graph.add_midi_input_node("keys");
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE(graph.connect_midi(midi_in, plugin));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> inject_failed{false};
+    std::atomic<std::uint64_t> processed_blocks{0};
+    std::thread audio_thread([&] {
+        std::array<float, 32> source{};
+        const float* input_ptrs[] = {source.data()};
+        std::array<float, 32> rendered{};
+        float* output_ptrs[] = {rendered.data()};
+        pulp::audio::BufferView<const float> in(input_ptrs, 1, source.size());
+        pulp::audio::BufferView<float> out(output_ptrs, 1, rendered.size());
+        pulp::midi::MidiBuffer events;
+        events.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
+
+        while (!stop.load(std::memory_order_acquire)) {
+            if (!graph.inject_midi(midi_in, events)) {
+                inject_failed.store(true, std::memory_order_relaxed);
+            }
+            graph.process(out, in, 32);
+            processed_blocks.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+
+    while (processed_blocks.load(std::memory_order_relaxed) < 8) {
+        std::this_thread::yield();
+    }
+
+    bool all_swaps_succeeded = true;
+    for (int iteration = 0; iteration < 32; ++iteration) {
+        graph.begin_swap_edit();
+        if ((iteration % 2) == 0) {
+            all_swaps_succeeded = graph.disconnect(plugin, 0, output, 0) &&
+                graph.connect(plugin, 0, gain, 0) &&
+                graph.connect(gain, 0, output, 0) && all_swaps_succeeded;
+        } else {
+            all_swaps_succeeded = graph.disconnect(plugin, 0, gain, 0) &&
+                graph.disconnect(gain, 0, output, 0) &&
+                graph.connect(plugin, 0, output, 0) && all_swaps_succeeded;
+        }
+        all_swaps_succeeded =
+            graph.prepare_swap(48000.0, 32) == SignalGraph::SwapResult::Swapped &&
+            all_swaps_succeeded;
+    }
+
+    stop.store(true, std::memory_order_release);
+    audio_thread.join();
+
+    REQUIRE(all_swaps_succeeded);
+    REQUIRE_FALSE(inject_failed.load(std::memory_order_relaxed));
+    REQUIRE(processed_blocks.load(std::memory_order_relaxed) > 8);
+}
+
 TEST_CASE("SignalGraph MIDI ingress and egress mailboxes are Race-free",
           "[host][graph][midi][race][tsan]") {
     SignalGraph graph;

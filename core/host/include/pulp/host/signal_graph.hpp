@@ -471,9 +471,17 @@ public:
     bool audio_rate_modulation_lane(const Connection& connection,
                                     state::ModulationLane& lane) const;
 
-    // Inject a MIDI buffer into a MidiInput source node. Call before
-    // process(); the events become that node's MIDI output this block.
-    bool inject_midi(NodeId midi_input_node, const midi::MidiBuffer& events);
+    // Inject a MIDI buffer into a MidiInput source node. Call before process();
+    // the latest published events become that node's MIDI output exactly once.
+    // Audio-callback-safe after prepare(): the mailbox is fixed-capacity and the
+    // call never allocates or locks. Exactly one thread may inject into a given
+    // MidiInput node; it may be the audio thread immediately before process(), or
+    // a control-side producer, but never concurrent writers. A false return means
+    // the live node is unavailable or the bounded mailbox retained only a prefix;
+    // that retained prefix is still published. A preserved MidiInput NodeId keeps
+    // its unconsumed publication across a gap-free prepare_swap().
+    bool inject_midi(NodeId midi_input_node,
+                     const midi::MidiBuffer& events) noexcept;
 
     // Inject sample-accurate parameter events into a Plugin node. Call before
     // process(); the latest published batch is consumed exactly once by that
@@ -842,11 +850,11 @@ private:
     struct MidiBlockSnapshot {
         MidiBlockSnapshot();
         MidiBlockSnapshot(const MidiBlockSnapshot& other);
-        MidiBlockSnapshot& operator=(const MidiBlockSnapshot& other);
+        MidiBlockSnapshot& operator=(const MidiBlockSnapshot& other) noexcept;
         bool set_from_midi(const midi::MidiBuffer& src,
                            uint64_t new_sequence,
-                           bool source_incomplete = false);
-        bool copy_to_midi(midi::MidiBuffer& dst) const;
+                           bool source_incomplete = false) noexcept;
+        bool copy_to_midi(midi::MidiBuffer& dst) const noexcept;
 
         midi::MidiBuffer events;
         midi::UmpBuffer ump;
@@ -855,9 +863,13 @@ private:
     };
 
     struct MidiInputMailbox {
+        static_assert(std::atomic<uint64_t>::is_always_lock_free,
+                      "MIDI ingress sequence atomics must be lock-free");
+
         runtime::TripleBuffer<MidiBlockSnapshot> published;
         MidiBlockSnapshot writer_scratch;
         std::atomic<uint64_t> next_sequence{0};
+        std::atomic<uint64_t> sequence_seen{0};
     };
 
     struct ParameterBlockSnapshot {
@@ -933,18 +945,19 @@ private:
         std::vector<uint32_t> sparse_automation_param_ids;
         std::vector<SparseAutomationAccum> sparse_automation_accum;
 
-        // MIDI scratch is audio-thread-owned. Control-thread ingress and
-        // egress use the mailboxes below so inject_midi()/extract_midi() do
-        // not race process() scratch mutation.
+        // MIDI scratch is audio-thread-owned. Single-writer ingress and
+        // control-thread egress use the mailboxes below so inject_midi()/
+        // extract_midi() do not race process() scratch mutation. The shared
+        // ingress mailbox preserves an unconsumed publication when a stable
+        // MidiInput node crosses a gap-free snapshot swap.
         midi::MidiBuffer midi_in;
         midi::MidiBuffer midi_out;
         midi::UmpBuffer midi_in_ump;
         midi::UmpBuffer midi_out_ump;
         bool midi_in_incomplete = false;
         bool midi_out_incomplete = false;
-        std::unique_ptr<MidiInputMailbox> midi_input_mailbox;
+        std::shared_ptr<MidiInputMailbox> midi_input_mailbox;
         std::unique_ptr<runtime::TripleBuffer<MidiBlockSnapshot>> midi_output_mailbox;
-        uint64_t midi_input_sequence_seen = 0;
 
         // Control/audio-thread parameter-event ingress for Plugin nodes. The
         // mailbox is single-writer/latest-wins like MIDI ingress; the sequence
@@ -1096,7 +1109,7 @@ private:
 
         // `pending_seq` is audio-thread scratch: the mailbox sequence a MidiInput
         // would consume this block, captured during the ingress pre-fill and
-        // committed to midi_input_sequence_seen only after the routed dispatch
+        // committed to the shared mailbox's sequence_seen only after routed dispatch
         // succeeds (so a fallback to the legacy walk re-consumes the same block).
         struct RoutedMidiNode { std::uint32_t plan_index; NodeId id; std::uint64_t pending_seq = 0; };
 
