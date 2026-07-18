@@ -557,9 +557,21 @@ def _template_novelty_db(residual: np.ndarray, period: float, guard: int) -> flo
     frames = synchronous[: n_periods * m].reshape(n_periods, m)
     template = np.median(frames, axis=0)
     novelty = np.sqrt(np.mean((frames - template) ** 2, axis=1))  # per-period residual-of-residual
-    median = float(np.median(novelty))
+    # Denominator is a HIGH percentile of the per-period novelty, NOT the median. The median
+    # is a lone-outlier test only when the recurring background is unimodal. At a HALF-integer
+    # period (`sr/f0` fractional part ~0.5) the BLEP edge's sub-sample phase alternates A/B/A/B,
+    # so the true residual period is 2P: framed at P, half the periods match the median-frame
+    # template and half do NOT — a BIMODAL novelty. The median then sits in the low cluster and
+    # a recurring, half-of-all-periods departure reads as a lone outlier, false-firing on a CLEAN
+    # oscillator (and flipping with the parity of the period count, i.e. render length — the very
+    # N3 failure this axis exists to prevent). A high percentile puts any recurring cluster that
+    # occupies more than ~10% of periods (2P halves, 3P thirds, 4P quarters) INTO the denominator,
+    # so only a genuine one-off seam — a single period, far under 10% for any render long enough
+    # to clear the >= 4-period guard — stays a large ratio. Real seams keep a >50 dB margin over
+    # the refusal threshold, so the tighter denominator does not cost sensitivity.
+    background = float(np.percentile(novelty, 90.0))
     worst = float(novelty.max())
-    return 20.0 * np.log10(worst / median) if median > 0.0 else np.inf
+    return 20.0 * np.log10(worst / background) if background > 0.0 else np.inf
 
 
 def _edge_smear_signature(
@@ -738,6 +750,11 @@ def detect(
     )
     if not np.isfinite(a.click_db) or a.period_confidence < min_period_confidence:
         note += " — no stable period found; reading not trustworthy"
+    elif np.isnan(a.period_drift):
+        # Too few periods to split the render in two and measure drift at all — NOT a
+        # measured drift. `steady` is False here (NaN <= x is False), so the reading is
+        # correctly not-trustworthy, but the note must not claim a drift it never saw.
+        note += " — render too short to establish period stability; reading not trustworthy"
     elif not steady:
         note += " — pitch drifts during the render; the periodicity premise does not hold"
     elif edge_smear:

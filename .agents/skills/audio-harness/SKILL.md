@@ -821,9 +821,16 @@ Durable "why / watch-out-for" notes so this isn't re-litigated (rationale, not w
   period, builds the median-frame TEMPLATE, and scores the worst period's departure from it over
   the median period's — a one-off seam is the single period that does NOT match the recurring
   template (a large outlier), while the smear repeats the same per-edge shape every period so it
-  barely departs. It is a per-period RATIO, so it is **render-length INDEPENDENT** (a longer clip
-  only adds more template-matching periods — it moves neither the worst nor the median): the same
-  near-floor seam that a global statistic dropped on a multi-second render now fires at any length.
+  barely departs. The departure is scored against a HIGH percentile (90th) of the per-period
+  departures, NOT the median — because at a HALF-INTEGER period (`sr/f0` frac ~0.5) the BLEP edge
+  alternates sub-sample phase A/B/A/B (true residual period 2P), so HALF the periods depart from
+  the per-P template: a median denominator reads that recurring half as a lone outlier and
+  FALSE-FIRES on a clean oscillator, flipping with period-count parity (render length). A high
+  percentile puts any recurring cluster over ~10% of periods (2P halves, 3P thirds) INTO the
+  denominator, so only a genuine one-off seam stays a large ratio. It is a per-period RATIO, so it
+  is **render-length INDEPENDENT** (a longer clip only adds more template-matching periods — it
+  moves neither the worst nor the percentile): the same near-floor seam that a global statistic
+  dropped on a multi-second render now fires at any length, at integer AND half-integer periods.
   `edge_concentration` (cosine similarity of `|residual|` to `|diff(y)|`) is kept, but ONLY to
   split smear (rides the waveform's own edges) from a block-rate zipper (off the edges) — novelty
   alone reads a stationary zipper as low-novelty and would wrongly refuse it. A refusal is NOT a pass:

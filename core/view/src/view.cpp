@@ -176,6 +176,12 @@ View* root_for_gesture_relationship_cleanup(View* view) {
     return view;
 }
 
+// Backs View::structure_generation(). Bumped only by remove_child (the sole
+// path that detaches a node). Starts at 1 so 0 is a reserved sentinel. Relaxed
+// ordering: tree mutation and the cache lookups that read it run on the same
+// (UI) thread; the atomic only guards against incidental cross-thread access.
+std::atomic<std::uint64_t> g_view_structure_generation{1};
+
 } // namespace
 
 View::View()
@@ -497,8 +503,14 @@ void View::paint_all(canvas::Canvas& canvas) {
         // bounds with border-radius >= 40% of the smaller dimension) and expand
         // the clip rect just enough to admit them. Non-marker children still
         // clip normally because they don't match the circle heuristic.
+        //
+        // This is an import-only accommodation, so the heuristic — and its
+        // O(children) per-frame scan — runs only when a container opted in via
+        // set_clip_marker_tolerance(). Native/authored trees keep the strict CSS
+        // `overflow:hidden` clip and pay nothing for a feature they don't use.
         float marker_pad = 0.0f;
-        for (const auto& child : children_) {
+        if (clip_marker_tolerance_) {
+          for (const auto& child : children_) {
             if (!child || !child->visible_) continue;
             if (child->position_ != Position::absolute) continue;
             const auto& cb = child->bounds_;
@@ -518,6 +530,7 @@ void View::paint_all(canvas::Canvas& canvas) {
             const float top_over    = std::max(0.0f, -cb.y);
             marker_pad = std::max({marker_pad, right_over, bottom_over,
                                               left_over, top_over});
+          }
         }
         if (marker_pad > 0.0f) {
             canvas.clip_rect(-marker_pad, -marker_pad,
@@ -1179,7 +1192,14 @@ std::unique_ptr<View> View::remove_child(View* child) {
     child->notify_frame_clock_changed();
     auto owned = std::move(*it);
     children_.erase(it);
+    // A node was detached: invalidate every external liveness cache keyed on the
+    // structure generation (see View::structure_generation()).
+    g_view_structure_generation.fetch_add(1, std::memory_order_relaxed);
     return owned;
+}
+
+std::uint64_t View::structure_generation() noexcept {
+    return g_view_structure_generation.load(std::memory_order_relaxed);
 }
 
 bool View::children_in_z_order() const {
@@ -1354,8 +1374,6 @@ void View::dismiss_active_overlay() {
     }
 }
 
-namespace {
-
 // Recursively expand a child's painted-bounds contribution
 // up through any `overflow:visible` descendants. Returns the bounding
 // rect (in window coords) of `v` and every transitive descendant whose
@@ -1364,7 +1382,8 @@ namespace {
 //
 // `parent_abs_x` / `parent_abs_y` are the absolute window-coord origin
 // of `v->parent()`. The function consumes those, applies `v`'s own
-// `bounds().x/y`, and recurses.
+// `bounds().x/y`, and recurses. Declared in view.hpp so ScrollView::hit_test
+// (a separate TU) can share the exact same extent math.
 void accumulate_overflow_extent(const View* v,
                                 float parent_abs_x,
                                 float parent_abs_y,
@@ -1389,8 +1408,6 @@ void accumulate_overflow_extent(const View* v,
                                    min_x, min_y, max_x, max_y);
     }
 }
-
-}  // namespace
 
 bool View::overlay_contains(Point window_pt) const {
     // Walk up to compute absolute origin in window/root coords. Same

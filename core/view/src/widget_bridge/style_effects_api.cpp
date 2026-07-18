@@ -148,18 +148,18 @@ choc::value::Value effect_result(bool success, const std::string& error) {
 
 } // namespace
 
-void WidgetBridge::register_widget_style_filter_clip_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_style_filter_clip_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setFilter(id, "blur(4px) brightness(0.8) saturate(1.2) drop-shadow(...)")
     // Walks the function sequence and builds View::FilterOp entries; the
     // View paint path passes the chain to canvas.save_layer_with_filters,
     // which composes via SkImageFilters on the Skia backend (CG falls
     // through to blur-only for now).
-    register_bridge_function(api, "setFilter", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setFilter", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto filter_str = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
 
         if (filter_str == "none" || filter_str.empty()) {
@@ -279,10 +279,10 @@ void WidgetBridge::register_widget_style_filter_clip_api() {
     // the bridge cheap; string-form CSS parsing stays in
     // setFilter.
     register_bridge_function(api, "setBackdropFilter",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto blur_px = args.get<double>(1, 0.0);
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_backdrop_blur(static_cast<float>(blur_px));
             return choc::value::Value();
         });
@@ -297,7 +297,7 @@ void WidgetBridge::register_widget_style_filter_clip_api() {
     // a host log line — the same "surface the reason" contract setWidgetShader
     // uses for compile errors.
     register_bridge_function(api, "setClipPath",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto clip_result = [](bool applied, const std::string& warning) {
                 auto r = choc::value::createObject("");
                 r.addMember("applied", choc::value::createBool(applied));
@@ -306,7 +306,7 @@ void WidgetBridge::register_widget_style_filter_clip_api() {
             };
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (!v) return clip_result(false, "No widget with id '" + id + "'");
             auto trim = [](std::string s) {
                 auto a = s.find_first_not_of(" \t\n\r");
@@ -366,15 +366,15 @@ void WidgetBridge::register_widget_style_filter_clip_api() {
     // at install time and rejected with its error (mirrors setWidgetShader)
     // rather than installing a shader that would paint nothing.
     register_bridge_function(api, "setViewEffect",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto spec_json = args.get<std::string>(1, "");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (!v) return effect_result(false, "No widget with id '" + id + "'");
 
             if (spec_json.empty() || spec_json == "none" || spec_json == "null") {
                 v->set_effect(nullptr);
-                request_repaint();
+                self.request_repaint();
                 return effect_result(true, "");
             }
 
@@ -386,7 +386,7 @@ void WidgetBridge::register_widget_style_filter_clip_api() {
             }
             if (parsed.isVoid()) {  // JSON null parses to a void value
                 v->set_effect(nullptr);
-                request_repaint();
+                self.request_repaint();
                 return effect_result(true, "");
             }
 
@@ -406,13 +406,13 @@ void WidgetBridge::register_widget_style_filter_clip_api() {
             }
 
             v->set_effect(std::move(effect));
-            request_repaint();
+            self.request_repaint();
             return effect_result(true, "");
         });
 }
 
-void WidgetBridge::register_widget_style_blend_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_style_blend_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setMixBlendMode(id, "multiply") for CSS / RN `mix-blend-mode`.
     // Maps the W3C blend-mode keyword set to the canvas BlendMode enum
@@ -425,10 +425,10 @@ void WidgetBridge::register_widget_style_blend_api() {
     // the View at default `BlendMode::normal` so the fast path stays
     // a paint-time no-op.
     register_bridge_function(api, "setMixBlendMode",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "normal");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (!v) return choc::value::Value();
             using BM = pulp::canvas::Canvas::BlendMode;
             BM mode = BM::normal;

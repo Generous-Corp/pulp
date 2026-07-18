@@ -186,6 +186,29 @@ if(PULP_HAS_SKIA)
 endif()
 catch_discover_tests(pulp-test-canvas-cg-gradients)
 
+# CoreGraphicsCanvas image-draw verbs [#6223 S34]. Apple-only TU: encodes a
+# known PNG, draws it back through the CG decoder + CGContextDrawImage, reads
+# the pixels, and proves the actual image (color + orientation) lands instead
+# of the pre-S34 filename-placeholder fallback.
+add_executable(pulp-test-canvas-cg-image test_canvas_cg_image.cpp)
+target_link_libraries(pulp-test-canvas-cg-image PRIVATE pulp::canvas Catch2::Catch2WithMain)
+if(APPLE)
+    target_link_libraries(pulp-test-canvas-cg-image PRIVATE
+        "-framework CoreGraphics" "-framework ImageIO" "-framework CoreServices")
+endif()
+catch_discover_tests(pulp-test-canvas-cg-image)
+
+# ImageFileCache path-keyed decoded/GPU-uploaded image cache [#6223 S35].
+# Skia-gated (value type is sk_sp<SkImage>); asserts hit/miss, backend-token
+# partitioning, clear() invalidation, disabled passthrough, and LRU eviction.
+if(PULP_HAS_SKIA)
+    add_executable(pulp-test-image-file-cache test_image_file_cache.cpp)
+    target_link_libraries(pulp-test-image-file-cache PRIVATE pulp::canvas Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-image-file-cache PRIVATE PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-image-file-cache PRIVATE ${SKIA_INCLUDE_DIRS})
+    catch_discover_tests(pulp-test-image-file-cache)
+endif()
+
 # CSS filter chain coverage: Skia-only pixel readback (contrast /
 # invert / opacity ordering with drop-shadow, set_filter drop-shadow
 # parser) plus portable filter-chain matrix math (contrast bias,

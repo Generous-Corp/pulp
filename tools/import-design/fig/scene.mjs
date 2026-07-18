@@ -931,12 +931,53 @@ export function materializeFrame(scene, frame, ctx) {
       parent && (parent.stackMode === 'HORIZONTAL' || parent.stackMode === 'VERTICAL');
     const optedOut = node.stackPositioning === 'ABSOLUTE';
     if (parent && node.transform && (!parentIsAutoLayout || optedOut)) {
-      const x = node.transform.m02;
-      const y = node.transform.m12;
+      const t = node.transform;
+      const x = t.m02;
+      const y = t.m12;
       if (typeof x === 'number' && typeof y === 'number') {
         style.position = 'absolute';
-        style.left = Math.round(x);
-        style.top = Math.round(y);
+        // The affine transform's rotation column was dropped here, keeping only
+        // the translation (m02/m12). A rotated layer — e.g. a knob's value
+        // needle, stored as a thin rect rotated to the value angle — then
+        // rendered as an axis-aligned bar at the rotated origin: a vertical stub
+        // floating off-center instead of a radial pointer. Recover the rotation.
+        const angle = Math.atan2(t.m10, t.m00);   // radians
+        const deg = angle * 180 / Math.PI;
+        // Only a NON-orthogonal rotation makes an axis-aligned box non-axis-
+        // aligned and needs the transform (a knob's value needle at 43.4deg).
+        // A multiple of 90deg keeps a rect axis-aligned, and for a solid fill a
+        // 180deg spin is a visual no-op — applying it (plus the centre-pivot
+        // compensation below) only shifts the box off its intended row, which is
+        // exactly what floated a slider's 180deg-rotated fill above its track.
+        // Orthogonal rotations fall through to plain m02/m12 placement.
+        const mod90 = Math.abs(deg) % 90;
+        const nonOrthogonal = mod90 > 0.5 && mod90 < 89.5;
+        // Scope to box-model nodes (frames / rounded-rects / ellipses). A
+        // VECTOR_LIKE node is re-lowered to `path_data`, and Figma bakes the
+        // layer rotation into that path — re-applying it here would double-rotate
+        // the glyph. The reported bug is a knob's value needle, a ROUNDED_RECTANGLE.
+        if (nonOrthogonal && !VECTOR_LIKE.has(node.type)) {
+          // Figma rotates the layer around its LOCAL origin (0,0), landing that
+          // origin at (m02, m12). The renderer applies `rotate()` around the
+          // element's CENTER (default transform-origin). Compensate left/top so
+          // the center-pivot rotation reproduces Figma's origin-pivot placement:
+          // element-center = (m02,m12) + R(theta)*(w/2,h/2), and the renderer
+          // pivots on (left+w/2, top+h/2), so solve for left/top.
+          const w = typeof style.width === 'number' ? style.width : 0;
+          const h = typeof style.height === 'number' ? style.height : 0;
+          const c = Math.cos(angle), s = Math.sin(angle);
+          const cx = c * (w / 2) - s * (h / 2);   // R(theta)*(w/2,h/2)
+          const cy = s * (w / 2) + c * (h / 2);
+          style.left = Math.round(x + cx - w / 2);
+          style.top = Math.round(y + cy - h / 2);
+          // CSS-compatible rotate() the native codegen lowers to setRotation();
+          // the renderer's default center transform-origin matches the
+          // compensation above.
+          style.transform = `rotate(${deg.toFixed(2)}deg)`;
+        } else {
+          style.left = Math.round(x);
+          style.top = Math.round(y);
+        }
       }
     }
     // On a TEXT node the solid fill is the glyph color, applied as `color` in the

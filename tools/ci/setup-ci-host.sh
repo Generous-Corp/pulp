@@ -2,7 +2,7 @@
 # setup-ci-host.sh — one-command onboarding of a Mac as a Pulp **Tart VM** CI host.
 #
 # Opinionated automation of docs/guides/mac-ci-host-setup.md: installs Tart +
-# sshpass, sets up TART_HOME (default ~/VMs → no Full Disk Access needed),
+# sshpass, declares this host's TART_HOME (in ~/.zprofile and the launchd agent),
 # acquires the pulp-build-runner golden (copy from another host, or tells you to
 # bake), and installs the persistent ephemeral-runner launchd agent with a
 # host-class label. Idempotent. The bare-metal lane is a different tool
@@ -11,16 +11,18 @@
 # This setup is OPTIONAL (see the guide). It adds Tart + ~100 GB+ of VM images.
 #
 # Usage:
-#   tools/ci/setup-ci-host.sh --class m5
-#   tools/ci/setup-ci-host.sh --class m5 \
-#       --copy-from 'macstudio:/Volumes/Workshop/VMs/vms/pulp-build-runner:latest'
-#   tools/ci/setup-ci-host.sh --class studio --tart-home /Volumes/Workshop/VMs   # external → prints the FDA step
-#   tools/ci/setup-ci-host.sh --class m5 --validate          # also run a one-shot VM build to prove it
+#   tools/ci/setup-ci-host.sh --class m5 --tart-home "$HOME/VMs"
+#   tools/ci/setup-ci-host.sh --class m5 --tart-home "$HOME/VMs" \
+#       --copy-from 'other-host:/path/to/VMs/vms/pulp-build-runner:latest'
+#   tools/ci/setup-ci-host.sh --class studio --tart-home /Volumes/<drive>/VMs  # external → prints the FDA step
+#   tools/ci/setup-ci-host.sh --class m5 --tart-home "$HOME/VMs" --validate   # also prove it with one VM build
 #
 # Flags:
 #   --class <name>     REQUIRED. Host class for the runner label (m5|studio|macbook|…).
 #   --copy-from <ssh:path | path>   rsync a golden in from another host/drive (sparse-safe).
-#   --tart-home <dir>  VM store (default: $HOME/VMs). On /Volumes → Full Disk Access required.
+#   --tart-home <dir>  REQUIRED (or TART_HOME in env). This host's VM store; the
+#                      path differs per host, so there is no default. Under $HOME
+#                      → no Full Disk Access needed; on /Volumes → FDA required.
 #   --repo <dir>       Pulp checkout (default: this repo).
 #   --no-agent         Do everything except install/load the launchd agent.
 #   --validate         After setup, run one ephemeral VM build on the host-only label.
@@ -47,7 +49,20 @@ while [ $# -gt 0 ]; do case "$1" in
 esac; done
 
 [ -n "$CLASS" ] || die "--class <name> is required (e.g. m5, studio, macbook)"
-export TART_HOME="${TART_HOME_ARG:-$HOME/VMs}"
+
+# This script is where a host's VM store gets DECLARED — it writes the path to
+# ~/.zprofile and bakes it into the launchd agent. So the operator states it;
+# picking for them would silently commit a wrong disk to two config files.
+# --tart-home wins, then an already-exported TART_HOME, then a hard error.
+[ -n "$TART_HOME_ARG" ] && export TART_HOME="$TART_HOME_ARG"
+if [ -z "${TART_HOME:-}" ]; then
+  die "--tart-home <dir> is required (or TART_HOME in the environment): name the
+  disk this host keeps its VMs on. There is no default — the path differs per
+  host, and this script writes it into ~/.zprofile and the launchd agent, so a
+  guess would commit the wrong disk to both.
+  A store under \$HOME needs no Full Disk Access; one on /Volumes does (step 5).
+  Example: --tart-home \"\$HOME/VMs\""
+fi
 LABELS="self-hosted,macos,arm64,pulp-build,pulp-build-${CLASS}"
 AGENT="$HOME/Library/LaunchAgents/com.danielraffel.pulp.tart-runner.plist"
 TEMPLATE="$REPO_ROOT/tools/launchd/pulp-tart-runner.plist.template"
@@ -94,12 +109,19 @@ if [ "$NO_AGENT" = 1 ]; then
 else
   note "5/6 installing launchd runner agent (label: pulp-build-${CLASS})"
   mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs/pulp"
-  # launchd does not expand $HOME/$PULP_REPO — write absolute paths. Also rewrite
-  # TART_HOME + the --labels line for this host.
-  sed -e "s|\$PULP_REPO|$REPO_ROOT|g" -e "s|\$HOME|$HOME|g" \
-      -e "s|<string>/Volumes/Workshop/VMs</string>|<string>$TART_HOME</string>|g" \
+  # launchd expands nothing — every placeholder must become an absolute path here.
+  # $TART_HOME goes first: $HOME is a prefix of many stores, so substituting
+  # $HOME first would leave "$TART_HOME" unresolved and launchd would hand the
+  # supervisor a literal dollar-sign path.
+  sed -e "s|\$TART_HOME|$TART_HOME|g" \
+      -e "s|\$PULP_REPO|$REPO_ROOT|g" -e "s|\$HOME|$HOME|g" \
       -e "s|self-hosted,macos,arm64,pulp-build</string>|$LABELS</string>|g" \
       "$TEMPLATE" > "$AGENT"
+  # An unsubstituted placeholder is the failure mode this whole path exists to
+  # avoid: the agent would load and then run against the wrong store.
+  if grep -q '\$TART_HOME\|\$PULP_REPO\|\$HOME' "$AGENT"; then
+    die "placeholder left unsubstituted in $AGENT — the template changed shape; fix the sed above"
+  fi
   if [ "$EXTERNAL" = 1 ]; then
     warn "Full Disk Access REQUIRED before loading: System Settings → Privacy & Security →"
     warn "  Full Disk Access → enable /bin/bash. Then run:  launchctl load $AGENT"

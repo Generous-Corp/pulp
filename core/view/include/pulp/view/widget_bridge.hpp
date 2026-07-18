@@ -275,8 +275,27 @@ private:
     std::unique_ptr<NativeGpuBridgeState> native_gpu_bridge_state_;
     std::vector<std::filesystem::path> asset_roots_;
 
+    // Per-id cache entry: the resolved View plus the tree structure generation
+    // at which that View was last CONFIRMED to live under `root_`. A fresh entry
+    // starts unvalidated (generation 0, the reserved sentinel), so the first
+    // widget() lookup always runs the authoritative subtree walk; once confirmed,
+    // repeat lookups short-circuit to O(1) while View::structure_generation() is
+    // unchanged (no remove_child has detached anything since). The implicit
+    // View* conversions keep this a drop-in for the former
+    // `unordered_map<string, View*>` at every call site; assignment resets the
+    // validation because a replacement pointer has not yet been confirmed.
+    struct BridgeWidgetState {
+        View* view = nullptr;
+        std::uint64_t validated_generation = 0;
+        BridgeWidgetState() = default;
+        BridgeWidgetState(View* v) : view(v) {}          // NOLINT: intentional implicit
+        BridgeWidgetState& operator=(View* v) { view = v; validated_generation = 0; return *this; }
+        operator View*() const { return view; }
+        View* operator->() const { return view; }
+    };
+
     // Track widgets by ID for JS access
-    std::unordered_map<std::string, View*> widgets_;
+    std::unordered_map<std::string, BridgeWidgetState> widgets_;
 
     // Idempotency guards for native-event registrations, one record per widget
     // id. Each registrar (registerPointer / registerWheel / etc.) wraps the
@@ -467,86 +486,24 @@ private:
     // `set_repaint_callback`.
     void request_repaint();
 
+    // The ~75 bridge sub-API registrars used to be private member
+    // declarations here. Every added API changed this PUBLIC header and forced
+    // a recompile of the whole view/render/host surface that includes it.
+    // They now live as static methods of BridgeRegistrars (an internal friend,
+    // declared in the src-only widget_bridge/registrars.hpp), each taking the
+    // owning WidgetBridge& — so adding or removing a bridge API touches only
+    // that internal header, the owning .cpp, and register_api()'s data table
+    // in widget_bridge.cpp, never this header. The friend grants those statics
+    // access to WidgetBridge's private state.
+    friend struct BridgeRegistrars;
     void register_api();
-    void register_accessibility_api();
-    void register_dom_api();
-    void register_hover_event_api();
-    void register_pointer_event_api();
-    void register_wheel_event_api();
-    void register_context_menu_event_api();
-    void register_drop_event_api();
-    void register_widget_style_background_color_api();
-    void register_widget_style_shadow_api();
-    void register_widget_style_opacity_api();
-    void register_widget_style_overflow_api();
-    void register_widget_style_background_gradient_api();
-    void register_widget_style_box_shadow_api();
-    void register_widget_style_cursor_direction_api();
-    void register_widget_style_filter_clip_api();
-    void register_widget_style_blend_api();
-    void register_widget_style_rn_compat_api();
-    void register_widget_style_state_api();
-    void register_widget_style_background_repeat_api();
-    void register_widget_style_mask_object_api();
-    void register_widget_style_background_subproperty_api();
-    void register_widget_style_visibility_api();
-    void register_widget_style_interaction_api();
-    void register_layout_grid_api();
-    void register_layout_flex_api();
-    void register_layout_query_api();
-    void register_layout_box_model_api();
-    void register_layout_position_api();
-    void register_list_style_api();
-    void register_metadata_removal_api();
-    void register_metadata_source_api();
-    void register_metadata_computed_api();
-    void register_platform_services_ai_api();
-    void register_platform_services_exec_api();
-    void register_query_service_api();
+
     // Lazily creates the off-UI-thread query service (spawns its worker thread
     // only on first use) with a deliver hook that funnels results into the
-    // async_exec_results_ queue drained by poll_async_results().
+    // async_exec_results_ queue drained by poll_async_results(). Stays a
+    // WidgetBridge member (not a registrar) — register_query_service_api()
+    // calls it through `self`.
     QueryService& ensure_query_service();
-    void register_platform_services_dialog_api();
-    void register_platform_services_clipboard_api();
-    void register_state_binding_api();
-    void register_storage_key_value_api();
-    void register_asset_loading_api();
-    void register_font_assets_api();
-    void register_svg_api();
-    void register_shader_widget_api();
-    void register_shader_canvas_api();
-    void register_theme_api();
-    void register_tokens_api();
-    void register_widget_assets_api();
-    void register_widget_schema_api();
-    void register_widget_factory_controls_api();
-    void register_widget_value_controls_api();
-    void register_widget_factory_form_api();
-    void register_widget_factory_container_api();
-    void register_widget_factory_composite_api();
-    void register_widget_value_list_api();
-    void register_widget_factory_text_editor_api();
-    void register_widget_factory_design_system_api();
-    void register_widget_value_label_api();
-    void register_widget_value_basic_api();
-    void register_widget_typography_api();
-    void register_widget_typography_color_api();
-    void register_widget_typography_decoration_api();
-    void register_widget_typography_overflow_api();
-    void register_widget_typography_extended_api();
-    void register_widget_typography_shadow_shorthand_api();
-    void register_widget_value_content_api();
-    void register_widget_text_runs_api();
-    void register_widget_border_box_api();
-    void register_widget_outline_api();
-    void register_widget_border_radius_api();
-    void register_widget_border_side_api();
-    void register_runtime_api();
-    void register_animation_api();
-    void register_animation_style_api();
-    void register_canvas2d_api();
-    void register_gpu_api();
 };
 
 } // namespace pulp::view

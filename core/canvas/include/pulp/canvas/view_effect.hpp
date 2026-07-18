@@ -62,12 +62,24 @@ struct GpuBlurEffect : ViewEffect {
     }
 };
 
-/// GPU bloom/glow effect — HDR-aware bloom (threshold + blur + additive blend).
-/// Requires float-based color pipeline for proper HDR threshold.
+/// GPU bloom/glow — a real bright-pass + blur + additive composite.
+///
+/// SkiaCanvas thresholds the subtree (only pixels brighter than `threshold`
+/// contribute), blurs the survivors by `radius`, and composites them back
+/// additively (kPlus) so bright regions bleed a glow past their edges. Backends
+/// without offscreen post-processing degrade to a plain blurred layer (the base
+/// `save_layer_with_bloom` default); RecordingCanvas records the bloom intent
+/// so headless tests can assert it.
+///
+/// `threshold` is a brightness cutoff WITHIN the 8-bit [0,1] range — Pulp
+/// surfaces are 8-bit unorm + sRGB (see `core/render/`), so this is a
+/// low-dynamic-range bloom, not HDR headroom above 1.0. That is enough for the
+/// light-on-dark glow it exists for; a true HDR bloom would need a float color
+/// pipeline Pulp does not have.
 struct GpuBloomEffect : ViewEffect {
-    float threshold = 0.8f;
-    float intensity = 0.5f;
-    float radius = 8.0f;
+    float threshold = 0.8f;  ///< Brightness cutoff in [0,1]; below it, no glow.
+    float intensity = 0.5f;  ///< Glow gain applied to the thresholded highlights.
+    float radius = 8.0f;     ///< Blur radius (px) of the glow.
 
     void configure_layer(Canvas& canvas, float x, float y, float w, float h) override {
         // Real bloom: SkiaCanvas thresholds + blurs + additively composites the

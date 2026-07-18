@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <vector>
 
 using namespace pulp;
 

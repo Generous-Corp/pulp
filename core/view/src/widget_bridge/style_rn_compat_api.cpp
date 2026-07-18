@@ -11,8 +11,8 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_style_rn_compat_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_style_rn_compat_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // RN iOS-legacy shadow{Color,Offset,Opacity,Radius} per-attribute setters for
     // box-shadow. Mirrors the textShadow* pattern above so a JSX prop
@@ -23,35 +23,35 @@ void WidgetBridge::register_widget_style_rn_compat_api() {
     // styling. Each setter mutates one field of View::shadow_ and
     // flips has_shadow_ on, mirroring how text-shadow longhand works.
     register_bridge_function(api, "setShadowColor",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto hex = args.get<std::string>(1, "");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_box_shadow_color(parse_bridge_css_color(hex));
             return choc::value::Value();
         });
     register_bridge_function(api, "setShadowOffset",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto dx = static_cast<float>(args.get<double>(1, 0.0));
             auto dy = static_cast<float>(args.get<double>(2, 0.0));
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_box_shadow_offset(dx, dy);
             return choc::value::Value();
         });
     register_bridge_function(api, "setShadowOpacity",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto a  = static_cast<float>(args.get<double>(1, 1.0));
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_box_shadow_opacity(a);
             return choc::value::Value();
         });
     register_bridge_function(api, "setShadowRadius",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto r  = static_cast<float>(args.get<double>(1, 0.0));
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_box_shadow_radius(r);
             return choc::value::Value();
         });
@@ -75,9 +75,9 @@ void WidgetBridge::register_widget_style_rn_compat_api() {
     // single consistent behavior produced, and the catalog can report a
     // CSS-spec subset where Pulp's behavior matches the dominant author intent.
     register_bridge_function(api, "setIncludeFontPadding",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
-            auto v  = id.empty() ? &root_ : widget(id);
+            auto v  = id.empty() ? &self.root_ : self.widget(id);
             // Accept the value, store it, no paint impact — Pulp's
             // text shaping doesn't add Android-vestigial padding
             // regardless of this flag.
@@ -93,10 +93,10 @@ void WidgetBridge::register_widget_style_rn_compat_api() {
     // cards (24px+); subtle below 12px. See view.cpp's
     // build_continuous_corner_rounded_rect_path for the path math.
     register_bridge_function(api, "setBorderCurve",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "circular");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (!v) return choc::value::Value();
             v->set_border_curve(kw == "continuous"
                                 ? View::BorderCurve::continuous
@@ -121,10 +121,10 @@ void WidgetBridge::register_widget_style_rn_compat_api() {
     // the isolation contract. Same CSS-subset pattern as
     // overscrollBehavior, includeFontPadding, and scrollBehavior.
     register_bridge_function(api, "setIsolation",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "auto");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_isolation(kw);
             return choc::value::Value();
         });
@@ -149,10 +149,10 @@ void WidgetBridge::register_widget_style_rn_compat_api() {
     // recognizable; the catalog notes call out the single-shadow
     // approximation honestly.
     register_bridge_function(api, "setElevation",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto e  = static_cast<float>(args.get<double>(1, 0.0));
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (!v) return choc::value::Value();
             if (e <= 0.0f) {
                 v->clear_box_shadow();
@@ -174,18 +174,18 @@ void WidgetBridge::register_widget_style_rn_compat_api() {
     // to parents, so all three keywords [auto/contain/none] behave as
     // CSS `contain` — a valid subset of the spec).
     register_bridge_function(api, "setScrollBehavior",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "smooth");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_scroll_behavior(kw);
             return choc::value::Value();
         });
     register_bridge_function(api, "setOverscrollBehavior",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "auto");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_overscroll_behavior(kw);
             return choc::value::Value();
         });

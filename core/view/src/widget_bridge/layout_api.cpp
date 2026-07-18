@@ -16,27 +16,27 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_layout_grid_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_layout_grid_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // createGrid(id, parentId) — creates a grid container (CSS display: grid)
-    register_bridge_function(api, "createGrid", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createGrid", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
         auto v = std::make_unique<View>();
         v->set_id(id);
         v->set_layout_mode(LayoutMode::grid);
-        widgets_[id] = v.get();
-        resolve_parent(pid)->add_child(std::move(v));
+        self.widgets_[id] = v.get();
+        self.resolve_parent(pid)->add_child(std::move(v));
         return choc::value::createString(id);
     });
 
 
     // setGrid(id, property, value) — set grid container properties
-    register_bridge_function(api, "setGrid", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setGrid", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto key = args.get<std::string>(1, "");
-        auto* v = widget(id);
+        auto* v = self.widget(id);
         if (!v) return choc::value::Value();
 
         if (key == "template_columns") {
@@ -106,13 +106,13 @@ void WidgetBridge::register_layout_grid_api() {
     });
 }
 
-void WidgetBridge::register_layout_flex_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_layout_flex_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
-    register_bridge_function(api, "setFlex", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setFlex", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto key = args.get<std::string>(1, "");
-        View* v = id.empty() ? &root_ : widget(id);
+        View* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         auto& f = v->flex();
         auto val = args.get<double>(2, 0);
@@ -645,13 +645,13 @@ void WidgetBridge::register_layout_flex_api() {
     });
 }
 
-void WidgetBridge::register_layout_query_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
-    register_bridge_function(api, "layout", [this](choc::javascript::ArgumentList) {
-        root_.clear_layout_dirty();
-        root_.layout_children();
-        request_repaint();
+    register_bridge_function(api, "layout", [&self](choc::javascript::ArgumentList) {
+        self.root_.clear_layout_dirty();
+        self.root_.layout_children();
+        self.request_repaint();
         return choc::value::Value();
     });
 
@@ -669,10 +669,10 @@ void WidgetBridge::register_layout_query_api() {
     // bail at getBoundingClientRect == 0). Forcing layout here closes
     // that timing gap. Layout is internally idempotent if nothing has
     // changed, so the cost is bounded to one tree walk per call.
-    register_bridge_function(api, "getLayoutRect", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "getLayoutRect", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        root_.layout_children();
-        View* v = id.empty() ? &root_ : widget(id);
+        self.root_.layout_children();
+        View* v = id.empty() ? &self.root_ : self.widget(id);
         return make_layout_rect_value(v);
     });
 
@@ -680,17 +680,17 @@ void WidgetBridge::register_layout_query_api() {
     // getLayoutAncestorRects(id) -> [{id, bounds}, ...]
     // Same coordinate space as getLayoutRect(), but with the native View
     // parent chain included so validation can localize coordinate drift.
-    register_bridge_function(api, "getLayoutAncestorRects", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "getLayoutAncestorRects", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        root_.layout_children();
-        View* v = id.empty() ? &root_ : widget(id);
+        self.root_.layout_children();
+        View* v = id.empty() ? &self.root_ : self.widget(id);
         return make_layout_ancestor_chain_value(v);
     });
 
 
     // getRootSize() -> {width, height} — actual root view dimensions for vw/vh/matchMedia
-    register_bridge_function(api, "getRootSize", [this](choc::javascript::ArgumentList) {
-        auto b = root_.bounds();
+    register_bridge_function(api, "getRootSize", [&self](choc::javascript::ArgumentList) {
+        auto b = self.root_.bounds();
         auto r = choc::value::createObject("");
         r.addMember("width", choc::value::createFloat64(b.width));
         r.addMember("height", choc::value::createFloat64(b.height));
@@ -698,8 +698,8 @@ void WidgetBridge::register_layout_query_api() {
     });
 }
 
-void WidgetBridge::register_layout_box_model_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_layout_box_model_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // CSS box-sizing keyword. Yoga's `YGNodeStyleSetBoxSizing` honors the spec,
     // so record the enum on FlexStyle and let `build_yoga_subtree` route it
@@ -707,10 +707,10 @@ void WidgetBridge::register_layout_box_model_api() {
     // The unset FlexStyle default is `border-box` to match Yoga/imported web
     // layout convention; this setter maps absent or unknown keywords to
     // `content-box`, the CSS-spec keyword default.
-    register_bridge_function(api, "setBoxSizing", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBoxSizing", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto kw = args.get<std::string>(1, "content-box");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         auto& f = v->flex();
         if (kw == "border-box") {
@@ -725,14 +725,14 @@ void WidgetBridge::register_layout_box_model_api() {
     });
 }
 
-void WidgetBridge::register_layout_position_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_layout_position_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setPosition(id, "static"/"relative"/"absolute"/"fixed"/"sticky") — CSS position
     // Instrument under PULP_DEBUG_FLEX_THRASH so we can see whether JSX
     // `position: "absolute"` reaches the bridge. When runtime React imports
     // miss this path, inline absolute children render at the wrong place.
-    register_bridge_function(api, "setPosition", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setPosition", [&self](choc::javascript::ArgumentList args) {
         static const bool flex_thrash_log = std::getenv("PULP_DEBUG_FLEX_THRASH") != nullptr;
         if (flex_thrash_log) {
             std::fprintf(stderr, "[flex-thrash] setPosition id=%s pos=%s\n",
@@ -741,7 +741,7 @@ void WidgetBridge::register_layout_position_api() {
         }
         auto id = args.get<std::string>(0, "");
         auto pos = args.get<std::string>(1, "static");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         if (pos == "relative") v->set_position(View::Position::relative);
         else if (pos == "absolute") v->set_position(View::Position::absolute);
@@ -758,8 +758,8 @@ void WidgetBridge::register_layout_position_api() {
     // prop-applier pass raw percent strings for these keys, so the unit
     // survives the bridge boundary; yoga_layout.cpp routes them through
     // View::top_unit_ / right_unit_ / bottom_unit_ / left_unit_.
-    register_bridge_function(api, "setTop", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
+    register_bridge_function(api, "setTop", [&self](choc::javascript::ArgumentList args) {
+        auto* v = self.widget(args.get<std::string>(0, ""));
         if (v) {
             auto sval = args.get<std::string>(1, "");
             if (!sval.empty() && sval.back() == '%') {
@@ -774,8 +774,8 @@ void WidgetBridge::register_layout_position_api() {
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setRight", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
+    register_bridge_function(api, "setRight", [&self](choc::javascript::ArgumentList args) {
+        auto* v = self.widget(args.get<std::string>(0, ""));
         if (v) {
             auto sval = args.get<std::string>(1, "");
             if (!sval.empty() && sval.back() == '%') {
@@ -790,8 +790,8 @@ void WidgetBridge::register_layout_position_api() {
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setBottom", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
+    register_bridge_function(api, "setBottom", [&self](choc::javascript::ArgumentList args) {
+        auto* v = self.widget(args.get<std::string>(0, ""));
         if (v) {
             auto sval = args.get<std::string>(1, "");
             if (!sval.empty() && sval.back() == '%') {
@@ -806,8 +806,8 @@ void WidgetBridge::register_layout_position_api() {
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setLeft", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
+    register_bridge_function(api, "setLeft", [&self](choc::javascript::ArgumentList args) {
+        auto* v = self.widget(args.get<std::string>(0, ""));
         if (v) {
             auto sval = args.get<std::string>(1, "");
             if (!sval.empty() && sval.back() == '%') {
@@ -824,8 +824,8 @@ void WidgetBridge::register_layout_position_api() {
 
 
     // setZIndex(id, n) — CSS z-index
-    register_bridge_function(api, "setZIndex", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, ""));
+    register_bridge_function(api, "setZIndex", [&self](choc::javascript::ArgumentList args) {
+        auto* v = self.widget(args.get<std::string>(0, ""));
         if (v) v->set_z_index(static_cast<int>(args.get<double>(1, 0)));
         return choc::value::Value();
     });

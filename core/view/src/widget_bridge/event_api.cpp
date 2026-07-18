@@ -46,16 +46,16 @@ void dispatch_gesture_js(const std::shared_ptr<std::atomic<bool>>& alive,
 
 } // namespace
 
-void WidgetBridge::register_hover_event_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_hover_event_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // registerHover(id) - enables "mouseenter"/"mouseleave" JS callbacks (CSS :hover).
-    register_bridge_function(api, "registerHover", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerHover", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto it = widgets_.find(id);
-        if (it != widgets_.end()) {
-            auto alive = callback_alive_;
-            auto* engine = &engine_;
+        auto it = self.widgets_.find(id);
+        if (it != self.widgets_.end()) {
+            auto alive = self.callback_alive_;
+            auto* engine = &self.engine_;
             it->second->on_hover_enter = [alive, engine, id]() {
                 dispatch_event(alive, engine, id, "mouseenter", "0");
             };
@@ -67,16 +67,16 @@ void WidgetBridge::register_hover_event_api() {
     });
 }
 
-void WidgetBridge::register_pointer_event_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // registerClick(id) - enables "click" event dispatch for any widget.
-    register_bridge_function(api, "registerClick", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerClick", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto it = widgets_.find(id);
-        if (it != widgets_.end()) {
-            auto alive = callback_alive_;
-            auto* engine = &engine_;
+        auto it = self.widgets_.find(id);
+        if (it != self.widgets_.end()) {
+            auto alive = self.callback_alive_;
+            auto* engine = &self.engine_;
             it->second->on_click = [alive, engine, id]() {
                 dispatch_event(alive, engine, id, "click", "0");
             };
@@ -85,14 +85,14 @@ void WidgetBridge::register_pointer_event_api() {
     });
 
     // claimOverlay(id) / releaseOverlay(id) - generalized overlay click routing.
-    register_bridge_function(api, "claimOverlay", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "claimOverlay", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto it = widgets_.find(id);
-        if (it != widgets_.end() && it->second) {
+        auto it = self.widgets_.find(id);
+        if (it != self.widgets_.end() && it->second) {
             // Install a JS-visible dismiss callback so React overlay consumers
             // can flip setOpen(false) when the framework dismisses the overlay.
-            auto alive = callback_alive_;
-            auto* engine = &engine_;
+            auto alive = self.callback_alive_;
+            auto* engine = &self.engine_;
             it->second->on_overlay_dismissed = [alive, engine, id]() {
                 dispatch_event(alive, engine, id, "dismiss", "0");
             };
@@ -100,10 +100,10 @@ void WidgetBridge::register_pointer_event_api() {
         }
         return choc::value::Value();
     });
-    register_bridge_function(api, "releaseOverlay", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "releaseOverlay", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto it = widgets_.find(id);
-        if (it != widgets_.end() && it->second) {
+        auto it = self.widgets_.find(id);
+        if (it != self.widgets_.end() && it->second) {
             // JS-driven release, typically React unmount. Clear the dismiss
             // callback first so a later ESC/outside-click cannot re-fire it.
             it->second->on_overlay_dismissed = nullptr;
@@ -113,22 +113,22 @@ void WidgetBridge::register_pointer_event_api() {
     });
 
     // registerPointer(id) - enables pointer event dispatch for a widget.
-    register_bridge_function(api, "registerPointer", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerPointer", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         // Idempotency: re-renders re-issue registerPointer for the same id.
         // Without this gate each call wraps the previous on_pointer_event,
         // stacking N lambdas and multiplying dispatch cost by render count.
-        if (!claim_pointer_registration(id)) {
+        if (!self.claim_pointer_registration(id)) {
             return choc::value::Value();
         }
         if (const char* dbg = std::getenv("PULP_DEBUG_POINTER"); dbg && *dbg) {
-            std::cerr << "[bridge] registerPointer id=" << id << " widgets_.has=" << (widgets_.count(id) ? "yes" : "NO") << "\n";
+            std::cerr << "[bridge] registerPointer id=" << id << " widgets_.has=" << (self.widgets_.count(id) ? "yes" : "NO") << "\n";
         }
-        auto it = widgets_.find(id);
-        if (it != widgets_.end()) {
-            auto* w = it->second;
-            auto alive = callback_alive_;
-            auto* engine = &engine_;
+        auto it = self.widgets_.find(id);
+        if (it != self.widgets_.end()) {
+            auto* w = it->second.view;
+            auto alive = self.callback_alive_;
+            auto* engine = &self.engine_;
             auto previous_pointer = w->on_pointer_event;
             w->on_pointer_event = [alive, engine, id, previous_pointer](const MouseEvent& me) {
                 if (previous_pointer) {
@@ -226,12 +226,12 @@ void WidgetBridge::register_pointer_event_api() {
     });
 
     // registerGesture(id) - enables gesture event dispatch for a widget.
-    register_bridge_function(api, "registerGesture", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerGesture", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto it = widgets_.find(id);
-        if (it != widgets_.end()) {
-            auto alive = callback_alive_;
-            auto* engine = &engine_;
+        auto it = self.widgets_.find(id);
+        if (it != self.widgets_.end()) {
+            auto alive = self.callback_alive_;
+            auto* engine = &self.engine_;
             it->second->on_gesture_cb = [alive, engine, id](const GestureEvent& ge) {
                 std::string type;
                 switch (ge.phase) {
@@ -252,22 +252,22 @@ void WidgetBridge::register_pointer_event_api() {
         return choc::value::Value();
     });
 
-    auto add_recognizer_once = [this](
+    auto add_recognizer_once = [&self](
             const std::string& id,
             const std::string& key,
             std::unique_ptr<GestureRecognizer> recognizer) {
         if (!recognizer) return;
-        auto it = widgets_.find(id);
-        if (it == widgets_.end() || !it->second)
+        auto it = self.widgets_.find(id);
+        if (it == self.widgets_.end() || !it->second)
             return;
-        if (!claim_gesture_registration(id, key))
+        if (!self.claim_gesture_registration(id, key))
             return;
         it->second->add_gesture_recognizer(std::move(recognizer));
     };
 
-    auto allow_pinch_rotate_simultaneous = [this](const std::string& id) {
-        auto it = widgets_.find(id);
-        if (it == widgets_.end() || !it->second) return;
+    auto allow_pinch_rotate_simultaneous = [&self](const std::string& id) {
+        auto it = self.widgets_.find(id);
+        if (it == self.widgets_.end() || !it->second) return;
         PinchRecognizer* pinch = nullptr;
         RotateRecognizer* rotate = nullptr;
         const size_t count = it->second->gesture_recognizer_count();
@@ -281,11 +281,11 @@ void WidgetBridge::register_pointer_event_api() {
             pinch->allow_simultaneous_with(*rotate);
     };
 
-    register_bridge_function(api, "registerTapGesture", [this, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
+    register_bridge_function(api, "registerTapGesture", [&self, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
         auto id = args.get<std::string>(0, "");
         auto tap = std::make_unique<TapRecognizer>(1);
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
         tap->on_ended = [alive, engine, id](GestureRecognizer& recognizer) {
             auto& tap_ref = static_cast<TapRecognizer&>(recognizer);
             dispatch_gesture_js(alive, engine, id, "tap",
@@ -295,11 +295,11 @@ void WidgetBridge::register_pointer_event_api() {
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "registerDoubleTapGesture", [this, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
+    register_bridge_function(api, "registerDoubleTapGesture", [&self, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
         auto id = args.get<std::string>(0, "");
         auto tap = std::make_unique<TapRecognizer>(2);
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
         tap->on_ended = [alive, engine, id](GestureRecognizer& recognizer) {
             auto& tap_ref = static_cast<TapRecognizer&>(recognizer);
             dispatch_gesture_js(alive, engine, id, "doubletap",
@@ -309,11 +309,11 @@ void WidgetBridge::register_pointer_event_api() {
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "registerLongPressGesture", [this, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
+    register_bridge_function(api, "registerLongPressGesture", [&self, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
         auto id = args.get<std::string>(0, "");
         auto long_press = std::make_unique<LongPressRecognizer>();
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
         long_press->on_began = [alive, engine, id](GestureRecognizer& recognizer) {
             auto& long_press_ref = static_cast<LongPressRecognizer&>(recognizer);
             dispatch_gesture_js(alive, engine, id, "longpress",
@@ -323,11 +323,11 @@ void WidgetBridge::register_pointer_event_api() {
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "registerPanGesture", [this, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
+    register_bridge_function(api, "registerPanGesture", [&self, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
         auto id = args.get<std::string>(0, "");
         auto pan = std::make_unique<PanRecognizer>();
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
         auto dispatch_pan = [alive, engine, id](const char* event_name,
                                                 GestureRecognizer& recognizer) {
             auto& pan_ref = static_cast<PanRecognizer&>(recognizer);
@@ -352,11 +352,11 @@ void WidgetBridge::register_pointer_event_api() {
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "registerSwipeGesture", [this, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
+    register_bridge_function(api, "registerSwipeGesture", [&self, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
         auto id = args.get<std::string>(0, "");
         auto swipe = std::make_unique<SwipeRecognizer>();
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
         swipe->on_ended = [alive, engine, id](GestureRecognizer& recognizer) {
             auto& swipe_ref = static_cast<SwipeRecognizer&>(recognizer);
             const auto t = swipe_ref.translation();
@@ -371,11 +371,11 @@ void WidgetBridge::register_pointer_event_api() {
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "registerFlingGesture", [this, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
+    register_bridge_function(api, "registerFlingGesture", [&self, add_recognizer_once](choc::javascript::ArgumentList args) mutable {
         auto id = args.get<std::string>(0, "");
         auto fling = std::make_unique<FlingRecognizer>();
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
         fling->on_ended = [alive, engine, id](GestureRecognizer& recognizer) {
             auto& fling_ref = static_cast<FlingRecognizer&>(recognizer);
             const auto t = fling_ref.translation();
@@ -390,11 +390,11 @@ void WidgetBridge::register_pointer_event_api() {
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "registerPinchGesture", [this, add_recognizer_once, allow_pinch_rotate_simultaneous](choc::javascript::ArgumentList args) mutable {
+    register_bridge_function(api, "registerPinchGesture", [&self, add_recognizer_once, allow_pinch_rotate_simultaneous](choc::javascript::ArgumentList args) mutable {
         auto id = args.get<std::string>(0, "");
         auto pinch = std::make_unique<PinchRecognizer>();
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
         auto dispatch_pinch = [alive, engine, id](const char* event_name,
                                                   GestureRecognizer& recognizer) {
             auto& pinch_ref = static_cast<PinchRecognizer&>(recognizer);
@@ -417,11 +417,11 @@ void WidgetBridge::register_pointer_event_api() {
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "registerRotateGesture", [this, add_recognizer_once, allow_pinch_rotate_simultaneous](choc::javascript::ArgumentList args) mutable {
+    register_bridge_function(api, "registerRotateGesture", [&self, add_recognizer_once, allow_pinch_rotate_simultaneous](choc::javascript::ArgumentList args) mutable {
         auto id = args.get<std::string>(0, "");
         auto rotate = std::make_unique<RotateRecognizer>();
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
         auto dispatch_rotate = [alive, engine, id](const char* event_name,
                                                    GestureRecognizer& recognizer) {
             auto& rotate_ref = static_cast<RotateRecognizer&>(recognizer);
@@ -445,36 +445,36 @@ void WidgetBridge::register_pointer_event_api() {
     });
 
     // nativeSetPointerCapture(id, pointerId).
-    register_bridge_function(api, "nativeSetPointerCapture", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "nativeSetPointerCapture", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pointerId = static_cast<int>(args.get<double>(1, 0));
-        auto it = widgets_.find(id);
-        if (it != widgets_.end()) {
+        auto it = self.widgets_.find(id);
+        if (it != self.widgets_.end()) {
             it->second->set_pointer_capture(pointerId);
-            dispatch_event(engine_, id, "gotpointercapture",
+            dispatch_event(self.engine_, id, "gotpointercapture",
                            "{pointerId:" + std::to_string(pointerId) + "}");
         }
         return choc::value::Value();
     });
 
     // nativeReleasePointerCapture(id, pointerId).
-    register_bridge_function(api, "nativeReleasePointerCapture", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "nativeReleasePointerCapture", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pointerId = static_cast<int>(args.get<double>(1, 0));
-        auto it = widgets_.find(id);
-        if (it != widgets_.end()) {
+        auto it = self.widgets_.find(id);
+        if (it != self.widgets_.end()) {
             it->second->release_pointer_capture(pointerId);
-            dispatch_event(engine_, id, "lostpointercapture",
+            dispatch_event(self.engine_, id, "lostpointercapture",
                            "{pointerId:" + std::to_string(pointerId) + "}");
         }
         return choc::value::Value();
     });
 
     // enableInspectClick() - sets up Cmd+click detection on all registered widgets.
-    register_bridge_function(api, "enableInspectClick", [this](choc::javascript::ArgumentList) {
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
-        root_.on_global_click = [alive, engine](const std::string& id, uint16_t mods) {
+    register_bridge_function(api, "enableInspectClick", [&self](choc::javascript::ArgumentList) {
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
+        self.root_.on_global_click = [alive, engine](const std::string& id, uint16_t mods) {
             bool cmd = (mods & (0x10 | 0x08)) != 0;
             if (cmd) {
                 dispatch_event(alive, engine, "__inspect__", "click", js_string_literal(id));
@@ -484,23 +484,23 @@ void WidgetBridge::register_pointer_event_api() {
     });
 }
 
-void WidgetBridge::register_wheel_event_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_wheel_event_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // registerWheel(id) - enable wheel event dispatch for scroll/zoom.
-    register_bridge_function(api, "registerWheel", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerWheel", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         // Idempotency: re-renders re-issue registerWheel for the same id.
         // Without this gate each call wraps the previous on_pointer_event,
         // stacking N lambdas and multiplying dispatch cost by render count.
-        if (!claim_wheel_registration(id)) {
+        if (!self.claim_wheel_registration(id)) {
             return choc::value::Value();
         }
-        auto it = widgets_.find(id);
-        if (it != widgets_.end()) {
-            auto* w = it->second;
-            auto alive = callback_alive_;
-            auto* engine = &engine_;
+        auto it = self.widgets_.find(id);
+        if (it != self.widgets_.end()) {
+            auto* w = it->second.view;
+            auto alive = self.callback_alive_;
+            auto* engine = &self.engine_;
             auto previous_pointer = w->on_pointer_event;
             w->on_pointer_event = [alive, engine, id, previous_pointer](const MouseEvent& me) {
                 if (previous_pointer) {
@@ -522,17 +522,17 @@ void WidgetBridge::register_wheel_event_api() {
     });
 }
 
-void WidgetBridge::register_context_menu_event_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_context_menu_event_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // registerContextMenu(id, callbackName)
-    register_bridge_function(api, "registerContextMenu", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerContextMenu", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto cb = args.get<std::string>(1, "");
-        auto* v = widget(id);
+        auto* v = self.widget(id);
         if (v && !cb.empty()) {
-            auto alive = callback_alive_;
-            auto* engine = &engine_;
+            auto alive = self.callback_alive_;
+            auto* engine = &self.engine_;
             v->on_context_menu = [alive, engine, cb](Point pos) {
                 safe_dispatch_eval(alive, engine,
                     cb + "(" + std::to_string(pos.x) + "," + std::to_string(pos.y) + ")",
@@ -577,29 +577,29 @@ void WidgetBridge::register_context_menu_event_api() {
     });
 
     // registerShortcut(key, modifiers, callbackName)
-    register_bridge_function(api, "registerShortcut", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerShortcut", [&self](choc::javascript::ArgumentList args) {
         auto key = args.get<int>(0, 0);
         auto mods = args.get<int>(1, 0);
         auto cb = args.get<std::string>(2, "");
         if (!cb.empty()) {
-            shortcuts_.push_back({static_cast<KeyCode>(key),
+            self.shortcuts_.push_back({static_cast<KeyCode>(key),
                                   static_cast<uint16_t>(mods), cb});
         }
         return choc::value::Value();
     });
 }
 
-void WidgetBridge::register_drop_event_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_drop_event_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // Drag-and-drop: register JS callback for file/text drops.
-    register_bridge_function(api, "registerDrop", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerDrop", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto cb = args.get<std::string>(1, "");
-        auto* v = widget(id);
+        auto* v = self.widget(id);
         if (v && !cb.empty()) {
-            auto alive = callback_alive_;
-            auto* engine = &engine_;
+            auto alive = self.callback_alive_;
+            auto* engine = &self.engine_;
             v->on_drop = [alive, engine, cb](const std::string& type, const std::string& data, float x, float y) {
                 std::string safe_data;
                 for (char c : data) {

@@ -3,6 +3,15 @@ name: Build and Test
 on:
   pull_request:
     branches: [main, 'develop/**']
+  # Publish the Linux/Windows ccache + FetchContent caches that PR runs restore
+  # from. Only a non-PR run on the default branch may write to GitHub's cloud
+  # cache — a PR-run cache entry is scoped to the PR's own ref and is invisible
+  # to every other PR — so without this trigger the `Save …` steps below are
+  # unreachable and the restore steps are a permanent miss. A push run drops the
+  # macOS leg (see resolve-provider) and skips the reporting aliases: it exists
+  # to warm caches, not to gate anything.
+  push:
+    branches: [main]
   # Run the required macos/linux/windows alias gates on queued merge groups so
   # a GitHub merge queue on `main` can land PRs. The `merge_group` event does
   # not support `paths` filters, so it fires on every group; the classify job
@@ -44,9 +53,13 @@ on:
 # capacity when a PR accumulates fixup commits. workflow_dispatch
 # runs share the same group so a manual retrigger cancels any
 # auto-triggered run in flight.
+#
+# Push runs on main are exempt: they all share the `refs/heads/main` group, so
+# cancel-in-progress would let a rapid second merge kill the first run's
+# cache-save step and leave the cache stale exactly when main is busiest.
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   resolve-provider:
@@ -142,6 +155,12 @@ jobs:
 
           REQUESTED = (os.environ.get("REQUESTED_PROVIDER") or "github-hosted").strip()
           EVENT_NAME = (os.environ.get("GITHUB_EVENT_NAME") or "").strip()
+          # Events whose only job is to publish the GitHub-hosted Linux/Windows
+          # caches. The macOS leg is excluded from their matrix: it runs on the
+          # self-hosted Macs that serve the one required check in this repo, and
+          # those Macs keep their caches on local disk — so a macOS leg here
+          # would occupy the required gate's runners to save nothing.
+          PUSH_ONLY_CACHE_EVENTS = ("push",)
           RESOLVER = ["python3", "tools/scripts/resolve_runs_on.py"]
           REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")
 
@@ -460,13 +479,21 @@ jobs:
               "--namespace-setting-name", "PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON",
           ])
 
-          include = [
-              {
+          include = []
+          if EVENT_NAME not in PUSH_ONLY_CACHE_EVENTS:
+              include.append({
                   "key": "macos",
                   "name": "macOS (ARM64)",
                   "runs_on_json": macos_runs_on,
                   "provider": macos_provider,
-              },
+              })
+          else:
+              print(
+                  f"resolve-provider: {EVENT_NAME} event — macOS leg omitted "
+                  "(cache-warming run; macOS caches live on local disk)",
+                  file=sys.stderr,
+              )
+          include += [
               {
                   "key": "windows",
                   "name": "Windows (x64)",
@@ -510,10 +537,18 @@ jobs:
           fetch-depth: 0
           lfs: false
       - id: classify
+        # The base is event-dependent: a PR diffs its pinned target-branch sha,
+        # a push diffs the tip it moved away from. `origin/main` is correct for
+        # neither — on a push it resolves to HEAD itself and the diff is always
+        # empty. See tools/scripts/resolve_classify_base.py for the full
+        # contract and tools/scripts/test_resolve_classify_base.py for the cases.
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
-          python3 tools/scripts/classify_changes.py \
-            --mode=diff \
-            --base "${{ github.event.pull_request.base.sha || 'origin/main' }}"
+          set -euo pipefail
+          base="$(python3 tools/scripts/resolve_classify_base.py)"
+          python3 tools/scripts/classify_changes.py --mode=diff --base "$base"
 
   build:
     needs: [resolve-provider, classify]
@@ -711,8 +746,21 @@ jobs:
         run: ./setup.sh --ci --deps-only
         shell: bash
 
-      - name: Save FetchContent sources (main non-PR GitHub-hosted)
-        if: (runner.os != 'macOS' || runner.environment == 'github-hosted') && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.fetchcontent-cache.outputs.cache-hit != 'true'
+      # Save scope is deliberately narrower than restore scope: GitHub-hosted
+      # Linux/Windows only, and only on a push to main.
+      #   - `runner.environment == 'github-hosted' && runner.os != 'macOS'`:
+      #     the self-hosted Macs keep these caches on local disk between jobs,
+      #     so uploading multi-GB archives from them would slow the required
+      #     gate down to buy nothing. The restore-side disjunction
+      #     (`runner.os != 'macOS' || ...`) is wrong here — it would re-admit
+      #     any self-hosted non-macOS runner to the upload path.
+      #   - `github.event_name == 'push'`: a cache written by a PR run is
+      #     scoped to that PR's ref and invisible to other PRs. Only a push to
+      #     the default branch publishes an entry every PR can restore.
+      #     `!= 'pull_request'` was the old spelling and is also true on
+      #     merge_group and workflow_dispatch, which is not what we mean.
+      - name: Save FetchContent sources (main push, GitHub-hosted Linux/Windows)
+        if: runner.environment == 'github-hosted' && runner.os != 'macOS' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.fetchcontent-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -881,8 +929,14 @@ jobs:
           fi
         shell: bash
 
-      - name: Save ccache (main non-PR GitHub-hosted)
-        if: (runner.os != 'macOS' || runner.environment == 'github-hosted') && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.ccache-cache.outputs.cache-hit != 'true'
+      # Same scope as the FetchContent save above. `cache-hit != 'true'` means
+      # this refreshes once per distinct primary key: the key embeds
+      # hashFiles('**/CMakeLists.txt', 'tools/cmake/*.cmake'), so a main push
+      # republishes whenever the build definition moves and rides the existing
+      # entry otherwise. GitHub cache keys are immutable, so a hit cannot be
+      # overwritten in place regardless.
+      - name: Save ccache (main push, GitHub-hosted Linux/Windows)
+        if: runner.environment == 'github-hosted' && runner.os != 'macOS' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.ccache-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -1073,7 +1127,8 @@ jobs:
   # tests either, and the main matrix above already covers Windows tests.
   windows-msvc-release-gate:
     needs: classify
-    if: needs.classify.outputs.native_build_required == 'true'
+    # Not a cache producer; skip on cache-warming push runs.
+    if: needs.classify.outputs.native_build_required == 'true' && github.event_name != 'push'
     runs-on: windows-latest
     name: Windows MSVC release-path gate
     steps:
@@ -1132,7 +1187,8 @@ jobs:
   # cannot exercise a live endpoint — compile-verification is the goal.
   windows-midi2-gate:
     needs: classify
-    if: needs.classify.outputs.native_build_required == 'true'
+    # Not a cache producer; skip on cache-warming push runs.
+    if: needs.classify.outputs.native_build_required == 'true' && github.event_name != 'push'
     runs-on: windows-latest
     name: Windows MIDI Services SDK compile-gate (advisory)
     continue-on-error: true
@@ -1186,7 +1242,8 @@ jobs:
   # required alias, so it can never block merge.
   windows-ble-gate:
     needs: classify
-    if: needs.classify.outputs.native_build_required == 'true'
+    # Not a cache producer; skip on cache-warming push runs.
+    if: needs.classify.outputs.native_build_required == 'true' && github.event_name != 'push'
     runs-on: windows-latest
     name: Windows BLE compile-gate (advisory)
     continue-on-error: true
@@ -1236,7 +1293,9 @@ jobs:
     # same PULP_PREAMBLE_RUNS_ON_JSON toggle — otherwise the gate still queues on
     # ubuntu-latest to *report* the result even after the preamble is relocated.
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
-    if: always()
+    # Push runs are cache-warming only — no gate to report, and the macOS
+    # leg they would poll for is deliberately absent from the matrix.
+    if: always() && github.event_name != 'push'
     steps:
       - name: macOS leg outcome (required)
         env:
@@ -1296,7 +1355,9 @@ jobs:
   linux:
     needs: [build, classify]
     runs-on: ubuntu-latest
-    if: always()
+    # Push runs are cache-warming only — no gate to report, and the macOS
+    # leg they would poll for is deliberately absent from the matrix.
+    if: always() && github.event_name != 'push'
     steps:
       - name: Linux leg outcome (advisory)
         env:
@@ -1332,7 +1393,9 @@ jobs:
   windows:
     needs: [build, windows-msvc-release-gate, classify]
     runs-on: ubuntu-latest
-    if: always()
+    # Push runs are cache-warming only — no gate to report, and the macOS
+    # leg they would poll for is deliberately absent from the matrix.
+    if: always() && github.event_name != 'push'
     steps:
       - name: Windows leg outcome (advisory)
         env:

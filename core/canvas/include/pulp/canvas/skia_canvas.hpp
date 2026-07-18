@@ -186,6 +186,7 @@ public:
                           std::size_t byte_index) override;
 
     // ── Images ──────────────────────────────────────────────────────────
+    bool supports_image_draw() const override { return true; }
     bool draw_image_from_data(const uint8_t* data, size_t size,
                               float x, float y, float w, float h) override;
     bool draw_image_from_file(const std::string& path,
@@ -443,6 +444,16 @@ private:
     // unchanged on the CPU raster path or if the upload fails. Centralised so
     // every draw_image_* method takes the same branch.
     sk_sp<SkImage> ensure_gpu_image(sk_sp<SkImage> image) const;
+
+    // Decode a file image and GPU-upload it, going through the process-wide
+    // ImageFileCache so a file image drawn every frame is read + decoded +
+    // uploaded ONCE instead of per draw. Keyed on (path, this canvas's GPU
+    // backend identity). Returns null on read/decode failure. See
+    // image_file_cache.hpp for the path-keyed (not content-keyed) semantics.
+    sk_sp<SkImage> image_from_file_cached(const std::string& path) const;
+    // The backend identity token used as part of the cache key: the Graphite
+    // recorder or the Ganesh context, or null for a CPU raster canvas.
+    const void* image_cache_backend_key() const;
 
     SkCanvas* canvas_;        // Non-owning — owned by surface or caller
     skgpu::graphite::Recorder* recorder_ = nullptr; // Non-owning — owned by SkiaSurface

@@ -52,6 +52,14 @@ if(Python3_Interpreter_FOUND)
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
     endif()
 
+    # TART_HOME resolution: the Tart VM store is a per-host value, so the VM
+    # tooling must read it from the host (env, else the tartci profile) and hard
+    # error otherwise. A repo-side default is wrong on some host and wrong
+    # silently — `tart list` against the wrong store is an empty list, not an
+    # error, so the stray-VM reaper would report success while reaping nothing.
+    add_test(NAME tart-home-resolution COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_tart_home_resolution.py")
+
     # Planning-gitlink guard: reject an accidental `planning` submodule pointer
     # bump (a `git reset --hard` + `git add -A` re-staging the drifted gitlink);
     # a deliberate re-pin passes with a `Planning-Bump:` trailer.

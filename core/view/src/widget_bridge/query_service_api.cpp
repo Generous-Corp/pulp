@@ -52,10 +52,10 @@ QueryService& WidgetBridge::ensure_query_service() {
     return *query_service_;
 }
 
-void WidgetBridge::register_query_service_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_query_service_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
-    register_bridge_function(api, "queryIndexBuild", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "queryIndexBuild", [&self](choc::javascript::ArgumentList args) {
         auto dataset = args.get<std::string>(0, "");
         if (dataset.empty()) return choc::value::Value{};
 
@@ -71,11 +71,11 @@ void WidgetBridge::register_query_service_api() {
         }
 
         auto callback = args.get<std::string>(2, "");
-        ensure_query_service().build(std::move(dataset), std::move(items), std::move(callback));
+        self.ensure_query_service().build(std::move(dataset), std::move(items), std::move(callback));
         return choc::value::Value{};
     });
 
-    register_bridge_function(api, "queryIndexSearch", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "queryIndexSearch", [&self](choc::javascript::ArgumentList args) {
         auto dataset = args.get<std::string>(0, "");
         auto text = args.get<std::string>(1, "");
         auto callback = args.get<std::string>(2, "");
@@ -87,14 +87,14 @@ void WidgetBridge::register_query_service_api() {
         options.fuzzy = args.get<bool>(4, true);
         options.case_sensitive = args.get<bool>(5, false);
 
-        ensure_query_service().query(std::move(dataset), std::move(text), std::move(callback),
+        self.ensure_query_service().query(std::move(dataset), std::move(text), std::move(callback),
                                      options);
         return choc::value::Value{};
     });
 
-    register_bridge_function(api, "queryIndexRelease", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "queryIndexRelease", [&self](choc::javascript::ArgumentList args) {
         auto dataset = args.get<std::string>(0, "");
-        if (!dataset.empty() && query_service_) query_service_->release(dataset);
+        if (!dataset.empty() && self.query_service_) self.query_service_->release(dataset);
         return choc::value::Value{};
     });
 }

@@ -366,6 +366,32 @@ drops (the `<script>` label is gone) while the visible `<div>` text survives.
 Note this is the LOSSY fallback — a JSON-IR or runtime-DOM claude/stitch input
 never reaches it; it fires only on raw non-JSON HTML.
 
+**Gotcha - `.fig` layer rotation was dropped, so a rotated needle rendered as an
+axis-aligned stub.** `scene.mjs`'s `styleFor` took only the translation column
+(`m02`/`m12`) of a node's affine transform and threw away the rotation
+(`m00/m01/m10/m11`). A knob's value needle — a thin ROUNDED_RECTANGLE rotated to
+the value angle — then imported as a vertical bar floating off-centre instead of
+a radial pointer (reported on TRIAZ "Rnd Pan"). The fix extracts
+`atan2(m10, m00)`, emits `transform: rotate(<deg>deg)`, and **compensates
+left/top for the renderer's centre transform-origin** (Figma rotates about the
+layer origin; the view rotates about centre) — so NO `setTransformOrigin` is
+emitted and CSS-lane `rotate()` (which is also centre-pivot) stays correct. The
+native codegen lowers `transform: rotate()` to `setRotation` in the shared
+`emit_js_visual_overrides`. TWO scope guards, both load-bearing:
+1. **Non-orthogonal only.** Apply the transform ONLY when the angle is not a
+   multiple of 90deg (`mod90 > 0.5 && mod90 < 89.5`). A multiple of 90deg keeps a
+   rect axis-aligned, and for a solid fill a 180deg spin is a visual no-op — the
+   centre-pivot compensation then only shifts the box off its row. That exact
+   case floated a slider's 180deg-rotated progress fill ABOVE its track (a
+   regression from the first cut of this fix). Orthogonal rotations fall through
+   to plain `m02`/`m12` placement.
+2. **Box-model only.** A `VECTOR_LIKE` node bakes its rotation into `path_data`,
+   so re-applying it double-rotates the glyph (guard `!VECTOR_LIKE.has(node.type)`;
+   verify a rotated icon like the "Reverse" ↩ button is byte-identical
+   before/after).
+Covered by `[rotation]` in `test_design_import_codegen.cpp` + a decoder test in
+`fig/fig.test.mjs` (45deg needle rotates; VECTOR and 180deg fill do not).
+
 ### Design contract (`pulp design compile`) — the token/widget allowlist
 
 Before generating or hand-writing a UI, compile the **design contract**: the
@@ -3933,3 +3959,22 @@ place, rather than surfacing later as one target's fidelity drift.
 
 `design_ir_helpers.hpp` is private to `core/view/src/` and is not part of the installed SDK
 surface — do not reference it from a public header.
+
+## Importer accommodations are opt-in, not universal
+
+Two point-in-time import fixes used to run in the core paint / hit paths for
+*every* tree. They are now CSS-faithful by default and the materializer opts in
+only where the accommodation is wanted — so imports keep their behavior while
+native/authored trees clip strictly per CSS and pay nothing for the scan:
+
+- **Circle-marker clip tolerance** (`View::set_clip_marker_tolerance()`, default
+  OFF). Expands an `overflow:hidden`/`scroll` container's clip so an
+  XY-pad-style value dot sitting at an edge value is not cropped. The native
+  materializer turns it on for the clipping containers it materializes; the
+  per-frame `O(children)` marker scan only runs when it is on. If an imported
+  circular marker is being clipped, verify the container actually got
+  `set_clip_marker_tolerance(true)` — a hand-built tree will not have it.
+- **ScrollView `overflow:visible` hit inflation** — the old hard-coded ±500px
+  hit expansion is gone; the hit area now follows the real overflow geometry.
+  A tree relying on the old blanket inflation for off-bounds hit-testing must
+  size its interactive children honestly instead.

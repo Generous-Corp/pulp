@@ -8,8 +8,8 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_border_radius_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_border_radius_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setBorderRadius(id, radius) - uniform corner radius. Per-corner
     // setters (setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight)
@@ -29,10 +29,10 @@ void WidgetBridge::register_widget_border_radius_api() {
         return {static_cast<float>(args.get<double>(idx, 0.0)), 0.0f};
     };
 
-    register_bridge_function(api, "setBorderRadius", [this, parseRadiusArg](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderRadius", [&self, parseRadiusArg](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto [px, pct] = parseRadiusArg(args, 1);
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         if (pct > 0.0f) {
             v->set_border_radius_pct(pct);
@@ -49,40 +49,40 @@ void WidgetBridge::register_widget_border_radius_api() {
     // the View; paint_all() then routes background/border through the
     // per-corner path builder rather than fill_rounded_rect. Uses the same
     // %-string handling as setBorderRadius.
-    register_bridge_function(api, "setBorderTopLeftRadius", [this, parseRadiusArg](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderTopLeftRadius", [&self, parseRadiusArg](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto [px, pct] = parseRadiusArg(args, 1);
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         if (pct > 0.0f) v->set_corner_radius_tl_pct(pct);
         else v->set_corner_radius_tl(px);
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setBorderTopRightRadius", [this, parseRadiusArg](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderTopRightRadius", [&self, parseRadiusArg](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto [px, pct] = parseRadiusArg(args, 1);
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         if (pct > 0.0f) v->set_corner_radius_tr_pct(pct);
         else v->set_corner_radius_tr(px);
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setBorderBottomLeftRadius", [this, parseRadiusArg](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderBottomLeftRadius", [&self, parseRadiusArg](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto [px, pct] = parseRadiusArg(args, 1);
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         if (pct > 0.0f) v->set_corner_radius_bl_pct(pct);
         else v->set_corner_radius_bl(px);
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setBorderBottomRightRadius", [this, parseRadiusArg](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderBottomRightRadius", [&self, parseRadiusArg](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto [px, pct] = parseRadiusArg(args, 1);
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         if (pct > 0.0f) v->set_corner_radius_br_pct(pct);
         else v->set_corner_radius_br(px);

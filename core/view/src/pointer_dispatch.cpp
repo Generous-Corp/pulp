@@ -109,4 +109,96 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
     }
 }
 
+void deliver_mouse_wheel(View& root, Point root_pt,
+                         float scroll_delta_x, float scroll_delta_y,
+                         const WheelHost& host) {
+    const auto repaint = [&] { if (host.request_repaint) host.request_repaint(); };
+
+    // 1. An open ComboBox popup consumes the wheel to scroll its (clamped) item
+    // list, ahead of any enclosing ScrollView (whose scroll would close it). The
+    // dropdown paints as an overlay with no view backing, so a plain hit_test
+    // lands on the sibling underneath — this mirrors the popup bypass so the
+    // wheel scrolls the open menu, not the page behind it.
+    if (auto* combo = ComboBox::active_popup_) {
+        float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
+        if (combo->dropdown_window_rect(ddx, ddy, ddw, ddh) &&
+            root_pt.x >= ddx && root_pt.x <= ddx + ddw &&
+            root_pt.y >= ddy && root_pt.y <= ddy + ddh) {
+            MouseEvent me;
+            me.position = point_to_local(root_pt, combo, &root);
+            me.window_position = root_pt;
+            me.is_wheel = true;
+            me.scroll_delta_x = scroll_delta_x;
+            me.scroll_delta_y = scroll_delta_y;
+            combo->on_mouse_event(me);
+            repaint();
+            return;
+        }
+    }
+
+    auto* target = root.hit_test(root_pt);
+    if (!target) {
+        // 2. Hovering over empty background inside a scroll pane returns no hit
+        // because there is no hit-testable child under the point. Route it to
+        // the scroll container the cursor is over so scrolling works anywhere in
+        // the pane without a click first.
+        if (auto* scroll = find_wheel_scroll_view_at(root, root_pt)) {
+            MouseEvent me;
+            me.position = root_pt;
+            me.window_position = root_pt;
+            me.is_wheel = true;
+            me.scroll_delta_x = scroll_delta_x;
+            me.scroll_delta_y = scroll_delta_y;
+            scroll->on_mouse_event(me);
+            scroll->layout_children();
+            repaint();
+        }
+        return;
+    }
+
+    MouseEvent me;
+    me.position = root_pt;
+    // Set window_position so a WidgetBridge wheel registrar can emit valid
+    // clientX/clientY — without this, JSX `onWheel` handlers that do
+    // `e.clientX - rect.left` (e.g. anchor-frequency for trackpad zoom) get
+    // `0 - rect.left` and the wrong anchor.
+    me.window_position = root_pt;
+    me.is_wheel = true;
+    me.scroll_delta_x = scroll_delta_x;
+    me.scroll_delta_y = scroll_delta_y;
+
+    // 3. Value widgets (knob / fader / slider / stepper / pan) under the cursor
+    // consume the wheel to adjust their value, taking precedence over an
+    // enclosing ScrollView — so "hover + scroll" tweaks the control rather than
+    // scrolling the page.
+    if (target->wants_wheel_value()) {
+        target->on_wheel(me.scroll_delta_y);
+        repaint();
+        return;
+    }
+
+    // 4. W3C wheel bubble: dispatch to every ancestor with on_pointer_event set.
+    // Each handler self-filters on me.is_wheel (registerPointer short-circuits
+    // when is_wheel is true, registerWheel when it is false), so a view that
+    // registered both gets both halves and one that registered only one ignores
+    // the other. Stopping at the first ancestor with on_pointer_event (an older
+    // approach) was wrong: it stopped at a canvas child that registered ONLY
+    // pointer events, so the wheel never reached the ancestor wrap-div that
+    // registered the zoom handler. A wants_wheel_scroll ancestor still wins and
+    // terminates the walk.
+    for (auto* v = target; v; v = v->parent()) {
+        if (v->wants_wheel_scroll()) {
+            v->on_mouse_event(me);
+            v->layout_children();
+            repaint();
+            return;
+        }
+        if (v->on_pointer_event) v->on_mouse_event(me);
+    }
+    // 5. No ancestor handled the wheel — deliver to the deepest hit so any
+    // default behavior still runs.
+    target->on_mouse_event(me);
+    repaint();
+}
+
 }  // namespace pulp::view

@@ -1206,6 +1206,125 @@ void CoreGraphicsCanvas::set_stroke_pattern(const std::string& image_src,
     // strokes continue with the existing stroke_color_.
 }
 
+// ── Images ────────────────────────────────────────────────────────────────
+//
+// Wire the ImageIO decoder (cg_decode_image_from_path_or_data, above) into the
+// Canvas image-draw verbs. Before this, CoreGraphicsCanvas inherited the base
+// no-op verbs (return false), so ImageView fell back to rendering each image's
+// FILENAME as placeholder text on the macOS CPU paint path — the
+// "filename-placeholder trap" that has its own skill + a CLI default that
+// forces the Skia backend to dodge it. With a real decoder present there is no
+// reason for CG to render unfaithfully; supports_image_draw() now returns true
+// so headless tooling treats CG as image-capable.
+
+bool CoreGraphicsCanvas::draw_cg_image_in_rect(CGImageRef img,
+                                               bool has_src,
+                                               float sx, float sy,
+                                               float sw, float sh,
+                                               float dx, float dy,
+                                               float dw, float dh) {
+    if (!img) return false;
+    if (!ctx_ || dw <= 0.0f || dh <= 0.0f) { CGImageRelease(img); return false; }
+    CGImageRef to_draw = img;
+    if (has_src) {
+        // Source-rect crop (sprite-sheet slicing). CGImageCreateWithImageInRect
+        // interprets the rect in the image's own top-left-origin pixel space,
+        // matching the sx/sy convention the Skia backend uses.
+        CGImageRef cropped = CGImageCreateWithImageInRect(
+            img, CGRectMake(sx, sy, sw, sh));
+        CGImageRelease(img);
+        if (!cropped) return false;
+        to_draw = cropped;
+    }
+    // The construction CTM flip (translate(0,h) + scale(1,-1)) already puts us
+    // in a top-down space. An ImageIO-decoded CGImage stores its rows top-first,
+    // and CGContextDrawImage maps the image so that — under this flipped CTM —
+    // it lands right-side-up when drawn straight into the destination rect. (The
+    // conic-gradient blit counter-flips because ITS source bitmap is authored
+    // bottom-up; a decoded image is the opposite orientation, so no extra flip.)
+    // Interpolation quality honors the sticky imageSmoothing state already
+    // pushed onto the GState by set_image_smoothing().
+    CGContextDrawImage(ctx_, CGRectMake(dx, dy, dw, dh), to_draw);
+    CGImageRelease(to_draw);
+    return true;
+}
+
+bool CoreGraphicsCanvas::draw_image_from_file(const std::string& path,
+                                              float x, float y, float w, float h) {
+    if (path.empty()) return false;
+    CGImageRef img = cg_decode_image_from_path_or_data(path);
+    if (!img) return false;
+    return draw_cg_image_in_rect(img, /*has_src=*/false, 0, 0, 0, 0, x, y, w, h);
+}
+
+bool CoreGraphicsCanvas::draw_image_from_data(const uint8_t* data, size_t size,
+                                              float x, float y, float w, float h) {
+    if (!data || size == 0) return false;
+    CGImageRef img = nullptr;
+    @autoreleasepool {
+        // Copy the bytes into CFData: CGImageSource may keep a lazy reference
+        // to its backing data past this call, and `data` is caller-owned.
+        CFDataRef cf = CFDataCreate(kCFAllocatorDefault, data,
+                                    static_cast<CFIndex>(size));
+        if (!cf) return false;
+        CGImageSourceRef source = CGImageSourceCreateWithData(cf, nullptr);
+        CFRelease(cf);
+        if (!source) return false;
+        img = CGImageSourceCreateImageAtIndex(source, 0, nullptr);
+        CFRelease(source);
+    }
+    if (!img) return false;
+    return draw_cg_image_in_rect(img, /*has_src=*/false, 0, 0, 0, 0, x, y, w, h);
+}
+
+bool CoreGraphicsCanvas::draw_image_from_file_rect(const std::string& path,
+                                                   float sx, float sy,
+                                                   float sw, float sh,
+                                                   float dx, float dy,
+                                                   float dw, float dh) {
+    if (path.empty()) return false;
+    CGImageRef img = cg_decode_image_from_path_or_data(path);
+    if (!img) return false;
+    return draw_cg_image_in_rect(img, /*has_src=*/true, sx, sy, sw, sh,
+                                 dx, dy, dw, dh);
+}
+
+bool CoreGraphicsCanvas::draw_image_from_data_rect(const uint8_t* data, size_t size,
+                                                   float sx, float sy,
+                                                   float sw, float sh,
+                                                   float dx, float dy,
+                                                   float dw, float dh) {
+    if (!data || size == 0) return false;
+    CGImageRef img = nullptr;
+    @autoreleasepool {
+        CFDataRef cf = CFDataCreate(kCFAllocatorDefault, data,
+                                    static_cast<CFIndex>(size));
+        if (!cf) return false;
+        CGImageSourceRef source = CGImageSourceCreateWithData(cf, nullptr);
+        CFRelease(cf);
+        if (!source) return false;
+        img = CGImageSourceCreateImageAtIndex(source, 0, nullptr);
+        CFRelease(source);
+    }
+    if (!img) return false;
+    return draw_cg_image_in_rect(img, /*has_src=*/true, sx, sy, sw, sh,
+                                 dx, dy, dw, dh);
+}
+
+bool CoreGraphicsCanvas::measure_image_from_file(const std::string& path,
+                                                 float& out_width,
+                                                 float& out_height) {
+    out_width = 0.0f;
+    out_height = 0.0f;
+    if (path.empty()) return false;
+    CGImageRef img = cg_decode_image_from_path_or_data(path);
+    if (!img) return false;
+    out_width = static_cast<float>(CGImageGetWidth(img));
+    out_height = static_cast<float>(CGImageGetHeight(img));
+    CGImageRelease(img);
+    return true;
+}
+
 // Canvas2D ctx.miterLimit.
 // CGContextSetMiterLimit attaches the value to the current GState, so
 // save()/restore() snapshots and pops it naturally. Spec: non-positive

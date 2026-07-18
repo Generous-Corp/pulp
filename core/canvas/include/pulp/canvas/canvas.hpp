@@ -1124,6 +1124,14 @@ public:
     }
 
     // ── Images ───────────────────────────────────────────────────────────
+    /// Whether this backend can actually decode + draw a raster image (the
+    /// `draw_image_from_*` verbs below). Default false: the base no-op verbs
+    /// return false and callers (e.g. ImageView) render a filename placeholder.
+    /// Backends with a real decoder — SkiaCanvas and CoreGraphicsCanvas —
+    /// override to true so headless tooling can warn ("image draw unsupported
+    /// on this backend") instead of silently producing an unfaithful render.
+    virtual bool supports_image_draw() const { return false; }
+
     /// Draw an image from encoded data (PNG, JPEG, WebP) at the given rect.
     /// Returns true if the image was decoded and drawn successfully.
     virtual bool draw_image_from_data(const uint8_t* data, size_t size,

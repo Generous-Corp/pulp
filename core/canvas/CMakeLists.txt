@@ -124,6 +124,7 @@ if(PULP_HAS_SKIA)
         src/skia_canvas_path.cpp
         src/box_shadow_cache.cpp
         src/svg_dom_cache.cpp
+        src/image_file_cache.cpp
         src/skia_canvas_opacity.cpp
         src/skia_canvas_shaders.cpp
         src/bundled_fonts.cpp

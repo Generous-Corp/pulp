@@ -49,6 +49,34 @@ void request_app_close(NSWindow* window);
 // NSWindow.
 void configure_window_type(NSWindow* window, const pulp::view::WindowOptions& options);
 
+// ── Shared window lifecycle (CPU + GPU window hosts) ──────────────────
+//
+// MacWindowHost (CoreGraphics) and MacGpuWindowHost (Dawn/Skia) build,
+// position, and tear down their backing NSWindow identically. These verbs
+// hold the one copy so the two hosts cannot drift.
+
+// Create and configure the NSWindow both window hosts back onto: titled /
+// closable / miniaturizable style (plus resizable when requested),
+// released-when-closed OFF (the host's own strong ref owns the final
+// dealloc), title, multi-window-type configuration, and content min-size.
+// The caller then attaches its own content view + delegate and any
+// host-specific tweaks (the CPU host also seeds a dark backgroundColor and
+// accepts mouse-moved events). Returns a +1-owned window (MRC "create"
+// rule) — assign it straight to the owning ivar. Never nil.
+NSWindow* create_configured_window(const pulp::view::WindowOptions& options);
+
+// Position `window` beside `other_window`: align their tops, try the right
+// side first and fall back to the left, clamped to the other window's
+// screen. Shared by both hosts' position_beside(). No-op if either is nil.
+void position_window_beside(NSWindow* window, NSWindow* other_window);
+
+// Detach + close a host window during teardown: clear its delegate, keep
+// released-when-closed OFF (the host's strong ref owns dealloc), then close.
+// The caller must nil the delegate's callback blocks (onClose / onResize)
+// FIRST so close cannot re-enter windowShouldClose:/onClose against a
+// half-freed host. No-op when `window` is nil.
+void detach_and_close_window(NSWindow* window);
+
 // ── Child-view (embedded native subview) geometry ────────────────────
 
 // Convert a top-down (x, y, width, height) rect into the container's

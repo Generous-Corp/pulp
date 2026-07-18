@@ -8,6 +8,21 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07040"></a>
+## [0.704.0] - 2026-07-18
+
+- feature/ci cache save event aware ([#6155](https://github.com/danielraffel/pulp/pull/6155))
+- ci(wclap): run Build+prove on merge_group so the merge queue can land PRs ([#6274](https://github.com/danielraffel/pulp/pull/6274))
+- docs: document reference-free oscillator validation tooling + cross-link ([#6279](https://github.com/danielraffel/pulp/pull/6279))
+- docs(shaders): stop advertising SkSL post-effects that were removed ([#6172](https://github.com/danielraffel/pulp/pull/6172))
+
+<a id="v07030"></a>
+## [0.703.0] - 2026-07-17
+
+- fix(design-import): carry .fig layer rotation so knob needles point radially ([#6270](https://github.com/danielraffel/pulp/pull/6270))
+- fix(osc): Fable-review follow-ups — click half-integer novelty, WP-4 knee pin, nits ([#6271](https://github.com/danielraffel/pulp/pull/6271))
+- build(ci): require a declared VM store instead of guessing one ([#6173](https://github.com/danielraffel/pulp/pull/6173))
+
 <a id="v07010"></a>
 ## [0.701.0] - 2026-07-18
 
@@ -6561,6 +6576,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.704.0]: https://github.com/danielraffel/pulp/releases/tag/v0.704.0
+[0.703.0]: https://github.com/danielraffel/pulp/releases/tag/v0.703.0
 [0.701.0]: https://github.com/danielraffel/pulp/releases/tag/v0.701.0
 [0.700.0]: https://github.com/danielraffel/pulp/releases/tag/v0.700.0
 [0.699.0]: https://github.com/danielraffel/pulp/releases/tag/v0.699.0

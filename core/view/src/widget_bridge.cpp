@@ -1,4 +1,5 @@
 #include <pulp/view/widget_bridge.hpp>
+#include "widget_bridge/registrars.hpp"
 #include "widget_bridge/gpu_common.hpp"
 #include "widget_bridge/bridge_dispatch.hpp"
 #include "widget_bridge/value_widget_access.hpp"
@@ -578,8 +579,20 @@ View* WidgetBridge::widget(const std::string& id) {
 
     auto it = widgets_.find(id);
     if (it != widgets_.end()) {
-        if (it->second != nullptr && subtree_contains_view(root_, it->second)) {
-            return it->second;
+        View* cached = it->second.view;
+        if (cached != nullptr) {
+            // O(1) fast path: the generation is unchanged since we last confirmed
+            // `cached` lives under root_, and add_child never detaches, so it must
+            // still be there. Only remove_child bumps the generation (and a fresh
+            // entry carries the 0 sentinel), forcing the authoritative walk below.
+            const std::uint64_t gen = View::structure_generation();
+            if (it->second.validated_generation == gen) {
+                return cached;
+            }
+            if (subtree_contains_view(root_, cached)) {
+                it->second.validated_generation = gen;
+                return cached;
+            }
         }
         widgets_.erase(it); forget_widget_registrations(id);
     }
@@ -593,7 +606,8 @@ View* WidgetBridge::widget(const std::string& id) {
 }
 
 void WidgetBridge::sync_from_store() {
-    for (auto& [id, view] : widgets_) {
+    for (auto& [id, state] : widgets_) {
+        View* view = state.view;
         if (auto* knob = dynamic_cast<Knob*>(view)) {
             // Try to find a parameter matching this widget's id
             // Convention: widget id matches parameter name
@@ -627,7 +641,7 @@ void WidgetBridge::sync_from_store() {
 View* WidgetBridge::resolve_parent(const std::string& parent_id) {
     if (parent_id.empty()) return &root_;
     auto it = widgets_.find(parent_id);
-    return it != widgets_.end() ? it->second : &root_;
+    return it != widgets_.end() ? it->second.view : &root_;
 }
 
 std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
@@ -713,7 +727,8 @@ void WidgetBridge::restore_values(const std::unordered_map<std::string, float>& 
 }
 
 void WidgetBridge::snapshot_values(WidgetReloadSnapshot& out) const {
-    for (auto& [id, view] : widgets_) {
+    for (auto& [id, state] : widgets_) {
+        View* view = state.view;
         float value = 0.0f;
         if (try_get_scalar_value(view, value)) out.scalar_values[id] = value;
         // Selection controls: their selected INDEX is reload state too — without
@@ -739,13 +754,13 @@ void WidgetBridge::restore_values(const WidgetReloadSnapshot& snapshot) {
         if (try_set_scalar_value(it->second, val)) continue;
         // Selection controls — restore the index SILENTLY so re-applying it during
         // a reload doesn't fire the widget's on_change as if the user clicked.
-        if (auto* combo = dynamic_cast<ComboBox*>(it->second)) combo->set_selected_silent(static_cast<int>(std::lround(val)));
-        else if (auto* seg = dynamic_cast<SegmentedControl*>(it->second)) seg->set_selected_silent(static_cast<int>(std::lround(val)));
+        if (auto* combo = dynamic_cast<ComboBox*>(it->second.view)) combo->set_selected_silent(static_cast<int>(std::lround(val)));
+        else if (auto* seg = dynamic_cast<SegmentedControl*>(it->second.view)) seg->set_selected_silent(static_cast<int>(std::lround(val)));
     }
     for (auto& [id, val] : snapshot.xy_values) {
         auto it = widgets_.find(id);
         if (it == widgets_.end()) continue;
-        if (auto* xy = dynamic_cast<XYPad*>(it->second)) { xy->set_x(val.x); xy->set_y(val.y); }
+        if (auto* xy = dynamic_cast<XYPad*>(it->second.view)) { xy->set_x(val.x); xy->set_y(val.y); }
     }
     // Custom widget-declared state (item 1.4b): hand each saved blob back to the
     // widget that still lives under the same script id. A widget whose id/type
@@ -813,7 +828,7 @@ void WidgetBridge::service_frame_callbacks() {
 // call sites to audit by eye.
 struct WidgetBridge::ApiGroup {
     std::optional<ReloadCapability> gate;
-    void (WidgetBridge::*install)();
+    void (*install)(WidgetBridge&);
 };
 
 void WidgetBridge::register_api() {
@@ -821,65 +836,65 @@ void WidgetBridge::register_api() {
     // overwrite a JS name registered by an earlier one, and the JS preludes
     // evaluated after this run against the resulting surface. Append; never sort.
     static constexpr ApiGroup kGroups[] = {
-        {std::nullopt,                     &WidgetBridge::register_widget_factory_controls_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_factory_controls_api},
         // Reads arbitrary file paths (image/sprite assets) → gated by Filesystem.
-        {ReloadCapability::Filesystem,     &WidgetBridge::register_widget_assets_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_factory_form_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_value_controls_api},
-        {std::nullopt,                     &WidgetBridge::register_state_binding_api},
-        {std::nullopt,                     &WidgetBridge::register_animation_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_style_visibility_api},
-        {std::nullopt,                     &WidgetBridge::register_accessibility_api},
-        {std::nullopt,                     &WidgetBridge::register_hover_event_api},
-        {std::nullopt,                     &WidgetBridge::register_layout_grid_api},
-        {std::nullopt,                     &WidgetBridge::register_pointer_event_api},
-        {std::nullopt,                     &WidgetBridge::register_metadata_removal_api},
+        {ReloadCapability::Filesystem,     &BridgeRegistrars::register_widget_assets_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_factory_form_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_value_controls_api},
+        {std::nullopt,                     &BridgeRegistrars::register_state_binding_api},
+        {std::nullopt,                     &BridgeRegistrars::register_animation_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_style_visibility_api},
+        {std::nullopt,                     &BridgeRegistrars::register_accessibility_api},
+        {std::nullopt,                     &BridgeRegistrars::register_hover_event_api},
+        {std::nullopt,                     &BridgeRegistrars::register_layout_grid_api},
+        {std::nullopt,                     &BridgeRegistrars::register_pointer_event_api},
+        {std::nullopt,                     &BridgeRegistrars::register_metadata_removal_api},
 
         // Extended API: containers, layout, all widgets, themes, canvas.
-        {std::nullopt,                     &WidgetBridge::register_widget_factory_container_api},
-        {std::nullopt,                     &WidgetBridge::register_layout_flex_api},
-        {std::nullopt,                     &WidgetBridge::register_dom_api},
-        {std::nullopt,                     &WidgetBridge::register_layout_query_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_style_interaction_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_factory_composite_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_value_list_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_factory_text_editor_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_factory_design_system_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_value_label_api},
-        {std::nullopt,                     &WidgetBridge::register_metadata_source_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_value_basic_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_typography_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_value_content_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_factory_container_api},
+        {std::nullopt,                     &BridgeRegistrars::register_layout_flex_api},
+        {std::nullopt,                     &BridgeRegistrars::register_dom_api},
+        {std::nullopt,                     &BridgeRegistrars::register_layout_query_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_style_interaction_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_factory_composite_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_value_list_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_factory_text_editor_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_factory_design_system_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_value_label_api},
+        {std::nullopt,                     &BridgeRegistrars::register_metadata_source_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_value_basic_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_typography_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_value_content_api},
 
         // Visual properties (CSS box model). CSS color parsing lives in
         // css_color.cpp (parse_bridge_css_color); each color-consuming registrar
         // calls it directly.
-        {std::nullopt,                     &WidgetBridge::register_tokens_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_text_runs_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_style_background_color_api},
-        {std::nullopt,                     &WidgetBridge::register_svg_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_border_box_api},
-        {std::nullopt,                     &WidgetBridge::register_list_style_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_outline_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_border_radius_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_border_side_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_style_shadow_api},
-        {std::nullopt,                     &WidgetBridge::register_wheel_event_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_style_opacity_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_typography_color_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_style_overflow_api},
-        {std::nullopt,                     &WidgetBridge::register_layout_box_model_api},
-        {std::nullopt,                     &WidgetBridge::register_canvas2d_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_style_state_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_typography_decoration_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_style_background_repeat_api},
-        {std::nullopt,                     &WidgetBridge::register_layout_position_api},
-        {std::nullopt,                     &WidgetBridge::register_animation_style_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_typography_overflow_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_style_cursor_direction_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_style_filter_clip_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_style_mask_object_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_style_blend_api},
+        {std::nullopt,                     &BridgeRegistrars::register_tokens_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_text_runs_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_style_background_color_api},
+        {std::nullopt,                     &BridgeRegistrars::register_svg_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_border_box_api},
+        {std::nullopt,                     &BridgeRegistrars::register_list_style_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_outline_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_border_radius_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_border_side_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_style_shadow_api},
+        {std::nullopt,                     &BridgeRegistrars::register_wheel_event_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_style_opacity_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_typography_color_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_style_overflow_api},
+        {std::nullopt,                     &BridgeRegistrars::register_layout_box_model_api},
+        {std::nullopt,                     &BridgeRegistrars::register_canvas2d_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_style_state_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_typography_decoration_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_style_background_repeat_api},
+        {std::nullopt,                     &BridgeRegistrars::register_layout_position_api},
+        {std::nullopt,                     &BridgeRegistrars::register_animation_style_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_typography_overflow_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_style_cursor_direction_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_style_filter_clip_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_style_mask_object_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_style_blend_api},
 
         // Storage-only setters for remaining CSS compatibility entries. Each
         // handler records the value on the View's catalog slot so harness
@@ -887,43 +902,43 @@ void WidgetBridge::register_api() {
         // status documents implementation depth: `partial` for storage-only with
         // deferred paint, `noop` for accept-and-ignore, and `wontfix` for
         // architectural out-of-scope.
-        {std::nullopt,                     &WidgetBridge::register_widget_typography_extended_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_style_rn_compat_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_typography_shadow_shorthand_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_style_background_subproperty_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_style_background_gradient_api},
-        {std::nullopt,                     &WidgetBridge::register_widget_style_box_shadow_api},
-        {std::nullopt,                     &WidgetBridge::register_shader_widget_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_typography_extended_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_style_rn_compat_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_typography_shadow_shorthand_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_style_background_subproperty_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_style_background_gradient_api},
+        {std::nullopt,                     &BridgeRegistrars::register_widget_style_box_shadow_api},
+        {std::nullopt,                     &BridgeRegistrars::register_shader_widget_api},
 
         // Persists style presets to temp files → gated by Storage.
-        {ReloadCapability::Storage,        &WidgetBridge::register_widget_schema_api},
-        {std::nullopt,                     &WidgetBridge::register_theme_api},
-        {ReloadCapability::Ai,             &WidgetBridge::register_platform_services_ai_api},
-        {std::nullopt,                     &WidgetBridge::register_metadata_computed_api},
+        {ReloadCapability::Storage,        &BridgeRegistrars::register_widget_schema_api},
+        {std::nullopt,                     &BridgeRegistrars::register_theme_api},
+        {ReloadCapability::Ai,             &BridgeRegistrars::register_platform_services_ai_api},
+        {std::nullopt,                     &BridgeRegistrars::register_metadata_computed_api},
 #if PULP_BRIDGE_EXEC_ENABLED
         // Shell exec — dev-only (compiled out of ship) AND gated by the exec cap.
-        {ReloadCapability::Exec,           &WidgetBridge::register_platform_services_exec_api},
+        {ReloadCapability::Exec,           &BridgeRegistrars::register_platform_services_exec_api},
 #endif
-        {std::nullopt,                     &WidgetBridge::register_context_menu_event_api},
+        {std::nullopt,                     &BridgeRegistrars::register_context_menu_event_api},
         // Native file dialogs read/choose arbitrary paths → gated by Filesystem.
-        {ReloadCapability::Filesystem,     &WidgetBridge::register_platform_services_dialog_api},
-        {std::nullopt,                     &WidgetBridge::register_runtime_api},
+        {ReloadCapability::Filesystem,     &BridgeRegistrars::register_platform_services_dialog_api},
+        {std::nullopt,                     &BridgeRegistrars::register_runtime_api},
         // Off-thread index/search — non-effectful, so no capability.
-        {std::nullopt,                     &WidgetBridge::register_query_service_api},
-        {ReloadCapability::Clipboard,      &WidgetBridge::register_platform_services_clipboard_api},
+        {std::nullopt,                     &BridgeRegistrars::register_query_service_api},
+        {ReloadCapability::Clipboard,      &BridgeRegistrars::register_platform_services_clipboard_api},
         // Key/value persistence → Storage; asset loading reads file:// paths →
         // Filesystem (granted independently).
-        {ReloadCapability::Storage,        &WidgetBridge::register_storage_key_value_api},
-        {ReloadCapability::Filesystem,     &WidgetBridge::register_asset_loading_api},
-        {std::nullopt,                     &WidgetBridge::register_drop_event_api},
-        {ReloadCapability::Filesystem,     &WidgetBridge::register_font_assets_api},
-        {std::nullopt,                     &WidgetBridge::register_shader_canvas_api},
-        {std::nullopt,                     &WidgetBridge::register_gpu_api},
+        {ReloadCapability::Storage,        &BridgeRegistrars::register_storage_key_value_api},
+        {ReloadCapability::Filesystem,     &BridgeRegistrars::register_asset_loading_api},
+        {std::nullopt,                     &BridgeRegistrars::register_drop_event_api},
+        {ReloadCapability::Filesystem,     &BridgeRegistrars::register_font_assets_api},
+        {std::nullopt,                     &BridgeRegistrars::register_shader_canvas_api},
+        {std::nullopt,                     &BridgeRegistrars::register_gpu_api},
     };
 
     for (const auto& group : kGroups) {
         if (group.gate && !granted_capabilities_.has(*group.gate)) continue;
-        (this->*group.install)();
+        group.install(*this);
     }
 }
 

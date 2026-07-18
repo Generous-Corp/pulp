@@ -195,6 +195,59 @@ test('materializeFrame builds a valid figma-plugin envelope', () => {
   assert.equal(envelope.asset_manifest.assets.length, 1);
 });
 
+test('a rotated box-model layer carries its rotation, not just its origin', () => {
+  // A knob's value needle is a thin ROUNDED_RECTANGLE the .fig rotates to the
+  // value angle. Dropping the rotation (keeping only m02/m12) rendered it as an
+  // axis-aligned stub off-center. The decoder must lower the rotation to
+  // `transform: rotate()` and compensate left/top for the renderer's center
+  // pivot. A VECTOR (path-baked rotation) must NOT get a second rotation.
+  const deg = 45;
+  const rad = deg * Math.PI / 180;
+  const c = Math.cos(rad), s = Math.sin(rad);
+  const rot = (m02, m12) => ({ m00: c, m01: -s, m02, m10: s, m11: c, m12 });
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Knob',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+      size: { x: 40, y: 40 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'ROUNDED_RECTANGLE', name: 'knob indicator',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+      size: { x: 2, y: 10 }, transform: rot(28, 9) },
+    { guid: { sessionID: 0, localID: 4 }, type: 'VECTOR', name: 'ring',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'c' },
+      size: { x: 20, y: 20 }, transform: rot(4, 4) },
+    // A 180deg-rotated solid fill (a slider's progress bar): orthogonal, so it
+    // stays axis-aligned and must NOT get a transform — applying one shifted the
+    // fill off its track row.
+    { guid: { sessionID: 0, localID: 5 }, type: 'ROUNDED_RECTANGLE', name: 'fill',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'd' },
+      size: { x: 18, y: 2 }, transform: { m00: -1, m01: 0, m02: 30, m10: 0, m11: -1, m12: 3 } },
+  ]});
+  const frame = findFrame(scene, 'Knob');
+  const { envelope } = materializeFrame(scene, frame, {
+    images: new Map(), fileKey: 'K', parserVersion: '0.1.0-test',
+    compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z',
+  });
+  const indicator = envelope.root.children.find((n) => n.name === 'knob indicator');
+  assert.equal(indicator.style.transform, 'rotate(45.00deg)',
+    'box-model layer lowers its rotation to transform: rotate()');
+  // Center-pivot compensation: left/top are shifted off the raw m02/m12 so the
+  // renderer's center rotation reproduces Figma's origin rotation.
+  assert.notEqual(indicator.style.left, 28, 'left compensated for center pivot');
+
+  const ring = envelope.root.children.find((n) => n.name === 'ring');
+  assert.ok(!ring.style.transform,
+    'a VECTOR keeps its path-baked rotation and gets no second rotate()');
+
+  // An orthogonal (180deg) box-model rotation stays axis-aligned: plain
+  // placement, no transform, so a slider's rotated fill does not float off-row.
+  const fill = envelope.root.children.find((n) => n.name === 'fill');
+  assert.ok(!fill.style.transform,
+    'a 180deg (orthogonal) fill stays axis-aligned and gets no rotate()');
+  assert.equal(fill.style.left, 30, 'orthogonal fill keeps plain m02 placement');
+  assert.equal(fill.style.top, 3, 'orthogonal fill keeps plain m12 placement');
+});
+
 test('unterminated string throws instead of hanging', () => {
   const r = new ByteReader(Buffer.from([0x68, 0x69])); // "hi" with no NUL, then EOF
   assert.throws(() => r.string(), /unterminated string/);

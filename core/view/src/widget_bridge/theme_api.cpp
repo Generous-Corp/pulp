@@ -11,41 +11,41 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_theme_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_theme_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // Theme control
-    register_bridge_function(api, "setTheme", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setTheme", [&self](choc::javascript::ArgumentList args) {
         auto n = args.get<std::string>(0, "dark");
-        root_.set_theme(n=="light" ? Theme::light() : n=="pro_audio" ? Theme::pro_audio() : Theme::dark());
+        self.root_.set_theme(n=="light" ? Theme::light() : n=="pro_audio" ? Theme::pro_audio() : Theme::dark());
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "applyTokenDiff", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "applyTokenDiff", [&self](choc::javascript::ArgumentList args) {
         auto json = args.get<std::string>(0, "");
-        if (!json.empty()) { auto d = Theme::from_json(json); auto c = root_.theme(); c.apply_overrides(d); root_.set_theme(c); }
+        if (!json.empty()) { auto d = Theme::from_json(json); auto c = self.root_.theme(); c.apply_overrides(d); self.root_.set_theme(c); }
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "getThemeJson", [this](choc::javascript::ArgumentList) {
-        return choc::value::createString(root_.theme().to_json());
+    register_bridge_function(api, "getThemeJson", [&self](choc::javascript::ArgumentList) {
+        return choc::value::createString(self.root_.theme().to_json());
     });
 
     // importDesignTokens(w3cJson) - parse W3C Design Tokens JSON and apply to theme
-    register_bridge_function(api, "importDesignTokens", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "importDesignTokens", [&self](choc::javascript::ArgumentList args) {
         auto json = args.get<std::string>(0, "");
         if (!json.empty()) {
             auto imported = parse_w3c_tokens(json);
-            auto current = root_.theme();
+            auto current = self.root_.theme();
             current.apply_overrides(imported);
-            root_.set_theme(current);
+            self.root_.set_theme(current);
         }
         return choc::value::Value();
     });
 
     // exportDesignTokens() - export current theme as W3C Design Tokens JSON
-    register_bridge_function(api, "exportDesignTokens", [this](choc::javascript::ArgumentList) {
-        return choc::value::createString(export_w3c_tokens(root_.theme()));
+    register_bridge_function(api, "exportDesignTokens", [&self](choc::javascript::ArgumentList) {
+        return choc::value::createString(export_w3c_tokens(self.root_.theme()));
     });
 }
 
