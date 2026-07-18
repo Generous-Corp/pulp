@@ -12,6 +12,7 @@ using pulp::audio::Buffer;
 using pulp::audio::SampleStreamAsyncCompletionStatus;
 using pulp::audio::SampleStreamAsyncDispatchStatus;
 using pulp::audio::SampleStreamAsyncPollStatus;
+using pulp::audio::SampleStreamAsyncPrepareStatus;
 using pulp::audio::SampleStreamAsyncReserveStatus;
 using pulp::audio::SampleStreamAsyncService;
 using pulp::audio::SampleStreamCacheService;
@@ -131,6 +132,30 @@ auto constant_reader(float value) {
 }
 
 }  // namespace
+
+TEST_CASE("Async stream service reports typed prepare outcomes",
+          "[audio][sampler][async-stream][prepare]") {
+    SampleStreamAsyncService<1, 1> service;
+    auto invalid = service.prepare_checked({});
+    REQUIRE(invalid.status ==
+            SampleStreamAsyncPrepareStatus::InvalidConfiguration);
+    REQUIRE_FALSE(service.prepared());
+
+    const auto ready = service.prepare_checked({
+        .cache = {
+            .scheduler_capacity = 8,
+            .page_memory_budget_bytes = 16,
+        },
+        .decode = {
+            .worker_count = 1,
+            .source_capacity = 2,
+            .maximum_channels = 1,
+            .maximum_frames_per_job = 4,
+        },
+    });
+    REQUIRE(ready.status == SampleStreamAsyncPrepareStatus::Ok);
+    REQUIRE(service.prepared());
+}
 
 TEST_CASE("Async stream service drains canceled work before generation replacement",
           "[audio][sampler][async-stream][retirement]") {
