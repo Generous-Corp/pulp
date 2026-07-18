@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v06970"></a>
+## [0.697.0] - 2026-07-17
+
+- fix(design-import): reconnect a detached slider fill to its thumb ([#6248](https://github.com/danielraffel/pulp/pull/6248))
+- ci: un-starve the release bot (supersession-immune scheduled drain + macOS-first de-starve) ([#6246](https://github.com/danielraffel/pulp/pull/6246))
+- ci(watchdog): auto-close SHA-keyed "release: stuck" trackers once the bump ships ([#6156](https://github.com/danielraffel/pulp/pull/6156))
+- docs(ci): record VM-lane routing reality and the JIT idle-vs-dead trap ([#6168](https://github.com/danielraffel/pulp/pull/6168))
+
 <a id="v06960"></a>
 ## [0.696.0] - 2026-07-17
 
@@ -6526,6 +6534,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.697.0]: https://github.com/danielraffel/pulp/releases/tag/v0.697.0
 [0.696.0]: https://github.com/danielraffel/pulp/releases/tag/v0.696.0
 [0.695.2]: https://github.com/danielraffel/pulp/releases/tag/v0.695.2
 [0.694.0]: https://github.com/danielraffel/pulp/releases/tag/v0.694.0
