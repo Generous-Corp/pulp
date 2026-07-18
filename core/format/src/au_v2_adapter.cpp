@@ -12,6 +12,7 @@
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/detail/param_host_sync.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
+#include <pulp/format/detail/audio_buffer_list_validation.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/parameter_text.hpp>
 #include <pulp/format/registry.hpp>
@@ -572,10 +573,7 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
                                           UInt32 inFramesToProcess)
 {
     if (!processor_) {
-        for (UInt32 i = 0; i < outBuffer.mNumberBuffers; ++i) {
-            memset(outBuffer.mBuffers[i].mData, 0,
-                   outBuffer.mBuffers[i].mDataByteSize);
-        }
+        detail::zero_audio_buffer_list(&outBuffer);
         return noErr;
     }
 
@@ -594,6 +592,38 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     // "Bad Max Frames — Render should fail" contract test.
     if (inFramesToProcess > GetMaxFramesPerSlice()) {
         return kAudioUnitErr_TooManyFramesToProcess;
+    }
+
+    const auto& input_format = Input(0).GetStreamFormat();
+    const auto& output_format = Output(0).GetStreamFormat();
+    const bool input_noninterleaved =
+        (input_format.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0;
+    const bool output_noninterleaved =
+        (output_format.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0;
+    const UInt32 expected_input_buffers = input_noninterleaved
+        ? input_format.mChannelsPerFrame : UInt32{1};
+    const UInt32 expected_output_buffers = output_noninterleaved
+        ? output_format.mChannelsPerFrame : UInt32{1};
+    const UInt32 input_channels_per_buffer = input_noninterleaved
+        ? UInt32{1} : input_format.mChannelsPerFrame;
+    const UInt32 output_channels_per_buffer = output_noninterleaved
+        ? UInt32{1} : output_format.mChannelsPerFrame;
+    const bool valid_input = detail::audio_buffer_list_shape_matches(
+                                 &inBuffer, expected_input_buffers,
+                                 input_channels_per_buffer) &&
+        detail::audio_buffer_list_has_storage(
+            &inBuffer, inFramesToProcess, input_format.mBytesPerFrame);
+    const bool valid_output = detail::audio_buffer_list_shape_matches(
+                                  &outBuffer, expected_output_buffers,
+                                  output_channels_per_buffer) &&
+        detail::audio_buffer_list_has_storage(
+            &outBuffer, inFramesToProcess, output_format.mBytesPerFrame);
+    if (!valid_input || !valid_output) {
+        detail::zero_audio_buffer_list(&outBuffer);
+        ioActionFlags |= kAudioUnitRenderAction_OutputIsSilence;
+        processor_->set_sidechain(nullptr);
+        store_.reset_triggers_rt();
+        return noErr;
     }
 
     // No host↔plugin parameter reconcile here any more. GetParameter/SetParameter

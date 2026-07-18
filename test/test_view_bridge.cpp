@@ -690,6 +690,82 @@ TEST_CASE("scripted idle pump no-ops after its processor owner is destroyed",
     bridge.reset(); // teardown must also avoid Processor lifecycle callbacks
 }
 
+// Hosts are allowed to release the format instance, editor, native host, and
+// queued idle callback in different orders. Exercise every independently-owned
+// participant instead of pinning only the owner-first ordering that originally
+// crashed Ableton. The explicit retire() mirrors the format adapters' teardown
+// contract: no referenced Processor/StateStore object may die while the shared
+// owner token still reports live.
+TEST_CASE("scripted editor teardown-order matrix rejects every stale callback",
+          "[view_bridge][idle-pump][crash][owner-lifetime][lifecycle][matrix]") {
+    struct Fixture {
+        runtime::AliveToken owner_alive;
+        std::unique_ptr<StubProcessor> processor = std::make_unique<StubProcessor>();
+        std::unique_ptr<state::StateStore> store =
+            std::make_unique<state::StateStore>();
+        std::unique_ptr<format::ViewBridge> bridge =
+            std::make_unique<format::ViewBridge>(
+                *processor, *store, owner_alive.capture());
+        std::function<void()> pump = format::make_scripted_idle_pump(*bridge);
+
+        void retire_owner() { owner_alive.retire(); }
+    };
+
+    SECTION("processor first") {
+        Fixture f;
+        f.pump();
+        f.retire_owner();
+        f.processor.reset();
+        f.pump();
+        REQUIRE_FALSE(f.bridge->owner_is_alive());
+        f.bridge.reset();
+        f.store.reset();
+    }
+
+    SECTION("store first") {
+        Fixture f;
+        f.pump();
+        f.retire_owner();
+        f.store.reset();
+        f.pump();
+        REQUIRE_FALSE(f.bridge->owner_is_alive());
+        f.bridge.reset();
+        f.processor.reset();
+    }
+
+    SECTION("processor and store owner first") {
+        Fixture f;
+        f.pump();
+        f.retire_owner();
+        f.processor.reset();
+        f.store.reset();
+        f.pump();
+        REQUIRE_FALSE(f.bridge->open());
+        f.bridge.reset();
+    }
+
+    SECTION("view bridge first") {
+        Fixture f;
+        f.pump();
+        f.bridge.reset();
+        f.pump();
+        f.retire_owner();
+        f.processor.reset();
+        f.store.reset();
+    }
+
+    SECTION("native host callback first") {
+        Fixture f;
+        f.pump();
+        f.pump = {};
+        f.bridge.reset();
+        f.retire_owner();
+        f.processor.reset();
+        f.store.reset();
+        SUCCEED("native host released its callback before every referenced owner");
+    }
+}
+
 // ── Runtime host-parameter surface (W3) ──────────────────────────────────────
 //
 // An imported design turns its knobs against `View::host_params()`. Nothing in

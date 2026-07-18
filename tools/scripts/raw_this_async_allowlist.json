@@ -1,0 +1,115 @@
+{
+  "_comment": "Reviewed pre-existing raw-owner worker captures. Each needle must be part of the matched thread construction and carries the teardown invariant that makes the site acceptable. New sites fail raw_this_async_check.py until reviewed.",
+  "entries": [
+    {
+      "path": "core/audio/include/pulp/audio/buffering_reader.hpp",
+      "needle": "std::thread([this]",
+      "reason": "BufferingReader destructor calls stop and joins the worker before member teardown"
+    },
+    {
+      "path": "core/audio/platform/linux/alsa_device.cpp",
+      "needle": "std::thread([this]",
+      "reason": "AlsaDevice destructor stops and joins the IO thread before closing device state"
+    },
+    {
+      "path": "core/audio/platform/win/wasapi_device.cpp",
+      "needle": "std::thread([this]",
+      "reason": "WasapiDevice destructor calls stop before close; the self-thread branch retires the loop before detach"
+    },
+    {
+      "path": "core/audio/src/streaming_sample_source.cpp",
+      "needle": "std::thread([this]",
+      "reason": "StreamingSampleSource release stops and joins the reader thread before clearing the reader"
+    },
+    {
+      "path": "core/events/platform/mac/bonjour_backend.cpp",
+      "needle": "std::thread(&BonjourBackend::process_loop, this",
+      "reason": "BonjourBackend destructor stops DNS services and joins both process-loop threads"
+    },
+    {
+      "path": "core/events/platform/win/bonjour_backend.cpp",
+      "needle": "std::thread(&WindowsBonjourBackend::process_loop, this",
+      "reason": "WindowsBonjourBackend destructor stops and joins browse and registration threads"
+    },
+    {
+      "path": "core/events/src/child_process_manager.cpp",
+      "needle": "std::thread([this]",
+      "reason": "ConnectedChildProcess owns a dedicated join-or-reap teardown path for its monitor worker"
+    },
+    {
+      "path": "core/events/src/child_process_manager.cpp",
+      "needle": "std::thread server_thread([this, &server_done, &server_ok]",
+      "reason": "ChildProcessManager start joins this scoped IPC-server worker on every return path before the captured stack flags leave scope"
+    },
+    {
+      "path": "core/events/src/interprocess_connection.cpp",
+      "needle": "std::thread([this]",
+      "reason": "IPC read and accept loops have explicit stop or disconnect teardown; read-loop post-callback dereferences are AliveToken guarded"
+    },
+    {
+      "path": "core/events/src/volume_detector.cpp",
+      "needle": "std::thread([this, interval]",
+      "reason": "MountedVolumeListChangeDetector destructor stops and joins the polling thread"
+    },
+    {
+      "path": "core/format/include/pulp/format/background_task_lane.hpp",
+      "needle": "std::thread([this]",
+      "reason": "BackgroundTaskLane destructor stops and joins its single worker"
+    },
+    {
+      "path": "core/format/include/pulp/format/reload/reloadable_shell.hpp",
+      "needle": "std::thread([this]",
+      "reason": "ReloadableShell destructor stops and joins its watcher before Processor teardown"
+    },
+    {
+      "path": "core/gpu_audio/src/gpu_audio_transport.cpp",
+      "needle": "std::thread([this]",
+      "reason": "GpuAudioTransport shutdown joins its worker before transport storage is released"
+    },
+    {
+      "path": "core/host/src/background_scanner.cpp",
+      "needle": "std::thread([this, worker = std::move(worker), progress = std::move(progress), completion = std::move(completion)]",
+      "reason": "BackgroundScanner destructor invokes stop_and_join and the callbacks are moved into the worker"
+    },
+    {
+      "path": "core/midi/platform/linux/alsa_midi_device.cpp",
+      "needle": "std::thread([this]",
+      "reason": "AlsaMidiInput destructor closes the handle and joins the read thread"
+    },
+    {
+      "path": "core/midi/platform/linux/ble_midi_linux.cpp",
+      "needle": "std::thread([this]",
+      "reason": "BluezBleMidiCentral stops and joins the worker before disconnecting owned devices"
+    },
+    {
+      "path": "core/platform/platform/linux/environment_linux.cpp",
+      "needle": "std::thread([this]",
+      "reason": "LinuxEnvObserver is process-static and its destructor signals and joins the poll thread"
+    },
+    {
+      "path": "core/platform/platform/win/environment_win.cpp",
+      "needle": "std::thread([this]",
+      "reason": "Windows environment observer is intentionally process-lived and its worker is documented as process-lived"
+    },
+    {
+      "path": "core/render/src/render_loop.cpp",
+      "needle": "std::thread([this]",
+      "reason": "WindowsRenderLoop and TimerRenderLoop destructors stop and join their worker threads"
+    },
+    {
+      "path": "core/runtime/src/async_stream.cpp",
+      "needle": "std::thread([this]",
+      "reason": "AsyncStream destructor calls stop; existing writer and reader workers remain tracked lifecycle debt"
+    },
+    {
+      "path": "core/runtime/src/udev_monitor.cpp",
+      "needle": "std::thread([this]",
+      "reason": "UdevMonitor destructor signals its wake pipe and joins before releasing udev and library state"
+    },
+    {
+      "path": "core/runtime/src/websocket_channel.cpp",
+      "needle": "std::thread([raw = chan.get()]",
+      "reason": "WebSocketChannel factory transfers unique ownership only after starting the reader and destructor closes then joins it"
+    }
+  ]
+}
