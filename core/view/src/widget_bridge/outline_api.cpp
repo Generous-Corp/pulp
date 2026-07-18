@@ -2,6 +2,7 @@
 
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
+#include "css_color.hpp"
 
 #include <cctype>
 #include <functional>
@@ -10,9 +11,8 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_outline_api(std::function<canvas::Color(const std::string&)> parse_color) {
+void WidgetBridge::register_widget_outline_api() {
     BridgeApiContext api{engine_};
-    auto parseHexColor = std::move(parse_color);
 
     // CSS / RN outline cluster. Outline is paint-time only: it does NOT
     // take up Yoga layout space (parent never reserves room
@@ -27,7 +27,7 @@ void WidgetBridge::register_widget_outline_api(std::function<canvas::Color(const
     // setBackground / setBorderColor (#hex / rgb() / named), plus the
     // CSS `currentColor` keyword which resolves to the View's text
     // color via the inheritable cascade.
-    register_bridge_function(api, "setOutlineColor", [this, parseHexColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setOutlineColor", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -53,7 +53,7 @@ void WidgetBridge::register_widget_outline_api(std::function<canvas::Color(const
                                                       canvas::Color::rgba8(220, 220, 220)));
             }
         } else {
-            v->set_outline_color(parseHexColor(hex));
+            v->set_outline_color(parse_bridge_css_color(hex));
         }
         return choc::value::Value();
     });

@@ -14,6 +14,7 @@
 
 #include <pulp/view/geometry.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/view.hpp>  // View::CursorStyle (set_ns_cursor_for_style)
 
 #include <cstdint>
 
@@ -119,6 +120,21 @@ bool view_is_in_tree(pulp::view::View* needle, pulp::view::View* root);
 // Translate a macOS virtual key code into Pulp's KeyCode enum.
 pulp::view::KeyCode key_code_from_ns(unsigned short code);
 
+// ── Cursor ───────────────────────────────────────────────────────────
+
+// Hide or show the process cursor, keeping AppKit's reference-counted
+// [NSCursor hide]/[NSCursor unhide] pair balanced: the hidden state is
+// tracked here, so repeated calls in the same direction are no-ops and
+// the count can never run away. Shared with set_ns_cursor_for_style —
+// relative-mouse mode and an `invisible` cursor style hide the same
+// cursor and must not each keep their own count.
+void set_ns_cursor_hidden(bool hidden);
+
+// Set the process cursor to the NSCursor backing `style`, unhiding first
+// (via set_ns_cursor_hidden) for any style other than `invisible`.
+// Styles with no native backing fall back to the arrow cursor.
+void set_ns_cursor_for_style(pulp::view::View::CursorStyle style);
+
 // Depth-first search for the topmost (last-painted) ModalOverlay in the
 // subtree rooted at `root`. Returns nullptr when none is visible.
 pulp::view::ModalOverlay* find_topmost_modal(pulp::view::View* root);
@@ -177,6 +193,72 @@ inline float display_link_nominal_dt(CVDisplayLinkRef link) {
     return 0.0f;
 }
 
+/// Owns one CVDisplayLinkRef's handle lifecycle: create, route the output
+/// callback, bind a display, start, stop, release.
+///
+/// Every macOS host that drives frames from a link (the standalone GPU window
+/// host and both plugin-view hosts) hand-rolled this CoreVideo boilerplate, and
+/// the release paths drifted. The verbs stay orthogonal — one per CoreVideo call
+/// — so each host keeps ordering its own pump seeding / suspension around them
+/// exactly as it needs to. The vsync gate, the liveness protocol that lets the
+/// callback's main-queue block outlive the host, and the frame closure itself
+/// deliberately stay with the host: those three protocols are not identical
+/// across the hosts, so this owns the handle and nothing else.
+///
+/// Not thread-safe: every verb is called from the host's thread, never from the
+/// link callback.
+class MacDisplayLinkDriver {
+public:
+    MacDisplayLinkDriver() = default;
+    ~MacDisplayLinkDriver() { stop(); }
+
+    MacDisplayLinkDriver(const MacDisplayLinkDriver&) = delete;
+    MacDisplayLinkDriver& operator=(const MacDisplayLinkDriver&) = delete;
+
+    /// Does a link handle exist? True between a successful open() and stop().
+    /// Independent of whether the link is currently ticking.
+    bool is_open() const { return link_ != nullptr; }
+
+    /// Create a link over the active displays and route its output callback to
+    /// (`callback`, `context`). Returns false — leaving the driver closed —
+    /// when a link is already open or CoreVideo declines to create one.
+    bool open(CVDisplayLinkOutputCallback callback, void* context) {
+        if (link_) return false;
+        CVDisplayLinkCreateWithActiveCGDisplays(&link_);
+        if (!link_) return false;
+        CVDisplayLinkSetOutputCallback(link_, callback, context);
+        return true;
+    }
+
+    /// Point the link at `display`, so frames are paced by the vsync of the
+    /// screen the host is actually on. No-op while closed.
+    void bind_to_display(CGDirectDisplayID display) {
+        if (link_) CVDisplayLinkSetCurrentCGDisplay(link_, display);
+    }
+
+    /// Start ticking. No-op while closed.
+    void resume() {
+        if (link_) CVDisplayLinkStart(link_);
+    }
+
+    /// This link's nominal frame interval, or 0 while closed / unknown.
+    float nominal_dt() const { return display_link_nominal_dt(link_); }
+
+    /// Stop ticking and release the handle. Idempotent. CVDisplayLinkStop is
+    /// synchronous, so no output callback runs after this returns — but a block
+    /// an earlier callback already dispatched to the main queue can still be
+    /// pending, which is what each host's own liveness token covers.
+    void stop() {
+        if (!link_) return;
+        CVDisplayLinkStop(link_);
+        CVDisplayLinkRelease(link_);
+        link_ = nullptr;
+    }
+
+private:
+    CVDisplayLinkRef link_ = nullptr;
+};
+
 /// Should the CPU plugin-view host drive a per-vsync render link?
 ///
 /// Yes whenever the editor is in a window. It used to additionally require a
@@ -196,5 +278,39 @@ inline bool plugin_view_wants_render_link(bool has_view, bool in_window) {
 }
 
 }  // namespace pulp::view::mac_frame_timing
+
+// ── Host clear / background color ─────────────────────────────────────
+//
+// Every macOS host (the standalone window host and both plugin-view hosts)
+// seeds an opaque dark background (RGB 30,30,46 = 0x1E1E2E) so no
+// clear/undefined composite flashes before the first Metal frame lands.
+// Defined once here so the NSColor, CGColor, and canvas rgba8 spellings can
+// never drift apart.
+namespace pulp::view::mac_host {
+
+inline constexpr uint8_t kHostClearR = 30;
+inline constexpr uint8_t kHostClearG = 30;
+inline constexpr uint8_t kHostClearB = 46;
+
+// AppKit spelling for NSWindow.backgroundColor.
+inline NSColor* ns_host_clear_color() {
+    return [NSColor colorWithCalibratedRed:kHostClearR / 255.0
+                                     green:kHostClearG / 255.0
+                                      blue:kHostClearB / 255.0
+                                     alpha:1.0];
+}
+
+// Core Graphics spelling for CALayer.backgroundColor. Returns a +1-owned
+// CGColorRef (CG "Create" rule) in sRGB; assign it to a retaining property.
+inline CGColorRef cg_host_clear_color() {
+    const CGFloat comps[4] = {kHostClearR / 255.0, kHostClearG / 255.0,
+                              kHostClearB / 255.0, 1.0};
+    CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGColorRef color = CGColorCreate(cs, comps);
+    CGColorSpaceRelease(cs);
+    return color;
+}
+
+}  // namespace pulp::view::mac_host
 
 #endif  // __OBJC__

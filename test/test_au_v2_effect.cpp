@@ -27,6 +27,7 @@
 #include <AudioUnitSDK/AUPlugInDispatch.h>
 #include <AudioToolbox/AudioUnit.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -956,6 +957,278 @@ TEST_CASE("AU v2 effect clears OutputIsSilence when the processor generates outp
     REQUIRE(effect.ProcessBufferLists(flags, input.bl, output.bl, kFrames) == noErr);
     REQUIRE((flags & kAudioUnitRenderAction_OutputIsSilence) == 0);
     REQUIRE((flags & kAudioUnitRenderAction_PreRender) != 0);
+
+    effect.DoCleanup();
+}
+
+// ===========================================================================
+// #6190 — the real AU v2 adapter's bypass is latency-compensated.
+//
+// A bypassed effect that reports a non-zero latency must delay its dry copy by
+// exactly that latency, so the pass-through stays sample-aligned with the
+// host's plugin-delay-compensation on the wet path. Before the fix the adapter
+// memcpy'd input→output undelayed, so the bypassed audio arrived `latency`
+// samples early (comb-filtering on parallel busses). This drives the actual
+// PulpAUEffect::ProcessBufferLists bypass short-circuit — the wiring guard for
+// the shared boundary::render_bypass_passthrough helper — so a regression that
+// unwires the delay line (back to a raw memcpy) fails here, not at auval time.
+// ===========================================================================
+namespace {
+
+class LatencyBypassEffect : public pulp::format::Processor {
+public:
+    static constexpr int kLatency = 16;
+    static constexpr pulp::state::ParamID kBypassId = 1;
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "AUBypassLatency",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.au-bypass-latency",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Main In", 2}},
+            .output_buses = {{"Main Out", 2}},
+        };
+    }
+
+    int latency_samples() const override { return kLatency; }
+
+    void define_parameters(pulp::state::StateStore& store) override {
+        pulp::state::ParamInfo bypass{};
+        bypass.id = kBypassId;
+        bypass.name = "Bypass";
+        bypass.range = {0.0f, 1.0f, 0.0f, 1.0f};
+        bypass.designation = pulp::state::ParamDesignation::Bypass;
+        store.add_parameter(bypass);
+    }
+
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    // Would negate the signal — deliberately distinct from a pass-through so a
+    // bypass that mistakenly ran the processor would be caught too. In bypass
+    // this never runs (the adapter short-circuits).
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        for (std::size_t c = 0; c < output.num_channels(); ++c) {
+            float* dst = output.channel_ptr(c);
+            const float* src = c < input.num_channels() ? input.channel_ptr(c) : nullptr;
+            for (std::size_t n = 0; n < output.num_samples(); ++n)
+                dst[n] = src ? -src[n] : 0.0f;
+        }
+    }
+
+    void process(pulp::format::ProcessBuffers& audio,
+                 pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext& context) override {
+        auto* out = audio.main_output();
+        auto* in = audio.main_input();
+        if (out && in) process(*out, *in, midi_in, midi_out, context);
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> create_latency_bypass_effect() {
+    return std::make_unique<LatencyBypassEffect>();
+}
+
+struct ScopedLatencyBypassFactory {
+    ScopedLatencyBypassFactory() : previous(pulp::format::registered_factory()) {
+        pulp::format::register_plugin(create_latency_bypass_effect);
+    }
+    ~ScopedLatencyBypassFactory() { pulp::format::register_plugin(previous); }
+    pulp::format::ProcessorFactory previous;
+};
+
+}  // namespace
+
+TEST_CASE("AU v2 effect: bypass delays the dry signal by the reported latency",
+          "[au][au-v2][effect][bypass][issue-6190]")
+{
+    ScopedLatencyBypassFactory factory;
+
+    constexpr double kSampleRate = 48000.0;
+    constexpr UInt32 kChannels = 2;
+    constexpr UInt32 kFrames = 64;
+    static_assert(LatencyBypassEffect::kLatency < static_cast<int>(kFrames),
+                  "impulse must reappear within the rendered block");
+
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    effect.CreateElements();
+    REQUIRE(effect.GetInput(0)->SetStreamFormat(
+                silence_test_format(kSampleRate, kChannels)) == noErr);
+    REQUIRE(effect.GetOutput(0)->SetStreamFormat(
+                silence_test_format(kSampleRate, kChannels)) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+
+    // Engage bypass through the host-facing parameter surface.
+    REQUIRE(effect.SetParameter(LatencyBypassEffect::kBypassId,
+                                kAudioUnitScope_Global, 0, 1.0f, 0) == noErr);
+
+    // Impulse at frame 0 on both input channels.
+    std::array<float, kFrames> in_l{}; in_l[0] = 1.0f;
+    std::array<float, kFrames> in_r{}; in_r[0] = 1.0f;
+    std::array<float, kFrames> out_l{}; out_l.fill(-1.0f);
+    std::array<float, kFrames> out_r{}; out_r.fill(-1.0f);
+
+    struct TwoBufferList {
+        AudioBufferList bl;
+        AudioBuffer second;
+    };
+    auto make_bufferlist = [](float* a, float* b, TwoBufferList& list) {
+        list.bl.mNumberBuffers = 2;
+        list.bl.mBuffers[0] = {1, static_cast<UInt32>(kFrames * sizeof(float)), a};
+        list.bl.mBuffers[1] = {1, static_cast<UInt32>(kFrames * sizeof(float)), b};
+    };
+    TwoBufferList input{}, output{};
+    make_bufferlist(in_l.data(), in_r.data(), input);
+    make_bufferlist(out_l.data(), out_r.data(), output);
+
+    AudioUnitRenderActionFlags flags = 0;
+    REQUIRE(effect.ProcessBufferLists(flags, input.bl, output.bl, kFrames) == noErr);
+
+    // The impulse must reappear at exactly frame `latency`, delayed — not at
+    // frame 0 (undelayed passthrough, the bug) and not negated (the processor,
+    // which bypass must skip).
+    for (UInt32 n = 0; n < kFrames; ++n) {
+        const float expected =
+            (n == static_cast<UInt32>(LatencyBypassEffect::kLatency)) ? 1.0f : 0.0f;
+        INFO("frame " << n);
+        REQUIRE(out_l[n] == expected);
+        REQUIRE(out_r[n] == expected);
+    }
+
+    effect.DoCleanup();
+}
+
+namespace {
+
+// Processor that flags a latency/tail change from process() when asked.
+struct AuLatencyTrigger { bool latency = false; bool tail = false; };
+AuLatencyTrigger g_au_lat_trigger;
+
+class AuLatencyProcessor : public pulp::format::Processor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "AuLatency",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.au.latency",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"In", 2}},
+            .output_buses = {{"Out", 2}},
+        };
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        if (g_au_lat_trigger.latency) { flag_latency_changed(); g_au_lat_trigger.latency = false; }
+        if (g_au_lat_trigger.tail)    { flag_tail_changed();    g_au_lat_trigger.tail = false; }
+        for (std::size_t ch = 0; ch < out.num_channels() && ch < in.num_channels(); ++ch) {
+            auto ic = in.channel(ch);
+            auto oc = out.channel(ch);
+            for (std::size_t i = 0; i < out.num_samples(); ++i) oc[i] = ic[i];
+        }
+    }
+};
+std::unique_ptr<pulp::format::Processor> create_au_latency() {
+    return std::make_unique<AuLatencyProcessor>();
+}
+struct ScopedAuLatencyFactory {
+    ScopedAuLatencyFactory() : previous(pulp::format::registered_factory()) {
+        pulp::format::register_plugin(create_au_latency);
+    }
+    ~ScopedAuLatencyFactory() { pulp::format::register_plugin(previous); }
+    pulp::format::ProcessorFactory previous;
+};
+
+// Intercepts AUBase::PropertyChanged so the test can observe which properties
+// the adapter told the host had changed.
+struct CapturingAUEffect : pulp::format::au::PulpAUEffect {
+    using pulp::format::au::PulpAUEffect::PulpAUEffect;
+    std::vector<AudioUnitPropertyID> changed;
+    void PropertyChanged(AudioUnitPropertyID inID, AudioUnitScope inScope,
+                         AudioUnitElement inElement) override {
+        changed.push_back(inID);
+        pulp::format::au::PulpAUEffect::PropertyChanged(inID, inScope, inElement);
+    }
+};
+
+}  // namespace
+
+// An AU v2 host watches kAudioUnitProperty_Latency / ...TailTime via
+// PropertyListeners; PropertyChanged is the SDK call that wakes them. If a
+// processor-flagged latency/tail change is not republished, the host's
+// plugin-delay compensation silently drifts. The wiring existed but nothing
+// asserted the notification is ever delivered.
+TEST_CASE("AU v2 fires PropertyChanged for a processor latency/tail change",
+          "[au][au-v2][effect][latency][conformance]") {
+    ScopedAuLatencyFactory factory;
+    g_au_lat_trigger = {};
+
+    constexpr double kSampleRate = 48000.0;
+    constexpr UInt32 kChannels = 2;
+    constexpr UInt32 kFrames = 64;
+
+    CapturingAUEffect effect(nullptr);
+    effect.CreateElements();
+    REQUIRE(effect.GetInput(0)->SetStreamFormat(
+                silence_test_format(kSampleRate, kChannels)) == noErr);
+    REQUIRE(effect.GetOutput(0)->SetStreamFormat(
+                silence_test_format(kSampleRate, kChannels)) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+
+    struct TwoBufferList {
+        AudioBufferList bl;
+        AudioBuffer second;
+    };
+    std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+    auto make_bl = [](float* a, float* b, TwoBufferList& list) {
+        list.bl.mNumberBuffers = 2;
+        list.bl.mBuffers[0] = {1, static_cast<UInt32>(kFrames * sizeof(float)), a};
+        list.bl.mBuffers[1] = {1, static_cast<UInt32>(kFrames * sizeof(float)), b};
+    };
+    TwoBufferList input{}, output{};
+    make_bl(in_l.data(), in_r.data(), input);
+    make_bl(out_l.data(), out_r.data(), output);
+
+    auto count = [&](AudioUnitPropertyID id) {
+        return std::count(effect.changed.begin(), effect.changed.end(), id);
+    };
+
+    // Baseline block: nothing flagged, so no latency/tail notification.
+    AudioUnitRenderActionFlags flags = 0;
+    REQUIRE(effect.ProcessBufferLists(flags, input.bl, output.bl, kFrames) == noErr);
+    REQUIRE(count(kAudioUnitProperty_Latency) == 0);
+    REQUIRE(count(kAudioUnitProperty_TailTime) == 0);
+
+    // A flagged latency change is republished exactly once.
+    g_au_lat_trigger.latency = true;
+    flags = 0;
+    REQUIRE(effect.ProcessBufferLists(flags, input.bl, output.bl, kFrames) == noErr);
+    REQUIRE(count(kAudioUnitProperty_Latency) == 1);
+    REQUIRE(count(kAudioUnitProperty_TailTime) == 0);
+
+    // A flagged tail change fires the TailTime property.
+    g_au_lat_trigger.tail = true;
+    flags = 0;
+    REQUIRE(effect.ProcessBufferLists(flags, input.bl, output.bl, kFrames) == noErr);
+    REQUIRE(count(kAudioUnitProperty_TailTime) == 1);
 
     effect.DoCleanup();
 }

@@ -18,6 +18,8 @@
 // Tests live under [issue-1035] so coverage harness can attribute
 // them to the slice that introduced them.
 
+#include "test_cli_shellout_util.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/platform/child_process.hpp>
@@ -93,7 +95,9 @@ fs::path pulp_binary() {
 
 bool binary_exists() { return fs::exists(pulp_binary()); }
 
-ProcessResult run_pulp(const std::vector<std::string>& args, int timeout_ms = 30000) {
+// Timeout defaults to the shared hang guard — see test_cli_shellout_util.hpp.
+ProcessResult run_pulp(const std::vector<std::string>& args,
+                       int timeout_ms = pulp_test_cli::shellout_timeout_ms()) {
     auto bin = pulp_binary();
     if (!fs::exists(bin)) {
         ProcessResult r;
@@ -182,6 +186,92 @@ TEST_CASE("extract_claude_classnames skips pseudo-classes and at-rule wrappers",
     REQUIRE(rules.count("ok") == 1);
     REQUIRE(rules.count("skip") == 0);
     REQUIRE(rules.count("responsive") == 0);
+}
+
+// An at-rule body must be consumed whole. Counting only to the first
+// `}` desynchronizes the walker for the rest of the block: the at-rule's
+// second rule gets promoted to an unconditional global, and the next
+// top-level rule's selector arrives glued to the leftover `}` and is
+// silently dropped. Both halves are asserted here because either one
+// alone renders wrong pixels with no diagnostic.
+TEST_CASE("extract_claude_classnames keeps its place across a multi-rule @media block",
+          "[cli][import-design][css-media]") {
+    const std::string html = R"HTML(
+        <style>@media (x) { .a { padding: 1px } .b { padding: 2px } } .c { padding: 3px }</style>
+    )HTML";
+
+    const auto rules = extract_claude_classnames(html);
+
+    // CHECK, not REQUIRE: the leak and the drop are separate halves of
+    // the same desync, and seeing both in one run is what tells you the
+    // walker lost its place rather than merely mis-filtering a selector.
+    //
+    // Conditional rules stay conditional — neither may leak out as a
+    // global, or a responsive/dark-mode override would apply always.
+    CHECK(rules.count("a") == 0);
+    CHECK(rules.count("b") == 0);
+    // The rule *after* the at-rule must survive.
+    CHECK(rules.count("c") == 1);
+    REQUIRE(rules.size() == 1);
+    REQUIRE(rules.at("c").at("padding") == "3px");
+}
+
+TEST_CASE("extract_claude_classnames skips nested at-rules and resumes after them",
+          "[cli][import-design][css-media]") {
+    const std::string html = R"HTML(
+        <style>
+        @media (min-width: 600px) {
+            @supports (display: grid) { .nested { display: grid } }
+            .inner { color: red }
+        }
+        .after { color: green }
+        </style>
+    )HTML";
+
+    const auto rules = extract_claude_classnames(html);
+
+    REQUIRE(rules.count("nested") == 0);
+    REQUIRE(rules.count("inner") == 0);
+    REQUIRE(rules.count("after") == 1);
+    REQUIRE(rules.at("after").at("color") == "green");
+    REQUIRE(rules.size() == 1);
+}
+
+TEST_CASE("extract_claude_classnames tolerates braces inside strings",
+          "[cli][import-design][css-media]") {
+    const std::string html = R"HTML(
+        <style>
+        .quoted { content: "}" ; color: red }
+        .tail { color: blue }
+        </style>
+    )HTML";
+
+    const auto rules = extract_claude_classnames(html);
+
+    // The `}` inside the string must not close `.quoted`'s body early,
+    // which would strand `; color: red }` and eat `.tail`'s selector.
+    REQUIRE(rules.count("quoted") == 1);
+    REQUIRE(rules.at("quoted").at("color") == "red");
+    REQUIRE(rules.count("tail") == 1);
+    REQUIRE(rules.at("tail").at("color") == "blue");
+}
+
+// A body-less at-rule ends at `;`. Scanning straight to the next `{`
+// folds the statement into the following rule's selector list, which
+// disqualifies it as a plain classname.
+TEST_CASE("extract_claude_classnames collects the rule after a body-less at-rule",
+          "[cli][import-design][css-media]") {
+    const std::string html = R"HTML(
+        <style>
+        @import url("theme.css");
+        .imported { color: teal }
+        </style>
+    )HTML";
+
+    const auto rules = extract_claude_classnames(html);
+
+    REQUIRE(rules.count("imported") == 1);
+    REQUIRE(rules.at("imported").at("color") == "teal");
 }
 
 TEST_CASE("extract_claude_classnames skips .scheme-* and empty bodies",
@@ -1421,3 +1511,4 @@ TEST_CASE("pulp design tweak --help prints usage", "[cli][design-tweak][shellout
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("Usage: pulp design tweak") != std::string::npos);
 }
+

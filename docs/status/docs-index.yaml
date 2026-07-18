@@ -199,6 +199,11 @@ docs:
     kind: guide
     summary: DSP algorithm reference — 20 processors with usage examples and parameter docs
 
+  - slug: oscillators
+    path: guides/oscillators.md
+    kind: guide
+    summary: The pulp::signal::osc oscillator suite — VA, VCO, DCO, and WT (modern + lo-fi tiers) over shared phase/BLEP primitives; distinct from the legacy signal::Oscillator
+
   - slug: examples
     path: guides/examples.md
     kind: guide

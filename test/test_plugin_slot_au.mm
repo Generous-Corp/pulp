@@ -44,12 +44,12 @@ std::string fourcc(std::uint32_t v) {
                        static_cast<char>(v & 0xff)};
 }
 
-// First Apple-manufacturer audio Effect, as a "TYPE:SUBT:MANU" 4CC triplet
+// First Apple-manufacturer AU of `type`, as a "TYPE:SUBT:MANU" 4CC triplet
 // (what load_au_plugin parses). Empty if none is registered — a headless CI
 // VM may not surface Apple's bundled AUs.
-std::string first_apple_effect_unique_id() {
+std::string first_apple_unique_id(OSType type) {
     AudioComponentDescription want{};
-    want.componentType = kAudioUnitType_Effect;
+    want.componentType = type;
     want.componentManufacturer = kAudioUnitManufacturer_Apple;
     AudioComponent c = AudioComponentFindNext(nullptr, &want);
     if (!c) return {};
@@ -57,6 +57,16 @@ std::string first_apple_effect_unique_id() {
     if (AudioComponentGetDescription(c, &got) != noErr) return {};
     return fourcc(got.componentType) + ":" + fourcc(got.componentSubType) + ":" +
            fourcc(got.componentManufacturer);
+}
+
+std::string first_apple_effect_unique_id() {
+    return first_apple_unique_id(kAudioUnitType_Effect);
+}
+
+// Apple's bundled software synth (DLSMusicDevice) ships with macOS, so an
+// instrument is reachable wherever the effect above is.
+std::string first_apple_instrument_unique_id() {
+    return first_apple_unique_id(kAudioUnitType_MusicDevice);
 }
 
 }  // namespace
@@ -107,6 +117,79 @@ TEST_CASE("AU host output AudioBufferList reuses pre-sized storage (A2 RT no-all
             static_cast<UInt32>(frames) * sizeof(float));
     REQUIRE(abl->mBuffers[0].mData == ch0.data());
     REQUIRE(abl->mBuffers[1].mData == ch1.data());
+}
+
+TEST_CASE("AU host slot prepares and renders an instrument, which has no input bus",
+          "[host][au][integration]") {
+    // An instrument (aumu) exposes zero input elements, so setting
+    // kAudioUnitProperty_StreamFormat on input element 0 returns
+    // kAudioUnitErr_InvalidElement and treating that as fatal rejects every
+    // instrument. An effect-only test cannot cover this: effects expose both
+    // scopes and so never take the failing path.
+    const std::string uid = first_apple_instrument_unique_id();
+    if (uid.empty()) {
+        SKIP("no Apple instrument AU registered in this environment");
+    }
+
+    host::PluginInfo info;
+    info.name = "SystemInstrument";
+    info.unique_id = uid;
+    info.format = host::PluginFormat::AudioUnit;
+    info.is_instrument = true;
+    info.is_effect = false;
+    info.num_inputs = 0;
+    info.num_outputs = 2;
+
+    auto slot = host::PluginSlot::load(info);
+    if (!slot) {
+        SKIP("system AU '" + uid + "' did not load in this environment");
+    }
+
+    // The regression: this returned false for every instrument.
+    REQUIRE(slot->prepare(48000.0, 512));
+
+    constexpr int channels = 2;
+    constexpr int frames = 512;
+    constexpr float kSentinel = 1.0f;
+    std::array<std::vector<float>, channels> chans{
+        std::vector<float>(frames, kSentinel), std::vector<float>(frames, kSentinel)};
+    std::array<float*, channels> out_ptrs{chans[0].data(), chans[1].data()};
+    // An instrument pulls no input; a 0-channel view is what a host with
+    // nothing to feed it passes.
+    audio::BufferView<const float> input(nullptr, 0, frames);
+    audio::BufferView<float> output(out_ptrs.data(), channels, frames);
+    midi::MidiBuffer midi_in, midi_out;
+    host::ParameterEventQueue params;
+
+    // Rendering must WRITE the buffer, not merely leave it finite: when
+    // AudioUnitRender fails, process() logs and returns with the caller's
+    // buffer untouched, so `isfinite` alone would pass over a dead render.
+    slot->process(output, input, midi_in, midi_out, params, frames);
+
+    bool overwritten = false;
+    for (int c = 0; c < channels; ++c) {
+        const float* p = output.channel_ptr(static_cast<std::size_t>(c));
+        for (int i = 0; i < frames; ++i) {
+            if (p[i] != kSentinel) overwritten = true;
+            if (!std::isfinite(p[i])) FAIL("non-finite output at channel " << c
+                                           << " sample " << i);
+        }
+    }
+    CHECK(overwritten);
+
+    // Drive it the way a host actually uses an instrument: a note on must
+    // produce energy. This is the end-to-end claim the fix exists to support.
+    midi_in.add(midi::MidiEvent::note_on(0, 69, 100));
+    double energy = 0.0;
+    for (int block = 0; block < 8; ++block) {
+        slot->process(output, input, midi_in, midi_out, params, frames);
+        midi_in.clear();
+        for (int c = 0; c < channels; ++c) {
+            const float* p = output.channel_ptr(static_cast<std::size_t>(c));
+            for (int i = 0; i < frames; ++i) energy += double(p[i]) * double(p[i]);
+        }
+    }
+    CHECK(energy > 0.0);
 }
 
 TEST_CASE("AU host slot renders a real system AudioUnit (A2 integration)",

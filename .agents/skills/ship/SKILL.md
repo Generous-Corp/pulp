@@ -888,8 +888,8 @@ newer) before cutting or debugging release jobs.
 
 Pulp's notarized macOS release workflow clones the Steinberg VST3 SDK directly
 inside `.github/workflows/sign-and-release.yml`. Keep that workflow pinned to
-the same upstream tag used everywhere else in the repo: `v3.7.12_build_20`.
-The shortened `v3.7.12` ref does not exist on Steinberg's repo and causes the
+the same upstream tag used everywhere else in the repo: `v3.8.0_build_66`.
+The shortened `v3.8.0` ref does not exist on Steinberg's repo and causes the
 tag-triggered macOS release job to fail immediately at `Clone VST3 SDK`, before
 configure, build, or signing begin.
 
@@ -1244,3 +1244,11 @@ Facts worth keeping (measured):
 - **Host-label hygiene matters for pinning.** A supervisor advertising two host labels
   (e.g. both `pulp-host-m5` and `pulp-host-macstudio`) makes `pin` land somewhere you
   did not choose. Check the labels before trusting a pin.
+
+## cmd_ship shells out with shell_quote(), never concatenated quotes
+
+Every shell-out in `tools/cli/cmd_ship.cpp` goes through `shell_quote()` from
+`cli_common.hpp`. It previously mixed three idioms — the shared helper, a local `sh_quote`
+lambda, and ~18 naive `'"' + path + '"'` splices — including on the signing-keychain reload
+and `gh secret set` paths, so identically-shaped paths behaved differently per call site.
+Adding a subcommand: quote with `shell_quote()`, do not copy whichever idiom is nearest.

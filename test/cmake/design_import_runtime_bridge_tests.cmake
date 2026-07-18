@@ -33,8 +33,12 @@ catch_discover_tests(pulp-test-design-frame-view
 # HostParamSurface / HostActionSurface — the SDK runtime host-param + action
 # surfaces: StateStore backing, DesignFrameView
 # sync/route/re-key, action forwarding, and cross-host binding via a fake.
+# The rt_allocation_probe harness intercepts global operator new, so the
+# paint-safe display-text reads can be asserted alloc-free rather than merely
+# documented as such.
 add_executable(pulp-test-host-param-surface
-    test_host_param_surface.cpp)
+    test_host_param_surface.cpp
+    harness/rt_allocation_probe.cpp)
 target_link_libraries(pulp-test-host-param-surface
     PRIVATE pulp::view pulp::state Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-host-param-surface
@@ -113,9 +117,12 @@ target_compile_definitions(pulp-test-design-import-react-runtime PRIVATE PULP_RE
 catch_discover_tests(pulp-test-design-import-react-runtime
     PROPERTIES LABELS "parser-import")
 
-# stable_anchor_id assignment for imported design nodes.
+# stable_anchor_id assignment for imported design nodes. PULP_REPO_ROOT lets
+# the cross-language conformance cases read test/fixtures/anchor_vectors.json,
+# the shared vector table the @pulp/import-ir vitest suite reads too.
 add_executable(pulp-test-design-import-anchors test_design_import_anchors.cpp)
 target_link_libraries(pulp-test-design-import-anchors PRIVATE pulp::view Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-design-import-anchors PRIVATE PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-design-import-anchors
     PROPERTIES LABELS "parser-import")
 

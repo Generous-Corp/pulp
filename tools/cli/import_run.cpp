@@ -17,6 +17,7 @@
 #include "import_emit_scan.hpp"
 #include "import_spi.hpp"
 #include "import_terms.hpp"
+#include "json_writer.hpp"
 #include "tool_registry.hpp"
 
 #include <chrono>
@@ -39,23 +40,6 @@ namespace spi = pulp::cli::import_spi;
 namespace ie = pulp::cli::import_emit;
 namespace ies = pulp::cli::import_emit_scan;
 
-// ── JSON string escaping for request payloads ──
-
-std::string json_escape(const std::string& s) {
-    std::string out;
-    for (char c : s) {
-        switch (c) {
-            case '"': out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default: out += c;
-        }
-    }
-    return out;
-}
-
 // ── Index resolution ──
 
 det::KnownFrameworks load_known_frameworks(std::string* index_path_out) {
@@ -70,7 +54,7 @@ det::KnownFrameworks load_known_frameworks(std::string* index_path_out) {
     // add-on importer, which contributes its own index when it is installed. Merge
     // those in — and note that with nothing installed this adds nothing, so
     // detection matches nothing and reveals nothing about what could have matched.
-    auto installed = det::merge_installed_indices(reg::pulp_home() / "tools");
+    auto installed = det::merge_installed_indices(reg::tools_install_home() / "tools");
     if (!installed.error.empty()) {
         if (!kf.error.empty()) kf.error += "; ";
         kf.error += installed.error;

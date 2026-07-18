@@ -202,6 +202,10 @@ pulp_add_test_suite(pulp-test-aax-rt-safety
 # AAX metadata/model tests
 pulp_add_test_suite(pulp-test-aax-model LIBRARIES pulp::format)
 
+# AAX editor support — gesture touch/release routing and the editor sizing
+# contract (SDK-free pure logic behind the AAX_CEffectGUI shell)
+pulp_add_test_suite(pulp-test-aax-editor LIBRARIES pulp::format)
+
 # AAX MIDI bridge — SDK-gated runtime test. test_aax_midi.cpp covers the
 # reassembly/fragmentation SDK-free; this drives the thin SDK glue
 # (decode_midi_node / encode_midi_node in aax_midi_node.cpp) through the real
@@ -219,6 +223,42 @@ if(PULP_HAS_AAX)
         LIBRARIES pulp::format pulp-aax-sdk-interface
         INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/core/format/include")
     target_compile_options(pulp-test-aax-midi-node PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-multichar>
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-undef-prefix>)
+
+    # AAX custom editor — SDK-gated construction test. test_aax_editor.cpp
+    # covers the gesture/sizing logic SDK-free; this drives the AAX_CEffectGUI
+    # shell (aax_effect_gui.cpp), which like aax_runtime.cpp is otherwise only
+    # built per-plugin, so the adapter source is compiled into the test. Needs
+    # pulp-aax-library for AAX_CEffectGUI + the ACF unknown base.
+    pulp_add_test_suite(pulp-test-aax-effect-gui
+        SOURCES test_aax_effect_gui.cpp
+                "${CMAKE_SOURCE_DIR}/core/format/src/aax_effect_gui.cpp"
+        LIBRARIES pulp::format pulp::view pulp-aax-library
+        INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/core/format/include")
+    target_compile_options(pulp-test-aax-effect-gui PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-multichar>
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-undef-prefix>)
+
+    # Which editor the entry-point macros register — the parameter strip by
+    # default, the custom editor only under PULP_AAX_PLUGIN_WITH_GUI. Drives
+    # both macros through a recording collection, so it compiles aax_runtime.cpp
+    # (for get_effect_descriptions) and aax_effect_gui.cpp (for the create proc
+    # the opt-in macro takes the address of). SDK-gated because the macros are
+    # written against the Avid interfaces; the plugin codes below are the
+    # placeholders a real target gets from pulp_add_plugin.
+    pulp_add_test_suite(pulp-test-aax-entry-registration
+        SOURCES test_aax_entry_registration.cpp
+                "${CMAKE_SOURCE_DIR}/core/format/src/aax_runtime.cpp"
+                "${CMAKE_SOURCE_DIR}/core/format/src/aax_effect_gui.cpp"
+                "${CMAKE_SOURCE_DIR}/core/format/src/aax_midi_node.cpp"
+        LIBRARIES pulp::format pulp::view pulp-aax-library
+        INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/core/format/include")
+    target_compile_definitions(pulp-test-aax-entry-registration PRIVATE
+        PULP_MANUFACTURER_CODE="PULP"
+        PULP_AAX_PRODUCT_CODE="PGAN"
+        PULP_AAX_NATIVE_CODE="PGN1")
+    target_compile_options(pulp-test-aax-entry-registration PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-multichar>
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-undef-prefix>)
 endif()

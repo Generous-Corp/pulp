@@ -1,18 +1,19 @@
-name: pulp-react build + test
+name: JS packages build + test
 
 on:
-  pull_request:
-    paths:
-      - 'packages/pulp-react/**'
-      - '.github/workflows/pulp-react-build.yml'
   push:
     branches: [main]
     paths:
       - 'packages/pulp-react/**'
+      - 'packages/pulp-import-ir/**'
+      - 'test/fixtures/anchor_vectors.json'
       - '.github/workflows/pulp-react-build.yml'
 
+  schedule:
+    - cron: '41 5 * * *'  # nightly de-starve safety net (see planning/fleet/2026-07-17-ci-destarve-analysis.md)
+  workflow_dispatch: {}
 concurrency:
-  group: pulp-react-build-${{ github.ref }}
+  group: js-packages-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -92,3 +93,37 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
           verbose: true
+
+  import-ir:
+    runs-on: ubuntu-latest
+    name: Build and test @pulp/import-ir
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        # No `cache: npm` here — the package has no lockfile, and
+        # actions/setup-node's npm cache keys off one.
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        # `npm install`, not `npm ci` — see the cache note above.
+        run: npm install --no-audit --no-fund
+        working-directory: packages/pulp-import-ir
+
+      - name: Build
+        # test/build-output.test.ts asserts against dist/, so the bundle has
+        # to exist before the suite runs.
+        run: npm run build
+        working-directory: packages/pulp-import-ir
+
+      - name: Test
+        # Includes the cross-language anchor conformance suite, which reads
+        # test/fixtures/anchor_vectors.json from the repo root — the same
+        # table pulp-test-design-import-anchors pins on the C++ side. Until
+        # this job existed the package's vitest suite ran in no CI lane at
+        # all, so TS-side anchor drift could land unnoticed.
+        run: npm test
+        working-directory: packages/pulp-import-ir

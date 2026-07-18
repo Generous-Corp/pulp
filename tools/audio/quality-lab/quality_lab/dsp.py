@@ -43,6 +43,19 @@ class LagEstimate(NamedTuple):
     confidence: float
 
 
+class AllanDeviation(NamedTuple):
+    """Result of :func:`overlapping_allan_deviation`. `taus` are the averaging factors (in
+    samples of the input series) the deviation was evaluated at; `deviations` is the
+    overlapping Allan deviation at each tau; `slope` is the robust log-log slope of deviation
+    vs tau. The SLOPE SIGN is the discriminator: white frequency noise (clock jitter) falls as
+    tau^(-1/2) (slope ~ -0.5, NEGATIVE), while random-walk frequency noise (analog drift) rises
+    as tau^(+1/2) (slope ~ +0.5, POSITIVE). A near-zero slope is the flicker/white-PM regime in
+    between. Empty arrays and a 0.0 slope when the series was too short to form even one tau."""
+    taus: np.ndarray
+    deviations: np.ndarray
+    slope: float
+
+
 def highband(y: np.ndarray) -> np.ndarray:
     """Cheap high-pass via first difference — emphasizes attack edges (>~300 Hz)."""
     return np.diff(np.asarray(y, dtype=np.float64), prepend=0.0)
@@ -765,3 +778,55 @@ def theil_sen_slope(x: np.ndarray, y: np.ndarray) -> float:
             if dx != 0.0:
                 slopes.append((y[j] - y[i]) / dx)
     return float(np.median(slopes)) if slopes else 0.0
+
+
+def overlapping_allan_deviation(
+    freq: np.ndarray, max_averaging: int | None = None
+) -> AllanDeviation:
+    """Overlapping Allan deviation of a frequency series `freq` (e.g. an f0(t) track), plus the
+    robust log-log slope that separates analog DRIFT from clock JITTER by its SIGN.
+
+    Allan deviation answers a question a plain standard deviation cannot: it is stable against —
+    in fact designed to characterize — a signal whose variance never converges (a random walk
+    has unbounded variance in the limit), and its DEPENDENCE ON THE AVERAGING TIME tau
+    fingerprints the noise type. White frequency noise (clock jitter — each sample independent)
+    averages DOWN as tau^(-1/2); random-walk frequency noise (analog drift — the accumulation of
+    small independent kicks) grows as tau^(+1/2). So the slope of log(deviation) vs log(tau) is
+    ~-1/2 for jitter and ~+1/2 for drift: opposite signs, a clean separation the two processes do
+    not otherwise offer to a single scalar.
+
+    Computed via the phase (second-difference) estimator over octave-spaced averaging factors m:
+    integrate the frequency to phase x, then
+
+        sigma^2(m) = 1 / (2 m^2 (N - 2m)) * sum_i (x[i+2m] - 2 x[i+m] + x[i])^2,
+
+    the standard overlapping estimator — every overlapping second-difference triple at each m, so
+    each tau uses the whole record. tau is reported in input-sample units (tau0 = 1); a physical
+    tau0 would only rescale tau, shifting the log-log intercept, never the slope. The slope is fit
+    with :func:`theil_sen_slope` so a single anomalous tau cannot swing its sign.
+
+    `max_averaging` caps the largest averaging factor (default: the largest octave with at least
+    one overlapping triple, m <= (N-1)/2). Pure numpy; deterministic. Returns empty arrays and a
+    0.0 slope when the series is too short to form even one tau."""
+    y = np.asarray(freq, dtype=np.float64)
+    x = np.concatenate(([0.0], np.cumsum(y)))          # phase = integrated frequency (tau0 = 1)
+    n = x.size
+    limit = (n - 1) // 2
+    if max_averaging is not None:
+        limit = min(limit, int(max_averaging))
+    taus: list[float] = []
+    devs: list[float] = []
+    m = 1
+    while m <= limit:                                  # octave-spaced m = 1, 2, 4, … ≤ limit
+        d2 = x[2 * m:] - 2.0 * x[m:-m] + x[:-2 * m]    # all overlapping second differences at lag m
+        var = float(np.sum(d2 * d2)) / (2.0 * m * m * (n - 2 * m))
+        if var > 0.0:
+            taus.append(float(m))
+            devs.append(float(np.sqrt(var)))
+        m *= 2
+    taus_arr = np.asarray(taus, dtype=np.float64)
+    devs_arr = np.asarray(devs, dtype=np.float64)
+    slope = (
+        theil_sen_slope(np.log(taus_arr), np.log(devs_arr)) if taus_arr.size >= 2 else 0.0
+    )
+    return AllanDeviation(taus_arr, devs_arr, slope)

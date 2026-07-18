@@ -13,8 +13,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [wave3-html] (HTML aria-label + role attributes route to View access slots)",
-        "test/test_widget_bridge.cpp [issue-1641-followup-aria-removeattribute]",
+        "test/test_widget_bridge_html_aria.cpp [wave3-html] (HTML aria-label + role attributes route to View access slots)",
+        "test/test_widget_bridge_html_aria.cpp [issue-1641-followup-aria-removeattribute]",
         "test/test_widget_bridge.cpp [issue-1737] (aria-pressed / -checked / -disabled / -hidden routing to View::access_*_ slots; tri-state; removeAttribute resets)"
       ],
       "notes": "Wave 3 (PR #1641) wired aria-label + role + macOS NSAccessibility. pulp #1737 \u2014 added aria-pressed / -checked / -disabled / -hidden state attributes via new setAccessibilityState bridge fn + View::access_pressed_/_checked_/_disabled_/_hidden_ slots; JS shim setAttribute fast-paths the four state attrs and __replayAriaAttributes__ covers the React-pre-mount commit order; removeAttribute clears the matching slot (mirrors the #1641 followup pattern for aria-label / role). Linux AT-SPI bridge + Windows UIA bridge remain `arch-deferred-platform-at` (tracked under pulp #217 \u2014 multi-week platform integration scope; not a Pulp-side ARIA-attribute gap). The state slots are populated cross-platform; whichever platform AT bridge lands next will read them automatically.",
@@ -30,7 +30,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Wave 1 architectural reclassification \u2014 full Range / Selection API is arch-text-editor-owns-selection (Pulp's text editor has its own selection model; the W3C Range/Selection API is not modeled by design). Wave 4 cleanup \u2014 status partial \u2192 supported + emptied unsupportedValues so the harness reflects the wired DocumentFragment surface (the React reconciler path); the Range/Selection API is an explicit arch non-goal, not a partial-deferred gap.",
       "issue": ""
@@ -83,7 +83,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -94,7 +94,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -105,7 +105,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -116,7 +116,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": "1148"
@@ -130,7 +130,7 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"Element.disabled wires to setEnabled\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "DIVERGE\u2192PASS sweep \u2014 previously the setter only flipped the stylesheet flag, leaving the native widget interactive even though `:disabled` styles applied. Now wired end-to-end via setEnabled.",
       "issue": ""
@@ -141,7 +141,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -152,7 +152,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -163,7 +163,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -174,7 +174,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -185,7 +185,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -196,7 +196,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -207,7 +207,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Pulp #468.",
       "issue": "468"
@@ -218,7 +218,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Same for offsetHeight, clientWidth, clientHeight.",
       "issue": ""
@@ -229,7 +229,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -240,7 +240,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -251,7 +251,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -262,7 +262,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -273,7 +273,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -284,7 +284,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": "1323"
@@ -295,7 +295,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -311,7 +311,7 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"new Event() round-trips through dispatchEvent\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "DIVERGE\u2192PASS sweep \u2014 userland `new Event(...)` previously was a TypeError because no Event class was exposed. Now exposed as a global constructor (plus CustomEvent for parity). Type-only events are sufficient for the harness gap; full DOM event class hierarchy (UIEvent / MouseEvent / KeyboardEvent etc.) remains a roadmap follow-up.",
       "issue": ""
@@ -328,7 +328,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "PR #1345 added :hover; PR #1641 (Wave 3 html.3) extended selector engine with [attr] / descendant / child / compound. Wave 1 architectural reclassification \u2014 @media / @keyframes / @import / @font-face / @supports / complex selectors are arch-no-cascade-engine (Pulp doesn't model the CSS cascade by design; selector evaluation is single-pass tag/.class/#id/[attr]/combinator). Wave 4 cleanup \u2014 status partial \u2192 supported + emptied unsupportedValues; the inline-style surface that IS implemented is the supported claim, the at-rule + cascade-engine extensions are explicit arch non-goals (consumers reach for @pulp/react state-dependent components for media-query / keyframe needs).",
       "issue": ""
@@ -339,7 +339,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -350,7 +350,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -361,7 +361,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Inherits ToggleButton widget \u2014 toggleable by default.",
       "issue": ""
@@ -372,7 +372,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "See canvas2d/* for the rendering surface.",
       "issue": ""
@@ -388,7 +388,7 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"<details> open setter dispatches toggle event\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "DIVERGE\u2192PASS sweep \u2014 open/closed toggle behavior wired through Element.open setter. <summary>-driven children hiding when closed is a paint-side concern that remains roadmap; the harness gap was about JS-side toggle semantics.",
       "issue": ""
@@ -406,7 +406,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::<dialog> show/close round-trips visibility and dispatches close"
+        "test/test_widget_bridge_css_per_edge.cpp::<dialog> show/close round-trips visibility and dispatches close"
       ],
       "notes": "DIVERGE\u2192PASS sweep \u2014 show/showModal/close methods exposed. pulp #1737: catalog flipped noop \u2192 supported to match the wired behavior. Wave 1 walked this back to noop conservatively because modal-input-trap + ::backdrop aren't wired, but the JS surface (show / showModal / close / open / returnValue) IS wired and the existing test [test/test_widget_bridge.cpp \"<dialog> show/close...\"] exercises the round-trip. Architectural follow-ups (native modal-input-trap layer, ::backdrop pseudo-element paint) are documented in supportedValues notes \u2014 same precedent as object-fit's degraded-but-honored claim. Closes the last html-surface NO-OP.",
       "issue": ""
@@ -419,7 +419,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Generic container \u2014 Yoga column flex by default.",
       "issue": ""
@@ -430,7 +430,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -441,7 +441,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -452,7 +452,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Used by React reconciler. Confirmed wired in web-compat-document.js (pulp #1434 batch 1).",
       "issue": ""
@@ -463,7 +463,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -493,8 +493,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [wave3-html] (querySelector minimal selector engine)",
-        "test/test_widget_bridge.cpp [issue-1641-followup-querySelector-colon]",
+        "test/test_widget_bridge_html_aria.cpp [wave3-html] (querySelector minimal selector engine)",
+        "test/test_widget_bridge_html_aria.cpp [issue-1641-followup-querySelector-colon]",
         "test/test_widget_bridge.cpp [issue-1737] (pseudo-class evaluation: :hover state, :disabled, :checked, :enabled, :not, :first/:last/:only-child, :nth-child, :empty)"
       ],
       "notes": "Wave 3 (PR #1641) wired tag/.class/#id/[attr]/[attr=value]/descendant/child. pulp #1641 followup fixed bracket-aware colon scanning. pulp #1737 \u2014 pseudo-class state matching now implemented end-to-end: state-on-element forms read the bridge-maintained el._isHovered/_hasFocus/_isActive/_disabled/_checked slots; DOM-position forms walk parent._children; :nth-child(...) supports both keyword (`odd`/`even`) and `An+B` formula syntax; :not(<simple>) recursively dispatches to _matchesSelector. Stylesheet `_applyTo` strips the pseudo before structural matching so the existing :hover/:focus/:active wire-up path keeps firing on style application (the live state evaluation happens via the event listener). Out of scope: `:has()`, `:is()`, `:where()`, attribute namespaces \u2014 these need the full CSS Selectors Level 4 cascade engine (arch-no-cascade-engine per CLAUDE.md; use @pulp/react components for state-dependent styling that goes beyond what's wired here).",
@@ -506,7 +506,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -517,7 +517,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Heading levels h1-h6 each map to a Label with default size + weight.",
       "issue": ""
@@ -528,7 +528,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -539,7 +539,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -550,7 +550,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -561,7 +561,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -572,7 +572,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -583,7 +583,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -594,7 +594,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Visual divider.",
       "issue": ""
@@ -626,7 +626,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "DIVERGE\u2192PASS sweep \u2014 fall-through to text-editor is the SUPPORTED behavior for these input types in Pulp's render surface; the catalog previously listed them as gaps but they accept input correctly (the value is just a string typed by the user). Specialized chrome \u2014 date pickers, color wheels, file pickers \u2014 remains a roadmap item; that's a separate UX concern from compat. Wave 1 drift cleanup \u2014 partial \u2192 supported (wired through _ensureNative -> bridge createTextEditor / createFader / createCheckbox).",
       "issue": ""
@@ -641,7 +641,7 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"<label for=...> click toggles labeled checkbox\"",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "DIVERGE\u2192PASS sweep \u2014 `for` attribute click-routing wired in JS. Full focus-pull (currently bridge has no setFocus) remains a roadmap follow-up; the harness gap was about the wired vs. silently-dropped distinction.",
       "issue": ""
@@ -652,7 +652,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -663,7 +663,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -674,7 +674,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Confirmed 2026-05-04. Block-level CSS semantics not modeled (no margin defaults).",
       "issue": ""
@@ -685,7 +685,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -696,7 +696,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -707,7 +707,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -718,7 +718,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Confirmed in web-compat-element.js _ensureNative.",
       "issue": ""
@@ -733,7 +733,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "PR #1345 / pulp #1149 part b added :hover; PR #1641 (Wave 3 html.3) extended selector engine. Wave 1 architectural reclassification \u2014 @media / @keyframes / complex selectors are arch-no-cascade-engine (Pulp's inline <style> parser is single-pass; the cascade engine is an explicit non-goal). Wave 4 cleanup \u2014 status partial \u2192 supported + emptied unsupportedValues so the harness reflects the wired surface; rides the StyleSheet_inline catalog claim.",
       "issue": "1149"
@@ -747,7 +747,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "PR #1347 (pulp #1147): <svg> is a leaf container that reserves layout space. For rendered SVG paths use the @pulp/react SvgPath intrinsic. Wave 1 architectural reclassification \u2014 full SVG rasterization of children is arch-explicit-non-goal (createCol shim reserves layout space; @pulp/react SvgPath intrinsic is the canonical rendered-path API \u2014 the layout-shim surface IS the supported surface). Wave 4 cleanup \u2014 status partial \u2192 supported + emptied unsupportedValues; child path/rect/circle/text rasterization is arch-non-goal, not a partial-deferred gap.",
       "issue": "1147"
@@ -758,7 +758,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""

@@ -37,6 +37,12 @@
 //     ]
 //   }
 //
+// `target_frame` is accepted and re-emitted for schema parity with the Figma
+// lane, but it does not resolve here: the schema above describes ONE SVG and ONE
+// element list, so a manifest cannot declare a second frame and the generated
+// view owns exactly one. A `swap` element hit-tests but never changes frame.
+// Multi-frame swap links come from the Figma lane instead.
+//
 // The manifest parse (bare SVG bytes + JSON) → std::vector<DesignFrameElement> is
 // the testable core; the two generate_* functions turn a parsed manifest into
 // compile-shaped C++ source text.

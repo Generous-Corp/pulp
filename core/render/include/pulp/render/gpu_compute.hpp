@@ -552,6 +552,22 @@ public:
 
     virtual AsyncStats async_stats() const = 0;
 
+    /// Opt the ASYNC convolution path into GPU-busy timing (default OFF). When on,
+    /// convolve_batch_async() occasionally brackets its compute passes with a
+    /// timestamp query and reads the result back through the SAME non-blocking
+    /// readback machinery (never a blocking map), so the shader's own execution time
+    /// becomes observable without stalling the audio path. Default-off is a hard
+    /// guarantee: with timing disabled the async path is byte-for-byte what it was,
+    /// so the native realtime audio path pays and risks nothing. The browser GPU
+    /// demo turns it on to show honest GPU-compute-vs-round-trip.
+    virtual void set_async_timing_enabled(bool /*enabled*/) {}
+
+    /// The most recent GPU-busy time of the async convolution shader, in nanoseconds
+    /// (EMA-smoothed), or 0 when timing is disabled, unsupported, or the device
+    /// quantized a small dispatch to 0 ns (Metal/Chrome do). 0 means "no honest
+    /// number", never an error — callers must render it as absent, not a stall.
+    virtual double last_gpu_busy_ns() const { return 0.0; }
+
     // ── Kernel-source seam (diagnostic) ──────────────────────────────────
     //
     // A named compute pipeline's WGSL is readable, and replaceable before the

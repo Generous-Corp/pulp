@@ -28,6 +28,36 @@ enum class UmpMessageType : uint8_t {
     Data128           = 0x5,  // 128-bit: 8-byte SysEx, mixed data set
 };
 
+// ── UMP word length by message type ─────────────────────────────────────
+
+/// Spec-complete UMP packet length, in 32-bit words, for a raw message-type
+/// nibble (bits 28-31 of word 0, values 0x0-0xF). Covers every message type
+/// the MIDI 2.0 UMP spec defines — including the reserved ranges and the
+/// 128-bit UMP-Stream type (0xF) — so a cursor walking a packet stream
+/// advances past an unrecognized message by its true length instead of
+/// re-reading its trailing words as a fresh header:
+///
+///   0x0,0x1,0x2,0x6,0x7  -> 1 word  (32-bit)
+///   0x3,0x4,0x8,0x9,0xA  -> 2 words (64-bit)
+///   0xB,0xC              -> 3 words (96-bit)
+///   0x5,0xD,0xE,0xF      -> 4 words (128-bit)
+inline int ump_words_for_message_type(uint8_t message_type) {
+    switch (message_type & 0x0F) {
+        case 0x0: case 0x1: case 0x2:
+        case 0x6: case 0x7:
+            return 1;
+        case 0x3: case 0x4:
+        case 0x8: case 0x9: case 0xA:
+            return 2;
+        case 0xB: case 0xC:
+            return 3;
+        case 0x5: case 0xD: case 0xE: case 0xF:
+            return 4;
+        default:
+            return 1;  // unreachable: the nibble is masked to 0x0-0xF
+    }
+}
+
 // ── UMP Status codes for MIDI 2.0 Channel Voice (type 0x4) ─────────────
 
 enum class Midi2Status : uint8_t {
@@ -100,20 +130,11 @@ struct UmpPacket {
         return static_cast<uint16_t>(words[1] & 0xFFFF);
     }
 
-    // Packet size in words based on message type
+    // Packet size in words based on message type. Delegates to the
+    // spec-complete free function so this and any raw-nibble cursor walk share
+    // one word-length table.
     static int size_for_type(UmpMessageType type) {
-        switch (type) {
-            case UmpMessageType::Utility:
-            case UmpMessageType::System:
-            case UmpMessageType::Midi1ChannelVoice:
-                return 1;
-            case UmpMessageType::DataSysEx:
-            case UmpMessageType::Midi2ChannelVoice:
-                return 2;
-            case UmpMessageType::Data128:
-                return 4;
-            default: return 1;
-        }
+        return ump_words_for_message_type(static_cast<uint8_t>(type));
     }
 
     // ── Factory methods ─────────────────────────────────────────────────
@@ -242,6 +263,31 @@ struct UmpPacket {
     static constexpr uint8_t kPerNoteResetControllers = 0x01;
     static constexpr uint8_t kPerNoteDetachControllers = 0x02;
 };
+
+// ── UMP packet-stream cursor ─────────────────────────────────────────────
+
+/// Walk one UMP packet's contiguous word array, visiting each complete message
+/// in order. `visit(mt, msg_words, msg_word_count)` fires once per message,
+/// where `mt` is the message-type nibble, `msg_words` points at the message's
+/// first word, and `msg_word_count` is its spec length. The cursor advances by
+/// that spec length (see `ump_words_for_message_type`), so a multi-word
+/// message's trailing words are never re-read as a fresh header. A message
+/// whose declared length runs past `word_count` (a truncated packet) stops the
+/// walk without visiting that message, so the visitor may safely read all
+/// `msg_word_count` words. Pure and allocation-free — safe on the audio thread.
+template <typename Visitor>
+inline void walk_ump_packet(const uint32_t* words, uint32_t word_count,
+                            Visitor&& visit) {
+    if (!words) return;
+    uint32_t w = 0;
+    while (w < word_count) {
+        const uint8_t mt = static_cast<uint8_t>((words[w] >> 28) & 0x0F);
+        const uint32_t n = static_cast<uint32_t>(ump_words_for_message_type(mt));
+        if (w + n > word_count) break;  // truncated: declared length overruns
+        visit(mt, words + w, n);
+        w += n;
+    }
+}
 
 // ── Utility messages (UMP type 0x0) ──────────────────────────────────────
 

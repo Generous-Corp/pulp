@@ -153,7 +153,8 @@ alternatives from the registry when available.
 
 ## Attribution Audit
 
-`tools/deps/audit.py` now runs **two** invariants under `--strict`:
+`tools/deps/audit.py` runs **three** invariants; the first two are `--strict`,
+the third also needs `--verify-licenses` (both are in `gates.sh`):
 
 1. **Consistency** — every `manifest.json` entry must appear in
    `DEPENDENCIES.md`, `NOTICE.md`, and `docs/reference/licensing.md`.
@@ -161,10 +162,46 @@ alternatives from the registry when available.
    (`requirements-docs.txt`, `mkdocs.yml`, root + `bindings/python`
    `FetchContent_Declare`, `external/<dir>/`) must be represented in
    `manifest.json` via name or `external_names` alias.
+3. **Truthfulness** — the attribution text must match the license actually on
+   disk: no NOTICE entry may reproduce a truncated permission notice, and no
+   checked-out tree may offer a copyleft alternative while the manifest
+   declares something permissive.
 
-The completeness check prevents misses where a declared dependency lands with
-zero attribution coverage because the audit only verifies cross-file
-consistency, not that declared deps are present.
+Checks 1 and 2 only ask whether a dep is *named* in each file. That is why
+both of these passed a green `--strict` run for months: NOTICE.md reproduced
+MIT without its warranty disclaimer for 21 entries, and the VST3 SDK was
+labeled MIT on all four surfaces while the pinned tree (v3.7.12) was
+"Steinberg VST3 License OR GPLv3". **A name being present says nothing about
+the text being right** — when a license claim matters, read the tree.
+
+### Writing a NOTICE entry
+
+Copy the license **verbatim from the dependency's own tree or pinned upstream
+ref** — never paste a template. MIT looks like boilerplate but is not uniform
+in practice: of 21 deps audited, mkdocs-material writes `NON-INFRINGEMENT`
+where the rest write `NONINFRINGEMENT`, and Catch2's Boost license has a
+materially different disclaimer ("TITLE AND NON-INFRINGEMENT", "ANYONE
+DISTRIBUTING THE SOFTWARE"). The entry must carry the whole notice —
+permission grant, inclusion condition, **and** warranty disclaimer.
+
+Traps when extending the checks:
+
+- **Match on flattened text.** License prose is hard-wrapped, so a phrase spans
+  a newline as often as not (`"to deal\nin the Software"`). Raw matching
+  reports entries as missing clauses they plainly contain — use
+  `audit.flatten()`.
+- **Boost opens with MIT's line.** Both start "Permission is hereby granted",
+  so identify a family by a phrase unique to it, and note the conditions are
+  worded differently ("shall" vs "must be included in all copies").
+- **Never grep a bare `GPL`.** It false-positives on identifiers such as
+  `gPluginFactory`. Match "General Public License" — and note v3.7.12 words it
+  "General Public License (GPL) Version 3", never "GNU General Public License".
+- **A dep's license lives in `LICENSE` files, not source headers**, which only
+  reference the nearest LICENSE.
+- **`external/` before the FetchContent cache.** `external/<dep>` is what the
+  build compiles; the cache accumulates every ref ever fetched, so a stale
+  cache dir can shadow the real tree and get the audit verifying a version the
+  repo does not use. A cache hit must match the pinned version.
 
 When adding a dep, always touch all four attribution files (manifest,
 DEPENDENCIES, NOTICE, licensing) plus — if the CMake / pip / vendored

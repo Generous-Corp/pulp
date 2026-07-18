@@ -141,7 +141,7 @@ Based on the workload description:
    ```bash
    cd <project_root>
    cmake -S . -B build -DPULP_JS_ENGINE=<engine>
-   cmake --build build -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)
+   tools/ci/governed-build.sh cmake --build build
    ```
    Or via the CLI:
    ```bash

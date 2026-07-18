@@ -20,6 +20,10 @@
 
 namespace pulp::format::lv2_adapter {
 
+// Per-bus channel ceiling. Independent of, but intentionally equal to,
+// boundary::kBoundaryMaxChannels (adapter_boundary.hpp) — this lightweight LV2
+// header deliberately does not include the boundary header, so the value is
+// duplicated rather than aliased. If the shared ceiling changes, change this too.
 static constexpr int kMaxChannels = 8;
 
 // LV2 plugin instance — wraps a Pulp Processor

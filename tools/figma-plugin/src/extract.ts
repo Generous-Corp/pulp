@@ -544,6 +544,26 @@ function extractStyle(n: SceneNode, ctx: WalkCtx): ExtractedStyle {
   if ("cornerRadius" in n && typeof n.cornerRadius === "number") {
     s.border_radius = n.cornerRadius;
   }
+  // Per-corner radii. The Figma plugin API exposes each corner separately when
+  // they differ (n.cornerRadius reads as `figma.mixed` then). The producer only
+  // read the uniform value, so an asymmetric card imported via the plugin lane
+  // lost its rounding — the shared per-corner codegen had nothing to emit. The
+  // C++ parse_ir_style already reads these four fields.
+  const tl = (n as { topLeftRadius?: number }).topLeftRadius;
+  const tr = (n as { topRightRadius?: number }).topRightRadius;
+  const br = (n as { bottomRightRadius?: number }).bottomRightRadius;
+  const bl = (n as { bottomLeftRadius?: number }).bottomLeftRadius;
+  if (
+    typeof tl === "number" && typeof tr === "number" &&
+    typeof br === "number" && typeof bl === "number" &&
+    !(tl === tr && tr === br && br === bl)
+  ) {
+    s.border_top_left_radius = tl;
+    s.border_top_right_radius = tr;
+    s.border_bottom_right_radius = br;
+    s.border_bottom_left_radius = bl;
+    delete s.border_radius;
+  }
 
   // Opacity
   if ("opacity" in n && (n as BlendMixin).opacity !== undefined && (n as BlendMixin).opacity < 1) {

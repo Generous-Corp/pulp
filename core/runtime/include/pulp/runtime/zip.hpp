@@ -27,8 +27,18 @@ namespace pulp::runtime {
 std::optional<std::vector<uint8_t>> gzip_compress(const uint8_t* data, size_t size,
                                                    int level = 6);
 
-/// Decompress a gzip (RFC 1952) or zlib (RFC 1950) stream.
-std::optional<std::vector<uint8_t>> gzip_decompress(const uint8_t* data, size_t size);
+/// Default ceiling on total decompressed output (bytes). Decompression is a
+/// bomb vector — a small, highly compressible input can inflate to gigabytes
+/// and OOM-kill the process — so callers on untrusted paths (appcast feeds,
+/// design-import bundles) get a bounded default. 256 MiB is far above any
+/// real payload Pulp handles while making a bomb fail closed.
+inline constexpr size_t kDefaultMaxDecompressOutput = 256u * 1024u * 1024u;
+
+/// Decompress a gzip (RFC 1952) or zlib (RFC 1950) stream. Fails closed
+/// (returns nullopt) if the decompressed output would exceed `max_output`.
+std::optional<std::vector<uint8_t>> gzip_decompress(
+    const uint8_t* data, size_t size,
+    size_t max_output = kDefaultMaxDecompressOutput);
 
 /// Convenience: compress a string into an RFC 1952 gzip stream.
 std::optional<std::vector<uint8_t>> gzip_compress(std::string_view data, int level = 6);

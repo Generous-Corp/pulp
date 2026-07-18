@@ -2,59 +2,39 @@
 
 ## Goal
 
-Close seven host-facing and real-time-safety gaps identified by comparing Pulp
-with JUCE and iPlug2, without replacing Pulp's `Processor` model or copying
-framework-specific authoring abstractions.
+Close seven host-facing and real-time-safety gaps in Pulp's parameter, state,
+and host-integration surfaces, without replacing Pulp's `Processor` model or
+introducing framework-specific authoring abstractions.
 
 This is a living implementation ledger. Status, validation evidence, and review
 findings are updated as the work progresses.
 
-## Baseline
+## Design principles
 
-- Worktree: `/Users/danielraffel/Code/pulp-parameter-state-hardening`
-- Branch: `feature/parameter-state-hardening`
-- Original base: `origin/main` at `8efe1f9865ff792e53b7436f55e6a142eb1d9d5f`
-- Pre-merge rebase: `origin/main` at `26b27de44c5257c7f8488e08699ddf10740cac59`
-- Reference trees: `/Users/danielraffel/Code/JUCE`,
-  `/Users/danielraffel/Code/iPlug2`
+Two invariants drive the parameter work:
 
-## Comparative parameter findings
+- **Normalized transport and typed plain-value semantics are separate layers.**
+  The host contract speaks normalized values; the typed layer owns plain-value
+  formatting and parsing, and format/parse are a reversible pair on that layer.
+- **Display labels are data, not a formatting side effect.** One ordered label
+  table drives both host enumeration and text parsing, so the two can never
+  disagree.
 
-### JUCE
-
-JUCE models float, int, bool, and choice as distinct parameter classes. The
-common host contract exposes normalized values, while each typed parameter owns
-plain-value formatting and parsing. `isDiscrete`, `isBoolean`, `getNumSteps`,
-and choice strings are explicit host metadata rather than heuristics.
-
-Useful invariant: normalized transport and typed plain-value semantics are
-separate layers, and format/parse are a reversible pair on the typed layer.
-
-### iPlug2
-
-iPlug2 stores an explicit parameter type plus display-text mappings. Boolean is
-a two-value enum with customizable labels. Enum and boolean parsing accepts
-known labels and deliberately does not silently fall back to arbitrary numeric
-input; continuous/integer parsing may use numeric fallback and then constrains
-the result.
-
-Useful invariant: display labels are data, not formatting side effects, and the
-same table should drive both host enumeration and text parsing.
-
-### Pulp decision
-
-Adopt a hybrid:
+## Design decisions
 
 1. Add an explicit `ParamKind` (`Continuous`, `Integer`, `Toggle`, `Enum`) to
-   `ParamInfo`; never infer kind from `step`, name, or unit.
+   `ParamInfo`; never infer kind from `step`, name, or unit. Discreteness,
+   booleanness, step count, and choice strings are explicit host metadata rather
+   than heuristics.
 2. Add ordered value labels for enum/toggle parameters. Labels define index
    semantics and reversible text tokens.
 3. Keep Pulp's raw/plain `float` storage and normalized host boundary. Centralize
    conversion, formatting, and parsing helpers so adapters do not reimplement
    policy.
 4. Make parsing fallible. Custom `from_string` wins; labels are matched next;
-   numeric parsing is allowed for continuous/integer parameters only. All
-   successful results are finite, clamped, and snapped.
+   numeric parsing is allowed for continuous/integer parameters only, so an enum
+   or toggle never silently accepts arbitrary numeric input. All successful
+   results are finite, clamped, and snapped.
 5. Preserve source compatibility: existing aggregate `ParamInfo` declarations
    default to `Continuous`; legacy stepped parameters continue to work, but only
    explicitly typed parameters receive richer host semantics.
@@ -174,12 +154,10 @@ Adopt a hybrid:
   behavior, enum numeric rejection, and full focused regression. No unresolved
   must-fix finding remains.
 
-### Pre-merge review against current main
+### Pre-merge review
 
-- Rebased all eight implementation commits onto current `origin/main` before
-  reviewing the actual merge candidate.
-- Thermo-nuclear code-health review found that new sidechain/task coverage
-  pushed `test_headless.cpp` from 969 to 1,108 lines and mixed unrelated
+- Code-health review found that new sidechain/task coverage pushed
+  `test_headless.cpp` from 969 to 1,108 lines and mixed unrelated
   responsibilities. Extracted `pulp-test-format-hardening`; the original suite
   is now 984 lines and the focused suite owns sidechain/task behavior.
 - Adversarial review found raw `try/catch` in the public background-task header,
@@ -201,7 +179,7 @@ Adopt a hybrid:
 - Focused review-fix validation passes: format hardening 127 assertions/5
   cases, explicit-kind StateStore 5/1, layout/source compatibility 17/5, CLAP
   port/config 54/2, and headless layout selection 4/1.
-- Final rebased affected-suite run passes: StateStore 1,825 assertions/98
+- Final affected-suite run passes: StateStore 1,825 assertions/98
   cases, CLAP 302/19, LV2 105/13, AAX model 142/17, plugin-state IO 166/16,
   headless 214/26, format hardening 127/5, Processor layout/latency/mode 131/21,
   and AudioTap/ring 60/7. `PulpGain_AUv3` builds successfully in Release.

@@ -367,57 +367,15 @@ void Meter::update(float raw_peak, float raw_rms, float dt) {
                          b.height + 2 * kMeterPeakOverscan});
 }
 
-void Meter::set_source(std::shared_ptr<MeterSource> source, int channel) {
-    source_ = std::move(source);
-    source_channel_ = channel < 0 ? 0 : channel;
-    if (source_) {
-        try_source_subscription();
-    } else {
-        // Unbinding: drop the subscription so the meter stops holding the
-        // editor's frames alive once nothing feeds it.
-        stop_source_subscription();
-    }
-}
-
-void Meter::try_source_subscription() {
-    FrameClock* clock = frame_clock();
-    if (source_sub_id_ != -1) {
-        if (clock == subscribed_clock_) return;  // already on the right clock
-        stop_source_subscription();              // clock changed → re-point below
-    }
-    if (!source_) return;               // nothing to read
-    if (!clock) return;                 // no clock reachable yet (preview / pre-host)
-    subscribed_clock_ = clock;
-    source_sub_id_ = clock->subscribe([this](float dt) { return on_source_frame(dt); });
-}
-
-void Meter::stop_source_subscription() {
-    if (source_sub_id_ != -1 && subscribed_clock_) {
-        subscribed_clock_->unsubscribe(source_sub_id_);
-    }
-    source_sub_id_ = -1;
-    subscribed_clock_ = nullptr;
-}
-
-bool Meter::on_source_frame(float dt) {
-    // Self-heal teardown: if the source was unbound, or this meter was detached
-    // / re-parented so the reachable clock no longer matches the one we
-    // subscribed to, drop the subscription (return false auto-unsubscribes).
-    // This covers detaches that never fire on_detached on every descendant.
-    if (!source_ || frame_clock() != subscribed_clock_) {
-        source_sub_id_ = -1;
-        subscribed_clock_ = nullptr;
-        return false;
-    }
-    const MeterFrame frame = source_->read();
+void Meter::on_meter_frame(const MeterFrame& frame, float dt) {
     // Defensively bound the index by BOTH the frame's channel count and the
     // fixed array capacity — a misbehaving publisher can set `channels` past
-    // kMaxChannels, and source_channel_ is caller-supplied. Never index OOB.
+    // kMaxChannels, and the channel is caller-supplied. Never index OOB.
     const int usable = std::min(frame.channels, MeterFrame::kMaxChannels);
-    if (source_channel_ >= 0 && source_channel_ < usable) {
-        update(frame.peak[source_channel_], frame.rms[source_channel_], dt);
+    const int channel = meter_source_channel();
+    if (channel >= 0 && channel < usable) {
+        update(frame.peak[channel], frame.rms[channel], dt);
     }
-    return true;
 }
 
 canvas::Color ImageView::fill_gradient_color_at(float t) const {

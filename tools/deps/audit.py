@@ -20,6 +20,15 @@ It verifies two classes of invariant:
    redistributed bootstrap binary) is represented by a manifest entry. This
    class of check was missing, which is how #582 shipped MkDocs Material
    without touching the four attribution files.
+
+3. **Truthfulness** (``--verify-licenses``) — the attribution surfaces must
+   agree with the license text actually on disk. The checks above only ask
+   whether a dependency is *named* in each file, so both of the following
+   passed a green ``--strict`` audit: NOTICE.md reproduced a truncated MIT
+   license for 25 of its 26 MIT entries, and the VST3 SDK was labeled MIT
+   across all four surfaces while the pinned tree was "Steinberg VST3
+   License OR GPLv3". A name being present says nothing about the text being
+   right.
 """
 
 from __future__ import annotations
@@ -49,8 +58,190 @@ EXTERNAL_DIR = ROOT / "external"
 GRADLE_WRAPPER_JAR = ROOT / "android" / "gradle" / "wrapper" / "gradle-wrapper.jar"
 
 
+# ── License verification ────────────────────────────────────────────────────
+#
+# Where a dependency's real license text lives locally. setup.sh clones into a
+# shared FetchContent cache and links external/<name> at it, so both roots are
+# checked. Trees that are not present locally are reported as unverified rather
+# than assumed good — an absent tree is not evidence of a correct license.
+FETCHCONTENT_CACHE = Path.home() / "Library" / "Caches" / "Pulp" / "fetchcontent-src"
+
+LICENSE_FILE_NAMES = ("LICENSE", "LICENSE.txt", "LICENSE.md", "COPYING", "license.txt")
+
+# A permission notice has three parts, and reproducing only the first is the
+# truncation this check exists to catch: these licenses condition redistribution
+# on including the notice, and the warranty disclaimer is part of it.
+#
+# Families are identified by a phrase unique to each, not by the shared opener
+# "Permission is hereby granted" — the Boost license opens with that line too,
+# and matching on it alone misreports BSL entries (Catch2) as truncated MIT.
+# Each family's condition is worded differently ("shall" vs "must"), so the
+# structure is checked per family rather than with one set of markers.
+LICENSE_DISCLAIMER = "THE SOFTWARE IS PROVIDED"
+LICENSE_FAMILIES = (
+    # (family, phrase identifying it, phrase for its inclusion condition)
+    ("MIT", "to deal in the Software without restriction", "shall be included in all"),
+    ("BSL-1.0", "Boost Software License", "must be included in all copies"),
+)
+
+# Match the spelled-out phrase, never a bare "GPL": v3.7.12's LICENSE.txt words
+# it "General Public License (GPL) Version 3" and never "GNU General Public
+# License", while "GPL" alone false-positives on identifiers (gPluginFactory).
+COPYLEFT_MARKERS = (
+    "General Public License",
+    "Server Side Public License",
+    "Mozilla Public License",
+)
+
+# Licenses whose presence in a redistributed tree is a policy violation per
+# CLAUDE.md. MPL-2.0 is review-required rather than forbidden, so it is
+# reported as a warning by name rather than a hard failure.
+REVIEW_ONLY_MARKERS = ("Mozilla Public License",)
+
+
 def load_manifest() -> list[dict]:
     return json.loads(MANIFEST.read_text())["dependencies"]
+
+
+def flatten(text: str) -> str:
+    """Collapse all whitespace so phrase matching survives line wrapping.
+
+    License prose is hard-wrapped at differing widths, so a phrase spans a
+    newline as often as not ("to deal\\nin the Software"). Matching raw text
+    reported entries as missing clauses they plainly contained.
+    """
+    return re.sub(r"\s+", " ", text)
+
+
+def parse_notice_entries() -> dict[str, str]:
+    """Return {entry name: body text} for every ``## `` block in NOTICE.md."""
+    text = NOTICE_MD.read_text()
+    entries: dict[str, str] = {}
+    for block in re.split(r"^## ", text, flags=re.M)[1:]:
+        name, _, body = block.partition("\n")
+        entries[name.strip()] = body
+    return entries
+
+
+def find_notice_truncations() -> list[tuple[str, list[str]]]:
+    """Find NOTICE.md entries reproducing an incomplete permission notice.
+
+    Only entries whose license family is recognized are checked; BSD, Apache,
+    zlib and public-domain entries carry no matching phrase and are left alone.
+    """
+    problems: list[tuple[str, list[str]]] = []
+    for name, raw_body in parse_notice_entries().items():
+        body = flatten(raw_body)
+        for _family, identifier, condition in LICENSE_FAMILIES:
+            if identifier not in body:
+                continue
+            missing = []
+            if condition not in body:
+                missing.append("inclusion condition")
+            if LICENSE_DISCLAIMER not in body:
+                missing.append("warranty disclaimer")
+            if missing:
+                problems.append((name, missing))
+            break
+    return problems
+
+
+def local_source_tree(dep: dict) -> Path | None:
+    """Locate a dependency's checked-out tree, or None if not available.
+
+    ``external/`` is searched before the shared FetchContent cache, and never
+    merged with it: external/<dep> is what the build actually compiles (setup.sh
+    links it at the pinned ref), while the cache accumulates every ref ever
+    fetched. Searching them together let a stale cache dir shadow the real tree
+    and the audit then verified a version the repo does not use.
+
+    A cache hit must also match the manifest's pinned version, since the cache
+    holds several refs of the same dependency side by side.
+    """
+    aliases = manifest_alias_set(dep) | {dep["name"]}
+    wanted = {_normalise(a) for a in aliases}
+
+    if EXTERNAL_DIR.is_dir():
+        for path in sorted(p for p in EXTERNAL_DIR.iterdir() if p.is_dir()):
+            # _normalise strips punctuation, which makes the directory
+            # "cpp-httplib" match the manifest's "cpphttplib" alias.
+            if _normalise(path.name) in wanted:
+                return path
+
+    version = dep.get("version", "")
+    if FETCHCONTENT_CACHE.is_dir() and version:
+        for path in sorted(p for p in FETCHCONTENT_CACHE.iterdir() if p.is_dir()):
+            # Cache dirs are "<name>-<ref>". Strip the ref using the pinned
+            # version rather than splitting on "-", which mangles multi-hyphen
+            # refs ("sdl3-release-3.2.12" -> "sdl3-release-3.2").
+            if not path.name.endswith(version):
+                continue
+            if _normalise(path.name[: -len(version)].rstrip("-")) in wanted:
+                return path
+    return None
+
+
+def find_license_files(tree: Path) -> list[Path]:
+    """Top-level and one-level-deep license files in a dependency tree.
+
+    Scoped deliberately: a dependency's own license sits at the root or in the
+    module dirs beside it, while a deep walk pulls in vendored third-party and
+    sample dependencies whose licenses are not the dependency's own claim.
+
+    Deduplicated by resolved path — macOS is case-insensitive, so LICENSE.txt
+    and license.txt name one file there and would otherwise report twice.
+    """
+    wanted = {n.lower() for n in LICENSE_FILE_NAMES}
+    found: dict[Path, Path] = {}
+
+    def collect(directory: Path) -> None:
+        try:
+            entries = sorted(directory.iterdir())
+        except OSError:
+            return
+        for entry in entries:
+            if entry.name.lower() in wanted and entry.is_file():
+                found.setdefault(entry.resolve(), entry)
+
+    collect(tree)
+    for child in sorted(p for p in tree.iterdir() if p.is_dir()):
+        if child.name in {"doc", "docs", "test", "tests", "samples", "thirdparty"}:
+            continue
+        collect(child)
+    return list(found.values())
+
+
+def verify_dep_license(dep: dict) -> tuple[str, list[str]]:
+    """Check a dependency's on-disk license against its manifest claim.
+
+    Returns (status, problems) where status is one of verified / unverified.
+    """
+    declared = dep.get("license", "")
+    tree = local_source_tree(dep)
+    if tree is None:
+        return "unverified", []
+
+    license_files = find_license_files(tree)
+    if not license_files:
+        return "unverified", []
+
+    problems: list[str] = []
+    for path in license_files:
+        try:
+            text = path.read_text(errors="replace")
+        except OSError:
+            continue
+        rel = path.relative_to(tree)
+        flat = flatten(text)
+        for marker in COPYLEFT_MARKERS:
+            if marker not in flat:
+                continue
+            severity = "review-required" if marker in REVIEW_ONLY_MARKERS else "FORBIDDEN"
+            problems.append(
+                f"{rel} offers {marker} ({severity}) but the manifest declares "
+                f"{declared!r}"
+            )
+    return "verified", problems
 
 
 def parse_dependencies_md() -> set[str]:
@@ -519,6 +710,11 @@ def main() -> int:
     parser.add_argument("--check-upstream", action="store_true", help="Query upstream repos")
     parser.add_argument("--format", choices=["text", "markdown"], default="text")
     parser.add_argument("--strict", action="store_true", help="Fail if docs/notices are incomplete")
+    parser.add_argument(
+        "--verify-licenses",
+        action="store_true",
+        help="Check attribution text against the licenses actually on disk",
+    )
     args = parser.parse_args()
 
     manifest = load_manifest()
@@ -567,6 +763,18 @@ def main() -> int:
     declared = collect_declared()
     uncovered = find_uncovered_declarations(manifest, declared)
 
+    truncated_notices: list[tuple[str, list[str]]] = []
+    license_problems: list[tuple[str, list[str]]] = []
+    unverified: list[str] = []
+    if args.verify_licenses:
+        truncated_notices = find_notice_truncations()
+        for dep in manifest:
+            status, problems = verify_dep_license(dep)
+            if status == "unverified":
+                unverified.append(dep["name"])
+            if problems:
+                license_problems.append((dep["name"], problems))
+
     if args.format == "markdown":
         output = render_markdown(
             rows, missing_deps, missing_notice, missing_licensing, uncovered,
@@ -597,9 +805,29 @@ def main() -> int:
             for dep in uncovered:
                 where = f" ({dep.location})" if dep.location else ""
                 print(f"  - {dep.name} from {dep.source}{where}")
+        if args.verify_licenses:
+            if license_problems:
+                print("\nLicense text contradicts the manifest:")
+                for name, problems in license_problems:
+                    for problem in problems:
+                        print(f"  - {name}: {problem}")
+            if truncated_notices:
+                print("\nNOTICE.md reproduces an incomplete MIT permission notice:")
+                for name, missing in truncated_notices:
+                    print(f"  - {name}: missing {', '.join(missing)}")
+            if unverified:
+                print(
+                    f"\nLicense not verified against a local tree ({len(unverified)}) — "
+                    "not checked out, so not proof of anything:"
+                )
+                for name in unverified:
+                    print(f"  - {name}")
+            if not (license_problems or truncated_notices):
+                print("\nLicense verification: no problems found")
 
     if args.strict and (
         missing_deps or missing_notice or missing_licensing or uncovered
+        or license_problems or truncated_notices
     ):
         return 1
     return 0

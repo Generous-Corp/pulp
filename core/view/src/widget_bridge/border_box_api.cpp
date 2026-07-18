@@ -2,36 +2,34 @@
 
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
+#include "css_color.hpp"
 
-#include <functional>
 #include <string>
-#include <utility>
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_border_box_api(std::function<canvas::Color(const std::string&)> parse_color) {
+void WidgetBridge::register_widget_border_box_api() {
     BridgeApiContext api{engine_};
-    auto parseHexColor = std::move(parse_color);
 
-    register_bridge_function(api, "setBorder", [this, parseHexColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorder", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
         auto width = args.get<double>(2, 1.0);
         auto radius = args.get<double>(3, 0.0);
         auto* v = id.empty() ? &root_ : widget(id);
-        if (v && !hex.empty()) v->set_border(parseHexColor(hex), (float)width, (float)radius);
+        if (v && !hex.empty()) v->set_border(parse_bridge_css_color(hex), (float)width, (float)radius);
         return choc::value::Value();
     });
 
     // setBorderSide(id, side, width, color) — per-side border
-    register_bridge_function(api, "setBorderSide", [this, parseHexColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderSide", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto side = args.get<std::string>(1, "");
         auto width = static_cast<float>(args.get<double>(2, 1.0));
         auto hex = args.get<std::string>(3, "");
         auto* v = id.empty() ? &root_ : widget(id);
         if (v) {
-            auto c = hex.empty() ? canvas::Color::rgba8(128,128,128) : parseHexColor(hex);
+            auto c = hex.empty() ? canvas::Color::rgba8(128,128,128) : parse_bridge_css_color(hex);
             if (side == "top") v->set_border_top(c, width);
             else if (side == "right") v->set_border_right(c, width);
             else if (side == "bottom") v->set_border_bottom(c, width);
@@ -68,11 +66,11 @@ void WidgetBridge::register_widget_border_box_api(std::function<canvas::Color(co
     // `borderRadius`) can update without recomputing the others.
     //
     // setBorderColor(id, hex)
-    register_bridge_function(api, "setBorderColor", [this, parseHexColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBorderColor", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
         auto* v = id.empty() ? &root_ : widget(id);
-        if (v && !hex.empty()) v->set_border_color(parseHexColor(hex));
+        if (v && !hex.empty()) v->set_border_color(parse_bridge_css_color(hex));
         return choc::value::Value();
     });
 

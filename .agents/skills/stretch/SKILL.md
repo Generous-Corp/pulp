@@ -24,7 +24,7 @@ Keep quality comparisons explicit about which sample type is under test.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF
-cmake --build build --target stretchcli -j
+tools/ci/governed-build.sh cmake --build build --target stretchcli
 ./build/examples/offline-stretch/stretchcli in.wav out.wav --ratio 2.0 --quality 2
 ```
 `--ratio` = out_dur/in_dur (2.0 = half speed). Output length is exactly

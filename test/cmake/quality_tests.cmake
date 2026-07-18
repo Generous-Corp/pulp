@@ -40,11 +40,31 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
 
+    # Governed-build wrapper: the bound on Shipyard's `local` mac backend, which
+    # runs the build string directly on the host and so never sees the pulp
+    # CLI's lease integration. Pins the lease-denial contract (back off to the
+    # store's reported capacity, floor when none) with a stub tartci — no
+    # compile, no lease store, no host-size dependency. UNIX-only: it drives a
+    # bash script, and the wrapper only runs on the macOS/Linux CI hosts.
+    if(UNIX)
+        add_test(NAME governed-build-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_governed_build.py")
+        set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
+    endif()
+
     # Planning-gitlink guard: reject an accidental `planning` submodule pointer
     # bump (a `git reset --hard` + `git add -A` re-staging the drifted gitlink);
     # a deliberate re-pin passes with a `Planning-Bump:` trailer.
     add_test(NAME planning-gitlink-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_planning_gitlink_guard.py")
+
+    # Runner-topology guard: pure reconciliation logic (label matching, the
+    # black-hole / offline / ephemeral-idle distinction, contract drift) plus a
+    # well-formedness check of the shipped routing contract. No network — the
+    # live-fleet half runs on a schedule in runner-topology-check.yml, since
+    # that invariant breaks with no commit involved.
+    add_test(NAME runner-topology-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_check.py")
 
     # PR-check triage: pure comparison logic that labels a red PR check as
     # pre-existing-on-main vs regressed-by-this-PR (the "also-red-on-main"
@@ -52,9 +72,20 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME pr-check-triage-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_pr_check_triage.py")
 
-    # Version-at-land (T1.1): single-writer version assignment from Version-Bump
-    # intent trailers. Pure aggregate_intent / plan_assignments logic (the bot
-    # is dry-run only at this stage).
+    # Format-baseline diff: exit-code routing (skip vs fail vs diff) and the
+    # --diag-dir contract that copies captured validator output out of the temp
+    # dir before it is deleted. Runs the validators nowhere — the capture
+    # subprocess is mocked — so it needs no plugin bundles or macOS validators.
+    add_test(NAME format-baseline-diff-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_format_baseline_diff.py")
+
+    # Version-at-land: single-writer version assignment on main. Drives
+    # plan_assignments over throwaway git ranges, asserting it reproduces the
+    # same path + conventional-commit heuristic the hand-bump model uses (the
+    # live assess_surfaces heuristic, not positive intent trailers), and covers
+    # the drain-base / apply_and_push transaction (two concurrent post-merge
+    # drains apply a version exactly once, guarded by the Version-Bump-Applied
+    # idempotency marker). Needs a working `git`.
     add_test(NAME version-at-land-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_version_at_land.py")
 
@@ -104,6 +135,26 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME skills-doc-check-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_skills_doc_check.py")
 
+    # local_diff_cover.sh contracts: config-key consumption, the per-worktree
+    # report path, and build-cov mutual exclusion. Fixture-only — it never runs
+    # a coverage build. The lock cases spawn real concurrent shells and wait on
+    # each other, so this is seconds rather than milliseconds.
+    if(UNIX)
+        add_test(NAME local-diff-cover-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_local_diff_cover
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(local-diff-cover-selftest PROPERTIES TIMEOUT 300)
+    endif()
+    # Tool registry: docs/status/tools.yaml must stay valid (every path and
+    # invocation resolves) AND complete (every committed entry point under the
+    # swept dirs is registered or excluded), and the CLAUDE.md digest generated
+    # from it must be in sync. This is what keeps agents from hand-rolling a
+    # script for a job a shipped tool already does.
+    add_test(NAME tools-registry-check COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/tools_registry_check.py" --check)
+    add_test(NAME tools-registry-check-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_tools_registry_check.py")
+
     # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).
     add_test(NAME gallery-diff-selftest
@@ -145,4 +196,12 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(scene3d-cmake-boundary-negative-contract PROPERTIES
         PASS_REGULAR_EXPRESSION "scene3d_cmake_boundary_contract_case=valid-current-${PULP_SCENE3D_CMAKE_EXPECT}.*scene3d_cmake_boundary_contract_case=expect-mismatch.*scene3d_cmake_boundary_contract_case=enabled-missing-build-path.*scene3d_cmake_boundary_contract_case=enabled-missing-link-file.*scene3d_cmake_boundary_contract_case=valid-enabled-gpu-off.*scene3d_cmake_boundary_contract_case=enabled-gpu-off-render-target-present.*scene3d_cmake_boundary_contract_case=valid-disabled.*scene3d_cmake_boundary_contract_case=disabled-build-path-present.*scene3d_cmake_boundary_contract_case=disabled-link-file-present.*scene3d_cmake_boundary_contract_case=disabled-target-present.*scene3d_cmake_boundary_contract_verified=true")
 
+endif()
+
+# setup.sh's shared source cache: seeding a re-pinned dependency from a cache
+# of a DIFFERENT version that is already on the machine. Drives throwaway
+# file:// repos, so it needs no network and touches no real cache.
+if(UNIX)
+    add_test(NAME setup-source-cache
+        COMMAND bash "${CMAKE_SOURCE_DIR}/tools/scripts/test_setup_source_cache.sh")
 endif()

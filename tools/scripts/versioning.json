@@ -1,6 +1,9 @@
 {
   "$schema": "./versioning.schema.json",
   "schema_version": 1,
+
+  "_comment_post_merge": "Model B — PRs touch NO version files; version-at-land infers the level from the heuristic and assigns it on merge (--mode=apply is a no-op; the gate stops requiring a file bump for a touched surface but still hard-fails a fix/feat the heuristic scores none everywhere). One source of truth read by the pre-push hook, gates.sh, and version-skill-check.yml. See docs/guides/version-at-land-cutover.md.",
+  "post_merge_assignment": true,
   "_comment": "Repo-agnostic config for version_bump_check.py and skill_sync_check.py. Pivoted from YAML to JSON to avoid the PyYAML install friction on PEP-668 Python. Schema and field names unchanged; see planning/versioning-and-skill-sync-plan.md for the design.",
 
   "surfaces": {

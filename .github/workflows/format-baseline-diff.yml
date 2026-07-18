@@ -75,7 +75,7 @@ jobs:
             git clone --depth 1 https://github.com/apple/AudioUnitSDK.git external/AudioUnitSDK
           fi
           if [ ! -d external/vst3sdk ]; then
-            git clone --depth 1 --branch v3.7.12_build_20 \
+            git clone --depth 1 --branch v3.8.0_build_66 \
               --recurse-submodules https://github.com/steinbergmedia/vst3sdk.git \
               external/vst3sdk
           fi
@@ -91,9 +91,12 @@ jobs:
           # target is missing because its SDK couldn't be fetched
           # (transient network failure), build the rest and let
           # format_baseline_diff.py skip the missing lane.
+          # This job resolves to PULP_LOCAL_MACOS_RUNS_ON_JSON — the shared
+          # self-hosted Studios — so each format build takes a governed share
+          # (a tartci lease) instead of `-j$(sysctl -n hw.ncpu)` (every core).
           available=()
           for fmt in AU VST3 CLAP; do
-            if cmake --build build --target PulpEffect_$fmt -j"$(sysctl -n hw.ncpu)" 2>/dev/null; then
+            if tools/ci/governed-build.sh cmake --build build --target PulpEffect_$fmt 2>/dev/null; then
               available+=("PulpEffect_$fmt")
               echo "Built PulpEffect_$fmt"
             else
@@ -176,7 +179,22 @@ jobs:
 
       - name: Run baseline diff
         run: |
-          python3 tools/scripts/format_baseline_diff.py --plugin PulpEffect
+          python3 tools/scripts/format_baseline_diff.py --plugin PulpEffect \
+            --diag-dir "$RUNNER_TEMP/baseline-diag"
+
+      - name: Upload validator output
+        # The validators' own output is the only thing that explains a failure
+        # here, and it is written inside a temp dir the diff script deletes on
+        # the way out. --diag-dir above copies it somewhere durable; this makes
+        # it reachable from the run. `if: always()` because the run that most
+        # needs its output uploaded is the one that failed.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: format-baseline-validator-output-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/baseline-diag
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Clean up installed plugin bundles
         # The "Install plugin bundles to system folders" step above copies

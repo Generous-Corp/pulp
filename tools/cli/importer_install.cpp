@@ -225,7 +225,7 @@ fs::path skills_dir() {
     return fs::temp_directory_path() / "pulp-agents-skills";
 }
 
-fs::path importer_records_dir() { return pulp_home() / "importers"; }
+fs::path importer_records_dir() { return tools_install_home() / "importers"; }
 
 // ── Semver ──
 

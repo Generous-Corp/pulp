@@ -182,8 +182,21 @@ def gradient_conic_css(p):
             if p.get("gradientStops") else None)
 
 def map_node_type(t):
+    # An ELLIPSE is a circle, not a box. "Has a fill means renderable" holds for
+    # a RECTANGLE (a frame paints its own background box) and is FALSE for a
+    # circle: codegen has no painter for one, so a filled ellipse typed `frame`
+    # paints a SQUARE. The IR already has `ellipse` (is_synthesizable_primitive)
+    # and synthesize_node gives it a real path — this decoder just never said
+    # what the node was. Mirrors the .fig lane's envelopeType (fig/scene.mjs).
+    #
+    # STAR / POLYGON / REGULAR_POLYGON need no equivalent line: is_vector_like()
+    # captures them as PNG assets below (type `image`) before their frame typing
+    # can matter. They reach this fallback only when that export fails, which
+    # emits its own diagnostic.
+    if t == "ELLIPSE":
+        return "ellipse"
     if t in ("FRAME", "GROUP", "SECTION", "COMPONENT", "COMPONENT_SET", "INSTANCE",
-             "RECTANGLE", "ELLIPSE", "POLYGON", "STAR", "LINE", "SLICE"):
+             "RECTANGLE", "POLYGON", "STAR", "LINE", "SLICE"):
         return "frame"
     if t == "TEXT": return "text"
     if t in ("VECTOR", "BOOLEAN_OPERATION"): return "vector"
@@ -238,6 +251,22 @@ def extract_style(n, ctx=None):
             s["border_color"] = color; s["border_width"] = weight; s["border_style"] = "solid"
     if isinstance(n.get("cornerRadius"), (int, float)):
         s["border_radius"] = n["cornerRadius"]
+    # Per-corner radii: Figma's REST API returns `rectangleCornerRadii` as
+    # [topLeft, topRight, bottomRight, bottomLeft] when the corners differ. The
+    # producer only read the uniform `cornerRadius`, so an asymmetric card
+    # imported via REST lost its rounding — the shared per-corner codegen had
+    # nothing to emit. The C++ parse_ir_style already reads these four fields.
+    radii = n.get("rectangleCornerRadii")
+    if isinstance(radii, list) and len(radii) == 4 and any(
+        isinstance(r, (int, float)) for r in radii
+    ):
+        tl, tr, br, bl = radii
+        if not (tl == tr == br == bl):
+            s["border_top_left_radius"] = tl
+            s["border_top_right_radius"] = tr
+            s["border_bottom_right_radius"] = br
+            s["border_bottom_left_radius"] = bl
+            s.pop("border_radius", None)
     op = n.get("opacity")
     if isinstance(op, (int, float)) and op < 1: s["opacity"] = op
     effects = n.get("effects")
@@ -374,6 +403,12 @@ def is_pure_vector_illustration(n):
 # meter — the figma-plugin lane default) at the node's own size, instead of
 # capturing its internal vectors as images (which suppresses recognition and
 # renders a misplaced raw sprite). Mirror this in the TS extractor.
+#
+# Scope: name recognition applies ONLY to plain hand-drawn frames. Component
+# instances and their content are exempt (walk() stamps them audio_widget
+# "none") — that content is the designer's own widget art, and wiring it into a
+# control goes through component identity (figma.component_key + the
+# recognition resolver), never through the layer name.
 def _tokenize_name(name):
     """Whole-word tokens mirroring the C++ tokenize_name (design_import.cpp):
     split on non-alphanumerics AND camelCase / acronym / digit boundaries,
@@ -487,6 +522,8 @@ def fetch_frame_svg(file_key, node_id, token):
         return None
     return figma_get(url, timeout=120, what="frame SVG download").decode("utf-8")
 
+_CONTAINER_TYPES = ("FRAME", "INSTANCE", "COMPONENT", "COMPONENT_SET")
+
 def _has_child_containers(n):
     """True if the node is a layout CONTAINER (has child frames/instances/
     components) rather than a leaf widget. A container named like a widget
@@ -495,7 +532,18 @@ def _has_child_containers(n):
     widget's OWN visual content (e.g. an ELYSIUM 'Knob Small' instance wraps a
     vector Group), so they do NOT count as containers — only structural nesting
     (FRAME / INSTANCE / COMPONENT / COMPONENT_SET) does."""
-    return any(c.get("type") in ("FRAME", "INSTANCE", "COMPONENT", "COMPONENT_SET")
+    return any(c.get("type") in _CONTAINER_TYPES for c in n.get("children", []))
+
+def _owns_shape_art(n):
+    """True when the node directly contains raw shapes (ellipse / rectangle /
+    vector / boolean …) — the signature of a DETACHED component copy: a frame
+    named like a widget whose children are its own art parts ('knob base',
+    'knob ring'). Such a frame is a single widget, so name recognition must not
+    fire again on the parts inside it. A widget-named frame holding only
+    containers ('Knob Row' of Knob instances) is a group, not one widget, and
+    its members keep their own recognition. TEXT doesn't count as art here — a
+    label slot alone doesn't make its parent a drawn widget."""
+    return any(c.get("type") not in _CONTAINER_TYPES and c.get("type") != "TEXT"
                for c in n.get("children", []))
 
 def is_auto_layout(n):
@@ -530,12 +578,14 @@ class ExtractContext:
     creates one, threads it through walk()/extract_style()/_record_font(), and
     returns it so the caller reads the outputs explicitly instead of reaching into
     process-global state — the decomposed seam the plan calls for."""
-    __slots__ = ("asset_ids", "fonts", "image_fills")
+    __slots__ = ("asset_ids", "fonts", "image_fills", "components", "component_sets")
 
     def __init__(self):
         self.asset_ids = []      # node ids to export as PNG via /images
         self.fonts = {}          # (family, style, weight) -> entry (deduped, fill order)
         self.image_fills = set()  # Figma imageRefs from IMAGE fills, resolved after the walk
+        self.components = {}      # /nodes "components": componentId -> {key, name, componentSetId}
+        self.component_sets = {}  # /nodes "componentSets": setId -> {key, name}
 
 
 def _record_font(n, ctx):
@@ -560,16 +610,41 @@ def _record_font(n, ctx):
         ctx.fonts[key] = entry
 
 
-def node_tree_to_ir(root):
+def node_tree_to_ir(root, components=None, component_sets=None):
     """Walk a Figma node tree into the Pulp IR, returning (ir_node, ExtractContext)
     so the side effects (asset ids / fonts / image fills) are EXPLICIT outputs —
-    no module globals. The decomposed seam."""
+    no module globals. The decomposed seam.
+
+    `components` / `component_sets` are the /nodes response maps (componentId →
+    {key, name, componentSetId} and setId → {key, name}); they let each INSTANCE
+    carry its component identity so the importer's recognition resolver can wire
+    it by key. Optional — a tree walked without them still expands and protects
+    instance content, it just can't name the component."""
     ctx = ExtractContext()
+    ctx.components = components or {}
+    ctx.component_sets = component_sets or {}
     ir = walk(root, None, 0, ctx)
     return ir, ctx
 
 
-def walk(n, parent, z, ctx):
+def _component_identity(n, ctx):
+    """(component_key, component_name) for an INSTANCE node, preferring the
+    component SET's key when the component belongs to one — the recognition
+    resolver's tables (library-manifest.json, --recognition-manifest) are keyed
+    by component_set_key, matching what the TS plugin lane emits. Falls back to
+    the plain component key for set-less components. (None, None) when the maps
+    don't know the instance."""
+    comp = ctx.components.get(n.get("componentId") or "")
+    if not comp:
+        return None, None
+    name = comp.get("name")
+    cset = ctx.component_sets.get(comp.get("componentSetId") or "")
+    if cset and cset.get("key"):
+        return cset.get("key"), cset.get("name") or name
+    return comp.get("key"), name
+
+
+def walk(n, parent, z, ctx, inside_widget=False):
     ntype = n.get("type")
     t = map_node_type(ntype)
     style = extract_style(n, ctx)
@@ -590,15 +665,41 @@ def walk(n, parent, z, ctx):
         if runs:
             out["runs"] = runs
 
-    # Audio-widget recognition (mirrors importer detect_audio_widget). A
-    # knob/fader/meter node is emitted as a recognized leaf widget so the
-    # importer renders it natively (silver knob etc.) at the node's own size —
-    # NOT captured as a raw image sprite from its internal vectors (which
-    # suppresses recognition and renders a misplaced fragment).
+    # A widget's own content is the designer's art — never name-guess it into a
+    # built-in widget (which paints Pulp's stock silver knob over the design).
+    # Two boundaries start "inside a widget":
+    #   1. A component INSTANCE (or COMPONENT master placed on the canvas) —
+    #      the component IS the widget; wiring it into a control goes through
+    #      its identity (figma.component_key + the recognition resolver:
+    #      library-manifest / --recognition-manifest), and unmatched components
+    #      are surfaced, never guessed (never-silent-knob).
+    #   2. A DETACHED copy: a widget-named frame that directly owns raw shapes
+    #      ('knob base', 'knob ring') — one widget whose parts are art, unlike
+    #      a widget-named group of containers ("Knob Row"), whose members keep
+    #      their own recognition.
+    # Everything inside either boundary gets an explicit audio_widget "none"
+    # (the opt-out parse_ir_audio_widget honors, so the C++ name heuristic
+    # stays off too). Name recognition below remains for plain hand-drawn
+    # placeholder frames only.
+    is_instance = ntype == "INSTANCE"
+    is_component_root = ntype in ("COMPONENT", "COMPONENT_SET")
+    in_widget = inside_widget or is_instance or is_component_root
+    if in_widget:
+        out["audio_widget"] = "none"
+
     bb = n.get("absoluteBoundingBox") or {}
     tiny = bb.get("width", 0) < 1 and bb.get("height", 0) < 1
     captured = False
-    wkind = widget_kind_from_name(n.get("name", ""))
+    wkind = None if in_widget else widget_kind_from_name(n.get("name", ""))
+    if wkind and _owns_shape_art(n):
+        # Detached-copy boundary: a widget-named frame that directly owns raw
+        # shapes is a DRAWN widget — its subtree is that one widget's art, and
+        # the frame itself must not be painted over with the built-in kind.
+        # Name promotion remains only for empty / text-only placeholder frames,
+        # where there is no art to destroy.
+        in_widget = True
+        out["audio_widget"] = "none"
+        wkind = None
     # Only promote LEAF-ish nodes. A CONTAINER whose name merely
     # contains a widget word (e.g. "Knob Row", "Fader Bank") must NOT be promoted
     # to a leaf widget — that would drop its children (the real knobs inside).
@@ -606,6 +707,13 @@ def walk(n, parent, z, ctx):
     if wkind and not _has_child_containers(n):
         out["audio_widget"] = wkind
         captured = True  # leaf widget: importer renders native; don't capture/recurse
+    elif wkind:
+        # Container-not-widget, decided here against the RAW Figma tree. Pin it:
+        # asset capture below can collapse the child containers into leaf
+        # images, and the C++ importer re-runs the same name heuristic on that
+        # DEGRADED envelope — without the pin it re-promotes the container and
+        # paints a built-in widget over the captured art.
+        out["audio_widget"] = "none"
     # Asset capture (extract.ts:268-322). Vector-like nodes → PNG asset_ref.
     # Pure-vector-illustration frames → whole-frame PNG, drop children.
     elif is_vector_like(ntype) and not tiny:
@@ -621,10 +729,17 @@ def walk(n, parent, z, ctx):
     out["figma"] = {"parent_id": parent.get("id") if parent else None, "z_order": z,
                     "visible": n.get("visible", True), "locked": n.get("locked", False),
                     "blend_mode": n.get("blendMode", "PASS_THROUGH")}
+    if is_instance:
+        component_key, component_name = _component_identity(n, ctx)
+        if component_key:
+            out["figma"]["component_key"] = component_key
+        if component_name:
+            out["figma"]["main_component_name"] = component_name
     if not captured:  # illustration frames drop their children (rasterized whole)
         kids = [c for c in n.get("children", []) if c.get("visible", True) is not False]
         if kids:
-            out["children"] = [walk(c, n, i, ctx) for i, c in enumerate(kids)]
+            out["children"] = [walk(c, n, i, ctx, in_widget)
+                               for i, c in enumerate(kids)]
     return out
 
 def export_assets(file_key, ids, token, out_dir):
@@ -1362,7 +1477,10 @@ def main():
     doc = (json.load(open(args.node_json)) if args.node_json
            else fetch_nodes_cached(file_key, node_id, token, args.cache_dir, args.refresh_cache))
     root = doc["nodes"][node_id]["document"]
-    root_node, ctx = node_tree_to_ir(root)
+    node_entry = doc["nodes"][node_id]
+    root_node, ctx = node_tree_to_ir(root,
+                                     components=node_entry.get("components"),
+                                     component_sets=node_entry.get("componentSets"))
 
     out_dir = os.path.dirname(os.path.abspath(args.out))
     asset_manifest_entries = []

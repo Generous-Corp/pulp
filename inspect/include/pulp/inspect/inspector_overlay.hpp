@@ -1393,6 +1393,38 @@ private:
     void track_raw_history_view(View* v);
     bool any_raw_history_view_dangling() const;
 
+    // ── Gesture undo target ──────────────────────────────────────────
+    //
+    // Every per-gesture EditHistory closure that mutates a captured View
+    // must survive a live React SUBTREE rebuild between capture and Cmd+Z:
+    // clear_edit_history() only fires at ROOT replacement, so a bare `View*`
+    // held in a closure can dangle. GestureUndoTarget centralizes the one
+    // dangling-mitigation rule that the text-edit and reparent sites
+    // hand-rolled — and that the resize + move-float sites historically
+    // LACKED, a latent use-after-free. It holds the stable anchor when the
+    // view has one (re-found via resolve_anchor() at replay) and falls back
+    // to the raw pointer, TRACKED via track_raw_history_view() so
+    // rebuild_flat_tree() clears the history if it leaves the tree. resolve()
+    // returns nullptr for a freed/unresolvable target so a closure can no-op
+    // gracefully. Copyable (an EditHistory closure captures it by value).
+    struct GestureUndoTarget {
+        View* raw = nullptr;
+        std::string anchor;
+        bool anchored = false;
+        // Re-find the live view at replay time. A nested type may touch the
+        // enclosing class's private resolve_anchor().
+        View* resolve(const InspectorOverlay& ov) const {
+            return anchored ? ov.resolve_anchor(anchor) : raw;
+        }
+    };
+    // Capture `v` as a gesture undo target. `anchored_gate` lets a site keep
+    // its own notion of when the anchored replay path applies (the text-edit
+    // site ties it to a wired TweakStore); the target is anchored only when
+    // the gate holds AND the view carries a non-empty anchor id. Tracks the
+    // raw pointer when the target is NOT anchored so the rebuild seam can
+    // clear the history before a dangling closure runs.
+    GestureUndoTarget capture_undo_target(View* v, bool anchored_gate = true);
+
     // ── Coordinate helpers ──────────────────────────────────────────
     Rect view_bounds_in_root(const View* v) const;
 
@@ -1474,6 +1506,46 @@ private:
     /// dimensions, page count, live entry count, and an occupancy bar.
     /// Updates atlas_row_count_ with the number of rows laid out.
     void paint_atlas_tab(Canvas& canvas, float x, float y, float w, float h);
+
+    // ── Mouse-event precedence chain ─────────────────────────────────
+    //
+    // handle_mouse_event() resolves the event's gesture phase ONCE, then
+    // offers it to the handlers below in a fixed order. Modality
+    // precedence — text tool over eyedropper, an in-flight gesture over a
+    // fresh press, the panel over the canvas — IS that order.
+    //
+    // A handler returns a value to CONSUME the event (the bool is what
+    // handle_mouse_event returns) or std::nullopt to decline and let the
+    // next one look. Declining is not the same as not acting: a handler
+    // may update state and still fall through, which is how a resize
+    // release commits and then lets the same click re-select.
+
+    /// One mouse event, normalized for the whole chain. `event` is the
+    /// live event — it outlives the chain, which runs inside
+    /// handle_mouse_event's frame.
+    struct MouseGesture {
+        const MouseEvent& event;
+        Point pos;
+        bool is_press;
+        bool is_drag_tick;
+        bool is_release;
+    };
+
+    /// Resolve `event`'s phase against the in-flight gesture state. The
+    /// only place either is_down convention is interpreted.
+    MouseGesture resolve_mouse_gesture(const MouseEvent& event) const;
+
+    std::optional<bool> mouse_text_tool(const MouseGesture& g);
+    /// Passive: re-centers the loupe on the cursor, never consumes.
+    void mouse_zoom_loupe(const MouseGesture& g);
+    std::optional<bool> mouse_eyedropper(const MouseGesture& g);
+    std::optional<bool> mouse_active_resize(const MouseGesture& g);
+    std::optional<bool> mouse_begin_resize(const MouseGesture& g);
+    std::optional<bool> mouse_active_move(const MouseGesture& g);
+    std::optional<bool> mouse_begin_move(const MouseGesture& g);
+    std::optional<bool> mouse_panel(const MouseGesture& g);
+    /// Canvas fallback: hover tracking, click-to-select, drag containment.
+    std::optional<bool> mouse_select(const MouseGesture& g);
 
     // ── Panel hit testing ───────────────────────────────────────────
     bool point_in_panel(Point p) const;
@@ -1580,5 +1652,11 @@ inline InspectorOverlay* g_active_inspector = nullptr;
 /// Installs paint hook, key intercept, and mouse intercept via function pointers
 /// so pulp-view doesn't need to link pulp-inspect.
 void install_inspector_hooks(InspectorOverlay& inspector);
+
+/// Tear down what install_inspector_hooks() set up: nulls g_active_inspector
+/// and releases all five View hook slots. Call this before destroying the
+/// InspectorOverlay so a host that outlives its inspector cannot fire a hook
+/// bound to freed memory. Safe to call when no hooks were installed.
+void uninstall_inspector_hooks();
 
 } // namespace pulp::inspect

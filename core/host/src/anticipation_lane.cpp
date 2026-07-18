@@ -11,7 +11,9 @@ bool AnticipationLane::prepare(
     const AnticipationSubgraph& sub,
     const std::function<std::atomic<float>*(NodeId)>& gain_for,
     const std::function<PluginSlot*(NodeId)>& plugin_for, double sample_rate,
-    int block_frames, int lead_blocks) {
+    int block_frames, int lead_blocks,
+    const std::function<ParameterEventInjectionBinding(NodeId)>&
+        parameter_events_for) {
     // Reset to a clean not-prepared state so a mid-way failure can't leave the
     // lane half-configured (every method gates on prepared_, but keep it tidy for
     // a re-prepare).
@@ -24,6 +26,14 @@ bool AnticipationLane::prepare(
     if (!build_executor_snapshot(sub.nodes, sub.connections, gain_for, plugin_for,
                                  plugin_ctx_, scratch_, snapshot_)) {
         return false;
+    }
+    if (parameter_events_for) {
+        for (auto& context : plugin_ctx_) {
+            const auto injection = parameter_events_for(context.node_id);
+            context.parameter_events_user_data = injection.user_data;
+            context.append_parameter_events = injection.append;
+            context.parameter_events_sequence_seen = injection.sequence_seen;
+        }
     }
     if (!pool_.reset(snapshot_.buffer_slot_count(),
                      static_cast<std::uint32_t>(block_frames),
@@ -71,7 +81,9 @@ bool AnticipationLane::render_one_block() {
     block.frame_count = frames;
     block.buses = &buses;
     if (!block.validate()) return false;
+    reset_plugin_parameter_event_sequences(plugin_ctx_);
     if (!exec_.process_routed(block, snapshot_, pool_).ok()) return false;
+    commit_plugin_parameter_event_sequences(plugin_ctx_);
     return ring_.write(ov, block_frames_) == static_cast<std::uint64_t>(block_frames_);
 }
 

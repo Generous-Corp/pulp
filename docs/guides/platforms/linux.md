@@ -33,7 +33,7 @@ sudo pacman -S base-devel cmake git alsa-lib
 
 ```bash
 # VST3 SDK (MIT) — cloned at configure time
-git clone --depth 1 --recursive --branch v3.7.12_build_20 https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk
+git clone --depth 1 --recursive --branch v3.8.0_build_66 https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk
 cd external/vst3sdk && git submodule update --init --recursive --depth 1
 
 # CLAP (MIT) — fetched automatically via CMake FetchContent

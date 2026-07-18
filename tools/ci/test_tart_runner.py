@@ -22,10 +22,16 @@ import json
 import os
 import re
 import subprocess
+import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("tart-runner.sh")
+LINUX_SCRIPT = Path(__file__).with_name("tart-runner-linux.sh")
+WINDOWS_SCRIPT = Path(__file__).with_name("qemu-runner-windows.sh")
+SUPERVISORS = (SCRIPT, LINUX_SCRIPT, WINDOWS_SCRIPT)
 M5_LABELS = "self-hosted,macos,arm64,pulp-build,pulp-build-m5"
 STUDIO_LABELS = "self-hosted,macos,arm64,pulp-build,pulp-build-studio"
 PLAIN_LABELS = "self-hosted,macos,arm64,pulp-build"
@@ -233,6 +239,177 @@ class LabelMatchSemanticsTests(unittest.TestCase):
         r = subprocess.run(["python3", "-c", self.snippet], input=stdin,
                            capture_output=True, text=True, check=True, env=env)
         self.assertEqual(int(r.stdout.strip()), 1)
+
+
+GH_STUB = r"""#!/usr/bin/env bash
+# Stub `gh`: one job always queued, no stale runner registration, and a JIT mint
+# that always fails — standing in for the transient API errors (token hiccup,
+# rate limit, 5xx) the supervisor must survive rather than exit on.
+case "$*" in
+  *generate-jitconfig*) echo "gh: simulated transient JIT mint failure" >&2; exit 1;;
+  *actions/runners*)    exit 0;;   # reclaim_runner_name: nothing stale to clear
+  *actions/runs*)       echo 1;;   # queue gate: one job waiting
+esac
+exit 0
+"""
+
+TART_STUB = r"""#!/usr/bin/env bash
+case "${1:-}" in
+  list) echo '[]';;   # running_macos_vms → 0, i.e. a free VM slot
+esac
+exit 0
+"""
+
+
+class SupervisorSurvivesTransientFailureTests(unittest.TestCase):
+    """The supervisor loop must RETRY transient failures, never exit on them.
+
+    `die` exits the script. Called from inside run_one, that killed the whole
+    supervisor on the first hiccup — a caller's `|| true` cannot catch an
+    `exit` — leaving recovery to launchd KeepAlive, whose respawn throttle
+    compounds a one-off blip into a long outage. Per-iteration failures now go
+    through `soft_fail` (return 1) so the loop counts, backs off, and continues.
+
+    This drives the REAL loop against stub `gh`/`tart` binaries on PATH, so it
+    fails on the exit-on-transient behavior rather than on a grep.
+    """
+
+    def _run_loop(self, script: Path, marker: str, timeout: float = 30.0):
+        """Run `script --loop` against the stubs; return (output, exited_early)."""
+        with tempfile.TemporaryDirectory() as td:
+            for name, body in (("gh", GH_STUB), ("tart", TART_STUB),
+                               ("qemu-system-aarch64", TART_STUB)):
+                p = Path(td, name)
+                p.write_text(body, encoding="utf-8")
+                p.chmod(0o755)
+            env = {
+                **os.environ,
+                "PATH": f"{td}:{os.environ['PATH']}",
+                "PULP_VM_POLL": "1",         # keep the test fast...
+                "PULP_VM_BACKOFF_MAX": "1",  # ...and pin the backoff to 1s
+                # Windows supervisor preconditions (fatal, checked before the
+                # loop) — satisfy them so the loop itself is what's under test.
+                "TARTCI_WIN_GOLDEN": str(Path(td, "golden.qcow2")),
+            }
+            Path(td, "golden.qcow2").write_text("stub", encoding="utf-8")
+            proc = subprocess.Popen(
+                ["bash", str(script), "--loop"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, env=env,
+            )
+            killer = threading.Timer(timeout, proc.kill)
+            killer.start()
+            lines: list[str] = []
+            exited_early = False
+            try:
+                while True:
+                    line = proc.stdout.readline()
+                    if not line:
+                        # EOF: the supervisor process is GONE. With the bug, this
+                        # is exactly what happens after the first failed mint.
+                        exited_early = True
+                        break
+                    lines.append(line)
+                    if marker in line:
+                        break
+            finally:
+                killer.cancel()
+                proc.kill()
+                proc.wait(timeout=5)
+                proc.stdout.close()
+            return "".join(lines), exited_early
+
+    def test_loop_reaches_second_iteration_after_a_failed_mint(self) -> None:
+        out, exited_early = self._run_loop(SCRIPT, "[2]")
+        self.assertIn("JIT config mint failed", out,
+                      f"stub gh never failed the mint:\n{out}")
+        self.assertFalse(exited_early,
+                         f"supervisor EXITED on a transient failure:\n{out}")
+        self.assertIn("[2]", out,
+                      f"loop never reached iteration 2:\n{out}")
+
+    def test_loop_keeps_going_across_repeated_failures(self) -> None:
+        # Not just one retry — a supervisor must survive a sustained outage.
+        out, exited_early = self._run_loop(SCRIPT, "[3]")
+        self.assertFalse(exited_early, f"supervisor EXITED:\n{out}")
+        self.assertIn("[3]", out, f"loop never reached iteration 3:\n{out}")
+
+    def test_failed_iteration_is_counted_and_backed_off(self) -> None:
+        out, _ = self._run_loop(SCRIPT, "consecutive=2")
+        self.assertIn("consecutive=1", out, out)
+        self.assertIn("consecutive=2", out, out)
+        self.assertIn("backing off", out, out)
+
+    def test_linux_supervisor_survives_transient_failure(self) -> None:
+        out, exited_early = self._run_loop(LINUX_SCRIPT, "[2]")
+        self.assertFalse(exited_early, f"Linux supervisor EXITED:\n{out}")
+        self.assertIn("[2]", out, out)
+
+    def test_windows_supervisor_survives_transient_failure(self) -> None:
+        out, exited_early = self._run_loop(WINDOWS_SCRIPT, "[2]")
+        self.assertFalse(exited_early, f"Windows supervisor EXITED:\n{out}")
+        self.assertIn("[2]", out, out)
+
+
+class RunOneNeverExitsTests(unittest.TestCase):
+    """Structural guard: no `die` may be reachable from a per-iteration path.
+
+    The behavioral tests above cover the failure modes that exist today; this
+    keeps a NEW `die` from being added to run_one tomorrow, in any of the three
+    supervisors, where it would silently reintroduce exit-on-transient.
+    """
+
+    @staticmethod
+    def _run_one_body(script: Path) -> str:
+        body = script.read_text(encoding="utf-8")
+        m = re.search(r"\nrun_one\(\)\{.*?\n\}\n", body, re.S)
+        assert m, f"run_one not found in {script.name}"
+        return m.group(0)
+
+    def test_run_one_does_not_die(self) -> None:
+        for script in SUPERVISORS:
+            with self.subTest(script=script.name):
+                self.assertNotRegex(
+                    self._run_one_body(script), r"\bdie\b",
+                    f"{script.name}: run_one calls `die` — `exit` inside a "
+                    "function kills the supervisor and `|| true` cannot catch it",
+                )
+
+    def test_supervisors_define_soft_fail(self) -> None:
+        for script in SUPERVISORS:
+            with self.subTest(script=script.name):
+                self.assertIn("soft_fail()",
+                              script.read_text(encoding="utf-8"))
+
+    def test_fatal_preconditions_still_die(self) -> None:
+        # `die` is still correct for startup preconditions — don't over-correct
+        # into a supervisor that loops forever against a missing `tart`.
+        body = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('command -v tart >/dev/null 2>&1 || die', body)
+        self.assertIn('*) die "unknown arg: $1";;', body)
+
+
+class BackoffTests(unittest.TestCase):
+    """Behavioral test of the extracted `backoff_secs` helper."""
+
+    def _backoff(self, script: Path, fails: int, poll: int, cap: int) -> int:
+        body = script.read_text(encoding="utf-8")
+        m = re.search(r"(backoff_secs\(\)\{.*?\n\}\n)", body, re.S)
+        self.assertIsNotNone(m, f"backoff_secs not found in {script.name}")
+        prog = f'POLL={poll}; BACKOFF_MAX={cap}\n{m.group(1)}\nbackoff_secs {fails}'
+        r = subprocess.run(["bash", "-c", prog], capture_output=True,
+                           text=True, check=True)
+        return int(r.stdout.strip())
+
+    def test_backoff_doubles_then_caps(self) -> None:
+        for script in SUPERVISORS:
+            with self.subTest(script=script.name):
+                self.assertEqual(self._backoff(script, 1, 20, 300), 20)
+                self.assertEqual(self._backoff(script, 2, 20, 300), 40)
+                self.assertEqual(self._backoff(script, 3, 20, 300), 80)
+                # Capped — never an unbounded wait.
+                self.assertEqual(self._backoff(script, 9, 20, 300), 300)
+                self.assertEqual(self._backoff(script, 99, 20, 300), 300)
 
 
 if __name__ == "__main__":

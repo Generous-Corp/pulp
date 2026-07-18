@@ -92,11 +92,12 @@ public:
     /// extent → fully visible). Useful for paint() positioning or tests.
     float slide_offset() const { return progress_ * extent_; }
 
-    /// Step the slide animation. Returns the new progress in [0, 1].
-    /// Hides the view (visible = false) once a closing tween completes, so a
-    /// hidden panel paints nothing and contributes no hit-testable area.
-    float advance_animations(float dt) {
-        if (!is_animating()) return progress_;
+    /// Step the slide animation. Read the resulting progress via `progress()`
+    /// or `slide_offset()`. Hides the view (visible = false) once a closing
+    /// tween completes, so a hidden panel paints nothing and contributes no
+    /// hit-testable area.
+    void advance_animations(float dt) override {
+        if (!is_animating()) return;
         progress_ = tween_.advance(dt);
         if (tween_.finished()) {
             if (state_ == State::opening) {
@@ -109,7 +110,6 @@ public:
             }
             if (on_state_change) on_state_change(state_);
         }
-        return progress_;
     }
 
     /// Fires on every State transition (closed→opening, opening→open,

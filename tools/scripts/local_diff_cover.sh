@@ -20,6 +20,7 @@
 #   tools/scripts/local_diff_cover.sh pulp-test-state      # targeted (fast)
 #   PULP_DIFF_COVER_CTEST_REGEX='State|WidgetBridge' tools/scripts/local_diff_cover.sh pulp-test-state
 #   PULP_SKIP_DIFF_COVER=1 tools/scripts/local_diff_cover.sh   # bypass
+#   PULP_DIFF_COVER_HTML_REPORT=/path/report.html tools/scripts/local_diff_cover.sh
 #
 # Exit codes:
 #   0 — diff coverage at or above threshold (or skipped)
@@ -45,7 +46,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CONFIG_JSON="${REPO_ROOT}/tools/scripts/coverage_config.json"
 BUILD_DIR="${REPO_ROOT}/build-cov"
-HTML_REPORT="${TMPDIR:-/tmp}/diff-cover.html"
+BUILD_COV_LOCK="${BUILD_DIR}.lock"
+
+# The report lives beside the coverage data it describes, under this
+# worktree's build-cov. $TMPDIR is per-USER, not per-worktree, so a fixed
+# filename under it is a shared mailbox: concurrent runs from other worktrees
+# (several agent sessions, plus shipyard's local validation, routinely run at
+# once) overwrite each other, and a report read as evidence for the wrong
+# branch is a correctness failure, not clutter. build-cov is per-worktree,
+# single-writer while the lock below is held, and already reclaimed by
+# clean_build_cov.sh.
+HTML_REPORT="${PULP_DIFF_COVER_HTML_REPORT:-${BUILD_DIR}/coverage/diff-cover.html}"
 
 # Scrub any inherited git environment. When this script runs from a git hook
 # (e.g. pre-push) or another git-invoked context, GIT_DIR / GIT_WORK_TREE are
@@ -58,6 +69,58 @@ HTML_REPORT="${TMPDIR:-/tmp}/diff-cover.html"
 # pre-push hook mutated a live worktree's .git.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
       GIT_COMMON_DIR GIT_PREFIX GIT_NAMESPACE GIT_QUARANTINE_PATH
+
+# ── build-cov mutual exclusion ─────────────────────────────────────────────
+# Everything below shares one build-cov directory: a CMake cache, an object
+# tree, and a .profraw set that is deleted and re-accumulated per run. Two runs
+# racing in the same worktree — a hand-run racing shipyard's local validation,
+# which invokes this script too — interleave all three and report a coverage
+# number that measures neither run's change set. That reads as a real coverage
+# failure and sends someone debugging code that is fine.
+#
+# mkdir is the atomic primitive because flock(1) is not on stock macOS. The
+# lockdir records its owner's pid so a run killed before its EXIT trap can fire
+# (SIGKILL, a reboot) leaves a lock later runs can prove is dead and reclaim,
+# rather than wedging every future run.
+release_build_cov_lock() {
+    rm -rf "${BUILD_COV_LOCK}" >/dev/null 2>&1 || true
+}
+
+acquire_build_cov_lock() {
+    local announced=0 owner recheck
+    mkdir -p "$(dirname "${BUILD_COV_LOCK}")"
+    while ! mkdir "${BUILD_COV_LOCK}" 2>/dev/null; do
+        owner="$(cat "${BUILD_COV_LOCK}/pid" 2>/dev/null || true)"
+        if [ -n "${owner}" ] && ! kill -0 "${owner}" 2>/dev/null; then
+            # Reclaim only after re-reading: if another waiter won the lock in
+            # between, the pid changes and we must not delete its live lock.
+            sleep 1
+            recheck="$(cat "${BUILD_COV_LOCK}/pid" 2>/dev/null || true)"
+            if [ "${recheck}" = "${owner}" ] && ! kill -0 "${owner}" 2>/dev/null; then
+                echo "[local_diff_cover] reclaiming stale lock left by dead pid ${owner}" >&2
+                rm -rf "${BUILD_COV_LOCK}"
+            fi
+            continue
+        fi
+        if [ "${announced}" -eq 0 ]; then
+            echo "[local_diff_cover] waiting for another diff-coverage run to finish${owner:+ (pid ${owner})}…" >&2
+            echo "[local_diff_cover] lock: ${BUILD_COV_LOCK}" >&2
+            announced=1
+        fi
+        sleep 2
+    done
+    # Arm the release before recording the owner: writing the pid can itself
+    # fail (a full disk is the usual way, since build-cov accumulates), and
+    # under `set -e` that exits — with the trap already armed, it releases the
+    # lock instead of stranding a pid-less one no later run could reclaim.
+    trap release_build_cov_lock EXIT
+    echo "$$" > "${BUILD_COV_LOCK}/pid"
+}
+
+# Let tests source the helpers above without running a coverage build.
+if [ "${PULP_DIFF_COVER_LIB_ONLY:-0}" = "1" ]; then
+    return 0 2>/dev/null || exit 0
+fi
 
 # ── PULP_SKIP_DIFF_COVER bypass ─────────────────────────────────────────────
 # Honor PULP_SKIP_DIFF_COVER=1 before doing ANY other work (no config
@@ -167,6 +230,11 @@ fi
 # ── Build coverage ──────────────────────────────────────────────────────────
 # build-cov/ lives separately from build/ so we don't trash the
 # developer's main CMake cache (which is non-coverage).
+#
+# Taken after the dependency preflight so a missing-dep exit 2 never makes a
+# concurrent run wait on a lock this one was never going to use.
+acquire_build_cov_lock
+
 echo "=== Configuring coverage build in ${BUILD_DIR} ==="
 
 # Pick the right Clang driver per platform — clang-cl on Windows accepts
@@ -498,6 +566,7 @@ if [ ${#DIFF_COVER_EXCLUDE_ARGS[@]} -gt 0 ]; then
 else
     echo "=== diff-cover (--compare-branch=${COMPARE_BRANCH} --fail-under=${THRESHOLD}) ==="
 fi
+mkdir -p "$(dirname "${HTML_REPORT}")"
 set +e
 python3 -m diff_cover.diff_cover_tool \
     "${COBERTURA_XML}" \

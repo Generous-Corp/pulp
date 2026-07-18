@@ -58,17 +58,20 @@ instead of silently dropping its tokens.
 | `typography.*` | yes | Composite `typography` tokens with `fontFamily`, `fontSize`, `fontWeight`, `lineHeight`, `fontFeature`, `fontVariation`. |
 | `rounded.*` | yes | `dimension` tokens. Nested levels nest to arbitrary depth (dot-joined path). |
 | `spacing.*` | yes | `dimension` tokens. A bare number (e.g. `base: 8`) is read as px per spec; nested levels nest to arbitrary depth. Genuinely non-dimensional values (e.g. `auto`) are preserved as strings. |
+| `shadows.*` | yes | **Pulp extension**, not an upstream 0.3.0 key. `shadow-<name>` `string` tokens holding the CSS shadow value verbatim (`0 1px 3px rgba(0,0,0,.2)`); nested levels nest to arbitrary depth (dot-joined path). The `shadow-*` namespace already exists via the `## Shadows` body section — this gives structured frontmatter a door to it, so a DESIGN.md can declare a shadow without dropping to prose. Authors coming from `## Elevation` should spell the frontmatter key `shadows`; `elevation:` warns as an unknown key. |
 | `components.*` | yes | Each component is a flat map of token references and literal style values; numeric and boolean YAML scalars (e.g. `fontWeight: 600`, `enabled: true`) flow through as strings. References are *not* resolved at parse time (see below). |
 | Unknown top-level keys | warn | The parser emits one `designmd.unknown-key` warning per unrecognized top-level key (catches typos like `color:`/`typgrphy:`) and otherwise ignores it. The file still imports. |
 | Unknown component properties | passthrough | Per the spec, unknown component props are preserved as opaque strings. |
 
-When frontmatter is present it is the sole token source; the Markdown body
-after the closing `---` fence is parsed for headings and lint context only.
+Frontmatter is authoritative but not exclusive. The parser also scans the
+Markdown body for token sections and lets the body **fill gaps** frontmatter
+left: a token defined in both forms keeps its frontmatter value, and a token
+only the body names is still imported. Prose-authored files (common for
+Stitch / Brand-Kit exports) therefore keep their tokens when frontmatter is
+added to them, rather than silently importing an empty set.
 
-When a file has **no frontmatter**, the parser falls back to scanning the
-Markdown body so prose-authored files (common for Stitch / Brand-Kit
-exports) don't import as an empty token set. It reads `name: value` list
-items and `| name | value |` table rows under these sections:
+The body scan reads `name: value` list items and `| name | value |` table
+rows under these sections:
 
 | Body section | Tokens |
 |--------------|--------|

@@ -12,10 +12,12 @@
 #include <pulp/view/window_host.hpp>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <string_view>
 
 // The dev inspector (Cmd+I overlay) is gated behind the PULP_ENABLE_INSPECTOR
@@ -937,88 +939,57 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
                           effective_config.screenshot_path, cap.delay);
     }
 #if PULP_ENABLE_AUDIO_PROBES
-    // Probe-JSON-only one-shot: when --audio-probe-json was requested without
-    // --screenshot, reuse the same frame-delay machinery to let the audio path
-    // run a few blocks, then write the JSON and close. (When --screenshot is
-    // also set, the dump rode the screenshot capture_fn above instead.)
-    else if (!effective_config.audio_probe_json_path.empty()) {
-        auto* host = window.get();
-        detail::DelayedAction cap;
-        cap.delay = effective_config.screenshot_frame_delay > 0
-            ? effective_config.screenshot_frame_delay : 30;
-        // JSON-only mode has no image bytes to validate or file to write through
-        // ScreenshotCapture. Use the same delayed one-shot state machine, but
-        // make the JSON dump itself the side effect.
-        cap.action_fn = [write_probe_json,
-                         path = effective_config.audio_probe_json_path]() {
-            write_probe_json(path);
+    // Audio-dump one-shots: when a dump was requested WITHOUT --screenshot,
+    // reuse the same frame-delay machinery to let the audio path run a few
+    // blocks, then write the file and close. (When --screenshot is also set,
+    // every dump rode the screenshot capture_fn above instead.)
+    //
+    // Each mode differs only in which config path arms it, which writer runs,
+    // and what the arming log calls it — the delayed one-shot around them is
+    // identical, so the modes are a table. A dump has no image bytes to validate
+    // or file to write through ScreenshotCapture, so the plain DelayedAction
+    // state machine drives them with the write as its side effect.
+    //
+    // At most ONE arms: the first requested entry wins and the rest are ignored,
+    // because a single idle callback can only carry one one-shot.
+    else {
+        struct AudioDumpOneShot {
+            const std::string& path;
+            // By value: each writer is a distinct lambda type, so a reference
+            // here would dangle on the materialized std::function temporary.
+            std::function<void(const std::string&)> write_fn;
+            const char* label;
         };
-        cap.close_fn = [host] { host->request_close(); };
-        auto prior = pre_screenshot_idle;
-        host->set_idle_callback([prior, cap = std::move(cap)]() mutable {
-            if (prior) prior();
-            cap();
-        });
-        runtime::log_info(
-            "Standalone: audio-probe-json mode armed — will dump to {} after {} frames",
-            effective_config.audio_probe_json_path, cap.delay);
-    }
-    else if (!effective_config.audio_scope_json_path.empty()) {
-        auto* host = window.get();
-        detail::DelayedAction cap;
-        cap.delay = effective_config.screenshot_frame_delay > 0
-            ? effective_config.screenshot_frame_delay : 30;
-        cap.action_fn = [write_scope_json,
-                         path = effective_config.audio_scope_json_path]() {
-            write_scope_json(path);
-        };
-        cap.close_fn = [host] { host->request_close(); };
-        auto prior = pre_screenshot_idle;
-        host->set_idle_callback([prior, cap = std::move(cap)]() mutable {
-            if (prior) prior();
-            cap();
-        });
-        runtime::log_info(
-            "Standalone: audio-scope-json mode armed — will dump to {} after {} frames",
-            effective_config.audio_scope_json_path, cap.delay);
-    }
-    else if (!effective_config.audio_capture_wav_path.empty()) {
-        auto* host = window.get();
-        detail::DelayedAction cap;
-        cap.delay = effective_config.screenshot_frame_delay > 0
-            ? effective_config.screenshot_frame_delay : 30;
-        cap.action_fn = [write_capture_wav,
-                         path = effective_config.audio_capture_wav_path]() {
-            write_capture_wav(path);
-        };
-        cap.close_fn = [host] { host->request_close(); };
-        auto prior = pre_screenshot_idle;
-        host->set_idle_callback([prior, cap = std::move(cap)]() mutable {
-            if (prior) prior();
-            cap();
-        });
-        runtime::log_info(
-            "Standalone: audio-capture-wav mode armed — will dump to {} after {} frames",
-            effective_config.audio_capture_wav_path, cap.delay);
-    }
-    else if (!effective_config.audio_capture_rolling_path.empty()) {
-        auto* host = window.get();
-        detail::DelayedAction cap;
-        cap.delay = effective_config.screenshot_frame_delay > 0
-            ? effective_config.screenshot_frame_delay : 30;
-        cap.action_fn = [write_capture_rolling,
-                         path = effective_config.audio_capture_rolling_path]() {
-            write_capture_rolling(path);
-        };
-        cap.close_fn = [host] { host->request_close(); };
-        auto prior = pre_screenshot_idle;
-        host->set_idle_callback([prior, cap = std::move(cap)]() mutable {
-            if (prior) prior();
-            cap();
-        });
-        runtime::log_info(
-            "Standalone: audio-capture-rolling mode armed — will dump to {} after {} frames",
-            effective_config.audio_capture_rolling_path, cap.delay);
+        const std::array<AudioDumpOneShot, 4> dumps{{
+            {effective_config.audio_probe_json_path, write_probe_json,
+             "audio-probe-json"},
+            {effective_config.audio_scope_json_path, write_scope_json,
+             "audio-scope-json"},
+            {effective_config.audio_capture_wav_path, write_capture_wav,
+             "audio-capture-wav"},
+            {effective_config.audio_capture_rolling_path, write_capture_rolling,
+             "audio-capture-rolling"},
+        }};
+        for (const auto& dump : dumps) {
+            if (dump.path.empty()) continue;
+            auto* host = window.get();
+            detail::DelayedAction cap;
+            cap.delay = effective_config.screenshot_frame_delay > 0
+                ? effective_config.screenshot_frame_delay : 30;
+            cap.action_fn = [write_fn = dump.write_fn, path = dump.path] {
+                write_fn(path);
+            };
+            cap.close_fn = [host] { host->request_close(); };
+            auto prior = pre_screenshot_idle;
+            host->set_idle_callback([prior, cap = std::move(cap)]() mutable {
+                if (prior) prior();
+                cap();
+            });
+            runtime::log_info(
+                "Standalone: {} mode armed — will dump to {} after {} frames",
+                dump.label, dump.path, cap.delay);
+            break;
+        }
     }
 #endif
 

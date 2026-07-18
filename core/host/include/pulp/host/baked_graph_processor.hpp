@@ -9,12 +9,16 @@
 // for the lowerable subset. There is no codegen and no second routing backend —
 // the baked Processor only CALLS process_routed, never defines it.
 //
-// Lowerable today: AudioInput, AudioOutput, and the built-in Gain utility.
+// Lowerable: AudioInput, AudioOutput, the built-in Gain utility, and a Custom
+// node whose registered type opts in with `lowerable = true`, matches the node's
+// port shape, and is transport-independent (the baked process() drops the host
+// transport, so a transport-sensitive node would diverge).
 // A graph is REFUSED loudly (null processor + a reason) rather than silently
 // mis-baked when it is not prepared, not executor-eligible, or carries a hosted
-// Plugin node (opaque external state, not self-contained) or a Custom node.
-// Custom-node lowering and on-disk plan serialization are deliberate follow-ups;
-// this slice keeps the captured plan as in-memory owned data.
+// Plugin node (opaque external state, not self-contained).
+// A plan can be kept in memory (bake) or serialized to a signed .pulpbake
+// envelope and read back (bake_to_plan -> write_baked_signed -> load_baked); see
+// baked_codec.hpp for the on-disk format and its trust gate.
 //
 // bake() captures the graph's TOPOLOGY and Gain VALUES, not hot runtime state: the
 // baked Processor builds fresh feedback/delay/scratch state in prepare() and starts

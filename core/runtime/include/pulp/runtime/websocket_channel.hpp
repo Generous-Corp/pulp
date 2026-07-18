@@ -50,6 +50,13 @@ struct WebSocketOptions {
     /// trigger an error + close. Default 16 MiB — enough for normal
     /// control traffic while bounding pathological peers.
     std::size_t max_payload = 16u * 1024u * 1024u;
+
+    /// Maximum total size (bytes) of a message reassembled across
+    /// continuation frames. `max_payload` bounds a single frame; without a
+    /// separate total cap a peer streaming endless non-final fragments would
+    /// grow the reassembly buffer without limit (memory-exhaustion DoS).
+    /// Exceeding this triggers an error + close. Default 64 MiB.
+    std::size_t max_message = 64u * 1024u * 1024u;
 };
 
 class WebSocketChannel : public MessageChannel {

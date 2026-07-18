@@ -15,7 +15,10 @@
 #   - node-ABI (Processor/PluginSlot virtual methods are append-only)
 #   - hotspot-size (known refactor hotspots must not exceed frozen LOC baselines)
 #   - planning-gitlink (no accidental `planning` submodule pointer bump)
-#   - deps-audit (catches DEPENDENCIES.md / NOTICE.md drift)
+#   - deps-audit (catches DEPENDENCIES.md / NOTICE.md drift, and checks the
+#     attribution text against the license files actually on disk)
+#   - deps-audit self-tests (tools/deps/test_audit.py — the coverage lane runs
+#     them behind continue-on-error, so nothing enforced them)
 #   - codecov-config (codecov.yml flags/components mirror the live core/* tree
 #     with no double-counts, and its ignore list mirrors diff_cover_excludes)
 #   - framework-neutrality (Pulp's own source names no other framework, and
@@ -130,6 +133,23 @@ if [ -x "$HOST_VITALS" ]; then
     fi
 fi
 
+# ── 0b. shipyard-local mac routing (ADVISORY) ──────────────────────────────
+# The required `macos` check is posted ONLY by the local self-hosted runner.
+# A `[targets.mac]` override in the gitignored .shipyard.local/config.toml can
+# silently route that lane to a cloud provider, and the failure looks like a
+# hang, not a misconfiguration: shipyard watches a redundant cloud run and
+# times out at 3600s while the required check never appears. Surfacing it here
+# costs a millisecond and saves an hour. Read-only and advisory — a deliberate
+# cloud macOS lane is legitimate, and this must never strand a push.
+SHIPYARD_LOCAL="$ROOT/tools/scripts/shipyard_local_check.py"
+if [ -f "$SHIPYARD_LOCAL" ]; then
+    echo "" >&2
+    echo "▸ shipyard-local mac routing (advisory)" >&2
+    if "$PYTHON" "$SHIPYARD_LOCAL" --repo-root "$ROOT"; then
+        echo "  mac → local self-hosted runners (required 'macos' check will post)." >&2
+    fi
+fi
+
 # ── 1. skill-sync ──────────────────────────────────────────────────────────
 echo "" >&2
 echo "▸ skill-sync check" >&2
@@ -202,14 +222,51 @@ if [ -f "$PGL" ]; then
 fi
 
 # ── 7. deps-audit ──────────────────────────────────────────────────────────
+# --verify-licenses additionally checks the attribution text against the license
+# files on disk. Without it the audit only asks whether a dependency is *named*
+# in each file, which is how a truncated NOTICE and an MIT-labelled GPL-or-
+# proprietary VST3 pin both passed a green --strict run. Offline and sub-second:
+# it reads checked-out trees and never queries upstream (that is --check-upstream).
 if [ -f "$DEPS_AUDIT" ]; then
     echo "" >&2
-    echo "▸ deps-audit (attribution drift)" >&2
-    if ! "$PYTHON" "$DEPS_AUDIT" --strict >/dev/null 2>&1; then
-        echo "  deps-audit: attribution drift detected — run \`python3 tools/deps/audit.py --strict\` for details." >&2
+    echo "▸ deps-audit (attribution drift + license truthfulness)" >&2
+    if ! "$PYTHON" "$DEPS_AUDIT" --strict --verify-licenses >/dev/null 2>&1; then
+        echo "  deps-audit: attribution drift detected — run \`python3 tools/deps/audit.py --strict --verify-licenses\` for details." >&2
         fail=1
     else
         echo "  deps-audit: ok" >&2
+    fi
+fi
+
+# ── 7a. deps-audit self-tests ──────────────────────────────────────────────
+# The audit's own tests rotted — two assertions were failing on main (manifest
+# ordering, a missing source_files key) — because nothing ENFORCED them. The
+# Python coverage lane does run them, but behind `continue-on-error: true` and
+# on a workflow that does not gate merge, so a failure there reddens nothing.
+# No ctest registers them. Run them where a red result stops a push.
+if [ -f "$ROOT/tools/deps/test_audit.py" ]; then
+    echo "" >&2
+    echo "▸ deps-audit self-tests" >&2
+    if ! "$PYTHON" "$ROOT/tools/deps/test_audit.py" >/dev/null 2>&1; then
+        echo "  deps-audit self-tests: failing — run \`python3 tools/deps/test_audit.py\` for details." >&2
+        fail=1
+    else
+        echo "  deps-audit self-tests: ok" >&2
+    fi
+fi
+
+# ── 7a-bis. setup.sh shared-source-cache tests ─────────────────────────────
+# Guards the cross-version cache seeding path, which only misbehaves when a
+# dependency is re-pinned on a machine that already cached the old version —
+# a state no cold CI runner reproduces.
+if [ -f "$ROOT/tools/scripts/test_setup_source_cache.sh" ]; then
+    echo "" >&2
+    echo "▸ setup.sh source-cache tests" >&2
+    if ! bash "$ROOT/tools/scripts/test_setup_source_cache.sh" >/dev/null 2>&1; then
+        echo "  setup.sh source-cache tests: failing — run \`bash tools/scripts/test_setup_source_cache.sh\` for details." >&2
+        fail=1
+    else
+        echo "  setup.sh source-cache tests: ok" >&2
     fi
 fi
 
