@@ -327,6 +327,32 @@ gap-bridge is the whole intervention, and a fill already touching its thumb (plu
 track+thumb-only faders and every non-slider row) is left exactly as stored.
 Covered by the `[slider]` cases in `test_design_import_codegen.cpp`.
 
+**Gotcha - a "universal" IR fix is only universal across the emit paths that
+carry it.** `normalize_border_shorthand` splits `style.border` into
+`border_color`/`border_width` for every lane, but the border only PAINTS if the
+node's emit path calls `setBorder`. `design_codegen.cpp` has TWO native-frame emit
+paths: `emit_js_container` (recognized containers) and `emit_js_generic_frame`
+(the fall-through for a childless node whose kind is neither
+container/widget/vector/image/text — a v0/claude/stitch `button`/`canvas`/`input`
+div). `emit_js_generic_frame` emitted background/gradient/corner-radius but NOT
+setBorder, so a bordered generic-frame node silently lost its stroke on EVERY
+lane even though the shorthand was split correctly. When you add a style emit to
+one frame path, add it to BOTH — and verify a real lane, not a grep: import
+`test/fixtures/v0-dev/audio-control-panel.tsx` and count declared-vs-emitted
+(`setBorder`/`setBackgroundGradient`/`setCornerRadius`) in the output JS. A
+grep-level "the field reaches the IR" check misses a drop that lives one layer
+down in codegen.
+
+**Gotcha - the v0 TSX parser does not resolve `style={constObject}`
+references.** `extract_jsx_style_body` (`design_import_v0_tsx.cpp`) resolves only
+inline `style={{...}}` object literals. A hand-authored/v0 pattern that hoists
+the style into `const panelStyle = {...}` and passes `style={panelStyle}` is
+dropped whole — on `audio-control-panel.tsx` the root panel loses its
+background, padding, border, and radius. Resolving it means extracting
+`const …Style = {…}` decls and threading a registry through
+`apply_v0_jsx_attribute`; treat it as a focused parser change with its own tests,
+not a one-liner.
+
 ### Design contract (`pulp design compile`) — the token/widget allowlist
 
 Before generating or hand-writing a UI, compile the **design contract**: the
