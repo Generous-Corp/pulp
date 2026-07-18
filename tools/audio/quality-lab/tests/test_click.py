@@ -695,6 +695,41 @@ def test_a_clean_blep_render_stays_refused_at_every_render_length(dur, wave):
     assert not r.fired and r.low_coverage, f"clean polyBLEP {wave} at dur={dur}s not refused: {r.notes}"
 
 
+# HALF-INTEGER periods (`sr/f0` fractional part ~0.5) are the adversarial case for the
+# per-period template: the BLEP edge's sub-sample phase alternates A/B/A/B, so the true
+# residual period is 2P. Framed at P, half the periods depart from the median-frame template
+# — a BIMODAL novelty a lone-outlier (median-denominator) test misreads as a seam, false-firing
+# on a CLEAN oscillator with a verdict that flips with the parity of the period count (render
+# length). The high-percentile denominator puts that recurring half-of-all-periods cluster INTO
+# the background so it cannot read as an outlier.
+_HALF_INTEGER_F0 = [48000 / 109.5, 48000 / 96.5, 48000 / 217.5]
+
+
+@pytest.mark.parametrize("dur", DUR_SWEEP)
+@pytest.mark.parametrize("f0", _HALF_INTEGER_F0)
+def test_a_clean_half_integer_period_never_false_fires(dur, f0):
+    """A clean polyBLEP square at a half-integer period must REFUSE at every render length —
+    never fire on a correct oscillator, and never let the verdict depend on period-count parity
+    (the render-length flip a lone-outlier median denominator produced here)."""
+    y = fx.polyblep_square(48000, f0, dur)
+    r = click.detect(y, 48000, f0_hint=f0)
+    assert not r.fired, f"false fire on a clean half-integer oscillator f0={f0:.3f} dur={dur}s"
+
+
+@pytest.mark.parametrize("dur", DUR_SWEEP)
+@pytest.mark.parametrize("f0", _HALF_INTEGER_F0)
+def test_a_seam_at_a_half_integer_period_still_fires(dur, f0):
+    """The bimodal-smear fix must not blind the detector: a clear seam on a half-integer-period
+    oscillator is still the one period that departs beyond the (now elevated) recurring
+    background, so it fires at every render length."""
+    y = fx.bandlimited_square(48000, f0, dur)
+    peak = float(np.max(np.abs(y - np.mean(y))))
+    seam = fx.inject_step(y, int(0.5 * dur * 48000), peak * 10 ** (-20 / 20.0))
+    assert click.detect(seam, 48000, f0_hint=f0).fired, (
+        f"missed a -20 dB seam on a half-integer oscillator f0={f0:.3f} dur={dur}s"
+    )
+
+
 @pytest.mark.parametrize("dur", DUR_SWEEP)
 def test_template_novelty_is_low_and_stable_for_pure_smear(dur):
     """The mechanism behind the refusal, isolated and pinned. A pure BLEP smear repeats the
