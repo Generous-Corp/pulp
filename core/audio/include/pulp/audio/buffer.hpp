@@ -192,6 +192,17 @@ public:
 
     std::size_t num_channels() const { return num_channels_; }
     std::size_t num_samples() const { return num_samples_; }
+    /// Number of sample elements retained by the backing allocation. This can
+    /// exceed num_channels() * num_samples() after a resize-down.
+    std::size_t allocated_sample_capacity() const noexcept { return data_.capacity(); }
+
+    /// Release all owned sample and channel-pointer storage.
+    void release() noexcept {
+        std::vector<SampleType>().swap(data_);
+        std::vector<SampleType*>().swap(ptrs_);
+        num_channels_ = 0;
+        num_samples_ = 0;
+    }
 
     /// Zero-fill all channels.
     void clear() {

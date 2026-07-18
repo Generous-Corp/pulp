@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/audio/sample_memory_governor.hpp>
 #include <pulp/audio/sample_preload_contract.hpp>
 #include <pulp/audio/sample_stream_service.hpp>
 
@@ -205,6 +206,66 @@ public:
             return false;
         }
 
+        publish_view(config);
+        return true;
+    }
+
+    /// Takes ownership of an already-filled preload without allocating and
+    /// copying a second planar sample store. The preload lease must account
+    /// for exactly this buffer in the shared sampler-memory governor.
+    bool prepare_owned(const SampleAssetConfig& config,
+                       Buffer<float> preload,
+                       SampleMemoryLease preload_lease) {
+        release();
+        const auto bytes = checked_sample_storage_bytes(
+            config.channels, config.preload_frames);
+        const auto expected_samples = bytes
+            ? *bytes / static_cast<std::uint64_t>(sizeof(float))
+            : std::uint64_t{0};
+        if (!bytes || !preload_lease ||
+            preload_lease.category() != SampleMemoryCategory::Preload ||
+            preload_lease.bytes() != *bytes ||
+            preload.num_channels() != config.channels ||
+            preload.num_samples() != config.preload_frames ||
+            preload.allocated_sample_capacity() != expected_samples ||
+            (config.stream_source &&
+             preload_lease.epoch() != config.stream_source->memory_governor_epoch) ||
+            !config_valid(config, preload.view())) {
+            preload.release();
+            preload_lease.reset();
+            return false;
+        }
+
+        try {
+            preload_ = std::move(preload);
+            preload_channel_ptrs_.resize(config.channels);
+            for (std::uint32_t channel = 0; channel < config.channels; ++channel) {
+                preload_channel_ptrs_[channel] = preload_.channel(channel).data();
+            }
+            preload_lease_ = std::move(preload_lease);
+        } catch (...) {
+            release();
+            preload.release();
+            preload_lease.reset();
+            return false;
+        }
+
+        publish_view(config);
+        return true;
+    }
+
+    void release() noexcept {
+        view_ = {};
+        std::vector<const float*>().swap(preload_channel_ptrs_);
+        preload_ = {};
+        preload_lease_.reset();
+    }
+
+    bool prepared() const noexcept { return view_.valid(); }
+    SampleAssetView view() const noexcept { return view_; }
+
+private:
+    void publish_view(const SampleAssetConfig& config) noexcept {
         view_ = {
             .asset = config.asset,
             .source = config.source,
@@ -220,19 +281,8 @@ public:
             .registration = SampleAssetRegistrationProof(
                 config, preload_channel_ptrs_.data()),
         };
-        return true;
     }
 
-    void release() noexcept {
-        view_ = {};
-        std::vector<const float*>().swap(preload_channel_ptrs_);
-        preload_ = {};
-    }
-
-    bool prepared() const noexcept { return view_.valid(); }
-    SampleAssetView view() const noexcept { return view_; }
-
-private:
     template<typename SampleType>
     static bool config_valid(const SampleAssetConfig& config,
                              BufferView<SampleType> preload) noexcept {
@@ -273,6 +323,9 @@ private:
                stream.window->page_frames() == stream.page_frames;
     }
 
+    // Declared before the storage so reverse member destruction frees the
+    // buffer before returning its bytes to the governor.
+    SampleMemoryLease preload_lease_;
     Buffer<float> preload_;
     std::vector<const float*> preload_channel_ptrs_;
     SampleAssetView view_{};

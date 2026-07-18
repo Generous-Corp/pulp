@@ -22,6 +22,7 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -76,6 +77,7 @@ struct PulpSamplerStreamStats {
     std::uint64_t sources_retired = 0;
     std::uint64_t active_sources = 0;
     std::uint64_t preload_frames = 0;
+    audio::SampleMemoryGovernorStats memory{};
 };
 
 struct PulpSamplerTestAccess;
@@ -154,12 +156,28 @@ class SamplerStreamingRuntime {
                  1,
              static_cast<std::uint64_t>(cache_working_set_page_frames)});
 
+        const auto page_budget = audio::checked_sample_storage_bytes(
+            kMaximumChannels,
+            page_frames_,
+            kSourceCapacity * kCachePagesPerSource);
+        const auto preload_budget = maximum_preload.valid()
+            ? audio::checked_sample_storage_bytes(
+                  kMaximumChannels,
+                  maximum_preload.required_preload_frames,
+                  kSourceCapacity)
+            : std::nullopt;
+        if (!page_budget || !preload_budget ||
+            *preload_budget > std::numeric_limits<std::uint64_t>::max() - *page_budget ||
+            !memory_governor_.prepare(*page_budget + *preload_budget)) {
+            return false;
+        }
+
         service_ready_ = service_.prepare({
             .cache =
                 {
                     .scheduler_capacity = kCommandCapacity,
-                    .page_memory_budget_bytes = kSourceCapacity * kMaximumChannels *
-                                                kCachePagesPerSource * page_frames_ * sizeof(float),
+                    .page_memory_budget_bytes = 0,
+                    .memory_governor = memory_governor_.handle(),
                 },
             .decode =
                 {
@@ -222,6 +240,7 @@ class SamplerStreamingRuntime {
             file_request_pending_ = false;
             file_request_prepared_.reset();
         }
+        (void) memory_governor_.release();
     }
 
     template <typename Loader, typename ViewReader, typename Publisher>
@@ -289,6 +308,7 @@ class SamplerStreamingRuntime {
             .sources_retired = sources_retired_.load(std::memory_order_relaxed),
             .active_sources = active_sources_.load(std::memory_order_relaxed),
             .preload_frames = preload_frames_.load(std::memory_order_relaxed),
+            .memory = memory_governor_.stats(),
         };
     }
 
@@ -378,6 +398,9 @@ class SamplerStreamingRuntime {
         std::array<double, kMaximumBundleMembers> logical_rates{};
         std::array<std::uint32_t, kMaximumBundleMembers> octaves{};
         std::array<audio::SamplePreloadContract, kMaximumBundleMembers> contracts{};
+        // Leases precede buffers so reverse member destruction frees sample
+        // storage before returning its bytes to the shared governor.
+        std::array<audio::SampleMemoryLease, kMaximumBundleMembers> preload_leases{};
         std::array<audio::Buffer<float>, kMaximumBundleMembers> preloads{};
         std::array<std::uint64_t, kMaximumBundleMembers> preload_counts{};
         std::uint32_t member_count = 0;
@@ -393,6 +416,7 @@ class SamplerStreamingRuntime {
     std::atomic<std::uint64_t> sources_retired_{0};
     std::atomic<std::uint64_t> active_sources_{0};
     std::atomic<std::uint64_t> preload_frames_{0};
+    audio::SampleMemoryGovernor memory_governor_;
     audio::SampleStreamAsyncService<> service_;
     CommandInbox commands_;
     std::array<std::unique_ptr<StreamedSlot>, kBundleSlotCount> slots_{};
@@ -584,6 +608,15 @@ class SamplerStreamingRuntime {
             const auto preload_frames =
                 std::min(file.total_frames, required.required_preload_frames);
             contract.configured_preload_frames = preload_frames;
+            const auto preload_bytes = audio::checked_sample_storage_bytes(
+                file.channels, preload_frames);
+            if (!preload_bytes)
+                return {};
+            auto preload_reservation = memory_governor_.reserve(
+                audio::SampleMemoryCategory::Preload, *preload_bytes);
+            if (!preload_reservation.acquired())
+                return {};
+            prepared->preload_leases[member] = std::move(preload_reservation.lease);
             prepared->preloads[member].resize(file.channels,
                                               static_cast<std::size_t>(preload_frames));
             if (file.binding.read(0, prepared->preloads[member].view(), preload_frames,
@@ -622,6 +655,7 @@ class SamplerStreamingRuntime {
         auto& octaves = prepared.octaves;
         auto& contracts = prepared.contracts;
         auto& preloads = prepared.preloads;
+        auto& preload_leases = prepared.preload_leases;
         auto& preload_counts = prepared.preload_counts;
         const auto member_count = prepared.member_count;
 
@@ -703,7 +737,10 @@ class SamplerStreamingRuntime {
                     .preload_contract = contracts[member],
                     .stream_source = stream_views[member],
                 };
-                if (!slot->members[member].asset.prepare(asset_config, preloads[member].view())) {
+                if (!slot->members[member].asset.prepare_owned(
+                        asset_config,
+                        std::move(preloads[member]),
+                        std::move(preload_leases[member]))) {
                     discard_unpublished_slot(*slot);
                     return false;
                 }
