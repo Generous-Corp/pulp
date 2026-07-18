@@ -107,6 +107,10 @@
         "tools/scripts/test_host_vitals.sh",
         "tools/scripts/host_vitals_sensor.sh",
         "tools/scripts/install_host_vitals_sensor.sh",
+        "tools/scripts/shipyard_autoupdate.py",
+        "tools/scripts/test_shipyard_autoupdate.py",
+        "tools/scripts/install_shipyard_autoupdate.sh",
+        "tools/scripts/test_install_shipyard_autoupdate.py",
         "tools/scripts/single_backend_guard.py",
         "tools/scripts/processing_model_terms_lint.py",
         "tools/launchd/**",
@@ -181,6 +185,13 @@
         "core/dsl/include/pulp/dsl/faust*",
         "tools/cmake/PulpFaust.cmake"
       ]
+    },
+    "friction-report": [],
+    "handoff": {
+      "paths": [],
+      "_doc": {
+        "empty-ok": "handoff is a cross-session process skill; it owns no source paths, so no diff triggers a required update (same pattern as code-comments and pr-review-sweep)."
+      }
     },
     "hosting": {
       "paths": [
@@ -390,6 +401,7 @@
         "tools/ci/tart-*.sh",
         "tools/ci/pulp-worktree.sh",
         "tools/ci/setup-ci-host.sh",
+        "tools/ci/governed-build.sh",
         "tools/ci/examples/vm-image.*",
         "tools/launchd/pulp-tart-runner.plist.template",
         ".shipyard/vm-image.toml",
@@ -484,6 +496,9 @@
         "core/format/src/au_v2_cocoa_view.mm",
         "core/format/src/au_adapter.mm",
         "core/format/src/au_view_controller_ios.mm",
+        "core/format/src/aax_effect_gui.cpp",
+        "core/format/include/pulp/format/aax_effect_gui.hpp",
+        "core/format/include/pulp/format/aax_editor.hpp",
         "core/view/include/pulp/view/editor_bridge.hpp",
         "core/view/src/editor_bridge.cpp",
         "examples/view-bridge-demo/**"
@@ -514,7 +529,6 @@
       "paths": [
         "examples/webview-*/**"
       ]
-    },
-    "friction-report": []
+    }
   }
 }

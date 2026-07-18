@@ -25,7 +25,13 @@
 ///
 ///   * passband ripple < 0.001 dB up to 0.4 * Nyquist (well under
 ///     the 0.1 dB design target),
-///   * group delay ~ 6 samples at the half-band's input rate,
+///   * group delay ~ 3.96 samples at the filter's own (2x) rate near
+///     DC — equivalently ~ 1.98 samples at the upsampler's input rate
+///     — rising toward the transition band, as any minimum-phase IIR
+///     does. A full 2x oversampling round trip (upsample, then
+///     downsample) cascades both allpass paths and costs ~ 3.46
+///     samples at the input rate. See `kDefaultCoefficientsA` for how
+///     these follow in closed form from the coefficients,
 ///   * stopband attenuation that grows monotonically from ~ -25 dB at
 ///     the transition-band edge (0.6 * Nyquist) to ~ -60 dB deep in
 ///     the stopband (0.98 * Nyquist).
@@ -46,10 +52,15 @@
 /// ## Upsampling (2x)
 /// `HalfBandUpsampler2x::process(x, out_lo, out_hi)` takes one input
 /// sample and produces two output samples at twice the rate. The two
-/// allpass paths are evaluated on the input, summed for the "low"
-/// output (the one aligned with the input phase) and differenced for
-/// the "high" output (the in-between sample). This matches the
-/// standard polyphase identity for half-band interpolation.
+/// allpass paths are evaluated on the input and emitted directly —
+/// path A becomes the "low" output (the phase aligned with the input),
+/// path B the "high" output (the in-between sample). Neither is summed
+/// nor differenced: each path is individually allpass, and the
+/// half-band response emerges only once the two are interleaved into a
+/// single 2x-rate stream, where the paths' phase difference is 0 in
+/// the passband (samples reinforce) and pi in the stopband (they
+/// cancel). This is the standard polyphase identity for half-band
+/// interpolation.
 ///
 /// ## Downsampling (2x)
 /// `HalfBandDownsampler2x::process(in_lo, in_hi)` consumes two input
@@ -61,7 +72,7 @@
 /// ## Coefficient lineage
 /// The default coefficients (`kDefaultCoefficientsA`,
 /// `kDefaultCoefficientsB`) are a published Tier-2 half-band design
-/// (three sections per path / six sections total) reached from the
+/// (six sections per path / twelve sections total) reached from the
 /// general allpass half-band literature (Vaidyanathan, "Multirate
 /// Systems and Filter Banks"; Regalia, Mitra & Vaidyanathan, "The
 /// Digital All-Pass Filter: A Versatile Signal Processing Building
@@ -147,7 +158,24 @@ using HalfBandAllpassSection64 = HalfBandAllpassSectionT<double>;
 ///     pattern. For single-stage 2x oversampling, callers needing
 ///     deeper rejection at the transition edge should pass a custom
 ///     higher-order coefficient set to the constructor.
-///   * group delay ~ 6 samples at the half-band's input rate.
+///   * group delay near DC that follows in closed form from the
+///     coefficients: a first-order allpass (a + z^-1) / (1 + a*z^-1)
+///     delays by (1-a)/(1+a) at DC, so path A sums to ~ 1.99 and path
+///     B to ~ 1.47 samples at the rate the sections are clocked at.
+///     The half-band `A(z^2) + z^-1 * B(z^2)` therefore delays by
+///     ~ 3.96 samples at its own (2x) rate — ~ 1.98 at the upsampler's
+///     input rate — and an up-then-down round trip, which cascades
+///     both paths at the input rate, costs their sum: ~ 3.46 samples.
+///     Delay is frequency-dependent and rises toward the transition
+///     band; these figures are the DC/passband end. The Audio Doctor's
+///     group-delay analyzer measures two of these independently — the
+///     filter's own ~3.96 at the 2x rate, and the ~3.46 round trip —
+///     and the suite asserts each against the closed form above to
+///     within 0.01 samples (test/test_audio_doctor.cpp). The ~1.98
+///     input-rate figure is the 2x measurement halved rather than a
+///     third measurement, so the suite prints it but does not assert
+///     it: at half the tolerance it cannot fail unless the 2x
+///     assertion already has.
 ///
 /// Lineage: derived from the published polyphase IIR half-band
 /// literature (Vaidyanathan, "Multirate Systems and Filter Banks"

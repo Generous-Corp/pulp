@@ -162,6 +162,121 @@ TEST_CASE("Signal generators are deterministic and shaped as documented",
     }
 }
 
+TEST_CASE("Naive saw and square are exact closed forms",
+          "[audio][generators]") {
+    // 1 kHz at 48 kHz is exactly 48 samples per cycle, and every phase
+    // asserted below (0, 1/4, 1/2, 3/4, and the wrap) is a dyadic rational
+    // the double expression represents exactly — so these are EXACT
+    // comparisons, not tolerance ones.
+    constexpr double kSr = 48000.0;
+    constexpr double kF0 = 1000.0;
+    constexpr int kPeriod = 48;
+
+    SECTION("saw ramps -1 → +1 and steps exactly at the wrap") {
+        const auto saw = make_saw(1, 4800, kF0, kSr);
+        auto s = saw.channel(0);
+
+        CHECK(s[0] == -1.0f);                       // cycle start
+        CHECK(s[12] == -0.5f);                      // quarter
+        CHECK(s[24] == 0.0f);                       // half
+        CHECK(s[36] == 0.5f);                       // three-quarter
+        CHECK(s[kPeriod] == -1.0f);                 // wrap sample: back to -1
+
+        // Last sample before the wrap: the documented closed form.
+        CHECK(s[47] == static_cast<float>(2.0 * (47.0 / 48.0) - 1.0));
+        CHECK(s[47] > s[46]);                       // rising ramp
+        CHECK(s[48] < s[47]);                       // discontinuous drop
+
+        // Exactly one wrap per period over the whole buffer: 4800 samples at
+        // 48 samples/cycle wrap at i = 48, 96, … 4752 → 99 descending steps.
+        int wraps = 0;
+        for (std::size_t i = 1; i < s.size(); ++i)
+            wraps += (s[i] < s[i - 1]);
+        CHECK(wraps == 99);
+    }
+
+    SECTION("saw honors amplitude and cycle-valued phase offset") {
+        const auto half = make_saw(1, kPeriod, kF0, kSr, 0.5f);
+        CHECK(half.channel(0)[0] == -0.5f);
+        CHECK(half.channel(0)[36] == 0.25f);
+        CHECK(analyze(half, kSr).max_peak() <= 0.5);
+
+        // A half-cycle offset moves the wrap to the buffer midpoint and puts
+        // sample 0 at the ramp's midpoint (2·0.5 − 1 == 0).
+        const auto shifted = make_saw(1, kPeriod, kF0, kSr, 1.0f, 0.5);
+        CHECK(shifted.channel(0)[0] == 0.0f);
+        CHECK(shifted.channel(0)[24] == -1.0f);
+        // Phase is wrapped into [0, 1), so +1.0 cycle is a no-op.
+        const auto wrapped = make_saw(1, kPeriod, kF0, kSr, 1.0f, 1.0);
+        CHECK(std::memcmp(make_saw(1, kPeriod, kF0, kSr).channel(0).data(),
+                          wrapped.channel(0).data(),
+                          kPeriod * sizeof(float)) == 0);
+    }
+
+    SECTION("square duty cycle is exact") {
+        // Strict `p < pulse_width`: p == 0.5 at i = 24 lands on the low half.
+        const auto even = make_square(1, 4800, kF0, kSr);
+        auto e = even.channel(0);
+        CHECK(e[0] == 1.0f);
+        CHECK(e[23] == 1.0f);
+        CHECK(e[24] == -1.0f);
+        CHECK(e[47] == -1.0f);
+        CHECK(e[48] == 1.0f);
+        int high = 0;
+        for (float v : e)
+            high += (v > 0.0f);
+        CHECK(high == 2400);                        // 50% of 4800
+        // An even square is DC-free by construction.
+        CHECK(analyze(even, kSr).channels[0].dc_offset == 0.0);
+
+        const auto narrow = make_square(1, 4800, kF0, kSr, 1.0f, 0.25);
+        int narrow_high = 0;
+        for (float v : narrow.channel(0))
+            narrow_high += (v > 0.0f);
+        CHECK(narrow_high == 1200);                 // 25% of 4800
+        CHECK(narrow.channel(0)[11] == 1.0f);
+        CHECK(narrow.channel(0)[12] == -1.0f);
+
+        // Degenerate duties are legal DC, not clamped away.
+        const auto silent_high = make_square(1, kPeriod, kF0, kSr, 1.0f, 0.0);
+        const auto always_high = make_square(1, kPeriod, kF0, kSr, 1.0f, 1.0);
+        for (int i = 0; i < kPeriod; ++i) {
+            CHECK(silent_high.channel(0)[static_cast<std::size_t>(i)] == -1.0f);
+            CHECK(always_high.channel(0)[static_cast<std::size_t>(i)] == 1.0f);
+        }
+    }
+
+    SECTION("square honors amplitude and phase offset") {
+        const auto q = make_square(1, kPeriod, kF0, kSr, 0.25f, 0.5, 0.5);
+        CHECK(q.channel(0)[0] == -0.25f);           // phase 0.5 → low half
+        CHECK(q.channel(0)[24] == 0.25f);           // wraps to the high half
+        CHECK(analyze(q, kSr).max_peak() <= 0.25);
+    }
+
+    SECTION("deterministic, finite, and identical across channels") {
+        for (const auto& buf : {make_saw(2, 4096, 220.0, kSr, 0.5f),
+                                make_square(2, 4096, 220.0, kSr, 0.5f, 0.3)}) {
+            const auto m = analyze(buf, kSr);
+            CHECK_FALSE(m.has_nan_or_inf());
+            CHECK(m.max_peak() <= 0.5);
+            CHECK(m.max_rms() > 0.001);
+            // Multi-channel generators write the same signal to every channel.
+            CHECK(std::memcmp(buf.channel(0).data(), buf.channel(1).data(),
+                              4096 * sizeof(float)) == 0);
+        }
+
+        // Same arguments → bit-identical buffers.
+        const auto saw_a = make_saw(1, 4096, 220.0, kSr, 0.5f, 0.125);
+        const auto saw_b = make_saw(1, 4096, 220.0, kSr, 0.5f, 0.125);
+        CHECK(std::memcmp(saw_a.channel(0).data(), saw_b.channel(0).data(),
+                          4096 * sizeof(float)) == 0);
+        const auto sq_a = make_square(1, 4096, 220.0, kSr, 0.5f, 0.3, 0.125);
+        const auto sq_b = make_square(1, 4096, 220.0, kSr, 0.5f, 0.3, 0.125);
+        CHECK(std::memcmp(sq_a.channel(0).data(), sq_b.channel(0).data(),
+                          4096 * sizeof(float)) == 0);
+    }
+}
+
 TEST_CASE("RenderScenario: PulpGain effect scenario",
           "[audio][scenario][pulpgain]") {
     // -12 dBFS sine peak → RMS -15.05 dBFS; -6 dB output gain → -21.05.

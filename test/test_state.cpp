@@ -9,8 +9,10 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstring>
+#include <limits>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -75,6 +77,53 @@ static void write_le_u32(std::vector<uint8_t>& data, std::size_t offset, uint32_
     data[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
     data[offset + 2] = static_cast<uint8_t>((value >> 16) & 0xFF);
     data[offset + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
+}
+
+TEST_CASE("StateStore sanitizes non-finite parameter writes",
+          "[state][nan][security]") {
+    // std::clamp propagates NaN, so without a guard a NaN/Inf write would be
+    // stored verbatim and reach both the DSP and the serialized preset. Every
+    // write path must land a finite, in-range value.
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+
+    SECTION("set_value(NaN/Inf) falls back to a finite in-range value") {
+        for (float bad : {std::numeric_limits<float>::quiet_NaN(),
+                          std::numeric_limits<float>::infinity(),
+                          -std::numeric_limits<float>::infinity()}) {
+            store.set_value(1, bad);
+            const float v = store.get_value(1);
+            REQUIRE(std::isfinite(v));
+            REQUIRE(v >= -60.0f);
+            REQUIRE(v <= 12.0f);
+        }
+    }
+
+    SECTION("set_normalized(NaN) yields a finite value") {
+        store.set_normalized(1, std::numeric_limits<float>::quiet_NaN());
+        REQUIRE(std::isfinite(store.get_value(1)));
+    }
+}
+
+TEST_CASE("StateStore clamps the modulated value to the parameter range",
+          "[state][modulation]") {
+    // base + mod_offset can exceed the declared range; the DSP that reads the
+    // modulated value must never observe an out-of-range number.
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+
+    store.set_value(1, 12.0f);        // base at max
+    store.set_mod_offset(1, 24.0f);   // modulate far past max
+    REQUIRE(store.get_modulated(1) <= 12.0f);
+    REQUIRE(store.get_modulated(1) >= -60.0f);
+
+    store.set_mod_offset(1, -100.0f);  // modulate far below min
+    REQUIRE(store.get_modulated(1) >= -60.0f);
+
+    // An in-range modulation is returned unchanged (clamp is a no-op).
+    store.set_value(1, 0.0f);
+    store.set_mod_offset(1, 3.0f);
+    REQUIRE_THAT(store.get_modulated(1), WithinAbs(3.0, 0.001));
 }
 
 TEST_CASE("ParamRange normalization", "[state][range]") {

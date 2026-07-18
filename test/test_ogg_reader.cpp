@@ -148,6 +148,39 @@ TEST_CASE("OggReader rejects missing and malformed files",
     REQUIRE_FALSE(reader->read(malformed.string()).has_value());
 }
 
+// A user-dropped .ogg is untrusted input into stb_vorbis — decades-old C with
+// a long public CVE history as a codebase class. A stream truncated at any
+// byte offset must fail closed or return bounded data, never crash or read out
+// of bounds (ASan enforces the OOB half). This complements the single 5-byte
+// rejection above with a full truncation sweep of a REAL Vorbis stream, where
+// truncation lands mid-page/mid-packet rather than at the magic bytes.
+TEST_CASE("OggReader survives truncated Vorbis streams",
+          "[audio][ogg][fuzz][security]") {
+    auto reader = pulp::audio::create_ogg_reader();
+    REQUIRE(reader != nullptr);
+    auto decoded = pulp::runtime::base64_decode(kTinyOggVorbisBase64);
+    REQUIRE(decoded.has_value());
+    const auto& bytes = *decoded;
+    REQUIRE(bytes.size() > 64);
+
+    TempDir temp;
+    for (std::size_t len = 0; len <= bytes.size(); len += 7) {
+        auto p = (temp.path / ("trunc_" + std::to_string(len) + ".ogg")).string();
+        {
+            std::ofstream f(p, std::ios::binary);
+            f.write(reinterpret_cast<const char*>(bytes.data()),
+                    static_cast<std::streamsize>(len));
+        }
+        (void)reader->read_info(p);
+        auto d = reader->read(p);
+        if (d) {
+            REQUIRE(d->num_channels() <= 8u);  // no absurd channel count
+            for (const auto& ch : d->channels)
+                REQUIRE(ch.size() <= len + 1);  // no gross over-read
+        }
+    }
+}
+
 TEST_CASE("OggReader reports metadata for a valid Vorbis stream",
           "[audio][ogg]") {
     auto reader = pulp::audio::create_ogg_reader();

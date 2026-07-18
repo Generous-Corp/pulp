@@ -23,6 +23,10 @@
 #                     (default: assume plugins are already built in ./build/)
 #   --plugin <name>   plugin slug to validate (default: PulpDrums)
 #   --output <dir>    output directory (default: test/fixtures/format-baseline)
+#   --diag-dir <dir>  also write per-validator diagnostics here: the raw
+#                     (un-normalized) output and the exit code. Kept out of
+#                     --output because every file there is treated as a
+#                     validator fixture to diff.
 #
 # Exit codes:
 #   0 — all available validators captured successfully
@@ -39,12 +43,14 @@ set -euo pipefail
 BUILD_FIRST=0
 PLUGIN="PulpEffect"
 OUTPUT_DIR="test/fixtures/format-baseline"
+DIAG_DIR=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --build) BUILD_FIRST=1; shift;;
         --plugin) PLUGIN="$2"; shift 2;;
         --output) OUTPUT_DIR="$2"; shift 2;;
+        --diag-dir) DIAG_DIR="$2"; shift 2;;
         *) echo "Unknown flag: $1" >&2; exit 2;;
     esac
 done
@@ -59,6 +65,12 @@ if [[ $BUILD_FIRST -eq 1 ]]; then
 fi
 
 mkdir -p "$OUTPUT_DIR"
+if [[ -n "$DIAG_DIR" ]]; then
+    mkdir -p "$DIAG_DIR"
+fi
+
+RAW_TMP="$(mktemp -t pulp-baseline-raw)"
+trap 'rm -f "$RAW_TMP"' EXIT
 
 captured=0
 failed=0
@@ -85,6 +97,41 @@ normalize() {
         -e 's|[0-9]+ ?ms|<MS>ms|g'
 }
 
+# ── Validator runner ───────────────────────────────────────────────────
+# Run one validator and record its combined output, normalized, at
+# $outfile. Returns 0 when the validator exited 0.
+#
+# A non-zero exit means one of two very different things — the validator
+# ran and reported findings, or it never ran at all (bundle unresolvable,
+# binary missing its runtime) — and the exit code alone does not tell them
+# apart. So echo the code and an excerpt of the output to the log: without
+# them a failure here is a dead end, because the only other copy of the
+# output lives in a temp dir the caller deletes.
+run_validator() {
+    local label="$1" outfile="$2"
+    shift 2
+    local rc=0
+    "${NO_EDITOR_ENV[@]}" "$@" >"$RAW_TMP" 2>&1 || rc=$?
+    normalize <"$RAW_TMP" >"$outfile"
+
+    if [[ -n "$DIAG_DIR" ]]; then
+        local stem
+        stem="$(basename "$outfile" .txt)"
+        cp "$RAW_TMP" "$DIAG_DIR/${stem}.raw.txt"
+        printf '%s\n' "$rc" >"$DIAG_DIR/${stem}.exit"
+    fi
+
+    if [[ $rc -ne 0 ]]; then
+        echo "[baseline] $label: exit $rc — first 20 lines of its output:" >&2
+        sed -n '1,20p' "$RAW_TMP" | sed 's|^|[baseline]   |' >&2
+        if [[ ! -s "$RAW_TMP" ]]; then
+            echo "[baseline]   (no output at all — the validator did not run)" >&2
+        fi
+        return 1
+    fi
+    return 0
+}
+
 # ── auval (AU) ─────────────────────────────────────────────────────────
 if command -v auval >/dev/null 2>&1; then
     AU_BUNDLE="$HOME/Library/Audio/Plug-Ins/Components/${PLUGIN}.component"
@@ -98,8 +145,8 @@ if command -v auval >/dev/null 2>&1; then
             type=$(/usr/libexec/PlistBuddy -c "Print :AudioComponents:0:type" "$AU_BUNDLE/Contents/Info.plist")
             subtype=$(/usr/libexec/PlistBuddy -c "Print :AudioComponents:0:subtype" "$AU_BUNDLE/Contents/Info.plist")
             manuf=$(/usr/libexec/PlistBuddy -c "Print :AudioComponents:0:manufacturer" "$AU_BUNDLE/Contents/Info.plist")
-            if "${NO_EDITOR_ENV[@]}" auval -v "$type" "$subtype" "$manuf" 2>&1 \
-                | normalize > "$OUTPUT_DIR/${PLUGIN}.au.txt"; then
+            if run_validator "auval" "$OUTPUT_DIR/${PLUGIN}.au.txt" \
+                    auval -v "$type" "$subtype" "$manuf"; then
                 captured=$((captured + 1))
             else
                 failed=$((failed + 1))
@@ -121,8 +168,8 @@ if command -v pluginval >/dev/null 2>&1; then
         echo "[baseline] pluginval: $PLUGIN" >&2
         # --strictness-level 5 is the most thorough but slow; level 3
         # catches most issues and runs in seconds.
-        if "${NO_EDITOR_ENV[@]}" pluginval --validate "$VST3_BUNDLE" --strictness-level 3 --skip-gui-tests 2>&1 \
-            | normalize > "$OUTPUT_DIR/${PLUGIN}.vst3.txt"; then
+        if run_validator "pluginval" "$OUTPUT_DIR/${PLUGIN}.vst3.txt" \
+                pluginval --validate "$VST3_BUNDLE" --strictness-level 3 --skip-gui-tests; then
             captured=$((captured + 1))
         else
             failed=$((failed + 1))
@@ -139,8 +186,8 @@ if command -v clap-validator >/dev/null 2>&1; then
     CLAP_BUNDLE="$HOME/Library/Audio/Plug-Ins/CLAP/${PLUGIN}.clap"
     if [[ -e "$CLAP_BUNDLE" ]]; then
         echo "[baseline] clap-validator: $PLUGIN" >&2
-        if "${NO_EDITOR_ENV[@]}" clap-validator validate "$CLAP_BUNDLE" 2>&1 \
-            | normalize > "$OUTPUT_DIR/${PLUGIN}.clap.txt"; then
+        if run_validator "clap-validator" "$OUTPUT_DIR/${PLUGIN}.clap.txt" \
+                clap-validator validate "$CLAP_BUNDLE"; then
             captured=$((captured + 1))
         else
             failed=$((failed + 1))
@@ -158,9 +205,13 @@ if [[ $captured -eq 0 && $failed -eq 0 ]]; then
 fi
 
 if [[ $failed -gt 0 && $captured -eq 0 ]]; then
-    # All available validators failed. That's a hard fail — no
-    # signal at all.
-    echo "[baseline] All $failed validator(s) failed — no captured output." >&2
+    # Every validator that ran exited non-zero. Their output was still
+    # written to $OUTPUT_DIR (and to --diag-dir when set) — each one's exit
+    # code and an excerpt are in the log above.
+    echo "[baseline] All $failed validator(s) exited non-zero. Their output is in $OUTPUT_DIR" >&2
+    if [[ -n "$DIAG_DIR" ]]; then
+        echo "[baseline] Raw output + exit codes: $DIAG_DIR" >&2
+    fi
     exit 1
 fi
 

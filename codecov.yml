@@ -143,7 +143,9 @@ ignore:
   - "**/coreaudio_device.mm"
   - "**/sdl_window_host.cpp"
   - "**/scanner_clap.cpp"
+  - "**/plugin_slot_au.mm"
   - "**/au_v2_adapter.cpp"
+  - "**/au_adapter.mm"
   - "**/au_v2_instrument.cpp"
   - "**/reload_probe.cpp"
   - "**/aax_midi_node.cpp"
@@ -427,6 +429,8 @@ component_management:
         - "!core/platform/platform/mac/**"
         - "!core/platform/platform/linux/**"
         - "!core/platform/platform/win/**"
+        # The web platform subtree (clipboard_web.cpp, ...) is owned by the `web`
+        # component, like the other OS subtrees above — otherwise it double-counts.
         - "!core/platform/platform/web/**"
         - "!core/platform/src/android/**"
         - "!core/platform/include/pulp/platform/android/**"

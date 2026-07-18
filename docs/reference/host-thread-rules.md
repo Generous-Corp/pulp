@@ -15,9 +15,11 @@ freed memory. This reference exists to pin the contract down.
 ## `SignalGraph`
 
 The graph uses an immutable-snapshot pattern. `process()` reads only
-from a `CompiledGraph` published via `std::atomic` shared_ptr swap.
-Mutators on the UI thread invalidate the snapshot, forcing silence
-until `prepare()` is called to republish.
+from a `CompiledGraph` published through `runtime::Slot`. Ordinary mutators on
+the UI thread invalidate the snapshot, forcing silence until `prepare()` is
+called to republish. A `begin_swap_edit()` / `prepare_swap()` transaction is the
+gap-free exception: its supported mutators leave the old snapshot playing while
+the control thread compiles and atomically publishes the candidate.
 
 ### UI-thread-only APIs (mutators)
 
@@ -29,6 +31,7 @@ live snapshot. **Never call them from the audio thread.**
 - `connect` / `connect_midi` / `connect_feedback` / `disconnect`
 - `clear`
 - `prepare` / `release`
+- `begin_swap_edit` / `prepare_swap` / `abort_swap_edit`
 
 ### UI/control-thread live scalar updates
 
@@ -48,12 +51,23 @@ live snapshot. **Never call them from the audio thread.**
   snapshot-owned lock-free mailboxes; safe to call concurrently with
   `process()`. In typical flow, the UI thread injects MIDI and reads
   extracted events.
+- `inject_parameter_events` — publishes one block of sample-offset parameter
+  events through a snapshot-owned lock-free mailbox. It is safe to call
+  concurrently with `process()` from one control-side writer. The latest
+  publication replaces any older unconsumed publication and is consumed once
+  by the next successful block. Injected events are appended after graph
+  automation, so graph automation keeps queue-capacity priority and an
+  injected event wins a stable-sort tie at the same sample offset. A `false`
+  return means the node is unavailable or the source queue already overflowed;
+  any retained source prefix is still published. If graph automation leaves
+  insufficient destination capacity, the fixed queue drops the injected tail.
 
 The TSan-oriented graph tests pin the combined contract: one thread may run
 `SignalGraph::process()` while a control thread calls `set_node_gain()`,
-`inject_midi()`, and `extract_midi()` against the prepared snapshot. See
+`inject_midi()`, `extract_midi()`, and `inject_parameter_events()` against the
+prepared snapshot. See
 `pulp-test-host-signal-graph` filter
-`"[host][graph][threading][race][tsan][midi]"`.
+`"[host][graph][threading][race][tsan]"`.
 
 ### Worker-thread producer APIs
 
@@ -85,8 +99,8 @@ called from the audio thread:
 - `set_node_parameter` / `get_node_parameter` forward to
   `PluginSlot::set_parameter` / `get_parameter`. These operate on the
   `nodes_` vector directly (via `node()`), so they are **UI-thread-only**.
-  Per-block automation goes through `ParameterEventQueue` (Phase 0C)
-  not through these.
+  Per-block automation goes through `ParameterEventQueue`, either from graph
+  automation connections or `inject_parameter_events()`, not through these.
 
 ## `PluginSlot`
 
@@ -124,14 +138,14 @@ Consumers must honor `HostParamInfo::flags`:
 
 ## Snapshot publish protocol
 
-1. UI thread calls a mutator (e.g. `connect(a, 0, b, 0)`).
-2. Mutator appends to `connections_`, then `atomic_store(&live_, nullptr)`.
-3. Audio thread's next `process()` call sees `live_ == nullptr` and
+1. UI thread calls an ordinary mutator (e.g. `connect(a, 0, b, 0)`).
+2. Mutator appends to `connections_`, then unpublishes the live slot.
+3. Audio thread's next `process()` call sees no live snapshot and
    writes silence to the output buffer, returning immediately.
 4. UI thread calls `prepare(sample_rate, max_block_size)`. `prepare()`:
    - calls each plugin's `prepare(sample_rate, max_block_size)`
    - `compile_()` builds a fresh `CompiledGraph` from `nodes_` + `connections_`
-   - atomic-stores the new snapshot
+   - publishes the new snapshot through `runtime::Slot`
 5. Audio thread's next `process()` call sees the new snapshot and
    resumes producing audio.
 
@@ -150,8 +164,13 @@ thread drops its reference to the old snapshot. No dangling reads.
 - Internal `invalidate_live_()` (triggered by mutators) — just nulls
   the snapshot. Doesn't touch plugin state.
 
-If you want to change topology without an audio dropout, you can't —
-yet. The current semantic is "mutation = silence until re-prepare".
-A future iteration may add atomic-topology-swap (build a new
-CompiledGraph eagerly in the mutator and swap without going through
-nullptr); for v1, the simple semantic is intentional.
+For an eligible topology change without an audio dropout, call
+`begin_swap_edit()`, make the supported edits on that same control thread, then
+call `prepare_swap(sample_rate, max_block_size)`. The old snapshot keeps playing
+through candidate compilation. `Swapped` means the candidate was published
+gap-free; `NeedsEagerPrepare` means the transaction failed closed and the caller
+must use ordinary `prepare()`. Eligibility requires unchanged node/plugin/custom
+instance contracts, sample rate, block size, total latency, and feed-forward PDC
+delay structure. Matching PDC history is shared by private connection identity;
+feedback, MIDI, smoothed sparse automation, anticipation, latency-changing edits,
+and disconnect/reconnect of a delayed edge use the eager path.

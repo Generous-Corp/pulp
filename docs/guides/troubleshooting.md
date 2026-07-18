@@ -55,7 +55,7 @@ rm external/vst3sdk external/AudioUnitSDK  # remove broken links
 
 Or recreate them manually from the pinned revisions:
 ```bash
-git clone --depth 1 --recursive --branch v3.7.12_build_20 \
+git clone --depth 1 --recursive --branch v3.8.0_build_66 \
     https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk
 
 # macOS only:
@@ -80,7 +80,7 @@ Each failed check includes a fix command. Common ones:
 | C++20 compiler missing | `xcode-select --install` (macOS) or `sudo apt install g++-13` (Linux) |
 | CMake too old | `brew upgrade cmake` or install from cmake.org |
 | git-lfs missing | `brew install git-lfs && git lfs install` |
-| VST3 SDK missing | `git clone --depth 1 --recursive --branch v3.7.12_build_20 https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk` |
+| VST3 SDK missing | `git clone --depth 1 --recursive --branch v3.8.0_build_66 https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk` |
 | ALSA headers missing | `sudo apt install libasound2-dev` (Linux) |
 
 ### No C++20 support

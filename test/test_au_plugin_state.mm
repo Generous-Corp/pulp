@@ -16,6 +16,7 @@
 
 #import "../core/format/src/au_audio_unit.h"
 
+#include <algorithm>
 #include <array>
 #include <string>
 #include <vector>
@@ -27,11 +28,17 @@ namespace {
 
 class TestAUEffectProcessor;
 class TestAUInstrumentProcessor;
+class TestAUMpeInstrumentProcessor;
 
 TestAUEffectProcessor* g_last_effect_processor = nullptr;
 TestAUInstrumentProcessor* g_last_instrument_processor = nullptr;
+TestAUMpeInstrumentProcessor* g_last_mpe_processor = nullptr;
 int g_pending_au_latency_samples = 0;
 int g_pending_au_tail_samples = 0;
+// Toggles whether TestAUMpeInstrumentProcessor declares supports_mpe. Lets one
+// capture processor cover both the opt-in and the non-opt-in (null mpe_input)
+// paths.
+bool g_au_mpe_declare = true;
 
 class TestAUEffectProcessor : public pulp::format::Processor {
 public:
@@ -204,6 +211,72 @@ public:
     std::size_t last_process_buffers_main_output_channels = 0;
 };
 
+// One captured per-note expression event, flattened from MpeExpressionEvent so
+// the test can assert routing without holding onto the buffer's storage.
+struct CapturedMpeEvent {
+    pulp::midi::MpeExpressionEvent::Kind kind;
+    uint8_t channel = 0;
+    uint8_t note = 0;
+    float pitch_bend_semitones = 0.0f;
+    float pressure = 0.0f;
+    float timbre = 0.0f;
+    int32_t sample_offset = 0;
+};
+
+// MPE-declaring instrument for the AU v3 MPE-routing test. Snapshots the
+// per-note expression buffer the render block hands it via mpe_input() each
+// block, so the test can assert the adapter ran the MpeVoiceTracker over the
+// channel-wide MIDI it fed and attached the resulting per-note events.
+class TestAUMpeInstrumentProcessor : public pulp::format::Processor {
+public:
+    TestAUMpeInstrumentProcessor() { g_last_mpe_processor = this; }
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d{
+            .name = "AUMpeInstrumentTest",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.au-mpe-instrument",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Instrument,
+            .input_buses = {},
+            .output_buses = {{"Audio Out", 2}},
+            .accepts_midi = true,
+        };
+        d.supports_mpe = g_au_mpe_declare;
+        return d;
+    }
+
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    void process(pulp::audio::BufferView<float>&,
+                 const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+
+    void process(pulp::format::ProcessBuffers&,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        ++process_count;
+        captured.clear();
+        const pulp::midi::MpeBuffer* mpe = mpe_input();
+        mpe_input_present = (mpe != nullptr);
+        if (mpe) {
+            for (const auto& e : *mpe) {
+                captured.push_back({e.kind, e.state.channel, e.state.note,
+                                    e.state.pitch_bend_semitones, e.state.pressure,
+                                    e.state.timbre, e.sample_offset});
+            }
+        }
+    }
+
+    int process_count = 0;
+    bool mpe_input_present = false;
+    std::vector<CapturedMpeEvent> captured;
+};
+
 class TestAUWideEditorProcessor : public TestAUEffectProcessor {
 public:
     pulp::format::ViewSize view_size() const override {
@@ -268,6 +341,10 @@ std::unique_ptr<pulp::format::Processor> create_instrument_processor() {
 
 std::unique_ptr<pulp::format::Processor> create_wide_editor_processor() {
     return std::make_unique<TestAUWideEditorProcessor>();
+}
+
+std::unique_ptr<pulp::format::Processor> create_mpe_instrument_processor() {
+    return std::make_unique<TestAUMpeInstrumentProcessor>();
 }
 
 std::unique_ptr<pulp::format::Processor> create_sidechain_effect_processor() {
@@ -547,6 +624,149 @@ TEST_CASE("AU v3 fullState round-trips plugin-owned payload",
         [loader release];
         [saver release];
     }
+}
+
+TEST_CASE("AU v3 routes channel-wide MIDI into per-note MPE expression",
+          "[au][auv3][mpe]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_MusicDevice;
+        desc.componentSubType = 'TstM';
+        desc.componentManufacturer = 'Plup';
+
+        // Snapshot of one render-block invocation, copied out of the processor
+        // BEFORE the owning unit is released (the processor is owned by the
+        // unit's bridge, so it dangles after -release).
+        struct DriveResult {
+            bool mpe_input_present = false;
+            int process_count = 0;
+            std::vector<CapturedMpeEvent> captured;
+        };
+
+        auto drive_block = [&](bool declare_mpe) -> DriveResult {
+            g_au_mpe_declare = declare_mpe;
+            ScopedFactoryRegistration registration(create_mpe_instrument_processor);
+
+            NSError* error = nil;
+            PulpAudioUnit* unit =
+                [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                           options:0
+                                                             error:&error];
+            REQUIRE(unit != nil);
+            REQUIRE(error == nil);
+
+            auto* processor = g_last_mpe_processor;
+            REQUIRE(processor != nullptr);
+
+            NSError* allocate_error = nil;
+            REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+            REQUIRE(allocate_error == nil);
+
+            constexpr UInt32 kFrames = 16;
+            float left[kFrames] = {};
+            float right[kFrames] = {};
+            struct StereoBufferList {
+                AudioBufferList list;
+                AudioBuffer extra[1];
+            } output{};
+            output.list.mNumberBuffers = 2;
+            output.list.mBuffers[0].mNumberChannels = 1;
+            output.list.mBuffers[0].mDataByteSize = kFrames * sizeof(float);
+            output.list.mBuffers[0].mData = left;
+            output.list.mBuffers[1].mNumberChannels = 1;
+            output.list.mBuffers[1].mDataByteSize = kFrames * sizeof(float);
+            output.list.mBuffers[1].mData = right;
+
+            // Channel-wide MIDI on MPE lower-zone member channel 1 (0-based):
+            // a note-on plus the three expression axes the MpeVoiceTracker
+            // narrows into per-note pitch bend / timbre / pressure. Linked in
+            // host delivery order (the AU render path does not sort midi_in).
+            std::array<AURenderEvent, 4> events{};
+            auto set_midi = [](AURenderEvent& e, uint8_t s, uint8_t d1, uint8_t d2,
+                               uint16_t len) {
+                e.MIDI.eventType = AURenderEventMIDI;
+                e.MIDI.eventSampleTime = 0;
+                e.MIDI.length = len;
+                e.MIDI.cable = 0;
+                e.MIDI.data[0] = s;
+                e.MIDI.data[1] = d1;
+                e.MIDI.data[2] = d2;
+            };
+            set_midi(events[0], 0x91, 60, 100, 3);    // note-on, member ch, note 60
+            set_midi(events[1], 0xE1, 0x00, 0x60, 3); // pitch bend up (0x3000)
+            set_midi(events[2], 0xB1, 74, 100, 3);    // CC74 → timbre
+            set_midi(events[3], 0xD1, 80, 0, 2);      // channel pressure
+            events[0].MIDI.next = &events[1];
+            events[1].MIDI.next = &events[2];
+            events[2].MIDI.next = &events[3];
+            events[3].MIDI.next = nullptr;
+
+            AudioUnitRenderActionFlags flags = 0;
+            AudioTimeStamp timestamp{};
+            timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+            timestamp.mSampleTime = 0;
+
+            AUInternalRenderBlock block = [unit internalRenderBlock];
+            REQUIRE(block != nil);
+            auto status = block(&flags, &timestamp, kFrames, 0, &output.list,
+                                &events[0], nil);
+            REQUIRE(status == noErr);
+
+            DriveResult result;
+            result.mpe_input_present = processor->mpe_input_present;
+            result.process_count = processor->process_count;
+            result.captured = processor->captured;
+
+            [unit deallocateRenderResources];
+            [unit release];
+            return result;
+        };
+
+        SECTION("opted-in instrument receives routed per-note expression") {
+            const DriveResult r = drive_block(/*declare_mpe=*/true);
+            REQUIRE(r.process_count == 1);
+            REQUIRE(r.mpe_input_present);
+
+            using K = pulp::midi::MpeExpressionEvent::Kind;
+            const auto& evs = r.captured;
+            auto has = [&](K k) {
+                return std::any_of(evs.begin(), evs.end(),
+                    [&](const CapturedMpeEvent& e) { return e.kind == k; });
+            };
+            REQUIRE(has(K::NoteOn));
+            REQUIRE(has(K::PitchBend));
+            REQUIRE(has(K::Timbre));
+            REQUIRE(has(K::Pressure));
+
+            // Every emitted event carries the note-on's identity (member
+            // channel 1, note 60): the channel-wide MIDI was narrowed onto the
+            // one active note.
+            for (const auto& e : evs) {
+                REQUIRE(e.channel == 1);
+                REQUIRE(e.note == 60);
+            }
+
+            auto first = [&](K k) -> const CapturedMpeEvent& {
+                auto it = std::find_if(evs.begin(), evs.end(),
+                    [&](const CapturedMpeEvent& e) { return e.kind == k; });
+                REQUIRE(it != evs.end());
+                return *it;
+            };
+            REQUIRE(first(K::PitchBend).pitch_bend_semitones > 0.0f);
+            REQUIRE_THAT(first(K::Timbre).timbre,
+                         WithinAbs(100.0f / 127.0f, 1e-3f));
+            REQUIRE_THAT(first(K::Pressure).pressure,
+                         WithinAbs(80.0f / 127.0f, 1e-3f));
+        }
+
+        SECTION("non-opted-in instrument gets a null mpe_input") {
+            const DriveResult r = drive_block(/*declare_mpe=*/false);
+            REQUIRE(r.process_count == 1);
+            REQUIRE_FALSE(r.mpe_input_present);
+            REQUIRE(r.captured.empty());
+        }
+    }
+    g_au_mpe_declare = true;
 }
 
 TEST_CASE("AU v3 render events preserve parameter sample offsets and update StateStore",

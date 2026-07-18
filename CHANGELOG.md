@@ -8,6 +8,123 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07010"></a>
+## [0.701.0] - 2026-07-18
+
+- feat(osc): suite tail — render --seed/--engine, Tier B click novelty + Allan, WP-4 fitter, corpus+perf, docs ([#6265](https://github.com/danielraffel/pulp/pull/6265))
+
+<a id="v07000"></a>
+## [0.700.0] - 2026-07-18
+
+- test(design-import): lock knob value-arc against a parked plain ring (6.2) ([#6264](https://github.com/danielraffel/pulp/pull/6264))
+- test(design-import): Claude DOM inline border/gradient/shadow reach codegen ([#6259](https://github.com/danielraffel/pulp/pull/6259))
+
+<a id="v06990"></a>
+## [0.699.0] - 2026-07-18
+
+- test(format): assert AU v2 republishes processor latency/tail changes ([#6245](https://github.com/danielraffel/pulp/pull/6245))
+- ci(version): Model B — post-merge assignment, PRs stop touching the version cell ([#6255](https://github.com/danielraffel/pulp/pull/6255))
+
+<a id="v06981"></a>
+## [0.698.1] - 2026-07-18
+
+- fix(design-import): skip non-visible tags in the HTML regex fallback ([#6254](https://github.com/danielraffel/pulp/pull/6254))
+
+<a id="v06980"></a>
+## [0.698.0] - 2026-07-18
+
+- fix(design-import): emit setBorder on the generic-frame fall-through path ([#6250](https://github.com/danielraffel/pulp/pull/6250))
+
+<a id="v06970"></a>
+## [0.697.0] - 2026-07-17
+
+- fix(design-import): reconnect a detached slider fill to its thumb ([#6248](https://github.com/danielraffel/pulp/pull/6248))
+- ci: un-starve the release bot (supersession-immune scheduled drain + macOS-first de-starve) ([#6246](https://github.com/danielraffel/pulp/pull/6246))
+- ci(watchdog): auto-close SHA-keyed "release: stuck" trackers once the bump ships ([#6156](https://github.com/danielraffel/pulp/pull/6156))
+- docs(ci): record VM-lane routing reality and the JIT idle-vs-dead trap ([#6168](https://github.com/danielraffel/pulp/pull/6168))
+
+<a id="v06960"></a>
+## [0.696.0] - 2026-07-17
+
+- fix(import-design): plugin/REST per-corner radii + re-add --fail-below test ([#6244](https://github.com/danielraffel/pulp/pull/6244))
+- ci(version): flip version-at-land to --push (single-writer version assignment) ([#6241](https://github.com/danielraffel/pulp/pull/6241))
+
+<a id="v06952"></a>
+## [0.695.2] - 2026-07-17
+
+- fix(import-design): read CSS gradients in the Claude lane, not just backgroundColor ([#6235](https://github.com/danielraffel/pulp/pull/6235))
+- fix(import-design): --validate render location + material-audit stroke-blindness ([#6240](https://github.com/danielraffel/pulp/pull/6240))
+- fix(osc): adversarial-review follow-ups (leakage-aware pitch floor, DCO/WT/VCO hardening) ([#6242](https://github.com/danielraffel/pulp/pull/6242))
+- ci(version): harden version-at-land before the --push flip ([#6237](https://github.com/danielraffel/pulp/pull/6237))
+- ci(version): version-at-land infra + correct bump derivation (combines #6195 + #6219) ([#6221](https://github.com/danielraffel/pulp/pull/6221))
+
+<a id="v06940"></a>
+## [0.694.0] - 2026-07-17
+
+- docs(skill): correct pitch-analyzer octave/missing-fundamental behavior ([#6229](https://github.com/danielraffel/pulp/pull/6229))
+- fix(aax): default the entry point to the host parameter strip ([#6225](https://github.com/danielraffel/pulp/pull/6225))
+
+<a id="v06930"></a>
+## [0.693.0] - 2026-07-17
+
+- ci: add off-fleet merge-stall watchdog for green-but-not-merging PRs ([#6218](https://github.com/danielraffel/pulp/pull/6218))
+- ci(registry): tolerate missing PyYAML + fix stale visual-compare test fixtures ([#6230](https://github.com/danielraffel/pulp/pull/6230))
+
+<a id="v06920"></a>
+## [0.692.0] - 2026-07-17
+
+- fix(fig): design-import visual parity + self-policing material audit ([#6199](https://github.com/danielraffel/pulp/pull/6199))
+
+<a id="v06900"></a>
+## [0.690.0] - 2026-07-17
+
+- feat(host): carry PDC state across live swaps ([#6216](https://github.com/danielraffel/pulp/pull/6216))
+
+<a id="v06880"></a>
+## [0.688.0] - 2026-07-17
+
+- fix/keychain search list converge ([#6197](https://github.com/danielraffel/pulp/pull/6197))
+- test/anchor cross language conformance ([#6183](https://github.com/danielraffel/pulp/pull/6183))
+- fix/baseline diff diagnosable ([#6174](https://github.com/danielraffel/pulp/pull/6174))
+- fix/ship sign flake ([#6158](https://github.com/danielraffel/pulp/pull/6158))
+- docs/downstream capability plan ([#6146](https://github.com/danielraffel/pulp/pull/6146))
+- fix/web render loop reentrancy ([#6145](https://github.com/danielraffel/pulp/pull/6145))
+
+<a id="v06870"></a>
+## [0.687.0] - 2026-07-17
+
+- feature/timeline engine ([#6201](https://github.com/danielraffel/pulp/pull/6201))
+
+<a id="v06850"></a>
+## [0.685.0] - 2026-07-17
+
+- ci(wclap): run the WebCLAP lane on every PR ([#6202](https://github.com/danielraffel/pulp/pull/6202))
+- build(guard): bound the self-hosted workflow melts; drop the false CI premise ([#6200](https://github.com/danielraffel/pulp/pull/6200))
+- build(ci): converge fleet Macs onto the Shipyard pin when idle ([#6178](https://github.com/danielraffel/pulp/pull/6178))
+- build(ci): reconcile runner routing lanes against the live fleet ([#6177](https://github.com/danielraffel/pulp/pull/6177))
+- build(ci): let a VM supervisor survive a transient failure ([#6175](https://github.com/danielraffel/pulp/pull/6175))
+
+<a id="v06810"></a>
+## [0.681.0] - 2026-07-17
+
+- fix(webui): add grid_layout.cpp to the wasm UI build ([#6194](https://github.com/danielraffel/pulp/pull/6194))
+
+<a id="v06780"></a>
+## [0.678.0] - 2026-07-16
+
+- ci(watchdog): report a dead runner lane by queue age, off-fleet ([#6176](https://github.com/danielraffel/pulp/pull/6176))
+
+<a id="v06761"></a>
+## [0.676.1] - 2026-07-16
+
+- docs(skill): friction-report — retarget the confirm-the-failure cross-reference ([#6180](https://github.com/danielraffel/pulp/pull/6180))
+
+<a id="v06760"></a>
+## [0.676.0] - 2026-07-16
+
+- refactor(render): delete GPU graph renderers that contain no GPU code ([#6165](https://github.com/danielraffel/pulp/pull/6165))
+- fix(import-design): correct the stale --validate placeholder warning ([#6160](https://github.com/danielraffel/pulp/pull/6160))
+
 <a id="v06750"></a>
 ## [0.675.0] - 2026-07-16
 
@@ -6444,6 +6561,25 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.701.0]: https://github.com/danielraffel/pulp/releases/tag/v0.701.0
+[0.700.0]: https://github.com/danielraffel/pulp/releases/tag/v0.700.0
+[0.699.0]: https://github.com/danielraffel/pulp/releases/tag/v0.699.0
+[0.698.1]: https://github.com/danielraffel/pulp/releases/tag/v0.698.1
+[0.698.0]: https://github.com/danielraffel/pulp/releases/tag/v0.698.0
+[0.697.0]: https://github.com/danielraffel/pulp/releases/tag/v0.697.0
+[0.696.0]: https://github.com/danielraffel/pulp/releases/tag/v0.696.0
+[0.695.2]: https://github.com/danielraffel/pulp/releases/tag/v0.695.2
+[0.694.0]: https://github.com/danielraffel/pulp/releases/tag/v0.694.0
+[0.693.0]: https://github.com/danielraffel/pulp/releases/tag/v0.693.0
+[0.692.0]: https://github.com/danielraffel/pulp/releases/tag/v0.692.0
+[0.690.0]: https://github.com/danielraffel/pulp/releases/tag/v0.690.0
+[0.688.0]: https://github.com/danielraffel/pulp/releases/tag/v0.688.0
+[0.687.0]: https://github.com/danielraffel/pulp/releases/tag/v0.687.0
+[0.685.0]: https://github.com/danielraffel/pulp/releases/tag/v0.685.0
+[0.681.0]: https://github.com/danielraffel/pulp/releases/tag/v0.681.0
+[0.678.0]: https://github.com/danielraffel/pulp/releases/tag/v0.678.0
+[0.676.1]: https://github.com/danielraffel/pulp/releases/tag/v0.676.1
+[0.676.0]: https://github.com/danielraffel/pulp/releases/tag/v0.676.0
 [0.675.0]: https://github.com/danielraffel/pulp/releases/tag/v0.675.0
 [0.674.0]: https://github.com/danielraffel/pulp/releases/tag/v0.674.0
 [0.673.0]: https://github.com/danielraffel/pulp/releases/tag/v0.673.0

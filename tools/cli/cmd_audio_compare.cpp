@@ -21,6 +21,12 @@ namespace {
 
 constexpr const char* kToolId = "audio-quality-lab";
 
+// Could-not-measure. Distinct from 1 (an error, or a check that ran and FAILED)
+// so a script can tell "your audio is bad" from "I could not measure your
+// audio". `audio validate` returns the same code for the same meaning, and the
+// contract is documented in docs/reference/cli.md — renumber neither alone.
+constexpr int kExitCannotMeasure = 2;
+
 // Options that consume the following token as their value — used only to count
 // positionals for a friendly local arity error; all args are forwarded verbatim.
 bool takes_value(const std::string& opt) {
@@ -103,7 +109,7 @@ int cmd_audio_compare(const std::vector<std::string>& args) {
     if (positionals < 2) {
         std::cerr << "pulp audio compare: need <reference.wav> and <candidate.wav>.\n\n";
         print_compare_usage();
-        return 2;  // could-not-measure (bad invocation), matching the tool's invalid code
+        return kExitCannotMeasure;
     }
 
     auto tool = resolve_quality_lab();

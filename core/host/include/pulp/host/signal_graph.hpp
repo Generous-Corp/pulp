@@ -29,6 +29,7 @@
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/state/modulation_lane.hpp>
 #include <atomic>
+#include <cassert>
 #include <thread>
 #include <functional>
 #include <memory>
@@ -474,6 +475,17 @@ public:
     // process(); the events become that node's MIDI output this block.
     bool inject_midi(NodeId midi_input_node, const midi::MidiBuffer& events);
 
+    // Inject sample-accurate parameter events into a Plugin node. Call before
+    // process(); the latest published batch is consumed exactly once by that
+    // node on the next block it processes. Events use block-relative sample
+    // offsets and are delivered after graph-generated automation, so an
+    // injected event wins an equal-offset tie while existing automation keeps
+    // capacity priority. Returns false for an unprepared/non-Plugin/unresolved
+    // node or when `events` already reports source-side overflow; the retained
+    // prefix is still published in the overflow case.
+    bool inject_parameter_events(NodeId plugin_node,
+                                 const state::ParameterEventQueue& events);
+
     // Drain the MIDI events that arrived at a MidiOutput sink node during
     // the last process() call. Appends to `out`.
     bool extract_midi(NodeId midi_output_node, midi::MidiBuffer& out) const;
@@ -636,8 +648,11 @@ public:
     // independent reference oracle. Ineligible graphs always fall back to the
     // legacy walk regardless of this flag. The flag is a control-thread toggle read
     // relaxed on the audio thread. The two paths produce bit-identical output
-    // per block for eligible graphs, so toggling mid-stream is RT-safe and
-    // seamless for feedforward graphs. For graphs with FEEDBACK, the legacy walk
+    // per block for eligible zero-PDC graphs, so toggling mid-stream is RT-safe
+    // and seamless there. A prepared snapshot with active feed-forward PDC pins
+    // its execution domain until the next prepare: the legacy, serial, and
+    // parallel paths own independent delay history, so switching between them
+    // mid-stream would select a stale ring. For graphs with FEEDBACK, the legacy walk
     // and the executor keep INDEPENDENT one-block-delay state (the legacy
     // ConnectionDelay::feedback_prev vs the executor's per-edge prev slot), so a
     // mid-stream switch resets feedback history to whatever the destination path
@@ -845,6 +860,25 @@ private:
         std::atomic<uint64_t> next_sequence{0};
     };
 
+    struct ParameterBlockSnapshot {
+        std::array<state::ParameterEvent,
+                   state::ParameterEventQueue::kCapacity> events{};
+        std::size_t size = 0;
+        std::uint64_t sequence = 0;
+        bool source_incomplete = false;
+
+        bool set_from_queue(const state::ParameterEventQueue& src,
+                            std::uint64_t new_sequence) noexcept;
+        bool append_to(state::ParameterEventQueue& dst) const noexcept;
+    };
+
+    struct ParameterInputMailbox {
+        runtime::TripleBuffer<ParameterBlockSnapshot> published;
+        ParameterBlockSnapshot writer_scratch;
+        std::atomic<std::uint64_t> next_sequence{0};
+        std::atomic<std::uint64_t> sequence_seen{0};
+    };
+
     struct NodeRuntime {
         // Per-node output-port channel storage (interleaved per-port, flat).
         // data_ has size num_output_ports * max_block_size_; channel_ptrs_[p]
@@ -912,6 +946,11 @@ private:
         std::unique_ptr<runtime::TripleBuffer<MidiBlockSnapshot>> midi_output_mailbox;
         uint64_t midi_input_sequence_seen = 0;
 
+        // Control/audio-thread parameter-event ingress for Plugin nodes. The
+        // mailbox is single-writer/latest-wins like MIDI ingress; the sequence
+        // is committed only after the selected processing path succeeds.
+        std::shared_ptr<ParameterInputMailbox> parameter_input_mailbox;
+
         // Audio-rate modulation scratch. Each listed param gets one
         // max-block-sized region in audio_rate_param_data, filled immediately
         // before the destination plugin processes.
@@ -931,10 +970,14 @@ private:
     // common alignment at input_latency samples.
     struct ConnectionDelay {
         int delay_samples = 0;
-        // Ring buffer: delay_samples + max_block_size_ frames per source
-        // channel. Empty when delay_samples == 0 (pass-through path).
-        std::vector<float> ring;
-        int write_pos = 0;
+        struct State {
+            // Ring buffer: delay_samples + max_block_size_ frames per source
+            // channel, plus the audio-thread-owned cursor. Shared only between
+            // identity-matched live snapshots with equal delay structure.
+            std::vector<float> ring;
+            int write_pos = 0;
+        };
+        std::shared_ptr<State> state;
         // Feedback edges hold the previous block's source-port audio so the
         // destination can read it before the source writes the current block.
         std::vector<float> feedback_prev;  // size = max_block_size_
@@ -963,9 +1006,17 @@ private:
     // node runtime AND holds shared_ptr<PluginSlot>, it's safe to read even
     // if GraphNode owners are mutated before the audio thread releases its
     // reference. The old snapshot is destroyed only when both threads let go.
+    enum class PdcExecutionDomain : std::uint8_t {
+        Dynamic,  // no PDC: runtime routing toggles remain live
+        Legacy,
+        RoutedSerial,
+        RoutedParallel,
+    };
+
     struct CompiledGraph {
         std::vector<NodeId> order;
         std::vector<Connection> connections;
+        std::vector<std::uint64_t> connection_identities;
         std::vector<NodeRuntime::EdgeRef> feedback_edges;
         std::vector<ConnectionDelay> connection_delays;  // parallel to connections
         // Runtime + plugin + node-info keyed by NodeId so we don't rely on
@@ -1000,6 +1051,10 @@ private:
         double sample_rate = 0.0;  // needed to convert automation_smoothing_ms
                                    // into samples.
         int64_t total_latency_samples = 0;
+        // Non-Dynamic when this snapshot owns feed-forward delay history. The
+        // selected path is captured at prepare time so a relaxed runtime toggle
+        // cannot jump to another domain's stale ring mid-stream.
+        PdcExecutionDomain pdc_execution_domain = PdcExecutionDomain::Dynamic;
         MidiBlockSnapshot midi_publish_scratch;
         // 2.2b reinit-free-swap predicate inputs (captured at compile so a
         // prepare_swap candidate can be compared against this live snapshot):
@@ -1012,106 +1067,115 @@ private:
         std::unordered_map<NodeId, const void*> custom_instances;
         std::uint64_t custom_registry_generation = 0;
 
-        // Immutable canonical-executor routing for this snapshot, built in
-        // compile_() when the topology is executor-eligible (see
-        // signal_graph_topology_executor_eligible). Empty/invalid otherwise. Its
-        // Gain bindings reference this snapshot's own `runtime[id].gain` atomics,
-        // its Plugin/Custom bindings invoke this snapshot's own slots/callbacks,
-        // so it carries no keepalive — it lives and dies exactly with this
-        // CompiledGraph, published atomically with it via live_slot_. The legacy
-        // walk remains the reference/fallback path for ineligible or
-        // routing-failed graphs, not a retired one.
-        format::GraphRuntimeSnapshot routing_snapshot;
-        bool routing_valid = false;
-        // Per-snapshot scratch pool driving the routed path, sized in compile_()
-        // to routing_snapshot's slot count × max_block_size. Owned by THIS
-        // snapshot (like the legacy per-node runtime scratch), so a re-prepare
-        // builds a fresh pool on a fresh cg and never mutates the buffers an
-        // in-flight audio-thread reader is using on a retired snapshot. Feedback
-        // previous-block state lives here and resets with the snapshot.
-        format::GraphRuntimeBufferPool exec_pool;
-        // Plugin-binding storage for the routed path, owned per-snapshot like
-        // exec_pool. routing_plugin_ctx is reserved in compile_() to the plugin
-        // count so the snapshot's Plugin bindings can point their user_data at
-        // stable elements; routing_plugin_scratch is the serial snapshot's shared
-        // MIDI/param fallback scratch when no per-node executor scratch is
-        // supplied. The slots themselves live in `plugins` above (same cg
-        // lifetime).
-        std::vector<PluginBindingContext> routing_plugin_ctx;
-        PluginRoutingScratch routing_plugin_scratch;
-        // Custom-binding storage for the routed path, owned per-snapshot like
-        // routing_plugin_ctx. Reserved in compile_() to the custom-node count so
-        // each Custom binding's user_data points at a stable element; each holds a
-        // COPY of this snapshot's resolved process callback (its own keepalive on
-        // any captured instance, same cg lifetime as `custom_processors`).
-        std::vector<CustomBindingContext> routing_custom_ctx;
-        // Per-node MIDI buffers for the routed path's event edges, owned
-        // per-snapshot like exec_pool. Empty (node_count 0) for graphs with no
-        // MIDI. The routed dispatch bridges the SignalGraph MIDI mailboxes to
-        // these buffers around process_routed: a MidiInput node's mailbox is read
-        // into its scratch output before the walk, and a MidiOutput node's
-        // gathered scratch input is published to its mailbox after. `routing_midi_io`
-        // lists those system nodes by (dense plan index, NodeId) so the bridge
-        // avoids a per-block NodeId lookup.
-        format::GraphRuntimeMidiScratch routing_midi;
+        // ONE routed-executor path: the plan snapshot, the scratch pool sized for
+        // exactly that snapshot, the stable binding storage its bindings' user_data
+        // points into, and whether the build succeeded. They are grouped because
+        // they are only ever valid TOGETHER — driving one path's snapshot against
+        // the other path's pool is a bug that field naming alone could not prevent.
+        //
+        // `pool` is sized in compile_() to `snapshot`'s slot count × max_block_size
+        // and owned by THIS snapshot (like the legacy per-node runtime scratch), so
+        // a re-prepare builds a fresh pool on a fresh cg and never mutates the
+        // buffers an in-flight audio-thread reader is using on a retired snapshot.
+        // Feedback previous-block state lives there and resets with the snapshot.
+        // `plugin_ctx` / `custom_ctx` are reserved in compile_() to the plugin /
+        // custom-node count so each binding's user_data points at a stable element;
+        // each CustomBindingContext holds a COPY of this snapshot's resolved process
+        // callback (its own keepalive on any captured instance, same cg lifetime as
+        // `custom_processors`). The plugin slots themselves live in `plugins` above.
+        // `levelization` is the static level schedule the parallel path runs; it
+        // stays empty on the serial path.
+        struct RoutedPath {
+            format::GraphRuntimeSnapshot snapshot;
+            format::GraphRuntimeBufferPool pool;
+            std::vector<PluginBindingContext> plugin_ctx;
+            std::vector<CustomBindingContext> custom_ctx;
+            graph::GraphRuntimeLevelization levelization;
+            bool valid = false;
+        };
+
         // `pending_seq` is audio-thread scratch: the mailbox sequence a MidiInput
         // would consume this block, captured during the ingress pre-fill and
         // committed to midi_input_sequence_seen only after the routed dispatch
         // succeeds (so a fallback to the legacy walk re-consumes the same block).
         struct RoutedMidiNode { std::uint32_t plan_index; NodeId id; std::uint64_t pending_seq = 0; };
-        std::vector<RoutedMidiNode> routing_midi_inputs;
-        std::vector<RoutedMidiNode> routing_midi_outputs;
-        // Per-node parameter-event queues + per-connection slew state for routed
-        // sparse automation, owned per-snapshot like exec_pool. Empty (node_count
-        // 0) for graphs with no sparse automation.
-        format::GraphRuntimeAutomationScratch routing_automation;
 
-        // Levelized PARALLEL routing for this snapshot (built only when parallel
-        // routing is enabled at compile time). Same plan as routing_snapshot but
-        // with a reuse-free buffer assignment (parallel_safe) so concurrent
-        // same-level nodes never alias a slot, plus its own (larger) scratch pool
-        // and the static level schedule. The MIDI/automation scratch and the
-        // MidiInput/Output node lists above are SHARED (identical plan; only ONE
-        // path runs per block). routing_plugin_ctx_parallel holds the parallel
-        // snapshot's Plugin bindings' stable user_data; each binding owns its
-        // fallback scratch so same-level Plugin nodes do not share mutable MIDI
-        // output state.
-        format::GraphRuntimeSnapshot routing_snapshot_parallel;
-        format::GraphRuntimeBufferPool exec_pool_parallel;
-        graph::GraphRuntimeLevelization routing_levelization;
-        std::vector<PluginBindingContext> routing_plugin_ctx_parallel;
-        // Parallel snapshot's Custom bindings' stable user_data (mirrors
-        // routing_plugin_ctx_parallel; the parallel and serial Custom callbacks
-        // are independent copies, but a custom node is stateless on the audio
-        // thread w.r.t. concurrency here — only the snapshot wiring differs).
-        std::vector<CustomBindingContext> routing_custom_ctx_parallel;
-        bool routing_parallel_valid = false;
+        // Immutable canonical-executor routing for this snapshot, built in
+        // compile_() when the topology is executor-eligible (see
+        // signal_graph_topology_executor_eligible). Empty/invalid otherwise. The
+        // Gain bindings reference this snapshot's own `runtime[id].gain` atomics
+        // and the Plugin/Custom bindings invoke this snapshot's own slots /
+        // callbacks, so this carries no keepalive — it lives and dies exactly with
+        // this CompiledGraph, published atomically with it via live_slot_. The
+        // legacy walk remains the reference/fallback path for ineligible or
+        // routing-failed graphs, not a retired one.
+        struct RoutedPaths {
+            // The default path: compact buffer assignment, slots reused.
+            RoutedPath serial;
+            // Levelized PARALLEL routing (built only when parallel routing is
+            // enabled at compile time). Same plan as `serial` but with a reuse-free
+            // buffer assignment (parallel_safe) so concurrent same-level nodes never
+            // alias a slot, plus its own (larger) pool and the level schedule. Each
+            // of its Plugin bindings owns its fallback scratch so same-level Plugin
+            // nodes do not share mutable MIDI output state.
+            RoutedPath parallel;
+            // The serial path's shared MIDI/param fallback scratch, used when no
+            // per-node executor scratch is supplied.
+            PluginRoutingScratch plugin_scratch;
+            // Per-node MIDI buffers for the routed path's event edges. Empty
+            // (node_count 0) for graphs with no MIDI. The routed dispatch bridges
+            // the SignalGraph MIDI mailboxes to these buffers around
+            // process_routed: a MidiInput node's mailbox is read into its scratch
+            // output before the walk, and a MidiOutput node's gathered scratch
+            // input is published to its mailbox after. `midi_inputs` / `midi_outputs`
+            // list those system nodes by (dense plan index, NodeId) so the bridge
+            // avoids a per-block NodeId lookup.
+            format::GraphRuntimeMidiScratch midi;
+            std::vector<RoutedMidiNode> midi_inputs;
+            std::vector<RoutedMidiNode> midi_outputs;
+            // Per-node parameter-event queues + per-connection slew state for
+            // routed sparse automation. Empty (node_count 0) for graphs with no
+            // sparse automation.
+            format::GraphRuntimeAutomationScratch automation;
+            // The MIDI/automation scratch and the MidiInput/Output node lists are
+            // deliberately SHARED across the two paths: the plans are identical and
+            // only ONE path runs per block.
+        };
+        RoutedPaths routed;
 
         // Anticipative rendering for this snapshot (built only when anticipation is
         // enabled at compile time AND the routed plan has an eligible latent
         // interior). The lane pre-renders the interior off the audio thread; the
-        // live path masks the interior in routing_snapshot's walk and feeds the
-        // lane's pre-rendered boundary signals into the interior boundary-source
-        // output slots of exec_pool. anticipation_skip_mask is indexed by
-        // routing_snapshot's dense node order; anticipation_prefill maps each lane
-        // output channel to the exec_pool slot carrying that boundary signal;
-        // anticipation_consume_scratch is the per-snapshot capture buffer consume()
-        // pops a block into before the prefill copy. The lane owns the interior
-        // plugin instances' state advancement — process() never runs them.
-        AnticipationLane anticipation_lane;
-        std::vector<std::uint8_t> anticipation_skip_mask;
-        struct AnticipationPrefill {
-            std::uint32_t out_channel = 0;  // lane output channel
-            std::uint32_t slot = 0;         // exec_pool mono slot to fill
+        // live path masks the interior in routed.serial's walk and feeds the lane's
+        // pre-rendered boundary signals into the interior boundary-source output
+        // slots of routed.serial.pool. `skip_mask` is indexed by
+        // routed.serial.snapshot's dense node order; `prefill` maps each lane output
+        // channel to the routed.serial.pool slot carrying that boundary signal;
+        // `consume_scratch` is the per-snapshot capture buffer consume() pops a
+        // block into before the prefill copy. The lane owns the interior plugin
+        // instances' state advancement — process() never runs them.
+        struct AnticipationSplice {
+            AnticipationLane lane;
+            std::vector<std::uint8_t> skip_mask;
+            struct Prefill {
+                std::uint32_t out_channel = 0;  // lane output channel
+                std::uint32_t slot = 0;         // routed.serial.pool mono slot to fill
+            };
+            std::vector<Prefill> prefill;
+            std::vector<std::vector<float>> consume_scratch;
+            std::vector<float*> consume_ptrs;
+            bool valid = false;
         };
-        std::vector<AnticipationPrefill> anticipation_prefill;
-        std::vector<std::vector<float>> anticipation_consume_scratch;
-        std::vector<float*> anticipation_consume_ptrs;
-        bool anticipation_valid = false;
+        AnticipationSplice anticipation;
     };
 
     std::vector<GraphNode> nodes_;
     std::vector<Connection> connections_;
+    // Private authoring identity parallel to connections_. Public Connection
+    // stays a value-only routing description; disconnect+reconnect mints a new
+    // identity so stale PDC history can never attach to a logically new edge.
+    std::vector<std::uint64_t> connection_identities_;
+    std::uint64_t next_connection_identity_{1};
     std::unordered_map<std::string, CustomNodeType> custom_node_types_;
     // Bumped on every register_custom_node_type; captured into each CompiledGraph
     // so the 2.2b reinit-free-swap predicate can reject a candidate compiled after
@@ -1139,7 +1203,7 @@ private:
     // routing build / edit-time param validation instead of the live PluginSlot.
     // STALENESS INVARIANT: an entry is valid ONLY while the node set and per-node
     // slot identities are unchanged since the last prepare(). A 2.2b swap never
-    // recaptures it — the reinit-free predicate (snapshot_is_plugin_reinit_free_)
+    // recaptures it — the reinit-free predicate (snapshot_is_plugin_reinit_free_locked_)
     // enforces exactly that invariant, and a non-reinit-free edit falls back to a
     // full prepare() which rebuilds this map. Do NOT read it after a mutation that
     // could add/remove/re-instantiate a node without a matching re-prepare.
@@ -1181,7 +1245,7 @@ private:
     // it is stateless w.r.t. topology (it takes the snapshot + the snapshot's own
     // pool as arguments) and prepare() never mutates it, so the single audio
     // thread is its only writer (relaxed stat counters). The mutable scratch pool
-    // is owned per-snapshot by CompiledGraph (see CompiledGraph::exec_pool) so it
+    // is owned per-snapshot by CompiledGraph (see CompiledGraph::RoutedPath::pool) so it
     // rides the existing RCU lifetime and is never resized under a reader.
     std::atomic<bool> canonical_executor_routing_enabled_{true};
     format::GraphRuntimeExecutor executor_;
@@ -1196,8 +1260,8 @@ private:
     // 2.2b swap-edit transaction state (guarded by graph_mutation_mutex_).
     // in_swap_edit_ is set between begin_swap_edit() and prepare_swap()/
     // abort_swap_edit(); swap_edit_owner_ is the thread that opened it. While set,
-    // invalidate_live_() no-ops for the OWNER thread's allow-set mutations (so the
-    // live snapshot keeps playing); any direct invalidate_live_() from a non-owner
+    // invalidate_live_locked_() no-ops for the OWNER thread's allow-set mutations (so
+    // the live snapshot keeps playing); any direct invalidate_live_locked_() from a non-owner
     // thread, and the lifecycle/limits/registry mutators which force-abort at their
     // top, cancel the transaction.
     bool in_swap_edit_{false};
@@ -1257,7 +1321,7 @@ private:
     // nodes_ / connections_ vectors and the plain (non-atomic) GraphNode fields
     // they own (gain, ports, plugin/custom identity, custom state) — AND the
     // snapshot-publication state (live_slot_) that a
-    // re-prepare and a concurrent invalidate_live_() both mutate. The control
+    // re-prepare and a concurrent invalidate_live_locked_() both mutate. The control
     // surface is multi-threaded: a host thread calls prepare()/compile_() (which
     // iterates nodes_/connections_ and reads GraphNode::gain) while a UI thread
     // adds/removes nodes or connections, edits a GraphNode field
@@ -1277,14 +1341,26 @@ private:
     //               connect_feedback, disconnect, clear, set_node_gain,
     //               set_node_parameter, set_custom_node_state, prepare, release.
     //   readers   : node_gain, get_node_parameter, custom_node_state, node_loads.
-    // The low-level helpers node() / has_path() / would_create_cycle() /
+    // The low-level helpers node() / has_path_locked_() / would_create_cycle() /
     // processing_order() / custom_node_type() / audio_rate_modulation_lane() /
-    // validate_generated_graph() / total_declared_ports_() are LOCK-FREE and
+    // validate_generated_graph() / total_declared_ports_locked_() do NOT lock and
     // assume the caller already holds this mutex; the public methods above are
     // their only callers on the mutating path. Public methods that delegate to
     // another public mutator (add_custom_node -> add_unresolved_custom_node) do
     // NOT take the lock themselves — the leaf takes it once — to avoid
     // self-deadlock on this non-recursive mutex.
+    //
+    // ENFORCEMENT, not just prose: a helper that assumes the lock carries a
+    // `_locked_` suffix, and every one whose call graph is entirely internal
+    // opens with assert_graph_mutation_locked_() — which checks the debug-only
+    // owner record GraphMutationLock maintains, so a missed lock fails loudly in
+    // a debug/CI build instead of racing silently. Acquire the mutex through
+    // GraphMutationLock (never a bare lock_guard) so that record stays accurate.
+    // The two helpers reachable from a public method that does NOT lock —
+    // has_path_locked_ (via would_create_cycle) and total_declared_ports_locked_
+    // (via validate_generated_graph / estimate_generated_graph_work_units) —
+    // carry the suffix for their internal contract but cannot assert until those
+    // public entry points become locking wrappers over `_locked_` cores.
     //
     // The nodes() / connections() accessors hand out a reference to the live
     // vector and the live_slot_.live()*() snapshot getters read live_slot_.live(); both are governed by
@@ -1306,9 +1382,77 @@ private:
     //    the latter busy-waited under this mutex by release()).
     mutable std::mutex graph_mutation_mutex_;
 
-    bool has_path(NodeId from, NodeId to) const;
-    std::size_t total_declared_ports_() const;
-    // Lock-free core of audio_rate_modulation_lane() — scans nodes_ via node() and
+#ifndef NDEBUG
+    // The thread currently holding graph_mutation_mutex_, recorded by
+    // GraphMutationLock and read by assert_graph_mutation_locked_(). Debug-only:
+    // it exists to catch a missed lock, so release builds carry neither the field
+    // nor the check.
+    mutable std::atomic<std::thread::id> graph_mutation_owner_{};
+#endif
+
+    // Scoped acquisition of graph_mutation_mutex_. Records the owning thread in a
+    // debug build so assert_graph_mutation_locked_() can prove a `_locked_`
+    // helper's caller really holds the lock; in a release build it is a plain
+    // unique_lock over the same mutex. unlock() releases early for the one caller
+    // (prepare_swap) that drops the lock before invoking user callbacks.
+    class GraphMutationLock {
+    public:
+        explicit GraphMutationLock(const SignalGraph& graph)
+            : lock_(graph.graph_mutation_mutex_)
+#ifndef NDEBUG
+            , owner_(&graph.graph_mutation_owner_)
+#endif
+        {
+            note_acquired_();
+        }
+        ~GraphMutationLock() {
+            if (lock_.owns_lock()) note_released_();
+        }
+        GraphMutationLock(const GraphMutationLock&) = delete;
+        GraphMutationLock& operator=(const GraphMutationLock&) = delete;
+        void unlock() {
+            note_released_();
+            lock_.unlock();
+        }
+
+    private:
+        void note_acquired_() noexcept {
+#ifndef NDEBUG
+            owner_->store(std::this_thread::get_id(), std::memory_order_relaxed);
+#endif
+        }
+        void note_released_() noexcept {
+#ifndef NDEBUG
+            owner_->store(std::thread::id{}, std::memory_order_relaxed);
+#endif
+        }
+
+        std::unique_lock<std::mutex> lock_;
+#ifndef NDEBUG
+        std::atomic<std::thread::id>* owner_ = nullptr;
+#endif
+    };
+
+    // Fails a debug build when a `_locked_` helper is reached without this thread
+    // holding graph_mutation_mutex_. Compiles to nothing in release.
+    void assert_graph_mutation_locked_() const noexcept {
+#ifndef NDEBUG
+        assert(graph_mutation_owner_.load(std::memory_order_relaxed)
+                   == std::this_thread::get_id()
+               && "graph_mutation_mutex_ must be held by the calling thread");
+#endif
+    }
+
+    // Writable counterpart to the const node() lookup — the ONE place the source
+    // topology's constness is shed, so the mutators do not each hand-roll a
+    // const_cast. Caller holds graph_mutation_mutex_ (same contract as node()).
+    GraphNode* node_mut_locked_(NodeId id);
+    void append_connection_locked_(Connection connection);
+    void erase_connection_at_locked_(std::size_t index);
+
+    bool has_path_locked_(NodeId from, NodeId to) const;
+    std::size_t total_declared_ports_locked_() const;
+    // Core of audio_rate_modulation_lane() — scans nodes_ via node() and
     // assumes the caller already holds graph_mutation_mutex_. The public
     // audio_rate_modulation_lane() locks and forwards here; connect_audio_rate_
     // modulation() (already holding the mutex) calls this core directly to avoid
@@ -1322,6 +1466,9 @@ private:
                       const audio::BufferView<const float>& input,
                       int num_samples,
                       const format::ProcessContext* transport);
+    static std::uint64_t append_parameter_mailbox_events_(
+        void* runtime,
+        state::ParameterEventQueue& destination) noexcept;
     // Legacy serial reference walk — the hand-maintained, bit-exact inter-node
     // DSP oracle and fallback for process_impl(). Lives in its own translation
     // unit (signal_graph_reference_walk.cpp) but stays a member so it can name
@@ -1355,28 +1502,27 @@ private:
         std::vector<CustomBindingContext>& custom_ctx,
         format::GraphRuntimeSnapshot& out);
     // Shared preflight (generated-graph limits + audio-rate automation
-    // event-capacity gate) for prepare() and (2.2b) prepare_swap(). PURE — mutates
-    // no live state. Caller holds graph_mutation_mutex_. Returns false (logged) on
+    // event-capacity gate) for prepare() and prepare_swap(). PURE — mutates no
+    // live state. Caller holds graph_mutation_mutex_. Returns false (logged) on
     // any rejection.
     bool preflight_locked_(int max_block_size);
-    // 2.2b reinit-free-swap predicate (PRE-compile half). True iff a live topology
+    // Reinit-free-swap predicate (PRE-compile half). True iff a live topology
     // swap to the current nodes_/connections_ needs NO plugin/custom re-init and
     // carries no per-snapshot mutable state a fresh snapshot would glitch: same
-    // sr/block; unchanged custom registry (M6); anticipation off both sides (M5);
-    // no MIDI edge (M4); no smoothed sparse-automation edge (CX3); identical node
-    // set + plugin/custom instance identity (M2); every resolved plugin node has a
-    // cached-metadata entry (CX2). The latency-equality gate (M3) is checked
-    // POST-compile in prepare_swap(). Pure const read; caller holds the mutation
-    // mutex.
-    bool snapshot_is_plugin_reinit_free_(const CompiledGraph& old_cg,
-                                         double sr, int bs) const;
+    // sr/block; unchanged custom registry; anticipation off both sides; no MIDI
+    // edge; no smoothed sparse-automation edge; identical node set + plugin/custom
+    // instance identity; every resolved plugin node has a cached-metadata entry.
+    // The latency-equality gate is checked POST-compile in prepare_swap(). Pure
+    // const read; caller holds the mutation mutex.
+    bool snapshot_is_plugin_reinit_free_locked_(const CompiledGraph& old_cg,
+                                                double sr, int bs) const;
     // Edit-time plugin parameter list for connection validation. Prefers the
     // prepare-time cache (prepared_plugin_meta_) so a connect during a swap-edit
     // does NOT call the live PluginSlot::parameters() concurrently with process()
-    // on that slot (2.2b S4); falls back to the live slot for a not-yet-prepared
-    // node. Edit-path only (not real-time), so the by-value copy is fine.
-    std::vector<HostParamInfo> cached_or_live_params_(const GraphNode& n) const;
-    std::unique_ptr<PluginSlot> load_live_swap_plugin_(const PluginInfo& info) const;
+    // on that slot; falls back to the live slot for a not-yet-prepared node.
+    // Edit-path only (not real-time), so the by-value copy is fine.
+    std::vector<HostParamInfo> cached_or_live_params_locked_(const GraphNode& n) const;
+    std::unique_ptr<PluginSlot> load_live_swap_plugin_locked_(const PluginInfo& info) const;
     pulp::audio::AudioProcessLoadSnapshot warm_staged_slot_locked_(PluginSlot& slot,
                                                                    NodeId id) const;
     bool node_has_feedback_edge_locked_(NodeId id) const;
@@ -1391,9 +1537,9 @@ private:
     void cancel_swap_edit_locked_();
     std::vector<audio::AudioProcessLoadSnapshot>
     staged_node_loads_locked_() const;
-    void publish_prepared_stats_(const CompiledGraph& cg);
-    void clear_prepared_stats_();
-    void invalidate_live_();
+    void publish_prepared_stats_locked_(const CompiledGraph& cg);
+    void clear_prepared_stats_locked_();
+    void invalidate_live_locked_();
     static void compute_latencies_for_(CompiledGraph& cg,
                                        const std::vector<Connection>& connections,
                                        const std::unordered_map<NodeId, PreparedPluginMetadata>&

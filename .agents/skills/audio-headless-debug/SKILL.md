@@ -41,6 +41,7 @@ These were built deliberately for exactly this. Reaching for a hand-written
 | Fundamental-frequency check | `estimate_frequency()` / `assert_frequency_near()` | `audio_metrics.hpp` / `audio_assertions.hpp` |
 | Human-readable buffer report | `summarize(metrics)` | `audio_metrics.hpp` |
 | Glitch/artifact + "audio doctor" detection | `audio_artifacts.hpp`, `audio_doctor_artifacts.hpp` | `tools/audio/analysis/` |
+| Magnitude response / THD / phase + group delay from rendered buffers | `response_relative_to_input()`, `measure_thd()`, `measure_group_delay()` (gate on `defined_at(hz)` for delay, and the stricter `phase_defined_at(hz)` for phase — a stopband reports undefined, and the accessors return NaN) | `pulp/audio/analysis/audio_spectrum.hpp` |
 | Command-line: render/inspect/compare a WAV without writing C++ | **`pulp audio validate <summarize\|doctor\|compare\|assert>`** (assert checks: `no_nan_inf`, `not_silent`, `silent`, `peak_below`, `frequency_near`) | `tools/cli/cmd_audio_validate.cpp` |
 | Live per-callback metering / MIDI log / buffer-underrun capture | `pulp::inspect::AudioInspector` | `inspect/include/pulp/inspect/audio_inspector.hpp` |
 | Interactive inspection from an agent session | the **`pulp_inspect_audio`** MCP tool (the Audio Inspector) | MCP |
@@ -261,3 +262,62 @@ They refuse rather than guess: silence, an output that is not a delayed copy of
 the input, an integer-sample-periodic stimulus, and a report that moved
 mid-render all come back `inconclusive`. See the `audio-harness` skill for the
 full list and the stimulus each policy needs.
+
+## The spectral analyzers throw — and the throw is the feature
+
+`measure_aliasing` and `measure_thd` reject inputs they would otherwise report a
+confident number for. Catch the exception or size the arguments correctly; do not
+read the refusal as a tooling bug.
+
+The one that surprises people is the bass wall. `measure_aliasing` only models an
+alias site where a *requested* harmonic crosses Nyquist, so with the default
+`num_harmonics = 64` at 48 kHz, a fundamental below ~375 Hz models no alias site
+at all. It used to answer "clean" — a naive, maximally aliased saw read −200 dB
+and passed a −100 dBc gate, because "no aliases among the zero places I looked"
+is technically true. **Size `num_harmonics` from the sample rate**, not from a
+default: it needs `fundamental_hz * num_harmonics >= nyquist`.
+
+`measure_thd` refuses silence (a dead processor otherwise reads THD 0 and passes
+`thd < 1%`), a buffer shorter than `fft_length` (the old zero-pad made a clean
+sine read −48.7 dB against a truth of −176.7, and recorded `coherent = true`),
+and a fundamental at or above Nyquist.
+
+## Measuring pitch of a dense signal — `estimate_pitch`, not `estimate_frequency`
+
+Debugging a pitch or tuning bug (VCO drift, DCO quantization, a detuned voice)?
+`estimate_frequency` is zero-crossing and locks to a harmonic on any real
+oscillator — it will send you chasing a phantom octave error. Use
+`estimate_pitch` / `track_pitch` (`pitch_track.hpp`): projection-refined,
+sub-cent, and it refuses noise/silence rather than reporting a wrong pitch.
+`track_pitch` gives the `f0(t)` trajectory for drift/jitter analysis.
+
+It also **recovers the true fundamental when a harmonic is the loudest partial**
+(a rolled-off or resonant oscillator whose 2nd/3rd/… partial dominates the FFT
+peak) by descending to the lowest subharmonic that carries real energy at its own
+fundamental — so on a bright oscillator it no longer certifies a confident octave
+error. **Give it a long enough window on low notes**, though: the subharmonic tooth
+test uses a leakage-aware floor, and over a SHORT window (few periods of a bass
+note) a genuinely faint fundamental falls below the window's own spectral-leakage
+floor and can't be resolved — so use n≈2^15, not a 4096-sample frame, when debugging
+a low-note tuning/drift issue (a fixed floor there used to read a confident octave
+DOWN on a plain saw; fixed 2026-07). One honest exception to trust when you see it:
+a genuine MISSING fundamental (energy only at 2·f0/3·f0, nothing at f0) reports the
+loudest PRESENT partial (2·f0), not a fabricated f0 — that octave-up reading is the
+truth about the signal, not an analyzer bug. See the audio-harness `estimate_pitch`
+section for the algorithm detail.
+
+## Never gate on `detection_floor_db`
+
+It is a ~2σ bound that assumes a **white** residual. Aliases are discrete tones,
+so the assumption fails exactly where the number is most tempting, and asserting
+it is the analyzer grading its own homework. Its one legitimate use is deciding
+whether a reading is conclusive at all — a gate is trustworthy only while the
+measured value clears the floor.
+
+**Prove a floor with a negative control instead**: a fixture whose alias content
+is zero by construction must read collapsed, and injected impurities of known
+level must come back at that level. That is evidence; the derived number is an
+assumption. `tone_residual_db` is the projection path and sidesteps window
+leakage entirely — prefer it to reading a windowed spectrum near a loud tone, and
+note that kaiser's deep floor holds near the tone but not at bins 1–3, where the
+DC-removal pedestal dominates regardless of window.

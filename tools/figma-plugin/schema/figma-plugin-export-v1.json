@@ -151,6 +151,11 @@
           "description": "Source-identified interactive overlays for a faithful_svg render. Maps to IRNode.interactive_elements.",
           "items": { "$ref": "#/$defs/interactive_element" }
         },
+        "alternate_frames": {
+          "type": "array",
+          "description": "Alternate states of a faithful_svg node, each itself a faithful_svg node with its own svg_asset_id and interactive_elements. Maps to IRNode.alternate_frames; the importer materializes each via DesignFrameView::add_frame. ORDER IS SIGNIFICANT: this node is frame 0 and entry i is frame i+1, which is the index a swap element's target_frame names. Omit for a single-state design.",
+          "items": { "$ref": "#/$defs/node" }
+        },
         "children": {
           "type": "array",
           "items": { "$ref": "#/$defs/node" }

@@ -14,8 +14,17 @@
 //   4. Wires LV2_Descriptor's connect_port/activate/run/deactivate/cleanup
 //      into the PluginSlot interface.
 //
-// Parameter automation (lv2:ControlPort), MIDI (LV2 atom ports), worker
-// extension, state extension, and editors are not exposed by this backend yet.
+// Parameter automation works: host parameter events are applied to the
+// lv2:ControlPort scratch, which is connect_port'd before run(). MIDI (LV2
+// atom ports), the worker extension, the state extension, and editors are not
+// exposed by this backend.
+//
+// Consequently this backend cannot host instruments. Discovery keeps only
+// lv2:AudioPort and lv2:ControlPort, so atom, event, and CV ports are never
+// connect_port'd, yet run() is still called — and LV2 requires every port be
+// connected first. Every LV2 instrument has an atom MIDI input port, so
+// running one is undefined behavior, not a clean failure. process() likewise
+// accepts the host's MidiBuffer and discards it.
 
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/runtime/log.hpp>

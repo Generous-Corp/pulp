@@ -262,6 +262,9 @@ public:
 
 private:
     struct NativeGpuBridgeState;
+    // One capability-gated entry in register_api()'s registration table.
+    // Defined in widget_bridge.cpp — the table is an implementation detail.
+    struct ApiGroup;
 
     ScriptEngine& engine_;
     View& root_;
@@ -275,16 +278,34 @@ private:
     // Track widgets by ID for JS access
     std::unordered_map<std::string, View*> widgets_;
 
-    // Idempotency guards for native-event registrations. Each registrar
-    // (registerPointer / registerWheel / etc.) wraps the previous
-    // on_pointer_event so calling N times stacks N lambdas — every
-    // re-render of a React tree that re-runs the registration would
-    // multiply the dispatch cost by the render count. These sets gate
-    // the registrations so each (widget id, channel) wires the native
-    // hook exactly once.
-    std::unordered_set<std::string> pointer_registered_;
-    std::unordered_set<std::string> wheel_registered_;
-    std::unordered_set<std::string> gesture_recognizer_registered_;
+    // Idempotency guards for native-event registrations, one record per widget
+    // id. Each registrar (registerPointer / registerWheel / etc.) wraps the
+    // previous on_pointer_event so calling N times stacks N lambdas — every
+    // re-render of a React tree that re-runs the registration would multiply
+    // the dispatch cost by the render count. The claim_* helpers below gate the
+    // registrations so each (widget id, channel) wires the native hook exactly
+    // once, and forgetting an id is a single erase.
+    //
+    // Keyed independently of `widgets_`: a registrar claims its channel BEFORE
+    // resolving the widget, so an id can carry registration state with no live
+    // widget behind it.
+    struct WidgetRegistrations {
+        bool pointer = false;
+        bool wheel = false;
+        // Recognizer keys already added to this widget (`tap`, `pinch`, …).
+        // A vector, not a set: a widget carries a handful of recognizers, so a
+        // linear scan beats hashing.
+        std::vector<std::string> gesture_recognizers;
+    };
+    std::unordered_map<std::string, WidgetRegistrations> registrations_;
+
+    // Claim a native-event channel for `id`. Returns true the first time the
+    // channel is claimed — the caller then wires the native hook — and false
+    // once it is already registered.
+    bool claim_pointer_registration(const std::string& id);
+    bool claim_wheel_registration(const std::string& id);
+    bool claim_gesture_registration(const std::string& id,
+                                    const std::string& recognizer_key);
 
     // Registered keyboard shortcuts from JS
     struct ShortcutBinding {

@@ -12,6 +12,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/zip.hpp>
+#include <pulp/view/design_codegen.hpp>
 #include <pulp/view/design_import.hpp>
 
 #include <cstdlib>
@@ -189,6 +190,76 @@ TEST_CASE("parse_claude_html_with_runtime materialises an app-injected DOM tree"
     REQUIRE(found_role);
 }
 
+TEST_CASE("a Claude DOM node's inline border/gradient/shadow survive to codegen",
+          "[view][import][claude][border]") {
+    // End-to-end for the Claude HTML DOM lane's INLINE-style path (the runtime
+    // harness that materialises a real Claude Design app, not the class-based
+    // regex fallback). The DOM→IR mapper reads inline border/boxShadow/gradient,
+    // but until the generic-frame emit gained setBorder a bordered `button`/`div`
+    // lost its stroke on the way to JS. Prove all three style categories reach
+    // the emitted bridge JS. >9 nodes to clear the loader-shell fallback floor.
+    const std::string app_js = R"JS(
+        var root = document.getElementById('root');
+        if (!root) { root = document.createElement('div'); root.id = 'root';
+                     document.body.appendChild(root); }
+        function make(tag, props, kids) {
+            var el = document.createElement(tag);
+            if (props) for (var k in props) {
+                if (k === 'style') { for (var s in props.style) el.style[s] = props.style[s]; }
+                else if (k === 'text') el.textContent = props[k];
+                else el.setAttribute(k, props[k]);
+            }
+            if (kids) for (var i = 0; i < kids.length; i++) el.appendChild(kids[i]);
+            return el;
+        }
+        var editor = make('div', { id: 'editor' });
+        for (var i = 0; i < 3; i++) {
+            var panel = make('section', { style: { backgroundColor: '#1e1e2e', padding: '8px' } });
+            panel.appendChild(make('h2', { text: 'Panel ' + i }));
+            panel.appendChild(make('button', { style: {
+                border: '2px solid #33aaff',
+                borderRadius: '6px',
+                boxShadow: '0 2px 4px #00000040',
+                backgroundImage: 'linear-gradient(90deg, #111111, #222222)'
+            } }));
+            editor.appendChild(panel);
+        }
+        root.appendChild(editor);
+    )JS";
+
+    std::ostringstream manifest;
+    manifest << "{" << manifest_entry("u-app", "text/javascript", app_js, true) << "}";
+    const std::string body =
+        R"(<div id="root"></div><script src="u-app"></script>)";
+
+    std::string err;
+    ClaudeRuntimeOptions opts; opts.error_out = &err;
+    auto ir = parse_claude_html_with_runtime(build_envelope(manifest.str(), body), opts);
+    INFO("runtime error_out: " << err);
+    REQUIRE(err.empty());
+    REQUIRE(ir.source == DesignSource::claude);
+
+    // The inline border reached the IR on at least one node.
+    bool border_in_ir = false;
+    std::function<void(const IRNode&)> walk = [&](const IRNode& n) {
+        if (n.style.border && n.style.border->find("#33aaff") != std::string::npos)
+            border_in_ir = true;
+        for (const auto& c : n.children) walk(c);
+    };
+    walk(ir.root);
+    REQUIRE(border_in_ir);
+
+    // End-to-end: the shared native codegen emits all three style categories.
+    CodeGenOptions cg;
+    cg.mode = CodeGenMode::bridge_native_js;
+    cg.include_comments = false;
+    const auto js = generate_pulp_js(ir, cg);
+    REQUIRE(js.find("setBorder('") != std::string::npos);
+    REQUIRE(js.find("#33aaff") != std::string::npos);
+    REQUIRE(js.find("setBackgroundGradient('") != std::string::npos);
+    REQUIRE(js.find("setBoxShadow('") != std::string::npos);
+}
+
 TEST_CASE("parse_claude_html_with_runtime falls back when bundle JS is too large",
           "[view][import][issue-468]") {
     // 1 KB payload — bigger than the configured cap below — so the
@@ -277,4 +348,78 @@ TEST_CASE("parse_claude_html_with_runtime against the real Spectr fixture "
     // If even the real Spectr bundle can't get past the floor, surface
     // the error_out via INFO above so the diagnostic is captured.
     REQUIRE(nodes > 9);
+}
+
+TEST_CASE("claude lane carries a CSS gradient background through to the IR",
+          "[view][import][claude][gradient]") {
+    // The claude producer read `backgroundColor`, `border` and `boxShadow` but
+    // never `background`/`backgroundImage`, so a gradient panel in a Claude
+    // Design page imported FLAT while the .fig lane rendered it. This is the
+    // cross-lane coverage gap the shared setBackgroundGradient codegen could not
+    // fix on its own — the field was never populated. A gradient must reach
+    // style.background_gradient so the shared codegen emits it.
+    const std::string app_js = R"JS(
+        var root = document.getElementById('root');
+        var plate = make_el('div', { id: 'plate',
+            style: { background: 'linear-gradient(180deg, #ffffff 0%, #000000 100%)',
+                     width: '200px', height: '80px' } });
+        root.appendChild(plate);
+        var img = make_el('div', { id: 'bgimg',
+            style: { backgroundImage: 'radial-gradient(circle, #ff0000, #0000ff)',
+                     width: '64px', height: '64px' } });
+        root.appendChild(img);
+        var solid = make_el('div', { id: 'solid',
+            style: { background: '#123456', width: '10px', height: '10px' } });
+        root.appendChild(solid);
+        // Pad past the runtime walker's 9-node floor so it does not fall back to
+        // the static parser (which is a different path than the gradient fix).
+        for (var i = 0; i < 12; i++) {
+            root.appendChild(make_el('div', { id: 'pad' + i,
+                style: { width: '4px', height: '4px' } }));
+        }
+        function make_el(tag, props) {
+            var el = document.createElement(tag);
+            if (props.id) el.id = props.id;
+            if (props.style) for (var s in props.style) el.style[s] = props.style[s];
+            return el;
+        }
+    )JS";
+
+    std::ostringstream manifest;
+    manifest << "{" << manifest_entry("u-app", "text/javascript", app_js, true) << "}";
+    const std::string body =
+        R"(<div id="root"></div><script src="u-app"></script>)";
+
+    std::string err;
+    ClaudeRuntimeOptions opts; opts.error_out = &err;
+    auto ir = parse_claude_html_with_runtime(build_envelope(manifest.str(), body), opts);
+    INFO("runtime error_out: " << err);
+    REQUIRE(err.empty());
+
+    const IRNode* plate = nullptr;
+    const IRNode* bgimg = nullptr;
+    const IRNode* solid = nullptr;
+    std::function<void(const IRNode&)> walk = [&](const IRNode& n) {
+        if (n.name == "plate") plate = &n;
+        else if (n.name == "bgimg") bgimg = &n;
+        else if (n.name == "solid") solid = &n;
+        for (const auto& c : n.children) walk(c);
+    };
+    walk(ir.root);
+
+    REQUIRE(plate);
+    REQUIRE(plate->style.background_gradient.has_value());
+    REQUIRE(plate->style.background_gradient->find("linear-gradient") != std::string::npos);
+
+    // backgroundImage gradients count too, and win over `background`.
+    REQUIRE(bgimg);
+    REQUIRE(bgimg->style.background_gradient.has_value());
+    REQUIRE(bgimg->style.background_gradient->find("radial-gradient") != std::string::npos);
+
+    // A `background` shorthand carrying a solid color still paints as a color,
+    // not a dropped gradient.
+    REQUIRE(solid);
+    REQUIRE_FALSE(solid->style.background_gradient.has_value());
+    REQUIRE(solid->style.background_color.has_value());
+    REQUIRE(*solid->style.background_color == "#123456");
 }

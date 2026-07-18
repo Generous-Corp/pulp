@@ -6,6 +6,7 @@
 #include <pulp/view/geometry.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/theme.hpp>
+#include <pulp/view/value_source.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/view_effect.hpp>
 #include <optional>
@@ -24,6 +25,8 @@ class GestureArbiter; class GestureRecognizer;
 class FrameClock;
 class WidgetPainter;     // pulp/view/widget_painter.hpp — pluggable paint delegate
 class WidgetMetrics;     // pulp/view/widget_metrics.hpp — pluggable sizing delegate
+class FrameClockBinding; // pulp/view/value_source_binding.hpp
+struct ViewValueBindings; // pulp/view/src/view.cpp — lazily allocated value-source bindings
 struct FileDragRequest;  // pulp/view/drag_drop.hpp
 struct ActiveDrag;       // pulp/view/drag_drop.hpp
 struct DropData;         // pulp/view/drag_drop.hpp
@@ -354,6 +357,45 @@ public:
 
     /// Get the frame clock (walks up parent chain to find it).
     FrameClock* frame_clock() const;
+
+    // ── Live host→view value sources ────────────────────────────────────────
+    // The seam a view showing a live host value (a meter, a readout, a
+    // modulation ring) uses instead of hand-rolling a frame-clock-polled
+    // reader. nullptr unbinds. UI thread. Semantics, paint-safety, the
+    // frames-alive effect and the FrameClock lifetime contract are documented
+    // once in value_source_binding.hpp.
+
+    /// Bind a MeterSource. `channel` is the primary channel — the one
+    /// `on_meter_frame` drives a single-value widget from. A view painting
+    /// several meters reads the whole snapshot via `meter_frame()` instead.
+    void set_meter_source(std::shared_ptr<MeterSource> source, int channel = 0);
+    bool has_meter_source() const;
+    int meter_source_channel() const;
+
+    /// The latest MeterFrame snapshotted on the clock. All-zero
+    /// (`channels == 0`) until the first frame, and again from the moment the
+    /// source is changed or unbound. Bound your channel index by
+    /// `min(frame.channels, MeterFrame::kMaxChannels)` — `publish()` stores the
+    /// frame verbatim and never trusts the count to gate an access.
+    const MeterFrame& meter_frame() const;
+
+    /// Bind a ScalarSource — one cached number (a readout, a modulation ring's
+    /// modulated position).
+    void set_scalar_source(std::shared_ptr<ScalarSource> source);
+    bool has_scalar_source() const;
+
+    /// The latest scalar snapshotted on the clock. 0 until the first frame, and
+    /// again from the moment the source is changed or unbound.
+    float scalar_value() const;
+
+    /// A new MeterFrame was snapshotted this frame, `dt` seconds after the last.
+    /// Default no-op — `meter_frame()` already exposes it to `paint()`. A widget
+    /// that advances per-frame state from the reading (ballistics, smoothing)
+    /// overrides this. UI thread, on the FrameClock.
+    virtual void on_meter_frame(const MeterFrame& frame, float dt) {
+        (void)frame;
+        (void)dt;
+    }
 
     // ── Transient-animation glue ─────────────────────────────────────────────
     // Tween/easing already exist; what a faithful port re-rolls every time is
@@ -876,13 +918,34 @@ public:
         Color color{0, 0, 0, 80};
         bool inset = false;
     };
+    /// Replaces the whole stack with one layer. CSS `box-shadow: A` semantics —
+    /// a declaration always supersedes the previous one rather than adding to
+    /// it, so every existing single-shadow caller keeps its exact behavior.
     void set_box_shadow(float ox, float oy, float blur, float spread, Color c,
                         bool inset = false) {
-        shadow_ = {ox, oy, blur, spread, c, inset}; has_shadow_ = true;
+        shadows_.assign(1, BoxShadow{ox, oy, blur, spread, c, inset});
     }
-    void clear_box_shadow() { has_shadow_ = false; }
-    bool has_box_shadow() const { return has_shadow_; }
-    const BoxShadow& box_shadow() const { return shadow_; }
+    /// Appends a layer, preserving CSS author order: `box-shadow: A, B` is
+    /// set_box_shadow(A) followed by add_box_shadow(B). A is the first layer
+    /// and therefore paints ON TOP of B — see the reverse iteration in
+    /// View::paint_all. Layered shadows are how a design expresses depth: a
+    /// wide soft halo plus a tight dark contact shadow. Keeping only the first
+    /// layer keeps the halo and drops the contact shadow, which reads as flat.
+    void add_box_shadow(float ox, float oy, float blur, float spread, Color c,
+                        bool inset = false) {
+        shadows_.push_back(BoxShadow{ox, oy, blur, spread, c, inset});
+    }
+    void clear_box_shadow() { shadows_.clear(); }
+    bool has_box_shadow() const { return !shadows_.empty(); }
+    /// The first (topmost) layer, or a default-constructed shadow when the
+    /// stack is empty — callers that only ever set one shadow can keep
+    /// treating this as "the" shadow.
+    const BoxShadow& box_shadow() const {
+        static const BoxShadow kEmpty{};
+        return shadows_.empty() ? kEmpty : shadows_.front();
+    }
+    /// Every layer, in CSS author order (first paints on top).
+    const std::vector<BoxShadow>& box_shadows() const { return shadows_; }
 
     /// RN iOS-legacy shadow* longhand setters. RN 0.71+ added `boxShadow` as
     /// the cross-platform path, but the four per-attribute setters still appear
@@ -891,21 +954,23 @@ public:
     /// one field of the shared BoxShadow struct so a JSX prop diff that touches
     /// one prop doesn't clobber the others.
     ///
-    /// Any of these turns has_shadow_ on (matches React Native's
-    /// behavior — setting any shadow prop activates the shadow paint).
+    /// Any of these activates the shadow paint (matches React Native's
+    /// behavior — setting any shadow prop activates it), creating a
+    /// default-valued first layer if the stack is empty. RN has no
+    /// multi-shadow longhand, so these address the first layer only.
     void set_box_shadow_color(Color c) {
-        shadow_.color = c; has_shadow_ = true;
+        first_box_shadow().color = c;
     }
     void set_box_shadow_offset(float ox, float oy) {
-        shadow_.offset_x = ox; shadow_.offset_y = oy; has_shadow_ = true;
+        auto& s = first_box_shadow(); s.offset_x = ox; s.offset_y = oy;
     }
     void set_box_shadow_opacity(float a) {
         // RN's shadowOpacity is 0..1; overwrite the shadow color's normalized
         // alpha channel while preserving the existing RGB channels.
-        shadow_.color.a = a; has_shadow_ = true;
+        first_box_shadow().color.a = a;
     }
     void set_box_shadow_radius(float r) {
-        shadow_.blur = r; has_shadow_ = true;
+        first_box_shadow().blur = r;
     }
 
     /// Generic click callback (fires on mouse-down, if set).
@@ -1313,14 +1378,17 @@ public:
         std::string direction = "normal";
         std::string fill_mode;
     };
-    StagedAnimation& staged_animation() { return staged_animation_; }
-    const StagedAnimation& staged_animation() const { return staged_animation_; }
+    StagedAnimation& staged_animation() { return style_extras().staged_animation; }
+    const StagedAnimation& staged_animation() const {
+        static const StagedAnimation kEmpty;
+        return style_extras_ ? style_extras_->staged_animation : kEmpty;
+    }
 
     /// CSS backdrop-filter: blur(px) — frosted-glass blur applied to whatever
     /// is behind this View when it paints. Zero == no backdrop
     /// filter. Skia maps to `saveLayer(SaveLayerRec{ .fBackdrop = Blur })`.
-    void set_backdrop_blur(float radius) { backdrop_blur_ = radius; }
-    float backdrop_blur() const { return backdrop_blur_; }
+    void set_backdrop_blur(float radius) { style_extras().backdrop_blur = radius; }
+    float backdrop_blur() const { return style_extras_ ? style_extras_->backdrop_blur : 0.0f; }
 
     /// CSS `clip-path: path("...")`. Stores an SVG-path-d string; paint_all()
     /// installs it as a canvas clip via
@@ -1328,28 +1396,40 @@ public:
     /// clears the slot. URL refs (`url(#id)`) and named shape forms
     /// (`circle()`, `inset()`, `polygon()`) are deferred — only the
     /// `path("...")` form is honored today.
-    void set_clip_path(const std::string& svg_path_d) { clip_path_ = svg_path_d; }
-    const std::string& clip_path() const { return clip_path_; }
-    bool has_clip_path() const { return !clip_path_.empty(); }
+    void set_clip_path(const std::string& svg_path_d) { style_extras().clip_path = svg_path_d; }
+    const std::string& clip_path() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->clip_path : kEmpty;
+    }
+    bool has_clip_path() const { return style_extras_ && !style_extras_->clip_path.empty(); }
 
     /// CSS `mask-image: ...`. View opens a masked compositing layer when this
     /// slot is set to a non-`none` value. Backends without mask support route
     /// through the default save_layer path and preserve the value for bridge
     /// round-tripping.
-    void set_mask_image(const std::string& value) { mask_image_ = value; }
-    const std::string& mask_image() const { return mask_image_; }
+    void set_mask_image(const std::string& value) { style_extras().mask_image = value; }
+    const std::string& mask_image() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->mask_image : kEmpty;
+    }
 
     /// CSS `mask` shorthand. Stored verbatim alongside `mask_image_`; the
     /// longhand fan-out in the JS shim populates the image slot from this
     /// string.
-    void set_mask(const std::string& value) { mask_ = value; }
-    const std::string& mask() const { return mask_; }
+    void set_mask(const std::string& value) { style_extras().mask = value; }
+    const std::string& mask() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->mask : kEmpty;
+    }
 
     /// CSS `mask-size` (pairs with mask-image). Stored alongside mask_image_
     /// and passed to the canvas mask layer. Honored values: `auto` (default),
     /// `cover`, `contain`, `<length>`, `<length> <length>`.
-    void set_mask_size(const std::string& value) { mask_size_ = value; }
-    const std::string& mask_size() const { return mask_size_; }
+    void set_mask_size(const std::string& value) { style_extras().mask_size = value; }
+    const std::string& mask_size() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->mask_size : kEmpty;
+    }
 
     /// CSS `appearance` — controls native form-widget rendering.
     /// Pulp paints all widgets custom (no native form widgets), so
@@ -1358,23 +1438,32 @@ public:
     /// The slot exists so authors who set `appearance: none` for
     /// reset-style consistency see a no-op (not an unsupported drop)
     /// and the value round-trips through CSSStyleDeclaration.
-    void set_appearance(const std::string& value) { appearance_ = value; }
-    const std::string& appearance() const { return appearance_; }
+    void set_appearance(const std::string& value) { style_extras().appearance = value; }
+    const std::string& appearance() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->appearance : kEmpty;
+    }
 
     /// CSS `object-fit` — controls how an `<img>` content's intrinsic size is
     /// fitted into its layout box. ImageView consumes this slot at paint time
     /// when the backend can measure the decoded image's natural size; otherwise
     /// it falls back to `fill` and stretches to bounds. Honored values:
     /// `fill` (default), `contain`, `cover`, `none`, and `scale-down`.
-    void set_object_fit(const std::string& value) { object_fit_ = value; }
-    const std::string& object_fit() const { return object_fit_; }
+    void set_object_fit(const std::string& value) { style_extras().object_fit = value; }
+    const std::string& object_fit() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->object_fit : kEmpty;
+    }
 
     /// CSS `object-position` — alignment of the object inside its
     /// content box when object-fit leaves blank space (e.g. `contain`
     /// in a wider box). ImageView consumes it alongside `object-fit` at paint
     /// time when a measurable image is available.
-    void set_object_position(const std::string& value) { object_position_ = value; }
-    const std::string& object_position() const { return object_position_; }
+    void set_object_position(const std::string& value) { style_extras().object_position = value; }
+    const std::string& object_position() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->object_position : kEmpty;
+    }
 
     /// CSS background sub-properties. These slots store the keyword for
     /// round-tripping; paint impact is partial — see notes:
@@ -1386,22 +1475,37 @@ public:
     ///     Catalog: partial.
     ///   • background-origin: relevant only for repeating gradients (which
     ///     we don't paint per-tile). Catalog: noop.
-    void set_background_attachment(std::string kw) { background_attachment_ = std::move(kw); }
-    const std::string& background_attachment() const { return background_attachment_; }
-    void set_background_clip(std::string kw)       { background_clip_ = std::move(kw); }
-    const std::string& background_clip() const     { return background_clip_; }
-    void set_background_origin(std::string kw)     { background_origin_ = std::move(kw); }
-    const std::string& background_origin() const   { return background_origin_; }
+    void set_background_attachment(std::string kw) { style_extras().background_attachment = std::move(kw); }
+    const std::string& background_attachment() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->background_attachment : kEmpty;
+    }
+    void set_background_clip(std::string kw)       { style_extras().background_clip = std::move(kw); }
+    const std::string& background_clip() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->background_clip : kEmpty;
+    }
+    void set_background_origin(std::string kw)     { style_extras().background_origin = std::move(kw); }
+    const std::string& background_origin() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->background_origin : kEmpty;
+    }
 
     /// CSS background-position / background-size. Both are storage-only slots
     /// today: Pulp's solid-bg paint path doesn't honor position or size offsets
     /// (these only matter for url()/image-set() raster backgrounds). Storing
     /// the keyword keeps the round-trip honest so the image pipeline can honor
     /// the existing value without a JS-side change.
-    void set_background_position(std::string kw)   { background_position_ = std::move(kw); }
-    const std::string& background_position() const { return background_position_; }
-    void set_background_size(std::string kw)       { background_size_ = std::move(kw); }
-    const std::string& background_size() const     { return background_size_; }
+    void set_background_position(std::string kw)   { style_extras().background_position = std::move(kw); }
+    const std::string& background_position() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->background_position : kEmpty;
+    }
+    void set_background_size(std::string kw)       { style_extras().background_size = std::move(kw); }
+    const std::string& background_size() const {
+        static const std::string kEmpty;
+        return style_extras_ ? style_extras_->background_size : kEmpty;
+    }
 
     // Storage-only slots for CSS properties that the bridge accepts but View
     // does not fully consume. Each slot is round-trippable so harness tests can
@@ -1652,6 +1756,20 @@ private:
     /// after the subtree was built reaches self-subscribing descendants.
     void notify_frame_clock_changed();
 
+    /// Re-point every FrameClockBinding registered on this view at the
+    /// currently reachable clock. Called non-virtually from
+    /// `notify_frame_clock_changed()`, and bindings enrol themselves rather
+    /// than being listed by hand, so no subclass can strand a binding on a
+    /// stale clock by overriding a hook without chaining. No-op when nothing is
+    /// bound.
+    void sync_value_bindings();
+
+    /// Enrol/withdraw a binding constructed with this view as its owner.
+    /// FrameClockBinding calls these from its own ctor/dtor; nothing else does.
+    void register_value_binding(FrameClockBinding* b);
+    void unregister_value_binding(FrameClockBinding* b);
+    friend class FrameClockBinding;
+
     /// Seed corner_radii_ from the uniform corner_radius_ on the first
     /// transition into per-corner mode. Idempotent: subsequent calls (when
     /// has_corner_radii_ is already true) are no-ops.
@@ -1710,6 +1828,13 @@ private:
     bool requires_gpu_host_ = false;
     bool contains_native_overlay_ = false;
     FrameClock* frame_clock_ = nullptr;
+    // Lazily allocated on the first set_meter_source / set_scalar_source, so a
+    // view that shows no live value costs one null pointer.
+    std::unique_ptr<ViewValueBindings> value_bindings_;
+    // Head of the intrusive list of every FrameClockBinding owned by this view —
+    // the two above plus any a subclass holds (DesignFrameView's per-element
+    // scalars). Intrusive so enrolling a binding never allocates.
+    FrameClockBinding* value_binding_head_ = nullptr;
 
     // Visual properties
     float opacity_ = 1.0f;
@@ -1779,8 +1904,14 @@ private:
     // intentionally need clipping must call set_overflow(Overflow::hidden)
     // explicitly — same opt-in as `overflow:hidden` in CSS.
     Overflow overflow_ = Overflow::visible;
-    BoxShadow shadow_{};
-    bool has_shadow_ = false;
+    /// CSS box-shadow layers in author order; empty means no shadow.
+    std::vector<BoxShadow> shadows_;
+    /// The first layer, materialized with default values when absent. Backs
+    /// the RN longhand setters, which mutate one field at a time.
+    BoxShadow& first_box_shadow() {
+        if (shadows_.empty()) shadows_.emplace_back();
+        return shadows_.front();
+    }
     float scale_ = 1.0f;
     float translate_x_ = 0, translate_y_ = 0;
     float rotation_deg_ = 0;
@@ -1796,27 +1927,37 @@ private:
     bool has_transform_matrix_ = false;
     float filter_blur_ = 0;
     std::vector<FilterOp> filter_chain_{};
-    float backdrop_blur_ = 0;
-    // CSS clip-path / mask storage. Paint-time consumption for clip_path_ via
-    // Canvas::clip_path_svg (SkPath::FromSVGString on Skia, no-op fallback
-    // elsewhere). mask_image_ / mask_ are consumed by mask-capable backends and
-    // round-trip through storage elsewhere.
-    std::string clip_path_;
-    std::string mask_image_;
-    std::string mask_;
-    std::string mask_size_;     // CSS mask-size paired with mask_image_
-    std::string appearance_;    // CSS appearance — storage-only no-op for Pulp custom widgets
-    std::string object_fit_;      // CSS object-fit consumed by ImageView paint
-    std::string object_position_; // CSS object-position paired with object-fit
+    // CSS-compat storage-only style slots, lazily allocated. Native View
+    // trees never set these, so keeping them behind a pointer avoids ~14
+    // empty std::strings + floats per View instance. Allocated on first
+    // write via style_extras(); readers fall back to defaults when null.
+    // Paint-time consumption: clip_path via Canvas::clip_path_svg
+    // (SkPath::FromSVGString on Skia, no-op fallback elsewhere); mask_image /
+    // mask via mask-capable backends; the rest round-trip through storage.
+    struct ViewStyleExtras {
+        StagedAnimation staged_animation{};
+        float backdrop_blur = 0.0f;
+        std::string clip_path;
+        std::string mask_image;
+        std::string mask;
+        std::string mask_size;     // CSS mask-size paired with mask_image
+        std::string appearance;    // CSS appearance — storage-only no-op for Pulp custom widgets
+        std::string object_fit;      // CSS object-fit consumed by ImageView paint
+        std::string object_position; // CSS object-position paired with object-fit
+        std::string background_attachment;  // noop today
+        std::string background_clip;        // partial (text deferred)
+        std::string background_origin;      // noop today
+        std::string background_position;    // storage-only (raster bg deferred)
+        std::string background_size;        // storage-only (raster bg deferred)
+    };
+    std::unique_ptr<ViewStyleExtras> style_extras_;
+    ViewStyleExtras& style_extras() {
+        if (!style_extras_) style_extras_ = std::make_unique<ViewStyleExtras>();
+        return *style_extras_;
+    }
     /// Transition specs + active animations.
     std::vector<TransitionSpec> transitions_{};
     std::vector<CssAnimation> active_animations_{};
-    StagedAnimation staged_animation_{};
-    std::string background_attachment_;  // noop today
-    std::string background_clip_;        // partial (text deferred)
-    std::string background_origin_;      // noop today
-    std::string background_position_;    // storage-only (raster bg deferred)
-    std::string background_size_;        // storage-only (raster bg deferred)
 
     // Storage-only catalog slots.
     float       text_indent_ = 0.0f;       // partial (paint deferred)

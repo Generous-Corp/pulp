@@ -54,6 +54,48 @@ its ABI shape rather than as the only implemented backend. Patterns to mirror:
   parameter edits in the slot. Otherwise `get_parameter()` can report a
   stale host-side value even though the plug-in restored its own state.
 
+### VST3: re-sync a separated edit controller on state restore
+
+VST3 splits a plug-in into an `IComponent` (processor) and an
+`IEditController`. When they are *separate objects*, restoring only the
+component state (`IComponent::setState`) leaves the controller — and the
+vendor UI — showing stale values. The host contract is: after
+`component->setState`, push the same processor state into the controller with
+`IEditController::setComponentState`, and separately save/restore the
+controller's own `getState`/`setState`. Combined plug-ins (one object
+implementing both interfaces) skip all of this — detect the combined case by
+`FUnknown` pointer equality (`controller == component`).
+
+`Vst3Slot` lives in an anonymous namespace, so this logic lives in a
+free-function seam, `pulp::host::detail::vst3_state_sync.hpp`
+(`vst3_serialize_state` / `vst3_restore_state`) — that is also the only place a
+host-slot test can reach it. It writes a versioned `PV3S` container (component
+plus an optional controller section); a blob without the magic is treated as
+legacy raw-component state, so sessions saved before the container existed
+still load. Length fields are bounds-checked as `len > remaining` (never
+`remaining - len`) so a malformed blob cannot underflow into an out-of-bounds
+read.
+
+### VST3: embed the editor like CLAP — a parent-consuming IPlugView
+
+`IEditController::createView("editor")` hands back an `IPlugView` that, like
+CLAP `set_parent`, CONSUMES a parent: `IPlugView::attached(container, "NSView")`
+inserts the plug-in's view into a host-owned container rather than returning a
+view. So the VST3 editor path reuses the same container as CLAP
+(`create_editor_container`), and the ordering matters — query
+`IPlugView::getSize` first to size the container, create the container (already
+in the parent window), THEN `attached()`. Tear down in reverse: `removed()`
+before `release()`, and close the editor before terminating the controller it
+came from (`createView`'s view must not outlive its controller).
+
+The AppKit part is only the container; the VST3 negotiation (createView,
+`isPlatformTypeSupported`, `getSize`, `attached`, `onSize`/`checkSizeConstraint`,
+`removed`) is a pure-interface seam, `pulp::host::detail::vst3_editor.hpp`, which
+is where a headless test drives it with a fake `IEditController` / `IPlugView`
+(inherit the SDK `EditController` / `CPluginView` bases). The full container
+attach is only reachable with a real native window, so it is proven by the
+real-DAW smoke, not the unit test.
+
 ### Defensive boundary for entry / factory calls
 
 `scanner_clap.cpp` wraps `entry->init()` and `entry->get_factory()` in
@@ -222,16 +264,25 @@ does not contain crashes in deeper plug-in code.
   (per-node latency is propagated through the topology in the buffer assignment,
   and each feedforward connection that needs it gets a delay ring sized in the
   `GraphRuntimeBufferPool`), so fan-in paths of differing latency time-align
-  identically. MIDI edges route through per-node MIDI scratch buffers owned by
+  identically. Each pool ring's mutable samples + write cursor live in a
+  shareable state object while the RT lookup still returns raw pointers; this
+  is the seam `prepare_swap` uses off-RT to adopt identity-matched PDC history
+  without reading or copying live ring contents. MIDI edges route through
+  per-node MIDI scratch buffers owned by
   the executor (`GraphRuntimeMidiScratch`); SignalGraph bridges its MIDI
-  mailboxes (inject_midi / extract_midi) around the routed call. Parameter
-  automation routes through a `GraphRuntimeAutomationScratch` (per-node parameter
-  event queue + per-connection slew state + per-node dense buffers): sparse edges
-  sample the source at the block edges, map/slew/mix per the connection's
-  resolved bounds, and emit two control points; dense audio-rate edges map every
-  sample (through the same per-connection PDC delay ring as audio), mix into a
-  per-node buffer, and emit one event per sample — both bit-identical to the walk
-  and built into the same per-node event queue. A node exceeding
+  mailboxes (inject_midi / extract_midi) around the routed call. External
+  per-block parameter events cross the same boundary through a per-node
+  `inject_parameter_events` mailbox. The routed call appends that publication
+  after executor-generated automation and commits its sequence only after the
+  whole dispatch succeeds, matching serial fallback and anticipation behavior.
+  Parameter automation routes through a `GraphRuntimeAutomationScratch`
+  (per-node parameter event queue + per-connection slew state + per-node dense
+  buffers): sparse edges sample the source at the block edges, map/slew/mix per
+  the connection's resolved bounds, and emit two control points; dense
+  audio-rate edges map every sample (through the same per-connection PDC delay
+  ring as audio), mix into a per-node buffer, and emit one event per sample —
+  both bit-identical to the walk and built into the same per-node event queue.
+  A node exceeding
   `kMaxParamsPerNode` (64) distinct sparse OR dense params is kept on the legacy
   walk.
   - **Where the walk lives.** The legacy serial reference walk is no longer
@@ -247,6 +298,87 @@ does not contain crashes in deeper plug-in code.
     applies: any audio-output-affecting edit to the walk must be mirrored in the
     executor (and vice versa), guarded by `test_graph_routing_differential_parity`,
     `test_signal_graph_executor_parity`, and `test_signal_graph_offline_parity`.
+  - **Where the live-swap engine lives.** The no-silence topology-edit machinery —
+    the swap policy and scanned-plugin catalog, the staged-replacement pipeline,
+    the `begin_swap_edit` / `prepare_swap` / `abort_swap_edit` transaction with its
+    crossfade publish and rollback, `snapshot_is_plugin_reinit_free_locked_`, and
+    the load-admission gate — lives in `core/host/src/signal_graph_live_swap.cpp`,
+    so `signal_graph.cpp` keeps the topology/compile/process spine. The file
+    arrangement mirrors `signal_graph_reference_walk.cpp`, but the *reason* does
+    NOT: these are still ordinary `SignalGraph` members that name its private
+    nested types, only their definitions moved. **The reference walk's
+    independence rule does not transfer here** — there is no second
+    implementation to stay bit-exact against, and factoring shared code out of
+    live-swap into `signal_graph.cpp` (or `signal_graph_internal.hpp`, where
+    `prepare_midi_block_storage` already single-sources every graph MIDI block's
+    real-time capacities for both the compile path and the swap warm-up probe) is
+    a fix, not a violation. Everything in the live-swap TU runs on the CONTROL
+    thread.
+  - **Gap-free PDC carry is identity-based and conservative.** `connections_`
+    has a private parallel vector of monotonic identities; every insertion and
+    erasure must update both vectors. `CompiledGraph` snapshots those identities
+    beside `connections`. During `prepare_swap`, the old and candidate delayed
+    edge sets must form an identity-keyed bijection with equal delay sizes and
+    equal total graph latency. The candidate then shares, never copies, each old
+    domain's audio-thread-owned ring state: legacy `ConnectionDelay`,
+    `routed.serial.pool`, and `routed.parallel.pool`. Disconnect+reconnect mints a
+    new identity and is refused even when the public `Connection` values compare
+    equal. Because those domains keep independent histories, a PDC-active
+    `CompiledGraph` pins the execution domain chosen during `prepare()`; relaxed
+    routing toggles remain dynamic only for zero-PDC snapshots, and a live swap
+    that would change the pinned domain is refused. Feedback graphs,
+    routed-validity changes, and latency/delay-structure changes are also refused.
+    Tests: `test_signal_graph_pdc_swap_continuity.cpp`
+    uses D=97 with 64-frame blocks across all three execution domains and includes
+    the reconnect negative plus a concurrent swap hammer.
+  - **`_locked_` is a contract, and it is now asserted.** A `SignalGraph` helper
+    suffixed `_locked_` requires the caller to already hold
+    `graph_mutation_mutex_`; the convention now spans `signal_graph.cpp` and
+    `signal_graph_live_swap.cpp`, so it is easier to violate from the far side than
+    it was when one TU held every caller. Helpers whose call graph is entirely
+    internal open with `assert_graph_mutation_locked_()`, which reads a debug-only
+    owner record — so **take the mutex through `GraphMutationLock`, never a bare
+    `std::lock_guard`/`unique_lock`**. A bare guard locks correctly but leaves the
+    owner record empty, and the next `_locked_` helper you call asserts as though
+    you forgot the lock entirely (a debug-only false failure that reads like a real
+    one). Only `prepare_swap` calls `GraphMutationLock::unlock()` early, to drop
+    the lock before invoking user callbacks. Two `_locked_` helpers cannot assert —
+    `has_path_locked_` (reached via `would_create_cycle`) and
+    `total_declared_ports_locked_` (via `validate_generated_graph` /
+    `estimate_generated_graph_work_units`) — because those public entry points do
+    not lock; their suffix documents the internal contract only. (`node_load_mu_`
+    is a different mutex and is correctly taken with a plain `lock_guard`.)
+  - **`CompiledGraph::routed` groups what is only ever valid together.** Each
+    `RoutedPath` (`routed.serial`, `routed.parallel`) owns its own `snapshot`,
+    `pool`, `plugin_ctx`, `custom_ctx`, and `valid` flag — driving one path's
+    snapshot against the other path's pool is the bug the grouping exists to make
+    hard, since the parallel path's assignment is reuse-free and the serial path's
+    is compact. The MIDI scratch, automation scratch, and MidiInput/MidiOutput node
+    lists sit on `routed` itself and are **deliberately SHARED** by both paths: the
+    plans are identical and only ONE path runs per block. That sharing is load-
+    bearing — anything that makes those structs carry per-path state (or that runs
+    both paths in a block) breaks it silently, because the MIDI mailbox bridge and
+    the automation queues would then interleave across paths.
+  - **`build_executor_snapshot` prefers the `ExecutorSnapshotBinders` struct.** The
+    positional overload still exists as a forwarder for unmigrated call sites, and
+    it is exactly where a resolver can go wrong quietly: several of its resolvers
+    are same-shaped `std::function<T*(NodeId)>`, so swapping two by argument
+    position compiles and mis-binds. Every binder field is optional and has a
+    documented fallback (`plugin_latency_for` / `plugin_params_for` empty means
+    "fall back to the live slot", which is fine for baked/anticipation callers but
+    NOT on the swap path, where the point of the cached accessors is that a
+    swap-time build makes no live `PluginSlot` metadata call).
+  - **Multi-path routing has an arithmetic guard.**
+    `test/test_signal_graph_audio_parity.cpp` (target
+    `pulp-test-signal-graph-audio-parity`) renders a fan-out/fan-in topology whose
+    paths carry distinct non-commutative transfer functions, and checks the output
+    bit-exactly against expectations derived by hand from the stimulus — on the
+    walk, the routed serial path, and the routed parallel path. Nothing in it is
+    captured from a build, so a routing change cannot move the bar with it: a
+    dropped, swapped, or reordered path fails. It also asserts
+    `routed_walk_fallbacks()` / `routing_executor_stats()`, since a routed case
+    that quietly degraded into the walk would otherwise pass vacuously (the walk is
+    both oracle and fallback).
   - **Connection lane CLASSIFICATION is single-sourced** (distinct from the
     execution-independence rule above). Which lane a host `Connection` carries —
     audio / event(MIDI) / automation, plus the orthogonal feedback flag and the
@@ -474,6 +606,14 @@ does not contain crashes in deeper plug-in code.
   audio-thread scratch directly. Keep mailbox snapshots and writer scratch
   preallocated by `prepare()`; constructing a fresh MIDI snapshot in
   `inject_midi()` reintroduces realtime-path allocation.
+- `SignalGraph::inject_parameter_events()` uses a separate prepared per-node
+  mailbox with one control-side writer. Publications are latest-wins and
+  one-shot: the next successful serial, routed, parallel, or anticipation
+  block consumes the newest sequence once. Append injected events after graph
+  automation before the stable sample-offset sort; this preserves graph
+  automation when the fixed queue is full and lets injected events win a
+  same-offset tie. Reuse the mailbox across gap-free snapshots for the same
+  plugin node so an edit cannot discard a publication made before the swap.
 - Keep plugin automation scratch preallocated by `SignalGraph::prepare()`.
   The audio-thread `process()` path must not create per-block containers for
   input pointer casts, sparse automation accumulation, or dense audio-rate
@@ -597,6 +737,54 @@ Gotchas:
 
 ## Common tripwires
 
+- **Instruments have no input bus — never address input element 0 blind.**
+  An AU instrument (`aumu`) and a generator (`augn`) expose **zero input
+  elements**; so does a MIDI processor (`aumi`, which despite the name is
+  `kAudioUnitType_MIDIProcessor`, not an instrument — and it may expose no
+  *output* element either). A MIDI effect (`aumf`) *does* have audio input and
+  is unaffected. Setting a per-element input property on an input-less AU —
+  `kAudioUnitProperty_StreamFormat`, `kAudioUnitProperty_SetRenderCallback` —
+  returns `kAudioUnitErr_InvalidElement` (**-10877**), *not* a format error.
+  Treating that as fatal rejects **every instrument on the system** while every
+  effect keeps working, so the failure is invisible to effect-only tests. Ask
+  `kAudioUnitProperty_ElementCount` on the scope first and skip the input-side
+  setup when it is 0 (`scope_element_count()` in
+  `core/host/src/plugin_slot_au.mm`). When the AU does not answer the query,
+  assume an input bus **exists**: a non-answering effect then behaves as it
+  always did, and a non-answering instrument fails loudly at the property set
+  with a named scope+status. Assuming *none* would skip input setup on that
+  effect and leave every `AudioUnitRender` failing while the caller's buffer
+  keeps stale contents — **silent wrong audio, the worst of the four outcomes.**
+  The general rule for any backend: derive the bus layout from what the plug-in
+  **reports**, never from the assumption that an input side exists. The other
+  slots already do this and are the pattern to copy — VST3 loops
+  `component_->getBusCount(kAudio, kInput)` and ignores `setBusArrangements`'
+  status ("missing buses degrade gracefully"); CLAP and VST3 both size
+  `ProcessData` from the caller's view. AU was the outlier.
+- **The LV2 slot cannot safely host an instrument — and it fails as UB, not
+  cleanly.** Port discovery keeps only `lv2:AudioPort`/`lv2:ControlPort` stanzas
+  (`plugin_slot_lv2.cpp`, `if (!is_audio && !is_control) continue;`), so atom /
+  event / CV ports are never seen and never `connect_port`'d — yet `run()` is
+  called anyway. The LV2 spec requires **every** port be connected before
+  `run()` unless it is `lv2:connectionOptional`; running with unconnected ports
+  is undefined behavior and commonly segfaults. Every LV2 instrument has an atom
+  MIDI input port, and many effects carry atom ports for transport. There is
+  also no MIDI delivery path for LV2 at all. Unlike the AU trap above this does
+  not fail loudly — so **do not claim "Pulp hosts instruments" unqualified**:
+  AU yes, VST3/CLAP plausibly, LV2 no. Fixing it means an atom-sequence input
+  buffer + MIDI mapping; the minimum stopgap is to detect non-audio/non-control
+  input ports at discovery and refuse `prepare()` loudly unless
+  `connectionOptional`.
+- **Test hosts against a real *instrument*, not just a real effect.** The
+  effect-only integration test in `test/test_plugin_slot_au.mm` passed happily
+  through the bug above. Apple's bundled `DLSMusicDevice`
+  (`kAudioUnitType_MusicDevice` + `kAudioUnitManufacturer_Apple`) ships on every
+  Mac, so an instrument fixture costs nothing —
+  `first_apple_instrument_unique_id()` is there for this. Any host change that
+  touches bus/format negotiation needs both shapes, or half the plug-in universe
+  goes untested. (These tests WARN-and-return when no system AU is registered;
+  a headless VM may not surface Apple's AUs, so treat a green run in CI as
+  "not disproven" rather than "covered" — a **skip is never a pass**.)
 - Building `pulp-host` without adding a new `.cpp` to `target_sources` —
   the file sits on disk but isn't compiled; link errors fire only in the
   dispatcher's `case`. **Always** update `core/host/CMakeLists.txt`
@@ -717,6 +905,13 @@ rules:
   `core/host`. Current loaders consume it for per-block automation where
   the format supports sample offsets. Use it — not `set_parameter` — for
   per-block automation.
+- **External parameter-event mailbox.** Hosts publish per-block events with
+  `SignalGraph::inject_parameter_events()` before `process()`. The API is
+  additive on `SignalGraph`; do not add a `Processor` or `PluginSlot` virtual.
+  Sample offsets are block-relative. A `false` return reports an invalid or
+  unavailable node, or a source queue that already overflowed; a retained
+  source prefix can still be published and consumed. Destination overflow is
+  observed later when the audio-thread merge fills the fixed queue.
 - **Node ABI surface.** `PluginSlot` includes
   `pulp/runtime/node_abi.hpp` and participates in the node ABI
   virtual-order gate. Existing virtual methods may not be inserted,
@@ -725,6 +920,67 @@ rules:
   the diff against the PR base.
 - **Thread rules doc.** `docs/reference/host-thread-rules.md` is the
   canonical reference.
+
+## Hosted plugin editors
+
+`EditorAttachment::create(slot, window)` embeds a hosted plugin's own GUI.
+Wired for **CLAP on macOS**; VST3 / AU / LV2 slots still report no editor. The
+non-obvious parts:
+
+- **The APIs are inverted from `HostedEditor`.** CLAP `set_parent` and VST3
+  `IPlugView::attached` CONSUME a parent view — the plugin inserts its own view
+  into what you hand it and never hands one back. `HostedEditor` is the other
+  way round (the slot returns a handle the host embeds). The slots reconcile
+  this with a host-owned container `NSView` (`hosted_editor_container.hpp`)
+  reported as `native_handle`. AU v2's CocoaUI does return a view, but wraps it
+  in the same container so teardown is uniform. Do not "simplify" this away.
+- **The container is inserted into the parent window at CREATION**, not at
+  attach. `EditorAttachment::create` calls `create_hosted_editor()` BEFORE
+  `attach_native_child_view()`, so a container that deferred insertion would
+  have the plugin run `set_parent`/`attached` against a windowless view —
+  editors that bring up Metal/OpenGL layers misbehave there. The later attach is
+  an `addSubview:` move within the same window.
+- **`core/host` is compiled WITHOUT ARC.** Container views are retained and
+  released by hand. Check `flags.make` before assuming ARC in any `core/host`
+  `.mm`.
+- **`clap_host_gui` must be served from `host_get_extension`.** It returned
+  nullptr for every extension before editors existed, so a plugin could not call
+  back at all. `request_show`/`request_hide` are denied — Pulp only creates
+  embedded editors. Deny rather than pretend.
+- **The thread rules are ASYMMETRIC, and getting this backwards is the easy
+  mistake.** Every `clap_plugin_gui` call (`create`, `hide`, `destroy`,
+  `can_resize`, `set_size`…) is `[main-thread]`. But the `clap_host_gui`
+  callbacks a plugin invokes are `[thread-safe]` — `request_resize` and
+  `resize_hints_changed` are `[thread-safe & !floating]`, and
+  `request_show`/`request_hide`/`closed` are `[thread-safe]`. A plugin may call
+  them from a render thread. So a host callback must NEVER walk straight into a
+  `clap_plugin_gui` call or a native view — that runs a main-thread-only API off
+  the editor's thread. The slot records the thread that opened the editor and
+  refuses (`request_resize` → false, which the spec allows) or defers (`closed`
+  → pay the destroy at teardown) off-thread. Any `bool` a `[thread-safe]`
+  callback touches must be atomic: two callers can otherwise both pass a
+  test-then-set and double-destroy the plugin's gui.
+- **Do not call `set_scale()` on cocoa/uikit.** `clap/ext/gui.h` documents them
+  as logical-size APIs that must not receive it; win32/x11 are physical-size and
+  do want it.
+- **The gui and the container have independent lifetimes.** A plugin can report
+  its gui destroyed (`clap_host_gui::closed(was_destroyed=true)`) while the
+  caller still holds a `HostedEditor` pointing at the container. Freeing the
+  container there dangles that handle, because `EditorAttachment` detaches by
+  pointer on release. Acknowledge with `destroy()` only; let the caller's
+  teardown release the container.
+- **A native child ALWAYS composites above Pulp's GPU layer** — you cannot paint
+  Pulp chrome over an embedded editor. This is a fixed OS behavior, not a bug to
+  fix, and it constrains node-editor designs.
+- **Pulp's OWN plugins withdraw `clap.gui` under `CI=1` / `PULP_HEADLESS=1` /
+  `PULP_TEST_MODE=1`** (`format/detail/editor_environment.hpp`). A dogfood test
+  asserting a fixed `has_editor()` will pass locally and fail in CI; read the
+  same flag instead.
+- **Testing without a bundle:** `make_clap_slot(info, creator)` in
+  `core/host/src/plugin_slot_clap_internal.hpp` builds a slot around a
+  caller-created `clap_plugin_t`, skipping dlopen. The creator receives the
+  slot's real `clap_host_t`, so a fake can call back into `clap_host_gui`. See
+  `test/test_clap_hosted_editor.mm`.
 
 ## Per-format depth
 

@@ -17,16 +17,6 @@ name: Tracing build (Perfetto opt-in)
 # checks. It contends with nothing on the required `macos` gate.
 
 on:
-  pull_request:
-    branches: [main, develop]
-    paths:
-      - 'core/**'
-      - 'test/**'
-      - 'tools/cli/**'
-      - 'tools/cmake/**'
-      - 'CMakeLists.txt'
-      - 'setup.sh'
-      - '.github/workflows/tracing-build.yml'
   push:
     branches: [main]
     paths:
@@ -39,6 +29,8 @@ on:
       - '.github/workflows/tracing-build.yml'
   workflow_dispatch:
 
+  schedule:
+    - cron: '41 5 * * *'  # nightly de-starve safety net (see planning/fleet/2026-07-17-ci-destarve-analysis.md)
 permissions:
   contents: read
 

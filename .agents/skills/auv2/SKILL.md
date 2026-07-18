@@ -178,6 +178,20 @@ the audio callback path. Tests live in
 `pulp-test-processor-layout-latency` plus the existing
 `pulp-test-au-v2-effect` suite.
 
+### Bypass audio must be latency-compensated (PDC alignment)
+
+The `ProcessBufferLists` bypass short-circuit must NOT `memcpy` the dry input
+straight to the output. When the Processor reports a non-zero latency, the host
+has delay-aligned the plugin's *wet* path by that latency (PDC), so a raw dry
+copy arrives `latency` samples early — comb-filtering on parallel busses.
+Route the bypass pass-through through `boundary::render_bypass_passthrough`
+(`adapter_boundary.hpp`), sizing the member `bypass_` delay line to
+`reported_latency_samples(processor_->latency_samples(), host_quirks_)` in
+`Initialize()`. A zero latency collapses to a straight passthrough. The real
+adapter is pinned by `pulp-test-au-v2-effect [bypass]` (drives
+`ProcessBufferLists` with a latency-reporting, bypass-engaged processor and
+asserts the impulse lands at frame `latency`, not frame 0).
+
 ### Channel-config negotiation (`kAudioUnitProperty_SupportedNumChannels`)
 
 `PulpAUEffect::SupportedNumChannels()` reports the supported (input, output)
@@ -722,3 +736,35 @@ Pulp gates it on `range.step >= 1`). A CONTINUOUS param with a custom
    retain); `inValue == nullptr` means "use the current value".
    Guard from_string with `std::isfinite`. Test:
    `test/test_au_v2_param_display.mm`.
+
+## Verifying AU v2 tests locally needs the AudioUnitSDK
+
+The AU v2 test targets (`pulp-test-au-v2-*`) link `ausdk` and only get
+configured when `external/AudioUnitSDK` is present — CMake prints
+`AudioUnitSDK found — AU v2 support enabled`. A fresh worktree does NOT have it
+(the SDK is developer-supplied, not committed), so the AU targets silently
+don't exist and `cmake --build --target pulp-test-au-v2-effect` fails with
+`No rule to make target`. Before verifying any AU change:
+
+```bash
+git clone --depth 1 https://github.com/apple/AudioUnitSDK.git external/AudioUnitSDK
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF   # reconfigure to pick it up
+```
+
+## GetParameterInfo metadata + latency/tail change notification
+
+Two host-conformance surfaces beyond the display-string path above:
+
+- `GetParameterInfo` maps `range.min/max/default_value` to
+  `minValue/maxValue/defaultValue` and the unit string to an
+  `AudioUnitParameterUnit` (`"Hz"`→Hertz, `"dB"`→Decibels, `"%"`→Percent,
+  Boolean, else Generic). A wrong range/unit silently mis-scales every host
+  automation lane — assert the numeric metadata, not just the
+  ValuesHaveStrings flag. Test: `test/test_au_v2_param_display.mm`.
+- When the processor flags a latency/tail change during `process()`,
+  `ProcessBufferLists` republishes it via
+  `PropertyChanged(kAudioUnitProperty_Latency / kAudioUnitProperty_TailTime)`
+  so the host re-reads plugin-delay compensation. To test the delivery,
+  subclass `PulpAUEffect` and override `PropertyChanged` to capture the
+  property IDs, then drive a real `ProcessBufferLists` render. Test:
+  `test/test_au_v2_effect.cpp`.

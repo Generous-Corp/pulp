@@ -43,6 +43,7 @@ import {
   FLAG_WORKER_READY, FLAG_DEVICE_LOST, FLAG_SHUTDOWN, FLAG_ENGINE_GPU,
   STATE_READY, STATE_DEVICE_LOST, STATE_FAILED,
 } from "./gpu-ring.mjs";
+import { recommendLatencyBlocks } from "./adaptive-depth.mjs";
 
 const IDLE_WAIT_MS = 4;      // idle: nothing queued — still well under a block period
 const BUSY_WAIT_MS = 1;      // work outstanding: ~10 polls per 512-frame block
@@ -368,7 +369,10 @@ async function runLoop(blockPeriodMs, latencyBlocks) {
       // absolute timestamp — handing it performance.now()+x would give the module
       // an effectively infinite deadline (hours) and leave all expiry to the loop
       // below, so a wedged map would pin a staging buffer instead of expiring.
-      const budgetMs = latencyBlocks * blockPeriodMs;
+      // Live latency: adaptive depth can retarget it from the page mid-stream, so the
+      // budget must follow (JS L and the plugin's L move together). Falls back to the
+      // captured value if the ring is somehow unattached.
+      const budgetMs = (ring ? ring.liveLatency() : latencyBlocks) * blockPeriodMs;
       const deadline = t0 + budgetMs;   // absolute, for THIS loop's bookkeeping
       // A refused submit (module queue full) is an abandoned block, not an error:
       // it becomes a miss the plugin's CPU path covers.
@@ -395,10 +399,18 @@ async function runLoop(blockPeriodMs, latencyBlocks) {
 
     if (now - lastStats >= STATS_PERIOD_MS) {
       lastStats = now;
-      // stat(4) is the module's ONLY honest source of a GPU-busy number, and it
-      // is always 0 today (no async timestamp-query path). Render 0 as "no
-      // timing", never as a stall. Never synthesize one from the callback.
+      // stat(4) is the module's ONLY honest source of a GPU-busy number: the async
+      // convolution shader's timestamp-query span in ns (0 when unsupported or the
+      // device quantized a small dispatch to 0). Render 0 as "no timing", never as a
+      // stall. Never synthesize one from the callback.
       state.gpuNsLast = gpu.api.stat(4);
+      // Adaptive-depth recommendation: how many block-periods the MEASURED round trip
+      // (avgBlockUs) needs, with headroom. The page's DepthController debounces this
+      // and, on a sustained change, retargets the ring + the plugin's L together. The
+      // worker only SUGGESTS; it never moves its own latency (that would desync the
+      // plugin). blockPeriodMs → µs to match recommendLatencyBlocks' units.
+      state.recommendedDepth =
+        recommendLatencyBlocks(state.avgBlockUs || 0, blockPeriodMs * 1000);
       ring.publishStats(state);
     }
 
@@ -422,7 +434,13 @@ async function bringUp(msg) {
 
   let device;
   try {
-    device = await adapter.requestDevice();
+    // Opt INTO timestamp-query when the adapter offers it: WebGPU grants optional
+    // features only if named in requiredFeatures. Without this the device never has
+    // timestamp-query even where the adapter lists it (measured on Safari 2026-07-16),
+    // so the honest GPU-compute-time readout could never light up. Harmless where
+    // unsupported — the feature is simply absent and the timing path stays 0.
+    const wantTs = adapter.features && adapter.features.has("timestamp-query");
+    device = await adapter.requestDevice(wantTs ? { requiredFeatures: ["timestamp-query"] } : {});
   } catch (e) {
     throw new Error("no-device:" + (e && e.message ? e.message : e));
   }

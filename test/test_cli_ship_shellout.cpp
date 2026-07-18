@@ -15,6 +15,8 @@
 // by pointing `PULP_HOME` at a per-test empty directory and clearing
 // the ship-related env vars; it restores prior values on teardown.
 
+#include "test_cli_shellout_util.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>
 
@@ -64,6 +66,11 @@ public:
         pulp_setenv(name_.c_str(), value.c_str());
     }
 
+    // Re-points the variable inside the guard's lifetime, for a case that needs
+    // to exercise several values. The captured original is still restored on
+    // destruction, so the guarantee is unchanged.
+    void set(const std::string& value) { pulp_setenv(name_.c_str(), value.c_str()); }
+
     ~ScopedEnvVar() {
         if (old_value_) {
             pulp_setenv(name_.c_str(), old_value_->c_str());
@@ -99,16 +106,11 @@ fs::path pulp_binary() {
 
 bool binary_exists() { return fs::exists(pulp_binary()); }
 
-// Guards against a wedged child, not a performance budget. `ship sign` shells
-// out to codesign once per discovered bundle plus the signing-ready preflight,
-// so a full-suite parallel run on a loaded machine can push a single case past
-// a tight cap and fail it for elapsed time rather than behavior. The outer
-// `ctest --timeout` is the binding guard; keep this looser than it so a slow
-// machine surfaces there, with a test name and elapsed time, instead of here as
-// a bare `timed_out`. Matches the 60s the other CLI shellout suites use.
+// Timeout defaults to the shared hang guard — these cases drive codesign-heavy
+// branches whose cost is host-dependent. See test_cli_shellout_util.hpp.
 ProcessResult run_pulp_in(const fs::path& cwd,
                           const std::vector<std::string>& args,
-                          int timeout_ms = 60000) {
+                          int timeout_ms = pulp_test_cli::shellout_timeout_ms()) {
     auto bin = pulp_binary();
     ProcessOptions opts;
     opts.timeout_ms = timeout_ms;
@@ -175,6 +177,26 @@ void write_ship_config(const fs::path& home, std::string_view text) {
 // `read_user_config_value()` finds no `config.toml`) and clears the env
 // vars `cmd_ship` consults directly. `ScopedEnvVar`'s destructor
 // restores prior values, leaving the developer's environment untouched.
+//
+// `HOME` is redirected at the same empty directory, which isolates the
+// shell-outs from two pieces of host state they never mean to exercise:
+//
+//   1. The user keychain. `ship sign` runs the real `codesign` once per
+//      discovered bundle, and a bare `codesign --sign NAME` resolves the
+//      name against the *user* codesigning-identity search list. That
+//      lookup is serialized machine-wide through securityd, so its cost
+//      grows linearly with the number of identity searches running
+//      anywhere on the host — on a shared machine running several jobs at
+//      once, three lookups can take longer than a shell-out's whole
+//      timeout budget. An empty `HOME` yields an empty search list, so
+//      codesign reaches the same "no identity found" verdict without
+//      querying securityd at all. The sign attempt, its failure, and the
+//      CLI's `FAILED` report are all still exercised for real — only the
+//      dependence on the host's keychain contents goes away, which also
+//      stops these tests from silently depending on the machine *not*
+//      owning an identity whose name matches a fixture string.
+//   2. `~/.config/pulp/secrets/notary.env`, which `ship notarize` layers
+//      under env/CLI values on a configured signing machine.
 fs::path make_isolated_pulp_home() {
     auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
     auto dir = fs::temp_directory_path()
@@ -187,6 +209,7 @@ fs::path make_isolated_pulp_home() {
 struct ShipShelloutFixture {
     fs::path home_dir;
     ScopedEnvVar pulp_home;
+    ScopedEnvVar user_home;
     ScopedEnvVar android_store_pass;
     ScopedEnvVar android_key_pass;
     ScopedEnvVar pulp_sign_identity;
@@ -200,6 +223,7 @@ struct ShipShelloutFixture {
     ShipShelloutFixture()
         : home_dir(make_isolated_pulp_home()),
           pulp_home("PULP_HOME", home_dir.string()),
+          user_home("HOME", home_dir.string()),
           android_store_pass("ANDROID_STORE_PASS"),
           android_key_pass("ANDROID_KEY_PASS"),
           pulp_sign_identity("PULP_SIGN_IDENTITY"),
@@ -1528,4 +1552,46 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 #else
     SUCCEED("Linux-only packaging route");
 #endif
+}
+
+// ── Shared shell-out timeout policy ─────────────────────────────────────────
+//
+// These pin the hang guard every CLI shell-out suite spawns its child with.
+// The contract matters because the failure it prevents is silent: a value that
+// is too tight turns a loaded machine into an opaque in-child `timed_out`
+// instead of letting `ctest --timeout` report which test ran long.
+
+TEST_CASE("shellout timeout defaults to the fixed generous hang guard", "[cli][shellout]") {
+    ScopedEnvVar override_var("PULP_TEST_SHELLOUT_TIMEOUT_MS");  // unset for this scope
+
+    REQUIRE(pulp_test_cli::shellout_timeout_ms() ==
+            pulp_test_cli::kDefaultShelloutTimeoutMs);
+
+    // The guard must stay far looser than any suite's real work, so that a slow
+    // host trips the outer ctest guard (which names the test and elapsed time)
+    // rather than this one. The old per-file 10s value is what failed the gate.
+    REQUIRE(pulp_test_cli::kDefaultShelloutTimeoutMs >= 60000);
+}
+
+TEST_CASE("shellout timeout honours the env override", "[cli][shellout]") {
+    ScopedEnvVar override_var("PULP_TEST_SHELLOUT_TIMEOUT_MS");
+
+    override_var.set("5000");
+    REQUIRE(pulp_test_cli::shellout_timeout_ms() == 5000);
+
+    override_var.set("240000");
+    REQUIRE(pulp_test_cli::shellout_timeout_ms() == 240000);
+}
+
+TEST_CASE("shellout timeout falls back to the default on unusable overrides",
+          "[cli][shellout]") {
+    ScopedEnvVar override_var("PULP_TEST_SHELLOUT_TIMEOUT_MS");
+
+    // A partial parse must not silently become a 30ms timeout.
+    for (const char* bad : {"", "abc", "30s", "0", "-1", " ", "12.5"}) {
+        override_var.set(bad);
+        INFO("override value: '" << bad << "'");
+        REQUIRE(pulp_test_cli::shellout_timeout_ms() ==
+                pulp_test_cli::kDefaultShelloutTimeoutMs);
+    }
 }

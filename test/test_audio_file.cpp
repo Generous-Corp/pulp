@@ -897,6 +897,70 @@ TEST_CASE("WAV helpers write deinterleaved channel data and reject malformed inp
     std::filesystem::remove(malformed);
 }
 
+// A user-dropped sample is untrusted input into the WAV decode path. A
+// truncated file (header cut mid-chunk) or a lying chunk-size field must be
+// rejected or safely truncated — never crash, read out of bounds, or trigger
+// a huge allocation from an attacker-controlled size. Under ASan an OOB read
+// fails the test; the over-read guard below catches a decoder that trusts a
+// lying size field.
+TEST_CASE("WAV decoder survives truncated and corrupted input",
+          "[audio][file][wav][fuzz][security]") {
+    AudioFileData data;
+    data.sample_rate = 44100;
+    data.channels.resize(2);
+    for (auto& ch : data.channels) {
+        ch.resize(64);
+        for (std::size_t i = 0; i < ch.size(); ++i)
+            ch[i] = 0.25f * std::sin(2.0f * 3.14159f * 440.0f *
+                                     static_cast<float>(i) / 44100.0f);
+    }
+    auto valid_path = unique_temp_audio_path("_fuzz_valid.wav");
+    REQUIRE(write_wav_file(valid_path.string(), data));
+    std::ifstream in(valid_path, std::ios::binary);
+    std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)),
+                                    std::istreambuf_iterator<char>());
+    in.close();
+    REQUIRE(bytes.size() > 44);
+
+    auto write_and_read = [](const std::vector<std::uint8_t>& b) {
+        auto p = unique_temp_audio_path("_fuzz.wav");
+        {
+            std::ofstream f(p, std::ios::binary);
+            f.write(reinterpret_cast<const char*>(b.data()),
+                    static_cast<std::streamsize>(b.size()));
+        }
+        // Must return (never crash / OOB). read_info is allowed to succeed or
+        // fail; if the full read succeeds, the decoded frame count must be
+        // bounded by the bytes actually present — a decoder that trusts a
+        // lying size field would over-read and blow past this.
+        (void)read_audio_file_info(p.string());
+        auto d = read_audio_file(p.string());
+        if (d) REQUIRE(d->num_frames() <= b.size());
+        std::filesystem::remove(p);
+    };
+
+    SECTION("truncation across the header/chunk region and into data") {
+        for (std::size_t len = 0; len <= bytes.size(); len += 2) {
+            if (len > 64 && len < bytes.size() - 2) continue;  // sample the middle
+            write_and_read({bytes.begin(),
+                            bytes.begin() + static_cast<std::ptrdiff_t>(len)});
+        }
+    }
+
+    SECTION("chunk-size fields corrupted to absurd values") {
+        std::vector<std::uint8_t> c = bytes;
+        // RIFF size (offset 4) and the first sub-chunk size (offset 16-ish);
+        // set several 32-bit size slots to 0xFFFFFFFF and re-read.
+        for (std::size_t off : {std::size_t{4}, std::size_t{16}, std::size_t{40}}) {
+            if (off + 4 <= c.size())
+                c[off] = c[off + 1] = c[off + 2] = c[off + 3] = 0xFF;
+        }
+        write_and_read(c);
+    }
+
+    std::filesystem::remove(valid_path);
+}
+
 TEST_CASE("OGG registry reader rejects invalid files deterministically",
           "[audio][file][ogg][issue-640]") {
     auto path = unique_temp_audio_path("_invalid.ogg");

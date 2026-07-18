@@ -55,6 +55,51 @@ TEST_CASE("Negative: PulpGain handles Inf input without crashing", "[negative][g
     SUCCEED("Inf input processed without crash");
 }
 
+// ── In-place / aliased buffers (out ptr == in ptr) ──────────────────────
+//
+// A host may legally hand the same buffer as both input and output (CLAP
+// explicitly permits in-place processing, and HeadlessHost::process documents
+// that input and output may alias). A processor that reads its input after
+// writing its output — the classic aliasing bug — produces silence or garbage
+// only on that path, so out-of-place tests never catch it. Assert that
+// processing in place is bit-identical to processing out of place.
+
+TEST_CASE("Negative: in-place processing (out aliases in) matches out-of-place",
+          "[negative][aliasing]") {
+    auto fill_sine = [](audio::Buffer<float>& b) {
+        for (std::size_t i = 0; i < b.num_samples(); ++i) {
+            const float s = std::sin(2.0f * std::numbers::pi_v<float> * 440.0f *
+                                     static_cast<float>(i) / 48000.0f);
+            b.channel(0)[i] = s;
+            if (b.num_channels() > 1) b.channel(1)[i] = s;
+        }
+    };
+
+    // Reference: separate input and output buffers.
+    format::HeadlessHost ref_host(examples::create_pulp_gain);
+    ref_host.prepare(48000.0, 256);
+    audio::Buffer<float> ref_in(2, 256), ref_out(2, 256);
+    fill_sine(ref_in);
+    process_buf(ref_host, ref_in, ref_out);
+
+    // In-place: one buffer is both input and output — out pointers alias in.
+    format::HeadlessHost ip_host(examples::create_pulp_gain);
+    ip_host.prepare(48000.0, 256);
+    audio::Buffer<float> io(2, 256);
+    fill_sine(io);
+    const float* in_ptrs[2] = {io.channel(0).data(), io.channel(1).data()};
+    audio::BufferView<const float> in_view(in_ptrs, io.num_channels(),
+                                           io.num_samples());
+    auto out_view = io.view();  // out channel pointers == in channel pointers
+    ip_host.process(out_view, in_view);
+
+    for (std::size_t ch = 0; ch < 2; ++ch) {
+        for (std::size_t i = 0; i < 256; ++i) {
+            REQUIRE(io.channel(ch)[i] == ref_out.channel(ch)[i]);
+        }
+    }
+}
+
 // ── Extreme sample rates ────────────────────────────────────────────────
 
 TEST_CASE("Negative: PulpGain survives very low sample rate", "[negative][gain]") {

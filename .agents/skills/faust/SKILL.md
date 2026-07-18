@@ -132,7 +132,7 @@ Follow the pattern in `examples/faust-gain/test_faust_gain.cpp`:
 
 ```bash
 # Build everything (uses pre-generated C++ — no faust needed)
-cmake --build build -j$(sysctl -n hw.ncpu)
+tools/ci/governed-build.sh cmake --build build
 
 # Run all FAUST tests
 ctest --test-dir build -R "faust" --output-on-failure

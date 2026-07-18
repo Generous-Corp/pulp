@@ -34,6 +34,25 @@ ResponseCurve response_relative_to_input(const RenderScenario& scenario,
                                       options);
 }
 
+PhaseCurve measure_group_delay(const RenderScenario& scenario,
+                               std::span<const double> checkpoints_hz,
+                               const GroupDelayOptions& options) {
+    // Same stimulus and render budget as the magnitude response: the impulse
+    // must be rendered across the whole analysis span (offset + N) so the tail
+    // of the response is measured rather than zero-padded by the scenario.
+    const int render_len = options.analysis_offset + options.fft_length;
+
+    auto impulse = make_impulse(/*channels=*/2, render_len, 1.0f, 0);
+    auto driven = scenario;
+    auto result = driven.input(impulse)
+                      .duration_frames(render_len)
+                      .render();
+
+    return measure_group_delay(std::as_const(impulse).view(),
+                               std::as_const(result.output).view(),
+                               result.sample_rate, checkpoints_hz, options);
+}
+
 ThdResult measure_thd(const RenderScenario& scenario, double fundamental_hz,
                       const ThdOptions& options) {
     const int render_len = options.analysis_offset + options.fft_length;

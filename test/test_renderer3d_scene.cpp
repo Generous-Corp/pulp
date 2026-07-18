@@ -191,6 +191,38 @@ TEST_CASE("Renderer3D applies per-primitive material uniforms",
     REQUIRE(blue < green * 0.35);
 }
 
+TEST_CASE("Renderer3D reports a feature one SceneData primitive uses",
+          "[render][scene3d][gpu]") {
+    // Each primitive carries exactly one of the two features: the first is
+    // unlit and single-sided, the second is lit and double-sided. The scene-wide
+    // flags report a feature that any single primitive uses, and the differing
+    // cull state keeps the two primitives off each other's pipeline.
+    auto scene = make_mixed_material_primitive_render_scene();
+    REQUIRE(scene.materials.size() == 2);
+    scene.materials[0].unlit = true;
+    scene.materials[0].double_sided = false;
+    scene.materials[1].unlit = false;
+    scene.materials[1].double_sided = true;
+
+    SceneDataRenderConfig config;
+    config.width = 128;
+    config.height = 128;
+
+    auto result = Renderer3D::render_scene_data(scene, config);
+    if (!result.gpu_available) {
+        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        return;
+    }
+
+    INFO(result.error);
+    REQUIRE(result.success);
+    REQUIRE(result.primitive_count == 2);
+    REQUIRE(result.unlit_material_applied);
+    REQUIRE(result.double_sided_material_applied);
+    REQUIRE(result.pipeline_cache_entry_count == 2);
+    REQUIRE(result.pipeline_cache_hit_count == 0);
+}
+
 TEST_CASE("Renderer3D applies directional light color",
           "[render][scene3d][gpu]") {
     SceneDataRenderConfig config;

@@ -33,7 +33,7 @@ of Pulp's three first-class plugin formats alongside CLAP and AU v3.
 | Entry-point generator macro | `core/format/include/pulp/format/vst3_entry.hpp` |
 | Editor `IPlugView` implementation | `core/format/src/vst3_plug_view.cpp`, `core/format/include/pulp/format/vst3_plug_view.hpp` |
 | Info.plist template (macOS bundle) | `tools/cmake/PulpInfoPlist.vst3.in` |
-| VST3 SDK fetch | `external/vst3sdk` — `git clone --depth 1 --branch v3.7.12 https://github.com/steinbergmedia/vst3sdk.git` (MIT) |
+| VST3 SDK fetch | `external/vst3sdk` — `git clone --depth 1 --branch v3.8.0_build_66 https://github.com/steinbergmedia/vst3sdk.git` (MIT) |
 | CLI validator invocation | `tools/cli/cmd_validate.cpp` (`pluginval --strictness-level 5 --timeout-ms 30000 --validate …`) |
 
 There is no hand-written `PulpVst3.cmake` helper — the VST3 target is
@@ -546,6 +546,29 @@ host needs opt-in declaration of which fields Pulp reads, we will add
 `IProcessContextRequirements`. Today every supported host delivers all
 required fields by default.
 
+### `process()` phase order is the contract
+
+`process()` reads as a sequence of named phases — `build_process_context`,
+`write_midi_output`, and the inline blocks between them. Named phases look like
+independent steps that would be safe to reorder or reuse. They are not: the
+order carries contracts nothing checks for you.
+
+- **`midi_in_.sort()` must precede the MPE tracker loop.** `MpeVoiceTracker` is
+  a state machine over a sample-ordered stream — controllers and note events are
+  appended from two independent sources, so an unsorted stream attributes
+  expression to the wrong notes.
+- **`build_process_context()` is stateful, not a pure decode.** It advances
+  `playhead_prev_` in place, so it must run exactly once per block and on every
+  block. Its name and signature suggest otherwise: call it twice, or skip it on
+  an early-return path, and the *next* block's `transport_changed` /
+  `transport_jump` flags are wrong. That surfaces far away, as a DSP reset that
+  never fires.
+- **`snapshot_param_values()` runs after host input events, before `process()`**
+  (see "`param_snapshot_` is post-input-events, pre-process").
+- **The explicit output-event pass must precede the snapshot-diff pass** — the
+  diff reads the skip-set the first pass fills, and without it a param that
+  already reported sample-accurate points gets a stale offset-0 duplicate.
+
 ### State save / restore
 
 `getState(stream)` serialises `store_.serialize()` bytes directly.
@@ -736,10 +759,16 @@ verifying the descriptor, DSP, and `kSpeakerArr` constants align.
 
 ### VST3 SDK is MIT, fetched via `git clone` in setup.sh
 
-`external/vst3sdk` is not checked in. `setup.sh` clones v3.7.12 by
+`external/vst3sdk` is not checked in. `setup.sh` clones v3.8.0_build_66 by
 default. If you bump the SDK version, also update the note in
 `docs/guides/formats.md` and verify `public.sdk/source/...` ABI didn't
 shift.
+
+The pin may not go below v3.8.0: that is the first tag Steinberg released
+under MIT, and Pulp redistributes VST3 headers inside its own MIT-licensed
+SDK artifacts. Earlier tags offer only "Steinberg VST3 License OR GPLv3",
+neither of which Pulp can redistribute. `assert_vst3_license_is_mit` in
+`setup.sh` fails the setup if a re-pin drifts back.
 
 ## Validation recipes
 
@@ -966,10 +995,65 @@ overrides both (`vst3_adapter.cpp`):
 ## The VST3 adapter consumes the shared adapter-boundary core
 
 `core/format/include/pulp/format/adapter_boundary.hpp` is the shared home for f64 param
-marshalling, latency-compensated bypass, and param dual-write. VST3 now consumes it
-(`boundary::LatencyCompensatedBypass`, `boundary::apply_param_value`, the f64 helpers,
-`kBoundaryMaxChannels`) instead of carrying local copies. Fix marshalling/bypass semantics
-in `adapter_boundary.hpp`, not in the adapter. The header's prose states actual per-adapter
-adoption — trust it over an assumption that all adapters are migrated (AU/LV2 still carry
-local bypass, and AU/AAX/LV2 still pass the dry signal through UNDELAYED while bypassed,
-a real PDC-misalignment bug tracked as its own follow-up).
+marshalling, latency-compensated bypass, param dual-write, and output-parameter
+publication. VST3 consumes it (`boundary::LatencyCompensatedBypass`,
+`boundary::apply_param_value`, `boundary::find_param_index`,
+`boundary::snapshot_param_values`, `boundary::changed_since_snapshot`, the f64 helpers,
+`kBoundaryMaxChannels`) instead of carrying local copies. Fix marshalling/bypass/
+publication semantics in `adapter_boundary.hpp`, not in the adapter. The header's prose
+states actual per-adapter adoption — trust it over an assumption that all adapters are
+migrated (AU/LV2 still carry local bypass, and AU/AAX/LV2 still pass the dry signal
+through UNDELAYED while bypassed, a real PDC-misalignment bug tracked as its own
+follow-up). VST3 also does **not** use `boundary::apply_host_transport`: it drives
+`detail::playhead_diff` directly from `build_process_context`.
+
+**Shared with CLAP — that is the point, and the trap.** The publication bookkeeping is one
+body of code behind two host ABIs. Editing it for VST3 changes CLAP in the same commit,
+and "fixing" VST3 by re-inlining a local variant silently re-opens the divergence these
+two paths already drifted into once as copies. A change that is genuinely VST3-only
+belongs in the adapter's host-ABI emit (the `IParamValueQueue` points, the
+`setParamNormalized` sync), never in the shared bookkeeping. `find_param_index` is a
+**linear scan on purpose** — param counts are small and it is what both adapters already
+did. If it ever becomes hot, index it in `adapter_boundary.hpp` for *both* adapters; do
+not add a VST3-local map.
+
+## The adapter has an end-to-end null — extend it rather than trusting a diff
+
+`test/test_vst3_audio_parity.cpp` renders one deterministic Processor through
+`HeadlessHost` and through the real `PulpVst3Processor::process()` — `ProcessData` /
+`AudioBusBuffers` / `IEventList` / `IParameterChanges`, the plumbing a host builds — and
+requires the output to be **bit-identical** (memcmp, no tolerance) across a sample-rate ×
+block-size sweep including a ragged final block. `HeadlessHost` shares no adapter code, so
+the reference cannot drift with the thing it is checking. `test_adapter_boundary_parity.cpp`
+drives VST3 only as a neutral-struct matrix column and never enters `process()`; it is not
+a substitute.
+
+Things that fixture learned the hard way, if you extend it:
+
+- **The store carries one MORE param than you registered.** `initialize()` runs
+  `maybe_synthesize_bypass()`, and `synthesize_bypass_parameter` defaults **on**, so a
+  synthesized `Bypass` (`kSynthesizedBypassParamId`, `'pByp'`) is appended last. Every
+  index the publication path resolves is a position in *that* list — an off-by-one lands
+  on Bypass and silently normalizes against its `{0,1}` range without going out of bounds.
+  (Relatedly, `getParameterCount()` is 2085, not 5: it also counts the 16×130 hidden
+  MIDI-CC controllers registered for `IMidiMapping`. Assert on `getParameterInfo(i).id`,
+  never the count.)
+- **The host boundary is normalized, so a null needs values that survive it.** The harness
+  normalizes and the adapter denormalizes, while the direct path writes the plain value.
+  Only values that round-trip bitwise (dyadic rationals on a linear range) compare fairly.
+  The fixture asserts that round-trip rather than assuming it, so a drift there names the
+  range math instead of blaming the adapter.
+- **VST3 has no raw-short-message event.** Notes arrive as `kNoteOnEvent` with a float
+  velocity the adapter rebuilds as `uint8_t(velocity * 127.0f)` — lossy. The fixture uses
+  dyadic velocities (0.5 → 63) and feeds the direct path the byte decode produces, so the
+  stimulus stays identical and the null measures the adapter, not the note encoding.
+- **Publication faults are invisible in the waveform.** A plugin-side param change never
+  reaches the samples, so the audio null stays green through a wholly broken publication
+  path. That is why the param cases are separate assertions — verified by mutation: moving
+  the pre-process param snapshot after `process()` reddens only the publication cases and
+  leaves the null passing.
+- **`setParamNormalized` in the skip branch is load-bearing and easy to drop.** It keeps
+  the EditController synced for params that emitted explicit sample-accurate points.
+  Deleting it changes no sample, so it was covered by nothing until the null's
+  controller-read case; without that case a refactor that drops it ships green while the
+  host UI and host-side automation reads show a stale value.
