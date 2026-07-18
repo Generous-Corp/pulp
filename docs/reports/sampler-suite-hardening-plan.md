@@ -1,6 +1,6 @@
 # Sampler Suite Hardening Plan
 
-**Status:** active implementation plan
+**Status:** final integration and evidence audit in progress
 
 **Baseline:** Pulp `2fa9948ba` (v0.675.0)
 
@@ -8,94 +8,50 @@
 
 ## Implementation ledger
 
-Current branch evidence, without implying completion of later gates:
+Current branch evidence, without implying completion of the remaining landing
+gates:
 
-- S0 partial: bit-exact nonvacuous resident/sequential parity covers unaligned
-  preload handoff, callback partitions, reset, channel mapping, and 10,000
-  one-frame allocation-probed callbacks. Prepared-page coordinate parity covers
-  canonical boundaries, forward/reverse integer steps, seeks, stale generations,
-  and deterministic missing-page recovery.
-- S1 partial: WAV and uncompressed AIFF/AIFF-C `NONE` retain mapped ranged
-  readers. Codec capability is explicit, ranged reads are bounded, and preload
-  admission uses the checked latency/rate/guard formula. Synchronized release
-  and destruction tests prove that entered reader work is joined before its
-  captured owner is destroyed. Ranged mapped bindings cooperatively observe a
-  stop token between bounded chunks, while arbitrary and decode-once callbacks
-  remain explicitly join-only rather than claiming prompt interruption.
-- S2 partial: requester-aware scheduling, checked page-memory admission, shared
-  page coalescing, explicit pressure, and generation-gated FIFO retirement/reuse
-  are implemented in a deterministic caller-driven service. A bounded ordered
-  RT command port carries demand and generation-qualified cancellation, and an
-  immutable asset owner publishes trivial audio views under a checked preload
-  contract and service-issued source-registration proof. Source collection is
-  audio-watermark gated. An allocation-free linear forward voice reader plans
-  coalesced page demand, crosses preload/page boundaries, and advances the
-  current source timeline through explicit starvation. A fixed-count decode
-  pool now provides bounded SPSC job/completion mailboxes, one in-flight decode
-  per source, preallocated worker scratch, leased completion views, and
-  cooperative or join-only teardown. The cache and decode pool are now joined
-  by an owner-thread async service with exact registration/reservation tickets,
-  queue-full retry without cross-source head-of-line blocking, stale-completion
-  rejection, two-phase audio-watermark retirement, and decode-before-cache
-  teardown. Release and AddressSanitizer coverage exercise registration
-  rollback, reprepare identity, active-I/O retirement, slot recycling, and
-  completion lease release. `PulpSampler` now exercises this path for strict
-  ranged WAV/AIFF forward one-shots with contract-derived preload/lookahead,
-  a bounded eight-voice cache working set, explicit starvation, coherent source
-  replacement, and 10,000 allocation-probed callbacks. The resident loop state
-  machine has now been extracted
-  into a storage-independent, trivially copyable `LoopPlaybackCursor`; the
-  existing renderer delegates to it without changing ordinary-step or
-  crossfade output. Independent-oracle parity covers reverse entry, two-phase
-  direction changes, high-rate fade-zone probes, multiple wraps/reflections,
-  and short-loop residual travel. Stream admission prepares the full certified
-  tail horizon before publication so reverse entry cannot outrun its cache;
-  each reverse note revalidates that horizon and holds its cursor and envelope
-  at time zero until its first render plan owns valid page snapshots, including
-  a forced retirement between the readiness scan and plan capture. Admission
-  deadlines scale with the sequential page count; shutdown and timed-out
-  in-flight admission roll back without leaking either source-registration
-  slot. The allocation-free paged reader now replays that
-  cursor for one-shots and forward/reverse crossfade loops, snapshots primary,
-  blend, and interpolation pages, advances deterministically through starvation,
-  and drives a contract-derived cursor-based lookahead scheduler in
-  `PulpSampler`; direct forward-boundary demand preserves the certified service
-  interval even for one-frame host blocks, while lookahead construction stays
-  capped at eight plans per callback. A 1 Hz pitched asset proves the
-  callback scan budget remains bounded, while scheduler-order coverage proves
-  accumulated cross-plan lead is included in page urgency. A saturated command
-  inbox regression holds lookahead until it falls behind the render cursor,
-  then proves signed-lag recovery resumes sustained output without new misses;
-  a one-slot partial enqueue proves accepted prefixes are refreshed before the
-  remaining page demands.
-  Production demand order is checked against an independent paged-loop oracle,
-  reverse rendering crosses the loop seam without starvation at more than 10x
-  realtime test pacing, and the new plan/enqueue/render path has a 10,000-block
-  allocation probe. S4 is now partial: interpolation is a sample-read policy
-  separate from traversal, with hold and true-nearest kept semantically
-  distinct. Resident and paged readers share footprints and evaluation for
-  linear, cubic Hermite, and cubic Lagrange, while `PulpSampler` exposes those
-  tiers plus an immutable ratio-tracking Kaiser-sinc bank. Phase-normalized
-  cutoff tables preserve DC within 2e-6 in the focused harness, adjacent tables
-  blend to the requested downsample cutoff, a known aliased 4x-downsample tone
-  is rejected, and both the kernel and streamed callback paths have 10,000-call
-  allocation probes. The certified preload guard now covers the selected sinc
-  footprint. S4 also now has a bounded resident-mip vertical slice in
-  `PulpSampler`: forward one-shots up to the explicit offline-build budget own
-  immutable octave pyramids generated by a 140 dB-design Kaiser decimator.
-  Exact-octave polynomial reads select those levels; fractional octaves, loops,
-  reverse entry, oversized assets, and unavailable levels use ratio-tracking
-  sinc rather than making an unsupported anti-alias claim. Voice automation
-  stays live in the selected mip coordinate system. Publication commits the
-  mip owner before exposing its trivial view, and callback acknowledgements
-  protect the exact resident snapshot acquired at callback start. DC,
-  coordinate scaling, stopband rejection, bounded-build fallback, concurrent
-  replacement, reverse/loop policy, Release, ASan, and allocation-probed
-  callback coverage are green. Persisted streamed mip sidecars, ping-pong
-  example policy, and starvation gain shaping remain later gates.
-- The existing Release audio harness baseline and all 375 Audio Quality Lab
-  self-tests pass. Quality Lab remains supplementary to exact transport,
-  telemetry, lifetime, and allocation gates.
+- S0-S2: exact resident/streamed parity, bounded ranged WAV and uncompressed
+  AIFF admission, checked preload contracts, immutable publication, shared
+  page caching, two decode workers, generation-safe retirement, reverse-entry
+  prewarm, loop-aware lookahead, rollback, teardown, and callback-allocation
+  probes are implemented. `PulpSampler` exercises the production-shaped path
+  with eight independently positioned voices.
+- S3: the paged readers distinguish ready, service starvation, decode failure,
+  invalid contract, stale generation, and normal end. A 64-frame equal-power
+  fade to silence and 64-frame recovery ramp shape misses; focused tests cover
+  predicted, emergency, recovery, and held-cursor behavior.
+- S4: hold, nearest, linear, cubic Hermite, cubic Lagrange, and ratio-tracking
+  Kaiser-sinc policies share prepared resident/paged footprints. Exact-octave
+  polynomial forward one-shots can select immutable resident mips or strict
+  persisted streamed `.pulpmip` sidecars; other traversal/rate cases fall back
+  to ratio-tracking sinc. The offline `pulp audio sampler-mip build` command
+  atomically publishes hash-addressed levels using the 140 dB-design decimator.
+- S5: focused C++ interpolation gates and dependency-bearing Python reference
+  and negative-control gates exist. The checked-in interpolation benchmark
+  capture is historical: its source-bundle digest no longer matches the current
+  sampler sources and must be recaptured before it is current performance
+  evidence.
+- S6: the versioned neutral heritage schema, strict canonical JSON, validated
+  prepared profile, ordered independently bypassable stages, exact causal
+  two-leg SRC, deterministic RNG policies, bounded runtime RNG-state capture,
+  example integration, latency reporting, fail-closed diagnostics, and an
+  independent Audio Quality Lab reference/negative-control gate are present.
+  The example also has a strict versioned profile/runtime state envelope.
+- S7 remains intentionally unshipped. There are no named hardware profiles or
+  capture-matched claims; those still require the research, provenance,
+  measurement, listening, and clean-room gates below.
+- S8 is partial. This documentation now describes current integration and
+  limitations. The example's API records define configuration, prepare/load,
+  preload, envelope, heritage, and combined diagnostics, but the processor
+  currently forwards only boolean file load, stream stats, heritage controls,
+  heritage diagnostics, and latency. At this checkpoint the streaming-memory
+  configuration and combined diagnostics are not wired through the processor,
+  and plugin-state integration of the tested heritage state envelope remains
+  in flight.
+
+Quality Lab remains supplementary to exact transport, telemetry, lifetime,
+allocation, and current artifact-verification gates.
 
 ## Decision
 
