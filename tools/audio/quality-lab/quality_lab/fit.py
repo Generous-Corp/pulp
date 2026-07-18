@@ -442,8 +442,24 @@ def fit_pitch(kit: MeasurementKit, profile_ref: VcoProfile) -> list[FitParam]:
     upper = [1.1, 200.0, 0.5, 6.0]
     p, cov, _ = _lm(residual, p0, lower, upper)
     names = ["scale_error", "tune_offset_cents", "hf_compression", "hf_knee_octaves"]
+    # The knee only bends the curve where hf_compression multiplies it (`comp = hf_comp *
+    # (o - knee)` for o > knee). If compression fits ~0 the knee is INERT — unidentifiable —
+    # and the solver leaves it at a search-box value whose CI excludes the truth. Report it
+    # PINNED to nominal with an insensitive note rather than present that as measured (the
+    # shaper fitter does the same for a 2-valued square). Threshold is one order of magnitude
+    # below the smallest compression the pitch curve resolves.
+    kInsensitiveCompression = 1.0e-3
+    hf_comp_val = float(p[names.index("hf_compression")])
     out = []
     for i, name in enumerate(names):
+        if name == "hf_knee_octaves" and hf_comp_val < kInsensitiveCompression:
+            nominal = profile_ref.tuning.hf_knee_octaves
+            out.append(FitParam(name, float(nominal), float(nominal), float(nominal),
+                                IDENTIFIABILITY[name].measurement, disposition="pinned",
+                                note="insensitive — high-end compression fit ~0, so the knee "
+                                     "has no effect on the curve; pinned to nominal",
+                                stage="1-pitch"))
+            continue
         lo, hi = _ci(p[i], cov[i, i])
         out.append(FitParam(name, float(p[i]), lo, hi,
                             IDENTIFIABILITY[name].measurement,
