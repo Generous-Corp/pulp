@@ -1,8 +1,13 @@
 #pragma once
 
 #include "timeline_example_engine.hpp"
+#include "timeline_step_pattern_content.hpp"
 
 #include <pulp/state/sequencer_state_channel.hpp>
+
+#include <cstdint>
+#include <atomic>
+#include <memory>
 
 namespace pulp::examples::timeline_phase1 {
 
@@ -29,6 +34,13 @@ class TimelineStepSequencerProcessor final : public format::Processor {
     const state::Snapshot& pattern_snapshot() const noexcept { return pattern_; }
     bool engine_prepared() const noexcept { return engine_.prepared(); }
     bool has_active_notes() const noexcept { return engine_.synth_has_active_notes(); }
+    /// Control-thread pump: applies queued channel commands, rebuilds the typed
+    /// persistent component, and publishes a lowered program to the stable graph.
+    bool apply_pending_edits_and_recompile();
+    const timeline::Project* persistent_project() const noexcept {
+        return persistent_project_.get();
+    }
+    const timeline::SchemaRegistry& pattern_registry() const noexcept { return registry_; }
     playback::TransportError set_playing(bool playing) noexcept;
     playback::TransportError seek_samples(std::int64_t sample) noexcept;
     playback::TransportError set_loop_samples(bool enabled, std::int64_t start,
@@ -39,7 +51,16 @@ class TimelineStepSequencerProcessor final : public format::Processor {
     state::SequencerStateChannel channel_;
     state::Snapshot pattern_;
     state::Epoch epoch_ = 0;
+    state::EngineSequence engine_sequence_ = 0;
+    timeline::SchemaRegistry registry_;
+    bool registry_ready_ = false;
+    std::shared_ptr<const timeline::Project> persistent_project_;
+    double sample_rate_ = 0.0;
+    std::uint32_t maximum_block_size_ = 0;
+    std::atomic<std::uint8_t> active_pattern_{0};
     TimelineExampleEngine engine_;
+
+    bool compile_pattern(const state::Snapshot& snapshot, bool replace_engine);
 };
 
 std::unique_ptr<format::Processor> create_timeline_step_sequencer();

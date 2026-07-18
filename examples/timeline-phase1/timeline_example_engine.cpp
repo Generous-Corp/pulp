@@ -185,6 +185,17 @@ struct TimelineExampleEngine::Impl {
         ready = true;
         return true;
     }
+
+    bool recompile(playback::ProgramCompileRequest request) {
+        if (!ready || !request.project)
+            return false;
+        auto live = store.read();
+        if (!live)
+            return false;
+        request.tempo_map = live->tempo_map_owner();
+        request.dirty.all = true;
+        return compiler.submit(std::move(request)) && !compiler.status().has_error;
+    }
 };
 
 TimelineExampleEngine::TimelineExampleEngine() = default;
@@ -199,6 +210,10 @@ bool TimelineExampleEngine::prepare(playback::ProgramCompileRequest request, dou
         return false;
     impl_ = std::move(replacement);
     return true;
+}
+
+bool TimelineExampleEngine::recompile(playback::ProgramCompileRequest request) {
+    return impl_ && impl_->recompile(std::move(request));
 }
 
 host::TimelineGraphProcessResult

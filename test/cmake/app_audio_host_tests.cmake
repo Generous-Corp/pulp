@@ -609,6 +609,7 @@ pulp_add_test_suite(pulp-test-network-service-discovery LIBRARIES pulp::events)
 add_executable(pulp-test-timeline-phase1-examples
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_example_engine.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_audio_player.cpp
+    ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_step_pattern_content.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_step_sequencer.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_examples.cpp
     ${CMAKE_SOURCE_DIR}/test/harness/rt_allocation_probe.cpp)

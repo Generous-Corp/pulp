@@ -30,14 +30,16 @@ Its deterministic device-free validation path is:
 
 `pulp-timeline-step-sequencer` owns the existing frozen
 `SequencerStateChannel` for its fixed-capacity grid and UI-facing playhead. It
-does not widen or redesign that channel. The persistent pattern is lowered into
-a timeline `NoteContent` clip, compiled into `ArrangementNoteRenderer`, injected
-through the binding's stable `MidiInput`, and routed to a small audible sine
-destination inside the same `SignalGraph`. Its one-bar transport loop repeats
-the arrangement and flushes active notes at discontinuities and stop. This
-minimal standalone has a fixed pattern and no editor; the channel publishes its
-coherent grid snapshot and live playhead without implying a second timeline
-state model.
+does not widen or redesign that channel. The channel-owned snapshot is persisted
+as the registered `pulp.examples.timeline.step_pattern` typed document content.
+Its control-thread pump drains and reduces queued edits, updates that component,
+lowers the resulting grid into a timeline `NoteContent` clip, and publishes the
+recompiled program. `ArrangementNoteRenderer` then injects notes through the
+binding's stable `MidiInput` to a small audible sine destination inside the same
+`SignalGraph`. Its one-bar transport loop repeats the arrangement and flushes
+active notes at discontinuities and stop. The minimal standalone has no editor,
+but its processor exposes the real channel and edit/recompile pump a view would
+drive; edits are not mirrored into a second grid model or ignored.
 
 ```bash
 cmake --build build --target pulp-timeline-step-sequencer
@@ -53,7 +55,10 @@ The device-free validation path is:
 ## Focused tests
 
 The `pulp-test-timeline-phase1-examples` suite covers bounded decode rejection,
-headless construction, variable block sizes, one-wrap split blocks, audible
-note delivery, stop-time note flushing, and allocation-free processing after
-prepare. The two standalone binaries also register their `--headless` paths as
-CTest cases so their real entry points cannot silently rot.
+variable block sizes, one-wrap split blocks, registered-pattern persistence,
+command-to-recompile output changes, audible note delivery, stop-time note
+flushing, and allocation-free processing after prepare. It also drives both
+real processors through `StandaloneApp`'s device-independent callback seam and
+requires nonzero output; unavailable hardware cannot turn the test green. The
+two standalone binaries register their `--headless` paths as CTest cases so
+their real entry points cannot silently rot.
