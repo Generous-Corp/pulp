@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <vector>
 
 namespace {
 
@@ -49,6 +50,62 @@ std::array<float, 16> render_noise(std::uint64_t seed) {
     REQUIRE(engine.process(output.view()));
     std::array<float, 16> rendered{};
     std::copy(output.channel(0).begin(), output.channel(0).end(), rendered.begin());
+    return rendered;
+}
+
+SampleHeritageProfile rate_profile(double host_rate = 48000.0,
+                                   double machine_rate = 32000.0,
+                                   double clock_ratio = 1.25) {
+    return {
+        .schema_version = kSampleHeritageProfileSchemaVersion,
+        .profile_id = "neutral.rate-pipeline-v2",
+        .host_sample_rate = host_rate,
+        .stages = {
+            {false, SampleHeritageMachineDomainStage{machine_rate}},
+            {false, SampleHeritageClockPitchStage{clock_ratio}},
+        },
+    };
+}
+
+struct ExactRender {
+    std::vector<float> output;
+    std::size_t input_frames = 0;
+    std::size_t machine_frames = 0;
+};
+
+ExactRender render_exact(const SampleHeritagePreparedProfile& profile,
+                         std::span<const std::size_t> partitions,
+                         std::size_t maximum_output_frames) {
+    SampleHeritageEngine engine;
+    REQUIRE(engine.prepare({profile, 1, maximum_output_frames}) ==
+            SampleHeritagePrepareStatus::Ok);
+    std::vector<float> input(engine.maximum_input_frames());
+    std::vector<float> output(maximum_output_frames);
+    ExactRender rendered;
+    std::uint64_t source_cursor = 0;
+    for (const auto frames : partitions) {
+        const auto plan = engine.plan_exact(frames);
+        REQUIRE(plan.valid());
+        REQUIRE(plan.input_frames <= input.size());
+        for (std::size_t frame = 0; frame < plan.input_frames; ++frame) {
+            const auto position = static_cast<double>(source_cursor + frame);
+            input[frame] = static_cast<float>(
+                0.45 * std::sin(position * 0.031) +
+                0.15 * std::cos(position * 0.007));
+        }
+        const float* input_pointer = input.data();
+        float* output_pointer = output.data();
+        const BufferView<const float> input_view(&input_pointer, 1,
+                                                 plan.input_frames);
+        BufferView<float> output_view(&output_pointer, 1, frames);
+        REQUIRE(engine.process_exact(plan, input_view, output_view) ==
+                SampleHeritageProcessStatus::Ok);
+        rendered.output.insert(rendered.output.end(), output.begin(),
+                               output.begin() + static_cast<std::ptrdiff_t>(frames));
+        rendered.input_frames += plan.input_frames;
+        rendered.machine_frames += plan.machine_frames;
+        source_cursor += plan.input_frames;
+    }
     return rendered;
 }
 
@@ -122,22 +179,57 @@ TEST_CASE("Heritage noise is deterministic for explicit seeds and reset policy",
         REQUIRE(before.channel(0)[frame] == after.channel(0)[frame]);
 }
 
-TEST_CASE("Heritage validation fails unsupported conversion seams explicitly",
+TEST_CASE("Heritage validation accepts bounded machine and clock conversions",
           "[audio][sampler][heritage][validation]") {
     auto profile = all_stage_profile(true);
     profile.stages[0].bypass = false;
     std::get<SampleHeritageMachineDomainStage>(profile.stages[0].parameters).sample_rate =
         32000.0;
     auto result = validate_sample_heritage_profile(profile);
-    REQUIRE(result.status == SampleHeritageProfileStatus::UnsupportedRateConversion);
-    REQUIRE(result.stage_index == 0);
+    REQUIRE(result.valid());
 
     profile = all_stage_profile(true);
     profile.stages[2].bypass = false;
     std::get<SampleHeritageClockPitchStage>(profile.stages[2].parameters).ratio = 0.99;
     result = validate_sample_heritage_profile(profile);
+    REQUIRE(result.valid());
+
+    profile = all_stage_profile(true);
+    profile.stages[0].bypass = false;
+    std::get<SampleHeritageMachineDomainStage>(profile.stages[0].parameters).sample_rate =
+        8000.0;
+    profile.stages[2].bypass = false;
+    std::get<SampleHeritageClockPitchStage>(profile.stages[2].parameters).ratio = 1000.0;
+    result = validate_sample_heritage_profile(profile);
     REQUIRE(result.status == SampleHeritageProfileStatus::UnsupportedRateConversion);
-    REQUIRE(result.stage_index == 2);
+}
+
+TEST_CASE("Heritage schema v2 enforces canonical topology and portable identity",
+          "[audio][sampler][heritage][schema]") {
+    auto reordered = rate_profile();
+    std::swap(reordered.stages[0], reordered.stages[1]);
+    const auto invalid = validate_sample_heritage_profile(reordered);
+    REQUIRE(invalid.status == SampleHeritageProfileStatus::InvalidStageOrder);
+    REQUIRE(invalid.stage_index == 1);
+
+    auto first = rate_profile(44100.0, 32000.0, 1.0);
+    auto second = first;
+    second.host_sample_rate = 96000.0;
+    const auto first_validated = validate_sample_heritage_profile(first);
+    const auto second_validated = validate_sample_heritage_profile(second);
+    REQUIRE(first_validated.valid());
+    REQUIRE(second_validated.valid());
+    REQUIRE(first_validated.profile.profile_digest ==
+            second_validated.profile.profile_digest);
+
+    auto clock_domain_filter = rate_profile(48000.0, 32000.0, 0.5);
+    clock_domain_filter.stages.push_back(
+        {false, SampleHeritageReconstructionFilterStage{9000.0}});
+    const auto invalid_filter =
+        validate_sample_heritage_profile(clock_domain_filter);
+    REQUIRE(invalid_filter.status ==
+            SampleHeritageProfileStatus::InvalidStageParameter);
+    REQUIRE(invalid_filter.stage_index == 2);
 }
 
 TEST_CASE("Heritage duplicate stages and invalid deterministic seeds fail closed",
@@ -301,4 +393,134 @@ TEST_CASE("Every synthetic heritage stage runs independently",
     REQUIRE(render({false, SampleHeritageReconstructionFilterStage{12000.0}}) != input);
     REQUIRE(render({false, SampleHeritageNoiseStage{0.01f, 0x1234u}}) != input);
     REQUIRE(render({false, SampleHeritageOutputStage{0.5f}}) != input);
+}
+
+TEST_CASE("Heritage causal two-leg SRC is bitwise partition invariant",
+          "[audio][sampler][heritage][src][partition]") {
+    const auto validated = validate_sample_heritage_profile(rate_profile());
+    REQUIRE(validated.valid());
+    constexpr std::array whole{std::size_t{1024}};
+    constexpr std::array split{
+        std::size_t{1}, std::size_t{7}, std::size_t{64}, std::size_t{3},
+        std::size_t{257}, std::size_t{128}, std::size_t{511}, std::size_t{53},
+    };
+    static_assert(1 + 7 + 64 + 3 + 257 + 128 + 511 + 53 == 1024);
+    const auto one = render_exact(validated.profile, whole, 1024);
+    const auto many = render_exact(validated.profile, split, 1024);
+    REQUIRE(one.output == many.output);
+    REQUIRE(one.input_frames == many.input_frames);
+    REQUIRE(one.machine_frames == many.machine_frames);
+    REQUIRE(one.input_frames > 1024);
+    REQUIRE(std::any_of(one.output.begin(), one.output.end(),
+                        [](float sample) { return sample != 0.0f; }));
+}
+
+TEST_CASE("Heritage exact plans are bounded single-use contracts",
+          "[audio][sampler][heritage][src][contract]") {
+    const auto validated = validate_sample_heritage_profile(rate_profile());
+    REQUIRE(validated.valid());
+    SampleHeritageEngine legacy;
+    REQUIRE_FALSE(legacy.prepare(validated.profile));
+    SampleHeritageEngine engine;
+    REQUIRE(engine.prepare({validated.profile, 1, 128}) ==
+            SampleHeritagePrepareStatus::Ok);
+    REQUIRE(engine.machine_sample_rate() == 32000.0);
+    REQUIRE(engine.clocked_sample_rate() == 40000.0);
+    REQUIRE(engine.clock_ratio() == 1.25);
+    REQUIRE(std::abs(engine.latency_output_frames() - 48.0) < 1.0e-12);
+
+    const auto plan = engine.plan_exact(64);
+    REQUIRE(plan.valid());
+    REQUIRE(plan.input_frames > 0);
+    REQUIRE(plan.input_frames <= engine.maximum_input_frames());
+    REQUIRE(plan.machine_frames <= engine.maximum_machine_frames());
+    std::vector<float> input(plan.input_frames, 0.25f);
+    std::vector<float> output(64, -1.0f);
+    const float* input_pointer = input.data();
+    float* output_pointer = output.data();
+    const BufferView<const float> short_input(&input_pointer, 1,
+                                              plan.input_frames - 1);
+    BufferView<float> output_view(&output_pointer, 1, output.size());
+    REQUIRE(engine.process_exact(plan, short_input, output_view) ==
+            SampleHeritageProcessStatus::InputFrameMismatch);
+    REQUIRE(std::all_of(output.begin(), output.end(),
+                        [](float sample) { return sample == -1.0f; }));
+
+    const BufferView<const float> input_view(&input_pointer, 1, input.size());
+    REQUIRE(engine.process_exact(plan, input_view, output_view) ==
+            SampleHeritageProcessStatus::Ok);
+    REQUIRE(engine.process_exact(plan, input_view, output_view) ==
+            SampleHeritageProcessStatus::InvalidPlan);
+
+    const auto stale = engine.plan_exact(8);
+    engine.reset();
+    REQUIRE(engine.process_exact(stale, input_view, output_view) ==
+            SampleHeritageProcessStatus::InvalidPlan);
+    const auto reset_plan = engine.plan_exact(64);
+    REQUIRE(reset_plan.input_frames == plan.input_frames);
+    REQUIRE(reset_plan.machine_frames == plan.machine_frames);
+    std::vector<float> reset_output(64, -1.0f);
+    float* reset_output_pointer = reset_output.data();
+    BufferView<float> reset_output_view(&reset_output_pointer, 1,
+                                        reset_output.size());
+    REQUIRE(engine.process_exact(reset_plan, input_view, reset_output_view) ==
+            SampleHeritageProcessStatus::Ok);
+    REQUIRE(reset_output == output);
+    REQUIRE(engine.plan_exact(129).status ==
+            SampleHeritagePlanStatus::OutputTooLarge);
+}
+
+TEST_CASE("All-bypass exact heritage processing is direct and bit transparent",
+          "[audio][sampler][heritage][src][bypass]") {
+    auto profile = rate_profile();
+    for (auto& stage : profile.stages) stage.bypass = true;
+    const auto validated = validate_sample_heritage_profile(profile);
+    REQUIRE(validated.valid());
+    SampleHeritageEngine engine;
+    REQUIRE(engine.prepare({validated.profile, 2, 257}) ==
+            SampleHeritagePrepareStatus::Ok);
+    REQUIRE(engine.latency_output_frames() == 0.0);
+    const auto plan = engine.plan_exact(257);
+    REQUIRE(plan.valid());
+    REQUIRE(plan.input_frames == 257);
+    REQUIRE(plan.machine_frames == 0);
+    Buffer<float> input(2, 257);
+    Buffer<float> output(2, 257);
+    for (std::size_t channel = 0; channel < 2; ++channel)
+        for (std::size_t frame = 0; frame < 257; ++frame)
+            input.channel(channel)[frame] =
+                static_cast<float>(channel * 257 + frame) * 0.001f - 0.2f;
+    const auto input_view = static_cast<const Buffer<float>&>(input).view();
+    REQUIRE(engine.process_exact(plan, input_view, output.view()) ==
+            SampleHeritageProcessStatus::Ok);
+    REQUIRE(std::equal(input.channel(0).begin(), input.channel(0).end(),
+                       output.channel(0).begin()));
+    REQUIRE(std::equal(input.channel(1).begin(), input.channel(1).end(),
+                       output.channel(1).begin()));
+}
+
+TEST_CASE("Prepared exact heritage SRC allocates nothing in process calls",
+          "[audio][sampler][heritage][src][rt]") {
+    const auto validated = validate_sample_heritage_profile(rate_profile());
+    REQUIRE(validated.valid());
+    SampleHeritageEngine engine;
+    REQUIRE(engine.prepare({validated.profile, 1, 64}) ==
+            SampleHeritagePrepareStatus::Ok);
+    std::vector<float> input(engine.maximum_input_frames(), 0.1f);
+    std::array<float, 64> output{};
+    const float* input_pointer = input.data();
+    float* output_pointer = output.data();
+    bool processed = true;
+    pulp::test::RtAllocationProbe probe;
+    for (int callback = 0; callback < 10000; ++callback) {
+        const auto plan = engine.plan_exact(output.size());
+        const BufferView<const float> input_view(&input_pointer, 1,
+                                                 plan.input_frames);
+        BufferView<float> output_view(&output_pointer, 1, output.size());
+        processed = plan.valid() &&
+            engine.process_exact(plan, input_view, output_view) ==
+                SampleHeritageProcessStatus::Ok && processed;
+    }
+    REQUIRE(processed);
+    REQUIRE_FALSE(probe.saw_allocation());
 }

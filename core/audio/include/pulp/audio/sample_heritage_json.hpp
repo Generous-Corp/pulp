@@ -61,11 +61,11 @@ struct SampleHeritageRuntimeStateJsonWriteResult {
     bool valid() const noexcept { return status == SampleHeritageJsonStatus::Ok; }
 };
 
-/// Parses the complete schema-v1 contract. This is an allocating, off-audio-thread API.
+/// Parses the complete schema-v2 contract. This is an allocating, off-audio-thread API.
 SampleHeritageJsonParseResult parse_sample_heritage_profile_json(
     std::string_view json);
 
-/// Validates and writes one deterministic, whitespace-free schema-v1 representation.
+/// Validates and writes one deterministic, whitespace-free schema-v2 representation.
 /// This is an allocating, off-audio-thread API.
 SampleHeritageJsonWriteResult write_sample_heritage_profile_json(
     const SampleHeritageProfile& profile);
