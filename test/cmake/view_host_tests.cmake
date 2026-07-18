@@ -314,6 +314,13 @@ pulp_add_test_suite(pulp-test-pointer-dispatch LIBRARIES pulp::view)
 # (test/test_hosting_input_smoke.cpp).
 pulp_add_test_suite(pulp-test-hosting-input-smoke LIBRARIES pulp::view)
 
+# Multi-instance ISOLATION proof for S11 (pulp #6223): two independent root
+# View trees in one process must not share a focus slot, active overlay, open
+# popup, or overlay paint queue. This is the delta the root-owned interaction
+# context delivers — it cannot be expressed with the pre-S11 process-wide
+# statics (test/test_interaction_multiinstance.cpp).
+pulp_add_test_suite(pulp-test-interaction-multiinstance LIBRARIES pulp::view)
+
 # Browser (Emscripten) window host: the CSS-pixel <-> root coordinate mapping,
 # the HiDPI backing-store rule, browser-event translation, and View-tree routing
 # from core/view/include/pulp/view/web/web_event_translate.hpp. Header-only and

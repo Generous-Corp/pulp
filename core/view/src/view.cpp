@@ -194,14 +194,19 @@ View::View()
 View::~View() {
     if (gesture_arbiter_)
         gesture_arbiter_->reset();
-    // Clear the overlay slot if this dying View holds it. Without this, an
-    // unmounted React popover leaves a dangling pointer that the platform
-    // window host would dereference on the next click.
+    // Clear the overlay + focus slots if this dying View holds them. Without
+    // this, an unmounted React popover / focused widget leaves a dangling
+    // pointer that the platform window host would dereference on the next click
+    // or keypress (crash via dynamic_cast<TextEditor*> on freed memory in
+    // -[PulpView focusedTextEditor]). Clear BOTH the root-owned slot (S11) and
+    // the process-global shim mirror. Uses existing_interaction() so a tree that
+    // never allocated a state block is not forced to allocate one during
+    // teardown. (~ComboBox does the same for active_popup.)
+    if (RootInteractionState* s = existing_interaction()) {
+        if (s->focused_input == this) s->focused_input = nullptr;
+        if (s->active_overlay == this) s->active_overlay = nullptr;
+    }
     if (active_overlay_ == this) active_overlay_ = nullptr;
-    // Clear the input-focus slot if this dying View holds it. Without this, a
-    // React unmount of the focused widget leaves the platform host's
-    // focused-view pointer dangling; the next keypress crashes via dynamic_cast
-    // on freed memory in -[PulpView focusedTextEditor].
     if (focused_input_ == this) focused_input_ = nullptr;
     // Cancel any running animate() tweens so their FrameClock callbacks (which
     // capture `this`) can't fire after this View is gone.
@@ -1286,9 +1291,30 @@ View* View::hit_test(Point local_point) {
 
 // ── Overlay paint queue ──────────────────────────────────────────────────────
 
+namespace {
+// True when `v` is not part of a multi-node tree and therefore has no root of
+// its own to own the interaction state. Such a widget shares the process-global
+// fallback with every other detached widget (see interaction() below).
+bool is_detached_widget(const View* v) {
+    return v->parent() == nullptr && v->child_count() == 0;
+}
+
+// The single process-global fallback interaction block — used by detached
+// widgets and, for the overlay paint queue, by legacy `overlay_queue()` callers.
+View::RootInteractionState& fallback_interaction() {
+    static View::RootInteractionState state;
+    return state;
+}
+} // namespace
+
 std::vector<View::OverlayRequest>& View::overlay_queue() {
-    static std::vector<OverlayRequest> queue;
-    return queue;
+    // Legacy process-global entry point. Now backed by the fallback interaction
+    // block so a detached widget that enqueues via interaction().overlay_queue
+    // and a legacy overlay_queue() caller share ONE queue. Root-aware code
+    // (parented ComboBox paint, the standalone inspector idle) enqueues onto the
+    // owning root's queue via interaction() instead; paint_overlays drains the
+    // painting root's queue.
+    return fallback_interaction().overlay_queue;
 }
 
 // Inspector hooks — set by the inspector module via function pointers
@@ -1351,9 +1377,16 @@ View* View::focused_input_ = nullptr;
 // replacement popover doesn't immediately get nulled out by our subsequent
 // clear.
 void View::dismiss_active_overlay() {
+    // Static entry point (ESC / outside-click) has no root in hand, so it acts
+    // on the process-global shim mirror: the most-recently-claimed overlay. Clear
+    // BOTH the mirror and the victim's root-owned slot (S11) BEFORE the callback,
+    // so a replacement popover the callback claims survives our clears.
     View* victim = active_overlay_;
     if (!victim) return;
     active_overlay_ = nullptr;
+    if (RootInteractionState* s = victim->existing_interaction();
+        s && s->active_overlay == victim)
+        s->active_overlay = nullptr;
     if (victim->on_overlay_dismissed) {
         victim->on_overlay_dismissed();
     }
@@ -1438,7 +1471,14 @@ bool View::overlay_contains(Point window_pt) const {
 }
 
 void View::paint_overlays(canvas::Canvas& canvas, View* painting_root) {
-    auto& queue = overlay_queue();
+    // Drain the queue owned by the root being painted (S11): a parented
+    // ComboBox enqueues its dropdown onto its own root's queue, so a second
+    // hosted editor's paint pass never draws editor A's overlays. When the root
+    // is unknown (nullptr — legacy/headless callers) fall back to the shared
+    // process-global queue. `overlay_queue()` is that same fallback block, so a
+    // detached widget's enqueue is drained here too.
+    auto& queue = painting_root ? painting_root->interaction().overlay_queue
+                                : overlay_queue();
     for (auto& req : queue) {
         if (req.paint_fn) req.paint_fn(canvas);
     }
@@ -1509,6 +1549,60 @@ bool View::drag_active() const {
     const View* root = this;
     while (root->parent_ != nullptr) root = root->parent_;
     return root->active_drag_ != nullptr && root->active_drag_->active;
+}
+
+// ── Per-root interaction state (S11) ─────────────────────────────────────────
+//
+// See the RootInteractionState comment in view.hpp. The state lives on the tree
+// root (like `active_drag_`) so two hosted editors never share focus / overlay /
+// popup slots. A DETACHED widget — one with no parent AND no children, so it is
+// not part of any tree that could own the state — resolves to a single
+// process-global fallback. That fallback preserves the pre-S11 single-focus /
+// single-popup behavior for unhosted widgets and is what the headless
+// characterization smoke (unparented widgets) observes through the shim mirrors.
+// (is_detached_widget / fallback_interaction are defined above, next to
+// overlay_queue() which shares the fallback block's queue.)
+
+View::RootInteractionState& View::interaction() {
+    if (is_detached_widget(this)) return fallback_interaction();
+    View* root = tree_root(this);
+    if (!root->interaction_state_)
+        root->interaction_state_ = std::make_unique<RootInteractionState>();
+    return *root->interaction_state_;
+}
+
+const View::RootInteractionState& View::interaction() const {
+    return const_cast<View*>(this)->interaction();
+}
+
+View::RootInteractionState* View::existing_interaction() {
+    if (is_detached_widget(this)) return &fallback_interaction();
+    View* root = tree_root(this);
+    return root->interaction_state_.get();  // nullptr if never allocated
+}
+
+void View::claim_input_focus() {
+    interaction().focused_input = this;
+    focused_input_ = this;  // process-global shim mirror
+}
+
+void View::release_input_focus() {
+    if (RootInteractionState* s = existing_interaction();
+        s && s->focused_input == this)
+        s->focused_input = nullptr;
+    if (focused_input_ == this) focused_input_ = nullptr;  // shim mirror
+}
+
+void View::claim_overlay() {
+    interaction().active_overlay = this;
+    active_overlay_ = this;  // process-global shim mirror
+}
+
+void View::release_overlay() {
+    if (RootInteractionState* s = existing_interaction();
+        s && s->active_overlay == this)
+        s->active_overlay = nullptr;
+    if (active_overlay_ == this) active_overlay_ = nullptr;  // shim mirror
 }
 
 void View::set_painter(std::shared_ptr<WidgetPainter> p) {
