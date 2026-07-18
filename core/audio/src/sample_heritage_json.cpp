@@ -413,7 +413,9 @@ SampleHeritageJsonWriteResult write_sample_heritage_profile_json(
     if (!validation.valid()) return result;
 
     auto& output = result.json;
-    output = "{\"schema_version\":1,\"profile_id\":\"" + profile.profile_id +
+    output = "{\"schema_version\":" +
+             std::to_string(kSampleHeritageProfileSchemaVersion) +
+             ",\"profile_id\":\"" + profile.profile_id +
              "\",\"host_sample_rate\":";
     append_number(output, profile.host_sample_rate);
     output += ",\"stages\":[";
@@ -624,10 +626,15 @@ write_sample_heritage_runtime_state_json(
     if (result.runtime_status != SampleHeritageRuntimeStateStatus::Ok)
         return result;
 
-    result.json =
-        "{\"schema_version\":1,\"profile_schema_version\":1,\"profile_id\":\"";
+    result.json = "{\"schema_version\":" +
+                  std::to_string(kSampleHeritageRuntimeStateSchemaVersion) +
+                  ",\"profile_schema_version\":" +
+                  std::to_string(kSampleHeritageProfileSchemaVersion) +
+                  ",\"profile_id\":\"";
     result.json += state.bound_profile_id();
-    result.json += "\",\"profile_digest_version\":1,\"profile_digest\":";
+    result.json += "\",\"profile_digest_version\":" +
+                   std::to_string(kSampleHeritageProfileDigestVersion) +
+                   ",\"profile_digest\":";
     append_digest_hex(result.json, state.profile_digest);
     result.json += ",\"rng_states\":[";
     for (std::size_t index = 0; index < state.rng_state_count; ++index) {

@@ -15,8 +15,8 @@
 
 namespace pulp::audio {
 
-inline constexpr std::uint32_t kSampleHeritageProfileSchemaVersion = 1;
-inline constexpr std::uint32_t kSampleHeritageProfileDigestVersion = 1;
+inline constexpr std::uint32_t kSampleHeritageProfileSchemaVersion = 2;
+inline constexpr std::uint32_t kSampleHeritageProfileDigestVersion = 2;
 inline constexpr std::size_t kSampleHeritageMaximumStages = 7;
 inline constexpr std::size_t kSampleHeritageMaximumChannels = 8;
 inline constexpr std::size_t kSampleHeritageMaximumProfileIdBytes = 63;
@@ -106,6 +106,7 @@ enum class SampleHeritageProfileStatus : std::uint8_t {
     InvalidHostSampleRate,
     TooManyStages,
     DuplicateStage,
+    InvalidStageOrder,
     InvalidStageParameter,
     UnsupportedRateConversion,
     DigestUnavailable,
@@ -181,21 +182,51 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
         return result;
     }
 
+    double machine_sample_rate = source.host_sample_rate;
+    double clock_ratio = 1.0;
+    for (const auto& spec : source.stages) {
+        if (spec.bypass) continue;
+        if (const auto* machine =
+                std::get_if<SampleHeritageMachineDomainStage>(&spec.parameters)) {
+            machine_sample_rate = machine->sample_rate;
+        } else if (const auto* clock =
+                       std::get_if<SampleHeritageClockPitchStage>(&spec.parameters)) {
+            clock_ratio = clock->ratio;
+        }
+    }
+    const auto clocked_sample_rate = machine_sample_rate * clock_ratio;
+
     std::array<bool, kSampleHeritageMaximumStages> seen{};
+    for (std::size_t index = 0; index < source.stages.size(); ++index) {
+        const auto type = std::visit(
+            [](const auto& stage) noexcept {
+                using Stage = std::decay_t<decltype(stage)>;
+                return detail::stage_type_index<Stage>;
+            },
+            source.stages[index].parameters);
+        if (std::exchange(seen[type], true)) {
+            result.status = SampleHeritageProfileStatus::DuplicateStage;
+            result.stage_index = index;
+            return result;
+        }
+    }
+
+    std::size_t previous_type = 0;
+    bool have_previous_type = false;
     for (std::size_t index = 0; index < source.stages.size(); ++index) {
         result.stage_index = index;
         const auto status = std::visit(
             [&](const auto& stage) noexcept {
                 using Stage = std::decay_t<decltype(stage)>;
                 constexpr auto type = detail::stage_type_index<Stage>;
-                if (std::exchange(seen[type], true))
-                    return SampleHeritageProfileStatus::DuplicateStage;
+                if (have_previous_type && type < previous_type)
+                    return SampleHeritageProfileStatus::InvalidStageOrder;
+                previous_type = type;
+                have_previous_type = true;
                 if constexpr (std::is_same_v<Stage, SampleHeritageMachineDomainStage>) {
-                    if (!(stage.sample_rate > 0.0) || !std::isfinite(stage.sample_rate))
+                    if (!(stage.sample_rate >= 8000.0 && stage.sample_rate <= 384000.0) ||
+                        !std::isfinite(stage.sample_rate))
                         return SampleHeritageProfileStatus::InvalidStageParameter;
-                    if (!source.stages[index].bypass &&
-                        stage.sample_rate != source.host_sample_rate)
-                        return SampleHeritageProfileStatus::UnsupportedRateConversion;
                 } else if constexpr (std::is_same_v<Stage,
                                                     SampleHeritageQuantizationStage>) {
                     if (stage.bit_depth < 2 || stage.bit_depth > 24 ||
@@ -213,15 +244,13 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
                 } else if constexpr (std::is_same_v<Stage, SampleHeritageClockPitchStage>) {
                     if (!(stage.ratio > 0.0) || !std::isfinite(stage.ratio))
                         return SampleHeritageProfileStatus::InvalidStageParameter;
-                    if (!source.stages[index].bypass && stage.ratio != 1.0)
-                        return SampleHeritageProfileStatus::UnsupportedRateConversion;
                 } else if constexpr (std::is_same_v<Stage, SampleHeritageDacHoldStage>) {
                     if (stage.hold_samples == 0 || stage.hold_samples > 65536)
                         return SampleHeritageProfileStatus::InvalidStageParameter;
                 } else if constexpr (std::is_same_v<Stage,
                                                     SampleHeritageReconstructionFilterStage>) {
                     if (!(stage.cutoff_hz > 0.0 &&
-                          stage.cutoff_hz < source.host_sample_rate * 0.5) ||
+                          stage.cutoff_hz < clocked_sample_rate * 0.5) ||
                         !std::isfinite(stage.cutoff_hz))
                         return SampleHeritageProfileStatus::InvalidStageParameter;
                 } else if constexpr (std::is_same_v<Stage, SampleHeritageNoiseStage>) {
@@ -248,6 +277,16 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
             result.status = status;
             return result;
         }
+    }
+
+    const auto host_to_machine = source.host_sample_rate / machine_sample_rate;
+    const auto clocked_to_host = clocked_sample_rate / source.host_sample_rate;
+    if (!(host_to_machine > 0.0 && host_to_machine <= 128.0) ||
+        !(clocked_to_host > 0.0 && clocked_to_host <= 128.0) ||
+        !std::isfinite(host_to_machine) || !std::isfinite(clocked_to_host)) {
+        result.status = SampleHeritageProfileStatus::UnsupportedRateConversion;
+        result.stage_index = source.stages.size();
+        return result;
     }
 
     result.profile.schema_version = source.schema_version;
