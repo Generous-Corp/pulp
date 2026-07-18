@@ -186,7 +186,38 @@ void GraphEditorView::on_mouse_event(const MouseEvent& ev) {
     // give us a Point. The base class dispatches through this overload
     // before the per-phase callbacks.
     last_modifiers_ = ev.modifiers;
+    // A double-click on a node opens its plugin editor. open_node_editor is
+    // idempotent, so a press+release pair that both carry click_count == 2
+    // opens it exactly once. `automatic` covers the headless convention.
+    if (ev.click_count >= 2 &&
+        (ev.phase == MousePhase::press || ev.phase == MousePhase::automatic)) {
+        host::NodeId nid = 0;
+        if (hit_node_(ev.position.x, ev.position.y, nid)) {
+            open_node_editor(nid);
+        }
+    }
     View::on_mouse_event(ev);
+}
+
+bool GraphEditorView::open_node_editor(host::NodeId id) {
+    if (is_editor_open(id)) return true;
+    if (!editor_host_provider_) return false;
+    const host::GraphNode* n = graph_.node(id);
+    if (!n || !n->plugin) return false;
+    WindowHost* host = editor_host_provider_(id);
+    if (!host) return false;
+    // EditorAttachment co-owns the node's PluginSlot (copies the shared_ptr),
+    // so the editor stays valid even if the node is later removed.
+    auto attachment = EditorAttachment::create(n->plugin, host);
+    if (!attachment) return false;
+    open_editors_[id] = std::move(attachment);
+    return true;
+}
+
+void GraphEditorView::close_node_editor(host::NodeId id) {
+    // Erasing the attachment runs ~EditorAttachment: detach the child view and
+    // destroy the hosted editor, in order.
+    open_editors_.erase(id);
 }
 
 void GraphEditorView::on_mouse_down(Point pos) {
