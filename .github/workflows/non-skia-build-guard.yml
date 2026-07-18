@@ -30,6 +30,7 @@ concurrency:
 
 jobs:
   core-view-no-skia:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     name: core/view compiles without Skia (Core Graphics path)
     runs-on: macos-15
     timeout-minutes: 30

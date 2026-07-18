@@ -55,6 +55,7 @@ permissions:
 
 jobs:
   drain-dry-run:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
