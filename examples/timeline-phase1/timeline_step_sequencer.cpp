@@ -76,6 +76,39 @@ state::AppliedEdit rejected_edit(const state::StepEditCommand& command,
     return echo;
 }
 
+std::optional<state::AppliedEdit>
+apply_active_extent_step_edit(state::Snapshot& snapshot,
+                              const state::StepEditCommand& command,
+                              state::EngineSequence& engine_sequence) {
+    if (command.kind != state::StepEditKind::RandomizeLane)
+        return state::apply_step_edit<state::ReferenceSequencerConfig>(
+            snapshot, command, engine_sequence);
+
+    const auto pattern_index = command.payload.randomize_lane.pattern;
+    const auto lane_index = command.payload.randomize_lane.lane;
+    const auto length = snapshot.patterns[pattern_index].length;
+    const auto active_steps = length == 0 ? state::kStepCount : length;
+
+    // The frozen reference reducer intentionally operates over compile-time
+    // capacity. This example persists only active extent, so preserve the
+    // inactive tail: otherwise randomize -> save/load -> expand reveals state
+    // that was never serialized and the two authoritative histories diverge.
+    std::array<state::StepCell, state::kStepCount> inactive_tail{};
+    for (std::uint8_t step = active_steps; step < state::kStepCount; ++step)
+        inactive_tail[step] = snapshot.patterns[pattern_index].lanes[lane_index][step];
+
+    auto echo = state::apply_step_edit<state::ReferenceSequencerConfig>(
+        snapshot, command, engine_sequence);
+    if (!echo || echo->kind != state::AppliedEditKind::StepRangeChanged)
+        return echo;
+
+    for (std::uint8_t step = active_steps; step < state::kStepCount; ++step)
+        snapshot.patterns[pattern_index].lanes[lane_index][step] = inactive_tail[step];
+    echo->payload.step_range.step_count = active_steps;
+    echo->dirty.step_count = active_steps;
+    return echo;
+}
+
 std::shared_ptr<const timeline::Project>
 make_playback_pattern_project(const state::Snapshot& pattern) {
     std::vector<timeline::NoteEvent> notes;
@@ -258,8 +291,8 @@ bool TimelineStepSequencerProcessor::apply_pending_edits_and_recompile() {
                                             candidate.epoch, 2));
             continue;
         }
-        auto echo = state::apply_step_edit<state::ReferenceSequencerConfig>(
-            candidate, *command, candidate_sequence);
+        auto echo = apply_active_extent_step_edit(candidate, *command,
+                                                  candidate_sequence);
         if (echo)
             applied.push_back(std::move(*echo));
     }

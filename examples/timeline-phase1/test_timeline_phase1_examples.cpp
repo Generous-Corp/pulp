@@ -390,6 +390,87 @@ TEST_CASE("timeline step channel rejects cells beyond active pattern length") {
     REQUIRE(after.right == before.right);
 }
 
+TEST_CASE("timeline step lane randomize preserves save load expand equivalence") {
+    TimelineStepSequencerProcessor processor;
+    processor.prepare(prepare_context());
+    REQUIRE(processor.engine_prepared());
+
+    std::array<state::StepCell, state::kStepCount> hidden_before{};
+    for (std::uint8_t step = 16; step < state::kStepCount; ++step)
+        hidden_before[step] = processor.pattern_snapshot().patterns[0].lanes[0][step];
+
+    state::StepEditCommand randomize;
+    randomize.client_sequence = 11;
+    randomize.kind = state::StepEditKind::RandomizeLane;
+    randomize.payload.randomize_lane.pattern = 0;
+    randomize.payload.randomize_lane.lane = 0;
+    randomize.payload.randomize_lane.seed = 0xC0FFEEu;
+    randomize.payload.randomize_lane.density = 127;
+    randomize.payload.randomize_lane.min_velocity = 72;
+    randomize.payload.randomize_lane.max_velocity = 110;
+    REQUIRE(processor.channel().ui_try_submit(randomize));
+    REQUIRE(processor.apply_pending_edits_and_recompile());
+
+    const auto randomize_echo = processor.channel().ui_try_pop_applied();
+    REQUIRE(randomize_echo);
+    REQUIRE(randomize_echo->kind == state::AppliedEditKind::StepRangeChanged);
+    REQUIRE(randomize_echo->dirty.step_count == 16);
+    REQUIRE(randomize_echo->payload.step_range.step_count == 16);
+    for (std::uint8_t step = 16; step < state::kStepCount; ++step) {
+        const auto& hidden = processor.pattern_snapshot().patterns[0].lanes[0][step];
+        REQUIRE(hidden.flags == hidden_before[step].flags);
+        REQUIRE(hidden.velocity == hidden_before[step].velocity);
+        REQUIRE(hidden.pitch_offset == hidden_before[step].pitch_offset);
+    }
+
+    auto saved = timeline::serialize_project(*processor.persistent_project(),
+                                             processor.pattern_registry());
+    REQUIRE(saved);
+    auto loaded = timeline::deserialize_project(saved.value().json,
+                                                processor.pattern_registry());
+    REQUIRE(loaded);
+    const auto* loaded_clip = loaded.value()
+                                  .find_sequence({3})
+                                  ->find_track({4})
+                                  ->find_clip({5});
+    REQUIRE(loaded_clip);
+    const auto* loaded_registered =
+        std::get_if<timeline::RegisteredContent>(&loaded_clip->content());
+    REQUIRE(loaded_registered);
+    auto loaded_pattern = loaded_registered->value_as<StepPatternDocument>()->snapshot;
+
+    state::StepEditCommand expand;
+    expand.client_sequence = 12;
+    expand.kind = state::StepEditKind::SetPatternLength;
+    expand.payload.set_pattern_length.pattern = 0;
+    expand.payload.set_pattern_length.length = state::kStepCount;
+    REQUIRE(processor.channel().ui_try_submit(expand));
+    REQUIRE(processor.apply_pending_edits_and_recompile());
+    const auto expand_echo = processor.channel().ui_try_pop_applied();
+    REQUIRE(expand_echo);
+    REQUIRE(expand_echo->kind == state::AppliedEditKind::PatternLengthChanged);
+    loaded_pattern.patterns[0].length = state::kStepCount;
+
+    auto loaded_expanded = make_registered_step_pattern(loaded_pattern,
+                                                        processor.pattern_registry());
+    REQUIRE(loaded_expanded);
+    const auto* live_clip = processor.persistent_project()
+                                ->find_sequence({3})
+                                ->find_track({4})
+                                ->find_clip({5});
+    REQUIRE(live_clip);
+    const auto* live_registered =
+        std::get_if<timeline::RegisteredContent>(&live_clip->content());
+    REQUIRE(live_registered);
+    REQUIRE(loaded_expanded->canonical_payload_json() ==
+            live_registered->canonical_payload_json());
+
+    REQUIRE(processor.seek_samples(0) == playback::TransportError::None);
+    StereoBlock rendered(128);
+    process_direct(processor, rendered);
+    REQUIRE(rendered.energy() > 0.0);
+}
+
 TEST_CASE("timeline step channel snapshots only when applied echoes overflow") {
     TimelineStepSequencerProcessor processor;
     processor.prepare(prepare_context());
