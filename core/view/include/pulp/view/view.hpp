@@ -1202,6 +1202,18 @@ public:
     void set_overflow(Overflow o) { overflow_ = o; }
     Overflow overflow() const { return overflow_; }
 
+    /// Import-only accommodation. A common imported-design pattern puts a
+    /// circular value-marker (an XY-pad-style dot) as a position:absolute child
+    /// of an overflow:hidden container, anchored at left:cx-r / top:cy-r. At
+    /// edge values half the dot sits outside the content box and the strict CSS
+    /// clip chops it. Opting in lets paint_all detect such circle-markers and
+    /// expand the clip rect just enough to admit them. OFF by default so native
+    /// (non-imported) trees pay neither the semantic deviation from CSS
+    /// `overflow:hidden` nor the per-frame O(children) marker scan — the design
+    /// importer turns it on for the containers it materializes.
+    void set_clip_marker_tolerance(bool on) { clip_marker_tolerance_ = on; }
+    bool clip_marker_tolerance() const { return clip_marker_tolerance_; }
+
     /// CSS transform properties
     void set_scale(float s) { scale_ = s; }
     float scale() const { return scale_; }
@@ -1915,6 +1927,9 @@ private:
     // intentionally need clipping must call set_overflow(Overflow::hidden)
     // explicitly — same opt-in as `overflow:hidden` in CSS.
     Overflow overflow_ = Overflow::visible;
+    /// Import-only circle-marker clip tolerance (see set_clip_marker_tolerance).
+    /// Default OFF: native trees clip strictly and skip the per-frame scan.
+    bool clip_marker_tolerance_ = false;
     /// CSS box-shadow layers in author order; empty means no shadow.
     std::vector<BoxShadow> shadows_;
     /// The first layer, materialized with default values when absent. Backs
@@ -2036,6 +2051,21 @@ private:
     std::optional<int>   inh_text_align_;
     std::optional<std::string> inh_font_family_;
 };
+
+// Expand min/max window-coord extents to cover `v` and every transitive
+// descendant reachable through an unbroken chain of `overflow:visible` views —
+// i.e. the true painted bounding box, since an `overflow:hidden` ancestor
+// clips whatever is below it. `parent_abs_x/y` are the absolute window-coord
+// origin of `v`'s parent. Shared by View::overlay_contains and
+// ScrollView::hit_test so both size an overflow:visible child's interactive
+// area from its actual painted extent rather than a blanket margin.
+void accumulate_overflow_extent(const View* v,
+                                float parent_abs_x,
+                                float parent_abs_y,
+                                float& min_x,
+                                float& min_y,
+                                float& max_x,
+                                float& max_y);
 
 // ── Accessibility exposure gate ──────────────────────────────────────────────
 //

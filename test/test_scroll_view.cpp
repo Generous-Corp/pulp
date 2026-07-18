@@ -237,16 +237,19 @@ TEST_CASE("ScrollView::hit_test box-none also suppresses scrollbar self-target",
     REQUIRE(sv.hit_test({195, 50}) == nullptr);
 }
 
-// ── Symmetric overflow:visible hit-test extension ───────────────────────
+// ── overflow:visible hit-test extension (true painted extent) ───────────
 //
-// ScrollView::hit_test had the same right/down-only asymmetry as
-// View::hit_test. Lock the symmetric ±500px slack here too so left- or
-// up-extending popovers anchored inside a scroll container hit-test
-// correctly.
+// ScrollView::hit_test routes clicks into a child's overflow:visible
+// popover using the child's TRUE painted extent — the bounding box of the
+// child plus every descendant reachable through an unbroken overflow:visible
+// chain, via the shared accumulate_overflow_extent(). This replaced a blanket
+// ±500px slack constant: the hit area now follows the popover's real painted
+// pixels in every direction, so a click ON the painted popover hits it and a
+// click just past it misses — regardless of how far (or not) it extends.
 //
 // Same fixture pattern as test_view.cpp: place a popover grandchild
 // outside an overflow:visible container in each direction, assert the
-// ScrollView routes the click into the popover via the symmetric slack.
+// ScrollView routes the click into the popover over its painted box.
 namespace {
 struct ScrollPopoverFixture {
     ScrollView sv;
@@ -270,32 +273,43 @@ struct ScrollPopoverFixture {
 };
 } // namespace
 
-TEST_CASE("ScrollView::hit_test extends overflow:visible 500px to the LEFT",
-          "[scrollview][hit_test][overflow-symmetric]") {
+TEST_CASE("ScrollView::hit_test routes to an overflow:visible popover on the LEFT",
+          "[scrollview][hit_test][overflow-extent]") {
     ScrollPopoverFixture f(-200, 25);
     REQUIRE(f.sv.hit_test({425, 650}) == f.popover);
 }
 
-TEST_CASE("ScrollView::hit_test extends overflow:visible 500px to the RIGHT",
-          "[scrollview][hit_test][overflow-symmetric]") {
+TEST_CASE("ScrollView::hit_test routes to an overflow:visible popover on the RIGHT",
+          "[scrollview][hit_test][overflow-extent]") {
     ScrollPopoverFixture f(200, 25);
     REQUIRE(f.sv.hit_test({825, 650}) == f.popover);
 }
 
-TEST_CASE("ScrollView::hit_test extends overflow:visible 500px UPWARD",
-          "[scrollview][hit_test][overflow-symmetric]") {
+TEST_CASE("ScrollView::hit_test routes to an overflow:visible popover ABOVE",
+          "[scrollview][hit_test][overflow-extent]") {
     ScrollPopoverFixture f(25, -200);
     REQUIRE(f.sv.hit_test({650, 425}) == f.popover);
 }
 
-TEST_CASE("ScrollView::hit_test extends overflow:visible 500px DOWNWARD",
-          "[scrollview][hit_test][overflow-symmetric]") {
+TEST_CASE("ScrollView::hit_test routes to an overflow:visible popover BELOW",
+          "[scrollview][hit_test][overflow-extent]") {
     ScrollPopoverFixture f(25, 200);
     REQUIRE(f.sv.hit_test({650, 825}) == f.popover);
 }
 
-TEST_CASE("ScrollView::hit_test does NOT extend overflow:visible past 500px LEFT",
-          "[scrollview][hit_test][overflow-symmetric]") {
+TEST_CASE("ScrollView::hit_test misses just past an overflow:visible popover box",
+          "[scrollview][hit_test][overflow-extent]") {
+    // Popover painted at container-local x∈[-650,-600]; a click at the far
+    // right edge lands just past it and must not resolve to the popover.
     ScrollPopoverFixture f(-650, 25);
     REQUIRE(f.sv.hit_test({0, 650}) != f.popover);
+}
+
+TEST_CASE("ScrollView::hit_test follows the popover's painted extent beyond 500px",
+          "[scrollview][hit_test][overflow-extent]") {
+    // The popover paints 600px left of the container — past the old ±500px
+    // slack that would have made it unhittable. True-extent hit-testing routes
+    // a click that lands on its painted box regardless of the distance.
+    ScrollPopoverFixture f(-600, 25);
+    REQUIRE(f.sv.hit_test({25, 650}) == f.popover);
 }

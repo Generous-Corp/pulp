@@ -503,8 +503,14 @@ void View::paint_all(canvas::Canvas& canvas) {
         // bounds with border-radius >= 40% of the smaller dimension) and expand
         // the clip rect just enough to admit them. Non-marker children still
         // clip normally because they don't match the circle heuristic.
+        //
+        // This is an import-only accommodation, so the heuristic — and its
+        // O(children) per-frame scan — runs only when a container opted in via
+        // set_clip_marker_tolerance(). Native/authored trees keep the strict CSS
+        // `overflow:hidden` clip and pay nothing for a feature they don't use.
         float marker_pad = 0.0f;
-        for (const auto& child : children_) {
+        if (clip_marker_tolerance_) {
+          for (const auto& child : children_) {
             if (!child || !child->visible_) continue;
             if (child->position_ != Position::absolute) continue;
             const auto& cb = child->bounds_;
@@ -524,6 +530,7 @@ void View::paint_all(canvas::Canvas& canvas) {
             const float top_over    = std::max(0.0f, -cb.y);
             marker_pad = std::max({marker_pad, right_over, bottom_over,
                                               left_over, top_over});
+          }
         }
         if (marker_pad > 0.0f) {
             canvas.clip_rect(-marker_pad, -marker_pad,
@@ -1352,8 +1359,6 @@ void View::dismiss_active_overlay() {
     }
 }
 
-namespace {
-
 // Recursively expand a child's painted-bounds contribution
 // up through any `overflow:visible` descendants. Returns the bounding
 // rect (in window coords) of `v` and every transitive descendant whose
@@ -1362,7 +1367,8 @@ namespace {
 //
 // `parent_abs_x` / `parent_abs_y` are the absolute window-coord origin
 // of `v->parent()`. The function consumes those, applies `v`'s own
-// `bounds().x/y`, and recurses.
+// `bounds().x/y`, and recurses. Declared in view.hpp so ScrollView::hit_test
+// (a separate TU) can share the exact same extent math.
 void accumulate_overflow_extent(const View* v,
                                 float parent_abs_x,
                                 float parent_abs_y,
@@ -1387,8 +1393,6 @@ void accumulate_overflow_extent(const View* v,
                                    min_x, min_y, max_x, max_y);
     }
 }
-
-}  // namespace
 
 bool View::overlay_contains(Point window_pt) const {
     // Walk up to compute absolute origin in window/root coords. Same
