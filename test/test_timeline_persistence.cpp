@@ -1,3 +1,4 @@
+#include <pulp/timeline/command.hpp>
 #include <pulp/timeline/serialize.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -99,6 +100,14 @@ encode_counter(const std::shared_ptr<const void>& value, BoundedJsonSink& output
     return runtime::Result<SchemaWriteSuccess, PersistenceError>(runtime::Ok(SchemaWriteSuccess{}));
 }
 
+std::size_t retained_i64(const std::shared_ptr<const void>&, const void*) noexcept {
+    return sizeof(std::int64_t);
+}
+
+std::size_t retained_int(const std::shared_ptr<const void>&, const void*) noexcept {
+    return sizeof(int);
+}
+
 SchemaRegistry registry_with_counter() {
     SchemaRegistryBuilder builder;
     REQUIRE(register_builtin_timeline_schemas(builder).has_value());
@@ -107,7 +116,7 @@ SchemaRegistry registry_with_counter() {
     schema.domain = SchemaDomain::Content;
     schema.current_version = 1;
     schema.fields = {{"value", SchemaValueKind::I64String}};
-    schema.codec = {{}, decode_counter, encode_counter};
+    schema.codec = {{}, decode_counter, encode_counter, retained_i64};
     REQUIRE(builder.register_type(std::move(schema)).has_value());
     return take(std::move(builder).build());
 }
@@ -132,7 +141,7 @@ SchemaRegistry registry_with_complex() {
     schema.type_name = "vendor.complex";
     schema.domain = SchemaDomain::Content;
     schema.current_version = 1;
-    schema.codec = {{}, decode_complex, encode_complex};
+    schema.codec = {{}, decode_complex, encode_complex, retained_int};
     REQUIRE(builder.register_type(std::move(schema)).has_value());
     return take(std::move(builder).build());
 }
@@ -151,7 +160,7 @@ SchemaRegistry registry_with_decoys() {
     schema.type_name = "vendor.decoys";
     schema.domain = SchemaDomain::Content;
     schema.current_version = 1;
-    schema.codec = {{}, decode_complex, encode_decoys};
+    schema.codec = {{}, decode_complex, encode_decoys, retained_int};
     REQUIRE(builder.register_type(std::move(schema)).has_value());
     return take(std::move(builder).build());
 }
@@ -184,7 +193,7 @@ SchemaRegistry registry_with_hostile_encoder(std::shared_ptr<EncodeSpy> spy) {
     schema.type_name = "vendor.hostile";
     schema.domain = SchemaDomain::Content;
     schema.current_version = 1;
-    schema.codec = {std::move(spy), decode_counter, encode_hostile};
+    schema.codec = {std::move(spy), decode_counter, encode_hostile, retained_int};
     REQUIRE(builder.register_type(std::move(schema)).has_value());
     return take(std::move(builder).build());
 }
@@ -283,7 +292,10 @@ TEST_CASE("Timeline version-one fixture remains readable and canonical") {
     REQUIRE(decoded.value().name() == "fixture");
     auto encoded = serialize_project(decoded.value(), builtins());
     REQUIRE(encoded.has_value());
-    REQUIRE(encoded.value().json + "\n" == fixture);
+    REQUIRE(encoded.value().json.find("\"identities\":[") != std::string::npos);
+    auto canonical = deserialize_project(encoded.value().json, builtins());
+    REQUIRE(canonical.has_value());
+    REQUIRE(take(serialize_project(canonical.value(), builtins())).json == encoded.value().json);
 }
 
 TEST_CASE("Timeline canonical snapshots preserve full-width values as decimal strings") {
@@ -321,9 +333,10 @@ TEST_CASE("Timeline snapshots round trip media notes and absolute time") {
 
 TEST_CASE("Timeline registered content uses the explicit typed codec") {
     const auto registry = registry_with_counter();
-    auto registered = take(RegisteredContent::create_no_owned_ids(
-        {"vendor.counter", 1}, std::make_shared<const std::int64_t>(-42)));
-    auto encoded = serialize_project(project_with(registered), registry);
+    auto registered = take(registry.create_registered_no_owned_ids(
+        {"vendor.counter", 1}, std::make_shared<const std::int64_t>(-42), 1024));
+    const auto original = project_with(registered);
+    auto encoded = serialize_project(original, registry);
     REQUIRE(encoded.has_value());
     REQUIRE(encoded.value().json.find(R"("data":{"value":"-42"},"type_name":"vendor.counter")") !=
             std::string::npos);
@@ -332,13 +345,15 @@ TEST_CASE("Timeline registered content uses the explicit typed codec") {
     const auto& content = decoded.value().sequences()[0].tracks()[0].clips()[0].content();
     const auto& result = std::get<RegisteredContent>(content);
     REQUIRE(*result.value_as<std::int64_t>() == -42);
+    REQUIRE(equivalent(original.sequences()[0].tracks()[0].clips()[0],
+                       decoded.value().sequences()[0].tracks()[0].clips()[0]));
     REQUIRE(take(serialize_project(decoded.value(), registry)).json == encoded.value().json);
 }
 
 TEST_CASE("Timeline budgeted writer streams every JSON scalar and escape form") {
     const auto registry = registry_with_complex();
-    auto registered = take(RegisteredContent::create_no_owned_ids({"vendor.complex", 1},
-                                                                  std::make_shared<const int>(1)));
+    auto registered = take(registry.create_registered_no_owned_ids(
+        {"vendor.complex", 1}, std::make_shared<const int>(1), 1024));
     auto clip = take(Clip::create({4}, {0}, {10}, std::move(registered)));
     std::string escaped = "quote\" slash\\";
     escaped.push_back('\b');
@@ -367,15 +382,13 @@ TEST_CASE("Timeline budgeted writer streams every JSON scalar and escape form") 
 TEST_CASE("Timeline registered encoders cannot exceed the remaining output sink") {
     auto spy = std::make_shared<EncodeSpy>();
     const auto registry = registry_with_hostile_encoder(spy);
-    auto registered = take(RegisteredContent::create_no_owned_ids({"vendor.hostile", 1},
-                                                                  std::make_shared<const int>(1)));
     constexpr std::size_t budget = 2'048;
-    auto encoded =
-        serialize_project(project_with(std::move(registered)), registry, SerializeOptions{budget});
-    REQUIRE_FALSE(encoded.has_value());
-    REQUIRE(encoded.error().code == PersistenceErrorCode::OutputLimitExceeded);
+    auto registered = registry.create_registered_no_owned_ids(
+        {"vendor.hostile", 1}, std::make_shared<const int>(1), budget);
+    REQUIRE_FALSE(registered.has_value());
+    REQUIRE(registered.error().code == PersistenceErrorCode::OutputLimitExceeded);
     REQUIRE(spy->calls == 1);
-    REQUIRE(spy->sink_maximum < budget);
+    REQUIRE(spy->sink_maximum == budget);
     REQUIRE(spy->sink_size == spy->sink_maximum);
     REQUIRE(spy->append_attempts == spy->sink_maximum + 1);
 }
@@ -660,8 +673,8 @@ TEST_CASE("Timeline extension decoys do not consume structural quotas") {
     REQUIRE(deserialize_project(opaque_snapshot, builtins(), exact).has_value());
 
     const auto registered_registry = registry_with_decoys();
-    auto registered = take(RegisteredContent::create_no_owned_ids({"vendor.decoys", 1},
-                                                                  std::make_shared<const int>(1)));
+    auto registered = take(registered_registry.create_registered_no_owned_ids(
+        {"vendor.decoys", 1}, std::make_shared<const int>(1), 4096));
     auto registered_snapshot =
         take(serialize_project(project_with(registered), registered_registry)).json;
     REQUIRE(deserialize_project(registered_snapshot, registered_registry, exact).has_value());

@@ -132,6 +132,14 @@ void collect(const NodePtr& root, std::unordered_set<const IdentityNode*>& addre
     collect(root->right, addresses);
 }
 
+void collect_entries(const NodePtr& root, std::vector<IdentityRecord>& entries) {
+    if (!root)
+        return;
+    collect_entries(root->left, entries);
+    entries.push_back({root->id, root->location});
+    collect_entries(root->right, entries);
+}
+
 std::size_t shared(const NodePtr& root, const std::unordered_set<const IdentityNode*>& addresses) {
     if (!root)
         return 0;
@@ -161,6 +169,13 @@ std::optional<ItemLocation> IdentityDirectory::locate(ItemId id) const noexcept 
 
 bool IdentityDirectory::equivalent(const IdentityDirectory& other) const noexcept {
     return count(root_) == count(other.root_) && entries_match(root_, other.root_);
+}
+
+std::vector<IdentityRecord> IdentityDirectory::entries() const {
+    std::vector<IdentityRecord> result;
+    result.reserve(count(root_));
+    collect_entries(root_, result);
+    return result;
 }
 
 std::size_t IdentityDirectory::shared_nodes_with(const IdentityDirectory& other) const {

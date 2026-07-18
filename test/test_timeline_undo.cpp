@@ -5,6 +5,122 @@
 #include <catch2/catch_test_macros.hpp>
 
 using namespace timeline_test;
+namespace runtime = pulp::runtime;
+
+namespace {
+runtime::Result<std::shared_ptr<const void>, PersistenceError>
+decode_registered_int(const JsonValue& data, const void*) noexcept {
+    const auto* value = data.find("value");
+    if (!value)
+        return runtime::Err(PersistenceError{PersistenceErrorCode::MissingField});
+    auto parsed = parse_canonical_i64_string(*value);
+    if (!parsed)
+        return runtime::Err(parsed.error());
+    std::shared_ptr<const void> result =
+        std::make_shared<const int>(static_cast<int>(parsed.value()));
+    return runtime::Ok(std::move(result));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+encode_registered_int(const std::shared_ptr<const void>& value, BoundedJsonSink& output,
+                      const void*) noexcept {
+    output.append("{\"value\":\"");
+    output.append(std::to_string(*static_cast<const int*>(value.get())));
+    output.append("\"}");
+    return runtime::Ok(SchemaWriteSuccess{});
+}
+
+std::size_t retained_registered_int(const std::shared_ptr<const void>&, const void*) noexcept {
+    return 4096;
+}
+
+SchemaRegistry registered_int_registry() {
+    SchemaRegistryBuilder builder;
+    TypeSchema schema;
+    schema.type_name = "vendor.registered";
+    schema.domain = SchemaDomain::Content;
+    schema.current_version = 3;
+    schema.fields = {{"value", SchemaValueKind::I64String}};
+    schema.codec = {{}, decode_registered_int, encode_registered_int, retained_registered_int};
+    REQUIRE(builder.register_type(std::move(schema)));
+    auto registry = std::move(builder).build();
+    REQUIRE(registry);
+    return std::move(registry).value();
+}
+} // namespace
+
+TEST_CASE("Registered payload retention participates in journal and undo byte limits") {
+    const auto registry = registered_int_registry();
+    auto content = registry.create_registered_no_owned_ids({"vendor.registered", 3},
+                                                           std::make_shared<const int>(42), 1024);
+    REQUIRE(content);
+    auto inserted =
+        Clip::create({7}, {2 * kTicksPerQuarter}, {kTicksPerQuarter}, std::move(content).value());
+    REQUIRE(inserted);
+
+    SECTION("journal preflight rejects a large inserted payload") {
+        SessionLimits limits;
+        limits.journal.max_retained_bytes = 1024;
+        auto session = std::move(DocumentSession::create(make_project(), limits)).value();
+        auto writer = std::move(session->register_writer()).value();
+        auto tx = session_transaction(writer, {}, {InsertClip{{3}, {4}, inserted.value()}});
+        auto rejected = session->submit(writer, std::move(tx));
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error().code == ConflictCode::JournalFull);
+        REQUIRE(session->revision().value == 0);
+    }
+
+    SECTION("undo preflight counts a remove inverse that owns the payload") {
+        auto track = Track::create({4}, "track", {inserted.value()});
+        REQUIRE(track);
+        auto sequence = Sequence::create({3}, "sequence", TickDuration{8 * kTicksPerQuarter},
+                                         {std::move(track).value()});
+        REQUIRE(sequence);
+        auto project =
+            Project::create({{1}, "registered", 8, {3}, {}, {std::move(sequence).value()}});
+        REQUIRE(project);
+        SessionLimits limits;
+        limits.undo.max_retained_bytes = 1024;
+        auto session =
+            std::move(DocumentSession::create(std::move(project).value(), limits)).value();
+        auto writer = std::move(session->register_writer()).value();
+        auto tx = session_transaction(writer, {}, {RemoveClip{{3}, {4}, {7}}});
+        auto rejected = session->submit(writer, std::move(tx));
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error().code == ConflictCode::UndoFull);
+        REQUIRE(session->snapshot()->find_sequence({3})->find_track({4})->find_clip({7}));
+    }
+}
+
+TEST_CASE("Registered payload retries compare canonical semantics across allocations") {
+    const auto registry = registered_int_registry();
+    const auto make_clip = [&](int value) {
+        auto content = registry.create_registered_no_owned_ids(
+            {"vendor.registered", 3}, std::make_shared<const int>(value), 1024);
+        REQUIRE(content);
+        auto created = Clip::create({7}, {2 * kTicksPerQuarter}, {kTicksPerQuarter},
+                                    std::move(content).value());
+        REQUIRE(created);
+        return std::move(created).value();
+    };
+
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto first = session_transaction(writer, {}, {InsertClip{{3}, {4}, make_clip(42)}});
+    auto exact_retry = first;
+    exact_retry.commands[0].command = InsertClip{{3}, {4}, make_clip(42)};
+    auto collision = first;
+    collision.commands[0].command = InsertClip{{3}, {4}, make_clip(43)};
+
+    auto committed = session->submit(writer, std::move(first));
+    REQUIRE(committed);
+    auto retried = session->submit(writer, std::move(exact_retry));
+    REQUIRE(retried);
+    REQUIRE(retried->revision == committed->revision);
+    auto rejected = session->submit(writer, std::move(collision));
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::TransactionIdCollision);
+}
 
 TEST_CASE("Timeline undo and redo are ordinary journaled inverse transactions") {
     auto session = std::move(DocumentSession::create(make_project())).value();
@@ -88,9 +204,10 @@ TEST_CASE("Timeline undo and replay preserve extension content exactly") {
     };
 
     SECTION("registered content retains schema and payload identity") {
+        const auto registry = registered_int_registry();
         auto payload = std::make_shared<const int>(42);
-        auto content = RegisteredContent::create_no_owned_ids(
-            {"vendor.registered", 3}, std::static_pointer_cast<const void>(payload));
+        auto content = registry.create_registered_no_owned_ids(
+            {"vendor.registered", 3}, std::static_pointer_cast<const void>(payload), 1024);
         REQUIRE(content);
         auto inserted = Clip::create({7}, {2 * kTicksPerQuarter}, {kTicksPerQuarter},
                                      std::move(content).value());

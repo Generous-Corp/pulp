@@ -1,5 +1,7 @@
 #include <pulp/timeline/serialize.hpp>
 
+#include "project_state_access.hpp"
+
 #include <algorithm>
 #include <bit>
 #include <charconv>
@@ -164,6 +166,41 @@ const char* locator_name(AssetLocatorKind value) noexcept {
     return value == AssetLocatorKind::PackageRelative ? "package_relative" : "external_uri";
 }
 
+const char* item_kind_name(ItemKind value) noexcept {
+    switch (value) {
+    case ItemKind::Project:
+        return "project";
+    case ItemKind::Asset:
+        return "asset";
+    case ItemKind::Sequence:
+        return "sequence";
+    case ItemKind::Track:
+        return "track";
+    case ItemKind::Clip:
+        return "clip";
+    case ItemKind::Note:
+        return "note";
+    }
+    return "project";
+}
+
+runtime::Result<ItemKind, PersistenceError> decode_item_kind(std::string_view value,
+                                                             std::string path) {
+    if (value == "project")
+        return runtime::Ok(ItemKind::Project);
+    if (value == "asset")
+        return runtime::Ok(ItemKind::Asset);
+    if (value == "sequence")
+        return runtime::Ok(ItemKind::Sequence);
+    if (value == "track")
+        return runtime::Ok(ItemKind::Track);
+    if (value == "clip")
+        return runtime::Ok(ItemKind::Clip);
+    if (value == "note")
+        return runtime::Ok(ItemKind::Note);
+    return fail<ItemKind>(PersistenceErrorCode::InvalidSchema, std::move(path));
+}
+
 bool write_rate(EncodeContext& context, timebase::RationalRate rate) {
     return context.writer.append("{\"denominator\":") &&
            context.writer.u64(rate.denominator, true) && context.writer.append(",\"numerator\":") &&
@@ -223,56 +260,6 @@ bool write_asset(EncodeContext& context, const MediaAsset& asset) {
     });
 }
 
-bool write_canonical(EncodeContext& context, const JsonValue& value) {
-    switch (value.kind) {
-    case JsonValue::Kind::Null:
-        return context.writer.append("null");
-    case JsonValue::Kind::Boolean:
-        return context.writer.append(value.boolean ? "true" : "false");
-    case JsonValue::Kind::String:
-        return context.writer.quoted(value.scalar);
-    case JsonValue::Kind::Number: {
-        if (value.scalar.find_first_of(".eE") != std::string::npos) {
-            context.failure = PersistenceError{PersistenceErrorCode::InvalidNumber, value.begin};
-            return false;
-        }
-        std::int64_t number = 0;
-        const auto parsed =
-            std::from_chars(value.scalar.data(), value.scalar.data() + value.scalar.size(), number);
-        if (parsed.ec != std::errc{} || parsed.ptr != value.scalar.data() + value.scalar.size()) {
-            context.failure = PersistenceError{PersistenceErrorCode::InvalidNumber, value.begin};
-            return false;
-        }
-        return context.writer.i64(number);
-    }
-    case JsonValue::Kind::Array:
-        if (!context.writer.character('['))
-            return false;
-        for (std::size_t index = 0; index < value.array.size(); ++index)
-            if ((index != 0 && !context.writer.character(',')) ||
-                !write_canonical(context, value.array[index]))
-                return false;
-        return context.writer.character(']');
-    case JsonValue::Kind::Object: {
-        std::vector<const std::pair<std::string, JsonValue>*> members;
-        members.reserve(value.object.size());
-        for (const auto& member : value.object)
-            members.push_back(&member);
-        std::sort(members.begin(), members.end(),
-                  [](const auto* lhs, const auto* rhs) { return lhs->first < rhs->first; });
-        if (!context.writer.character('{'))
-            return false;
-        for (std::size_t index = 0; index < members.size(); ++index)
-            if ((index != 0 && !context.writer.character(',')) ||
-                !context.writer.quoted(members[index]->first) || !context.writer.character(':') ||
-                !write_canonical(context, members[index]->second))
-                return false;
-        return context.writer.character('}');
-    }
-    }
-    return false;
-}
-
 bool write_content(EncodeContext& context, const ClipContent& content) {
     if (std::holds_alternative<EmptyContent>(content))
         return write_envelope(context, "pulp.timeline.content.empty", 1,
@@ -311,23 +298,9 @@ bool write_content(EncodeContext& context, const ClipContent& content) {
         });
     }
     if (const auto* registered = std::get_if<RegisteredContent>(&content)) {
-        auto data =
-            context.registry.encode_registered(SchemaDomain::Content, registered->schema(),
-                                               registered->value(), context.writer.remaining());
-        if (!data) {
-            context.failure = data.error();
-            return false;
-        }
-        DecodeLimits validation_limits;
-        validation_limits.max_input_bytes = data.value().size();
-        auto parsed = parse_json(data.value(), validation_limits);
-        if (!parsed || parsed.value()->root().kind != JsonValue::Kind::Object) {
-            context.failure =
-                PersistenceError{PersistenceErrorCode::InvalidSchema, 0, 0, 0, "/content/data"};
-            return false;
-        }
-        return write_envelope(context, registered->schema().type_name, registered->schema().version,
-                              [&] { return write_canonical(context, parsed.value()->root()); });
+        return write_envelope(
+            context, registered->schema().type_name, registered->schema().version,
+            [&] { return context.writer.append(registered->canonical_payload_json()); });
     }
     const auto& unknown = std::get<OpaqueContent>(content);
     context.opaque = true;
@@ -719,10 +692,11 @@ decode_content(const std::shared_ptr<const ParsedJson>& document, const JsonValu
     auto payload = schema->codec.decode(*data.value(), schema->codec.context.get());
     if (!payload)
         return fail<ClipContent>(payload.error().code, std::move(path));
-    auto registered = RegisteredContent::create_no_owned_ids(
-        {schema->type_name, schema->current_version}, std::move(payload).value());
+    auto registered =
+        registry.create_registered_no_owned_ids({schema->type_name, schema->current_version},
+                                                std::move(payload).value(), limits.max_input_bytes);
     if (!registered)
-        return model_fail<ClipContent>(registered.error(), std::move(path));
+        return fail<ClipContent>(registered.error().code, std::move(path));
     return runtime::Result<ClipContent, PersistenceError>(
         runtime::Ok(ClipContent(std::move(registered).value())));
 }
@@ -921,6 +895,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     static constexpr ExpectedField project_fields[] = {
         {"assets", SchemaValueKind::Array},
         {"id", SchemaValueKind::U64String},
+        {"identities", SchemaValueKind::Array, false},
         {"name", SchemaValueKind::String},
         {"next_item_id", SchemaValueKind::U64String},
         {"root_sequence_id", SchemaValueKind::U64String},
@@ -1054,7 +1029,29 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
                 !write_asset(context, project.assets()[index]))
                 return false;
         if (!context.writer.append("],\"id\":") || !context.writer.u64(project.id().value, true) ||
-            !context.writer.append(",\"name\":") || !context.writer.quoted(project.name()) ||
+            !context.writer.append(",\"identities\":["))
+            return false;
+        const auto identities = detail::ProjectStateAccess::identity_entries(project);
+        for (std::size_t index = 0; index < identities.size(); ++index) {
+            const auto& identity = identities[index];
+            const auto& location = identity.location;
+            if ((index != 0 && !context.writer.character(',')) ||
+                !context.writer.append("{\"active\":") ||
+                !context.writer.append(location.active ? "true" : "false") ||
+                !context.writer.append(",\"clip_id\":") ||
+                !context.writer.u64(location.clip_id.value, true) ||
+                !context.writer.append(",\"id\":") ||
+                !context.writer.u64(identity.item.value, true) ||
+                !context.writer.append(",\"kind\":") ||
+                !context.writer.quoted(item_kind_name(location.kind)) ||
+                !context.writer.append(",\"sequence_id\":") ||
+                !context.writer.u64(location.sequence_id.value, true) ||
+                !context.writer.append(",\"track_id\":") ||
+                !context.writer.u64(location.track_id.value, true) ||
+                !context.writer.character('}'))
+                return false;
+        }
+        if (!context.writer.append("],\"name\":") || !context.writer.quoted(project.name()) ||
             !context.writer.append(",\"next_item_id\":") ||
             !context.writer.u64(project.next_item_id(), true) ||
             !context.writer.append(",\"root_sequence_id\":") ||
@@ -1100,6 +1097,7 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
     auto root = required(*data.value(), "root_sequence_id", "/data");
     auto assets = required(*data.value(), "assets", "/data");
     auto sequences = required(*data.value(), "sequences", "/data");
+    const auto* identities = data.value()->find("identities");
     if (!id || !name || !next || !root || !assets || !sequences ||
         assets.value()->kind != JsonValue::Kind::Array ||
         sequences.value()->kind != JsonValue::Kind::Array)
@@ -1128,6 +1126,39 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
                                  decoded.error().byte_offset);
         decoded_sequences.push_back(std::move(decoded).value());
     }
+    std::vector<detail::IdentityRecord> decoded_identities;
+    if (identities) {
+        if (identities->kind != JsonValue::Kind::Array)
+            return fail<Project>(PersistenceErrorCode::UnexpectedType, "/data/identities");
+        decoded_identities.reserve(identities->array.size());
+        for (std::size_t index = 0; index < identities->array.size(); ++index) {
+            const auto path = "/data/identities/" + std::to_string(index);
+            const auto& value = identities->array[index];
+            auto id_value = required(value, "id", path);
+            auto kind_value = string_field(value, "kind", path);
+            auto sequence_value = required(value, "sequence_id", path);
+            auto track_value = required(value, "track_id", path);
+            auto clip_value = required(value, "clip_id", path);
+            auto active_value = required(value, "active", path);
+            if (!id_value || !kind_value || !sequence_value || !track_value || !clip_value ||
+                !active_value || active_value.value()->kind != JsonValue::Kind::Boolean)
+                return fail<Project>(PersistenceErrorCode::MissingField, path);
+            auto item = parse_canonical_u64_string(*id_value.value(), path + "/id");
+            auto kind = decode_item_kind(kind_value.value(), path + "/kind");
+            auto sequence_id =
+                parse_canonical_u64_string(*sequence_value.value(), path + "/sequence_id");
+            auto track_id = parse_canonical_u64_string(*track_value.value(), path + "/track_id");
+            auto clip_id = parse_canonical_u64_string(*clip_value.value(), path + "/clip_id");
+            if (!item || !kind || !sequence_id || !track_id || !clip_id)
+                return fail<Project>(PersistenceErrorCode::InvalidNumber, path);
+            decoded_identities.push_back({{item.value()},
+                                          {kind.value(),
+                                           {sequence_id.value()},
+                                           {track_id.value()},
+                                           {clip_id.value()},
+                                           active_value.value()->boolean}});
+        }
+    }
     auto created = Project::create(ProjectInput{{decoded_id.value()},
                                                 std::move(name).value(),
                                                 decoded_next.value(),
@@ -1136,6 +1167,13 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
                                                 std::move(decoded_sequences)});
     if (!created)
         return model_fail<Project>(created.error(), "/");
+    if (identities) {
+        auto restored = detail::ProjectStateAccess::restore_identities(
+            std::move(created).value(), std::move(decoded_identities));
+        if (!restored)
+            return model_fail<Project>(restored.error(), "/data/identities");
+        created = std::move(restored);
+    }
     return runtime::Result<Project, PersistenceError>(runtime::Ok(std::move(created).value()));
 }
 

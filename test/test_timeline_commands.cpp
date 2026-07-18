@@ -57,6 +57,7 @@ TEST_CASE("Timeline move and note velocity commands enforce typed preconditions"
 
 TEST_CASE("Timeline edits and inverses preserve clip playback properties") {
     const ClipPlaybackProperties playback{0.375f, 120, 240};
+    const ClipPlaybackProperties replacement{0.75f, 60, 90};
     auto track = Track::create({4}, "track", {make_note_clip({5}, {6}, 0, 1000, playback)});
     REQUIRE(track);
     auto sequence = Sequence::create({3}, "sequence", TickDuration{8 * kTicksPerQuarter},
@@ -69,12 +70,13 @@ TEST_CASE("Timeline edits and inverses preserve clip playback properties") {
     ClipTimeRange new_range = MusicalTimeRange{{2 * kTicksPerQuarter}, {kTicksPerQuarter}};
     auto edit = transaction({1}, 1, 1, {},
                             {MoveClip{{3}, {4}, {5}, old_range, new_range},
-                             SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 4096}});
+                             SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 4096},
+                             SetClipPlaybackProperties{{3}, {4}, {5}, playback, replacement}});
     auto changed = reduce_transaction(original.value(), edit);
     REQUIRE(changed);
-    REQUIRE(clip(changed->project).playback_properties() == playback);
+    REQUIRE(clip(changed->project).playback_properties() == replacement);
 
-    auto inverse = transaction({1}, 2, 3, {}, changed->inverses);
+    auto inverse = transaction({1}, 2, 4, {}, changed->inverses);
     auto restored = reduce_transaction(changed->project, inverse);
     REQUIRE(restored);
     REQUIRE(clip(restored->project).playback_properties() == playback);
@@ -170,4 +172,18 @@ TEST_CASE("Timeline identity and clip indexes path copy at logarithmic scale") {
     REQUIRE(project->shared_identity_nodes_with(moved->project) > 9900);
     REQUIRE(project->find_sequence({3})->find_track({4})->shared_index_nodes_with(
                 *moved->project.find_sequence({3})->find_track({4})) > 19000);
+}
+
+TEST_CASE("Opaque semantic equality ignores admission limits") {
+    const std::string raw = R"({"data":{"value":"same"},"type_name":"vendor.opaque","version":1})";
+    auto strict = OpaqueContent::create({"vendor.opaque", 1}, raw,
+                                        {.max_input_bytes = 1024, .max_opaque_bytes = 1024});
+    auto broad = OpaqueContent::create({"vendor.opaque", 1}, raw);
+    REQUIRE(strict);
+    REQUIRE(broad);
+    auto left = Clip::create({7}, {0}, {10}, std::move(strict).value());
+    auto right = Clip::create({7}, {0}, {10}, std::move(broad).value());
+    REQUIRE(left);
+    REQUIRE(right);
+    REQUIRE(equivalent(left.value(), right.value()));
 }

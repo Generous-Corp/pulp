@@ -24,6 +24,7 @@ namespace pulp::timeline {
 namespace detail {
 class ProjectStateAccess;
 }
+class SchemaRegistry;
 
 struct ItemId {
     std::uint64_t value = 0;
@@ -169,14 +170,17 @@ class NoteContent {
 // so subtree remapping can preserve them without hidden reference corruption.
 class RegisteredContent {
   public:
-    static runtime::Result<RegisteredContent, ModelError>
-    create_no_owned_ids(SchemaIdentity schema, std::shared_ptr<const void> value);
-
     const SchemaIdentity& schema() const noexcept {
         return schema_;
     }
     const std::shared_ptr<const void>& value() const noexcept {
         return value_;
+    }
+    const std::string& canonical_payload_json() const noexcept {
+        return canonical_payload_json_;
+    }
+    std::size_t retained_bytes() const noexcept {
+        return retained_bytes_;
     }
 
     template <typename T> const T* value_as() const noexcept {
@@ -184,10 +188,16 @@ class RegisteredContent {
     }
 
   private:
-    RegisteredContent(SchemaIdentity schema, std::shared_ptr<const void> value)
-        : schema_(std::move(schema)), value_(std::move(value)) {}
+    friend class SchemaRegistry;
+    RegisteredContent(SchemaIdentity schema, std::shared_ptr<const void> value,
+                      std::string canonical_payload_json, std::size_t retained_bytes)
+        : schema_(std::move(schema)), value_(std::move(value)),
+          canonical_payload_json_(std::move(canonical_payload_json)),
+          retained_bytes_(retained_bytes) {}
     SchemaIdentity schema_;
     std::shared_ptr<const void> value_;
+    std::string canonical_payload_json_;
+    std::size_t retained_bytes_ = 0;
 };
 
 // Opaque extension envelopes retain the exact parser bounds under which they
@@ -258,6 +268,8 @@ class Clip {
     const ClipContent& content() const noexcept;
     runtime::Result<Clip, ModelError> with_time_range(ClipTimeRange range) const;
     runtime::Result<Clip, ModelError> with_content(ClipContent content) const;
+    runtime::Result<Clip, ModelError>
+    with_playback_properties(ClipPlaybackProperties playback) const;
     ClipPlaybackProperties playback_properties() const noexcept;
 
   private:

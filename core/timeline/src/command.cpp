@@ -28,12 +28,12 @@ bool equal_content(const ClipContent& lhs, const ClipContent& rhs) noexcept {
     }
     if (const auto* left = std::get_if<RegisteredContent>(&lhs)) {
         const auto& right = std::get<RegisteredContent>(rhs);
-        return left->schema() == right.schema() && left->value() == right.value();
+        return left->schema() == right.schema() &&
+               left->canonical_payload_json() == right.canonical_payload_json();
     }
     const auto& left = std::get<OpaqueContent>(lhs);
     const auto& right = std::get<OpaqueContent>(rhs);
-    return left.schema() == right.schema() && left.raw_json() == right.raw_json() &&
-           left.validation_limits() == right.validation_limits();
+    return left.schema() == right.schema() && left.raw_json() == right.raw_json();
 }
 
 std::size_t saturated_add(std::size_t lhs, std::size_t rhs) noexcept {
@@ -48,6 +48,8 @@ std::size_t clip_retained_size(const Clip& clip) noexcept {
         size = saturated_add(size, notes->notes().size() * sizeof(NoteEvent));
     else if (const auto* opaque = std::get_if<OpaqueContent>(&clip.content()))
         size = saturated_add(size, opaque->raw_json().size());
+    else if (const auto* registered = std::get_if<RegisteredContent>(&clip.content()))
+        size = saturated_add(size, registered->retained_bytes());
     return size;
 }
 
@@ -90,11 +92,15 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                        left.clip_id == right.clip_id &&
                        equivalent(left.expected_range, right.expected_range) &&
                        equivalent(left.replacement_range, right.replacement_range);
-            } else {
+            } else if constexpr (std::is_same_v<T, SetNoteVelocity>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.note_id == right.note_id &&
                        left.expected_velocity == right.expected_velocity &&
                        left.replacement_velocity == right.replacement_velocity;
+            } else {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.clip_id == right.clip_id && left.expected == right.expected &&
+                       left.replacement == right.replacement;
             }
         },
         lhs);

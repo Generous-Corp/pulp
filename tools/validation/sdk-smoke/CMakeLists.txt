@@ -203,6 +203,19 @@ if(TARGET Pulp::signal)
     target_link_libraries(PulpSDKSmokeSignalCxx20Probe PRIVATE Pulp::signal)
 endif()
 
+if(TARGET Pulp::timeline)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/timeline_cxx20_export_probe.cpp"
+"#include <pulp/timeline/model.hpp>\n"
+"\n"
+"int main() {\n"
+"    constexpr pulp::timeline::ClipPlaybackProperties properties;\n"
+"    return properties == pulp::timeline::ClipPlaybackProperties{} ? 0 : 1;\n"
+"}\n")
+    add_executable(PulpSDKSmokeTimelineCxx20Probe
+        "${CMAKE_CURRENT_BINARY_DIR}/timeline_cxx20_export_probe.cpp")
+    target_link_libraries(PulpSDKSmokeTimelineCxx20Probe PRIVATE Pulp::timeline)
+endif()
+
 set(PULP_SDK_SMOKE_FORMATS)
 if(TARGET Pulp::standalone)
     list(APPEND PULP_SDK_SMOKE_FORMATS Standalone)

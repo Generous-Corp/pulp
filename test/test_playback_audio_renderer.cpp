@@ -1,5 +1,6 @@
 #include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/program_compiler.hpp>
+#include <pulp/timeline/transaction.hpp>
 
 #include "harness/scoped_rt_process_probe.hpp"
 
@@ -80,11 +81,35 @@ std::shared_ptr<const DecodedAudioAssetPool> pool(std::vector<DecodedAudioAsset>
 class InlineExecutor final : public CompileExecutor {
   public:
     bool submit(std::unique_ptr<CompileTask> task, std::chrono::steady_clock::time_point) override {
-        while (task->run_slice({std::chrono::steady_clock::now() + std::chrono::seconds(1), 1}) ==
-               CompileTaskStatus::Pending) {
-        }
+        do {
+            ++slice_count;
+        } while (task->run_slice({std::chrono::steady_clock::now() + std::chrono::seconds(1), 1}) ==
+                 CompileTaskStatus::Pending);
         return true;
     }
+    std::size_t slice_count = 0;
+};
+
+class DeadlineExecutor final : public CompileExecutor {
+  public:
+    bool submit(std::unique_ptr<CompileTask> incoming,
+                std::chrono::steady_clock::time_point) override {
+        task = std::move(incoming);
+        return task != nullptr;
+    }
+    CompileTaskStatus run_one(std::chrono::steady_clock::time_point deadline,
+                              std::size_t work = 1) {
+        REQUIRE(task);
+        const auto status = task->run_slice({deadline, work});
+        if (status == CompileTaskStatus::Complete)
+            task.reset();
+        return status;
+    }
+    void drain() {
+        while (task)
+            (void)run_one(std::chrono::steady_clock::now() + std::chrono::seconds(1));
+    }
+    std::unique_ptr<CompileTask> task;
 };
 
 struct CompiledFixture {
@@ -261,6 +286,93 @@ TEST_CASE("one bounded compiler pass publishes note and audio payloads for a mix
     REQUIRE(compiled_track->audio_program()->clips()[0].gain_linear == 0.5f);
 }
 
+TEST_CASE("playback property commands dirty and rebuild audible clip gain") {
+    auto asset_pool = pool({{3, audio_data({std::vector<float>(8, 1.0f)})}});
+    auto map = map_120();
+    auto clip = absolute_media_clip(100, 0, 8, 3, 0, 8, {.gain_linear = 0.5f});
+    auto track = take(Track::create({10}, "gain", {clip}));
+    auto project = project_with_tracks({track}, {{3, "tone", 8, {48'000, 1}}});
+    CompiledFixture compiled(project, map, asset_pool);
+
+    Output before(1, 1);
+    auto first_program = compiled.store.read();
+    REQUIRE(ArrangementAudioRenderer::process(*first_program, snapshot(*first_program, 1),
+                                              before.view()) == AudioRenderStatus::Rendered);
+    REQUIRE(before.storage[0][0] == 0.5f);
+
+    Transaction transaction;
+    transaction.id = {{1}, 1};
+    transaction.commands.push_back(
+        {{{1}, 1},
+         SetClipPlaybackProperties{
+             {2}, {10}, {100}, {.gain_linear = 0.5f}, {.gain_linear = 0.25f}}});
+    auto changed = reduce_transaction(*project, transaction);
+    REQUIRE(changed);
+    REQUIRE(changed->dirty.items().size() == 1);
+    REQUIRE(changed->dirty.items()[0].owner_track == ItemId{10});
+    REQUIRE(changed->dirty.items()[0].flags == DirtyFlags::Content);
+
+    ProgramCompileRequest request;
+    request.project = std::make_shared<const Project>(changed->project);
+    request.sequence_id = {2};
+    request.tempo_map = map;
+    request.document_revision = 2;
+    request.dirty = {false, {{10}}};
+    request.audio_assets = asset_pool;
+    REQUIRE(compiled.compiler->submit(std::move(request)));
+    auto second_program = compiled.store.read();
+    Output after(1, 1);
+    REQUIRE(ArrangementAudioRenderer::process(*second_program, snapshot(*second_program, 1),
+                                              after.view()) == AudioRenderStatus::Rendered);
+    REQUIRE(after.storage[0][0] == 0.25f);
+}
+
+TEST_CASE("audio track linking remains incremental under one-work-unit slices") {
+    constexpr std::size_t clip_count = 256;
+    std::vector<Clip> clips;
+    clips.reserve(clip_count);
+    for (std::size_t index = 0; index < clip_count; ++index)
+        clips.push_back(musical_media_clip(100 + index,
+                                           static_cast<std::int64_t>(index * kTicksPerQuarter),
+                                           kTicksPerQuarter, 3, 1));
+    auto track = take(Track::create({10}, "many", std::move(clips)));
+    auto project = project_with_tracks({track}, {{3, "sample", 1, {48'000, 1}}});
+    CompiledFixture compiled(project, map_120(), pool({{3, audio_data({{1.0f}})}}));
+    REQUIRE(compiled.store.read()->find_track({10})->audio_program()->clips().size() == clip_count);
+    REQUIRE(compiled.executor.slice_count > clip_count * 4);
+}
+
+TEST_CASE("expired compile deadlines stop an in-progress audio link pass") {
+    constexpr std::size_t clip_count = 64;
+    std::vector<Clip> clips;
+    for (std::size_t index = 0; index < clip_count; ++index)
+        clips.push_back(musical_media_clip(100 + index,
+                                           static_cast<std::int64_t>(index * kTicksPerQuarter),
+                                           kTicksPerQuarter, 3, 1));
+    auto track = take(Track::create({10}, "deadline", std::move(clips)));
+    auto project = project_with_tracks({track}, {{3, "sample", 1, {48'000, 1}}});
+    PlaybackProgramStore store;
+    DeadlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest request;
+    request.project = project;
+    request.sequence_id = {2};
+    request.tempo_map = map_120();
+    request.document_revision = 1;
+    request.dirty.all = true;
+    request.audio_assets = pool({{3, audio_data({{1.0f}})}});
+    REQUIRE(compiler.submit(std::move(request)));
+    for (std::size_t index = 0; index <= clip_count; ++index)
+        REQUIRE(executor.run_one(std::chrono::steady_clock::now() + std::chrono::seconds(1)) ==
+                CompileTaskStatus::Pending);
+    REQUIRE_FALSE(store.has_value());
+    REQUIRE(executor.run_one(std::chrono::steady_clock::now() - std::chrono::milliseconds(1),
+                             1'000'000) == CompileTaskStatus::Pending);
+    REQUIRE_FALSE(store.has_value());
+    executor.drain();
+    REQUIRE(store.has_value());
+}
+
 TEST_CASE("audio renderer projects absolute anchors and source rates on reprepare") {
     const auto data = audio_data({std::vector<float>(441, 0.75f)}, 44'100);
     auto clip =
@@ -381,13 +493,13 @@ TEST_CASE("audio renderer requires exact transport and program tempo map identit
 }
 
 TEST_CASE("audio renderer follows transport loop splits and seeks without stale cursors") {
-    std::vector<float> ramp(128);
+    std::vector<float> ramp(256);
     for (std::size_t i = 0; i < ramp.size(); ++i)
         ramp[i] = static_cast<float>(i);
-    const auto data = audio_data({ramp});
-    auto clip = absolute_media_clip(100, 0, 128, 3, 0, 128);
+    const auto data = audio_data({ramp}, 44'100);
+    auto clip = take(Clip::create_absolute({100}, {0}, 256, {44'100, 1}, MediaRef{{3}, {0}, 256}));
     auto track = take(Track::create({10}, "loop", {clip}));
-    auto project = project_with_tracks({track}, {{3, "ramp", 128, {48'000, 1}}});
+    auto project = project_with_tracks({track}, {{3, "ramp", 256, {44'100, 1}}});
     const auto map = map_120();
     CompiledFixture compiled(project, map, pool({{3, data}}));
     auto program = compiled.store.read();
@@ -404,10 +516,10 @@ TEST_CASE("audio renderer follows transport loop splits and seeks without stale 
     Output looped(1, 32);
     REQUIRE(ArrangementAudioRenderer::process(*program, state, looped.view()) ==
             AudioRenderStatus::Rendered);
-    REQUIRE(looped.storage[0][0] == 48.0f);
-    REQUIRE(looped.storage[0][15] == 63.0f);
+    REQUIRE_THAT(looped.storage[0][0], WithinAbs(44.1f, 1e-5f));
+    REQUIRE_THAT(looped.storage[0][15], WithinAbs(57.88125f, 1e-5f));
     REQUIRE(looped.storage[0][16] == 0.0f);
-    REQUIRE(looped.storage[0][31] == 15.0f);
+    REQUIRE_THAT(looped.storage[0][31], WithinAbs(13.78125f, 1e-5f));
 
     REQUIRE(transport.seek(map->samples_to_ticks({32})) == TransportError::None);
     REQUIRE(transport.begin_block(16, state) == TransportError::None);
@@ -415,7 +527,7 @@ TEST_CASE("audio renderer follows transport loop splits and seeks without stale 
     Output seeked(1, 16);
     REQUIRE(ArrangementAudioRenderer::process(*program, state, seeked.view()) ==
             AudioRenderStatus::Rendered);
-    REQUIRE(seeked.storage[0][0] == 32.0f);
+    REQUIRE_THAT(seeked.storage[0][0], WithinAbs(29.4f, 1e-5f));
 }
 
 TEST_CASE("audio renderer mixes tracks and maps mono and stereo deterministically") {
@@ -487,6 +599,14 @@ TEST_CASE("audio compiler rejects invalid assets sample rates and capacities") {
     auto linked = link_audio_track_program({10}, {compiled_clip}, {.max_clips = 0});
     REQUIRE_FALSE(linked);
     REQUIRE(linked.error().code == AudioRendererErrorCode::CapacityExceeded);
+    auto duplicate_late = compiled_clip;
+    duplicate_late.timeline_start = 100;
+    auto interleaved = compiled_clip;
+    interleaved.id = {999};
+    interleaved.timeline_start = 50;
+    linked = link_audio_track_program({10}, {compiled_clip, interleaved, duplicate_late}, {});
+    REQUIRE_FALSE(linked);
+    REQUIRE(linked.error().code == AudioRendererErrorCode::InvalidIdentity);
 
     std::vector<std::vector<float>> excessive_channels(65, std::vector<float>(1, 0.0f));
     auto excessive = std::make_shared<audio::AudioFileData>();
@@ -523,6 +643,81 @@ TEST_CASE("audio compiler enforces whole program track capacity") {
     REQUIRE(compiler.status().has_error);
     REQUIRE(compiler.status().last_error.code == CompileErrorCode::AudioProgramInvalid);
     REQUIRE(compiler.status().last_error.audio_detail == AudioRendererErrorCode::CapacityExceeded);
+}
+
+TEST_CASE("compiler invalidation covers global clip counts assets and exact tempo identity") {
+    auto make_project = [](bool extra_dirty_clip) {
+        std::vector<Clip> dirty{absolute_media_clip(100, 0, 8, 3, 0, 8)};
+        if (extra_dirty_clip)
+            dirty.push_back(absolute_media_clip(101, 16, 8, 3, 0, 8));
+        auto first = take(Track::create({10}, "dirty", std::move(dirty)));
+        auto second =
+            take(Track::create({20}, "clean", {absolute_media_clip(200, 32, 8, 3, 0, 8)}));
+        return project_with_tracks({first, second}, {{3, "tone", 8, {48'000, 1}}});
+    };
+    auto data = audio_data({std::vector<float>(8, 1.0f)});
+    auto first_pool = pool({{3, data}});
+    auto first_map = map_120();
+    PlaybackProgramStore store;
+    InlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+
+    ProgramCompileRequest first;
+    first.project = make_project(false);
+    first.sequence_id = {2};
+    first.tempo_map = first_map;
+    first.document_revision = 1;
+    first.dirty.all = true;
+    first.audio_assets = first_pool;
+    first.audio_limits.max_clips = 2;
+    REQUIRE(compiler.submit(std::move(first)));
+    auto baseline = store.read();
+    const auto* baseline_dirty = baseline->find_track({10});
+    const auto* baseline_clean = baseline->find_track({20});
+
+    ProgramCompileRequest over_limit;
+    over_limit.project = make_project(true);
+    over_limit.sequence_id = {2};
+    over_limit.tempo_map = first_map;
+    over_limit.document_revision = 2;
+    over_limit.dirty.tracks = {{10}};
+    over_limit.audio_assets = first_pool;
+    over_limit.audio_limits.max_clips = 2;
+    REQUIRE(compiler.submit(std::move(over_limit)));
+    REQUIRE(compiler.status().has_error);
+    REQUIRE(compiler.status().last_error.audio_detail == AudioRendererErrorCode::CapacityExceeded);
+    REQUIRE(store.read()->document_revision() == 1);
+
+    auto second_pool = pool({{3, data}});
+    ProgramCompileRequest new_pool;
+    new_pool.project = make_project(false);
+    new_pool.sequence_id = {2};
+    new_pool.tempo_map = first_map;
+    new_pool.document_revision = 3;
+    new_pool.dirty.tracks = {{10}};
+    new_pool.audio_assets = second_pool;
+    new_pool.audio_limits.max_clips = 2;
+    REQUIRE(compiler.submit(std::move(new_pool)));
+    auto pool_rebuilt = store.read();
+    REQUIRE(pool_rebuilt->find_track({10}) != baseline_dirty);
+    REQUIRE(pool_rebuilt->find_track({20}) != baseline_clean);
+    const auto* pool_dirty = pool_rebuilt->find_track({10});
+    const auto* pool_clean = pool_rebuilt->find_track({20});
+
+    auto same_rate_new_map = map_120();
+    ProgramCompileRequest new_map;
+    new_map.project = make_project(false);
+    new_map.sequence_id = {2};
+    new_map.tempo_map = same_rate_new_map;
+    new_map.document_revision = 4;
+    new_map.dirty.tracks = {{10}};
+    new_map.audio_assets = second_pool;
+    new_map.audio_limits.max_clips = 2;
+    REQUIRE(compiler.submit(std::move(new_map)));
+    auto map_rebuilt = store.read();
+    REQUIRE(map_rebuilt->find_track({10}) != pool_dirty);
+    REQUIRE(map_rebuilt->find_track({20}) != pool_clean);
+    REQUIRE(map_rebuilt->tempo_map_owner().get() == same_rate_new_map.get());
 }
 
 TEST_CASE("audio renderer enforces runtime clip capacity across the whole program") {
@@ -578,10 +773,13 @@ TEST_CASE("audio render entry point is allocation free and fails closed") {
     REQUIRE(ArrangementAudioRenderer::process(*program, state, output.view()) ==
             AudioRenderStatus::InvalidTransport);
     REQUIRE(output.storage[0] == std::vector<float>(64, 0.0f));
+    std::fill(output.storage[0].begin(), output.storage[0].end(), 7.0f);
+    std::fill(output.storage[1].begin(), output.storage[1].end(), 7.0f);
     REQUIRE(ArrangementAudioRenderer::process(*program, snapshot(*program, 64), output.view(),
                                               {.max_channels = 1}) ==
             AudioRenderStatus::CapacityExceeded);
-    REQUIRE(output.storage[1] == std::vector<float>(64, 0.0f));
+    REQUIRE(output.storage[0] == std::vector<float>(64, 7.0f));
+    REQUIRE(output.storage[1] == std::vector<float>(64, 7.0f));
 
     CompiledFixture narrow(project, map_120(), pool({{3, data}}), {.max_channels = 1});
     auto narrow_program = narrow.store.read();

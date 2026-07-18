@@ -81,7 +81,16 @@ struct SetNoteVelocity {
     std::uint16_t replacement_velocity = 0;
 };
 
-using Command = std::variant<InsertClip, RemoveClip, MoveClip, SetNoteVelocity>;
+struct SetClipPlaybackProperties {
+    ItemId sequence_id;
+    ItemId track_id;
+    ItemId clip_id;
+    ClipPlaybackProperties expected;
+    ClipPlaybackProperties replacement;
+};
+
+using Command =
+    std::variant<InsertClip, RemoveClip, MoveClip, SetNoteVelocity, SetClipPlaybackProperties>;
 
 struct CommandEnvelope {
     CommandId id;

@@ -37,9 +37,8 @@ struct SchemaWriteSuccess {};
 // The callback ABI deliberately has no string-returning compatibility path.
 class BoundedJsonSink {
   public:
-    explicit BoundedJsonSink(
-        std::size_t maximum,
-        PersistenceErrorCode overflow_code = PersistenceErrorCode::OutputLimitExceeded)
+    explicit BoundedJsonSink(std::size_t maximum, PersistenceErrorCode overflow_code =
+                                                      PersistenceErrorCode::OutputLimitExceeded)
         : maximum_(maximum), overflow_code_(overflow_code) {}
 
     BoundedJsonSink(const BoundedJsonSink&) = delete;
@@ -48,15 +47,25 @@ class BoundedJsonSink {
     BoundedJsonSink& operator=(BoundedJsonSink&&) = delete;
 
     bool append(std::string_view bytes);
-    bool failed() const noexcept { return failed_; }
-    std::size_t size() const noexcept { return output_.size(); }
-    std::size_t maximum() const noexcept { return maximum_; }
-    std::size_t remaining() const noexcept { return maximum_ - output_.size(); }
+    bool failed() const noexcept {
+        return failed_;
+    }
+    std::size_t size() const noexcept {
+        return output_.size();
+    }
+    std::size_t maximum() const noexcept {
+        return maximum_;
+    }
+    std::size_t remaining() const noexcept {
+        return maximum_ - output_.size();
+    }
     PersistenceError error(std::string path = {}) const;
 
   private:
     friend class SchemaRegistry;
-    const std::string& stored_output() const noexcept { return output_; }
+    const std::string& stored_output() const noexcept {
+        return output_;
+    }
     const std::size_t maximum_ = 0;
     const PersistenceErrorCode overflow_code_ = PersistenceErrorCode::OutputLimitExceeded;
     std::string output_;
@@ -66,8 +75,8 @@ class BoundedJsonSink {
 
 struct FieldSchema {
     FieldSchema() = default;
-    FieldSchema(std::string field_name, SchemaValueKind value_kind,
-                bool is_required = true, std::string reference = {})
+    FieldSchema(std::string field_name, SchemaValueKind value_kind, bool is_required = true,
+                std::string reference = {})
         : name(std::move(field_name)), kind(value_kind), required(is_required),
           referenced_type(std::move(reference)) {}
 
@@ -82,14 +91,16 @@ using SchemaDecodeFn = runtime::Result<std::shared_ptr<const void>, PersistenceE
 using SchemaEncodeFn = runtime::Result<SchemaWriteSuccess, PersistenceError> (*)(
     const std::shared_ptr<const void>& value, BoundedJsonSink& output,
     const void* context) noexcept;
+using SchemaRetainedSizeFn = std::size_t (*)(const std::shared_ptr<const void>& value,
+                                             const void* context) noexcept;
 using SchemaMigrationFn = runtime::Result<SchemaWriteSuccess, PersistenceError> (*)(
-    std::string_view source_envelope, BoundedJsonSink& output,
-    const void* context) noexcept;
+    std::string_view source_envelope, BoundedJsonSink& output, const void* context) noexcept;
 
 struct SchemaCodec {
     std::shared_ptr<const void> context;
     SchemaDecodeFn decode = nullptr;
     SchemaEncodeFn encode = nullptr;
+    SchemaRetainedSizeFn retained_size = nullptr;
 };
 
 struct MigrationStep {
@@ -140,8 +151,11 @@ class SchemaRegistry {
 
     runtime::Result<std::string, PersistenceError>
     encode_registered(SchemaDomain domain, const SchemaIdentity& identity,
-                      const std::shared_ptr<const void>& value,
-                      std::size_t maximum_bytes) const;
+                      const std::shared_ptr<const void>& value, std::size_t maximum_bytes) const;
+    runtime::Result<RegisteredContent, PersistenceError>
+    create_registered_no_owned_ids(const SchemaIdentity& identity,
+                                   std::shared_ptr<const void> value,
+                                   std::size_t maximum_bytes) const;
 
   private:
     friend class SchemaRegistryBuilder;
