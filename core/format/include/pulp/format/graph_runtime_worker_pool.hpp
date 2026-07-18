@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cassert>
 #include <cstdint>
 #include <memory>
 #include <thread>
@@ -50,7 +51,8 @@ public:
     // RT-safe: publish an optional platform audio workgroup handle. May be
     // called before start() or when the render context changes. Each worker
     // leaves its old group and joins the new one on its own thread before it
-    // participates in another batch. Null removes the current group.
+    // participates in another batch. A null device handle preserves the
+    // best-effort realtime-priority fallback used when no OS workgroup exists.
     void set_audio_workgroup(void* workgroup) noexcept;
 
     // AU observer path: coherent O(1) publication. The raw workgroup is borrowed
@@ -86,6 +88,18 @@ public:
     }
 
 #ifdef PULP_GRAPH_RUNTIME_WORKER_POOL_TEST_HOOKS
+    // Install before start(). This intercepts only the no-handle fallback join,
+    // allowing tests to prove that device-null attempts fallback while AU-null
+    // removal does not. Production workgroup joins are never redirected.
+    void set_fallback_join_hook_for_test(bool (*hook)(void*) noexcept,
+                                         void* context) noexcept {
+        assert(!running_.load(std::memory_order_acquire));
+        fallback_join_hook_for_test_ = hook;
+        fallback_join_context_for_test_ = context;
+    }
+    bool configured_audio_workgroup_uses_fallback_for_test() const noexcept {
+        return current_audio_workgroup_publication().fallback_when_null;
+    }
 #ifndef NDEBUG
     void pause_workgroup_transition_for_test() noexcept {
         transition_pause_released_for_test_.store(false, std::memory_order_release);
@@ -127,11 +141,13 @@ private:
     struct AudioWorkgroupPublication {
         void* workgroup = nullptr;
         std::uint64_t generation = 0;
+        bool fallback_when_null = true;
     };
 
     AudioWorkgroupPublication current_audio_workgroup_publication() const noexcept;
     bool workers_acknowledged_current_audio_workgroup() const noexcept;
-    void publish_audio_workgroup(void* workgroup) noexcept;
+    void publish_audio_workgroup(void* workgroup,
+                                 bool fallback_when_null) noexcept;
     void worker_loop(std::uint32_t worker_index) noexcept;
     void clear_transient_reheat_if_no_worker_cold() noexcept;
     // Run this worker's STATIC contiguous task range for the current batch and
@@ -147,12 +163,19 @@ private:
     // serially on the render thread; standalone device changes are serialized
     // by CoreAudioDevice::switch_mutex_. An odd sequence means the pointer is
     // being changed, and an even sequence identifies one immutable snapshot.
-    // Workers never combine a pointer from publication N with N +/- 1's
-    // generation, including under rapid A -> B -> null -> A changes.
+    // Workers never combine a pointer or null policy from publication N with
+    // N +/- 1's generation, including under rapid A -> B -> null -> A changes.
     std::atomic<std::uint64_t> audio_workgroup_sequence_{2};
     std::atomic<void*> audio_workgroup_{nullptr};
+    std::atomic<bool> audio_workgroup_fallback_when_null_{true};
     std::unique_ptr<std::atomic<std::uint64_t>[]> worker_workgroup_generation_;
     std::unique_ptr<std::atomic<bool>[]> worker_workgroup_join_succeeded_;
+
+    // Immutable while workers are running. The setter is exposed only to the
+    // focused test target, but these fields remain in every build so the class
+    // layout cannot differ between the library and its consumer.
+    bool (*fallback_join_hook_for_test_)(void*) noexcept = nullptr;
+    void* fallback_join_context_for_test_ = nullptr;
 
     // Published batch (valid for the current epoch). Written by run() before the
     // epoch bump (release), read by workers after observing the new epoch

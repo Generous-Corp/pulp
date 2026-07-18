@@ -36,6 +36,17 @@ struct CallingThreadCtx {
     std::atomic<bool> escaped{false};
 };
 
+struct FallbackJoinProbe {
+    std::atomic<std::uint32_t> attempts{0};
+    std::atomic<bool> succeed{true};
+};
+
+bool fallback_join_probe(void* context) noexcept {
+    auto* probe = static_cast<FallbackJoinProbe*>(context);
+    probe->attempts.fetch_add(1, std::memory_order_relaxed);
+    return probe->succeed.load(std::memory_order_relaxed);
+}
+
 void calling_thread_task(void* ctx, std::uint32_t) noexcept {
     auto* c = static_cast<CallingThreadCtx*>(ctx);
     if (std::this_thread::get_id() != c->caller) {
@@ -254,6 +265,108 @@ TEST_CASE("WorkerPool applies workgroup changes and removal to live workers",
     REQUIRE(pool.workers_use_current_audio_workgroup());
     release_test_workgroup(first);
     release_test_workgroup(second);
+    pool.stop();
+}
+
+TEST_CASE("WorkerPool distinguishes device fallback from AU context removal",
+          "[format][worker-pool][workgroup][rt-safety][lifetime]") {
+    GraphRuntimeWorkerPool pool;
+    FallbackJoinProbe fallback;
+    pool.set_fallback_join_hook_for_test(fallback_join_probe, &fallback);
+
+    // The initial no-handle generation is the same state as a standalone
+    // device which cannot provide an OS workgroup: preserve baseline fallback.
+    REQUIRE(pool.configured_audio_workgroup() == nullptr);
+    REQUIRE(pool.configured_audio_workgroup_uses_fallback_for_test());
+    REQUIRE(pool.start(4));
+    REQUIRE(pool.prepare_audio_workgroup_for_render());
+    REQUIRE(fallback.attempts.load(std::memory_order_relaxed) == 3);
+
+    // AU null means the host removed its realtime render context. Every worker
+    // leaves and acknowledges it, but no sticky fallback priority is applied.
+    pool.set_audio_workgroup_from_render_context(nullptr);
+    REQUIRE_FALSE(pool.configured_audio_workgroup_uses_fallback_for_test());
+    REQUIRE(pool.prepare_audio_workgroup_for_render());
+    REQUIRE(fallback.attempts.load(std::memory_order_relaxed) == 3);
+
+    // The same null pointer through the standalone/device surface is a distinct
+    // generation whose policy requires a real fallback attempt on each worker.
+    pool.set_audio_workgroup(nullptr);
+    REQUIRE(pool.configured_audio_workgroup_uses_fallback_for_test());
+    REQUIRE(pool.prepare_audio_workgroup_for_render());
+    REQUIRE(fallback.attempts.load(std::memory_order_relaxed) == 6);
+    pool.stop();
+}
+
+TEST_CASE("WorkerPool failed device fallback stays inline until republished",
+          "[format][worker-pool][workgroup][rt-safety][lifetime]") {
+    GraphRuntimeWorkerPool pool;
+    FallbackJoinProbe fallback;
+    fallback.succeed.store(false, std::memory_order_relaxed);
+    pool.set_fallback_join_hook_for_test(fallback_join_probe, &fallback);
+    REQUIRE(pool.start(4));
+
+    REQUIRE_FALSE(pool.prepare_audio_workgroup_for_render());
+    REQUIRE_FALSE(pool.workers_use_current_audio_workgroup());
+    REQUIRE(fallback.attempts.load(std::memory_order_relaxed) == 3);
+
+    CallingThreadCtx first{std::this_thread::get_id()};
+    pool.run(64, calling_thread_task, &first);
+    REQUIRE(first.runs.load(std::memory_order_relaxed) == 64);
+    REQUIRE_FALSE(first.escaped.load(std::memory_order_relaxed));
+    // The failed generation is acknowledged and never hot-spin retried.
+    REQUIRE(fallback.attempts.load(std::memory_order_relaxed) == 3);
+
+    CallingThreadCtx second{std::this_thread::get_id()};
+    pool.run(64, calling_thread_task, &second);
+    REQUIRE(second.runs.load(std::memory_order_relaxed) == 64);
+    REQUIRE_FALSE(second.escaped.load(std::memory_order_relaxed));
+    REQUIRE(fallback.attempts.load(std::memory_order_relaxed) == 3);
+
+    // A later device publication is the retry boundary.
+    fallback.succeed.store(true, std::memory_order_relaxed);
+    pool.set_audio_workgroup(nullptr);
+    REQUIRE(pool.prepare_audio_workgroup_for_render());
+    REQUIRE(pool.workers_use_current_audio_workgroup());
+    REQUIRE(fallback.attempts.load(std::memory_order_relaxed) == 6);
+    pool.stop();
+}
+
+TEST_CASE("WorkerPool rapid null publications keep policy coherent",
+          "[format][worker-pool][workgroup][rt-safety][lifetime]") {
+    GraphRuntimeWorkerPool pool;
+    FallbackJoinProbe fallback;
+    pool.set_fallback_join_hook_for_test(fallback_join_probe, &fallback);
+    REQUIRE(pool.start(4));
+    REQUIRE(pool.prepare_audio_workgroup_for_render());
+    REQUIRE(fallback.attempts.load(std::memory_order_relaxed) == 3);
+
+    // Pointer ABA cannot expose device policy from N with AU generation N+1.
+    {
+        pulp::test::RtAllocationProbe allocation_probe;
+        for (int i = 0; i < 10000; ++i) {
+            pool.set_audio_workgroup(nullptr);
+            pool.set_audio_workgroup_from_render_context(nullptr);
+        }
+        CHECK_FALSE(allocation_probe.saw_allocation());
+    }
+    REQUIRE_FALSE(pool.configured_audio_workgroup_uses_fallback_for_test());
+    REQUIRE(pool.prepare_audio_workgroup_for_render());
+    REQUIRE(fallback.attempts.load(std::memory_order_relaxed) == 3);
+
+    // Reverse the final publication. The pointer is still null, but each worker
+    // must observe the final device policy and make exactly one fallback attempt.
+    {
+        pulp::test::RtAllocationProbe allocation_probe;
+        for (int i = 0; i < 10000; ++i) {
+            pool.set_audio_workgroup_from_render_context(nullptr);
+            pool.set_audio_workgroup(nullptr);
+        }
+        CHECK_FALSE(allocation_probe.saw_allocation());
+    }
+    REQUIRE(pool.configured_audio_workgroup_uses_fallback_for_test());
+    REQUIRE(pool.prepare_audio_workgroup_for_render());
+    REQUIRE(fallback.attempts.load(std::memory_order_relaxed) == 6);
     pool.stop();
 }
 
