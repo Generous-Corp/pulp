@@ -372,7 +372,7 @@ class VaCore:
 
 # ── Full VcoOscillator render ─────────────────────────────────────────────────
 
-DEFAULT_START_PHASE = 0.13   # matches OscSourceProcessor::kStartPhase.
+DEFAULT_START_PHASE = 0.13   # matches VcoSourceProcessor::kStartPhase.
 
 
 def render(profile: VcoProfile, shape: Shape, frequency_hz: float,
