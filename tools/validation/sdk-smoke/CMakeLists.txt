@@ -42,7 +42,7 @@ set(PULP_SDK_SMOKE_REQUIRE_FORMATS ""
 find_package(Pulp REQUIRED CONFIG)
 
 foreach(_pulp_alias_target
-        audio dsl events format host playback signal signal-modal-spec state timebase view standalone gpu-audio)
+        audio dsl events format host playback signal signal-modal-spec state timebase timeline view standalone gpu-audio)
     if(TARGET "Pulp::${_pulp_alias_target}"
        AND NOT TARGET "pulp::${_pulp_alias_target}")
         message(FATAL_ERROR
@@ -121,6 +121,35 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/playback_export_probe.cpp"
 add_executable(PulpSDKSmokePlaybackProbe
     "${CMAKE_CURRENT_BINARY_DIR}/playback_export_probe.cpp")
 target_link_libraries(PulpSDKSmokePlaybackProbe PRIVATE Pulp::playback)
+
+if(NOT TARGET Pulp::timeline)
+    message(FATAL_ERROR
+        "Pulp SDK smoke: installed SDK does not expose Pulp::timeline")
+endif()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/timeline_export_probe.cpp"
+"#include <pulp/timeline/command.hpp>\n"
+"#include <pulp/timeline/document_session.hpp>\n"
+"#include <pulp/timeline/journal.hpp>\n"
+"#include <pulp/timeline/model.hpp>\n"
+"#include <pulp/timeline/transaction.hpp>\n"
+"#include <pulp/timeline/undo.hpp>\n"
+"\n"
+"int main() {\n"
+"    using namespace pulp::timeline;\n"
+"    auto track = Track::create({3}, \"track\", {});\n"
+"    if (!track) return 1;\n"
+"    auto sequence = Sequence::create({2}, \"sequence\", std::nullopt,\n"
+"                                     {std::move(track).value()});\n"
+"    if (!sequence) return 2;\n"
+"    auto project = Project::create({{1}, \"project\", 4, {2}, {},\n"
+"                                    {std::move(sequence).value()}});\n"
+"    if (!project) return 3;\n"
+"    auto session = DocumentSession::create(std::move(project).value());\n"
+"    return session ? 0 : 4;\n"
+"}\n")
+add_executable(PulpSDKSmokeTimelineProbe
+    "${CMAKE_CURRENT_BINARY_DIR}/timeline_export_probe.cpp")
+target_link_libraries(PulpSDKSmokeTimelineProbe PRIVATE Pulp::timeline)
 
 # Installed host/state/dsl header + link probe. These targets were exported
 # before all of their public headers were reliably copied into the SDK, so a

@@ -1,5 +1,11 @@
 add_library(pulp-timeline
+    src/command.cpp
+    src/document_session.cpp
+    src/identity_directory.cpp
+    src/journal.cpp
     src/model.cpp
+    src/transaction.cpp
+    src/undo.cpp
 )
 add_library(pulp::timeline ALIAS pulp-timeline)
 

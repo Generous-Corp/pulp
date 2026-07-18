@@ -15,7 +15,7 @@ modules:
     docs: reference/modules.md#timebase
 
   - name: timeline
-    summary: Immutable timeline snapshots with path-copy indexes musical and absolute anchors and atomic scoped two-pass ID remapping
+    summary: Immutable timeline snapshots with path-copy indexes typed atomic transactions bounded journal and inverse-command undo
     status: experimental
     dependencies: [runtime, timebase]
     docs: reference/modules.md#timeline

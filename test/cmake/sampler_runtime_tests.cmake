@@ -19,6 +19,30 @@ pulp_add_test_suite(pulp-test-playback-program
         $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>
         $<$<BOOL:${PULP_SANITIZER}>:PULP_TEST_WITH_SANITIZER=1>)
 
+pulp_add_test_suite(pulp-test-timeline-commands LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-journal LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-undo LIBRARIES pulp::timeline)
+
+add_library(pulp-test-timeline-no-exceptions OBJECT
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/command.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/document_session.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/identity_directory.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/journal.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/model.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/undo.cpp)
+target_link_libraries(pulp-test-timeline-no-exceptions PRIVATE
+    pulp::runtime pulp::timebase)
+target_include_directories(pulp-test-timeline-no-exceptions PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/timeline/include)
+if(MSVC)
+    target_compile_options(pulp-test-timeline-no-exceptions PRIVATE /EHs-c- /GR-)
+else()
+    target_compile_options(pulp-test-timeline-no-exceptions PRIVATE
+        -fno-exceptions -fno-rtti)
+endif()
+
 # Sample asset drop target adapter over cheap extension classification.
 pulp_add_test_suite(pulp-test-sample-asset-drop-target LIBRARIES pulp::view)
 

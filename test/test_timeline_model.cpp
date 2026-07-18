@@ -148,7 +148,7 @@ TEST_CASE("Timeline anchors model tempo-following and fixed absolute ranges") {
     REQUIRE(absolute.absolute_sample_rate() == RationalRate{48'000, 1});
 
     // A Track cannot compare positions from different clock domains without a
-    // context-owned tempo/rate projection, so Phase 1 rejects the mixture.
+    // context-owned tempo/rate projection, so the model rejects the mixture.
     auto mixed = Track::create({12}, "mixed", {absolute, musical});
     REQUIRE_FALSE(mixed.has_value());
     REQUIRE(mixed.error().code == ModelErrorCode::MixedTimeAnchors);
