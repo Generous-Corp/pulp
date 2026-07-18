@@ -1181,6 +1181,16 @@ so a build that only works on the build machine never ships. Identities are the
 the ambiguous name). `examples/super-convolver/package.sh` is a thin wrapper —
 copy it for a new plugin. Intended to graduate into `pulp ship package --combined`.
 
+The script also accepts bundles from multiple products in one installer. Every
+component package and `pkg-ref` is keyed by the plugin's deterministic
+first-seen index plus format (`plugin-0-au`, `plugin-1-au`, ...), never by format
+alone or by a lossy slug of the display name. Multi-plugin installers nest each
+product's formats beneath a product choice; single-plugin installers retain the
+flat format list. Keep `tools/scripts/test_build_combined_installer.py` green
+when changing this graph: it uses fake package/signing tools, sets
+`PULP_SKIP_SIGNING_PREFLIGHT=1` so it cannot inspect or mutate a developer's
+keychains, and asserts that colliding-looking names remain distinct.
+
 **`--content "Title" "Desc" DEST SRCDIR`** (repeatable) adds a selectable
 component that installs the *contents* of `SRCDIR` to an absolute `DEST` (e.g.
 sample models / IRs into `/Library/Application Support/<Plugin>/...`), rather than
