@@ -666,6 +666,51 @@ public:
     // can pin the lifetime of the gain atomics + plugin slots it references.
     std::shared_ptr<const void> live_snapshot_handle() const noexcept;
 
+    /// Control-thread view of the actual routed paths embedded in the live
+    /// compiled snapshot. Unlike topology eligibility, this reports whether
+    /// snapshot construction and its fixed scratch pools both succeeded for the
+    /// requested block size.
+    struct RoutedExecutionStatus {
+        bool prepared = false;
+        bool serial_selected = false;
+        bool serial_snapshot_valid = false;
+        bool serial_pool_fits = false;
+        bool parallel_selected = false;
+        bool parallel_snapshot_valid = false;
+        bool parallel_pool_fits = false;
+        bool worker_pool_running = false;
+        bool reference_walk_permitted = true;
+
+        constexpr bool routed_path_ready() const noexcept {
+            const bool serial_ready =
+                serial_selected && serial_snapshot_valid && serial_pool_fits;
+            const bool parallel_ready = parallel_selected && parallel_snapshot_valid &&
+                                        parallel_pool_fits && worker_pool_running;
+            return prepared && (serial_ready || parallel_ready);
+        }
+        constexpr bool strict_routed_ready() const noexcept {
+            return routed_path_ready() && !reference_walk_permitted;
+        }
+    };
+    RoutedExecutionStatus routed_execution_status(int block_size) const noexcept;
+    std::uint64_t routed_only_execution_failures() const noexcept {
+        return routed_only_execution_failures_.load(std::memory_order_relaxed);
+    }
+
+    /// Require compiled routed execution while at least one owner holds a lease.
+    /// If no prepared routed path can process a block, process() clears output
+    /// instead of entering the legacy reference walk. Control-thread only.
+    void acquire_routed_only_execution() noexcept {
+        routed_only_execution_owners_.fetch_add(1, std::memory_order_relaxed);
+    }
+    void release_routed_only_execution() noexcept {
+        auto owners = routed_only_execution_owners_.load(std::memory_order_relaxed);
+        while (owners != 0 && !routed_only_execution_owners_.compare_exchange_weak(
+                                  owners, owners - 1, std::memory_order_relaxed)) {
+        }
+        assert(owners != 0 && "unbalanced routed-only execution lease");
+    }
+
     // Controls whether the audio callback drives the canonical
     // GraphRuntimeExecutor when the live snapshot is executor-eligible. Default
     // ON: the routed executor is the primary inter-node backend. Set it OFF to
@@ -1343,6 +1388,8 @@ private:
     // See routed_walk_fallbacks(): incremented when an eligible routed path failed
     // dispatch and process() fell back to the walk. Audio-thread writer only.
     std::atomic<std::uint64_t> routed_walk_fallbacks_{0};
+    std::atomic<std::uint32_t> routed_only_execution_owners_{0};
+    std::atomic<std::uint64_t> routed_only_execution_failures_{0};
     // See transport_suppressed_for_anticipation(): set by compile_() to the count
     // of transport-sensitive nodes that active anticipation forced exterior
     // (excluded from the ahead-rendered interior so they observe the live
