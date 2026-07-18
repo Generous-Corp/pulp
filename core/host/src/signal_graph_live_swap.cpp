@@ -603,10 +603,14 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
     // must be able to drain a pending note-off with extract_midi() and then use
     // eager prepare(). The authoring edits remain in nodes_/connections_; only
     // the old compiled snapshot stays live until that eager replacement.
-    const bool has_midi_output = std::any_of(
+    const bool candidate_has_midi_output = std::any_of(
         nodes_.begin(), nodes_.end(),
         [](const GraphNode& node) { return node.type == NodeType::MidiOutput; });
-    if (has_midi_output) {
+    const auto& live = live_slot_.live();
+    const bool live_has_midi_output = live != nullptr && std::any_of(
+        live->shapes.begin(), live->shapes.end(),
+        [](const auto& entry) { return entry.second.type == NodeType::MidiOutput; });
+    if (candidate_has_midi_output || live_has_midi_output) {
         set_live_swap_diagnostics_locked_(
             LiveSwapFallbackReason::PredicateExcluded,
             0,
