@@ -3,6 +3,7 @@
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/timeline/document_session.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
@@ -82,10 +83,17 @@ std::string hex(std::span<const std::uint8_t> bytes) {
     return result;
 }
 
-std::vector<std::uint8_t> render_trace(std::shared_ptr<const Project> project,
-                                       const std::shared_ptr<const CompiledTempoMap>& map,
-                                       const std::shared_ptr<const DecodedAudioAssetPool>& assets,
-                                       std::span<const std::uint32_t> block_sizes) {
+struct RenderTrace {
+    std::vector<std::uint8_t> bytes;
+    std::vector<float> audio_samples;
+    std::uint64_t fade_in_frames = 0;
+    std::uint64_t fade_out_frames = 0;
+};
+
+RenderTrace render_trace(std::shared_ptr<const Project> project,
+                         const std::shared_ptr<const CompiledTempoMap>& map,
+                         const std::shared_ptr<const DecodedAudioAssetPool>& assets,
+                         std::span<const std::uint32_t> block_sizes) {
     PlaybackProgramStore store;
     DeferredCompileExecutor executor;
     PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
@@ -102,6 +110,18 @@ std::vector<std::uint8_t> render_trace(std::shared_ptr<const Project> project,
     REQUIRE_FALSE(compiler.status().has_error);
     REQUIRE(store.has_value());
 
+    RenderTrace trace;
+    {
+        auto compiled = store.read();
+        REQUIRE(compiled);
+        const auto* track = compiled->find_track({10});
+        REQUIRE(track != nullptr);
+        REQUIRE(track->audio_program() != nullptr);
+        REQUIRE(track->audio_program()->clips().size() == 1);
+        trace.fade_in_frames = track->audio_program()->clips()[0].fade_in_frames;
+        trace.fade_out_frames = track->audio_program()->clips()[0].fade_out_frames;
+    }
+
     MasterTransport transport;
     REQUIRE(transport.prepare(*map, {.max_buffer_size = 9, .initially_playing = true}) ==
             TransportError::None);
@@ -109,7 +129,6 @@ std::vector<std::uint8_t> render_trace(std::shared_ptr<const Project> project,
     REQUIRE(notes.prepare(8));
     PlaybackProgramBlockLatch latch;
 
-    std::vector<std::uint8_t> bytes;
     std::uint32_t absolute_sample = 0;
     for (const auto frames : block_sizes) {
         TransportSnapshot snapshot;
@@ -125,18 +144,21 @@ std::vector<std::uint8_t> render_trace(std::shared_ptr<const Project> project,
         const auto note_result = notes.process(block, snapshot);
         REQUIRE(note_result.code == NoteRenderCode::Ok);
 
-        append_u32(bytes, frames);
-        for (const auto sample : samples)
-            append_u32(bytes, std::bit_cast<std::uint32_t>(sample));
-        append_u32(bytes, static_cast<std::uint32_t>(notes.events().size()));
+        append_u32(trace.bytes, frames);
+        for (const auto sample : samples) {
+            trace.audio_samples.push_back(sample);
+            append_u32(trace.bytes, std::bit_cast<std::uint32_t>(sample));
+        }
+        append_u32(trace.bytes, static_cast<std::uint32_t>(notes.events().size()));
         for (const auto& event : notes.events()) {
-            append_u32(bytes, absolute_sample + static_cast<std::uint32_t>(event.sample_offset));
+            append_u32(trace.bytes,
+                       absolute_sample + static_cast<std::uint32_t>(event.sample_offset));
             REQUIRE(event.size() == 3);
-            bytes.insert(bytes.end(), event.data(), event.data() + event.size());
+            trace.bytes.insert(trace.bytes.end(), event.data(), event.data() + event.size());
         }
         absolute_sample += frames;
     }
-    return bytes;
+    return trace;
 }
 
 std::string read_fixture(std::string_view name) {
@@ -157,7 +179,12 @@ TEST_CASE("journal replay reproduces byte-identical audio and MIDI golden stream
     auto session = take(DocumentSession::create(checkpoint));
     auto writer = take(session->register_writer());
 
-    const ClipPlaybackProperties audible{0.25f, 4, 6};
+    const auto fade_in_ticks = tick_at_sample(*map, 4).value;
+    const auto fade_out_ticks = tick_at_sample(*map, 6).value;
+    REQUIRE(map->ticks_to_samples({fade_in_ticks}) == SamplePosition{4});
+    REQUIRE(map->ticks_to_samples({fade_out_ticks}) == SamplePosition{6});
+    const ClipPlaybackProperties audible{0.25f, static_cast<std::uint64_t>(fade_in_ticks),
+                                         static_cast<std::uint64_t>(fade_out_ticks)};
     Transaction transaction;
     transaction.id = writer.allocate_transaction_id();
     transaction.expected_revision = {};
@@ -179,12 +206,37 @@ TEST_CASE("journal replay reproduces byte-identical audio and MIDI golden stream
     const auto committed_stream = render_trace(session->snapshot(), map, assets, schedule);
     const auto replayed_stream = render_trace(
         std::make_shared<const Project>(std::move(replayed).value()), map, assets, schedule);
-    REQUIRE(replayed_stream == committed_stream);
+    REQUIRE(replayed_stream.bytes == committed_stream.bytes);
+    REQUIRE(committed_stream.fade_in_frames == 4);
+    REQUIRE(committed_stream.fade_out_frames == 6);
+    REQUIRE(committed_stream.audio_samples.size() == 32);
+    REQUIRE(committed_stream.audio_samples[0] == Catch::Approx(0.0f));
+    REQUIRE(committed_stream.audio_samples[1] == Catch::Approx(0.0625f));
+    REQUIRE(committed_stream.audio_samples[4] == Catch::Approx(0.25f));
+    REQUIRE(committed_stream.audio_samples[18] == Catch::Approx(0.25f * 5.0f / 6.0f));
+    REQUIRE(committed_stream.audio_samples[22] == Catch::Approx(0.25f / 6.0f));
+    REQUIRE(committed_stream.audio_samples[23] == Catch::Approx(0.0f));
+    REQUIRE(committed_stream.audio_samples[24] == Catch::Approx(0.0f));
     const auto checkpoint_stream =
         render_trace(std::make_shared<const Project>(checkpoint), map, assets, schedule);
-    REQUIRE(checkpoint_stream != committed_stream);
+    REQUIRE(checkpoint_stream.bytes != committed_stream.bytes);
 
-    const auto actual = hex(committed_stream);
+    Transaction remove_fades;
+    remove_fades.id = writer.allocate_transaction_id();
+    remove_fades.expected_revision = session->revision();
+    remove_fades.commands = {{
+        writer.allocate_command_id(),
+        SetClipPlaybackProperties{{2}, {10}, {11}, audible, {0.25f, 0, 0}},
+    }};
+    REQUIRE(session->submit(writer, std::move(remove_fades)));
+    const auto no_fades_stream = render_trace(session->snapshot(), map, assets, schedule);
+    REQUIRE(no_fades_stream.fade_in_frames == 0);
+    REQUIRE(no_fades_stream.fade_out_frames == 0);
+    REQUIRE(no_fades_stream.audio_samples[0] == Catch::Approx(0.25f));
+    REQUIRE(no_fades_stream.audio_samples[23] == Catch::Approx(0.25f));
+    REQUIRE(no_fades_stream.bytes != committed_stream.bytes);
+
+    const auto actual = hex(committed_stream.bytes);
     INFO("actual replay-render golden: " << actual);
     REQUIRE(actual == read_fixture("replay-render.golden"));
 }
