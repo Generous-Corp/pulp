@@ -31,12 +31,12 @@ namespace pulp::examples {
 struct PulpSamplerTestAccess {
     static audio::SampleStreamSourceToken
     published_stream_source(const PulpSamplerProcessor& processor) {
-        return processor.streaming_.published_source().streamed.source;
+        return processor.streaming_->published_source().streamed.source;
     }
 
     static std::uint64_t
     published_stream_page_frames(const PulpSamplerProcessor& processor) {
-        return processor.streaming_.published_source().streamed.stream_source.page_frames;
+        return processor.streaming_->published_source().streamed.stream_source.page_frames;
     }
 
     static std::size_t active_streamed_voices_for_source(
@@ -79,7 +79,7 @@ struct PulpSamplerTestAccess {
     }
 
     static audio::SampleSincKernelBankView sinc_bank(const PulpSamplerProcessor& processor) {
-        return processor.sinc_bank_.view();
+        return processor.sinc_bank_->view();
     }
 
     static audio::SampleInterpolationPolicy
@@ -92,7 +92,7 @@ struct PulpSamplerTestAccess {
     }
 
     static SamplerMipPyramidView resident_mips(const PulpSamplerProcessor& processor) {
-        return processor.streaming_.published_source().resident_mips;
+        return processor.streaming_->published_source().resident_mips;
     }
 
     static std::uint32_t active_resident_mip_octave(const PulpSamplerProcessor& processor) {
@@ -112,14 +112,14 @@ struct PulpSamplerTestAccess {
     }
 
     static void pause_stream_dispatch(PulpSamplerProcessor& processor, bool paused) {
-        processor.streaming_.service_dispatch_paused_.store(paused, std::memory_order_release);
-        processor.streaming_.service_wake_.notify_all();
+        processor.streaming_->service_dispatch_paused_.store(paused, std::memory_order_release);
+        processor.streaming_->service_wake_.notify_all();
     }
 
     static void fail_next_stream_decode(PulpSamplerProcessor& processor) {
-        processor.streaming_.fail_next_stream_decode_for_test_.store(
+        processor.streaming_->fail_next_stream_decode_for_test_.store(
             true, std::memory_order_release);
-        processor.streaming_.service_wake_.notify_all();
+        processor.streaming_->service_wake_.notify_all();
     }
 
     static bool invalidate_active_stream_preload_contract(
@@ -133,48 +133,48 @@ struct PulpSamplerTestAccess {
     }
 
     static bool pause_stream_command_drain(PulpSamplerProcessor& processor, bool paused) {
-        processor.streaming_.service_command_drain_paused_for_test_.store(
+        processor.streaming_->service_command_drain_paused_for_test_.store(
             paused, std::memory_order_release);
-        processor.streaming_.service_wake_.notify_all();
+        processor.streaming_->service_wake_.notify_all();
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-        while (processor.streaming_.service_command_drain_paused_ack_for_test_.load(
+        while (processor.streaming_->service_command_drain_paused_ack_for_test_.load(
                    std::memory_order_acquire) != paused &&
                std::chrono::steady_clock::now() < deadline) {
             std::this_thread::yield();
         }
-        return processor.streaming_.service_command_drain_paused_ack_for_test_.load(
+        return processor.streaming_->service_command_drain_paused_ack_for_test_.load(
                    std::memory_order_acquire) == paused;
     }
 
     static void pause_file_stage(PulpSamplerProcessor& processor, bool paused) {
-        processor.streaming_.file_stage_paused_for_test_.store(paused, std::memory_order_release);
+        processor.streaming_->file_stage_paused_for_test_.store(paused, std::memory_order_release);
     }
 
     static bool file_stage_paused(const PulpSamplerProcessor& processor) {
-        return processor.streaming_.file_stage_paused_ack_for_test_.load(std::memory_order_acquire);
+        return processor.streaming_->file_stage_paused_ack_for_test_.load(std::memory_order_acquire);
     }
 
     static std::uint64_t file_stage_attempts(const PulpSamplerProcessor& processor) {
-        return processor.streaming_.file_stage_attempts_for_test_.load(std::memory_order_acquire);
+        return processor.streaming_->file_stage_attempts_for_test_.load(std::memory_order_acquire);
     }
 
     static void throw_during_next_file_stage(PulpSamplerProcessor& processor) {
-        processor.streaming_.throw_during_file_stage_for_test_.store(true,
+        processor.streaming_->throw_during_file_stage_for_test_.store(true,
                                                                      std::memory_order_release);
     }
 
     static std::size_t fill_stream_command_inbox(PulpSamplerProcessor& processor,
                                                  std::size_t remaining_capacity = 0) {
-        const auto published = processor.streaming_.published_source();
+        const auto published = processor.streaming_->published_source();
         if (published.kind != SamplerPublishedSourceKind::Streamed || !published.streamed.valid()) {
             return 0;
         }
         const auto& asset = published.streamed;
-        const auto capacity = processor.streaming_.commands_.telemetry().capacity;
+        const auto capacity = processor.streaming_->commands_.telemetry().capacity;
         const auto target = remaining_capacity < capacity ? capacity - remaining_capacity : 0;
         std::size_t enqueued = 0;
-        while (processor.streaming_.commands_.telemetry().pending < target &&
-               processor.streaming_.commands_.demand_page({
+        while (processor.streaming_->commands_.telemetry().pending < target &&
+               processor.streaming_->commands_.demand_page({
                    .source = asset.source,
                    .requester = {0x7175657565, 1},
                    .page_index = 0,
@@ -189,12 +189,12 @@ struct PulpSamplerTestAccess {
 
     static void set_reverse_prewarm_timeout(PulpSamplerProcessor& processor,
                                             std::chrono::milliseconds timeout) {
-        processor.streaming_.reverse_prewarm_timeout_for_test_ = timeout;
-        processor.streaming_.reverse_prewarm_timeout_override_for_test_ = true;
+        processor.streaming_->reverse_prewarm_timeout_for_test_ = timeout;
+        processor.streaming_->reverse_prewarm_timeout_override_for_test_ = true;
     }
 
     static bool streamed_tail_page_ready(const PulpSamplerProcessor& processor) {
-        const auto published = processor.streaming_.published_source();
+        const auto published = processor.streaming_->published_source();
         if (published.kind != SamplerPublishedSourceKind::Streamed || !published.streamed.valid() ||
             published.streamed.total_frames == 0) {
             return false;
@@ -207,7 +207,7 @@ struct PulpSamplerTestAccess {
     }
 
     static bool streamed_reverse_horizon_ready(const PulpSamplerProcessor& processor) {
-        const auto published = processor.streaming_.published_source();
+        const auto published = processor.streaming_->published_source();
         if (published.kind != SamplerPublishedSourceKind::Streamed || !published.streamed.valid() ||
             published.streamed.total_frames == 0 || published.streamed.preload_frames == 0) {
             return false;
@@ -235,75 +235,75 @@ struct PulpSamplerTestAccess {
     }
 
     static SamplerPublishedSourceKind published_source_kind(const PulpSamplerProcessor& processor) {
-        return processor.streaming_.published_source().kind;
+        return processor.streaming_->published_source().kind;
     }
 
     static bool reverse_prewarm_pending(const PulpSamplerProcessor& processor) {
-        return processor.streaming_.reverse_prewarm_pending_for_test_.load(
+        return processor.streaming_->reverse_prewarm_pending_for_test_.load(
             std::memory_order_acquire);
     }
 
     static void block_next_reverse_decode(PulpSamplerProcessor& processor) {
-        processor.streaming_.reverse_decode_entered_for_test_.store(false,
+        processor.streaming_->reverse_decode_entered_for_test_.store(false,
                                                                     std::memory_order_relaxed);
-        processor.streaming_.release_reverse_decode_for_test_.store(false,
+        processor.streaming_->release_reverse_decode_for_test_.store(false,
                                                                     std::memory_order_release);
-        processor.streaming_.block_next_reverse_decode_for_test_.store(true,
+        processor.streaming_->block_next_reverse_decode_for_test_.store(true,
                                                                        std::memory_order_release);
     }
 
     static bool reverse_decode_entered(const PulpSamplerProcessor& processor) {
-        return processor.streaming_.reverse_decode_entered_for_test_.load(
+        return processor.streaming_->reverse_decode_entered_for_test_.load(
             std::memory_order_acquire);
     }
 
     static void release_reverse_decode(PulpSamplerProcessor& processor) {
-        processor.streaming_.release_reverse_decode_for_test_.store(true,
+        processor.streaming_->release_reverse_decode_for_test_.store(true,
                                                                     std::memory_order_release);
     }
 
     static std::uint32_t unpublished_rollback_count(const PulpSamplerProcessor& processor) {
-        return processor.streaming_.unpublished_rollback_count_for_test_.load(
+        return processor.streaming_->unpublished_rollback_count_for_test_.load(
             std::memory_order_acquire);
     }
 
     static std::uint64_t unpublished_rollback_attempts(const PulpSamplerProcessor& processor) {
-        return processor.streaming_.unpublished_rollback_attempts_for_test_.load(
+        return processor.streaming_->unpublished_rollback_attempts_for_test_.load(
             std::memory_order_acquire);
     }
 
     static void fail_after_stream_member_count(PulpSamplerProcessor& processor, int count) {
-        processor.streaming_.fail_after_stream_member_count_for_test_.store(
+        processor.streaming_->fail_after_stream_member_count_for_test_.store(
             count, std::memory_order_release);
     }
 
     static void pause_before_bundle_publish(PulpSamplerProcessor& processor, bool paused) {
-        processor.streaming_.pause_before_bundle_publish_for_test_.store(paused,
+        processor.streaming_->pause_before_bundle_publish_for_test_.store(paused,
                                                                          std::memory_order_release);
-        processor.streaming_.service_wake_.notify_all();
+        processor.streaming_->service_wake_.notify_all();
     }
 
     static bool bundle_publish_paused(const PulpSamplerProcessor& processor) {
-        return processor.streaming_.bundle_publish_paused_ack_for_test_.load(
+        return processor.streaming_->bundle_publish_paused_ack_for_test_.load(
             std::memory_order_acquire);
     }
 
     static std::uint64_t physical_stream_source_count(const PulpSamplerProcessor& processor) {
-        return processor.streaming_.service_.cache_stats().source_count;
+        return processor.streaming_->service_.cache_stats().source_count;
     }
 
     static bool service_contains_source(const PulpSamplerProcessor& processor,
                                         audio::SampleStreamSourceToken source) {
-        return processor.streaming_.service_.cache_service().contains_source(source);
+        return processor.streaming_->service_.cache_service().contains_source(source);
     }
 
     static std::uint32_t published_stream_mip_count(const PulpSamplerProcessor& processor) {
-        return processor.streaming_.published_source().streamed_mips.level_count;
+        return processor.streaming_->published_source().streamed_mips.level_count;
     }
 
     static audio::SampleAssetView published_stream_asset(const PulpSamplerProcessor& processor,
                                                          std::uint32_t octave) {
-        const auto published = processor.streaming_.published_source();
+        const auto published = processor.streaming_->published_source();
         if (octave == 0)
             return published.streamed;
         const auto* level = published.streamed_mips.level(octave);
@@ -311,7 +311,7 @@ struct PulpSamplerTestAccess {
     }
 
     static std::uint64_t published_selection_generation(const PulpSamplerProcessor& processor) {
-        return processor.streaming_.published_source().selection_generation;
+        return processor.streaming_->published_source().selection_generation;
     }
 
     static std::uint32_t active_streamed_mip_octave(const PulpSamplerProcessor& processor) {
@@ -332,7 +332,7 @@ struct PulpSamplerTestAccess {
 
     static std::uint32_t
     worst_case_dual_region_page_demands(const PulpSamplerProcessor& processor) {
-        const auto& streaming = processor.streaming_;
+        const auto& streaming = *processor.streaming_;
         const auto source_frames = static_cast<std::uint64_t>(
             std::ceil(static_cast<double>(streaming.maximum_host_block_frames_) *
                       SamplerStreamingRuntime::kMaximumPitchRatio *
@@ -359,7 +359,7 @@ struct PulpSamplerTestAccess {
 
     static audio::SamplePreloadContract
     published_preload_contract(const PulpSamplerProcessor& processor) {
-        return processor.streaming_.published_source().streamed.preload_contract;
+        return processor.streaming_->published_source().streamed.preload_contract;
     }
 
     static double active_streamed_position(const PulpSamplerProcessor& processor) {
@@ -416,7 +416,7 @@ struct PulpSamplerTestAccess {
     }
 
     static std::size_t stream_command_count(const PulpSamplerProcessor& processor) {
-        return processor.streaming_.commands_.telemetry().pending;
+        return processor.streaming_->commands_.telemetry().pending;
     }
 };
 

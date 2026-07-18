@@ -23,6 +23,30 @@ namespace pulp::examples {
 /// stopped; callback methods are allocation-free after a successful prepare.
 class SamplerHeritageRuntime {
 public:
+    class PreparedReplacement {
+    public:
+        PreparedReplacement() = default;
+        PreparedReplacement(PreparedReplacement&&) noexcept = default;
+        PreparedReplacement& operator=(PreparedReplacement&&) noexcept = default;
+        PreparedReplacement(const PreparedReplacement&) = delete;
+        PreparedReplacement& operator=(const PreparedReplacement&) = delete;
+
+    private:
+        friend class SamplerHeritageRuntime;
+        audio::SampleHeritagePreparedProfile profile{};
+        std::unique_ptr<audio::SampleHeritageEngine> engine;
+        std::vector<float> dry_storage;
+        audio::SampleHeritageProfileStatus profile_status =
+            audio::SampleHeritageProfileStatus::Ok;
+        std::size_t channel_count = 0;
+        std::size_t maximum_input_frames = 0;
+        double nominal_latency_frames = 0.0;
+        std::uint32_t reported_latency_frames = 0;
+        bool all_stages_bypassed = true;
+        audio::SampleHeritageRuntimeStateStatus runtime_state_status =
+            audio::SampleHeritageRuntimeStateStatus::NotPrepared;
+    };
+
     SamplerHeritageRuntime()
         : engine_(std::make_unique<audio::SampleHeritageEngine>()) {}
 
@@ -62,7 +86,8 @@ public:
                                       std::size_t channel_count,
                                       std::size_t maximum_output_frames,
                                       const audio::SampleHeritageRuntimeState*
-                                          runtime_state = nullptr) noexcept {
+                                          runtime_state = nullptr,
+                                      double runtime_host_sample_rate = 0.0) noexcept {
         if (!configured_valid_) {
             release_processing();
             status_.store(PulpSamplerHeritageStatus::Disabled,
@@ -70,10 +95,11 @@ public:
             return PulpSamplerHeritageStatus::Disabled;
         }
 
-        PreparedCandidate candidate;
+        PreparedReplacement candidate;
         const auto result = prepare_candidate(
             configured_, profile_status_, host_sample_rate, channel_count,
-            maximum_output_frames, runtime_state, candidate);
+            maximum_output_frames, runtime_state, runtime_host_sample_rate,
+            candidate);
         if (result != PulpSamplerHeritageStatus::Ready &&
             result != PulpSamplerHeritageStatus::ReadyRuntimeResetForHostRate) {
             release_processing();
@@ -85,42 +111,38 @@ public:
         return result;
     }
 
-    /// Validates and prepares a replacement completely before publishing it.
-    /// On any failure the currently prepared runtime remains untouched.
-    PulpSamplerHeritageStatus replace_prepared(
+    PulpSamplerHeritageStatus stage_replacement(
         const audio::SampleHeritageProfile& profile,
         double host_sample_rate,
         std::size_t channel_count,
         std::size_t maximum_output_frames,
-        const audio::SampleHeritageRuntimeState*
-            runtime_state,
-        double required_stream_output_sample_rate,
-        std::size_t required_stream_block_frames) noexcept {
+        const audio::SampleHeritageRuntimeState* runtime_state,
+        double runtime_host_sample_rate,
+        PreparedReplacement& candidate) noexcept {
         const auto validation = audio::validate_sample_heritage_profile(profile);
         if (!validation.valid()) return PulpSamplerHeritageStatus::InvalidProfile;
-
-        PreparedCandidate candidate;
-        const auto result = prepare_candidate(
+        return prepare_candidate(
             validation.profile, validation.status, host_sample_rate,
-            channel_count, maximum_output_frames, runtime_state, candidate);
-        if (result != PulpSamplerHeritageStatus::Ready &&
-            result != PulpSamplerHeritageStatus::ReadyRuntimeResetForHostRate) {
-            return result;
-        }
-        const auto candidate_clock = candidate.all_stages_bypassed
-            ? 1.0
-            : candidate.engine->clock_ratio();
-        const auto candidate_stream_rate = static_cast<float>(
-            host_sample_rate * candidate_clock);
-        const auto candidate_stream_frames = candidate.all_stages_bypassed
-            ? maximum_output_frames
-            : candidate.maximum_input_frames;
-        if (candidate_stream_rate != required_stream_output_sample_rate ||
-            candidate_stream_frames != required_stream_block_frames) {
-            return PulpSamplerHeritageStatus::StreamDomainRebindRequired;
-        }
-        publish_candidate(std::move(candidate), result);
-        return result;
+            channel_count, maximum_output_frames, runtime_state,
+            runtime_host_sample_rate, candidate);
+    }
+
+    static double replacement_clock_ratio(
+        const PreparedReplacement& candidate) noexcept {
+        return candidate.all_stages_bypassed ? 1.0
+                                             : candidate.engine->clock_ratio();
+    }
+
+    static std::size_t replacement_maximum_input_frames(
+        const PreparedReplacement& candidate,
+        std::size_t maximum_output_frames) noexcept {
+        return candidate.all_stages_bypassed ? maximum_output_frames
+                                             : candidate.maximum_input_frames;
+    }
+
+    void publish_replacement(PreparedReplacement&& candidate,
+                             PulpSamplerHeritageStatus ready) noexcept {
+        publish_candidate(std::move(candidate), ready);
     }
 
     void release_processing() noexcept {
@@ -259,21 +281,6 @@ public:
 #endif
 
 private:
-    struct PreparedCandidate {
-        audio::SampleHeritagePreparedProfile profile{};
-        std::unique_ptr<audio::SampleHeritageEngine> engine;
-        std::vector<float> dry_storage;
-        audio::SampleHeritageProfileStatus profile_status =
-            audio::SampleHeritageProfileStatus::Ok;
-        std::size_t channel_count = 0;
-        std::size_t maximum_input_frames = 0;
-        double nominal_latency_frames = 0.0;
-        std::uint32_t reported_latency_frames = 0;
-        bool all_stages_bypassed = true;
-        audio::SampleHeritageRuntimeStateStatus runtime_state_status =
-            audio::SampleHeritageRuntimeStateStatus::NotPrepared;
-    };
-
     static PulpSamplerHeritageStatus prepare_candidate(
         const audio::SampleHeritagePreparedProfile& profile,
         audio::SampleHeritageProfileStatus profile_status,
@@ -281,13 +288,18 @@ private:
         std::size_t channel_count,
         std::size_t maximum_output_frames,
         const audio::SampleHeritageRuntimeState* runtime_state,
-        PreparedCandidate& candidate) noexcept {
+        double runtime_host_sample_rate,
+        PreparedReplacement& candidate) noexcept {
         candidate.profile = profile;
         candidate.profile_status = profile_status;
         candidate.channel_count = channel_count;
         auto runtime_profile = profile;
-        const auto host_rate_changed =
-            runtime_profile.host_sample_rate != host_sample_rate;
+        const auto runtime_rate_known =
+            runtime_host_sample_rate > 0.0 &&
+            std::isfinite(runtime_host_sample_rate);
+        const auto host_rate_changed = runtime_state != nullptr
+            ? !runtime_rate_known || runtime_host_sample_rate != host_sample_rate
+            : runtime_profile.host_sample_rate != host_sample_rate;
         runtime_profile.host_sample_rate = host_sample_rate;
         try {
             candidate.engine =
@@ -344,7 +356,7 @@ private:
         return ready;
     }
 
-    void publish_candidate(PreparedCandidate&& candidate,
+    void publish_candidate(PreparedReplacement&& candidate,
                            PulpSamplerHeritageStatus ready) noexcept {
         release_processing();
         configured_ = candidate.profile;
