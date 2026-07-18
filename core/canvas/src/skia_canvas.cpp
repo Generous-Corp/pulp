@@ -39,6 +39,7 @@
 
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/canvas/svg_dom_cache.hpp>
+#include <pulp/canvas/image_file_cache.hpp>
 #include <pulp/canvas/emoji_segmenter.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/font_options.hpp>
@@ -837,6 +838,30 @@ sk_sp<SkImage> SkiaCanvas::ensure_gpu_image(sk_sp<SkImage> image) const {
     return image;
 }
 
+const void* SkiaCanvas::image_cache_backend_key() const {
+    // One canvas has at most one active GPU backend. Fold it into the cache key
+    // so a texture uploaded for this recorder / context is never handed to a
+    // canvas drawing through a different one; null = CPU raster (cache the
+    // decoded raster image, still skipping the per-frame disk read + decode).
+    if (recorder_) return static_cast<const void*>(recorder_);
+    if (gr_context_) return static_cast<const void*>(gr_context_);
+    return nullptr;
+}
+
+sk_sp<SkImage> SkiaCanvas::image_from_file_cached(const std::string& path) const {
+    if (path.empty()) return nullptr;
+    return ImageFileCache::instance().get_or_build(
+        path, image_cache_backend_key(), [&]() -> sk_sp<SkImage> {
+            auto sk_data = SkData::MakeFromFileName(path.c_str());
+            if (!sk_data) return nullptr;
+            auto image = SkImages::DeferredFromEncodedData(sk_data);
+            if (!image) return nullptr;
+            // Upload to a GPU texture up front so the cached value is ready to
+            // draw with no per-frame re-upload. No-op on CPU raster canvases.
+            return ensure_gpu_image(std::move(image));
+        });
+}
+
 bool SkiaCanvas::draw_image_from_data(const uint8_t* data, size_t size,
                                        float x, float y, float w, float h) {
     if (!canvas_ || !data || size == 0) return false;
@@ -856,12 +881,10 @@ bool SkiaCanvas::draw_image_from_file(const std::string& path,
                                        float x, float y, float w, float h) {
     if (!canvas_ || path.empty()) return false;
 
-    auto sk_data = SkData::MakeFromFileName(path.c_str());
-    if (!sk_data) return false;
-
-    auto image = SkImages::DeferredFromEncodedData(sk_data);
+    // Path-keyed cache: decode + GPU-upload once, reuse across frames. See
+    // image_file_cache.hpp for the on-disk-mutation semantic change.
+    auto image = image_from_file_cached(path);
     if (!image) return false;
-    image = ensure_gpu_image(std::move(image));
 
     // Honor the sticky imageSmoothingEnabled / Quality state.
     canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
@@ -922,16 +945,15 @@ bool SkiaCanvas::draw_image_from_file_rect(const std::string& path,
                                             float sx, float sy, float sw, float sh,
                                             float dx, float dy, float dw, float dh) {
     if (!canvas_ || path.empty()) return false;
-    auto sk_data = SkData::MakeFromFileName(path.c_str());
-    if (!sk_data) return false;
-    auto image = SkImages::DeferredFromEncodedData(sk_data);
+    // Path-keyed cache: decode + GPU-upload once, reuse across frames. Skia
+    // Graphite (the live GPU backend) cannot draw a raster-backed SkImage
+    // directly — it logs "Couldn't convert SkImage to a Graphite-backed
+    // representation" and silently drops the draw — so the cached value is
+    // already uploaded to a Graphite texture when recorder_ is set (a no-op on
+    // CPU raster canvases). The sprite-strip src/dst slice is applied here at
+    // draw time; the full decoded image is what's shared across frames.
+    auto image = image_from_file_cached(path);
     if (!image) return false;
-    // Skia Graphite (the live GPU backend) cannot draw a raster-backed
-    // SkImage directly; it logs "Couldn't convert SkImage to a Graphite-
-    // backed representation" and silently drops the draw. The
-    // ensure_gpu_image helper uploads to a Graphite texture when
-    // recorder_ is set, and no-ops on CPU raster canvases.
-    image = ensure_gpu_image(std::move(image));
     canvas_->drawImageRect(image,
                            SkRect::MakeXYWH(sx, sy, sw, sh),
                            SkRect::MakeXYWH(dx, dy, dw, dh),
@@ -951,9 +973,11 @@ bool SkiaCanvas::measure_image_from_file(const std::string& path,
                                           float& out_width, float& out_height) {
     out_width = 0.0f; out_height = 0.0f;
     if (path.empty()) return false;
-    auto sk_data = SkData::MakeFromFileName(path.c_str());
-    if (!sk_data) return false;
-    auto image = SkImages::DeferredFromEncodedData(sk_data);
+    // Route through the same path-keyed cache draw uses: ImageView::paint calls
+    // measure_image_from_file() then draw_image_from_file() on the same canvas,
+    // so the measure primes the cache and the subsequent draw is a hit — one
+    // decode + upload for the pair instead of two.
+    auto image = image_from_file_cached(path);
     if (!image) return false;
     out_width  = static_cast<float>(image->width());
     out_height = static_cast<float>(image->height());
