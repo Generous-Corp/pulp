@@ -216,6 +216,12 @@ test('a rotated box-model layer carries its rotation, not just its origin', () =
     { guid: { sessionID: 0, localID: 4 }, type: 'VECTOR', name: 'ring',
       parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'c' },
       size: { x: 20, y: 20 }, transform: rot(4, 4) },
+    // A 180deg-rotated solid fill (a slider's progress bar): orthogonal, so it
+    // stays axis-aligned and must NOT get a transform — applying one shifted the
+    // fill off its track row.
+    { guid: { sessionID: 0, localID: 5 }, type: 'ROUNDED_RECTANGLE', name: 'fill',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'd' },
+      size: { x: 18, y: 2 }, transform: { m00: -1, m01: 0, m02: 30, m10: 0, m11: -1, m12: 3 } },
   ]});
   const frame = findFrame(scene, 'Knob');
   const { envelope } = materializeFrame(scene, frame, {
@@ -232,6 +238,14 @@ test('a rotated box-model layer carries its rotation, not just its origin', () =
   const ring = envelope.root.children.find((n) => n.name === 'ring');
   assert.ok(!ring.style.transform,
     'a VECTOR keeps its path-baked rotation and gets no second rotate()');
+
+  // An orthogonal (180deg) box-model rotation stays axis-aligned: plain
+  // placement, no transform, so a slider's rotated fill does not float off-row.
+  const fill = envelope.root.children.find((n) => n.name === 'fill');
+  assert.ok(!fill.style.transform,
+    'a 180deg (orthogonal) fill stays axis-aligned and gets no rotate()');
+  assert.equal(fill.style.left, 30, 'orthogonal fill keeps plain m02 placement');
+  assert.equal(fill.style.top, 3, 'orthogonal fill keeps plain m12 placement');
 });
 
 test('unterminated string throws instead of hanging', () => {
