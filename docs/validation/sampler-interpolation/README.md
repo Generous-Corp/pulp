@@ -1,7 +1,7 @@
 # Sampler interpolation CPU evidence
 
 **Status:** current verified Release capture for sampler source revision
-`e04d34749772af31f52c5fa2e0fe8907ca0cde9b`. The full verifier and its negative
+`35f8741d8885d524730173044c96f24081c04076`. The full verifier and its negative
 controls pass against the recorded source bundle and supplied benchmark binary.
 
 This directory holds durable Release measurements for the interpolation
