@@ -155,7 +155,7 @@ struct SkslPostEffect : ViewEffect {
     /// How the finished post-effect layer composites onto its parent.
     /// `BlendMode::lighter` = additive glow. Default source-over.
     Canvas::BlendMode blend_mode = Canvas::BlendMode::normal;
-    /// Max neighbour-sampling distance (px) for content.eval offsets.
+    /// Max neighbor-sampling distance (px) for content.eval offsets.
     float sample_radius = 0.0f;
 
     void configure_layer(Canvas& canvas, float x, float y, float w, float h) override {

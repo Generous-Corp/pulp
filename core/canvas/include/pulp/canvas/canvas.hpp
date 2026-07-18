@@ -1498,7 +1498,7 @@ public:
     ///
     /// `sample_radius` is the maximum distance (px) the shader may sample
     /// `content.eval()` away from the pixel being shaded — Skia needs this so a
-    /// shader that reads neighbouring texels (e.g. chromatic aberration's
+    /// shader that reads neighboring texels (e.g. chromatic aberration's
     /// per-channel offset) gets valid samples near the layer edge instead of
     /// transparent black. Leave 0 for shaders that only read the current pixel.
     ///
