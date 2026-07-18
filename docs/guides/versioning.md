@@ -118,7 +118,29 @@ Both also run in the pre-push `gates.sh`, so a violation is caught before the pu
 
 There is deliberately no bypass in CI other than the commit trailers. The audit trail lives in git, not in GitHub labels or PR-body text.
 
+## CI cadence — macOS is the product (2026-07-17)
+
+Pulp ships on macOS; other platforms are "know they don't break," not the
+product. So CI runs on a per-platform CADENCE, not per-branch: the macOS gate
++ macOS sanitizers + the required checks run on EVERY PR; heavy advisory /
+secondary-platform lanes (coverage, non-skia-build-guard, android,
+visual-harness, tracing-build, sandbox-e2e, install-consumer-smoke,
+pulp-react-build) moved OFF `pull_request` to `push: main` + nightly +
+`workflow_dispatch` — caught within one merge, not on every PR-update. This
+un-starves the GitHub-hosted ubuntu pool the release bot + version-skill run
+on. It is a reversible DIAL: ratchet a platform back up by restoring its
+`pull_request` trigger. See planning/fleet/2026-07-17-ci-destarve-analysis.md.
+
 ### fix/feat-needs-bump (issue #1009)
+
+> **Intent-trailer model is LIVE (2026-07-17):** on `pull_request` events the
+> workflow now runs `version_bump_check.py --accept-intent-trailers` (a SWAP of
+> the flag below, not an add — the two fail closed together). A release-worthy
+> PR DECLARES `Version-Bump: <surface>=<level>` and touches no version files;
+> the post-merge `version-at-land` bot assigns the number. A touched surface
+> with no bump/intent/skip still hard-fails, so coverage is unchanged. See
+> `docs/guides/version-at-land-cutover.md`. The historical file-bump behavior
+> below still describes what a file-bump satisfies.
 
 On `pull_request` events, the workflow additionally runs
 `version_bump_check.py --require-bump-for-fix-feat`. This asserts that

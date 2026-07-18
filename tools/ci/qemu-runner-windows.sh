@@ -26,10 +26,17 @@ RUNNER_GROUP_ID="${PULP_RUNNER_GROUP_ID:-1}"
 RUNNER_VERSION="${PULP_RUNNER_VERSION:-2.335.1}"
 WORKROOT="${TARTCI_WIN_WORK:-${TMPDIR:-/tmp}/tartci-win}"
 LOOP=0; POLL="${PULP_VM_POLL:-20}"
+BACKOFF_MAX="${PULP_VM_BACKOFF_MAX:-300}"  # ceiling for the post-failure backoff
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 -o IdentitiesOnly=yes -o BatchMode=yes)
 
 note(){ printf '\033[36m• %s\033[0m\n' "$*" >&2; }
+# `die` is for FATAL PRECONDITIONS only (bad args, missing qemu/gh, no golden or
+# firmware), all checked before the loop starts. Never reach it from run_one:
+# `exit` in a function kills the whole script and a caller's `|| true` cannot
+# catch it, so one transient failure would take the supervisor down with it. Use
+# `soft_fail` there — it returns 1 so the loop can count, back off, keep serving.
 die(){ printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+soft_fail(){ printf '\033[31m✗ %s\033[0m\n' "$*" >&2; return 1; }
 command -v qemu-system-aarch64 >/dev/null 2>&1 || die "qemu not installed"
 command -v gh >/dev/null 2>&1 || die "gh not installed / authed (need admin to mint JIT)"
 
@@ -60,8 +67,9 @@ run_one(){ # $1=iteration index
   for l in "${_ls[@]}"; do label_args+=(-f "labels[]=$l"); done
   jit="$(gh api -X POST "repos/$REPO/actions/runners/generate-jitconfig" \
         -f "name=$job" -F "runner_group_id=$RUNNER_GROUP_ID" "${label_args[@]}" \
-        --jq '.encoded_jit_config')" || die "JIT mint failed (need repo admin)"
-  [ -n "$jit" ] || die "empty JIT config"
+        --jq '.encoded_jit_config')" \
+    || { soft_fail "[$i] JIT mint failed (transient API error, or gh lacks repo admin)"; return 1; }
+  [ -n "$jit" ] || { soft_fail "[$i] empty JIT config"; return 1; }
 
   local port jobdir overlay efivars qpid
   port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
@@ -69,8 +77,14 @@ run_one(){ # $1=iteration index
   overlay="$jobdir/overlay.qcow2"; efivars="$jobdir/efivars.fd"
 
   note "[$i] CoW overlay off $(basename "$GOLDEN") + boot (ssh 127.0.0.1:$port)"
-  qemu-img create -f qcow2 -b "$GOLDEN" -F qcow2 "$overlay" >/dev/null
-  cp "$VARS_TPL" "$efivars"
+  # Explicit checks, not errexit: run_one is invoked from the loop in a context
+  # that suppresses `set -e` for its whole body. Unchecked, a failed overlay/vars
+  # setup would boot QEMU against nothing and only surface ~10min later as "no
+  # SSH", masking the real cause.
+  qemu-img create -f qcow2 -b "$GOLDEN" -F qcow2 "$overlay" >/dev/null \
+    || { soft_fail "[$i] qemu-img overlay create failed off $(basename "$GOLDEN")"; rm -rf "$jobdir"; return 1; }
+  cp "$VARS_TPL" "$efivars" \
+    || { soft_fail "[$i] efivars copy failed"; rm -rf "$jobdir"; return 1; }
   qemu-system-aarch64 -name "$job" -accel hvf -machine virt,highmem=on -cpu host -smp 8 -m 8192 \
     -drive if=pflash,format=raw,readonly=on,file="$FW" -drive if=pflash,format=raw,file="$efivars" \
     -device ramfb -device qemu-xhci,id=usb -device usb-kbd -device usb-tablet \
@@ -147,13 +161,34 @@ exit $LASTEXITCODE' | iconv -t UTF-16LE | base64)"
   kill "$qpid" 2>/dev/null || true; sleep 1; rm -rf "$jobdir"
 }
 
+# Exponential backoff for CONSECUTIVE failed iterations, capped at BACKOFF_MAX:
+# POLL, 2*POLL, 4*POLL, … A tight retry against a rate-limited API or a wedged
+# host is its own outage, but a supervisor that stops retrying is a worse one.
+backoff_secs(){ # $1=consecutive failure count (>=1)
+  local n="$1" s="$POLL"
+  while [ "$n" -gt 1 ]; do
+    s=$((s * 2)); n=$((n - 1))
+    [ "$s" -ge "$BACKOFF_MAX" ] && { s="$BACKOFF_MAX"; break; }
+  done
+  printf '%s' "$s"
+}
+
 i=0
+fails=0
 if [ "$LOOP" = 1 ]; then
   note "ephemeral Windows runner LOOP (Ctrl-C to stop); golden=$(basename "$GOLDEN") labels=$LABELS"
   while true; do
     q="$(queued_bat_work)"
     if [ "${q:-0}" -gt 0 ]; then
-      i=$((i+1)); note "[$i] queued=$q → booting ephemeral Windows VM"; run_one "$i" || true
+      i=$((i+1)); note "[$i] queued=$q → booting ephemeral Windows VM"
+      if run_one "$i"; then
+        fails=0
+      else
+        fails=$((fails + 1))
+        b="$(backoff_secs "$fails")"
+        note "[$i] iteration failed (consecutive=$fails) — backing off ${b}s, then continuing"
+        sleep "$b"
+      fi
     else
       note "waiting ${POLL}s (queued=$q — no Build-and-Test work)"; sleep "$POLL"
     fi

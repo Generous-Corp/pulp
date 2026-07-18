@@ -186,6 +186,7 @@ set(_PULP_WEBUI_CANVAS_SOURCES
 # authoring, NO window hosts other than the browser one below.
 set(_PULP_WEBUI_VIEW_SOURCES
     ${_PULP_WEBUI_ROOT}/core/view/src/view.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/value_source_binding.cpp
     # The text editor was split into several TUs; the wasm build needs the same set the
     # native build compiles (core/view/CMakeLists.txt), because a Label can open the editor's
     # default context menu (label.cpp → TextEditor::show_default_context_menu) and that pulls
@@ -256,6 +257,18 @@ set(_PULP_WEBUI_RENDER_SOURCES
 # with. No EventLoop, no Timer, no threads.
 set(_PULP_WEBUI_EVENTS_SOURCES
     ${_PULP_WEBUI_ROOT}/core/events/src/main_thread_dispatcher.cpp
+    # StateStore::set_main_loop makes store.cpp emit a call to EventLoop::dispatch, so the
+    # store needs the event loop compiled in.
+    ${_PULP_WEBUI_ROOT}/core/events/src/event_loop.cpp
+)
+
+# The parameter StateStore. The REAL plugin editor (not the generated grid) reads its params
+# from a live StateStore the web host owns and the JS side syncs — so this build needs the
+# store itself, NOT the DSP that usually owns it. store.cpp pulls state_migration.cpp in for
+# the schema-version table it holds by value.
+set(_PULP_WEBUI_STATE_SOURCES
+    ${_PULP_WEBUI_ROOT}/core/state/src/store.cpp
+    ${_PULP_WEBUI_ROOT}/core/state/src/state_migration.cpp
 )
 
 # The browser WindowHost (canvas input events -> View tree, GL surface -> paint).
@@ -272,6 +285,7 @@ list(APPEND _PULP_WEBUI_PLATFORM_SOURCES
 set(_PULP_WEBUI_ALL_SOURCES
     ${_PULP_WEBUI_RUNTIME_SOURCES}
     ${_PULP_WEBUI_EVENTS_SOURCES}
+    ${_PULP_WEBUI_STATE_SOURCES}
     ${_PULP_WEBUI_CANVAS_SOURCES}
     ${_PULP_WEBUI_VIEW_SOURCES}
     ${_PULP_WEBUI_RENDER_SOURCES}
@@ -331,7 +345,15 @@ function(pulp_add_web_ui NAME)
         PULP_HAS_SKIA=1
         PULP_HAS_TEXT_SHAPING=1
         PULP_HAS_YOGA=1
-        PULP_ENABLE_JS=0)
+        PULP_ENABLE_JS=0
+        # This build compiles AND arms the rAF RenderLoop (render_loop.cpp +
+        # render_loop_emscripten.cpp above; window_host_web starts it). Without this macro,
+        # WindowHost::schedule_repaint() cannot see the loop and falls back to a SYNCHRONOUS
+        # repaint() — so a view that calls request_repaint() during paint (any continuously
+        # animating editor, e.g. SuperConvolver's living field) re-enters paint immediately
+        # and recurses until the JS stack overflows. Native defines this on pulp-view-core;
+        # the hand-listed wasm build must define it too.
+        PULP_VIEW_HAS_RENDER_LOOP=1)
     # NOTE: SK_TRIVIAL_ABI=[[clang::trivial_abi]] is REQUIRED against the wasm
     # Skia slice (it is built with gn `is_trivial_abi = true`; without the macro
     # wasm-ld silently links a trapping stub for every cross-boundary sk_sp

@@ -223,23 +223,10 @@ reload_signing_key_from_keychain(const std::string& plugin_id) {
 #endif
 }
 
-int cmd_ship(const std::vector<std::string>& args) {
-    // Parse subcommand
-    std::string sub = args.empty() ? "help" : args[0];
-    if (sub == "help" || sub == "--help" || sub == "-h")
-        return print_ship_help();
 
-    auto root = find_project_root();
-    if (root.empty()) {
-        std::cerr << "Error: not in a Pulp project directory\n";
-        return 1;
-    }
-
-    // ── doctor: ensure non-interactive signing + notarization readiness ───────
-    // Runs the self-healing keychain/.p8 doctor. Independent of a build dir, so
-    // it is handled before the build-dir check below. Flags (--check-online,
-    // --print-env, --quiet) pass straight through.
-    if (sub == "doctor") {
+static int ship_doctor(const std::vector<std::string>& args,
+                       const fs::path& root) {
+    const std::string sub = "doctor";
         auto script = signing_doctor_script(root);
         if (!fs::exists(script)) {
             std::cerr << "pulp ship doctor: missing " << script.string() << "\n";
@@ -249,17 +236,12 @@ int cmd_ship(const std::vector<std::string>& args) {
         for (size_t i = 1; i < args.size(); ++i)
             cmd += " " + shell_quote(args[i]);
         return run(cmd);
-    }
-
-    auto build_dir = root / "build";
-    // swap-pack signs a UX bundle passed explicitly; it needs no configured build.
-    if (sub != "swap-pack" && !fs::exists(build_dir / "CMakeCache.txt")) {
-        std::cerr << "Build directory not found. Run `pulp build` first.\n";
-        return 1;
-    }
+}
 
     // ── sign ────────────────────────────────────────────────────────────────
-    if (sub == "sign") {
+static int ship_sign(const std::vector<std::string>& args,
+                       const fs::path& root, const fs::path& build_dir) {
+    const std::string sub = "sign";
         run_signing_preflight(root);  // self-heal the dedicated keychain (no prompt)
         std::string identity, target, keystore_path, key_alias, store_pass, key_pass;
         std::string sign_path;  // --path: sign one explicit desktop artifact (not .pkg)
@@ -424,10 +406,12 @@ int cmd_ship(const std::vector<std::string>& args) {
         else
             std::cout << "Signed " << signed_count << " bundles.\n";
         return signed_count > 0 ? 0 : 1;
-    }
+}
 
     // ── package ─────────────────────────────────────────────────────────────
-    if (sub == "package") {
+static int ship_package(const std::vector<std::string>& args,
+                       const fs::path& root, const fs::path& build_dir) {
+    const std::string sub = "package";
         auto artifacts = root / "artifacts";
         fs::create_directories(artifacts);
 
@@ -832,10 +816,12 @@ int cmd_ship(const std::vector<std::string>& args) {
         return 1;
 #endif  // __APPLE__
 #endif  // _WIN32 else
-    }
+}
 
     // ── check ───────────────────────────────────────────────────────────────
-    if (sub == "check") {
+static int ship_check(const std::vector<std::string>& args,
+                       const fs::path& root, const fs::path& build_dir) {
+    const std::string sub = "check";
         std::string target;
         for (size_t i = 1; i < args.size(); ++i)
             if (args[i] == "--target") {
@@ -884,7 +870,7 @@ int cmd_ship(const std::vector<std::string>& args) {
             }
         }
         return 0;
-    }
+}
 
     // ── notarize ────────────────────────────────────────────────────────────
     //
@@ -912,7 +898,9 @@ int cmd_ship(const std::vector<std::string>& args) {
     // `--dry-run` short-circuits before invoking notarytool and prints
     // the resolved command line so the user (or our shell-out test) can
     // verify the flags without touching Apple's servers.
-    if (sub == "notarize") {
+static int ship_notarize(const std::vector<std::string>& args,
+                       const fs::path& root, const fs::path& build_dir) {
+    const std::string sub = "notarize";
 #ifndef __APPLE__
         std::cerr << "Notarization is only available on macOS.\n";
         return 1;
@@ -1123,7 +1111,7 @@ int cmd_ship(const std::vector<std::string>& args) {
         std::cout << "Notarized " << success_count << "/" << bundles.size() << " bundles.\n";
         return success_count == static_cast<int>(bundles.size()) ? 0 : 1;
 #endif
-    }
+}
 
     // ── release (sign → package → notarize → staple, one command) ──────────
     //
@@ -1145,7 +1133,9 @@ int cmd_ship(const std::vector<std::string>& args) {
     // `signing.apple.*` config is set), the pipeline runs sign+package
     // only and exits cleanly so CI can still exercise the orchestration
     // without notarytool round-trips.
-    if (sub == "release") {
+static int ship_release(const std::vector<std::string>& args,
+                       const fs::path& root, const fs::path& build_dir) {
+    const std::string sub = "release";
         std::string target = "macos";
         std::string identity, apple_id, team_id, password, version;
         std::string api_key, api_key_id, api_issuer, installer_identity;
@@ -1377,7 +1367,7 @@ int cmd_ship(const std::vector<std::string>& args) {
         std::cout << "\npulp ship release: macOS pipeline complete.\n";
         return 0;
 #endif
-    }
+}
 
     // ── auv3-xcodeproj (one-click Xcode flow) ───────────────────────────────
     //
@@ -1400,7 +1390,9 @@ int cmd_ship(const std::vector<std::string>& args) {
     // generation requires Xcode and the matching iOS SDK to be installed.
     // `--dry-run` still exits 0 before those checks so CI / sandboxed
     // environments can exercise the wrapper without a real Xcode install.
-    if (sub == "auv3-xcodeproj") {
+static int ship_auv3_xcodeproj(const std::vector<std::string>& args,
+                       const fs::path& root, const fs::path& build_dir) {
+    const std::string sub = "auv3-xcodeproj";
 #ifndef __APPLE__
         std::cerr << "pulp ship auv3-xcodeproj: macOS-only (requires Xcode + iOS SDKs).\n";
         return 1;
@@ -1574,10 +1566,12 @@ int cmd_ship(const std::vector<std::string>& args) {
         }
         return 0;
 #endif
-    }
+}
 
     // ── appcast ─────────────────────────────────────────────────────────────
-    if (sub == "appcast") {
+static int ship_appcast(const std::vector<std::string>& args,
+                       const fs::path& root, const fs::path& build_dir) {
+    const std::string sub = "appcast";
         std::string version, notes, url, download_url, output_path, title, sign_key, min_os;
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--version") {
@@ -1671,7 +1665,7 @@ int cmd_ship(const std::vector<std::string>& args) {
         out << feed.to_xml();
         std::cout << "Appcast written to " << output_path << " (" << feed.items.size() << " items)\n";
         return 0;
-    }
+}
 
     // ── share ─────────────────────────────────────────────────────────────
     //
@@ -1690,7 +1684,9 @@ int cmd_ship(const std::vector<std::string>& args) {
     // The final `spctl` is the exact check a downloader's Gatekeeper runs, so
     // a green result here means the friend will not see "Unnotarized
     // Developer ID". `--dry-run` prints the plan without touching anything.
-    if (sub == "share") {
+static int ship_share(const std::vector<std::string>& args,
+                       const fs::path& root, const fs::path& build_dir) {
+    const std::string sub = "share";
 #ifndef __APPLE__
         std::cerr << "pulp ship share: macOS-only (codesign + notarization + DMG).\n";
         return 1;
@@ -1859,10 +1855,12 @@ int cmd_ship(const std::vector<std::string>& args) {
                   << " — inspect the spctl output above.\n";
         return 1;
 #endif
-    }
+}
 
     // ── swap-pack: sign a hot-reload UX bundle ────────────────────────────────
-    if (sub == "swap-pack") {
+static int ship_swap_pack(const std::vector<std::string>& args,
+                       const fs::path& root, const fs::path& build_dir) {
+    const std::string sub = "swap-pack";
         namespace reload = pulp::format::reload;
         std::string bundle, plugin_id, channel, out, sign_key, repo;
         std::uint64_t pack_version = 1;
@@ -2011,7 +2009,43 @@ int cmd_ship(const std::vector<std::string>& args) {
                       << "\n";
         }
         return 0;
+}
+
+int cmd_ship(const std::vector<std::string>& args) {
+    // Parse subcommand
+    std::string sub = args.empty() ? "help" : args[0];
+    if (sub == "help" || sub == "--help" || sub == "-h")
+        return print_ship_help();
+
+    auto root = find_project_root();
+    if (root.empty()) {
+        std::cerr << "Error: not in a Pulp project directory\n";
+        return 1;
     }
+
+    // ── doctor: ensure non-interactive signing + notarization readiness ───────
+    // Runs the self-healing keychain/.p8 doctor. Independent of a build dir, so
+    // it is handled before the build-dir check below. Flags (--check-online,
+    // --print-env, --quiet) pass straight through.
+    if (sub == "doctor")
+        return ship_doctor(args, root);
+
+    auto build_dir = root / "build";
+    // swap-pack signs a UX bundle passed explicitly; it needs no configured build.
+    if (sub != "swap-pack" && !fs::exists(build_dir / "CMakeCache.txt")) {
+        std::cerr << "Build directory not found. Run `pulp build` first.\n";
+        return 1;
+    }
+
+    if (sub == "sign")           return ship_sign(args, root, build_dir);
+    if (sub == "package")        return ship_package(args, root, build_dir);
+    if (sub == "check")          return ship_check(args, root, build_dir);
+    if (sub == "notarize")       return ship_notarize(args, root, build_dir);
+    if (sub == "release")        return ship_release(args, root, build_dir);
+    if (sub == "auv3-xcodeproj") return ship_auv3_xcodeproj(args, root, build_dir);
+    if (sub == "appcast")        return ship_appcast(args, root, build_dir);
+    if (sub == "share")          return ship_share(args, root, build_dir);
+    if (sub == "swap-pack")      return ship_swap_pack(args, root, build_dir);
 
     std::cerr << "pulp ship: unknown subcommand: " << sub << "\n";
     return 2;

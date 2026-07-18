@@ -37,6 +37,16 @@
     },
     {
       "paths": [
+        "tools/scripts/runner_topology.json",
+        ".github/workflows/runner-topology-check.yml"
+      ],
+      "docs": [
+        "docs/guides/local-ci.md"
+      ],
+      "why": "The routing contract IS the documented lane->label topology; local-ci.md was already drifted from the live variables (it described the macOS overflow lane as pointing at a label the variable had not named for months) precisely because the two could move independently. Changing a lane without updating the guide re-opens that gap."
+    },
+    {
+      "paths": [
         ".github/workflows/auto-release.yml",
         ".github/workflows/auto-release-watchdog.yml",
         ".github/workflows/release-cadence-check.yml"
@@ -58,6 +68,16 @@
     },
     {
       "paths": [
+        ".github/workflows/merge-stall-check.yml",
+        "tools/scripts/merge_stall_watchdog.py"
+      ],
+      "docs": [
+        "docs/guides/local-ci.md"
+      ],
+      "why": "The off-fleet merge-stall watchdog's alarm predicate (required-green + CLEAN/BEHIND + auto-merge + age, sustained two sweeps) and its threshold are documented in local-ci.md as the operator-facing account of when CI pages on 'green PRs are not merging'. Retuning the guard without a doc edit drifts that account, and a monitor whose documented behavior is wrong gets muted."
+    },
+    {
+      "paths": [
         ".github/workflows/version-skill-check.yml",
         ".github/workflows/coverage.yml"
       ],
@@ -65,6 +85,15 @@
         "docs/guides/versioning.md"
       ],
       "why": "The authoritative version/skill/coverage gate workflows are described by the versioning guide; changing the enforced gates without a doc edit drifts the documented enforcement layer."
+    },
+    {
+      "paths": [
+        ".github/workflows/version-at-land.yml"
+      ],
+      "docs": [
+        "docs/guides/version-at-land-cutover.md"
+      ],
+      "why": "The single-writer post-merge version-assignment bot is documented by the cutover guide, including the dry-run→--push flip and the one-time straggler rule; changing the workflow (especially the flip off dry-run) without a doc edit drifts the release-critical cutover procedure."
     }
   ]
 }

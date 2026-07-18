@@ -164,24 +164,14 @@ extern "C" int pulp_gpu_xfer(const float* in_planar, float* out_planar, int fram
 
 namespace pulp::view { class View; }
 
+// The parameter ids, the spectrum bus and GpuStatus, plus the editor's host interface, now
+// live in super_convolver_ui_host.hpp — so the EDITOR can be built without this header (its
+// DSP), which is what lets the same editor run natively and on the web. This processor both
+// owns the DSP and IS a SuperConvolverUiHost (its four host calls are exactly these members),
+// so implementing the interface costs nothing and keeps one editor for both worlds.
+#include "super_convolver_ui_host.hpp"
+
 namespace pulp::examples {
-
-enum SuperConvolverParams : state::ParamID {
-    kMix     = 1,  // dry/wet, %
-    kSize    = 2,  // IR length, seconds
-    kGain    = 3,  // output gain, dB
-    kBypass  = 4,
-    kEngine  = 5,  // 0 = CPU (default), 1 = GPU
-    kRooms   = 6,  // GPU multi-room reverb: # of distinct IRs in one GPU batch
-    kFlow    = 7,  // 0 = static field; >0 = per-block moving pans (living field)
-    kGpuOnly = 8,  // web GPU engine: 0 = CPU safety net (default), 1 = no net
-};
-
-// Live wet-output magnitude spectrum (dB), published lock-free from the audio
-// thread to the GPU UI's frequency display. 256 log-ready bins.
-inline constexpr int kSpectrumBins = 256;
-using SpectrumFrame = std::array<float, kSpectrumBins>;
-using SpectrumBus = pulp::runtime::TripleBuffer<SpectrumFrame>;
 
 /// Normalize `ir` so its maximum magnitude frequency response (max_f |H(f)|) is
 /// `target` — i.e. 0 dB of steady-state gain at `target == 1`. This BOUNDS the
@@ -328,7 +318,7 @@ inline std::vector<float> window_ir_to_length(const std::vector<float>& ir,
     return out;
 }
 
-class SuperConvolverProcessor : public format::Processor {
+class SuperConvolverProcessor : public format::Processor, public SuperConvolverUiHost {
 public:
     // Fixed convolver block. Independent of the host's block size; the
     // re-blocking FIFO chunks the host stream into this. Power of two for the
@@ -361,6 +351,16 @@ public:
     // pass the same value as `gpuLatencyBlocks` in the worklet's processorOptions:
     // it is one contract, expressed in two languages.
     static constexpr std::size_t kWebGpuLatencyBlocks = 2;
+
+    // Ceiling for the adaptive/live pipeline depth (set_web_gpu_latency_blocks).
+    // The web delay rings are physically sized to THIS depth once, in prepare(), so
+    // a live depth change only moves the read tap WITHIN the pre-sized buffer — no
+    // reallocation, so nothing the audio thread is reading is ever resized out from
+    // under it. The worklet serializes process() with the non-RT export tick that
+    // sets the depth, so no atomics are needed; the fixed max buffer is what keeps
+    // every access in-bounds through the change. 12 blocks ≈ 128 ms at 48 kHz — well
+    // past any depth the round-trip telemetry would pick.
+    static constexpr std::size_t kMaxWebGpuLatencyBlocks = 12;
 
     // Hard cap on a loaded IR's length (at the session rate). A multi-minute
     // file would otherwise drive an unbounded decode + resample + GPU FFT; we
@@ -478,16 +478,26 @@ public:
                              .range = {0.0f, 1.0f, 0.0f, 1.0f},
                              .kind = state::ParamKind::Toggle,
                              .value_labels = {"Off", "On"}});
+        // Rooms and Flow drive the living field — the editor reads them to set how
+        // DENSE the field is (Rooms → emitter count) and how much it MOVES (Flow).
+        // Both are declared on the web GPU variant so the editor shows the same five
+        // controls as the native editor (Mix / Size / Gain / Rooms / Flow) and the
+        // field responds to them. The audio side of Rooms/Flow — the batched
+        // multi-room moving-pan reverb — stays native-only (the whole GpuMultiConvolver
+        // stack is `#if !defined(PULP_WASM)`); on the web these two steer the field
+        // VISUALIZATION, which is exactly what that field IS. Rooms>20 flips the engine
+        // to GPU, mirroring the native "past the CPU's room cap → GPU" behavior.
+        store.add_parameter({.id = kRooms, .name = "Rooms", .unit = "",
+                             .range = {1.0f, 128.0f, 16.0f, 1.0f}});
+        store.add_parameter({.id = kFlow, .name = "Flow", .unit = "%",
+                             .range = {0.0f, 100.0f, 0.0f, 0.1f}});
 #endif
 
-        // Rooms/Flow are deliberately NOT offered on the web GPU lane.
-        // GpuMultiConvolver runs MissPolicy::Silence with no CPU net, so a
-        // throttled background tab would simply drop out with nothing to cover it;
-        // and its batched multi-IR spectra are the op most likely to exceed a
-        // browser's storage-buffer binding limit. The WAM lane gets no GPU engine
-        // at all for a different reason: it is served from GitHub Pages, which
-        // cannot set COOP/COEP, so SharedArrayBuffer — the only way an
-        // AudioWorklet can reach a WebGPU worker — throws there.
+        // The WAM lane gets no GPU engine at all: it is served from GitHub Pages,
+        // which cannot set COOP/COEP, so SharedArrayBuffer — the only way an
+        // AudioWorklet can reach a WebGPU worker — throws there. That lane declares
+        // only Mix/Size/Gain (see the shared block above), so its editor shows three
+        // sliders and no engine chip.
     }
 
     // Total latency, FIXED at prepare() for the prepared lifetime: the re-block
@@ -561,18 +571,9 @@ public:
     /// measured average cost as a percentage of that budget — so 100 − rt_percent
     /// is the headroom left (roughly how much more work, e.g. more rooms, the GPU
     /// could still take in real time). UI/main-thread only.
-    struct GpuStatus {
-        bool active = false;
-        std::string backend;
-        int rooms = 0;
-        bool multi = false;
-        std::uint64_t blocks = 0;
-        std::uint64_t misses = 0;
-        double avg_us = 0.0;      // EWMA wall-clock per block (round-trip included)
-        double budget_us = 0.0;   // real-time budget for one GPU block here
-        double rt_percent = 0.0;  // avg_us / budget_us * 100 (lower = more headroom)
-    };
-    GpuStatus gpu_status() const {
+    // GpuStatus is declared in super_convolver_ui_host.hpp (same namespace) so the editor's
+    // host interface can name it without pulling in the DSP.
+    GpuStatus gpu_status() const override {
         std::lock_guard<std::mutex> lock(stack_mutex_);
         GpuStatus g;
         g.active = gpu_engine_active();
@@ -615,12 +616,43 @@ public:
 
 #endif
 
+#if defined(PULP_WASM)
+    // gpu_status() satisfies SuperConvolverUiHost in the wasm build. The browser GPU engine's
+    // live counters live in the DedicatedWorker and the SharedArrayBuffer, NOT in this
+    // processor — so it answers honestly with an inactive status rather than inventing
+    // numbers. The PAGE reads the real GPU status out of the SAB and drives the editor.
+    GpuStatus gpu_status() const override { return {}; }
+#endif
+
     /// Disable the background rebuild worker. A host with no thread facility (a
     /// wasm build; also the lane the native tests use to reproduce it) must then
     /// pump service_ir_rebuild() itself from a non-RT control thread. Call before
     /// prepare(); under PULP_WASM the worker does not exist and this is already
     /// the only mode.
     void set_background_worker_enabled(bool enabled) { worker_enabled_ = enabled; }
+
+    /// The browser GPU round-trip pipeline depth, in internal blocks — how many
+    /// blocks of latency the plugin budgets for the GPU worker's async submit →
+    /// readback round trip. It sets the CPU-net delay (gpu_extra_) and the dry delay
+    /// so a missed GPU block is covered sample-for-sample, and MUST match the JS
+    /// side's `latencyBlocks` (deadline budget + ring) — the two move together or the
+    /// CPU net stops being interchangeable with the GPU wet.
+    ///
+    /// It can be called LIVE (after prepare()), on the worklet's non-RT tick like the
+    /// pulp_ir_* exports: the rings are physically sized to kMaxWebGpuLatencyBlocks
+    /// once in prepare(), so a change only moves the read tap within them — no
+    /// reallocation. Clamped to [1, kMaxWebGpuLatencyBlocks]. A live change re-syncs
+    /// against the transport over a few blocks (a one-time settle, self-healing via
+    /// the ring's per-block index), so the controller debounces before calling this.
+    /// This is the runtime knob the adaptive/per-device depth logic drives — see
+    /// planning/2026-07-16-adaptive-gpu-pipeline-depth.md.
+    void set_web_gpu_latency_blocks(std::size_t blocks) {
+        if (blocks == 0) blocks = 1;
+        if (blocks > kMaxWebGpuLatencyBlocks) blocks = kMaxWebGpuLatencyBlocks;
+        web_gpu_latency_blocks_ = blocks;
+        apply_web_gpu_latency();
+    }
+    std::size_t web_gpu_latency_blocks() const { return web_gpu_latency_blocks_; }
 
     /// One pass of the off-audio-thread IR/engine reconciliation: rebuild the base
     /// IR when its source or Size changed, stage it for the audio thread through
@@ -873,7 +905,7 @@ public:
         // and the module cannot ask it. It is applied to BOTH engines through the
         // existing cpu_extra_ring_, so flipping Engine never moves the reported
         // latency (which would jump the host's PDC mid-stream).
-        gpu_extra_ = kWebGpuLatencyBlocks * kInternalBlock;
+        gpu_extra_ = web_gpu_latency_blocks_ * kInternalBlock;
         for (std::size_t ch = 0; ch < kChannels; ++ch)
             cpu_wet_[ch].assign(kInternalBlock, 0.0f);
         xfer_in_.assign(kChannels * kInternalBlock, 0.0f);
@@ -889,11 +921,23 @@ public:
         // engine can switch live without the reported latency moving. When no GPU
         // device exists gpu_extra_ == 0 and the latency is just kInternalBlock.
         latency_samples_ = static_cast<int>(kInternalBlock + gpu_extra_);
-        const std::size_t dry_delay = static_cast<std::size_t>(latency_samples_);
+        dry_delay_ = static_cast<std::size_t>(latency_samples_);
+#if defined(PULP_SC_WEB_GPU)
+        // Physically size the web delay rings to the MAX pipeline depth, ONCE. A live
+        // set_web_gpu_latency_blocks() then only moves the effective tap (dry_delay_ /
+        // gpu_extra_ stay <= physical), so the audio thread never has a buffer resized
+        // out from under it — the whole reason adaptive depth is glitch-free here.
+        const std::size_t dry_phys =
+            kInternalBlock + kMaxWebGpuLatencyBlocks * kInternalBlock;
+        const std::size_t cpu_phys = kMaxWebGpuLatencyBlocks * kInternalBlock;
+#else
+        const std::size_t dry_phys = dry_delay_;
+        const std::size_t cpu_phys = gpu_extra_;
+#endif
         for (std::size_t ch = 0; ch < kChannels; ++ch) {
-            dry_ring_[ch].assign(dry_delay, 0.0f);
+            dry_ring_[ch].assign(dry_phys, 0.0f);
             dry_pos_[ch] = 0;
-            cpu_extra_ring_[ch].assign(gpu_extra_, 0.0f);
+            cpu_extra_ring_[ch].assign(cpu_phys, 0.0f);
             cpu_extra_pos_[ch] = 0;
         }
 
@@ -935,7 +979,7 @@ public:
 
     /// A snapshot of the current impulse response for the GPU UI waveform /
     /// spectrogram. UI-thread only — never call from the audio thread.
-    std::vector<float> impulse_response_snapshot() const {
+    std::vector<float> impulse_response_snapshot() const override {
         std::lock_guard<std::mutex> lock(ir_display_mutex_);
         return ir_display_;
     }
@@ -971,7 +1015,7 @@ public:
     /// or was missing and has since appeared). Always bumps the generation so
     /// the IR rebuilds. Main/UI thread only. Use this for explicit user
     /// "Load IR" actions; set_ir_path() (dedup) is for state restore.
-    void load_ir_path(std::string path) {
+    void load_ir_path(std::string path) override {
         {
             std::lock_guard<std::mutex> lock(ir_path_mutex_);
             active_ir_path_ = std::move(path);
@@ -1070,7 +1114,7 @@ public:
 
     /// The current IR source path ("" when using PCM or a built-in IR).
     /// UI/main-thread only (takes a mutex).
-    std::string ir_path() const {
+    std::string ir_path() const override {
         std::lock_guard<std::mutex> lock(ir_path_mutex_);
         return active_ir_path_;
     }
@@ -1352,7 +1396,9 @@ public:
                 ch < input.num_channels() ? input.channel(ch).data() : nullptr;
             float* out = output.channel(ch).data();
             const std::size_t avail = out_len_[ch];
-            const std::size_t delay = dry_ring_[ch].size();
+            // Effective delay (<= the physical ring, which is pre-sized to the max
+            // depth on web); the swap-loop below only touches slots [0, delay).
+            const std::size_t delay = dry_delay_;
             // Every channel walks the SAME ramp, so it starts from the block-entry value
             // rather than from wherever the previous channel left off.
             float mix = mix_z_, gain = gain_z_;
@@ -1479,6 +1525,25 @@ private:
                 out_len_[ch] += kInternalBlock;
             }
         }
+    }
+
+    // Retarget the web CPU-net + dry delays to the current web_gpu_latency_blocks_
+    // without reallocating: the rings are physically sized to kMaxWebGpuLatencyBlocks
+    // in prepare(), so this only moves the effective tap. A no-op until prepared (the
+    // rings are still empty) — prepare() will pick up the stored block count. Positions
+    // are wrapped into the new active window so the swap-loops stay in [0, delay). Runs
+    // on the worklet's non-RT tick, serialized with process(), so no atomics needed.
+    void apply_web_gpu_latency() {
+#if defined(PULP_SC_WEB_GPU)
+        if (dry_ring_[0].empty()) return;  // not prepared yet
+        gpu_extra_ = web_gpu_latency_blocks_ * kInternalBlock;
+        dry_delay_ = kInternalBlock + gpu_extra_;
+        latency_samples_ = static_cast<int>(dry_delay_);
+        for (std::size_t ch = 0; ch < kChannels; ++ch) {
+            dry_pos_[ch] = dry_delay_ ? dry_pos_[ch] % dry_delay_ : 0;
+            cpu_extra_pos_[ch] = gpu_extra_ ? cpu_extra_pos_[ch] % gpu_extra_ : 0;
+        }
+#endif
     }
 
     // Push one internal block of CPU wet through the per-channel extra-delay ring
@@ -2187,6 +2252,10 @@ private:
     std::array<std::size_t, kChannels> out_len_{};
     std::array<std::vector<float>, kChannels> dry_ring_{};   // dry delay (total latency)
     std::array<std::size_t, kChannels> dry_pos_{};
+    // Effective dry delay in samples (kInternalBlock + gpu_extra_). On web the ring
+    // above is physically sized to the max depth and this is the live tap; on native
+    // it equals the ring size. Read every process() block.
+    std::size_t dry_delay_ = 0;
     // Per-channel extra delay applied to the CPU wet so it lines up with the GPU
     // wet at the same fixed reported latency (length gpu_extra_; empty when no GPU
     // device exists). Audio thread only.
@@ -2233,6 +2302,9 @@ private:
     std::atomic<std::uint64_t> web_gpu_misses_{0};   // blocks the worker missed
 #endif
     std::size_t gpu_extra_ = 0;                     // GPU transport latency, samples (fixed)
+    // Runtime pipeline depth (blocks) → gpu_extra_ at prepare(). Default is the
+    // historical compile-time constant; the adaptive depth logic sets it per device.
+    std::size_t web_gpu_latency_blocks_ = kWebGpuLatencyBlocks;
     int latency_samples_ = static_cast<int>(kInternalBlock);
 
     // Off-audio-thread rebuild + live-engine state. The worker exists only where a

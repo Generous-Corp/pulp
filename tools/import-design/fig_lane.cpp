@@ -1,11 +1,13 @@
 #include "fig_lane.hpp"
 
+#include "envelope_merge.hpp"
+
 #include <pulp/platform/child_process.hpp>
 
-#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -88,15 +90,6 @@ DecodeResult run_decode(const std::vector<std::string>& args, std::string* stdou
     return {result.exit_code, truncated};
 }
 
-// A per-run, hard-to-predict scratch directory. The monotonic tick keeps two
-// concurrent imports of the same file from colliding and stops a local attacker
-// from pre-planting a symlink at a guessable path that node's write would follow.
-fs::path make_scratch_dir(const std::string& input_file) {
-    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-    return fs::temp_directory_path()
-           / ("pulp-fig-" + fs::path(input_file).stem().string() + "-" + std::to_string(tick));
-}
-
 }  // namespace
 
 std::optional<int> handle(const LaneArgs& args) {
@@ -127,13 +120,13 @@ std::optional<int> handle(const LaneArgs& args) {
         return r.exit_code == 0 ? 0 : (r.exit_code == 2 ? 2 : 3);
     }
 
-    if (args.frame_name.empty()) {
+    if (args.frame_names.empty()) {
         std::cerr << "Error: --from fig requires --frame <guid|name>; "
                      "run with --outline to list frames\n";
         return 1;
     }
 
-    const fs::path scratch = make_scratch_dir(args.input_file);
+    const fs::path scratch = make_scratch_dir("fig", args.input_file);
     std::error_code ec;
     fs::create_directories(scratch, ec);
     if (ec) {
@@ -143,19 +136,64 @@ std::optional<int> handle(const LaneArgs& args) {
     }
     if (args.created_tmp_dir) *args.created_tmp_dir = scratch.string();
 
-    std::vector<std::string> decode_args{"emit", args.input_file, "--frame",
-                                         args.frame_name, "--out", scratch.string()};
-    if (!args.page_name.empty()) {
-        decode_args.push_back("--page");
-        decode_args.push_back(args.page_name);
-    }
-    const auto r = run_decode(decode_args, nullptr);
-    if (r.exit_code != 0) {
-        std::cerr << "Error: .fig decode failed for frame '" << args.frame_name << "'\n";
-        return r.exit_code == 2 ? 2 : 3;
+    auto decode_frame = [&](const std::string& frame, const fs::path& out) -> std::optional<int> {
+        std::vector<std::string> decode_args{"emit", args.input_file, "--frame",
+                                             frame, "--out", out.string()};
+        if (!args.page_name.empty()) {
+            decode_args.push_back("--page");
+            decode_args.push_back(args.page_name);
+        }
+        const auto r = run_decode(decode_args, nullptr);
+        if (r.exit_code != 0) {
+            std::cerr << "Error: .fig decode failed for frame '" << frame << "'\n";
+            return r.exit_code == 2 ? 2 : 3;
+        }
+        return std::nullopt;
+    };
+
+    // geometry.json is the decoder's solved rect for the PRIMARY frame — the
+    // one the merged envelope's root is built from. Resolve it against
+    // whichever scratch directory that primary frame decoded into: the scratch
+    // root on the single-frame fast path, the `f0` subdir once the multi-state
+    // path decodes each frame into its own directory.
+    auto resolve_geometry = [&](const fs::path& dir) {
+        if (!args.geometry_file) return;
+        if (const auto geom = dir / "geometry.json"; fs::exists(geom))
+            *args.geometry_file = geom.string();
+    };
+
+    // Single-state capture: decode straight into the scratch root, exactly as a
+    // pre-multi-state import did (no merge step on the common path).
+    if (args.frame_names.size() == 1) {
+        if (auto err = decode_frame(args.frame_names.front(), scratch)) return *err;
+        resolve_geometry(scratch);
+        args.input_file = (scratch / "scene.pulp.json").string();
+        args.source_str = "figma-plugin";
+        return std::nullopt;
     }
 
-    args.input_file = (scratch / "scene.pulp.json").string();
+    // Multi-state capture: the decoder emits one envelope per frame, so decode
+    // each into its own subdirectory and merge them into a single envelope whose
+    // root carries the rest as alternate_frames. Frame INDEX is --frame order.
+    std::vector<fs::path> envelopes;
+    for (std::size_t i = 0; i < args.frame_names.size(); ++i) {
+        const fs::path sub = scratch / ("f" + std::to_string(i));
+        fs::create_directories(sub, ec);
+        if (ec) {
+            std::cerr << "Error: could not create scratch dir " << sub << ": "
+                      << ec.message() << "\n";
+            return 1;
+        }
+        if (auto err = decode_frame(args.frame_names[i], sub)) return *err;
+        envelopes.push_back(sub / "scene.pulp.json");
+    }
+
+    const fs::path merged = scratch / "scene.pulp.json";
+    if (auto err = merge_frame_envelopes(envelopes, scratch, merged)) return *err;
+
+    // The merged root is frame 0, so its geometry is f0's.
+    resolve_geometry(scratch / "f0");
+    args.input_file = merged.string();
     args.source_str = "figma-plugin";
     return std::nullopt;  // continue down the figma-plugin path
 }

@@ -190,6 +190,67 @@ def _cmd_compare(args: argparse.Namespace) -> int:
     return 2 if report["verdict"] == compare.VERDICT_INVALID else 0
 
 
+def _cmd_fit(args: argparse.Namespace) -> int:
+    """WP-4 F1 — fit an OSC-VCO profile from a measurement kit (Quality-Lab lane).
+
+    Demonstrates Gate 1 end-to-end: render a kit from a known profile, then recover
+    the deterministic parameters and report each with its confidence interval and
+    the measurement that produced it. Pinned (stage-2 drift/jitter) rows are
+    labeled, never presented as measured.
+    """
+    import math
+    from . import fit as fitmod
+    from .osc_forward import Shape, VcoProfile, VcoTuning, WaveshaperParams
+
+    true = VcoProfile()
+    true.tuning = VcoTuning(tune_offset_cents=7.0, scale_error=1.0025,
+                            hf_compression=0.03, hf_knee_octaves=3.0)
+    true.bow = 2.5
+    true.shapers[Shape.triangle] = WaveshaperParams(amount=0.7, drive=2.2, asymmetry=0.35)
+    true.level_tilt_db_per_octave = 2.5
+    true.core_reset_seconds = 3.0e-6
+    true.ac_corner_hz = 8.0
+    true.pulse_width = 0.42
+
+    kit = fitmod.build_measurement_kit(true)
+    fitted = fitmod.fit_profile(kit, VcoProfile(),
+                                pinned={"drift_depth": 4.0, "jitter_depth": 0.5})
+
+    truth = {
+        "tune_offset_cents": true.tuning.tune_offset_cents,
+        "scale_error": true.tuning.scale_error,
+        "hf_compression": true.tuning.hf_compression,
+        "hf_knee_octaves": true.tuning.hf_knee_octaves,
+        "bow": true.bow,
+        "shaper_triangle_amount": true.shapers[Shape.triangle].amount,
+        "shaper_triangle_drive": true.shapers[Shape.triangle].drive,
+        "shaper_triangle_asymmetry": true.shapers[Shape.triangle].asymmetry,
+        "ac_corner_hz": true.ac_corner_hz,
+        "level_tilt_db_per_octave": true.level_tilt_db_per_octave,
+        "core_reset_seconds": true.core_reset_seconds,
+        "pulse_width": true.pulse_width,
+    }
+    print("[quality-lab fit] F1 synthetic round-trip (Gate 1) — stages 1, 3, 4, 5")
+    print(f"  {'parameter':30s} {'disposition':11s} {'estimate':>13s} {'known':>13s}")
+    for p in fitted.params:
+        known = truth.get(p.name)
+        known_s = f"{known:13.6g}" if known is not None else f"{'(deferred)':>13s}"
+        print(f"  {p.name:30s} {p.disposition:11s} {p.estimate:13.6g} {known_s}  "
+              f"[{p.stage}] {p.measurement}")
+
+    # Pitch curve recovery (the doc's ±1-cent tolerance is on the curve, not raw params).
+    rp = fitted.to_profile()
+    cents = max(abs(1200.0 * math.log2(rp.tuning.frequency_hz(v) / true.tuning.frequency_hz(v)))
+                for v in [-2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.5])
+    print(f"  pitch curve max error: {cents:.3f} cents (tolerance 1.0)")
+
+    if args.out:
+        with open(args.out, "w") as fh:
+            json.dump(fitted.to_dict(), fh, indent=2)
+        print(f"  wrote fitted profile -> {args.out}")
+    return 0
+
+
 def _cmd_regression_net(args: argparse.Namespace) -> int:
     from . import compare, regression_net
     try:
@@ -317,6 +378,13 @@ def main(argv: list[str] | None = None) -> int:
                       help="materiality threshold override (defaults to the axis's own default)")
     cmp_.add_argument("--json", default="", help="write the full report JSON to this path")
     cmp_.set_defaults(func=_cmd_compare)
+
+    ft = sub.add_parser(
+        "fit",
+        help="WP-4 F1: fit an OSC-VCO profile from a measurement kit (synthetic "
+             "round-trip demo; recovers the deterministic parameters, labels pinned rows)")
+    ft.add_argument("--out", default="", help="write the fitted profile JSON to this path")
+    ft.set_defaults(func=_cmd_fit)
 
     rnet = sub.add_parser(
         "regression-net",

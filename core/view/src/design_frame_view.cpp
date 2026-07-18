@@ -325,8 +325,68 @@ void DesignFrameView::activate_frame(int index) {
     // the stand-ins and never a real control.
     apply_bind_grid();
     build_overlays();
+    rebuild_element_scalar_slots();
     invalidate_layout();
     on_active_frame_changed();
+}
+
+// ── Live per-element scalars ────────────────────────────────────────────────
+
+void DesignFrameView::set_element_scalar_source(const std::string& param_key,
+                                                std::shared_ptr<ScalarSource> source) {
+    if (param_key.empty()) return;  // never a valid element identity
+    if (!source) {
+        // Unbinding drops the binding (and its subscription), so an unbound view
+        // stops holding the editor's frames alive.
+        element_scalars_.erase(param_key);
+        rebuild_element_scalar_slots();
+        return;
+    }
+    auto& slot = element_scalars_[param_key];
+    if (!slot) slot = std::make_unique<ScalarSourceBinding>(*this);
+    slot->set_source(std::move(source));
+    rebuild_element_scalar_slots();
+}
+
+float DesignFrameView::element_scalar(int i) const {
+    if (i < 0 || i >= static_cast<int>(active_element_scalars_.size())) return 0.0f;
+    const ScalarSourceBinding* b = active_element_scalars_[i];
+    return b ? b->value() : 0.0f;
+}
+
+bool DesignFrameView::element_has_scalar_source(int i) const {
+    if (i < 0 || i >= static_cast<int>(active_element_scalars_.size())) return false;
+    return active_element_scalars_[i] != nullptr;
+}
+
+void DesignFrameView::rebuild_element_scalar_slots() {
+    active_element_scalars_.assign(elements_.size(), nullptr);
+    if (element_scalars_.empty()) return;
+
+    for (size_t i = 0; i < elements_.size(); ++i) {
+        const std::string& key = elements_[i].param_key;
+        if (key.empty()) continue;
+        auto it = element_scalars_.find(key);
+        if (it == element_scalars_.end() || !it->second) continue;
+        active_element_scalars_[i] = it->second.get();
+    }
+
+    // A binding is live iff the ACTIVE frame declares its key. A key no frame
+    // carries — a typo, or a param dropped from a redesign — would otherwise
+    // hold the editor at full frame rate forever to feed a ring nothing paints,
+    // silently costing the plugin the idle-at-0-fps behavior the whole unbind
+    // path exists to protect. Decided from the rebuilt table rather than by
+    // parking everything and un-parking the matches, so a binding that stays
+    // matched is never toggled off and on — that would drop its cached value and
+    // churn its subscription on every rebuild, including the rebuild that runs
+    // when a SIBLING element is bound.
+    for (auto& [key, binding] : element_scalars_) {
+        if (!binding) continue;
+        const bool declared = std::find(active_element_scalars_.begin(),
+                                        active_element_scalars_.end(),
+                                        binding.get()) != active_element_scalars_.end();
+        binding->set_active(declared);
+    }
 }
 
 int DesignFrameView::add_frame(std::string svg, std::vector<DesignFrameElement> elements,

@@ -409,6 +409,7 @@ target_sources(pulp-view-core PRIVATE
     src/asset_manager.cpp
     src/script_event_dispatch.cpp
     src/gesture.cpp
+    src/value_source_binding.cpp
     src/view.cpp
     src/pointer_dispatch.cpp
     src/caret.cpp
@@ -419,6 +420,8 @@ target_sources(pulp-view-core PRIVATE
     src/grid_layout.cpp
     src/layout_snapshot.cpp
     src/widgets.cpp
+    src/widget_schema.cpp
+    src/knob_sprite_paint.cpp
     src/slider_core.cpp
     src/widgets/label.cpp
     src/widgets/visualizers.cpp

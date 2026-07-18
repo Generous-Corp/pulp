@@ -114,9 +114,20 @@ jobs:
         env:
           GITHUB_PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
+          # Intent-trailer model is LIVE (version-at-land runs --push): a
+          # release-worthy PR DECLARES `Version-Bump: <surface>=<level>` and
+          # touches no version files; the post-merge bot assigns the number.
+          # So the PR gate accepts intent — it does NOT require a file bump.
+          # This is a SWAP, not an add: `--require-bump-for-fix-feat` runs a
+          # separate guard that accepts only a `chore: bump versions` commit or
+          # a skip trailer (never a positive intent), so the two flags fail
+          # closed together on an intent-only PR (test_version_bump_intent.py::
+          # test_combined_flags_fail_closed). `--accept-intent-trailers` alone
+          # loses no coverage: a touched surface with no bump/intent/skip still
+          # hard-fails.
           extra=""
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-              extra="--require-bump-for-fix-feat"
+              extra="--accept-intent-trailers"
           fi
           python3 tools/scripts/version_bump_check.py \
               --base "${{ steps.base.outputs.ref }}" \

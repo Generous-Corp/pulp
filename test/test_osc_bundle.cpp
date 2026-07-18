@@ -569,3 +569,39 @@ TEST_CASE("Address pattern character class negated enumeration",
     REQUIRE(address_matches("/pad/[!abc]", "/pad/z"));
     REQUIRE_FALSE(address_matches("/pad/[!abc]", "/pad/b"));
 }
+
+// A bundle element may itself be a bundle, so deserialization recurses. The
+// UDP receiver accepts datagrams up to 64 KB, enough to encode thousands of
+// nesting levels — far more than the small secondary-thread stack that runs
+// the receiver can survive under naive recursion. One hostile packet must
+// fail closed, never overflow the stack.
+TEST_CASE("Bundle deserialize bounds nesting depth against a hostile packet",
+          "[osc][bundle][security][fuzz]") {
+    // Wrap `inner` in a new single-element bundle. Built inside-out so the
+    // test input itself involves no deep recursion.
+    auto wrap = [](const std::vector<uint8_t>& inner) {
+        std::vector<uint8_t> buf;
+        const char header[] = "#bundle";
+        buf.insert(buf.end(), header, header + 8);
+        for (int i = 0; i < 8; ++i) buf.push_back(0);  // timetag = immediate
+        append_u32(buf, static_cast<uint32_t>(inner.size()));
+        buf.insert(buf.end(), inner.begin(), inner.end());
+        return buf;
+    };
+
+    SECTION("pathologically deep nesting is rejected without crashing") {
+        std::vector<uint8_t> deep = make_empty_bundle_bytes();
+        for (int i = 0; i < 5000; ++i) deep = wrap(deep);
+        auto hostile = Bundle::deserialize(deep.data(), deep.size());
+        REQUIRE_FALSE(hostile.has_value());  // fail-closed; the point is: no crash
+    }
+
+    SECTION("legitimately shallow nesting still round-trips") {
+        std::vector<uint8_t> shallow = make_empty_bundle_bytes();
+        for (int i = 0; i < 8; ++i) shallow = wrap(shallow);
+        auto ok = Bundle::deserialize(shallow.data(), shallow.size());
+        REQUIRE(ok.has_value());
+        REQUIRE(ok->elements.size() == 1);
+        REQUIRE(ok->elements[0].is_bundle());
+    }
+}

@@ -21,10 +21,10 @@
       "name": "AudioUnitSDK",
       "category": "format-sdk",
       "license": "Apache-2.0",
-      "version": "HEAD",
+      "version": "1.3.0",
       "source_kind": "external-clone",
       "repository": "https://github.com/apple/AudioUnitSDK.git",
-      "upstream": { "kind": "git-head" },
+      "upstream": { "kind": "git-tag", "ref": "AudioUnitSDK-1.3.0" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [

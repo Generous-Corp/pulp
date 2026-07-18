@@ -152,8 +152,105 @@ std::string pascal_identifier(std::string_view input, std::string_view fallback 
     return out;
 }
 
+int hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+std::optional<std::array<unsigned, 4>> parse_hex_color(std::string_view value) {
+    if (value.empty() || value.front() != '#')
+        return std::nullopt;
+    auto nibble = [](int v) -> unsigned { return static_cast<unsigned>((v << 4) | v); };
+    if (value.size() == 4 || value.size() == 5) {
+        const int r = hex_digit(value[1]);
+        const int g = hex_digit(value[2]);
+        const int b = hex_digit(value[3]);
+        const int a = value.size() == 5 ? hex_digit(value[4]) : 15;
+        if (r < 0 || g < 0 || b < 0 || a < 0)
+            return std::nullopt;
+        return std::array<unsigned, 4>{nibble(r), nibble(g), nibble(b), nibble(a)};
+    }
+    if (value.size() == 7 || value.size() == 9) {
+        auto pair = [&](std::size_t offset) -> std::optional<unsigned> {
+            const int hi = hex_digit(value[offset]);
+            const int lo = hex_digit(value[offset + 1]);
+            if (hi < 0 || lo < 0)
+                return std::nullopt;
+            return static_cast<unsigned>((hi << 4) | lo);
+        };
+        auto r = pair(1);
+        auto g = pair(3);
+        auto b = pair(5);
+        auto a = value.size() == 9 ? pair(7) : std::optional<unsigned>(255);
+        if (!r || !g || !b || !a)
+            return std::nullopt;
+        return std::array<unsigned, 4>{*r, *g, *b, *a};
+    }
+    return std::nullopt;
+}
+
+// Parse `rgb()` / `rgba()` to an 0..255 quad. Mirrors the Swift emitter's
+// parser (design_swift_codegen.cpp) deliberately: the two lanes must agree on
+// a color or the same design renders differently depending on which backend
+// materialized it. Percentages and the modern space-separated `rgb(R G B / A)`
+// form stay unhandled here, exactly as they are there — an unrecognized value
+// returns nullopt and the caller falls back, rather than guessing.
+//
+// The duplication is real and known: parse_hex_color / this / the materializer's
+// parse_any_css_color / the Swift pair are four spellings of one concept, which is
+// why they drifted in the first place. Consolidating them into a shared lowering
+// helper is tracked separately; matching behavior now beats leaving the C++ lane
+// silently dropping colors until that lands.
+std::optional<std::array<unsigned, 4>> parse_rgb_color(std::string_view value) {
+    std::string s;
+    s.reserve(value.size());
+    for (char c : value)
+        if (!std::isspace(static_cast<unsigned char>(c))) s += static_cast<char>(std::tolower(c));
+    const bool has_alpha = s.rfind("rgba(", 0) == 0;
+    const bool plain = s.rfind("rgb(", 0) == 0;
+    if (!has_alpha && !plain) return std::nullopt;
+    const std::size_t open = s.find('(');
+    const std::size_t close = s.find(')', open);
+    if (close == std::string::npos) return std::nullopt;
+    std::vector<std::string> parts;
+    std::string cur;
+    for (std::size_t i = open + 1; i < close; ++i) {
+        if (s[i] == ',') { parts.push_back(cur); cur.clear(); }
+        else cur += s[i];
+    }
+    parts.push_back(cur);
+    if (parts.size() < 3) return std::nullopt;
+    auto to_u8 = [](const std::string& t, bool* ok) -> unsigned {
+        try { std::size_t idx = 0; double d = std::stod(t, &idx);
+              if (idx != t.size()) { *ok = false; return 0; }
+              *ok = true;
+              return static_cast<unsigned>(std::clamp<long>(std::lround(d), 0, 255)); }
+        catch (...) { *ok = false; return 0; }
+    };
+    bool ok = true;
+    unsigned r = to_u8(parts[0], &ok); if (!ok) return std::nullopt;
+    unsigned g = to_u8(parts[1], &ok); if (!ok) return std::nullopt;
+    unsigned b = to_u8(parts[2], &ok); if (!ok) return std::nullopt;
+    unsigned a = 255;
+    if (parts.size() >= 4) {
+        try { std::size_t idx = 0; double af = std::stod(parts[3], &idx);
+              if (idx != parts[3].size()) return std::nullopt;
+              a = static_cast<unsigned>(std::clamp(af, 0.0, 1.0) * 255.0 + 0.5); }
+        catch (...) { return std::nullopt; }
+    }
+    return std::array<unsigned, 4>{r, g, b, a};
+}
+
 std::string color_literal_expr(std::string_view value) {
-    if (auto color = parse_hex_color_rgba(value)) {
+    // Hex first (the common case), then rgb()/rgba(). Before the rgb() arm this
+    // returned an empty expression for every rgba() value, so the baked-C++ lane
+    // silently dropped colors the live-JS materializer renders — the same design,
+    // two different pictures, depending on which lane you took.
+    auto color = parse_hex_color(value);
+    if (!color) color = parse_rgb_color(value);
+    if (color) {
         std::ostringstream out;
         out << "pulp::view::Color::rgba8("
             << (*color)[0] << ", " << (*color)[1] << ", "
@@ -360,7 +457,7 @@ TokenSymbols build_token_symbols(const DesignIR& ir, EmitContext& ctx) {
     for (const auto& [name, value] : ir.tokens.colors) {
         const auto symbol = "tokens::" + unique_symbol(ctx.used_token_names, pascal_identifier(name, "Color"));
         symbols.color_by_name.emplace(name, symbol);
-        if (parse_hex_color_rgba(value))
+        if (parse_hex_color(value))
             symbols.color_by_value.emplace(value, symbol);
     }
     for (const auto& [name, value] : ir.tokens.dimensions) {
@@ -981,34 +1078,24 @@ const char* frame_element_kind_token(InteractiveElementKind kind) {
 // string literal) and decoded once at construction, matching the catalog
 // generator (tools/import-design/make_catalog_component.py).
 //
-// Returns true when it emitted the faithful construction (assigning `var`).
-// Returns false when the node is not faithful, has no svg_asset_id, or the asset
-// can't be resolved at codegen time — the caller then falls back to the normal
-// native-widget emit so the output always compiles and renders something.
-bool emit_faithful_frame(std::ostringstream& out,
-                         int depth,
-                         EmitContext& ctx,
-                         const std::string& var,
-                         const IRNode& node) {
-    if (node.render_mode != NodeRenderMode::faithful_svg || !node.svg_asset_id)
-        return false;
+// Resolve a faithful node's SVG document, or an empty string when it has no
+// asset id or the asset can't be resolved at codegen time.
+std::string resolve_frame_svg(EmitContext& ctx, const IRNode& node) {
+    if (!node.svg_asset_id) return {};
     const IRAssetRef* asset = ctx.manifest.resolve(*node.svg_asset_id);
-    const std::string svg = asset ? resolve_svg_document(*asset) : std::string{};
-    if (svg.empty()) {
-        if (ctx.opts.include_comments)
-            emit_line(out, depth, ctx.opts.indent_spaces,
-                      "// faithful_svg asset '" + *node.svg_asset_id +
-                      "' unresolved at codegen time — falling back to native widgets");
-        return false;
-    }
+    return asset ? resolve_svg_document(*asset) : std::string{};
+}
 
-    if (ctx.opts.include_comments)
-        emit_line(out, depth, ctx.opts.indent_spaces,
-                  "// faithful_svg: render this node's own Figma SVG 1:1 via DesignFrameView");
-
-    // Embedded SVG: chunked base64, joined + decoded once.
+// Emit `std::string <name>;` holding one frame's SVG, as chunked base64 joined
+// and decoded once. Each call scopes its own kParts, so a multi-frame node can
+// call this per frame without colliding.
+void emit_frame_svg(std::ostringstream& out,
+                    int depth,
+                    EmitContext& ctx,
+                    const std::string& name,
+                    const std::string& svg) {
     const std::string b64 = runtime::base64_encode(svg);
-    emit_line(out, depth, ctx.opts.indent_spaces, "std::string " + var + "_svg;");
+    emit_line(out, depth, ctx.opts.indent_spaces, "std::string " + name + ";");
     emit_line(out, depth, ctx.opts.indent_spaces, "{");
     emit_line(out, depth + 1, ctx.opts.indent_spaces,
               "static const char* const kParts[] = {");
@@ -1026,12 +1113,19 @@ bool emit_faithful_frame(std::ostringstream& out,
     emit_line(out, depth + 1, ctx.opts.indent_spaces,
               "if (auto bytes = pulp::runtime::base64_decode(b64))");
     emit_line(out, depth + 2, ctx.opts.indent_spaces,
-              var + "_svg.assign(bytes->begin(), bytes->end());");
+              name + ".assign(bytes->begin(), bytes->end());");
     emit_line(out, depth, ctx.opts.indent_spaces, "}");
+}
 
-    // Interactive overlays (knob / dropdown / text_field / tab_group / stepper).
+// Emit `std::vector<DesignFrameElement> <name>;` holding one frame's interactive
+// overlays (knob / dropdown / text_field / tab_group / stepper / swap / ...).
+void emit_frame_elements(std::ostringstream& out,
+                         int depth,
+                         EmitContext& ctx,
+                         const std::string& name,
+                         const IRNode& node) {
     emit_line(out, depth, ctx.opts.indent_spaces,
-              "std::vector<pulp::view::DesignFrameElement> " + var + "_els;");
+              "std::vector<pulp::view::DesignFrameElement> " + name + ";");
     for (const auto& e : node.interactive_elements) {
         emit_line(out, depth, ctx.opts.indent_spaces, "{");
         emit_line(out, depth + 1, ctx.opts.indent_spaces,
@@ -1094,19 +1188,83 @@ bool emit_faithful_frame(std::ostringstream& out,
             emit_line(out, depth + 1, ctx.opts.indent_spaces,
                       "el.param_key = " + cpp_string_literal(e.param_key) + ";");
         emit_line(out, depth + 1, ctx.opts.indent_spaces,
-                  var + "_els.push_back(std::move(el));");
+                  name + ".push_back(std::move(el));");
         emit_line(out, depth, ctx.opts.indent_spaces, "}");
     }
+}
 
+// True when any control on `node` or any of its alternate frames carries a
+// host-param binding key.
+bool frame_set_has_bound_control(const IRNode& node) {
+    auto bound = [](const IRNode& n) {
+        return std::any_of(n.interactive_elements.begin(), n.interactive_elements.end(),
+                           [](const IRInteractiveElement& e) { return !e.param_key.empty(); });
+    };
+    if (bound(node)) return true;
+    return std::any_of(node.alternate_frames.begin(), node.alternate_frames.end(), bound);
+}
+
+// Returns true when it emitted the faithful construction (assigning `var`).
+// Returns false when the node is not faithful, has no svg_asset_id, or the asset
+// can't be resolved at codegen time — the caller then falls back to the normal
+// native-widget emit so the output always compiles and renders something.
+bool emit_faithful_frame(std::ostringstream& out,
+                         int depth,
+                         EmitContext& ctx,
+                         const std::string& var,
+                         const IRNode& node) {
+    if (node.render_mode != NodeRenderMode::faithful_svg || !node.svg_asset_id)
+        return false;
+    const std::string svg = resolve_frame_svg(ctx, node);
+    if (svg.empty()) {
+        if (ctx.opts.include_comments)
+            emit_line(out, depth, ctx.opts.indent_spaces,
+                      "// faithful_svg asset '" + *node.svg_asset_id +
+                      "' unresolved at codegen time — falling back to native widgets");
+        return false;
+    }
+
+    if (ctx.opts.include_comments)
+        emit_line(out, depth, ctx.opts.indent_spaces,
+                  "// faithful_svg: render this node's own Figma SVG 1:1 via DesignFrameView");
+
+    // Frame 0 = this node: the constructor's SVG + overlays.
+    emit_frame_svg(out, depth, ctx, var + "_svg", svg);
+    emit_frame_elements(out, depth, ctx, var + "_els", node);
     emit_line(out, depth, ctx.opts.indent_spaces,
               "auto " + var + " = std::make_unique<pulp::view::DesignFrameView>(std::move(" +
               var + "_svg), std::move(" + var + "_els));");
+
+    // Frames 1..N = the alternate states, in capture order. A `swap` element
+    // addresses frames POSITIONALLY, so every alternate must produce exactly one
+    // add_frame call, in order: dropping or reordering one would silently
+    // re-point every later swap target. An alternate whose SVG failed to resolve
+    // is therefore still added (blank, but with its overlays and its index
+    // intact) rather than skipped — apply_swap_target_verification and the
+    // unresolved-asset diagnostics are what report the problem.
+    for (std::size_t i = 0; i < node.alternate_frames.size(); ++i) {
+        const IRNode& frame = node.alternate_frames[i];
+        const std::string suffix = "_f" + std::to_string(i + 1);
+        const std::string frame_svg = resolve_frame_svg(ctx, frame);
+        if (frame_svg.empty() && ctx.opts.include_comments)
+            emit_line(out, depth, ctx.opts.indent_spaces,
+                      "// frame " + std::to_string(i + 1) +
+                      " SVG unresolved at codegen time — added blank to keep swap "
+                      "target indices stable");
+        else if (ctx.opts.include_comments)
+            emit_line(out, depth, ctx.opts.indent_spaces,
+                      "// frame " + std::to_string(i + 1) + ": " +
+                      (frame.name.empty() ? std::string("alternate state") : frame.name));
+        emit_frame_svg(out, depth, ctx, var + "_svg" + suffix, frame_svg);
+        emit_frame_elements(out, depth, ctx, var + "_els" + suffix, frame);
+        emit_line(out, depth, ctx.opts.indent_spaces,
+                  var + "->add_frame(std::move(" + var + "_svg" + suffix +
+                  "), std::move(" + var + "_els" + suffix + "));");
+    }
+
     // If any control carries a binding key, self-wire gestures to the host-param
     // surface — parity with the runtime materialize path (make_faithful_svg_frame).
-    const bool any_bound = std::any_of(
-        node.interactive_elements.begin(), node.interactive_elements.end(),
-        [](const IRInteractiveElement& e) { return !e.param_key.empty(); });
-    if (any_bound)
+    if (frame_set_has_bound_control(node))
         emit_line(out, depth, ctx.opts.indent_spaces,
                   var + "->route_changes_to_host_params(true);");
     return true;

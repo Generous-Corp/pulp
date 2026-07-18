@@ -1,6 +1,6 @@
 ---
 name: audio-harness
-description: The measurement surface for ALL Pulp DSP and audio-pipeline work — read it BEFORE writing or gating DSP, not only when something already sounds wrong. Covers the C++ harness (signal generators, metrics, assertions, RenderScenario, contracts), the offline Audio Doctor (magnitude/frequency response, THD/THD+N), and their Python sibling the Audio Quality Lab (tools/audio/quality-lab — null residual + alignment, LTAS log-spectral distance, spectral flux/centroid, HNR, Theil-Sen drift slope, Kaiser-sinc resampling, license-guarded corpus, regression-net ratchet). TRIGGER on AUTHORING work — "build/design an oscillator/filter/synth/effect", "add a DSP module", "what should the acceptance gate be", "how do I measure aliasing / anti-aliasing / alias floor", "null against a reference", "is this DSP correct", "choose a tolerance", "golden/regression corpus for audio", "measure drift or jitter", "A/B two renders" — AND on DEBUGGING work — "is there sound / no audio / I hear nothing", "does this filter/compressor/synth/delay produce the right signal", "prove the DSP / prove the contract", "measure the frequency response", "what's the THD / is it distorting", "render a test tone and assert", "audio regression", "64-frame works but 128 is silent", "sample-rate change pitch-shifted it", "describe what's in this buffer", "audio doctor", "compare before/after a DSP refactor". Reach for this BEFORE hand-rolling any FFT, null test, alias measurement, pitch tracker, or golden-render script — most of it already exists in one of the two lanes. Test/tool layer over HeadlessHost — deterministic, no audio device, no speakers. Off the realtime thread entirely.
+description: The measurement surface for ALL Pulp DSP and audio-pipeline work — read it BEFORE writing or gating DSP, not only when something already sounds wrong. Covers the C++ harness (signal generators, metrics, assertions, RenderScenario, contracts), the offline Audio Doctor (magnitude/frequency response, THD/THD+N, phase/group delay), and their Python sibling the Audio Quality Lab (tools/audio/quality-lab — null residual + alignment, LTAS log-spectral distance, spectral flux/centroid, HNR, Theil-Sen drift slope, Kaiser-sinc resampling, license-guarded corpus, regression-net ratchet). TRIGGER on AUTHORING work — "build/design an oscillator/filter/synth/effect", "add a DSP module", "what should the acceptance gate be", "how do I measure aliasing / anti-aliasing / alias floor", "null against a reference", "is this DSP correct", "choose a tolerance", "golden/regression corpus for audio", "measure drift or jitter", "A/B two renders" — AND on DEBUGGING work — "is there sound / no audio / I hear nothing", "does this filter/compressor/synth/delay produce the right signal", "prove the DSP / prove the contract", "measure the frequency response", "what's the THD / is it distorting", "what's the group delay / phase response / measured latency", "magnitude response curve", "render a test tone and assert", "audio regression", "64-frame works but 128 is silent", "sample-rate change pitch-shifted it", "describe what's in this buffer", "audio doctor", "compare before/after a DSP refactor". Reach for this BEFORE hand-rolling any FFT, null test, alias measurement, pitch tracker, or golden-render script — most of it already exists in one of the two lanes. Test/tool layer over HeadlessHost — deterministic, no audio device, no speakers. Off the realtime thread entirely.
 ---
 
 # Audio harness (observability + validation)
@@ -40,6 +40,8 @@ target a symbol comes from — the include path does.
 - A DSP refactor — compare old vs new renders (exact / numeric / spectral).
 - "How distorted is this?" — THD / THD+N and a harmonic breakdown.
 - "What does this lowpass actually do at 8 kHz?" — a magnitude-response curve.
+- "What's the group delay / latency of this filter?" — a phase + group-delay
+  curve, in samples or seconds, per frequency.
 
 ## The layering (each layer builds only on the ones below — no back-edges)
 
@@ -55,13 +57,13 @@ signal generators → scenarios → contracts → doctor
 | Metrics | `<pulp/audio/analysis/audio_metrics.hpp>` | lib | `analyze()` → `BufferMetrics`: peak, RMS, DC, NaN/Inf, clip count, silence-run; `estimate_frequency()` (zero-crossing, documented limits); `to_dbfs`; `summarize()` (agent-readable signal description). |
 | Assertions | `<pulp/audio/analysis/audio_assertions.hpp>` | lib | `assert_no_nan_inf / not_clipped / silent / not_silent / peak_between / rms_between / frequency_near / null_near / channels_independent` — each returns `CheckResult{passed,message}` with dBFS/Hz/cents messages, never a bare float. |
 | Artifacts | `<pulp/audio/analysis/audio_artifacts.hpp>` | lib | `BufferMetrics` → JSON (`schema_version` + provenance) for failing CI/local runs. |
-| Spectrum | `<pulp/audio/analysis/audio_spectrum.hpp>` | lib | The FFT-bearing core of the Doctor, over **already-rendered buffers** (no `Processor`): `response_relative_to_input(input, output, …)`, `magnitude_spectrum_curve()`, `measure_thd(signal, …)`, plus the shared `ResponseCurve` / `ThdResult` / `Window` types. This is what the `pulp audio validate doctor` CLI runs over decoded WAVs — and what you call directly when your audio came from somewhere other than a scenario (e.g. rendered through a real format adapter). |
-| Doctor artifacts | `<pulp/audio/analysis/audio_doctor_artifacts.hpp>` | lib | `write_response_artifact()` / `write_thd_artifact()` + the JSON serializers; `kDoctorCurveSchemaVersion`. |
+| Spectrum | `<pulp/audio/analysis/audio_spectrum.hpp>` | lib | The FFT-bearing core of the Doctor, over **already-rendered buffers** (no `Processor`): `response_relative_to_input(input, output, …)`, `magnitude_spectrum_curve()`, `measure_thd(signal, …)`, `measure_group_delay(input, output, …)` (phase + group delay), plus the shared `ResponseCurve` / `ThdResult` / `PhaseCurve` / `Window` types. This is what the `pulp audio validate doctor` CLI runs over decoded WAVs — and what you call directly when your audio came from somewhere other than a scenario (e.g. rendered through a real format adapter). |
+| Doctor artifacts | `<pulp/audio/analysis/audio_doctor_artifacts.hpp>` | lib | `write_response_artifact()` / `write_thd_artifact()` / `write_phase_artifact()` + the JSON serializers (`phase_curve_to_json`); `kDoctorCurveSchemaVersion`. |
 | Latency evidence | `<pulp/audio/analysis/latency_evidence.hpp>` | lib | Delayed-null + impulse-marker latency policies as pure functions (see *Proving reported latency*). |
 | Generators | `"support/audio_test_signals.hpp"`, `"support/audio_signal_generators.hpp"` | test | Deterministic stimulus: sine/square/saw, impulse(+train), step, DC, multi-sine, swept sine, seeded white/pink/brown noise, stepped automation + MIDI note scripts. No clocks, no `random_device`. |
 | Scenarios | `"support/render_scenario.hpp"` | test | `RenderScenario` builder over HeadlessHost (factory, sample rate, block size, channels, duration, input/MIDI/param scripts); `render()` → `ScenarioResult`. `run_matrix()` (SR × block sweeps) + `assert_block_partition_invariant()`. |
 | Contracts | `"support/audio_contracts.hpp"` | test | `AudioContract` — a named claim + scenario + accumulated `CheckResult`s; failures read `contract '<name>': ...`. Family helpers `expect_{passthrough,silence_preserved,tone,finite_and_unclipped}`. |
-| Doctor (offline) | `"support/audio_doctor.hpp"` | test | The **scenario-driven** entry points: `response_relative_to_input(scenario, …)` and `measure_thd(scenario, …)` synthesize the stimulus, drive the `Processor`, and delegate the math to `audio_spectrum.hpp`. It re-exports that header's result types, so a test that includes it needs nothing else. |
+| Doctor (offline) | `"support/audio_doctor.hpp"` | test | The **scenario-driven** entry points: `response_relative_to_input(scenario, …)`, `measure_thd(scenario, …)`, and `measure_group_delay(scenario, …)` (its results gated by `defined_at(hz)` for group delay and the stricter `phase_defined_at(hz)` for phase) synthesize the stimulus, drive the `Processor`, and delegate the math to `audio_spectrum.hpp`. It re-exports that header's result types, so a test that includes it needs nothing else. |
 
 Two traps this table exists to prevent:
 
@@ -76,6 +78,7 @@ Two traps this table exists to prevent:
   violation is a link error rather than a review comment. Do not add FFT code
   anywhere else.
 
+
 Read `test/support/README.md` for the authoritative layering contract.
 
 ## Run the proofs
@@ -83,7 +86,7 @@ Read `test/support/README.md` for the authoritative layering contract.
 ```bash
 # Build + run the whole harness (Release — Debug is meaningless for DSP timing/levels)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(sysctl -n hw.ncpu) --target \
+tools/ci/governed-build.sh cmake --build build --target \
   pulp-test-audio-support pulp-test-render-scenario pulp-test-audio-contracts \
   pulp-test-audio-doctor pulp-test-adapter-audio-parity pulp-test-golden \
   pulp-test-audio-matrix pulp-test-audio-tone-regression pulp-test-latency-contract
@@ -129,6 +132,20 @@ auto curve = response_relative_to_input(sc, {50.0, 8000.0});
 REQUIRE(curve.attenuation_db_at(8000.0) >= 20.0);   // "drops ≥20 dB at 8 kHz"
 auto thd = measure_thd(sc, /*fundamental_hz=*/999.0); // steady bin-coherent sine
 // thd.thd_percent(), thd.thd_plus_n, thd.harmonics[...]
+
+// Phase / group delay. ALWAYS gate first: a stopband has no phase to measure,
+// so the analyzer reports it undefined and the accessors return NaN rather than
+// a number read out of the noise floor. TWO gates, and they are not the same —
+// defined_at() qualifies group delay, phase_defined_at() qualifies phase.
+auto gd = measure_group_delay(sc, {100.0, 8000.0});
+if (gd.defined_at(100.0))
+    REQUIRE(gd.group_delay_samples_at(100.0) < 8.0); // "≤ 8 samples latency"
+if (gd.phase_defined_at(100.0))                      // STRICTER — see below
+    REQUIRE(gd.phase_radians_at(100.0) < 0.0);
+// gd.group_delay_seconds_at(hz)
+// gd.magnitude_db_rel_peak_at(hz) — peak-relative, NOT the absolute out/in
+// ratio that ResponseCurve::magnitude_db_at returns. The two curves use
+// different names for this reason; a +12 dB passband reads +12 there and 0 here.
 ```
 
 Measure audio that did NOT come from a scenario — e.g. rendered through a real
@@ -170,6 +187,40 @@ and confirm your test goes red.
 - **Response and THD are both RATIOS, so they cannot see a broadband gain
   error.** A wrong-by-0.5 dB adapter path passes every Doctor check. Level is a
   null test's job.
+
+**Group delay is a derivative, so the estimator matters.** `measure_group_delay`
+uses the ramped-signal Fourier identity (`τ = Re{X_r·conj(X)}/|X|²`, `X_r =
+FFT(n·x[n])`) rather than differencing an unwrapped phase curve: it needs no
+unwrapping, has no frequency step to tune, and is exact for any impulse response
+that fits inside the rectangular analysis window. Budget `fft_length` so the IR
+has decayed within it — a truncated IR is the one real error source, and the
+analyzer will faithfully report the delay of the *truncated* signal.
+
+**`phase_defined` is stricter than `defined`, and you want the strict one for
+phase.** Reported `phase_rad` IS unwrapped, and unwrapping is a walk from DC
+upward — so a bin's phase is only as trustworthy as every bin *below* it, and
+past a stopband null or a gap in the reference spectrum the accumulated offset
+lands on an unresolved 2πk branch. `defined` cannot see that: it asks only
+whether *this* bin has energy, which is the whole precondition for group delay
+(estimated per bin, never consulting the unwrap) and not nearly enough for
+phase. So a bin can be `defined` — carrying a real, correct group delay — while
+its phase is unreachable. `phase_defined` is the gate that says so, and
+`phase_radians_at()` is NaN wherever it is false. Expect exactly this on a
+band-limited or gapped reference: full group delay across the band, phase only
+up to the first gap. (The separate aliasing bound — phase unwraps correctly only
+while `group_delay < fft_length / 2` — is *not* gated: per bin the analyzer
+cannot tell an aliased phase from a true one, so it is your budgeting duty.)
+
+**`defined` is not only a stopband test — it also rejects a near-silent
+output.** The estimator divides by `|X|²`, so it has an energy floor of its own
+below which a bin has no phase to differentiate. A processor whose output has
+collapsed (a dead gain stage, a degenerate filter) can still produce a
+*perfectly shaped* impulse response, just at −160 dBFS: its peak-relative
+magnitude looks like a clean 0 dB passband, but every bin is under the
+estimator's floor. Those bins are `defined = false`. If a group-delay curve
+comes back entirely undefined for a processor you expected to measure, check the
+output's absolute level before suspecting the analyzer — an all-undefined curve
+usually means the processor emitted (almost) nothing, which is the finding.
 
 ## Discipline that keeps it trustworthy
 
@@ -300,6 +351,13 @@ window is visible and the host has GPU capture (`WindowHost::capture_png()`).
 
 ## CLI: `pulp audio validate <verb>` (offline, over WAVs / artifact bundles)
 
+> **Do not hand-roll WAV analysis.** If you are about to `soundfile.read()` two
+> WAVs and compare them, these verbs already do it. They are registered in
+> **`docs/status/tools.yaml`**, whose digest is generated into CLAUDE.md, and a
+> PostToolUse hook names them if you start writing the script anyway. The design
+> tools learned this the hard way: guidance that exists but never fires at the
+> moment of need is the same as no guidance.
+
 The harness analyzers are also reachable from the shipped CLI, nested under the
 existing `pulp audio` command (the `model`/`excerpt-find`/`read-bundle` verbs are
 untouched). The CLI is **not** tied to a plugin, so it analyzes captured audio
@@ -382,6 +440,24 @@ audio validate` verbs read, then exits. Pick the mode by which window you need:
 WAV writing is `pulp::audio::write_wav_file(path, data, WavBitDepth)` —
 `Int16` (default overload), `Int24`, or `Float32`.
 
+### In-tree render → WAV bridge (no plugin bundle)
+
+`pulp audio render` and `pulp run --audio-capture-*` both need a built plugin
+bundle / standalone. To get an **in-tree** `Processor` (or a raw oscillator
+wrapped in one) onto disk for the Python lane WITHOUT a bundle, use the
+scenario-side bridge in `"support/wav_bridge.hpp"`:
+`write_scenario_wav(result, path, WavBitDepth::Float32)` (or the
+`write_buffer_wav(buffer, sample_rate, …)` overload) deinterleaves a
+`ScenarioResult` / `Buffer<float>` and calls `write_wav_file`. Float32 is the
+default so the file carries the exact rendered samples; the deterministic
+harness makes the bytes reproducible. The `pulp-osc-render-wav` test tool
+(`test/osc_render_wav.cpp`) is the argv surface: it renders the in-tree
+`VcoOscillator` (via `"support/osc_wav_scenario.hpp"`) to a WAV
+(`--shape/--freq/--sr/--dur-ms/--channels/--drift-cents/--jitter-cents/--bits`),
+so an offline Quality-Lab script can analyze in-tree oscillator output with no
+bundle in the loop. The pytest `tools/audio/quality-lab/tests/test_osc_wav_bridge.py`
+is the end-to-end readability proof (soundfile loads it, fundamental matches).
+
 ## Roadmap
 
 The Phase-7 offline-render and live-capture slices have all landed: `pulp audio
@@ -410,6 +486,16 @@ harness or `ctest`.
   `engine [--input <wav>] --character <c>` (validate the REAL stretch engine, reference-free
   on a dry input), `engine-baseline` (regression gate: did an engine change make it worse?),
   `corpus list|add` (versioned, license-guarded corpus).
+- **`corpus.seed()`** ships FIVE synthetic families, not just the two stretch-oriented ones:
+  `synthetic_drumbreak` / `synthetic_tonalpad` (time-stretch / tonal) plus three oscillator
+  families (`family: "oscillator"`, `material_class: "synth"`) built from `osc_fixtures.py`'s
+  corpus-render helpers (`render_static_shapes`, `render_sync_sweep`, `render_tzfm_grid`) —
+  `synthetic_osc_static_shapes` (sine/saw/square/triangle at a few pitches), `synthetic_osc_sync_sweep`
+  (`hard_synced_saw` swept across master frequencies), `synthetic_osc_tzfm_grid` (`tzfm_sine` over a
+  mod-rate/index grid). They gate on the SAME `regression_net` ratchet as any other family — no
+  bespoke oscillator ratchet — typically via the `added-hf` axis (aliasing reads as added HF energy)
+  and `dsp.null_residual_db`'s bit-identical clamp (`-160.0`) for the determinism check. See
+  `tests/test_corpus_osc.py`.
 - Aligns a candidate to a reference (onset-map + local cross-correlation), runs the
   detectors (`transient_sharpness`, `spectral_centroid`, `hf_fizz`, `spectral_flux`, `hnr` —
   tonal noise/roughness via autocorrelation HNR; plus the standalone `stereo_width` for
@@ -720,6 +806,32 @@ Durable "why / watch-out-for" notes so this isn't re-litigated (rationale, not w
   env-path license fence.
 - **`audio_io.load_wav` mono-downmixes** — fine for tonal balance; a future stereo-image axis must
   NOT use that loader.
+- **`detectors/click.py` refuses a REAL BLEP/BLIT oscillator at a fractional period — do not
+  read that refusal as a click.** The detector's comb self-reference (delay one period, subtract)
+  nulls a bandlimited oscillator to the interpolator floor ONLY when successive periods are
+  identical up to the fractional delay. That holds for an exact additive fixture (sinc-periodic),
+  which is exactly why a click floor measured on a synthetic fixture does NOT transfer to a real
+  oscillator: on a polyBLEP saw/square, `sr/f0` is fractional, so the discontinuity lands at a
+  different sub-sample phase every period and the comb leaves a per-edge *approximation* residual
+  that reads a false −20 to −30 dB "click" even when the render's alias floor is −55 dB or lower.
+  `detect()` discriminates that regime with two measurements — `template_novelty_db` and
+  `edge_concentration` — and REFUSES (`low_coverage`, `fired=False`, a *third* refusal
+  precondition alongside low period-confidence and pitch drift) rather than false-firing.
+  `template_novelty_db` aligns the comb residual into per-period frames at the fitted fractional
+  period, builds the median-frame TEMPLATE, and scores the worst period's departure from it over
+  the median period's — a one-off seam is the single period that does NOT match the recurring
+  template (a large outlier), while the smear repeats the same per-edge shape every period so it
+  barely departs. It is a per-period RATIO, so it is **render-length INDEPENDENT** (a longer clip
+  only adds more template-matching periods — it moves neither the worst nor the median): the same
+  near-floor seam that a global statistic dropped on a multi-second render now fires at any length.
+  `edge_concentration` (cosine similarity of `|residual|` to `|diff(y)|`) is kept, but ONLY to
+  split smear (rides the waveform's own edges) from a block-rate zipper (off the edges) — novelty
+  alone reads a stationary zipper as low-novelty and would wrongly refuse it. A refusal is NOT a pass:
+  the honest gate for a discontinuous real oscillator is a **frozen-reference null**
+  (`dsp.null_residual_db` — render the same patch with the offending parameter held frozen), not
+  the comb self-reference. When you add a click fixture for a new oscillator, grow a REAL polyBLEP
+  render (`osc_fixtures.py`), not just a synthetic sum — the synthetic-only fixture is precisely
+  the blind spot that let the false-fire ship.
 
 ## Proving reported latency
 
@@ -753,6 +865,53 @@ true. Through the CLI a refusal is exit 2, distinct from a failed check.
 
 Every one of those paths previously returned a confident number that passed a
 gate. If a refusal surprises you, the input is usually wrong — not the tool.
+
+## Measuring an oscillator's pitch — `estimate_pitch`, not `estimate_frequency`
+
+`estimate_frequency` (audio_metrics.hpp) is a zero-crossing detector and its own
+doc disclaims harmonically-dense material. A real oscillator IS dense: on a
+bright tone it locks to a harmonic (measured ~1900 cents high on a formant
+waveform), so it cannot measure a VCO's drift or a DCO's few-cent quantization
+error. Reach for **`estimate_pitch` / `track_pitch`** (`pitch_track.hpp`)
+instead: a coarse `magnitude_spectrum_curve` peak seeds a golden-section refine
+over the shipped `fit_tone` projection, so it is leakage-free and sub-cent
+(<0.002 cent on a clean tone, coherent or not) and FFT-backend-stable. It
+**refuses** silence and noise rather than octave-guessing — honor the confidence
+gate. `track_pitch` gives the `f0(t)` trajectory; the drift/jitter statistics over
+it (Allan deviation, Theil-Sen slope) stay in the Quality Lab per the C++/Python
+split. A steep glide needs the window short relative to the sweep.
+
+**Harmonic-dominant material — don't assume the loudest bin is f0.** A rolled-off
+or resonant oscillator can carry MORE energy in an upper partial than in the
+fundamental, so the loudest FFT bin lands an octave/twelfth/higher above the true
+pitch. `estimate_pitch` recovers f0: it ranks the coarse peak against its
+subharmonics (to coarse/8) and adopts the lowest root that BOTH explains the
+segment (harmonic-comb energy within a margin of the best) AND carries real energy
+at its OWN fundamental tooth. That own-tooth test is load-bearing — explained
+energy alone cannot tell f0 from f0/N (a near-pure tone lets any subharmonic refine
+one of its harmonics onto the tone), and only the TRUE root has a partial sitting
+at the root itself. **The tooth floor is LEAKAGE-AWARE, and it has to be:** a fixed
+floor is defeated by rectangular-window LSQ leakage from the loud coarse peak into
+the f0/2 fit, and that leakage GROWS as the analysis window shortens (energy ~
+`(1/(π·Δf·T))²`). With a fixed floor a plain bass saw over the DEFAULT window holds
+only a handful of periods and reads a confident octave (or two) DOWN — the ordinary
+case, worse than the octave-up it was meant to fix. So a candidate's tooth must
+clear `max(absolute-noise-floor, expected coarse-peak leakage at its Δf over this
+window)`; a genuine fundamental far below a loud harmonic (Δf large) or over a long
+window (T large) still clears it, a leaky saw subharmonic over a few-period window
+does not. Corollary: **a genuinely faint fundamental is not resolvable below the
+leakage floor at a short window — use a longer analysis window** (the DCO/VCO
+quantization/drift fixtures already do, n≈2^15) rather than trusting a low bass note
+over a 4096-sample frame. Do NOT "fix" a wrong octave by lowering the floor — it
+re-opens the octave trap. **One honest residual, NOT a refusal:** a genuine
+missing-fundamental comb (energy only at 2·f0/3·f0, nothing at f0) has no tooth at
+f0 to lock, so the estimate stays on the loudest PRESENT partial (2·f0) — the
+frequency actually there, never a fabricated virtual f0; likewise the descent stops
+at coarse/8, so a 9th-harmonic-dominant signal (rare) reports a lower harmonic.
+Both return a real present frequency, never fail closed. (Regressions fixed
+2026-07: octave-UP on harmonic-dominant material — old guard stopped at coarse/4 on
+a fixed 10% cliff; then octave-DOWN on a plain short-window saw — fixed-floor
+leakage, closed with the leakage-aware floor above.)
 
 ## Never gate on `detection_floor_db`
 

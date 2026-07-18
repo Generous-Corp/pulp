@@ -16,7 +16,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 (sub-agent #12 follow-up): @pulp/react FlexProps now exposes alignContent (FlexAlignContent type); prop-applier forwards verbatim to the bridge's new setFlex 'align_content' case. Yoga's YGNodeStyleSetAlignContent supports all RN values natively.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
@@ -35,7 +35,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Pulp's FlexAlign type takes short forms only ({start, center, end, stretch}). RN documentation uses 'flex-start'/'flex-end' which prop-applier passes through verbatim -- these would not match the C++ enum names. Style decl converts 'flex-start'->'start' but @pulp/react does not. pulp #1434 rn batch B: bridge now accepts flex-start/flex-end/baseline; @pulp/react prop-applier passes through verbatim.",
       "issue": ""
@@ -55,7 +55,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Same long-form/short-form mismatch as alignItems. pulp #1434 rn batch B: same alias support as alignItems.",
       "issue": ""
@@ -84,7 +84,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-wires.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) \u2014 bridge fn was registered in widget_bridge.cpp; @pulp/react prop-applier dispatch wired in this PR.",
       "issue": ""
@@ -109,7 +109,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #8 \u2014 modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up.",
       "issue": ""
@@ -134,7 +134,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #8 \u2014 modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up.",
       "issue": ""
@@ -149,7 +149,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-wave2.test.ts",
-        "test/test_widget_bridge.cpp [issue-1663][borderradius-pct]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1663][borderradius-pct]"
       ],
       "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues. pulp #1663 wired %: bridge accepts \"NN%\" string, View stores in corner_radius_pct_ slot, paint-time effective_corner_radius() resolves against current bounds. Test backing at [view][bridge][rn][issue-1663][borderradius-pct].",
       "issue": ""
@@ -164,7 +164,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-wave2.test.ts",
-        "test/test_widget_bridge.cpp [issue-1663][borderradius-pct]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1663][borderradius-pct]"
       ],
       "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues. pulp #1663 wired %: bridge accepts \"NN%\" string, View stores in corner_radius_pct_ slot, paint-time effective_corner_radius() resolves against current bounds. Test backing at [view][bridge][rn][issue-1663][borderradius-pct].",
       "issue": ""
@@ -177,7 +177,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "RN prop is flat top-level, Pulp uses object shape. Convert: <View style={{borderBottomWidth: 2}} /> -> <View borderBottom={{color:'#000', width:2}} />. Awkward for RN ports. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 dropped spec-invalid '%/em/rem' from unsupportedValues (yoga #1622 ground truth: CSS rejects border-width: <%>; RN spec is number only \u2014 em/rem aren't RN values either). The prop-applier dispatches the numeric value through setBorder*Width which the Yoga + Skia stack honors end-to-end.",
       "issue": ""
@@ -202,7 +202,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #8 \u2014 modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up.",
       "issue": ""
@@ -230,7 +230,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) \u2014 LTR-only fast path. @pulp/react prop-applier maps Start\u2192Left, End\u2192Right; inset shorthand fans out to top/right/bottom/left; insetBlock\u2192top+bottom; insetInline\u2192left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection \u2014 see #1506 (catalog flipped partial \u2192 supported, Wave 1 drift cleanup).",
       "issue": ""
@@ -255,7 +255,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #8 \u2014 modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up.",
       "issue": ""
@@ -268,7 +268,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Same as borderBottomWidth. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 dropped spec-invalid '%/em/rem' from unsupportedValues (yoga #1622 ground truth: CSS rejects border-width: <%>; RN spec is number only \u2014 em/rem aren't RN values either). The prop-applier dispatches the numeric value through setBorder*Width which the Yoga + Skia stack honors end-to-end.",
       "issue": ""
@@ -283,7 +283,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-wave2.test.ts",
-        "test/test_widget_bridge.cpp [issue-1663][borderradius-pct]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1663][borderradius-pct]"
       ],
       "notes": "Workaround: <View border={{color:'transparent', width:0, radius:R}} />. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full elliptical rrect rendering is a deferred paint-side gap). pulp #1663 wired %: bridge accepts \"NN%\" string, View stores in corner_radius_pct_ slot, paint-time effective_corner_radius() resolves against current bounds. Test backing at [view][bridge][rn][issue-1663][borderradius-pct].",
       "issue": ""
@@ -308,7 +308,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #8 \u2014 modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up.",
       "issue": ""
@@ -321,7 +321,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 dropped spec-invalid '%/em/rem' from unsupportedValues (yoga #1622 ground truth: CSS rejects border-width: <%>; RN spec is number only \u2014 em/rem aren't RN values either). The prop-applier dispatches the numeric value through setBorder*Width which the Yoga + Skia stack honors end-to-end.",
       "issue": ""
@@ -335,7 +335,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) \u2014 LTR-only fast path. @pulp/react prop-applier maps Start\u2192Left, End\u2192Right; inset shorthand fans out to top/right/bottom/left; insetBlock\u2192top+bottom; insetInline\u2192left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection \u2014 see #1506 (catalog flipped partial \u2192 supported, Wave 1 drift cleanup).",
       "issue": ""
@@ -358,7 +358,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-border-style.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #10 \u2014 Skia paint installs SkDashPathEffect for dashed/dotted (CG falls through to solid via the canvas-base no-op set_line_dash). View::BorderStyle enum stores the keyword; bridge maps strings; Skia honors at stroke time. Other named styles (double/groove/ridge/inset/outset) currently degrade to solid \u2014 paint-side compositions are a follow-up. none/hidden short-circuit the stroke entirely.",
       "issue": ""
@@ -383,7 +383,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #8 \u2014 modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up.",
       "issue": ""
@@ -398,7 +398,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-wave2.test.ts",
-        "test/test_widget_bridge.cpp [issue-1663][borderradius-pct]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1663][borderradius-pct]"
       ],
       "notes": "Bridge has setBorderTopLeftRadius -- needs prop wiring. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues. pulp #1663 wired %: bridge accepts \"NN%\" string, View stores in corner_radius_pct_ slot, paint-time effective_corner_radius() resolves against current bounds. Test backing at [view][bridge][rn][issue-1663][borderradius-pct].",
       "issue": ""
@@ -413,7 +413,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-wave2.test.ts",
-        "test/test_widget_bridge.cpp [issue-1663][borderradius-pct]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1663][borderradius-pct]"
       ],
       "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues. pulp #1663 wired %: bridge accepts \"NN%\" string, View stores in corner_radius_pct_ slot, paint-time effective_corner_radius() resolves against current bounds. Test backing at [view][bridge][rn][issue-1663][borderradius-pct].",
       "issue": ""
@@ -426,7 +426,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Same as borderBottomWidth. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 dropped spec-invalid '%/em/rem' from unsupportedValues (yoga #1622 ground truth: CSS rejects border-width: <%>; RN spec is number only \u2014 em/rem aren't RN values either). The prop-applier dispatches the numeric value through setBorder*Width which the Yoga + Skia stack honors end-to-end.",
       "issue": ""
@@ -439,7 +439,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "User can call <View border={{color:'#000', width:N}} /> as workaround. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 dropped spec-invalid '%/em/rem' from unsupportedValues (yoga #1622 ground truth: CSS rejects border-width: <%>; RN spec is number only \u2014 em/rem aren't RN values either). The prop-applier dispatches the numeric value through setBorder*Width which the Yoga + Skia stack honors end-to-end.",
       "issue": ""
@@ -453,7 +453,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 batch 6: percent strings flow through prop-applier verbatim; the bridge routes them to YGNodeStyleSetPositionPercent via View::top_unit_/etc.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
@@ -473,7 +473,7 @@
         "packages/pulp-react/test/prop-applier-wave2.test.ts",
         "packages/pulp-react/test/prop-applier-box-shadow.test.ts",
         "packages/pulp-react/test/prop-applier-wave4.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "All forms wired: 'none' (clears), CSS string (single + multi-shadow paren-aware split), object form { offsetX, offsetY, blur?, spread?, color, inset? }, AND RN Fabric BoxShadowValue[] array form (prop-applier.ts:877-894 \u2014 clears first, dispatches one setBoxShadow per shadow with blurRadius/spreadDistance preferred over blur/spread). All 4 forms tested in prop-applier-wave4.test.ts. Closes pulp #1664 \u2014 catalog was stale citing array form as gap when it was actually wired by Wave 4 #1651.",
       "issue": ""
@@ -488,7 +488,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-not-impl-bundle1.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1545 landed setBoxSizing on the bridge + Yoga 3.x YGNodeStyleSetBoxSizing wiring; the @pulp/react prop-applier dispatches verbatim. Default is content-box (Yoga's historical model); border-box matches the CSS reset most web designs ship with.",
       "issue": "1545"
@@ -513,7 +513,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #8 \u2014 modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up.",
       "issue": ""
@@ -526,7 +526,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -573,7 +573,7 @@
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-wires.test.ts",
         "packages/pulp-react/test/prop-applier-wave2.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1550 catalog hygiene: flipped partial \u2192 supported. Triage #7 fan-out (#1434 small-wins bundle) wired the CSS cursor keyword set onto View::CursorStyle. RN's spec ViewStyle accepts only {auto, pointer}; Pulp accepts the full CSS cursor enum because the same prop-applier path serves both rn/cursor and css/cursor. Keywords without a dedicated visual (wait / help / progress / alias / copy / zoom-* / cell / context-menu) fall through to `default` \u2014 they're listed in unsupportedValues for catalog accuracy. Wave 1 drift cleanup \u2014 `auto` keyword falls back to default (View::CursorStyle::default_); arch-platform-cursor-set means we don't add a dedicated 'auto' slot. Wave 2 rn \u2014 added 'auto' regression coverage in the wave2 test bundle. 2026-05-12 macOS partial (pulp #1550): `alias` (NSCursor.dragLinkCursor), `copy` (NSCursor.dragCopyCursor), `zoom-in` / `zoom-out` (NSCursor.zoomInCursor / zoomOutCursor on macOS 10.15+ with defensive respondsToSelector), `context-menu` (NSCursor.contextualMenuCursor) now wire to real native cursors via View::CursorStyle slots and window_host_mac.mm dispatch. The remaining 4 (`wait`, `help`, `progress`, `cell`) have no native macOS cursor and stay catalog-unsupported \u2014 they fall through to default. Linux / Windows / web-platform-bridge implementations would add their own per-keyword mapping later.",
       "issue": ""
@@ -586,7 +586,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Only meaningful when the consumer renders <SvgPath> from @pulp/react. The bridge createSvgPath / setSvgPath / setSvgViewBox / setSvgFill / setSvgStroke / setSvgStrokeWidth surface lands on SvgPathWidget in core/view/.",
       "issue": "994"
@@ -603,7 +603,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-not-impl-bundle1.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1506 landed RTL bidi. The `direction` prop is value-disambiguated in @pulp/react: writing-direction keywords (ltr/rtl/inherit/auto) route to setDirection; flexDirection aliases ('row' / 'column' / 'row-reverse' / 'column-reverse') still fall through to setFlex(direction) for backward compat with older code. New code SHOULD use `writingDirection` (already wired) for clarity. Yoga honors writing direction for `flexDirection: 'row'` (visually reversed under rtl); Skia text-direction is consumed at shape time.",
       "issue": "1506"
@@ -619,10 +619,10 @@
         "contents"
       ],
       "tests": [
-        "test/test_widget_bridge.cpp [display-contents]",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_rn_style.cpp [display-contents]",
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
-      "notes": "@pulp/react users opt out via the boolean `visible` prop. No 'contents' equivalent. pulp #1434 (Triage #12): the prop-applier now accepts display: flex / none, mirroring the yoga side wired in #1422. \"contents\" remains unsupported (Yoga has no equivalent). ARCH-DEFERRED: display: contents requires parallel block/inline-flow layout that CLAUDE.md's flex+grid-only policy (Yoga 3.0 ceiling) explicitly rules out \u2014 the dispatcher silently no-ops; pinned by test/test_widget_bridge.cpp [display-contents].",
+      "notes": "@pulp/react users opt out via the boolean `visible` prop. No 'contents' equivalent. pulp #1434 (Triage #12): the prop-applier now accepts display: flex / none, mirroring the yoga side wired in #1422. \"contents\" remains unsupported (Yoga has no equivalent). ARCH-DEFERRED: display: contents requires parallel block/inline-flow layout that CLAUDE.md's flex+grid-only policy (Yoga 3.0 ceiling) explicitly rules out \u2014 the dispatcher silently no-ops; pinned by test/test_widget_bridge_rn_style.cpp [display-contents].",
       "issue": ""
     },
     "rn/elevation": {
@@ -648,7 +648,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) \u2014 LTR-only fast path. @pulp/react prop-applier maps Start\u2192Left, End\u2192Right; inset shorthand fans out to top/right/bottom/left; insetBlock\u2192top+bottom; insetInline\u2192left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection \u2014 see #1506 (catalog flipped partial \u2192 supported, Wave 1 drift cleanup).",
       "issue": ""
@@ -694,7 +694,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-wires.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-4 \u2014 full CSS filter chain. setFilter parses the function-call sequence into View::FilterOp[]; view.cpp paint hands off to canvas.save_layer_with_filters; Skia composes via SkImageFilters::Compose + SkColorFilters::Matrix per filter. CG path falls back to blur-only collapse (no SkColorFilter equivalent yet). Full function set: blur / brightness / contrast / grayscale / hue-rotate / invert / opacity / saturate / sepia / drop-shadow.",
       "issue": ""
@@ -708,7 +708,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-flex.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1518 closed the gap. Bare-number `flex={n}` is the canonical RN-flavored shorthand; `flex` as an object/string is not a thing in RN, so no further forms are needed. Underlying bridge wires were already stable (flex_grow / flex_shrink / flex_basis) \u2014 this is purely an adapter aliasing.",
       "issue": "1518"
@@ -723,7 +723,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1434-rn-batch-c]"
+        "test/test_widget_bridge_yoga.cpp [issue-1434-rn-batch-c]"
       ],
       "notes": "TS type is 'number' only. pulp #1434 rn batch C: bridge accepts number / \"NN%\" / \"auto\"; FlexStyle::dim_flex_basis.unit drives YGNodeStyleSetFlexBasis{,Percent,Auto}. Wave 1 architectural reclassification \u2014 `content` keyword is arch-yoga-limit (Yoga has no flex-basis content algorithm); status flipped partial \u2192 wontfix to match the actual ground-truth out-of-scope reason. number / percent / 'auto' all remain fully wired. Wave-5 follow-up audit (post-PR #1616 sweep): walked back wontfix\u2192partial. `wontfix` maps to OOS in the harness taxonomy and bypasses drift checking for the supported `number`/`%`/`auto` subset; partial preserves drift detection on the supported forms while keeping `content` listed as the real Yoga-architecture limit. arch-yoga-no-content-keyword \u2014 Yoga doesn't model the `content` keyword (it's a CSS Level 3 spec extension that maps to intrinsic-size resolution Yoga doesn't have). number, %, auto, and 0 are all supported.",
       "issue": ""
@@ -739,7 +739,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "ALSO MAJOR -- types.ts FlexDirection = 'row' | 'col'. Pulp uses 'col' instead of 'column' (RN convention) -- porting RN code requires renaming. And no reverse modes. pulp #1434 rn batch B: column added (RN canonical) alongside the legacy col shorthand; reverse modes route to Yoga.",
       "issue": ""
@@ -752,7 +752,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -765,7 +765,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -783,7 +783,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-bundle.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #14 \u2014 broadened flexWrap type to boolean | string (CSS keywords). RN spec accepts the same string vocabulary; routing same as css/flexWrap.",
       "issue": ""
@@ -799,7 +799,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1434-fontfamily]",
+        "test/test_widget_bridge_css_animations.cpp [issue-1434-fontfamily]",
         "test/test_canvas.cpp [issue-1737] (comma-list fontFamily falls back through SkFontMgr; quotes + whitespace handling)"
       ],
       "notes": "pulp #1434 Phase A2-5 wired the @pulp/react JSX dispatch + bridge list parser. pulp #1737 (#932 followup) closed the whole-list fallback chain \u2014 SkiaCanvas resolves the comma-separated list at paint time via split_font_family_list + per-family matchFamilyStyle walk. Resolution accepts a family if SkFontMgr returns a typeface whose actual family name contains (or is contained by) the requested family \u2014 guards against SkFontMgr's null-fallback masking a missing family. Single-family inputs unchanged \u2014 fast-path delegates straight to get_cached_typeface_single.",
@@ -813,7 +813,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -829,7 +829,7 @@
         "oblique"
       ],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -882,7 +882,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-wave2.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Keyword aliasing not done in prop-applier. Wave 1 drift cleanup \u2014 populated supportedValues with the RN standard weight set (normal / bold / 100..900); wired through prop-applier 'fontWeight' case. Wave 2 rn \u2014 added regression coverage for numeric weights '100'..'900'.",
       "issue": ""
@@ -895,7 +895,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -910,7 +910,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1712][rn-height]"
+        "test/test_widget_bridge_yoga.cpp [issue-1712][rn-height]"
       ],
       "notes": "pulp #1434 rn batch C wired number + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' end-to-end. TS type accepts `number | string`; prop-applier forwards verbatim; bridge dispatches via FlexStyle::dim_height.unit (px / percent / auto_) and yoga_layout.cpp routes to YGNodeStyleSetHeight{,Percent,Auto}. Wave 1 drift cleanup \u2014 supported \u2192 partial (`vh` string unit is a real deferred gap). arch-no-viewport \u2014 `vh`/`vw`/`vmin`/`vmax` units are deferred because Pulp has no global viewport context (Views can be embedded in plugin editors, standalone windows, or mobile screens with different sizing semantics; CSS viewport-unit semantics are undefined at the View level). Authors should use `%` units relative to the parent container instead. See pulp #1712.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
@@ -940,7 +940,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) \u2014 LTR-only fast path. @pulp/react prop-applier maps Start\u2192Left, End\u2192Right; inset shorthand fans out to top/right/bottom/left; insetBlock\u2192top+bottom; insetInline\u2192left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection \u2014 see #1506 (catalog flipped partial \u2192 supported, Wave 1 drift cleanup).",
       "issue": ""
@@ -955,7 +955,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) \u2014 LTR-only fast path. @pulp/react prop-applier maps Start\u2192Left, End\u2192Right; inset shorthand fans out to top/right/bottom/left; insetBlock\u2192top+bottom; insetInline\u2192left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection \u2014 see #1506 (catalog flipped partial \u2192 supported, Wave 1 drift cleanup).",
       "issue": ""
@@ -970,7 +970,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) \u2014 LTR-only fast path. @pulp/react prop-applier maps Start\u2192Left, End\u2192Right; inset shorthand fans out to top/right/bottom/left; insetBlock\u2192top+bottom; insetInline\u2192left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection \u2014 see #1506 (catalog flipped partial \u2192 supported, Wave 1 drift cleanup).",
       "issue": ""
@@ -1004,7 +1004,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Long-form RN names not auto-converted -- same trap as alignItems. pulp #1434 rn batch B: bridge accepts flex-start/flex-end CSS aliases via the same alias table.",
       "issue": ""
@@ -1018,7 +1018,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 batch 6: percent strings flow through prop-applier verbatim; the bridge routes them to YGNodeStyleSetPositionPercent via View::top_unit_/etc.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
@@ -1031,7 +1031,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -1046,7 +1046,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-wave2.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Wave 1 drift cleanup \u2014 supported \u2192 partial (unitless multiplier form is a real deferred gap; absolute-px works end-to-end). Wave 2 rn \u2014 unitless-multiplier semantics now resolved at dispatch time. Values <= 8 are treated as a multiplier of the live `fontSize` from props (default 14 if absent); larger values flow through as absolute pixels. Px-suffix strings strip the suffix and treat as absolute.",
       "issue": ""
@@ -1063,7 +1063,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-wave2.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Wave 1 drift cleanup \u2014 supported \u2192 partial (auto + string-form margins are real deferred gaps). Wave 2 rn \u2014 string margin shorthands (`'auto'`, `'5%'`, `'0 auto'`) now fan out to the per-edge bridge keys (which honor Yoga's YGNodeStyleSetMarginAuto for centering and the percent path).",
       "issue": ""
@@ -1079,7 +1079,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 per-edge accepts number, percent string, auto.",
       "issue": ""
@@ -1095,7 +1095,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) \u2014 LTR-only fast path. @pulp/react prop-applier maps Start\u2192Left, End\u2192Right; inset shorthand fans out to top/right/bottom/left; insetBlock\u2192top+bottom; insetInline\u2192left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection \u2014 see #1506 (catalog flipped partial \u2192 supported, Wave 1 drift cleanup).",
       "issue": ""
@@ -1111,7 +1111,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
@@ -1127,7 +1127,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 per-edge accepts number, percent string, auto.",
       "issue": ""
@@ -1143,7 +1143,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 per-edge accepts number, percent string, auto.",
       "issue": ""
@@ -1159,7 +1159,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) \u2014 LTR-only fast path. @pulp/react prop-applier maps Start\u2192Left, End\u2192Right; inset shorthand fans out to top/right/bottom/left; insetBlock\u2192top+bottom; insetInline\u2192left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection \u2014 see #1506 (catalog flipped partial \u2192 supported, Wave 1 drift cleanup).",
       "issue": ""
@@ -1175,7 +1175,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 per-edge accepts number, percent string, auto.",
       "issue": ""
@@ -1191,7 +1191,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
@@ -1205,7 +1205,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_max_height.unit; yoga_layout.cpp routes to YGNodeStyleSetMaxHeightPercent. pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_max_height.unit \u2192 YGNodeStyleSetMaxHeightPercent.",
       "issue": ""
@@ -1219,7 +1219,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_max_width.unit; yoga_layout.cpp routes to YGNodeStyleSetMaxWidthPercent. pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_max_width.unit \u2192 YGNodeStyleSetMaxWidthPercent.",
       "issue": ""
@@ -1233,7 +1233,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_min_height.unit; yoga_layout.cpp routes to YGNodeStyleSetMinHeightPercent. pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_min_height.unit \u2192 YGNodeStyleSetMinHeightPercent.",
       "issue": ""
@@ -1247,7 +1247,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_min_width.unit; yoga_layout.cpp routes to YGNodeStyleSetMinWidthPercent. pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_min_width.unit \u2192 YGNodeStyleSetMinWidthPercent.",
       "issue": ""
@@ -1277,7 +1277,7 @@
         "plus-darker"
       ],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Wired through @pulp/react JSX (RN 0.76 New Architecture). Skia paint backend honors the keyword at saveLayer compositing time; CG / D2D backends fall through to plain save_layer (no-op blend) until those backends grow the same shim. 2026-05-12 closure: `plus-lighter` reclassified as supported (additive kPlus mapping is spec-correct); `plus-darker` stays unsupported \u2014 Pulp maps it to kPlus too (same as plus-lighter) but W3C draft defines plus-darker as MULTIPLICATIVE \u2014 widget_bridge.cpp:5473 maps both to canvas::Canvas::BlendMode::lighter (SkBlendMode::kPlus at the Skia layer, matching Chromium's mapping). Caveat: `plus-darker` is technically a multiplicative variant in the W3C draft but Skia/Chromium ship additive kPlus for both. Pinned by test.",
       "issue": "1549"
@@ -1290,7 +1290,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -1309,7 +1309,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-outline.test.ts",
-        "test/test_widget_bridge.cpp [issue-1710][outline-currentcolor]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1710][outline-currentcolor]"
       ],
       "notes": "pulp #1519 \u2014 RN outline cluster. Outline is paint-time only and does NOT affect Yoga layout (parent never reserves space). Skia paint inflates the box by (offset + width/2) and strokes with the parsed color. Wave 1 drift cleanup \u2014 supported \u2192 partial (currentColor keyword resolution deferred; CSS color strings round-trip). Wired in pulp #1710 \u2014 `currentColor` keyword resolves to the View's inheritable text color (walks parent chain via View::inheritable_text_color), falling back to theme `text.primary` token when no ancestor set the text color explicitly. Test [view][bridge][rn][issue-1710][outline-currentcolor] proves the resolution.",
       "issue": ""
@@ -1323,7 +1323,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-outline.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1519 \u2014 gap between border-box edge and outline. Paint-only; no Yoga layout impact.",
       "issue": ""
@@ -1346,7 +1346,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-outline.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1519 \u2014 Skia installs SkDashPathEffect for dashed/dotted at outline-stroke time. Other named styles currently degrade to solid (paint-side gap, same as borderStyle). none/hidden/zero-width short-circuit the stroke.",
       "issue": ""
@@ -1360,7 +1360,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-outline.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1519 \u2014 outline stroke thickness. width<=0 short-circuits the paint. Paint-only; no Yoga layout impact.",
       "issue": ""
@@ -1376,7 +1376,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-pointer.test.ts",
-        "test/test_widget_bridge.cpp [issue-1737][rn-overflow-scroll]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1737][rn-overflow-scroll]"
       ],
       "notes": "pulp #1550 catalog hygiene: flipped partial \u2192 supported. pulp #1737 \u2014 keyword coverage reclassified to all 3 RN values to match the bridge implementation (widget_bridge.cpp:3650-3663) and the css/overflow precedent. `scroll` clips painted pixels like `hidden` but propagates through Yoga as a distinct overflow mode. Authors who need true scrollbars wire the ScrollView intrinsic; this mirrors React Native's split between style-level overflow and a dedicated ScrollView container.",
       "issue": ""
@@ -1390,7 +1390,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Generalized overlay-click routing. The CSS-shim auto-claim heuristic (web-compat-style-decl.js _reevaluateOverlay) calls into the same bridge functions when position:absolute combines with z-index above a threshold (>= 10) OR the data-overlay='true' hint is set, so DOM-lite consumers don't need to rewire to the @pulp/react overlay prop.",
       "issue": "1148"
@@ -1406,7 +1406,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-wave2.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Wave 1 drift cleanup \u2014 supported \u2192 partial (% form on padding edges is deferred). Wave 2 rn \u2014 string padding shorthands (`'5%'`, `'10px 20px'`, etc.) now fan out to the per-edge bridge keys (which already accept percent via Yoga's YGNodeStyleSetPaddingPercent). Numeric values still take the single-call shorthand path.",
       "issue": ""
@@ -1421,7 +1421,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts number (px) or percent string. RN spec also lists `auto` for padding but it is inexpressible (Yoga has no padding-auto API).",
       "issue": ""
@@ -1436,7 +1436,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) \u2014 LTR-only fast path. @pulp/react prop-applier maps Start\u2192Left, End\u2192Right; inset shorthand fans out to top/right/bottom/left; insetBlock\u2192top+bottom; insetInline\u2192left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection \u2014 see #1506 (catalog flipped partial \u2192 supported, Wave 1 drift cleanup).",
       "issue": ""
@@ -1451,7 +1451,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
@@ -1466,7 +1466,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts number (px) or percent string. RN spec also lists `auto` for padding but it is inexpressible (Yoga has no padding-auto API).",
       "issue": ""
@@ -1481,7 +1481,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts number (px) or percent string. RN spec also lists `auto` for padding but it is inexpressible (Yoga has no padding-auto API).",
       "issue": ""
@@ -1496,7 +1496,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) \u2014 LTR-only fast path. @pulp/react prop-applier maps Start\u2192Left, End\u2192Right; inset shorthand fans out to top/right/bottom/left; insetBlock\u2192top+bottom; insetInline\u2192left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection \u2014 see #1506 (catalog flipped partial \u2192 supported, Wave 1 drift cleanup).",
       "issue": ""
@@ -1511,7 +1511,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 accepts number (px) or percent string. RN spec also lists `auto` for padding but it is inexpressible (Yoga has no padding-auto API).",
       "issue": ""
@@ -1526,7 +1526,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch \u2014 alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
@@ -1543,7 +1543,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-wires.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) \u2014 bridge fn was registered in widget_bridge.cpp; @pulp/react prop-applier dispatch wired in this PR.",
       "issue": ""
@@ -1561,7 +1561,7 @@
         "sticky (RN omits)"
       ],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "RN's enum is {absolute, relative, static}. Pulp accepts more (fixed, sticky) than RN.",
       "issue": ""
@@ -1575,7 +1575,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 batch 6: percent strings flow through prop-applier verbatim; the bridge routes them to YGNodeStyleSetPositionPercent via View::top_unit_/etc.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
@@ -1588,7 +1588,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -1655,7 +1655,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) \u2014 LTR-only fast path. @pulp/react prop-applier maps Start\u2192Left, End\u2192Right; inset shorthand fans out to top/right/bottom/left; insetBlock\u2192top+bottom; insetInline\u2192left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection \u2014 see #1506 (catalog flipped partial \u2192 supported, Wave 1 drift cleanup).",
       "issue": ""
@@ -1668,7 +1668,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Only on @pulp/react SvgPath. See rn/fill caveat \u2014 no DOM-lite path-prop equivalent.",
       "issue": "994"
@@ -1681,7 +1681,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Only on @pulp/react SvgPath.",
       "issue": "994"
@@ -1698,7 +1698,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #11: bridge accepts auto + justify; \"auto\" resolves to left under LTR (pulp doesn't model RTL yet); \"justify\" routes through canvas TextAlign::justify (full SkParagraph kJustify rendering follows up).",
       "issue": ""
@@ -1746,7 +1746,7 @@
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-not-impl-bundle1.test.ts",
         "packages/pulp-react/test/prop-applier-wave2.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 (rn NOT-IMPL bundle 1): the @pulp/react surface aliases RN's `textDecorationLine` to the existing setTextDecoration bridge fn. Single-keyword form is honored by Label::TextDecoration; the RN compound form `'underline line-through'` is forwarded verbatim but only the first keyword takes effect today (same partial gap noted on css/textDecoration). `overline` is a pulp extension over RN spec. Wave 1 drift cleanup \u2014 added 'underline line-through' combined keyword to supportedValues (the prop-applier passes the keyword to the bridge verbatim). Wave 2 rn \u2014 added 'underline line-through' compound regression coverage.",
       "issue": ""
@@ -1777,7 +1777,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-not-impl-bundle1.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1548 work shipped: bridge fn registered (widget_bridge.cpp:5010-5017) and prop-applier wired (prop-applier.ts:1280). Earlier catalog note claimed deferred-to-#1548 \u2014 that work landed. CSS color strings flow through to View::set_text_shadow_color_."
     },
@@ -1790,7 +1790,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-not-impl-bundle1.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1548 work shipped: bridge fn registered (widget_bridge.cpp:5018-5026) and prop-applier wired (prop-applier.ts:1281-1287). { width, height } shape per RN spec; prop-applier coerces missing axes to 0."
     },
@@ -1803,7 +1803,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-not-impl-bundle1.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1548 work shipped: bridge fn registered (widget_bridge.cpp:5027-5034) and prop-applier wired (prop-applier.ts:1288). Blur radius in px (number)."
     },
@@ -1819,7 +1819,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-wires.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) \u2014 bridge fn was registered in widget_bridge.cpp; @pulp/react prop-applier dispatch wired in this PR.",
       "issue": ""
@@ -1833,7 +1833,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 batch 6: percent strings flow through prop-applier verbatim; the bridge routes them to YGNodeStyleSetPositionPercent via View::top_unit_/etc.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
@@ -1852,7 +1852,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-transform.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #9 fan-out \u2014 full CSS transform-function set wired via parseTransform walk-once accumulator. setSkew bridge fn registered; scaleX/scaleY share uniform setScale slot (last-write-wins; bridge gap); matrix() decomposed to translate+scale+rotate. rotateX / rotateY / matrix3d / perspective silently drop (pulp's 2D View has no 3D model). rn array surface does not include matrix() (RN spec omits it). independent scaleX != scaleY \u2014 last-write-wins on the uniform bridge.",
       "issue": ""
@@ -1869,7 +1869,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-wires.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) \u2014 bridge fn was registered in widget_bridge.cpp; @pulp/react prop-applier dispatch wired in this PR.",
       "issue": ""
@@ -1887,9 +1887,9 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-wires.test.ts",
-        "test/test_widget_bridge.cpp [issue-1656-tier2-userSelect]"
+        "test/test_widget_bridge_clip_mask.cpp [issue-1656-tier2-userSelect]"
       ],
-      "notes": "pulp #1737 \u2014 catalog flipped noop \u2192 supported to match the wired implementation. View::UserSelect enum + setter/getter landed under pulp #1538/#1656 follow-up; the bridge's setUserSelect (widget_bridge.cpp:2474-2484) already routes all 5 RN keywords with full evidence in test/test_widget_bridge.cpp [issue-1656-tier2-userSelect]. Native text-selection suppression on the input layer is the behaviour-fidelity follow-up; the keyword-coverage + storage round-trip is complete and matches the css/userSelect catalog precedent.",
+      "notes": "pulp #1737 \u2014 catalog flipped noop \u2192 supported to match the wired implementation. View::UserSelect enum + setter/getter landed under pulp #1538/#1656 follow-up; the bridge's setUserSelect (widget_bridge.cpp:2474-2484) already routes all 5 RN keywords with full evidence in test/test_widget_bridge_clip_mask.cpp [issue-1656-tier2-userSelect]. Native text-selection suppression on the input layer is the behaviour-fidelity follow-up; the keyword-coverage + storage round-trip is complete and matches the css/userSelect catalog precedent.",
       "issue": ""
     },
     "rn/verticalAlign": {
@@ -1918,7 +1918,7 @@
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-wave2.test.ts",
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "RN doesn't have a native SVG surface; this is a Pulp-specific @pulp/react intrinsic. CSS-shim consumers don't see this prop today. Wave 1 drift cleanup \u2014 supported \u2192 partial (only the [w,h] tuple is consumed; min-x/min-y prefix is parsed but ignored). Wave 2 rn \u2014 SVG-spec string form `'min-x min-y w h'` (or `'w h'`) now parses at dispatch time. The bridge consumes the trailing two tokens as (width, height); the min-x / min-y origin offset is not yet honored by the SvgPathWidget paint side (separate paint-side follow-up).",
       "issue": "994"
@@ -1933,7 +1933,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 rn batch C wired number + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' end-to-end. TS type accepts `number | string`; bridge dispatches via FlexStyle::dim_width.unit (px / percent / auto_) and yoga_layout.cpp routes to YGNodeStyleSetWidth{,Percent,Auto}.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
@@ -1961,7 +1961,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""

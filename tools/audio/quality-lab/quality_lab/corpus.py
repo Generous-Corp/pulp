@@ -20,7 +20,7 @@ import os
 import shutil
 from typing import Any
 
-from . import audio_io, generate, provenance
+from . import audio_io, generate, osc_fixtures, provenance
 
 # Permissive licenses allowed in the committed corpus (plus the synthetic marker).
 PERMISSIVE_LICENSES = {
@@ -121,6 +121,16 @@ _GENERATORS = {
         int(p.get("sr", 48000)), p.get("bpm", 120.0), p.get("ratio", 1.0), int(p.get("seed", 0)))[0],
     "tonal_pad": lambda p: generate.render_tonal(
         int(p.get("sr", 48000)), p.get("dur_s", 2.5), int(p.get("seed", 0)))[0],
+    "osc_static_shapes": lambda p: osc_fixtures.render_static_shapes(
+        int(p.get("sr", 48000)), p.get("dur_s", 0.4), p.get("pitches", [110.0, 440.0, 1760.0]),
+        p.get("shapes"), p.get("gap_s", 0.05)),
+    "osc_sync_sweep": lambda p: osc_fixtures.render_sync_sweep(
+        int(p.get("sr", 48000)), p.get("dur_s", 0.3),
+        p.get("f_master_list", [110.0, 220.0, 440.0, 880.0]),
+        p.get("f_slave_ratio", 2.5), p.get("gap_s", 0.05)),
+    "osc_tzfm_grid": lambda p: osc_fixtures.render_tzfm_grid(
+        int(p.get("sr", 48000)), p.get("dur_s", 0.3), p.get("f_carrier", 220.0),
+        p.get("mod_grid", [[55.0, 2.0], [110.0, 4.0], [27.5, 6.0]]), p.get("gap_s", 0.05)),
 }
 
 
@@ -146,8 +156,11 @@ def materialize(corpus_dir: str, name: str) -> str:
 
 
 def seed(corpus_dir: str | None = None) -> dict[str, Any]:
-    """Seed the committed corpus with the two synthetic families (regenerable, license-
-    clean) so it is never empty and the workflow is demonstrated."""
+    """Seed the committed corpus with the synthetic families (regenerable, license-
+    clean) so it is never empty and the workflow is demonstrated: two stretch-oriented
+    families (drum break, tonal pad) plus three oscillator families (static shapes,
+    hard-sync sweep, TZFM grid) that give the alias/HF regression axis oscillator
+    material to gate on, not just drum/tonal stimuli."""
     corpus_dir = corpus_dir or default_corpus_dir()
     register_generated(corpus_dir, name="synthetic_drumbreak", generator="drum_break",
                        material_class="percussive", family="time-stretch",
@@ -157,4 +170,22 @@ def seed(corpus_dir: str | None = None) -> dict[str, Any]:
                        material_class="tonal", family="tonal",
                        expected="graininess / dulling on sustained material",
                        params={"sr": 48000, "dur_s": 2.5, "seed": 0})
+    register_generated(corpus_dir, name="synthetic_osc_static_shapes", generator="osc_static_shapes",
+                       material_class="synth", family="oscillator",
+                       expected="added HF / alias energy on a static bandlimited render",
+                       params={"sr": 48000, "dur_s": 0.4,
+                               "shapes": ["sine", "saw", "square", "triangle"],
+                               "pitches": [110.0, 440.0, 1760.0], "gap_s": 0.05})
+    register_generated(corpus_dir, name="synthetic_osc_sync_sweep", generator="osc_sync_sweep",
+                       material_class="synth", family="oscillator",
+                       expected="reset-seam artifacts swept across the hard-sync range",
+                       params={"sr": 48000, "dur_s": 0.3,
+                               "f_master_list": [110.0, 220.0, 440.0, 880.0],
+                               "f_slave_ratio": 2.5, "gap_s": 0.05})
+    register_generated(corpus_dir, name="synthetic_osc_tzfm_grid", generator="osc_tzfm_grid",
+                       material_class="synth", family="oscillator",
+                       expected="through-zero FM sideband aliasing across a mod-rate/index grid",
+                       params={"sr": 48000, "dur_s": 0.3, "f_carrier": 220.0,
+                               "mod_grid": [[55.0, 2.0], [110.0, 4.0], [27.5, 6.0]],
+                               "gap_s": 0.05})
     return load_manifest(corpus_dir)

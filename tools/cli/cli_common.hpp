@@ -12,6 +12,8 @@
 // command file that includes cli_common.hpp still sees the full CLI API.
 #include "cli_doctor.hpp"   // impl: cli_doctor_helpers.cpp
 #include "cli_sdk.hpp"      // impl: cli_sdk.cpp
+#include "cli_aax.hpp"      // impl: cli_common.cpp / cli_doctor_helpers.cpp
+#include "cli_watch.hpp"    // impl: cli_common.cpp
 #include "shell_quote.hpp"
 
 #include <pulp/runtime/system.hpp>
@@ -131,21 +133,12 @@ bool checkout_supports_au(const fs::path& repo_root);
 #endif
 
 // ── AAX Helpers (used by validate + doctor + create) ────────────────────────
+// AAX SDK / validator discovery + setup guidance moved to cli_aax.hpp
+// (included above). Two generic bundle/file helpers that live in the same
+// impl TUs but are not AAX-specific stay here:
 
-bool aax_supported_on_host();
-std::string aax_download_url();
-std::string aax_sdk_download_label();
-std::string aax_validator_download_label();
-bool looks_like_aax_sdk_root(const fs::path& path);
-fs::path find_aax_sdk_root();
-fs::path find_aax_validator_root();
-void print_aax_setup_guidance(bool need_sdk, bool need_validator);
 fs::path write_temp_text_file(const std::string& prefix, const std::string& content);
 bool bundle_contains_payload(const fs::path& bundle_path);
-std::string run_aax_validator_command(const fs::path& validator_root,
-                                     const fs::path& plugin_path,
-                                     bool run_all);
-bool aax_validator_passed(const std::string& output);
 
 // ── Interactive Prompts ─────────────────────────────────────────────────────
 
@@ -158,31 +151,8 @@ std::string input(const std::string& prompt, const std::string& default_value = 
 } // namespace cli
 
 // ── File Watching / Dev Loop ────────────────────────────────────────────────
-
-struct WatchOptions {
-    fs::path root;
-    fs::path build_dir;
-    std::vector<std::string> build_args;
-    bool run_tests = false;          // run ctest after successful build
-    std::string test_filter;          // -R filter for ctest (empty = all)
-    bool run_validate = false;        // run quick dlopen validation after build
-    std::string launch_target;        // binary to launch/relaunch (empty = none)
-    std::vector<std::string> launch_args;  // args for launched binary
-    bool hot_dsp = false;             // keep the launched app alive across rebuilds;
-                                      // its ReloadableShell watcher hot-swaps the
-                                      // rebuilt logic instead of a process restart
-    int build_jobs = 0;                // optional host-governed build/test cap
-    std::string build_qos;             // optional host role QoS hint
-    bool build_watchdog = false;       // true when a lease-backed build should be CPU-watched
-};
-
-// Watch source files and rebuild on changes. Optionally runs tests,
-// validation, and manages a launched subprocess.
-int watch_loop(const WatchOptions& opts);
-
-// Legacy API — calls watch_loop with build-only options
-int watch_and_rebuild(const fs::path& root, const fs::path& build_dir,
-                      const std::vector<std::string>& build_args);
+// WatchOptions + watch_loop / watch_and_rebuild moved to cli_watch.hpp
+// (included above).
 
 // ── Fuzzy Matching ──────────────────────────────────────────────────────────
 

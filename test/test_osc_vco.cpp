@@ -24,16 +24,20 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <pulp/audio/analysis/audio_spectrum.hpp>
+#include <pulp/audio/analysis/pitch_track.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/signal/dc_blocker.hpp>
 #include <pulp/signal/osc/phase.hpp>
 #include <pulp/signal/osc/va.hpp>
 #include <pulp/signal/osc/vco.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <numbers>
 #include <span>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -49,7 +53,9 @@ using pulp::test::audio::AliasReport;
 using pulp::test::audio::fold_frequency;
 using pulp::test::audio::measure_aliasing;
 using pulp::test::audio::measure_thd;
+using pulp::test::audio::PitchTrackOptions;
 using pulp::test::audio::response_relative_to_input;
+using pulp::test::audio::track_pitch;
 using pulp::test::audio::ResponseOptions;
 using pulp::test::audio::ThdOptions;
 using pulp::test::audio::ThdResult;
@@ -206,6 +212,79 @@ double coherent_f0(int cycles, int length = kRenderLength) {
     return static_cast<double>(cycles) * kSampleRate / static_cast<double>(length);
 }
 
+// A sine at f0 modulated by the seeded drift/jitter source, as float samples for
+// the pitch tracker. A `warmup` prefix is rendered and discarded so the drift's
+// leaky integrator reaches its stationary variance before the analyzed span (the
+// walk starts from 0 at reset). Sine is used so f0(t) is read with no shape
+// harmonics in the way; the noise injection is upstream of the shape, so the
+// choice does not affect what is measured.
+std::vector<float> render_noise_sine(double f0, double drift_depth, double drift_rate,
+                                     double jitter_depth, std::uint64_t seed,
+                                     int analysis_len, int warmup = 0) {
+    VcoOscillator osc;
+    osc.prepare(kSampleRate);
+    osc.set_shape(VaShape::sine);
+    osc.set_seed(seed);
+    osc.set_drift_rate_hz(drift_rate);
+    osc.set_drift_depth(drift_depth);
+    osc.set_jitter_depth(jitter_depth);
+    osc.reset(0.0);
+    std::vector<float> out(static_cast<std::size_t>(analysis_len));
+    const double increment = f0 / kSampleRate;
+    const int total = warmup + analysis_len;
+    for (int i = 0; i < total; ++i) {
+        const double v = osc.next(increment);
+        if (i >= warmup) out[static_cast<std::size_t>(i - warmup)] = static_cast<float>(v);
+    }
+    return out;
+}
+
+// Summary of an f0(t) trajectory: how much the pitch wandered (RMS in cents about
+// the trajectory's log-mean, which removes any static tuning offset) and how
+// coherent that wander is frame-to-frame (lag-1 autocorrelation — near 1 for a
+// slow process, near 0 for a white one across non-overlapping frames).
+struct PitchStats {
+    int voiced = 0;
+    int total = 0;
+    double rms_cents = 0.0;
+    double autocorr1 = 0.0;
+    bool any_nonfinite = false;
+};
+
+PitchStats pitch_stats(const std::vector<float>& signal, int window, int hop) {
+    PitchTrackOptions options;
+    options.window_length = window;
+    options.hop_length = hop;
+    const auto track = track_pitch(std::span<const float>(signal), kSampleRate, options);
+
+    PitchStats stats;
+    stats.total = static_cast<int>(track.points.size());
+    const std::vector<double> hz = track.voiced_hz();
+    stats.voiced = static_cast<int>(hz.size());
+    for (const double f : hz)
+        if (!std::isfinite(f) || !(f > 0.0)) stats.any_nonfinite = true;
+    if (hz.size() < 2 || stats.any_nonfinite) return stats;
+
+    // Cents about the log-mean.
+    double log_mean = 0.0;
+    for (const double f : hz) log_mean += std::log2(f);
+    log_mean /= static_cast<double>(hz.size());
+    std::vector<double> cents(hz.size());
+    for (std::size_t i = 0; i < hz.size(); ++i)
+        cents[i] = 1200.0 * (std::log2(hz[i]) - log_mean);
+
+    double sumsq = 0.0;
+    for (const double c : cents) sumsq += c * c;
+    const double variance = sumsq / static_cast<double>(cents.size());
+    stats.rms_cents = std::sqrt(variance);
+
+    double lag1 = 0.0;
+    for (std::size_t i = 1; i < cents.size(); ++i) lag1 += cents[i] * cents[i - 1];
+    lag1 /= static_cast<double>(cents.size() - 1);
+    stats.autocorr1 = variance > 0.0 ? lag1 / variance : 0.0;
+    return stats;
+}
+
 // Analytic magnitude, in dB, of the one-pole DC blocker H(z) = (1 - z^-1) /
 // (1 - p z^-1) at frequency f — computed from the pole the VCO reports, so the
 // corner claim is a statement about the filter the VCO actually applies.
@@ -242,29 +321,55 @@ TEST_CASE("a neutral VCO is bit-for-bit the bandlimited core", "[signal][osc][vc
     }
 }
 
-TEST_CASE("the reserved drift/jitter site is inert", "[signal][osc][vco]") {
-    // The drift/jitter depths default to 0 and are UNIMPLEMENTED on purpose (no
-    // stochastic source until the time-domain analyzer lands). A knob that
-    // silently half-worked would be worse than an absent one, so this pins that
-    // even a non-zero depth changes nothing today — the output stays bit-identical
-    // to the no-path reference. When a source is wired, this test flips to
-    // asserting the perturbation instead.
-    for (const double f0 : kTestF0) {
-        const auto reference = render_va(VaShape::saw, f0);
+TEST_CASE("zero depth is a bit-exact bypass; non-zero depth perturbs the clock",
+          "[signal][osc][vco][noise]") {
+    // The drift/jitter site injects a seeded frequency modulation, but ONLY when a
+    // depth is non-zero. At depth 0 the factor is 1.0 bit-for-bit and no noise
+    // state advances, so the output stays bit-identical to the no-noise core — the
+    // master null the whole composition rests on. A non-zero depth must then
+    // actually change the clock (the reserved-knob-that-silently-did-nothing state
+    // this replaces). The rigorous drift-vs-jitter Allan-slope SEPARATION is
+    // deferred to the offline Python lane (it needs the WAV bridge); here the C++
+    // behavior — bypass, perturbation, scaling, slow-vs-fast character,
+    // determinism, bounds — is what is gated.
+    SECTION("both depths zero: bit-identical to the bandlimited core, seed aside") {
+        for (const double f0 : kTestF0) {
+            const auto reference = render_va(VaShape::saw, f0);
+            VcoOscillator osc;
+            osc.prepare(kSampleRate);
+            osc.set_shape(VaShape::saw);
+            osc.set_drift_depth(0.0);
+            osc.set_jitter_depth(0.0);
+            osc.set_seed(0xABCDEF01u); // irrelevant while both depths are 0.
+            osc.reset(kCleanStartPhase);
+            int differing = 0;
+            for (std::size_t i = 0; i < reference.size(); ++i)
+                if (osc.next(f0 / kSampleRate) != reference[i]) ++differing;
+            INFO("f0 " << f0 << ": " << differing << " samples differ at zero depth");
+            CHECK(differing == 0);
+        }
+    }
 
-        VcoOscillator osc;
-        osc.prepare(kSampleRate);
-        osc.set_shape(VaShape::saw);
-        osc.set_drift_depth(0.5);
-        osc.set_jitter_depth(0.5);
-        osc.reset(kCleanStartPhase);
-        const double increment = f0 / kSampleRate;
+    SECTION("a non-zero depth changes the output from the neutral path") {
+        const double f0 = 1103.0;
+        const auto neutral = render_va(VaShape::sine, f0, 0.0);
 
-        int differing = 0;
-        for (std::size_t i = 0; i < reference.size(); ++i)
-            if (osc.next(increment) != reference[i]) ++differing;
-        INFO("f0 " << f0 << ": " << differing << " samples perturbed by reserved depths");
-        CHECK(differing == 0);
+        auto perturbed_count = [&](double drift, double jitter) {
+            VcoOscillator osc;
+            osc.prepare(kSampleRate);
+            osc.set_shape(VaShape::sine);
+            osc.set_drift_depth(drift);
+            osc.set_jitter_depth(jitter);
+            osc.set_seed(1);
+            osc.reset(0.0);
+            int differing = 0;
+            for (std::size_t i = 0; i < neutral.size(); ++i)
+                if (osc.next(f0 / kSampleRate) != neutral[i]) ++differing;
+            return differing;
+        };
+
+        CHECK(perturbed_count(10.0, 0.0) > 0);  // drift alone perturbs.
+        CHECK(perturbed_count(0.0, 10.0) > 0);  // jitter alone perturbs.
     }
 }
 
@@ -543,6 +648,33 @@ TEST_CASE("the VCO applies the DC blocker's own LTI response", "[signal][osc][vc
                              << dc_block_mag_db(50.0, pole) << " dB)");
     CHECK_THAT(curve.magnitude_db_at(50.0), WithinAbs(-3.0, 0.6));
     CHECK(curve.magnitude_db_at(500.0) > -0.5);
+
+    // The above ties the corner to a reference filter seeded with the REPORTED
+    // pole. Also prove the pole is actually APPLIED to the VCO's own output: a
+    // wiring bug that computed ac_pole_ but never called dc_blocker_.set_pole
+    // would pass everything above. Render the VCO's own sine at a frequency
+    // below the corner through two different corners; the higher corner is a
+    // steeper highpass there, so it must attenuate that tone MORE. This can only
+    // be true if the corner reaches the output path.
+    auto out_rms = [](VcoOscillator& o, double f0, double corner) {
+        o.prepare(kSampleRate);
+        o.set_shape(VaShape::sine);
+        o.set_ac_coupling(corner);
+        o.reset();
+        constexpr int len = 48000;
+        double sum = 0.0;
+        for (int i = 0; i < len; ++i) {
+            const double v = o.next(f0 / kSampleRate);
+            if (i > 4096) sum += v * v; // skip the highpass settling transient.
+        }
+        return std::sqrt(sum / (len - 4096));
+    };
+    VcoOscillator a, b;
+    const double rms_low_corner = out_rms(a, 40.0, 50.0);
+    const double rms_high_corner = out_rms(b, 40.0, 400.0);
+    INFO("40 Hz tone RMS through the VCO: 50 Hz corner " << rms_low_corner
+         << ", 400 Hz corner " << rms_high_corner);
+    CHECK(rms_high_corner < rms_low_corner * 0.9); // higher corner cuts it more.
 }
 
 TEST_CASE("AC coupling off is an exact bypass", "[signal][osc][vco][ac]") {
@@ -601,6 +733,35 @@ TEST_CASE("the waveshaper's character is correct and its null is exact",
         for (std::size_t i = 0; i < plain.size(); ++i)
             if (osc.next(f0 / kSampleRate) != plain[i]) ++differing;
         CHECK(differing == 0);
+    }
+
+    SECTION("an out-of-range blend amount is clamped to [0,1], keeping output bounded") {
+        // `amount` is a blend; outside [0,1] it extrapolates the shaped/unshaped mix
+        // past the [-1,1] output contract (amount 2 reaches ~3x on a full-scale
+        // shape). The setter must clamp like every other unit-range control.
+        VcoOscillator osc;
+        osc.prepare(kSampleRate);
+        osc.set_shape(VaShape::saw);
+        WaveshaperParams hot;
+        hot.amount = 2.0; // way past the top of the blend range.
+        hot.drive = 4.0;
+        osc.set_waveshaper(VaShape::saw, hot);
+        CHECK(osc.waveshaper(VaShape::saw).amount == 1.0); // stored value clamped.
+
+        WaveshaperParams cold = hot;
+        cold.amount = -0.5;
+        osc.set_waveshaper(VaShape::saw, cold);
+        CHECK(osc.waveshaper(VaShape::saw).amount == 0.0);
+
+        // And the rendered output stays inside the [-1,1] contract even though the
+        // caller commanded an over-driven blend (re-set the hot params first).
+        osc.set_waveshaper(VaShape::saw, hot);
+        osc.reset(0.0);
+        double peak = 0.0;
+        for (int i = 0; i < kRenderLength; ++i)
+            peak = std::max(peak, std::fabs(osc.next(f0 / kSampleRate)));
+        INFO("peak with commanded amount 2.0 (clamped to 1.0): " << peak);
+        CHECK(peak <= 1.0 + 1e-9);
     }
 
     SECTION("a symmetric drive makes odd harmonics, not even ones") {
@@ -731,5 +892,244 @@ TEST_CASE("VCO output is deterministic with character engaged", "[signal][osc][v
         osc.reset(kCleanStartPhase);
         for (int i = 0; i < 512; ++i)
             REQUIRE(osc.next(2153.0 / kSampleRate) == first[static_cast<std::size_t>(i)]);
+    }
+}
+
+// ── Drift and jitter (seeded pitch noise), measured via track_pitch ─────────
+//
+// Each claim carries a number and, where a floor is involved, a negative
+// control. The drift and jitter amplitudes are recovered from the f0(t)
+// trajectory the shipped `track_pitch` demodulates — never hand-rolled. What is
+// NOT proven here, on purpose: the rigorous drift-vs-jitter SEPARATION by Allan
+// slope (drift ∝ τ^{+1/2}, jitter ∝ τ^{-1/2}) is a later offline Python-lane
+// increment that needs the WAV bridge. In C++ the two are told apart by the
+// coarser-but-sufficient time-domain character below — drift's f0(t) is coherent
+// frame-to-frame, jitter's is not.
+
+TEST_CASE("drift wanders the pitch slowly at ~the commanded RMS",
+          "[signal][osc][vco][drift]") {
+    constexpr double f0 = 1000.0;
+    constexpr int kLen = static_cast<int>(10.0 * kSampleRate); // 10 s analyzed.
+    constexpr int kWarmup = static_cast<int>(2.0 * kSampleRate); // let the walk settle.
+    constexpr int kWin = 4096;   // 85 ms ≪ the drift correlation time, so a frame
+    constexpr int kHop = 4096;   // reads the quasi-static drifted pitch; non-overlap.
+    constexpr double kRate = VcoOscillator::kDefaultDriftRateHz;
+
+    // Average measured statistics over several seeds — one 10 s realization of a
+    // ~0.4 Hz process has real variance; the mean over seeds is what the tolerance
+    // is set against (the plan asks for M ≥ 8 on stochastic rows).
+    constexpr int kSeeds = 8;
+    auto averaged = [&](double depth, std::uint64_t base) {
+        PitchStats acc;
+        for (int s = 0; s < kSeeds; ++s) {
+            const auto sig = render_noise_sine(f0, depth, kRate, 0.0,
+                                               base + static_cast<std::uint64_t>(s), kLen, kWarmup);
+            const PitchStats st = pitch_stats(sig, kWin, kHop);
+            REQUIRE(st.voiced > 20);
+            REQUIRE_FALSE(st.any_nonfinite);
+            acc.rms_cents += st.rms_cents;
+            acc.autocorr1 += st.autocorr1;
+        }
+        acc.rms_cents /= kSeeds;
+        acc.autocorr1 /= kSeeds;
+        return acc;
+    };
+
+    SECTION("negative control: no drift → f0(t) is flat to the analyzer floor") {
+        const auto sig = render_noise_sine(f0, 0.0, kRate, 0.0, 1, kLen, kWarmup);
+        const PitchStats st = pitch_stats(sig, kWin, kHop);
+        REQUIRE(st.voiced > 20);
+        INFO("clean sine f0(t) RMS " << st.rms_cents << " cents over " << st.voiced
+                                     << " voiced frames");
+        CHECK(st.rms_cents < 0.5);
+    }
+
+    SECTION("drift on: the wander matches the commanded RMS and is slow") {
+        constexpr double depth = 20.0; // cents RMS.
+        const PitchStats st = averaged(depth, 100);
+        INFO("drift depth " << depth << " cents: measured RMS " << st.rms_cents
+                            << " cents, lag-1 autocorr " << st.autocorr1);
+        CHECK(st.rms_cents > 0.6 * depth);
+        CHECK(st.rms_cents < 1.4 * depth);
+        // Slow: 85 ms-spaced frames are strongly correlated (a coherent low-freq
+        // wander), unlike white jitter whose non-overlapping frames are not.
+        CHECK(st.autocorr1 > 0.4);
+    }
+
+    SECTION("drift scales: doubling the depth ~doubles the wander") {
+        const double rms10 = averaged(10.0, 200).rms_cents;
+        const double rms20 = averaged(20.0, 300).rms_cents;
+        const double ratio = rms20 / rms10;
+        INFO("drift RMS: 10 cents -> " << rms10 << ", 20 cents -> " << rms20
+                                       << " (ratio " << ratio << ")");
+        CHECK(ratio > 1.5);
+        CHECK(ratio < 2.5);
+    }
+
+    SECTION("a non-positive drift rate is off, not the fastest wander") {
+        // Lower rate is slower, so the limit as rate -> 0 is a frozen walk with
+        // no wander. A rate of 0 or below must take that limit, NOT invert to
+        // full-depth per-sample white noise. With drift depth engaged but the
+        // rate at 0 and below, the f0(t) RMS must stay near the clean floor, not
+        // near the commanded 20 cents.
+        constexpr int kWin = 4096, kHop = 1024, kLen = 96000;
+        for (double rate : {0.0, -1.0}) {
+            const auto sig = render_noise_sine(f0, 20.0, rate, 0.0, 1, kLen);
+            const PitchStats st = pitch_stats(sig, kWin, kHop);
+            INFO("drift rate " << rate << ": f0(t) RMS " << st.rms_cents << " cents");
+            REQUIRE_FALSE(st.any_nonfinite);
+            // The frozen walk sits at the analyzer floor (~8e-5 cents). The
+            // pre-fix bug — pole mapped to 0, i.e. full-depth per-sample WHITE FM —
+            // measures ~0.31 cents RMS here (20-cent depth averaged over the
+            // 4096-sample window), so this 0.01-cent gate FAILS against the bug and
+            // clears the frozen walk with ~100x margin. A slack 1.0-cent gate let
+            // the white-noise bug pass, so it did not protect the fix.
+            CHECK(st.rms_cents < 0.01);
+        }
+    }
+}
+
+TEST_CASE("jitter adds fast, white cycle-to-cycle pitch noise",
+          "[signal][osc][vco][jitter]") {
+    constexpr double f0 = 3000.0;
+    constexpr int kLen = static_cast<int>(6.0 * kSampleRate);
+    constexpr int kWin = 1024;   // short window: less averaging of the per-sample
+    constexpr int kHop = 1024;   // white FM; non-overlap so frames are independent.
+
+    constexpr int kSeeds = 6;
+    auto averaged = [&](double depth, std::uint64_t base) {
+        double rms = 0.0, ac = 0.0;
+        int voiced_min = 1 << 30;
+        for (int s = 0; s < kSeeds; ++s) {
+            const auto sig = render_noise_sine(f0, 0.0, VcoOscillator::kDefaultDriftRateHz,
+                                               depth, base + static_cast<std::uint64_t>(s), kLen);
+            const PitchStats st = pitch_stats(sig, kWin, kHop);
+            REQUIRE_FALSE(st.any_nonfinite);
+            voiced_min = std::min(voiced_min, st.voiced);
+            rms += st.rms_cents;
+            ac += st.autocorr1;
+        }
+        return std::tuple<double, double, int>{rms / kSeeds, ac / kSeeds, voiced_min};
+    };
+
+    SECTION("negative control: no jitter → f0(t) is flat") {
+        const auto sig = render_noise_sine(f0, 0.0, VcoOscillator::kDefaultDriftRateHz,
+                                           0.0, 1, kLen);
+        const PitchStats st = pitch_stats(sig, kWin, kHop);
+        REQUIRE(st.voiced > 50);
+        INFO("clean sine f0(t) RMS " << st.rms_cents << " cents");
+        CHECK(st.rms_cents < 0.5);
+    }
+
+    SECTION("jitter on: measurable in f0(t), and white (uncorrelated frames)") {
+        constexpr double depth = 60.0; // cents RMS per sample.
+        const auto [rms, ac, voiced_min] = averaged(depth, 300);
+        REQUIRE(voiced_min > 50);
+        // A white per-sample deviation of `depth` cents RMS averages, over a
+        // window of kWin samples, to depth/sqrt(kWin) of frame-to-frame RMS.
+        // Assert BOTH sides of that expectation: a lower bound alone passes a
+        // source that is calibrated too STRONG, and the scaling section below
+        // cannot catch a global gain error (it cancels in the 40:80 ratio). The
+        // band mirrors the drift test's 0.6-1.4x.
+        const double expected = depth / std::sqrt(static_cast<double>(kWin));
+        INFO("jitter depth " << depth << " cents/sample: frame RMS " << rms
+                             << " cents (expected ~" << expected
+                             << "), lag-1 autocorr " << ac);
+        CHECK(rms > expected * 0.6);
+        CHECK(rms < expected * 1.4);
+        CHECK(std::fabs(ac) < 0.25); // white: independent non-overlapping frames.
+    }
+
+    SECTION("jitter scales: doubling the depth ~doubles the frame noise") {
+        const auto [rms40, ac40, v40] = averaged(40.0, 400);
+        const auto [rms80, ac80, v80] = averaged(80.0, 500);
+        (void)ac40; (void)ac80; (void)v40; (void)v80;
+        const double ratio = rms80 / rms40;
+        INFO("jitter RMS: 40 -> " << rms40 << ", 80 -> " << rms80 << " (ratio " << ratio << ")");
+        CHECK(ratio > 1.5);
+        CHECK(ratio < 2.5);
+    }
+}
+
+TEST_CASE("VCO noise is deterministic and seed-controlled",
+          "[signal][osc][vco][noise]") {
+    auto render_noisy = [](std::uint64_t seed, double f0) {
+        VcoOscillator osc;
+        osc.prepare(kSampleRate);
+        osc.set_shape(VaShape::saw);
+        osc.set_seed(seed);
+        osc.set_drift_depth(15.0);
+        osc.set_jitter_depth(30.0);
+        osc.reset(kCleanStartPhase);
+        std::vector<double> out(static_cast<std::size_t>(kRenderLength));
+        for (int i = 0; i < kRenderLength; ++i)
+            out[static_cast<std::size_t>(i)] = osc.next(f0 / kSampleRate);
+        return out;
+    };
+
+    SECTION("same seed reproduces bit-for-bit") {
+        const auto a = render_noisy(7, 1103.0);
+        const auto b = render_noisy(7, 1103.0);
+        int differing = 0;
+        for (std::size_t i = 0; i < a.size(); ++i)
+            if (a[i] != b[i]) ++differing;
+        CHECK(differing == 0);
+    }
+
+    SECTION("different seeds differ, and both stay valid") {
+        const auto a = render_noisy(7, 1103.0);
+        const auto b = render_noisy(8, 1103.0);
+        int differing = 0;
+        for (std::size_t i = 0; i < a.size(); ++i)
+            if (a[i] != b[i]) ++differing;
+        INFO(differing << " of " << a.size() << " samples differ between seeds");
+        CHECK(differing > 0);
+        for (const auto* r : {&a, &b})
+            for (const double x : *r) REQUIRE(std::isfinite(x));
+    }
+
+    SECTION("reset restarts the identical noise sequence") {
+        VcoOscillator osc;
+        osc.prepare(kSampleRate);
+        osc.set_shape(VaShape::saw);
+        osc.set_seed(9);
+        osc.set_drift_depth(15.0);
+        osc.set_jitter_depth(30.0);
+        osc.reset(kCleanStartPhase);
+        std::vector<double> first;
+        for (int i = 0; i < 512; ++i) first.push_back(osc.next(1103.0 / kSampleRate));
+        for (int i = 0; i < 97; ++i) osc.next(377.0 / kSampleRate); // run elsewhere.
+        osc.reset(kCleanStartPhase);
+        for (int i = 0; i < 512; ++i)
+            REQUIRE(osc.next(1103.0 / kSampleRate) == first[static_cast<std::size_t>(i)]);
+    }
+}
+
+TEST_CASE("VCO noise output stays bounded and finite at any depth",
+          "[signal][osc][vco][noise]") {
+    // A sine's amplitude is exactly the shape range and does not depend on
+    // frequency, so any bound violation under noisy pitch is a real defect (not
+    // polyBLEP overshoot). Depths far past musical range confirm the exp2 mapping
+    // keeps the increment finite and positive.
+    for (const double drift : {0.0, 20.0, 100.0, 1000.0}) {
+        for (const double jitter : {0.0, 50.0, 300.0, 2000.0}) {
+            VcoOscillator osc;
+            osc.prepare(kSampleRate);
+            osc.set_shape(VaShape::sine);
+            osc.set_seed(4242);
+            osc.set_drift_depth(drift);
+            osc.set_jitter_depth(jitter);
+            osc.reset(0.0);
+            double pk = 0.0;
+            bool finite = true;
+            for (int i = 0; i < kRenderLength; ++i) {
+                const double v = osc.next(1000.0 / kSampleRate);
+                if (!std::isfinite(v)) finite = false;
+                pk = std::fmax(pk, std::fabs(v));
+            }
+            INFO("drift " << drift << " cents, jitter " << jitter << " cents: peak " << pk);
+            CHECK(finite);
+            CHECK(pk <= 1.0 + 1e-9);
+        }
     }
 }

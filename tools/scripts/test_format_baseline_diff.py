@@ -262,5 +262,89 @@ class FormatBaselineDiffTests(unittest.TestCase):
         self.assertEqual(cm.exception.code, 0)
 
 
+    # ── --diag-dir: the captured output must outlive the temp dir ──────
+    def test_diag_dir_keeps_captured_output_when_capture_fails(self) -> None:
+        with self._root() as td:
+            root = pathlib.Path(td)
+            self._prepare_root(root)
+            diag = root / "diag"
+
+            rc, stderr = self._run(
+                root,
+                run_result=1,
+                captured={"PulpEffect.clap.txt": "ERROR: could not load bundle\n"},
+                extra_args=["--diag-dir", str(diag)],
+            )
+
+            kept = diag / "captured" / "PulpEffect.clap.txt"
+            self.assertTrue(kept.is_file(),
+                            "captured output must survive the temp dir")
+            self.assertIn("ERROR: could not load bundle", kept.read_text())
+
+        self.assertEqual(rc, 1)
+        self.assertIn("diagnostics written to", stderr)
+        self.assertIn("PulpEffect.clap.txt", stderr)
+
+    def test_diag_dir_keeps_captured_output_on_the_success_path(self) -> None:
+        with self._root() as td:
+            root = pathlib.Path(td)
+            baseline = self._prepare_root(root)
+            (baseline / "PulpEffect.clap.txt").write_text("ok\n", encoding="utf-8")
+            diag = root / "diag"
+
+            rc, _ = self._run(
+                root,
+                run_result=0,
+                captured={"PulpEffect.clap.txt": "ok\n"},
+                extra_args=["--diag-dir", str(diag)],
+            )
+
+            self.assertTrue((diag / "captured" / "PulpEffect.clap.txt").is_file())
+
+        self.assertEqual(rc, 0)
+
+    def test_diag_dir_is_forwarded_to_the_capture_script(self) -> None:
+        seen: list[list[str]] = []
+
+        with self._root() as td:
+            root = pathlib.Path(td)
+            self._prepare_root(root)
+            diag = root / "diag"
+
+            def fake_check_output(cmd: list[str]) -> bytes:
+                return f"{root}\n".encode()
+
+            def fake_run(cmd: list[str], cwd: pathlib.Path):
+                seen.append(cmd)
+                return subprocess.CompletedProcess(cmd, 2)
+
+            with mock.patch.object(fbd.subprocess, "check_output",
+                                   side_effect=fake_check_output), \
+                 mock.patch.object(fbd.subprocess, "run", side_effect=fake_run), \
+                 contextlib.redirect_stderr(io.StringIO()):
+                fbd.main(["--diag-dir", str(diag)])
+
+        self.assertEqual(len(seen), 1)
+        self.assertIn("--diag-dir", seen[0])
+        # The script resolves the path before forwarding it, so the capture
+        # script gets an absolute dir regardless of the caller's cwd.
+        self.assertEqual(seen[0][seen[0].index("--diag-dir") + 1],
+                         str(diag.resolve()))
+
+    def test_capture_failure_without_diag_dir_says_output_was_discarded(self) -> None:
+        with self._root() as td:
+            root = pathlib.Path(td)
+            self._prepare_root(root)
+
+            rc, stderr = self._run(
+                root,
+                run_result=1,
+                captured={"PulpEffect.clap.txt": "ERROR\n"},
+            )
+
+        self.assertEqual(rc, 1)
+        self.assertIn("--diag-dir", stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

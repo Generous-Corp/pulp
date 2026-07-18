@@ -54,6 +54,48 @@ its ABI shape rather than as the only implemented backend. Patterns to mirror:
   parameter edits in the slot. Otherwise `get_parameter()` can report a
   stale host-side value even though the plug-in restored its own state.
 
+### VST3: re-sync a separated edit controller on state restore
+
+VST3 splits a plug-in into an `IComponent` (processor) and an
+`IEditController`. When they are *separate objects*, restoring only the
+component state (`IComponent::setState`) leaves the controller — and the
+vendor UI — showing stale values. The host contract is: after
+`component->setState`, push the same processor state into the controller with
+`IEditController::setComponentState`, and separately save/restore the
+controller's own `getState`/`setState`. Combined plug-ins (one object
+implementing both interfaces) skip all of this — detect the combined case by
+`FUnknown` pointer equality (`controller == component`).
+
+`Vst3Slot` lives in an anonymous namespace, so this logic lives in a
+free-function seam, `pulp::host::detail::vst3_state_sync.hpp`
+(`vst3_serialize_state` / `vst3_restore_state`) — that is also the only place a
+host-slot test can reach it. It writes a versioned `PV3S` container (component
+plus an optional controller section); a blob without the magic is treated as
+legacy raw-component state, so sessions saved before the container existed
+still load. Length fields are bounds-checked as `len > remaining` (never
+`remaining - len`) so a malformed blob cannot underflow into an out-of-bounds
+read.
+
+### VST3: embed the editor like CLAP — a parent-consuming IPlugView
+
+`IEditController::createView("editor")` hands back an `IPlugView` that, like
+CLAP `set_parent`, CONSUMES a parent: `IPlugView::attached(container, "NSView")`
+inserts the plug-in's view into a host-owned container rather than returning a
+view. So the VST3 editor path reuses the same container as CLAP
+(`create_editor_container`), and the ordering matters — query
+`IPlugView::getSize` first to size the container, create the container (already
+in the parent window), THEN `attached()`. Tear down in reverse: `removed()`
+before `release()`, and close the editor before terminating the controller it
+came from (`createView`'s view must not outlive its controller).
+
+The AppKit part is only the container; the VST3 negotiation (createView,
+`isPlatformTypeSupported`, `getSize`, `attached`, `onSize`/`checkSizeConstraint`,
+`removed`) is a pure-interface seam, `pulp::host::detail::vst3_editor.hpp`, which
+is where a headless test drives it with a fake `IEditController` / `IPlugView`
+(inherit the SDK `EditController` / `CPluginView` bases). The full container
+attach is only reachable with a real native window, so it is proven by the
+real-DAW smoke, not the unit test.
+
 ### Defensive boundary for entry / factory calls
 
 `scanner_clap.cpp` wraps `entry->init()` and `entry->get_factory()` in
@@ -222,16 +264,25 @@ does not contain crashes in deeper plug-in code.
   (per-node latency is propagated through the topology in the buffer assignment,
   and each feedforward connection that needs it gets a delay ring sized in the
   `GraphRuntimeBufferPool`), so fan-in paths of differing latency time-align
-  identically. MIDI edges route through per-node MIDI scratch buffers owned by
+  identically. Each pool ring's mutable samples + write cursor live in a
+  shareable state object while the RT lookup still returns raw pointers; this
+  is the seam `prepare_swap` uses off-RT to adopt identity-matched PDC history
+  without reading or copying live ring contents. MIDI edges route through
+  per-node MIDI scratch buffers owned by
   the executor (`GraphRuntimeMidiScratch`); SignalGraph bridges its MIDI
-  mailboxes (inject_midi / extract_midi) around the routed call. Parameter
-  automation routes through a `GraphRuntimeAutomationScratch` (per-node parameter
-  event queue + per-connection slew state + per-node dense buffers): sparse edges
-  sample the source at the block edges, map/slew/mix per the connection's
-  resolved bounds, and emit two control points; dense audio-rate edges map every
-  sample (through the same per-connection PDC delay ring as audio), mix into a
-  per-node buffer, and emit one event per sample — both bit-identical to the walk
-  and built into the same per-node event queue. A node exceeding
+  mailboxes (inject_midi / extract_midi) around the routed call. External
+  per-block parameter events cross the same boundary through a per-node
+  `inject_parameter_events` mailbox. The routed call appends that publication
+  after executor-generated automation and commits its sequence only after the
+  whole dispatch succeeds, matching serial fallback and anticipation behavior.
+  Parameter automation routes through a `GraphRuntimeAutomationScratch`
+  (per-node parameter event queue + per-connection slew state + per-node dense
+  buffers): sparse edges sample the source at the block edges, map/slew/mix per
+  the connection's resolved bounds, and emit two control points; dense
+  audio-rate edges map every sample (through the same per-connection PDC delay
+  ring as audio), mix into a per-node buffer, and emit one event per sample —
+  both bit-identical to the walk and built into the same per-node event queue.
+  A node exceeding
   `kMaxParamsPerNode` (64) distinct sparse OR dense params is kept on the legacy
   walk.
   - **Where the walk lives.** The legacy serial reference walk is no longer
@@ -263,6 +314,23 @@ does not contain crashes in deeper plug-in code.
     real-time capacities for both the compile path and the swap warm-up probe) is
     a fix, not a violation. Everything in the live-swap TU runs on the CONTROL
     thread.
+  - **Gap-free PDC carry is identity-based and conservative.** `connections_`
+    has a private parallel vector of monotonic identities; every insertion and
+    erasure must update both vectors. `CompiledGraph` snapshots those identities
+    beside `connections`. During `prepare_swap`, the old and candidate delayed
+    edge sets must form an identity-keyed bijection with equal delay sizes and
+    equal total graph latency. The candidate then shares, never copies, each old
+    domain's audio-thread-owned ring state: legacy `ConnectionDelay`,
+    `routed.serial.pool`, and `routed.parallel.pool`. Disconnect+reconnect mints a
+    new identity and is refused even when the public `Connection` values compare
+    equal. Because those domains keep independent histories, a PDC-active
+    `CompiledGraph` pins the execution domain chosen during `prepare()`; relaxed
+    routing toggles remain dynamic only for zero-PDC snapshots, and a live swap
+    that would change the pinned domain is refused. Feedback graphs,
+    routed-validity changes, and latency/delay-structure changes are also refused.
+    Tests: `test_signal_graph_pdc_swap_continuity.cpp`
+    uses D=97 with 64-frame blocks across all three execution domains and includes
+    the reconnect negative plus a concurrent swap hammer.
   - **`_locked_` is a contract, and it is now asserted.** A `SignalGraph` helper
     suffixed `_locked_` requires the caller to already hold
     `graph_mutation_mutex_`; the convention now spans `signal_graph.cpp` and
@@ -538,6 +606,14 @@ does not contain crashes in deeper plug-in code.
   audio-thread scratch directly. Keep mailbox snapshots and writer scratch
   preallocated by `prepare()`; constructing a fresh MIDI snapshot in
   `inject_midi()` reintroduces realtime-path allocation.
+- `SignalGraph::inject_parameter_events()` uses a separate prepared per-node
+  mailbox with one control-side writer. Publications are latest-wins and
+  one-shot: the next successful serial, routed, parallel, or anticipation
+  block consumes the newest sequence once. Append injected events after graph
+  automation before the stable sample-offset sort; this preserves graph
+  automation when the fixed queue is full and lets injected events win a
+  same-offset tie. Reuse the mailbox across gap-free snapshots for the same
+  plugin node so an edit cannot discard a publication made before the swap.
 - Keep plugin automation scratch preallocated by `SignalGraph::prepare()`.
   The audio-thread `process()` path must not create per-block containers for
   input pointer casts, sparse automation accumulation, or dense audio-rate
@@ -829,6 +905,13 @@ rules:
   `core/host`. Current loaders consume it for per-block automation where
   the format supports sample offsets. Use it — not `set_parameter` — for
   per-block automation.
+- **External parameter-event mailbox.** Hosts publish per-block events with
+  `SignalGraph::inject_parameter_events()` before `process()`. The API is
+  additive on `SignalGraph`; do not add a `Processor` or `PluginSlot` virtual.
+  Sample offsets are block-relative. A `false` return reports an invalid or
+  unavailable node, or a source queue that already overflowed; a retained
+  source prefix can still be published and consumed. Destination overflow is
+  observed later when the audio-thread merge fills the fixed queue.
 - **Node ABI surface.** `PluginSlot` includes
   `pulp/runtime/node_abi.hpp` and participates in the node ABI
   virtual-order gate. Existing virtual methods may not be inserted,

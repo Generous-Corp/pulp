@@ -86,7 +86,31 @@ pulp import-design --from figma-plugin --file scene.pulp.json --output ui.js \
 and very sensitive to gradients, anti-aliasing, sub-pixel placement, and
 background differences — a visually faithful import can report a low % on a
 gradient-heavy design. Treat the % as a smoke signal; **eyeball the montage**
-(reference | render) for structure + assets. Build montages with PIL.
+(reference | render) for structure + assets.
+
+**Do not hand-roll the comparison — the repo already ships these. Reach for
+them before writing any PIL:**
+
+| Need | Tool |
+|---|---|
+| Labeled N-panel montage | `python3 tools/import-design/montage.py --out cmp.png ...` |
+| Per-widget fidelity audit vs a Figma source | `python3 tools/import-design/fidelity_diff.py --render r.png --scene scene.pulp.json --assets-dir DIR --frame-reference src.png` |
+| Side-by-side + heatmap + worst offending regions | `python3 tools/scripts/figma_import_diff.py` |
+| Masked per-region diff against a reference | `python3 tools/import-validation/diff_against_reference_regions.py` |
+| Re-import regression vs a golden | `python3 tools/import-validation/golden_regression.py` |
+
+This section used to end "Build montages with PIL." An agent comparing an
+imported design followed that line, hand-rolled crop scripts, and never found
+`fidelity_diff.py` — which was documented, but a thousand lines deep in a
+different skill. Guidance that tells you to build what already exists is worse
+than silence, so the invocation lives here rather than a pointer to go read
+another file.
+
+The full registry of these tools is **`docs/status/tools.yaml`**, whose digest
+is generated into CLAUDE.md so it is always in context, and a PostToolUse hook
+(`hooks/scripts/tool-registry-reminder.sh`) names the right tool if you start
+writing PIL anyway. Three deliveries for one lesson: burial is what caused the
+incident, so the fix is repetition at the moment of need.
 
 `compare_screenshots` / `compare_screenshot_files` decode PNGs with
 CoreGraphics on Apple and Skia on non-Apple builds when `PULP_HAS_SKIA=1`.

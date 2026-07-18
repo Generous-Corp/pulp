@@ -301,6 +301,22 @@ void WebSocketChannel::reader_main() {
     std::vector<std::uint8_t> assembled;
     MessageKind assembled_kind = MessageKind::Binary;
 
+    // Bound the TOTAL reassembled message size across continuation frames.
+    // `max_payload` bounds one frame; without this a peer streaming endless
+    // non-final fragments grows `assembled` without limit (memory-exhaustion
+    // DoS). On overflow, mirror the shutdown idiom used by the default-opcode
+    // case: fire an error, mark the channel closed, and let the while-loop
+    // condition tear the reader down.
+    auto append_bounded = [&](const std::vector<std::uint8_t>& next) -> bool {
+        if (next.size() > options_.max_message - assembled.size()) {
+            fire_error("reassembled message exceeds max_message");
+            open_.store(false);
+            return false;
+        }
+        assembled.insert(assembled.end(), next.begin(), next.end());
+        return true;
+    };
+
     while (open_.load()) {
         std::uint8_t hdr[2];
         if (!read_exactly(*tcp_, hdr, 2)) {
@@ -364,7 +380,7 @@ void WebSocketChannel::reader_main() {
                 else assembled_kind = MessageKind::Binary;
                 if (fin) {
                     if (!assembled.empty()) {
-                        assembled.insert(assembled.end(), payload.begin(), payload.end());
+                        if (!append_bounded(payload)) break;
                         payload.swap(assembled);
                         assembled.clear();
                     }
@@ -380,13 +396,13 @@ void WebSocketChannel::reader_main() {
                         });
                     }
                 } else {
-                    assembled.insert(assembled.end(), payload.begin(), payload.end());
+                    if (!append_bounded(payload)) break;
                 }
                 break;
             }
             case kOpCont:
                 if (fin && !assembled.empty()) {
-                    assembled.insert(assembled.end(), payload.begin(), payload.end());
+                    if (!append_bounded(payload)) break;
                     MessageCallback cb;
                     {
                         std::lock_guard<std::mutex> lock(mutex_);
@@ -400,7 +416,7 @@ void WebSocketChannel::reader_main() {
                         });
                     }
                 } else {
-                    assembled.insert(assembled.end(), payload.begin(), payload.end());
+                    if (!append_bounded(payload)) break;
                 }
                 break;
             default:

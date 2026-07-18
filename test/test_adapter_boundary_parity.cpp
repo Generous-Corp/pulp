@@ -34,6 +34,7 @@
 
 #include <clap/clap.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -633,6 +634,99 @@ TEST_CASE("boundary parity: zero reported latency is a straight passthrough",
     std::vector<float> out2(kFrames, 5.0f);
     bypass.process_channel(out2.data(), nullptr, kFrames, 0);
     for (uint32_t i = 0; i < kFrames; ++i) CHECK(out2[i] == 0.0f);
+}
+
+// ---------------------------------------------------------------------------
+// render_bypass_passthrough — the shared float-buffer bypass helper the AU v2,
+// AU v3, and AAX adapters route their bypass short-circuit through the shared helper. A
+// regression here fires if any of those adapters is reverted to an undelayed
+// memcpy, because they now call this exact function. VST3/CLAP keep their own
+// inline loops (they marshal f64), covered by the real-adapter tests below.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("render_bypass_passthrough delays the dry signal by the reported latency",
+          "[format][sf1][parity][bypass]") {
+    boundary::LatencyCompensatedBypass bypass;
+    bypass.prepare(kLatencySamples);
+    REQUIRE(bypass.is_latency_compensated());
+
+    // Stereo impulse at frame 0 on both channels.
+    std::vector<float> in_l(kFrames, 0.0f), in_r(kFrames, 0.0f);
+    std::vector<float> out_l(kFrames, -1.0f), out_r(kFrames, -1.0f);
+    in_l[0] = 1.0f;
+    in_r[0] = 1.0f;
+    const float* in_ptrs[2] = {in_l.data(), in_r.data()};
+    float* out_ptrs[2] = {out_l.data(), out_r.data()};
+
+    boundary::render_bypass_passthrough(bypass, out_ptrs, 2, in_ptrs, 2, kFrames);
+
+    // The impulse must reappear at exactly frame `latency`, not frame 0 — the
+    // undelayed passthrough (the bug) would place it at frame 0.
+    for (uint32_t i = 0; i < kFrames; ++i) {
+        INFO("frame " << i);
+        const float expected = (i == static_cast<uint32_t>(kLatencySamples)) ? 1.0f : 0.0f;
+        CHECK_THAT(out_l[i], WithinAbs(expected, 1e-6f));
+        CHECK_THAT(out_r[i], WithinAbs(expected, 1e-6f));
+    }
+}
+
+TEST_CASE("render_bypass_passthrough: zero latency is an undelayed copy; "
+          "missing input channels are silenced",
+          "[format][sf1][parity][bypass]") {
+    boundary::LatencyCompensatedBypass bypass;
+    bypass.prepare(0);
+    CHECK_FALSE(bypass.is_latency_compensated());
+
+    std::vector<float> in_l(kFrames), out_l(kFrames, -1.0f), out_r(kFrames, 7.0f);
+    for (uint32_t i = 0; i < kFrames; ++i) in_l[i] = static_cast<float>(i + 1);
+    const float* in_ptrs[1] = {in_l.data()};       // only one input channel
+    float* out_ptrs[2] = {out_l.data(), out_r.data()};
+
+    // 2 output channels, 1 input channel: ch0 copies input verbatim, ch1 has no
+    // matching input and must be zeroed (not left holding its prior 7.0f).
+    boundary::render_bypass_passthrough(bypass, out_ptrs, 2, in_ptrs, 1, kFrames);
+    for (uint32_t i = 0; i < kFrames; ++i) {
+        CHECK(out_l[i] == in_l[i]);
+        CHECK(out_r[i] == 0.0f);
+    }
+
+    // A null output-channel pointer is skipped, never dereferenced.
+    float* sparse_out[2] = {nullptr, out_r.data()};
+    std::fill(out_r.begin(), out_r.end(), 3.0f);
+    boundary::render_bypass_passthrough(bypass, sparse_out, 2, in_ptrs, 1, kFrames);
+    for (uint32_t i = 0; i < kFrames; ++i) CHECK(out_r[i] == 0.0f);  // ch1 silenced
+}
+
+TEST_CASE("render_bypass_passthrough: a channel count above the boundary ceiling "
+          "degrades to an undelayed copy uniformly",
+          "[format][sf1][parity][bypass]") {
+    // All-or-nothing: with more output channels than the boundary owns delay
+    // lines for, the whole block must fall back to a zero-delay copy rather than
+    // mixing delayed and undelayed channels.
+    boundary::LatencyCompensatedBypass bypass;
+    bypass.prepare(kLatencySamples);
+    REQUIRE(bypass.is_latency_compensated());
+    const int over = static_cast<int>(bypass.channel_capacity()) + 1;
+
+    std::vector<std::vector<float>> ins(over, std::vector<float>(kFrames, 0.0f));
+    std::vector<std::vector<float>> outs(over, std::vector<float>(kFrames, -1.0f));
+    std::vector<const float*> in_ptrs(over);
+    std::vector<float*> out_ptrs(over);
+    for (int c = 0; c < over; ++c) {
+        ins[c][0] = 1.0f;  // impulse at frame 0 on every channel
+        in_ptrs[c] = ins[c].data();
+        out_ptrs[c] = outs[c].data();
+    }
+
+    boundary::render_bypass_passthrough(bypass, out_ptrs.data(), over,
+                                        in_ptrs.data(), over, kFrames);
+
+    // Uniform undelayed copy: the impulse stays at frame 0 on every channel.
+    for (int c = 0; c < over; ++c) {
+        INFO("channel " << c);
+        CHECK_THAT(outs[c][0], WithinAbs(1.0f, 1e-6f));
+        for (uint32_t i = 1; i < kFrames; ++i) CHECK_THAT(outs[c][i], WithinAbs(0.0f, 1e-6f));
+    }
 }
 
 TEST_CASE("boundary parity: the real CLAP adapter's bypass is latency-compensated",

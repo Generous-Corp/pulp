@@ -2869,7 +2869,347 @@ private:
     std::array<pulp::host::ParameterEvent, 16> received_{};
     size_t received_count_ = 0;
 };
+
+class ParameterMailboxProbe final : public PluginSlot {
+public:
+    static constexpr uint32_t kParamId = 42;
+
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>&,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue& pe,
+                 int n) override {
+        received_count_ = 0;
+        overflowed_ = pe.overflowed();
+        dropped_ = pe.dropped_event_count();
+        for (const auto& event : pe) {
+            if (received_count_ < received_.size()) {
+                received_[received_count_++] = event;
+            }
+        }
+        for (size_t c = 0; c < out.num_channels(); ++c) {
+            std::memset(out.channel_ptr(c), 0, sizeof(float) * (size_t)n);
+        }
+    }
+
+    std::vector<HostParamInfo> parameters() const override {
+        HostParamInfo p;
+        p.id = kParamId;
+        p.name = "mailbox";
+        p.min_value = 0.0f;
+        p.max_value = 1.0f;
+        p.default_value = 0.0f;
+        p.flags.automatable = true;
+        p.flags.modulatable = true;
+        p.rate = ParamRate::AudioRate;
+        return {p};
+    }
+    float get_parameter(uint32_t) const override { return 0.f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return false; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+
+    std::size_t received_count() const { return received_count_; }
+    const pulp::host::ParameterEvent& received(std::size_t index) const {
+        return received_[index];
+    }
+    bool overflowed() const { return overflowed_; }
+    std::uint32_t dropped() const { return dropped_; }
+
+private:
+    PluginInfo info_ = make_plugin_info("ParameterMailboxProbe", 1, 1);
+    std::array<pulp::host::ParameterEvent,
+               pulp::host::ParameterEventQueue::kCapacity> received_{};
+    std::size_t received_count_ = 0;
+    bool overflowed_ = false;
+    std::uint32_t dropped_ = 0;
+};
 } // namespace
+
+TEST_CASE("SignalGraph parameter event mailbox is TSan clean",
+          "[host][graph][parameter][threading][race][tsan]") {
+    SignalGraph graph;
+    auto slot = std::make_unique<ParameterMailboxProbe>();
+    const auto plugin = graph.add_plugin_node(std::move(slot), 0, 1, "probe");
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    std::array<float, 32> output{};
+    float* output_ptrs[] = {output.data()};
+    pulp::audio::BufferView<float> out(output_ptrs, 1, output.size());
+    pulp::audio::BufferView<const float> in;
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> updates_active{false};
+    std::atomic<int> blocks_during_updates{0};
+    std::thread audio_thread([&] {
+        while (!stop.load(std::memory_order_acquire)) {
+            graph.process(out, in, 32);
+            if (updates_active.load(std::memory_order_acquire)) {
+                blocks_during_updates.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+    });
+
+    bool all_injects_succeeded = true;
+    constexpr int kMinUpdates = 10000;
+    constexpr int kMinBlocksDuringUpdates = 4;
+    constexpr int kMaxUpdates = 1000000;
+    int update_count = 0;
+    updates_active.store(true, std::memory_order_release);
+    while ((update_count < kMinUpdates
+            || blocks_during_updates.load(std::memory_order_relaxed)
+                < kMinBlocksDuringUpdates)
+           && update_count < kMaxUpdates) {
+        pulp::host::ParameterEventQueue events;
+        const bool pushed = events.push({
+            ParameterMailboxProbe::kParamId,
+            update_count % 32,
+            static_cast<float>(update_count % 101) / 100.0f,
+            0,
+        });
+        all_injects_succeeded =
+            pushed && graph.inject_parameter_events(plugin, events)
+            && all_injects_succeeded;
+        if ((update_count % 64) == 0) std::this_thread::yield();
+        ++update_count;
+    }
+    updates_active.store(false, std::memory_order_release);
+
+    stop.store(true, std::memory_order_release);
+    audio_thread.join();
+
+    REQUIRE(all_injects_succeeded);
+    REQUIRE(blocks_during_updates.load(std::memory_order_relaxed)
+            >= kMinBlocksDuringUpdates);
+    graph.release();
+}
+
+TEST_CASE("SignalGraph parameter event mailbox is one shot and latest wins") {
+    for (const int mode : {0, 1, 2}) {
+        INFO("routing mode " << mode);
+        SignalGraph graph;
+        auto slot = std::make_unique<MockAutomatable>();
+        auto* probe = slot.get();
+        const auto plugin = graph.add_plugin_node(std::move(slot), 0, 1, "probe");
+        graph.set_canonical_executor_routing_enabled(mode != 0);
+        graph.set_parallel_routing_enabled(mode == 2);
+
+        pulp::host::ParameterEventQueue first;
+        REQUIRE(first.push({42, 1, 0.1f, 0}));
+        REQUIRE_FALSE(graph.inject_parameter_events(plugin, first));
+        REQUIRE(graph.prepare(48000.0, 16));
+
+        pulp::host::ParameterEventQueue older;
+        REQUIRE(older.push({42, 2, 0.2f, 0}));
+        pulp::host::ParameterEventQueue latest;
+        REQUIRE(latest.push({42, 9, 0.9f, 0}));
+        REQUIRE(latest.push({42, 3, 0.3f, 0}));
+        REQUIRE(graph.inject_parameter_events(plugin, older));
+        REQUIRE(graph.inject_parameter_events(plugin, latest));
+
+        std::array<float, 16> output{};
+        float* output_ptrs[] = {output.data()};
+        pulp::audio::BufferView<float> out(output_ptrs, 1, output.size());
+        pulp::audio::BufferView<const float> in;
+        graph.process(out, in, 16);
+
+        REQUIRE(probe->received().size() == 2);
+        CHECK(probe->received()[0].sample_offset == 3);
+        CHECK(probe->received()[0].value == 0.3f);
+        CHECK(probe->received()[1].sample_offset == 9);
+        CHECK(probe->received()[1].value == 0.9f);
+
+        graph.process(out, in, 16);
+        CHECK(probe->received().size() == 2);
+        graph.release();
+        REQUIRE_FALSE(graph.inject_parameter_events(plugin, latest));
+    }
+}
+
+TEST_CASE("SignalGraph parameter event mailbox merges after graph automation") {
+    for (const bool routed : {false, true}) {
+        INFO("routed " << routed);
+        SignalGraph graph;
+        const auto input = graph.add_input_node(1, "source");
+        auto slot = std::make_unique<MockAutomatable>();
+        auto* probe = slot.get();
+        const auto plugin = graph.add_plugin_node(std::move(slot), 0, 1, "probe");
+        REQUIRE(graph.connect_automation(input, 0, plugin, 42, 0.0f, 1.0f));
+        graph.set_canonical_executor_routing_enabled(routed);
+        REQUIRE(graph.prepare(48000.0, 8));
+
+        pulp::host::ParameterEventQueue injected;
+        REQUIRE(injected.push({42, 0, 0.7f, 0}));
+        REQUIRE(injected.push({42, 3, 0.4f, 0}));
+        REQUIRE(graph.inject_parameter_events(plugin, injected));
+
+        std::array<float, 8> source{};
+        source.front() = 0.1f;
+        source.back() = 0.9f;
+        const float* input_ptrs[] = {source.data()};
+        std::array<float, 8> output{};
+        float* output_ptrs[] = {output.data()};
+        pulp::audio::BufferView<const float> in(input_ptrs, 1, source.size());
+        pulp::audio::BufferView<float> out(output_ptrs, 1, output.size());
+        graph.process(out, in, 8);
+
+        REQUIRE(probe->received().size() == 4);
+        CHECK(probe->received()[0].sample_offset == 0);
+        CHECK(probe->received()[0].value == 0.1f);
+        CHECK(probe->received()[1].sample_offset == 0);
+        CHECK(probe->received()[1].value == 0.7f);
+        CHECK(probe->received()[2].sample_offset == 3);
+        CHECK(probe->received()[2].value == 0.4f);
+        CHECK(probe->received()[3].sample_offset == 7);
+        CHECK(probe->received()[3].value == 0.9f);
+    }
+}
+
+TEST_CASE("SignalGraph parameter event mailbox preserves automation on overflow") {
+    for (const int mode : {0, 1, 2}) {
+        INFO("routing mode " << mode);
+        SignalGraph graph;
+        const auto input = graph.add_input_node(1, "source");
+        auto slot = std::make_unique<ParameterMailboxProbe>();
+        auto* probe = slot.get();
+        const auto plugin = graph.add_plugin_node(std::move(slot), 1, 1, "probe");
+        REQUIRE(graph.connect_audio_rate_modulation(
+            input, 0, plugin, ParameterMailboxProbe::kParamId, 0.0f, 1.0f));
+        graph.set_canonical_executor_routing_enabled(mode != 0);
+        graph.set_parallel_routing_enabled(mode == 2);
+        REQUIRE(graph.prepare(48000.0, 8));
+
+        pulp::host::ParameterEventQueue injected;
+        for (std::size_t i = 0; i < injected.capacity(); ++i) {
+            REQUIRE(injected.push({999, static_cast<int32_t>(i % 8), 0.5f, 0}));
+        }
+        REQUIRE(graph.inject_parameter_events(plugin, injected));
+
+        std::array<float, 8> source{};
+        const float* input_ptrs[] = {source.data()};
+        std::array<float, 8> output{};
+        float* output_ptrs[] = {output.data()};
+        pulp::audio::BufferView<const float> in(input_ptrs, 1, source.size());
+        pulp::audio::BufferView<float> out(output_ptrs, 1, output.size());
+        graph.process(out, in, 8);
+
+        REQUIRE(probe->received_count() == injected.capacity());
+        REQUIRE(probe->overflowed());
+        CHECK(probe->dropped() == 8);
+        std::size_t automation_count = 0;
+        std::size_t injected_count = 0;
+        for (std::size_t i = 0; i < probe->received_count(); ++i) {
+            if (probe->received(i).param_id == ParameterMailboxProbe::kParamId) {
+                ++automation_count;
+            } else if (probe->received(i).param_id == 999) {
+                ++injected_count;
+            }
+        }
+        CHECK(automation_count == 8);
+        CHECK(injected_count == injected.capacity() - 8);
+
+        graph.process(out, in, 8);
+        CHECK(probe->received_count() == 8);
+        CHECK_FALSE(probe->overflowed());
+    }
+}
+
+TEST_CASE("SignalGraph parameter event mailbox allocates only at prepare") {
+    SignalGraph graph;
+    auto slot = std::make_unique<ParameterMailboxProbe>();
+    auto* probe = slot.get();
+    const auto plugin = graph.add_plugin_node(std::move(slot), 1, 1, "probe");
+    REQUIRE(graph.prepare(48000.0, 8));
+
+    pulp::host::ParameterEventQueue injected;
+    REQUIRE(injected.push({42, 4, 0.75f, 0}));
+    std::array<float, 8> source{};
+    const float* input_ptrs[] = {source.data()};
+    std::array<float, 8> output{};
+    float* output_ptrs[] = {output.data()};
+    pulp::audio::BufferView<const float> in(input_ptrs, 1, source.size());
+    pulp::audio::BufferView<float> out(output_ptrs, 1, output.size());
+
+    pulp::test::RtAllocationProbe allocation_probe;
+    REQUIRE(graph.inject_parameter_events(plugin, injected));
+    graph.process(out, in, 8);
+    CHECK(allocation_probe.allocation_count() == 0);
+    CHECK(allocation_probe.allocated_bytes() == 0);
+    REQUIRE(probe->received_count() == 1);
+    CHECK(probe->received(0).sample_offset == 4);
+}
+
+TEST_CASE("SignalGraph parameter event mailbox survives a gap free swap") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    auto slot = std::make_unique<MockAutomatable>();
+    auto* probe = slot.get();
+    const auto plugin = graph.add_plugin_node(std::move(slot), 1, 1, "probe");
+    const auto gain = graph.add_gain_node("gain");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 8));
+
+    pulp::host::ParameterEventQueue injected;
+    REQUIRE(injected.push({42, 5, 0.625f, 0}));
+    REQUIRE(graph.inject_parameter_events(plugin, injected));
+
+    graph.begin_swap_edit();
+    REQUIRE(graph.disconnect(plugin, 0, output, 0));
+    REQUIRE(graph.connect(plugin, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.prepare_swap(48000.0, 8) == SignalGraph::SwapResult::Swapped);
+
+    std::array<float, 8> source{};
+    const float* input_ptrs[] = {source.data()};
+    std::array<float, 8> rendered{};
+    float* output_ptrs[] = {rendered.data()};
+    pulp::audio::BufferView<const float> in(input_ptrs, 1, source.size());
+    pulp::audio::BufferView<float> out(output_ptrs, 1, rendered.size());
+    graph.process(out, in, 8);
+
+    REQUIRE(probe->received().size() == 1);
+    CHECK(probe->received()[0].sample_offset == 5);
+    CHECK(probe->received()[0].value == 0.625f);
+}
+
+TEST_CASE("SignalGraph parameter event mailbox reports a truncated source") {
+    SignalGraph graph;
+    auto slot = std::make_unique<ParameterMailboxProbe>();
+    auto* probe = slot.get();
+    const auto plugin = graph.add_plugin_node(std::move(slot), 1, 1, "probe");
+    REQUIRE(graph.prepare(48000.0, 8));
+
+    pulp::host::ParameterEventQueue injected;
+    for (std::size_t i = 0; i < injected.capacity(); ++i) {
+        REQUIRE(injected.push({42, static_cast<int32_t>(i % 8), 0.5f, 0}));
+    }
+    REQUIRE_FALSE(injected.push({42, 0, 1.0f, 0}));
+    REQUIRE_FALSE(graph.inject_parameter_events(plugin, injected));
+
+    std::array<float, 8> source{};
+    const float* input_ptrs[] = {source.data()};
+    std::array<float, 8> output{};
+    float* output_ptrs[] = {output.data()};
+    pulp::audio::BufferView<const float> in(input_ptrs, 1, source.size());
+    pulp::audio::BufferView<float> out(output_ptrs, 1, output.size());
+    graph.process(out, in, 8);
+    CHECK(probe->received_count() == injected.capacity());
+}
 
 TEST_CASE("SignalGraph connect_automation delivers two-point events per block",
           "[host][graph][automation]") {

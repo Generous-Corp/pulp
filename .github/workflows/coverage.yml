@@ -26,8 +26,6 @@ name: Coverage
 # planning/coverage-tooling-decision-2026-04-21.md §7.
 
 on:
-  pull_request:
-    branches: [main, develop]
   push:
     branches: [main]
   schedule:
