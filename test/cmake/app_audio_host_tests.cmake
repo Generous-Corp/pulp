@@ -203,6 +203,8 @@ target_link_libraries(pulp-test-sample-interpolation-quality PRIVATE
 catch_discover_tests(pulp-test-sample-interpolation-quality)
 add_executable(pulp-sampler-render-wav sample_interpolation_render_wav.cpp)
 target_link_libraries(pulp-sampler-render-wav PRIVATE pulp::audio)
+add_executable(pulp-sampler-heritage-render-wav sample_heritage_render_wav.cpp)
+target_link_libraries(pulp-sampler-heritage-render-wav PRIVATE pulp::audio)
 option(PULP_AUDIO_QUALITY_LAB_GATE
     "Register the dependency-bearing sampler Quality Lab reference gate" OFF)
 set(PULP_AUDIO_QUALITY_LAB_PYTHON "" CACHE FILEPATH
@@ -234,6 +236,28 @@ if(PULP_AUDIO_QUALITY_LAB_GATE)
                 ENVIRONMENT
                     "PULP_SAMPLER_RENDER_WAV=$<TARGET_FILE:pulp-sampler-render-wav>;PULP_SAMPLER_AQL_REQUIRED=1;PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
                 LABELS "audio;sampler;quality-lab;dependency-gate"
+                TIMEOUT 120)
+    endforeach()
+    set(_pulp_sampler_heritage_aql_test
+        "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab/tests/test_sampler_heritage_reference.py")
+    foreach(_pulp_sampler_heritage_case IN ITEMS reference negative-control)
+        if(_pulp_sampler_heritage_case STREQUAL "reference")
+            set(_pulp_sampler_heritage_expression
+                "not negative_control")
+        else()
+            set(_pulp_sampler_heritage_expression "negative_control")
+        endif()
+        add_test(NAME sampler-heritage-quality-lab-${_pulp_sampler_heritage_case}
+            COMMAND "${PULP_AUDIO_QUALITY_LAB_PYTHON}" -m pytest
+                "${_pulp_sampler_heritage_aql_test}" -q -k
+                "${_pulp_sampler_heritage_expression}")
+        set_tests_properties(
+            sampler-heritage-quality-lab-${_pulp_sampler_heritage_case}
+            PROPERTIES
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
+                ENVIRONMENT
+                    "PULP_SAMPLER_HERITAGE_RENDER_WAV=$<TARGET_FILE:pulp-sampler-heritage-render-wav>;PULP_SAMPLER_AQL_REQUIRED=1;PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
+                LABELS "audio;sampler;heritage;quality-lab;dependency-gate"
                 TIMEOUT 120)
     endforeach()
 endif()
