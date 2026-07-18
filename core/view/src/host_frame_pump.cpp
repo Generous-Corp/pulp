@@ -1,8 +1,6 @@
 #include <pulp/view/host_frame_pump.hpp>
 
 #include <pulp/view/view.hpp>
-#include <pulp/view/widgets.hpp>
-#include <pulp/view/ui_components.hpp>  // ScrollView, Tooltip
 
 namespace pulp::view {
 
@@ -95,11 +93,8 @@ void advance_host_frame(View* root, FrameClock& clock, float dt) {
 
 void advance_widget_animations(View* view, float dt) {
     if (!view) return;
-    if (auto* k = dynamic_cast<Knob*>(view)) k->advance_animations(dt);
-    else if (auto* t = dynamic_cast<Toggle*>(view)) t->advance_animations(dt);
-    else if (auto* f = dynamic_cast<Fader*>(view)) f->advance_animations(dt);
-    else if (auto* sv = dynamic_cast<ScrollView*>(view)) sv->advance_animations(dt);
-    else if (auto* tip = dynamic_cast<Tooltip*>(view)) tip->advance_animations(dt);
+    // Per-widget non-CSS animation state (virtual; base is a no-op).
+    view->advance_animations(dt);
     // CSS animation timeline (honors animation-play-state: paused internally).
     view->tick_animations(dt);
     for (std::size_t i = 0; i < view->child_count(); ++i)

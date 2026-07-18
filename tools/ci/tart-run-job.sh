@@ -26,7 +26,9 @@
 #       [--cache-root ~/.cache/pulp-ci] [--ctest-args "..."] [--keep]
 set -euo pipefail
 
-export TART_HOME="${TART_HOME:-/Volumes/Workshop/VMs}"
+# TART_HOME comes from the host, not from this repo — see tools/ci/lib/tart-home.sh.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/tart-home.sh"
+
 SSH_KEY_PRIV="${PULP_VM_SSH_KEY:-$HOME/.ssh/id_ed25519}"
 VM_USER="${PULP_VM_USER:-admin}"
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10)
@@ -38,6 +40,7 @@ KEEP=0
 
 note(){ printf '\033[36m• %s\033[0m\n' "$*" >&2; }
 die(){ printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+pulp_require_tart_home
 command -v tart >/dev/null 2>&1 || die "tart not installed — brew install cirruslabs/cli/tart"
 
 while [ $# -gt 0 ]; do case "$1" in

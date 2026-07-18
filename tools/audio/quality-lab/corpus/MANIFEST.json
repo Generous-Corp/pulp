@@ -17,6 +17,81 @@
       }
     },
     {
+      "name": "synthetic_osc_static_shapes",
+      "kind": "generator",
+      "generator": "osc_static_shapes",
+      "material_class": "synth",
+      "license": "synthetic",
+      "expected_artifacts": "added HF / alias energy on a static bandlimited render",
+      "family": "oscillator",
+      "params": {
+        "sr": 48000,
+        "dur_s": 0.4,
+        "shapes": [
+          "sine",
+          "saw",
+          "square",
+          "triangle"
+        ],
+        "pitches": [
+          110.0,
+          440.0,
+          1760.0
+        ],
+        "gap_s": 0.05
+      }
+    },
+    {
+      "name": "synthetic_osc_sync_sweep",
+      "kind": "generator",
+      "generator": "osc_sync_sweep",
+      "material_class": "synth",
+      "license": "synthetic",
+      "expected_artifacts": "reset-seam artifacts swept across the hard-sync range",
+      "family": "oscillator",
+      "params": {
+        "sr": 48000,
+        "dur_s": 0.3,
+        "f_master_list": [
+          110.0,
+          220.0,
+          440.0,
+          880.0
+        ],
+        "f_slave_ratio": 2.5,
+        "gap_s": 0.05
+      }
+    },
+    {
+      "name": "synthetic_osc_tzfm_grid",
+      "kind": "generator",
+      "generator": "osc_tzfm_grid",
+      "material_class": "synth",
+      "license": "synthetic",
+      "expected_artifacts": "through-zero FM sideband aliasing across a mod-rate/index grid",
+      "family": "oscillator",
+      "params": {
+        "sr": 48000,
+        "dur_s": 0.3,
+        "f_carrier": 220.0,
+        "mod_grid": [
+          [
+            55.0,
+            2.0
+          ],
+          [
+            110.0,
+            4.0
+          ],
+          [
+            27.5,
+            6.0
+          ]
+        ],
+        "gap_s": 0.05
+      }
+    },
+    {
       "name": "synthetic_tonalpad",
       "kind": "generator",
       "generator": "tonal_pad",

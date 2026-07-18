@@ -1,6 +1,6 @@
 name: Release-watchdog reaper
 
-# Sweeps up the per-version release trackers that the watchdogs left behind.
+# Sweeps up the release trackers that the watchdogs left behind.
 #
 # The per-version-tracker pattern is retired: release-reconcile.yml now owns
 # release health and keeps exactly ONE incident issue, updated in place, so no
@@ -9,9 +9,27 @@ name: Release-watchdog reaper
 # pulp #2576) and because release-cadence-check and auto-release-watchdog still
 # file per-version trackers of their own.
 #
+# Two tracker shapes are reaped:
+#
+#   1. Version-keyed trackers ("Tag vX.Y.Z has no GitHub Release", …) — closed
+#      when that release objectively exists or a strictly-greater version has
+#      shipped.
+#   2. SHA-keyed "release: stuck — fix/feat merged without bump (<sha>)"
+#      trackers that auto-release.yml's stranded detector mints one-per-tip-SHA.
+#      Their title carries no semantic version, so they used to orphan forever
+#      (102 open by 2026-07; they bury real signal and burn agent scan tokens).
+#      The reaper now parses the body for the full tip SHA + uncovered surfaces
+#      and closes the tracker once a LATER release tag for every uncovered
+#      surface contains the stranded commit — i.e. the missing bump has shipped
+#      and consumers can reach the change. Logic lives in the pure, unit-tested
+#      tools/scripts/reap_stranded_tracker.py (test_reap_stranded_tracker.py).
+#
 # Conservative by construction: it only touches issues whose titles match the
-# exact auto-generated watchdog patterns, and only closes when the release
-# objectively exists or a strictly-greater version has shipped.
+# exact auto-generated watchdog patterns. A version tracker closes only when the
+# release exists or is superseded; a SHA-keyed tracker closes only when EVERY
+# uncovered surface has a release tag that contains the stranded commit. Any
+# unparseable field or any still-unshipped surface leaves the tracker open, so a
+# genuinely active strand is never closed.
 on:
   schedule:
     - cron: '0 6 * * *'  # daily 06:00 UTC
@@ -31,6 +49,17 @@ jobs:
     if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # full history + all tags for `git tag --contains`
+
+      - name: Fetch tags explicitly
+        run: git fetch --tags --force
+
+      - name: Self-test SHA-keyed reap logic
+        # Fail closed: if the pure close-decision helper regresses, do not sweep.
+        run: python3 tools/scripts/test_reap_stranded_tracker.py
+
       - name: Reap superseded/released trackers
         env:
           GH_TOKEN: ${{ github.token }}
@@ -65,7 +94,33 @@ jobs:
             # daily sweep before the remaining version trackers are reaped.
             ver="$(printf '%s' "$title" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
             if [ -z "$ver" ]; then
-              echo "Skipping SHA-keyed tracker #$num; close it after verifying the affected surface shipped."
+              # SHA-keyed "release: stuck" tracker — the title has no semantic
+              # version. Parse the body for the full tip SHA + uncovered
+              # surfaces, then close only once a later release tag for EVERY
+              # uncovered surface contains the stranded commit.
+              body="$(gh issue view "$num" --repo "$REPO" --json body --jq .body 2>/dev/null || true)"
+              parsed="$(printf '%s' "$body" | python3 tools/scripts/reap_stranded_tracker.py parse)"
+              tip_sha="${parsed%%$'\t'*}"
+              surfaces="${parsed#*$'\t'}"
+              if [ -z "$tip_sha" ] || [ -z "$surfaces" ]; then
+                echo "  #$num: could not parse tip SHA / surfaces from body — leaving open."
+                continue
+              fi
+              if ! git cat-file -e "${tip_sha}^{commit}" 2>/dev/null; then
+                echo "  #$num: tip ${tip_sha:0:8} not in fetched history — leaving open."
+                continue
+              fi
+              decision="$(git tag --contains "$tip_sha" 2>/dev/null \
+                | python3 tools/scripts/reap_stranded_tracker.py decide "$tip_sha" "$surfaces")"
+              verdict="${decision%%$'\t'*}"
+              dreason="${decision#*$'\t'}"
+              if [ "$verdict" = "close" ]; then
+                gh issue close "$num" --repo "$REPO" --reason completed \
+                  -c "Auto-reaped by watchdog-reaper.yml: $dreason. (pulp #2576) Reopen if a specific version's binaries are genuinely needed." \
+                  >/dev/null 2>&1 && closed=$((closed+1))
+              else
+                echo "  #$num: $dreason"
+              fi
               continue
             fi
 

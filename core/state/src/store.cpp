@@ -281,8 +281,14 @@ float constrain_stored_value(const ParamInfo& param, float value) {
     // Preserve the legacy direct-set behavior for untyped parameters, even
     // when their range carries a compatibility step. Explicit semantic kinds
     // opt into canonical integer/toggle/enum quantization on every write path.
-    if (param.kind == ParamKind::Continuous)
+    if (param.kind == ParamKind::Continuous) {
+        // std::clamp propagates NaN (all comparisons are false), so a NaN/Inf
+        // write would otherwise be stored verbatim and reach the DSP and the
+        // serialized preset. Sanitize non-finite input to the declared default
+        // first — matching the typed path's guard in constrain_param_value.
+        if (!std::isfinite(value)) value = param.range.default_value;
         return std::clamp(value, param.range.min, param.range.max);
+    }
     return constrain_param_value(param, value);
 }
 
@@ -347,7 +353,14 @@ float StateStore::get_value(ParamID id) const {
 float StateStore::get_modulated(ParamID id) const {
     auto it = id_to_index_.find(id);
     if (it == id_to_index_.end()) return 0.0f;
-    return values_[it->second].get_modulated();
+    // base + mod_offset can leave the declared range (e.g. base near max with
+    // positive modulation), and the DSP that reads this must never see an
+    // out-of-range value. Clamp to the parameter range; a non-finite offset
+    // falls back to the default rather than poisoning the audio path.
+    const ParamInfo& param = params_[it->second];
+    const float modulated = values_[it->second].get_modulated();
+    if (!std::isfinite(modulated)) return param.range.default_value;
+    return std::clamp(modulated, param.range.min, param.range.max);
 }
 
 void StateStore::set_mod_offset(ParamID id, float offset) {

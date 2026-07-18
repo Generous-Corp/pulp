@@ -83,16 +83,24 @@ add_executable(pulp-test-import-design-tool test_import_design_tool.cpp
     ${CMAKE_SOURCE_DIR}/external/miniz/miniz_zip.c
     # Compile the fig lane in-process so its logic is exercised (and covered)
     # directly, not only through the CLI subprocess.
-    ${CMAKE_SOURCE_DIR}/tools/import-design/fig_lane.cpp)
+    ${CMAKE_SOURCE_DIR}/tools/import-design/fig_lane.cpp
+    # fig_lane's multi-state merge lives here (and is shared with the
+    # repeated---file lane), so the in-process fig_lane cases need it linked.
+    ${CMAKE_SOURCE_DIR}/tools/import-design/envelope_merge.cpp)
 target_include_directories(pulp-test-import-design-tool PRIVATE
     ${CMAKE_SOURCE_DIR}/external/miniz
-    ${CMAKE_SOURCE_DIR}/tools/import-design)
+    ${CMAKE_SOURCE_DIR}/tools/import-design
+    # envelope_merge.cpp parses the design envelope with choc::json. This target
+    # deliberately does not link pulp::view (which re-exports these headers), so
+    # the include path is named directly rather than dragging the pipeline in.
+    ${choc_SOURCE_DIR})
 target_link_libraries(pulp-test-import-design-tool
     PRIVATE pulp::platform Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-import-design-tool PRIVATE
     PULP_IMPORT_DESIGN_TOOL_PATH="$<TARGET_FILE:pulp-import-design>"
     PULP_FIG_FIXTURE="${CMAKE_SOURCE_DIR}/test/fixtures/imports/fig/synthetic.fig"
-    PULP_FIG_DECODE_SCRIPT="${CMAKE_SOURCE_DIR}/tools/import-design/fig_decode.mjs")
+    PULP_FIG_DECODE_SCRIPT="${CMAKE_SOURCE_DIR}/tools/import-design/fig_decode.mjs"
+    PULP_FIGMA_REST_EXPORT="${CMAKE_SOURCE_DIR}/tools/import-design/figma_rest_export.py")
 add_dependencies(pulp-test-import-design-tool pulp-import-design)
 if(WIN32)
     catch_discover_tests(pulp-test-import-design-tool
@@ -115,12 +123,22 @@ else()
 endif()
 
 # Offline .fig decoder unit tests (Node). Cover kiwi decode, container
-# unpacking, outline, and envelope materialization against a committed
-# synthetic fixture. Skipped when Node is unavailable.
+# unpacking, outline, envelope materialization, and vector-geometry lowering
+# against a committed synthetic fixture. Skipped when Node is unavailable.
+#
+# Globbed rather than listed file-by-file: naming one entry point meant a new
+# `*.test.mjs` beside it was silently never executed, so a suite could be green
+# in CI while testing nothing. CONFIGURE_DEPENDS re-globs when a file is added.
+#
+# The glob covers the tool directory as well as fig/, for the same reason: the
+# import-design tools beside the decoder (material_audit.mjs) are part of this
+# suite, and a test file that no glob names is a suite testing nothing.
 if(_PULP_NODE_FOR_TESTS)
+    file(GLOB _PULP_FIG_TESTS CONFIGURE_DEPENDS
+         ${CMAKE_SOURCE_DIR}/tools/import-design/fig/*.test.mjs
+         ${CMAKE_SOURCE_DIR}/tools/import-design/*.test.mjs)
     add_test(NAME pulp-fig-decode-unit
-             COMMAND ${_PULP_NODE_FOR_TESTS} --test
-                     ${CMAKE_SOURCE_DIR}/tools/import-design/fig/fig.test.mjs)
+             COMMAND ${_PULP_NODE_FOR_TESTS} --test ${_PULP_FIG_TESTS})
     set_tests_properties(pulp-fig-decode-unit PROPERTIES
         TIMEOUT 60
         LABELS "parser-import;node")
@@ -166,3 +184,23 @@ if(APPLE)
     catch_discover_tests(pulp-test-screenshot-compare
         PROPERTIES LABELS "parser-import" TIMEOUT 240)
 endif()
+
+# `pulp import-design --url <figma.com scene URL>` guard. The classifier lives
+# in the header-only, dependency-free figma_url.hpp (same rationale as
+# import_detect.hpp), so the rule is covered in every lane without linking the
+# import pipeline; the shell-out case additionally exercises the real CLI path
+# when the binary is built.
+add_executable(pulp-test-cli-import-figma-url test_cli_import_figma_url.cpp)
+target_include_directories(pulp-test-cli-import-figma-url PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/import-design)
+target_link_libraries(pulp-test-cli-import-figma-url
+    PRIVATE Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-import-figma-url pulp-cli)
+endif()
+if(TARGET pulp-import-design)
+    add_dependencies(pulp-test-cli-import-figma-url pulp-import-design)
+endif()
+catch_discover_tests(pulp-test-cli-import-figma-url
+    PROPERTIES LABELS "parser-import")

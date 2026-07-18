@@ -10,7 +10,7 @@
 #   pulp-build-base    Tier 2: + cmake ninja python@3.12(PIL,numpy) + Skia +
 #                              warm ccache/FetchContent                   ~110-130 GB
 #
-# Storage: TART_HOME=/Volumes/Workshop/VMs (Spotlight-excluded). Clones are CoW.
+# Storage: the host's TART_HOME (Spotlight-excluded). Clones are CoW.
 #
 # Verified facts (cirruslabs macos-image-templates, tart docs — 2026-06-01):
 #   • Base image  ghcr.io/cirruslabs/macos-tahoe-base:latest is macOS 26 "Tahoe",
@@ -26,7 +26,9 @@
 #     `xcodes install` is the fallback and needs interactive auth.
 set -euo pipefail
 
-export TART_HOME="${TART_HOME:-/Volumes/Workshop/VMs}"
+# TART_HOME comes from the host, not from this repo — see tools/ci/lib/tart-home.sh.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/tart-home.sh"
+
 SSH_KEY_PUB="${PULP_VM_SSH_KEY_PUB:-$HOME/.ssh/id_ed25519.pub}"
 SSH_KEY_PRIV="${SSH_KEY_PUB%.pub}"
 # Tahoe matches Xcode 26.5. Override with PULP_MACOS_BASE_IMAGE if Apple ships a
@@ -44,7 +46,12 @@ SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLeve
 note(){ printf '\033[36m• %s\033[0m\n' "$*" >&2; }
 warn(){ printf '\033[33m⚠ %s\033[0m\n' "$*" >&2; }
 die(){ printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
-need_tart(){ command -v tart >/dev/null 2>&1 || die "tart not installed — brew install cirruslabs/cli/tart"; }
+# Every tart-touching subcommand goes through here, so it is also where the VM
+# store gets resolved — no subcommand can reach `tart` with an unresolved store.
+need_tart(){
+  pulp_require_tart_home
+  command -v tart >/dev/null 2>&1 || die "tart not installed — brew install cirruslabs/cli/tart"
+}
 have_sshpass(){ command -v sshpass >/dev/null 2>&1; }
 
 # Run a command inside a booted VM over ssh. Prefer key auth (present after Tier

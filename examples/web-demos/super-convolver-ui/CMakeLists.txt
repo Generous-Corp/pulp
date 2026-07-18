@@ -5,6 +5,14 @@
 # no core/gpu_audio. It talks to whatever host mounted it over the web-player
 # HostAdapter seam, so the SAME .wasm serves the WAM demo and the WebCLAP demo.
 #
+# It compiles the plugin's REAL editor (examples/super-convolver/
+# super_convolver_ui.hpp) — hence that directory on the include path. What it must
+# NEVER reach for there is super_convolver.hpp: that is the Processor, and it drags
+# in the convolver, the FFT and the audio thread. The editor depends only on
+# super_convolver_ui_host.hpp (parameter ids, spectrum bus, the four host calls),
+# which is exactly why the split exists. If a build of this target ever needs
+# super_convolver.hpp, the decoupling has regressed — fix that, don't add the include.
+#
 # Build:
 #   source ~/emsdk/emsdk_env.sh
 #   emcmake cmake -S examples/web-demos/super-convolver-ui -B build-webui \
@@ -29,4 +37,5 @@ include(${PULP_ROOT}/tools/cmake/PulpWebUi.cmake)
 
 pulp_add_web_ui(PulpSuperConvolverUi
     ENTRY    ${CMAKE_CURRENT_SOURCE_DIR}/ui_entry.cpp
-    INCLUDES ${CMAKE_CURRENT_SOURCE_DIR})
+    INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}
+             ${PULP_ROOT}/examples/super-convolver)

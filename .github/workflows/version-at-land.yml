@@ -1,42 +1,57 @@
-name: Version-at-Land (single-writer, dry-run)
+name: Version-at-Land (single-writer, push)
 
 # Single-writer version assignment on main (T1.1 — see
-# planning/2026-07-07-parallel-merge-land-coordination.md).
+# planning/2026-07-07-parallel-merge-land-coordination.md and
+# docs/guides/version-at-land-cutover.md).
 #
-# STAGE 1 (this file): DRY-RUN. On every push to main, drain the range since the
-# last `Version-Bump-Applied` marker, compute what version each surface WOULD be
-# assigned from the `Version-Bump:` intent trailers, and log it. It writes
-# nothing and commits nothing — it changes NOTHING about releases, so it is safe
-# to land while PRs still hand-bump. Its purpose is to prove the assignment is
-# correct against the real (still hand-written) bumps before we flip to --apply.
+# LIVE (--push). On every push to main, drain the range since the last
+# `Version-Bump-Applied` marker, assign each declared surface its next version
+# from main's CURRENT value, commit `chore: bump versions` with a
+# `Version-Bump-Applied:` marker (SSH-signed by the release bot), and push
+# --ff-only with retry. That bump commit triggers auto-release.yml exactly as a
+# hand-bump did before, so tagging + release are unchanged downstream.
 #
-# The concurrency group serialises runs (cancel-in-progress: false) so that when
-# it flips to writing, two near-simultaneous merges drain in order rather than
-# racing. Per Codex review: a GitHub concurrency group is a serialiser, not a
-# durable FIFO — the apply-stage bot must still recompute from fresh origin/main
-# and push with --ff-only + retry. That hardening lands with the --apply flip,
-# not here.
+# The concurrency group serialises runs (cancel-in-progress: false). Per Codex
+# review a GitHub concurrency group is a serialiser, not a durable FIFO — so
+# apply_and_push STILL recomputes from fresh origin/main and pushes --ff-only +
+# retry (a loser re-syncs past the winner's marker and no-ops). Proven in
+# tools/scripts/test_version_at_land.py (concurrency + idempotency).
 
 on:
   push:
     branches: [main]
-    # Only when a version-relevant surface could have moved. Kept broad on
-    # purpose in dry-run; narrowed with the config's trigger_paths at flip time.
-    paths:
-      - 'core/**'
-      - 'tools/**'
-      - '.claude-plugin/**'
-      - '.agents/skills/**'
-      - '.claude/commands/**'
-      - 'hooks/**'
+    # Deliberately NO `paths:` filter — run on EVERY push to main. A filter here
+    # is a silent-loss hole: a fix/feat that touches only a surface path the
+    # filter omits (e.g. `experimental/pulp-rs/**`, a live sdk trigger path in
+    # versioning.json) would declare a `Version-Bump:` intent, merge, never
+    # trigger this workflow, and — because the auto-release stranded detector
+    # treats a pending intent as covered — never alarm. The drain is bounded by
+    # the `Version-Bump-Applied` marker, so a push with no intent in range is a
+    # cheap no-op (see test_version_at_land.py::test_non_trigger_change_is_noop);
+    # correctness beats saving a few trivial ubuntu runs. The pending-intent
+    # liveness alarm is the time-based backstop if this ever fails to run.
+  # Supersession-immune safety net. GitHub holds only ONE queued run per
+  # concurrency group; on a high-churn main every new push throws the bot's
+  # queued run to the back and drops the previous one, so under hosted-runner
+  # backlog the push-triggered drain can starve FOREVER — the exact death spiral
+  # coverage.yml documents and fixed the same way (see its header). A scheduled
+  # run lands in its OWN concurrency group (below), immune to push supersession,
+  # so pending intent is always drained within the cadence.
+  schedule:
+    - cron: '*/15 * * * *'
   workflow_dispatch: {}
 
 concurrency:
-  group: version-at-land
+  # Event-scoped so a scheduled drain is never superseded by pushes (and vice
+  # versa). Concurrent push+schedule drains are safe: apply_and_push is
+  # --ff-only + Version-Bump-Applied-marker idempotent + recompute-per-retry, so
+  # a loser re-syncs past the winner's marker and no-ops (test_version_at_land.py
+  # concurrency proof). No double-bump.
+  group: version-at-land-${{ github.event_name }}
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write  # the single-writer bot pushes the `chore: bump versions` commit
 
 jobs:
   drain-dry-run:
@@ -44,25 +59,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0  # need history to find the last applied marker
+          persist-credentials: true
+          # RELEASE_BOT_TOKEN if present so the pushed commit re-triggers CI
+          # checks gated to non-GITHUB_TOKEN pushes; GITHUB_TOKEN for bootstrap.
+          # (post-tag-sync.yml already uses this exact pattern to push to main.)
+          token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - name: Compute drain base (last Version-Bump-Applied marker)
-        id: base
-        run: |
-          # The last commit the bot already processed. If none exists yet
-          # (before the first apply), fall back to the previous commit so the
-          # dry-run has a non-empty, bounded range to report on.
-          marker=$(git log --grep='Version-Bump-Applied' -1 --format=%H || true)
-          if [ -z "$marker" ]; then
-            marker=$(git rev-parse HEAD~1)
-            echo "no applied-marker yet; using HEAD~1 as the dry-run base" >&2
-          fi
-          echo "ref=$marker" >> "$GITHUB_OUTPUT"
+      - name: Configure release bot SSH signing
+        shell: bash
+        env:
+          RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}
+        run: bash tools/scripts/configure_release_bot_ssh_signing.sh
 
-      - name: Dry-run version assignment
+      - name: Assign versions (single-writer push)
         run: |
-          python3 tools/scripts/version_at_land.py \
-              --base "${{ steps.base.outputs.ref }}" \
-              --head HEAD \
-              --mode dry-run
-          echo "::notice::version-at-land dry-run complete (no files written)."
+          # --push recomputes from a fresh origin/main, prefers the
+          # `Version-Bump-Applied` marker, and pushes `chore: bump versions`
+          # --ff-only with retry. `--base` is only the first-run FALLBACK before
+          # any marker exists; `github.event.before` bounds it to this push.
+          python3 tools/scripts/version_at_land.py --push \
+              --base "${{ github.event.before }}"

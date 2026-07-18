@@ -605,6 +605,82 @@ TEST_CASE("WebSocketChannel reports unknown frame opcodes",
     server_thread.join();
 }
 
+// max_payload bounds a single frame, but a message reassembled across
+// continuation frames must also be bounded in TOTAL — otherwise a peer
+// streaming endless non-final fragments grows the reassembly buffer without
+// limit (memory-exhaustion DoS). The channel must error + close once the
+// running total exceeds max_message rather than accumulate indefinitely.
+TEST_CASE("WebSocketChannel bounds total reassembled message size",
+          "[websocket][frame-kind][security]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    auto port = bind_loopback(listener, 47851);
+    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+
+    std::atomic<bool> ready{false};
+    std::atomic<bool> server_accept_done{false};
+    std::atomic<bool> closed{false};
+    std::atomic<int> messages{0};
+    std::unique_ptr<WebSocketChannel> server_ws;
+    std::mutex mu;
+    std::string error;
+
+    std::thread server_thread([&] {
+        ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+        auto server_tcp = std::make_unique<TcpStream>(std::move(*accepted));
+        WebSocketOptions opts;
+        opts.max_message = 300;  // tiny cap so a few 100-byte frames exceed it
+        server_ws = WebSocketChannel::accept(std::move(server_tcp), opts);
+        if (!server_ws) return;
+        server_ws->on_error([&](std::string_view reason) {
+            std::lock_guard<std::mutex> lock(mu);
+            error = std::string(reason);
+        });
+        server_ws->on_closed([&] { closed.store(true); });
+        server_ws->on_message([&](const Message&) { messages.fetch_add(1); });
+        server_accept_done.store(true);
+    });
+    while (!ready.load()) std::this_thread::sleep_for(1ms);
+
+    Socket client;
+    REQUIRE(client.create(SocketType::TCP));
+    REQUIRE(client.connect("127.0.0.1", *port));
+    const std::string key = "dGhlIHNhbXBsZSBub25jZQ==";
+    const std::string request =
+        "GET /overflow HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Key: " + key + "\r\n"
+        "Sec-WebSocket-Version: 13\r\n\r\n";
+    REQUIRE(client.send(request) == static_cast<int>(request.size()));
+    auto response = receive_http_headers(client);
+    REQUIRE(response.find("101") != std::string::npos);
+    REQUIRE(wait_until([&] { return server_accept_done.load(); }));
+
+    // First a non-final text frame, then continuation frames, none FIN — a
+    // message that never completes but keeps growing. The 100-byte frames are
+    // each well under max_payload; only their running total exceeds
+    // max_message (300), which must trip the guard.
+    const std::string chunk(100, 'a');
+    REQUIRE(send_masked_client_frame(client, false, 0x1, chunk));
+    for (int i = 0; i < 5; ++i) {
+        send_masked_client_frame(client, false, 0x0, chunk);
+    }
+
+    REQUIRE(wait_until([&] {
+        std::lock_guard<std::mutex> lock(mu);
+        return error == "reassembled message exceeds max_message" && closed.load();
+    }));
+    REQUIRE(messages.load() == 0);  // never delivered a partial/oversized message
+
+    client.close();
+    if (server_ws) server_ws->close();
+    server_thread.join();
+}
+
 TEST_CASE("WebSocketChannel replies to ping frames with pong",
           "[websocket][frame-kind]") {
     Socket listener;

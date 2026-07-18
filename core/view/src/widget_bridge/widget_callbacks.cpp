@@ -1,43 +1,19 @@
 #include <pulp/view/widget_bridge.hpp>
+#include "bridge_dispatch.hpp"
 
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/virtual_list.hpp>
 
-#include <choc/text/choc_JSON.h>
-
 #include <algorithm>
 #include <atomic>
-#include <exception>
-#include <iostream>
 #include <memory>
 #include <string>
-#include <string_view>
 #include <unordered_map>
 #include <vector>
 
 namespace pulp::view {
 
 namespace {
-
-void safe_dispatch_eval(const std::shared_ptr<std::atomic<bool>>& alive,
-                        ScriptEngine* engine,
-                        const std::string& js,
-                        const char* context) {
-    if (!alive || !alive->load(std::memory_order_acquire) || engine == nullptr) return;
-    try {
-        if (!static_cast<bool>(*engine)) return;
-        engine->evaluate(js);
-        engine->pump_message_loop();
-    } catch (const std::exception& e) {
-        std::cerr << "WidgetBridge " << context << " error: " << e.what() << "\n";
-    } catch (...) {
-        std::cerr << "WidgetBridge " << context << " error: unknown exception\n";
-    }
-}
-
-std::string js_string_literal(std::string_view text) {
-    return choc::json::toString(choc::value::createString(std::string(text)), false);
-}
 
 void dispatch_virtual_list_row_release(const std::shared_ptr<std::atomic<bool>>& alive,
                                        ScriptEngine* engine,
@@ -56,42 +32,42 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
     auto* engine = &engine_;
     if (auto* k = dynamic_cast<Knob*>(w)) {
         k->on_change = [alive, engine, id](float v) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::to_string(v) + ")", "knob change");
+            dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
     } else if (auto* f = dynamic_cast<Fader*>(w)) {
         f->on_change = [alive, engine, id](float v) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::to_string(v) + ")", "fader change");
+            dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
     } else if (auto* t = dynamic_cast<Toggle*>(w)) {
         t->on_toggle = [alive, engine, id](bool v) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'toggle', " + std::string(v?"1":"0") + ")", "toggle");
+            dispatch_event(alive, engine, id, "toggle", v ? "1" : "0");
         };
     } else if (auto* r = dynamic_cast<RangeSlider*>(w)) {
         // HTML <input type="range"> change event. The payload is the
         // post-quantisation value, not normalized, so JS callers see the same
         // number they handed us via setValue/setMin/setMax/setStep.
         r->on_change = [alive, engine, id](float v) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::to_string(v) + ")", "range slider change");
+            dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
     } else if (auto* c = dynamic_cast<ComboBox*>(w)) {
         // Mirror createCombo's inline wiring so a `<combo>`/`<select>` tag
         // routed through __domAppend dispatches the same `select` event as the
         // factory path.
         c->on_change = [alive, engine, id](int idx) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'select', " + std::to_string(idx) + ")", "combo select");
+            dispatch_event(alive, engine, id, "select", std::to_string(idx));
         };
     } else if (auto* cb = dynamic_cast<Checkbox*>(w)) {
         // Mirror createCheckbox's inline `change` wiring.
         cb->on_change = [alive, engine, id](bool v) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::string(v?"1":"0") + ")", "checkbox change");
+            dispatch_event(alive, engine, id, "change", v ? "1" : "0");
         };
     } else if (auto* lb = dynamic_cast<ListBox*>(w)) {
         // Mirror createListBox's inline select/activate wiring.
         lb->on_select = [alive, engine, id](int idx) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'select', " + std::to_string(idx) + ")", "list select");
+            dispatch_event(alive, engine, id, "select", std::to_string(idx));
         };
         lb->on_activate = [alive, engine, id](int idx) {
-            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'activate', " + std::to_string(idx) + ")", "list activate");
+            dispatch_event(alive, engine, id, "activate", std::to_string(idx));
         };
     } else if (auto* vl = dynamic_cast<VirtualList*>(w)) {
         const auto id_literal = js_string_literal(id);

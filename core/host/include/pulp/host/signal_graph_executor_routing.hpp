@@ -8,6 +8,7 @@
 #include <pulp/midi/buffer.hpp>
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <span>
@@ -65,9 +66,16 @@ struct PluginRoutingScratch {
 // snapshot. Keep owned scratch heap-indirected so `scratch` survives moving this
 // context into `plugin_ctx`.
 struct PluginBindingContext {
+    NodeId node_id = 0;
     PluginSlot* slot = nullptr;
     PluginRoutingScratch* scratch = nullptr;
     std::unique_ptr<PluginRoutingScratch> owned_scratch;
+    using AppendParameterEventsFn =
+        std::uint64_t (*)(void*, state::ParameterEventQueue&) noexcept;
+    void* parameter_events_user_data = nullptr;
+    AppendParameterEventsFn append_parameter_events = nullptr;
+    std::atomic<std::uint64_t>* parameter_events_sequence_seen = nullptr;
+    std::uint64_t parameter_events_pending_sequence = 0;
     // Cached, prepare-stable copy of the node's transport-sensitivity capability
     // (GraphNode::transport_sensitive, resolved once at compile from
     // PluginSlot::wants_transport()). The binding reads THIS, never a live
@@ -75,6 +83,17 @@ struct PluginBindingContext {
     // anticipation partition resolve from the same value and can never disagree.
     bool wants_transport = false;
 };
+
+struct ParameterEventInjectionBinding {
+    void* user_data = nullptr;
+    PluginBindingContext::AppendParameterEventsFn append = nullptr;
+    std::atomic<std::uint64_t>* sequence_seen = nullptr;
+};
+
+void reset_plugin_parameter_event_sequences(
+    std::span<PluginBindingContext> contexts) noexcept;
+void commit_plugin_parameter_event_sequences(
+    std::span<PluginBindingContext> contexts) noexcept;
 
 // The custom-node process callback. Declared here (identical to the alias in
 // signal_graph.hpp) so this header carries no dependency on signal_graph.hpp,
@@ -162,35 +181,78 @@ bool signal_graph_topology_executor_eligible(std::span<const GraphNode> nodes,
 // As above, plus requiring the graph be prepared (a live snapshot exists).
 bool signal_graph_executor_eligible(const SignalGraph& graph);
 
+// The per-node value resolvers build_executor_snapshot binds a plan against.
+// One named field per resolver, so two same-shaped resolvers cannot be swapped
+// by argument position and a caller that needs only some of them leaves the rest
+// default-empty instead of counting placeholder arguments.
+//
+// Every field is optional: an empty resolver means "this caller supplies no such
+// value", and the build falls back exactly as documented on
+// build_executor_snapshot below.
+struct ExecutorSnapshotBinders {
+    // A Gain node's live atomic. Empty (or a null result) fails the build for a
+    // graph that has Gain nodes.
+    std::function<std::atomic<float>*(NodeId)> gain_for;
+    // A Plugin node's live slot. A null result still routes: the binding
+    // reproduces SignalGraph's pass-through-or-zero, matching the walk.
+    std::function<PluginSlot*(NodeId)> plugin_for;
+    // A per-node persistent CPU-load measurer the executor wraps each node's work
+    // in (node_loads() telemetry parity with the legacy walk). Null result = that
+    // node is not measured; empty = no node is measured (e.g. a baked Processor
+    // that exposes no per-node loads).
+    std::function<audio::AudioProcessLoadMeasurer*(NodeId)> load_for;
+    // A Custom node's live process callback (a COPY is stored in the binding
+    // context as its own keepalive). A null result (unregistered type / shape
+    // mismatch) still routes as pass-through-or-zero, matching the walk.
+    std::function<const CustomNodeProcessFn*(NodeId)> custom_for;
+    // A Custom node's transport-aware callback (null = none). Populated into the
+    // binding context alongside `custom_for`; a node with a non-null result is
+    // transport-sensitive (consistent with GraphNode::transport_sensitive
+    // resolved at compile).
+    std::function<const CustomNodeTransportProcessFn*(NodeId)> custom_transport_for;
+    // Cached plugin-metadata accessors so a swap-time build makes NO live
+    // PluginSlot metadata call. Empty → fall back to `plugin_for`'s live slot
+    // (baked / anticipation callers, which are not on the swap path).
+    std::function<int(NodeId)> plugin_latency_for;
+    std::function<const std::vector<HostParamInfo>*(NodeId)> plugin_params_for;
+    // Optional per-Plugin-node ingress binding for the control-to-audio
+    // parameter-event mailbox. Empty means this snapshot has no injected
+    // parameter events (for example baked/external routing callers).
+    std::function<ParameterEventInjectionBinding(NodeId)> parameter_events_for;
+};
+
 // Build the executor snapshot (plan + bindings) for an eligible topology,
-// resolving each Gain node's live atomic via `gain_for` and each Plugin node's
-// live slot via `plugin_for`. Plugin binding contexts are appended to
-// `plugin_ctx` (cleared first, then reserved to the plugin count so the bindings'
-// user_data stays valid) and reference `scratch`. Shared by the live-graph
-// translation and by SignalGraph::compile_ (which embeds the snapshot in the
-// compiled graph, resolving from its own runtime/plugins). A Plugin node whose
-// `plugin_for` yields null still routes: its binding reproduces SignalGraph's
-// pass-through-or-zero, matching the walk. Returns false (and leaves `out`
-// empty) if the topology is not eligible, a Gain atomic is missing, or the
-// canonical plan/snapshot cannot be built under its limits. Does NOT size a pool or set a keepalive — the caller owns those.
+// resolving each node's live values through `binders`. Plugin binding contexts
+// are appended to `plugin_ctx` (cleared first, then reserved to the plugin count
+// so the bindings' user_data stays valid) and reference `scratch`. Shared by the
+// live-graph translation and by SignalGraph::compile_ (which embeds the snapshot
+// in the compiled graph, resolving from its own runtime/plugins). Returns false
+// (and leaves `out` empty) if the topology is not eligible, a Gain atomic is
+// missing, or the canonical plan/snapshot cannot be built under its limits. Does
+// NOT size a pool or set a keepalive — the caller owns those.
 // `parallel_safe` builds the snapshot's buffer assignment without slot reuse so
 // it can drive GraphRuntimeExecutor::process_parallel (concurrent same-level
 // nodes never alias a recycled slot); default false = the compact serial layout.
-// `load_for`, when provided, resolves a per-node persistent CPU-load measurer
-// that the executor wraps each node's work in (for node_loads() telemetry parity
-// with the legacy walk). Null result = that node is not measured; an empty
-// function = no node is measured (e.g. a baked Processor that exposes no
-// per-node loads).
 // `custom_ctx`, when non-null, is the caller-owned storage for Custom-node
 // binding contexts (cleared, then reserved to the custom-node count so the
-// bindings' user_data stays valid); `custom_for` resolves a Custom node's live
-// process callback (a COPY is stored in the context as its own keepalive). When
-// `custom_ctx` is null and the topology contains a Custom node, the build fails
-// closed (returns false) so the caller falls back to the legacy walk — callers
-// whose subset never contains Custom nodes (e.g. a baked Processor or the
-// anticipation interior) may omit both. A Custom node whose `custom_for` yields
-// null (unregistered type / shape mismatch) still routes: its binding reproduces
-// SignalGraph's pass-through-or-zero, matching the walk.
+// bindings' user_data stays valid). When it is null and the topology contains a
+// Custom node, the build fails closed (returns false) so the caller falls back to
+// the legacy walk — callers whose subset never contains Custom nodes (e.g. a
+// baked Processor or the anticipation interior) may omit it.
+bool build_executor_snapshot(std::span<const GraphNode> nodes,
+                             std::span<const Connection> connections,
+                             const ExecutorSnapshotBinders& binders,
+                             std::vector<PluginBindingContext>& plugin_ctx,
+                             PluginRoutingScratch& scratch,
+                             format::GraphRuntimeSnapshot& out,
+                             bool parallel_safe = false,
+                             std::vector<CustomBindingContext>* custom_ctx = nullptr);
+
+// Positional-resolver forwarder onto the binder-struct overload above, kept for
+// call sites that have not migrated yet. Each argument maps to the
+// same-named ExecutorSnapshotBinders field and the semantics are identical.
+// Prefer the ExecutorSnapshotBinders overload for new code: two same-shaped
+// resolvers cannot be silently swapped there.
 bool build_executor_snapshot(std::span<const GraphNode> nodes,
                              std::span<const Connection> connections,
                              const std::function<std::atomic<float>*(NodeId)>& gain_for,
@@ -217,7 +279,9 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                              // (baked / anticipation callers, not on the swap path).
                              const std::function<int(NodeId)>& plugin_latency_for = {},
                              const std::function<const std::vector<HostParamInfo>*(NodeId)>&
-                                 plugin_params_for = {});
+                                 plugin_params_for = {},
+                             const std::function<ParameterEventInjectionBinding(NodeId)>&
+                                 parameter_events_for = {});
 
 // Translate a prepared, eligible `graph` into `out` (snapshot + sized pool +
 // keepalive). Returns false (out.valid == false) when ineligible/unprepared. On

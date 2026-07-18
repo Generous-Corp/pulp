@@ -178,7 +178,7 @@ public:
 
     // Animation accessors for testing
     float opacity() const { return opacity_.value(); }
-    void advance_animations(float dt);
+    void advance_animations(float dt) override;
 
 private:
     std::string text_;
@@ -510,7 +510,7 @@ public:
     float bar_opacity() const { return bar_opacity_.value(); }
     float bar_width() const { return bar_width_.value(); }
     float target_scroll_y() const { return target_scroll_y_; }
-    void advance_animations(float dt);
+    void advance_animations(float dt) override;
 
 private:
     void clamp_scroll_targets();

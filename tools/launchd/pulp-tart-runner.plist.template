@@ -8,13 +8,19 @@
   Install (per Mac that hosts Tart VMs — Studio, M5, …):
 
     1. Provision the golden first: tools/ci/tart-provision.sh ... runner ; tag pulp-build-runner
-    2. Copy this file to ~/Library/LaunchAgents/, replacing BOTH $PULP_REPO and
-       $HOME with absolute paths — launchd does NOT expand shell variables in
-       plist values (a literal "$HOME" log path fails to open → exit 78):
+    2. Copy this file to ~/Library/LaunchAgents/, replacing $PULP_REPO, $HOME,
+       and $TART_HOME with absolute paths — launchd does NOT expand shell
+       variables in plist values (a literal "$HOME" log path fails to open →
+       exit 78). $TART_HOME is this host's VM store; it differs per host, so
+       the template carries a placeholder rather than any one machine's path:
 
          sed -e "s|\$PULP_REPO|$PWD|g" -e "s|\$HOME|$HOME|g" \
+             -e "s|\$TART_HOME|$HOME/VMs|g" \
            tools/launchd/pulp-tart-runner.plist.template \
            > ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner.plist
+
+       (tools/ci/setup-ci-host.sh --tart-home <dir> does this substitution for
+       you. The supervisor hard-errors rather than guessing if it is missed.)
 
     3. **Grant Full Disk Access** (REQUIRED when TART_HOME / the repo live on a
        /Volumes external drive): macOS TCC blocks a LaunchAgent from reading the
@@ -79,7 +85,7 @@
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin</string>
         <key>TART_HOME</key>
-        <string>/Volumes/Workshop/VMs</string>
+        <string>$TART_HOME</string>
     </dict>
 </dict>
 </plist>

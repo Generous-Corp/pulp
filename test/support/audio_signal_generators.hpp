@@ -74,6 +74,55 @@ pulp::audio::Buffer<float> make_swept_sine(int channels, int frames,
                                            double sample_rate,
                                            float amplitude = 1.0f);
 
+/// Naive (mathematically ideal) sawtooth ramp — **aliased by construction**.
+///
+/// This is the closed-form ideal saw, point-sampled with no bandlimiting:
+/// every harmonic above Nyquist folds back into the baseband. That is the
+/// point. It exists to be the naive reference an anti-aliased oscillator is
+/// measured *against*, and to be broadband stimulus with energy at every
+/// harmonic of `f0_hz`. Do not "fix" the aliasing here — an alias-free saw
+/// would make it useless for both jobs.
+///
+/// Not to be confused with `WavetableT::make_saw` in
+/// `core/signal/wavetable.hpp`, which is a **bandlimited** wavetable factory
+/// for the shipped signal path. Same name, opposite contract: that one
+/// suppresses aliases, this one guarantees them.
+///
+/// Determinism contract: closed form per sample (no phase accumulation, so
+/// sample `i` never depends on the block partition):
+/// `t = phase + f0_hz * i / sample_rate; p = t - floor(t);`
+/// `sample = amplitude * (2p - 1)`. The ramp runs -amplitude → +amplitude
+/// across each cycle and steps discontinuously back at the wrap. `phase` is
+/// in **cycles** (turns), not radians, and is wrapped into [0, 1).
+/// `sample_rate` must be > 0; `f0_hz` may be negative (reverses the ramp).
+pulp::audio::Buffer<float> make_saw(int channels, int frames, double f0_hz,
+                                    double sample_rate,
+                                    float amplitude = 1.0f,
+                                    double phase = 0.0);
+
+/// Naive (mathematically ideal) square / pulse wave — **aliased by
+/// construction**, for the same reasons and the same purpose as `make_saw`
+/// above (naive reference + broadband stimulus; do not bandlimit it). The
+/// bandlimited counterpart is `WavetableT::make_square` in
+/// `core/signal/wavetable.hpp` — same name, opposite contract.
+///
+/// Determinism contract: closed form per sample, same phase expression as
+/// `make_saw` (`p = t - floor(t)` with `t = phase + f0_hz * i / sample_rate`),
+/// then `sample = p < pulse_width ? +amplitude : -amplitude`. The comparison
+/// is strict, so a `pulse_width` of exactly 0.5 puts the sample at p == 0.5
+/// on the *low* half — 48 kHz / 1 kHz gives exactly 24 high and 24 low
+/// samples per cycle.
+///
+/// `pulse_width` is the duty cycle in [0, 1] and defaults to 0.5 (an even
+/// square). The degenerate ends are legal DC and deliberately not clamped
+/// away: 0 is constant -amplitude, 1 is constant +amplitude. `phase` is in
+/// cycles as above. `sample_rate` must be > 0.
+pulp::audio::Buffer<float> make_square(int channels, int frames, double f0_hz,
+                                       double sample_rate,
+                                       float amplitude = 1.0f,
+                                       double pulse_width = 0.5,
+                                       double phase = 0.0);
+
 /// Deterministic uniform white noise in [-amplitude, amplitude).
 ///
 /// PRNG (the whole determinism contract): xorshift64* seeded through one

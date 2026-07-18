@@ -10,7 +10,7 @@ source of truth — there is no separate per-agent copy.
 You rarely invoke a skill by name. Each one activates automatically when
 your request matches what it covers (its `description` lists the triggers),
 and many also have a matching `/slash-command`. The table below is the full
-catalog of the 50 skills Pulp ships; open a skill's `SKILL.md`
+catalog of the 51 skills Pulp ships; open a skill's `SKILL.md`
 for its complete, authoritative guidance.
 
 | Skill | What it does |
@@ -18,7 +18,7 @@ for its complete, authoritative guidance.
 | `aax` | Optional AAX support for Pulp, including developer-supplied Avid SDK setup, CMake enablement, DigiShell/AAX Validator workflows, and local AAX builds on macOS or Windows. |
 | `android` | Android platform development for Pulp — NDK cross-compilation, Oboe audio, Dawn/Skia GPU rendering, JNI bridge, touch interaction, emulator workflows, and end-to-end smoke validation. |
 | `ara` | Optional ARA support for Pulp, including developer-supplied ARA SDK setup, CMake enablement, adapter companion APIs, validation, and ARA-aware plugin implementation guidance. |
-| `audio-harness` | Prove and debug what a Pulp processor actually emits — the audio observability harness (signal generators, metrics, assertions, RenderScenario, effect contracts) plus the offline Audio Doctor analyzers (magnitude/frequency response, THD/THD+N). |
+| `audio-harness` | The measurement surface for ALL Pulp DSP and audio-pipeline work — read it BEFORE writing or gating DSP, not only when something already sounds wrong. |
 | `audio-headless-debug` | Reproduce and debug "only happens in a DAW" audio plugin bugs (cutouts, glitches, parameter-change failures) entirely offline — headless Processor scenes for DSP bugs and a standalone AudioUnit host probe for adapter/host-interaction bugs. |
 | `auv2` | Audio Unit v2 adapter work for Pulp — picking the right AU component type (aufx/aumf/aumi/aumu), wiring MIDI input, and avoiding the DAW-side component cache that silently masks repackaging. |
 | `auv3` | Audio Unit v3 (AUAudioUnit) format adapter for Pulp — render-block wiring, parameter tree bridging, MIDI / sysex via AURenderEvent, sidechain pulls, state persistence, iOS extension surface, and the pitfalls discovered while wiring the adapter. |
@@ -32,6 +32,7 @@ for its complete, authoritative guidance.
 | `engine` | Query, recommend, and switch the Pulp JS engine backend (QuickJS, JavaScriptCore, V8). |
 | `faust` | Create FAUST DSP plugins in Pulp using offline codegen, pre-generated C++ headers, and the FaustProcessor template wrapper. |
 | `friction-report` | Turn a moment of friction — a conflicting PR, a wedged runner, a mysterious red check, a repeated manual chore — into a durable, actionable report. |
+| `handoff` | Coordinate a cross-session or cross-machine handoff — snapshot the open work, write a status doc to the pulp-planning repo on main, and emit a ready-to-paste goal prompt that links it, so a fresh session (often on another machine) can pick up and finish. |
 | `hosting` | Load, run, and test VST3 / AU / CLAP / LV2 plugins from Pulp code. |
 | `import-design` | Import designs from Figma, Stitch, v0, Pencil, React Native, or Claude Design into Pulp web-compat JS with automated visual validation. |
 | `installable-tools` | The acceptance bar for anything Pulp can install (a `pulp tool` registry entry, `pulp add` package, or any downloadable). |

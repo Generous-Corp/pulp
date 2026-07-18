@@ -39,3 +39,19 @@ if(PULP_BENCHMARK AND TARGET pulp-render)
         catch_discover_tests(pulp-test-bench-integration)
     endif()
 endif()
+
+# ── Oscillator throughput benchmark ─────────────────────────────────────────
+#
+# Tooling-only, gated on PULP_BENCHMARK like the zero-copy benchmark above,
+# but deliberately does NOT require `pulp-render`/PULP_ENABLE_GPU: oscillator
+# `next()` throughput has nothing to do with the GPU pipeline, so this target
+# stays buildable with just `-DPULP_BENCHMARK=ON` (pulp::signal is
+# header-only and always present). ${choc_SOURCE_DIR} is named directly
+# rather than linking a Pulp target that re-exports it, mirroring
+# test/cmake/design_import_tool_cli_tests.cmake's pulp-test-import-design-tool.
+if(PULP_BENCHMARK)
+    pulp_add_test_suite(pulp-test-osc-bench
+        LIBRARIES pulp::signal
+        INCLUDE_DIRS ${choc_SOURCE_DIR}
+        LABELS "bench")
+endif()

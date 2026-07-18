@@ -1,5 +1,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include "widget_bridge/gpu_common.hpp"
+#include "widget_bridge/bridge_dispatch.hpp"
+#include "widget_bridge/value_widget_access.hpp"
 #include <pulp/view/animation.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/motion.hpp>
@@ -19,6 +21,7 @@
 #include <cmath>
 #include <cstdio>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <unordered_map>
 
@@ -286,21 +289,6 @@ if (!globalThis.window.__pulpListenerShim__) {
 // DOM mutation methods live in core/view/js/web-compat-dom-ops.js. That JS file
 // is the single source of truth and gets evaluated by the constructor along
 // with the rest of the prelude chain.
-
-static void safe_dispatch_eval(ScriptEngine& engine, const std::string& js, const char* context) {
-    try {
-        engine.evaluate(js);
-        // Pump microtasks so React setState commits (and any queueMicrotask /
-        // Promise.then continuations scheduled by the handler) before the next
-        // event arrives. Without this, drag-style interactions see stale state
-        // on the immediately-following pointermove and silently bail.
-        engine.pump_message_loop();
-    } catch (const std::exception& e) {
-        std::cerr << "WidgetBridge " << context << " error: " << e.what() << "\n";
-    } catch (...) {
-        std::cerr << "WidgetBridge " << context << " error: unknown exception\n";
-    }
-}
 
 static void eval_or_throw(ScriptEngine& engine, const char* name, const std::string& js) {
     try {
@@ -590,8 +578,20 @@ View* WidgetBridge::widget(const std::string& id) {
 
     auto it = widgets_.find(id);
     if (it != widgets_.end()) {
-        if (it->second != nullptr && subtree_contains_view(root_, it->second)) {
-            return it->second;
+        View* cached = it->second.view;
+        if (cached != nullptr) {
+            // O(1) fast path: the generation is unchanged since we last confirmed
+            // `cached` lives under root_, and add_child never detaches, so it must
+            // still be there. Only remove_child bumps the generation (and a fresh
+            // entry carries the 0 sentinel), forcing the authoritative walk below.
+            const std::uint64_t gen = View::structure_generation();
+            if (it->second.validated_generation == gen) {
+                return cached;
+            }
+            if (subtree_contains_view(root_, cached)) {
+                it->second.validated_generation = gen;
+                return cached;
+            }
         }
         widgets_.erase(it); forget_widget_registrations(id);
     }
@@ -605,7 +605,8 @@ View* WidgetBridge::widget(const std::string& id) {
 }
 
 void WidgetBridge::sync_from_store() {
-    for (auto& [id, view] : widgets_) {
+    for (auto& [id, state] : widgets_) {
+        View* view = state.view;
         if (auto* knob = dynamic_cast<Knob*>(view)) {
             // Try to find a parameter matching this widget's id
             // Convention: widget id matches parameter name
@@ -639,7 +640,7 @@ void WidgetBridge::sync_from_store() {
 View* WidgetBridge::resolve_parent(const std::string& parent_id) {
     if (parent_id.empty()) return &root_;
     auto it = widgets_.find(parent_id);
-    return it != widgets_.end() ? it->second : &root_;
+    return it != widgets_.end() ? it->second.view : &root_;
 }
 
 std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
@@ -705,17 +706,14 @@ void WidgetBridge::clear() {
         auto removed = root_.remove_child(child);
         forget_widget_subtree(removed.get());
     }
-    widgets_.clear(); pointer_registered_.clear(); wheel_registered_.clear(); gesture_recognizer_registered_.clear();
+    widgets_.clear();
+    registrations_.clear();
 }
 
 void WidgetBridge::snapshot_values(std::unordered_map<std::string, float>& out) const {
     for (auto& [id, view] : widgets_) {
-        if (auto* k = dynamic_cast<Knob*>(view)) out[id] = k->value();
-        else if (auto* f = dynamic_cast<Fader*>(view)) out[id] = f->value();
-        else if (auto* r = dynamic_cast<RangeSlider*>(view)) out[id] = r->value();
-        else if (auto* t = dynamic_cast<Toggle*>(view)) out[id] = t->is_on() ? 1.0f : 0.0f;
-        else if (auto* cb = dynamic_cast<Checkbox*>(view)) out[id] = cb->is_checked() ? 1.0f : 0.0f;
-        else if (auto* tb = dynamic_cast<ToggleButton*>(view)) out[id] = tb->is_on() ? 1.0f : 0.0f;
+        float value = 0.0f;
+        if (try_get_scalar_value(view, value)) out[id] = value;
     }
 }
 
@@ -723,23 +721,15 @@ void WidgetBridge::restore_values(const std::unordered_map<std::string, float>& 
     for (auto& [id, val] : snapshot) {
         auto it = widgets_.find(id);
         if (it == widgets_.end()) continue;
-        if (auto* k = dynamic_cast<Knob*>(it->second)) k->set_value(val);
-        else if (auto* f = dynamic_cast<Fader*>(it->second)) f->set_value(val);
-        else if (auto* r = dynamic_cast<RangeSlider*>(it->second)) r->set_value(val);
-        else if (auto* t = dynamic_cast<Toggle*>(it->second)) t->set_on(val > 0.5f);
-        else if (auto* cb = dynamic_cast<Checkbox*>(it->second)) cb->set_checked(val > 0.5f);
-        else if (auto* tb = dynamic_cast<ToggleButton*>(it->second)) tb->set_on(val > 0.5f);
+        try_set_scalar_value(it->second, val);
     }
 }
 
 void WidgetBridge::snapshot_values(WidgetReloadSnapshot& out) const {
-    for (auto& [id, view] : widgets_) {
-        if (auto* k = dynamic_cast<Knob*>(view)) out.scalar_values[id] = k->value();
-        else if (auto* f = dynamic_cast<Fader*>(view)) out.scalar_values[id] = f->value();
-        else if (auto* r = dynamic_cast<RangeSlider*>(view)) out.scalar_values[id] = r->value();
-        else if (auto* t = dynamic_cast<Toggle*>(view)) out.scalar_values[id] = t->is_on() ? 1.0f : 0.0f;
-        else if (auto* cb = dynamic_cast<Checkbox*>(view)) out.scalar_values[id] = cb->is_checked() ? 1.0f : 0.0f;
-        else if (auto* tb = dynamic_cast<ToggleButton*>(view)) out.scalar_values[id] = tb->is_on() ? 1.0f : 0.0f;
+    for (auto& [id, state] : widgets_) {
+        View* view = state.view;
+        float value = 0.0f;
+        if (try_get_scalar_value(view, value)) out.scalar_values[id] = value;
         // Selection controls: their selected INDEX is reload state too — without
         // this a dev reload silently resets the user's dropdown / segment choice
         // (item 1.4 coverage gap). Stored as the index-as-float in scalar_values;
@@ -760,21 +750,16 @@ void WidgetBridge::restore_values(const WidgetReloadSnapshot& snapshot) {
     for (auto& [id, val] : snapshot.scalar_values) {
         auto it = widgets_.find(id);
         if (it == widgets_.end()) continue;
-        if (auto* k = dynamic_cast<Knob*>(it->second)) k->set_value(val);
-        else if (auto* f = dynamic_cast<Fader*>(it->second)) f->set_value(val);
-        else if (auto* r = dynamic_cast<RangeSlider*>(it->second)) r->set_value(val);
-        else if (auto* t = dynamic_cast<Toggle*>(it->second)) t->set_on(val > 0.5f);
-        else if (auto* cb = dynamic_cast<Checkbox*>(it->second)) cb->set_checked(val > 0.5f);
-        else if (auto* tb = dynamic_cast<ToggleButton*>(it->second)) tb->set_on(val > 0.5f);
+        if (try_set_scalar_value(it->second, val)) continue;
         // Selection controls — restore the index SILENTLY so re-applying it during
         // a reload doesn't fire the widget's on_change as if the user clicked.
-        else if (auto* combo = dynamic_cast<ComboBox*>(it->second)) combo->set_selected_silent(static_cast<int>(std::lround(val)));
-        else if (auto* seg = dynamic_cast<SegmentedControl*>(it->second)) seg->set_selected_silent(static_cast<int>(std::lround(val)));
+        if (auto* combo = dynamic_cast<ComboBox*>(it->second.view)) combo->set_selected_silent(static_cast<int>(std::lround(val)));
+        else if (auto* seg = dynamic_cast<SegmentedControl*>(it->second.view)) seg->set_selected_silent(static_cast<int>(std::lround(val)));
     }
     for (auto& [id, val] : snapshot.xy_values) {
         auto it = widgets_.find(id);
         if (it == widgets_.end()) continue;
-        if (auto* xy = dynamic_cast<XYPad*>(it->second)) { xy->set_x(val.x); xy->set_y(val.y); }
+        if (auto* xy = dynamic_cast<XYPad*>(it->second.view)) { xy->set_x(val.x); xy->set_y(val.y); }
     }
     // Custom widget-declared state (item 1.4b): hand each saved blob back to the
     // widget that still lives under the same script id. A widget whose id/type
@@ -797,8 +782,7 @@ void WidgetBridge::poll_async_results() {
 
     for (const auto& result : pending) {
         auto payload = choc::json::toString(choc::value::createString(result.output), false);
-        safe_dispatch_eval(engine_, "__dispatch__('" + result.callback_id + "', 'result', " +
-            payload + ")", "async result");
+        dispatch_event(engine_, result.callback_id, "result", payload);
     }
 
     if (had_pending_frames) {
@@ -834,311 +818,127 @@ void WidgetBridge::service_frame_callbacks() {
 #define PULP_BRIDGE_EXEC_ENABLED 1
 #endif
 
+// One bridge-API group. `gate` names the capability an EFFECTFUL group requires;
+// `std::nullopt` marks a pure-UI group, which is always registered.
+//
+// Making the gate DATA rather than a hand-written `if` around each call is what
+// lets the capability contract be read as a list — the enforcement seam the
+// capability model documents is now one table plus one loop, instead of ~75
+// call sites to audit by eye.
+struct WidgetBridge::ApiGroup {
+    std::optional<ReloadCapability> gate;
+    void (WidgetBridge::*install)();
+};
+
 void WidgetBridge::register_api() {
-    register_widget_factory_controls_api();
-    // Reads arbitrary file paths (image/sprite assets) → gated by Filesystem.
-    if (granted_capabilities_.has(ReloadCapability::Filesystem))
-        register_widget_assets_api();
-
-    register_widget_factory_form_api();
-
-    register_widget_value_controls_api();
-
-    register_state_binding_api();
-
-    register_animation_api();
-
-    register_widget_style_visibility_api();
-
-    register_accessibility_api();
-
-    register_hover_event_api();
-    register_layout_grid_api();
-
-    register_pointer_event_api();
-
-    register_metadata_removal_api();
-
-    // ═══════════════════════════════════════════════════════════════
-    // Extended API: containers, layout, all widgets, themes, canvas
-    // ═══════════════════════════════════════════════════════════════
-
-    register_widget_factory_container_api();
-    register_layout_flex_api();
-    register_dom_api();
-    register_layout_query_api();
-
-    register_widget_style_interaction_api();
-
-    register_widget_factory_composite_api();
-
-    register_widget_value_list_api();
-
-    register_widget_factory_text_editor_api();
-
-    register_widget_factory_design_system_api();
-
-
-
-    register_widget_value_label_api();
-
-    register_metadata_source_api();
-
-    register_widget_value_basic_api();
-
-    register_widget_typography_api();
-
-    register_widget_value_content_api();
-
-    // ── Visual properties (CSS Box Model) ─────────────────────────────
-
-    // CSS Color Level 4 parser — accepts hex, rgb(), rgba(), hsl(), hsla(), named, transparent
-    auto parseColor = [](const std::string& str) -> canvas::Color {
-        canvas::Color c = canvas::Color::rgba(1.0f, 1.0f, 1.0f, 1.0f);
-        if (str.empty()) return c;
-
-        // transparent
-        if (str == "transparent") return canvas::Color::rgba(0.0f, 0.0f, 0.0f, 0.0f);
-
-        // Hex: #RGB, #RRGGBB, #RRGGBBAA
-        if (str[0] == '#') {
-            if (str.size() == 4) {  // #RGB → #RRGGBB
-                c.r = static_cast<float>(std::stoul(std::string(2, str[1]), nullptr, 16)) / 255.0f;
-                c.g = static_cast<float>(std::stoul(std::string(2, str[2]), nullptr, 16)) / 255.0f;
-                c.b = static_cast<float>(std::stoul(std::string(2, str[3]), nullptr, 16)) / 255.0f;
-            } else if (str.size() >= 7) {
-                c.r = static_cast<float>(std::stoul(str.substr(1,2), nullptr, 16)) / 255.0f;
-                c.g = static_cast<float>(std::stoul(str.substr(3,2), nullptr, 16)) / 255.0f;
-                c.b = static_cast<float>(std::stoul(str.substr(5,2), nullptr, 16)) / 255.0f;
-                if (str.size() >= 9)
-                    c.a = static_cast<float>(std::stoul(str.substr(7,2), nullptr, 16)) / 255.0f;
-            }
-            return c;
-        }
-
-        // rgb(r, g, b) / rgba(r, g, b, a)
-        if (str.substr(0, 4) == "rgb(" || str.substr(0, 5) == "rgba(") {
-            auto inner = str.substr(str.find('(') + 1);
-            inner = inner.substr(0, inner.find(')'));
-            float vals[4] = {0, 0, 0, 1};
-            int n = 0;
-            std::istringstream ss(inner);
-            std::string tok;
-            while (std::getline(ss, tok, ',') && n < 4) {
-                while (!tok.empty() && tok[0] == ' ') tok.erase(0, 1);
-                vals[n++] = std::stof(tok);
-            }
-            c.r = std::clamp(vals[0] / 255.0f, 0.0f, 1.0f);
-            c.g = std::clamp(vals[1] / 255.0f, 0.0f, 1.0f);
-            c.b = std::clamp(vals[2] / 255.0f, 0.0f, 1.0f);
-            c.a = std::clamp(vals[3], 0.0f, 1.0f);  // alpha is already 0-1 in CSS
-            return c;
-        }
-
-        // hsl(h, s%, l%) / hsla(h, s%, l%, a)
-        if (str.substr(0, 4) == "hsl(" || str.substr(0, 5) == "hsla(") {
-            auto inner = str.substr(str.find('(') + 1);
-            inner = inner.substr(0, inner.find(')'));
-            float vals[4] = {0, 0, 0, 1};
-            int n = 0;
-            std::istringstream ss(inner);
-            std::string tok;
-            while (std::getline(ss, tok, ',') && n < 4) {
-                while (!tok.empty() && tok[0] == ' ') tok.erase(0, 1);
-                if (tok.back() == '%') tok.pop_back();
-                vals[n++] = std::stof(tok);
-            }
-            float h = std::fmod(vals[0], 360.0f) / 360.0f;
-            float s = vals[1] / 100.0f;
-            float l = vals[2] / 100.0f;
-            // HSL to RGB conversion
-            auto hue2rgb = [](float p, float q, float t) {
-                if (t < 0) t += 1; if (t > 1) t -= 1;
-                if (t < 1.0f/6) return p + (q - p) * 6 * t;
-                if (t < 1.0f/2) return q;
-                if (t < 2.0f/3) return p + (q - p) * (2.0f/3 - t) * 6;
-                return p;
-            };
-            float r, g, b;
-            if (s == 0) { r = g = b = l; }
-            else {
-                float q = l < 0.5f ? l * (1 + s) : l + s - l * s;
-                float p = 2 * l - q;
-                r = hue2rgb(p, q, h + 1.0f/3);
-                g = hue2rgb(p, q, h);
-                b = hue2rgb(p, q, h - 1.0f/3);
-            }
-            c.r = std::clamp(r, 0.0f, 1.0f);
-            c.g = std::clamp(g, 0.0f, 1.0f);
-            c.b = std::clamp(b, 0.0f, 1.0f);
-            c.a = std::clamp(vals[3], 0.0f, 1.0f);
-            return c;
-        }
-
-        // Named colors (common subset)
-        static const std::unordered_map<std::string, uint32_t> named = {
-            {"black", 0x000000}, {"white", 0xFFFFFF}, {"red", 0xFF0000},
-            {"green", 0x008000}, {"blue", 0x0000FF}, {"yellow", 0xFFFF00},
-            {"cyan", 0x00FFFF}, {"magenta", 0xFF00FF}, {"orange", 0xFFA500},
-            {"purple", 0x800080}, {"pink", 0xFFC0CB}, {"gray", 0x808080},
-            {"grey", 0x808080}, {"silver", 0xC0C0C0}, {"gold", 0xFFD700},
-            {"navy", 0x000080}, {"teal", 0x008080}, {"maroon", 0x800000},
-            {"olive", 0x808000}, {"lime", 0x00FF00}, {"aqua", 0x00FFFF},
-            {"fuchsia", 0xFF00FF}, {"coral", 0xFF7F50}, {"salmon", 0xFA8072},
-            {"tomato", 0xFF6347}, {"crimson", 0xDC143C}, {"indigo", 0x4B0082},
-            {"violet", 0xEE82EE}, {"turquoise", 0x40E0D0}, {"tan", 0xD2B48C},
-            {"khaki", 0xF0E68C}, {"plum", 0xDDA0DD}, {"orchid", 0xDA70D6},
-            {"chocolate", 0xD2691E}, {"sienna", 0xA0522D}, {"peru", 0xCD853F},
-            {"linen", 0xFAF0E6}, {"ivory", 0xFFFFF0}, {"beige", 0xF5F5DC},
-            {"wheat", 0xF5DEB3}, {"snow", 0xFFFAFA}, {"azure", 0xF0FFFF},
-            {"mintcream", 0xF5FFFA}, {"honeydew", 0xF0FFF0}, {"aliceblue", 0xF0F8FF},
-            {"lavender", 0xE6E6FA}, {"mistyrose", 0xFFE4E1}, {"seashell", 0xFFF5EE},
-            {"cornsilk", 0xFFF8DC}, {"papayawhip", 0xFFEFD5}, {"blanchedalmond", 0xFFEBCD},
-            {"bisque", 0xFFE4C4}, {"moccasin", 0xFFE4B5}, {"oldlace", 0xFDF5E6},
-            {"floralwhite", 0xFFFAF0}, {"ghostwhite", 0xF8F8FF}, {"whitesmoke", 0xF5F5F5},
-            {"gainsboro", 0xDCDCDC}, {"lightgray", 0xD3D3D3}, {"darkgray", 0xA9A9A9},
-            {"dimgray", 0x696969}, {"lightslategray", 0x778899}, {"slategray", 0x708090},
-            {"darkslategray", 0x2F4F4F},
-            {"lightcoral", 0xF08080}, {"indianred", 0xCD5C5C}, {"firebrick", 0xB22222},
-            {"darkred", 0x8B0000}, {"orangered", 0xFF4500}, {"darkorange", 0xFF8C00},
-            {"lightgreen", 0x90EE90}, {"limegreen", 0x32CD32}, {"forestgreen", 0x228B22},
-            {"darkgreen", 0x006400}, {"springgreen", 0x00FF7F}, {"seagreen", 0x2E8B57},
-            {"lightblue", 0xADD8E6}, {"skyblue", 0x87CEEB}, {"deepskyblue", 0x00BFFF},
-            {"dodgerblue", 0x1E90FF}, {"royalblue", 0x4169E1}, {"steelblue", 0x4682B4},
-            {"cornflowerblue", 0x6495ED}, {"mediumblue", 0x0000CD}, {"darkblue", 0x00008B},
-            {"midnightblue", 0x191970}, {"slateblue", 0x6A5ACD}, {"mediumpurple", 0x9370DB},
-            {"blueviolet", 0x8A2BE2}, {"darkviolet", 0x9400D3}, {"darkorchid", 0x9932CC},
-            {"darkmagenta", 0x8B008B}, {"deeppink", 0xFF1493}, {"hotpink", 0xFF69B4},
-            {"mediumvioletred", 0xC71585}, {"palevioletred", 0xDB7093},
-        };
-        auto it = named.find(str);
-        if (it != named.end()) {
-            uint32_t v = it->second;
-            c = canvas::Color::rgba8((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
-            return c;
-        }
-
-        return c;  // default white
-    };
-    // Alias for backward compatibility
-    auto parseHexColor = parseColor;
-    register_tokens_api(parseHexColor);
-
-    register_widget_text_runs_api(parseHexColor);
-
-    register_widget_style_background_color_api(parseHexColor);
-
-    register_svg_api(parseHexColor);
-
-    register_widget_border_box_api(parseHexColor);
-
-    register_list_style_api();
-
-    register_widget_outline_api(parseHexColor);
-
-    register_widget_border_radius_api();
-
-    register_widget_border_side_api(parseHexColor);
-
-    register_widget_style_shadow_api(parseHexColor);
-
-    register_wheel_event_api();
-
-    register_widget_style_opacity_api();
-
-    register_widget_typography_color_api(parseHexColor);
-
-    register_widget_style_overflow_api();
-    register_layout_box_model_api();
-
-    register_canvas2d_api(parseColor);
-
-    register_widget_style_state_api(parseColor);
-
-    register_widget_typography_decoration_api(parseHexColor);
-
-    register_widget_style_background_repeat_api();
-    register_layout_position_api();
-
-    register_animation_style_api();
-
-    register_widget_typography_overflow_api();
-
-    register_widget_style_cursor_direction_api();
-
-    register_widget_style_filter_clip_api(parseColor);
-
-    register_widget_style_mask_object_api();
-
-    register_widget_style_blend_api();
-
-    // Storage-only setters for remaining CSS compatibility entries. Each
-    // handler records the value on the View's catalog slot so harness
-    // round-trip tests can verify the bridge accepts the keyword. Catalog
-    // status documents implementation depth: `partial` for storage-only with
-    // deferred paint, `noop` for accept-and-ignore, and `wontfix` for
-    // architectural out-of-scope.
-
-    register_widget_typography_extended_api();
-
-    register_widget_style_rn_compat_api(parseHexColor);
-
-    register_widget_typography_shadow_shorthand_api();
-
-    register_widget_style_background_subproperty_api();
-
-    register_widget_style_background_gradient_api(parseColor);
-    register_widget_style_box_shadow_api(parseHexColor);
-
-    register_shader_widget_api();
-
-    // Persists style presets to temp files → gated by Storage.
-    if (granted_capabilities_.has(ReloadCapability::Storage))
-        register_widget_schema_api();
-
-
-    register_theme_api();
-
-    if (granted_capabilities_.has(ReloadCapability::Ai))
-        register_platform_services_ai_api();
-
-    register_metadata_computed_api();
-
-    // Shell exec — dev-only (compiled out of ship) AND gated by the exec cap.
+    // Registration ORDER is load-bearing: a later group may deliberately
+    // overwrite a JS name registered by an earlier one, and the JS preludes
+    // evaluated after this run against the resulting surface. Append; never sort.
+    static constexpr ApiGroup kGroups[] = {
+        {std::nullopt,                     &WidgetBridge::register_widget_factory_controls_api},
+        // Reads arbitrary file paths (image/sprite assets) → gated by Filesystem.
+        {ReloadCapability::Filesystem,     &WidgetBridge::register_widget_assets_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_factory_form_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_value_controls_api},
+        {std::nullopt,                     &WidgetBridge::register_state_binding_api},
+        {std::nullopt,                     &WidgetBridge::register_animation_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_style_visibility_api},
+        {std::nullopt,                     &WidgetBridge::register_accessibility_api},
+        {std::nullopt,                     &WidgetBridge::register_hover_event_api},
+        {std::nullopt,                     &WidgetBridge::register_layout_grid_api},
+        {std::nullopt,                     &WidgetBridge::register_pointer_event_api},
+        {std::nullopt,                     &WidgetBridge::register_metadata_removal_api},
+
+        // Extended API: containers, layout, all widgets, themes, canvas.
+        {std::nullopt,                     &WidgetBridge::register_widget_factory_container_api},
+        {std::nullopt,                     &WidgetBridge::register_layout_flex_api},
+        {std::nullopt,                     &WidgetBridge::register_dom_api},
+        {std::nullopt,                     &WidgetBridge::register_layout_query_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_style_interaction_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_factory_composite_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_value_list_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_factory_text_editor_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_factory_design_system_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_value_label_api},
+        {std::nullopt,                     &WidgetBridge::register_metadata_source_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_value_basic_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_typography_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_value_content_api},
+
+        // Visual properties (CSS box model). CSS color parsing lives in
+        // css_color.cpp (parse_bridge_css_color); each color-consuming registrar
+        // calls it directly.
+        {std::nullopt,                     &WidgetBridge::register_tokens_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_text_runs_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_style_background_color_api},
+        {std::nullopt,                     &WidgetBridge::register_svg_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_border_box_api},
+        {std::nullopt,                     &WidgetBridge::register_list_style_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_outline_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_border_radius_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_border_side_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_style_shadow_api},
+        {std::nullopt,                     &WidgetBridge::register_wheel_event_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_style_opacity_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_typography_color_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_style_overflow_api},
+        {std::nullopt,                     &WidgetBridge::register_layout_box_model_api},
+        {std::nullopt,                     &WidgetBridge::register_canvas2d_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_style_state_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_typography_decoration_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_style_background_repeat_api},
+        {std::nullopt,                     &WidgetBridge::register_layout_position_api},
+        {std::nullopt,                     &WidgetBridge::register_animation_style_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_typography_overflow_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_style_cursor_direction_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_style_filter_clip_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_style_mask_object_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_style_blend_api},
+
+        // Storage-only setters for remaining CSS compatibility entries. Each
+        // handler records the value on the View's catalog slot so harness
+        // round-trip tests can verify the bridge accepts the keyword. Catalog
+        // status documents implementation depth: `partial` for storage-only with
+        // deferred paint, `noop` for accept-and-ignore, and `wontfix` for
+        // architectural out-of-scope.
+        {std::nullopt,                     &WidgetBridge::register_widget_typography_extended_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_style_rn_compat_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_typography_shadow_shorthand_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_style_background_subproperty_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_style_background_gradient_api},
+        {std::nullopt,                     &WidgetBridge::register_widget_style_box_shadow_api},
+        {std::nullopt,                     &WidgetBridge::register_shader_widget_api},
+
+        // Persists style presets to temp files → gated by Storage.
+        {ReloadCapability::Storage,        &WidgetBridge::register_widget_schema_api},
+        {std::nullopt,                     &WidgetBridge::register_theme_api},
+        {ReloadCapability::Ai,             &WidgetBridge::register_platform_services_ai_api},
+        {std::nullopt,                     &WidgetBridge::register_metadata_computed_api},
 #if PULP_BRIDGE_EXEC_ENABLED
-    if (granted_capabilities_.has(ReloadCapability::Exec))
-        register_platform_services_exec_api();
+        // Shell exec — dev-only (compiled out of ship) AND gated by the exec cap.
+        {ReloadCapability::Exec,           &WidgetBridge::register_platform_services_exec_api},
 #endif
+        {std::nullopt,                     &WidgetBridge::register_context_menu_event_api},
+        // Native file dialogs read/choose arbitrary paths → gated by Filesystem.
+        {ReloadCapability::Filesystem,     &WidgetBridge::register_platform_services_dialog_api},
+        {std::nullopt,                     &WidgetBridge::register_runtime_api},
+        // Off-thread index/search — non-effectful, so no capability.
+        {std::nullopt,                     &WidgetBridge::register_query_service_api},
+        {ReloadCapability::Clipboard,      &WidgetBridge::register_platform_services_clipboard_api},
+        // Key/value persistence → Storage; asset loading reads file:// paths →
+        // Filesystem (granted independently).
+        {ReloadCapability::Storage,        &WidgetBridge::register_storage_key_value_api},
+        {ReloadCapability::Filesystem,     &WidgetBridge::register_asset_loading_api},
+        {std::nullopt,                     &WidgetBridge::register_drop_event_api},
+        {ReloadCapability::Filesystem,     &WidgetBridge::register_font_assets_api},
+        {std::nullopt,                     &WidgetBridge::register_shader_canvas_api},
+        {std::nullopt,                     &WidgetBridge::register_gpu_api},
+    };
 
-    register_context_menu_event_api();
-
-    // Native file dialogs read/choose arbitrary paths → gated by Filesystem.
-    if (granted_capabilities_.has(ReloadCapability::Filesystem))
-        register_platform_services_dialog_api();
-
-    register_runtime_api();
-    register_query_service_api();  // R7 off-thread index/search (non-effectful, no cap)
-    if (granted_capabilities_.has(ReloadCapability::Clipboard))
-        register_platform_services_clipboard_api();
-
-
-    // Key/value persistence → Storage; asset loading reads file:// paths →
-    // Filesystem (granted independently).
-    if (granted_capabilities_.has(ReloadCapability::Storage))
-        register_storage_key_value_api();
-    if (granted_capabilities_.has(ReloadCapability::Filesystem))
-        register_asset_loading_api();
-
-
-    register_drop_event_api();
-
-    if (granted_capabilities_.has(ReloadCapability::Filesystem))
-        register_font_assets_api();
-
-    register_shader_canvas_api();
-
-    register_gpu_api();
-
+    for (const auto& group : kGroups) {
+        if (group.gate && !granted_capabilities_.has(*group.gate)) continue;
+        (this->*group.install)();
+    }
 }
 
 } // namespace pulp::view

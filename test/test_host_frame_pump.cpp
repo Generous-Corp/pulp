@@ -17,6 +17,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/gap_widgets.hpp>
 
 #include <memory>
 #include <vector>
@@ -154,13 +155,13 @@ TEST_CASE("HostFramePump treats wake-from-idle as a resume, not a 12-second fram
 
 TEST_CASE("begin_host_frame delivers ONE dt to every consumer",
           "[view][frame-pump][timing][contract]") {
+    FrameClock clock;
     View root;
     auto child = std::make_unique<AlwaysAnimatingView>();
     View* child_ptr = child.get();
     root.add_child(std::move(child));
     attach_css_animation(*child_ptr, 10.0f);
 
-    FrameClock clock;
     HostFramePump pump;
 
     std::vector<float> subscriber_dts;
@@ -196,8 +197,8 @@ TEST_CASE("begin_host_frame delivers ONE dt to every consumer",
 
 TEST_CASE("begin_host_frame pumps activity probes on frames it does not render",
           "[view][frame-pump][timing][contract]") {
-    View root;  // static tree: nothing animating
     FrameClock clock;
+    View root;  // static tree: nothing animating
     HostFramePump pump;
 
     std::vector<float> activity_dts;
@@ -221,9 +222,9 @@ TEST_CASE("begin_host_frame pumps activity probes on frames it does not render",
 
 TEST_CASE("wake-from-idle does not teleport an animation that starts on wake",
           "[view][frame-pump][timing][wake]") {
+    FrameClock clock;
     View root;
     root.set_continuous_repaint(true);
-    FrameClock clock;
     HostFramePump pump;
 
     // Frame 1, then the editor sits idle for 30 s (host stops pumping entirely).
@@ -258,6 +259,20 @@ TEST_CASE("advance_widget_animations drives widgets and CSS with the host dt",
     advance_widget_animations(&root, 0.5f);
     REQUIRE(knob_ptr->hover_glow() > 0.0f);
     REQUIRE_THAT(knob_ptr->active_animations()[0].elapsed_seconds, WithinAbs(0.5f, 1e-5f));
+}
+
+TEST_CASE("advance_widget_animations drives every View subclass via the virtual",
+          "[view][frame-pump][timing]") {
+    // Dispatch runs through View::advance_animations(), so a widget reached by
+    // no hand-written type check — a Spinner here — still advances each frame.
+    View root;
+    auto spinner = std::make_unique<Spinner>();
+    Spinner* spinner_ptr = spinner.get();
+    root.add_child(std::move(spinner));
+
+    REQUIRE_THAT(spinner_ptr->phase(), WithinAbs(0.0f, 1e-6f));
+    advance_widget_animations(&root, 0.25f);
+    REQUIRE_THAT(spinner_ptr->phase(), WithinAbs(0.25f, 1e-5f));
 }
 
 // ── The gated host: the vsyncs a real macOS host does NOT dispatch ───────────
@@ -496,13 +511,15 @@ TEST_CASE("a caret subscription is re-homed onto a replacement clock",
     // Dropping the old subscription must not leave a focused editor with a dead
     // caret: the notification also re-subscribes on whatever clock is now reachable
     // (an editor moved between hosts, or a host that swaps its clock).
+    // Both clocks are declared before the tree so they outlive the caret
+    // subscription ~TextEditor tears down, as their lifetime contract requires.
+    FrameClock first;
+    FrameClock second;
     View root;
     auto editor = std::make_unique<TextEditor>();
     TextEditor* te = editor.get();
     root.add_child(std::move(editor));
 
-    FrameClock first;
-    FrameClock second;
     root.set_frame_clock(&first);
     te->on_focus_changed(true);
     REQUIRE(first.has_active_subscribers());

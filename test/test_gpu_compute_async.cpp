@@ -415,6 +415,77 @@ TEST_CASE("convolve_batch_async matches the blocking convolve_batch",
     REQUIRE_FALSE(fired);
 }
 
+// GPU-busy timing is opt-in and must be provably additive: turning it on may not
+// change a single output sample (it only brackets the passes with a timestamp query
+// and reads the ticks back through the same non-blocking path), and with it off the
+// timing number is 0. Where the device exposes timestamp-query, a real batched FFT
+// convolution reports a non-zero GPU-busy time. This is the native proof behind the
+// browser demo's "GPU math: X µs" — verified with no browser, on the real device.
+TEST_CASE("convolve_batch_async GPU-busy timing is additive and honest",
+          "[render][gpu][compute][async]") {
+    auto gpu = make_gpu();
+    if (!gpu) SKIP(kNoGpu);
+
+    constexpr uint32_t N = 1024, B = 8;
+    const auto irspec = flat_ir_spectrum(N, 0.6f, -0.15f);
+    REQUIRE(gpu->prepare_convolution_batch(N, irspec.data(), B));
+    const auto in = batch_input(N, B, 0.0f);
+
+    // Reference: the plain async path with timing OFF (the default).
+    std::vector<float> untimed(N * 2 * B, -777.0f);
+    GpuCompute::ReadbackResult r0{};
+    REQUIRE(gpu->convolve_batch_async(in.data(), untimed.data(), N, B,
+                                      std::chrono::seconds(2),
+                                      [&r0](const GpuCompute::ReadbackResult& r) {
+                                          r0 = r;
+                                      }) != 0);
+    drain(*gpu);
+    REQUIRE(r0.status == GpuCompute::ReadbackStatus::Success);
+    REQUIRE(gpu->last_gpu_busy_ns() == 0.0);   // off ⇒ no number
+
+    // Same input with timing ON, several blocks so a timestamp sample lands and
+    // (past device quantization) reports a real span.
+    gpu->set_async_timing_enabled(true);
+    std::vector<float> timed(N * 2 * B, -555.0f);
+    for (int i = 0; i < 16; ++i) {
+        GpuCompute::ReadbackResult r{};
+        REQUIRE(gpu->convolve_batch_async(in.data(), timed.data(), N, B,
+                                          std::chrono::seconds(2),
+                                          [&r](const GpuCompute::ReadbackResult& x) {
+                                              r = x;
+                                          }) != 0);
+        drain(*gpu);
+        REQUIRE(r.status == GpuCompute::ReadbackStatus::Success);
+    }
+
+    // ADDITIVE: bracketing the passes with a timestamp query and reading the ticks
+    // back changed not one output sample. THIS is the load-bearing proof — the audio
+    // path is untouched whether timing is on or off.
+    REQUIRE(timed == untimed);
+
+    // HONEST: a resolved GPU-busy span, in ns. Like the blocking multi_convolve_timed
+    // test, this only sanity-checks the number — under contention (and on Metal, which
+    // coalesces small compute-pass timestamps) the two ticks can read equal, i.e. 0,
+    // which the display renders as "no timing", never a stall. So accept 0; reject only
+    // a negative or absurd value. The additive-ness above is the deterministic signal.
+    const double ns = gpu->last_gpu_busy_ns();
+    INFO("GPU-busy = " << ns << " ns (" << ns / 1000.0 << " µs)");
+    REQUIRE(ns >= 0.0);
+    REQUIRE(ns < 1e9);   // < 1 s: a sane bound, not a garbage/uninitialized read
+    // Timing disabled must still report nothing after a timed run is turned back off.
+    gpu->set_async_timing_enabled(false);
+    std::vector<float> after(N * 2 * B, 0.0f);
+    GpuCompute::ReadbackResult ra{};
+    REQUIRE(gpu->convolve_batch_async(in.data(), after.data(), N, B,
+                                      std::chrono::seconds(2),
+                                      [&ra](const GpuCompute::ReadbackResult& r) {
+                                          ra = r;
+                                      }) != 0);
+    drain(*gpu);
+    REQUIRE(ra.status == GpuCompute::ReadbackStatus::Success);
+    REQUIRE(after == untimed);   // still byte-identical with timing back off
+}
+
 // THE load-bearing test. Two blocks in flight at once, with distinct payloads,
 // sharing the plan's compute buffers. If the in-order-queue invariant did not
 // hold — if submit N+1's WriteBuffer into plan.buf_a could land before submit

@@ -580,6 +580,11 @@ PULP_AAX_PLUGIN(my_namespace::create_my_processor)
 - metadata generation from `Processor::descriptor()`
 - Parameter, state, latency, transport, and MIDI registration through the AAX runtime
 
+It registers no editor, so Pro Tools draws its auto-generated parameter strip.
+`PULP_AAX_PLUGIN_WITH_GUI(factory_fn)` is identical except that it also
+registers Pulp's custom editor, which has not been validated in Pro Tools
+itself — see [the AAX guide](aax.md#choosing-the-editor) before opting in.
+
 ### Status
 
 `experimental` on macOS and Windows, `unsupported` on Linux per
@@ -639,8 +644,14 @@ Avid download page instead of guessing.
 
 ### Known Limitations
 
-- Native AAX only. DSP and AudioSuite are out of scope.
-- No AAX GUI layer yet. Current validator output may warn that the effect does not contain `EffectGUI`.
+- Native AAX only. DSP is out of scope. The `InsertOrAudioSuite` role is
+  declared, but Pulp registers no `AAX_IHostProcessor`, so the dedicated
+  AudioSuite offline-render path is not implemented and is out of scope.
+- The custom editor requires a Skia-enabled build. Without Skia the Windows
+  `PluginViewHost` falls back to the no-op factory and the plugin loads with no
+  editor.
+- The editor has not been validated in Pro Tools itself — no Avid SDK is present
+  in Pulp's CI, so it is covered by unit tests only.
 - Public CI does not build or validate AAX because the SDK and validator are not bundled by Pulp.
 - Component layouts are intentionally constrained to keep the surface small.
 

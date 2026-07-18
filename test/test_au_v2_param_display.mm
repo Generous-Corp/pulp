@@ -104,6 +104,29 @@ TEST_CASE("AU v2 continuous param advertises ValuesHaveStrings when to_string is
     REQUIRE((plain.flags & kAudioUnitParameterFlag_ValuesHaveStrings) == 0);
 }
 
+// GetParameterInfo feeds every AU host's automation lanes and generic editor.
+// If the adapter reports a wrong range, default, or unit the control is
+// silently mis-scaled — no crash, just wrong knob ranges. Only the
+// ValuesHaveStrings flag was covered; assert the numeric metadata + unit map.
+TEST_CASE("AU v2 GetParameterInfo maps range, default, and unit",
+          "[au][au-v2][params][metadata]") {
+    ScopedFactory factory;
+    pulp::format::au::PulpAUEffect effect(nullptr);
+
+    AudioUnitParameterInfo freq{};
+    REQUIRE(effect.GetParameterInfo(kAudioUnitScope_Global, kFreqId, freq) == noErr);
+    REQUIRE_THAT(freq.minValue, WithinAbs(20.0f, 0.001f));
+    REQUIRE_THAT(freq.maxValue, WithinAbs(20000.0f, 0.001f));
+    REQUIRE_THAT(freq.defaultValue, WithinAbs(1000.0f, 0.001f));
+    REQUIRE(freq.unit == kAudioUnitParameterUnit_Hertz);  // "Hz" → Hertz
+
+    AudioUnitParameterInfo plain{};
+    REQUIRE(effect.GetParameterInfo(kAudioUnitScope_Global, kPlainId, plain) == noErr);
+    REQUIRE_THAT(plain.minValue, WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(plain.maxValue, WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(plain.defaultValue, WithinAbs(0.5f, 0.001f));
+}
+
 TEST_CASE("AU v2 ParameterStringFromValue formats via to_string",
           "[au][au-v2][params][display]") {
     ScopedFactory factory;

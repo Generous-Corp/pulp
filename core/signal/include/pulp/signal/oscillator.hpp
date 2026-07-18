@@ -8,6 +8,13 @@ namespace pulp::signal {
 // RT contract: setters, reset, and next() allocate no memory. Smooth frequency
 // externally if zipper-free retuning is required.
 // Supports sine, saw, square, and triangle waveforms.
+//
+// Superseded by `pulp::signal::osc` (osc/va.hpp) — prefer it for new work, and
+// extend that module rather than this one. This stays for existing callers and
+// is not a foundation: its phase is float, it wraps only at the top (so a
+// negative increment, which through-zero FM requires, is impossible), and its
+// triangle integrates a leaky square, which makes level fall with pitch. The
+// newer module fixes all three and adds hard sync, TZFM, and pulse width.
 template <typename SampleType = float>
 class OscillatorT {
 public:

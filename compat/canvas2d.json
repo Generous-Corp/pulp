@@ -9,7 +9,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "PR #1348 fixed a typo where the JS was calling canvasFillRect (which never existed) \u2014 now correctly calls canvasRect.",
       "issue": "1346"
@@ -22,7 +22,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Stroke gradients fall back to first stop's color (bridge has no stroke-gradient setter today).",
       "issue": ""
@@ -35,7 +35,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -46,7 +46,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -57,7 +57,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -68,7 +68,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -79,7 +79,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -90,7 +90,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Path-construction op (no fill/stroke). Honors fill()/stroke()/clip() afterward. PR #1348.",
       "issue": "1346"
@@ -120,7 +120,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_canvas2d_shim.cpp [issue-1526]"
+        "test/test_canvas2d_shim_late.cpp [issue-1526]"
       ],
       "notes": "PR #1348. The bezier approximation is per-quadrant (k = (4/3)\u00b7tan(\u03b8/4)); fidelity is visually exact for fill/stroke/clip use cases. Wave 1 drift cleanup \u2014 partial \u2192 supported (PR #1348 wired path-mode arc as cubic-bezier segments via canvasPathArc; bezier approximation is per-quadrant, visually exact for fill/stroke/clip use cases).",
       "issue": "1346"
@@ -133,7 +133,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1521 \u2014 native SkPath::arcTo (Skia) / CGPathAddArcToPoint (CG). Wave 4 c2d cleanup: catalog reconciled to match wired implementation (prior PR #1348 lineTo fallback was replaced by #1521).",
       "issue": ""
@@ -144,7 +144,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_canvas2d_shim.cpp [issue-1526]"
+        "test/test_canvas2d_shim_late.cpp [issue-1526]"
       ],
       "notes": "",
       "issue": ""
@@ -155,7 +155,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_canvas2d_shim.cpp [issue-1526]"
+        "test/test_canvas2d_shim_late.cpp [issue-1526]"
       ],
       "notes": "",
       "issue": ""
@@ -195,7 +195,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -248,7 +248,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "PR #1348. Without save/restore, FilterBank's first ctx.save() threw TypeError and aborted the frame.",
       "issue": "1346"
@@ -259,7 +259,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "PR #1348.",
       "issue": "1346"
@@ -270,7 +270,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "PR #1348.",
       "issue": "1346"
@@ -281,7 +281,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "PR #1348.",
       "issue": "1346"
@@ -292,7 +292,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "PR #1348.",
       "issue": "1346"
@@ -303,7 +303,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "PR #1348. resetTransform aliases to setTransform(1,0,0,1,0,0).",
       "issue": "1346"
@@ -314,7 +314,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "PR #1348. Mirror update added in pulp #1527.",
       "issue": "1346"
@@ -335,7 +335,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_canvas2d_shim.cpp [issue-1527][dommatrix-mutators]"
+        "test/test_canvas2d_shim_late.cpp [issue-1527][dommatrix-mutators]"
       ],
       "notes": "DIVERGE\u2192PASS sweep \u2014 clarified that snapshot semantics are spec-compliant (HTML5 Canvas spec: getTransform() returns a NEW DOMMatrix); DOMMatrix mutation methods on a snapshot wouldn't affect the canvas anyway. pulp #1527 bridge-thin gap-fill. Wave-5 follow-up audit (post-PR #1616 sweep): walked back to partial. `_PulpCanvasMatrix` (web-compat-canvas.js) has `a/b/c/d/e/f` getters and `is2D`/`isIdentity` flags but does NOT implement DOMMatrix mutators like `multiplySelf` / `scaleSelf` / `inverse()`. Standard DOM code that does `ctx.getTransform().multiplySelf(other)` will throw at runtime. PR #1527 followup: DOMMatrix mutator methods (multiplySelf / scaleSelf / rotateSelf / translateSelf / inverse) now implemented on the snapshot. Snapshot semantics preserved per HTML5 spec \u2014 mutating the returned matrix does NOT affect the live ctx; mutators return `this` for chaining; inverse() returns a NEW matrix (throws TypeError on singular).",
       "issue": "1527"
@@ -349,7 +349,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_canvas2d_shim.cpp [issue-1348][codex-p1]"
+        "test/test_canvas2d_shim_late.cpp [issue-1348][codex-p1]"
       ],
       "notes": "PR #1348. File a follow-up if a plugin needs strict concat. Wave 1 paperwork \u2014 strict concat semantics deferred (PR #1348); pure-translation fast path covers the common case. Wired in PR #1701 \u2014 ctx.transform() forwards the composed matrix M' = M * given to canvasSetTransform; JS-side mirror and bridge state stay in sync. Verified via [view][canvas2d][issue-1348][codex-p1] tests.",
       "issue": "1346"
@@ -398,7 +398,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "issue-916. The shim guarantees a non-null TextMetrics object even on older hosts where canvasMeasureText isn't registered (returns zero-filled fields based on font px size).",
       "issue": ""
@@ -451,7 +451,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "PR #1348. CG (mac) gradient-shape fill landed in #1359/#1360 (merged 2026-05-03).",
       "issue": "964"
@@ -509,7 +509,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": "964"
@@ -524,7 +524,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "DIVERGE\u2192PASS sweep \u2014 the catalog note about \"shim takes pattern verbatim; bridge handles the spec-doubling\" was describing the architecture, not a gap. The end-to-end behavior is spec-compliant. Wave 1 paperwork \u2014 see SKILL canvas2d gotchas; HTML5-spec odd-length doubling is performed internally by canvasSetLineDash before recording.",
       "issue": ""
@@ -535,7 +535,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -549,7 +549,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_canvas2d_shim.cpp [issue-1526]"
+        "test/test_canvas2d_shim_late.cpp [issue-1526]"
       ],
       "notes": "Wave 4 c2d cleanup \u2014 defineProperty getter/setter pair re-flushes dash on assignment. Pre-Wave-4 the field tracked locally but only sent on the next setLineDash, so phase mutations between draws were silently dropped.",
       "issue": ""
@@ -564,7 +564,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "DIVERGE\u2192PASS sweep \u2014 pattern path was already wired (createPattern in PASS list, _applyFillStyle dispatches canvasSetFillPattern); the catalog had a stale gap entry from before pulp #1434's createPattern bridge work. Wave 1 paperwork \u2014 CanvasPattern wiring confirmed via createPattern + _applyFillStyle / canvasSetFillPattern (#1625 finding).",
       "issue": ""
@@ -592,7 +592,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -607,7 +607,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_canvas2d_shim.cpp [issue-1526]"
+        "test/test_canvas2d_shim_late.cpp [issue-1526]"
       ],
       "notes": "",
       "issue": ""
@@ -622,7 +622,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_canvas2d_shim.cpp [issue-1526]"
+        "test/test_canvas2d_shim_late.cpp [issue-1526]"
       ],
       "notes": "",
       "issue": ""
@@ -649,7 +649,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_canvas2d_shim.cpp [issue-1526]"
+        "test/test_canvas2d_shim_late.cpp [issue-1526]"
       ],
       "notes": "PR #1348.",
       "issue": "1346"
@@ -687,7 +687,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_canvas2d_shim.cpp [issue-1526]"
+        "test/test_canvas2d_shim_late.cpp [issue-1526]"
       ],
       "notes": "PR #1348. Both backends now honor every value: Skia handles them via SkBlendMode; CG via CGContextSetBlendMode (pulp #1371 fixed a silent no-op in CoreGraphicsCanvas::set_blend_mode and added pixel-level coverage in test_canvas.cpp).",
       "issue": "1346"
@@ -726,7 +726,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_canvas2d_shim.cpp [issue-1526]"
+        "test/test_canvas2d_shim_late.cpp [issue-1526]"
       ],
       "notes": "",
       "issue": ""
@@ -744,7 +744,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_canvas2d_shim.cpp [issue-1526]"
+        "test/test_canvas2d_shim_late.cpp [issue-1526]"
       ],
       "notes": "",
       "issue": ""
@@ -811,7 +811,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_canvas.cpp [skia][filter-chain][drop-shadow]",
+        "test/test_canvas_filter_chain.cpp [skia][filter-chain][drop-shadow]",
         "test/test_canvas2d_shim.cpp [issue-1520]"
       ],
       "notes": "pulp #1520 \u2014 JS shim + bridge + Skia parser/chain. Parser is local to skia_canvas.cpp; #1503's CSS filter on View elements is a parallel parser to be unified in a follow-up. arch-no-svg-filter-refs \u2014 url(#filter-id) SVG filter references are not supported \u2014 Pulp doesn't have an SVG filter graph. The 9 filter functions (blur/brightness/contrast/grayscale/hue-rotate/invert/opacity/saturate/sepia) plus drop-shadow are all wired on the Skia (GPU) backend. CG canvas backend (the CPU fallback used when no GPU context is available \u2014 `core/canvas/platform/mac/cg_canvas.mm` inherits the base `Canvas::set_filter` no-op) silently drops ALL filter functions; promoting CG to honor the chain requires CGImage filter wiring + a CG color-matrix equivalent (follow-up, tracked alongside the parallel `css/filter` CG-degradation note). For now, ctx.filter is honest-supported only when a Skia context is active; the Skia tests cited above prove that path.",
@@ -879,7 +879,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Tracked in detail under canvas2d/* by convention even though WebGPU is not strictly Canvas2D \u2014 the shim co-locates them. See planning/research/three-js* for the Three.js end-to-end story.",
       "issue": ""
@@ -890,7 +890,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "",
       "issue": ""
@@ -901,7 +901,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Bridge convenience; not part of the standard Canvas2D API.",
       "issue": ""
@@ -912,7 +912,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Bridge convenience.",
       "issue": ""
@@ -923,7 +923,7 @@
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Bridge convenience.",
       "issue": ""

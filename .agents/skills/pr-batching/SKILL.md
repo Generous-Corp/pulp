@@ -58,7 +58,7 @@ what you justify, not the reverse.
 cd <worktree-of-primary-branch>
 git log --oneline <shared-base>..feature/sibling   # confirm its OWN commits
 git cherry-pick <sha>...
-cmake --build build -j$(sysctl -n hw.ncpu)
+tools/ci/governed-build.sh cmake --build build
 ctest --test-dir build --output-on-failure -R '<affected>'
 ```
 

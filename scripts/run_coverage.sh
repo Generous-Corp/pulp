@@ -165,10 +165,25 @@ export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"
 # (so reviewers can see what did exercise), but the script must exit non-zero so
 # CI flags the failure; silently swallowing test failures hid real regressions.
 CTEST_RC=0
+# Run the suite in parallel with a per-test wall-clock cap. Serial ctest over
+# the full ~13.5k-case suite is the dominant cost of a coverage run and pushed
+# even the macOS leg past the workflow's internal budget (a killed run drops the
+# Cobertura report and reddens main). `-j` matches the parallelism the primary
+# build.yml/build-macos.yml lanes already use; source-based instrumentation is
+# parallel-safe because each test process writes its own merge-enabled profile
+# via LLVM_PROFILE_FILE's %m pattern. Cap at 8 like the primary lanes so a
+# high-core self-hosted runner doesn't oversubscribe memory with instrumented
+# Debug test processes. `--timeout` bounds a single wedged test so it can't eat
+# the whole budget; it is generous (instrumented Debug tests run slower than the
+# Release lanes' 120s), and a genuinely hung test failing here still emits a
+# partial report rather than getting SIGKILLed with the report dropped.
+CTEST_JOBS="${JOBS}"
+if [[ "${CTEST_JOBS}" -gt 8 ]]; then CTEST_JOBS=8; fi
+CTEST_PER_TEST_TIMEOUT="${PULP_COVERAGE_CTEST_TIMEOUT:-600}"
 if [[ -n "${TESTS_REGEX}" ]]; then
-    ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 || CTEST_RC=$?
+    ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
 else
-    ctest "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 || CTEST_RC=$?
+    ctest "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
 fi
 if [[ "${CTEST_RC}" -ne 0 ]]; then
     echo "=== ctest failed with exit ${CTEST_RC} — coverage report WILL be generated from partial profile data, then the script will exit with that code. ==="

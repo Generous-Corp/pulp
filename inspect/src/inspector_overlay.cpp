@@ -107,6 +107,12 @@ BadgePlacement compute_badge_placement(float sel_x, float sel_y, float sel_h,
 void install_inspector_hooks(InspectorOverlay& inspector) {
     g_active_inspector = &inspector;
     // Install all hooks via function pointers — no circular dependency.
+    // Every hook dereferences g_active_inspector rather than capturing the
+    // InspectorOverlay by reference, so uninstall_inspector_hooks() (or a bare
+    // `g_active_inspector = nullptr` on an old teardown path) makes the still-
+    // installed hooks inert instead of firing on a destroyed inspector. A null
+    // global returns each hook's no-op default (skip paint / don't handle / -1).
+    //
     // Gate overlay paint on the inspected root. The overlay's
     // selection box / handles / drop indicators are positioned in the inspected
     // root's coordinate space, so they must paint ONLY when the root being
@@ -115,13 +121,16 @@ void install_inspector_hooks(InspectorOverlay& inspector) {
     // root coordinates — a stray box at a random spot inside the inspector
     // window. nullptr (root unknown, legacy caller) paints unconditionally.
     View::set_inspector_paint_hook(
-        [&inspector](Canvas& canvas, View* painting_root) {
-            if (painting_root && painting_root != &inspector.inspected_root())
+        [](Canvas& canvas, View* painting_root) {
+            InspectorOverlay* insp = g_active_inspector;
+            if (!insp) return;
+            if (painting_root && painting_root != &insp->inspected_root())
                 return;
-            inspector.paint(canvas);
+            insp->paint(canvas);
         });
-    View::set_inspector_key_hook([&inspector](const KeyEvent& e) -> bool {
-        return inspector.handle_key_event(e);
+    View::set_inspector_key_hook([](const KeyEvent& e) -> bool {
+        InspectorOverlay* insp = g_active_inspector;
+        return insp ? insp->handle_key_event(e) : false;
     });
     // Window-gate the mouse hook, mirroring the paint-hook gate above. A
     // secondary window (the floating InspectorWindow) routes its
@@ -130,10 +139,12 @@ void install_inspector_hooks(InspectorOverlay& inspector) {
     // the inspector window would highlight/affect the canvas. nullptr (root
     // unknown, legacy/headless caller) runs unconditionally.
     View::set_inspector_mouse_hook(
-        [&inspector](const MouseEvent& e, View* event_root) -> bool {
-            if (event_root && event_root != &inspector.inspected_root())
+        [](const MouseEvent& e, View* event_root) -> bool {
+            InspectorOverlay* insp = g_active_inspector;
+            if (!insp) return false;
+            if (event_root && event_root != &insp->inspected_root())
                 return false;
-            return inspector.handle_mouse_event(e);
+            return insp->handle_mouse_event(e);
         });
     // Install the inline-text-edit hook here so the standalone host (and any
     // other install_inspector_hooks() caller) can
@@ -143,21 +154,37 @@ void install_inspector_hooks(InspectorOverlay& inspector) {
     // canvas overlay's inline edit. nullptr (root unknown, legacy/headless
     // caller) runs unconditionally.
     View::set_inspector_text_hook(
-        [&inspector](const TextInputEvent& e, View* event_root) -> bool {
-            if (event_root && event_root != &inspector.inspected_root())
+        [](const TextInputEvent& e, View* event_root) -> bool {
+            InspectorOverlay* insp = g_active_inspector;
+            if (!insp) return false;
+            if (event_root && event_root != &insp->inspected_root())
                 return false;
-            return inspector.handle_text_input(e);
+            return insp->handle_text_input(e);
         });
     // Cursor-affordance hook for move/resize cursor feedback over a selected
     // element. Same root gate; returns -1 to defer to the
     // normal hit-view cursor() path when off the selection or in another
     // window.
     View::set_inspector_cursor_hook(
-        [&inspector](const MouseEvent& e, View* event_root) -> int {
-            if (event_root && event_root != &inspector.inspected_root())
+        [](const MouseEvent& e, View* event_root) -> int {
+            InspectorOverlay* insp = g_active_inspector;
+            if (!insp) return -1;
+            if (event_root && event_root != &insp->inspected_root())
                 return -1;
-            return inspector.cursor_style_for(e.position);
+            return insp->cursor_style_for(e.position);
         });
+}
+
+void uninstall_inspector_hooks() {
+    // Clear the global first so any hook that fires between the two steps sees
+    // a null inspector and no-ops, then release the five View hook slots so no
+    // stale std::function outlives the inspector it was installed for.
+    g_active_inspector = nullptr;
+    View::set_inspector_paint_hook({});
+    View::set_inspector_key_hook({});
+    View::set_inspector_mouse_hook({});
+    View::set_inspector_text_hook({});
+    View::set_inspector_cursor_hook({});
 }
 
 void InspectorOverlay::set_active(bool active) {
@@ -411,6 +438,21 @@ void InspectorOverlay::track_raw_history_view(View* v) {
     for (View* existing : raw_history_views_)
         if (existing == v) return;
     raw_history_views_.push_back(v);
+}
+
+// Capture a gesture undo target. Anchored when the gate holds AND the view
+// carries a non-empty anchor id — that path re-finds the CURRENT live view via
+// resolve_anchor() at replay, surviving a subtree rebuild. Otherwise the raw
+// pointer is captured and TRACKED so the rebuild seam clears the history before
+// a dangling closure runs.
+InspectorOverlay::GestureUndoTarget
+InspectorOverlay::capture_undo_target(View* v, bool anchored_gate) {
+    GestureUndoTarget t;
+    t.raw = v;
+    t.anchor = v ? v->anchor_id() : std::string{};
+    t.anchored = anchored_gate && !t.anchor.empty();
+    if (!t.anchored) track_raw_history_view(v);
+    return t;
 }
 
 // True if any tracked raw-pointer view has left the tree
@@ -673,29 +715,30 @@ bool InspectorOverlay::commit_text_edit() {
         }
         if (edit_history_) {
             auto* self = this;
-            // For anchored targets the closures re-find the
-            // live view by anchor at replay time (resolve_anchor → nullptr no-op
-            // if a subtree rebuild freed it), so Cmd+Z after a live React rebuild
-            // never derefs a dangling raw pointer. For UN-anchored targets there
-            // is no anchor to re-find by, so we keep the raw `tgt` capture but
-            // TRACK it; rebuild_flat_tree() clears the history if that view ever
-            // leaves the tree, before these closures can run against freed memory.
-            if (!anchored) track_raw_history_view(tgt);
+            // Resolve the live target at replay time: for anchored targets by
+            // stable anchor (resolve_anchor → nullptr no-op if a subtree rebuild
+            // freed it), so Cmd+Z after a live React rebuild never derefs a
+            // dangling raw pointer; for UN-anchored targets the tracked raw
+            // pointer, cleared by rebuild_flat_tree() if the view leaves the
+            // tree. `anchored` here stays TweakStore-tied so the tweak
+            // apply/restore keeps its exact gating.
+            GestureUndoTarget target =
+                capture_undo_target(tgt, /*anchored_gate=*/tweak_store_ != nullptr);
             edit_history_->perform(
-                [self, tgt, anchor, path, new_text, anchored]() {
-                    View* live = anchored ? self->resolve_anchor(anchor) : tgt;
+                [self, target, anchor, path, new_text]() {
+                    View* live = target.resolve(*self);
                     if (!live) return;  // freed/un-resolvable → graceful no-op
                     set_editable_text_of(live, new_text);
-                    if (anchored && self->tweak_store_)
+                    if (target.anchored && self->tweak_store_)
                         self->tweak_store_->apply_tweak(
                             anchor, path,
                             choc::value::createString(new_text),
                             "inspector-text-edit");
                 },
-                [self, tgt, anchor, path, old_text, prior_val, anchored]() {
-                    View* live = anchored ? self->resolve_anchor(anchor) : tgt;
+                [self, target, anchor, path, old_text, prior_val]() {
+                    View* live = target.resolve(*self);
                     if (live) set_editable_text_of(live, old_text);
-                    if (!(anchored && self->tweak_store_)) return;
+                    if (!(target.anchored && self->tweak_store_)) return;
                     if (prior_val.has_value())
                         self->tweak_store_->apply_tweak(
                             anchor, path, *prior_val, "inspector-undo");
@@ -1768,11 +1811,8 @@ SourceJumpResult InspectorOverlay::jump_to_selection_source(bool dry_run) {
     return jump_to_source(config_, selected_, dry_run);
 }
 
-bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
-    if (!active_) return false;
-
-    auto pos = event.position;
-
+InspectorOverlay::MouseGesture
+InspectorOverlay::resolve_mouse_gesture(const MouseEvent& event) const {
     // ── Gesture-phase resolution ──────────────────────────────────
     // The move/resize gesture machines below need to distinguish a
     // PRESS (begin), a DRAG TICK (live update), and a RELEASE (commit).
@@ -1791,23 +1831,26 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     // it decides how the legacy is_down value is read for THIS event.
     const bool gesture_active = (active_drag_ != DragCorner::none) ||
                                 move_active_;
-    bool is_press, is_drag_tick, is_release;
+    MouseGesture g{event, event.position, false, false, false};
     if (event.hasExplicitPhase()) {
-        is_press = event.isPress();
-        is_drag_tick = event.isDrag();
-        is_release = event.isRelease();
+        g.is_press = event.isPress();
+        g.is_drag_tick = event.isDrag();
+        g.is_release = event.isRelease();
     } else if (gesture_active) {
         // Legacy convention DURING a gesture: is_down=false is a drag
         // tick, is_down=true is the release.
-        is_press = false;
-        is_drag_tick = !event.is_down;
-        is_release = event.is_down;
+        g.is_drag_tick = !event.is_down;
+        g.is_release = event.is_down;
     } else {
         // No gesture in flight: a button-down may BEGIN one.
-        is_press = event.is_down;
-        is_drag_tick = false;
-        is_release = false;
+        g.is_press = event.is_down;
     }
+    return g;
+}
+
+std::optional<bool> InspectorOverlay::mouse_text_tool(const MouseGesture& g) {
+    const Point pos = g.pos;
+    const bool is_press = g.is_press;
 
     // ── Text tool: click a text element to edit its copy ───────────
     //
@@ -1835,6 +1878,11 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         }
         return true;  // Text tool owns canvas presses (no drag/select)
     }
+    return std::nullopt;  // declined — the next handler looks
+}
+
+void InspectorOverlay::mouse_zoom_loupe(const MouseGesture& g) {
+    const Point pos = g.pos;
 
     // The loupe re-centers on the cursor for every mouse
     // event (move, press, release) while it's active. We only record
@@ -1847,6 +1895,11 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     if (zoom_active_) {
         zoom_sample_center_ = pos;
     }
+}
+
+std::optional<bool> InspectorOverlay::mouse_eyedropper(const MouseGesture& g) {
+    const Point pos = g.pos;
+    const bool is_press = g.is_press;
 
     // ── Eyedropper mode ────────────────────────────────────────────
     // When the eyedropper is armed it owns canvas-area mouse events:
@@ -1862,7 +1915,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     // record the cursor position and let paint() do the readback.
     if (eyedropper_active_ && !point_in_panel(pos)) {
         eyedropper_cursor_ = pos;
-        if (event.is_down) {
+        if (is_press) {
             // Resolved-style sampling is synchronous + frame-
             // independent, so a click without a prior move still
             // picks a real color (covers headless / scripted use).
@@ -1896,6 +1949,13 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         }
         return false;  // don't consume moves — let hover effects run
     }
+    return std::nullopt;  // declined — the next handler looks
+}
+
+std::optional<bool> InspectorOverlay::mouse_active_resize(const MouseGesture& g) {
+    const Point pos = g.pos;
+    const bool is_drag_tick = g.is_drag_tick;
+    const bool is_release = g.is_release;
 
     // ── Drag-handle gesture state machine ─────────────────────────
     // Under the state-CHANGED convention above, is_down=true arrives
@@ -1932,15 +1992,22 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                 std::vector<PriorTweak> after_tweaks =
                     snapshot_tweaks(anchor, {"layout.width", "layout.height",
                                              "transform.scale"});
+                // Resolve the live target by anchor at replay time (falling back
+                // to a tracked raw pointer when un-anchored) so undo after a live
+                // SUBTREE rebuild reverts the CURRENT view / no-ops instead of
+                // dereferencing the freed capture.
+                GestureUndoTarget target = capture_undo_target(tgt);
                 auto* self = this;
                 edit_history_->perform(
-                    [self, tgt, anchor, after, after_tweaks]() {
-                        self->restore_layout(tgt, after);
+                    [self, target, anchor, after, after_tweaks]() {
+                        if (View* live = target.resolve(*self))
+                            self->restore_layout(live, after);
                         self->restore_tweaks(anchor, after_tweaks,
                                              "inspector-drag-handle");
                     },
-                    [self, tgt, anchor, before, before_tweaks]() {
-                        self->restore_layout(tgt, before);
+                    [self, target, anchor, before, before_tweaks]() {
+                        if (View* live = target.resolve(*self))
+                            self->restore_layout(live, before);
                         self->restore_tweaks(anchor, before_tweaks,
                                              "inspector-undo");
                     },
@@ -2065,6 +2132,13 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             return true;  // consume the move event
         }
     }
+    return std::nullopt;  // declined — the next handler looks
+}
+
+std::optional<bool> InspectorOverlay::mouse_begin_resize(const MouseGesture& g) {
+    const Point pos = g.pos;
+    const MouseEvent& event = g.event;
+    const bool is_press = g.is_press;
 
     // Hand-off from selection to drag: if drag-handles
     // mode is enabled, a view is selected, and the press lands on a
@@ -2098,6 +2172,13 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             return true;  // consume the press; subsequent moves are ours
         }
     }
+    return std::nullopt;  // declined — the next handler looks
+}
+
+std::optional<bool> InspectorOverlay::mouse_active_move(const MouseGesture& g) {
+    const Point pos = g.pos;
+    const bool is_drag_tick = g.is_drag_tick;
+    const bool is_release = g.is_release;
 
     // ── Drag-to-move gesture state machine ─────────────────────────
     // Same press/move/release convention as the resize machine: while a
@@ -2124,15 +2205,21 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                     std::vector<PriorTweak> after_tweaks = snapshot_tweaks(
                         anchor,
                         {"layout.position", "layout.left", "layout.top"});
+                    // Resolve by anchor at replay (raw fallback tracked) so undo
+                    // after a live SUBTREE rebuild reverts the CURRENT view /
+                    // no-ops instead of dereferencing the freed capture.
+                    GestureUndoTarget target = capture_undo_target(tgt);
                     auto* self = this;
                     edit_history_->perform(
-                        [self, tgt, anchor, after, after_tweaks]() {
-                            self->restore_layout(tgt, after);
+                        [self, target, anchor, after, after_tweaks]() {
+                            if (View* live = target.resolve(*self))
+                                self->restore_layout(live, after);
                             self->restore_tweaks(anchor, after_tweaks,
                                                  "inspector-drag-move");
                         },
-                        [self, tgt, anchor, before, before_tweaks]() {
-                            self->restore_layout(tgt, before);
+                        [self, target, anchor, before, before_tweaks]() {
+                            if (View* live = target.resolve(*self))
+                                self->restore_layout(live, before);
                             self->restore_tweaks(anchor, before_tweaks,
                                                  "inspector-undo");
                         },
@@ -2215,52 +2302,45 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                     // rebuild_flat_tree clears the history if it leaves the tree)
                     // when a participant carries no anchor. A child that can't be
                     // resolved → graceful no-op.
-                    const bool child_anchored = !child_anchor.empty();
-                    const bool new_parent_anchored = !new_parent_anchor.empty();
-                    const bool old_parent_anchored = !old_parent_anchor.empty();
-                    if (!child_anchored) track_raw_history_view(tgt);
-                    if (!new_parent_anchored) track_raw_history_view(after_parent);
-                    if (!old_parent_anchored) track_raw_history_view(before_parent);
+                    // Each participant (child, new parent, old parent) resolves
+                    // through the shared gesture-undo recorder: by stable anchor
+                    // at replay when anchored, else a TRACKED raw pointer that the
+                    // rebuild seam clears. A child that can't be resolved →
+                    // graceful no-op. `*_t.anchor` carries the same stable anchor
+                    // the source-emit sink needs.
+                    GestureUndoTarget child_t = capture_undo_target(tgt);
+                    GestureUndoTarget after_t = capture_undo_target(after_parent);
+                    GestureUndoTarget before_t = capture_undo_target(before_parent);
                     // do_fn re-applies the AFTER tree state; undo_fn restores
                     // BEFORE. reparent_to is the structural primitive (no-op
                     // when parent unchanged), order is rewritten directly.
                     edit_history_->perform(
-                        [self, tgt, after_parent, after_index, after_order,
-                         emit_source_reparent, child_anchor, new_parent_anchor,
-                         new_insert_after_anchor,
-                         child_anchored, new_parent_anchored]() {
-                            View* child = child_anchored
-                                ? self->resolve_anchor(child_anchor) : tgt;
+                        [self, child_t, after_t, after_index, after_order,
+                         emit_source_reparent, new_insert_after_anchor]() {
+                            View* child = child_t.resolve(*self);
                             if (!child) return;  // freed → graceful no-op
-                            View* np = new_parent_anchored
-                                ? self->resolve_anchor(new_parent_anchor)
-                                : after_parent;
+                            View* np = after_t.resolve(*self);
                             self->reparent_view(child, np, after_index);
                             child->flex().order = after_order;
                             if (np) np->invalidate_layout();
                             child->invalidate_layout();
                             if (emit_source_reparent && self->reparent_source_sink_)
                                 self->reparent_source_sink_(
-                                    {child_anchor, new_parent_anchor,
+                                    {child_t.anchor, after_t.anchor,
                                      new_insert_after_anchor});
                         },
-                        [self, tgt, before_parent, before_index, before_order,
-                         emit_source_reparent, child_anchor, old_parent_anchor,
-                         old_insert_after_anchor,
-                         child_anchored, old_parent_anchored]() {
-                            View* child = child_anchored
-                                ? self->resolve_anchor(child_anchor) : tgt;
+                        [self, child_t, before_t, before_index, before_order,
+                         emit_source_reparent, old_insert_after_anchor]() {
+                            View* child = child_t.resolve(*self);
                             if (!child) return;  // freed → graceful no-op
-                            View* op = old_parent_anchored
-                                ? self->resolve_anchor(old_parent_anchor)
-                                : before_parent;
+                            View* op = before_t.resolve(*self);
                             self->reparent_view(child, op, before_index);
                             child->flex().order = before_order;
                             if (op) op->invalidate_layout();
                             child->invalidate_layout();
                             if (emit_source_reparent && self->reparent_source_sink_)
                                 self->reparent_source_sink_(
-                                    {child_anchor, old_parent_anchor,
+                                    {child_t.anchor, before_t.anchor,
                                      old_insert_after_anchor});
                         },
                         "move-reflow");
@@ -2321,6 +2401,13 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             return true;  // consume the move event
         }
     }
+    return std::nullopt;  // declined — the next handler looks
+}
+
+std::optional<bool> InspectorOverlay::mouse_begin_move(const MouseGesture& g) {
+    const Point pos = g.pos;
+    const MouseEvent& event = g.event;
+    const bool is_press = g.is_press;
 
     // Hand-off from selection to move: if dragging mode is enabled,
     // a view is selected, and the press lands on the view's BODY (not a
@@ -2389,7 +2476,12 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         if (move_float_) seed_move_origin(selected_);
         return true;  // consume the press; subsequent moves are ours
     }
-    move_refused_grid_ = false;
+    return std::nullopt;  // declined — the next handler looks
+}
+
+std::optional<bool> InspectorOverlay::mouse_panel(const MouseGesture& g) {
+    const Point pos = g.pos;
+    const bool is_press = g.is_press;
 
     // Check if mouse is in the panel area
     if (point_in_panel(pos)) {
@@ -2401,7 +2493,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         // the cursor has left the view area.
         alt_hover_target_ = nullptr;
 
-        if (event.is_down) {
+        if (is_press) {
             // Clicks on the semantic-knob controls / send-to-agent field at the
             // top of the tweaks panel. Checked first so a knob or field click
             // never falls through to a tweak-row icon or tree selection. The hit
@@ -2533,12 +2625,21 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         }
         return true;  // consume all panel events
     }
+    return std::nullopt;  // declined — the next handler looks
+}
+
+std::optional<bool> InspectorOverlay::mouse_select(const MouseGesture& g) {
+    const Point pos = g.pos;
+    const MouseEvent& event = g.event;
+    const bool is_press = g.is_press;
+    const bool is_drag_tick = g.is_drag_tick;
+    const bool is_release = g.is_release;
 
     // Clicking outside the panel while editing commits the open edit
     // (matches the blur-to-commit convention of the spec). We do NOT
     // consume the click — the user is presumably selecting a different
     // view in the canvas, which should proceed normally.
-    if (event.is_down && !editing_field_.empty()) {
+    if (is_press && !editing_field_.empty()) {
         commit_field_edit();
     }
 
@@ -2561,8 +2662,13 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         // mid-edit hover were allowed to move selected_, the edit would commit
         // to the wrong node (or a no-longer-valid target). follows_focus mode
         // is already safe here because it never chases the pointer.
+        // A pure hover-move only: neither press, drag tick, nor release, so
+        // an explicit-phase drag begun on empty canvas never re-selects
+        // mid-drag. In the state-CHANGED convention this reduces to the old
+        // !event.is_down test for a fresh (no active gesture) event.
         if (selection_mode_ == SelectionMode::follows_mouse &&
-            !event.is_down && !event.isAltDown() && !is_editing()) {
+            !is_press && !is_drag_tick && !is_release && !event.isAltDown() &&
+            !is_editing()) {
             selected_ = hit;
         }
     }
@@ -2609,7 +2715,32 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         return true;
 
     // Hover events: don't consume — let normal hover effects work
-    return false;
+    return std::nullopt;  // declined: the dispatcher reads this as "not consumed"
+}
+
+// Mouse-event modality precedence. Each handler either CONSUMES the event
+// (its optional holds what handle_mouse_event returns) or declines and lets the
+// next one look. THE ORDER IS THE CONTRACT: it is what makes the text tool beat
+// the eyedropper, an in-flight gesture beat a fresh press, and the panel beat the
+// canvas. Each handler documents why it sits where it does; do not reorder them
+// to make a new feature fit.
+bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
+    if (!active_) return false;
+
+    const MouseGesture g = resolve_mouse_gesture(event);
+
+    if (auto r = mouse_text_tool(g)) return *r;
+    mouse_zoom_loupe(g);  // passive: the loupe records the cursor, never consumes
+    if (auto r = mouse_eyedropper(g)) return *r;
+    if (auto r = mouse_active_resize(g)) return *r;
+    if (auto r = mouse_begin_resize(g)) return *r;
+    if (auto r = mouse_active_move(g)) return *r;
+    if (auto r = mouse_begin_move(g)) return *r;
+    // No move began this event, so no grid refusal stands.
+    move_refused_grid_ = false;
+    if (auto r = mouse_panel(g)) return *r;
+    // The canvas fallback always answers.
+    return mouse_select(g).value_or(false);
 }
 
 bool InspectorOverlay::point_in_panel(Point p) const {

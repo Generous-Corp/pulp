@@ -9,6 +9,7 @@
 // real `~/Library/Caches/Pulp/` state.
 
 #include "fetchcontent_cache.hpp"
+#include "json_writer.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -541,36 +542,6 @@ int render_preflight(const std::vector<CacheEntry>& entries,
            "check.\n";
     return 1;
 }
-
-namespace {
-
-std::string json_escape(const std::string& s) {
-    std::string out;
-    out.reserve(s.size() + 2);
-    for (char c : s) {
-        switch (c) {
-            case '"':  out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\b': out += "\\b"; break;
-            case '\f': out += "\\f"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default:
-                if (static_cast<unsigned char>(c) < 0x20) {
-                    char buf[8];
-                    std::snprintf(buf, sizeof(buf), "\\u%04x",
-                                  static_cast<unsigned int>(c) & 0xff);
-                    out += buf;
-                } else {
-                    out += c;
-                }
-        }
-    }
-    return out;
-}
-
-}  // namespace
 
 int render_report_json(const std::vector<CacheEntry>& entries,
                        const fs::path& cache_root,

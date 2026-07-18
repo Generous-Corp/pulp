@@ -164,6 +164,7 @@ const STAT_STATE = 10;             // 0 init, 1 ready, 2 device-lost, 3 failed
 // "the GPU is idle on CPU" and "the flip back is still correct" are two claims, and this is
 // the evidence for the second one.
 const STAT_PRIMED = 11;
+const STAT_RECOMMENDED_DEPTH = 12;  // adaptive: block-periods the round trip wants
 const STATS_DOUBLES = 16;
 
 const STATE_INIT = 0;
@@ -268,6 +269,27 @@ class GpuRing {
     return this;
   }
 
+  // Adaptive depth: retarget the pipeline latency live (page thread). Both sides read
+  // CTRL_LATENCY live — pop() (worklet) asks for the block this many old, the worker
+  // budgets this many block-periods — so writing it here moves the WHOLE JS transport
+  // to the new depth atomically. The plugin's own L is moved in lockstep by the
+  // worklet calling pulp_sc_set_pipeline_depth (see wclap-processor pollDepth); the two
+  // MUST move together or the CPU-net wet stops covering a missed GPU block. Clamped so
+  // latencyBlocks stays < slots (the ring is pre-sized to the max depth).
+  setLatency(L) {
+    let v = L | 0;
+    if (v < 1) v = 1;
+    if (v >= this.slots) v = this.slots - 1;
+    Atomics.store(this.ctrl, CTRL_LATENCY, v);
+    this.latencyBlocks = v;
+    return v;
+  }
+
+  // The current pipeline latency, read live from the control block — used by the
+  // worklet's pop() and the worker's deadline budget so a page-driven depth change
+  // reaches both sides without re-attaching either.
+  liveLatency() { return Atomics.load(this.ctrl, CTRL_LATENCY) >>> 0; }
+
   // ── audio thread (worklet) ────────────────────────────────────────────────
   // Copy one block of planar interleaved-by-channel floats ([ch0 B][ch1 B]) from
   // `src` at float offset `off` into the input ring, stamped with this block's
@@ -300,7 +322,13 @@ class GpuRing {
   pop(dst, off) {
     const c = this.ctrl;
     const n = this.blockFloats;
-    const want = (this.blockIndex - this.latencyBlocks) | 0;
+    // Read the latency LIVE from the control block: adaptive depth changes it from
+    // the page (setLatency), and the pop must ask for the block the CURRENT depth is
+    // owed or the JS transport and the plugin's L drift apart. One atomic load per
+    // block — wait-free, audio-thread-safe. The slots are pre-sized to the max depth
+    // so a deeper L never needs a bigger ring.
+    const L = Atomics.load(c, CTRL_LATENCY) >>> 0;
+    const want = (this.blockIndex - L) | 0;
     this.blockIndex = (this.blockIndex + 1) | 0;
 
     let r = Atomics.load(c, CTRL_OUT_READ) >>> 0;
@@ -405,6 +433,7 @@ class GpuRing {
     st[STAT_MAP_RESOLVES] = s.mapResolves || 0;
     st[STAT_STATE] = s.state == null ? STATE_INIT : s.state;
     st[STAT_PRIMED] = s.primed || 0;
+    st[STAT_RECOMMENDED_DEPTH] = s.recommendedDepth || 0;
     Atomics.add(c, CTRL_STATS_SEQ, 1);           // even: snapshot complete
   }
 
@@ -421,7 +450,7 @@ class GpuRing {
         lastBlockUs: st[STAT_LAST_BLOCK_US], avgBlockUs: st[STAT_AVG_BLOCK_US],
         gpuNsLast: st[STAT_GPU_NS_LAST], queueSubmits: st[STAT_QUEUE_SUBMITS],
         mapResolves: st[STAT_MAP_RESOLVES], state: st[STAT_STATE],
-        primed: st[STAT_PRIMED],
+        primed: st[STAT_PRIMED], recommendedDepth: st[STAT_RECOMMENDED_DEPTH],
       };
       if (Atomics.load(c, CTRL_STATS_SEQ) === seq) return snap;
     }
@@ -843,6 +872,29 @@ class RealtimeWclapPlugin {
     return new Float32Array(this.host.memory.buffer, ex.pulp_ir_data(), len).slice();
   }
 
+  // Adaptive GPU pipeline depth: the page's DepthController retargets the ring's
+  // latency (CTRL_LATENCY, via setLatency) when the measured round trip warrants it;
+  // this moves the PLUGIN's L to match, on the non-RT tick — never inside process() —
+  // exactly like pollIr. The JS transport (pop/worker budget) reads the latency live,
+  // so calling pulp_sc_set_pipeline_depth here keeps the plugin's CPU-net wet delay in
+  // lockstep with the transport. A no-op when the module lacks the export (only the
+  // GPU SuperConvolver has it) or when the depth has not changed. Cheap: one atomic
+  // load, and a wasm call only on an actual change.
+  pollDepth() {
+    const ex = this.host.ex;
+    const ring = this.host.gpuRing;
+    if (this._depthExport === undefined) {
+      this._depthExport =
+        (ring && typeof ex.pulp_sc_set_pipeline_depth === "function")
+          ? ex.pulp_sc_set_pipeline_depth : null;
+    }
+    if (!this._depthExport || !ring) return;
+    const L = ring.liveLatency() >>> 0;
+    if (L === this._appliedDepth) return;
+    this._appliedDepth = L;
+    this._depthExport(L);
+  }
+
   // Current plugin-reported latency / tail in samples (clap.latency / clap.tail
   // plugin extensions). Extension pointers are resolved + cached once; a plugin
   // that does not expose the extension reports 0. `>>> 0` keeps the uint32 ABI.
@@ -1028,6 +1080,7 @@ class RealtimeWclapPlugin {
     // nothing; the expensive part — copying the IR out — still only happens when the
     // generation actually changes.
     const ir = this.pollIr();
+    this.pollDepth();   // apply an adaptive pipeline-depth change, if the page made one
     return { params: this._outParamEvents, midi: this._outMidi, ir };
   }
 

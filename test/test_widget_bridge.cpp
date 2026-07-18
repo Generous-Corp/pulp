@@ -2852,6 +2852,138 @@ TEST_CASE("WidgetBridge clearBoxShadow removes the shadow",
     REQUIRE(bridge.widget("panel")->has_box_shadow() == false);
 }
 
+// ── Layered box shadows: addBoxShadow appends, setBoxShadow replaces ───────
+TEST_CASE("WidgetBridge addBoxShadow stacks layers in CSS author order",
+          "[view][bridge][layered-shadow]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('gain', 10, 10, 48, 48)");
+    // A Figma knob's two layers: soft halo first, tight contact shadow second.
+    bridge.load_script("setBoxShadow('gain', 0, 16, 6, 0, '#0000001a')");
+    bridge.load_script("addBoxShadow('gain', 0, 4, 4, 0, '#00000040')");
+
+    auto* w = bridge.widget("gain");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->has_box_shadow());
+    const auto& layers = w->box_shadows();
+    REQUIRE(layers.size() == 2);
+    REQUIRE_THAT(layers[0].offset_y, WithinAbs(16.0f, 0.001f));
+    REQUIRE_THAT(layers[0].blur, WithinAbs(6.0f, 0.001f));
+    REQUIRE_THAT(layers[0].color.a, WithinAbs(26.0f / 255.0f, 0.01f));
+    REQUIRE_THAT(layers[1].offset_y, WithinAbs(4.0f, 0.001f));
+    REQUIRE_THAT(layers[1].blur, WithinAbs(4.0f, 0.001f));
+    REQUIRE_THAT(layers[1].color.a, WithinAbs(64.0f / 255.0f, 0.01f));
+
+    // box_shadow() keeps meaning "the first layer" for every single-shadow caller.
+    REQUIRE_THAT(w->box_shadow().blur, WithinAbs(6.0f, 0.001f));
+}
+
+TEST_CASE("WidgetBridge setBoxShadow replaces the whole stack",
+          "[view][bridge][layered-shadow]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('gain', 10, 10, 48, 48)");
+    bridge.load_script("setBoxShadow('gain', 0, 16, 6, 0, '#0000001a')");
+    bridge.load_script("addBoxShadow('gain', 0, 4, 4, 0, '#00000040')");
+    // CSS `box-shadow: X` supersedes the previous declaration rather than
+    // adding to it — a later setBoxShadow must not leave the old layers behind.
+    bridge.load_script("setBoxShadow('gain', 0, 1, 2, 0, '#000000ff')");
+
+    auto* w = bridge.widget("gain");
+    REQUIRE(w->box_shadows().size() == 1);
+    REQUIRE_THAT(w->box_shadow().blur, WithinAbs(2.0f, 0.001f));
+
+    bridge.load_script("clearBoxShadow('gain')");
+    REQUIRE(w->box_shadows().empty());
+    REQUIRE_FALSE(w->has_box_shadow());
+}
+
+TEST_CASE("View::paint_all paints shadow layers back-to-front",
+          "[view][canvas][layered-shadow]") {
+    using namespace pulp::canvas;
+
+    SECTION("outset layers paint in reverse so the first lands on top") {
+        View v;
+        v.set_bounds({0, 0, 100, 50});
+        // Layer order as declared: soft halo, then tight contact shadow.
+        v.set_box_shadow(0, 16, 6, 0, Color::rgba8(0, 0, 0, 26), /*inset=*/false);
+        v.add_box_shadow(0, 4, 4, 0, Color::rgba8(0, 0, 0, 64), /*inset=*/false);
+
+        RecordingCanvas rc;
+        v.paint_all(rc);
+
+        std::vector<const DrawCommand*> shadows;
+        for (const auto& c : rc.commands())
+            if (c.type == DrawCommand::Type::draw_box_shadow) shadows.push_back(&c);
+
+        // Both layers reach the canvas...
+        REQUIRE(shadows.size() == 2);
+        // ...and the LAST declared layer paints FIRST, so the first declared
+        // layer composites over it — CSS paint order. Reversing this is a
+        // plausible-looking wrong render: the tight contact shadow gets buried
+        // under the soft halo and the depth reads as flat.
+        REQUIRE_THAT(shadows[0]->floats[2], WithinAbs(4.0f, 0.001f));   // contact, declared 2nd
+        REQUIRE_THAT(shadows[1]->floats[2], WithinAbs(6.0f, 0.001f));   // halo, declared 1st
+    }
+
+    SECTION("inset layers stack too, and stay after the children") {
+        View v;
+        v.set_bounds({0, 0, 100, 50});
+        v.set_box_shadow(0, 2, 9, 0, Color::rgba8(0, 0, 0, 40), /*inset=*/true);
+        v.add_box_shadow(0, 1, 3, 0, Color::rgba8(0, 0, 0, 90), /*inset=*/true);
+
+        RecordingCanvas rc;
+        v.paint_all(rc);
+
+        std::vector<const DrawCommand*> shadows;
+        for (const auto& c : rc.commands())
+            if (c.type == DrawCommand::Type::draw_box_shadow) shadows.push_back(&c);
+
+        REQUIRE(shadows.size() == 2);
+        REQUIRE_THAT(shadows[0]->floats[2], WithinAbs(3.0f, 0.001f));
+        REQUIRE_THAT(shadows[1]->floats[2], WithinAbs(9.0f, 0.001f));
+        // Inset flag survives on both layers.
+        REQUIRE_THAT(shadows[0]->f[4], WithinAbs(1.0f, 0.001f));
+        REQUIRE_THAT(shadows[1]->f[4], WithinAbs(1.0f, 0.001f));
+    }
+
+    SECTION("a mixed stack routes each layer to its own pass") {
+        // Outset layers paint before the clip; inset layers paint after the
+        // children. A stack holding both must not send either to the wrong pass.
+        View v;
+        v.set_bounds({0, 0, 100, 50});
+        v.set_overflow(View::Overflow::hidden);
+        v.set_box_shadow(0, 8, 12, 0, Color::rgba8(0, 0, 0, 40), /*inset=*/false);
+        v.add_box_shadow(0, 1, 3, 0, Color::rgba8(0, 0, 0, 90), /*inset=*/true);
+
+        RecordingCanvas rc;
+        v.paint_all(rc);
+
+        const auto& cmds = rc.commands();
+        size_t clip_idx = SIZE_MAX;
+        std::vector<size_t> shadow_idx;
+        for (size_t i = 0; i < cmds.size(); ++i) {
+            if (cmds[i].type == DrawCommand::Type::clip_rect && clip_idx == SIZE_MAX)
+                clip_idx = i;
+            if (cmds[i].type == DrawCommand::Type::draw_box_shadow) shadow_idx.push_back(i);
+        }
+        REQUIRE(clip_idx != SIZE_MAX);
+        REQUIRE(shadow_idx.size() == 2);
+        REQUIRE(shadow_idx[0] < clip_idx);   // outset, before the clip
+        REQUIRE_THAT(cmds[shadow_idx[0]].f[4], WithinAbs(0.0f, 0.001f));
+        REQUIRE(shadow_idx[1] > clip_idx);   // inset, after the children
+        REQUIRE_THAT(cmds[shadow_idx[1]].f[4], WithinAbs(1.0f, 0.001f));
+    }
+}
+
 TEST_CASE("View::paint_all dispatches outset shadow before clip, "
           "inset shadow after children",
           "[view][canvas][issue-925]") {
@@ -4370,4 +4502,214 @@ TEST_CASE("WidgetBridge reload snapshot leaves custom_state empty for built-ins 
     bridge.snapshot_values(snap);
     REQUIRE(snap.scalar_values.count("k") == 1);   // built-in still snapshotted by type
     REQUIRE(snap.custom_state.empty());            // built-in Knob opts out of custom state
+}
+
+// ── Canonical scalar-value access (widget_bridge/value_widget_access.hpp) ─────
+//
+// try_get_scalar_value / try_set_scalar_value are the single ladder that knows
+// which widgets carry a float and how to read/write it. Both snapshot_values
+// overloads and both restore_values overloads route through it, so the per-type
+// contract is pinned here through the public surface: whatever the snapshot
+// captures must restore to the same value, for every type in the ladder.
+TEST_CASE("WidgetBridge snapshot/restore round-trips every scalar value widget",
+          "[view][bridge][hot-reload][snapshot][parity]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+
+    auto knob = std::make_unique<Knob>();
+    knob->set_id("knob");
+    knob->set_value(0.25f);
+    auto* knob_ptr = knob.get();
+    root.add_child(std::move(knob));
+
+    auto fader = std::make_unique<Fader>();
+    fader->set_id("fader");
+    fader->set_value(0.75f);
+    auto* fader_ptr = fader.get();
+    root.add_child(std::move(fader));
+
+    auto range = std::make_unique<RangeSlider>();
+    range->set_id("range");
+    range->set_value(0.5f);
+    auto* range_ptr = range.get();
+    root.add_child(std::move(range));
+
+    auto toggle = std::make_unique<Toggle>();
+    toggle->set_id("toggle");
+    toggle->set_on(true);
+    auto* toggle_ptr = toggle.get();
+    root.add_child(std::move(toggle));
+
+    auto checkbox = std::make_unique<Checkbox>();
+    checkbox->set_id("checkbox");
+    checkbox->set_checked(true);
+    auto* checkbox_ptr = checkbox.get();
+    root.add_child(std::move(checkbox));
+
+    auto toggle_button = std::make_unique<ToggleButton>();
+    toggle_button->set_id("toggle-button");
+    toggle_button->set_on(true);
+    auto* toggle_button_ptr = toggle_button.get();
+    root.add_child(std::move(toggle_button));
+
+    WidgetBridge bridge(engine, root, store);
+    // widget() is the lookup that adopts a natively-created view into the id map
+    // that snapshot_values / restore_values iterate.
+    for (const char* id : {"knob", "fader", "range", "toggle", "checkbox", "toggle-button"})
+        REQUIRE(bridge.widget(id) != nullptr);
+
+    std::unordered_map<std::string, float> snap;
+    bridge.snapshot_values(snap);
+
+    // Every ladder type contributes; booleans report 1.0f / 0.0f.
+    REQUIRE(snap.at("knob") == Catch::Approx(0.25f));
+    REQUIRE(snap.at("fader") == Catch::Approx(0.75f));
+    REQUIRE(snap.at("range") == Catch::Approx(0.5f));
+    REQUIRE(snap.at("toggle") == Catch::Approx(1.0f));
+    REQUIRE(snap.at("checkbox") == Catch::Approx(1.0f));
+    REQUIRE(snap.at("toggle-button") == Catch::Approx(1.0f));
+
+    // Move every widget off its captured value, then restore.
+    knob_ptr->set_value(0.9f);
+    fader_ptr->set_value(0.1f);
+    range_ptr->set_value(0.2f);
+    toggle_ptr->set_on(false);
+    checkbox_ptr->set_checked(false);
+    toggle_button_ptr->set_on(false);
+
+    bridge.restore_values(snap);
+
+    REQUIRE(knob_ptr->value() == Catch::Approx(0.25f));
+    REQUIRE(fader_ptr->value() == Catch::Approx(0.75f));
+    REQUIRE(range_ptr->value() == Catch::Approx(0.5f));
+    REQUIRE(toggle_ptr->is_on());
+    REQUIRE(checkbox_ptr->is_checked());
+    REQUIRE(toggle_button_ptr->is_on());
+
+    // A restore value at/below the 0.5 threshold turns a boolean widget off —
+    // the set side of the ladder reads > 0.5 as on.
+    std::unordered_map<std::string, float> off;
+    off["toggle"] = 0.5f;
+    off["checkbox"] = 0.0f;
+    off["toggle-button"] = 0.5f;
+    bridge.restore_values(off);
+    REQUIRE_FALSE(toggle_ptr->is_on());
+    REQUIRE_FALSE(checkbox_ptr->is_checked());
+    REQUIRE_FALSE(toggle_button_ptr->is_on());
+}
+
+// The reload snapshot layers selection controls and XYPad ON TOP of the shared
+// scalar ladder: they are reached only when the scalar ladder declines the view.
+// Pin that precedence — a widget that carries a scalar must never be captured as
+// a selection index, and vice versa.
+TEST_CASE("WidgetBridge reload snapshot layers selection + XY on the scalar ladder",
+          "[view][bridge][hot-reload][snapshot][parity]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+
+    auto knob = std::make_unique<Knob>();
+    knob->set_id("knob");
+    knob->set_value(0.25f);
+    auto* knob_ptr = knob.get();
+    root.add_child(std::move(knob));
+
+    auto combo = std::make_unique<ComboBox>();
+    combo->set_id("combo");
+    combo->set_items({"a", "b", "c"});
+    combo->set_selected_silent(2);
+    auto* combo_ptr = combo.get();
+    root.add_child(std::move(combo));
+
+    auto xy = std::make_unique<XYPad>();
+    xy->set_id("xy");
+    xy->set_x(0.3f);
+    xy->set_y(0.7f);
+    auto* xy_ptr = xy.get();
+    root.add_child(std::move(xy));
+
+    WidgetBridge bridge(engine, root, store);
+    for (const char* id : {"knob", "combo", "xy"})
+        REQUIRE(bridge.widget(id) != nullptr);
+
+    WidgetReloadSnapshot snap;
+    bridge.snapshot_values(snap);
+
+    REQUIRE(snap.scalar_values.at("knob") == Catch::Approx(0.25f));
+    // The selection index rides in scalar_values as an index-as-float.
+    REQUIRE(snap.scalar_values.at("combo") == Catch::Approx(2.0f));
+    // XYPad carries no scalar, so it lands in the XY channel only.
+    REQUIRE(snap.scalar_values.count("xy") == 0);
+    REQUIRE(snap.xy_values.at("xy").x == Catch::Approx(0.3f));
+    REQUIRE(snap.xy_values.at("xy").y == Catch::Approx(0.7f));
+
+    knob_ptr->set_value(0.9f);
+    combo_ptr->set_selected_silent(0);
+    xy_ptr->set_x(0.0f);
+    xy_ptr->set_y(0.0f);
+
+    bridge.restore_values(snap);
+
+    REQUIRE(knob_ptr->value() == Catch::Approx(0.25f));
+    REQUIRE(combo_ptr->selected() == 2);
+    REQUIRE(xy_ptr->x_value() == Catch::Approx(0.3f));
+    REQUIRE(xy_ptr->y_value() == Catch::Approx(0.7f));
+}
+
+// ── Native-event registration guards (WidgetBridge::registrations_) ───────────
+//
+// Registration state is one record per widget id covering every native channel
+// (pointer / wheel / gesture), so tearing a subtree down forgets all of them in
+// a single erase. The guard exists to stop a re-rendering reconciler stacking N
+// lambdas on one widget (covered by the spectr idempotence tests); the contract
+// pinned here is the OTHER half — the guard must not outlive the widget, or a
+// recycled id silently wires nothing and the new widget is inert.
+TEST_CASE("WidgetBridge re-wires a recycled widget id after its subtree is forgotten",
+          "[view][bridge][registration]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Plain containers, not value widgets: View's base on_mouse_event is what
+    // dispatches on_pointer_event, so this exercises the registrar's wiring
+    // rather than a widget's own mouse handling.
+    bridge.load_script(R"(
+        globalThis.hits = 0;
+        createRow('box');
+        createRow('k', 'box');
+        on('k', 'pointerdown', function() { globalThis.hits++; });
+    )");
+
+    MouseEvent down{};
+    down.button = MouseButton::left;
+    down.is_down = true;
+
+    auto* first = bridge.widget("k");
+    REQUIRE(first != nullptr);
+    first->on_mouse_event(down);
+    REQUIRE(engine.evaluate("String(globalThis.hits)").toString() == "1");
+
+    // Tearing the subtree down must forget every registration channel for 'k',
+    // not just its entry in the widget id map.
+    bridge.load_script("removeWidget('box'); void 0;");
+    REQUIRE(bridge.widget("k") == nullptr);
+
+    // A fresh widget recycling the same id wires again. Were the pointer guard
+    // to survive the teardown, registerPointer would no-op here and this widget
+    // would never see a pointer event.
+    bridge.load_script(R"(
+        createRow('box2');
+        createRow('k', 'box2');
+        on('k', 'pointerdown', function() { globalThis.hits++; });
+    )");
+
+    auto* second = bridge.widget("k");
+    REQUIRE(second != nullptr);
+    second->on_mouse_event(down);
+    REQUIRE(engine.evaluate("String(globalThis.hits)").toString() == "2");
 }

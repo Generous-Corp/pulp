@@ -19,12 +19,18 @@
 // handle tracks the in-flight edit value so it follows the cursor regardless of
 // the audio thread's per-block parameter echo.
 
-#include "super_convolver.hpp"
+#include "super_convolver_ui_host.hpp"
 #include "field_renderer.hpp"
+#include "source_display.hpp"     // clean_source_name — the Source chip's label
 #include <pulp/state/parameter_edit.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/view.hpp>
+#if !defined(__EMSCRIPTEN__)
+// The native picker. A browser tab has no filesystem and no modal file dialog a
+// wasm module can call — there the request goes out to the page instead (see
+// open_ir_chooser), so the header must not even be reachable in that build.
 #include <pulp/view/file_chooser.hpp>
+#endif
 #include <pulp/view/theme.hpp>
 #include <pulp/view/theme_presets.hpp>
 #include <pulp/canvas/canvas.hpp>
@@ -83,8 +89,9 @@ class SuperConvolverUi : public vw::View {
 public:
     SuperConvolverUi(pulp::state::StateStore& store,
                      pulp::examples::SpectrumBus& spectrum,
-                     pulp::examples::SuperConvolverProcessor& proc)
+                     pulp::examples::SuperConvolverUiHost& proc)
         : store_(store), spectrum_(spectrum), proc_(proc), edit_(store) {
+        build_sliders();
         // Live content (IR snapshot, spectrum curve, automation echo) → repaint
         // every frame. Prefer the GPU editor host for smooth rendering; the SDK
         // falls back to the CPU host if GPU init isn't available in the DAW.
@@ -93,6 +100,51 @@ public:
     }
 
     void on_resized() override { layout(); }
+
+    // ── Parameters the plugin might not HAVE ────────────────────────────────────────
+    //
+    // Rooms, Flow and Engine belong to the GPU multi-room stack, and that whole stack is
+    // `#if !defined(PULP_WASM)`. So a WAM/WebCLAP build of this plugin declares Mix, Size,
+    // Gain and Bypass and NOTHING ELSE — the editor's remaining controls address
+    // parameters that do not exist in that store.
+    //
+    // Reading one is not a soft failure. StateStore::get_value() on an unregistered id is
+    // undefined, and in wasm it is a hard "memory access out of bounds" on the first
+    // paint: the editor mounted, faulted, and the page fell back to the generated grid.
+    //
+    // So the editor asks. `has()` is the plugin's own answer — it built the store — and
+    // the control strip, the engine chip and the field all defer to it. Natively every
+    // parameter is present and nothing below changes.
+    bool has(pulp::state::ParamID id) const { return store_.info(id) != nullptr; }
+
+    /// The control strip shows exactly the sliders whose parameter the plugin declared.
+    /// Natively that is all five. On the web it is Mix / Size / Gain, because Rooms and
+    /// Flow do not exist there — and a slider that drives nothing is worse than no slider:
+    /// the user drags it, hears no change, and concludes the plugin is broken.
+    void build_sliders() {
+        sliders_.clear();
+        for (const Slider& sl : all_sliders())
+            if (has(sl.id)) sliders_.push_back(sl);
+    }
+
+    /// The parameter's value, or `fallback` when the plugin does not expose it.
+    float value_or(pulp::state::ParamID id, float fallback) const {
+        return has(id) ? store_.get_value(id) : fallback;
+    }
+
+    /// The active engine's emitter cap: 128 rooms on the GPU, 20 on the CPU.
+    int emitter_cap() const { return value_or(kEngine, 0.0f) >= 0.5f ? 128 : 20; }
+
+    /// The live emitter count — what fills the field and the header readout. Rooms
+    /// is the field's density on every build that declares it (native AND the web
+    /// GPU variant, where Rooms steers the field visualization even though the
+    /// multi-room AUDIO stays native-only). A build without Rooms (the plain
+    /// WAM/WebCLAP lane) shows no engine chip anyway, so 0 simply leaves the field at
+    /// its base density. Never read get_value(kRooms) unguarded — it is UB when the
+    /// id is unregistered, and that was the bug that pinned the readout at zero.
+    int emitter_count() const {
+        return has(kRooms) ? static_cast<int>(std::lround(value_or(kRooms, 1.0f))) : 0;
+    }
 
     /// Show the info card (same overlay the header "i" glyph toggles). For
     /// headless capture / tests; a click anywhere dismisses it at runtime.
@@ -116,9 +168,8 @@ public:
         read_spectrum();
         field_time_ += 1.0 / 60.0;
         const float field_flow = std::clamp(
-            static_cast<float>(store_.get_value(kFlow)) * 0.01f, 0.0f, 1.0f);
-        const int field_density = std::min(96,
-            std::max(1, static_cast<int>(std::lround(store_.get_value(kRooms)))));
+            static_cast<float>(value_or(kFlow, 0.0f)) * 0.01f, 0.0f, 1.0f);
+        const int field_density = std::min(96, std::max(1, emitter_count()));
         pulp::superconvolver::draw_acoustic_field(
             canvas, 0, 0, W, H, field_time_, field_flow, field_density, overall_energy(),
             viz_mode_);
@@ -137,9 +188,34 @@ public:
         canvas.stroke_circle(ix, iy, ir);
         canvas.set_fill_color(tk_label());
         canvas.set_font("Inter", 11.0f * s);
-        centered_text(canvas, "i", ix, iy + 4.0f * s, 11.0f * s);
+        // "i" is a NARROW glyph, so centered_text's char-count width estimate (px * 0.52)
+        // over-measures it and nudges it left of the circle's center. Center on its true
+        // advance (~0.28em) so the stem sits dead-center.
+        canvas.fill_text("i", ix - 11.0f * s * 0.14f, iy + 4.0f * s);
 
         const auto g = proc_.gpu_status();
+
+        // "The switch can't happen, and here's why" — the popover a native plugin
+        // shows. On the web the GPU lane can be unavailable (no adapter, or no
+        // worklet lane): tapping to GPU then lights a GPU badge over audio the GPU
+        // never touches (the CPU net silently carries it). Detect it honestly: watch
+        // for the engine transitioning to GPU (from the chip, a Rooms auto-switch, or
+        // a preset), and if after a grace period the GPU has produced ZERO blocks,
+        // say so once. blocks is cumulative, so "still zero" means it never carried —
+        // not merely idle now — so this never fires for a GPU that worked then paused.
+        {
+            const bool engine_gpu_now = has(kEngine) && store_.get_value(kEngine) >= 0.5f;
+            if (engine_gpu_now && !engine_gpu_prev_) {
+                gpu_switch_time_ = field_time_;
+                gpu_unavail_toasted_ = false;
+            }
+            engine_gpu_prev_ = engine_gpu_now;
+            if (engine_gpu_now && !gpu_unavail_toasted_ && gpu_switch_time_ > 0.0
+                && (field_time_ - gpu_switch_time_) > 2.5 && g.blocks == 0) {
+                show_toast("GPU engine unavailable here — the CPU is carrying the audio");
+                gpu_unavail_toasted_ = true;
+            }
+        }
 
         // Engine chip — top-right, tap to toggle CPU/GPU (concept tokens). Dot is
         // cyan for GPU / amber for CPU; the emitter cap is 128 (GPU) / 20 (CPU).
@@ -148,8 +224,8 @@ public:
             const float rx = local_bounds().width - 24 * s;
             const bool gpu = store_.get_value(kEngine) >= 0.5f;
             const char* eng = gpu ? "GPU" : "CPU";
-            const int cap = gpu ? 128 : 20;
-            const int now = static_cast<int>(std::lround(store_.get_value(kRooms)));
+            const int cap = emitter_cap();
+            const int now = emitter_count();
             canvas.set_fill_color(tk_text());
             canvas.set_font("Inter", 12.0f * s);
             right_text(canvas, eng, rx, 29 * s, 12.0f * s);
@@ -262,6 +338,68 @@ public:
         // Dim the field so the card reads.
         canvas.set_fill_color(cv::Color::rgba8(4, 5, 8, 190));
         canvas.fill_rect(0, 0, W, H);
+
+        // {label, description}: label in paper, description in dim. A blank label is
+        // a full-width intro sentence in dim.
+        static const std::pair<const char*, const char*> kRows[] = {
+            {"", "A convolution reverb that convolves your signal against a"},
+            {"", "cloud of decorrelated rooms in one batched GPU pass."},
+            {"Source", "load an impulse response, or use the synthetic room"},
+            {"Rooms", "how many decorrelated rooms fill the stereo field"},
+            {"Flow", "drift each room's pan into a living, moving field"},
+            {"Size", "length of the synthetic room's tail"},
+            {"CPU / GPU", "tap the badge to switch engines"},
+        };
+        const cv::Color bone = cv::Color::rgba8(188, 194, 204);
+        const cv::Color paper = cv::Color::rgba8(237, 239, 243);
+        const cv::Color dim = cv::Color::rgba8(140, 146, 156);
+
+        if (narrow_) {
+            // Phone: the desktop two-column label/description does not fit, so each
+            // labeled row STACKS (label over an indented description) and the card
+            // spans nearly the full width. Clipped to the card so a long line is
+            // trimmed at the edge instead of spilling onto the field.
+            const float pad = 18 * s, line = 18 * s, fs = 11.0f * s;
+            int lines = 0;
+            for (const auto& [l, d] : kRows) { (void)d; lines += l[0] ? 2 : 1; }
+            const float cw = W - 24 * s;
+            const float chh = pad * 2 + 24 * s + lines * line + 22 * s;
+            const float cx = (W - cw) * 0.5f, cy = (H - chh) * 0.5f;
+            canvas.set_fill_color(cv::Color::rgba8(9, 11, 15, 245));
+            canvas.fill_rounded_rect(cx, cy, cw, chh, 14 * s);
+            canvas.set_stroke_color(cv::Color::rgba8(220, 228, 238, 34));
+            canvas.set_line_width(1.0f);
+            canvas.stroke_rounded_rect(cx, cy, cw, chh, 14 * s);
+            canvas.save();
+            canvas.clip_rect(cx, cy, cw, chh);
+            const float tx = cx + pad;
+            float ty = cy + pad + 14 * s;
+            canvas.set_fill_color(bone);
+            tracked_text(canvas, "SuperConvolver", tx, ty, 13.0f * s, 0.14f);
+            ty += 26 * s;
+            for (const auto& [label, desc] : kRows) {
+                if (label[0] == '\0') {
+                    canvas.set_font("Inter", fs);
+                    canvas.set_fill_color(dim);
+                    canvas.fill_text(desc, tx, ty);
+                    ty += line;
+                } else {
+                    canvas.set_font("Inter", fs);
+                    canvas.set_fill_color(paper);
+                    canvas.fill_text(label, tx, ty);
+                    ty += line * 0.86f;
+                    canvas.set_fill_color(dim);
+                    canvas.fill_text(desc, tx + 10 * s, ty);
+                    ty += line;
+                }
+            }
+            canvas.set_fill_color(dim);
+            canvas.set_font("Inter", 10.0f * s);
+            canvas.fill_text("Tap anywhere to close", tx, cy + chh - 16 * s);
+            canvas.restore();
+            return;
+        }
+
         const float cw = std::min(W - 80 * s, 460 * s), chh = 250 * s;
         const float cx = (W - cw) * 0.5f, cy = (H - chh) * 0.5f;
         canvas.set_fill_color(cv::Color::rgba8(9, 11, 15, 245));
@@ -272,24 +410,13 @@ public:
 
         const float tx = cx + 28 * s;
         float ty = cy + 40 * s;
-        canvas.set_fill_color(cv::Color::rgba8(188, 194, 204));  // --bone
+        canvas.set_fill_color(bone);
         tracked_text(canvas, "SuperConvolver", tx, ty, 14.0f * s, 0.16f);
         ty += 30 * s;
-        // {label, description}: label in paper, description in dim. A blank label
-        // is a full-width intro sentence in dim.
-        static const std::pair<const char*, const char*> kRows[] = {
-            {"", "A convolution reverb that convolves your signal against a"},
-            {"", "cloud of decorrelated rooms in one batched GPU pass."},
-            {"Source", "load an impulse response, or use the synthetic room"},
-            {"Rooms", "how many decorrelated rooms fill the stereo field"},
-            {"Flow", "drift each room's pan into a living, moving field"},
-            {"Size", "length of the synthetic room's tail"},
-            {"CPU / GPU", "tap the badge to switch engines"},
-        };
         for (const auto& [label, desc] : kRows) {
             canvas.set_font("Inter", 11.5f * s);
             if (label[0] != '\0') {
-                canvas.set_fill_color(cv::Color::rgba8(237, 239, 243));  // --paper
+                canvas.set_fill_color(paper);
                 canvas.fill_text(label, tx, ty);
                 canvas.set_fill_color(cv::Color::rgba8(120, 126, 136));  // --dim
                 canvas.fill_text(desc, tx + 92 * s, ty);
@@ -326,6 +453,28 @@ public:
     void on_mouse_drag(vw::Point p) override { pointer_move(p); }
     void on_mouse_up(vw::Point) override { pointer_release(); }
 
+    // Widget geometry by PARAMETER, for hosts that drive this editor from outside
+    // the view tree (the browser fixture synthesises pointer events at these rects
+    // and measures ink inside them). Keyed by ParamID rather than by slider index
+    // because a host knows the parameter it wants, not this editor's column order.
+    bool slider_track_for_param(pulp::state::ParamID id, vw::Rect* out) {
+        if (layout_dirty_) layout();
+        for (const Slider& sl : sliders_)
+            if (sl.id == id) { if (out) *out = sl.track; return true; }
+        return false;
+    }
+    /// The band above a slider's track, where paint_controls draws its name and
+    /// value. Text lives here and nowhere else in the column.
+    bool slider_label_for_param(pulp::state::ParamID id, vw::Rect* out) {
+        vw::Rect t;
+        if (!slider_track_for_param(id, &t)) return false;
+        const float s = scale();
+        if (out) *out = {t.x, t.y - 26 * s, t.width, 26 * s};
+        return true;
+    }
+    /// The header engine chip (CPU/GPU + emitter count) — the editor's live readout.
+    vw::Rect engine_rect() { if (layout_dirty_) layout(); return engine_; }
+
     // Test accessors (headless interaction verification).
     void layout_for_test() { layout(); }
     vw::Rect ir_rect_for_test() { if (layout_dirty_) layout(); return ir_; }
@@ -360,17 +509,27 @@ private:
     }
     float scale() const { return std::max(0.5f, local_bounds().height / 560.0f); }
 
-    std::array<Slider, 5>& sliders() { return sliders_; }
+    std::vector<Slider>& sliders() { return sliders_; }
 
     void layout() {
         const float W = local_bounds().width, H = local_bounds().height;
         const float s = scale();
-        const float m = 20 * s, top = 64 * s;
+        const float m = 20 * s;
+        // Narrow (phone) mode. `scale()` keys off HEIGHT, so a tall, skinny phone
+        // canvas has a LARGE s and a SMALL W — and the one-line header (wordmark
+        // left, centered mode tabs, engine chip right) no longer fits: the tabs
+        // collide with the wordmark and the chip. Below this logical width, drop
+        // the tabs to their own row and stack each slider's label over its value.
+        // Desktop sits far above the threshold and is untouched.
+        narrow_ = W < 680.0f * s;
+        const float top = narrow_ ? 132 * s : 64 * s;
         const float avail = H - top - m;
 
-        // The Source chip (top-left, below the wordmark) IS the loader — click it
-        // to open the picker. Rect shared by paint (draw) and pointer (hit-test).
-        load_ir_btn_ = {24 * s, 44 * s, 196 * s, 38 * s};
+        // The Source chip (below the wordmark) IS the loader — click it to open the
+        // picker. Rect shared by paint (draw) and pointer (hit-test). On a phone it
+        // spans its own full-width row (row 3) so it never sits under the tabs.
+        load_ir_btn_ = narrow_ ? vw::Rect{m, 92 * s, W - 2 * m, 36 * s}
+                               : vw::Rect{24 * s, 44 * s, 196 * s, 38 * s};
 
         // Hero IR waveform (largest), then spectrum, then the control strip.
         const float ir_h   = avail * 0.42f;
@@ -381,11 +540,18 @@ private:
         spectrum_rect_ = {m, ir_.bottom() + 12 * s, W - 2 * m, spec_h};
         controls_ = {m, spectrum_rect_.bottom() + 12 * s, W - 2 * m, ctl_h};
 
-        // Five equal columns: four sliders (Mix/Size/Gain/Rooms) + a toggle
-        // column holding the Engine (CPU/GPU) toggle stacked over Bypass.
-        const float cw = controls_.width / 5.0f;  // five sliders fill the row
+        // Equal columns: one per slider the plugin actually declared, plus one for the
+        // toggle column (Engine over Bypass). Natively that is the familiar five. On the
+        // web it is four — Rooms and Flow do not exist there (see build_sliders()) — and
+        // dividing by a hardcoded 5 would both leave a dead gap and, worse, index past the
+        // end of the list. It did: it faulted paint() out of bounds on the first frame.
+        // Fill the row EVENLY: one cell per visible slider spanning the full control width, so
+        // the group has even left/right padding instead of a dead cell hanging off the right.
+        // (Divide by the LIVE count, never a hardcoded 5 — Rooms/Flow are absent on some builds,
+        // and dividing by 5 both left a gap and indexed past the end, faulting paint().)
+        const float cw = controls_.width / static_cast<float>(sliders_.size());
         const float label_h = 20 * s, value_h = 22 * s, pad = 10 * s;
-        for (int i = 0; i < 5; ++i) {
+        for (int i = 0; i < static_cast<int>(sliders_.size()); ++i) {
             Slider& sl = sliders_[static_cast<size_t>(i)];
             sl.cell = {controls_.x + i * cw, controls_.y, cw, controls_.height};
             (void)label_h; (void)value_h; (void)pad;
@@ -397,12 +563,19 @@ private:
         }
         // Engine is the top-right chip (tap to toggle CPU/GPU); Bypass lives in
         // the host chrome. Mode tabs are three equal cells centered at the top.
-        engine_ = {W - 200 * s, 12 * s, 176 * s, 44 * s};
+        // No Engine parameter (a WAM/WebCLAP build) → no chip. An empty rect draws
+        // nothing and hit-tests to nothing, so the affordance simply is not offered
+        // rather than being offered and doing nothing.
+        engine_ = has(kEngine) ? vw::Rect{W - 200 * s, 12 * s, 176 * s, 44 * s} : vw::Rect{};
         bypass_ = {};
-        const float tab_w = 92 * s, tab_h = 26 * s, tab_y = 16 * s;
+        // Mode tabs: centered on desktop; on a phone they drop to their own row
+        // (row 2, under the wordmark and clear of the chip) so nothing overlaps.
+        const float tab_w = narrow_ ? std::min(92 * s, (W - 2 * m) / 3.0f) : 92 * s;
+        const float tab_h = 26 * s;
+        const float tab_y = narrow_ ? 50 * s : 16 * s;
+        const float tabs_x0 = W * 0.5f - tab_w * 1.5f;
         for (int i = 0; i < 3; ++i)
-            tabs_[static_cast<size_t>(i)] =
-                {W * 0.5f - tab_w * 1.5f + i * tab_w, tab_y, tab_w, tab_h};
+            tabs_[static_cast<size_t>(i)] = {tabs_x0 + i * tab_w, tab_y, tab_w, tab_h};
         layout_dirty_ = false;
     }
 
@@ -459,7 +632,17 @@ private:
     // Open the native file picker and set the chosen file as the IR source. The
     // dialog is synchronous on macOS (modal on the UI thread), so capturing the
     // processor by reference in the callback is safe.
+    //
+    // In a browser the editor cannot pick the file itself: there is no filesystem
+    // behind the wasm module and no synchronous dialog it may open. The whole
+    // request is therefore the empty load_ir_path — the host's job is to obtain
+    // the audio some other way (the page's own picker) and hand the plugin the
+    // decoded PCM. An empty path is the ASK, never a path to load; the web host
+    // reads it that way and no other implementation ever sees it.
     void open_ir_chooser() {
+#if defined(__EMSCRIPTEN__)
+        proc_.load_ir_path({});
+#else
         vw::FileChooser chooser;
         chooser.set_title("Load impulse response")
                .add_extension_filter("Impulse response (WAV/AIFF/FLAC)",
@@ -471,6 +654,7 @@ private:
             // missing path has since appeared.
             if (!paths.empty()) proc.load_ir_path(paths.front());
         });
+#endif
     }
 
     // ── IR waveform (hero) ──
@@ -647,7 +831,7 @@ private:
         // linear fade at the bottom keeps labels legible over bright modes without
         // the banding a stepped fill would show (esp. in Field mode).
         {
-            const float top = c.y - 26 * s, bot = c.bottom();
+            const float top = c.y - (narrow_ ? 44.0f : 26.0f) * s, bot = c.bottom();
             const cv::Color gcols[2] = {cv::Color::rgba8(5, 6, 9, 0),
                                         cv::Color::rgba8(4, 5, 8, 224)};
             const float gpos[2] = {0.0f, 1.0f};
@@ -656,23 +840,36 @@ private:
             canvas.set_fill_color(cv::Color::rgba8(0, 0, 0, 0));  // clears the gradient
         }
 
-        for (int i = 0; i < 5; ++i) {
+        for (int i = 0; i < static_cast<int>(sliders_.size()); ++i) {
             const Slider& sl = sliders_[static_cast<size_t>(i)];
             const auto& t = sl.track;
             const bool active = (active_slider_ == i);
 
-            // Label at the track's left — uppercase, tracked, dim #787E88; value
-            // right-aligned at the track's right — bold #EDEFF3. Concept tokens.
-            canvas.set_fill_color(tk_label());
-            canvas.set_font("Inter", 9.5f * s);
-            tracked_text(canvas, sl.label, t.x, t.y - 12 * s, 9.5f * s, 0.26f);
             char buf[40];
             std::snprintf(buf, sizeof buf, "%.*f%s%s", sl.decimals,
                           static_cast<double>(slider_value(i)),
                           sl.unit[0] ? " " : "", sl.unit);
-            canvas.set_fill_color(tk_text());
-            canvas.set_font("Inter", 14.0f * s);
-            right_text(canvas, buf, t.x + t.width, t.y - 11 * s, 14.0f * s);
+            if (narrow_) {
+                // Phone: a quarter-width column cannot fit "MIX" and "35 %" on one
+                // line — they overlapped. Stack the label over the value, both
+                // centered in the cell, with the track below.
+                const float cx = t.x + t.width * 0.5f;
+                canvas.set_fill_color(tk_label());
+                canvas.set_font("Inter", 9.5f * s);
+                centered_text(canvas, sl.label, cx, t.y - 30 * s, 9.5f * s);
+                canvas.set_fill_color(tk_text());
+                canvas.set_font("Inter", 13.0f * s);
+                centered_text(canvas, buf, cx, t.y - 13 * s, 13.0f * s);
+            } else {
+                // Desktop: label at the track's left — uppercase, tracked, dim
+                // #787E88; value right-aligned at the track's right — bold #EDEFF3.
+                canvas.set_fill_color(tk_label());
+                canvas.set_font("Inter", 9.5f * s);
+                tracked_text(canvas, sl.label, t.x, t.y - 12 * s, 9.5f * s, 0.26f);
+                canvas.set_fill_color(tk_text());
+                canvas.set_font("Inter", 14.0f * s);
+                right_text(canvas, buf, t.x + t.width, t.y - 11 * s, 14.0f * s);
+            }
 
             const float frac = value_frac(i);
             const float hx = t.x + frac * t.width;
@@ -723,9 +920,9 @@ private:
         for (int i = 0; i < 3; ++i) {
             if (in_rect(p, tabs_[static_cast<size_t>(i)])) { viz_mode_ = i; return; }
         }
-        if (in_rect(p, engine_)) {   // top-right chip toggles CPU/GPU
-            const bool gpu = store_.get_value(kEngine) >= 0.5f;
-            const int rooms = static_cast<int>(std::lround(store_.get_value(kRooms)));
+        if (has(kEngine) && in_rect(p, engine_)) {   // top-right chip toggles CPU/GPU
+            const bool gpu = value_or(kEngine, 0.0f) >= 0.5f;
+            const int rooms = static_cast<int>(std::lround(value_or(kRooms, 1.0f)));
             // CPU can't sustain more than kCpuRoomCap rooms. GPU->CPU while Rooms
             // is above that would silently ignore the extra rooms, so refuse and
             // say why; CPU->GPU is always fine. (Dragging Rooms past the cap on
@@ -737,7 +934,7 @@ private:
             }
             return;
         }
-        for (int i = 0; i < 5; ++i) {
+        for (int i = 0; i < static_cast<int>(sliders_.size()); ++i) {
             if (in_rect(p, sliders_[static_cast<size_t>(i)].cell)) {
                 active_slider_ = i;
                 edit_.begin(sliders_[static_cast<size_t>(i)].id);
@@ -768,7 +965,7 @@ private:
         // sustains in real time (kCpuRoomCap), auto-switch to GPU so the extra
         // rooms are actually heard instead of silently ignored. Fires once on the
         // crossing (the guard sees Engine already GPU on the next drag tick).
-        if (sl.id == kRooms && v > kCpuRoomCap && store_.get_value(kEngine) < 0.5f)
+        if (sl.id == kRooms && v > kCpuRoomCap && value_or(kEngine, 0.0f) < 0.5f)
             toggle_param(kEngine);
     }
 
@@ -800,22 +997,34 @@ private:
 
     pulp::state::StateStore& store_;
     pulp::examples::SpectrumBus& spectrum_;
-    pulp::examples::SuperConvolverProcessor& proc_;
+    pulp::examples::SuperConvolverUiHost& proc_;
     pulp::state::ParameterEdit edit_;
     ScPalette pal_ = make_ink_signal_palette();   // resolved from the Ink & Signal preset
 
     vw::Rect ir_{}, spectrum_rect_{}, controls_{}, bypass_{}, engine_{}, load_ir_btn_{};
-    std::array<Slider, 5> sliders_{{
-        {kMix,   "Mix",    0.0f, 100.0f, 0, "%"},
-        {kSize,  "Size",   0.05f, 4.0f,  2, "s"},
-        {kGain,  "Gain",  -24.0f, 24.0f, 1, "dB"},
-        {kRooms, "Rooms",  1.0f, 128.0f, 0, "", true},
-        {kFlow,  "Flow",   0.0f, 100.0f, 0, "%"},
-    }};
+    // Every slider the editor CAN show. Which of them it DOES show is decided in the
+    // constructor from the store — see build_sliders(). A function rather than a static
+    // constexpr member: Slider has default member initializers, which are not complete
+    // inside the enclosing class definition.
+    static std::array<Slider, 5> all_sliders() {
+        return {{
+            {kMix,   "Mix",    0.0f, 100.0f, 0, "%"},
+            {kSize,  "Size",   0.05f, 4.0f,  2, "s"},
+            {kGain,  "Gain",  -24.0f, 24.0f, 1, "dB"},
+            {kRooms, "Rooms",  1.0f, 128.0f, 0, "", true},
+            {kFlow,  "Flow",   0.0f, 100.0f, 0, "%"},
+        }};
+    }
+    std::vector<Slider> sliders_;
     std::array<float, kSpectrumBins> spec_display_{};
     int active_slider_ = -1;
     bool pointer_down_ = false;
     bool layout_dirty_ = true;
+    bool narrow_ = false;       // phone-width layout (set in layout())
+    // "GPU unavailable" popover state (see paint): watch a switch to GPU produce blocks.
+    bool engine_gpu_prev_ = false;
+    bool gpu_unavail_toasted_ = false;
+    double gpu_switch_time_ = -1.0;
     double field_time_ = 0.0;   // advances per repaint → the field's animation clock
     int viz_mode_ = 0;          // 0 Tracers · 1 Currents · 2 Field
     vw::Rect tabs_[3]{};        // mode-tab hit rects

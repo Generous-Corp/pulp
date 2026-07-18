@@ -2,6 +2,8 @@
 // binary, bake a real .pulpgraph into a signed .pulpbake, and prove verify accepts the
 // trusted artifact and rejects tampering / an untrusted signer.
 
+#include "test_cli_shellout_util.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/host/graph_serializer.hpp>
@@ -30,7 +32,7 @@ const char* kRepoRoot = PULP_REPO_ROOT;
 std::string run_cli(const std::vector<std::string>& args, int& code) {
     pulp::platform::ProcessOptions options;
     options.working_directory = kRepoRoot;
-    options.timeout_ms = 60000;
+    options.timeout_ms = pulp_test_cli::shellout_timeout_ms();  // shared hang guard
     const auto r = pulp::platform::ChildProcess::run(kCliBin, args, options);
     code = r.timed_out ? -1 : r.exit_code;
     return r.stdout_output + r.stderr_output;  // callers grep the merged stream

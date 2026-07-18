@@ -156,7 +156,7 @@ lowercase names for serialization and the JS bridge.
 | `EmptyState` | Dashed-border placeholder | message, action + callback | `gap_widgets.hpp` |
 | `Tooltip` | Hover tooltip | text, show_at fade-in, hide fade-out | `ui_components.hpp` |
 | `CallOutBox` | Floating alert/notification | message, confirm/cancel, auto-dismiss, `confirm()`/`notify()` factories | `ui_components.hpp` |
-| `AnchoredCallout` | Popover anchored to a target rect (JUCE `CallOutBox` parity) | arbitrary child content, pointer triangle, side auto-flip when clipped, edge clamping, arrow tracking | `callout_box.hpp` |
+| `AnchoredCallout` | Popover anchored to a target rect | arbitrary child content, pointer triangle, side auto-flip when clipped, edge clamping, arrow tracking | `callout_box.hpp` |
 | `ReorderList` | Drag-to-reorder container | lift dragged child, neighbours slide by measured pitch, drop tween + landing glow, `on_reorder(from,to)` commit | `reorder_list.hpp` |
 
 ## Audio-specific

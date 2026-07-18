@@ -2,6 +2,7 @@
 
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
+#include "bridge_dispatch.hpp"
 
 #include <pulp/view/gesture.hpp>
 #include <pulp/platform/popup_menu.hpp>
@@ -11,7 +12,6 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
-#include <exception>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -19,35 +19,6 @@
 namespace pulp::view {
 
 namespace {
-
-void safe_dispatch_eval(ScriptEngine& engine, const std::string& js, const char* context) {
-    try {
-        engine.evaluate(js);
-        // Pump microtasks so React setState commits before the next event arrives.
-        engine.pump_message_loop();
-    } catch (const std::exception& e) {
-        std::cerr << "WidgetBridge " << context << " error: " << e.what() << "\n";
-    } catch (...) {
-        std::cerr << "WidgetBridge " << context << " error: unknown exception\n";
-    }
-}
-
-void safe_dispatch_eval(const std::shared_ptr<std::atomic<bool>>& alive,
-                        ScriptEngine* engine,
-                        const std::string& js,
-                        const char* context) {
-    if (!alive || !alive->load(std::memory_order_acquire) || engine == nullptr) return;
-    try {
-        if (!static_cast<bool>(*engine)) return;
-        engine->evaluate(js);
-        // Pump microtasks so React setState commits before the next event arrives.
-        engine->pump_message_loop();
-    } catch (const std::exception& e) {
-        std::cerr << "WidgetBridge " << context << " error: " << e.what() << "\n";
-    } catch (...) {
-        std::cerr << "WidgetBridge " << context << " error: unknown exception\n";
-    }
-}
 
 Point local_to_root(const View* view, Point point) {
     for (auto* cur = view; cur; cur = cur->parent()) {
@@ -70,9 +41,7 @@ void dispatch_gesture_js(const std::shared_ptr<std::atomic<bool>>& alive,
                          const std::string& id,
                          const std::string& event_name,
                          const std::string& data) {
-    safe_dispatch_eval(alive, engine,
-        "__dispatch__('" + id + "', '" + event_name + "', {" + data + "})",
-        "recognizer gesture");
+    dispatch_event(alive, engine, id, event_name, "{" + data + "}");
 }
 
 } // namespace
@@ -88,10 +57,10 @@ void WidgetBridge::register_hover_event_api() {
             auto alive = callback_alive_;
             auto* engine = &engine_;
             it->second->on_hover_enter = [alive, engine, id]() {
-                safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'mouseenter', 0)", "hover enter");
+                dispatch_event(alive, engine, id, "mouseenter", "0");
             };
             it->second->on_hover_leave = [alive, engine, id]() {
-                safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'mouseleave', 0)", "hover leave");
+                dispatch_event(alive, engine, id, "mouseleave", "0");
             };
         }
         return choc::value::Value();
@@ -109,7 +78,7 @@ void WidgetBridge::register_pointer_event_api() {
             auto alive = callback_alive_;
             auto* engine = &engine_;
             it->second->on_click = [alive, engine, id]() {
-                safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'click', 0)", "click");
+                dispatch_event(alive, engine, id, "click", "0");
             };
         }
         return choc::value::Value();
@@ -125,8 +94,7 @@ void WidgetBridge::register_pointer_event_api() {
             auto alive = callback_alive_;
             auto* engine = &engine_;
             it->second->on_overlay_dismissed = [alive, engine, id]() {
-                safe_dispatch_eval(alive, engine,
-                    "__dispatch__('" + id + "', 'dismiss', 0)", "overlay dismiss");
+                dispatch_event(alive, engine, id, "dismiss", "0");
             };
             it->second->claim_overlay();
         }
@@ -150,7 +118,7 @@ void WidgetBridge::register_pointer_event_api() {
         // Idempotency: re-renders re-issue registerPointer for the same id.
         // Without this gate each call wraps the previous on_pointer_event,
         // stacking N lambdas and multiplying dispatch cost by render count.
-        if (!pointer_registered_.insert(id).second) {
+        if (!claim_pointer_registration(id)) {
             return choc::value::Value();
         }
         if (const char* dbg = std::getenv("PULP_DEBUG_POINTER"); dbg && *dbg) {
@@ -158,7 +126,7 @@ void WidgetBridge::register_pointer_event_api() {
         }
         auto it = widgets_.find(id);
         if (it != widgets_.end()) {
-            auto* w = it->second;
+            auto* w = it->second.view;
             auto alive = callback_alive_;
             auto* engine = &engine_;
             auto previous_pointer = w->on_pointer_event;
@@ -203,19 +171,15 @@ void WidgetBridge::register_pointer_event_api() {
                 if (const char* dbg = std::getenv("PULP_DEBUG_POINTER"); dbg && *dbg) {
                     std::cerr << "[bridge] pointer " << type << " id=" << id << "\n";
                 }
-                safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', '" + type + "', " + data + ")", "pointer");
+                dispatch_event(alive, engine, id, type, data);
 
                 std::string mouse_type;
                 if (type == "pointerdown") mouse_type = "mousedown";
                 else if (type == "pointerup") mouse_type = "mouseup";
                 else if (type == "pointercancel") mouse_type = "mouseup";
                 if (!mouse_type.empty()) {
-                    safe_dispatch_eval(alive, engine,
-                        "__dispatch__('" + id + "', '" + mouse_type + "', " + data + ")",
-                        "per-widget mouse");
-                    safe_dispatch_eval(alive, engine,
-                        "__dispatch__('__global__', '" + mouse_type + "', " + data + ")",
-                        "global mouse");
+                    dispatch_event(alive, engine, id, mouse_type, data);
+                    dispatch_event(alive, engine, "__global__", mouse_type, data);
                 }
             };
 
@@ -236,13 +200,9 @@ void WidgetBridge::register_pointer_event_api() {
                 if (const char* dbg = std::getenv("PULP_DEBUG_POINTER"); dbg && *dbg) {
                     std::cerr << "[bridge] drag id=" << id << " @(" << pos.x << "," << pos.y << ")\n";
                 }
-                safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'pointermove', " + data + ")", "pointermove");
-                safe_dispatch_eval(alive, engine,
-                    "__dispatch__('" + id + "', 'mousemove', " + data + ")",
-                    "per-widget mousemove");
-                safe_dispatch_eval(alive, engine,
-                    "__dispatch__('__global__', 'mousemove', " + data + ")",
-                    "global mousemove");
+                dispatch_event(alive, engine, id, "pointermove", data);
+                dispatch_event(alive, engine, id, "mousemove", data);
+                dispatch_event(alive, engine, "__global__", "mousemove", data);
             };
 
             // Identity-preserving pointermove for iOS multi-touch.
@@ -257,15 +217,9 @@ void WidgetBridge::register_pointer_event_api() {
                     "isPrimary:" + (me.isPrimary() ? "true" : "false") + ","
                     "pressure:" + std::to_string(me.pressure) + ","
                     "button:0,buttons:1}";
-                safe_dispatch_eval(alive, engine,
-                    "__dispatch__('" + id + "', 'pointermove', " + data + ")",
-                    "pointermove");
-                safe_dispatch_eval(alive, engine,
-                    "__dispatch__('" + id + "', 'mousemove', " + data + ")",
-                    "per-widget mousemove");
-                safe_dispatch_eval(alive, engine,
-                    "__dispatch__('__global__', 'mousemove', " + data + ")",
-                    "global mousemove");
+                dispatch_event(alive, engine, id, "pointermove", data);
+                dispatch_event(alive, engine, id, "mousemove", data);
+                dispatch_event(alive, engine, "__global__", "mousemove", data);
             };
         }
         return choc::value::Value();
@@ -292,7 +246,7 @@ void WidgetBridge::register_pointer_event_api() {
                     "clientX:" + std::to_string(ge.position.x) + ","
                     "clientY:" + std::to_string(ge.position.y) +
                     "}";
-                safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', '" + type + "', " + data + ")", "gesture");
+                dispatch_event(alive, engine, id, type, data);
             };
         }
         return choc::value::Value();
@@ -306,8 +260,7 @@ void WidgetBridge::register_pointer_event_api() {
         auto it = widgets_.find(id);
         if (it == widgets_.end() || !it->second)
             return;
-        const std::string gate = id + ":" + key;
-        if (!gesture_recognizer_registered_.insert(gate).second)
+        if (!claim_gesture_registration(id, key))
             return;
         it->second->add_gesture_recognizer(std::move(recognizer));
     };
@@ -498,7 +451,8 @@ void WidgetBridge::register_pointer_event_api() {
         auto it = widgets_.find(id);
         if (it != widgets_.end()) {
             it->second->set_pointer_capture(pointerId);
-            safe_dispatch_eval(engine_, "__dispatch__('" + id + "', 'gotpointercapture', {pointerId:" + std::to_string(pointerId) + "})", "gotpointercapture");
+            dispatch_event(engine_, id, "gotpointercapture",
+                           "{pointerId:" + std::to_string(pointerId) + "}");
         }
         return choc::value::Value();
     });
@@ -510,7 +464,8 @@ void WidgetBridge::register_pointer_event_api() {
         auto it = widgets_.find(id);
         if (it != widgets_.end()) {
             it->second->release_pointer_capture(pointerId);
-            safe_dispatch_eval(engine_, "__dispatch__('" + id + "', 'lostpointercapture', {pointerId:" + std::to_string(pointerId) + "})", "lostpointercapture");
+            dispatch_event(engine_, id, "lostpointercapture",
+                           "{pointerId:" + std::to_string(pointerId) + "}");
         }
         return choc::value::Value();
     });
@@ -522,7 +477,7 @@ void WidgetBridge::register_pointer_event_api() {
         root_.on_global_click = [alive, engine](const std::string& id, uint16_t mods) {
             bool cmd = (mods & (0x10 | 0x08)) != 0;
             if (cmd) {
-                safe_dispatch_eval(alive, engine, "__dispatch__('__inspect__', 'click', '" + id + "')", "inspect click");
+                dispatch_event(alive, engine, "__inspect__", "click", js_string_literal(id));
             }
         };
         return choc::value::Value();
@@ -538,12 +493,12 @@ void WidgetBridge::register_wheel_event_api() {
         // Idempotency: re-renders re-issue registerWheel for the same id.
         // Without this gate each call wraps the previous on_pointer_event,
         // stacking N lambdas and multiplying dispatch cost by render count.
-        if (!wheel_registered_.insert(id).second) {
+        if (!claim_wheel_registration(id)) {
             return choc::value::Value();
         }
         auto it = widgets_.find(id);
         if (it != widgets_.end()) {
-            auto* w = it->second;
+            auto* w = it->second.view;
             auto alive = callback_alive_;
             auto* engine = &engine_;
             auto previous_pointer = w->on_pointer_event;
@@ -560,7 +515,7 @@ void WidgetBridge::register_wheel_event_api() {
                     "clientX:" + std::to_string(me.window_position.x) + ","
                     "clientY:" + std::to_string(me.window_position.y) +
                     "}";
-                safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'wheel', " + data + ")", "wheel");
+                dispatch_event(alive, engine, id, "wheel", data);
             };
         }
         return choc::value::Value();

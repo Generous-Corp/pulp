@@ -169,6 +169,14 @@ bool parse_annotated_manifest(const std::string& json,
         e.note = static_cast<int>(num(ev, "note", static_cast<float>(e.note)));
         e.view_group = static_cast<int>(num(ev, "view_group",
                                             static_cast<float>(e.view_group)));
+        // `target_frame` round-trips through this lane but cannot resolve here:
+        // the sidecar manifest carries a single SVG and a single element list,
+        // with no surface for declaring additional frames, so nothing in this
+        // lane calls DesignFrameView::add_frame() and the generated view owns
+        // exactly one frame. A `swap` element therefore hit-tests but never
+        // changes frame — set_active_frame() ignores any index outside the
+        // installed frame set. Multi-frame swap links come from the Figma lane,
+        // which lowers a faithful_svg node's alternate_frames to add_frame().
         e.target_frame = static_cast<int>(num(ev, "target_frame",
                                               static_cast<float>(e.target_frame)));
 
@@ -265,6 +273,7 @@ std::string generate_view_source(const AnnotatedCaptureManifest& m,
         emit_i("selected_index", e.selected_index, 0);
         emit_i("note", e.note, -1);
         emit_i("view_group", e.view_group, -1);
+        // Emitted for schema parity; inert in this lane's single-frame view.
         emit_i("target_frame", e.target_frame, -1);
         if (!e.options.empty()) {
             o << "        e.options = {";

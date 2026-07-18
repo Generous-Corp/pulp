@@ -9,6 +9,10 @@ pulp_add_test_suite(pulp-test-ump-sysex7-reassembler
     SOURCES test_ump_sysex7_reassembler.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::midi)
 
+pulp_add_test_suite(pulp-test-ump-packet-cursor
+    SOURCES test_ump_packet_cursor.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::midi)
+
 pulp_add_test_suite(pulp-test-processor-defaults
     SOURCES test_processor_defaults.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::format)

@@ -6,6 +6,7 @@
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/max_block_contract.hpp>
+#include <pulp/format/mpe_expression.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/ara.hpp>
 #include <pulp/format/detail/midi_out_offset.hpp>
@@ -40,6 +41,73 @@ void resize_f64_boundary_scratch(
 using pulp::format::boundary::copy_f32_to_f64;
 using pulp::format::boundary::copy_f64_to_f32;
 using pulp::format::boundary::zero_f64;
+
+// Decode CLAP's host transport into the format-neutral boundary struct. The
+// shared adapter-boundary core then writes the ProcessContext transport fields,
+// derives the bar when the host supplies none, and diffs the change flags —
+// identically for every format. The CLAP-specific work is the flag /
+// fixed-point decode here.
+//
+// A null @p tr (the host supplied no transport) yields a default `valid=false`
+// transport, which leaves every ProcessContext transport field at its default.
+// @p sample_rate converts CLAP's seconds timeline to a sample position.
+boundary::HostTransport decode_clap_transport(const clap_event_transport_t* tr,
+                                              double sample_rate) {
+    boundary::HostTransport transport;
+    if (!tr) return transport;
+
+    const uint32_t flags = tr->flags;
+
+    transport.valid = true;
+    transport.is_playing = (flags & CLAP_TRANSPORT_IS_PLAYING) != 0;
+    transport.is_recording = (flags & CLAP_TRANSPORT_IS_RECORDING) != 0;
+    if (flags & CLAP_TRANSPORT_HAS_TEMPO) {
+        transport.has_tempo = true;
+        transport.tempo_bpm = tr->tempo;
+    }
+    if (flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
+        transport.has_beats = true;
+        transport.position_beats =
+            static_cast<double>(tr->song_pos_beats) / CLAP_BEATTIME_FACTOR;
+    }
+    if (flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE) {
+        const double seconds =
+            static_cast<double>(tr->song_pos_seconds) / CLAP_SECTIME_FACTOR;
+        transport.has_samples = true;
+        transport.position_samples = static_cast<int64_t>(
+            std::llround(seconds * sample_rate));
+    }
+    if (flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE) {
+        transport.has_time_sig = true;
+        transport.time_sig_numerator = static_cast<int>(tr->tsig_num);
+        transport.time_sig_denominator = static_cast<int>(tr->tsig_denom);
+    }
+
+    // Cycle / loop range. CLAP gates this on CLAP_TRANSPORT_IS_LOOP_ACTIVE;
+    // loop_start_beats / loop_end_beats are CLAP fixed-point `clap_beattime` so
+    // they convert through the same factor as song_pos_beats. The mapper only
+    // writes them when is_looping.
+    transport.is_looping = (flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE) != 0;
+    if (transport.is_looping) {
+        transport.loop_start_beats =
+            static_cast<double>(tr->loop_start_beats) / CLAP_BEATTIME_FACTOR;
+        transport.loop_end_beats =
+            static_cast<double>(tr->loop_end_beats) / CLAP_BEATTIME_FACTOR;
+    }
+
+    // Bar index. CLAP exposes `bar_number` directly (bar at song pos 0 has bar
+    // 0) whenever it supplies a beats timeline, so prefer that over deriving
+    // from beats; otherwise the mapper derives it.
+    if (flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
+        transport.has_host_bar = true;
+        transport.host_bar = static_cast<int64_t>(tr->bar_number);
+    }
+
+    // Host clock / SMPTE frame rate stay at the documented "host did not
+    // provide" sentinels (host_time_ns = 0, frame_rate = unknown): CLAP 1.2.2's
+    // `clap_event_transport` carries neither field.
+    return transport;
+}
 }
 
 static PulpClapPlugin* get_self(const clap_plugin_t* plugin) {
@@ -116,11 +184,10 @@ bool clap_init(const clap_plugin_t* plugin) {
 
     const auto caps = desc.effective_capabilities();
 
-    // Wire MPE sidecar when the plugin opts in.
-    self->mpe_enabled = caps.supports_mpe;
-    if (self->mpe_enabled) {
-        midi::bind_tracker_to_buffer(
-            self->mpe_tracker, self->mpe_buffer, self->mpe_current_sample_offset);
+    // Wire MPE sidecar when the plugin opts in. configure() binds the tracker's
+    // callbacks; the buffer is reserved + capacity-limited in activate().
+    self->mpe.configure(caps.supports_mpe);
+    if (self->mpe.enabled) {
         runtime::log_info("CLAP: MPE sidecar enabled for '{}'", desc.name);
     }
 
@@ -158,9 +225,8 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
                            kRealtimeMidiSysexPayloadCapacity);
     self->midi_in.set_realtime_capacity_limit(true);
     self->midi_out.set_realtime_capacity_limit(true);
-    self->mpe_buffer.reserve(kRealtimeMidiEventCapacity);
+    self->mpe.reserve(kRealtimeMidiEventCapacity);
     self->ump_buffer.reserve(kRealtimeMidiEventCapacity);
-    self->mpe_buffer.set_realtime_capacity_limit(true);
     self->ump_buffer.set_realtime_capacity_limit(true);
     self->param_snapshot.reserve(self->store.all_params().size());
     // Sized here, not on the audio thread: process() calls assign()/resize() to
@@ -270,31 +336,8 @@ bool clap_param_modulation_lane(const PulpClapPlugin& self,
     return state::validate_modulation_lane(lane).accepted;
 }
 
-clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process_t* process) {
-    auto* self = get_self(plugin);
-    if (!self->processor) return CLAP_PROCESS_ERROR;
-
-    auto num_samples = process->frames_count;
-    if (num_samples == 0) return CLAP_PROCESS_CONTINUE;
-
-    // Flush denormals to zero for the whole audio-callback body so quiet tails
-    // in recursive filter/reverb/feedback state can't stall the host's audio
-    // thread, then restore its prior FP mode on scope exit. See
-    // docs/guides/dsp-threading.md "Numeric mode".
-    pulp::signal::ScopedFlushDenormals flush_denormals;
-
-    // Max-block contract guard (defensive; well-behaved hosts never exceed the
-    // advertised max). The Processor and all its scratch buffers were sized in
-    // clap_activate() to self->max_buffer_size. A render larger than that would
-    // overrun them and corrupt DSP state. Per the shared max-block contract
-    // (max_block_contract.hpp) — matching VST3/AU-v3/AAX — clamp the processed
-    // region to the prepared max and zero the un-processable tail
-    // [max, original) on every main output channel below so it reads back as
-    // clean silence rather than garbage.
-    const auto original_num_samples = num_samples;
-    num_samples = static_cast<uint32_t>(clamp_block_to_prepared_max(
-        static_cast<int>(num_samples), self->max_buffer_size));
-
+static void clap_phase_decode_param_events(PulpClapPlugin* self,
+                                           const clap_process_t* process) {
     // Reset per-buffer modulation offsets before applying new events
     self->store.reset_all_mod();
     self->param_events.clear();
@@ -340,6 +383,639 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         }
     }
     self->param_events.sort();
+}
+
+static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
+                                          const clap_process_t* process) {
+    // Build MIDI from CLAP note events. Reuse per-instance scratch buffers so
+    // capacity survives warmup and the steady-state process path stays RT-safe.
+    auto& midi_in = self->midi_in;
+    clear_midi_event_buffers(*self);
+    auto* in_events = process->in_events;
+    const uint32_t event_count = in_events ? in_events->size(in_events) : 0;
+    // Track whether any native CLAP_EVENT_MIDI2 packet was delivered so we
+    // can skip the MIDI 1.0 → UMP synthesis path when the host is speaking
+    // UMP natively. The host still sends CLAP_EVENT_NOTE_* in parallel for
+    // note events; those populate midi_in for the MPE tracker and plugins
+    // that only consume MIDI 1.0.
+    bool host_delivered_ump = false;
+    // Clear the UMP sidecar up-front: we append to it directly when the
+    // host sends CLAP_EVENT_MIDI2 during the event loop below.
+    if (self->ump_enabled) {
+        self->ump_buffer.clear();
+    }
+    // One-time debug log when a plugin that didn't opt into MPE drops a
+    // note-expression event.
+    bool note_expression_drop_logged = false;
+    if (in_events) {
+        for (uint32_t i = 0; i < event_count; ++i) {
+            auto* hdr = in_events->get(in_events, i);
+            // Same CLAP event-space gate as the param/gesture loop above.
+            if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
+            if (hdr->type == CLAP_EVENT_NOTE_ON) {
+                const auto ev = load_event<clap_event_note_t>(hdr);
+                auto me = midi::MidiEvent::note_on(
+                    static_cast<uint8_t>(ev.channel),
+                    static_cast<uint8_t>(ev.key),
+                    static_cast<uint8_t>(ev.velocity * 127.0));
+                me.sample_offset = static_cast<int32_t>(hdr->time);
+                midi_in.add(me);
+            } else if (hdr->type == CLAP_EVENT_NOTE_OFF) {
+                const auto ev = load_event<clap_event_note_t>(hdr);
+                auto me = midi::MidiEvent::note_off(
+                    static_cast<uint8_t>(ev.channel),
+                    static_cast<uint8_t>(ev.key),
+                    static_cast<uint8_t>(ev.velocity * 127.0));
+                me.sample_offset = static_cast<int32_t>(hdr->time);
+                midi_in.add(me);
+            } else if (hdr->type == CLAP_EVENT_NOTE_CHOKE) {
+                // NOTE_CHOKE has no MIDI 1.0 equivalent (the host is
+                // telling the plugin "force-release this voice, no
+                // matching note-off is coming"). The closest analogue is
+                // a zero-velocity note-off on the same (channel, key).
+                // See clap/events.h around CLAP_EVENT_NOTE_CHOKE — the
+                // velocity field is spec-ignored.
+                const auto ev = load_event<clap_event_note_t>(hdr);
+                auto me = midi::MidiEvent::note_off(
+                    static_cast<uint8_t>(ev.channel),
+                    static_cast<uint8_t>(ev.key),
+                    0);
+                me.sample_offset = static_cast<int32_t>(hdr->time);
+                midi_in.add(me);
+            } else if (hdr->type == CLAP_EVENT_NOTE_EXPRESSION) {
+                // CLAP per-note expression. Pulp already has an MPE
+                // sidecar (`MpeBuffer`); map the expression to the
+                // closest MIDI 1.0 message and let the MPE tracker turn
+                // it into per-note state below. Only do this when the
+                // plugin opted into MPE — otherwise there is no sensible
+                // channel-wide interpretation (e.g. a per-note pressure
+                // would collapse onto whichever voice happens to share
+                // the channel). Plugins that consume UMP can access
+                // per-note expressions natively via the UMP sidecar;
+                // future work can extend that path.
+                const auto ev = load_event<clap_event_note_expression_t>(hdr);
+                if (!self->mpe.enabled) {
+                    if (!note_expression_drop_logged) {
+                        runtime::log_debug(
+                            "CLAP: dropping CLAP_EVENT_NOTE_EXPRESSION; "
+                            "plugin did not opt in to MPE");
+                        note_expression_drop_logged = true;
+                    }
+                } else {
+                    const auto channel = static_cast<uint8_t>(
+                        ev.channel < 0 ? 0 : ev.channel & 0x0F);
+                    // NOTE: ev.key selects the target note for per-note
+                    // routing. The MIDI 1.0 synthesis path below emits
+                    // channel-wide messages (channel AT, pitch bend,
+                    // CCs); the MpeVoiceTracker narrows them back to the
+                    // matching member-channel voice by convention. A
+                    // future pass can route via the UMP sidecar for true
+                    // per-note fidelity.
+                    const auto t = static_cast<int32_t>(hdr->time);
+                    midi::MidiEvent me{};
+                    bool emitted = false;
+                    switch (ev.expression_id) {
+                        case CLAP_NOTE_EXPRESSION_PRESSURE: {
+                            // 0..1 → channel aftertouch (7-bit).
+                            me = mpe::channel_pressure(channel, ev.value);
+                            me.sample_offset = t;
+                            emitted = true;
+                            break;
+                        }
+                        case CLAP_NOTE_EXPRESSION_TUNING: {
+                            // CLAP tuning is already a signed semitone
+                            // offset; the shared mapping normalizes it to
+                            // the default MPE member-bend range so the
+                            // MpeVoiceTracker expands it back correctly.
+                            me = mpe::pitch_bend_from_semitones(channel, ev.value);
+                            me.sample_offset = t;
+                            emitted = true;
+                            break;
+                        }
+                        case CLAP_NOTE_EXPRESSION_BRIGHTNESS: {
+                            // Brightness / timbre → CC 74.
+                            me = mpe::timbre_cc(channel, ev.value);
+                            me.sample_offset = t;
+                            emitted = true;
+                            break;
+                        }
+                        case CLAP_NOTE_EXPRESSION_VOLUME: {
+                            // Volume (log domain in CLAP spec) → CC 7.
+                            const double v = std::clamp(ev.value, 0.0, 4.0);
+                            const auto v7 = static_cast<uint8_t>(
+                                (v / 4.0) * 127.0 + 0.5);
+                            me = midi::MidiEvent::cc(channel, 7, v7);
+                            me.sample_offset = t;
+                            emitted = true;
+                            break;
+                        }
+                        case CLAP_NOTE_EXPRESSION_PAN: {
+                            // 0..1 → CC 10.
+                            const double v = std::clamp(ev.value, 0.0, 1.0);
+                            const auto v7 = static_cast<uint8_t>(v * 127.0 + 0.5);
+                            me = midi::MidiEvent::cc(channel, 10, v7);
+                            me.sample_offset = t;
+                            emitted = true;
+                            break;
+                        }
+                        case CLAP_NOTE_EXPRESSION_VIBRATO:
+                        case CLAP_NOTE_EXPRESSION_EXPRESSION:
+                        default:
+                            // Vibrato / expression and any future/unknown
+                            // IDs have no universally sensible MIDI 1.0
+                            // mapping; UMP-aware plugins should consume
+                            // these via the native UMP sidecar.
+                            break;
+                    }
+                    if (emitted) {
+                        midi_in.add(me);
+                    }
+                }
+            } else if (hdr->type == CLAP_EVENT_MIDI) {
+                // Raw MIDI 1.0 event — the host's fallback channel for
+                // CC, pitch bend, channel aftertouch, poly aftertouch,
+                // and program change. `port_index` is informational for
+                // multi-port plugins; single-port plugins accept all.
+                const auto ev = load_event<clap_event_midi_t>(hdr);
+                midi::MidiEvent me{
+                    choc::midi::ShortMessage(ev.data[0], ev.data[1], ev.data[2]),
+                    static_cast<int32_t>(hdr->time),
+                    0.0};
+                midi_in.add(me);
+            } else if (hdr->type == CLAP_EVENT_MIDI_SYSEX) {
+                // CLAP gives us a host-owned payload pointer. midi_in owns a
+                // preallocated payload pool so the copy below does not allocate
+                // on the process path.
+                const auto ev = load_event<clap_event_midi_sysex_t>(hdr);
+                if (ev.buffer && ev.size > 0) {
+                    midi_in.add_sysex_copy(
+                        ev.buffer,
+                        ev.size,
+                        static_cast<int32_t>(hdr->time),
+                        0.0);
+                }
+#if defined(CLAP_VERSION_GE) && CLAP_VERSION_GE(1, 1, 0)
+            } else if (hdr->type == CLAP_EVENT_MIDI2) {
+                // Native MIDI 2.0 UMP packet — append directly to the
+                // UMP sidecar when the plugin opted in. We flag
+                // host_delivered_ump so the MIDI 1.0 → UMP synthesis
+                // path below does not double-append the same voice
+                // events. CLAP_EVENT_MIDI2 is an enum value (not a
+                // #define), so we gate on CLAP_VERSION_GE(1,1,0), which
+                // is the release that introduced it.
+                if (self->ump_enabled) {
+                    const auto ev = load_event<clap_event_midi2_t>(hdr);
+                    midi::UmpPacket p{};
+                    p.words[0] = ev.data[0];
+                    p.words[1] = ev.data[1];
+                    p.words[2] = ev.data[2];
+                    p.words[3] = ev.data[3];
+                    p.word_count = midi::UmpPacket::size_for_type(p.message_type());
+                    self->ump_buffer.add(p, static_cast<int32_t>(hdr->time));
+                    host_delivered_ump = true;
+                }
+#endif
+            }
+        }
+    }
+    return host_delivered_ump;
+}
+
+static pulp::format::ProcessContext clap_phase_build_context(
+    PulpClapPlugin* self, const clap_process_t* process, uint32_t num_samples) {
+    // Process context
+    pulp::format::ProcessContext ctx;
+    ctx.sample_rate = self->sample_rate;
+    ctx.num_samples = static_cast<int>(num_samples);
+    ctx.process_mode = pulp::format::ProcessMode::Realtime;
+    ctx.render_speed_hint = pulp::format::RenderSpeedHint::Realtime;
+    const auto transport =
+        decode_clap_transport(process->transport, ctx.sample_rate);
+
+    // Apply the neutral transport and diff against the previous block. Stateful;
+    // updates `self->playhead_prev` in place.
+    boundary::apply_host_transport(ctx, transport, self->playhead_prev);
+    return ctx;
+}
+
+static void clap_phase_snapshot_params(
+    PulpClapPlugin* self, std::span<const state::ParamInfo> all_params) {
+    // Snapshot parameter values to detect plugin-side changes.
+    // INVARIANT: every scratch vector sized to all_params().size() here runs on
+    // the audio thread, so each must be reserve()d to that size in
+    // clap_activate() or the first block grow-and-allocates. Adding a new
+    // per-param scratch below requires a matching reserve there; the
+    // `ClapSlot::process is allocation-free` rt-safety test guards this.
+    boundary::snapshot_param_values(self->store, all_params,
+                                    self->param_snapshot);
+    self->output_param_has_event.assign(all_params.size(), 0);
+}
+
+static void clap_phase_prepare_sidecars(PulpClapPlugin* self,
+                                        bool host_delivered_ump) {
+    auto& midi_in = self->midi_in;
+    // MPE sidecar: run inbound MIDI through the voice tracker and attach
+    // the resulting expression buffer to the processor for the duration
+    // of this process() call. Events stay sample-ordered because midi_in
+    // is already in host delivery order.
+    self->mpe.run(*self->processor, midi_in);
+
+    // UMP sidecar. The host can deliver three event streams in the same
+    // block:
+    //   * CLAP_EVENT_NOTE_ON / _OFF — collected into midi_in.
+    //   * CLAP_EVENT_MIDI (raw MIDI 1.0 channel-voice + CC/PB/AT) —
+    //     also collected into midi_in.
+    //   * CLAP_EVENT_MIDI2 — appended directly to self->ump_buffer
+    //     during the event loop above (sets host_delivered_ump=true).
+    //
+    // CLAP does not require hosts to consolidate notes-vs-CCs into a
+    // single transport. A real host may emit notes via CLAP_EVENT_NOTE_*
+    // and CCs via CLAP_EVENT_MIDI2, expecting both halves to reach a
+    // supports_ump processor. The earlier "skip midi1_to_ump when any
+    // MIDI2 was delivered" branch silently dropped the note half of
+    // those mixed streams from the UMP buffer.
+    //
+    // Convert midi_in → UMP unconditionally so a supports_ump processor
+    // sees the union. The CLAP spec guarantees the host won't redundantly
+    // encode the same logical event in two transports, so duplicates
+    // don't arise from a spec-conformant host. host_delivered_ump is
+    // retained as a hint for future MIDI2-aware filtering (e.g. only
+    // synthesize event types not present in the native stream) but no
+    // longer gates the synthesis itself.
+    if (self->ump_enabled) {
+        midi::midi1_to_ump(midi_in, self->ump_buffer);
+        (void)host_delivered_ump;
+        self->processor->set_ump_input(&self->ump_buffer);
+    } else {
+        self->processor->set_ump_input(nullptr);
+    }
+    self->processor->set_param_events(&self->param_events);
+    self->output_param_events.clear();
+    self->processor->set_output_param_events(&self->output_param_events);
+}
+
+static void clap_phase_bypass_passthrough(
+    PulpClapPlugin* self, const clap_process_t* process,
+    int in_channels, int out_channels, bool main_output_f64,
+    uint32_t original_num_samples) {
+        // Bypass is pure host-buffer passthrough (no processor scratch), so it
+        // safely handles the full original block rather than the clamped count.
+        // The dry-delay line is sized independently of the block size (to the
+        // reported latency in clap_activate()), so it too processes the full
+        // original_num_samples — bypass stays a true 1:1 host passthrough with
+        // no clamp tail to zero.
+        const bool delayed = self->bypass.is_latency_compensated() &&
+            out_channels <= static_cast<int>(self->bypass.channel_capacity());
+        for (int ch = 0; ch < out_channels; ++ch) {
+            const bool has_input_channel =
+                process->audio_inputs_count > 0 &&
+                ch < in_channels &&
+                ch < static_cast<int>(process->audio_inputs[0].channel_count);
+            const double* in64 =
+                has_input_channel && process->audio_inputs[0].data64
+                    ? process->audio_inputs[0].data64[ch]
+                    : nullptr;
+            const float* in32 =
+                has_input_channel && process->audio_inputs[0].data32
+                    ? process->audio_inputs[0].data32[ch]
+                    : nullptr;
+
+            if (main_output_f64) {
+                auto* out64 = process->audio_outputs_count > 0 &&
+                                      process->audio_outputs[0].data64
+                                  ? process->audio_outputs[0].data64[ch]
+                                  : nullptr;
+                if (out64 == nullptr) continue;
+                if (in64 != nullptr) {
+                    if (delayed) {
+                        for (uint32_t n = 0; n < original_num_samples; ++n) {
+                            out64[n] = static_cast<double>(self->bypass.process_sample(
+                                static_cast<float>(in64[n]),
+                                static_cast<std::size_t>(ch)));
+                        }
+                    } else {
+                        std::memcpy(out64, in64,
+                                    sizeof(double) * original_num_samples);
+                    }
+                } else if (in32 != nullptr) {
+                    if (delayed) {
+                        for (uint32_t n = 0; n < original_num_samples; ++n) {
+                            out64[n] = static_cast<double>(self->bypass.process_sample(
+                                in32[n], static_cast<std::size_t>(ch)));
+                        }
+                    } else {
+                        copy_f32_to_f64(in32, out64, original_num_samples);
+                    }
+                } else {
+                    zero_f64(out64, original_num_samples);
+                }
+                continue;
+            }
+
+            auto* out32 = process->audio_outputs_count > 0 &&
+                                  process->audio_outputs[0].data32
+                              ? process->audio_outputs[0].data32[ch]
+                              : nullptr;
+            if (out32 == nullptr) continue;
+            if (in32 != nullptr || in64 != nullptr) {
+                if (delayed) {
+                    // The plugin path is host-compensated by its reported
+                    // latency, so the bypassed dry signal must be delayed by
+                    // the same amount to stay sample-aligned with the host's
+                    // plugin-delay-compensation. The delay line is fed only
+                    // while bypassed: a one-time transient in the first
+                    // latency samples after engaging bypass is accepted
+                    // (bypass toggling is a user action, not sample-critical)
+                    // in exchange for a zero-cost non-bypassed path. Steady
+                    // state emits input[n - latency].
+                    for (uint32_t n = 0; n < original_num_samples; ++n) {
+                        const float sample = in32 ? in32[n] : static_cast<float>(in64[n]);
+                        out32[n] = self->bypass.process_sample(
+                            sample, static_cast<std::size_t>(ch));
+                    }
+                } else if (in32 != nullptr) {
+                    std::memcpy(out32, in32,
+                                sizeof(float) * original_num_samples);
+                } else {
+                    copy_f64_to_f32(in64, out32, original_num_samples);
+                }
+            } else {
+                std::memset(out32, 0, sizeof(float) * original_num_samples);
+            }
+        }
+        self->processor->set_sidechain(nullptr);
+}
+
+static void clap_phase_run_processor(
+    PulpClapPlugin* self, const clap_process_t* process,
+    ProcessBuffers& process_buffers, ProcessBuffers64& process_buffers64,
+    const pulp::format::ProcessContext& ctx, bool native_f64,
+    int out_channels, bool main_output_f64, uint32_t routed_output_buses,
+    const std::array<bool, kMaxOutputBuses - 1>& aux_output_f64,
+    const std::array<ProcessBusBufferView<float>, kMaxOutputBuses>& output_buses,
+    uint32_t num_samples) {
+    auto& midi_in = self->midi_in;
+    auto& midi_out = self->midi_out;
+        pulp::runtime::ScopedNoAlloc no_alloc_guard;
+        if (native_f64) {
+            self->processor->process_f64(process_buffers64, midi_in, midi_out, ctx);
+        } else {
+            self->processor->process(process_buffers, midi_in, midi_out, ctx);
+        }
+        if (!native_f64 && main_output_f64 && process->audio_outputs_count > 0 &&
+            process->audio_outputs[0].data64) {
+            auto& bus = process->audio_outputs[0];
+            for (int ch = 0; ch < out_channels; ++ch) {
+                copy_f32_to_f64(self->output_ptrs[ch], bus.data64[ch], num_samples);
+            }
+        }
+        for (uint32_t b = 1; b < routed_output_buses; ++b) {
+            if (native_f64 || !aux_output_f64[b - 1]) continue;
+            auto& bus = process->audio_outputs[b];
+            if (!bus.data64) continue;
+            // Bounded by the routed view, not the host channel count: only
+            // these channels have scratch wired (and zeroed) this block. Host
+            // channels outside the view — including a whole bus demoted by a
+            // null mid-bus channel pointer — keep the direct data64 pre-zero
+            // from block start, and a demoted bus's stale scratch pointers are
+            // never dereferenced.
+            const auto aux_channels =
+                static_cast<int>(output_buses[b].buffer.num_channels());
+            for (int ch = 0; ch < aux_channels; ++ch) {
+                copy_f32_to_f64(self->aux_output_ptrs[b - 1][ch],
+                                bus.data64[ch],
+                                num_samples);
+            }
+        }
+}
+
+static void clap_phase_clear_constant_mask(const clap_process_t* process) {
+    // constant_mask is the plugin's promise about the block it just wrote: a set
+    // bit says "every frame of this channel holds the value in sample 0". CLAP
+    // permits in-place buffers, so an output buffer can arrive carrying the mask
+    // an upstream plugin (or the host) set on the input it aliases. Nothing above
+    // writes the mask, so leaving it alone would let a stale bit make a host read
+    // one sample of a channel that in fact varies — silent, and worst on CV-rate
+    // outputs, where the whole signal is the variation. Clearing it is always
+    // sound: 0 means "no channel is known constant", which is the truth for every
+    // block a Processor writes, and it costs one store per bus. Every output bus
+    // is fully written above — bus 0 by the Processor (or the bypass copy), the
+    // rest pre-zeroed — so no bus is exempt.
+    for (uint32_t b = 0; b < process->audio_outputs_count; ++b) {
+        process->audio_outputs[b].constant_mask = 0;
+    }
+}
+
+static void clap_phase_emit_output(
+    PulpClapPlugin* self, const clap_process_t* process,
+    std::span<const state::ParamInfo> all_params) {
+    auto& midi_out = self->midi_out;
+    // Emit output parameter events for any values the plugin changed,
+    // so the host can record automation
+    auto* out_events = process->out_events;
+    if (out_events) {
+        // Sort the sample-accurate explicit output events (offset ascending) and
+        // mark the skip-set so the offset-0 snapshot fallback below does not
+        // double-report a param that already emitted explicit events. Both the
+        // queue and the skip-set were sized at block start — no allocation here.
+        self->output_param_events.sort();
+        const int32_t out_frames = static_cast<int32_t>(process->frames_count);
+        const int32_t out_last_frame = out_frames > 0 ? out_frames - 1 : 0;
+        for (auto it = self->output_param_events.begin();
+             it != self->output_param_events.end(); ++it) {
+            const std::size_t idx =
+                boundary::find_param_index(all_params, it->param_id);
+            if (idx != boundary::kParamIndexNotFound) {
+                self->output_param_has_event[idx] = 1;
+            }
+        }
+        // (1) Snapshot-diff fallback, at time 0, for params WITHOUT explicit
+        // events. These are all at offset 0 (the earliest time), so emitting
+        // them before the offset-ordered merge below preserves CLAP's global
+        // ascending-time contract.
+        for (std::size_t i = 0; i < all_params.size(); ++i) {
+            if (self->output_param_has_event[i]) continue;
+            float current = self->store.get_value(all_params[i].id);
+            if (boundary::changed_since_snapshot(current,
+                                                 self->param_snapshot[i])) {
+                clap_event_param_value_t ev{};
+                ev.header.size = sizeof(ev);
+                ev.header.type = CLAP_EVENT_PARAM_VALUE;
+                ev.header.time = 0;
+                ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+                ev.header.flags = 0;
+                ev.param_id = all_params[i].id;
+                ev.cookie = nullptr;
+                ev.note_id = -1;
+                ev.port_index = -1;
+                ev.channel = -1;
+                ev.key = -1;
+                ev.value = static_cast<double>(current);
+                out_events->try_push(out_events, &ev.header);
+            }
+        }
+
+        // Bridge processor-emitted MIDI (midi_out) back to the host.
+        // Before this code, plugins that produced CC, pitch bend, channel
+        // aftertouch, program change, etc. had those events silently
+        // dropped by the CLAP adapter.
+        //
+        // CLAP's out_events contract requires events to be pushed in
+        // ascending sample-offset order across ALL event types in the
+        // block. The earlier two-pass shape (all shorts, then all sysex)
+        // sorted shorts internally but emitted the entire sysex tail
+        // afterward, which violated the contract whenever a sysex
+        // scheduled at offset N preceded a short scheduled at offset N+1. Hosts
+        // that strictly enforce the ordering reject out-of-order events;
+        // lenient hosts get wrong timing.
+        //
+        // Merge the two streams in (sample_offset, kind) order and
+        // push as we go. midi_out's short and sysex vectors are each
+        // already sorted (sort() runs below for shorts; sysex entries
+        // are appended in source-sample order by the processor); we
+        // walk them with a three-cursor merge that ALSO interleaves the
+        // sample-accurate output parameter events (self->output_param_events,
+        // already sorted above), so params, shorts, and sysex all emit in one
+        // globally ascending sample-offset stream.
+        midi_out.sort();
+        const auto& shorts = midi_out;
+        const auto& sysexes = midi_out.sysex();
+        std::size_t pi = 0;        // output-param cursor
+        std::size_t si = 0;        // short cursor
+        std::size_t xi = 0;        // sysex cursor
+        const std::size_t p_end = self->output_param_events.size();
+        const std::size_t s_end = shorts.size();
+        const std::size_t x_end = sysexes.size();
+        // Shared cross-format outbound-offset contract: offset N in -> N out;
+        // a negative offset clamps to the block start (see
+        // detail/midi_out_offset.hpp + test_midi_out_offset_parity.cpp). Kept as
+        // int32 here so the ascending-offset merge comparisons below stay signed.
+        auto sample_at = [](int32_t off) -> int32_t {
+            return static_cast<int32_t>(detail::clap_output_offset(off));
+        };
+        auto param_at = [&](std::size_t i) -> int32_t {
+            int32_t off = self->output_param_events.begin()[i].sample_offset;
+            if (off < 0) return 0;
+            if (off > out_last_frame) return out_last_frame;  // clamp into block
+            return off;
+        };
+
+        auto emit_param = [&](const state::ParameterEvent& pe, int32_t off) {
+            clap_event_param_value_t ev{};
+            ev.header.size = sizeof(ev);
+            ev.header.type = CLAP_EVENT_PARAM_VALUE;
+            ev.header.time = static_cast<uint32_t>(off);
+            ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+            ev.header.flags = 0;
+            ev.param_id = pe.param_id;
+            ev.cookie = nullptr;
+            ev.note_id = -1;
+            ev.port_index = -1;
+            ev.channel = -1;
+            ev.key = -1;
+            ev.value = static_cast<double>(pe.value);  // CLAP param values are plain domain
+            out_events->try_push(out_events, &ev.header);
+        };
+
+        auto emit_short = [&](const midi::MidiEvent& me) {
+            clap_event_midi_t ev{};
+            ev.header.size = sizeof(ev);
+            ev.header.type = CLAP_EVENT_MIDI;
+            ev.header.time = static_cast<uint32_t>(sample_at(me.sample_offset));
+            ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+            ev.header.flags = 0;
+            ev.port_index = 0;
+            ev.data[0] = me.data()[0];
+            ev.data[1] = me.size() > 1 ? me.data()[1] : uint8_t{0};
+            ev.data[2] = me.size() > 2 ? me.data()[2] : uint8_t{0};
+            out_events->try_push(out_events, &ev.header);
+        };
+
+        auto emit_sysex = [&](const auto& se) {
+            if (se.data.empty()) return;
+            clap_event_midi_sysex_t ev{};
+            ev.header.size = sizeof(ev);
+            ev.header.type = CLAP_EVENT_MIDI_SYSEX;
+            ev.header.time = static_cast<uint32_t>(sample_at(se.sample_offset));
+            ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+            ev.header.flags = 0;
+            ev.port_index = 0;
+            ev.buffer = se.data.data();
+            ev.size = static_cast<uint32_t>(se.data.size());
+            out_events->try_push(out_events, &ev.header);
+        };
+
+        while (pi < p_end || si < s_end || xi < x_end) {
+            // Peek the next offset of each stream (INT32_MAX = exhausted), then
+            // emit the earliest. Params win ties (params <= shorts <= sysex),
+            // which is a valid non-decreasing order for equal offsets.
+            const int32_t po = pi < p_end ? param_at(pi) : INT32_MAX;
+            const int32_t so =
+                si < s_end ? sample_at(shorts.begin()[si].sample_offset) : INT32_MAX;
+            const int32_t xo =
+                xi < x_end ? sample_at(sysexes[xi].sample_offset) : INT32_MAX;
+            if (pi < p_end && po <= so && po <= xo) {
+                emit_param(self->output_param_events.begin()[pi], po);
+                ++pi;
+            } else if (si < s_end && so <= xo) {
+                emit_short(shorts.begin()[si]);
+                ++si;
+            } else {
+                emit_sysex(sysexes[xi]);
+                ++xi;
+            }
+        }
+    }
+}
+
+static void clap_phase_request_callback(PulpClapPlugin* self) {
+    // If the processor flagged a latency / tail change during this block, ask
+    // the host to schedule a main-thread callback. The actual
+    // `clap_host_latency->changed()` / `clap_host_tail->changed()` push runs
+    // from clap_on_main_thread() so we never call host APIs from process().
+    // Peek (don't consume) so the on_main_thread handler still sees the same
+    // edge.
+    // Same mechanism carries a processor's request for a NON-REALTIME tick.
+    // CLAP hands parameter changes to the plugin as events inside process(), so
+    // a processor with no worker thread of its own (every wasm build: a WebCLAP
+    // module has no `std::thread`) can only get off the audio thread by asking
+    // the host for a main-thread callback. `non_realtime_tick_pending()` is
+    // RT-safe by contract and defaults to false, so plugins that don't need it
+    // pay one non-virtual-dispatch-free false per block.
+    if (self->host && self->host->request_callback && self->processor &&
+        (self->processor->latency_change_pending() ||
+         self->processor->tail_change_pending() ||
+         self->processor->non_realtime_tick_pending())) {
+        self->host->request_callback(self->host);
+    }
+}
+
+clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process_t* process) {
+    auto* self = get_self(plugin);
+    if (!self->processor) return CLAP_PROCESS_ERROR;
+
+    auto num_samples = process->frames_count;
+    if (num_samples == 0) return CLAP_PROCESS_CONTINUE;
+
+    // Flush denormals to zero for the whole audio-callback body so quiet tails
+    // in recursive filter/reverb/feedback state can't stall the host's audio
+    // thread, then restore its prior FP mode on scope exit. See
+    // docs/guides/dsp-threading.md "Numeric mode".
+    pulp::signal::ScopedFlushDenormals flush_denormals;
+
+    // Max-block contract guard (defensive; well-behaved hosts never exceed the
+    // advertised max). The Processor and all its scratch buffers were sized in
+    // clap_activate() to self->max_buffer_size. A render larger than that would
+    // overrun them and corrupt DSP state. Per the shared max-block contract
+    // (max_block_contract.hpp) — matching VST3/AU-v3/AAX — clamp the processed
+    // region to the prepared max and zero the un-processable tail
+    // [max, original) on every main output channel below so it reads back as
+    // clean silence rather than garbage.
+    const auto original_num_samples = num_samples;
+    num_samples = static_cast<uint32_t>(clamp_block_to_prepared_max(
+        static_cast<int>(num_samples), self->max_buffer_size));
+
+    clap_phase_decode_param_events(self, process);
 
     // Build audio buffer views (no allocation — uses pre-allocated arrays).
     // Bus 0 routes to the main input/output; bus 1 (when present) routes to
@@ -666,342 +1342,14 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         }
     }
 
-    // Build MIDI from CLAP note events. Reuse per-instance scratch buffers so
-    // capacity survives warmup and the steady-state process path stays RT-safe.
-    auto& midi_in = self->midi_in;
-    auto& midi_out = self->midi_out;
-    clear_midi_event_buffers(*self);
-    const uint32_t event_count = in_events ? in_events->size(in_events) : 0;
-    // Track whether any native CLAP_EVENT_MIDI2 packet was delivered so we
-    // can skip the MIDI 1.0 → UMP synthesis path when the host is speaking
-    // UMP natively. The host still sends CLAP_EVENT_NOTE_* in parallel for
-    // note events; those populate midi_in for the MPE tracker and plugins
-    // that only consume MIDI 1.0.
-    bool host_delivered_ump = false;
-    // Clear the UMP sidecar up-front: we append to it directly when the
-    // host sends CLAP_EVENT_MIDI2 during the event loop below.
-    if (self->ump_enabled) {
-        self->ump_buffer.clear();
-    }
-    // One-time debug log when a plugin that didn't opt into MPE drops a
-    // note-expression event.
-    bool note_expression_drop_logged = false;
-    if (in_events) {
-        for (uint32_t i = 0; i < event_count; ++i) {
-            auto* hdr = in_events->get(in_events, i);
-            // Same CLAP event-space gate as the param/gesture loop above.
-            if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
-            if (hdr->type == CLAP_EVENT_NOTE_ON) {
-                const auto ev = load_event<clap_event_note_t>(hdr);
-                auto me = midi::MidiEvent::note_on(
-                    static_cast<uint8_t>(ev.channel),
-                    static_cast<uint8_t>(ev.key),
-                    static_cast<uint8_t>(ev.velocity * 127.0));
-                me.sample_offset = static_cast<int32_t>(hdr->time);
-                midi_in.add(me);
-            } else if (hdr->type == CLAP_EVENT_NOTE_OFF) {
-                const auto ev = load_event<clap_event_note_t>(hdr);
-                auto me = midi::MidiEvent::note_off(
-                    static_cast<uint8_t>(ev.channel),
-                    static_cast<uint8_t>(ev.key),
-                    static_cast<uint8_t>(ev.velocity * 127.0));
-                me.sample_offset = static_cast<int32_t>(hdr->time);
-                midi_in.add(me);
-            } else if (hdr->type == CLAP_EVENT_NOTE_CHOKE) {
-                // NOTE_CHOKE has no MIDI 1.0 equivalent (the host is
-                // telling the plugin "force-release this voice, no
-                // matching note-off is coming"). The closest analogue is
-                // a zero-velocity note-off on the same (channel, key).
-                // See clap/events.h around CLAP_EVENT_NOTE_CHOKE — the
-                // velocity field is spec-ignored.
-                const auto ev = load_event<clap_event_note_t>(hdr);
-                auto me = midi::MidiEvent::note_off(
-                    static_cast<uint8_t>(ev.channel),
-                    static_cast<uint8_t>(ev.key),
-                    0);
-                me.sample_offset = static_cast<int32_t>(hdr->time);
-                midi_in.add(me);
-            } else if (hdr->type == CLAP_EVENT_NOTE_EXPRESSION) {
-                // CLAP per-note expression. Pulp already has an MPE
-                // sidecar (`MpeBuffer`); map the expression to the
-                // closest MIDI 1.0 message and let the MPE tracker turn
-                // it into per-note state below. Only do this when the
-                // plugin opted into MPE — otherwise there is no sensible
-                // channel-wide interpretation (e.g. a per-note pressure
-                // would collapse onto whichever voice happens to share
-                // the channel). Plugins that consume UMP can access
-                // per-note expressions natively via the UMP sidecar;
-                // future work can extend that path.
-                const auto ev = load_event<clap_event_note_expression_t>(hdr);
-                if (!self->mpe_enabled) {
-                    if (!note_expression_drop_logged) {
-                        runtime::log_debug(
-                            "CLAP: dropping CLAP_EVENT_NOTE_EXPRESSION; "
-                            "plugin did not opt in to MPE");
-                        note_expression_drop_logged = true;
-                    }
-                } else {
-                    const auto channel = static_cast<uint8_t>(
-                        ev.channel < 0 ? 0 : ev.channel & 0x0F);
-                    // NOTE: ev.key selects the target note for per-note
-                    // routing. The MIDI 1.0 synthesis path below emits
-                    // channel-wide messages (channel AT, pitch bend,
-                    // CCs); the MpeVoiceTracker narrows them back to the
-                    // matching member-channel voice by convention. A
-                    // future pass can route via the UMP sidecar for true
-                    // per-note fidelity.
-                    const auto t = static_cast<int32_t>(hdr->time);
-                    midi::MidiEvent me{};
-                    bool emitted = false;
-                    switch (ev.expression_id) {
-                        case CLAP_NOTE_EXPRESSION_PRESSURE: {
-                            // 0..1 → channel aftertouch (7-bit).
-                            const double v = std::clamp(ev.value, 0.0, 1.0);
-                            const uint8_t v7 = static_cast<uint8_t>(v * 127.0 + 0.5);
-                            me = {choc::midi::ShortMessage(
-                                static_cast<uint8_t>(0xD0 | (channel & 0x0F)),
-                                v7, 0), t, 0.0};
-                            emitted = true;
-                            break;
-                        }
-                        case CLAP_NOTE_EXPRESSION_TUNING: {
-                            // ±120 semitones → 14-bit pitch bend clamped
-                            // to ±2 semitones default MPE member range.
-                            // We normalize the raw value to the ±48st
-                            // member-bend default so the MpeVoiceTracker
-                            // expands it back correctly.
-                            const double norm = std::clamp(
-                                ev.value / static_cast<double>(
-                                    midi::MpeVoiceTracker::kDefaultMemberBendSemitones),
-                                -1.0, 1.0);
-                            const int bend14 = static_cast<int>(
-                                std::lround(8192.0 + norm * 8191.0));
-                            const auto pb = static_cast<uint16_t>(
-                                std::clamp(bend14, 0, 16383));
-                            me = midi::MidiEvent::pitch_bend(channel, pb);
-                            me.sample_offset = t;
-                            emitted = true;
-                            break;
-                        }
-                        case CLAP_NOTE_EXPRESSION_BRIGHTNESS: {
-                            // Brightness / timbre → CC 74.
-                            const double v = std::clamp(ev.value, 0.0, 1.0);
-                            const auto v7 = static_cast<uint8_t>(v * 127.0 + 0.5);
-                            me = midi::MidiEvent::cc(channel, 74, v7);
-                            me.sample_offset = t;
-                            emitted = true;
-                            break;
-                        }
-                        case CLAP_NOTE_EXPRESSION_VOLUME: {
-                            // Volume (log domain in CLAP spec) → CC 7.
-                            const double v = std::clamp(ev.value, 0.0, 4.0);
-                            const auto v7 = static_cast<uint8_t>(
-                                (v / 4.0) * 127.0 + 0.5);
-                            me = midi::MidiEvent::cc(channel, 7, v7);
-                            me.sample_offset = t;
-                            emitted = true;
-                            break;
-                        }
-                        case CLAP_NOTE_EXPRESSION_PAN: {
-                            // 0..1 → CC 10.
-                            const double v = std::clamp(ev.value, 0.0, 1.0);
-                            const auto v7 = static_cast<uint8_t>(v * 127.0 + 0.5);
-                            me = midi::MidiEvent::cc(channel, 10, v7);
-                            me.sample_offset = t;
-                            emitted = true;
-                            break;
-                        }
-                        case CLAP_NOTE_EXPRESSION_VIBRATO:
-                        case CLAP_NOTE_EXPRESSION_EXPRESSION:
-                        default:
-                            // Vibrato / expression and any future/unknown
-                            // IDs have no universally sensible MIDI 1.0
-                            // mapping; UMP-aware plugins should consume
-                            // these via the native UMP sidecar.
-                            break;
-                    }
-                    if (emitted) {
-                        midi_in.add(me);
-                    }
-                }
-            } else if (hdr->type == CLAP_EVENT_MIDI) {
-                // Raw MIDI 1.0 event — the host's fallback channel for
-                // CC, pitch bend, channel aftertouch, poly aftertouch,
-                // and program change. `port_index` is informational for
-                // multi-port plugins; single-port plugins accept all.
-                const auto ev = load_event<clap_event_midi_t>(hdr);
-                midi::MidiEvent me{
-                    choc::midi::ShortMessage(ev.data[0], ev.data[1], ev.data[2]),
-                    static_cast<int32_t>(hdr->time),
-                    0.0};
-                midi_in.add(me);
-            } else if (hdr->type == CLAP_EVENT_MIDI_SYSEX) {
-                // CLAP gives us a host-owned payload pointer. midi_in owns a
-                // preallocated payload pool so the copy below does not allocate
-                // on the process path.
-                const auto ev = load_event<clap_event_midi_sysex_t>(hdr);
-                if (ev.buffer && ev.size > 0) {
-                    midi_in.add_sysex_copy(
-                        ev.buffer,
-                        ev.size,
-                        static_cast<int32_t>(hdr->time),
-                        0.0);
-                }
-#if defined(CLAP_VERSION_GE) && CLAP_VERSION_GE(1, 1, 0)
-            } else if (hdr->type == CLAP_EVENT_MIDI2) {
-                // Native MIDI 2.0 UMP packet — append directly to the
-                // UMP sidecar when the plugin opted in. We flag
-                // host_delivered_ump so the MIDI 1.0 → UMP synthesis
-                // path below does not double-append the same voice
-                // events. CLAP_EVENT_MIDI2 is an enum value (not a
-                // #define), so we gate on CLAP_VERSION_GE(1,1,0), which
-                // is the release that introduced it.
-                if (self->ump_enabled) {
-                    const auto ev = load_event<clap_event_midi2_t>(hdr);
-                    midi::UmpPacket p{};
-                    p.words[0] = ev.data[0];
-                    p.words[1] = ev.data[1];
-                    p.words[2] = ev.data[2];
-                    p.words[3] = ev.data[3];
-                    p.word_count = midi::UmpPacket::size_for_type(p.message_type());
-                    self->ump_buffer.add(p, static_cast<int32_t>(hdr->time));
-                    host_delivered_ump = true;
-                }
-#endif
-            }
-        }
-    }
+    const bool host_delivered_ump = clap_phase_decode_midi_events(self, process);
 
-    // Process context
-    pulp::format::ProcessContext ctx;
-    ctx.sample_rate = self->sample_rate;
-    ctx.num_samples = static_cast<int>(num_samples);
-    ctx.process_mode = pulp::format::ProcessMode::Realtime;
-    ctx.render_speed_hint = pulp::format::RenderSpeedHint::Realtime;
-    // Decode CLAP's host transport into the format-neutral boundary struct;
-    // the shared adapter-boundary core (SF-1) then writes the ProcessContext
-    // transport fields, derives the bar when the host supplies none, and diffs
-    // the change-flags — identically for every format. The CLAP-specific work
-    // is only the flag/fixed-point decode below.
-    boundary::HostTransport transport;
-    if (process->transport) {
-        const auto* tr = process->transport;
-        const uint32_t flags = tr->flags;
+    auto ctx = clap_phase_build_context(self, process, num_samples);
 
-        transport.valid = true;
-        transport.is_playing = (flags & CLAP_TRANSPORT_IS_PLAYING) != 0;
-        transport.is_recording = (flags & CLAP_TRANSPORT_IS_RECORDING) != 0;
-        if (flags & CLAP_TRANSPORT_HAS_TEMPO) {
-            transport.has_tempo = true;
-            transport.tempo_bpm = tr->tempo;
-        }
-        if (flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
-            transport.has_beats = true;
-            transport.position_beats =
-                static_cast<double>(tr->song_pos_beats) / CLAP_BEATTIME_FACTOR;
-        }
-        if (flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE) {
-            const double seconds =
-                static_cast<double>(tr->song_pos_seconds) / CLAP_SECTIME_FACTOR;
-            transport.has_samples = true;
-            transport.position_samples = static_cast<int64_t>(
-                std::llround(seconds * ctx.sample_rate));
-        }
-        if (flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE) {
-            transport.has_time_sig = true;
-            transport.time_sig_numerator = static_cast<int>(tr->tsig_num);
-            transport.time_sig_denominator = static_cast<int>(tr->tsig_denom);
-        }
-
-        // Cycle / loop range. CLAP gates this on CLAP_TRANSPORT_IS_LOOP_ACTIVE;
-        // loop_start_beats / loop_end_beats are CLAP fixed-point
-        // `clap_beattime` so they convert through the same factor as
-        // song_pos_beats. The mapper only writes them when is_looping.
-        transport.is_looping = (flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE) != 0;
-        if (transport.is_looping) {
-            transport.loop_start_beats =
-                static_cast<double>(tr->loop_start_beats) / CLAP_BEATTIME_FACTOR;
-            transport.loop_end_beats =
-                static_cast<double>(tr->loop_end_beats) / CLAP_BEATTIME_FACTOR;
-        }
-
-        // Bar index. CLAP exposes `bar_number` directly (bar at song pos 0 has
-        // bar 0) whenever it supplies a beats timeline, so prefer that over
-        // deriving from beats; otherwise the mapper derives it.
-        if (flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
-            transport.has_host_bar = true;
-            transport.host_bar = static_cast<int64_t>(tr->bar_number);
-        }
-
-        // Host clock / SMPTE frame rate stay at the documented "host did not
-        // provide" sentinels (host_time_ns = 0, frame_rate = unknown): CLAP
-        // 1.2.2's `clap_event_transport` carries neither field.
-    }
-
-    // Apply the neutral transport and diff against the previous block. Stateful;
-    // updates `self->playhead_prev` in place.
-    boundary::apply_host_transport(ctx, transport, self->playhead_prev);
-
-    // Snapshot parameter values to detect plugin-side changes.
-    // INVARIANT: every scratch vector sized to all_params().size() here runs on
-    // the audio thread, so each must be reserve()d to that size in
-    // clap_activate() or the first block grow-and-allocates. Adding a new
-    // per-param scratch below requires a matching reserve there; the
-    // `ClapSlot::process is allocation-free` rt-safety test guards this.
     auto all_params = self->store.all_params();
-    self->param_snapshot.resize(all_params.size());
-    self->output_param_has_event.assign(all_params.size(), 0);
-    for (std::size_t i = 0; i < all_params.size(); ++i) {
-        self->param_snapshot[i] = self->store.get_value(all_params[i].id);
-    }
+    clap_phase_snapshot_params(self, all_params);
 
-    // MPE sidecar: run inbound MIDI through the voice tracker and attach
-    // the resulting expression buffer to the processor for the duration
-    // of this process() call. Events stay sample-ordered because midi_in
-    // is already in host delivery order.
-    if (self->mpe_enabled) {
-        self->mpe_buffer.clear();
-        for (const auto& ev : midi_in) {
-            self->mpe_current_sample_offset = ev.sample_offset;
-            self->mpe_tracker.process(ev);
-        }
-        self->processor->set_mpe_input(&self->mpe_buffer);
-    } else {
-        self->processor->set_mpe_input(nullptr);
-    }
-
-    // UMP sidecar. The host can deliver three event streams in the same
-    // block:
-    //   * CLAP_EVENT_NOTE_ON / _OFF — collected into midi_in.
-    //   * CLAP_EVENT_MIDI (raw MIDI 1.0 channel-voice + CC/PB/AT) —
-    //     also collected into midi_in.
-    //   * CLAP_EVENT_MIDI2 — appended directly to self->ump_buffer
-    //     during the event loop above (sets host_delivered_ump=true).
-    //
-    // CLAP does not require hosts to consolidate notes-vs-CCs into a
-    // single transport. A real host may emit notes via CLAP_EVENT_NOTE_*
-    // and CCs via CLAP_EVENT_MIDI2, expecting both halves to reach a
-    // supports_ump processor. The earlier "skip midi1_to_ump when any
-    // MIDI2 was delivered" branch silently dropped the note half of
-    // those mixed streams from the UMP buffer.
-    //
-    // Convert midi_in → UMP unconditionally so a supports_ump processor
-    // sees the union. The CLAP spec guarantees the host won't redundantly
-    // encode the same logical event in two transports, so duplicates
-    // don't arise from a spec-conformant host. host_delivered_ump is
-    // retained as a hint for future MIDI2-aware filtering (e.g. only
-    // synthesize event types not present in the native stream) but no
-    // longer gates the synthesis itself.
-    if (self->ump_enabled) {
-        midi::midi1_to_ump(midi_in, self->ump_buffer);
-        (void)host_delivered_ump;
-        self->processor->set_ump_input(&self->ump_buffer);
-    } else {
-        self->processor->set_ump_input(nullptr);
-    }
-    self->processor->set_param_events(&self->param_events);
-    self->output_param_events.clear();
-    self->processor->set_output_param_events(&self->output_param_events);
+    clap_phase_prepare_sidecars(self, host_delivered_ump);
 
     // Process! Wrap the plugin call in a ScopedNoAlloc so any debug
     // hooks (operator new override, sanitizer integration) can flag
@@ -1015,322 +1363,25 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     const bool bypassed = self->bypass_param_id != 0 &&
                           self->store.get_value(self->bypass_param_id) >= 0.5f;
     if (bypassed) {
-        // Bypass is pure host-buffer passthrough (no processor scratch), so it
-        // safely handles the full original block rather than the clamped count.
-        // The dry-delay line is sized independently of the block size (to the
-        // reported latency in clap_activate()), so it too processes the full
-        // original_num_samples — bypass stays a true 1:1 host passthrough with
-        // no clamp tail to zero.
-        const bool delayed = self->bypass.is_latency_compensated() &&
-            out_channels <= static_cast<int>(self->bypass.channel_capacity());
-        for (int ch = 0; ch < out_channels; ++ch) {
-            const bool has_input_channel =
-                process->audio_inputs_count > 0 &&
-                ch < in_channels &&
-                ch < static_cast<int>(process->audio_inputs[0].channel_count);
-            const double* in64 =
-                has_input_channel && process->audio_inputs[0].data64
-                    ? process->audio_inputs[0].data64[ch]
-                    : nullptr;
-            const float* in32 =
-                has_input_channel && process->audio_inputs[0].data32
-                    ? process->audio_inputs[0].data32[ch]
-                    : nullptr;
-
-            if (main_output_f64) {
-                auto* out64 = process->audio_outputs_count > 0 &&
-                                      process->audio_outputs[0].data64
-                                  ? process->audio_outputs[0].data64[ch]
-                                  : nullptr;
-                if (out64 == nullptr) continue;
-                if (in64 != nullptr) {
-                    if (delayed) {
-                        for (uint32_t n = 0; n < original_num_samples; ++n) {
-                            out64[n] = static_cast<double>(self->bypass.process_sample(
-                                static_cast<float>(in64[n]),
-                                static_cast<std::size_t>(ch)));
-                        }
-                    } else {
-                        std::memcpy(out64, in64,
-                                    sizeof(double) * original_num_samples);
-                    }
-                } else if (in32 != nullptr) {
-                    if (delayed) {
-                        for (uint32_t n = 0; n < original_num_samples; ++n) {
-                            out64[n] = static_cast<double>(self->bypass.process_sample(
-                                in32[n], static_cast<std::size_t>(ch)));
-                        }
-                    } else {
-                        copy_f32_to_f64(in32, out64, original_num_samples);
-                    }
-                } else {
-                    zero_f64(out64, original_num_samples);
-                }
-                continue;
-            }
-
-            auto* out32 = process->audio_outputs_count > 0 &&
-                                  process->audio_outputs[0].data32
-                              ? process->audio_outputs[0].data32[ch]
-                              : nullptr;
-            if (out32 == nullptr) continue;
-            if (in32 != nullptr || in64 != nullptr) {
-                if (delayed) {
-                    // The plugin path is host-compensated by its reported
-                    // latency, so the bypassed dry signal must be delayed by
-                    // the same amount to stay sample-aligned with the host's
-                    // plugin-delay-compensation. The delay line is fed only
-                    // while bypassed: a one-time transient in the first
-                    // latency samples after engaging bypass is accepted
-                    // (bypass toggling is a user action, not sample-critical)
-                    // in exchange for a zero-cost non-bypassed path. Steady
-                    // state emits input[n - latency].
-                    for (uint32_t n = 0; n < original_num_samples; ++n) {
-                        const float sample = in32 ? in32[n] : static_cast<float>(in64[n]);
-                        out32[n] = self->bypass.process_sample(
-                            sample, static_cast<std::size_t>(ch));
-                    }
-                } else if (in32 != nullptr) {
-                    std::memcpy(out32, in32,
-                                sizeof(float) * original_num_samples);
-                } else {
-                    copy_f64_to_f32(in64, out32, original_num_samples);
-                }
-            } else {
-                std::memset(out32, 0, sizeof(float) * original_num_samples);
-            }
-        }
-        self->processor->set_sidechain(nullptr);
+        clap_phase_bypass_passthrough(self, process, in_channels, out_channels,
+                                      main_output_f64, original_num_samples);
     } else {
-        pulp::runtime::ScopedNoAlloc no_alloc_guard;
-        if (native_f64) {
-            self->processor->process_f64(process_buffers64, midi_in, midi_out, ctx);
-        } else {
-            self->processor->process(process_buffers, midi_in, midi_out, ctx);
-        }
-        if (!native_f64 && main_output_f64 && process->audio_outputs_count > 0 &&
-            process->audio_outputs[0].data64) {
-            auto& bus = process->audio_outputs[0];
-            for (int ch = 0; ch < out_channels; ++ch) {
-                copy_f32_to_f64(self->output_ptrs[ch], bus.data64[ch], num_samples);
-            }
-        }
-        for (uint32_t b = 1; b < routed_output_buses; ++b) {
-            if (native_f64 || !aux_output_f64[b - 1]) continue;
-            auto& bus = process->audio_outputs[b];
-            if (!bus.data64) continue;
-            // Bounded by the routed view, not the host channel count: only
-            // these channels have scratch wired (and zeroed) this block. Host
-            // channels outside the view — including a whole bus demoted by a
-            // null mid-bus channel pointer — keep the direct data64 pre-zero
-            // from block start, and a demoted bus's stale scratch pointers are
-            // never dereferenced.
-            const auto aux_channels =
-                static_cast<int>(output_buses[b].buffer.num_channels());
-            for (int ch = 0; ch < aux_channels; ++ch) {
-                copy_f32_to_f64(self->aux_output_ptrs[b - 1][ch],
-                                bus.data64[ch],
-                                num_samples);
-            }
-        }
+        clap_phase_run_processor(self, process, process_buffers, process_buffers64,
+                                 ctx, native_f64, out_channels, main_output_f64,
+                                 routed_output_buses, aux_output_f64, output_buses,
+                                 num_samples);
     }
 
-    // constant_mask is the plugin's promise about the block it just wrote: a set
-    // bit says "every frame of this channel holds the value in sample 0". CLAP
-    // permits in-place buffers, so an output buffer can arrive carrying the mask
-    // an upstream plugin (or the host) set on the input it aliases. Nothing above
-    // writes the mask, so leaving it alone would let a stale bit make a host read
-    // one sample of a channel that in fact varies — silent, and worst on CV-rate
-    // outputs, where the whole signal is the variation. Clearing it is always
-    // sound: 0 means "no channel is known constant", which is the truth for every
-    // block a Processor writes, and it costs one store per bus. Every output bus
-    // is fully written above — bus 0 by the Processor (or the bypass copy), the
-    // rest pre-zeroed — so no bus is exempt.
-    for (uint32_t b = 0; b < process->audio_outputs_count; ++b) {
-        process->audio_outputs[b].constant_mask = 0;
-    }
+    clap_phase_clear_constant_mask(process);
 
     // Return trigger / momentary params (panic, reset, tap) to their default
     // now that the Processor has observed this block. Done before the
     // output-event scan below so the host records the auto-reset as automation.
     self->store.reset_triggers_rt();
 
-    // Emit output parameter events for any values the plugin changed,
-    // so the host can record automation
-    auto* out_events = process->out_events;
-    if (out_events) {
-        // Sort the sample-accurate explicit output events (offset ascending) and
-        // mark the skip-set so the offset-0 snapshot fallback below does not
-        // double-report a param that already emitted explicit events. Both the
-        // queue and the skip-set were sized at block start — no allocation here.
-        self->output_param_events.sort();
-        const int32_t out_frames = static_cast<int32_t>(process->frames_count);
-        const int32_t out_last_frame = out_frames > 0 ? out_frames - 1 : 0;
-        for (auto it = self->output_param_events.begin();
-             it != self->output_param_events.end(); ++it) {
-            for (std::size_t i = 0; i < all_params.size(); ++i) {
-                if (all_params[i].id == it->param_id) {
-                    self->output_param_has_event[i] = 1;
-                    break;
-                }
-            }
-        }
-        // (1) Snapshot-diff fallback, at time 0, for params WITHOUT explicit
-        // events. These are all at offset 0 (the earliest time), so emitting
-        // them before the offset-ordered merge below preserves CLAP's global
-        // ascending-time contract.
-        for (std::size_t i = 0; i < all_params.size(); ++i) {
-            if (self->output_param_has_event[i]) continue;
-            float current = self->store.get_value(all_params[i].id);
-            if (std::memcmp(&current, &self->param_snapshot[i], sizeof(float)) != 0) {
-                clap_event_param_value_t ev{};
-                ev.header.size = sizeof(ev);
-                ev.header.type = CLAP_EVENT_PARAM_VALUE;
-                ev.header.time = 0;
-                ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
-                ev.header.flags = 0;
-                ev.param_id = all_params[i].id;
-                ev.cookie = nullptr;
-                ev.note_id = -1;
-                ev.port_index = -1;
-                ev.channel = -1;
-                ev.key = -1;
-                ev.value = static_cast<double>(current);
-                out_events->try_push(out_events, &ev.header);
-            }
-        }
+    clap_phase_emit_output(self, process, all_params);
 
-        // Bridge processor-emitted MIDI (midi_out) back to the host.
-        // Before this code, plugins that produced CC, pitch bend, channel
-        // aftertouch, program change, etc. had those events silently
-        // dropped by the CLAP adapter.
-        //
-        // CLAP's out_events contract requires events to be pushed in
-        // ascending sample-offset order across ALL event types in the
-        // block. The earlier two-pass shape (all shorts, then all sysex)
-        // sorted shorts internally but emitted the entire sysex tail
-        // afterward, which violated the contract whenever a sysex
-        // scheduled at offset N preceded a short scheduled at offset N+1. Hosts
-        // that strictly enforce the ordering reject out-of-order events;
-        // lenient hosts get wrong timing.
-        //
-        // Merge the two streams in (sample_offset, kind) order and
-        // push as we go. midi_out's short and sysex vectors are each
-        // already sorted (sort() runs below for shorts; sysex entries
-        // are appended in source-sample order by the processor); we
-        // walk them with a three-cursor merge that ALSO interleaves the
-        // sample-accurate output parameter events (self->output_param_events,
-        // already sorted above), so params, shorts, and sysex all emit in one
-        // globally ascending sample-offset stream.
-        midi_out.sort();
-        const auto& shorts = midi_out;
-        const auto& sysexes = midi_out.sysex();
-        std::size_t pi = 0;        // output-param cursor
-        std::size_t si = 0;        // short cursor
-        std::size_t xi = 0;        // sysex cursor
-        const std::size_t p_end = self->output_param_events.size();
-        const std::size_t s_end = shorts.size();
-        const std::size_t x_end = sysexes.size();
-        // Shared cross-format outbound-offset contract: offset N in -> N out;
-        // a negative offset clamps to the block start (see
-        // detail/midi_out_offset.hpp + test_midi_out_offset_parity.cpp). Kept as
-        // int32 here so the ascending-offset merge comparisons below stay signed.
-        auto sample_at = [](int32_t off) -> int32_t {
-            return static_cast<int32_t>(detail::clap_output_offset(off));
-        };
-        auto param_at = [&](std::size_t i) -> int32_t {
-            int32_t off = self->output_param_events.begin()[i].sample_offset;
-            if (off < 0) return 0;
-            if (off > out_last_frame) return out_last_frame;  // clamp into block
-            return off;
-        };
-
-        auto emit_param = [&](const state::ParameterEvent& pe, int32_t off) {
-            clap_event_param_value_t ev{};
-            ev.header.size = sizeof(ev);
-            ev.header.type = CLAP_EVENT_PARAM_VALUE;
-            ev.header.time = static_cast<uint32_t>(off);
-            ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
-            ev.header.flags = 0;
-            ev.param_id = pe.param_id;
-            ev.cookie = nullptr;
-            ev.note_id = -1;
-            ev.port_index = -1;
-            ev.channel = -1;
-            ev.key = -1;
-            ev.value = static_cast<double>(pe.value);  // CLAP param values are plain domain
-            out_events->try_push(out_events, &ev.header);
-        };
-
-        auto emit_short = [&](const midi::MidiEvent& me) {
-            clap_event_midi_t ev{};
-            ev.header.size = sizeof(ev);
-            ev.header.type = CLAP_EVENT_MIDI;
-            ev.header.time = static_cast<uint32_t>(sample_at(me.sample_offset));
-            ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
-            ev.header.flags = 0;
-            ev.port_index = 0;
-            ev.data[0] = me.data()[0];
-            ev.data[1] = me.size() > 1 ? me.data()[1] : uint8_t{0};
-            ev.data[2] = me.size() > 2 ? me.data()[2] : uint8_t{0};
-            out_events->try_push(out_events, &ev.header);
-        };
-
-        auto emit_sysex = [&](const auto& se) {
-            if (se.data.empty()) return;
-            clap_event_midi_sysex_t ev{};
-            ev.header.size = sizeof(ev);
-            ev.header.type = CLAP_EVENT_MIDI_SYSEX;
-            ev.header.time = static_cast<uint32_t>(sample_at(se.sample_offset));
-            ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
-            ev.header.flags = 0;
-            ev.port_index = 0;
-            ev.buffer = se.data.data();
-            ev.size = static_cast<uint32_t>(se.data.size());
-            out_events->try_push(out_events, &ev.header);
-        };
-
-        while (pi < p_end || si < s_end || xi < x_end) {
-            // Peek the next offset of each stream (INT32_MAX = exhausted), then
-            // emit the earliest. Params win ties (params <= shorts <= sysex),
-            // which is a valid non-decreasing order for equal offsets.
-            const int32_t po = pi < p_end ? param_at(pi) : INT32_MAX;
-            const int32_t so =
-                si < s_end ? sample_at(shorts.begin()[si].sample_offset) : INT32_MAX;
-            const int32_t xo =
-                xi < x_end ? sample_at(sysexes[xi].sample_offset) : INT32_MAX;
-            if (pi < p_end && po <= so && po <= xo) {
-                emit_param(self->output_param_events.begin()[pi], po);
-                ++pi;
-            } else if (si < s_end && so <= xo) {
-                emit_short(shorts.begin()[si]);
-                ++si;
-            } else {
-                emit_sysex(sysexes[xi]);
-                ++xi;
-            }
-        }
-    }
-
-    // If the processor flagged a latency / tail change during this block, ask
-    // the host to schedule a main-thread callback. The actual
-    // `clap_host_latency->changed()` / `clap_host_tail->changed()` push runs
-    // from clap_on_main_thread() so we never call host APIs from process().
-    // Peek (don't consume) so the on_main_thread handler still sees the same
-    // edge.
-    // Same mechanism carries a processor's request for a NON-REALTIME tick.
-    // CLAP hands parameter changes to the plugin as events inside process(), so
-    // a processor with no worker thread of its own (every wasm build: a WebCLAP
-    // module has no `std::thread`) can only get off the audio thread by asking
-    // the host for a main-thread callback. `non_realtime_tick_pending()` is
-    // RT-safe by contract and defaults to false, so plugins that don't need it
-    // pay one non-virtual-dispatch-free false per block.
-    if (self->host && self->host->request_callback && self->processor &&
-        (self->processor->latency_change_pending() ||
-         self->processor->tail_change_pending() ||
-         self->processor->non_realtime_tick_pending())) {
-        self->host->request_callback(self->host);
-    }
+    clap_phase_request_callback(self);
 
     return CLAP_PROCESS_CONTINUE;
 }

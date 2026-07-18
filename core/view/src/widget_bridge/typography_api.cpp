@@ -2,6 +2,7 @@
 
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
+#include "css_color.hpp"
 
 #include <pulp/view/text_editor.hpp>
 
@@ -132,16 +133,15 @@ void WidgetBridge::register_widget_typography_api() {
     });
 }
 
-void WidgetBridge::register_widget_typography_color_api(std::function<canvas::Color(const std::string&)> parse_color) {
+void WidgetBridge::register_widget_typography_color_api() {
     BridgeApiContext api{engine_};
-    auto parseHexColor = std::move(parse_color);
 
-    register_bridge_function(api, "setTextColor", [this, parseHexColor](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setTextColor", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
         auto* v = widget(id);
         if (!v || hex.empty()) return choc::value::Value();
-        auto color = parseHexColor(hex);
+        auto color = parse_bridge_css_color(hex);
         // CSS-style cascade.
         // - On a Label: set the Label's own explicit text_color, which
         //   wins over inheritance and theme tokens.
@@ -164,9 +164,8 @@ void WidgetBridge::register_widget_typography_color_api(std::function<canvas::Co
     });
 }
 
-void WidgetBridge::register_widget_typography_decoration_api(std::function<canvas::Color(const std::string&)> parse_color) {
+void WidgetBridge::register_widget_typography_decoration_api() {
     BridgeApiContext api{engine_};
-    auto parseHexColor = std::move(parse_color);
 
     // setTextTransform(id, "uppercase"/"lowercase"/"capitalize"/"none") - CSS text-transform.
     register_bridge_function(api, "setTextTransform", [this](choc::javascript::ArgumentList args) {
@@ -202,11 +201,11 @@ void WidgetBridge::register_widget_typography_decoration_api(std::function<canva
 
     // setTextDecorationColor(id, "#rrggbb"|color-token)
     register_bridge_function(api, "setTextDecorationColor",
-        [this, parseHexColor](choc::javascript::ArgumentList args) {
+        [this](choc::javascript::ArgumentList args) {
             auto* v = widget(args.get<std::string>(0, ""));
             auto hex = args.get<std::string>(1, "");
             if (auto* l = dynamic_cast<Label*>(v); l && !hex.empty()) {
-                l->set_text_decoration_color(parseHexColor(hex));
+                l->set_text_decoration_color(parse_bridge_css_color(hex));
             }
             return choc::value::Value();
         });

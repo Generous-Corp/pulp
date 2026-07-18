@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>
 
+#include "test_cli_shellout_util.hpp"
+
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -156,8 +158,9 @@ pulp::platform::ProcessResult run_create(const std::vector<std::string>& args,
     // cold-start intermittently blew past a 10 s budget — the create itself
     // succeeded, but `ChildProcess::run` killed it and `timed_out` tripped
     // (only the delegating kit cases, never the single-process reject cases).
-    // 60 s tolerates the cold-VM start while still catching a genuine hang.
-    options.timeout_ms = 60000;
+    // The shared hang guard tolerates the cold-VM start; see
+    // test_cli_shellout_util.hpp for why it is fixed and generous.
+    options.timeout_ms = pulp_test_cli::shellout_timeout_ms();
 
     ScopedEnvVar disable_update("PULP_UPDATE_CHECK_DISABLED", "1");
     auto binary = pulp_binary();

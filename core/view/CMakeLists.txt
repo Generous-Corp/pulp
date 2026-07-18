@@ -409,6 +409,7 @@ target_sources(pulp-view-core PRIVATE
     src/asset_manager.cpp
     src/script_event_dispatch.cpp
     src/gesture.cpp
+    src/value_source_binding.cpp
     src/view.cpp
     src/pointer_dispatch.cpp
     src/caret.cpp
@@ -416,8 +417,11 @@ target_sources(pulp-view-core PRIVATE
     src/custom_shader_host.cpp
     src/host_param_surface.cpp
     src/yoga_layout.cpp
+    src/grid_layout.cpp
     src/layout_snapshot.cpp
     src/widgets.cpp
+    src/widget_schema.cpp
+    src/knob_sprite_paint.cpp
     src/slider_core.cpp
     src/widgets/label.cpp
     src/widgets/visualizers.cpp
@@ -523,6 +527,8 @@ target_sources(pulp-view-script PRIVATE
     src/script_inspector_bridge.cpp
     src/js_engine_recommend.cpp
     src/widget_bridge.cpp
+    src/widget_bridge/bridge_dispatch.cpp
+    src/widget_bridge/css_color.cpp
     src/widget_bridge/accessibility_api.cpp
     src/widget_bridge/animation_api.cpp
     src/widget_bridge/dom_api.cpp
@@ -580,6 +586,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
         src/anchor_strategy.cpp
         src/design_export.cpp
         src/design_import.cpp
+        src/design_import_png.cpp
         src/design_binding_metadata.cpp
         src/design_ir_json.cpp
         src/recognition_resolver.cpp

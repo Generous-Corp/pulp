@@ -236,6 +236,33 @@ not apply — `_bridge` is a C++ struct). The block:
    `self.MIDIOutputEventBlock` (AU v3.1+). Each event's
    `sample_offset` is added to `timestamp->mSampleTime`.
 
+The bypass short-circuit (before step 6, when `shouldBypassEffect`) must NOT
+`memcpy` the dry input straight to the output. When the Processor reports a
+non-zero latency the host has delay-aligned the *wet* path by that latency
+(PDC), so a raw dry copy arrives `latency` samples early — comb-filtering on
+parallel busses. Route it through `boundary::render_bypass_passthrough`
+(`adapter_boundary.hpp`), sizing the `AUBridge::bypass` delay line to
+`reported_latency_samples(processor->latency_samples(), host_quirks)` in
+`allocateRenderResources`. A zero latency collapses to a straight passthrough.
+The AU v3 render block can't be driven in stock CI (needs a live host), so the
+bypass logic is covered by the shared `test_adapter_boundary_parity.cpp`
+`[bypass]` fixture the helper is exercised through.
+
+### MPE routing
+
+When a `Processor` declares `supports_mpe`, AU v3 feeds per-note expression the
+same way CLAP/VST3 do — via the shared `boundary::MpeSidecar` (in
+`adapter_boundary.hpp`), NOT a hand-rolled tracker. `AUBridge` owns one
+`boundary::MpeSidecar mpe;`; `configure()` it at init, `reserve()+reset()` in
+`allocateRenderResources`, `reset()` in `deallocateRenderResources`, and call
+`mpe.run(*processor, midi_in)` in the render block **right before**
+`processor->process()` and **after** the bypass early-return (a bypassed plugin
+gets no MPE). AU delivers MIDI already time-ordered, so pass it in host order
+(no sort) — matching CLAP. Non-MPE plugins get `set_mpe_input(nullptr)` each
+block. Unlike bypass, MPE routing IS unit-tested headlessly: the AU v3 MPE case
+in `test_au_plugin_state.mm` drives `internalRenderBlock` with a channel-wide
+MIDI list and asserts per-note NoteOn/PitchBend/Timbre/Pressure routing.
+
 ### State: `fullState` dictionary
 
 `fullState` wraps `store_.serialize()` bytes inside an `NSData` keyed
@@ -437,9 +464,9 @@ Apple's "Creating custom audio effects" sample doc states verbatim:
 > contain at least one source file for the extension binary to be
 > created, properly loaded, and linked with the framework bundle."
 
-iPlug2 ships the same 3-tier architecture. Pulp's macOS AU v3 lane
+That constraint is what forces the 3-tier shape. Pulp's macOS AU v3 lane
 (`tools/cmake/PulpAuv3.cmake`'s `_pulp_add_auv3_macos_*` helpers,
-on the macOS framework path) follows this pattern exactly:
+on the macOS framework path) implements it:
 
 ```
 ChainerSynth.app/                                 ← container .app
@@ -491,7 +518,7 @@ the macOS framework path on macOS.
 **Do NOT put `au_entry.mm`'s `PulpAUFactoryObj` (legacy
 AudioComponentRegister factory C function) anywhere in the macOS AU v3
 lane.** The macOS path uses `_NSExtensionMain` + `NSExtensionPrincipalClass`
-to find the factory class. iPlug2 follows the same convention.
+to find the factory class.
 
 ### rpath: 4 levels up, not 2
 
@@ -506,10 +533,11 @@ set_target_properties(${appex_target} PROPERTIES
     INSTALL_RPATH "@executable_path/../../../../Frameworks")
 ```
 
-**iPlug2's modern CMake helper has this wrong** — it sets
-`@executable_path/../../Frameworks` which works for iOS's flat .appex
-layout but breaks macOS where the .appex has its own
-`Contents/MacOS/`. Don't copy that recipe.
+**`@executable_path/../../Frameworks` is the tempting wrong answer** — it
+suits iOS's flat .appex layout, but breaks on macOS, where the .appex has
+its own `Contents/MacOS/` and sits one bundle deeper. An rpath recipe
+carried over from an iOS lane will resolve inside the .appex and the
+framework silently fails to load.
 
 The container .app's binary at `MyApp.app/Contents/MacOS/MyApp` needs
 2 parent dirs up: `INSTALL_RPATH "@executable_path/../Frameworks"`.
@@ -1302,3 +1330,14 @@ and hoping the result looks wrong.
 A Processor should not *rely* on this either: a worker thread that reads the store on
 every tick is one host away from the same crash. Publish what the thread needs to
 atomics from `process()` instead.
+
+## UMP word lengths come from core/midi, and the MIDIEventList walk is testable
+
+Do not hand-roll a words-per-message-type table in the adapter. `core/midi`'s
+`ump_words_for_message_type(uint8_t)` is the single spec-complete source (every nibble
+0x0-0xF, including the reserved ranges and the 128-bit UMP-Stream type 0xF), and
+`UmpPacket::size_for_type` delegates to it. A second, under-covering table is exactly the
+UMP-cursor-advance bug class: advancing an unrecognized message by 1 word re-reads its
+trailing words as fresh headers. The AU v3 MIDIEventList word-cursor walk is extracted out
+of the ObjC render block so it is unit-testable (truncated-packet + multi-word-advance
+vectors) rather than only reachable through a live AU host.

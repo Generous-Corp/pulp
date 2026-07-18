@@ -262,6 +262,9 @@ public:
 
 private:
     struct NativeGpuBridgeState;
+    // One capability-gated entry in register_api()'s registration table.
+    // Defined in widget_bridge.cpp — the table is an implementation detail.
+    struct ApiGroup;
 
     ScriptEngine& engine_;
     View& root_;
@@ -272,19 +275,56 @@ private:
     std::unique_ptr<NativeGpuBridgeState> native_gpu_bridge_state_;
     std::vector<std::filesystem::path> asset_roots_;
 
-    // Track widgets by ID for JS access
-    std::unordered_map<std::string, View*> widgets_;
+    // Per-id cache entry: the resolved View plus the tree structure generation
+    // at which that View was last CONFIRMED to live under `root_`. A fresh entry
+    // starts unvalidated (generation 0, the reserved sentinel), so the first
+    // widget() lookup always runs the authoritative subtree walk; once confirmed,
+    // repeat lookups short-circuit to O(1) while View::structure_generation() is
+    // unchanged (no remove_child has detached anything since). The implicit
+    // View* conversions keep this a drop-in for the former
+    // `unordered_map<string, View*>` at every call site; assignment resets the
+    // validation because a replacement pointer has not yet been confirmed.
+    struct BridgeWidgetState {
+        View* view = nullptr;
+        std::uint64_t validated_generation = 0;
+        BridgeWidgetState() = default;
+        BridgeWidgetState(View* v) : view(v) {}          // NOLINT: intentional implicit
+        BridgeWidgetState& operator=(View* v) { view = v; validated_generation = 0; return *this; }
+        operator View*() const { return view; }
+        View* operator->() const { return view; }
+    };
 
-    // Idempotency guards for native-event registrations. Each registrar
-    // (registerPointer / registerWheel / etc.) wraps the previous
-    // on_pointer_event so calling N times stacks N lambdas — every
-    // re-render of a React tree that re-runs the registration would
-    // multiply the dispatch cost by the render count. These sets gate
-    // the registrations so each (widget id, channel) wires the native
-    // hook exactly once.
-    std::unordered_set<std::string> pointer_registered_;
-    std::unordered_set<std::string> wheel_registered_;
-    std::unordered_set<std::string> gesture_recognizer_registered_;
+    // Track widgets by ID for JS access
+    std::unordered_map<std::string, BridgeWidgetState> widgets_;
+
+    // Idempotency guards for native-event registrations, one record per widget
+    // id. Each registrar (registerPointer / registerWheel / etc.) wraps the
+    // previous on_pointer_event so calling N times stacks N lambdas — every
+    // re-render of a React tree that re-runs the registration would multiply
+    // the dispatch cost by the render count. The claim_* helpers below gate the
+    // registrations so each (widget id, channel) wires the native hook exactly
+    // once, and forgetting an id is a single erase.
+    //
+    // Keyed independently of `widgets_`: a registrar claims its channel BEFORE
+    // resolving the widget, so an id can carry registration state with no live
+    // widget behind it.
+    struct WidgetRegistrations {
+        bool pointer = false;
+        bool wheel = false;
+        // Recognizer keys already added to this widget (`tap`, `pinch`, …).
+        // A vector, not a set: a widget carries a handful of recognizers, so a
+        // linear scan beats hashing.
+        std::vector<std::string> gesture_recognizers;
+    };
+    std::unordered_map<std::string, WidgetRegistrations> registrations_;
+
+    // Claim a native-event channel for `id`. Returns true the first time the
+    // channel is claimed — the caller then wires the native hook — and false
+    // once it is already registered.
+    bool claim_pointer_registration(const std::string& id);
+    bool claim_wheel_registration(const std::string& id);
+    bool claim_gesture_registration(const std::string& id,
+                                    const std::string& recognizer_key);
 
     // Registered keyboard shortcuts from JS
     struct ShortcutBinding {
@@ -454,17 +494,17 @@ private:
     void register_wheel_event_api();
     void register_context_menu_event_api();
     void register_drop_event_api();
-    void register_widget_style_background_color_api(std::function<canvas::Color(const std::string&)> parse_color);
-    void register_widget_style_shadow_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_widget_style_background_color_api();
+    void register_widget_style_shadow_api();
     void register_widget_style_opacity_api();
     void register_widget_style_overflow_api();
-    void register_widget_style_background_gradient_api(std::function<canvas::Color(const std::string&)> parse_color);
-    void register_widget_style_box_shadow_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_widget_style_background_gradient_api();
+    void register_widget_style_box_shadow_api();
     void register_widget_style_cursor_direction_api();
-    void register_widget_style_filter_clip_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_widget_style_filter_clip_api();
     void register_widget_style_blend_api();
-    void register_widget_style_rn_compat_api(std::function<canvas::Color(const std::string&)> parse_color);
-    void register_widget_style_state_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_widget_style_rn_compat_api();
+    void register_widget_style_state_api();
     void register_widget_style_background_repeat_api();
     void register_widget_style_mask_object_api();
     void register_widget_style_background_subproperty_api();
@@ -492,11 +532,11 @@ private:
     void register_storage_key_value_api();
     void register_asset_loading_api();
     void register_font_assets_api();
-    void register_svg_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_svg_api();
     void register_shader_widget_api();
     void register_shader_canvas_api();
     void register_theme_api();
-    void register_tokens_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_tokens_api();
     void register_widget_assets_api();
     void register_widget_schema_api();
     void register_widget_factory_controls_api();
@@ -510,21 +550,21 @@ private:
     void register_widget_value_label_api();
     void register_widget_value_basic_api();
     void register_widget_typography_api();
-    void register_widget_typography_color_api(std::function<canvas::Color(const std::string&)> parse_color);
-    void register_widget_typography_decoration_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_widget_typography_color_api();
+    void register_widget_typography_decoration_api();
     void register_widget_typography_overflow_api();
     void register_widget_typography_extended_api();
     void register_widget_typography_shadow_shorthand_api();
     void register_widget_value_content_api();
-    void register_widget_text_runs_api(std::function<canvas::Color(const std::string&)> parse_color);
-    void register_widget_border_box_api(std::function<canvas::Color(const std::string&)> parse_color);
-    void register_widget_outline_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_widget_text_runs_api();
+    void register_widget_border_box_api();
+    void register_widget_outline_api();
     void register_widget_border_radius_api();
-    void register_widget_border_side_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_widget_border_side_api();
     void register_runtime_api();
     void register_animation_api();
     void register_animation_style_api();
-    void register_canvas2d_api(std::function<canvas::Color(const std::string&)> parse_color);
+    void register_canvas2d_api();
     void register_gpu_api();
 };
 

@@ -1,23 +1,6 @@
 name: Visual Harness
 
 on:
-  pull_request:
-    branches: [main, 'develop/**']
-    paths:
-      - '.github/workflows/visual-harness.yml'
-      - 'ci/visual-harness.Dockerfile'
-      - 'compat.json'
-      - 'core/view/**'
-      - 'core/render/**'
-      - 'docs/reference/text-shaping.md'
-      - 'external/fonts/**'
-      - 'external/skia-build/VERSION.md'
-      - 'tools/deps/manifest.json'
-      - 'tools/harness/adapters/**'
-      - 'tools/harness/verifier.py'
-      - 'tools/harness/visual/**'
-      - 'test/CMakeLists.txt'
-      - 'test/visual/**'
   push:
     branches: [main]
     paths:
@@ -37,6 +20,8 @@ on:
       - 'test/visual/**'
   workflow_dispatch:
 
+  schedule:
+    - cron: '41 5 * * *'  # nightly de-starve safety net (see planning/fleet/2026-07-17-ci-destarve-analysis.md)
 permissions:
   contents: read
 

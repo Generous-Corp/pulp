@@ -11,6 +11,30 @@ TEST_CASE("parse_stitch_html extracts text from simple HTML", "[view][import]") 
     REQUIRE(ir.root.children[0].text_content == "Plugin Title");
 }
 
+TEST_CASE("parse_stitch_html skips non-visible element content",
+          "[view][import]") {
+    // The regex fallback matches any <tag>...</tag>, so a <script> body (a
+    // Stitch tailwind.config block, a Claude bundler placeholder — parse_claude_html
+    // routes through here too) or a <style> sheet would otherwise become a text
+    // label that paints raw JS/CSS into the imported design. Only real content
+    // survives.
+    auto html =
+        "<style>.card { color: red; }</style>\n"
+        "<script>tailwind.config = { theme: {} }</script>\n"
+        "<div>Real Content</div>";
+    auto ir = parse_stitch_html(html);
+
+    for (const auto& child : ir.root.children) {
+        REQUIRE(child.text_content.find("tailwind.config") == std::string::npos);
+        REQUIRE(child.text_content.find("color: red") == std::string::npos);
+    }
+    // The visible div text still lands.
+    bool has_real = false;
+    for (const auto& child : ir.root.children)
+        if (child.text_content == "Real Content") has_real = true;
+    REQUIRE(has_real);
+}
+
 TEST_CASE("parse_stitch_html accepts JSON IR directly", "[view][import]") {
     auto json = R"({"type": "frame", "name": "Screen", "children": []})";
     auto ir = parse_stitch_html(json);
@@ -471,6 +495,43 @@ TEST_CASE("parse_figma_plugin_json handles a Pulp / Knob without optional units"
     REQUIRE(ir.root.audio_default == Catch::Approx(0.5f));
     REQUIRE(ir.root.attributes.at("binding") == "param.mix");
     REQUIRE(ir.root.attributes.count("units") == 0);
+}
+
+// An explicit `audio_widget: "none"` is an opt-out, not an absence: the
+// offline .fig decoder stamps it on every node inside an expanded component
+// instance so a layer literally named "knob base" keeps the designer's own
+// art instead of being name-promoted to the built-in silver knob. Before this
+// fix "none" parsed to AudioWidgetType::none but did NOT count as explicit,
+// so the name heuristic ran anyway and painted Pulp's stock knob over every
+// expanded component whose internals mention "knob"/"fader"/etc.
+TEST_CASE("explicit audio_widget 'none' suppresses name-based widget detection",
+          "[view][import][figma-plugin][audio-widget]") {
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "provenance": { "adapter": "figma-plugin", "version": "0.1.0",
+                        "source_uri": "figma://local/0:0" },
+        "root": {
+            "type": "frame",
+            "name": "Root",
+            "style": { "width": 100, "height": 100 },
+            "children": [
+                { "type": "frame", "name": "knob base", "audio_widget": "none",
+                  "style": { "width": 28, "height": 28 } },
+                { "type": "frame", "name": "knob ring",
+                  "style": { "width": 28, "height": 28 } }
+            ]
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.children.size() == 2);
+    // Opted out: stays a plain container despite the knob-token name.
+    REQUIRE(ir.root.children[0].audio_widget == AudioWidgetType::none);
+    // Control: the same shape WITHOUT the opt-out is still name-promoted, so
+    // this test cannot pass by the heuristic being broken altogether.
+    REQUIRE(ir.root.children[1].audio_widget == AudioWidgetType::knob);
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1363,3 +1424,154 @@ TEST_CASE("kitchen-sink envelope parses all 6 Pulp Library widgets from one root
     REQUIRE(spec.audio_min == Catch::Approx(-60.0f));
     REQUIRE(spec.audio_max == Catch::Approx(0.0f));
 }
+
+// The envelope has documented a `diagnostics?: [...]` field since it was first
+// written, and the parser ignored it — so `--from fig`, which rewrites its
+// source to figma-plugin and lands in parse_figma_plugin_json, announced every
+// flattened gradient and unresolvable asset to scene.pulp.json and to nobody.
+// These tests pin the field as read, not merely documented.
+TEST_CASE("figma-plugin envelope diagnostics land on the IR",
+          "[view][import][figma-plugin][diagnostics]") {
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "root": { "type": "frame", "name": "Editor", "children": [] },
+        "diagnostics": [
+            {
+                "code": "gradient_flattened",
+                "detail": "3-stop linear gradient flattened to its mean color",
+                "node_name": "Panel / Backdrop",
+                "node_id": "12:34",
+                "severity": "warning"
+            },
+            {
+                "code": "asset_unresolved",
+                "detail": "icon font not found",
+                "node_name": "Toolbar / Icon",
+                "severity": "error"
+            },
+            {
+                "code": "capture_partial",
+                "detail": "clipped subtree not walked",
+                "node_name": "Scroll / Body",
+                "severity": "info"
+            },
+            {
+                "code": "blend_mode_dropped",
+                "detail": "multiply is not supported",
+                "node_name": "Glow",
+                "severity": "screaming"
+            }
+        ]
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.diagnostics.size() == 4);
+
+    // 1 — code, detail and node_name all survive onto the diagnostic.
+    REQUIRE(ir.diagnostics[0].code == "gradient_flattened");
+    REQUIRE(ir.diagnostics[0].message == "3-stop linear gradient flattened to its mean color");
+    REQUIRE(ir.diagnostics[0].path == "Panel / Backdrop");
+
+    // 2 — severity maps by name; anything unrecognized degrades to a warning
+    //     rather than being dropped or promoted.
+    REQUIRE(ir.diagnostics[0].severity == ImportDiagnosticSeverity::warning);
+    REQUIRE(ir.diagnostics[1].severity == ImportDiagnosticSeverity::error);
+    REQUIRE(ir.diagnostics[2].severity == ImportDiagnosticSeverity::info);
+    REQUIRE(ir.diagnostics[3].severity == ImportDiagnosticSeverity::warning);
+
+    // 3 — node_id anchors the diagnostic back to the node it came from; a
+    //     diagnostic emitted without one carries no anchor at all.
+    REQUIRE(ir.diagnostics[0].anchor_id.has_value());
+    REQUIRE(*ir.diagnostics[0].anchor_id == "12:34");
+    REQUIRE_FALSE(ir.diagnostics[1].anchor_id.has_value());
+
+    REQUIRE(has_import_diagnostic(ir.diagnostics, "blend_mode_dropped"));
+}
+
+TEST_CASE("figma-plugin diagnostic falls back to message and node_id",
+          "[view][import][figma-plugin][diagnostics]") {
+    // `detail` is the offline decoder's field name. A different emitter of the
+    // same envelope may say `message` instead, and need not carry a readable
+    // node_name — neither should be silently blanked.
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "root": { "type": "frame", "name": "Editor", "children": [] },
+        "diagnostics": [
+            {
+                "code": "font_missing",
+                "message": "Inter Display was substituted",
+                "node_id": "88:2"
+            }
+        ]
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.diagnostics.size() == 1);
+    REQUIRE(ir.diagnostics[0].message == "Inter Display was substituted");
+    // With no node_name, the guid is the only handle left — unreadable, but
+    // resolvable, and better than an empty path.
+    REQUIRE(ir.diagnostics[0].path == "88:2");
+    REQUIRE(ir.diagnostics[0].anchor_id.has_value());
+    REQUIRE(*ir.diagnostics[0].anchor_id == "88:2");
+}
+
+TEST_CASE("figma-plugin diagnostics parser skips entries that say nothing",
+          "[view][import][figma-plugin][diagnostics]") {
+    // A codeless diagnostic cannot be acted on or grouped, and a non-object
+    // entry is malformed input the parser must survive rather than trust.
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "root": { "type": "frame", "name": "Editor", "children": [] },
+        "diagnostics": [
+            { "detail": "something happened", "node_name": "Panel" },
+            "not-an-object",
+            42,
+            { "code": "gradient_flattened", "detail": "kept" }
+        ]
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.diagnostics.size() == 1);
+    REQUIRE(ir.diagnostics[0].code == "gradient_flattened");
+    REQUIRE(ir.diagnostics[0].message == "kept");
+}
+
+TEST_CASE("figma-plugin envelope without usable diagnostics parses clean",
+          "[view][import][figma-plugin][diagnostics]") {
+    // Absent is the common case; a non-array `diagnostics` is a malformed
+    // emitter. Neither is an import failure — both mean zero diagnostics.
+    const std::string absent = R"JSON({
+        "format_version": "v1",
+        "root": { "type": "frame", "name": "Editor", "children": [] }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(absent);
+    REQUIRE(ir.root.name == "Editor");
+    REQUIRE(ir.diagnostics.empty());
+
+    // A scalar `diagnostics` is the shape that punishes a missing isArray()
+    // guard: choc throws on size()/[] over a non-container, so the import
+    // would die on malformed input instead of ignoring it.
+    const std::string scalar = R"JSON({
+        "format_version": "v1",
+        "root": { "type": "frame", "name": "Editor", "children": [] },
+        "diagnostics": "gradient_flattened"
+    })JSON";
+
+    auto scalar_ir = parse_figma_plugin_json(scalar);
+    REQUIRE(scalar_ir.root.name == "Editor");
+    REQUIRE(scalar_ir.diagnostics.empty());
+
+    const std::string object = R"JSON({
+        "format_version": "v1",
+        "root": { "type": "frame", "name": "Editor", "children": [] },
+        "diagnostics": { "code": "gradient_flattened" }
+    })JSON";
+
+    auto object_ir = parse_figma_plugin_json(object);
+    REQUIRE(object_ir.root.name == "Editor");
+    REQUIRE(object_ir.diagnostics.empty());
+}
+

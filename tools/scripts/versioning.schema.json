@@ -81,6 +81,10 @@
       "type": "array",
       "items": { "type": "string" }
     },
+    "post_merge_assignment": {
+      "type": "boolean",
+      "description": "Model B — when true, PRs touch no version files; version-at-land infers the level from the heuristic and assigns it on merge (--mode=apply is a no-op; the PR gate stops requiring a file bump for a touched surface but still hard-fails a fix/feat scoring none on every surface)."
+    },
     "trailers": {
       "type": "object",
       "additionalProperties": false,

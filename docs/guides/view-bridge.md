@@ -224,12 +224,32 @@ bridge.attach_secondary_view(std::move(inspector), ViewRole::Inspector);
 | AU v3      | `core/format/src/au_adapter.mm`           | `AUAudioUnitViewController`   |
 | CLAP       | `core/format/include/pulp/format/clap_entry.hpp` | `gui_create` / `gui_show` |
 | Standalone | `core/format/src/standalone.cpp`          | `run()` / window open         |
+| AAX        | `core/format/src/aax_effect_gui.cpp`      | `CreateViewContainer()`       |
 
 Each adapter constructs one `ViewBridge` per editor window and forwards
 host lifecycle events to `open()` / `close()` / `resize()`.
 
-The optional AAX adapter is audio/control-only today; it does not expose a
-custom `EffectGUI` / ViewBridge editor surface yet.
+The optional AAX adapter exposes a custom editor through
+`AAX_CEffectGUI`, registered with the host under
+`kAAX_ProcPtrID_Create_EffectGUI`. Without that registration Pro Tools has no
+plugin GUI to instantiate and falls back to its auto-generated parameter strip,
+so the proc pointer — not the view code — is what makes a custom UI appear at
+all. Two AAX-specific details differ from the other adapters:
+
+- **The editor has its own `Processor`.** AAX separates the host-side data model
+  (`AAX_CEffectParameters`) from the real-time algorithm, whose `Processor`
+  lives in its private data block and is unreachable from the model. The model
+  therefore builds a second `Processor` for `create_view()` and mirrors its
+  store against the AAX parameter manager, which stays the value authority.
+  This is the opposite of the AU v2 rule, where a second `Processor` would be a
+  bug — there, one instance serves both audio and UI.
+- **Sizing is plugin-driven.** AAX never asks the plugin to accept a size; it
+  reads one from `GetViewSize()` and the plugin pushes later changes through
+  `AAX_IViewContainer::SetViewSize`, closer to the AU v2 model than to VST3's.
+
+Editor gestures map to `AAX_IEffectParameters::TouchParameter` /
+`ReleaseParameter` so a knob drag records one automation stroke rather than a
+scatter of isolated points. The editor requires a Skia-enabled build.
 
 ## Example
 
