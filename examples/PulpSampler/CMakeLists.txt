@@ -1,9 +1,11 @@
 # PulpSampler — sample-buffer sampler with MIDI triggering and ADSR
 # CLAP is the validated example format; enable others only after validation.
 
+include(pulp_sampler_sources.cmake)
+
 if(PULP_HAS_CLAP)
     # CLAP plugin
-    add_library(PulpSampler_CLAP MODULE clap_entry.cpp)
+    add_library(PulpSampler_CLAP MODULE clap_entry.cpp ${PULP_SAMPLER_IMPLEMENTATION})
     target_link_libraries(PulpSampler_CLAP PRIVATE pulp::format pulp::audio pulp::signal clap)
     target_include_directories(PulpSampler_CLAP PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     set_target_properties(PulpSampler_CLAP PROPERTIES
@@ -23,6 +25,7 @@ endif()
 # Test
 if(PULP_BUILD_TESTS)
     add_executable(pulp-sampler-test
+        ${PULP_SAMPLER_IMPLEMENTATION}
         test_pulp_sampler_contract.cpp
         test_pulp_sampler_mip_sidecar.cpp
         test_pulp_sampler_mip_runtime.cpp
