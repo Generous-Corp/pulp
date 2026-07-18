@@ -158,6 +158,24 @@ already cache via a local. When adding a new format backend that calls
 
 ## Testing against a real plug-in
 
+For repeatable black-box measurements of an installed Audio Unit instrument,
+build or install `pulp-au-instrument-probe`. It renders offline without opening
+an audio device, requires an explicit `--name`, lists vendor parameter IDs, can
+apply plain-domain parameter values and timestamped MIDI hits, and writes a
+local float WAV. By default an accidentally silent render is a failure;
+`--allow-silent` is reserved for experiments where silence is itself expected.
+
+```bash
+pulp-au-instrument-probe --name "Reference Instrument" --list-params \
+  --note 60 --seconds 2 --hits "0:100,250:80" --out /tmp/reference.wav
+```
+
+The probe is a bench oracle, not an implementation oracle: keep commercial
+renders out of version control, record the recipe and numeric measurements,
+and derive DSP from published specifications or independently authored models.
+Reference-specific names, parameter maps, and corpora belong in the private
+validation project, not in the SDK tool.
+
 For unattended, scriptable interrogation prefer the isolated CLI/MCP surfaces:
 
 ```bash
