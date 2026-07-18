@@ -89,8 +89,19 @@ struct SetClipPlaybackProperties {
     ClipPlaybackProperties replacement;
 };
 
+struct SetTempoMap {
+    timebase::TempoMap expected;
+    timebase::TempoMap replacement;
+};
+
+struct SetMeterMap {
+    timebase::MeterMap expected;
+    timebase::MeterMap replacement;
+};
+
 using Command =
-    std::variant<InsertClip, RemoveClip, MoveClip, SetNoteVelocity, SetClipPlaybackProperties>;
+    std::variant<InsertClip, RemoveClip, MoveClip, SetNoteVelocity, SetClipPlaybackProperties,
+                 SetTempoMap, SetMeterMap>;
 
 struct CommandEnvelope {
     CommandId id;

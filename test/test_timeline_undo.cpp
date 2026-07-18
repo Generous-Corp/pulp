@@ -136,6 +136,43 @@ TEST_CASE("Timeline undo and redo are ordinary journaled inverse transactions") 
     REQUIRE(session->journal().entries().size() == 3);
 }
 
+TEST_CASE("Tempo and meter edits survive undo redo journal replay and canonical persistence") {
+    const auto initial = make_project();
+    const auto tempo = make_tempo_map(91.0);
+    const auto meter = make_meter_map({7, 8});
+    auto session = std::move(DocumentSession::create(initial)).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto tx = session_transaction(writer, {},
+                                  {SetTempoMap{initial.tempo_map(), tempo},
+                                   SetMeterMap{initial.meter_map(), meter}});
+    REQUIRE(session->submit(writer, std::move(tx)));
+    REQUIRE(session->snapshot()->tempo_map() == tempo);
+    REQUIRE(session->snapshot()->meter_map() == meter);
+
+    auto registry = make_builtin_timeline_registry();
+    REQUIRE(registry);
+    const auto canonical = serialize_project(*session->snapshot(), registry.value());
+    REQUIRE(canonical);
+    auto decoded = deserialize_project(canonical->json, registry.value());
+    REQUIRE(decoded);
+    REQUIRE(decoded->tempo_map() == tempo);
+    REQUIRE(decoded->meter_map() == meter);
+    REQUIRE(serialize_project(decoded.value(), registry.value())->json == canonical->json);
+
+    REQUIRE(session->undo(writer));
+    REQUIRE(session->snapshot()->tempo_map() == initial.tempo_map());
+    REQUIRE(session->snapshot()->meter_map() == initial.meter_map());
+    REQUIRE(session->redo(writer));
+    REQUIRE(session->snapshot()->tempo_map() == tempo);
+    REQUIRE(session->snapshot()->meter_map() == meter);
+
+    auto replayed = session->journal().replay(initial, {});
+    REQUIRE(replayed);
+    REQUIRE(replayed->tempo_map() == tempo);
+    REQUIRE(replayed->meter_map() == meter);
+    REQUIRE(serialize_project(replayed.value(), registry.value())->json == canonical->json);
+}
+
 TEST_CASE("Timeline gesture grouping undoes the full change and writers never coalesce") {
     auto session = std::move(DocumentSession::create(make_project())).value();
     auto writer = std::move(session->register_writer()).value();

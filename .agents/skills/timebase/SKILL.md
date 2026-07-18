@@ -35,7 +35,9 @@ quantizer's beat/frame arithmetic.
   it explicitly. Differential tests must match cold-map canonical results.
 - `CompiledMeterMap` uses zero-based bars and exact integer bar/tick conversion.
   Tempo changes never affect bar conversion and meter changes never affect
-  tick/sample conversion.
+  tick/sample conversion. Conversion is total across `INT64_MIN..INT64_MAX`:
+  exact results are returned when representable and out-of-range results
+  saturate without signed-overflow UB.
 - Keep `TransportQuantizer`'s public behavior stable. Generic beat/frame/grid
   arithmetic belongs in `<pulp/timebase/quantize.hpp>` and the format wrapper
   delegates to it.

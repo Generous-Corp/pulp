@@ -443,6 +443,8 @@ class Project {
     runtime::Result<Project, ModelError>
     replace_sequence(Sequence sequence, std::span<const IdentityMutation> identities = {},
                      std::optional<std::uint64_t> next_item_id = std::nullopt) const;
+    Project replace_tempo_map(timebase::TempoMap tempo_map) const;
+    Project replace_meter_map(timebase::MeterMap meter_map) const;
     explicit Project(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
     std::shared_ptr<const Data> data_;
 };

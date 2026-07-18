@@ -15,6 +15,12 @@ struct ProjectEditAccess {
                      std::optional<std::uint64_t> next_item_id = std::nullopt) {
         return project.replace_sequence(std::move(sequence), identities, next_item_id);
     }
+    static Project replace_tempo_map(const Project& project, timebase::TempoMap tempo_map) {
+        return project.replace_tempo_map(std::move(tempo_map));
+    }
+    static Project replace_meter_map(const Project& project, timebase::MeterMap meter_map) {
+        return project.replace_meter_map(std::move(meter_map));
+    }
 };
 
 namespace {
@@ -297,6 +303,18 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
                 velocity.replacement_velocity, velocity.expected_velocity});
             dirty.push_back({velocity.note_id, velocity.track_id, velocity.sequence_id,
                              DirtyFlags::Content | DirtyFlags::Notes});
+        } else if (const auto* tempo = std::get_if<SetTempoMap>(&envelope.command)) {
+            if (project.tempo_map() != tempo->expected)
+                return fail_target(ConflictCode::ExpectedValueMismatch, project.id());
+            project = ProjectEditAccess::replace_tempo_map(project, tempo->replacement);
+            inverses.emplace_back(SetTempoMap{tempo->replacement, tempo->expected});
+            dirty.push_back({project.id(), {}, {}, DirtyFlags::Timing});
+        } else if (const auto* meter = std::get_if<SetMeterMap>(&envelope.command)) {
+            if (project.meter_map() != meter->expected)
+                return fail_target(ConflictCode::ExpectedValueMismatch, project.id());
+            project = ProjectEditAccess::replace_meter_map(project, meter->replacement);
+            inverses.emplace_back(SetMeterMap{meter->replacement, meter->expected});
+            dirty.push_back({project.id(), {}, {}, DirtyFlags::Timing});
         } else {
             const auto& playback = std::get<SetClipPlaybackProperties>(envelope.command);
             if (const auto code =

@@ -64,9 +64,12 @@ invariants.
 
 ## Editing contracts
 
-- `InsertClip`, `RemoveClip`, `MoveClip`, and `SetNoteVelocity` are the bounded
-  Phase-1 mutation vocabulary. `reduce_transaction()` is pure: it returns a new
-  snapshot, exact canonical dirty set, and reverse-ordered inverse commands.
+- `InsertClip`, `RemoveClip`, `MoveClip`, `SetNoteVelocity`,
+  `SetClipPlaybackProperties`, `SetTempoMap`, and `SetMeterMap` are the bounded
+  Phase-1 mutation vocabulary. Map commands carry exact expected/replacement
+  document values and participate in the same transaction, journal, undo, and
+  replay machinery. `reduce_transaction()` is pure: it returns a new snapshot,
+  exact canonical dirty set, and reverse-ordered inverse commands.
 - `DocumentSession` is the sole authoritative writer. Multiple control-thread
   callers serialize through it; readers atomically pin immutable snapshots.
   Every transaction declares its expected revision. Stale revisions and typed

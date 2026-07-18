@@ -1090,6 +1090,20 @@ Project::replace_sequence(Sequence sequence, std::span<const IdentityMutation> m
              std::move(identities)}))));
 }
 
+Project Project::replace_tempo_map(timebase::TempoMap tempo_map) const {
+    return Project(std::make_shared<const Data>(
+        Data{data_->id, data_->name, data_->next_item_id, data_->root_sequence_id,
+             data_->assets, data_->sequences, std::move(tempo_map), data_->meter_map,
+             data_->identities}));
+}
+
+Project Project::replace_meter_map(timebase::MeterMap meter_map) const {
+    return Project(std::make_shared<const Data>(
+        Data{data_->id, data_->name, data_->next_item_id, data_->root_sequence_id,
+             data_->assets, data_->sequences, data_->tempo_map, std::move(meter_map),
+             data_->identities}));
+}
+
 std::size_t Project::shared_identity_nodes_with(const Project& other) const {
     return data_->identities.shared_nodes_with(other.data_->identities);
 }
