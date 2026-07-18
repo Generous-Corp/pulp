@@ -58,6 +58,7 @@ target_sources(pulp-audio PRIVATE
     src/sample_mip_sidecar.cpp
     src/sample_mip_sidecar_staging.cpp
     src/sample_pool.cpp
+    src/sample_stream_service.cpp
     src/sample_stream_window.cpp
     src/sample_voice_renderer.cpp
     src/sample_zone_map.cpp
