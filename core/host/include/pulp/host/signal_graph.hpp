@@ -290,6 +290,7 @@ struct GraphNode {
 class SignalGraph {
 public:
     class PreparedTopologyEdit;
+    class ExecutionSnapshot;
 
     struct GraphLimits {
         std::size_t max_nodes = 4096;
@@ -913,6 +914,7 @@ public:
     std::size_t custom_node_type_count() const;
 
 private:
+    friend class ExecutionSnapshot;
     struct MidiBlockSnapshot {
         MidiBlockSnapshot();
         MidiBlockSnapshot(const MidiBlockSnapshot& other);
@@ -1555,6 +1557,13 @@ private:
                       const audio::BufferView<const float>& input,
                       int num_samples,
                       const format::ProcessContext* transport);
+    void process_snapshot_impl(audio::BufferView<float>& output,
+                               const audio::BufferView<const float>& input,
+                               int num_samples,
+                               const format::ProcessContext* transport,
+                               CompiledGraph* snapshot);
+    static bool inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,
+                                           const midi::MidiBuffer& events) noexcept;
     static std::uint64_t append_parameter_mailbox_events_(
         void* runtime,
         state::ParameterEventQueue& destination) noexcept;
@@ -1635,6 +1644,36 @@ private:
                                            plugin_meta);
 };
 
+/// Strong, typed handle to one exact compiled SignalGraph generation. The
+/// control thread stores this inside a larger immutable publication; the audio
+/// thread may then inject MIDI and process that same generation even after the
+/// graph's ordinary live slot advances. The owning SignalGraph and its worker
+/// pool must outlive the handle. Copying is control-thread-only.
+class SignalGraph::ExecutionSnapshot {
+public:
+    ExecutionSnapshot() = default;
+    explicit operator bool() const noexcept { return snapshot_ != nullptr; }
+
+    bool inject_midi(NodeId midi_input_node,
+                     const midi::MidiBuffer& events) const noexcept;
+    void process(audio::BufferView<float>& output,
+                 const audio::BufferView<const float>& input,
+                 int num_samples) const noexcept;
+    void process(audio::BufferView<float>& output,
+                 const audio::BufferView<const float>& input,
+                 int num_samples,
+                 const format::ProcessContext& transport) const noexcept;
+
+private:
+    friend class PreparedTopologyEdit;
+    ExecutionSnapshot(SignalGraph& owner,
+                      std::shared_ptr<SignalGraph::CompiledGraph> snapshot) noexcept
+        : owner_(&owner), snapshot_(std::move(snapshot)) {}
+
+    SignalGraph* owner_ = nullptr;
+    std::shared_ptr<SignalGraph::CompiledGraph> snapshot_;
+};
+
 // Isolated, fail-closed authoring transaction for topology-producing clients.
 // This deliberately exposes only nodes that SignalGraph itself owns and can
 // prepare off-side. External PluginSlot creation/replacement remains on the
@@ -1659,6 +1698,7 @@ public:
         CompileFailed,
         RuntimeAdoptionFailed,
         ParallelWorkerStartFailed,
+        QuiescedRollbackFailed,
         NotPrepared,
         AlreadyCommitted,
     };
@@ -1710,7 +1750,15 @@ public:
     bool routed_execution_ready(int block_size) const noexcept;
 
     Result prepare(double sample_rate, int max_block_size);
+    /// Quiesced dimension-changing prepare. No process(), MIDI injection, or
+    /// anticipation pump may overlap this call. External plugins and retained
+    /// custom nodes are re-prepared on the private candidate; owner topology and
+    /// publication remain untouched if preparation fails.
+    Result prepare_quiesced(double sample_rate, int max_block_size);
     Result commit();
+    ExecutionSnapshot committed_execution_snapshot() const noexcept {
+        return ExecutionSnapshot(*owner_, committed_snapshot_);
+    }
     Result last_result() const noexcept { return last_result_; }
 
 private:
@@ -1743,6 +1791,7 @@ private:
     SignalGraph* owner_ = nullptr;
     std::unique_ptr<SignalGraph> candidate_;
     std::shared_ptr<SignalGraph::CompiledGraph> prepared_snapshot_;
+    std::shared_ptr<SignalGraph::CompiledGraph> committed_snapshot_;
     std::unordered_set<NodeId> baseline_node_ids_;
     std::unordered_set<std::string> baseline_registry_keys_;
     std::unordered_set<std::string> replaced_registry_keys_;

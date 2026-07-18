@@ -548,6 +548,14 @@ does not contain crashes in deeper plug-in code.
   allocator), move the authoring containers, and call the Slot's noexcept
   prepared publication. Never put an allocating `emplace` or ordinary
   `Slot::publish` after that boundary.
+  A caller that has stopped audio processing and anticipation may instead use
+  `prepare_quiesced()` for a dimension change involving external plugins or
+  retained custom instances. Candidate preparation can touch those shared
+  lifecycle objects, so failure must re-prepare *every* owner object at the old
+  dimensions before the old snapshot resumes. If that rollback fails, the graph
+  deliberately unpublishes and reports `QuiescedRollbackFailed`; never resume a
+  partially restored graph. New custom instances created before a later prepare
+  failure still require their control-thread `release` callback.
 - Per-node CPU load: `process()` wraps each node's work in a persistent
   per-node `audio::AudioProcessLoadMeasurer` (keyed by `NodeId` in
   `node_load_`), read via `node_loads()`. The measurers live on the
@@ -849,6 +857,15 @@ rules:
   writes a gain. What is immutable is the *topology*. `Slot::ReadGuard::get()`
   therefore hands back a mutable `T*`; a genuinely read-only publication says so
   in the type (`Slot<const T>`).
+- **Pin the exact committed generation when publications are coupled.**
+  `ExecutionSnapshot` is a strong handle to one specific compiled graph, and its
+  MIDI injection and `process()` methods never redirect to a newer live graph.
+  `TimelineGraphBinding` publishes that handle together with its immutable
+  playback program and bound track renderers as one `runtime::Slot` generation.
+  Topology and content adoption must replace that one generation; independently
+  latching the program store or looking up the graph's current live snapshot can
+  produce a mixed old/new audio block. As with ordinary graph processing, only
+  one audio thread may process these mutable execution snapshots at a time.
 - **Read it, don't reach for it.** Anything that dereferences the snapshot off
   the prepare/release thread must hold a pin for the whole dereference:
   `auto pin = live_slot_.read(); if (auto* cg = pin.get()) { ... }`. That

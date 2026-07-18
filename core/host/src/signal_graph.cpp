@@ -675,10 +675,15 @@ bool SignalGraph::inject_midi(NodeId id,
     auto read_guard = live_slot_.read();
     auto* cg = read_guard.get();
     if (!cg) return false;
-    auto it = cg->runtime.find(id);
-    if (it == cg->runtime.end()) return false;
-    auto shape_it = cg->shapes.find(id);
-    if (shape_it == cg->shapes.end()
+    return inject_midi_into_snapshot_(*cg, id, events);
+}
+
+bool SignalGraph::inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,
+                                              const midi::MidiBuffer& events) noexcept {
+    auto it = snapshot.runtime.find(id);
+    if (it == snapshot.runtime.end()) return false;
+    auto shape_it = snapshot.shapes.find(id);
+    if (shape_it == snapshot.shapes.end()
         || shape_it->second.type != NodeType::MidiInput
         || !it->second.midi_input_mailbox) {
         return false;
@@ -2271,8 +2276,14 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
     // private nested struct (signal_graph.hpp) so the control-thread snapshot
     // readers can pin the same way.
     auto read_guard = live_slot_.read();
+    process_snapshot_impl(output, input, num_samples, transport, read_guard.get());
+}
 
-    auto* cg = read_guard.get();
+void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
+                                        const audio::BufferView<const float>& input,
+                                        int num_samples,
+                                        const format::ProcessContext* transport,
+                                        CompiledGraph* cg) {
     // Negative or zero block sizes mean "nothing to do" — return without
     // touching output (a memset with size_t(negative) wraps to a huge size).
     if (num_samples <= 0) return;
@@ -2585,6 +2596,32 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
     // the hand-maintained bit-exact oracle/fallback (see
     // signal_graph_reference_walk.cpp).
     run_reference_walk_(output, input, num_samples, cg);
+}
+
+bool SignalGraph::ExecutionSnapshot::inject_midi(
+    NodeId midi_input_node, const midi::MidiBuffer& events) const noexcept {
+    return snapshot_ != nullptr &&
+           SignalGraph::inject_midi_into_snapshot_(*snapshot_, midi_input_node, events);
+}
+
+void SignalGraph::ExecutionSnapshot::process(
+    audio::BufferView<float>& output, const audio::BufferView<const float>& input,
+    int num_samples) const noexcept {
+    if (owner_ == nullptr || snapshot_ == nullptr) {
+        if (num_samples > 0) output.clear();
+        return;
+    }
+    owner_->process_snapshot_impl(output, input, num_samples, nullptr, snapshot_.get());
+}
+
+void SignalGraph::ExecutionSnapshot::process(
+    audio::BufferView<float>& output, const audio::BufferView<const float>& input,
+    int num_samples, const format::ProcessContext& transport) const noexcept {
+    if (owner_ == nullptr || snapshot_ == nullptr) {
+        if (num_samples > 0) output.clear();
+        return;
+    }
+    owner_->process_snapshot_impl(output, input, num_samples, &transport, snapshot_.get());
 }
 
 void SignalGraph::clear() {

@@ -581,6 +581,99 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
     return last_result_ = Result::Prepared;
 }
 
+SignalGraph::PreparedTopologyEdit::Result
+SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
+                                                     int max_block_size) {
+    if (committed_)
+        return last_result_ = Result::AlreadyCommitted;
+    if (mutation_failed_)
+        return last_result_ = Result::InvalidMutation;
+    if (prepared_snapshot_)
+        return last_result_ = Result::Prepared;
+    if (prepare_attempted_)
+        return last_result_;
+    prepare_attempted_ = true;
+
+    // This path is deliberately separate from prepare(): the caller guarantees
+    // that audio processing and anticipation are quiesced, so shared external
+    // plugin/custom instances may be re-prepared for new dimensions on the
+    // private candidate. The owner's authoring graph and live publication remain
+    // unchanged unless the candidate succeeds and commit() is called.
+    GraphMutationLock owner_lock(*owner_);
+    if (!base_is_current_locked_() || owner_->in_swap_edit_)
+        return last_result_ = Result::StaleBase;
+
+    bool candidate_prepared = false;
+    try {
+        candidate_prepared = candidate_->prepare(sample_rate, max_block_size);
+    } catch (...) {
+        candidate_prepared = false;
+    }
+
+    // candidate_->prepare() may create some new custom instances before a
+    // later plugin/custom prepare fails. Remember them even on failure so an
+    // abandoned edit still balances every successful create/prepare with the
+    // control-thread release callback.
+    prepared_new_custom_ids_.clear();
+    for (const auto& node : candidate_->nodes_) {
+        if (node.type == NodeType::Custom && is_new_node_(node.id) && node.custom_instance)
+            prepared_new_custom_ids_.push_back(node.id);
+    }
+    if (!candidate_prepared) {
+        // Candidate preparation touches shared external plugin/custom instances.
+        // Restore every owner lifecycle object to the exact old dimensions before
+        // allowing the old compiled snapshot to resume. If restoration itself
+        // fails, revoke the owner's live publication: running the old snapshot
+        // against partially re-prepared instances would be undefined behavior.
+        bool restored = base_live_ == nullptr;
+        if (base_live_ != nullptr) {
+            restored = true;
+            try {
+                owner_->prepared_plugin_meta_.clear();
+                for (auto& node : owner_->nodes_) {
+                    if (!node.plugin)
+                        continue;
+                    if (!node.plugin->prepare(base_live_->sample_rate,
+                                              base_live_->max_block_size)) {
+                        restored = false;
+                        break;
+                    }
+                    owner_->prepared_plugin_meta_[node.id] = PreparedPluginMetadata{
+                        node.plugin->parameters(),
+                        std::max(0, node.plugin->latency_samples()),
+                        node.plugin->wants_transport()};
+                }
+                if (restored) {
+                    for (auto& node : owner_->nodes_) {
+                        if (node.type != NodeType::Custom || !node.custom_instance)
+                            continue;
+                        const auto* type = owner_->custom_node_type(
+                            node.custom_type_id, node.custom_type_version);
+                        if (type != nullptr && type->prepare)
+                            type->prepare(node.custom_instance.get(), base_live_->sample_rate,
+                                          base_live_->max_block_size);
+                    }
+                }
+            } catch (...) {
+                restored = false;
+            }
+        }
+        if (!restored) {
+            owner_->live_slot_.unpublish();
+            owner_->total_latency_samples_.store(0, std::memory_order_relaxed);
+            owner_->clear_prepared_stats_locked_();
+            return last_result_ = Result::QuiescedRollbackFailed;
+        }
+        return last_result_ = Result::ExternalPluginReprepareRequired;
+    }
+
+    prepared_snapshot_ = candidate_->live_slot_.live();
+    if (!prepared_snapshot_)
+        return last_result_ = Result::CompileFailed;
+
+    return last_result_ = Result::Prepared;
+}
+
 SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::commit() {
     if (committed_)
         return last_result_ = Result::AlreadyCommitted;
@@ -670,6 +763,7 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
     owner_->publish_prepared_stats_locked_(*prepared_snapshot_);
     ++owner_->authoring_generation_;
 
+    committed_snapshot_ = prepared_snapshot_;
     prepared_snapshot_.reset();
     prepared_new_custom_ids_.clear();
     committed_ = true;

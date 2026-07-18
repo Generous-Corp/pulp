@@ -122,6 +122,29 @@ class TimelineGraphPlaybackBinding {
                                    const TimelineGraphBindingConfig& config, double sample_rate,
                                    int maximum_block_size);
 
+    /// Re-publishes content for the existing topology as one immutable binding
+    /// generation. This is the only content-program adoption path; process()
+    /// never independently latches PlaybackProgramStore.
+    TimelineGraphAdmission adopt_program(const playback::PlaybackProgram& program);
+    TimelineGraphAdmission adopt_latest_program();
+
+    /// Dimension-changing prepare for a host lifecycle boundary where audio
+    /// process(), MIDI injection, and anticipation are stopped. External plugins
+    /// and retained custom nodes are re-prepared; renderer carry is deliberately
+    /// reset after a successful sample-rate or maximum-block change.
+    TimelineGraphAdmission prepare_quiesced(
+        const playback::PlaybackProgram& program,
+        std::span<const TimelineTrackGraphRoute> routes,
+        const TimelineGraphBindingConfig& config, double sample_rate,
+        int maximum_block_size);
+
+    using BeforeBindingPublishHookForTest = void (*)(void*) noexcept;
+    void set_before_binding_publish_hook_for_test(
+        BeforeBindingPublishHookForTest hook, void* context = nullptr) noexcept {
+        before_binding_publish_hook_for_test_ = hook;
+        before_binding_publish_context_for_test_ = context;
+    }
+
     TimelineGraphProcessResult process(audio::BufferView<float>& output,
                                        const audio::BufferView<const float>& input,
                                        const playback::TransportSnapshot& transport) noexcept;
@@ -132,14 +155,20 @@ class TimelineGraphPlaybackBinding {
     playback::RendererCarryState renderer_state_for(timeline::ItemId track_id) const noexcept;
 
   private:
+    TimelineGraphAdmission prepare_impl(
+        const playback::PlaybackProgram& program,
+        std::span<const TimelineTrackGraphRoute> routes,
+        const TimelineGraphBindingConfig& config, double sample_rate,
+        int maximum_block_size, bool quiesced);
     void remove_all_owned_nodes() noexcept;
 
     SignalGraph& graph_;
     const playback::PlaybackProgramStore& store_;
-    playback::PlaybackProgramBlockLatch latch_;
     std::shared_ptr<detail::TimelineGraphSharedBlockState> shared_;
     runtime::Slot<const detail::TimelineGraphBindingState> state_;
     std::uint64_t binding_instance_id_ = 0;
+    BeforeBindingPublishHookForTest before_binding_publish_hook_for_test_ = nullptr;
+    void* before_binding_publish_context_for_test_ = nullptr;
 };
 
 using TimelineGraphBinding = TimelineGraphPlaybackBinding;

@@ -268,6 +268,73 @@ class MidiCountingSlot final : public PluginSlot {
     PluginInfo info_;
 };
 
+class DimensionTrackingSlot final : public PluginSlot {
+  public:
+    DimensionTrackingSlot() {
+        info_.name = "timeline dimension tracker";
+        info_.unique_id = "pulp.test.timeline-dimension-tracker";
+        info_.format = PluginFormat::CLAP;
+        info_.is_effect = true;
+        info_.num_inputs = 1;
+        info_.num_outputs = 1;
+    }
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double sample_rate, int max_block_size) override {
+        if (fail_sample_rate.load(std::memory_order_relaxed) == sample_rate)
+            return false;
+        prepared_sample_rate.store(sample_rate, std::memory_order_relaxed);
+        prepared_max_block.store(max_block_size, std::memory_order_relaxed);
+        return true;
+    }
+    void release() override {}
+    void process(audio::BufferView<float>& output,
+                 const audio::BufferView<const float>& input,
+                 const midi::MidiBuffer&, midi::MidiBuffer&,
+                 const ParameterEventQueue&, int frames) override {
+        for (std::size_t channel = 0; channel < output.num_channels(); ++channel)
+            std::memcpy(output.channel_ptr(channel), input.channel_ptr(channel),
+                        sizeof(float) * static_cast<std::size_t>(frames));
+    }
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    void set_parameter(std::uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<std::uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+
+    std::atomic<double> prepared_sample_rate{0.0};
+    std::atomic<int> prepared_max_block{0};
+    std::atomic<double> fail_sample_rate{0.0};
+
+  private:
+    PluginInfo info_;
+};
+
+struct BindingPublishPause {
+    static void hook(void* context) noexcept {
+        auto& pause = *static_cast<BindingPublishPause*>(context);
+        pause.entered.store(true, std::memory_order_release);
+        while (!pause.released.load(std::memory_order_acquire))
+            std::this_thread::yield();
+    }
+    bool wait_until_entered() const noexcept {
+        for (int spin = 0; spin < 1'000'000; ++spin) {
+            if (entered.load(std::memory_order_acquire)) return true;
+            std::this_thread::yield();
+        }
+        return false;
+    }
+    std::atomic<bool> entered{false};
+    std::atomic<bool> released{false};
+};
+
 TransportSnapshot snapshot(const PlaybackProgram& program, std::uint32_t frames,
                            std::int64_t start = 0) {
     TransportSnapshot result;
@@ -459,6 +526,7 @@ TEST_CASE("timeline graph binding adopts live programs without replacing nodes")
 
     programs.publish(audio_project(0.5f, 128), map, assets, 2);
     auto next = programs.store.read();
+    REQUIRE(binding.adopt_latest_program());
     Buffer after(1, 64);
     auto after_view = after.view();
     REQUIRE(binding.process(after_view, input.const_view(), snapshot(*next, 64, 64)));
@@ -677,8 +745,8 @@ TEST_CASE("timeline graph binding validates sample rate at prepare and publicati
     auto output_view = output.view();
     REQUIRE(binding.process(output_view, input.const_view(), snapshot(*changed, 32)).code ==
             TimelineGraphProcessCode::InvalidTransport);
-    REQUIRE(output.storage[0] == std::vector<float>(32, 7.0f));
-    REQUIRE(binding.prepare(*changed, routes, config(1), 44'100.0, 64));
+    REQUIRE(output.storage[0] == std::vector<float>(32, 0.0f));
+    REQUIRE(binding.prepare_quiesced(*changed, routes, config(1), 44'100.0, 64));
     REQUIRE(binding.process(output_view, input.const_view(), snapshot(*changed, 32)));
 }
 
@@ -741,7 +809,7 @@ TEST_CASE("SignalGraph routed status rejects a build-invalid live snapshot") {
     REQUIRE(output.storage[0] == std::vector<float>(32, 1.0f));
 }
 
-TEST_CASE("timeline graph binding reports loss of its prepared routed snapshot") {
+TEST_CASE("timeline graph binding pins its exact routed snapshot") {
     const auto map = tempo_map();
     ProgramHarness programs;
     programs.publish(audio_project(1.0f, 128), map,
@@ -757,9 +825,8 @@ TEST_CASE("timeline graph binding reports loss of its prepared routed snapshot")
     Buffer input(1, 32);
     Buffer output(1, 32, 7.0f);
     auto output_view = output.view();
-    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*pinned, 32)).code ==
-            TimelineGraphProcessCode::RoutedDispatchFailed);
-    REQUIRE(output.storage[0] == std::vector<float>(32, 0.0f));
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*pinned, 32)));
+    REQUIRE(output.storage[0] == std::vector<float>(32, 1.0f));
 }
 
 TEST_CASE("timeline graph binding rejects MIDI capacity before graph mutation") {
@@ -810,9 +877,9 @@ TEST_CASE("timeline graph binding shape and topology guards preserve caller outp
     programs.publish(parallel_audio_project(128), map, assets, 2);
     auto added = programs.store.read();
     Buffer input(1, 32);
-    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*added, 32)).code ==
-            TimelineGraphProcessCode::TopologyChanged);
-    REQUIRE(output.storage[0] == std::vector<float>(32, 7.0f));
+    REQUIRE(binding.adopt_latest_program().code == TimelineGraphAdmissionCode::MissingTrack);
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*pinned, 32)));
+    REQUIRE(output.storage[0] == std::vector<float>(32, 1.0f));
 }
 
 TEST_CASE("timeline graph binding topology fingerprint ignores track ordering") {
@@ -830,6 +897,7 @@ TEST_CASE("timeline graph binding topology fingerprint ignores track ordering") 
 
     programs.publish(parallel_audio_project(128, true), map, assets, 2);
     auto reordered = programs.store.read();
+    REQUIRE(binding.adopt_latest_program());
     Buffer input(1, 32);
     Buffer output(1, 32);
     auto output_view = output.view();
@@ -839,9 +907,9 @@ TEST_CASE("timeline graph binding topology fingerprint ignores track ordering") 
     programs.publish(audio_project(1.0f, 128), map, assets, 3);
     auto removed = programs.store.read();
     std::fill(output.storage[0].begin(), output.storage[0].end(), 7.0f);
-    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*removed, 32)).code ==
-            TimelineGraphProcessCode::TopologyChanged);
-    REQUIRE(output.storage[0] == std::vector<float>(32, 7.0f));
+    REQUIRE(binding.adopt_latest_program().code == TimelineGraphAdmissionCode::MissingTrack);
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*reordered, 32)));
+    REQUIRE(output.storage[0][0] == 1.5f);
 }
 
 TEST_CASE("timeline graph binding preserves prepared state after a later route fails") {
@@ -1090,4 +1158,210 @@ TEST_CASE("timeline graph binding publishes coherent state during live reprepare
     REQUIRE(two_blocks.load(std::memory_order_relaxed) > 0);
     REQUIRE(invalid_blocks.load(std::memory_order_relaxed) == 0);
     REQUIRE(allocations.load(std::memory_order_relaxed) == 0);
+}
+
+TEST_CASE("timeline graph binding publishes node-set generations atomically") {
+    const auto map = tempo_map();
+    auto assets = asset_pool(std::vector<float>(128, 1.0f));
+    ProgramHarness two_programs;
+    two_programs.publish(parallel_audio_project(128), map, assets, 1);
+    auto two = two_programs.store.read();
+    ProgramHarness one_programs;
+    one_programs.publish(audio_project(1.0f, 128), map, assets, 2);
+    auto one = one_programs.store.read();
+
+    SignalGraph graph;
+    const auto output_node = graph.add_output_node(1);
+    TimelineGraphPlaybackBinding binding(graph, two_programs.store);
+    const std::array two_routes{
+        TimelineTrackGraphRoute{{10}, output_node, 0, 0},
+        TimelineTrackGraphRoute{{11}, output_node, 0, 0}};
+    const std::array one_route{
+        TimelineTrackGraphRoute{{10}, output_node, 0, 0}};
+    REQUIRE(binding.prepare(*two, two_routes, config(1), 48'000.0, 64));
+
+    Buffer input(1, 32);
+    Buffer output(1, 32);
+    auto output_view = output.view();
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*two, 32)));
+    REQUIRE(output.storage[0][0] == 1.5f);
+
+    BindingPublishPause remove_pause;
+    binding.set_before_binding_publish_hook_for_test(&BindingPublishPause::hook,
+                                                     &remove_pause);
+    std::atomic<TimelineGraphAdmissionCode> remove_code{
+        TimelineGraphAdmissionCode::GraphPrepareFailed};
+    std::thread remover([&] {
+        remove_code.store(binding.prepare(*one, one_route, config(1), 48'000.0, 64).code,
+                          std::memory_order_release);
+    });
+    REQUIRE(remove_pause.wait_until_entered());
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*two, 32)));
+    REQUIRE(output.storage[0][0] == 1.5f);
+    remove_pause.released.store(true, std::memory_order_release);
+    remover.join();
+    REQUIRE(remove_code.load(std::memory_order_acquire) ==
+            TimelineGraphAdmissionCode::Accepted);
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*one, 32)));
+    REQUIRE(output.storage[0][0] == 1.0f);
+
+    BindingPublishPause add_pause;
+    binding.set_before_binding_publish_hook_for_test(&BindingPublishPause::hook,
+                                                     &add_pause);
+    std::atomic<TimelineGraphAdmissionCode> add_code{
+        TimelineGraphAdmissionCode::GraphPrepareFailed};
+    std::thread adder([&] {
+        add_code.store(binding.prepare(*two, two_routes, config(1), 48'000.0, 64).code,
+                       std::memory_order_release);
+    });
+    REQUIRE(add_pause.wait_until_entered());
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*one, 32)));
+    REQUIRE(output.storage[0][0] == 1.0f);
+    add_pause.released.store(true, std::memory_order_release);
+    adder.join();
+    REQUIRE(add_code.load(std::memory_order_acquire) ==
+            TimelineGraphAdmissionCode::Accepted);
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*two, 32)));
+    REQUIRE(output.storage[0][0] == 1.5f);
+    binding.set_before_binding_publish_hook_for_test(nullptr);
+}
+
+TEST_CASE("timeline graph binding publishes content generations atomically") {
+    const auto map = tempo_map();
+    auto assets = asset_pool(std::vector<float>(128, 1.0f));
+    ProgramHarness programs;
+    programs.publish(audio_project(1.0f, 128), map, assets, 1);
+    auto first = programs.store.read();
+    SignalGraph graph;
+    const auto output_node = graph.add_output_node(1);
+    TimelineGraphPlaybackBinding binding(graph, programs.store);
+    const std::array routes{TimelineTrackGraphRoute{{10}, output_node, 0, 0}};
+    REQUIRE(binding.prepare(*first, routes, config(1), 48'000.0, 64));
+
+    Buffer input(1, 32);
+    Buffer output(1, 32);
+    auto output_view = output.view();
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*first, 32)));
+    REQUIRE(output.storage[0][0] == 1.0f);
+
+    programs.publish(audio_project(0.5f, 128), map, assets, 2);
+    auto second = programs.store.read();
+    BindingPublishPause pause;
+    binding.set_before_binding_publish_hook_for_test(&BindingPublishPause::hook, &pause);
+    std::atomic<TimelineGraphAdmissionCode> adoption_code{
+        TimelineGraphAdmissionCode::GraphPrepareFailed};
+    std::thread adopter([&] {
+        adoption_code.store(binding.adopt_program(*second).code,
+                            std::memory_order_release);
+    });
+    REQUIRE(pause.wait_until_entered());
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*first, 32, 32)));
+    REQUIRE(output.storage[0][0] == 1.0f);
+    pause.released.store(true, std::memory_order_release);
+    adopter.join();
+    REQUIRE(adoption_code.load(std::memory_order_acquire) ==
+            TimelineGraphAdmissionCode::Accepted);
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*second, 32, 64)));
+    REQUIRE(output.storage[0][0] == 0.5f);
+    binding.set_before_binding_publish_hook_for_test(nullptr);
+}
+
+TEST_CASE("timeline graph binding quiescently reprepares plugin dimensions") {
+    auto map48 = tempo_map({48'000, 1});
+    auto assets = asset_pool(std::vector<float>(512, 1.0f));
+    ProgramHarness programs48;
+    programs48.publish(audio_project(1.0f, 512), map48, assets, 1);
+    auto program48 = programs48.store.read();
+
+    SignalGraph graph;
+    auto plugin = std::make_unique<DimensionTrackingSlot>();
+    auto* plugin_ptr = plugin.get();
+    const auto plugin_node = graph.add_plugin_node(std::move(plugin), 1, 1,
+                                                   "dimension tracker");
+    const auto output_node = graph.add_output_node(1);
+    REQUIRE(graph.connect(plugin_node, 0, output_node, 0));
+    REQUIRE(graph.prepare(48'000.0, 64));
+    TimelineGraphPlaybackBinding binding(graph, programs48.store);
+    const std::array routes{
+        TimelineTrackGraphRoute{{10}, plugin_node, 0, 0}};
+    REQUIRE(binding.prepare(*program48, routes, config(1), 48'000.0, 64));
+
+    auto map44 = tempo_map({44'100, 1});
+    ProgramHarness programs44;
+    programs44.publish(audio_project(1.0f, 512), map44, assets, 2);
+    auto program44 = programs44.store.read();
+    REQUIRE(binding.prepare_quiesced(*program44, routes, config(1), 44'100.0, 128));
+    REQUIRE(plugin_ptr->prepared_sample_rate.load(std::memory_order_relaxed) == 44'100.0);
+    REQUIRE(plugin_ptr->prepared_max_block.load(std::memory_order_relaxed) == 128);
+    REQUIRE(binding.prepare_quiesced(*program44, routes, config(1), 44'100.0, 256));
+    REQUIRE(plugin_ptr->prepared_max_block.load(std::memory_order_relaxed) == 256);
+
+    Buffer input(1, 32);
+    Buffer output(1, 32);
+    auto output_view = output.view();
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*program44, 32)));
+    REQUIRE(output.storage[0][0] == 1.0f);
+
+    auto map32 = tempo_map({32'000, 1});
+    ProgramHarness programs32;
+    programs32.publish(audio_project(1.0f, 512), map32, assets, 3);
+    auto program32 = programs32.store.read();
+    plugin_ptr->fail_sample_rate.store(32'000.0, std::memory_order_relaxed);
+    REQUIRE(binding.prepare_quiesced(*program32, routes, config(1), 32'000.0, 256).code ==
+            TimelineGraphAdmissionCode::GraphPrepareFailed);
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*program44, 32, 32)));
+    REQUIRE(output.storage[0][0] == 1.0f);
+    REQUIRE(plugin_ptr->prepared_sample_rate.load(std::memory_order_relaxed) == 44'100.0);
+    REQUIRE(plugin_ptr->prepared_max_block.load(std::memory_order_relaxed) == 256);
+}
+
+TEST_CASE("timeline graph binding restores shared lifecycles after quiesced failure") {
+    auto map48 = tempo_map({48'000, 1});
+    auto assets = asset_pool(std::vector<float>(512, 1.0f));
+    ProgramHarness programs48;
+    programs48.publish(audio_project(1.0f, 512), map48, assets, 1);
+    auto program48 = programs48.store.read();
+
+    SignalGraph graph;
+    auto first = std::make_unique<DimensionTrackingSlot>();
+    auto* first_ptr = first.get();
+    const auto first_node = graph.add_plugin_node(std::move(first), 1, 1, "first tracker");
+    auto second = std::make_unique<DimensionTrackingSlot>();
+    auto* second_ptr = second.get();
+    const auto second_node = graph.add_plugin_node(std::move(second), 1, 1, "second tracker");
+    const auto output_node = graph.add_output_node(1);
+    REQUIRE(graph.connect(first_node, 0, second_node, 0));
+    REQUIRE(graph.connect(second_node, 0, output_node, 0));
+    REQUIRE(graph.prepare(48'000.0, 64));
+    TimelineGraphPlaybackBinding binding(graph, programs48.store);
+    const std::array routes{TimelineTrackGraphRoute{{10}, first_node, 0, 0}};
+    REQUIRE(binding.prepare(*program48, routes, config(1), 48'000.0, 64));
+
+    auto map32 = tempo_map({32'000, 1});
+    ProgramHarness programs32;
+    programs32.publish(audio_project(1.0f, 512), map32, assets, 2);
+    auto program32 = programs32.store.read();
+    second_ptr->fail_sample_rate.store(32'000.0, std::memory_order_relaxed);
+    REQUIRE(binding.prepare_quiesced(*program32, routes, config(1), 32'000.0, 128).code ==
+            TimelineGraphAdmissionCode::GraphPrepareFailed);
+    REQUIRE(first_ptr->prepared_sample_rate.load(std::memory_order_relaxed) == 48'000.0);
+    REQUIRE(first_ptr->prepared_max_block.load(std::memory_order_relaxed) == 64);
+    REQUIRE(second_ptr->prepared_sample_rate.load(std::memory_order_relaxed) == 48'000.0);
+    REQUIRE(second_ptr->prepared_max_block.load(std::memory_order_relaxed) == 64);
+
+    Buffer input(1, 32);
+    Buffer output(1, 32);
+    auto output_view = output.view();
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*program48, 32)));
+    REQUIRE(output.storage[0][0] == 1.0f);
+
+    // If restoring even one already-touched shared instance fails, the binding
+    // revokes its publication instead of exposing a partially re-prepared graph.
+    first_ptr->fail_sample_rate.store(48'000.0, std::memory_order_relaxed);
+    REQUIRE(binding.prepare_quiesced(*program32, routes, config(1), 32'000.0, 128).code ==
+            TimelineGraphAdmissionCode::GraphPrepareFailed);
+    std::fill(output.storage[0].begin(), output.storage[0].end(), 7.0f);
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*program48, 32)).code ==
+            TimelineGraphProcessCode::MissingProgram);
+    REQUIRE(output.storage[0] == std::vector<float>(32, 0.0f));
 }

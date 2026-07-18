@@ -5162,6 +5162,31 @@ TEST_CASE("SignalGraph prepared edit surface is fail closed and releases abandon
         REQUIRE(destroys.load(std::memory_order_relaxed) == 1);
         REQUIRE(graph.nodes().empty());
     }
+
+    SECTION("a quiesced prepare failure releases custom instances created before it") {
+        std::atomic<int> creates{0};
+        std::atomic<int> releases{0};
+        std::atomic<int> destroys{0};
+        auto type = make_prepared_edit_level_type(
+            "pulp.test.prepared.quiesced-failure", 1.0f, &creates, nullptr,
+            &destroys);
+        type.prepare = [](void*, double, int) { throw std::runtime_error("prepare"); };
+        type.release = [&](void*) {
+            releases.fetch_add(1, std::memory_order_relaxed);
+        };
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->register_custom_node_type(std::move(type)));
+        REQUIRE(edit->add_custom_node("pulp.test.prepared.quiesced-failure") != 0);
+
+        REQUIRE(edit->prepare_quiesced(48000.0, 8)
+                == Result::ExternalPluginReprepareRequired);
+        edit.reset();
+
+        REQUIRE(creates.load(std::memory_order_relaxed) == 1);
+        REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+        REQUIRE(destroys.load(std::memory_order_relaxed) == 1);
+        REQUIRE(graph.nodes().empty());
+    }
 }
 
 TEST_CASE("SignalGraph prepared edit registry remains bounded under binding churn",
