@@ -326,16 +326,18 @@ tools/ci/governed-build.sh cmake --build build-sampler-release \
   --target pulp-sampler-test
 ./build-sampler-release/examples/PulpSampler/pulp-sampler-test
 
-cmake -S . -B build-sampler-asan -DCMAKE_BUILD_TYPE=Debug \
+cmake -S . -B build-sampler-asan -DCMAKE_BUILD_TYPE=Release \
   -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_ENABLE_GPU=OFF \
+  -DPULP_TEXT_SHAPING=OFF \
   -DPULP_SANITIZER=address
 tools/ci/governed-build.sh cmake --build build-sampler-asan \
   --target pulp-sampler-test
 ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 \
   ./build-sampler-asan/examples/PulpSampler/pulp-sampler-test
 
-cmake -S . -B build-sampler-tsan -DCMAKE_BUILD_TYPE=Debug \
+cmake -S . -B build-sampler-tsan -DCMAKE_BUILD_TYPE=Release \
   -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_ENABLE_GPU=OFF \
+  -DPULP_TEXT_SHAPING=OFF \
   -DPULP_SANITIZER=thread
 tools/ci/governed-build.sh cmake --build build-sampler-tsan \
   --target pulp-sampler-test
