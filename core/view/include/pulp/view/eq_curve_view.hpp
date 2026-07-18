@@ -4,8 +4,10 @@
 #include <pulp/view/animation.hpp>
 #include <pulp/view/graph_scale.hpp>
 #include <pulp/signal/biquad.hpp>
+#include <pulp/state/store.hpp>
 #include <vector>
 #include <functional>
+#include <span>
 
 namespace pulp::view {
 
@@ -132,6 +134,58 @@ public:
     void set_spectrum(const float* magnitudes_db, size_t bin_count);
     void clear_spectrum();
 
+    // ── Analyzer dBFS scale ─────────────────────────────────────────────────
+    // The spectrum overlay is drawn on its OWN dBFS scale spanning the FULL
+    // plotting height, decoupled from the ±gain axis the EQ curve/dots use.
+    // Default: analyzer_top_db (0 dBFS) at the top of the plot, analyzer_bottom_db
+    // (−60 dBFS) at the bottom — so a smoothed envelope fills the whole graph
+    // (Logic / Pro-Q style) instead of being crushed into the gain axis. The
+    // setters exist for a future drag-to-zoom; the defaults are hardcoded.
+    void set_analyzer_range(float top_db, float bottom_db) {
+        analyzer_top_db_ = top_db;
+        analyzer_bottom_db_ = bottom_db;
+    }
+    float analyzer_top_db() const { return analyzer_top_db_; }
+    float analyzer_bottom_db() const { return analyzer_bottom_db_; }
+    // Map a dBFS value to a plot-space y via the analyzer scale (top_db → top of
+    // plot, bottom_db → bottom). Clamped to the plot. Independent of the gain
+    // axis; the spectrum overlay and any analyzer tick labels use this.
+    float analyzer_db_to_y(float dbfs) const;
+
+    // ── StateStore binding (parameter automation: record + playback) ────────
+    // Parameter IDs for one band's frequency, gain, and Q. One entry per band,
+    // in the same order as the bands passed to set_bands(). A zero id means the
+    // band has no parameter for that field (e.g. a gain-less filter).
+    struct BandParamIds {
+        pulp::state::ParamID freq = 0;
+        pulp::state::ParamID gain = 0;
+        pulp::state::ParamID q = 0;
+    };
+
+    // Bind this view to a StateStore so parameter automation works end-to-end:
+    //
+    //   • Record (Direction A): the built-in drag / scroll / pinch / reset
+    //     handlers bracket their edits in begin_gesture → set_value → end_gesture
+    //     so the host records automation and groups the drag into one undo step.
+    //   • Playback (Direction B): a Main-thread listener maps a host-originated
+    //     parameter change back onto the corresponding band and repaints, so the
+    //     curve follows automation. The listener is a PURE widget update — it
+    //     never re-opens a gesture nor writes back to the store, so it cannot
+    //     feed back into the record path.
+    //
+    // Additive/opt-in: on_band_changed still fires. RT-safety: begin/end_gesture
+    // and set_value run on the host main thread (the drag handlers already do);
+    // the Main listener fires only from the UI-thread listener pump.
+    void bind_bands(pulp::state::StateStore& store, std::span<const BandParamIds> ids);
+
+    // Whether the built-in handlers record their edits to the bound store
+    // (Direction A). On by default. A host that runs its OWN edit logic
+    // (relative / group moves, numeric scrubbing) and drives the store itself
+    // turns this OFF so the view does not double-write, while STILL receiving
+    // host-playback updates through the bind_bands listener (Direction B).
+    void set_record_gestures(bool on) { record_gestures_ = on; }
+    bool record_gestures() const { return record_gestures_; }
+
     // Interaction callbacks
     std::function<void(size_t band_index, Band band)> on_band_changed;
     std::function<void(size_t band_index)> on_band_selected;
@@ -199,12 +253,40 @@ private:
     mutable std::vector<float> band_db_;
     mutable std::vector<canvas::Canvas::Point2D> fill_poly_;
 
+    // Analyzer dBFS scale (full plot height), independent of the ±gain axis.
+    float analyzer_top_db_ = 0.0f;
+    float analyzer_bottom_db_ = -60.0f;
+
+    // ── StateStore binding state ────────────────────────────────────────────
+    pulp::state::StateStore* store_ = nullptr;
+    std::vector<BandParamIds> band_params_;
+    bool record_gestures_ = true;
+    // True while a Direction-A write is in flight, so the bind_bands listener
+    // ignores our own echo (the host adapter suppresses its own separately).
+    bool writing_to_store_ = false;
+    // Param ids whose gesture is open for the active dot drag (0 = none).
+    pulp::state::ParamID drag_freq_gesture_ = 0;
+    pulp::state::ParamID drag_gain_gesture_ = 0;
+
     void rebuild_coefficients();
     float freq_to_x(float freq) const;
     float x_to_freq(float x) const;
     float db_to_y(float db) const;
     float y_to_db(float y) const;
     int hit_test_band(Point pos) const;
+
+    // StateStore helpers. store_set brackets the write with the echo guard;
+    // store_begin/store_end forward gesture boundaries (no value write).
+    void store_begin(pulp::state::ParamID id);
+    void store_set(pulp::state::ParamID id, float value);
+    void store_end(pulp::state::ParamID id);
+    // Direction B: apply a host-originated parameter change to the matching band.
+    void apply_param_from_host(pulp::state::ParamID id, float value);
+
+    // Listener subscriptions for Direction B. Declared LAST so they are torn
+    // down FIRST — the listener callback reads bands_ / band_params_, so it must
+    // be removed before those members are destroyed.
+    std::vector<pulp::state::ListenerToken> param_listener_tokens_;
 };
 
 } // namespace pulp::view

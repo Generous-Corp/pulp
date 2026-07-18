@@ -10,11 +10,17 @@
 #include <pulp/view/breadcrumb.hpp>
 #include <pulp/view/theme_editor.hpp>
 #include <pulp/view/graph_scale.hpp>
+#include <pulp/view/screenshot.hpp>
+#include <pulp/state/store.hpp>
 #include <pulp/signal/frequency_response.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdlib>
+#include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace pulp::view;
@@ -43,6 +49,218 @@ bool has_fill_color(const RecordingCanvas& canvas, Color color) {
 }
 
 } // namespace
+
+// ── EqCurveView: StateStore binding (parameter automation) ──────────────────
+//
+// bind_bands() wires the widget to a StateStore so drags RECORD host automation
+// (begin_gesture → set_value → end_gesture) and host writes PLAY BACK onto the
+// curve (a Main-thread listener drained by pump_listeners). These assert the two
+// directions and the no-feedback guard.
+
+TEST_CASE("EqCurveView bind_bands records a dot drag as one gesture",
+          "[view][eq_curve][automation]") {
+    using pulp::state::ListenerThread;
+    using pulp::state::ParamID;
+    using pulp::state::StateStore;
+
+    StateStore store;
+    store.add_parameter({.id = 1, .name = "F0", .range = {20.0f, 20000.0f, 1000.0f, 0.0f}});
+    store.add_parameter({.id = 2, .name = "G0", .range = {-24.0f, 24.0f, 0.0f, 0.0f}});
+    store.add_parameter({.id = 3, .name = "Q0", .range = {0.1f, 30.0f, 1.0f, 0.0f}});
+
+    int begins = 0, ends = 0;
+    store.set_gesture_callbacks([&](ParamID) { ++begins; }, [&](ParamID) { ++ends; });
+    std::vector<std::pair<ParamID, float>> sets;
+    auto rec = store.add_listener(
+        [&](ParamID id, float v) { sets.emplace_back(id, v); }, ListenerThread::Audio);
+
+    EqCurveView eq;
+    eq.set_sample_rate(48000.0f);
+    eq.set_frequency_range(20.0f, 20000.0f);
+    eq.set_gain_range(-24.0f, 24.0f);
+    eq.set_bounds({0, 0, 400, 300});
+    // Low-pass: a dot drag moves ONLY frequency (no gain), so exactly one param
+    // gesture opens and closes.
+    eq.set_bands({{1000.0f, 0.0f, 0.707f, EqCurveView::FilterType::low_pass, true}});
+    std::array<EqCurveView::BandParamIds, 1> ids{{{1, 2, 3}}};
+    eq.bind_bands(store,
+                  std::span<const EqCurveView::BandParamIds>(ids.data(), ids.size()));
+
+    const float hy = eq.gain_scale().to_y(0.0f);  // low-pass handle rides 0 dB
+    eq.on_mouse_down({eq.frequency_scale().to_x(1000.0f), hy});
+    eq.on_mouse_drag({eq.frequency_scale().to_x(4000.0f), hy});
+    eq.on_mouse_up({eq.frequency_scale().to_x(4000.0f), hy});
+
+    REQUIRE(begins == 1);  // exactly one begin_gesture (frequency only)
+    REQUIRE(ends == 1);    // and exactly one end_gesture
+    // At least one frequency set_value was emitted during the drag.
+    REQUIRE(std::any_of(sets.begin(), sets.end(),
+                        [](const auto& s) { return s.first == 1u; }));
+    // A gain-less filter writes neither gain nor Q.
+    REQUIRE_FALSE(std::any_of(sets.begin(), sets.end(), [](const auto& s) {
+        return s.first == 2u || s.first == 3u;
+    }));
+    // The recorded band actually moved.
+    REQUIRE(eq.bands()[0].frequency > 1000.0f);
+}
+
+TEST_CASE("EqCurveView bind_bands records scroll-Q and reset as gestures",
+          "[view][eq_curve][automation]") {
+    using pulp::state::ListenerThread;
+    using pulp::state::ParamID;
+    using pulp::state::StateStore;
+
+    StateStore store;
+    store.add_parameter({.id = 1, .name = "F0", .range = {20.0f, 20000.0f, 1000.0f, 0.0f}});
+    store.add_parameter({.id = 2, .name = "G0", .range = {-24.0f, 24.0f, 0.0f, 0.0f}});
+    store.add_parameter({.id = 3, .name = "Q0", .range = {0.1f, 30.0f, 1.0f, 0.0f}});
+
+    int begins = 0, ends = 0;
+    store.set_gesture_callbacks([&](ParamID) { ++begins; }, [&](ParamID) { ++ends; });
+    std::vector<std::pair<ParamID, float>> sets;
+    auto rec = store.add_listener(
+        [&](ParamID id, float v) { sets.emplace_back(id, v); }, ListenerThread::Audio);
+
+    EqCurveView eq;
+    eq.set_sample_rate(48000.0f);
+    eq.set_frequency_range(20.0f, 20000.0f);
+    eq.set_gain_range(-24.0f, 24.0f);
+    eq.set_bounds({0, 0, 400, 300});
+    eq.set_bands({{1000.0f, 6.0f, 1.0f, EqCurveView::FilterType::peak, true}});
+    std::array<EqCurveView::BandParamIds, 1> ids{{{1, 2, 3}}};
+    eq.bind_bands(store,
+                  std::span<const EqCurveView::BandParamIds>(ids.data(), ids.size()));
+
+    const float hx = eq.frequency_scale().to_x(1000.0f);
+    const float hy = eq.gain_scale().to_y(6.0f);  // peak handle rides its gain
+
+    SECTION("scroll wheel over a dot records a Q gesture") {
+        MouseEvent e;
+        e.is_wheel = true;
+        e.position = {hx, hy};
+        e.scroll_delta_y = -6.0f;  // narrow → raise Q
+        eq.on_mouse_event(e);
+
+        REQUIRE(begins == 1);
+        REQUIRE(ends == 1);
+        REQUIRE(std::any_of(sets.begin(), sets.end(),
+                            [](const auto& s) { return s.first == 3u; }));  // Q written
+        REQUIRE(eq.bands()[0].q > 1.0f);
+    }
+
+    SECTION("double-click a dot resets its gain in one gesture") {
+        MouseEvent e;
+        e.is_down = true;
+        e.click_count = 2;
+        e.position = {hx, hy};
+        eq.on_mouse_event(e);
+
+        REQUIRE(begins == 1);
+        REQUIRE(ends == 1);
+        bool gain_reset = std::any_of(sets.begin(), sets.end(), [](const auto& s) {
+            return s.first == 2u && s.second == 0.0f;
+        });
+        REQUIRE(gain_reset);
+        REQUIRE_THAT(eq.bands()[0].gain_db, WithinAbs(0.0f, 0.001f));
+    }
+}
+
+TEST_CASE("EqCurveView bind_bands plays back a host write without re-recording",
+          "[view][eq_curve][automation]") {
+    using pulp::state::ListenerThread;
+    using pulp::state::ParamID;
+    using pulp::state::StateStore;
+
+    StateStore store;
+    store.add_parameter({.id = 1, .name = "F0", .range = {20.0f, 20000.0f, 1000.0f, 0.0f}});
+    store.add_parameter({.id = 2, .name = "G0", .range = {-24.0f, 24.0f, 0.0f, 0.0f}});
+    store.add_parameter({.id = 3, .name = "Q0", .range = {0.1f, 30.0f, 1.0f, 0.0f}});
+
+    int begins = 0, ends = 0;
+    store.set_gesture_callbacks([&](ParamID) { ++begins; }, [&](ParamID) { ++ends; });
+
+    EqCurveView eq;
+    eq.set_sample_rate(48000.0f);
+    eq.set_bounds({0, 0, 400, 300});
+    eq.set_bands({{1000.0f, 3.0f, 1.0f, EqCurveView::FilterType::peak, true}});
+    std::array<EqCurveView::BandParamIds, 1> ids{{{1, 2, 3}}};
+    eq.bind_bands(store,
+                  std::span<const EqCurveView::BandParamIds>(ids.data(), ids.size()));
+
+    // The host automates freq + gain from the audio thread; the UI pump drains it.
+    store.set_value_rt(1, 5000.0f);
+    store.set_value_rt(2, -6.0f);
+    const std::size_t drained = store.pump_listeners();
+
+    REQUIRE(drained >= 1);
+    REQUIRE_THAT(eq.bands()[0].frequency, WithinAbs(5000.0f, 0.01f));
+    REQUIRE_THAT(eq.bands()[0].gain_db, WithinAbs(-6.0f, 0.01f));
+    // The playback listener is a pure widget update — it must NOT open a gesture
+    // nor re-emit an edit back to the store.
+    REQUIRE(begins == 0);
+    REQUIRE(ends == 0);
+}
+
+// ── EqCurveView: analyzer full-height dBFS scale ─────────────────────────────
+//
+// The spectrum overlay maps onto a dedicated dBFS scale spanning the FULL plot
+// height (0 dBFS at the top → −60 dBFS at the bottom), decoupled from the ±gain
+// axis so a broadband envelope fills the whole graph (Logic / Pro-Q style).
+
+TEST_CASE("EqCurveView analyzer scale spans full plot height",
+          "[view][eq_curve][analyzer]") {
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 400, 300});  // plot: y 0 (top) .. 300 (bottom)
+
+    // Default 0 dBFS → top, −60 dBFS → bottom, linear in between.
+    REQUIRE_THAT(eq.analyzer_db_to_y(0.0f), WithinAbs(0.0f, 0.01f));
+    REQUIRE_THAT(eq.analyzer_db_to_y(-60.0f), WithinAbs(300.0f, 0.01f));
+    REQUIRE_THAT(eq.analyzer_db_to_y(-30.0f), WithinAbs(150.0f, 0.01f));
+
+    // Independent of the ±gain axis: narrowing the gain range must not move it.
+    eq.set_gain_range(-6.0f, 6.0f);
+    REQUIRE_THAT(eq.analyzer_db_to_y(-30.0f), WithinAbs(150.0f, 0.01f));
+
+    // Clamped to the plot at both ends.
+    REQUIRE_THAT(eq.analyzer_db_to_y(12.0f), WithinAbs(0.0f, 0.01f));
+    REQUIRE_THAT(eq.analyzer_db_to_y(-120.0f), WithinAbs(300.0f, 0.01f));
+
+    // The setters retarget the scale (reserved for a future drag-to-zoom).
+    eq.set_analyzer_range(-10.0f, -70.0f);
+    REQUIRE_THAT(eq.analyzer_db_to_y(-10.0f), WithinAbs(0.0f, 0.01f));
+    REQUIRE_THAT(eq.analyzer_db_to_y(-70.0f), WithinAbs(300.0f, 0.01f));
+}
+
+// Headless PNG proof that the analyzer envelope spans the full height. Opt-in
+// (hidden [.render] tag + env guard) so CI stays file-free; run with
+//   PULP_EQ_RENDER_PNG=1 ctest -R phase9-widgets
+// or the binary directly with the tag, to write /tmp/eq-analyzer-fullheight.png.
+TEST_CASE("EqCurveView analyzer renders full-height (headless PNG)",
+          "[view][eq_curve][analyzer][.render]") {
+    if (std::getenv("PULP_EQ_RENDER_PNG") == nullptr) return;
+
+    EqCurveView eq;
+    eq.set_sample_rate(48000.0f);
+    eq.set_frequency_range(20.0f, 24000.0f);
+    eq.set_gain_range(-12.0f, 12.0f);
+    eq.set_bounds({0, 0, 900, 400});
+    eq.set_bands({
+        {80.0f, 3.0f, 0.7f, EqCurveView::FilterType::low_shelf, true},
+        {240.0f, -4.5f, 1.4f, EqCurveView::FilterType::peak, true},
+        {1000.0f, 6.0f, 2.4f, EqCurveView::FilterType::peak, true},
+        {3200.0f, 2.0f, 1.2f, EqCurveView::FilterType::peak, true},
+        {6400.0f, -3.0f, 1.6f, EqCurveView::FilterType::peak, true},
+        {12000.0f, 4.0f, 0.7f, EqCurveView::FilterType::high_shelf, true},
+    });
+    // A broadband envelope near −40 dBFS with a low-frequency hump, so the fill
+    // sits well into the plot and is clearly not crushed onto the gain axis.
+    std::vector<float> mags(1025, -42.0f);
+    for (std::size_t i = 8; i < 48; ++i) mags[i] = -18.0f;
+    eq.set_spectrum(mags.data(), mags.size());
+
+    const bool ok = render_to_file(eq, 900, 400, "/tmp/eq-analyzer-fullheight.png", 2.0f);
+    REQUIRE(ok);
+}
 
 // ── EqCurveView: the drawn curve ────────────────────────────────────────────
 //

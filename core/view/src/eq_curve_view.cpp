@@ -198,6 +198,70 @@ void EqCurveView::clear_spectrum() {
     spectrum_smoothed_.clear();
 }
 
+// ── Analyzer dBFS scale ─────────────────────────────────────────────────────
+// A dedicated scale spanning the full plotting height (top_db at the top,
+// bottom_db at the bottom), decoupled from the ±gain axis, so the spectrum
+// envelope fills the whole graph rather than being squeezed onto the gain axis.
+float EqCurveView::analyzer_db_to_y(float dbfs) const {
+    const auto b = local_bounds();
+    const float plot_top = b.y + std::min(content_top_pad_, b.height);
+    const float plot_bottom = b.y + b.height;
+    const float span = analyzer_bottom_db_ - analyzer_top_db_;  // e.g. -60
+    const float t = span != 0.0f ? (dbfs - analyzer_top_db_) / span : 0.0f;
+    return plot_top + std::clamp(t, 0.0f, 1.0f) * (plot_bottom - plot_top);
+}
+
+// ── StateStore binding ──────────────────────────────────────────────────────
+void EqCurveView::store_begin(state::ParamID id) {
+    if (store_ && id != 0) store_->begin_gesture(id);
+}
+
+void EqCurveView::store_end(state::ParamID id) {
+    if (store_ && id != 0) store_->end_gesture(id);
+}
+
+void EqCurveView::store_set(state::ParamID id, float value) {
+    if (!store_ || id == 0) return;
+    // Guard: a set_value fired inline (no host EventLoop) would re-enter our own
+    // Direction-B listener; the flag makes that a no-op so we don't re-apply our
+    // own edit. It is NOT the loop guard against host writes — the listener path
+    // never writes back to the store regardless (see apply_param_from_host).
+    writing_to_store_ = true;
+    store_->set_value(id, value);
+    writing_to_store_ = false;
+}
+
+void EqCurveView::apply_param_from_host(state::ParamID id, float value) {
+    // Pure widget update: map id → (band, field), write the value into the band,
+    // rebuild the drawn curve, and repaint. Never opens a gesture or writes back
+    // to the store, so a host-driven change cannot feed back into the record path.
+    for (size_t bi = 0; bi < band_params_.size() && bi < bands_.size(); ++bi) {
+        const BandParamIds& p = band_params_[bi];
+        if (id != 0 && id == p.freq)      bands_[bi].frequency = value;
+        else if (id != 0 && id == p.gain) bands_[bi].gain_db = value;
+        else if (id != 0 && id == p.q)    bands_[bi].q = value;
+        else continue;
+        rebuild_coefficients();
+        request_repaint();
+        return;
+    }
+}
+
+void EqCurveView::bind_bands(state::StateStore& store, std::span<const BandParamIds> ids) {
+    store_ = &store;
+    band_params_.assign(ids.begin(), ids.end());
+    param_listener_tokens_.clear();
+    // One Main-thread listener dispatches every bound param. Main so it is fed by
+    // the UI-thread pump (pump_listeners) draining host RT writes, never inline
+    // on the audio thread.
+    param_listener_tokens_.push_back(store.add_listener(
+        [this](state::ParamID id, float value) {
+            if (writing_to_store_) return;  // our own Direction-A echo
+            apply_param_from_host(id, value);
+        },
+        state::ListenerThread::Main));
+}
+
 // The four axis conversions all defer to the shared scales, so anything
 // overlaid on this view (a spectrum, a crosshair) lands on the same pixels.
 float EqCurveView::freq_to_x(float freq) const { return frequency_scale().to_x(freq); }
@@ -339,30 +403,32 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
         }
 
         // (d) Build a top-edge polyline sampled every ~3 px, plus baseline anchors
-        // at the 0 dB line, as one closed fill polygon. Points [1 .. n-2] are the
-        // envelope; [0] and [n-1] are the baseline anchors.
+        // at the bottom of the plot, as one closed fill polygon. Points [1 .. n-2]
+        // are the envelope; [0] and [n-1] are the baseline anchors. The envelope
+        // is mapped through the DEDICATED analyzer dBFS scale (analyzer_db_to_y),
+        // which spans the FULL plot height (0 dBFS top → −60 dBFS bottom) — NOT
+        // the ±gain axis — so a broadband envelope fills the whole graph like
+        // Logic / Pro-Q instead of being crushed onto the gain axis.
         const Color spec = Color::rgba8(0x64, 0xaf, 0xeb);
-        const float y_top  = gain_axis.to_y(max_db_);  // +max dB line (gradient top)
-        const float y_zero = gain_axis.to_y(0.0f);      // 0 dB line (gradient bottom)
         const float plot_top = b.y + std::min(content_top_pad_, b.height);
+        const float y_base = b.y + b.height;  // bottom of plot = analyzer floor
 
         fill_poly_.clear();
-        fill_poly_.push_back({b.x, y_zero});
+        fill_poly_.push_back({b.x, y_base});
         constexpr float step = 3.0f;
         for (float fx = 0.0f; fx <= b.width; fx += step) {
             const size_t ci = std::min(columns - 1, static_cast<size_t>(fx));
-            // Clamp within the plot and never below the 0 dB baseline — the fill
-            // is a hump above 0 dB, not a band that dips below it.
-            const float y = std::clamp(gain_axis.to_y(spectrum_db_[ci]), plot_top, y_zero);
+            const float y = analyzer_db_to_y(spectrum_db_[ci]);
             fill_poly_.push_back({b.x + fx, y});
         }
-        fill_poly_.push_back({b.x + b.width, y_zero});
+        fill_poly_.push_back({b.x + b.width, y_base});
 
-        // Fill: vertical gradient, ~0x44 alpha at +max dB fading to ~0x06 at 0 dB.
+        // Fill: vertical gradient, ~0x44 alpha at the top (loud) fading to ~0x06
+        // at the bottom (quiet), across the full analyzer height.
         const Color stops[2] = {with_alpha(spec, 0x44 / 255.0f),
                                 with_alpha(spec, 0x06 / 255.0f)};
         const float positions[2] = {0.0f, 1.0f};
-        canvas.set_fill_gradient_linear(b.x, y_top, b.x, y_zero, stops, positions, 2);
+        canvas.set_fill_gradient_linear(b.x, plot_top, b.x, y_base, stops, positions, 2);
         canvas.fill_path(fill_poly_.data(), fill_poly_.size());
 
         // Top stroke: a thin brighter accent line along the envelope only (skip
@@ -510,6 +576,19 @@ void EqCurveView::on_mouse_down(Point pos) {
     if (hit >= 0) {
         dragging_band_ = hit;
         drag_start_ = pos;
+        // Direction A: open a gesture for the param(s) this dot drag will change
+        // — freq always, gain only for a band that has one — so the whole drag
+        // is one grouped, host-recordable edit.
+        if (record_gestures_ && store_ &&
+            hit < static_cast<int>(band_params_.size())) {
+            const BandParamIds& p = band_params_[static_cast<size_t>(hit)];
+            store_begin(p.freq);
+            drag_freq_gesture_ = p.freq;
+            if (band_has_gain(bands_[static_cast<size_t>(hit)].type)) {
+                store_begin(p.gain);
+                drag_gain_gesture_ = p.gain;
+            }
+        }
         if (on_band_selected) on_band_selected(static_cast<size_t>(hit));
     }
 }
@@ -529,6 +608,13 @@ void EqCurveView::on_mouse_drag(Point pos) {
             band.gain_db = std::clamp(target_db, min_db_, max_db_);
         }
         rebuild_coefficients();
+        // Direction A: publish the changed value(s) inside the open gesture.
+        if (record_gestures_ && store_ &&
+            dragging_band_ < static_cast<int>(band_params_.size())) {
+            const BandParamIds& p = band_params_[static_cast<size_t>(dragging_band_)];
+            store_set(p.freq, band.frequency);
+            if (band_has_gain(band.type)) store_set(p.gain, band.gain_db);
+        }
         if (on_band_changed) on_band_changed(static_cast<size_t>(dragging_band_), band);
     }
 }
@@ -553,6 +639,15 @@ void EqCurveView::on_mouse_event(const MouseEvent& event) {
             rebuild_coefficients();
             selected_band_ = band;
             hovered_band_ = band;
+            // Direction A: a scroll adjusts Q — wrap the single write in a
+            // begin/set/end so the host records it as one gesture.
+            if (record_gestures_ && store_ &&
+                band < static_cast<int>(band_params_.size())) {
+                const state::ParamID qid = band_params_[static_cast<size_t>(band)].q;
+                store_begin(qid);
+                store_set(qid, b.q);
+                store_end(qid);
+            }
             if (on_band_changed) on_band_changed(static_cast<size_t>(band), b);
         }
         return;
@@ -571,6 +666,14 @@ void EqCurveView::on_mouse_event(const MouseEvent& event) {
             rebuild_coefficients();
             selected_band_ = band;
             suppress_next_down_ = true;
+            // Direction A: the reset write is one gesture-bracketed edit.
+            if (record_gestures_ && store_ &&
+                band < static_cast<int>(band_params_.size())) {
+                const state::ParamID gid = band_params_[static_cast<size_t>(band)].gain;
+                store_begin(gid);
+                store_set(gid, 0.0f);
+                store_end(gid);
+            }
             if (on_band_changed)
                 on_band_changed(static_cast<size_t>(band), bands_[static_cast<size_t>(band)]);
             return;
@@ -603,6 +706,14 @@ void EqCurveView::on_gesture_event(const GestureEvent& event) {
     rebuild_coefficients();
     selected_band_ = band;
     hovered_band_ = band;
+    // Direction A: a pinch adjusts Q — bracket the write as one gesture.
+    if (record_gestures_ && store_ &&
+        band < static_cast<int>(band_params_.size())) {
+        const state::ParamID qid = band_params_[static_cast<size_t>(band)].q;
+        store_begin(qid);
+        store_set(qid, b.q);
+        store_end(qid);
+    }
     if (on_band_changed) on_band_changed(static_cast<size_t>(band), b);
     request_repaint();
 }
@@ -615,6 +726,12 @@ void EqCurveView::on_mouse_leave() { hovered_band_ = -1; }
 
 void EqCurveView::on_mouse_up(Point pos) {
     (void)pos;
+    // Direction A: close whatever gesture(s) the drag opened. store_end no-ops on
+    // a zero id, so a non-drag release (no open gesture) is harmless.
+    store_end(drag_freq_gesture_);
+    store_end(drag_gain_gesture_);
+    drag_freq_gesture_ = 0;
+    drag_gain_gesture_ = 0;
     dragging_band_ = -1;
 }
 
