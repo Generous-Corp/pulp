@@ -20,6 +20,10 @@
 
 namespace pulp::timeline {
 
+namespace detail {
+class ProjectStateAccess;
+}
+
 struct ItemId {
     std::uint64_t value = 0;
 
@@ -313,6 +317,7 @@ class Project {
 
   private:
     friend struct ProjectEditAccess;
+    friend class detail::ProjectStateAccess;
     struct Data;
     runtime::Result<Project, ModelError>
     replace_sequence(Sequence sequence, std::span<const IdentityMutation> identities = {},

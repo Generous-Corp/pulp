@@ -48,12 +48,21 @@ invariants.
 - Command and transaction IDs are writer-scoped monotonic idempotency keys.
   `UndoGroupId` is the separate, explicit gesture-coalescing identity; different
   writers never coalesce.
+- `WriterToken` is a move-only, session-bound capability. Its ID allocators are
+  thread-safe and saturate permanently at exhaustion; never copy or synthesize
+  writer-local ID streams.
+- Gesture phases form one serialized session state machine: `Begin` opens a
+  writer/group, only matching `Update`/`End` may follow, and other writers plus
+  undo/redo receive `GestureState` until the group closes.
 - Project identity lookup is a persistent AVL directory. Deletion tombstones
   IDs forever; inverse insertion may reactivate the exact identity and parent
   chain. Never scan the whole project or reuse an ID to implement undo.
 - The in-memory command journal is bounded and fail-closed. A full journal
   rejects before publication; it never ring-evicts committed entries.
   `checkpoint()` truncates only a caller-confirmed durable prefix.
+- Journal mutation and tombstone restoration are session-internal. Public
+  `reduce_transaction()` never revives tombstones, and replay rejects a
+  checkpoint snapshot/revision mismatch or cross-entry writer-ID reuse.
 - Undo and redo submit fresh ordinary transactions. They append to the journal;
   they do not delete or rewrite history.
 

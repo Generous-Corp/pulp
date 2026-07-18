@@ -111,6 +111,19 @@ const IdentityNode* find(const NodePtr& root, ItemId id) noexcept {
     return nullptr;
 }
 
+bool same_location(const ItemLocation& lhs, const ItemLocation& rhs) noexcept {
+    return lhs.kind == rhs.kind && lhs.sequence_id == rhs.sequence_id &&
+           lhs.track_id == rhs.track_id && lhs.clip_id == rhs.clip_id && lhs.active == rhs.active;
+}
+
+bool entries_match(const NodePtr& source, const NodePtr& other) noexcept {
+    if (!source)
+        return true;
+    const auto* match = find(other, source->id);
+    return match && same_location(source->location, match->location) &&
+           entries_match(source->left, other) && entries_match(source->right, other);
+}
+
 void collect(const NodePtr& root, std::unordered_set<const IdentityNode*>& addresses) {
     if (!root)
         return;
@@ -144,6 +157,10 @@ bool IdentityDirectory::replace(ItemId id, ItemLocation location) {
 std::optional<ItemLocation> IdentityDirectory::locate(ItemId id) const noexcept {
     const auto* found = detail::find(root_, id);
     return found ? std::optional<ItemLocation>(found->location) : std::nullopt;
+}
+
+bool IdentityDirectory::equivalent(const IdentityDirectory& other) const noexcept {
+    return count(root_) == count(other.root_) && entries_match(root_, other.root_);
 }
 
 std::size_t IdentityDirectory::shared_nodes_with(const IdentityDirectory& other) const {

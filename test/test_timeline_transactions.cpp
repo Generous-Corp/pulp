@@ -1,10 +1,21 @@
+#include "../core/timeline/src/session_nonce_test_access.hpp"
+#include "../core/timeline/src/writer_token_test_access.hpp"
 #include "timeline_command_test_helpers.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <limits>
+#include <mutex>
 #include <thread>
+#include <type_traits>
+#include <unordered_set>
 
 using namespace timeline_test;
+
+static_assert(!std::is_copy_constructible_v<WriterToken>);
+static_assert(!std::is_copy_assignable_v<WriterToken>);
+static_assert(std::is_move_constructible_v<WriterToken>);
 
 TEST_CASE("Timeline transaction rejection is atomic at every command position") {
     const auto original = make_project();
@@ -37,6 +48,19 @@ TEST_CASE("Document session rejects stale writers and caches exact retries") {
     REQUIRE(retried);
     REQUIRE(retried->revision.value == 1);
     REQUIRE(session->journal().entries().size() == 1);
+
+    auto collision = retry;
+    std::get<SetNoteVelocity>(collision.commands[0].command).replacement_velocity = 3000;
+    auto collided = session->submit(first_writer.value(), std::move(collision));
+    REQUIRE_FALSE(collided);
+    REQUIRE(collided.error().code == ConflictCode::TransactionIdCollision);
+
+    auto command_collision = session_transaction(first_writer.value(), session->revision(),
+                                                 {SetNoteVelocity{{3}, {4}, {5}, {6}, 2000, 3000}});
+    command_collision.commands[0].id.sequence = 1;
+    auto command_rejected = session->submit(first_writer.value(), std::move(command_collision));
+    REQUIRE_FALSE(command_rejected);
+    REQUIRE(command_rejected.error().code == ConflictCode::CommandIdCollision);
 
     auto stale = session_transaction(second_writer.value(), {},
                                      {SetNoteVelocity{{3}, {4}, {5}, {6}, 2000, 3000}});
@@ -88,4 +112,65 @@ TEST_CASE("Writer tokens are bound to their authoritative document session") {
     REQUIRE_FALSE(rejected);
     REQUIRE(rejected.error().code == ConflictCode::InvalidIdentifier);
     REQUIRE(second->revision().value == 0);
+}
+
+TEST_CASE("Writer token ID allocation is race-free and unique") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    std::mutex mutex;
+    std::unordered_set<std::uint64_t> ids;
+    auto allocate = [&] {
+        for (int i = 0; i < 2000; ++i) {
+            const auto id = writer.allocate_command_id();
+            std::lock_guard lock(mutex);
+            REQUIRE(id.valid());
+            ids.insert(id.sequence);
+        }
+    };
+    std::thread a(allocate);
+    std::thread b(allocate);
+    a.join();
+    b.join();
+    REQUIRE(ids.size() == 4000);
+}
+
+TEST_CASE("Writer token ID exhaustion saturates under concurrent allocation") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    constexpr auto last = std::numeric_limits<std::uint64_t>::max() - 1;
+    pulp::timeline::detail::WriterTokenTestAccess::set_next_ids(writer, last, last, last);
+    std::array<CommandId, 2> results;
+    std::thread a([&] { results[0] = writer.allocate_command_id(); });
+    std::thread b([&] { results[1] = writer.allocate_command_id(); });
+    a.join();
+    b.join();
+    REQUIRE(results[0].valid() != results[1].valid());
+    const auto valid = results[0].valid() ? results[0] : results[1];
+    REQUIRE(valid.sequence == last);
+    REQUIRE_FALSE(writer.allocate_command_id().valid());
+    REQUIRE(writer.allocate_transaction_id().sequence == last);
+    REQUIRE_FALSE(writer.allocate_transaction_id().valid());
+    REQUIRE(writer.allocate_undo_group_id().sequence == last);
+    REQUIRE_FALSE(writer.allocate_undo_group_id().valid());
+}
+
+TEST_CASE("Document session nonce exhaustion saturates under concurrent creation") {
+    constexpr auto last = std::numeric_limits<std::uint64_t>::max() - 1;
+    const auto previous = pulp::timeline::detail::SessionNonceTestAccess::exchange_next(last);
+    struct RestoreNonce {
+        std::uint64_t value;
+        ~RestoreNonce() {
+            pulp::timeline::detail::SessionNonceTestAccess::exchange_next(value);
+        }
+    } restore{previous};
+
+    std::array<bool, 2> created{};
+    std::thread a([&] { created[0] = static_cast<bool>(DocumentSession::create(make_project())); });
+    std::thread b([&] { created[1] = static_cast<bool>(DocumentSession::create(make_project())); });
+    a.join();
+    b.join();
+    REQUIRE(created[0] != created[1]);
+    auto exhausted = DocumentSession::create(make_project());
+    REQUIRE_FALSE(exhausted);
+    REQUIRE(exhausted.error().code == ConflictCode::SequenceExhausted);
 }

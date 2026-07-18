@@ -3,9 +3,14 @@
 #include <pulp/timeline/journal.hpp>
 #include <pulp/timeline/undo.hpp>
 
+#include <atomic>
 #include <memory>
 
 namespace pulp::timeline {
+
+namespace detail {
+class WriterTokenTestAccess;
+}
 
 struct SessionLimits {
     JournalLimits journal;
@@ -16,21 +21,27 @@ struct SessionLimits {
 
 class WriterToken {
   public:
+    WriterToken() = default;
+    WriterToken(const WriterToken&) = delete;
+    WriterToken& operator=(const WriterToken&) = delete;
+    WriterToken(WriterToken&& other) noexcept;
+    WriterToken& operator=(WriterToken&& other) noexcept;
+
     WriterId id() const noexcept {
         return id_;
     }
-    std::uint64_t next_transaction = 1;
-    std::uint64_t next_command = 1;
-    std::uint64_t next_undo_group = 1;
-
     TransactionId allocate_transaction_id() noexcept;
     CommandId allocate_command_id() noexcept;
     UndoGroupId allocate_undo_group_id() noexcept;
 
   private:
     friend class DocumentSession;
+    friend class detail::WriterTokenTestAccess;
     WriterId id_;
     std::uint64_t owner_nonce_ = 0;
+    std::atomic<std::uint64_t> next_transaction_{1};
+    std::atomic<std::uint64_t> next_command_{1};
+    std::atomic<std::uint64_t> next_undo_group_{1};
 };
 
 struct DocumentView {

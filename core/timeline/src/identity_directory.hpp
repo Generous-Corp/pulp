@@ -16,6 +16,7 @@ class IdentityDirectory {
     bool insert(ItemId id, ItemLocation location);
     bool replace(ItemId id, ItemLocation location);
     std::optional<ItemLocation> locate(ItemId id) const noexcept;
+    bool equivalent(const IdentityDirectory& other) const noexcept;
     std::size_t shared_nodes_with(const IdentityDirectory& other) const;
     static ProjectIdentityStats stats() noexcept;
 
