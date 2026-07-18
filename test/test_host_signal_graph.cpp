@@ -7,6 +7,7 @@
 #include "harness/rt_allocation_probe.hpp"
 #include <pulp/host/scanner.hpp>
 #include <pulp/host/plugin_slot.hpp>
+#include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
@@ -4920,6 +4921,552 @@ TEST_CASE("SignalGraph routed_walk_fallbacks() stays zero for routed + walk-by-c
         for (int b = 0; b < kBlocks; ++b) g.process(out_view, in_view, kFrames);
         REQUIRE(g.routed_walk_fallbacks() == 0);  // walk-by-choice is normal, not a failure
     }
+}
+
+namespace {
+struct PreparedEditLevel {
+    float level = 1.0f;
+};
+
+CustomNodeType make_prepared_edit_level_type(
+    std::string id, float level, std::atomic<int>* creates = nullptr,
+    std::atomic<int>* prepares = nullptr, std::atomic<int>* destroys = nullptr,
+    bool fail_create = false) {
+    CustomNodeType type;
+    type.type_id = std::move(id);
+    type.version = 1;
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.default_name = "Prepared edit level";
+    type.create = [level, creates, fail_create]() -> void* {
+        if (creates) creates->fetch_add(1, std::memory_order_relaxed);
+        return fail_create ? nullptr : static_cast<void*>(new PreparedEditLevel{level});
+    };
+    type.destroy = [destroys](void* raw) {
+        if (destroys) destroys->fetch_add(1, std::memory_order_relaxed);
+        delete static_cast<PreparedEditLevel*>(raw);
+    };
+    type.prepare = [prepares](void*, double, int) {
+        if (prepares) prepares->fetch_add(1, std::memory_order_relaxed);
+    };
+    type.process_instance = [](
+        void* raw, pulp::audio::BufferView<float>& output,
+        const pulp::audio::BufferView<const float>& input, int frames) {
+        const float level = static_cast<PreparedEditLevel*>(raw)->level;
+        for (int i = 0; i < frames; ++i) {
+            output.channel_ptr(0)[i] = input.channel_ptr(0)[i] * level;
+        }
+    };
+    return type;
+}
+
+class PreparedEditCountingPlugin final : public PluginSlot {
+public:
+    explicit PreparedEditCountingPlugin(std::atomic<int>& prepare_calls)
+        : prepare_calls_(prepare_calls) {
+        info_.name = "PreparedEditCountingPlugin";
+        info_.num_inputs = 1;
+        info_.num_outputs = 1;
+    }
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override {
+        prepare_calls_.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+    void release() override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const ParameterEventQueue&, int frames) override {
+        for (int i = 0; i < frames; ++i) {
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+        }
+    }
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(uint32_t) const override { return 0.0f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return true; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+
+private:
+    std::atomic<int>& prepare_calls_;
+    PluginInfo info_;
+};
+} // namespace
+
+TEST_CASE("SignalGraph prepared edit first prepare failure is a full rollback",
+          "[host][graph][prepared-edit][transaction]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    SignalGraph graph;
+
+    SECTION("custom creation fails after a complete candidate was authored") {
+        std::atomic<int> creates{0};
+        const auto json_before = GraphSerializer::to_json(graph);
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->register_custom_node_type(
+            make_prepared_edit_level_type("pulp.test.prepared.fail", 2.0f,
+                                          &creates, nullptr, nullptr, true)));
+        const auto input = edit->add_input_node(1, "input");
+        const auto custom = edit->add_custom_node("pulp.test.prepared.fail");
+        const auto output = edit->add_output_node(1, "output");
+        REQUIRE(input != 0);
+        REQUIRE(custom != 0);
+        REQUIRE(output != 0);
+        REQUIRE(edit->connect(input, 0, custom, 0));
+        REQUIRE(edit->connect(custom, 0, output, 0));
+        edit->set_canonical_executor_routing_enabled(false);
+
+        REQUIRE(edit->prepare(48000.0, 8)
+                == Result::CustomInstanceCreateFailed);
+        REQUIRE(edit->prepare(48000.0, 8)
+                == Result::CustomInstanceCreateFailed);
+        REQUIRE(creates.load(std::memory_order_relaxed) == 1);
+        edit.reset();
+
+        REQUIRE(graph.nodes().empty());
+        REQUIRE(graph.connections().empty());
+        REQUIRE(graph.custom_node_type_count() == 0);
+        REQUIRE_FALSE(graph.is_prepared());
+        REQUIRE(graph.canonical_executor_routing_enabled());
+        REQUIRE(GraphSerializer::to_json(graph) == json_before);
+        REQUIRE(graph.add_input_node(1, "first real node") == 1);
+    }
+
+    SECTION("one failed route poisons the whole candidate") {
+        const auto json_before = GraphSerializer::to_json(graph);
+        auto edit = graph.begin_prepared_topology_edit();
+        const auto input = edit->add_input_node(1, "input");
+        REQUIRE(input == 1);
+        REQUIRE_FALSE(edit->connect(input, 0, 9999, 0));
+        REQUIRE(edit->prepare(48000.0, 8) == Result::InvalidMutation);
+        edit.reset();
+        REQUIRE(graph.nodes().empty());
+        REQUIRE(graph.connections().empty());
+        REQUIRE(GraphSerializer::to_json(graph) == json_before);
+        REQUIRE(graph.add_input_node(1, "first real node") == 1);
+    }
+
+    SECTION("a stale candidate cannot overwrite newer authoring state") {
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->add_output_node(1, "candidate output") == 1);
+        REQUIRE(graph.add_input_node(1, "newer owner input") == 1);
+        const auto owner_json = GraphSerializer::to_json(graph);
+
+        REQUIRE(edit->prepare(48000.0, 8) == Result::StaleBase);
+        REQUIRE(edit->commit() == Result::NotPrepared);
+        REQUIRE(GraphSerializer::to_json(graph) == owner_json);
+        REQUIRE(graph.nodes().size() == 1);
+        REQUIRE(graph.nodes().front().name == "newer owner input");
+        REQUIRE(graph.add_output_node(1, "next owner output") == 2);
+    }
+
+    SECTION("the first successful graph is installed only at commit") {
+        auto edit = graph.begin_prepared_topology_edit();
+        const auto input = edit->add_input_node(1, "input");
+        const auto output = edit->add_output_node(1, "output");
+        REQUIRE(edit->connect(input, 0, output, 0));
+        edit->set_parallel_routing_enabled(true);
+
+        REQUIRE_FALSE(edit->routed_execution_ready(8));
+        REQUIRE(edit->prepare(48000.0, 8) == Result::Prepared);
+        REQUIRE(edit->routed_execution_ready(8));
+        REQUIRE_FALSE(edit->routed_execution_ready(9));
+        REQUIRE(graph.nodes().empty());
+        REQUIRE_FALSE(graph.is_prepared());
+        REQUIRE(edit->commit() == Result::Committed);
+        REQUIRE(graph.nodes().size() == 2);
+        REQUIRE(graph.connections().size() == 1);
+        REQUIRE(graph.is_prepared());
+        std::array<float, 8> source{};
+        source.fill(0.25f);
+        std::array<float, 8> rendered{};
+        const float* source_ptrs[] = {source.data()};
+        float* rendered_ptrs[] = {rendered.data()};
+        pulp::audio::BufferView<const float> in(source_ptrs, 1, source.size());
+        pulp::audio::BufferView<float> out(rendered_ptrs, 1, rendered.size());
+        graph.process(out, in, 8);
+        REQUIRE(rendered == source);
+        REQUIRE(graph.routing_executor_stats().serial_levels_run > 0);
+        REQUIRE(graph.routed_walk_fallbacks() == 0);
+        REQUIRE(graph.add_gain_node("next owner node") == 3);
+    }
+}
+
+TEST_CASE("SignalGraph prepared edit publishes old or new topology without silence",
+          "[host][graph][prepared-edit][transaction][threading]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    std::atomic<int> creates{0};
+    std::atomic<int> prepares{0};
+    std::atomic<int> destroys{0};
+    SignalGraph graph;
+    REQUIRE(graph.register_custom_node_type(make_prepared_edit_level_type(
+        "pulp.test.prepared.level.1", 1.0f, &creates, &prepares, &destroys)));
+    const auto input = graph.add_input_node(1, "input");
+    auto current = graph.add_custom_node("pulp.test.prepared.level.1");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, current, 0));
+    REQUIRE(graph.connect(current, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 16));
+
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit->register_custom_node_type(make_prepared_edit_level_type(
+        "pulp.test.prepared.level.2", 2.0f, &creates, &prepares, &destroys)));
+    REQUIRE(edit->remove_node(current));
+    const auto replacement =
+        edit->add_custom_node("pulp.test.prepared.level.2");
+    REQUIRE(replacement != 0);
+    REQUIRE(edit->connect(input, 0, replacement, 0));
+    REQUIRE(edit->connect(replacement, 0, output, 0));
+    REQUIRE(edit->prune_unused_custom_node_types() == 1);
+
+    std::atomic<bool> stop{false};
+    std::atomic<int> old_blocks{0};
+    std::atomic<int> new_blocks{0};
+    std::atomic<int> invalid_blocks{0};
+    std::atomic<std::size_t> audio_thread_allocations{0};
+    std::thread audio([&] {
+        std::array<float, 16> source{};
+        source.fill(1.0f);
+        std::array<float, 16> rendered{};
+        const float* source_ptrs[] = {source.data()};
+        float* rendered_ptrs[] = {rendered.data()};
+        pulp::audio::BufferView<const float> in(source_ptrs, 1, source.size());
+        pulp::audio::BufferView<float> out(rendered_ptrs, 1, rendered.size());
+        pulp::test::RtAllocationProbe allocation_probe;
+        while (!stop.load(std::memory_order_acquire)) {
+            graph.process(out, in, 16);
+            const float value = rendered[0];
+            const bool coherent = std::all_of(
+                rendered.begin(), rendered.end(),
+                [value](float sample) { return sample == value; });
+            if (!coherent) {
+                invalid_blocks.fetch_add(1, std::memory_order_relaxed);
+            } else if (value == 1.0f) {
+                old_blocks.fetch_add(1, std::memory_order_relaxed);
+            } else if (value == 2.0f) {
+                new_blocks.fetch_add(1, std::memory_order_relaxed);
+            } else {
+                invalid_blocks.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+        audio_thread_allocations.store(
+            allocation_probe.allocation_count(), std::memory_order_relaxed);
+    });
+
+    REQUIRE(edit->prepare(48000.0, 16) == Result::Prepared);
+    REQUIRE(edit->commit() == Result::Committed);
+    for (int i = 0; i < 10000
+                    && new_blocks.load(std::memory_order_relaxed) == 0; ++i) {
+        std::this_thread::yield();
+    }
+    stop.store(true, std::memory_order_release);
+    audio.join();
+
+    REQUIRE(old_blocks.load(std::memory_order_relaxed) > 0);
+    REQUIRE(new_blocks.load(std::memory_order_relaxed) > 0);
+    REQUIRE(invalid_blocks.load(std::memory_order_relaxed) == 0);
+    REQUIRE(audio_thread_allocations.load(std::memory_order_relaxed) == 0);
+    REQUIRE(graph.nodes().size() == 3);
+    REQUIRE(graph.custom_node_type_count() == 1);
+    REQUIRE(creates.load(std::memory_order_relaxed) == 2);
+    REQUIRE(prepares.load(std::memory_order_relaxed) == 2);
+}
+
+TEST_CASE("SignalGraph prepared edit changes dimensions only for lifecycle-free custom nodes",
+          "[host][graph][prepared-edit][dimensions]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    std::atomic<int> creates{0};
+    std::atomic<int> destroys{0};
+    SignalGraph graph;
+    auto type = make_prepared_edit_level_type("pulp.test.prepared.dimension", 0.5f,
+                                              &creates, nullptr, &destroys);
+    type.prepare = {};
+    REQUIRE(graph.register_custom_node_type(std::move(type)));
+    const auto input = graph.add_input_node(1, "input");
+    const auto custom = graph.add_custom_node("pulp.test.prepared.dimension");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, custom, 0));
+    REQUIRE(graph.connect(custom, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 8));
+    REQUIRE(creates.load(std::memory_order_relaxed) == 1);
+
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit->prepare(44100.0, 16) == Result::Prepared);
+    REQUIRE(edit->routed_execution_ready(16));
+    REQUIRE_FALSE(edit->routed_execution_ready(17));
+    REQUIRE(graph.prepared_max_block_size() == 8);
+    REQUIRE(edit->commit() == Result::Committed);
+    REQUIRE(graph.prepared_max_block_size() == 16);
+    REQUIRE(creates.load(std::memory_order_relaxed) == 1);
+
+    std::array<float, 16> source{};
+    source.fill(1.0f);
+    std::array<float, 16> rendered{};
+    const float* source_ptrs[] = {source.data()};
+    float* rendered_ptrs[] = {rendered.data()};
+    pulp::audio::BufferView<const float> in(source_ptrs, 1, source.size());
+    pulp::audio::BufferView<float> out(rendered_ptrs, 1, rendered.size());
+    graph.process(out, in, 16);
+    REQUIRE(std::all_of(rendered.begin(), rendered.end(),
+                        [](float sample) { return sample == 0.5f; }));
+}
+
+TEST_CASE("SignalGraph prepared edit surface is fail closed and releases abandoned instances",
+          "[host][graph][prepared-edit][surface]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    SignalGraph graph;
+
+    SECTION("all owned node and route wrappers stay candidate local") {
+        auto edit = graph.begin_prepared_topology_edit();
+        auto type = make_prepared_edit_level_type("pulp.test.prepared.surface", 1.0f);
+        REQUIRE(edit->register_custom_node_type(std::move(type)));
+        const auto input = edit->add_input_node(1, "input");
+        const auto output = edit->add_output_node(1, "output");
+        const auto gain = edit->add_gain_node("gain");
+        const auto midi_input = edit->add_midi_input_node("midi input");
+        const auto midi_output = edit->add_midi_output_node("midi output");
+        const auto custom = edit->add_custom_node("pulp.test.prepared.surface", 1);
+        const auto unresolved = edit->add_unresolved_custom_node(
+            "pulp.test.prepared.missing", 1, 1, 1, "missing");
+        REQUIRE(input != 0);
+        REQUIRE(output != 0);
+        REQUIRE(gain != 0);
+        REQUIRE(custom != 0);
+        REQUIRE(unresolved != 0);
+        REQUIRE(edit->connect(input, 0, gain, 0));
+        REQUIRE(edit->connect(gain, 0, output, 0));
+        REQUIRE(edit->connect_feedback(gain, 0, gain, 0));
+        REQUIRE(edit->connect_midi(midi_input, midi_output));
+        REQUIRE(edit->set_node_gain(gain, 0.25f));
+        edit->set_canonical_executor_routing_enabled(false);
+        edit->set_parallel_routing_enabled(false);
+        edit->set_anticipation_enabled(false);
+        REQUIRE(edit->node(custom) != nullptr);
+        REQUIRE(edit->nodes().size() == 7);
+        REQUIRE(edit->connections().size() == 4);
+        REQUIRE_FALSE(edit->unregister_custom_node_type(
+            "pulp.test.prepared.surface", 1));
+        REQUIRE(edit->prepare(48000.0, 8) == Result::InvalidMutation);
+        REQUIRE(graph.nodes().empty());
+    }
+
+    SECTION("unused types can be explicitly unregistered") {
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->register_custom_node_type(
+            make_prepared_edit_level_type("pulp.test.prepared.unused", 1.0f)));
+        REQUIRE(edit->custom_node_type_count() == 1);
+        REQUIRE(edit->unregister_custom_node_type("pulp.test.prepared.unused", 1));
+        REQUIRE(edit->custom_node_type_count() == 0);
+        REQUIRE(edit->prune_unused_custom_node_types() == 0);
+        REQUIRE(edit->commit() == Result::NotPrepared);
+    }
+
+    SECTION("an abandoned prepared instance is released and destroyed once") {
+        std::atomic<int> creates{0};
+        std::atomic<int> prepares{0};
+        std::atomic<int> releases{0};
+        std::atomic<int> destroys{0};
+        auto type = make_prepared_edit_level_type(
+            "pulp.test.prepared.abandoned", 1.0f, &creates, &prepares, &destroys);
+        type.release = [&](void*) {
+            releases.fetch_add(1, std::memory_order_relaxed);
+        };
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->register_custom_node_type(std::move(type)));
+        REQUIRE(edit->add_custom_node("pulp.test.prepared.abandoned") != 0);
+        REQUIRE(edit->prepare(48000.0, 8) == Result::Prepared);
+        REQUIRE(edit->add_gain_node("too late") == 0);
+        edit.reset();
+        REQUIRE(creates.load(std::memory_order_relaxed) == 1);
+        REQUIRE(prepares.load(std::memory_order_relaxed) == 1);
+        REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+        REQUIRE(destroys.load(std::memory_order_relaxed) == 1);
+        REQUIRE(graph.nodes().empty());
+    }
+}
+
+TEST_CASE("SignalGraph prepared edit registry remains bounded under binding churn",
+          "[host][graph][prepared-edit][registry]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    std::atomic<int> creates{0};
+    std::atomic<int> prepares{0};
+    std::atomic<int> destroys{0};
+    SignalGraph graph;
+    REQUIRE(graph.register_custom_node_type(make_prepared_edit_level_type(
+        "pulp.test.prepared.churn.0", 1.0f, &creates, &prepares, &destroys)));
+    const auto input = graph.add_input_node(1, "input");
+    auto current = graph.add_custom_node("pulp.test.prepared.churn.0");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, current, 0));
+    REQUIRE(graph.connect(current, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 8));
+
+    constexpr int kReplacements = 64;
+    for (int i = 1; i <= kReplacements; ++i) {
+        auto edit = graph.begin_prepared_topology_edit();
+        const std::string type_id =
+            "pulp.test.prepared.churn." + std::to_string(i);
+        REQUIRE(edit->register_custom_node_type(make_prepared_edit_level_type(
+            type_id, 1.0f + static_cast<float>(i), &creates, &prepares,
+            &destroys)));
+        REQUIRE(edit->remove_node(current));
+        const auto next = edit->add_custom_node(type_id);
+        REQUIRE(next != 0);
+        REQUIRE(edit->connect(input, 0, next, 0));
+        REQUIRE(edit->connect(next, 0, output, 0));
+        REQUIRE(edit->prune_unused_custom_node_types() == 1);
+        REQUIRE(edit->custom_node_type_count() == 1);
+        REQUIRE(edit->prepare(48000.0, 8) == Result::Prepared);
+        REQUIRE(edit->commit() == Result::Committed);
+        REQUIRE(graph.custom_node_type_count() == 1);
+        current = next;
+    }
+    REQUIRE(creates.load(std::memory_order_relaxed) == kReplacements + 1);
+    REQUIRE(prepares.load(std::memory_order_relaxed) == kReplacements + 1);
+}
+
+TEST_CASE("SignalGraph prepared edit rejects external plugin reprepare before mutation",
+          "[host][graph][prepared-edit][plugin]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    std::atomic<int> prepare_calls{0};
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    const auto plugin = graph.add_plugin_node(
+        std::make_unique<PreparedEditCountingPlugin>(prepare_calls), 1, 1,
+        "plugin");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 8));
+    REQUIRE(prepare_calls.load(std::memory_order_relaxed) == 1);
+
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit->add_gain_node("candidate only") != 0);
+    REQUIRE(edit->prepare(48000.0, 16)
+            == Result::ExternalPluginReprepareRequired);
+    edit.reset();
+
+    REQUIRE(prepare_calls.load(std::memory_order_relaxed) == 1);
+    REQUIRE(graph.nodes().size() == 3);
+    REQUIRE(graph.connections().size() == 2);
+    REQUIRE(graph.is_prepared());
+}
+
+TEST_CASE("SignalGraph prepared edit adopts only unchanged PDC intersection and pending MIDI",
+          "[host][graph][prepared-edit][pdc][midi]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    const auto latency = graph.add_plugin_node(
+        std::make_unique<MockLatencyPlugin>(2, 1), 1, 1, "latency");
+    const auto output = graph.add_output_node(1, "output");
+    const auto midi_input = graph.add_midi_input_node("midi input");
+    const auto midi_output = graph.add_midi_output_node("midi output");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    REQUIRE(graph.connect(input, 0, latency, 0));
+    REQUIRE(graph.connect(latency, 0, output, 0));
+    REQUIRE(graph.connect_midi(midi_input, midi_output));
+    REQUIRE(graph.prepare(48000.0, 4));
+    REQUIRE(graph.latency_samples() == 2);
+
+    std::array<float, 4> source{};
+    source.fill(1.0f);
+    std::array<float, 4> rendered{};
+    const float* source_ptrs[] = {source.data()};
+    float* rendered_ptrs[] = {rendered.data()};
+    pulp::audio::BufferView<const float> in(source_ptrs, 1, source.size());
+    pulp::audio::BufferView<float> out(rendered_ptrs, 1, rendered.size());
+    graph.process(out, in, 4); // prime the plugin and host delay histories
+
+    pulp::midi::MidiBuffer pending;
+    pending.reserve(1);
+    pending.add(pulp::midi::MidiEvent::note_on(0, 64, 100));
+    REQUIRE(graph.inject_midi(midi_input, pending));
+
+    auto add = graph.begin_prepared_topology_edit();
+    const auto gain = add->add_gain_node("new PDC branch");
+    REQUIRE(add->connect(input, 0, gain, 0));
+    REQUIRE(add->connect(gain, 0, output, 0));
+    REQUIRE(add->prepare(48000.0, 4) == Result::Prepared);
+    REQUIRE(add->commit() == Result::Committed);
+    REQUIRE(graph.is_prepared());
+    REQUIRE(graph.latency_samples() == 2);
+    REQUIRE(graph.connections().size() == 6);
+    graph.process(out, in, 4);
+    // Existing direct-edge history and plugin state carry (2.0 throughout);
+    // the newly delayed gain branch starts at zero and reaches 1.0 after two.
+    REQUIRE(rendered == (std::array<float, 4>{2.0f, 2.0f, 3.0f, 3.0f}));
+    pulp::midi::MidiBuffer arrived;
+    arrived.reserve(1);
+    REQUIRE(graph.extract_midi(midi_output, arrived));
+    REQUIRE(arrived.size() == 1);
+
+    auto remove = graph.begin_prepared_topology_edit();
+    REQUIRE(remove->remove_node(gain));
+    REQUIRE(remove->prepare(48000.0, 4) == Result::Prepared);
+    REQUIRE(remove->commit() == Result::Committed);
+    REQUIRE(graph.connections().size() == 4);
+    graph.process(out, in, 4);
+    REQUIRE(rendered == (std::array<float, 4>{2.0f, 2.0f, 2.0f, 2.0f}));
+
+    auto reconnect = graph.begin_prepared_topology_edit();
+    REQUIRE(reconnect->disconnect(input, 0, output, 0));
+    REQUIRE(reconnect->connect(input, 0, output, 0)); // equal value, new identity
+    REQUIRE(reconnect->prepare(48000.0, 4) == Result::Prepared);
+    REQUIRE(reconnect->commit() == Result::Committed);
+    graph.process(out, in, 4);
+    // The equal-looking reconnected edge must not receive the retired ring.
+    REQUIRE(rendered == (std::array<float, 4>{1.0f, 1.0f, 2.0f, 2.0f}));
+}
+
+TEST_CASE("SignalGraph prepared edit feedback rejection preserves live graph and pending MIDI",
+          "[host][graph][prepared-edit][feedback][midi]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    const auto gain = graph.add_gain_node("gain");
+    const auto output = graph.add_output_node(1, "output");
+    const auto midi_input = graph.add_midi_input_node("midi input");
+    const auto midi_output = graph.add_midi_output_node("midi output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.connect_feedback(gain, 0, gain, 0));
+    REQUIRE(graph.connect_midi(midi_input, midi_output));
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    pulp::midi::MidiBuffer pending;
+    pending.reserve(1);
+    pending.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
+    REQUIRE(graph.inject_midi(midi_input, pending));
+    const auto connections_before = graph.connections();
+
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit->add_gain_node("candidate only") != 0);
+    REQUIRE(edit->prepare(48000.0, 4) == Result::RuntimeAdoptionFailed);
+    edit.reset();
+    REQUIRE(graph.connections() == connections_before);
+    REQUIRE(graph.nodes().size() == 5);
+    REQUIRE(graph.is_prepared());
+
+    std::array<float, 4> source{};
+    std::array<float, 4> rendered{};
+    const float* source_ptrs[] = {source.data()};
+    float* rendered_ptrs[] = {rendered.data()};
+    pulp::audio::BufferView<const float> in(source_ptrs, 1, source.size());
+    pulp::audio::BufferView<float> out(rendered_ptrs, 1, rendered.size());
+    graph.process(out, in, 4);
+    pulp::midi::MidiBuffer arrived;
+    arrived.reserve(1);
+    REQUIRE(graph.extract_midi(midi_output, arrived));
+    REQUIRE(arrived.size() == 1);
 }
 
 // ── GraphSerializer round-trip ───────────────────────────────────────────
