@@ -1,8 +1,27 @@
 #include <pulp/timeline/schema_registry.hpp>
 
 #include <algorithm>
+#include <limits>
 
 namespace pulp::timeline {
+
+bool BoundedJsonSink::append(std::string_view bytes) {
+    if (failed_) return false;
+    if (bytes.size() > remaining()) {
+        failed_ = true;
+        const auto room = std::numeric_limits<std::uint64_t>::max() - output_.size();
+        attempted_ = bytes.size() > room ? std::numeric_limits<std::uint64_t>::max()
+                                         : output_.size() + bytes.size();
+        return false;
+    }
+    output_.append(bytes);
+    return true;
+}
+
+PersistenceError BoundedJsonSink::error(std::string path) const {
+    return PersistenceError{overflow_code_, 0, attempted_, maximum_, std::move(path)};
+}
+
 namespace {
 
 template <typename T>
@@ -86,6 +105,23 @@ std::span<const TypeSchema> SchemaRegistry::types() const noexcept {
 }
 
 runtime::Result<std::string, PersistenceError>
+SchemaRegistry::encode_registered(SchemaDomain domain, const SchemaIdentity& identity,
+                                  const std::shared_ptr<const void>& value,
+                                  std::size_t maximum_bytes) const {
+    const auto* schema = find(domain, identity.type_name);
+    if (!schema || !schema->codec.encode || identity.version != schema->current_version)
+        return persistence_fail<std::string>(PersistenceErrorCode::InvalidSchema);
+    BoundedJsonSink sink(maximum_bytes, PersistenceErrorCode::OutputLimitExceeded);
+    auto encoded = schema->codec.encode(value, sink, schema->codec.context.get());
+    if (sink.failed())
+        return runtime::Result<std::string, PersistenceError>(runtime::Err(sink.error()));
+    if (!encoded)
+        return runtime::Result<std::string, PersistenceError>(runtime::Err(encoded.error()));
+    return runtime::Result<std::string, PersistenceError>(
+        runtime::Ok(std::string(sink.stored_output())));
+}
+
+runtime::Result<std::string, PersistenceError>
 SchemaRegistry::migrate(SchemaDomain domain, std::string_view type_name,
                         std::uint32_t source_version, std::uint32_t target_version,
                         std::string_view source_envelope, const DecodeLimits& limits) const {
@@ -93,6 +129,15 @@ SchemaRegistry::migrate(SchemaDomain domain, std::string_view type_name,
         return persistence_fail<std::string>(PersistenceErrorCode::LimitExceeded);
     const auto* schema = find(domain, type_name);
     if (!schema)
+        return persistence_fail<std::string>(PersistenceErrorCode::InvalidSchema);
+    auto initial = parse_json(source_envelope, limits);
+    if (!initial)
+        return runtime::Result<std::string, PersistenceError>(
+            runtime::Err(initial.error()));
+    auto initial_envelope = validate_exact_envelope(
+        initial.value()->root(), type_name, source_version, "",
+        PersistenceErrorCode::InvalidSchema);
+    if (!initial_envelope)
         return persistence_fail<std::string>(PersistenceErrorCode::InvalidSchema);
     if (source_version == target_version)
         return runtime::Result<std::string, PersistenceError>(
@@ -109,23 +154,25 @@ SchemaRegistry::migrate(SchemaDomain domain, std::string_view type_name,
         if (!step || (version < target_version ? step->to_version > target_version
                                                : step->to_version < target_version))
             return persistence_fail<std::string>(PersistenceErrorCode::MigrationPathMissing);
-        auto migrated = step->migrate(current, step->context.get());
+        BoundedJsonSink sink(limits.max_input_bytes,
+                             PersistenceErrorCode::LimitExceeded);
+        auto migrated = step->migrate(current, sink, step->context.get());
+        if (sink.failed())
+            return runtime::Result<std::string, PersistenceError>(
+                runtime::Err(sink.error()));
         if (!migrated)
-            return migrated;
-        if (migrated.value().size() > limits.max_input_bytes)
-            return persistence_fail<std::string>(PersistenceErrorCode::LimitExceeded);
-        auto parsed = parse_json(migrated.value(), limits);
-        if (!parsed || parsed.value()->root().kind != JsonValue::Kind::Object)
+            return runtime::Result<std::string, PersistenceError>(
+                runtime::Err(migrated.error()));
+        std::string next(sink.stored_output());
+        auto parsed = parse_json(next, limits);
+        if (!parsed)
             return persistence_fail<std::string>(PersistenceErrorCode::MigrationFailed);
-        const auto* migrated_type = parsed.value()->root().find("type_name");
-        const auto* migrated_version = parsed.value()->root().find("version");
-        if (!migrated_type || migrated_type->kind != JsonValue::Kind::String ||
-            migrated_type->scalar != type_name || !migrated_version)
+        auto next_envelope = validate_exact_envelope(
+            parsed.value()->root(), type_name, step->to_version, "",
+            PersistenceErrorCode::MigrationFailed);
+        if (!next_envelope)
             return persistence_fail<std::string>(PersistenceErrorCode::MigrationFailed);
-        auto decoded_version = parse_u32_number(*migrated_version, "/version");
-        if (!decoded_version || decoded_version.value() != step->to_version)
-            return persistence_fail<std::string>(PersistenceErrorCode::MigrationFailed);
-        current = std::move(migrated).value();
+        current = std::move(next);
         version = step->to_version;
     }
     return runtime::Result<std::string, PersistenceError>(runtime::Ok(std::move(current)));
@@ -203,9 +250,9 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"role", SchemaValueKind::String},
                                {"storage_policy", SchemaValueKind::String}}));
     schemas.push_back(builtin("pulp.timeline.sequence", SchemaDomain::Document,
-                              {{"absolute_duration", SchemaValueKind::Object, false},
+                              {{"absolute_duration", SchemaValueKind::Object},
                                {"id", SchemaValueKind::U64String},
-                               {"musical_duration", SchemaValueKind::I64String, false},
+                               {"musical_duration", SchemaValueKind::I64String},
                                {"name", SchemaValueKind::String},
                                {"tracks", SchemaValueKind::Array}}));
     schemas.push_back(builtin("pulp.timeline.track", SchemaDomain::Document,

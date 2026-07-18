@@ -31,6 +31,39 @@ enum class SchemaValueKind : std::uint8_t {
     Array,
 };
 
+struct SchemaWriteSuccess {};
+
+// Callback output is accepted only through this incrementally checked sink.
+// The callback ABI deliberately has no string-returning compatibility path.
+class BoundedJsonSink {
+  public:
+    explicit BoundedJsonSink(
+        std::size_t maximum,
+        PersistenceErrorCode overflow_code = PersistenceErrorCode::OutputLimitExceeded)
+        : maximum_(maximum), overflow_code_(overflow_code) {}
+
+    BoundedJsonSink(const BoundedJsonSink&) = delete;
+    BoundedJsonSink& operator=(const BoundedJsonSink&) = delete;
+    BoundedJsonSink(BoundedJsonSink&&) = delete;
+    BoundedJsonSink& operator=(BoundedJsonSink&&) = delete;
+
+    bool append(std::string_view bytes);
+    bool failed() const noexcept { return failed_; }
+    std::size_t size() const noexcept { return output_.size(); }
+    std::size_t maximum() const noexcept { return maximum_; }
+    std::size_t remaining() const noexcept { return maximum_ - output_.size(); }
+    PersistenceError error(std::string path = {}) const;
+
+  private:
+    friend class SchemaRegistry;
+    const std::string& stored_output() const noexcept { return output_; }
+    const std::size_t maximum_ = 0;
+    const PersistenceErrorCode overflow_code_ = PersistenceErrorCode::OutputLimitExceeded;
+    std::string output_;
+    bool failed_ = false;
+    std::uint64_t attempted_ = 0;
+};
+
 struct FieldSchema {
     FieldSchema() = default;
     FieldSchema(std::string field_name, SchemaValueKind value_kind,
@@ -46,10 +79,12 @@ struct FieldSchema {
 
 using SchemaDecodeFn = runtime::Result<std::shared_ptr<const void>, PersistenceError> (*)(
     const JsonValue& data, const void* context) noexcept;
-using SchemaEncodeFn = runtime::Result<std::string, PersistenceError> (*)(
-    const std::shared_ptr<const void>& value, const void* context) noexcept;
-using SchemaMigrationFn = runtime::Result<std::string, PersistenceError> (*)(
-    std::string_view source_envelope, const void* context) noexcept;
+using SchemaEncodeFn = runtime::Result<SchemaWriteSuccess, PersistenceError> (*)(
+    const std::shared_ptr<const void>& value, BoundedJsonSink& output,
+    const void* context) noexcept;
+using SchemaMigrationFn = runtime::Result<SchemaWriteSuccess, PersistenceError> (*)(
+    std::string_view source_envelope, BoundedJsonSink& output,
+    const void* context) noexcept;
 
 struct SchemaCodec {
     std::shared_ptr<const void> context;
@@ -102,6 +137,11 @@ class SchemaRegistry {
     migrate(SchemaDomain domain, std::string_view type_name, std::uint32_t source_version,
             std::uint32_t target_version, std::string_view source_envelope,
             const DecodeLimits& limits = {}) const;
+
+    runtime::Result<std::string, PersistenceError>
+    encode_registered(SchemaDomain domain, const SchemaIdentity& identity,
+                      const std::shared_ptr<const void>& value,
+                      std::size_t maximum_bytes) const;
 
   private:
     friend class SchemaRegistryBuilder;

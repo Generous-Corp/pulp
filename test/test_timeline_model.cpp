@@ -187,6 +187,76 @@ TEST_CASE("Timeline registered content remaps while opaque content fails closed"
     REQUIRE_FALSE(opaque_remap.has_value());
     REQUIRE(opaque_remap.error().code == ModelErrorCode::OpaqueContentCannotRemap);
     REQUIRE(allocator.next_value() == before);
+
+    const auto opaque_track = take_value(Track::create({12}, "opaque", {opaque_clip}));
+    ItemIdAllocator track_allocator(std::numeric_limits<std::uint64_t>::max() - 1);
+    const auto track_before = track_allocator.next_value();
+    auto track_remap = remap_ids(opaque_track, track_allocator);
+    REQUIRE_FALSE(track_remap.has_value());
+    REQUIRE(track_remap.error().code == ModelErrorCode::OpaqueContentCannotRemap);
+    REQUIRE(track_allocator.next_value() == track_before);
+
+    const auto opaque_sequence = take_value(
+        Sequence::create({13}, "opaque", TickDuration{100}, {opaque_track}));
+    ItemIdAllocator sequence_allocator(500);
+    const auto sequence_before = sequence_allocator.next_value();
+    auto sequence_remap = remap_ids(opaque_sequence, sequence_allocator);
+    REQUIRE_FALSE(sequence_remap.has_value());
+    REQUIRE(sequence_remap.error().code == ModelErrorCode::OpaqueContentCannotRemap);
+    REQUIRE(sequence_allocator.next_value() == sequence_before);
+}
+
+TEST_CASE("Timeline opaque content validates and retains its exact admission boundary") {
+    const SchemaIdentity identity{"vendor.timeline.future", 7};
+    const std::string raw =
+        R"({"data":{"text":"future"},"type_name":"vendor.timeline.future","version":7})";
+    OpaqueContentLimits limits;
+    limits.max_input_bytes = raw.size();
+    limits.max_opaque_bytes = raw.size();
+    limits.max_depth = 4;
+    limits.max_total_values = 8;
+    limits.max_array_elements = 2;
+    limits.max_object_members = 3;
+    limits.max_string_bytes = 64;
+    auto accepted = OpaqueContent::create(identity, raw, limits);
+    REQUIRE(accepted.has_value());
+    REQUIRE(accepted.value().raw_json() == raw);
+    REQUIRE(accepted.value().validation_limits() == limits);
+
+    auto too_small = limits;
+    --too_small.max_input_bytes;
+    auto bounded = OpaqueContent::create(identity, raw, too_small);
+    REQUIRE_FALSE(bounded.has_value());
+    REQUIRE(bounded.error().code == ModelErrorCode::OpaqueContentLimitExceeded);
+
+    REQUIRE_FALSE(OpaqueContent::create(
+        identity,
+        R"({"data":{},"extra":0,"type_name":"vendor.timeline.future","version":7})")
+                      .has_value());
+    REQUIRE_FALSE(OpaqueContent::create(
+        identity, R"({"type_name":"vendor.timeline.future","version":7})")
+                      .has_value());
+    REQUIRE_FALSE(OpaqueContent::create(
+        identity,
+        R"({"data":0,"type_name":"vendor.timeline.future","version":7})")
+                      .has_value());
+    REQUIRE_FALSE(OpaqueContent::create(
+        identity,
+        R"({"data":{},"type_name":"vendor.timeline.other","version":7})")
+                      .has_value());
+    REQUIRE_FALSE(OpaqueContent::create(
+        identity,
+        R"({"data":{},"type_name":"vendor.timeline.future","version":8})")
+                      .has_value());
+    REQUIRE_FALSE(OpaqueContent::create(
+        identity,
+        R"({"data":{},"data":{},"type_name":"vendor.timeline.future","version":7})")
+                      .has_value());
+    std::string invalid_utf8 =
+        R"({"data":{"text":")";
+    invalid_utf8.push_back(static_cast<char>(0xc0));
+    invalid_utf8 += R"("},"type_name":"vendor.timeline.future","version":7})";
+    REQUIRE_FALSE(OpaqueContent::create(identity, std::move(invalid_utf8)).has_value());
 }
 
 TEST_CASE("Timeline ID allocation is monotonic and fails closed at exhaustion") {
