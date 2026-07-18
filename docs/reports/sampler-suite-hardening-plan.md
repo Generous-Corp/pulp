@@ -30,7 +30,9 @@ gates:
 - S5: focused C++ interpolation gates and dependency-bearing Python reference
   and negative-control gates exist. The current checked-in Apple M5 Max Release
   capture contains the complete 108-row matrix and passes its full source,
-  binary, budget, environment, and negative-control verifier.
+  binary, budget, environment, and negative-control verifier. Its
+  content-addressed interpolation source bundle remains current across later
+  sampler-integration-only commits.
 - S6: the versioned neutral heritage schema, strict canonical JSON, validated
   prepared profile, ordered independently bypassable stages, exact causal
   two-leg SRC, deterministic RNG policies, bounded runtime RNG-state capture,
@@ -39,7 +41,12 @@ gates:
   The example's strict versioned profile/runtime envelope is wired through
   outer plugin state. Callback-end `SeqLock` publication supplies same-rate RNG
   continuation before the next session's first callback; host-rate changes
-  preserve the profile but reset runtime state and DSP transients.
+  preserve the profile but reset runtime state and DSP transients. Streaming is
+  prepared in the `host rate * active clock ratio` domain with the heritage
+  maximum input block. Per-voice admission caps `pitch * clock` at 4x, and
+  aggregate source throughput is `sum(pitch * source rate) * clock`; heritage
+  diagnostics distinguish clock-caused note admission from live automation
+  rejection.
 - S7 remains intentionally unshipped. There are no named hardware profiles or
   capture-matched claims; those still require the research, provenance,
   measurement, listening, and clean-room gates below.
@@ -303,6 +310,101 @@ Work proceeds in vertical, independently provable increments:
 Each increment must leave the CPU path useful, deterministic, documented, and
 testable. A later increment may extend a stable seam but may not retroactively
 make an earlier RT or lifetime claim true.
+
+## Landing validation matrix
+
+Run this matrix from one final integrated revision. Focused success cannot
+substitute for the full Release suite, and ordinary pytest skips cannot
+substitute for the configured Audio Quality Lab gates.
+
+### Focused Release and sanitizers
+
+```bash
+cmake -S . -B build-sampler-release -DCMAKE_BUILD_TYPE=Release \
+  -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_ENABLE_GPU=OFF
+tools/ci/governed-build.sh cmake --build build-sampler-release \
+  --target pulp-sampler-test
+./build-sampler-release/examples/PulpSampler/pulp-sampler-test
+
+cmake -S . -B build-sampler-asan -DCMAKE_BUILD_TYPE=Debug \
+  -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_ENABLE_GPU=OFF \
+  -DPULP_SANITIZER=address
+tools/ci/governed-build.sh cmake --build build-sampler-asan \
+  --target pulp-sampler-test
+ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 \
+  ./build-sampler-asan/examples/PulpSampler/pulp-sampler-test
+
+cmake -S . -B build-sampler-tsan -DCMAKE_BUILD_TYPE=Debug \
+  -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_ENABLE_GPU=OFF \
+  -DPULP_SANITIZER=thread
+tools/ci/governed-build.sh cmake --build build-sampler-tsan \
+  --target pulp-sampler-test
+TSAN_OPTIONS=halt_on_error=1 \
+  ./build-sampler-tsan/examples/PulpSampler/pulp-sampler-test
+```
+
+### Full Release and audio harness
+
+```bash
+cmake -S . -B build-final-release -DCMAKE_BUILD_TYPE=Release \
+  -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON
+tools/ci/governed-build.sh cmake --build build-final-release
+tools/ci/governed-build.sh ctest --test-dir build-final-release \
+  --output-on-failure
+
+tools/ci/governed-build.sh cmake --build build-final-release --target \
+  pulp-test-audio-support pulp-test-render-scenario pulp-test-audio-contracts \
+  pulp-test-audio-doctor pulp-test-adapter-audio-parity pulp-test-golden \
+  pulp-test-audio-matrix pulp-test-audio-tone-regression \
+  pulp-test-latency-contract
+tools/ci/governed-build.sh ctest --test-dir build-final-release \
+  -R 'audio|golden|render|contract|doctor' --output-on-failure
+```
+
+### Audio Quality Lab, CLI, and benchmark evidence
+
+```bash
+python3 -m venv .venv-aql
+.venv-aql/bin/python -m pip install -e 'tools/audio/quality-lab[test]'
+.venv-aql/bin/python -m pytest tools/audio/quality-lab/tests -q
+
+cmake -S . -B build-final-aql -DCMAKE_BUILD_TYPE=Release \
+  -DPULP_BUILD_TESTS=ON -DPULP_AUDIO_QUALITY_LAB_GATE=ON \
+  -DPULP_AUDIO_QUALITY_LAB_PYTHON="$PWD/.venv-aql/bin/python"
+tools/ci/governed-build.sh cmake --build build-final-aql --target \
+  pulp-sampler-render-wav pulp-sampler-heritage-render-wav
+tools/ci/governed-build.sh ctest --test-dir build-final-aql \
+  -R '^sampler-(quality-lab|heritage-quality-lab)-' --output-on-failure
+
+tools/ci/governed-build.sh cmake --build build-final-release --target \
+  pulp-cli pulp-test-cli-shellout
+./build-final-release/test/pulp-test-cli-shellout '[sampler-mip]'
+tools/ci/governed-build.sh ctest --test-dir build-final-release \
+  -R '^cli-audio-sampler-mip-help$' --output-on-failure
+
+cmake -S . -B build-final-benchmark -DCMAKE_BUILD_TYPE=Release \
+  -DPULP_BUILD_TESTS=ON -DPULP_BENCHMARK=ON -DPULP_ENABLE_GPU=OFF
+tools/ci/governed-build.sh cmake --build build-final-benchmark \
+  --target pulp-sampler-interpolation-benchmark
+python3 tools/scripts/verify_sampler_interpolation_benchmark.py \
+  --benchmark-binary \
+  build-final-benchmark/test/pulp-sampler-interpolation-benchmark
+python3 tools/scripts/verify_sampler_interpolation_benchmark.py --self-test \
+  --benchmark-binary \
+  build-final-benchmark/test/pulp-sampler-interpolation-benchmark
+```
+
+### Documentation
+
+```bash
+tools/check-docs.sh
+python3 tools/scripts/docs_noise_lint.py --mode report \
+  docs/examples/pulp-sampler.md \
+  docs/reports/sampler-suite-hardening-plan.md \
+  docs/validation/sampler-interpolation/README.md
+python3 tools/scripts/us_english_check.py
+git diff --check
+```
 
 ## Completion audit
 
