@@ -81,7 +81,12 @@
 
 namespace pulp::format::au {
 
-static constexpr int kMaxChannels = 8;
+// Per-bus channel ceiling. Single source of truth is
+// boundary::kBoundaryMaxChannels (adapter_boundary.hpp) — kept as an `int` here
+// because AU's channel counts, loop indices, and clamps are all signed. Same
+// value (8) across every adapter; change it once at the boundary.
+static constexpr int kMaxChannels =
+    static_cast<int>(boundary::kBoundaryMaxChannels);
 
 // The bypass parameter has to be tracked on two surfaces: AUAudioUnit's
 // `shouldBypassEffect` AUValue and the plugin-provided `Bypass` parameter
@@ -174,6 +179,15 @@ struct AUBridge {
     // thread. A single instance is fine: the render block feeds packets in
     // arrival order and the reassembler tracks one in-progress stream.
     midi::UmpSysex7Reassembler sysex_reassembler;
+
+    // MPE sidecar — mirrors the VST3/CLAP wiring. When the Processor opts into
+    // MPE (effective_capabilities().supports_mpe), the render block runs midi_in
+    // through the tracker and hands the resulting per-note expression buffer to
+    // the Processor via set_mpe_input() for the duration of process(). Configured
+    // in initWithComponentDescription, reserved + capacity-limited in
+    // allocateRenderResources, reset in deallocateRenderResources. See
+    // boundary::MpeSidecar.
+    boundary::MpeSidecar mpe;
 
     // Previous-block transport snapshot used to derive the change flags on
     // `ProcessContext`. Default-constructed (no previous block) so the first
@@ -375,6 +389,15 @@ struct ScopedAuV3HostWriting {
     if (_bridge.sidechain_channels > 0) {
         _bridge.sidechain_storage.assign(
             _bridge.sidechain_channels * 512 /*max_frames hint*/, 0.0f);
+    }
+
+    // Wire the MPE sidecar when the plug-in opts in. configure() binds the
+    // tracker's callbacks once here on the host thread (never the render
+    // thread); the buffer is reserved + capacity-limited in
+    // allocateRenderResources. Mirrors the VST3/CLAP adapters.
+    _bridge.mpe.configure(desc.effective_capabilities().supports_mpe);
+    if (_bridge.mpe.enabled) {
+        pulp::runtime::log_info("AU: MPE sidecar enabled for '{}'", desc.name);
     }
 
     // Create buses
@@ -691,6 +714,14 @@ struct ScopedAuV3HostWriting {
     _bridge.sysex_reassembler.reserve(
         pulp::format::au::AUBridge::kMaxSysexPayloadBytes);
 
+    // Reserve the MPE expression buffer so the render block never allocates: one
+    // inbound MIDI event can fan out to several expression events (note-on +
+    // bend + pressure + timbre). Reset the tracker so a fresh render-resource
+    // allocation starts with no stale per-note state. Matches VST3's
+    // setupProcessing.
+    _bridge.mpe.reserve(pulp::format::au::AUBridge::kMaxEventsPerBlock);
+    _bridge.mpe.reset();
+
     if (_bridge.processor) {
         pulp::format::PrepareContext ctx;
         ctx.sample_rate = _bridge.sample_rate;
@@ -714,6 +745,9 @@ struct ScopedAuV3HostWriting {
 
 - (void)deallocateRenderResources {
     if (_bridge.processor) _bridge.processor->release();
+    // Drop per-note expression state so a re-allocation does not route a stale
+    // noteId to a voice that no longer exists (mirrors VST3's setActive(false)).
+    _bridge.mpe.reset();
     [super deallocateRenderResources];
 }
 
@@ -1200,6 +1234,14 @@ struct ScopedAuV3HostWriting {
             pulp::format::ProcessBusBufferSet<const float>{std::span(input_buses)},
             pulp::format::ProcessBusBufferSet<float>{std::span(output_buses)},
         };
+
+        // MPE sidecar: run inbound MIDI through the voice tracker and attach the
+        // resulting per-note expression buffer to the processor for the duration
+        // of this process() call. Events are taken in host delivery order (like
+        // CLAP; the AU render path does not sort midi_in). No-op (detaches the
+        // buffer) when the plug-in did not opt into MPE. Allocation-free: the
+        // buffer was reserved + capacity-limited in allocateRenderResources.
+        bridge->mpe.run(*bridge->processor, midi_in);
 
         bridge->processor->set_param_events(&bridge->param_events);
         {

@@ -41,6 +41,14 @@
 ///      values before `process()`, and the bitwise post-`process()` diff. The
 ///      host-ABI emit stays in the adapter. Consumed by `clap_adapter.cpp` and
 ///      `vst3_adapter.cpp`.
+///   6. **MPE per-note-expression sidecar** — `MpeSidecar` owns the
+///      `MpeVoiceTracker` + `MpeBuffer` + inbound-offset cursor + descriptor
+///      opt-in flag, and the enable / bind / per-block clear-run-attach dance an
+///      adapter wraps around its MIDI decode. The per-format expression *decode*
+///      (VST3 `kNoteExpressionValueEvent`, CLAP `clap_event_note_expression_t`)
+///      stays in the adapter — it synthesizes channel-wide MIDI via
+///      `mpe_expression.hpp` into the shared `MidiBuffer` this consumes.
+///      Consumed by `clap_adapter.cpp` and `vst3_adapter.cpp`.
 ///
 /// **Real-time contract.** Everything here runs on the audio/render thread and
 /// is allocation-, lock-, and syscall-free after `prepare()`: the only place
@@ -65,8 +73,11 @@
 
 namespace pulp::format::boundary {
 
-/// Channel ceiling shared with the CLAP / LV2 / VST3 adapters
-/// (CLAP and LV2 declare their own `kMaxChannels = 8` against this value).
+/// Channel ceiling — the single source of truth for the per-bus channel count
+/// every adapter caps at. `clap_adapter::kMaxChannels` and `au::kMaxChannels`
+/// are `static_cast<int>` aliases of this value; the LV2 adapter keeps an
+/// independent `kMaxChannels = 8` literal (its header deliberately does not pull
+/// in this one) cross-referenced back here. Change the ceiling here.
 inline constexpr std::size_t kBoundaryMaxChannels = 8;
 
 // ---------------------------------------------------------------------------
@@ -416,5 +427,93 @@ inline void snapshot_param_values(const state::StateStore& store,
 inline bool changed_since_snapshot(float current, float snapshotted) noexcept {
     return std::memcmp(&current, &snapshotted, sizeof(float)) != 0;
 }
+
+// ---------------------------------------------------------------------------
+// 6. MPE per-note-expression sidecar
+//
+// A format that carries per-note expression feeds a Processor that opted into
+// MPE (PluginDescriptor::supports_mpe) through Pulp's MPE model: inbound MIDI
+// runs an MpeVoiceTracker whose callbacks append per-note deltas to an
+// MpeBuffer, and that buffer is handed to the Processor for exactly the duration
+// of one process() call. CLAP and VST3 each open-coded the identical enable /
+// bind / per-block clear-run-attach dance around their own event decode;
+// MpeSidecar is the single owner of it. The per-format expression *decode*
+// (VST3 kNoteExpressionValueEvent, CLAP clap_event_note_expression_t) stays in
+// the adapter — it synthesizes channel-wide MIDI via mpe_expression.hpp into the
+// shared MidiBuffer this consumes.
+// ---------------------------------------------------------------------------
+
+/// Owns the MPE tracker + expression buffer + inbound-offset cursor an adapter
+/// wraps around its MIDI decode, plus the descriptor opt-in flag. An adapter
+/// holds one as a direct member; each method runs on the thread named in its doc.
+///
+/// **Non-movable by contract.** `configure()` binds the tracker's callbacks to
+/// references into `buffer` and `current_sample_offset`; moving or copying the
+/// struct after that would leave those callbacks pointing at the old storage.
+/// Adapters embed it in an object that is itself never moved after construction,
+/// so copy/move are deleted to make the invariant a compile error rather than a
+/// silent dangling capture.
+struct MpeSidecar {
+    midi::MpeVoiceTracker tracker;
+    midi::MpeBuffer buffer;
+    /// Sample offset stamped onto every expression event the tracker emits for
+    /// the MIDI event currently being processed; updated per event in `run()`.
+    std::int32_t current_sample_offset = 0;
+    /// Mirrors `PluginDescriptor::effective_capabilities().supports_mpe`.
+    bool enabled = false;
+
+    MpeSidecar() = default;
+    MpeSidecar(const MpeSidecar&) = delete;
+    MpeSidecar& operator=(const MpeSidecar&) = delete;
+    MpeSidecar(MpeSidecar&&) = delete;
+    MpeSidecar& operator=(MpeSidecar&&) = delete;
+
+    /// Enable the sidecar per the descriptor opt-in and, when enabled, bind the
+    /// tracker's callbacks to `buffer` / `current_sample_offset`. Host-thread
+    /// setup (init / after `define_parameters()`); never the audio thread. Call
+    /// once per plugin instance.
+    void configure(bool supports_mpe) {
+        enabled = supports_mpe;
+        if (enabled) {
+            midi::bind_tracker_to_buffer(tracker, buffer, current_sample_offset);
+        }
+    }
+
+    /// Reserve the expression buffer to @p event_capacity and pin it to
+    /// realtime-capacity mode so `run()` never allocates — one inbound MIDI
+    /// event can fan out to several expression events (note-on + bend + pressure
+    /// + timbre). Off the audio thread (activate / setup).
+    void reserve(std::size_t event_capacity) {
+        buffer.reserve(event_capacity);
+        buffer.set_realtime_capacity_limit(true);
+    }
+
+    /// Drop all per-note tracker state so a re-activation / transport reset does
+    /// not route a stale noteId to a voice that no longer exists. Off the audio
+    /// thread.
+    void reset() { tracker.reset(); }
+
+    /// Per-block: when enabled, clear the buffer, run @p midi_in through the
+    /// tracker (stamping each emitted expression event with its source event's
+    /// `sample_offset`), and attach the buffer to @p processor for this
+    /// `process()` call; when disabled, detach any previously-attached buffer.
+    ///
+    /// @p midi_in must already be in the order the adapter wants the tracker to
+    /// see (VST3 sorts its buffer first; CLAP and AU use host delivery order).
+    /// RT-safe provided `reserve()` ran off the audio thread.
+    template <typename MidiRange>
+    void run(Processor& processor, const MidiRange& midi_in) {
+        if (enabled) {
+            buffer.clear();
+            for (const auto& ev : midi_in) {
+                current_sample_offset = ev.sample_offset;
+                tracker.process(ev);
+            }
+            processor.set_mpe_input(&buffer);
+        } else {
+            processor.set_mpe_input(nullptr);
+        }
+    }
+};
 
 }  // namespace pulp::format::boundary

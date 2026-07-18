@@ -247,16 +247,13 @@ private:
     // ── Per-note expression (MPE) sidecar ───────────────────────────────────
     //
     // Mirrors the CLAP adapter's MPE wiring: inbound note events plus the MIDI
-    // messages synthesized from note-expression value events run through
-    // mpe_tracker_, whose callbacks append per-note expression deltas to
-    // mpe_buffer_. The buffer is handed to the Processor via set_mpe_input()
-    // for the duration of each process() call. Reserved + capacity-limited in
+    // messages synthesized from note-expression value events run through the
+    // sidecar's tracker, whose callbacks append per-note expression deltas to
+    // its buffer. The buffer is handed to the Processor via set_mpe_input() for
+    // the duration of each process() call. Reserved + capacity-limited in
     // setupProcessing() so the process path never allocates. Only active when
-    // the descriptor opts into MPE (mpe_enabled_).
-    midi::MpeVoiceTracker mpe_tracker_;
-    midi::MpeBuffer mpe_buffer_;
-    int32_t mpe_current_sample_offset_ = 0;
-    bool mpe_enabled_ = false;
+    // the descriptor opts into MPE (mpe_.enabled). See boundary::MpeSidecar.
+    boundary::MpeSidecar mpe_;
 
     // noteId -> (channel, note) linkage. VST3 note-expression value events
     // reference the noteId carried by the originating note-on, so the adapter
