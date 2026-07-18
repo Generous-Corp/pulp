@@ -53,11 +53,14 @@ live snapshot. **Never call them from the audio thread.**
   control-side producer, or the audio thread immediately before `process()`,
   never both concurrently. Injection is allocation-free after `prepare()`, is
   latest-wins when several blocks are published before processing, and is
-  consumed exactly once. A `false` overflow result still publishes the bounded
-  prefix. Preserved `MidiInput` node IDs keep an unconsumed publication across
-  an ingress-only gap-free `prepare_swap()`. MIDI extraction remains a
-  control-side read. A topology containing `MidiOutput` uses the eager-prepare
-  fallback; that specific refusal keeps the old snapshot live so the control
+  consumed exactly once. Publication sequence numbers never use zero (the
+  unpublished sentinel), including after 64-bit wrap. A `false` overflow result
+  still publishes the bounded prefix. Preserved `MidiInput` node IDs keep an
+  unconsumed publication across an ingress-only gap-free `prepare_swap()`. MIDI
+  extraction remains a
+  control-side read. If either the current authoring topology or the live
+  snapshot contains `MidiOutput`, the edit uses the eager-prepare fallback;
+  that specific refusal keeps the old snapshot live so the control
   thread can drain pending egress before calling ordinary `prepare()`.
 - `inject_parameter_events` — publishes one block of sample-offset parameter
   events through a snapshot-owned lock-free mailbox. It is safe to call

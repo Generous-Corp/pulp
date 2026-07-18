@@ -55,12 +55,14 @@ Four connection variants cover the non-audio-passthrough cases:
   the latest block to a `MidiInput` before processing; one designated writer
   may call it from a control producer or from the audio callback immediately
   before `process()`. The publication is consumed once and follows a preserved
-  `MidiInput` node ID across a gap-free swap. A `false` return still publishes
+  `MidiInput` node ID across a gap-free swap; its non-zero publication sequence
+  skips the zero sentinel after 64-bit wrap. A `false` return still publishes
   the fixed-capacity prefix. `extract_midi(node, &out)` reads the latest
   `MidiOutput` input snapshot after a block. Ingress-only MIDI graphs may swap
-  gap-free; a graph containing `MidiOutput` returns `NeedsEagerPrepare` while
-  keeping the old snapshot readable so pending egress can be drained before
-  ordinary `prepare()`. MIDI edges
+  gap-free; an edit whose candidate or currently-live graph contains
+  `MidiOutput` returns `NeedsEagerPrepare` while keeping the old snapshot
+  readable so pending egress can be drained before ordinary `prepare()`. MIDI
+  edges
   preserve the full logical block: short MIDI events, SysEx sidecars, and an
   attached `UmpBuffer`. MPE is derived from those events rather than stored as a
   separate graph-owned sidecar, so route MIDI 1.0 MPE channel messages or MIDI
