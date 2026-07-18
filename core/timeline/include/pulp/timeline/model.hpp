@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/runtime/result.hpp>
+#include <pulp/timeline/assets.hpp>
 #include <pulp/timebase/rational_time.hpp>
 #include <pulp/timebase/tick.hpp>
 
@@ -51,12 +52,25 @@ enum class ModelErrorCode : std::uint8_t {
     MissingItem,
     IdentityConflict,
     InvalidIdentityTransition,
+    InvalidSchemaIdentity,
+    InvalidContentHash,
+    InvalidAssetLocator,
+    DuplicateAssetRepresentation,
+    OpaqueContentCannotRemap,
 };
 
 struct ModelError {
     ModelErrorCode code = ModelErrorCode::InvalidItemId;
     ItemId item;
     ItemId related_item;
+};
+
+struct SchemaIdentity {
+    std::string type_name;
+    std::uint32_t version = 0;
+
+    bool valid() const noexcept;
+    auto operator<=>(const SchemaIdentity&) const = default;
 };
 
 class ItemIdAllocator {
@@ -79,6 +93,10 @@ struct MediaAsset {
     std::string name;
     std::uint64_t frame_count = 0;
     timebase::RationalRate sample_rate;
+    ContentHash content_hash;
+    AssetStoragePolicy storage_policy = AssetStoragePolicy::External;
+    std::vector<AssetLocator> locators;
+    std::vector<AssetRepresentation> representations;
 };
 
 struct MediaRef {
@@ -132,7 +150,48 @@ class NoteContent {
     std::shared_ptr<const std::vector<NoteEvent>> notes_;
 };
 
-using ClipContent = std::variant<EmptyContent, MediaRef, NoteContent>;
+// Registered content is an extension-defined typed C++ value. The schema
+// registry owns serialization; the model deliberately stores no generic
+// string-keyed property bag. Phase 1 registered payloads must own no ItemIds,
+// so subtree remapping can preserve them without hidden reference corruption.
+class RegisteredContent {
+  public:
+    static runtime::Result<RegisteredContent, ModelError>
+    create_no_owned_ids(SchemaIdentity schema, std::shared_ptr<const void> value);
+
+    const SchemaIdentity& schema() const noexcept { return schema_; }
+    const std::shared_ptr<const void>& value() const noexcept { return value_; }
+
+    template <typename T>
+    const T* value_as() const noexcept { return static_cast<const T*>(value_.get()); }
+
+  private:
+    RegisteredContent(SchemaIdentity schema, std::shared_ptr<const void> value)
+        : schema_(std::move(schema)), value_(std::move(value)) {}
+    SchemaIdentity schema_;
+    std::shared_ptr<const void> value_;
+};
+
+// Unknown extension content remains an exact validated JSON envelope. It is
+// safe to retain and re-save but cannot be copied/imported because its internal
+// identity/reference shape is unavailable.
+class OpaqueContent {
+  public:
+    static runtime::Result<OpaqueContent, ModelError>
+    create(SchemaIdentity schema, std::string raw_json);
+
+    const SchemaIdentity& schema() const noexcept { return schema_; }
+    const std::string& raw_json() const noexcept { return raw_json_; }
+
+  private:
+    OpaqueContent(SchemaIdentity schema, std::string raw_json)
+        : schema_(std::move(schema)), raw_json_(std::move(raw_json)) {}
+    SchemaIdentity schema_;
+    std::string raw_json_;
+};
+
+using ClipContent =
+    std::variant<EmptyContent, MediaRef, NoteContent, RegisteredContent, OpaqueContent>;
 
 class Clip {
   public:
