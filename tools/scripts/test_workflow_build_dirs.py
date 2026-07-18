@@ -96,6 +96,29 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertNotIn("cmake --build build ", text)
         self.assertNotIn("ctest --test-dir build ", text)
 
+    def test_tsan_selects_network_reader_thread_suites(self) -> None:
+        text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")
+        regex_line = next(
+            line for line in text.splitlines() if "--tests-regex" in line
+        )
+
+        for suite in ("Osc", "WebSocket", "Channel"):
+            with self.subTest(suite=suite):
+                self.assertIn(suite, regex_line)
+
+    def test_macos_build_runs_ios_syntax_gate_after_configure(self) -> None:
+        text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+        configure = 'cmake -S . -B "$PULP_BUILD_DIR"'
+        syntax_gate = (
+            'bash test/cmake/test_ios_source_syntax.sh '
+            '"$GITHUB_WORKSPACE" "$PULP_BUILD_DIR"'
+        )
+        build = 'cmake --build "$PULP_BUILD_DIR" --config Release'
+
+        self.assertIn(syntax_gate, text)
+        self.assertLess(text.index(configure), text.index(syntax_gate))
+        self.assertLess(text.index(syntax_gate), text.index(build))
+
 
 class MacosNinjaGeneratorTests(unittest.TestCase):
     """The macOS build leg uses the Ninja generator.

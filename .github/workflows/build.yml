@@ -915,6 +915,9 @@ jobs:
       - name: Build
         shell: bash
         run: |
+          if [ "${RUNNER_OS}" = "macOS" ]; then
+            bash test/cmake/test_ios_source_syntax.sh "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR"
+          fi
           cmake --build "$PULP_BUILD_DIR" --config Release
           # Build finished cleanly → clear the in-progress sentinel (ODR guard).
           rm -f "$PULP_BUILD_DIR/.pulp-build-incomplete"

@@ -265,8 +265,9 @@ jobs:
         # Scope to thread-relevant TEST_CASE names: sync primitives
         # (TripleBuffer/SeqLock/SpscQueue/Atomic/Mutex), schedulers
         # (EventLoop/Timer/AsyncUpdater), state (StateStore/ParamValue),
-        # IPC (InterprocessConnection/ChildProcessManager), and
-        # MIDI/MPE/UMP buffer threading. Catches what TSan exists for;
+        # IPC/network readers (InterprocessConnection/ChildProcessManager,
+        # Osc/WebSocket/Channel), and MIDI/MPE/UMP buffer threading. Catches
+        # what TSan exists for;
         # ASan + UBSan still cover the full matrix.
         # AudioWorkgroup is a pre-existing flake (#412 step 4 will
         # replace it with a deterministic race-hammer harness).
@@ -277,7 +278,7 @@ jobs:
           ctest --test-dir build-tsan --output-on-failure -j1 \
             --repeat until-pass:2 \
             --timeout 120 \
-            --tests-regex 'AudioWorkgroup|EventLoop|StateStore|Timer|TripleBuffer|SeqLock|SpscQueue|ParamValue|MidiBuffer|MpeTracker|UmpCursor|AsyncUpdater|InterprocessConnection|ChildProcessManager|Atomic|Mutex|Concurrent|Race|Workgroup|AudioBridge|RingBuffer|Lockfree' \
+            --tests-regex 'AudioWorkgroup|EventLoop|StateStore|Timer|TripleBuffer|SeqLock|SpscQueue|ParamValue|MidiBuffer|MpeTracker|UmpCursor|AsyncUpdater|InterprocessConnection|ChildProcessManager|Osc|WebSocket|Channel|Atomic|Mutex|Concurrent|Race|Workgroup|AudioBridge|RingBuffer|Lockfree' \
             --exclude-regex 'AudioWorkgroup'  # Timer race fixed by the Timer::start/stop shared_ptr fix (#414)
 
   ubsan:

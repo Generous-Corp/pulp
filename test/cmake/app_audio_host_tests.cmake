@@ -290,6 +290,19 @@ add_executable(pulp-test-audio-matrix test_audio_determinism_matrix.cpp)
 target_link_libraries(pulp-test-audio-matrix PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-matrix PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-audio-matrix)
+# Cross-platform byte golden. Keep contraction policy target-local: this test
+# owns a deliberately exact arithmetic contract; unrelated production/test
+# targets retain the project's normal optimization policy.
+add_executable(pulp-test-cross-platform-audio-golden
+    test_cross_platform_audio_golden.cpp)
+target_link_libraries(pulp-test-cross-platform-audio-golden
+    PRIVATE pulp::audio pulp::signal Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-cross-platform-audio-golden PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(pulp-test-cross-platform-audio-golden PRIVATE
+    $<$<COMPILE_LANG_AND_ID:CXX,AppleClang,Clang,GNU>:-ffp-contract=off>
+    $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/fp:strict>)
+catch_discover_tests(pulp-test-cross-platform-audio-golden)
 # Audio edge-case corpus: zero blocks, denormals, impulse pos, DC extremes, mid-block param change, re-prepare. Framework contract only.
 add_executable(pulp-test-audio-edge-cases test_audio_edge_cases.cpp)
 target_link_libraries(pulp-test-audio-edge-cases PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)

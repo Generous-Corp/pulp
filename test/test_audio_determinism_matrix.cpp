@@ -24,8 +24,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/headless.hpp>
+#include <pulp/format/processor.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
+#include <pulp/signal/biquad.hpp>
 
 #include <array>
 #include <cmath>
@@ -41,6 +43,54 @@ using Catch::Matchers::WithinAbs;
 using pulp::test::audio::make_sine_vec;
 
 namespace {
+
+class SampleRateFilterProcessor final : public pulp::format::Processor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "SampleRateFilterFixture",
+            .manufacturer = "Pulp",
+            .bundle_id = "com.pulp.test.sample-rate-filter",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Audio In", 2}},
+            .output_buses = {{"Audio Out", 2}},
+        };
+    }
+
+    void define_parameters(pulp::state::StateStore&) override {}
+
+    void prepare(const pulp::format::PrepareContext& context) override {
+        filters_.assign(static_cast<std::size_t>(context.output_channels), {});
+        for (auto& filter : filters_) {
+            filter.set_coefficients(pulp::signal::Biquad::Type::lowpass,
+                                    3200.0f, 0.70710677f,
+                                    static_cast<float>(context.sample_rate));
+        }
+    }
+
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        const auto channels = std::min(output.num_channels(), input.num_channels());
+        const auto samples = output.num_samples();
+        for (std::size_t channel = 0; channel < channels; ++channel) {
+            const float* src = input.channel_ptr(channel);
+            float* dst = output.channel_ptr(channel);
+            auto& filter = filters_[channel];
+            for (std::size_t sample = 0; sample < samples; ++sample)
+                dst[sample] = filter.process(src[sample]);
+        }
+    }
+
+private:
+    std::vector<pulp::signal::Biquad> filters_;
+};
+
+std::unique_ptr<pulp::format::Processor> create_sample_rate_filter() {
+    return std::make_unique<SampleRateFilterProcessor>();
+}
 
 constexpr std::array<double, 5> kSampleRates{
     44100.0, 48000.0, 88200.0, 96000.0, 192000.0};
@@ -196,6 +246,29 @@ TEST_CASE("Audio matrix: PulpGain re-prepare at a new SR does not leak state",
             REQUIRE(s == 0.0f);
         }
     }
+}
+
+TEST_CASE("Audio matrix: SR-dependent coefficients refresh on re-prepare",
+          "[audio][matrix][prepare][filter]") {
+    constexpr int block = 128;
+    constexpr int total = 1024;
+
+    pulp::format::HeadlessHost reused(create_sample_rate_filter);
+    reused.prepare(44100.0, block);
+    auto warm_L = make_sine_vec(total, 440.0f, 44100.0);
+    auto warm_R = make_sine_vec(total, 660.0f, 44100.0);
+    (void)process_blocked(reused, warm_L, warm_R, block);
+
+    reused.prepare(96000.0, block);
+    auto input_L = make_sine_vec(total, 440.0f, 96000.0);
+    auto input_R = make_sine_vec(total, 660.0f, 96000.0);
+    const auto re_prepared = process_blocked(reused, input_L, input_R, block);
+
+    pulp::format::HeadlessHost fresh(create_sample_rate_filter);
+    fresh.prepare(96000.0, block);
+    const auto fresh_96k = process_blocked(fresh, input_L, input_R, block);
+
+    REQUIRE(re_prepared == fresh_96k);
 }
 
 // ── PulpTone instrument: no MIDI ⇒ silent at every cell ─────────────
