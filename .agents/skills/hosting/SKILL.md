@@ -553,13 +553,17 @@ does not contain crashes in deeper plug-in code.
   retained custom instances. Candidate preparation can touch those shared
   lifecycle objects, so *every non-commit exit* — candidate failure, routed
   rejection, commit rejection, exception, or simple edit destruction — must
-  re-prepare every retained object at the old dimensions before the old snapshot
-  resumes. A successful candidate prepare is not ownership transfer; only a
-  successful commit cancels that rollback obligation. If restoration fails, the
-  graph deliberately unpublishes and reports `QuiescedRollbackFailed`; a coupled
-  binding must unpublish too. Never resume a partially restored graph. New custom
-  instances created before a later prepare failure still require their
-  control-thread `release` callback.
+  restore each retained object whose candidate prepare callback was entered
+  before the old snapshot resumes. Track entry immediately before invoking user
+  code: candidate preflight can fail before every callback, and plugin/custom
+  preparation can stop midway. On an unprepared base, releasing an untouched
+  retained object is an unbalanced lifecycle call just as surely as failing to
+  release a touched one. A successful candidate prepare is not ownership
+  transfer; only a successful commit cancels that rollback obligation. If
+  restoration fails, the graph deliberately unpublishes and reports
+  `QuiescedRollbackFailed`; a coupled binding must unpublish too. Never resume a
+  partially restored graph. New custom instances created before a later prepare
+  failure still require their control-thread `release` callback.
 - Per-node CPU load: `process()` wraps each node's work in a persistent
   per-node `audio::AudioProcessLoadMeasurer` (keyed by `NodeId` in
   `node_load_`), read via `node_loads()`. The measurers live on the

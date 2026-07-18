@@ -915,6 +915,11 @@ public:
 
 private:
     friend class ExecutionSnapshot;
+    struct PrepareLifecycleObserver {
+        void* context = nullptr;
+        void (*plugin_will_prepare)(void*, PluginSlot*) noexcept = nullptr;
+        void (*custom_will_prepare)(void*, void*) noexcept = nullptr;
+    };
     struct MidiBlockSnapshot {
         MidiBlockSnapshot();
         MidiBlockSnapshot(const MidiBlockSnapshot& other);
@@ -1585,6 +1590,8 @@ private:
     enum class CompileMode { Normal, SwapNoAnticipation };
     std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size,
                                             CompileMode mode = CompileMode::Normal);
+    bool prepare_impl_(double sample_rate, int max_block_size,
+                       const PrepareLifecycleObserver* lifecycle_observer);
     // Build one routed-executor snapshot for compile_, defining the live-value
     // resolver set (gain / plugin slot / custom process / custom transport / load
     // measurer / plugin latency / plugin params) ONCE. compile_ builds two
@@ -1771,11 +1778,13 @@ private:
     void release_new_custom_instances_() noexcept;
     struct QuiescedPluginLifecycle {
         std::shared_ptr<PluginSlot> plugin;
+        bool touched = false;
     };
     struct QuiescedCustomLifecycle {
         std::shared_ptr<void> instance;
         std::function<void(void*, double, int)> prepare;
         std::function<void(void*)> release;
+        bool touched = false;
     };
     template <typename Fn>
     NodeId add_node_(Fn&& fn) {
