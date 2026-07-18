@@ -23,6 +23,7 @@
 #include <span>
 #include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace pulp;
@@ -32,9 +33,34 @@ using Catch::Matchers::WithinAbs;
 namespace pulp::examples {
 
 struct PulpSamplerTestAccess {
-    static PulpSamplerLoadResult load_sample_file_result(
-        PulpSamplerProcessor& processor, std::string_view path) {
-        return processor.streaming_->load_sample_file_result(path);
+    static std::pair<std::uint64_t, std::uint64_t> control_load_counts(
+        const PulpSamplerProcessor& processor) noexcept {
+        return {
+            processor.control_load_attempts_for_test_.load(
+                std::memory_order_acquire),
+            processor.control_load_entries_for_test_.load(
+                std::memory_order_acquire),
+        };
+    }
+
+    static std::pair<std::uint64_t, std::uint64_t> control_diagnostics_counts(
+        const PulpSamplerProcessor& processor) noexcept {
+        return {
+            processor.control_diagnostics_attempts_for_test_.load(
+                std::memory_order_acquire),
+            processor.control_diagnostics_entries_for_test_.load(
+                std::memory_order_acquire),
+        };
+    }
+
+    static std::pair<std::uint64_t, std::uint64_t> control_release_counts(
+        const PulpSamplerProcessor& processor) noexcept {
+        return {
+            processor.control_release_attempts_for_test_.load(
+                std::memory_order_acquire),
+            processor.control_release_entries_for_test_.load(
+                std::memory_order_acquire),
+        };
     }
 
     static void fail_next_service_prepare(PulpSamplerProcessor& processor) {
@@ -58,7 +84,9 @@ struct PulpSamplerTestAccess {
                processor.heritage_.processing_released_for_test() &&
                std::all_of(processor.voice_scratch_.begin(),
                            processor.voice_scratch_.end(),
-                           [](const auto& scratch) { return scratch.empty(); });
+                           [](const auto& scratch) {
+                               return scratch.empty() && scratch.capacity() == 0;
+                           });
     }
 
     static void fail_next_thread_start(PulpSamplerProcessor& processor) {
@@ -1112,30 +1140,102 @@ TEST_CASE("PulpSampler envelope lifetime survives voice reset without double cou
     REQUIRE(fixture.proc->diagnostics().envelope.lifetime.starved_frames == first);
 }
 
-TEST_CASE("PulpSampler diagnostics polling stays generation coherent during load",
+TEST_CASE("PulpSampler serializes two loaders with coherent diagnostics publication",
           "[sampler][api][diagnostics][thread]") {
-    TempSamplerWav wav("diagnostics_concurrent", 100000, 0.25f);
+    TempSamplerWav first_wav("diagnostics_concurrent_first", 100000, 0.25f);
+    TempSamplerWav second_wav("diagnostics_concurrent_second", 100000, 0.5f);
     SamplerFixture fixture;
-    std::atomic<bool> finished{false};
-    PulpSamplerLoadResult loaded;
-    std::thread loader([&] {
-        loaded = fixture.proc->load_sample_file_result(wav.path);
-        finished.store(true, std::memory_order_release);
+    const auto load_before =
+        PulpSamplerTestAccess::control_load_counts(*fixture.proc);
+    const auto diagnostics_before =
+        PulpSamplerTestAccess::control_diagnostics_counts(*fixture.proc);
+    PulpSamplerTestAccess::pause_file_stage(*fixture.proc, true);
+
+    PulpSamplerLoadResult first_loaded, second_loaded;
+    PulpSamplerDiagnostics snapshot;
+    std::thread first_loader, second_loader, observer;
+    auto cleanup = runtime::make_scope_guard([&] {
+        PulpSamplerTestAccess::pause_file_stage(*fixture.proc, false);
+        if (first_loader.joinable()) first_loader.join();
+        if (second_loader.joinable()) second_loader.join();
+        if (observer.joinable()) observer.join();
     });
-    while (!finished.load(std::memory_order_acquire)) {
-        const auto snapshot = fixture.proc->diagnostics();
-        REQUIRE((snapshot.snapshot_epoch & 1u) == 0);
-        if (snapshot.last_load.loaded()) {
-            REQUIRE(snapshot.last_load.selection_generation ==
-                    snapshot.preload.selection_generation);
-        }
-    }
-    loader.join();
-    REQUIRE(loaded.loaded());
-    const auto snapshot = fixture.proc->diagnostics();
+
+    first_loader = std::thread([&] {
+        first_loaded = fixture.proc->load_sample_file_result(first_wav.path);
+    });
+    REQUIRE(wait_for_condition(
+        [&] { return PulpSamplerTestAccess::file_stage_paused(*fixture.proc); }));
+    second_loader = std::thread([&] {
+        second_loaded = fixture.proc->load_sample_file_result(second_wav.path);
+    });
+    REQUIRE(wait_for_condition([&] {
+        return PulpSamplerTestAccess::control_load_counts(*fixture.proc).first ==
+               load_before.first + 2;
+    }));
+    REQUIRE(PulpSamplerTestAccess::control_load_counts(*fixture.proc).second ==
+            load_before.second + 1);
+
+    observer = std::thread([&] { snapshot = fixture.proc->diagnostics(); });
+    REQUIRE(wait_for_condition([&] {
+        return PulpSamplerTestAccess::control_diagnostics_counts(
+                   *fixture.proc).first == diagnostics_before.first + 1;
+    }));
+    REQUIRE(PulpSamplerTestAccess::control_diagnostics_counts(
+                *fixture.proc).second == diagnostics_before.second);
+
+    PulpSamplerTestAccess::pause_file_stage(*fixture.proc, false);
+    first_loader.join();
+    second_loader.join();
+    observer.join();
+    REQUIRE(first_loaded.loaded());
+    REQUIRE(second_loaded.loaded());
+    REQUIRE((snapshot.snapshot_epoch & 1u) == 0);
+    REQUIRE(snapshot.snapshot_epoch != 0);
     REQUIRE(snapshot.last_load.selection_generation != 0);
     REQUIRE(snapshot.last_load.selection_generation ==
             snapshot.preload.selection_generation);
+    cleanup.dismiss();
+}
+
+TEST_CASE("PulpSampler serializes load against release without owner lifetime races",
+          "[sampler][api][diagnostics][thread]") {
+    TempSamplerWav wav("diagnostics_release_overlap", 100000, 0.25f);
+    SamplerFixture fixture;
+    const auto release_before =
+        PulpSamplerTestAccess::control_release_counts(*fixture.proc);
+    PulpSamplerTestAccess::pause_file_stage(*fixture.proc, true);
+
+    PulpSamplerLoadResult loaded;
+    std::thread loader, releaser;
+    auto cleanup = runtime::make_scope_guard([&] {
+        PulpSamplerTestAccess::pause_file_stage(*fixture.proc, false);
+        if (loader.joinable()) loader.join();
+        if (releaser.joinable()) releaser.join();
+    });
+    loader = std::thread([&] {
+        loaded = fixture.proc->load_sample_file_result(wav.path);
+    });
+    REQUIRE(wait_for_condition(
+        [&] { return PulpSamplerTestAccess::file_stage_paused(*fixture.proc); }));
+    releaser = std::thread([&] { fixture.proc->release(); });
+    REQUIRE(wait_for_condition([&] {
+        return PulpSamplerTestAccess::control_release_counts(*fixture.proc).first ==
+               release_before.first + 1;
+    }));
+    REQUIRE(PulpSamplerTestAccess::control_release_counts(*fixture.proc).second ==
+            release_before.second);
+
+    PulpSamplerTestAccess::pause_file_stage(*fixture.proc, false);
+    loader.join();
+    releaser.join();
+    REQUIRE(loaded.loaded());
+    REQUIRE(PulpSamplerTestAccess::fully_released(*fixture.proc));
+    const auto snapshot = fixture.proc->diagnostics();
+    REQUIRE(snapshot.prepare.status == PulpSamplerPrepareStatus::NotPrepared);
+    REQUIRE(snapshot.last_load.status == PulpSamplerLoadStatus::NotAttempted);
+    REQUIRE(snapshot.preload.selection_generation == 0);
+    cleanup.dismiss();
 }
 
 TEST_CASE("PulpSampler envelope diagnostics aggregate live voices and saturate",
@@ -3326,8 +3426,7 @@ TEST_CASE("PulpSampler reports decode-once FLAC rejection without replacing its 
     REQUIRE(source_before.source_id != 0);
     REQUIRE(source_before.source_generation != 0);
 
-    const auto rejected = PulpSamplerTestAccess::load_sample_file_result(
-        *fixture.proc, fallback.path);
+    const auto rejected = fixture.proc->load_sample_file_result(fallback.path);
     REQUIRE(rejected.status == PulpSamplerLoadStatus::DecodeOnceFallbackRejected);
     REQUIRE(rejected.codec_capability ==
             PulpSamplerCodecCapability::DecodeOnceFallback);
