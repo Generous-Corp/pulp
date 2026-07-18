@@ -13,6 +13,8 @@ namespace pulp::host {
 
 void* create_editor_container(void*, uint32_t, uint32_t) { return nullptr; }
 
+bool editor_container_adopt_view(void*, void*, uint32_t, uint32_t) { return false; }
+
 void resize_editor_container(void*, uint32_t, uint32_t) {}
 
 void destroy_editor_container(void*) {}

@@ -96,6 +96,21 @@ is where a headless test drives it with a fake `IEditController` / `IPlugView`
 attach is only reachable with a real native window, so it is proven by the
 real-DAW smoke, not the unit test.
 
+### AU: the Cocoa UI RETURNS a view — adopt it, don't offer a parent
+
+An AUv2's editor is a Cocoa-view factory, the mirror image of CLAP/VST3: query
+`kAudioUnitProperty_CocoaUI` for an `AudioUnitCocoaViewInfo` (a bundle URL + a
+class conforming to `AUCocoaUIBase`), load the bundle, and call
+`uiViewForAudioUnit:withSize:` to get an NSView the plug-in already laid out. So
+the host does NOT hand the plug-in an empty container to fill — it creates the
+container and ADOPTS the returned view into it (`editor_container_adopt_view`,
+which sets an autoresize mask so the view tracks the container). Two traps: the
+property hands back +1 CF references (the bundle URL and the class name) —
+`CFRelease` both on every exit path; and destroying the container already
+releases the adopted view (it is a subview), so the slot keeps no separate view
+handle. The Cocoa-UI negotiation needs a real AU with a view, so it is proven by
+the real-DAW smoke; only the container adoption is unit-tested.
+
 ### Defensive boundary for entry / factory calls
 
 `scanner_clap.cpp` wraps `entry->init()` and `entry->get_factory()` in
