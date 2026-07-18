@@ -1,6 +1,7 @@
 add_library(pulp-timeline-phase1-examples STATIC
     timeline_example_engine.cpp
     timeline_audio_player.cpp
+    timeline_step_pattern_content.cpp
     timeline_step_sequencer.cpp
 )
 target_include_directories(pulp-timeline-phase1-examples PUBLIC
@@ -20,6 +21,7 @@ target_link_libraries(pulp-timeline-phase1-examples PUBLIC
 add_library(pulp-timeline-phase1-examples-noexcept OBJECT
     timeline_example_engine.cpp
     timeline_audio_player.cpp
+    timeline_step_pattern_content.cpp
     timeline_step_sequencer.cpp
 )
 target_include_directories(pulp-timeline-phase1-examples-noexcept PRIVATE

@@ -5,6 +5,7 @@
 
 #include <pulp/format/headless.hpp>
 #include <pulp/format/standalone.hpp>
+#include <pulp/timeline/serialize.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -64,7 +65,40 @@ void process_direct(format::Processor& processor, StereoBlock& block) {
     processor.process(output, input, midi_in, midi_out, {});
 }
 
+bool submit_pitch_edit(TimelineStepSequencerProcessor& processor,
+                       std::int8_t pitch_offset) {
+    state::StepEditCommand command;
+    command.client_sequence = 1;
+    command.transaction_id = 1;
+    command.kind = state::StepEditKind::SetCell;
+    command.payload.set_cell.pattern = 0;
+    command.payload.set_cell.lane = 0;
+    command.payload.set_cell.step = 0;
+    command.payload.set_cell.cell = processor.pattern_snapshot().patterns[0].lanes[0][0];
+    command.payload.set_cell.cell.pitch_offset = pitch_offset;
+    return processor.channel().ui_try_submit(command);
+}
+
 } // namespace
+
+namespace pulp::format {
+struct StandaloneRenderTestAccess {
+    static void ensure_processor(StandaloneApp& app) {
+        if (!app.processor_) {
+            app.processor_ = app.factory_();
+            app.processor_->set_state_store(&app.store_);
+            app.processor_->define_parameters(app.store_);
+        }
+    }
+    static void prepare(StandaloneApp& app) { app.prepare_render_state(); }
+    static void render(StandaloneApp& app,
+                       const audio::BufferView<const float>& input,
+                       audio::BufferView<float>& output,
+                       const audio::CallbackContext& context) {
+        app.render_audio_block(input, output, context);
+    }
+};
+} // namespace pulp::format
 
 static_assert(TimelineExampleEngine::process_rt_safety_class ==
               audio::RtSafetyClass::AudioCallbackSafeAfterPrepare);
@@ -196,7 +230,106 @@ TEST_CASE("timeline step sequencer graph process is allocation free after prepar
     REQUIRE(allocations == 0);
 }
 
-TEST_CASE("timeline examples construct and prepare in the standalone host") {
+TEST_CASE("timeline step sequencer fully reprepares for a new device rate") {
+    TimelineStepSequencerProcessor processor;
+    processor.prepare(prepare_context());
+    auto changed = prepare_context(64);
+    changed.sample_rate = 44'100.0;
+    processor.prepare(changed);
+    REQUIRE(processor.engine_prepared());
+    REQUIRE(processor.last_transport().sample_rate == (timebase::RationalRate{44'100, 1}));
+    StereoBlock block(64);
+    process_direct(processor, block);
+    REQUIRE(block.energy() > 0.0);
+}
+
+TEST_CASE("timeline step channel edits persist recompile and deterministically change render") {
+    TimelineStepSequencerProcessor processor;
+    processor.prepare(prepare_context());
+    REQUIRE(processor.engine_prepared());
+    REQUIRE(processor.persistent_project());
+    const auto* clip = processor.persistent_project()
+                           ->find_sequence({3})
+                           ->find_track({4})
+                           ->find_clip({5});
+    REQUIRE(clip);
+    const auto* registered = std::get_if<timeline::RegisteredContent>(&clip->content());
+    REQUIRE(registered);
+    REQUIRE(registered->schema().type_name == kStepPatternSchemaName);
+    const auto before_payload = registered->canonical_payload_json();
+
+    StereoBlock baseline(128);
+    process_direct(processor, baseline);
+    const auto baseline_left = baseline.left;
+    REQUIRE(submit_pitch_edit(processor, 12));
+    REQUIRE(processor.apply_pending_edits_and_recompile());
+    REQUIRE(processor.pattern_snapshot().engine_sequence == 1);
+    REQUIRE(processor.pattern_snapshot().patterns[0].lanes[0][0].pitch_offset == 12);
+    const auto applied = processor.channel().ui_try_pop_applied();
+    REQUIRE(applied);
+    REQUIRE(applied->kind == state::AppliedEditKind::StepRangeChanged);
+    REQUIRE(applied->client_sequence == 1);
+    const auto published = processor.channel().ui_read_latest_snapshot();
+    REQUIRE(published.patterns[0].lanes[0][0].pitch_offset == 12);
+
+    clip = processor.persistent_project()
+               ->find_sequence({3})
+               ->find_track({4})
+               ->find_clip({5});
+    registered = std::get_if<timeline::RegisteredContent>(&clip->content());
+    REQUIRE(registered);
+    REQUIRE(registered->canonical_payload_json() != before_payload);
+    auto serialized = timeline::serialize_project(*processor.persistent_project(),
+                                                  processor.pattern_registry());
+    REQUIRE(serialized);
+    auto restored = timeline::deserialize_project(serialized.value().json,
+                                                  processor.pattern_registry());
+    REQUIRE(restored);
+    const auto& restored_content = restored.value()
+                                       .find_sequence({3})
+                                       ->find_track({4})
+                                       ->find_clip({5})
+                                       ->content();
+    const auto& restored_registered = std::get<timeline::RegisteredContent>(restored_content);
+    REQUIRE(restored_registered.value_as<StepPatternDocument>()
+                ->snapshot.patterns[0].lanes[0][0].pitch_offset == 12);
+
+    REQUIRE(processor.seek_samples(0) == playback::TransportError::None);
+    StereoBlock changed(128);
+    process_direct(processor, changed);
+    REQUIRE(changed.energy() > 0.0);
+    REQUIRE(changed.left != baseline_left);
+
+    TimelineStepSequencerProcessor replay;
+    replay.prepare(prepare_context());
+    REQUIRE(submit_pitch_edit(replay, 12));
+    REQUIRE(replay.apply_pending_edits_and_recompile());
+    REQUIRE(replay.seek_samples(0) == playback::TransportError::None);
+    StereoBlock replayed(128);
+    process_direct(replay, replayed);
+    REQUIRE(replayed.left == changed.left);
+    REQUIRE(replayed.right == changed.right);
+}
+
+TEST_CASE("timeline step channel rejects edits outside the persisted active extent") {
+    TimelineStepSequencerProcessor processor;
+    processor.prepare(prepare_context());
+    state::StepEditCommand command;
+    command.client_sequence = 9;
+    command.kind = state::StepEditKind::SwitchPattern;
+    command.payload.switch_pattern.pattern = 1;
+    REQUIRE(processor.channel().ui_try_submit(command));
+    REQUIRE_FALSE(processor.apply_pending_edits_and_recompile());
+    const auto rejected = processor.channel().ui_try_pop_applied();
+    REQUIRE(rejected);
+    REQUIRE(rejected->kind == state::AppliedEditKind::CommandRejected);
+    REQUIRE(rejected->client_sequence == 9);
+    REQUIRE(rejected->payload.reject_reason == 2);
+    REQUIRE(processor.pattern_snapshot().active_pattern == 0);
+    REQUIRE(processor.engine_prepared());
+}
+
+TEST_CASE("timeline examples render deterministically through standalone callback seam") {
     struct Case {
         format::ProcessorFactory factory;
         bool audio_player;
@@ -208,16 +341,15 @@ TEST_CASE("timeline examples construct and prepare in the standalone host") {
     for (const auto& example : cases) {
         format::StandaloneApp app(example.factory);
         format::StandaloneConfig config;
-        config.headless = true;
         config.sample_rate = 48'000.0;
-        config.buffer_size = 128;
+        config.buffer_size = 64;
         config.input_channels = 0;
         config.output_channels = 2;
+        config.persist_settings = false;
+        config.route_test_signal_to_output = false;
         app.set_config(config);
-        if (!app.start()) {
-            SUCCEED("no audio device available for standalone callback path");
-            continue;
-        }
+        format::StandaloneRenderTestAccess::ensure_processor(app);
+        format::StandaloneRenderTestAccess::prepare(app);
         REQUIRE(app.processor());
         if (example.audio_player) {
             const auto* processor =
@@ -230,6 +362,28 @@ TEST_CASE("timeline examples construct and prepare in the standalone host") {
             REQUIRE(processor);
             REQUIRE(processor->engine_prepared());
         }
-        app.stop();
+
+        StereoBlock block(64);
+        audio::CallbackContext context;
+        context.sample_rate = 48'000.0;
+        context.buffer_size = 64;
+        for (int warmup = 0; warmup < 2; ++warmup) {
+            auto output = block.output();
+            auto input = block.input();
+            format::StandaloneRenderTestAccess::render(app, input, output, context);
+            REQUIRE(block.energy() > 0.0);
+            context.sample_position += 64;
+        }
+        std::size_t allocations = 1;
+        {
+            test::ScopedRtProcessProbe probe;
+            auto output = block.output();
+            auto input = block.input();
+            format::StandaloneRenderTestAccess::render(app, input, output, context);
+            allocations = probe.allocation_count();
+        }
+        REQUIRE(allocations == 0);
+        REQUIRE(block.energy() > 0.0);
+        REQUIRE(block.left == block.right);
     }
 }

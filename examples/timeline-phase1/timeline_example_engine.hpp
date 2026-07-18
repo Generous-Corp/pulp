@@ -26,6 +26,9 @@ class TimelineExampleEngine {
 
     bool prepare(playback::ProgramCompileRequest request, double sample_rate,
                  std::uint32_t maximum_block_size, bool add_audible_synth);
+    /// Control-thread publication into the existing program store. Track IDs,
+    /// tempo-map identity, graph topology, and transport remain stable.
+    bool recompile(playback::ProgramCompileRequest request);
     host::TimelineGraphProcessResult process(audio::BufferView<float>& output,
                                              const audio::BufferView<const float>& input) noexcept;
 
