@@ -51,6 +51,9 @@ public:
         xrun_counter_.store(0, std::memory_order_relaxed);
     }
 
+    void set_workgroup_change_callback(WorkgroupChangeCallback callback) override;
+    void quiesce_workgroup_changes() override;
+
 private:
     static OSStatus render_callback(
         void* inRefCon,
@@ -113,6 +116,8 @@ private:
     bool follow_default_ = false;
     bool default_output_listener_installed_ = false;
     std::mutex switch_mutex_;
+    WorkgroupChangeCallback workgroup_change_callback_;
+    bool workgroup_changes_quiesced_ = false;
 
     // Buffers for the callback
     std::vector<float*> output_ptrs_;

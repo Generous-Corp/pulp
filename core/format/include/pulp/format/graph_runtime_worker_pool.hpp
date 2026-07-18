@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -46,10 +47,20 @@ public:
     // Off-RT: signal and join all worker threads. Idempotent.
     void stop() noexcept;
 
-    // Off-RT: set an optional platform audio workgroup handle before start().
-    // On macOS this is an os_workgroup_t from the device callback; other
-    // platforms ignore the value and use the best-effort priority fallback.
+    // RT-safe: publish an optional platform audio workgroup handle. May be
+    // called before start() or when the render context changes. Each worker
+    // leaves its old group and joins the new one on its own thread before it
+    // participates in another batch. Null removes the current group.
     void set_audio_workgroup(void* workgroup) noexcept;
+
+    // Off-RT: wait until every worker has left/joined the last publication.
+    // Used before an owner invalidates a borrowed workgroup handle.
+    void wait_for_audio_workgroup_update() noexcept;
+
+    void* configured_audio_workgroup() const noexcept {
+        return audio_workgroup_.load(std::memory_order_acquire);
+    }
+    bool workers_use_current_audio_workgroup() const noexcept;
 
     std::uint32_t worker_count() const noexcept { return worker_count_; }
     bool running() const noexcept { return running_.load(std::memory_order_acquire); }
@@ -98,6 +109,8 @@ private:
     std::vector<std::thread> threads_;
     std::uint32_t worker_count_ = 0;
     std::atomic<void*> audio_workgroup_{nullptr};
+    std::atomic<std::uint64_t> audio_workgroup_generation_{1};
+    std::unique_ptr<std::atomic<std::uint64_t>[]> worker_workgroup_generation_;
 
     // Published batch (valid for the current epoch). Written by run() before the
     // epoch bump (release), read by workers after observing the new epoch

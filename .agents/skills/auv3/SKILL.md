@@ -929,6 +929,27 @@ calling `Processor::prepare()` before the host has a sample rate +
 max frames in hand wastes work and can mis-size buffers. Mirror:
 `deallocateRenderResources` calls `processor->release()`.
 
+### `renderContextObserver` is the parallel-renderer workgroup handoff
+
+`PulpAudioUnit` always returns an `AURenderContextObserver` block. At init it
+checks whether the Processor also implements the separate
+`format::AudioWorkgroupClient` capability (kept out of the Processor vtable for
+node-ABI stability). The observer atomically forwards
+`AudioUnitRenderContext::workgroup`, including a null context/workgroup for
+removal. Apple invokes the block on the realtime render thread immediately
+before a changed-context render, so the callback must never allocate, lock, or
+join threads. The renderer's worker pool publishes a generation; each worker
+performs its own leave/join and stays out of dispatched batches until current.
+A failed non-null join leaves that worker's generation stale, so it retries and
+the renderer continues inline. Do not wait for worker acknowledgment in this
+observer: unlike standalone device close/switch, this callback is realtime and
+must remain publication-only.
+
+Do not retain the borrowed OS handle in the adapter or call `os_workgroup_join`
+from the observer on behalf of another thread. A SequenceProcessor opts in by
+deriving from `AudioWorkgroupClient`; ordinary processors pay only the cached
+null capability pointer and the observer is a no-op.
+
 ### `tailTime` is in **seconds**, not samples
 
 Pulp's `descriptor().tail_samples` is an integer sample count;

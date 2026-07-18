@@ -67,6 +67,8 @@ using AudioCallback = std::function<void(
 // Abstract audio device interface
 class AudioDevice {
 public:
+    using WorkgroupChangeCallback = std::function<void(void* workgroup)>;
+
     virtual ~AudioDevice() = default;
 
     virtual bool open(const DeviceConfig& config) = 0;
@@ -88,8 +90,9 @@ public:
     /// `nullptr` and callers fall back to
     /// `AudioWorkgroup::set_realtime_priority()`.
     ///
-    /// The returned pointer is owned by the device and remains valid
-    /// for the lifetime of the open device. Callers must not free it.
+    /// The returned pointer is owned by the device. It remains valid until
+    /// close or, for a live-retargeting backend, until the removal notification
+    /// registered below has returned. Callers must not free it.
     /// Pass it to `AudioWorkgroup::set_workgroup(static_cast<os_workgroup_t>(...))`
     /// before joining from the audio thread.
     ///
@@ -105,6 +108,21 @@ public:
 
     /// Reset the xrun counter to 0. Safe from any thread.
     virtual void reset_xrun_counter() {}
+
+    /// Observe a live change to callback_workgroup(). Apple devices which
+    /// follow the system default output call this off the render thread after
+    /// stopping the old callback and before invalidating its borrowed handle,
+    /// then again with the replacement handle before rendering resumes.
+    /// Other backends never change their callback workgroup and ignore it.
+    virtual void set_workgroup_change_callback(WorkgroupChangeCallback callback) {
+        (void)callback;
+    }
+
+    /// Disable future workgroup-change notifications and serialize with any
+    /// notification already in flight. Live-retargeting backends must publish
+    /// null and wait for its callback to return before this method returns.
+    /// Called only off the render thread before close() invalidates the handle.
+    virtual void quiesce_workgroup_changes() {}
 };
 
 // Audio system — enumerates devices and creates device instances

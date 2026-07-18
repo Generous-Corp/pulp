@@ -311,6 +311,24 @@ low-cost levels serial when their static work-weight x block size is below the
 fork/join break-even threshold. `routing_executor_stats()` is the diagnostic
 surface for tests and tools that need to prove which routed path ran.
 
+Parallel renderers opt into native scheduling through
+`format::AudioWorkgroupClient`, a capability kept separate from `Processor`'s
+node ABI. Standalone forwards `AudioDevice::callback_workgroup()` after the
+device opens and removes it before close; live default-device changes stop the
+callback, publish null, wait for every worker to acknowledge leaving, then
+re-query and publish the replacement before rendering resumes. Standalone uses
+the same off-render-thread drain barrier before closing the device, because the
+handle is borrowed from the open device. Before that final drain, the device
+disables change notifications and serializes with any default-device switch
+already in flight; if the switch rebound a replacement handle, the serialized
+close path publishes null and drains it too. AUv3 forwards host context changes
+through `renderContextObserver`. `GraphRuntimeWorkerPool` generation-publishes
+each change so workers leave and join on their own threads. Until every worker
+has adopted the current generation, the next batch runs inline on the render
+thread rather than dispatching into a stale workgroup. A failed non-null join
+does not acknowledge the generation: that worker retries and batches remain
+inline until adoption succeeds or the owner publishes removal.
+
 `SignalGraph::set_anticipation_enabled(true)` adds an opt-in anticipative splice
 on top of the canonical routed path. When `prepare()` finds an eligible latent
 interior, the graph builds an `AnticipationLane`; a single background producer

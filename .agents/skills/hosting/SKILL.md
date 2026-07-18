@@ -504,6 +504,21 @@ does not contain crashes in deeper plug-in code.
   count runtime-variable without a drain handshake. The pool's completion barrier
   counts PARTICIPANTS finished (not tasks): an empty-range participant must still
   register done, or it can race the next batch's published state.
+  (4) WORKGROUP CHANGES are generation-published, not applied from the caller:
+  `SignalGraph` implements `format::AudioWorkgroupClient`, and each persistent
+  worker leaves/joins on its own thread. `run()` executes inline while any worker
+  still advertises an older generation, so an AU `renderContextObserver` change
+  cannot dispatch a deadline into the previous workgroup. A failed non-null join
+  does not acknowledge the generation: the worker retries and `run()` stays
+  inline. For an explicitly owned device, publish null and call the
+  off-render-thread acknowledgment barrier before switching or closing it; only
+  then may the borrowed OS handle be invalidated. Re-query and publish the
+  replacement before rendering resumes. Do not cache a device-owned handle past
+  that drain point. Close must first disable new device-change notifications and
+  serialize with any switch already in flight, then publish null and drain again
+  under that serialization boundary; an external null publication alone can race
+  a switch which rebinds immediately before close. AU render-context teardown
+  remains publication-only.
 - **Anticipative-rendering eligibility (`anticipation_eligibility.{hpp,cpp}`).**
   `analyze_anticipation_eligibility(nodes, connections)` is the static SAFETY
   contract for rendering a latent subgraph ahead of the audio deadline: it

@@ -16,6 +16,11 @@
 #include <thread>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <os/object.h>
+#include <os/workgroup.h>
+#endif
+
 namespace {
 
 using pulp::format::GraphRuntimeWorkerPool;
@@ -49,6 +54,35 @@ bool wait_for_worker_idle_sleep(GraphRuntimeWorkerPool& pool) {
         std::this_thread::yield();
     }
     return pool.worker_idle_sleep_count() > 0;
+}
+
+bool wait_for_workgroup_update(GraphRuntimeWorkerPool& pool) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!pool.workers_use_current_audio_workgroup() &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    return pool.workers_use_current_audio_workgroup();
+}
+
+void* make_test_workgroup(const char* name) {
+#if defined(__APPLE__)
+    return os_workgroup_parallel_create(name, nullptr);
+#else
+    (void)name;
+    static std::uintptr_t next = 0x1010;
+    auto* workgroup = reinterpret_cast<void*>(next);
+    next += 0x1010;
+    return workgroup;
+#endif
+}
+
+void release_test_workgroup(void* workgroup) {
+#if defined(__APPLE__)
+    os_release(workgroup);
+#else
+    (void)workgroup;
+#endif
 }
 
 } // namespace
@@ -180,6 +214,97 @@ TEST_CASE("WorkerPool cold-idles workers without blocking later batches",
     REQUIRE(ctx.runs.load() == 128);
     for (std::uint32_t i = 0; i < 128; ++i) REQUIRE(ctx.out[i] == i * i);
     pool.stop();
+}
+
+TEST_CASE("WorkerPool applies workgroup changes and removal to live workers",
+          "[format][worker-pool][workgroup][rt-safety]") {
+    GraphRuntimeWorkerPool pool;
+    auto* first = make_test_workgroup("pulp-worker-pool-first");
+    auto* second = make_test_workgroup("pulp-worker-pool-second");
+    REQUIRE(first != nullptr);
+    REQUIRE(second != nullptr);
+
+    pool.set_audio_workgroup(first);
+    REQUIRE(pool.configured_audio_workgroup() == first);
+    REQUIRE(pool.start(4));
+    REQUIRE(wait_for_workgroup_update(pool));
+
+    pool.set_audio_workgroup(second);
+    REQUIRE(pool.configured_audio_workgroup() == second);
+    REQUIRE(wait_for_workgroup_update(pool));
+
+    pool.set_audio_workgroup(nullptr);
+    REQUIRE(pool.configured_audio_workgroup() == nullptr);
+    pool.wait_for_audio_workgroup_update();
+    REQUIRE(pool.workers_use_current_audio_workgroup());
+    release_test_workgroup(first);
+    release_test_workgroup(second);
+    pool.stop();
+}
+
+TEST_CASE("WorkerPool rejects a failed non-null workgroup join",
+          "[format][worker-pool][workgroup][rt-safety]") {
+#if defined(__APPLE__)
+    GraphRuntimeWorkerPool pool;
+    REQUIRE(pool.start(4));
+    auto* cancelled = make_test_workgroup("pulp-worker-pool-cancelled");
+    REQUIRE(cancelled != nullptr);
+    os_workgroup_cancel(reinterpret_cast<os_workgroup_t>(cancelled));
+
+    pool.set_audio_workgroup(cancelled);
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+    bool falsely_acknowledged = false;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (pool.workers_use_current_audio_workgroup()) {
+            falsely_acknowledged = true;
+            break;
+        }
+        std::this_thread::yield();
+    }
+    REQUIRE_FALSE(falsely_acknowledged);
+
+    // A failed join must leave the generation stale. run() therefore executes
+    // inline and still preserves the complete batch while workers keep retrying.
+    SquareCtx ctx;
+    ctx.out.assign(128, 0xFFFFFFFFu);
+    pool.run(128, square_task, &ctx);
+    REQUIRE(ctx.runs.load() == 128);
+    for (std::uint32_t i = 0; i < 128; ++i) REQUIRE(ctx.out[i] == i * i);
+    REQUIRE_FALSE(pool.workers_use_current_audio_workgroup());
+
+    pool.set_audio_workgroup(nullptr);
+    pool.wait_for_audio_workgroup_update();
+    release_test_workgroup(cancelled);
+    pool.stop();
+#else
+    SUCCEED("Borrowed os_workgroup join failure is Apple-only");
+#endif
+}
+
+TEST_CASE("WorkerPool workgroup publication is allocation-free and preserves batches",
+          "[format][worker-pool][workgroup][rt-safety]") {
+    GraphRuntimeWorkerPool pool;
+    REQUIRE(pool.start(4));
+    REQUIRE(wait_for_workgroup_update(pool));
+    auto* workgroup = make_test_workgroup("pulp-worker-pool-rt");
+    REQUIRE(workgroup != nullptr);
+
+    SquareCtx ctx;
+    ctx.out.assign(128, 0xFFFFFFFFu);
+    {
+        pulp::test::RtAllocationProbe probe;
+        pool.set_audio_workgroup(workgroup);
+        pool.run(128, square_task, &ctx);
+        CHECK_FALSE(probe.saw_allocation());
+    }
+    REQUIRE(ctx.runs.load() == 128);
+    for (std::uint32_t i = 0; i < 128; ++i) REQUIRE(ctx.out[i] == i * i);
+    REQUIRE(wait_for_workgroup_update(pool));
+    pool.set_audio_workgroup(nullptr);
+    REQUIRE(wait_for_workgroup_update(pool));
+    pool.stop();
+    release_test_workgroup(workgroup);
 }
 
 TEST_CASE("WorkerPool clears a gate-collision reheat only when no worker parked",
