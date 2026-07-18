@@ -16,6 +16,8 @@
 #include <cstdint>
 #include <memory>
 #include <numeric>
+#include <optional>
+#include <string>
 #include <vector>
 
 using namespace pulp;
@@ -83,7 +85,8 @@ bool cells_equal(const state::StepCell& left, const state::StepCell& right) {
     return left.flags == right.flags && left.velocity == right.velocity &&
            left.probability == right.probability &&
            left.pitch_offset == right.pitch_offset &&
-           left.gate_ticks == right.gate_ticks && left.ratchet == right.ratchet;
+           left.gate_ticks == right.gate_ticks && left.ratchet == right.ratchet &&
+           left.reserved == right.reserved;
 }
 
 state::StepEditCommand length_command(state::ClientSequence sequence,
@@ -107,6 +110,46 @@ state::StepEditCommand clear_command(state::ClientSequence sequence,
     command.kind = state::StepEditKind::Clear;
     command.payload.clear = {scope, pattern, lane, step};
     return command;
+}
+
+std::optional<timeline::Project>
+project_with_step_pattern(timeline::RegisteredContent content) {
+    constexpr auto duration =
+        timebase::TickDuration{static_cast<std::int64_t>(state::kStepCount) *
+                               (timebase::kTicksPerQuarter / 4)};
+    auto clip = timeline::Clip::create({5}, {0}, duration, std::move(content));
+    if (!clip)
+        return std::nullopt;
+    std::vector<timeline::Clip> clips;
+    clips.push_back(std::move(clip).value());
+    auto track = timeline::Track::create({4}, "Step pattern", std::move(clips));
+    if (!track)
+        return std::nullopt;
+    std::vector<timeline::Track> tracks;
+    tracks.push_back(std::move(track).value());
+    auto sequence = timeline::Sequence::create({3}, "Step pattern", duration,
+                                               std::move(tracks));
+    if (!sequence)
+        return std::nullopt;
+    timeline::ProjectInput input;
+    input.id = {1};
+    input.name = "Step pattern codec test";
+    input.next_item_id = 6;
+    input.root_sequence_id = {3};
+    input.sequences.push_back(std::move(sequence).value());
+    auto project = timeline::Project::create(std::move(input));
+    if (!project)
+        return std::nullopt;
+    return std::move(project).value();
+}
+
+bool replace_once(std::string& text, std::string_view before,
+                  std::string_view after) {
+    const auto found = text.find(before);
+    if (found == std::string::npos)
+        return false;
+    text.replace(found, before.size(), after);
+    return true;
 }
 
 } // namespace
@@ -418,6 +461,219 @@ TEST_CASE("timeline step channel rejects cells beyond active pattern length") {
     process_direct(processor, after);
     REQUIRE(after.left == before.left);
     REQUIRE(after.right == before.right);
+}
+
+TEST_CASE("timeline step pattern codec is canonical at maximum bounded extent") {
+    auto registry = make_step_pattern_registry();
+    REQUIRE(registry);
+    state::Snapshot maximum;
+    maximum.schema_version = kStepPatternSchemaVersion;
+    maximum.active_pattern = state::kPatternCount - 1;
+    maximum.active_lane_count = state::kLaneCount;
+    maximum.active_pattern_count = state::kPatternCount;
+    for (std::uint8_t pattern = 0; pattern < state::kPatternCount; ++pattern) {
+        maximum.patterns[pattern].length =
+            pattern % 2 == 0 ? state::kStepCount : 0;
+        for (std::uint8_t lane = 0; lane < state::kLaneCount; ++lane) {
+            for (std::uint8_t step = 0; step < state::kStepCount; ++step) {
+                auto& cell = maximum.patterns[pattern].lanes[lane][step];
+                cell.flags = static_cast<std::uint8_t>((pattern + lane + step) & 0xffu);
+                cell.velocity = static_cast<std::uint8_t>((pattern + lane + step) % 128u);
+                cell.probability = static_cast<std::uint8_t>(127u - (step % 128u));
+                const auto pitch_ordinal =
+                    (static_cast<unsigned>(pattern) * state::kLaneCount + lane + step) %
+                    256u;
+                cell.pitch_offset = static_cast<std::int8_t>(
+                    static_cast<int>(pitch_ordinal) - 128);
+                cell.gate_ticks = static_cast<std::uint16_t>(
+                    (static_cast<unsigned>(pattern) * 997u + lane * 37u + step) & 0xffffu);
+                cell.ratchet = static_cast<std::uint8_t>((lane + step) & 0xffu);
+                cell.reserved = 0;
+            }
+        }
+    }
+    REQUIRE(step_pattern_snapshot_is_canonical(maximum));
+    auto registered = make_registered_step_pattern(maximum, *registry);
+    REQUIRE(registered);
+    const auto canonical = registered->canonical_payload_json();
+    auto project = project_with_step_pattern(std::move(*registered));
+    REQUIRE(project);
+    auto encoded = timeline::serialize_project(*project, *registry);
+    REQUIRE(encoded);
+    auto decoded = timeline::deserialize_project(encoded.value().json, *registry);
+    REQUIRE(decoded);
+    const auto* clip = decoded.value().find_sequence({3})->find_track({4})->find_clip({5});
+    REQUIRE(clip);
+    const auto* content = std::get_if<timeline::RegisteredContent>(&clip->content());
+    REQUIRE(content);
+    REQUIRE(content->canonical_payload_json() == canonical);
+    const auto* roundtrip = content->value_as<StepPatternDocument>();
+    REQUIRE(roundtrip);
+    REQUIRE(roundtrip->snapshot.active_pattern == maximum.active_pattern);
+    REQUIRE(roundtrip->snapshot.active_lane_count == state::kLaneCount);
+    REQUIRE(roundtrip->snapshot.active_pattern_count == state::kPatternCount);
+    for (std::uint8_t pattern = 0; pattern < state::kPatternCount; ++pattern) {
+        REQUIRE(roundtrip->snapshot.patterns[pattern].length ==
+                maximum.patterns[pattern].length);
+        for (std::uint8_t lane = 0; lane < state::kLaneCount; ++lane)
+            for (std::uint8_t step = 0; step < state::kStepCount; ++step)
+                REQUIRE(cells_equal(roundtrip->snapshot.patterns[pattern].lanes[lane][step],
+                                    maximum.patterns[pattern].lanes[lane][step]));
+    }
+}
+
+TEST_CASE("timeline step pattern codec rejects malformed schema counts cells and padding") {
+    TimelineStepSequencerProcessor source;
+    source.prepare(prepare_context());
+    auto encoded = timeline::serialize_project(*source.persistent_project(),
+                                               source.pattern_registry());
+    REQUIRE(encoded);
+    const std::array mutations{
+        std::pair{std::string_view{"\"schema_version\":1"},
+                  std::string_view{"\"schema_version\":2"}},
+        std::pair{std::string_view{"\"active_lane_count\":4"},
+                  std::string_view{"\"active_lane_count\":5"}},
+        std::pair{std::string_view{"[1,100,127,\"0\",12,1]"},
+                  std::string_view{"[1,100,128,\"0\",12,1]"}},
+    };
+    for (const auto& [before, after] : mutations) {
+        auto malformed = encoded.value().json;
+        REQUIRE(replace_once(malformed, before, after));
+        REQUIRE_FALSE(timeline::deserialize_project(malformed,
+                                                    source.pattern_registry()));
+    }
+
+    auto invalid_version = source.pattern_snapshot();
+    invalid_version.schema_version = kStepPatternSchemaVersion + 1;
+    REQUIRE_FALSE(make_registered_step_pattern(invalid_version,
+                                               source.pattern_registry()));
+
+    auto inactive_lane = source.pattern_snapshot();
+    inactive_lane.patterns[0].lanes[inactive_lane.active_lane_count][0].flags =
+        state::StepCell::kEnabledBit;
+    REQUIRE_FALSE(step_pattern_snapshot_is_canonical(inactive_lane));
+    REQUIRE_FALSE(make_registered_step_pattern(inactive_lane,
+                                               source.pattern_registry()));
+
+    auto mutable_document = std::make_shared<StepPatternDocument>();
+    mutable_document->snapshot = source.pattern_snapshot();
+    std::shared_ptr<const void> erased = mutable_document;
+    auto registered = source.pattern_registry().create_registered_no_owned_ids(
+        {kStepPatternSchemaName, kStepPatternSchemaVersion}, std::move(erased),
+        2u * 1024u * 1024u);
+    REQUIRE(registered);
+    mutable_document->snapshot.patterns[1].length = 1;
+    auto padded_project = project_with_step_pattern(std::move(registered).value());
+    REQUIRE(padded_project);
+    TimelineStepSequencerProcessor loader;
+    loader.prepare(prepare_context());
+    REQUIRE_FALSE(loader.load_persistent_project(*padded_project));
+
+    auto schema_document = std::make_shared<StepPatternDocument>();
+    schema_document->snapshot = source.pattern_snapshot();
+    std::shared_ptr<const void> schema_erased = schema_document;
+    auto schema_registered = source.pattern_registry().create_registered_no_owned_ids(
+        {kStepPatternSchemaName, kStepPatternSchemaVersion},
+        std::move(schema_erased), 2u * 1024u * 1024u);
+    REQUIRE(schema_registered);
+    schema_document->snapshot.schema_version = kStepPatternSchemaVersion + 1;
+    auto wrong_schema_project =
+        project_with_step_pattern(std::move(schema_registered).value());
+    REQUIRE(wrong_schema_project);
+    REQUIRE_FALSE(loader.load_persistent_project(*wrong_schema_project));
+}
+
+TEST_CASE("timeline step mixed batch rolls back document program and render") {
+    TimelineStepSequencerProcessor processor;
+    processor.prepare(prepare_context());
+    REQUIRE(processor.engine_prepared());
+    const auto* project_before = processor.persistent_project();
+    REQUIRE(project_before);
+    const auto* clip_before =
+        project_before->find_sequence({3})->find_track({4})->find_clip({5});
+    const auto* content_before =
+        std::get_if<timeline::RegisteredContent>(&clip_before->content());
+    REQUIRE(content_before);
+    const auto payload_before = content_before->canonical_payload_json();
+    const auto document_before = processor.pattern_snapshot();
+    const auto* tempo_map_before = processor.last_transport().tempo_map;
+    TimelineStepSequencerProcessor render_reference;
+    render_reference.prepare(prepare_context());
+    REQUIRE(render_reference.engine_prepared());
+    REQUIRE(render_reference.seek_samples(0) == playback::TransportError::None);
+    StereoBlock render_before(128);
+    process_direct(render_reference, render_before);
+
+    state::StepEditCommand valid;
+    valid.client_sequence = 51;
+    valid.transaction_id = 151;
+    valid.kind = state::StepEditKind::SetCell;
+    valid.payload.set_cell = {0, 0, 0, document_before.patterns[0].lanes[0][0]};
+    valid.payload.set_cell.cell.pitch_offset = 7;
+
+    state::StepEditCommand out_of_extent;
+    out_of_extent.client_sequence = 52;
+    out_of_extent.transaction_id = 152;
+    out_of_extent.kind = state::StepEditKind::SwitchPattern;
+    out_of_extent.payload.switch_pattern.pattern = 1;
+
+    state::StepEditCommand invalid_final;
+    invalid_final.client_sequence = 53;
+    invalid_final.transaction_id = 153;
+    invalid_final.kind = state::StepEditKind::SetCell;
+    invalid_final.payload.set_cell = {
+        0, 0, 15, document_before.patterns[0].lanes[0][15]};
+    invalid_final.payload.set_cell.cell.flags = state::StepCell::kEnabledBit;
+    invalid_final.payload.set_cell.cell.velocity = 100;
+    invalid_final.payload.set_cell.cell.gate_ticks = 65535;
+
+    REQUIRE(processor.channel().ui_try_submit(valid));
+    REQUIRE(processor.channel().ui_try_submit(out_of_extent));
+    REQUIRE(processor.channel().ui_try_submit(invalid_final));
+    REQUIRE_FALSE(processor.apply_pending_edits_and_recompile());
+
+    const std::array expected_reasons{3u, 2u, 3u};
+    const std::array expected_clients{51u, 52u, 53u};
+    const std::array expected_transactions{151u, 152u, 153u};
+    for (std::size_t index = 0; index < expected_reasons.size(); ++index) {
+        const auto echo = processor.channel().ui_try_pop_applied();
+        REQUIRE(echo);
+        REQUIRE(echo->kind == state::AppliedEditKind::CommandRejected);
+        REQUIRE(echo->engine_sequence == index + 1);
+        REQUIRE(echo->snapshot_epoch == 1);
+        REQUIRE(echo->client_sequence == expected_clients[index]);
+        REQUIRE(echo->transaction_id == expected_transactions[index]);
+        REQUIRE(echo->payload.reject_reason == expected_reasons[index]);
+    }
+    REQUIRE_FALSE(processor.channel().ui_try_pop_applied());
+
+    REQUIRE(processor.persistent_project() == project_before);
+    const auto* clip_after = processor.persistent_project()
+                                 ->find_sequence({3})->find_track({4})->find_clip({5});
+    const auto* content_after =
+        std::get_if<timeline::RegisteredContent>(&clip_after->content());
+    REQUIRE(content_after);
+    REQUIRE(content_after->canonical_payload_json() == payload_before);
+    REQUIRE(cells_equal(processor.pattern_snapshot().patterns[0].lanes[0][0],
+                        document_before.patterns[0].lanes[0][0]));
+    REQUIRE(cells_equal(processor.pattern_snapshot().patterns[0].lanes[0][15],
+                        document_before.patterns[0].lanes[0][15]));
+    REQUIRE(processor.pattern_snapshot().active_pattern == document_before.active_pattern);
+    REQUIRE(processor.pattern_snapshot().engine_sequence == 3);
+    REQUIRE(processor.pattern_snapshot().epoch == 2);
+    REQUIRE(processor.channel().ui_resync_required_epoch() == 2);
+    const auto resync = processor.channel().ui_read_latest_snapshot();
+    REQUIRE(resync.epoch == 2);
+    REQUIRE(resync.engine_sequence == 3);
+    REQUIRE(cells_equal(resync.patterns[0].lanes[0][0],
+                        document_before.patterns[0].lanes[0][0]));
+    REQUIRE(processor.last_transport().tempo_map == tempo_map_before);
+
+    REQUIRE(processor.seek_samples(0) == playback::TransportError::None);
+    StereoBlock render_after(128);
+    process_direct(processor, render_after);
+    REQUIRE(render_after.left == render_before.left);
+    REQUIRE(render_after.right == render_before.right);
 }
 
 TEST_CASE("timeline step lane randomize preserves save load expand equivalence") {

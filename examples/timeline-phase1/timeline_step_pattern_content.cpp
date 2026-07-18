@@ -2,6 +2,8 @@
 
 #include <pulp/timeline/schema_json.hpp>
 
+#include <algorithm>
+#include <array>
 #include <memory>
 #include <string>
 
@@ -13,6 +15,26 @@ using timeline::JsonValue;
 using timeline::PersistenceError;
 using timeline::PersistenceErrorCode;
 using timeline::SchemaWriteSuccess;
+
+bool cells_equal(const state::StepCell& left, const state::StepCell& right) noexcept {
+    return left.flags == right.flags && left.velocity == right.velocity &&
+           left.probability == right.probability &&
+           left.pitch_offset == right.pitch_offset &&
+           left.gate_ticks == right.gate_ticks && left.ratchet == right.ratchet &&
+           left.reserved == right.reserved;
+}
+
+bool cell_is_wire_valid(const state::StepCell& cell) noexcept {
+    return cell.velocity <= 127 && cell.probability <= 127 && cell.reserved == 0;
+}
+
+bool lane_is_default(
+    const std::array<state::StepCell, state::kStepCount>& lane) noexcept {
+    const state::StepCell default_cell{};
+    return std::all_of(lane.begin(), lane.end(), [&](const auto& cell) {
+        return cells_equal(cell, default_cell);
+    });
+}
 
 template <class T>
 runtime::Result<T, PersistenceError> fail(PersistenceErrorCode code,
@@ -104,6 +126,8 @@ decode_step_pattern(const JsonValue& data, const void*) noexcept {
             }
         }
     }
+    if (!step_pattern_snapshot_is_canonical(snapshot))
+        return fail<std::shared_ptr<const void>>(PersistenceErrorCode::InvalidSchema);
     std::shared_ptr<const void> result =
         std::make_shared<const StepPatternDocument>(std::move(document));
     return runtime::Result<std::shared_ptr<const void>, PersistenceError>(
@@ -117,15 +141,12 @@ encode_step_pattern(const std::shared_ptr<const void>& value, BoundedJsonSink& o
         return fail<SchemaWriteSuccess>(PersistenceErrorCode::InvalidSchema);
     const auto& snapshot =
         static_cast<const StepPatternDocument*>(value.get())->snapshot;
-    if (snapshot.active_lane_count == 0 || snapshot.active_lane_count > state::kLaneCount ||
-        snapshot.active_pattern_count == 0 ||
-        snapshot.active_pattern_count > state::kPatternCount ||
-        snapshot.active_pattern >= snapshot.active_pattern_count)
+    if (!step_pattern_snapshot_is_canonical(snapshot))
         return fail<SchemaWriteSuccess>(PersistenceErrorCode::InvalidSchema);
 
     const auto number = [&](std::uint32_t value) { output.append(std::to_string(value)); };
     output.append("{\"schema_version\":");
-    number(snapshot.schema_version);
+    number(kStepPatternSchemaVersion);
     output.append(",\"active_pattern\":");
     number(snapshot.active_pattern);
     output.append(",\"active_lane_count\":");
@@ -178,6 +199,42 @@ std::size_t retained_step_pattern(const std::shared_ptr<const void>&,
 }
 
 } // namespace
+
+bool step_pattern_snapshot_is_canonical(const state::Snapshot& snapshot) noexcept {
+    if (snapshot.schema_version != kStepPatternSchemaVersion ||
+        snapshot.active_lane_count == 0 ||
+        snapshot.active_lane_count > state::kLaneCount ||
+        snapshot.active_pattern_count == 0 ||
+        snapshot.active_pattern_count > state::kPatternCount ||
+        snapshot.active_pattern >= snapshot.active_pattern_count)
+        return false;
+
+    for (std::uint8_t pattern_index = 0; pattern_index < state::kPatternCount;
+         ++pattern_index) {
+        const auto& pattern = snapshot.patterns[pattern_index];
+        if (pattern_index >= snapshot.active_pattern_count) {
+            if (pattern.length != state::kStepCount)
+                return false;
+            for (const auto& lane : pattern.lanes)
+                if (!lane_is_default(lane))
+                    return false;
+            continue;
+        }
+        if (pattern.length > state::kStepCount)
+            return false;
+        for (std::uint8_t lane = 0; lane < state::kLaneCount; ++lane) {
+            if (lane >= snapshot.active_lane_count) {
+                if (!lane_is_default(pattern.lanes[lane]))
+                    return false;
+                continue;
+            }
+            for (const auto& cell : pattern.lanes[lane])
+                if (!cell_is_wire_valid(cell))
+                    return false;
+        }
+    }
+    return true;
+}
 
 std::optional<timeline::SchemaRegistry> make_step_pattern_registry() {
     timeline::SchemaRegistryBuilder builder;

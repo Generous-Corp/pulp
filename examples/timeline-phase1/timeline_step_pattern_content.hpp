@@ -15,6 +15,12 @@ struct StepPatternDocument {
     state::Snapshot snapshot;
 };
 
+/// Capacity outside active_pattern_count/active_lane_count is wire padding,
+/// not pattern state. Canonical documents require that padding to retain the
+/// default PatternState/StepCell values so encoding never silently discards a
+/// second, hidden meaning.
+bool step_pattern_snapshot_is_canonical(const state::Snapshot& snapshot) noexcept;
+
 std::optional<timeline::SchemaRegistry> make_step_pattern_registry();
 std::optional<timeline::RegisteredContent>
 make_registered_step_pattern(const state::Snapshot& snapshot,
