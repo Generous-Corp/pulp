@@ -334,8 +334,10 @@ sampler_targets=(
   pulp-test-sample-stream-service
   pulp-test-sample-stream-async-service
   pulp-test-sample-stream-decode-pool
+  pulp-test-sample-stream-window
   pulp-test-sample-stream-voice-reader
   pulp-test-sample-stream-loop-voice-reader
+  pulp-test-sample-voice-renderer
   pulp-test-sample-sinc-kernel
   pulp-test-sample-asset
   pulp-test-sample-memory-governor
@@ -343,6 +345,8 @@ sampler_targets=(
   pulp-test-sample-heritage-json
   pulp-test-sample-starvation-envelope
   pulp-test-sample-interpolation-quality
+  pulp-test-sampler-rt-safety-contract
+  pulp-test-dsp-runtime-no-alloc
 )
 
 sampler_binaries=(
@@ -358,8 +362,10 @@ sampler_binaries=(
   test/pulp-test-sample-stream-service
   test/pulp-test-sample-stream-async-service
   test/pulp-test-sample-stream-decode-pool
+  test/pulp-test-sample-stream-window
   test/pulp-test-sample-stream-voice-reader
   test/pulp-test-sample-stream-loop-voice-reader
+  test/pulp-test-sample-voice-renderer
   test/pulp-test-sample-sinc-kernel
   test/pulp-test-sample-asset
   test/pulp-test-sample-memory-governor
@@ -367,12 +373,17 @@ sampler_binaries=(
   test/pulp-test-sample-heritage-json
   test/pulp-test-sample-starvation-envelope
   test/pulp-test-sample-interpolation-quality
+  test/pulp-test-sampler-rt-safety-contract
+  test/pulp-test-dsp-runtime-no-alloc
 )
 
 cmake -S . -B build-sampler-release -DCMAKE_BUILD_TYPE=Release \
   -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPULP_ENABLE_GPU=OFF
 tools/ci/governed-build.sh cmake --build build-sampler-release \
   --target "${sampler_targets[@]}"
+grep '^CMAKE_BUILD_TYPE' build-sampler-release/CMakeCache.txt
+grep '^CXX_FLAGS ' \
+  build-sampler-release/examples/PulpSampler/CMakeFiles/pulp-sampler-test.dir/flags.make
 for binary in "${sampler_binaries[@]}"; do
   "./build-sampler-release/$binary"
 done
@@ -383,6 +394,9 @@ cmake -S . -B build-sampler-asan -DCMAKE_BUILD_TYPE=Release \
   -DPULP_SANITIZER=address
 tools/ci/governed-build.sh cmake --build build-sampler-asan \
   --target "${sampler_targets[@]}"
+grep '^CMAKE_BUILD_TYPE' build-sampler-asan/CMakeCache.txt
+grep '^CXX_FLAGS ' \
+  build-sampler-asan/examples/PulpSampler/CMakeFiles/pulp-sampler-test.dir/flags.make
 for binary in "${sampler_binaries[@]}"; do
   ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 \
     "./build-sampler-asan/$binary"
@@ -394,6 +408,9 @@ cmake -S . -B build-sampler-tsan -DCMAKE_BUILD_TYPE=Release \
   -DPULP_SANITIZER=thread
 tools/ci/governed-build.sh cmake --build build-sampler-tsan \
   --target "${sampler_targets[@]}"
+grep '^CMAKE_BUILD_TYPE' build-sampler-tsan/CMakeCache.txt
+grep '^CXX_FLAGS ' \
+  build-sampler-tsan/examples/PulpSampler/CMakeFiles/pulp-sampler-test.dir/flags.make
 for binary in "${sampler_binaries[@]}"; do
   TSAN_OPTIONS=halt_on_error=1 \
     "./build-sampler-tsan/$binary"
@@ -423,6 +440,9 @@ ctest --test-dir build-sampler-coverage \
 cmake -S . -B build-final-release -DCMAKE_BUILD_TYPE=Release \
   -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON
 tools/ci/governed-build.sh cmake --build build-final-release
+grep '^CMAKE_BUILD_TYPE' build-final-release/CMakeCache.txt
+grep '^CXX_FLAGS ' \
+  build-final-release/examples/PulpSampler/CMakeFiles/pulp-sampler-test.dir/flags.make
 tools/ci/governed-build.sh ctest --test-dir build-final-release \
   --output-on-failure
 
@@ -483,6 +503,9 @@ cmake -S . -B build-final-aql -DCMAKE_BUILD_TYPE=Release \
   -DPULP_AUDIO_QUALITY_LAB_PYTHON="$PWD/.venv-aql/bin/python"
 tools/ci/governed-build.sh cmake --build build-final-aql --target \
   pulp-sampler-render-wav pulp-sampler-heritage-render-wav
+grep '^CMAKE_BUILD_TYPE' build-final-aql/CMakeCache.txt
+grep '^CXX_FLAGS ' \
+  build-final-aql/test/CMakeFiles/pulp-sampler-render-wav.dir/flags.make
 tools/ci/governed-build.sh ctest --test-dir build-final-aql \
   -R '^sampler-(quality-lab|heritage-quality-lab)-' --output-on-failure
 ```
@@ -647,9 +670,31 @@ cmake -S . -B build-final-benchmark -DCMAKE_BUILD_TYPE=Release \
   -DPULP_BUILD_TESTS=ON -DPULP_BENCHMARK=ON -DPULP_ENABLE_GPU=OFF
 tools/ci/governed-build.sh cmake --build build-final-benchmark \
   --target pulp-sampler-interpolation-benchmark
+grep '^CMAKE_BUILD_TYPE' build-final-benchmark/CMakeCache.txt
+grep '^CXX_FLAGS ' \
+  build-final-benchmark/test/CMakeFiles/pulp-sampler-interpolation-benchmark.dir/flags.make
+PULP_BENCHMARK_CAPTURED_UTC=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+PULP_BENCHMARK_SOURCE_REVISION=$(git rev-parse HEAD)
+PULP_BENCHMARK_SOURCE_SHA256=$(python3 \
+  tools/scripts/verify_sampler_interpolation_benchmark.py \
+  --print-source-bundle-sha256)
+PULP_BENCHMARK_BINARY_SHA256=$(shasum -a 256 \
+  build-final-benchmark/test/pulp-sampler-interpolation-benchmark | \
+  awk '{print $1}')
+./build-final-benchmark/test/pulp-sampler-interpolation-benchmark \
+  --machine-label "Apple M5 Max Mac17,7" \
+  --machine-model "MacBook Pro Mac17,7, Apple M5 Max" \
+  --os "macOS 26.5.2 build 25F84" --architecture arm64 \
+  --compiler "Apple clang 21.0.0 (clang-2100.1.1.101)" \
+  --source-base-revision "$PULP_BENCHMARK_SOURCE_REVISION" \
+  --source-bundle-sha256 "$PULP_BENCHMARK_SOURCE_SHA256" \
+  --benchmark-binary-sha256 "$PULP_BENCHMARK_BINARY_SHA256" \
+  --generated-utc "$PULP_BENCHMARK_CAPTURED_UTC" \
+  > docs/validation/sampler-interpolation/apple-m5-max-mac17-7.release.json
 python3 tools/scripts/verify_sampler_interpolation_benchmark.py \
   --benchmark-binary \
   build-final-benchmark/test/pulp-sampler-interpolation-benchmark
+python3 tools/scripts/verify_sampler_interpolation_benchmark.py --source-only
 python3 tools/scripts/verify_sampler_interpolation_benchmark.py --self-test \
   --benchmark-binary \
   build-final-benchmark/test/pulp-sampler-interpolation-benchmark
