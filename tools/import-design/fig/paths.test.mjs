@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { decodePathBlob, applyTransform, boundsOf, toPathData, geometryToPath } from './paths.mjs';
-import { materializeFrame, buildScene } from './scene.mjs';
+import { materializeFrame, buildScene, findFrame } from './scene.mjs';
 
 // Encode a command stream the way Figma does: [u8 tag][f32 args…] little-endian.
 function encode(...cmds) {
@@ -113,6 +113,59 @@ test('a stroke-only vector resolves to its stroke outline, painted as a fill', (
   assert.equal(r.box.minX, 39);
   assert.equal(r.box.minY, 7);
   assert.equal(r.d, 'M0 0 L2 0 L2 20 L0 20 Z');
+});
+
+test('a stroke-band vector gets no CSS border — the band is the stroke', () => {
+  // geometryToPath already paints the stroke band as a fill. Emitting the node's
+  // stroke AGAIN as a `border` strokes that band's outline: two parallel lines
+  // where the design has one (the doubled/too-thick triad-pad triangle and every
+  // stroked ring). materializeFrame must suppress the border on such a node.
+  const scene = buildScene({
+    nodeChanges: [
+      { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+      { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Panel',
+        parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+        size: { x: 100, y: 100 } },
+      { ...strokeOnlyNode(), name: 'ring',
+        guid: { sessionID: 0, localID: 3 },
+        parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+        size: { x: 2, y: 20 }, strokeWeight: 2 },
+    ],
+    blobs,
+  });
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Panel'), {
+    images: new Map(), fileKey: 'K', parserVersion: 't',
+    compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z',
+  });
+  const ring = envelope.root.children.find((n) => n.name === 'ring');
+  assert.equal(ring.type, 'vector');
+  assert.ok(ring.fill && ring.fill !== 'none', 'stroke band is painted as a fill');
+  assert.ok(!(ring.style && ring.style.border),
+    'no redundant CSS border — it would double the outline');
+
+  // A FILLED vector with a separate stroke keeps its border (paint = fill).
+  const filled = buildScene({
+    nodeChanges: [
+      { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+      { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Panel',
+        parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+        size: { x: 100, y: 100 } },
+      { type: 'VECTOR', name: 'blob',
+        guid: { sessionID: 0, localID: 3 },
+        parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+        transform: { m00: 1, m01: 0, m02: 10, m10: 0, m11: 1, m12: 10 },
+        size: { x: 20, y: 20 }, strokeWeight: 2,
+        fillGeometry: [{ commandsBlob: 2 }],
+        fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 1, a: 1 }, visible: true }],
+        strokePaints: [{ type: 'SOLID', color: { r: 1, g: 0, b: 0, a: 1 }, visible: true }] },
+    ],
+    blobs: [...blobs, { bytes: encode([MOVE, 0, 0], [LINE, 20, 0], [LINE, 20, 20], [LINE, 0, 20], [CLOSE]) }],
+  });
+  const fv = materializeFrame(filled, findFrame(filled, 'Panel'), {
+    images: new Map(), fileKey: 'K', parserVersion: 't',
+    compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z',
+  }).envelope.root.children.find((n) => n.name === 'blob');
+  assert.ok(fv.style && fv.style.border, 'a real fill + stroke keeps its border');
 });
 
 test('a filled vector prefers its fill outline and reports the dropped stroke', () => {

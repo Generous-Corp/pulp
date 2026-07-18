@@ -1333,6 +1333,12 @@ export function materializeFrame(scene, frame, ctx) {
     // carrying path-data to a native SvgPathWidget), so resolving the shape here
     // is the whole fix — nothing downstream needs to change.
     let vectorResolved = false;
+    // A vector whose geometry came from `strokeGeometry` IS the stroke, already
+    // expanded into a filled band and painted as a fill below. Emitting the
+    // node's stroke a second time as a CSS border strokes that band's outline —
+    // two parallel lines where the design has one, the "doubled / too thick"
+    // outline seen on a triad-pad triangle and every stroked ring.
+    let vectorStrokeBand = false;
     if (VECTOR_LIKE.has(type)) {
       let resolved = null;
       let failure = null;
@@ -1348,6 +1354,7 @@ export function materializeFrame(scene, frame, ctx) {
       if (failure) pushDiag('vector-simplified', node, `${type} ${failure}; emitted as a plain box`);
       if (resolved) {
         vectorResolved = true;
+        vectorStrokeBand = resolved.paint === 'stroke';
         out.type = 'vector';
         out.path_data = resolved.d;
         out.viewBox = `0 0 ${round2(resolved.box.width)} ${round2(resolved.box.height)}`;
@@ -1528,7 +1535,7 @@ export function materializeFrame(scene, frame, ctx) {
       pushDiag('gradient-approximated', node, gradient.type);
     }
 
-    if ((node.strokePaints || []).length && typeof node.strokeWeight === 'number' && node.strokeWeight > 0) {
+    if (!vectorStrokeBand && (node.strokePaints || []).length && typeof node.strokeWeight === 'number' && node.strokeWeight > 0) {
       const s = firstSolidStroke(node);
       // Figma multiplies a paint's own `opacity` by its color's alpha — the
       // same product the fill and text paths already take. Reading only
