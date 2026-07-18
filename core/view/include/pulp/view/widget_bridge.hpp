@@ -275,8 +275,27 @@ private:
     std::unique_ptr<NativeGpuBridgeState> native_gpu_bridge_state_;
     std::vector<std::filesystem::path> asset_roots_;
 
+    // Per-id cache entry: the resolved View plus the tree structure generation
+    // at which that View was last CONFIRMED to live under `root_`. A fresh entry
+    // starts unvalidated (generation 0, the reserved sentinel), so the first
+    // widget() lookup always runs the authoritative subtree walk; once confirmed,
+    // repeat lookups short-circuit to O(1) while View::structure_generation() is
+    // unchanged (no remove_child has detached anything since). The implicit
+    // View* conversions keep this a drop-in for the former
+    // `unordered_map<string, View*>` at every call site; assignment resets the
+    // validation because a replacement pointer has not yet been confirmed.
+    struct BridgeWidgetState {
+        View* view = nullptr;
+        std::uint64_t validated_generation = 0;
+        BridgeWidgetState() = default;
+        BridgeWidgetState(View* v) : view(v) {}          // NOLINT: intentional implicit
+        BridgeWidgetState& operator=(View* v) { view = v; validated_generation = 0; return *this; }
+        operator View*() const { return view; }
+        View* operator->() const { return view; }
+    };
+
     // Track widgets by ID for JS access
-    std::unordered_map<std::string, View*> widgets_;
+    std::unordered_map<std::string, BridgeWidgetState> widgets_;
 
     // Idempotency guards for native-event registrations, one record per widget
     // id. Each registrar (registerPointer / registerWheel / etc.) wraps the

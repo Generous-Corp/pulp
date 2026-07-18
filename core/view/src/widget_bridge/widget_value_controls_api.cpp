@@ -22,21 +22,21 @@ void WidgetBridge::register_widget_value_controls_api() {
         auto it = widgets_.find(id);
         if (it == widgets_.end()) return choc::value::Value();
 
-        if (auto* knob = dynamic_cast<Knob*>(it->second))
+        if (auto* knob = dynamic_cast<Knob*>(it->second.view))
             knob->set_value(static_cast<float>(value));
-        else if (auto* fader = dynamic_cast<Fader*>(it->second))
+        else if (auto* fader = dynamic_cast<Fader*>(it->second.view))
             fader->set_value(static_cast<float>(value));
-        else if (auto* range = dynamic_cast<RangeSlider*>(it->second))
+        else if (auto* range = dynamic_cast<RangeSlider*>(it->second.view))
             range->set_value(static_cast<float>(value));
-        else if (auto* toggle = dynamic_cast<Toggle*>(it->second))
+        else if (auto* toggle = dynamic_cast<Toggle*>(it->second.view))
             toggle->set_on(value > 0.5);
-        else if (auto* cb = dynamic_cast<Checkbox*>(it->second))
+        else if (auto* cb = dynamic_cast<Checkbox*>(it->second.view))
             cb->set_checked(value > 0.5);
-        else if (auto* tb = dynamic_cast<ToggleButton*>(it->second))
+        else if (auto* tb = dynamic_cast<ToggleButton*>(it->second.view))
             tb->set_on(value > 0.5);
-        else if (auto* stepper = dynamic_cast<Stepper*>(it->second))
+        else if (auto* stepper = dynamic_cast<Stepper*>(it->second.view))
             stepper->set_value(value);
-        else if (auto* pan = dynamic_cast<PanControl*>(it->second))
+        else if (auto* pan = dynamic_cast<PanControl*>(it->second.view))
             pan->set_value(static_cast<float>(value));
 
         return choc::value::Value();
@@ -50,13 +50,13 @@ void WidgetBridge::register_widget_value_controls_api() {
         auto it = widgets_.find(id);
         if (it == widgets_.end()) return choc::value::createFloat64(0);
 
-        if (auto* knob = dynamic_cast<Knob*>(it->second))
+        if (auto* knob = dynamic_cast<Knob*>(it->second.view))
             return choc::value::createFloat64(knob->value());
-        if (auto* fader = dynamic_cast<Fader*>(it->second))
+        if (auto* fader = dynamic_cast<Fader*>(it->second.view))
             return choc::value::createFloat64(fader->value());
-        if (auto* range = dynamic_cast<RangeSlider*>(it->second))
+        if (auto* range = dynamic_cast<RangeSlider*>(it->second.view))
             return choc::value::createFloat64(range->value());
-        if (auto* toggle = dynamic_cast<Toggle*>(it->second))
+        if (auto* toggle = dynamic_cast<Toggle*>(it->second.view))
             return choc::value::createFloat64(toggle->is_on() ? 1.0 : 0.0);
 
         return choc::value::createFloat64(0);

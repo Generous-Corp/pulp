@@ -578,8 +578,20 @@ View* WidgetBridge::widget(const std::string& id) {
 
     auto it = widgets_.find(id);
     if (it != widgets_.end()) {
-        if (it->second != nullptr && subtree_contains_view(root_, it->second)) {
-            return it->second;
+        View* cached = it->second.view;
+        if (cached != nullptr) {
+            // O(1) fast path: the generation is unchanged since we last confirmed
+            // `cached` lives under root_, and add_child never detaches, so it must
+            // still be there. Only remove_child bumps the generation (and a fresh
+            // entry carries the 0 sentinel), forcing the authoritative walk below.
+            const std::uint64_t gen = View::structure_generation();
+            if (it->second.validated_generation == gen) {
+                return cached;
+            }
+            if (subtree_contains_view(root_, cached)) {
+                it->second.validated_generation = gen;
+                return cached;
+            }
         }
         widgets_.erase(it); forget_widget_registrations(id);
     }
@@ -593,7 +605,8 @@ View* WidgetBridge::widget(const std::string& id) {
 }
 
 void WidgetBridge::sync_from_store() {
-    for (auto& [id, view] : widgets_) {
+    for (auto& [id, state] : widgets_) {
+        View* view = state.view;
         if (auto* knob = dynamic_cast<Knob*>(view)) {
             // Try to find a parameter matching this widget's id
             // Convention: widget id matches parameter name
@@ -627,7 +640,7 @@ void WidgetBridge::sync_from_store() {
 View* WidgetBridge::resolve_parent(const std::string& parent_id) {
     if (parent_id.empty()) return &root_;
     auto it = widgets_.find(parent_id);
-    return it != widgets_.end() ? it->second : &root_;
+    return it != widgets_.end() ? it->second.view : &root_;
 }
 
 std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
@@ -713,7 +726,8 @@ void WidgetBridge::restore_values(const std::unordered_map<std::string, float>& 
 }
 
 void WidgetBridge::snapshot_values(WidgetReloadSnapshot& out) const {
-    for (auto& [id, view] : widgets_) {
+    for (auto& [id, state] : widgets_) {
+        View* view = state.view;
         float value = 0.0f;
         if (try_get_scalar_value(view, value)) out.scalar_values[id] = value;
         // Selection controls: their selected INDEX is reload state too — without
@@ -739,13 +753,13 @@ void WidgetBridge::restore_values(const WidgetReloadSnapshot& snapshot) {
         if (try_set_scalar_value(it->second, val)) continue;
         // Selection controls — restore the index SILENTLY so re-applying it during
         // a reload doesn't fire the widget's on_change as if the user clicked.
-        if (auto* combo = dynamic_cast<ComboBox*>(it->second)) combo->set_selected_silent(static_cast<int>(std::lround(val)));
-        else if (auto* seg = dynamic_cast<SegmentedControl*>(it->second)) seg->set_selected_silent(static_cast<int>(std::lround(val)));
+        if (auto* combo = dynamic_cast<ComboBox*>(it->second.view)) combo->set_selected_silent(static_cast<int>(std::lround(val)));
+        else if (auto* seg = dynamic_cast<SegmentedControl*>(it->second.view)) seg->set_selected_silent(static_cast<int>(std::lround(val)));
     }
     for (auto& [id, val] : snapshot.xy_values) {
         auto it = widgets_.find(id);
         if (it == widgets_.end()) continue;
-        if (auto* xy = dynamic_cast<XYPad*>(it->second)) { xy->set_x(val.x); xy->set_y(val.y); }
+        if (auto* xy = dynamic_cast<XYPad*>(it->second.view)) { xy->set_x(val.x); xy->set_y(val.y); }
     }
     // Custom widget-declared state (item 1.4b): hand each saved blob back to the
     // widget that still lives under the same script id. A widget whose id/type

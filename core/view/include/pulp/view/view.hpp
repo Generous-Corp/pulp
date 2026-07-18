@@ -64,6 +64,17 @@ public:
 
     void add_child(std::unique_ptr<View> child);
     std::unique_ptr<View> remove_child(View* child);
+
+    /// Process-wide monotonic counter bumped by every structural mutation that
+    /// can DETACH a node (remove_child). Never resets; starts at 1 so 0 is a
+    /// reserved "never validated" sentinel for external cache holders. add_child
+    /// does NOT bump it — adding a node cannot detach an already-reachable node,
+    /// so a pointer confirmed under some root at generation G is still under that
+    /// root at any later generation with no intervening remove_child. WidgetBridge
+    /// uses this to make its per-id widget-liveness cache O(1) on repeat lookups,
+    /// skipping the O(tree) subtree walk while the generation is unchanged.
+    static std::uint64_t structure_generation() noexcept;
+
     size_t child_count() const { return children_.size(); }
     View* child_at(size_t index) { return children_[index].get(); }
     const View* child_at(size_t index) const { return children_[index].get(); }

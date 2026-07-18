@@ -176,6 +176,12 @@ View* root_for_gesture_relationship_cleanup(View* view) {
     return view;
 }
 
+// Backs View::structure_generation(). Bumped only by remove_child (the sole
+// path that detaches a node). Starts at 1 so 0 is a reserved sentinel. Relaxed
+// ordering: tree mutation and the cache lookups that read it run on the same
+// (UI) thread; the atomic only guards against incidental cross-thread access.
+std::atomic<std::uint64_t> g_view_structure_generation{1};
+
 } // namespace
 
 View::View()
@@ -1164,7 +1170,14 @@ std::unique_ptr<View> View::remove_child(View* child) {
     child->notify_frame_clock_changed();
     auto owned = std::move(*it);
     children_.erase(it);
+    // A node was detached: invalidate every external liveness cache keyed on the
+    // structure generation (see View::structure_generation()).
+    g_view_structure_generation.fetch_add(1, std::memory_order_relaxed);
     return owned;
+}
+
+std::uint64_t View::structure_generation() noexcept {
+    return g_view_structure_generation.load(std::memory_order_relaxed);
 }
 
 bool View::children_in_z_order() const {
