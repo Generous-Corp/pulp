@@ -54,7 +54,9 @@ target_sources(pulp-audio PRIVATE
     src/sample_heritage_src.cpp
     src/sample_edit_document.cpp
     src/sample_key_map.cpp
+    src/sample_mip_manifest.cpp
     src/sample_mip_sidecar.cpp
+    src/sample_mip_sidecar_staging.cpp
     src/sample_pool.cpp
     src/sample_stream_window.cpp
     src/sample_voice_renderer.cpp
