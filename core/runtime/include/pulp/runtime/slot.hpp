@@ -37,6 +37,7 @@
 #include <pulp/runtime/spsc_queue.hpp>
 
 #include <atomic>
+#include <cassert>
 #include <cstddef>
 #include <memory>
 #include <thread>
@@ -146,12 +147,33 @@ public:
 
     /// Publisher thread. Swap in a new value; the displaced one is parked and
     /// freed as soon as no reader holds it. Publishing `nullptr` unpublishes.
-    void publish(std::shared_ptr<T> next) {
+    /// Publisher-thread allocation preflight for publish_prepared(). Call this
+    /// before an external transaction reaches its irreversible commit point.
+    /// Any allocation failure is reported here, while all external state is
+    /// still untouched.
+    void prepare_publish() {
+        reclaim_if_quiescent();
+        if (live_)
+            retired_.reserve(retired_.size() + 1);
+    }
+
+    /// Publish after prepare_publish(). This operation cannot allocate or
+    /// throw, so it is safe to pair immediately after an external commit.
+    void publish_prepared(std::shared_ptr<T> next) noexcept {
+        assert((!live_ || retired_.size() < retired_.capacity()) &&
+               "Slot::publish_prepared requires prepare_publish");
         live_raw_.store(next.get(), std::memory_order_seq_cst);
         if (live_)
             retired_.push_back(std::move(live_));
         live_ = std::move(next);
         reclaim_if_quiescent();
+    }
+
+    void publish(std::shared_ptr<T> next) {
+        // Reserve before changing live_raw_: allocation failure must leave the
+        // currently-published pointer and owner coherent.
+        prepare_publish();
+        publish_prepared(std::move(next));
     }
 
     void publish(std::unique_ptr<T> next) { publish(std::shared_ptr<T>(std::move(next))); }
