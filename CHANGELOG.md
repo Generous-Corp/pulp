@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07370"></a>
+## [0.737.0] - 2026-07-19
+
+- feat(view,render): partial repaint on the macOS GPU host (FU-2, WI-17) ([#6373](https://github.com/danielraffel/pulp/pull/6373))
+- phase/creative timeline phase2 ([#6372](https://github.com/danielraffel/pulp/pull/6372))
+
 <a id="v07360"></a>
 ## [0.736.0] - 2026-07-19
 
@@ -6750,6 +6756,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.737.0]: https://github.com/danielraffel/pulp/releases/tag/v0.737.0
 [0.736.0]: https://github.com/danielraffel/pulp/releases/tag/v0.736.0
 [0.735.0]: https://github.com/danielraffel/pulp/releases/tag/v0.735.0
 [0.734.0]: https://github.com/danielraffel/pulp/releases/tag/v0.734.0
