@@ -45,13 +45,6 @@ if(PULP_BUILD_TESTS)
         ${PROJECT_SOURCE_DIR}/test/harness)
     catch_discover_tests(pulp-sampler-test PROPERTIES TIMEOUT 30)
 
-    add_executable(pulp-sampler-cli-sidecar-probe
-        ${PULP_SAMPLER_IMPLEMENTATION}
-        test_sampler_cli_sidecar_probe.cpp)
-    target_link_libraries(pulp-sampler-cli-sidecar-probe PRIVATE
-        pulp::format pulp::audio pulp::signal)
-    target_include_directories(pulp-sampler-cli-sidecar-probe PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR})
     if(TARGET pulp-test-cli-shellout)
         add_dependencies(pulp-test-cli-shellout
             pulp-sampler-cli-sidecar-probe)
