@@ -396,6 +396,8 @@ export interface Style {
   background_gradient?: string;
   background_image?: string;
   background_repeat?: string;
+  background_size?: string;
+  object_fit?: string;
   color?: string;
   opacity?: number;
   border_radius?: number;

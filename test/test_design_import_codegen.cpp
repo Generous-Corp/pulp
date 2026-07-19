@@ -2644,6 +2644,74 @@ TEST_CASE("native codegen paints a gradient behind a transparent image",
     REQUIRE(js.find("setImageSource(") != std::string::npos);
 }
 
+TEST_CASE("native codegen lowers the Figma paint-stack fields",
+          "[view][import][paints]") {
+    // Audit item 7: paint-level opacity rides in the emitted rgba color; image
+    // scale modes ride in object-fit (image nodes, honored by ImageView::paint)
+    // or background-size/background-repeat (frame-shaped nodes); a solid plate
+    // below an image fill paints BEHIND the bitmap.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 300.0f;
+
+    // A 50%-opacity solid fill: the producer folds paint opacity into the
+    // color's alpha, and the codegen must pass the rgba through verbatim.
+    IRNode chip;
+    chip.type = "frame";
+    chip.name = "Half";
+    chip.style.width = 40.0f;
+    chip.style.height = 40.0f;
+    chip.style.background_color = "rgba(0, 0, 0, 0.500)";
+    ir.root.children.push_back(chip);
+
+    // An image fill in FIT mode over a solid plate (Figma stack
+    // [SOLID, IMAGE]): contain keyword + the plate behind the bitmap.
+    IRNode photo;
+    photo.type = "image";
+    photo.name = "Fit Photo";
+    photo.attributes["asset_path"] = "/tmp/photo.png";
+    photo.style.width = 64.0f;
+    photo.style.height = 64.0f;
+    photo.style.object_fit = "contain";
+    photo.style.background_color = "#112233";
+    ir.root.children.push_back(photo);
+
+    // A TILE'd texture on a frame-shaped node (REST lane shape): the scale
+    // mode lands in the View's background repeat/size slots.
+    IRNode tiled;
+    tiled.type = "frame";
+    tiled.name = "Texture";
+    tiled.style.width = 80.0f;
+    tiled.style.height = 80.0f;
+    tiled.style.background_image = "url(assets/noise.png)";
+    tiled.style.background_repeat = "repeat";
+    tiled.style.background_size = "auto";
+    ir.root.children.push_back(tiled);
+
+    const auto js = native_js(ir);
+    INFO(js);
+
+    REQUIRE(js.find("'rgba(0, 0, 0, 0.500)'") != std::string::npos);
+    REQUIRE(js.find("setObjectFit(") != std::string::npos);
+    REQUIRE(js.find("'contain'") != std::string::npos);
+    // Both, not either: the plate is behind the bitmap, not instead of it.
+    REQUIRE(js.find("setImageSource(") != std::string::npos);
+    REQUIRE(js.find("'#112233'") != std::string::npos);
+    REQUIRE(js.find("setBackgroundRepeat(") != std::string::npos);
+    REQUIRE(js.find("'repeat'") != std::string::npos);
+    REQUIRE(js.find("setBackgroundSize(") != std::string::npos);
+    REQUIRE(js.find("'auto'") != std::string::npos);
+
+    // The C++ codegen mirrors the same slots.
+    const auto cpp = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(cpp.source.find("set_object_fit(\"contain\")") != std::string::npos);
+    REQUIRE(cpp.source.find("set_background_repeat(\"repeat\")") != std::string::npos);
+    REQUIRE(cpp.source.find("set_background_size(\"auto\")") != std::string::npos);
+}
+
 TEST_CASE("native codegen paints a stroke declared as the CSS border shorthand",
           "[view][import][border]") {
     // IRStyle carries `border` — "1px solid #333" — AND the discrete

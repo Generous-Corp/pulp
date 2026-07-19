@@ -79,6 +79,8 @@ TEST_CASE("DesignIR v1 canonical JSON round-trips source metadata and assets",
     ir.root.style.background_color = "#101010";
     ir.root.style.background_image = "url(data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'/%3E)";
     ir.root.style.background_repeat = "no-repeat";
+    ir.root.style.background_size = "cover";
+    ir.root.style.object_fit = "contain";
     ir.root.style.border_color = "#ffffff";
     ir.root.style.border_width = 2.0f;
     ir.root.style.border_style = "solid";
@@ -125,6 +127,8 @@ TEST_CASE("DesignIR v1 canonical JSON round-trips source metadata and assets",
     REQUIRE(parsed.root.layout.flex_grow == 1.0f);
     REQUIRE(parsed.root.layout.overflow_y == "auto");
     REQUIRE(parsed.root.style.background_repeat == "no-repeat");
+    REQUIRE(parsed.root.style.background_size == "cover");
+    REQUIRE(parsed.root.style.object_fit == "contain");
     REQUIRE(parsed.root.style.border_top_left_radius == 3.0f);
     REQUIRE(parsed.root.style.text_overflow == "ellipsis");
     REQUIRE(parsed.root.stable_anchor_id == "stitch:panel");

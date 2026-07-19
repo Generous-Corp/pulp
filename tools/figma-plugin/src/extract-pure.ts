@@ -44,19 +44,186 @@ export function hex2(n: number): string {
   return n.toString(16).padStart(2, "0");
 }
 
+// A gradient paint's own `opacity` (0..1) scales every stop's alpha — it is
+// paint-level, distinct from the layer opacity, and dropping it painted a 24%
+// white sheen as a hard white ramp. Same fold the solid path (paintToColor)
+// and the REST/.fig lanes apply.
+function stopWithPaintOpacity(c: RGBA, paintOpacity: number): RGBA {
+  if (paintOpacity >= 1) return c;
+  return { ...c, a: (c.a === undefined ? 1 : c.a) * paintOpacity };
+}
+
 export function gradientToCss(p: GradientPaint): string {
   if (!p.gradientStops || p.gradientStops.length === 0) return "linear-gradient(transparent, transparent)";
+  const op = p.opacity !== undefined ? p.opacity : 1;
   // Pulp's setBackgroundGradient bridge takes color stop positions implicitly by
   // index, and its parseColor doesn't strip trailing `Npc%` from a token.
   // Emit colors only (no inline percentages).
-  const stops = p.gradientStops.map((s) => rgbaToCss(s.color)).join(", ");
+  const stops = p.gradientStops.map((s) => rgbaToCss(stopWithPaintOpacity(s.color, op))).join(", ");
   return `linear-gradient(to bottom, ${stops})`;
 }
 
 export function gradientFallbackFlat(p: GradientPaint): string {
   const first = p.gradientStops?.[0]?.color;
   if (!first) return "transparent";
-  return rgbaToCss(first);
+  return rgbaToCss(stopWithPaintOpacity(first, p.opacity !== undefined ? p.opacity : 1));
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Ordered paint-stack lowering (audit item 7).
+//
+// Figma renders `fills` bottom→top (index 0 at the BOTTOM). The IR's
+// background model has exactly three slots — one solid color, one gradient,
+// one image — painted in that order (color, then gradient over it, then the
+// image on top), so a stack is representable exactly when it reads
+// [solid…, gradient?, image?] bottom→top. This helper consumes that prefix
+// and reports everything else as a structured diagnostic instead of the old
+// behavior (first visible paint wins, the rest vanish silently).
+
+export interface LoweredPaintDiagnostic {
+  severity: "info" | "warning";
+  code: string;
+  kind: "unsupported_property" | "capture_partial";
+  message: string;
+}
+
+export interface LoweredPaintStack {
+  /// Leading (bottom) run of SOLID paints, composited source-over in stack
+  /// order with each paint's own opacity folded in — exact under NORMAL blend.
+  backgroundColor?: string;
+  /// First gradient above the solid run. Linear lowers to CSS; radial /
+  /// angular / diamond keep the existing flatten-with-diagnostic behavior
+  /// (handled by the caller, which owns the CSS conversion policy).
+  gradientPaint?: GradientPaint;
+  /// First IMAGE paint above the gradient slot.
+  imagePaint?: ImagePaint;
+  diagnostics: LoweredPaintDiagnostic[];
+}
+
+/// Composite a run of SOLID paints the way Figma paints them: array order,
+/// index 0 at the bottom, each source-over the result so far. A paint's own
+/// `opacity` is its alpha (Plugin API solid colors are RGB). Mirrors
+/// compositeSolids in tools/import-design/fig/scene.mjs.
+export function compositeSolidPaints(solids: readonly SolidPaint[]): string {
+  if (solids.length === 1) return paintToColor(solids[0]);
+  let r = 0, g = 0, b = 0, a = 0; // accumulated, non-premultiplied
+  for (const p of solids) {
+    const sa = p.opacity !== undefined ? p.opacity : 1;
+    if (sa <= 0) continue;
+    const na = sa + a * (1 - sa);
+    if (na <= 0) continue;
+    r = (p.color.r * sa + r * a * (1 - sa)) / na;
+    g = (p.color.g * sa + g * a * (1 - sa)) / na;
+    b = (p.color.b * sa + b * a * (1 - sa)) / na;
+    a = na;
+  }
+  return rgbaToCss({ r, g, b, a });
+}
+
+const GRADIENT_TYPES = new Set([
+  "GRADIENT_LINEAR", "GRADIENT_RADIAL", "GRADIENT_ANGULAR", "GRADIENT_DIAMOND",
+]);
+
+export function lowerFillPaints(fills: readonly Paint[]): LoweredPaintStack {
+  const out: LoweredPaintStack = { diagnostics: [] };
+  const visible = fills.filter((p) => p.visible !== false);
+  if (visible.length === 0) return out;
+
+  // Newer paint families (VIDEO, PATTERN, …) have no color to lower — dispatch
+  // them out explicitly so the loss is stated, and keep lowering whatever
+  // supported paints remain (better than letting an un-renderable top paint
+  // shadow a perfectly good solid below it).
+  const supported: Paint[] = [];
+  const unsupportedTypes: string[] = [];
+  for (const p of visible) {
+    if (p.type === "SOLID" || p.type === "IMAGE" || GRADIENT_TYPES.has(p.type)) supported.push(p);
+    else unsupportedTypes.push(p.type);
+  }
+  if (unsupportedTypes.length > 0) {
+    out.diagnostics.push({
+      severity: "warning",
+      code: "unsupported-paint-type",
+      kind: "unsupported_property",
+      message: `Unsupported paint type(s) ${unsupportedTypes.join(", ")} dropped; ` +
+        `only solid / gradient / image fills are lowered.`,
+    });
+  }
+
+  // Paint-level blend modes have no slot in the one-background model; the
+  // paint still lowers, composited NORMAL, and the difference is stated.
+  const blendModes = [...new Set(
+    visible
+      .map((p) => p.blendMode)
+      .filter((m): m is BlendMode => m !== undefined && m !== "NORMAL"),
+  )];
+  if (blendModes.length > 0) {
+    out.diagnostics.push({
+      severity: "warning",
+      code: "paint-blend-unsupported",
+      kind: "unsupported_property",
+      message: `Paint blend mode(s) ${blendModes.join(", ")} composited as NORMAL.`,
+    });
+  }
+
+  // A fully opaque solid hides everything below it, so trimming the stack to
+  // start at the LAST opaque solid is exact — no diagnostic owed for the
+  // hidden paints. Without this, [gradient, opaque solid] would lower the
+  // gradient and flatten the solid that actually covers it.
+  for (let k = supported.length - 1; k > 0; k--) {
+    const p = supported[k];
+    if (p.type === "SOLID" && (p.opacity === undefined || p.opacity >= 1)) {
+      supported.splice(0, k);
+      break;
+    }
+  }
+
+  // Slot scan, bottom→top: [solid… , gradient?, image?].
+  let i = 0;
+  const solids: SolidPaint[] = [];
+  while (i < supported.length && supported[i].type === "SOLID") {
+    solids.push(supported[i] as SolidPaint);
+    i++;
+  }
+  if (solids.length > 0) out.backgroundColor = compositeSolidPaints(solids);
+  if (i < supported.length && GRADIENT_TYPES.has(supported[i].type)) {
+    out.gradientPaint = supported[i] as GradientPaint;
+    i++;
+  }
+  if (i < supported.length && supported[i].type === "IMAGE") {
+    out.imagePaint = supported[i] as ImagePaint;
+    i++;
+  }
+  if (i < supported.length) {
+    const extras = supported.slice(i).map((p) => p.type);
+    out.diagnostics.push({
+      severity: "warning",
+      code: "multi-paint-flattened",
+      kind: "capture_partial",
+      message: `${extras.length} of ${supported.length} visible fill(s) ` +
+        `(${extras.join(", ")}) exceed the color/gradient/image background slots ` +
+        `and are flattened out; the stack renders from the lower paints only.`,
+    });
+  }
+  return out;
+}
+
+/// Figma IMAGE-fill scale mode → CSS object-fit for image-shaped nodes.
+/// FILL crops to cover the box (CSS cover); FIT letterboxes (CSS contain);
+/// CROP shows a transform-defined window — cover is the closest
+/// aspect-preserving approximation; TILE repeats at a scale factor, which the
+/// image painter cannot do, so the stretch default stands. The second tuple
+/// member says whether the mapping is exact (no diagnostic needed).
+export function scaleModeToObjectFit(
+  scaleMode: string | undefined,
+): { fit?: string; exact: boolean } {
+  switch (scaleMode) {
+    case undefined:
+    case "FILL": return { fit: "cover", exact: true };
+    case "FIT":  return { fit: "contain", exact: true };
+    case "CROP": return { fit: "cover", exact: false };
+    case "TILE": return { exact: false };
+    default:     return { exact: false };
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────

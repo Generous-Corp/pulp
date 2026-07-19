@@ -32,6 +32,8 @@ import {
   rgbaToCss,
   gradientToCss,
   gradientFallbackFlat,
+  lowerFillPaints,
+  scaleModeToObjectFit,
   dispatchNodeType,
   extractLayout,
   parentLayoutMode,
@@ -559,37 +561,71 @@ function extractStyle(n: SceneNode, ctx: WalkCtx): ExtractedStyle {
     }
   }
 
-  // Fills
+  // Fills — ordered paint-stack lowering (extract-pure.ts::lowerFillPaints).
+  // Figma renders `fills` bottom→top; the IR has one color + one gradient +
+  // one image background slot painted in that order, so a [solid…, gradient?,
+  // image?] prefix lowers exactly (leading solids composite source-over) and
+  // anything beyond it raises multi-paint-flattened / unsupported-paint-type
+  // instead of vanishing behind a first-visible-paint-wins pick.
   if ("fills" in n && Array.isArray(n.fills) && n.fills.length > 0) {
-    const fills = n.fills as readonly Paint[];
-    const visible = fills.filter((p) => p.visible !== false);
-    const first = visible[0];
-    if (first) {
-      if (first.type === "SOLID") {
-        s.background_color = paintToColor(first as SolidPaint);
-      } else if (first.type === "GRADIENT_LINEAR") {
-        s.background_gradient = gradientToCss(first as GradientPaint);
-      } else if (first.type === "IMAGE") {
-        // Extract image fill bytes via Figma's imageHash, cache by sha256.
-        const imgHash = (first as ImagePaint).imageHash;
-        if (imgHash) {
-          // Schedule asset capture; rejoined via a microtask so we don't block this synchronous walk.
-          // Note: extractStyle is synchronous; the caller will retroactively call
-          // captureImageFill via the deferred path. Mark with a placeholder
-          // and use a side-channel — but the simpler thing is to make extractStyle async-aware.
-          // SEE: image fills are wired via captureImageFillsForNode after style extraction.
-          s.background_image = `pending:${imgHash}`;
-        }
-      } else if (first.type === "GRADIENT_RADIAL" || first.type === "GRADIENT_ANGULAR" || first.type === "GRADIENT_DIAMOND") {
+    const lowered = lowerFillPaints(n.fills as readonly Paint[]);
+    for (const d of lowered.diagnostics) {
+      pushDiag(ctx, d.severity, d.code, d.kind, `${n.name}: ${d.message}`);
+    }
+    if (lowered.backgroundColor) s.background_color = lowered.backgroundColor;
+    const grad = lowered.gradientPaint;
+    if (grad) {
+      if (grad.type === "GRADIENT_LINEAR") {
+        s.background_gradient = gradientToCss(grad);
+      } else if (s.background_color) {
+        // A radial/angular/diamond gradient stacked over a solid: the flat
+        // fallback would overwrite the exact composite below it, so keep the
+        // solid and state the gradient's loss instead.
         pushDiag(ctx, "warning", "complex-gradient", "unsupported_property",
-          `${first.type} not supported; emitting flat first color fallback.`);
+          `${n.name}: ${grad.type} over a solid fill not supported; solid kept, gradient dropped.`);
+      } else {
+        pushDiag(ctx, "warning", "complex-gradient", "unsupported_property",
+          `${grad.type} not supported; emitting flat first color fallback.`);
         // Store the flat fallback as background_color, NOT background_gradient.
         // The codegen routes background_gradient through setBackgroundGradient,
         // which expects a linear-gradient(...) string and fails to parse a
         // bare hex/rgba value — visible effect: the color never paints.
         // Subregion tints inside ELYSIUM cells (Frame 482 #2d2d2d) were lost
         // this way until the fix.
-        s.background_color = gradientFallbackFlat(first as GradientPaint);
+        s.background_color = gradientFallbackFlat(grad);
+      }
+    }
+    const image = lowered.imagePaint;
+    if (image && image.imageHash) {
+      // Schedule asset capture; rejoined via a microtask so we don't block this
+      // synchronous walk. extractStyle is synchronous; the caller retroactively
+      // resolves the placeholder via captureImageFill after style extraction.
+      s.background_image = `pending:${image.imageHash}`;
+      // Scale mode → CSS object-fit, honored by ImageView::paint once the fill
+      // becomes an image node (FILL → cover, FIT → contain). CROP approximates
+      // with cover (the imageTransform crop window has no CSS equivalent) and
+      // TILE keeps the stretch default — both say so.
+      const { fit, exact } = scaleModeToObjectFit(image.scaleMode);
+      if (fit) s.object_fit = fit;
+      if (!exact) {
+        pushDiag(ctx, "warning", "image-scale-approximated", "capture_partial",
+          `${n.name}: image fill scale mode ${image.scaleMode} has no exact ` +
+          `equivalent; ${fit ? `approximated as object-fit: ${fit}` : "rendered stretched to the box"}.`);
+      }
+      // Paint-level opacity — distinct from layer opacity. For a childless
+      // node the fill IS the node's only content, so folding it into the
+      // layer opacity composites identically; with children present the fold
+      // would fade them too, so the loss is diagnosed instead.
+      const imgOpacity = image.opacity !== undefined ? image.opacity : 1;
+      if (imgOpacity < 1) {
+        const childCount = "children" in n ? (n as ChildrenMixin).children.length : 0;
+        if (childCount === 0) {
+          s.opacity = (s.opacity !== undefined ? s.opacity : 1) * imgOpacity;
+        } else {
+          pushDiag(ctx, "warning", "image-opacity-dropped", "unsupported_property",
+            `${n.name}: image fill opacity ${imgOpacity.toFixed(3)} cannot fold ` +
+            `into layer opacity (node has children); image renders opaque.`);
+        }
       }
     }
   }

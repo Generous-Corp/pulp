@@ -1239,6 +1239,13 @@ void apply_visual_style(View& view, const IRStyle& style,
         apply_css_background_gradient(view, *style.background_gradient);
     if (style.background_repeat)
         view.set_background_repeat(*style.background_repeat);
+    if (style.background_size)
+        view.set_background_size(*style.background_size);
+    // object-fit is honored by ImageView::paint; on plain Views it sits in the
+    // same style_extras slot the bridge writes, so applying it unconditionally
+    // keeps the native tree in lockstep with the JS lane's setObjectFit.
+    if (style.object_fit)
+        view.set_object_fit(*style.object_fit);
     if (style.color) {
         if (auto color = parse_any_css_color(*style.color))
             view.set_inheritable_text_color(*color);

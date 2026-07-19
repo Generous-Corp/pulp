@@ -1690,6 +1690,49 @@ Facts / gotchas:
 - Native arm only; `compat.json features.grid-container` tracks it (parsed
   handled, codegen partial). Tests: `[view][import][grid]`.
 
+### Ordered paint stacks, paint opacity, image scale modes (audit item 7)
+
+Figma renders `fills` bottom→top (array index 0 at the BOTTOM). The IR has
+exactly three background slots — one solid color, one gradient, one image —
+painted in that order, so a stack is representable exactly when it reads
+`[solid…, gradient?, image?]` bottom→top. All three producers (plugin
+`extract-pure.ts::lowerFillPaints`, REST `figma_rest_export.py::
+lower_fill_paints`, `.fig` `scene.mjs` styleFor box branch) share this slot
+scan, kept in field-for-field lockstep:
+
+- **Leading solids composite source-over** (exact under NORMAL blend) into
+  `background_color` — a `[#4b4d51, white@0.55]` thumb is `#aeafb1`, not the
+  dark base. A fully **opaque solid trims the stack** below it (also exact).
+- **Paint-level opacity** (distinct from layer opacity) folds into the emitted
+  color alpha: solids via `paintToColor`/`paint_to_color`/`compositeSolids`,
+  gradients by scaling every stop's alpha. An IMAGE paint's opacity folds into
+  the layer opacity only on a **childless** node (identical compositing);
+  with children it raises `image-opacity-dropped` instead of fading them.
+- **Image scale modes**: on image-shaped nodes (plugin/.fig lanes, where an
+  image fill becomes an image node) `scaleMode`/`imageScaleMode` lowers to
+  `object_fit` — FILL→`cover`, FIT→`contain` — which `ImageView::paint`
+  actually honors (real rendered fix: a FILL photo no longer imports
+  stretched). CROP (spelled `STRETCH` in `.fig` blobs) approximates as
+  `cover` + `image-scale-approximated`; TILE has no painter → stretch default
+  + the same diagnostic. On frame-shaped nodes (REST lane keeps
+  `background_image`) it lowers to `background_size`/`background_repeat`
+  (View storage slots via setBackgroundSize/setBackgroundRepeat; raster
+  background paint honoring is still the deferred `style_extras` slot).
+- **No silent drops**: paints beyond the slots raise `multi-paint-flattened`;
+  VIDEO/PATTERN/unknown families raise `unsupported-paint-type` (and never
+  shadow a lowerable solid below them); non-NORMAL paint `blendMode` raises
+  `paint-blend-unsupported` (paint still lowers, composited normal). New
+  `.fig` codes MUST be registered in `DIAGNOSTIC_SEVERITY` or both consumers
+  drop them as invisible `info`.
+- IR: `IRStyle.object_fit` / `background_size` are parsed (`objectFit` /
+  `backgroundSize`, camel or snake) + emitted by JS/C++ codegens + the native
+  importer; the plugin envelope schema carries `object_fit`/`background_size`
+  (regenerate `types.generated.ts` via `npm run gen-types` after schema
+  edits). Tests: `[view][import][paints]`, `tools/figma-plugin/test/
+  paints.test.ts`, `test/test_figma_rest_export.py::PaintStackTest`, and the
+  `.fig` `Paint Lab` fixture frame (regenerate `synthetic.fig` via
+  `make_synthetic_fig.mjs` — a staleness gate compares decoded content).
+
 ### Radial / conic background gradients
 
 Linear gradients were end-to-end; radial/conic used to round-trip the CSS string

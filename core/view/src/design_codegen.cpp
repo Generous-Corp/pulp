@@ -1418,12 +1418,23 @@ static void emit_js_image_node(const NativeEmit& e) {
     ss << ind << "createImage('" << id << "', " << pid << ");\n";
     emit_js_absolute_position(e, id);
     emit_js_visual_overrides(e, id);
-    // A background gradient paints the box BEHIND the image — the canonical
-    // case is a transparent PNG over a gradient plate. Not in the shared
-    // emit_js_visual_overrides: see the note there.
+    // A background color or gradient paints the box BEHIND the image — the
+    // canonical case is a transparent PNG over a solid or gradient plate
+    // (Figma: a SOLID fill below an IMAGE fill in the same paint stack). Not
+    // in the shared emit_js_visual_overrides: see the note there.
+    if (node.style.background_color)
+        ss << ind << "setBackground('" << id << "', '"
+           << js_single_quote_escape(*node.style.background_color) << "');\n";
     if (node.style.background_gradient)
         ss << ind << "setBackgroundGradient('" << id << "', '"
            << js_single_quote_escape(*node.style.background_gradient) << "');\n";
+    // CSS object-fit — the Figma IMAGE fill scale mode lowers here
+    // (FILL → cover, FIT → contain). ImageView::paint honors the keyword, so
+    // without this line a photo whose box aspect differs from the bitmap's
+    // imports stretched instead of cropped/letterboxed the way Figma shows it.
+    if (node.style.object_fit && !node.style.object_fit->empty())
+        ss << ind << "setObjectFit('" << id << "', '"
+           << js_single_quote_escape(*node.style.object_fit) << "');\n";
     auto it = node.attributes.find("asset_path");
     if (it != node.attributes.end() && !it->second.empty()) {
         ss << ind << "setImageSource('" << id << "', '"
@@ -1530,7 +1541,11 @@ static void emit_js_image_node(const NativeEmit& e) {
         emitted_w = node.style.width.value_or(0.0f);
         emitted_h = node.style.height.value_or(0.0f);
         auto bleed_it = node.attributes.find("asset_bleed");
-        if (bleed_it != node.attributes.end() && bleed_it->second == "1")
+        // style.object_fit (already emitted above) wins over the bleed
+        // heuristic — emitting a second, conflicting keyword here would make
+        // the last call win and silently undo the authored scale mode.
+        if (bleed_it != node.attributes.end() && bleed_it->second == "1" &&
+            !(node.style.object_fit && !node.style.object_fit->empty()))
             ss << ind << "setObjectFit('" << id << "', 'none');\n";
     }
     // Reference-free fidelity self-checks for this image (see design_fidelity).
@@ -1872,6 +1887,18 @@ static void emit_js_container(const NativeEmit& e, int& var_counter,
     // gradient off the node precisely to stop that.
     if (node.style.background_gradient)
         ss << ind << "setBackgroundGradient('" << id << "', '" << js_single_quote_escape(*node.style.background_gradient) << "');\n";
+    // Figma IMAGE-fill scale modes on frame-shaped nodes lower to the CSS
+    // background-repeat/background-size keywords (TILE → repeat, FILL → cover,
+    // FIT → contain). The bridge stores them on the View (setBackgroundRepeat /
+    // setBackgroundSize); raster background paint consumes the slots when it
+    // lands — emitting them keeps the round-trip lossless instead of dropping
+    // the authored scale mode at codegen.
+    if (node.style.background_repeat && !node.style.background_repeat->empty())
+        ss << ind << "setBackgroundRepeat('" << id << "', '"
+           << js_single_quote_escape(*node.style.background_repeat) << "');\n";
+    if (node.style.background_size && !node.style.background_size->empty())
+        ss << ind << "setBackgroundSize('" << id << "', '"
+           << js_single_quote_escape(*node.style.background_size) << "');\n";
     if (node.style.border_radius)
         ss << ind << "setCornerRadius('" << id << "', 'All', " << *node.style.border_radius << ");\n";
     // Emit border (Figma frame stroke) as setBorder(id, color, width).
