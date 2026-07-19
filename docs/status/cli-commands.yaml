@@ -1317,6 +1317,9 @@ commands:
       - name: --format
         kind: option
         description: "Token export format: w3c (default, DTCG JSON), css-variables (CSS custom properties; .dark modes → @media prefers-color-scheme), or tailwind/json-tailwind/css-tailwind (require --from designmd). Unknown values exit 2."
+      - name: --emit-w3c-tokens
+        kind: option
+        description: "Additionally write the imported tokens as a W3C Design Tokens (DTCG) document at the given path (\"-\" = stdout): \"/\" in token names nests into DTCG groups, dimensions use the {value, unit} object form, and variable provenance lands under $extensions[\"dev.pulp.source\"]. Additive — no other output changes."
       - name: --dry-run
         kind: flag
         description: Show generated code without writing files

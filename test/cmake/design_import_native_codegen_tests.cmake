@@ -9,6 +9,11 @@ pulp_add_test_suite(pulp-test-design-import
     TEST_SPEC "~[network]"
     LABELS "parser-import")
 
+# W3C Design Tokens (DTCG) emitter for IRTokens (design_tokens_w3c.cpp).
+add_executable(pulp-test-design-tokens-w3c test_design_tokens_w3c.cpp)
+target_link_libraries(pulp-test-design-tokens-w3c PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-design-tokens-w3c PROPERTIES LABELS "parser-import")
+
 # Reference-free import-fidelity self-checks (core/view/src/design_fidelity.cpp).
 add_executable(pulp-test-design-fidelity test_design_fidelity.cpp)
 target_link_libraries(pulp-test-design-fidelity PRIVATE pulp::view Catch2::Catch2WithMain)

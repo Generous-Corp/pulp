@@ -1512,3 +1512,69 @@ TEST_CASE("pulp design tweak --help prints usage", "[cli][design-tweak][shellout
     REQUIRE(r.stdout_output.find("Usage: pulp design tweak") != std::string::npos);
 }
 
+
+// ── --emit-w3c-tokens: additive DTCG token artifact ─────────────────────
+
+namespace {
+fs::path write_tokens_envelope(const fs::path& dir) {
+    auto scene = dir / "scene.pulp.json";
+    std::ofstream f(scene);
+    f << R"({
+  "format_version": "2026.05-figma-plugin-v1",
+  "provenance": {"adapter": "figma-plugin", "version": "t",
+                 "source_uri": "figma://x/1:1"},
+  "tokens": {
+    "colors": {"brand/primary": "#ff8800"},
+    "dimensions": {"spacing/sm": 4},
+    "sourceIdentity": {
+      "colors.brand/primary": {"sourceId": "VariableID:12:34",
+                               "sourceCollection": "Semantic",
+                               "sourceMode": "Dark",
+                               "sourceAdapter": "figma-plugin"}}},
+  "root": {"type": "frame", "name": "Root", "figma_node_id": "1:1",
+           "children": [{"type": "text", "name": "Hello", "figma_node_id": "1:2",
+                         "content": "Hello"}]}
+})";
+    return scene;
+}
+}  // namespace
+
+TEST_CASE("import-design --emit-w3c-tokens writes a DTCG document",
+          "[cli][import-design][design-tokens][w3c][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto dir = unique_temp_dir("pulp-import-w3c-tokens");
+    auto scene = write_tokens_envelope(dir);
+    auto w3c = dir / "design.tokens.json";
+    auto r = run_pulp({"import-design", "--from", "figma-plugin",
+                       "--file", scene.string(),
+                       "--output", (dir / "ui.js").string(),
+                       "--tokens", (dir / "tokens.json").string(),
+                       "--emit-w3c-tokens", w3c.string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(w3c));
+    // Valid JSON with the nested-group + provenance shape.
+    auto root = choc::json::parse(read_text(w3c));
+    auto token = root["colors"]["brand"]["primary"];
+    REQUIRE(std::string(token["$type"].toString()) == "color");
+    REQUIRE(std::string(token["$value"].toString()) == "#ff8800");
+    REQUIRE(std::string(
+                token["$extensions"]["dev.pulp.source"]["id"].toString())
+            == "VariableID:12:34");
+    auto dim = root["dimensions"]["spacing"]["sm"];
+    REQUIRE(std::string(dim["$value"]["unit"].toString()) == "px");
+    // The envelope token pipeline still ran untouched alongside.
+    REQUIRE(fs::exists(dir / "tokens.json"));
+    fs::remove_all(dir);
+}
+
+TEST_CASE("import-design --emit-w3c-tokens without a path exits 2",
+          "[cli][import-design][design-tokens][w3c][shellout]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"import-design", "--from", "figma-plugin",
+                       "--emit-w3c-tokens"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 2);
+    REQUIRE(r.stderr_output.find("--emit-w3c-tokens requires a path")
+            != std::string::npos);
+}

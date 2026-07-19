@@ -1,5 +1,6 @@
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_export.hpp>
+#include <pulp/view/design_tokens_w3c.hpp>
 #include <pulp/view/design_fidelity_ledger.hpp>
 #include <pulp/view/recognition_resolver.hpp>
 #include <pulp/view/widget_skin_derive.hpp>
@@ -784,6 +785,11 @@ static void print_usage() {
     std::cout << "  --asset-hash <uri=sha256>\n";
     std::cout << "                    Expected asset content hash; may be repeated\n";
     std::cout << "  --tokens <path>   Output token file (default: tokens.json; theme.css for css-variables)\n";
+    std::cout << "  --emit-w3c-tokens <path>\n";
+    std::cout << "                    Additionally write the imported tokens as a W3C Design\n";
+    std::cout << "                    Tokens (DTCG) document (\"-\" = stdout). Nested groups from\n";
+    std::cout << "                    \"/\" in token names; source provenance under $extensions.\n";
+    std::cout << "                    Additive — no other output changes.\n";
     std::cout << "  --format {w3c|css-variables|tailwind|json-tailwind|css-tailwind}\n";
     std::cout << "                    Token export format (default: w3c). css-variables emits CSS\n";
     std::cout << "                    custom properties (.dark modes → @media prefers-color-scheme);\n";
@@ -1712,6 +1718,10 @@ struct CliOptions {
     bool default_shortcuts = true;
     bool output_explicit = false;                         // output path was set explicitly
     bool tokens_file_explicit = false;                    // tokens file was set explicitly
+    // --emit-w3c-tokens <path>: additionally write the imported tokens as a
+    // W3C Design Tokens (DTCG) document; "-" means stdout. Purely additive —
+    // no other artifact changes when this is set.
+    std::string w3c_tokens_output;
     // Versioned detect surface.
     bool detect_only = false;
     bool report_new_format = false;
@@ -1761,6 +1771,12 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
         } else if (std::strcmp(argv[i], "--tokens") == 0 && i + 1 < argc) {
             opt.tokens_file = argv[++i];
             opt.tokens_file_explicit = true;
+        } else if (std::strcmp(argv[i], "--emit-w3c-tokens") == 0) {
+            if (i + 1 >= argc) {
+                std::cerr << "Error: --emit-w3c-tokens requires a path (or - for stdout)\n";
+                return 2;
+            }
+            opt.w3c_tokens_output = argv[++i];
         } else if (std::strcmp(argv[i], "--dry-run") == 0) {
             opt.dry_run = true;
         } else if (std::strcmp(argv[i], "--no-tokens") == 0) {
@@ -2112,6 +2128,7 @@ int main(int argc, char* argv[]) {
     auto& default_shortcuts = cli.default_shortcuts;
     auto& output_explicit = cli.output_explicit;
     auto& tokens_file_explicit = cli.tokens_file_explicit;
+    auto& w3c_tokens_output = cli.w3c_tokens_output;
     auto& detect_only = cli.detect_only;
     auto& report_new_format = cli.report_new_format;
     auto& input_directory = cli.input_directory;
@@ -2905,6 +2922,21 @@ int main(int argc, char* argv[]) {
         std::cerr << "warning: could not write import report to "
                   << import_report_path << "\n";
     const int report_exit = (fail_on_unresolved && !import_report.ok()) ? 2 : 0;
+
+    // --emit-w3c-tokens: additive DTCG token artifact, emitted for every
+    // artifact kind once the IR is parsed. Independent of --tokens/--format
+    // (the envelope token pipeline), which stays byte-identical.
+    if (!w3c_tokens_output.empty()) {
+        const auto w3c_json = pulp::view::to_w3c_tokens_json(ir.tokens) + "\n";
+        if (w3c_tokens_output == "-") {
+            std::cout << w3c_json;
+        } else if (!write_file(w3c_tokens_output, w3c_json)) {
+            std::cerr << "Error: cannot write W3C tokens to " << w3c_tokens_output << "\n";
+            return 1;
+        } else {
+            std::cout << "Wrote " << w3c_tokens_output << " (W3C Design Tokens)\n";
+        }
+    }
 
     if (artifact_emit == ArtifactEmit::ir_json) {
         const auto asset_options = make_asset_options(input_file,

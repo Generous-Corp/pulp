@@ -1144,6 +1144,24 @@ attribute, while `set_default_value(...)` must come from normalized
 and emit non-hex semantic color tokens as strings rather than trying to parse
 them as colors.
 
+#### W3C Design Tokens (DTCG) export — `--emit-w3c-tokens`
+
+`pulp import-design ... --emit-w3c-tokens <path>` (`-` = stdout) additionally
+writes the imported `IRTokens` as a DTCG document via
+`pulp::view::to_w3c_tokens_json()` (`core/view/src/design_tokens_w3c.cpp`).
+Purely additive — the envelope `tokens.json` / `--format` pipeline is
+untouched. Shape: top-level `colors`/`dimensions`/`strings` groups (empty
+groups omitted), `/` in token names nests into DTCG groups
+(`brand/primary` → `colors.brand.primary`), dimensions use the object form
+`{"value": N, "unit": "px"}`, and `IRTokens::source_identity` provenance
+lands under `$extensions["dev.pulp.source"]` (id/collection/mode/adapter,
+empty subfields omitted). Do not confuse this with `w3c_tokens.cpp`
+(`export_w3c_tokens(Theme)`) — that is the always-compiled runtime Theme
+pair with flat dot-groups and string dimension values; the DTCG emitter is
+the authoring-side surface. Note the `fig` lane currently extracts no
+variables into `IRTokens`, so a bare `.fig` import emits `{}` — the
+figma-plugin envelope and designmd lanes are the ones that carry tokens.
+
 #### figma-plugin `binding` → canonical `pulp*` binding contract
 
 The figma-plugin extractor (`tools/figma-plugin/`) exports a recognized Pulp
