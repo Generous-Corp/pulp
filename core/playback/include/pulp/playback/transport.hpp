@@ -37,6 +37,7 @@ struct TransportRange {
     timebase::TickPosition timeline_tick_end{};
     timebase::MonotonicBeat monotonic_start{};
     timebase::MonotonicBeat monotonic_end{};
+    timebase::BarPosition bar_start{};
     double tempo_bpm = 120.0;
     bool tempo_changed = false;
     bool discontinuity = false;
@@ -114,6 +115,9 @@ class MasterTransport {
     timebase::SamplePosition timeline_sample_{};
     timebase::TickPosition timeline_tick_{};
     timebase::MonotonicBeat monotonic_{};
+    timebase::TickPosition meter_anchor_tick_{};
+    timebase::BarPosition meter_anchor_bar_{};
+    MeterSignature meter_anchor_signature_{};
     std::uint64_t applied_seek_generation_ = 0;
     std::uint64_t block_index_ = 0;
     bool previous_playing_ = false;

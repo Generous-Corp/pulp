@@ -427,6 +427,34 @@ TEST_CASE("change metadata matches first block and playhead diff semantics") {
     REQUIRE(tempo_context.tempo_changed);
 }
 
+TEST_CASE("format projection preserves absolute bars across meter changes") {
+    const auto map = constant_map();
+    auto setup = config();
+    setup.initially_playing = true;
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, setup) == TransportError::None);
+
+    REQUIRE(transport.seek({4 * kTicksPerQuarter}) == TransportError::None);
+    (void)block(transport, 1);
+    REQUIRE(transport.set_meter({3, 4}) == TransportError::None);
+    const auto changed = block(transport, 1);
+    REQUIRE(format::project_process_context(changed, changed.ranges[0]).bar == 1);
+
+    REQUIRE(transport.seek({6 * kTicksPerQuarter}) == TransportError::None);
+    const auto later = block(transport, 1);
+    const auto context = format::project_process_context(later, later.ranges[0]);
+    REQUIRE(context.time_sig_numerator == 3);
+    REQUIRE(context.bar == 1);
+
+    auto prestart_setup = config();
+    prestart_setup.initial_position = {6 * kTicksPerQuarter};
+    MasterTransport prestart;
+    REQUIRE(prestart.prepare(map, prestart_setup) == TransportError::None);
+    REQUIRE(prestart.set_meter({3, 4}) == TransportError::None);
+    const auto first = block(prestart, 1);
+    REQUIRE(format::project_process_context(first, first.ranges[0]).bar == 2);
+}
+
 TEST_CASE("format projection maps common fields and keeps transitions range-local") {
     const auto map = constant_map();
     auto setup = config();
@@ -532,13 +560,13 @@ TEST_CASE("projection clamps extreme bar indices before integer conversion") {
     snapshot.meter = {1, 1 << 30};
     snapshot.range_count = 1;
 
-    snapshot.ranges[0].timeline_tick_start =
+    snapshot.ranges[0].bar_start =
         {std::numeric_limits<std::int64_t>::max()};
     const auto positive =
         format::project_process_context(snapshot, snapshot.ranges[0]);
     REQUIRE(positive.bar == std::numeric_limits<std::int64_t>::max());
 
-    snapshot.ranges[0].timeline_tick_start =
+    snapshot.ranges[0].bar_start =
         {std::numeric_limits<std::int64_t>::min()};
     const auto negative =
         format::project_process_context(snapshot, snapshot.ranges[0]);

@@ -3,7 +3,6 @@
 #include <pulp/format/process_context.hpp>
 #include <pulp/playback/transport.hpp>
 
-#include <cmath>
 #include <cstdint>
 #include <limits>
 
@@ -45,21 +44,7 @@ inline ProcessContext project_process_context(
     context.position_samples = range.timeline_sample_start.value;
     context.time_sig_numerator = snapshot.meter.numerator;
     context.time_sig_denominator = snapshot.meter.denominator;
-
-    const auto beats_per_bar = static_cast<double>(snapshot.meter.numerator) *
-                               4.0 / static_cast<double>(snapshot.meter.denominator);
-    if (beats_per_bar > 0.0) {
-        const auto projected_bar = std::floor(context.position_beats / beats_per_bar);
-        if (projected_bar >=
-            static_cast<double>(std::numeric_limits<std::int64_t>::max())) {
-            context.bar = std::numeric_limits<std::int64_t>::max();
-        } else if (projected_bar <=
-                   static_cast<double>(std::numeric_limits<std::int64_t>::min())) {
-            context.bar = std::numeric_limits<std::int64_t>::min();
-        } else {
-            context.bar = static_cast<std::int64_t>(projected_bar);
-        }
-    }
+    context.bar = range.bar_start.value;
     context.is_looping = snapshot.loop.enabled;
     if (snapshot.loop.enabled) {
         context.loop_start_beats = static_cast<double>(snapshot.loop.start.value) /

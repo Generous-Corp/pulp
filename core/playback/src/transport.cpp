@@ -2,6 +2,7 @@
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace pulp::playback {
@@ -26,6 +27,25 @@ std::uint64_t distance(timebase::SamplePosition start,
     if (end.value <= start.value)
         return 0;
     return static_cast<std::uint64_t>(end.value) - static_cast<std::uint64_t>(start.value);
+}
+
+timebase::BarPosition bar_at_tick(timebase::TickPosition tick,
+                                  timebase::TickPosition anchor_tick,
+                                  timebase::BarPosition anchor_bar,
+                                  MeterSignature meter) noexcept {
+    const long double ticks_per_bar =
+        static_cast<long double>(timebase::kTicksPerQuarter) *
+        static_cast<long double>(meter.numerator) * 4.0L /
+        static_cast<long double>(meter.denominator);
+    const long double relative_tick = static_cast<long double>(tick.value) -
+                                      static_cast<long double>(anchor_tick.value);
+    const long double projected = static_cast<long double>(anchor_bar.value) +
+                                  std::floor(relative_tick / ticks_per_bar);
+    if (projected >= static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
+        return {std::numeric_limits<std::int64_t>::max()};
+    if (projected <= static_cast<long double>(std::numeric_limits<std::int64_t>::min()))
+        return {std::numeric_limits<std::int64_t>::min()};
+    return {static_cast<std::int64_t>(projected)};
 }
 
 } // namespace
@@ -60,6 +80,9 @@ TransportError MasterTransport::prepare(const timebase::CompiledTempoMap& tempo_
     tempo_cursor_.seek(timeline_sample_);
     timeline_tick_ = config.initial_position;
     monotonic_ = {config.initial_position};
+    meter_anchor_tick_ = {};
+    meter_anchor_bar_ = {};
+    meter_anchor_signature_ = config.meter;
     previous_playing_ = false;
     previous_meter_ = config.meter;
     previous_loop_ = config.loop;
@@ -144,6 +167,18 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         pending_discontinuity_ = true;
     }
 
+    if (desired.meter != meter_anchor_signature_) {
+        if (first_block_) {
+            meter_anchor_tick_ = {};
+            meter_anchor_bar_ = {};
+        } else {
+            meter_anchor_bar_ = bar_at_tick(timeline_tick_, meter_anchor_tick_,
+                                            meter_anchor_bar_, meter_anchor_signature_);
+            meter_anchor_tick_ = timeline_tick_;
+        }
+        meter_anchor_signature_ = desired.meter;
+    }
+
     snapshot = {};
     snapshot.tempo_map = tempo_map_;
     snapshot.sample_rate = tempo_map_->sample_rate();
@@ -169,6 +204,8 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         range.timeline_sample_start = timeline_sample_;
         range.timeline_tick_start = timeline_tick_;
         range.monotonic_start = monotonic_;
+        range.bar_start = bar_at_tick(range.timeline_tick_start, meter_anchor_tick_,
+                                      meter_anchor_bar_, meter_anchor_signature_);
         range.tempo_bpm = tempo_cursor_.tempo_at_tick(range.timeline_tick_start);
         range.tempo_changed = index == 0
                                   ? !first_block_ &&
@@ -257,6 +294,9 @@ void MasterTransport::reset() noexcept {
     timeline_sample_ = {};
     timeline_tick_ = {};
     monotonic_ = {};
+    meter_anchor_tick_ = {};
+    meter_anchor_bar_ = {};
+    meter_anchor_signature_ = {};
     applied_seek_generation_ = 0;
     block_index_ = 0;
     previous_playing_ = false;
