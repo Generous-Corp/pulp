@@ -642,5 +642,47 @@ TEST_CASE("CoreGraphicsCanvas::set_line_dash clears back to solid",
     REQUIRE(filled >= W - 2);  // allow 2 px slack for end caps
 }
 
+// set_fill_color must cancel an active fill gradient — matching SkiaCanvas. A
+// prior gap left has_gradient_ set on the CoreGraphics path, so the FIRST solid
+// fill after any gradient silently reused the gradient (e.g. an EQ band's
+// gradient fill bled into the handle circles drawn right after it). This pins
+// the CPU-vs-GPU divergence: gradient fill, then a solid fill, then assert the
+// solid fill is a flat color and not a gradient sample.
+TEST_CASE("CoreGraphicsCanvas set_fill_color cancels an active gradient",
+          "[canvas][cg]") {
+    constexpr int W = 64, H = 64;
+    std::vector<uint8_t> pixels;
+    CGContextRef ctx = cg_make_bitmap(W, H, pixels);
+    REQUIRE(ctx != nullptr);
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W), static_cast<float>(H));
+        // Fill the WHOLE canvas with a red→blue gradient…
+        const Color stops[] = {Color::rgba(1.0f, 0.0f, 0.0f, 1.0f),
+                               Color::rgba(0.0f, 0.0f, 1.0f, 1.0f)};
+        const float pos[] = {0.0f, 1.0f};
+        canvas.set_fill_gradient_linear(0.0f, 0.0f, static_cast<float>(W), 0.0f, stops, pos, 2);
+        canvas.fill_rect(0, 0, W, H);
+        // …then a solid green fill over the WHOLE canvas. If set_fill_color did
+        // not cancel the gradient, this fill would repaint the gradient and the
+        // canvas would still be red/blue.
+        canvas.set_fill_color(Color::rgba(0.0f, 1.0f, 0.0f, 1.0f));
+        canvas.fill_rect(0, 0, W, H);
+    }
+    CGContextRelease(ctx);
+
+    CgPixelGrid grid{pixels, W, H};
+    // Every sampled pixel must be flat green — no gradient anywhere.
+    for (int x : {4, W / 2, W - 4}) {
+        for (int y : {4, H / 2, H - 4}) {
+            auto px = grid.at(x, y);
+            INFO("x=" << x << " y=" << y << " rgba=" << px[0] << "," << px[1] << "," << px[2] << "," << px[3]);
+            REQUIRE(px[3] == 255);
+            REQUIRE(px[1] > 200);        // green present
+            REQUIRE(px[0] < 40);         // no red leak
+            REQUIRE(px[2] < 40);         // no blue leak
+        }
+    }
+}
+
 
 #endif  // __APPLE__

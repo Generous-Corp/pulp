@@ -94,6 +94,57 @@ TEST_CASE("TestSignalSource: sine tone produces non-zero output", "[format][test
     }
 }
 
+TEST_CASE("TestSignalSource: noise is broadband, bounded, decorrelated, and deterministic",
+          "[format][test_signal]") {
+    TestSignalSource src;
+    src.set_sample_rate(48000.0);
+    src.set_config({ TestSignalType::noise, 440.0f, 0.5f });
+    REQUIRE(src.is_active());
+
+    constexpr int frames = 512;
+    constexpr int channels = 2;
+    std::vector<float> buf(static_cast<size_t>(channels * frames), 0.0f);
+    float* ptrs[channels] = { buf.data(), buf.data() + frames };
+    src.fill(ptrs, channels, frames);
+
+    // Broadband white noise carries real energy on both channels...
+    float e0 = 0.0f, e1 = 0.0f;
+    for (int i = 0; i < frames; ++i) {
+        e0 += ptrs[0][i] * ptrs[0][i];
+        e1 += ptrs[1][i] * ptrs[1][i];
+    }
+    REQUIRE(e0 > 1.0f);
+    REQUIRE(e1 > 1.0f);
+
+    // ...bounded by the amplitude field (noise reuses sine_amplitude = 0.5)...
+    for (float sample : buf) {
+        REQUIRE(std::abs(sample) <= 0.5f);
+    }
+
+    // ...the two channels are seeded differently, so they are not a duplicated
+    // mono signal...
+    int differing = 0;
+    for (int i = 0; i < frames; ++i)
+        if (std::abs(ptrs[0][i] - ptrs[1][i]) > 1e-6f) ++differing;
+    REQUIRE(differing > frames / 2);
+
+    // ...and it is deterministic: a fresh source with the same config and call
+    // reproduces the exact stream (fixed per-channel LCG seeds).
+    TestSignalSource src2;
+    src2.set_sample_rate(48000.0);
+    src2.set_config({ TestSignalType::noise, 440.0f, 0.5f });
+    std::vector<float> buf2(static_cast<size_t>(channels * frames), 0.0f);
+    float* ptrs2[channels] = { buf2.data(), buf2.data() + frames };
+    src2.fill(ptrs2, channels, frames);
+    REQUIRE(buf == buf2);
+}
+
+TEST_CASE("TestSignalSource: noise reports active", "[format][test_signal]") {
+    TestSignalSource src;
+    src.set_config({ TestSignalType::noise, 440.0f, 0.5f });
+    REQUIRE(src.is_active());
+}
+
 TEST_CASE("TestSignalSource: sine frequency is correct", "[format][test_signal]") {
     TestSignalSource src;
     double sr = 48000.0;

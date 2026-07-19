@@ -108,6 +108,7 @@ private:
     view::MultiMeter* output_meter_ = nullptr;
     view::Toggle* test_tone_toggle_ = nullptr;
     view::ComboBox* tone_freq_combo_ = nullptr;
+    view::ComboBox* signal_type_combo_ = nullptr;   // Sine / Noise
 
     // MIDI tab widgets
     view::ListBox* midi_list_ = nullptr;

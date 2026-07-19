@@ -715,7 +715,11 @@ TEST_CASE("SettingsPanel refreshes hotplug lists and test tone callbacks",
 
     auto combos = descendants<ComboBox>(*audio_tab);
     auto lists = descendants<ListBox>(*midi_tab);
-    REQUIRE(combos.size() >= 5);
+    // Audio-tab combo order: [0] output, [1] input, [2] rate, [3] buffer,
+    // [4] signal type (Sine/Noise), [5] tone frequency. The signal-type combo
+    // sits between the buffer and frequency combos, so the frequency combo is
+    // index 5.
+    REQUIRE(combos.size() >= 6);
     REQUIRE(lists.size() == 1);
     REQUIRE(audio.enumerate_calls == 2);
     REQUIRE(midi.enumerate_calls == 2);
@@ -740,7 +744,7 @@ TEST_CASE("SettingsPanel refreshes hotplug lists and test tone callbacks",
     REQUIRE(last_signal.sine_frequency_hz == 440.0f);
     REQUIRE(last_signal.sine_amplitude == 0.5f);
 
-    combos[4]->set_selected(2);
+    combos[5]->set_selected(2);   // tone-frequency combo → 880 Hz
     REQUIRE(signal_calls == 2);
     REQUIRE(last_signal.sine_frequency_hz == 880.0f);
 
@@ -748,7 +752,7 @@ TEST_CASE("SettingsPanel refreshes hotplug lists and test tone callbacks",
     REQUIRE(signal_calls == 3);
     REQUIRE(last_signal.type == TestSignalType::none);
 
-    combos[4]->set_selected(0);
+    combos[5]->set_selected(0);   // tone-frequency combo → 220 Hz
     REQUIRE(signal_calls == 3);
 
     toggles[0]->on_mouse_down({0, 0});

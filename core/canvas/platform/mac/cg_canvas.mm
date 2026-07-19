@@ -220,7 +220,14 @@ void CoreGraphicsCanvas::apply_stroke_color() {
         stroke_color_.b, stroke_color_.a);
 }
 
-void CoreGraphicsCanvas::set_fill_color(Color c) { fill_color_ = c; }
+void CoreGraphicsCanvas::set_fill_color(Color c) {
+    fill_color_ = c;
+    // Setting a solid fill color cancels any active fill gradient — matching
+    // SkiaCanvas::set_fill_color. Without this the last set_fill_gradient_*
+    // leaks into every subsequent solid fill (e.g. a gradient EQ band fill
+    // bleeds into the handle circles drawn after it), a CPU-vs-GPU divergence.
+    has_gradient_ = false;
+}
 void CoreGraphicsCanvas::set_stroke_color(Color c) { stroke_color_ = c; }
 
 void CoreGraphicsCanvas::set_line_width(float w) {

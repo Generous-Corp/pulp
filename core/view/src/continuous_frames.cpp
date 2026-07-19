@@ -3,6 +3,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>  // ScrollView
+#include <pulp/view/eq_curve_view.hpp>
 
 namespace pulp::view {
 
@@ -30,6 +31,15 @@ bool needs_continuous_frames(const View* view) {
     }
     if (auto* sv = dynamic_cast<const ScrollView*>(view)) {
         if (sv->scroll_animating()) return true;
+    }
+    // EqCurveView handle-radius hover settle — keep painting only while a dot is
+    // mid-transition; the flag clears the frame it settles, so the loop idles.
+    // The live analyzer also keeps frames alive, but ONLY while it is enabled AND
+    // has spectrum data — a default-on but silent editor with no bound spectrum
+    // reports idle here, so it does not spin frames on a static surface.
+    if (auto* eq = dynamic_cast<const EqCurveView*>(view)) {
+        if (eq->hover_animating()) return true;
+        if (eq->analyzer_animating()) return true;
     }
 
     // A running CSS animation on a generic View must keep the render loop

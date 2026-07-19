@@ -91,6 +91,23 @@ void TestSignalSource::fill(float* const* output, int num_channels, int num_samp
         return;
     }
 
+    if (config_.type == TestSignalType::noise) {
+        // White noise from a per-channel LCG — a flat broadband source, so a
+        // spectrum analyzer shows the EQ curve carved into the noise floor.
+        const float amp = config_.sine_amplitude;  // reuse the amplitude field
+        for (int ch = 0; ch < num_channels; ++ch) {
+            std::uint32_t s = noise_state_[static_cast<size_t>(ch) % noise_state_.size()];
+            for (int i = 0; i < num_samples; ++i) {
+                s = s * 1664525u + 1013904223u;
+                // Top 24 bits → [-1, 1).
+                const float white = static_cast<float>(s >> 8) / 8388608.0f - 1.0f;
+                output[ch][i] = amp * white;
+            }
+            noise_state_[static_cast<size_t>(ch) % noise_state_.size()] = s;
+        }
+        return;
+    }
+
     if (config_.type == TestSignalType::file && file_data_ && file_playing_.load(std::memory_order_relaxed)) {
         int64_t pos = file_position_.load(std::memory_order_relaxed);
         int64_t total = static_cast<int64_t>(file_data_->num_frames());

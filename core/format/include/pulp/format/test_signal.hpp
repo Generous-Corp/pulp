@@ -2,6 +2,7 @@
 
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -10,7 +11,7 @@
 
 namespace pulp::format {
 
-enum class TestSignalType { none, sine, file };
+enum class TestSignalType { none, sine, file, noise };
 
 struct TestSignalConfig {
     TestSignalType type = TestSignalType::none;
@@ -61,6 +62,10 @@ private:
 
     // Sine state (audio thread only)
     double sine_phase_ = 0.0;
+
+    // White-noise generator state (audio thread only). Seeded per channel so the
+    // two output channels are decorrelated.
+    std::array<std::uint32_t, 2> noise_state_ = {0x9e3779b9u, 0x1b56c4e9u};
 
     // File playback
     std::unique_ptr<audio::AudioFileData> file_data_;

@@ -264,7 +264,11 @@ void SettingsPanel::build_audio_tab() {
         if (callbacks_.on_test_signal_changed) {
             TestSignalConfig cfg;
             if (on) {
-                cfg.type = TestSignalType::sine;
+                // Signal type: 0 = Sine, 1 = Noise (broadband). Noise ignores the
+                // frequency dropdown but exercises the whole spectrum, so the
+                // analyzer shows the EQ shape carved into it.
+                const int type_idx = signal_type_combo_ ? signal_type_combo_->selected() : 0;
+                cfg.type = (type_idx == 1) ? TestSignalType::noise : TestSignalType::sine;
                 static const float freqs[] = { 220.0f, 440.0f, 880.0f, 1000.0f };
                 int idx = tone_freq_combo_ ? tone_freq_combo_->selected() : 1;
                 if (idx >= 0 && idx < 4) cfg.sine_frequency_hz = freqs[idx];
@@ -275,6 +279,18 @@ void SettingsPanel::build_audio_tab() {
     };
     ts_header->add_child(std::move(tone_toggle));
     audio_tab->add_child(std::move(ts_header));
+
+    // Signal type: Sine tone or broadband Noise.
+    auto type_combo = std::make_unique<view::ComboBox>();
+    signal_type_combo_ = type_combo.get();
+    type_combo->set_items({ "Sine", "Noise" });
+    type_combo->set_selected_silent(0);
+    type_combo->flex().preferred_height = 28.0f;
+    type_combo->on_change = [this](int) {
+        if (test_tone_toggle_ && test_tone_toggle_->is_on())
+            test_tone_toggle_->on_toggle(true);   // re-emit with the new type
+    };
+    audio_tab->add_child(std::move(type_combo));
 
     auto freq_combo = std::make_unique<view::ComboBox>();
     tone_freq_combo_ = freq_combo.get();
