@@ -34,9 +34,14 @@ invariants.
   `[-1, 1]`. Continuous segments use a monotonic quadratic blend, while Hold
   segments retain the left value until the next point. `value_at()` is for
   control-thread or compile-time queries, never the audio-thread scheduler.
+- `AutomationLane` is an unattached immutable value that binds one curve to a
+  format-neutral device `ItemId` and opaque 32-bit parameter ID. It validates
+  the two value identities only; the device need not exist in a Project, and
+  the lane is not registered, persisted, command-addressable, or playable yet.
 - Keep automation responsibilities separated: curve data belongs in
-  `automation_curve.*`, lane target ownership belongs in a later Timeline
-  module, and RT cursor/coalescing logic belongs in `core/playback`.
+  `automation_curve.*`, logical target binding belongs in `automation_lane.*`,
+  RT cursor/coalescing belongs in `core/playback`, and graph delivery belongs in
+  `core/host`.
 - `MediaRef` ranges are checked locally for overflow and against their asset at
   project construction.
 - A media asset's SHA-256 `ContentHash` is its durable identity. Locators are
@@ -110,16 +115,17 @@ invariants.
 ## Scope boundary
 
 This slice does not own a durable `JournalSink`, package/container I/O,
-publication, playback, automation lanes or delivery, launch slots, takes,
-nesting, devices, routing, audio, format adapters, or UI. Add those in their
-scheduled slices instead of widening the command and persistence core
-opportunistically.
+publication, playback, document-attached automation lanes or delivery, launch
+slots, takes, nesting, devices, routing, audio, format adapters, or UI. Add
+those in their scheduled slices instead of widening the command and persistence
+core opportunistically.
 
 ## Validation
 
-Build and run `pulp-test-timeline-model`, the commands, transactions, journal,
-and undo suites, plus `pulp-test-timeline-schema-registry` and
-`pulp-test-timeline-persistence` in Release and UBSan configurations.
+Build and run `pulp-test-timeline-model`, the automation curve and lane suites,
+the commands, transactions, journal, and undo suites, plus
+`pulp-test-timeline-schema-registry` and `pulp-test-timeline-persistence` in
+Release and UBSan configurations.
 Keep the 10k-clip edit test proving bounded node creation, subtree sharing, and
 reclamation; a vector rebuild is not an acceptable persistent-index substitute.
 Keep `pulp-test-timeline-replay-golden` green: it applies real journaled gain,
