@@ -1118,7 +1118,7 @@ diagnostics instead of throwing. Keep image assets routed through
 from IR attributes.
 
 **Windows path-separator gotcha (asset/font paths baked into generated JS):**
-when `pulp_import_design.cpp` resolves an `asset_ref`/font `asset_id` to a path
+when the CLI's asset pass (`resolve_sprite_skins` in `sprite_skins.cpp`) resolves an `asset_ref`/font `asset_id` to a path
 that is stamped into `attributes["asset_path"]` / `font.resolved_path` (and from
 there into `setImageSource(...)` / `registerFont(...)` in the generated JS),
 convert it with `fs::path::generic_string()`, NOT `.string()`. On Windows
@@ -1351,7 +1351,7 @@ Gotchas learned wiring this:
 - The **widest row in the whole asset is usually the label text**, not the thumb.
   `find_art_region`/`cx` scoping is what keeps the thumb measurement honest — do
   not measure the widest row over the entire image.
-- `pulp_import_design.cpp` divides art px by `asset_scale = img.width /
+- `sprite_skins.cpp` divides art px by `asset_scale = img.width /
   node_box_width_px` (figma-plugin exports at 2×, but DERIVE it, don't hardcode
   2). It stamps `shape_width` = thumb/bar width (→ widget width) and
   `skin_track_width` (fader only). The column `min_width` keeps the box width so
@@ -1402,7 +1402,7 @@ own emission. Fixes landed here, each grounded in the export data:
 - **Fader empty-track outline.** The captured empty track has a faint lighter
   edge. `derive_fader_skin` first tries to RECOVER it (brightest low-sat pixel on
   a dark track row vs the row-centre fill). **Gotcha:** the importer's in-tree
-  minimal PNG decoder (`decode_png_rgba` in `pulp_import_design.cpp`) FLATTENS the
+  minimal PNG decoder (`decode_png_rgba` in `sprite_skins.cpp`) FLATTENS the
   sub-pixel anti-aliased rim — it reads the whole thin track column as uniform
   fill, so the edge is unrecoverable from those pixels even though PIL sees it.
   Fallback: SYNTHESISE the rim by lightening the sampled dark track colour
@@ -2425,8 +2425,8 @@ Gotchas:
 `--knob-style sprite` no longer DEMOTES a recognized knob to a static image.
 A captured-art knob now stays a native `Knob` that actually TURNS:
 
-- **Importer hoist** (`pulp_import_design.cpp`, in the `!use_silver_knobs`
-  block): the disposition is keyed on how many asset-backed image children
+- **Importer hoist** (`resolve_sprite_skins` in `sprite_skins.cpp`, in the
+  `!use_silver_knobs` block): the disposition is keyed on how many asset-backed image children
   (captured layers) the knob has:
   - **exactly one** (the ELYSIUM shape — a captured disc + a separate stroked
     pointer the native notch replaces): HOIST the disc's `asset_ref` +
@@ -2489,8 +2489,8 @@ Gotchas:
 
 #### The LIBRARY/materializer path has its own hoist (`hoist_captured_art_knobs`)
 
-The sprite hoist above lives in the **CLI** (`pulp_import_design.cpp`, gated on
-`--knob-style sprite`). The **library/runtime path** — `build_native_view_tree`,
+The sprite hoist above lives in the **CLI** (`resolve_sprite_skins` in
+`sprite_skins.cpp`, gated on `--knob-style sprite`). The **library/runtime path** — `build_native_view_tree`,
 used by the GPU harness, standalone/plugin editors, and any embedder — does NOT
 go through the CLI, so without its own pass it synthesized a default `Knob` and
 discarded the captured disc (a generic blue value-arc instead of the design's

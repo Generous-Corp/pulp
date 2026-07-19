@@ -8,6 +8,7 @@ add_executable(pulp-import-design
     import_detect.cpp
     fig_lane.cpp
     envelope_merge.cpp
+    sprite_skins.cpp
     # miniz lets the CLI auto-unpack .pulp.zip exports from the Figma
     # plugin. Compiled here rather than pulled from
     # pulp::runtime because that target's miniz include dirs are PRIVATE

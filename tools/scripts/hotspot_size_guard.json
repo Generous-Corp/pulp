@@ -87,8 +87,8 @@
     },
     {
       "path": "tools/import-design/pulp_import_design.cpp",
-      "max_loc": 3610,
-      "note": "import-design CLI orchestration hotspot (+20 for the --fidelity-report arg/emit/help surface; ledger taxonomy + JSON live in design_fidelity_ledger.cpp; +24 for the --from fig lane arg/help surface, decode logic in fig_lane.cpp); grew with the recognition-resolver + installed-package custom-control wiring, the --validate faithful_svg honesty caveat, and the --fail-below similarity gate (arg parse + unit validation + help)"
+      "max_loc": 3579,
+      "note": "import-design CLI orchestration hotspot (+20 for the --fidelity-report arg/emit/help surface; ledger taxonomy + JSON live in design_fidelity_ledger.cpp; +24 for the --from fig lane arg/help surface, decode logic in fig_lane.cpp); grew with the recognition-resolver + installed-package custom-control wiring, the --validate faithful_svg honesty caveat, and the --fail-below similarity gate (arg parse + unit validation + help); ceiling lowered when the sprite/skin asset-resolution pass + PNG decoder moved to sprite_skins.cpp and main() was split into parse_cli_args / resolve_sprite_skins / run_fidelity_selfcheck seams"
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",
