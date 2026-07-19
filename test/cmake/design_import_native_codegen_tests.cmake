@@ -22,6 +22,16 @@ target_link_libraries(pulp-test-import-object-coverage PRIVATE pulp::view Catch2
 target_compile_definitions(pulp-test-import-object-coverage PRIVATE
     PULP_SRC_DIR="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-import-object-coverage PROPERTIES LABELS "parser-import")
+
+# Four-surface field-parity guard: every lowerable IRStyle/IRLayout field must
+# be referenced by all four codegen surfaces (JS, C++, Swift, native-common) or
+# carry an explicit in-test allowlist entry documenting the partial. Reads the
+# surface sources + design_ir.hpp from PULP_SRC_DIR; links Catch2 only.
+add_executable(pulp-test-design-import-parity test_design_import_parity.cpp)
+target_link_libraries(pulp-test-design-import-parity PRIVATE Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-design-import-parity PRIVATE
+    PULP_SRC_DIR="${CMAKE_SOURCE_DIR}")
+catch_discover_tests(pulp-test-design-import-parity PROPERTIES LABELS "parser-import")
 catch_discover_tests(pulp-test-design-import
     TEST_SPEC "[network]"
     PROPERTIES
