@@ -12,6 +12,11 @@
 
 namespace pulp::view {
 
+// Held by DesignFrameView behind a unique_ptr via forward declaration so this
+// header — included by 15+ others — does not pull in the collaborator's own
+// includes. Defined in design_param_binding.hpp.
+class DesignParamBinding;
+
 // One interactive element overlaid on a faithfully-rendered design frame. The
 // element list is TYPED and supplied by the importer (source-side semantics) —
 // DesignFrameView does NOT guess from the SVG. Bounds/coords are in the SVG's own
@@ -363,6 +368,11 @@ public:
     DesignFrameView(std::string svg, std::vector<DesignFrameElement> elements,
                     float panel_x = -1, float panel_y = -1,
                     float panel_w = -1, float panel_h = -1);
+
+    // Declared (not defaulted inline) so the unique_ptr<DesignParamBinding>
+    // member can hold an incomplete type here and be destroyed where the type is
+    // complete (design_frame_view.cpp). Out-of-line = default.
+    ~DesignFrameView();
 
     int element_count() const { return static_cast<int>(elements_.size()); }
     float panel_width() const { return panel_w_; }
@@ -806,7 +816,7 @@ public:
 
     // The keys the bind grid was last built with (build_bind_grid's argument),
     // whether or not each one produced a stand-in element on the active frame.
-    const std::vector<std::string>& bind_grid_keys() const { return bind_grid_keys_; }
+    const std::vector<std::string>& bind_grid_keys() const;
 
     // Whether element `i` is a bind-grid stand-in rather than a design control.
     bool element_is_bind_grid_stand_in(int i) const;
@@ -827,9 +837,7 @@ public:
     // The distinct param-scale mismatches seen so far, first-seen order,
     // de-duplicated by param_key. Queryable without a callback — handy for a
     // `--validate` style assertion over a ported control table.
-    const std::vector<ParamScaleMismatch>& param_scale_mismatches() const {
-        return param_scale_mismatches_;
-    }
+    const std::vector<ParamScaleMismatch>& param_scale_mismatches() const;
 
     // ── Host action/command channel ─────────────────────────────────────────
     // When enabled, a Kind::action button click is ALSO forwarded to
@@ -942,35 +950,11 @@ private:
     // Reports a ParamScaleMismatch when both counts exist and disagree.
     int resolve_value_count(int i) const;
 
-    // Record a distinct param-scale mismatch and fire the diagnostic callback.
-    // De-duplicates by param_key. Const because it is called from the const
-    // normalize path; the accumulator is a diagnostic log, not observable state.
-    void report_scale_mismatch(const std::string& key, int ui_count, int host_count,
-                               bool host_has_param) const;
-
-    // The host's value cardinality for `key`, or 0 when no surface resolves it.
-    int host_step_count_for(const std::string& key) const;
-
-    // Whether a live surface carries `key` — ParamScaleMismatch::host_has_param.
-    bool host_has_param_for(const std::string& key) const;
-
-    // Re-point the active frame's slot table at the bindings whose param_key the
-    // new element set declares, and park the rest. Called after every elements_
-    // swap, so a binding outlives a frame change and paint stays a plain index.
-    // Keeping each binding pointed at the reachable clock needs no hook here:
-    // bindings enrol with the View base, which re-points them all from its
-    // non-virtual funnel (see value_source_binding.hpp).
-    void rebuild_element_scalar_slots();
-
     // Map a choice element's selected index to a normalized [0,1] value and back,
     // using resolve_value_count. Single source of truth for choice<->normalized.
     float choice_to_norm(int i, int selected) const;
     int   norm_to_choice(int i, float v) const;
 
-    // Append the bind grid's stand-in elements for keys the active frame carries
-    // no control for. Called after every frame activation (activate_frame copies
-    // frames_[i].elements over elements_, which would otherwise drop the grid).
-    void apply_bind_grid();
     // Sync a user choice change (overlay widget -> element + on_element_changed).
     void  notify_choice(int i, int selected);
 
@@ -1023,13 +1007,13 @@ private:
     // layout_children() can position it via the panel transform.
     struct Overlay { int element_index = -1; View* widget = nullptr; };
 
+    // Host-parameter binding collaborator (scalar sources, bind grid, scale-
+    // mismatch diagnostic). Constructed in the ctor before the initial
+    // activate_frame(0); held by pointer so the header stays additive.
+    std::unique_ptr<DesignParamBinding> binding_;
+
     std::string svg_;
     std::vector<DesignFrameElement> elements_;
-    // Element scalar bindings, owned by stable param_key so they survive a frame
-    // swap, plus the active frame's index-aligned view of them (non-owning; null
-    // where the element has no binding) so element_scalar() stays paint-safe.
-    std::unordered_map<std::string, std::unique_ptr<ScalarSourceBinding>> element_scalars_;
-    std::vector<ScalarSourceBinding*> active_element_scalars_;
     std::vector<Overlay> overlays_;
     float svg_w_ = 0.0f, svg_h_ = 0.0f;            // SVG intrinsic size
     float panel_x_ = 0, panel_y_ = 0, panel_w_ = 0, panel_h_ = 0;  // crop, SVG coords
@@ -1041,17 +1025,6 @@ private:
     std::function<void(const UnregisteredCustomControl&)> on_unregistered_custom_;
     std::vector<UnregisteredCustomControl> unregistered_custom_;
 
-    // Param-scale mismatch diagnostic. Mutable because the normalize path that
-    // detects a mismatch is const — the accumulator records what was observed and
-    // never feeds back into what the view emits or renders.
-    std::function<void(const ParamScaleMismatch&)> on_param_scale_mismatch_;
-    mutable std::vector<ParamScaleMismatch> param_scale_mismatches_;
-
-    // Bind grid: the caller-supplied host-parameter keys, and the index of the
-    // first stand-in in elements_ (all stand-ins are appended after the active
-    // frame's own elements, so one index bounds them). -1 = no grid applied.
-    std::vector<std::string> bind_grid_keys_;
-    int bind_grid_begin_ = -1;
     std::vector<Frame> frames_;    ///< swappable frames; [0] is the constructor's
     int active_frame_ = 0;         ///< index into frames_ currently rendered
     bool route_to_host_params_ = false;   ///< self-wire gestures to host_params()
