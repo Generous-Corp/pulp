@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07381"></a>
+## [0.738.1] - 2026-07-19
+
+- refactor(design-import): extract geometry rewrites into normalize_design_ir ([#6379](https://github.com/danielraffel/pulp/pull/6379))
+- fix(figma-plugin): pack the headless bundle to fit the use_figma 50000-char cap ([#6377](https://github.com/danielraffel/pulp/pull/6377))
+
 <a id="v07380"></a>
 ## [0.738.0] - 2026-07-19
 
@@ -6762,6 +6768,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.738.1]: https://github.com/danielraffel/pulp/releases/tag/v0.738.1
 [0.738.0]: https://github.com/danielraffel/pulp/releases/tag/v0.738.0
 [0.737.0]: https://github.com/danielraffel/pulp/releases/tag/v0.737.0
 [0.736.0]: https://github.com/danielraffel/pulp/releases/tag/v0.736.0
