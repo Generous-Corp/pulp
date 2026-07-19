@@ -119,6 +119,13 @@ export interface ExtractedStyle {
   bottom?: number;
   width?: number;
   height?: number;
+  /// Figma min/max sizing (minWidth …). parse_ir_style resolves the snake
+  /// spelling and the flex engines lower them to min/max width/height clamps.
+  /// Figma honored them while solving, so they only bind on host resize.
+  min_width?: number;
+  min_height?: number;
+  max_width?: number;
+  max_height?: number;
   /// Render bounds (= bounding box + effect bleed). Present only when the
   /// node has effects that extend past the bounding box (drop shadows,
   /// outer strokes). Downstream importers use this to render PNG-captured
@@ -142,6 +149,28 @@ export interface ExtractedLayout {
   wrap?: boolean;
   width_mode?: "fixed" | "hug" | "fill";
   height_mode?: "fixed" | "hug" | "fill";
+  // The keys below use the consumer's camelCase spelling — the exact member
+  // names parse_ir_layout (design_ir_json.cpp) reads. Values are CSS
+  // spellings for the same reason: align_self/align_content pass through to
+  // the flex engines untranslated.
+  /// Cross-axis gap between wrapped flex tracks (Figma counterAxisSpacing)
+  /// or grid row gap. rowGap for a wrapping row, columnGap for a column.
+  rowGap?: number;
+  columnGap?: number;
+  /// Wrapped-track distribution (Figma counterAxisAlignContent SPACE_BETWEEN).
+  alignContent?: "space-between";
+  /// Child of a flex auto-layout parent: layoutGrow / layoutAlign.
+  flexGrow?: number;
+  alignSelf?: "flex-start" | "flex-end" | "center" | "stretch";
+  /// targetAspectRatio as width / height. Emitted only when an axis is
+  /// flexible — on a fully fixed node it would fight the solved size.
+  aspectRatio?: number;
+  /// Figma GRID auto-layout: uniform track templates from the row/column
+  /// counts, and per-child CSS line placement from the 0-based anchors.
+  gridTemplateColumns?: string;
+  gridTemplateRows?: string;
+  gridColumn?: string;
+  gridRow?: string;
 }
 
 export interface ExtractedDiagnostic {

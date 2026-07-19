@@ -350,6 +350,48 @@ const FIGMA_STACK_ALIGN = {
   BASELINE: 'flex-start',
 };
 
+// Figma GRID auto-layout, as stored in the kiwi schema: `gridRows` /
+// `gridColumns` are GUID-keyed track lists whose `position` is a
+// fractional-index string (byte-wise lexicographic order IS track order), and
+// `gridColumnsSizing` / `gridRowsSizing` map each track GUID to
+// {minSizing, maxSizing} of {type, value}. Children reference their cell with
+// `gridRowAnchor` / `gridColumnAnchor` GUIDs plus optional
+// `gridRowSpan` / `gridColumnSpan`. Field spellings verified against a decoded
+// GRID NodeChange (4×4 grid, FLEX-1 tracks, gap 4).
+function gridTrackOrder(map) {
+  const entries = (map && map.entries) || [];
+  return [...entries]
+    .sort((a, b) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0))
+    .map((e) => guidKey(e.id));
+}
+
+// Track list → the CSS template string GridStyle::parse_template consumes.
+// FLEX tracks are `fr`, FIXED tracks are design px, anything else (or a track
+// with no sizing entry) is `auto`. minSizing and maxSizing agree on every
+// plain track; if they ever diverge the max wins so content still fits.
+function gridTrackTemplate(order, sizingMap) {
+  const byId = new Map();
+  for (const e of (sizingMap && sizingMap.entries) || []) byId.set(guidKey(e.id), e.trackSize);
+  return order.map((id) => {
+    const ts = byId.get(id);
+    const s = ts && (ts.maxSizing || ts.minSizing);
+    if (!s) return 'auto';
+    if (s.type === 'FLEX') return `${s.value || 1}fr`;
+    if (s.type === 'FIXED') return `${Math.round(s.value || 0)}px`;
+    return 'auto';
+  }).join(' ');
+}
+
+// A child's CSS grid-line placement ("N" or "N / span S", 1-based) from its
+// anchor GUID within the parent's ordered track list. Null when the anchor is
+// missing or stale — auto-placement is the honest fallback.
+function gridChildLine(order, anchor, span) {
+  const idx = anchor ? order.indexOf(guidKey(anchor)) : -1;
+  if (idx < 0) return null;
+  const line = idx + 1;
+  return span > 1 ? `${line} / span ${span}` : `${line}`;
+}
+
 // Props an instance inherits from its master when it doesn't set them itself —
 // the auto-layout contract its expanded children flow under, plus the visuals
 // Figma stores only on the master.
@@ -359,6 +401,9 @@ const SYMBOL_INHERITED_KEYS = [
   'stackPaddingRight', 'stackPaddingBottom',
   'stackPrimaryAlignItems', 'stackCounterAlignItems',
   'stackPrimarySizing', 'stackCounterSizing',
+  'stackWrap', 'stackCounterSpacing', 'stackCounterAlignContent',
+  'gridRows', 'gridColumns', 'gridRowGap', 'gridColumnGap',
+  'gridColumnsSizing', 'gridRowsSizing', 'gridAutoTracks',
   'fillPaints', 'strokePaints', 'strokeWeight', 'strokeAlign',
   'cornerRadius', 'rectangleCornerRadiiIndependent',
   'rectangleTopLeftCornerRadius', 'rectangleTopRightCornerRadius',
@@ -1071,9 +1116,13 @@ export function materializeFrame(scene, frame, ctx) {
     // Absolute placement from the node's affine transform. m02/m12 are the
     // translation column — frame-relative x/y, exactly what left/top want.
     // `stackPositioning === 'ABSOLUTE'` opts a child out of its parent's
-    // auto-layout, so it is absolute even inside a flex parent.
-    const parentIsAutoLayout =
-      parent && (parent.stackMode === 'HORIZONTAL' || parent.stackMode === 'VERTICAL');
+    // auto-layout, so it is absolute even inside a flex parent. A GRID parent
+    // lays its children out too (cell placement), so its flowing children must
+    // not carry transforms either — same reasoning as flex.
+    const parentStackMode = parent ? parent.stackMode : undefined;
+    const parentIsFlex =
+      parentStackMode === 'HORIZONTAL' || parentStackMode === 'VERTICAL';
+    const parentIsAutoLayout = parentIsFlex || parentStackMode === 'GRID';
     const optedOut = node.stackPositioning === 'ABSOLUTE';
     if (parent && node.transform && (!parentIsAutoLayout || optedOut)) {
       const t = node.transform;
@@ -1301,12 +1350,101 @@ export function materializeFrame(scene, frame, ctx) {
       if (justify) layout.justify = justify;
       const align = FIGMA_STACK_ALIGN[node.stackCounterAlignItems];
       if (align) layout.align = align;
+      // Wrapping stacks: `stackWrap` turns the flex line into multiple tracks;
+      // `stackCounterSpacing` is the gap BETWEEN those tracks — cross-axis, so
+      // it lands on rowGap for a row and columnGap for a column. Without it a
+      // wrapped knob bank collapses its rows onto each other.
+      if (node.stackWrap === 'WRAP') {
+        layout.wrap = true;
+        if (typeof node.stackCounterSpacing === 'number') {
+          const key = node.stackMode === 'HORIZONTAL' ? 'rowGap' : 'columnGap';
+          layout[key] = Math.round(node.stackCounterSpacing);
+        }
+        // AUTO is the default packing (emit nothing); SPACE_BETWEEN distributes
+        // the wrapped tracks across the counter axis.
+        if (node.stackCounterAlignContent === 'SPACE_BETWEEN') {
+          layout.alignContent = 'space-between';
+        }
+      }
+    } else if (node.stackMode === 'GRID') {
+      // Figma GRID auto-layout → the IR's CSS-grid contract (the consumer
+      // lowers gridTemplate*/gridColumn/gridRow to the native grid engine).
+      // Track order comes from the fractional-index sort; sizing from the
+      // per-track maps. Grid gaps live on gridRowGap/gridColumnGap — NOT
+      // stackSpacing, which Figma leaves populated from any earlier flex mode.
+      const colOrder = gridTrackOrder(node.gridColumns);
+      const rowOrder = gridTrackOrder(node.gridRows);
+      layout = { display: 'grid' };
+      if (colOrder.length) {
+        layout.gridTemplateColumns = gridTrackTemplate(colOrder, node.gridColumnsSizing);
+      }
+      if (rowOrder.length) {
+        layout.gridTemplateRows = gridTrackTemplate(rowOrder, node.gridRowsSizing);
+      }
+      if (typeof node.gridRowGap === 'number') layout.rowGap = Math.round(node.gridRowGap);
+      if (typeof node.gridColumnGap === 'number') layout.columnGap = Math.round(node.gridColumnGap);
     }
-    // align-self is a property of the CHILD, and only means anything inside an
-    // auto-layout parent.
-    if (parentIsAutoLayout && FIGMA_STACK_ALIGN[node.stackChildAlignSelf]) {
+    // align-self is a property of the CHILD, and only means anything inside a
+    // FLEX auto-layout parent (grid children align via cell placement).
+    if (parentIsFlex && FIGMA_STACK_ALIGN[node.stackChildAlignSelf]) {
       layout = layout || {};
       layout.alignSelf = FIGMA_STACK_ALIGN[node.stackChildAlignSelf];
+    }
+    // layoutGrow — the child's share of the parent stack's free main-axis
+    // space. At design size the emitted solved widths already include the
+    // grown share (free space ≈ 0), so this is inert in the replay and only
+    // matters when the host resizes — which is exactly when Figma would grow
+    // the child too. Gated like alignSelf: flowing child of a FLEX stack.
+    if (parentIsFlex && !optedOut
+        && typeof node.stackChildPrimaryGrow === 'number' && node.stackChildPrimaryGrow > 0) {
+      layout = layout || {};
+      layout.flexGrow = node.stackChildPrimaryGrow;
+    }
+    // Grid cell placement for a flowing child of a GRID parent, as CSS
+    // 1-based lines resolved from the anchor GUID's track index.
+    if (parentStackMode === 'GRID' && !optedOut) {
+      const colOrder = gridTrackOrder(parent.gridColumns);
+      const rowOrder = gridTrackOrder(parent.gridRows);
+      const col = gridChildLine(colOrder, node.gridColumnAnchor, node.gridColumnSpan || 1);
+      const row = gridChildLine(rowOrder, node.gridRowAnchor, node.gridRowSpan || 1);
+      if (col || row) {
+        layout = layout || {};
+        if (col) layout.gridColumn = col;
+        if (row) layout.gridRow = row;
+      }
+    }
+    // targetAspectRatio only constrains an axis the layout can actually flex —
+    // a fully fixed node already carries Figma's solved w/h, and Yoga would
+    // re-derive the cross axis from the ratio, fighting the solved size over
+    // rounding. Emit it only when some axis is flexible (grow, stretch, or a
+    // hug-sized stack axis), where it genuinely governs resize behavior.
+    const ar = node.targetAspectRatio && node.targetAspectRatio.value;
+    if (ar && typeof ar.x === 'number' && typeof ar.y === 'number' && ar.y > 0 && ar.x > 0) {
+      const flexible =
+        (typeof node.stackChildPrimaryGrow === 'number' && node.stackChildPrimaryGrow > 0)
+        || node.stackChildAlignSelf === 'STRETCH'
+        || node.stackPrimarySizing === 'RESIZE_TO_FIT'
+        || node.stackPrimarySizing === 'RESIZE_TO_FIT_WITH_IMPLICIT_SIZE'
+        || node.stackCounterSizing === 'RESIZE_TO_FIT'
+        || node.stackCounterSizing === 'RESIZE_TO_FIT_WITH_IMPLICIT_SIZE';
+      if (flexible) {
+        layout = layout || {};
+        layout.aspectRatio = round2(ar.x / ar.y);
+      }
+    }
+    // Min/max sizing — clamps Figma already honored while solving, so they
+    // cannot move the design-size replay; they only bind on host resize.
+    // Guarded per-axis (finite, > 0): the kiwi OptionalVector's unset-axis
+    // encoding is not attested in available files, and a spurious 0 max would
+    // collapse the node.
+    const minmax = [
+      [node.minSize && node.minSize.value, 'min_width', 'min_height'],
+      [node.maxSize && node.maxSize.value, 'max_width', 'max_height'],
+    ];
+    for (const [vec, wKey, hKey] of minmax) {
+      if (!vec) continue;
+      if (Number.isFinite(vec.x) && vec.x > 0) style[wKey] = Math.round(vec.x);
+      if (Number.isFinite(vec.y) && vec.y > 0) style[hKey] = Math.round(vec.y);
     }
     // Figma auto-layout has no flex-shrink: a child is FIXED, HUG, or FILL, and
     // none of those let it render narrower than the size Figma solved for it. It
@@ -1320,7 +1458,7 @@ export function materializeFrame(scene, frame, ctx) {
     // We are replaying a SOLVED layout, not re-solving one, so this holds for
     // every flowed child: `style.width` above is the width Figma already
     // committed to, and any shrink can only move us away from it.
-    if (parentIsAutoLayout && !optedOut) {
+    if (parentIsFlex && !optedOut) {
       layout = layout || {};
       layout.flexShrink = 0;
     }
@@ -1488,7 +1626,8 @@ export function materializeFrame(scene, frame, ctx) {
     // emitting its (stale) constraints would fight the flex pass with margins
     // and grow the design never asked for.
     const parentIsStack =
-      parent && (parent.stackMode === 'HORIZONTAL' || parent.stackMode === 'VERTICAL');
+      parent && (parent.stackMode === 'HORIZONTAL' || parent.stackMode === 'VERTICAL'
+                 || parent.stackMode === 'GRID');
     if (parent && (!parentIsStack || node.stackPositioning === 'ABSOLUTE')) {
       const h = node.horizontalConstraint;
       const v = node.verticalConstraint;
@@ -1819,7 +1958,8 @@ export function materializeFrame(scene, frame, ctx) {
     const scopes = [];   // synthetic wrappers, pruned when they end up empty
     let target = kids;
     const parentIsAutoLayout =
-      node.stackMode === 'HORIZONTAL' || node.stackMode === 'VERTICAL';
+      node.stackMode === 'HORIZONTAL' || node.stackMode === 'VERTICAL'
+      || node.stackMode === 'GRID';
     for (const child of node.__children || scene.childrenOf.get(key) || []) {
       if (child.mask === true) {
         // A hidden mask neither paints nor clips.

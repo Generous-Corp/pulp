@@ -1987,3 +1987,168 @@ test('node dispatch: an unknown type falls back to frame WITH a diagnostic', () 
   assert.equal(unk.length, 1);
   assert.match(unk[0].detail, /HOLOGRAM_2027/);
 });
+
+// ── Auto-layout completion: wrap, child grow, GRID, aspect, min/max ─────────
+
+test('a wrapping stack emits wrap, counter-axis track gap, and align-content', () => {
+  const g = (l) => ({ sessionID: 0, localID: l });
+  const scene = buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page 1' },
+    { guid: g(2), type: 'FRAME', name: 'Bank',
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 300, y: 120 },
+      stackMode: 'HORIZONTAL', stackSpacing: 8,
+      stackWrap: 'WRAP', stackCounterSpacing: 16,
+      stackCounterAlignContent: 'SPACE_BETWEEN' },
+    // Control: an identical stack that does NOT wrap must not leak the
+    // wrapped-track fields — counter spacing means nothing on a single line.
+    { guid: g(3), type: 'FRAME', name: 'Line',
+      parentIndex: { guid: g(1), position: 'b' }, size: { x: 300, y: 40 },
+      stackMode: 'HORIZONTAL', stackSpacing: 8,
+      stackWrap: 'NO_WRAP', stackCounterSpacing: 16 },
+  ]});
+  const bank = materializeFrame(scene, findFrame(scene, 'Bank'), CTX_MIN).envelope.root;
+  assert.equal(bank.layout.wrap, true);
+  // A row's wrapped tracks stack vertically, so the cross-axis gap is rowGap —
+  // the key parse_ir_layout reads (design_ir_json.cpp:373).
+  assert.equal(bank.layout.rowGap, 16);
+  assert.ok(!('columnGap' in bank.layout), 'row wrap gap is vertical, not horizontal');
+  assert.equal(bank.layout.alignContent, 'space-between');
+  const line = materializeFrame(scene, findFrame(scene, 'Line'), CTX_MIN).envelope.root;
+  assert.ok(!('wrap' in line.layout), 'NO_WRAP emits no wrap key');
+  assert.ok(!('rowGap' in line.layout), 'counter spacing stays off single-line stacks');
+  assert.ok(!('alignContent' in line.layout), 'align-content is wrap-only');
+});
+
+test('stackChildPrimaryGrow reaches flowing children as flexGrow — and only them', () => {
+  const g = (l) => ({ sessionID: 0, localID: l });
+  const scene = buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page 1' },
+    { guid: g(2), type: 'FRAME', name: 'Row',
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 300, y: 40 },
+      stackMode: 'HORIZONTAL', stackSpacing: 8 },
+    { guid: g(3), type: 'FRAME', name: 'grower',
+      parentIndex: { guid: g(2), position: 'a' }, size: { x: 100, y: 40 },
+      stackChildPrimaryGrow: 2 },
+    // An ABSOLUTE child opted out of the stack: it keeps coordinates, and
+    // grow would fight that placement.
+    { guid: g(4), type: 'FRAME', name: 'badge',
+      parentIndex: { guid: g(2), position: 'b' }, size: { x: 10, y: 10 },
+      stackPositioning: 'ABSOLUTE', stackChildPrimaryGrow: 1,
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 } },
+    // A plain (non-auto-layout) frame: Figma leaves the child field stale, and
+    // emitting it would inject flex into an absolute layout.
+    { guid: g(5), type: 'FRAME', name: 'Plain',
+      parentIndex: { guid: g(1), position: 'b' }, size: { x: 100, y: 100 } },
+    { guid: g(6), type: 'FRAME', name: 'stale',
+      parentIndex: { guid: g(5), position: 'a' }, size: { x: 50, y: 50 },
+      stackChildPrimaryGrow: 1,
+      transform: { m00: 1, m01: 0, m02: 5, m10: 0, m11: 1, m12: 5 } },
+  ]});
+  const row = materializeFrame(scene, findFrame(scene, 'Row'), CTX_MIN).envelope.root;
+  const byName = Object.fromEntries(row.children.map((c) => [c.name, c]));
+  assert.equal(byName.grower.layout.flexGrow, 2, 'flowing child carries its grow share');
+  assert.ok(!(byName.badge.layout && 'flexGrow' in byName.badge.layout),
+    'an ABSOLUTE stack child is out of flow: no grow');
+  const plain = materializeFrame(scene, findFrame(scene, 'Plain'), CTX_MIN).envelope.root;
+  assert.ok(!(plain.children[0].layout && 'flexGrow' in plain.children[0].layout),
+    'a stale grow under a non-auto-layout parent must not emit');
+});
+
+test('a GRID stack lowers to the IR grid contract with per-cell child placement', () => {
+  const g = (l) => ({ sessionID: 0, localID: l });
+  // Track shape mirrors a decoded real-file GRID node: GUID-keyed track lists
+  // ordered by fractional-index position strings, sizing maps per track GUID.
+  const fr = { minSizing: { type: 'FLEX', value: 1 }, maxSizing: { type: 'FLEX', value: 1 } };
+  const px60 = { minSizing: { type: 'FIXED', value: 60 }, maxSizing: { type: 'FIXED', value: 60 } };
+  const scene = buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page 1' },
+    { guid: g(2), type: 'FRAME', name: 'Grid',
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 168, y: 146 },
+      stackMode: 'GRID', stackSpacing: 10,
+      gridRows: { entries: [
+        { id: g(11), position: '"' },
+        { id: g(10), position: '!' },
+      ] },
+      gridColumns: { entries: [
+        { id: g(20), position: '!' },
+        { id: g(21), position: '"' },
+      ] },
+      gridRowsSizing: { entries: [
+        { id: g(10), trackSize: fr }, { id: g(11), trackSize: fr },
+      ] },
+      gridColumnsSizing: { entries: [
+        { id: g(20), trackSize: px60 }, { id: g(21), trackSize: fr },
+      ] },
+      gridRowGap: 4, gridColumnGap: 6 },
+    { guid: g(3), type: 'FRAME', name: 'cell-a',
+      parentIndex: { guid: g(2), position: 'a' }, size: { x: 60, y: 60 },
+      gridRowAnchor: g(10), gridColumnAnchor: g(20),
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+      horizontalConstraint: 'MIN', verticalConstraint: 'MIN' },
+    { guid: g(4), type: 'FRAME', name: 'cell-b',
+      parentIndex: { guid: g(2), position: 'b' }, size: { x: 90, y: 130 },
+      gridRowAnchor: g(10), gridColumnAnchor: g(21), gridRowSpan: 2 },
+  ]});
+  const grid = materializeFrame(scene, findFrame(scene, 'Grid'), CTX_MIN).envelope.root;
+  assert.equal(grid.layout.display, 'grid');
+  // Track order comes from the fractional-index sort, NOT entry order — the
+  // rows fixture is deliberately shuffled. Sizing: FLEX → fr, FIXED → px.
+  assert.equal(grid.layout.gridTemplateRows, '1fr 1fr');
+  assert.equal(grid.layout.gridTemplateColumns, '60px 1fr');
+  assert.equal(grid.layout.rowGap, 4);
+  assert.equal(grid.layout.columnGap, 6);
+  assert.ok(!('gap' in grid.layout), 'stackSpacing is flex residue; grid gaps own GRID mode');
+  const byName = Object.fromEntries(grid.children.map((c) => [c.name, c]));
+  assert.equal(byName['cell-a'].layout.gridColumn, '1');
+  assert.equal(byName['cell-a'].layout.gridRow, '1');
+  assert.equal(byName['cell-b'].layout.gridColumn, '2');
+  assert.equal(byName['cell-b'].layout.gridRow, '1 / span 2');
+  // Grid children FLOW into their cells: no absolute coordinates, and their
+  // stale resize constraints must not fight the cell placement.
+  assert.ok(!('position' in byName['cell-a'].style), 'grid child stays in flow');
+  assert.ok(!('constraints' in byName['cell-a']), 'grid child drops constraints');
+});
+
+test('targetAspectRatio emits only where an axis is flexible', () => {
+  const g = (l) => ({ sessionID: 0, localID: l });
+  const scene = buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page 1' },
+    { guid: g(2), type: 'FRAME', name: 'Row',
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 300, y: 40 },
+      stackMode: 'HORIZONTAL' },
+    { guid: g(3), type: 'FRAME', name: 'flexible',
+      parentIndex: { guid: g(2), position: 'a' }, size: { x: 80, y: 40 },
+      stackChildPrimaryGrow: 1, targetAspectRatio: { value: { x: 2, y: 1 } } },
+    // Fully fixed: the solved w/h already encode the ratio; re-deriving the
+    // cross axis from it would fight the solved size over rounding.
+    { guid: g(4), type: 'FRAME', name: 'fixed',
+      parentIndex: { guid: g(2), position: 'b' }, size: { x: 40, y: 40 },
+      targetAspectRatio: { value: { x: 1, y: 1 } } },
+  ]});
+  const row = materializeFrame(scene, findFrame(scene, 'Row'), CTX_MIN).envelope.root;
+  const byName = Object.fromEntries(row.children.map((c) => [c.name, c]));
+  assert.equal(byName.flexible.layout.aspectRatio, 2);
+  assert.ok(!(byName.fixed.layout && 'aspectRatio' in byName.fixed.layout),
+    'a fully fixed node must not emit aspectRatio');
+});
+
+test('minSize/maxSize land as style min/max clamps, per-axis guarded', () => {
+  const g = (l) => ({ sessionID: 0, localID: l });
+  const scene = buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page 1' },
+    { guid: g(2), type: 'FRAME', name: 'Root',
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 200, y: 100 },
+      stackMode: 'VERTICAL' },
+    { guid: g(3), type: 'FRAME', name: 'clamped',
+      parentIndex: { guid: g(2), position: 'a' }, size: { x: 200, y: 40 },
+      minSize: { value: { x: 120, y: 0 } }, maxSize: { value: { x: 400, y: 0 } } },
+  ]});
+  const root = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN).envelope.root;
+  const clamped = root.children[0];
+  assert.equal(clamped.style.min_width, 120);
+  assert.equal(clamped.style.max_width, 400);
+  // The unset axis rides as 0 in the vector — a 0 max_height would collapse
+  // the node, so the per-axis > 0 guard must drop both.
+  assert.ok(!('min_height' in clamped.style), 'unset min axis must not emit');
+  assert.ok(!('max_height' in clamped.style), 'a zero max would collapse the node');
+});

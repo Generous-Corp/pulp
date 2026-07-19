@@ -605,14 +605,29 @@ def _owns_shape_art(n):
                for c in n.get("children", []))
 
 def is_auto_layout(n):
-    return n is not None and n.get("layoutMode") in ("HORIZONTAL", "VERTICAL")
+    """A parent that lays its own children out: flex stacks AND grid — a
+    GRID child flows into its cell, so absolute placement / constraints must
+    stay off it exactly as for flex children."""
+    return n is not None and n.get("layoutMode") in ("HORIZONTAL", "VERTICAL", "GRID")
 
-def extract_layout(n):
+def _aspect_ratio(n):
+    """`targetAspectRatio` as one float. REST documents a number; the Plugin
+    API's shape is a {x,y} Vector — accept both so the mirror stays robust."""
+    ar = n.get("targetAspectRatio")
+    if isinstance(ar, (int, float)) and ar > 0:
+        return float(ar)
+    if isinstance(ar, dict):
+        x, y = ar.get("x"), ar.get("y")
+        if isinstance(x, (int, float)) and isinstance(y, (int, float)) and x > 0 and y > 0:
+            return float(x) / float(y)
+    return None
+
+def extract_layout(n, parent=None):
     l = {}
-    if n.get("type") not in ("FRAME", "COMPONENT", "INSTANCE", "COMPONENT_SET"):
-        return l
+    ntype = n.get("type")
     lm = n.get("layoutMode")
-    if lm in ("HORIZONTAL", "VERTICAL"):
+    is_container = ntype in ("FRAME", "COMPONENT", "INSTANCE", "COMPONENT_SET")
+    if is_container and lm in ("HORIZONTAL", "VERTICAL"):
         l["display"] = "flex"
         l["direction"] = "row" if lm == "HORIZONTAL" else "column"
         l["gap"] = n.get("itemSpacing", 0)
@@ -624,10 +639,76 @@ def extract_layout(n):
         l["justify"] = pa.get(n.get("primaryAxisAlignItems"), "flex_start")
         l["align"] = ca.get(n.get("counterAxisAlignItems"), "stretch")
         l["wrap"] = n.get("layoutWrap") == "WRAP"
+        if l["wrap"]:
+            # counterAxisSpacing is the gap BETWEEN wrapped tracks — cross-axis,
+            # so a row's tracks stack vertically (rowGap) and a column's
+            # horizontally (columnGap). counterAxisAlignContent AUTO is the
+            # default packing; only SPACE_BETWEEN changes distribution.
+            cas = n.get("counterAxisSpacing")
+            if isinstance(cas, (int, float)):
+                l["rowGap" if lm == "HORIZONTAL" else "columnGap"] = cas
+            if n.get("counterAxisAlignContent") == "SPACE_BETWEEN":
+                l["alignContent"] = "space-between"
         l["width_mode"] = sz.get(n.get("layoutSizingHorizontal"), "fixed")
         l["height_mode"] = sz.get(n.get("layoutSizingVertical"), "fixed")
-    else:
+    elif is_container and lm == "GRID":
+        # Figma GRID auto-layout → the IR's CSS-grid contract. REST exposes
+        # counts + gaps (uniform tracks), so the template is repeat(N, 1fr);
+        # child cells arrive as 0-based anchor indexes below.
+        l["display"] = "grid"
+        cols = n.get("gridColumnCount")
+        rows = n.get("gridRowCount")
+        if isinstance(cols, int) and cols > 0:
+            l["gridTemplateColumns"] = f"repeat({cols}, 1fr)"
+        if isinstance(rows, int) and rows > 0:
+            l["gridTemplateRows"] = f"repeat({rows}, 1fr)"
+        if isinstance(n.get("gridRowGap"), (int, float)):
+            l["rowGap"] = n["gridRowGap"]
+        if isinstance(n.get("gridColumnGap"), (int, float)):
+            l["columnGap"] = n["gridColumnGap"]
+    elif is_container:
         l["width_mode"] = "fixed"; l["height_mode"] = "fixed"
+
+    # Child-side properties — meaningful only for a FLOWING child of an
+    # auto-layout parent (layoutPositioning ABSOLUTE opts out and is handled
+    # by the absolute-position/constraints path in walk()).
+    flowing = parent is not None and n.get("layoutPositioning") != "ABSOLUTE"
+    plm = parent.get("layoutMode") if parent else None
+    if flowing and plm in ("HORIZONTAL", "VERTICAL"):
+        grow = n.get("layoutGrow")
+        if isinstance(grow, (int, float)) and grow > 0:
+            l["flexGrow"] = grow
+        # INHERIT is the default (follow the parent's counterAxisAlignItems),
+        # which is exactly what omitting align-self does — emit nothing for it.
+        la = {"STRETCH": "stretch", "MIN": "flex-start", "MAX": "flex-end", "CENTER": "center"}
+        align_self = la.get(n.get("layoutAlign"))
+        if align_self:
+            l["alignSelf"] = align_self
+    if flowing and plm == "GRID":
+        # 0-based anchors + spans → CSS 1-based grid lines.
+        col = n.get("gridColumnAnchorIndex")
+        row = n.get("gridRowAnchorIndex")
+        col_span = n.get("gridColumnSpan") or 1
+        row_span = n.get("gridRowSpan") or 1
+        if isinstance(col, int) and col >= 0:
+            l["gridColumn"] = f"{col + 1} / span {col_span}" if col_span > 1 else f"{col + 1}"
+        if isinstance(row, int) and row >= 0:
+            l["gridRow"] = f"{row + 1} / span {row_span}" if row_span > 1 else f"{row + 1}"
+
+    # targetAspectRatio only constrains an axis the layout can flex; a fully
+    # fixed node already carries Figma's solved w/h and the ratio would fight
+    # that over rounding. Flexible = grow, stretch, or a non-FIXED sizing mode.
+    ar = _aspect_ratio(n)
+    if ar:
+        grow = n.get("layoutGrow")
+        flexible = (
+            (isinstance(grow, (int, float)) and grow > 0)
+            or n.get("layoutAlign") == "STRETCH"
+            or n.get("layoutSizingHorizontal") in ("HUG", "FILL")
+            or n.get("layoutSizingVertical") in ("HUG", "FILL")
+        )
+        if flexible:
+            l["aspectRatio"] = ar
     return l
 
 class ExtractContext:
@@ -716,9 +797,23 @@ def walk(n, parent, z, ctx, inside_widget=False):
     if t is None:
         return None
     style = extract_style(n, ctx)
-    layout = extract_layout(n)
-    # Absolute positioning when parent isn't auto-layout (extract.ts:158-188)
-    if parent is not None and not is_auto_layout(parent):
+    layout = extract_layout(n, parent)
+    # Min/max sizing — style-level clamps parse_ir_style reads and the flex
+    # engines lower to min/max width/height. Figma already honored them while
+    # solving, so they cannot move the design-size replay; they bind on resize.
+    for rest_key, style_key in (("minWidth", "min_width"), ("maxWidth", "max_width"),
+                                ("minHeight", "min_height"), ("maxHeight", "max_height")):
+        v = n.get(rest_key)
+        if isinstance(v, (int, float)) and v > 0:
+            style[style_key] = v
+    # Absolute positioning when the parent doesn't lay this child out: parent
+    # isn't auto-layout, or the child opted out of the stack with
+    # layoutPositioning ABSOLUTE (which Figma positions in the parent's
+    # coordinate space even inside a flex/grid parent). Same gate as the
+    # constraints emission below.
+    coordinate_positioned = parent is not None and (
+        not is_auto_layout(parent) or n.get("layoutPositioning") == "ABSOLUTE")
+    if coordinate_positioned:
         cbb = n.get("absoluteBoundingBox"); pbb = parent.get("absoluteBoundingBox")
         if cbb and pbb:
             style["position"] = "absolute"
@@ -800,12 +895,11 @@ def walk(n, parent, z, ctx, inside_widget=False):
     # Resize constraints, in the REST API's spelling (LEFT/RIGHT/CENTER/
     # LEFT_RIGHT/SCALE, TOP/BOTTOM/CENTER/TOP_BOTTOM/SCALE) — passed through
     # untranslated; design_ir_json.cpp normalizes and codegen lowers to flex.
-    # Same gate as absolute positioning above (plus the layoutPositioning
-    # opt-out): constraints govern a node placed in its parent's coordinate
-    # space, while a FLOWING auto-layout child is sized by the stack and stale
-    # constraints would fight that layout with margins/grow.
-    if parent is not None and (not is_auto_layout(parent)
-                               or n.get("layoutPositioning") == "ABSOLUTE"):
+    # Same gate as absolute positioning above: constraints govern a node placed
+    # in its parent's coordinate space, while a FLOWING auto-layout child is
+    # sized by the stack and stale constraints would fight that layout with
+    # margins/grow.
+    if coordinate_positioned:
         c = n.get("constraints")
         if isinstance(c, dict):
             cons = {k: c[k] for k in ("horizontal", "vertical")

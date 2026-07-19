@@ -1494,6 +1494,77 @@ lower to flex at codegen. Facts / gotchas:
   design size (verified pixel-identical on a 1299-node real file) — they only
   change resize behavior.
 
+### Auto Layout completion (child grow/align, wrap extras, GRID, aspect, min/max)
+
+The audit's "Auto Layout" row (checklist #3). All three producers now emit the
+complete auto-layout contract; the layout keys use the CONSUMER's camelCase
+spelling (`flexGrow`, `alignSelf`, `alignContent`, `rowGap`, `columnGap`,
+`aspectRatio`, `gridTemplateColumns/Rows`, `gridColumn/Row` — the exact members
+`parse_ir_layout` reads), values in CSS spellings (`flex-start`,
+`space-between`) because the flex bridge and `parse_flex_align` accept kebab,
+NOT snake. Never emit a key the consumer doesn't read — that dead-key trap is
+this subsystem's signature bug (see the `width_mode` comment in
+`design_ir_json.cpp`).
+
+- **Child grow/align** — gated exactly like constraints, but inverted: emitted
+  only for a FLOWING child of a FLEX auto-layout parent (Figma leaves the
+  fields stale everywhere else, and an `ABSOLUTE`-positioned child's grow/align
+  would fight its coordinate placement). Source spellings: `.fig` kiwi
+  `stackChildPrimaryGrow`/`stackChildAlignSelf`, plugin+REST
+  `layoutGrow`/`layoutAlign` (`INHERIT` emits nothing — omitting align-self IS
+  inherit). An `ABSOLUTE` stack child now also gets `position:absolute` +
+  left/top in the plugin/REST lanes (it previously got neither flex nor
+  coordinates and collapsed onto the stack origin).
+- **Wrap extras** — `counterAxisSpacing` (kiwi `stackCounterSpacing`) is the
+  gap BETWEEN wrapped tracks: a row's tracks stack vertically → `rowGap`, a
+  column's → `columnGap`. `counterAxisAlignContent` (`stackCounterAlignContent`)
+  `SPACE_BETWEEN` → `alignContent: "space-between"`; `AUTO` emits nothing.
+  Both are wrap-only — never emit them on a single-line stack.
+- **Figma GRID auto-layout** (`layoutMode`/`stackMode == "GRID"`; pinned
+  plugin typings 1.127.0 expose the full surface, no runtime cast needed) —
+  lowers to the existing IR grid contract. Plugin/REST: uniform tracks →
+  `repeat(N, 1fr)` from `gridRowCount`/`gridColumnCount`, gaps from
+  `gridRowGap`/`gridColumnGap`, children from 0-based
+  `gridRowAnchorIndex`/`gridColumnAnchorIndex` (+`grid*Span`) → CSS 1-based
+  lines. `.fig` kiwi: `gridRows`/`gridColumns` are GUID-keyed track lists whose
+  fractional-index `position` string sorts byte-wise into track order;
+  `gridColumnsSizing`/`gridRowsSizing` map track GUID → `{minSizing,maxSizing}`
+  (`FLEX`→`fr`, `FIXED`→px, else `auto`); children carry
+  `gridRowAnchor`/`gridColumnAnchor` GUIDs. Grid children FLOW: treat GRID
+  like flex in the absolute-position, constraints, and mask gates (a grid
+  child gets neither coordinates nor constraints). GRID mode ignores
+  `stackSpacing` — it is flex residue; the grid gaps own spacing.
+- **aspectRatio** — `targetAspectRatio` (kiwi OptionalVector `{x,y}`, REST
+  number-or-vector) emits ONLY when some axis is flexible (grow, stretch, or a
+  non-FIXED sizing mode). On a fully fixed node Yoga would re-derive the cross
+  axis from the ratio and fight Figma's solved size over rounding.
+- **min/max sizing** — style-level `min_width`/`max_width`/`min_height`/
+  `max_height` (snake; `parse_ir_style` resolves both spellings, native
+  materializer lowers to FlexStyle clamps, JS-web lane emits `style.minWidth`).
+  Per-axis guard `> 0` — the `.fig` OptionalVector rides unset axes as 0 and a
+  zero max collapses the node. Figma honored these while solving, so they only
+  bind on host resize.
+- **Consumer completions that shipped with this slice**: the JS codegen
+  (`design_codegen.cpp`) now lowers explicit `flex_grow` values, `align_self`,
+  `aspect_ratio`, `row_gap`/`column_gap`, `flex_wrap`, and `align_content`
+  (the constraint fallbacks check `grow_done`/`stretch_done` so an explicit
+  value is never doubled); the native materializer + cpp codegen read grid
+  templates from `layout.grid_template_*` when the v0/TSX contract attributes
+  are absent (previously a Figma GRID switched to grid mode with an EMPTY
+  column list and dropped every child), and both gained per-child
+  `gridColumn`/`gridRow` line parsing.
+- **Known 0.5px caveat**: Pulp's grid engine stretches every child to its cell
+  (`layout_grid()` has no per-child alignment yet), while Figma keeps a
+  fixed-size child at its own size inside a larger track. On the reference
+  file this shows as grid cells 33→33.5px tall (track height) with y-placement
+  EXACT (the old absolute path was 0.5 off from rounding). Within the parity
+  gate; fix belongs to the grid engine, not the producers.
+- Real-file parity: `layout_parity.py` reports byte-identical findings before/
+  after on the 1299-node reference frame; the only solved-rect deltas are the
+  16 grid cells above (≤0.5px). Tests: `[view][import][autolayout]`,
+  fig.test.mjs auto-layout completion block, `figma-plugin/test/layout.test.ts`,
+  REST `AutoLayoutTest`.
+
 ### Grid containers → native grid bridge (NOT Yoga grid)
 
 Pulp's engine has its **own** grid layout (`LayoutMode::grid` + `layout_grid()`

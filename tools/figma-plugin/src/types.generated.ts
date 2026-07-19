@@ -433,14 +433,14 @@ export interface Style {
   max_height?: number;
 }
 /**
- * Maps to IRLayout. Padding is nested as an object here; parser flattens to padding_top/right/bottom/left.
+ * Maps to IRLayout. Padding is nested as an object here; parser flattens to padding_top/right/bottom/left. The camelCase keys (rowGap, flexGrow, alignSelf, gridTemplate*, ...) use the consumer's spelling — the exact member names design_ir_json.cpp::parse_ir_layout reads — so the schema can never declare a key nobody consumes.
  */
 export interface Layout {
   display?: "flex" | "grid" | "none";
   direction?: "row" | "column";
   gap?: number;
-  row_gap?: number;
-  column_gap?: number;
+  rowGap?: number;
+  columnGap?: number;
   padding?: {
     top?: number;
     right?: number;
@@ -456,9 +456,14 @@ export interface Layout {
   justify?: "flex_start" | "flex_end" | "center" | "stretch" | "space_between" | "space_around";
   align?: "flex_start" | "flex_end" | "center" | "stretch" | "space_between" | "space_around";
   wrap?: boolean;
-  flex_grow?: number;
-  flex_shrink?: number;
-  aspect_ratio?: number;
+  alignContent?: "space-between";
+  flexGrow?: number;
+  alignSelf?: "flex-start" | "flex-end" | "center" | "stretch";
+  aspectRatio?: number;
+  gridTemplateColumns?: string;
+  gridTemplateRows?: string;
+  gridColumn?: string;
+  gridRow?: string;
   width_mode?: "fixed" | "hug" | "fill";
   height_mode?: "fixed" | "hug" | "fill";
 }
