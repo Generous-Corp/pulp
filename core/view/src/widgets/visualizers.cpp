@@ -8,10 +8,13 @@
 #include <pulp/view/text_overflow.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/canvas/text_shaper.hpp>
+#include <pulp/canvas/canvas.hpp>
 #include <pulp/audio/waveform_overview.hpp>
+#include <pulp/runtime/log.hpp>
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -299,6 +302,18 @@ void ImageView::paint(canvas::Canvas& canvas) {
     // Decode failed (file missing, unsupported codec, or backend doesn't
     // implement draw_image_from_file). Fall through to the filename
     // placeholder so authors can debug src wiring without a blank rect.
+    // Distinguish the two causes for the author: when the backend has no image
+    // decoder at all, the placeholder is inevitable regardless of the src, so
+    // warn once with the capability query (one vocabulary with paint_all's
+    // capability fallbacks) instead of leaving them guessing at a bad path.
+    if (!canvas.supports(canvas::CanvasCapability::images)) {
+        static std::atomic<bool> warned_no_images{false};
+        if (!warned_no_images.exchange(true, std::memory_order_relaxed)) {
+            pulp::runtime::log_warn(
+                "canvas backend cannot draw images; ImageView renders the "
+                "filename as placeholder text");
+        }
+    }
     canvas.set_fill_color(resolve_color("bg.surface", canvas::Color::rgba8(50, 50, 60)));
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 4);
     canvas.set_fill_color(resolve_color("text.secondary", canvas::Color::rgba8(120, 120, 140)));

@@ -393,6 +393,7 @@ CPU implementation beats or ties the GPU at all musical settings.
 | Skia backend | experimental | [canvas](modules.md#canvas) | |
 | SVG rendering | experimental | [canvas](modules.md#canvas) | |
 | Effects (shadow, blur, gradients) | usable | [canvas](modules.md#canvas) | |
+| Backend capability query (`Canvas::supports(CanvasCapability)`) | usable | [canvas](modules.md#canvas) | |
 
 Key headers: `pulp/canvas/canvas.hpp`, `pulp/canvas/cg_canvas.hpp`, `pulp/canvas/skia_canvas.hpp`, `pulp/canvas/svg.hpp`, `pulp/canvas/view_effect.hpp`
 

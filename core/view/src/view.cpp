@@ -12,6 +12,8 @@
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/value_source_binding.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
+#include <pulp/runtime/log.hpp>
+#include <pulp/canvas/canvas.hpp>
 #include <memory>
 #include <algorithm>
 #include <atomic>
@@ -285,6 +287,21 @@ std::atomic<bool>& tracing_badge_visible_flag() {
     static std::atomic<bool> visible{true};
     return visible;
 }
+
+// Warn at most once per process, per capability, when a paint path degrades
+// because the active canvas backend does not support the capability it needs.
+// The dedup is a relaxed atomic bitmask keyed by the CanvasCapability ordinal:
+// allocation-free on every call after the first, so it is safe inside
+// paint_all's ScopedNoAlloc guard (the one-time first-warn log is a
+// non-realtime event by construction, and the guard is a no-op in Release).
+// `msg` must be a string literal — passed straight to log_warn without format.
+void warn_capability_fallback_once(canvas::CanvasCapability cap,
+                                   const char* msg) {
+    static std::atomic<uint32_t> warned{0};
+    const uint32_t bit = 1u << static_cast<uint32_t>(cap);
+    if ((warned.fetch_or(bit, std::memory_order_relaxed) & bit) != 0) return;
+    pulp::runtime::log_warn("{}", msg);
+}
 }  // namespace
 
 bool tracing_badge_should_paint() {
@@ -376,6 +393,12 @@ void View::paint_all(canvas::Canvas& canvas) {
     // at the end of paint_all.
     bool needs_backdrop_layer = (backdrop_blur() > 0.0f);
     if (needs_backdrop_layer) {
+        if (!canvas.supports(canvas::CanvasCapability::backdrop_filter)) {
+            warn_capability_fallback_once(
+                canvas::CanvasCapability::backdrop_filter,
+                "canvas backend has no backdrop-filter blur; backdrop-filter "
+                "renders as an unblurred tint");
+        }
         canvas.save_backdrop_filter(0, 0, bounds_.width, bounds_.height,
                                     backdrop_blur());
     }
@@ -409,6 +432,12 @@ void View::paint_all(canvas::Canvas& canvas) {
     int layers_pushed = 0;
     if (needs_layer) {
         if (effect_ && effect_->needs_layer()) {
+            if (!canvas.supports(canvas::CanvasCapability::sksl_post_effect)) {
+                warn_capability_fallback_once(
+                    canvas::CanvasCapability::sksl_post_effect,
+                    "canvas backend cannot execute SkSL post-effects; view "
+                    "effects render as a plain layer");
+            }
             effect_->configure_layer(canvas, 0, 0, bounds_.width, bounds_.height);
             layers_pushed = effect_->layer_count();
         } else if (needs_mask_layer) {
@@ -421,12 +450,24 @@ void View::paint_all(canvas::Canvas& canvas) {
             // because the mask is the outermost composite per CSS Masking
             // Module Level 1; nested filter/blend belongs inside the masked
             // content.
+            if (!canvas.supports(canvas::CanvasCapability::mask_layer)) {
+                warn_capability_fallback_once(
+                    canvas::CanvasCapability::mask_layer,
+                    "canvas backend cannot apply mask layers; mask-image "
+                    "collapses to a plain layer (mask ignored)");
+            }
             canvas.save_layer_with_mask(0, 0, bounds_.width, bounds_.height,
                                          opacity_, mask_image(), mask_size());
         } else if (!filter_chain_.empty()) {
             // Full CSS filter chain. Translate View::FilterOp into
             // canvas::FilterChainEntry and hand off to the canvas backend;
             // Skia composes via SkImageFilters, CG falls back to blur-only.
+            if (!canvas.supports(canvas::CanvasCapability::filter_chain)) {
+                warn_capability_fallback_once(
+                    canvas::CanvasCapability::filter_chain,
+                    "canvas backend does not honor CSS filter color ops; "
+                    "filter chain collapses to blur/opacity only");
+            }
             std::vector<pulp::canvas::Canvas::FilterChainEntry> chain;
             chain.reserve(filter_chain_.size());
             for (const auto& op : filter_chain_) {
@@ -572,6 +613,12 @@ void View::paint_all(canvas::Canvas& canvas) {
               << " V " << (clip_h - cbr) << " A " << cbr << " " << cbr << " 0 0 1 " << (clip_w - cbr) << " " << clip_h
               << " H " << cbl << " A " << cbl << " " << cbl << " 0 0 1 0 " << (clip_h - cbl)
               << " V " << ctl << " A " << ctl << " " << ctl << " 0 0 1 " << ctl << " 0 Z";
+            if (!canvas.supports(canvas::CanvasCapability::clip_path_svg)) {
+                warn_capability_fallback_once(
+                    canvas::CanvasCapability::clip_path_svg,
+                    "canvas backend has no SVG-path clip; rounded overflow "
+                    "clip and clip-path silently do not clip");
+            }
             canvas.clip_path_svg(d.str());
         } else {
             canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
@@ -586,8 +633,15 @@ void View::paint_all(canvas::Canvas& canvas) {
     // without a path parser silently no-op. The clip is released by the
     // matching `canvas.restore()` at the end of paint_all; the outer
     // `canvas.save()` at function entry already covers it.
-    if (!clip_path().empty())
+    if (!clip_path().empty()) {
+        if (!canvas.supports(canvas::CanvasCapability::clip_path_svg)) {
+            warn_capability_fallback_once(
+                canvas::CanvasCapability::clip_path_svg,
+                "canvas backend has no SVG-path clip; rounded overflow "
+                "clip and clip-path silently do not clip");
+        }
         canvas.clip_path_svg(clip_path());
+    }
 
     // Per-corner border-radius: when any of the
     // setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight setters

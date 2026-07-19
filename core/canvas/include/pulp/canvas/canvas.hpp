@@ -190,6 +190,27 @@ enum class TextVerticalAlign { top, center, bottom, baseline };
 enum class TextBaseline { top, middle, bottom };
 enum class TextDirection { left_to_right, right_to_left, top_to_bottom, bottom_to_top };
 
+/// Queryable backend capabilities. `supports(c) == false` means the
+/// corresponding verb *degrades* (documented per-verb — silent no-op, a
+/// plain layer with the color/mask/blur op dropped, a filename placeholder,
+/// etc.) rather than rendering faithfully. Callers query this to log or
+/// branch instead of silently emitting an unfaithful frame. The base Canvas
+/// returns false for every capability precisely because its default verb
+/// implementations ARE those degradations.
+enum class CanvasCapability : uint8_t {
+    images,               ///< draw_image_from_* really decode + draw
+    svg,                  ///< draw_svg renders via SkSVGDOM
+    clip_path_svg,        ///< clip_path_svg parses the path and clips
+    filter_chain,         ///< save_layer_with_filters honors color ops
+    mask_layer,           ///< save_layer_with_mask applies the mask
+    backdrop_filter,      ///< save_backdrop_filter really blurs the backdrop
+    bloom_layer,          ///< save_layer_with_bloom is a real bloom
+    sksl_draw,            ///< draw_with_sksl executes the shader
+    sksl_post_effect,     ///< save_layer_with_sksl_post_effect executes
+    box_shadow_gaussian,  ///< draw_box_shadow is a true Gaussian, not stacked rects
+    scene_cache,          ///< record_scene / draw_scene are functional (FU-3)
+};
+
 // Abstract canvas for 2D drawing
 // Widgets paint against this interface. Concrete backends (Skia, CoreGraphics,
 // software) implement the virtual methods.
@@ -1123,14 +1144,23 @@ public:
         fill_text(text, x, y);
     }
 
+    // ── Capability queries ───────────────────────────────────────────────
+    /// Report whether this backend renders `cap`'s verb faithfully. Base
+    /// returns false for everything: the base-class verb defaults are all
+    /// degradations (silent no-op, color/mask/blur op dropped, filename
+    /// placeholder). Concrete backends override to advertise the subset they
+    /// actually implement. Callers branch on this to log-once and keep the
+    /// documented fallback rather than silently emitting an unfaithful frame.
+    virtual bool supports(CanvasCapability) const { return false; }
+
     // ── Images ───────────────────────────────────────────────────────────
     /// Whether this backend can actually decode + draw a raster image (the
-    /// `draw_image_from_*` verbs below). Default false: the base no-op verbs
-    /// return false and callers (e.g. ImageView) render a filename placeholder.
-    /// Backends with a real decoder — SkiaCanvas and CoreGraphicsCanvas —
-    /// override to true so headless tooling can warn ("image draw unsupported
-    /// on this backend") instead of silently producing an unfaithful render.
-    virtual bool supports_image_draw() const { return false; }
+    /// `draw_image_from_*` verbs below). Thin alias for
+    /// `supports(CanvasCapability::images)` — kept because it is public API
+    /// used by headless tooling (ImageView placeholder path, CG image tests).
+    /// Not virtual: backends express image support through `supports()`, and
+    /// this forwards to it so there is one vocabulary and one source of truth.
+    bool supports_image_draw() const { return supports(CanvasCapability::images); }
 
     /// Draw an image from encoded data (PNG, JPEG, WebP) at the given rect.
     /// Returns true if the image was decoded and drawn successfully.
