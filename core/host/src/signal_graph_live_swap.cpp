@@ -200,6 +200,7 @@ bool SignalGraph::set_node_live_swap_policy(NodeId id,
     auto* n = node_mut_locked_(id);
     if (!n || n->type != NodeType::Plugin) return false;
     n->live_swap_policy = clamp_live_swap_policy(std::move(policy));
+    ++authoring_generation_;
     return true;
 }
 
@@ -208,6 +209,7 @@ bool SignalGraph::set_node_hosted_editor_open(NodeId id, bool open) {
     auto* n = node_mut_locked_(id);
     if (!n || n->type != NodeType::Plugin) return false;
     n->hosted_editor_open = open;
+    ++authoring_generation_;
     return true;
 }
 
@@ -569,6 +571,7 @@ void SignalGraph::begin_swap_edit() {
         return;
     }
     in_swap_edit_ = true;
+    ++authoring_generation_;
     swap_edit_owner_ = std::this_thread::get_id();
     staged_replacements_.clear();
     // Reclaim any prior crossfade: a node whose plugin is a fade-done wrapper is

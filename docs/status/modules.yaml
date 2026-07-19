@@ -2,11 +2,23 @@
 # Vocabulary: stable, usable, experimental, partial, planned, unsupported
 
 modules:
-  - name: timebase
-    summary: Strong musical tick and sample positions, rational sample rates, immutable constant/ramped tempo maps, and shared transport quantization arithmetic
+  - name: playback
+    summary: Master transport plus immutable incrementally compiled playback programs, bounded WAV-backed arrangement audio rendering, block-coherent publication, and stable renderer shells
     status: experimental
-    dependencies: []
+    dependencies: [runtime, timebase, timeline, audio, midi]
+    docs: reference/modules.md#playback
+
+  - name: timebase
+    summary: Strong musical tick sample and bar positions editable tempo and meter maps compiled exact lookup and streaming transport cursors
+    status: experimental
+    dependencies: [runtime]
     docs: reference/modules.md#timebase
+
+  - name: timeline
+    summary: Immutable timeline snapshots with path-copy indexes typed atomic transactions bounded journal and undo durable assets schema registry and exact JSON persistence
+    status: experimental
+    dependencies: [runtime, timebase]
+    docs: reference/modules.md#timeline
 
   - name: runtime
     summary: Core utilities — SIMD (Highway), XML/JSON, ZIP, HTTP client, sockets, IPC pipes, crypto (SHA-256/AES/RSA via mbedTLS), i18n, analytics, licensing

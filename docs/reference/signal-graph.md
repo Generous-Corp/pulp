@@ -388,6 +388,37 @@ silently interpreted as current data.
 - **Load** (`PluginSlot::load`) runs on a worker thread; the returned
   slot is handed to the graph only after it's fully loaded.
 
+## Timeline playback adapter
+
+`TimelineGraphPlaybackBinding` lowers each phase-1 timeline track to a stable,
+transport-sensitive `CustomNodeType` audio source plus a stable `MidiInput`.
+The binding retains SignalGraph NodeIds by timeline `ItemId`; ordinary
+`PlaybackProgramStore` publications update renderer programs without replacing
+nodes or writing opaque custom-node state. Arrangement notes remain an engine
+transport-tick lane and enter the graph through `inject_midi()`.
+
+Timeline-owned nodes consume the callback's exact `TransportSnapshot`, including
+all loop-split ranges, from the binding's block-wide pin. The existing
+SignalGraph format ABI still carries one `ProcessContext`, so ordinary downstream
+plugins receive callback-wide `num_samples` and a transport-jump flag if any
+constituent range is discontinuous. Timeline nodes use the exact ranges when
+rendering; downstream nodes use the callback-wide context when processing the
+rendered audio.
+
+Admission checks the candidate's configured SignalGraph authoring limits and the
+canonical executor's authoritative routed-plan limits independently: node count,
+connection count, per-node ports, and total audio-plus-event ports all produce
+structured actual-versus-limit diagnostics. Per-track note capacity is capped at
+the graph MIDI handoff's 1024-event storage before graph mutation. Prepared and
+live program sample rates must match the `prepare()` API's `double` projection,
+including fractional rational rates. Live publications may reorder the same track
+IDs but must be re-prepared after adding or removing tracks. After prepare, the
+binding verifies the live compiled snapshot's routed-path validity and fixed pool
+fit. While a binding is alive, SignalGraph will clear a block that cannot use a
+prepared routed path instead of silently entering the reference walk. Topology
+eligibility is checked only after the capacity axes, so an oversized timeline
+route cannot be mistaken for an admitted routed snapshot.
+
 ## Baking a graph to a shippable artifact
 
 A live `SignalGraph` is editable and carries per-node overhead. Once a graph is

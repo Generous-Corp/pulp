@@ -237,6 +237,10 @@ flags:
     paths:
       - core/osc/
     carryforward: true
+  playback:
+    paths:
+      - core/playback/
+    carryforward: true
   platform:
     paths:
       - core/platform/
@@ -264,6 +268,10 @@ flags:
   timebase:
     paths:
       - core/timebase/
+    carryforward: true
+  timeline:
+    paths:
+      - core/timeline/
     carryforward: true
   view:
     paths:
@@ -422,6 +430,9 @@ component_management:
     - component_id: osc
       name: osc
       paths: ["core/osc/**"]
+    - component_id: playback
+      name: playback
+      paths: ["core/playback/**"]
     - component_id: platform
       name: platform
       paths:
@@ -459,6 +470,9 @@ component_management:
     - component_id: timebase
       name: timebase
       paths: ["core/timebase/**"]
+    - component_id: timeline
+      name: timeline
+      paths: ["core/timeline/**"]
     - component_id: view
       name: view
       paths:

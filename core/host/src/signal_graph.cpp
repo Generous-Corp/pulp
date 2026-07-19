@@ -9,6 +9,7 @@
 // See signal_graph.hpp for the mutation protocol details.
 
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_execution_snapshot.hpp>
 #include <pulp/host/anticipation_eligibility.hpp>
 #include <pulp/host/anticipation_partition.hpp>
 #include <pulp/host/anticipation_subgraph.hpp>
@@ -382,8 +383,17 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
     // compiled against an older generation is rejected (a re-register rebinds
     // callbacks to instances the old factory produced).
     ++custom_registry_generation_;
-    if (affects_existing_nodes) invalidate_live_locked_();
+    if (affects_existing_nodes) {
+        invalidate_live_locked_();
+    } else {
+        ++authoring_generation_;
+    }
     return true;
+}
+
+std::size_t SignalGraph::custom_node_type_count() const {
+    GraphMutationLock mutation_lock(*this);
+    return custom_node_types_.size();
 }
 
 const CustomNodeType* SignalGraph::custom_node_type(std::string_view type_id) const {
@@ -701,10 +711,15 @@ bool SignalGraph::inject_midi(NodeId id,
     auto read_guard = live_slot_.read();
     auto* cg = read_guard.get();
     if (!cg) return false;
-    auto it = cg->runtime.find(id);
-    if (it == cg->runtime.end()) return false;
-    auto shape_it = cg->shapes.find(id);
-    if (shape_it == cg->shapes.end()
+    return inject_midi_into_snapshot_(*cg, id, events);
+}
+
+bool SignalGraph::inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,
+                                              const midi::MidiBuffer& events) noexcept {
+    auto it = snapshot.runtime.find(id);
+    if (it == snapshot.runtime.end()) return false;
+    auto shape_it = snapshot.shapes.find(id);
+    if (shape_it == snapshot.shapes.end()
         || shape_it->second.type != NodeType::MidiInput
         || !it->second.midi_input_mailbox) {
         return false;
@@ -1043,15 +1058,59 @@ std::shared_ptr<const void> SignalGraph::live_snapshot_handle() const noexcept {
     return live_slot_.live();  // aliases the live CompiledGraph as an opaque keepalive
 }
 
+SignalGraph::RoutedExecutionStatus
+SignalGraph::routed_execution_status(int block_size) const noexcept {
+    RoutedExecutionStatus status;
+    const auto live = live_slot_.live();
+    if (!live || block_size <= 0)
+        return status;
+
+    status.prepared = true;
+    status.serial_snapshot_valid = live->routed.serial.valid;
+    status.serial_pool_fits =
+        live->routed.serial.valid &&
+        live->routed.serial.pool.fits(live->routed.serial.snapshot,
+                                      static_cast<std::uint32_t>(block_size));
+    status.parallel_snapshot_valid = live->routed.parallel.valid;
+    status.parallel_pool_fits =
+        live->routed.parallel.valid &&
+        live->routed.parallel.pool.fits(live->routed.parallel.snapshot,
+                                        static_cast<std::uint32_t>(block_size));
+    status.worker_pool_running = worker_pool_.running();
+    status.reference_walk_permitted =
+        routed_only_execution_owners_.load(std::memory_order_relaxed) == 0;
+
+    switch (live->pdc_execution_domain) {
+    case PdcExecutionDomain::Legacy:
+        break;
+    case PdcExecutionDomain::RoutedSerial:
+        status.serial_selected = true;
+        break;
+    case PdcExecutionDomain::RoutedParallel:
+        status.parallel_selected = true;
+        break;
+    case PdcExecutionDomain::Dynamic:
+        status.serial_selected =
+            canonical_executor_routing_enabled_.load(std::memory_order_relaxed);
+        status.parallel_selected =
+            parallel_routing_enabled_.load(std::memory_order_relaxed);
+        break;
+    }
+    return status;
+}
+
 pulp::audio::AudioProcessLoadSnapshot SignalGraph::graph_load() const {
     return graph_load_ ? graph_load_->snapshot() : pulp::audio::AudioProcessLoadSnapshot{};
 }
 
 void SignalGraph::set_live_dsp_telemetry_enabled(bool enabled) {
-    // Record the desired state so future recompiles seed their store from it, then
-    // flip the live snapshot's store immediately (atomic) so the toggle takes effect
-    // without waiting for a recompile. Pinning keeps the live snapshot alive for the
-    // store access; set_enabled touches only a relaxed atomic.
+    // Serialize the desired state + live reflection with snapshot publication.
+    // Otherwise a prepared transaction could read the new desired value while
+    // this call still updates the old snapshot, or publish a candidate seeded
+    // before this call. Pinning keeps the selected snapshot alive; the brief
+    // lock -> pin order is safe because release() must acquire this same lock
+    // before it can wait for readers.
+    GraphMutationLock mutation_lock(*this);
     desired_live_dsp_telemetry_enabled_.store(enabled, std::memory_order_relaxed);
     auto read_guard = live_slot_.read();
     if (auto* cg = read_guard.get()) {
@@ -1146,6 +1205,7 @@ SignalGraph::evaluate_optional_runtime_budget(
 
 void SignalGraph::invalidate_live_locked_() {
     assert_graph_mutation_locked_();
+    ++authoring_generation_;
     // During a swap-edit the OWNER thread's allow-set mutations must NOT
     // silence the live snapshot — it keeps playing the old compiled graph until
     // prepare_swap() atomically publishes the new one. Any other caller (a second
@@ -1310,17 +1370,13 @@ bool SignalGraph::build_routing_snapshot_locked_(
                 auto it = cg.plugins.find(id);
                 return it == cg.plugins.end() ? nullptr : it->second.get();
             },
-        // Each node's persistent CPU-load measurer, so routed execution reports
-        // the same node_loads() telemetry as the legacy walk. The measurers are
-        // insert-only and persist across snapshots; node_load_ was populated
-        // earlier in compile_. Lock the map's structure mutex (compile_ does not
-        // hold it) — a concurrent UI-thread node_loads() poll iterates under the
-        // same lock.
+        // The legacy runtime and routed binding must point at the exact same
+        // measurer. Resolve from this candidate snapshot rather than consulting
+        // an authoring-side map a second time (important for off-side edits).
         .load_for =
-            [this](NodeId id) -> audio::AudioProcessLoadMeasurer* {
-                std::lock_guard<std::mutex> node_load_lock(node_load_mu_);
-                auto it = node_load_.find(id);
-                return it == node_load_.end() ? nullptr : it->second.get();
+            [&cg](NodeId id) -> audio::AudioProcessLoadMeasurer* {
+                auto it = cg.runtime.find(id);
+                return it == cg.runtime.end() ? nullptr : it->second.load;
             },
         .custom_for =
             [&cg](NodeId id) -> const CustomNodeProcessFn* {
@@ -1403,7 +1459,15 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         // node_load_ only grows here, so the raw measurer pointer handed to the
         // audio thread via NodeRuntime::load stays valid across snapshot swaps.
         // Locked against a concurrent node_loads() poll on the UI thread.
-        {
+        if (prepared_edit_origin_ != nullptr) {
+            std::lock_guard<std::mutex> origin_load_lock(
+                prepared_edit_origin_->node_load_mu_);
+            const auto existing = prepared_edit_origin_->node_load_.find(n.id);
+            if (existing != prepared_edit_origin_->node_load_.end()) {
+                rt.load = existing->second.get();
+            }
+        }
+        if (rt.load == nullptr) {
             std::lock_guard<std::mutex> node_load_lock(node_load_mu_);
             auto& load_slot = node_load_[n.id];
             if (!load_slot) {
@@ -1728,7 +1792,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                          cg->routed.parallel.snapshot.buffer_assignment()
                              .connection_delay_samples);
             }
-            if (ok) {
+            if (ok && prepared_edit_origin_ == nullptr) {
                 // Start the persistent worker pool off the audio thread, ONCE.
                 // Hardware concurrency capped to a sane bound; participant 0 is
                 // the audio thread, so the pool spawns worker_count - 1 threads.
@@ -2006,6 +2070,12 @@ bool SignalGraph::preflight_locked_(int max_block_size) {
 }
 
 bool SignalGraph::prepare(double sample_rate, int max_block_size) {
+    return prepare_impl_(sample_rate, max_block_size, nullptr);
+}
+
+bool SignalGraph::prepare_impl_(
+    double sample_rate, int max_block_size,
+    const PrepareLifecycleObserver* lifecycle_observer) {
     // Serialize the ENTIRE prepare against concurrent control-thread mutators
     // (set_node_gain / add_*/remove_node, which all run on the UI thread). The
     // lock covers two distinct shared surfaces:
@@ -2023,6 +2093,7 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
     // mutex — set_node_gain() — releases the mutex before pinning, so this lock can
     // never invert order with the reader-drain handshake.
     GraphMutationLock mutation_lock(*this);
+    ++authoring_generation_;
 
     cancel_swap_edit_locked_();
 
@@ -2045,6 +2116,11 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
     prepared_plugin_meta_.clear();
     for (auto& n : nodes_) {
         if (n.plugin) {
+            if (lifecycle_observer != nullptr &&
+                lifecycle_observer->plugin_will_prepare != nullptr) {
+                lifecycle_observer->plugin_will_prepare(
+                    lifecycle_observer->context, n.plugin.get());
+            }
             if (!n.plugin->prepare(sample_rate, max_block_size)) {
                 runtime::log_error("SignalGraph: failed to prepare plugin '{}'", n.name);
                 return false;
@@ -2076,6 +2152,11 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
                 n.custom_state_pending = false;
             }
             if (type->prepare) {
+                if (lifecycle_observer != nullptr &&
+                    lifecycle_observer->custom_will_prepare != nullptr) {
+                    lifecycle_observer->custom_will_prepare(
+                        lifecycle_observer->context, n.custom_instance.get());
+                }
                 type->prepare(n.custom_instance.get(), sample_rate, max_block_size);
             }
         }
@@ -2196,6 +2277,7 @@ void SignalGraph::release() {
     // the pure-snapshot readers (inject_midi / extract_midi / node_latency_samples)
     // never take this mutex at all.
     GraphMutationLock mutation_lock(*this);
+    ++authoring_generation_;
 
     cancel_swap_edit_locked_();
 
@@ -2281,8 +2363,14 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
     // private nested struct (signal_graph.hpp) so the control-thread snapshot
     // readers can pin the same way.
     auto read_guard = live_slot_.read();
+    process_snapshot_impl(output, input, num_samples, transport, read_guard.get());
+}
 
-    auto* cg = read_guard.get();
+void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
+                                        const audio::BufferView<const float>& input,
+                                        int num_samples,
+                                        const format::ProcessContext* transport,
+                                        CompiledGraph* cg) {
     // Negative or zero block sizes mean "nothing to do" — return without
     // touching output (a memset with size_t(negative) wraps to a huge size).
     if (num_samples <= 0) return;
@@ -2290,6 +2378,8 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
         for (std::size_t c = 0; c < output.num_channels(); ++c)
             std::memset(output.channel_ptr(c), 0,
                         sizeof(float) * static_cast<size_t>(num_samples));
+        if (routed_only_execution_owners_.load(std::memory_order_relaxed) != 0)
+            routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
         return;
     }
 
@@ -2403,10 +2493,11 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                         }
                         const auto& injected =
                             rt_it->second.midi_input_mailbox->published.read();
+                        const auto sequence_seen =
+                            rt_it->second.midi_input_mailbox->sequence_seen.load(
+                                std::memory_order_relaxed);
                         if (injected.sequence != 0 &&
-                            injected.sequence !=
-                                rt_it->second.midi_input_mailbox->sequence_seen.load(
-                                    std::memory_order_relaxed)) {
+                            injected.sequence != sequence_seen) {
                             cg->routed.midi.set_out_incomplete(
                                 mi.plan_index, !injected.copy_to_midi(*out_buf));
                             mi.pending_seq = injected.sequence;
@@ -2421,7 +2512,8 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                     for (const auto& mi : cg->routed.midi_inputs) {
                         if (mi.pending_seq == 0) continue;
                         auto rt_it = cg->runtime.find(mi.id);
-                        if (rt_it != cg->runtime.end()) {
+                        if (rt_it != cg->runtime.end() &&
+                            rt_it->second.midi_input_mailbox) {
                             rt_it->second.midi_input_mailbox->sequence_seen.store(
                                 mi.pending_seq, std::memory_order_relaxed);
                         }
@@ -2567,7 +2659,8 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                 routed_eligible_dispatch_failed = true;  // eligible but did not route
             }
 
-            if (routed_eligible_dispatch_failed) {
+            if (routed_eligible_dispatch_failed &&
+                routed_only_execution_owners_.load(std::memory_order_relaxed) == 0) {
                 const std::uint64_t prev =
                     routed_walk_fallbacks_.fetch_add(1, std::memory_order_relaxed);
                 (void)prev;
@@ -2585,10 +2678,42 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
         // Any setup failure / disabled path falls through to the legacy walk.
     }
 
+    if (routed_only_execution_owners_.load(std::memory_order_relaxed) != 0) {
+        output.clear();
+        routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+
     // No routed path took this block — run the legacy serial reference walk,
     // the hand-maintained bit-exact oracle/fallback (see
     // signal_graph_reference_walk.cpp).
     run_reference_walk_(output, input, num_samples, cg);
+}
+
+bool SignalGraph::ExecutionSnapshot::inject_midi(
+    NodeId midi_input_node, const midi::MidiBuffer& events) const noexcept {
+    return snapshot_ != nullptr &&
+           SignalGraph::inject_midi_into_snapshot_(*snapshot_, midi_input_node, events);
+}
+
+void SignalGraph::ExecutionSnapshot::process(
+    audio::BufferView<float>& output, const audio::BufferView<const float>& input,
+    int num_samples) const noexcept {
+    if (owner_ == nullptr || snapshot_ == nullptr) {
+        if (num_samples > 0) output.clear();
+        return;
+    }
+    owner_->process_snapshot_impl(output, input, num_samples, nullptr, snapshot_.get());
+}
+
+void SignalGraph::ExecutionSnapshot::process(
+    audio::BufferView<float>& output, const audio::BufferView<const float>& input,
+    int num_samples, const format::ProcessContext& transport) const noexcept {
+    if (owner_ == nullptr || snapshot_ == nullptr) {
+        if (num_samples > 0) output.clear();
+        return;
+    }
+    owner_->process_snapshot_impl(output, input, num_samples, &transport, snapshot_.get());
 }
 
 void SignalGraph::clear() {
@@ -2620,6 +2745,7 @@ bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
         auto* n = node_mut_locked_(id);
         if (!n) return false;
         n->gain = linear_gain;
+        ++authoring_generation_;
     }
     // Pin the live snapshot around the load + the per-runtime gain store: this
     // UI-thread-owned API is not the prepare/release thread, so without the

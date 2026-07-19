@@ -257,6 +257,19 @@ A browser has no filesystem, so a plugin whose native build loads a file
 (`vw::FileChooser` → `set_ir_path`) needs a web equivalent. **Do not add a
 per-ABI entry point for it.** Go through the plugin's own state:
 
+- Pulp's bounded in-memory WAV decoder is portable core code, not a native
+  file-loader. `tools/cmake/PulpPortableWav.cmake` owns its shared sources and
+  include paths; both `PulpWam.cmake` and `PulpWclap.cmake` consume those lists.
+  Keep that shared manifest aligned with `core/audio/CMakeLists.txt` so native
+  and browser builds cannot silently diverge.
+
+- The timebase, timeline, and playback engines are part of both production DSP
+  builds. `PulpWam.cmake` and `PulpWclap.cmake` own their curated source lists,
+  compile them with `PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1`, and must stay in
+  lockstep with the native module lists. `web-timeline-source-closure` enforces
+  that source closure, and this workflow must trigger on changes to any engine
+  module or the bounded WAV decoder.
+
 - Both ABIs already expose the plugin's opaque state behind ONE `HostAdapter`
   call — WAM through `wam_state_size`/`wam_read_state`/`wam_write_state`, WebCLAP
   through the `clap.state` extension — and both produce the *same* `PLST` blob the

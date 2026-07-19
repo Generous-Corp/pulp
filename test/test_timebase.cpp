@@ -1,5 +1,8 @@
 #include <pulp/timebase/compiled_tempo_map.hpp>
+#include <pulp/timebase/compiled_meter_map.hpp>
 #include <pulp/timebase/quantize.hpp>
+
+#include "timebase_test_helpers.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -209,35 +212,177 @@ std::vector<LoopRange> split_loop_oracle(const CompiledTempoMap& map,
 
 } // namespace
 
+TEST_CASE("Editable tempo and meter maps reject malformed document values") {
+    const std::array invalid_tempo{TempoPoint{{0}, std::numeric_limits<double>::quiet_NaN()}};
+    const auto tempo = TempoMap::create(invalid_tempo);
+    REQUIRE_FALSE(tempo);
+    REQUIRE(tempo.error() == TempoMapError::InvalidBpm);
+
+    const std::array invalid_final_ramp{
+        TempoPoint{{0}, 120.0, TempoCurve::LinearInTicks}};
+    const auto final_ramp = TempoMap::create(invalid_final_ramp);
+    REQUIRE_FALSE(final_ramp);
+    REQUIRE(final_ramp.error() == TempoMapError::InvalidFinalCurve);
+
+    const std::array invalid_meter{MeterPoint{{0}, {4, 3}}};
+    const auto meter = MeterMap::create(invalid_meter);
+    REQUIRE_FALSE(meter);
+    REQUIRE(meter.error() == MeterMapError::InvalidSignature);
+}
+
+TEST_CASE("CompiledMeterMap converts exact zero-based bars ticks and discontinuities") {
+    constexpr auto bar_4_4 = 4 * kTicksPerQuarter;
+    const std::array points{
+        MeterPoint{{0}, {4, 4}},
+        MeterPoint{{2 * bar_4_4}, {3, 4}},
+    };
+    const auto editable = MeterMap::create(points);
+    REQUIRE(editable);
+    const auto compiled_result = CompiledMeterMap::compile(editable.value());
+    REQUIRE(compiled_result);
+    const auto& map = compiled_result.value();
+
+    REQUIRE(map.tick_to_bar({-1}) == BarTickPosition{{-1}, {bar_4_4 - 1}});
+    REQUIRE(map.tick_to_bar({2 * bar_4_4}) == BarTickPosition{{2}, {0}});
+    REQUIRE(map.bar_to_tick({2}) == TickPosition{2 * bar_4_4});
+    REQUIRE(map.bar_to_tick({3}, {17}) == TickPosition{2 * bar_4_4 + 3 * kTicksPerQuarter + 17});
+    REQUIRE(map.tick_to_bar(map.bar_to_tick({20}, {123})) == BarTickPosition{{20}, {123}});
+    REQUIRE(map.meter_at_tick({2 * bar_4_4 - 1}) == MeterSignature{4, 4});
+    REQUIRE(map.meter_at_tick({2 * bar_4_4}) == MeterSignature{3, 4});
+
+    const std::array off_boundary{
+        MeterPoint{{0}, {4, 4}}, MeterPoint{{bar_4_4 + 1}, {3, 4}}};
+    const auto rejected = CompiledMeterMap::compile(off_boundary);
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error() == MeterMapError::ChangeNotOnBarBoundary);
+}
+
+TEST_CASE("CompiledMeterMap is total and exact at the signed 64-bit boundaries") {
+    constexpr auto minimum = std::numeric_limits<std::int64_t>::min();
+    constexpr auto maximum = std::numeric_limits<std::int64_t>::max();
+    constexpr auto per_bar = 4 * kTicksPerQuarter;
+    const std::array points{MeterPoint{{0}, {4, 4}}};
+    const auto compiled = CompiledMeterMap::compile(points);
+    REQUIRE(compiled);
+    const auto& map = compiled.value();
+
+    auto minimum_bar = minimum / per_bar;
+    auto minimum_remainder = minimum % per_bar;
+    if (minimum_remainder < 0) {
+        --minimum_bar;
+        minimum_remainder += per_bar;
+    }
+    const auto maximum_bar = maximum / per_bar;
+    const auto maximum_remainder = maximum % per_bar;
+    REQUIRE(map.tick_to_bar({minimum}) ==
+            BarTickPosition{{minimum_bar}, {minimum_remainder}});
+    REQUIRE(map.tick_to_bar({maximum}) ==
+            BarTickPosition{{maximum_bar}, {maximum_remainder}});
+    REQUIRE(map.bar_to_tick({minimum_bar}, {minimum_remainder}) == TickPosition{minimum});
+    REQUIRE(map.bar_to_tick({maximum_bar}, {maximum_remainder}) == TickPosition{maximum});
+    REQUIRE(map.bar_to_tick({minimum}) == TickPosition{minimum});
+    REQUIRE(map.bar_to_tick({maximum}) == TickPosition{maximum});
+    REQUIRE(map.bar_to_tick({1}, {minimum}) == TickPosition{minimum + per_bar});
+    const std::array<std::int64_t, 11> boundary_ticks{
+        minimum, minimum + 1, -per_bar - 1, -per_bar, -1, 0,
+        1,       per_bar - 1, per_bar, maximum - 1, maximum};
+    for (const auto tick : boundary_ticks) {
+        const auto position = map.tick_to_bar({tick});
+        REQUIRE(position.tick_in_bar.value >= 0);
+        REQUIRE(position.tick_in_bar.value < per_bar);
+        REQUIRE(map.bar_to_tick(position.bar, position.tick_in_bar) == TickPosition{tick});
+    }
+
+    const std::array changed_points{
+        MeterPoint{{0}, {4, 4}}, MeterPoint{{per_bar}, {3, 4}}};
+    const auto changed = CompiledMeterMap::compile(changed_points);
+    REQUIRE(changed);
+    REQUIRE(changed->bar_to_tick({1}, {minimum}) == TickPosition{minimum + per_bar});
+    REQUIRE(changed->bar_to_tick({maximum}, {minimum}) == TickPosition{maximum});
+}
+
+TEST_CASE("TempoCursor matches cold lookup across ramps boundaries and discontinuities") {
+    const std::array points{
+        TempoPoint{{0}, 60.0, TempoCurve::LinearInTicks},
+        TempoPoint{{2 * kTicksPerQuarter}, 180.0, TempoCurve::Constant},
+        TempoPoint{{5 * kTicksPerQuarter}, 90.0, TempoCurve::LinearInTicks},
+        TempoPoint{{8 * kTicksPerQuarter}, 120.0, TempoCurve::Constant},
+    };
+    const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
+    TempoCursor cursor(map);
+    const auto end = map.ticks_to_samples({10 * kTicksPerQuarter}).value;
+    std::mt19937_64 random(0x435552534f52ULL);
+    std::uniform_int_distribution<std::int64_t> step(0, 4096);
+    std::int64_t sample = -10'000;
+    while (sample < end) {
+        const auto streaming = cursor.advance({sample});
+        const auto cold = map.resolve_sample({sample});
+        REQUIRE(streaming.tick == cold.tick);
+        REQUIRE(streaming.represented_sample == cold.represented_sample);
+        REQUIRE(streaming.absolute_error_samples == cold.absolute_error_samples);
+        REQUIRE(streaming.exact == cold.exact);
+        sample += step(random);
+    }
+
+    for (const auto discontinuity : {map.ticks_to_samples({7 * kTicksPerQuarter}),
+                                     map.ticks_to_samples({kTicksPerQuarter}),
+                                     map.ticks_to_samples({8 * kTicksPerQuarter})}) {
+        REQUIRE(cursor.advance(discontinuity).tick == map.resolve_sample(discontinuity).tick);
+    }
+}
+
+TEST_CASE("Tempo and meter compilation remain mathematically independent") {
+    const std::array tempos_a{TempoPoint{{0}, 60.0}};
+    const std::array tempos_b{TempoPoint{{0}, 240.0}};
+    const auto tempo_a = require_compiled_tempo_map(tempos_a, RationalRate{48'000, 1});
+    const auto tempo_b = require_compiled_tempo_map(tempos_b, RationalRate{48'000, 1});
+    const std::array meters_a{MeterPoint{{0}, {4, 4}}};
+    const std::array meters_b{MeterPoint{{0}, {7, 8}}};
+    const auto meter_a = CompiledMeterMap::compile(meters_a);
+    const auto meter_b = CompiledMeterMap::compile(meters_b);
+    REQUIRE(meter_a);
+    REQUIRE(meter_b);
+
+    REQUIRE(tempo_a.ticks_to_samples({kTicksPerQuarter}) == SamplePosition{48'000});
+    REQUIRE(tempo_b.ticks_to_samples({kTicksPerQuarter}) == SamplePosition{12'000});
+    REQUIRE(meter_a->bar_to_tick({1}) == TickPosition{4 * kTicksPerQuarter});
+    REQUIRE(meter_b->bar_to_tick({1}) == TickPosition{7 * kTicksPerQuarter / 2});
+}
+
 TEST_CASE("CompiledTempoMap validates its immutable input") {
-    REQUIRE_THROWS_AS(CompiledTempoMap(std::span<const TempoPoint>{}, {48'000, 1}),
-                      std::invalid_argument);
+    auto empty = CompiledTempoMap::compile(std::span<const TempoPoint>{}, {48'000, 1});
+    REQUIRE_FALSE(empty);
+    REQUIRE(empty.error() == TempoMapError::Empty);
     const std::array valid_point{TempoPoint{{0}, 120.0}};
-    REQUIRE_THROWS_AS(CompiledTempoMap(valid_point, {0, 1}), std::invalid_argument);
+    auto invalid_rate = CompiledTempoMap::compile(valid_point, {0, 1});
+    REQUIRE_FALSE(invalid_rate);
+    REQUIRE(invalid_rate.error() == TempoMapError::InvalidSampleRate);
     const std::array missing_zero{TempoPoint{{1}, 120.0}};
-    REQUIRE_THROWS_AS(CompiledTempoMap(missing_zero, {48'000, 1}), std::invalid_argument);
+    auto missing = CompiledTempoMap::compile(missing_zero, {48'000, 1});
+    REQUIRE_FALSE(missing);
+    REQUIRE(missing.error() == TempoMapError::MissingTickZero);
     const std::array unordered{TempoPoint{{0}, 120.0}, TempoPoint{{0}, 130.0}};
-    REQUIRE_THROWS_AS(CompiledTempoMap(unordered, {48'000, 1}), std::invalid_argument);
+    auto disorder = CompiledTempoMap::compile(unordered, {48'000, 1});
+    REQUIRE_FALSE(disorder);
+    REQUIRE(disorder.error() == TempoMapError::UnorderedPoints);
     const std::array cumulative_overflow{
         TempoPoint{{0}, 1.0},
         TempoPoint{{100'000'000'000'000'000}, 1.0},
         TempoPoint{{200'000'000'000'000'000}, 1.0},
     };
-    REQUIRE_THROWS_AS(CompiledTempoMap(cumulative_overflow, {768'000, 1}),
-                      std::invalid_argument);
+    REQUIRE_FALSE(CompiledTempoMap::compile(cumulative_overflow, {768'000, 1}));
     const std::array rounded_duration_overflow{
         TempoPoint{{0}, 60.0},
         TempoPoint{{std::numeric_limits<std::int64_t>::max()}, 60.0},
     };
-    REQUIRE_THROWS_AS(
-        CompiledTempoMap(rounded_duration_overflow,
-                         {18'446'744'073'709'224'001ULL, 26'143'344'775'665ULL}),
-        std::invalid_argument);
+    REQUIRE_FALSE(CompiledTempoMap::compile(
+        rounded_duration_overflow,
+        {18'446'744'073'709'224'001ULL, 26'143'344'775'665ULL}));
 }
 
 TEST_CASE("CompiledTempoMap reports nearest representation on a sparse tick grid") {
     const std::array points{TempoPoint{{0}, 1.0}};
-    const CompiledTempoMap map(points, {48'000, 1});
+    const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
 
     REQUIRE(map.ticks_to_samples({0}) == SamplePosition{0});
     REQUIRE(map.ticks_to_samples({1}) == SamplePosition{4});
@@ -247,7 +392,7 @@ TEST_CASE("CompiledTempoMap reports nearest representation on a sparse tick grid
     REQUIRE(result.absolute_error_samples == 2);
 
     const std::array sparse_points{TempoPoint{{0}, 1.0}};
-    const CompiledTempoMap sparse_map(sparse_points, {192'000, 1});
+    const auto sparse_map = require_compiled_tempo_map(sparse_points, RationalRate{192'000, 1});
     const auto samples_per_tick = 192'000.0L * 60.0L / static_cast<long double>(kTicksPerQuarter);
     const auto nearest_error_bound =
         static_cast<std::uint64_t>(std::floor(std::ceil(samples_per_tick) / 2.0L));
@@ -262,7 +407,7 @@ TEST_CASE("CompiledTempoMap reports nearest representation on a sparse tick grid
 
 TEST_CASE("CompiledTempoMap reports saturation outside the tick domain") {
     const std::array points{TempoPoint{{0}, 1'000.0}};
-    const CompiledTempoMap map(points, {44'100, 1});
+    const auto map = require_compiled_tempo_map(points, RationalRate{44'100, 1});
 
     const auto in_range = map.resolve_sample({0});
     REQUIRE(in_range.exact);
@@ -296,7 +441,7 @@ TEST_CASE("CompiledTempoMap reports saturation outside the tick domain") {
 
 TEST_CASE("CompiledTempoMap canonicalizes saturated sample-domain edges") {
     const std::array points{TempoPoint{{0}, 1.0}};
-    const CompiledTempoMap map(points, {48'000, 1});
+    const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
     constexpr auto minimum = std::numeric_limits<std::int64_t>::min();
     constexpr auto maximum = std::numeric_limits<std::int64_t>::max();
 
@@ -327,7 +472,7 @@ TEST_CASE("CompiledTempoMap adds rounded segment durations in the integer domain
         TempoPoint{{large_tick}, 1'000.0, TempoCurve::Constant},
         TempoPoint{{large_tick + 15}, 1'000.0, TempoCurve::Constant},
     };
-    const CompiledTempoMap map(points, {768'000, 1});
+    const auto map = require_compiled_tempo_map(points, RationalRate{768'000, 1});
     const auto first_anchor = map.ticks_to_samples({large_tick});
     const auto second_anchor = map.ticks_to_samples({large_tick + 15});
 
@@ -342,7 +487,7 @@ TEST_CASE("CompiledTempoMap keeps exact integer anchors across constant segments
         TempoPoint{{4 * kTicksPerQuarter}, 90.0, TempoCurve::Constant},
         TempoPoint{{8 * kTicksPerQuarter}, 150.0, TempoCurve::Constant},
     };
-    const CompiledTempoMap map(points, {48'000, 1});
+    const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
 
     REQUIRE(map.ticks_to_samples({0}) == SamplePosition{0});
     REQUIRE(map.ticks_to_samples({4 * kTicksPerQuarter}) == SamplePosition{96'000});
@@ -371,7 +516,7 @@ TEST_CASE("CompiledTempoMap analytically integrates and inverts linear tick ramp
         TempoPoint{{8 * kTicksPerQuarter}, 180.0, TempoCurve::LinearInTicks},
         TempoPoint{{16 * kTicksPerQuarter}, 90.0, TempoCurve::Constant},
     };
-    const CompiledTempoMap map(points, {48'000, 1});
+    const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
 
     const auto first_boundary = map.ticks_to_samples({8 * kTicksPerQuarter});
     const auto second_boundary = map.ticks_to_samples({16 * kTicksPerQuarter});
@@ -445,7 +590,7 @@ TEST_CASE("CompiledTempoMap randomized maps cover rates ramps boundaries and lar
             points.back().curve_to_next = TempoCurve::Constant;
 
             const auto oracle = make_oracle(points, rates[rate_index]);
-            const CompiledTempoMap map(points, rates[rate_index]);
+            const auto map = require_compiled_tempo_map(points, rates[rate_index]);
             std::uint64_t range_index = 0;
             const auto run_range = [&](std::int64_t minimum_tick, std::int64_t maximum_tick,
                                        int cases) {
@@ -525,7 +670,7 @@ TEST_CASE("CompiledTempoMap resolves quantized MonotonicBeat launches at exact s
                     TempoPoint{{0}, start_tempo, TempoCurve::LinearInTicks},
                     TempoPoint{{16 * kTicksPerQuarter}, end_tempo, TempoCurve::Constant},
                 };
-                const CompiledTempoMap map(points, {48'000, 1});
+                const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
                 for (const auto phase : phases) {
                     const auto block_start = map.ticks_to_samples({phase});
                     for (const auto request : {std::int64_t{0}, frames / 3,
@@ -542,7 +687,7 @@ TEST_CASE("CompiledTempoMap resolves quantized MonotonicBeat launches at exact s
 
     SECTION("negative preroll launches ceil toward the next signed grid boundary") {
         const std::array points{TempoPoint{{0}, 120.0}};
-        const CompiledTempoMap map(points, {48'000, 1});
+        const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
         for (const auto phase : {-2 * quantum.value - 1, -quantum.value - 1,
                                  -quantum.value + 1, std::int64_t{-1}}) {
             const auto block_start = map.ticks_to_samples({phase});
@@ -565,7 +710,7 @@ TEST_CASE("CompiledTempoMap projects at most one loop wrap into two exact ranges
                     TempoPoint{{0}, start_tempo, TempoCurve::LinearInTicks},
                     TempoPoint{{16 * kTicksPerQuarter}, end_tempo, TempoCurve::Constant},
                 };
-                const CompiledTempoMap map(points, {48'000, 1});
+                const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
                 const auto nominal_ticks_per_frame = static_cast<std::int64_t>(
                     std::ceil(start_tempo * static_cast<double>(kTicksPerQuarter) /
                               (48'000.0 * 60.0)));
@@ -589,7 +734,7 @@ TEST_CASE("CompiledTempoMap projects at most one loop wrap into two exact ranges
 
     SECTION("a callback spanning more than one wrap fails closed") {
         const std::array points{TempoPoint{{0}, 1'000.0}};
-        const CompiledTempoMap map(points, {48'000, 1});
+        const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
         constexpr TickDuration tiny_loop{1'000};
         const auto block_start = map.ticks_to_samples({tiny_loop.value - 1});
         REQUIRE(split_loop_oracle(map, block_start, 16, tiny_loop).empty());
@@ -598,7 +743,7 @@ TEST_CASE("CompiledTempoMap projects at most one loop wrap into two exact ranges
 
     SECTION("negative preroll ranges use floor cycles and non-negative loop positions") {
         const std::array points{TempoPoint{{0}, 120.0}};
-        const CompiledTempoMap map(points, {48'000, 1});
+        const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
         const std::array<std::int64_t, 4> phases{-2 * loop_length.value - 100,
                                                  -loop_length.value - 100,
                                                  -loop_length.value + 100,
@@ -622,7 +767,7 @@ TEST_CASE("CompiledTempoMap preserves MonotonicBeat over variable callbacks") {
         TempoPoint{{0}, 70.0, TempoCurve::LinearInTicks},
         TempoPoint{{16 * kTicksPerQuarter}, 220.0, TempoCurve::Constant},
     };
-    const CompiledTempoMap map(points, {48'000, 1});
+    const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
     const std::array<std::int64_t, 12> blocks{1, 17, 64, 3, 255, 7,
                                               512, 31, 2, 127, 9, 1024};
     SamplePosition block_start{0};

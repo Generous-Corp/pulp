@@ -13,6 +13,7 @@ target_sources(pulp-host PRIVATE
     src/signal_graph.cpp
     src/signal_graph_reference_walk.cpp
     src/signal_graph_live_swap.cpp
+    src/signal_graph_prepared_topology_edit.cpp
     src/offline_signal_graph_host.cpp
     src/plugin_slot.cpp
     src/graph_serializer.cpp
@@ -28,9 +29,10 @@ target_sources(pulp-host PRIVATE
     src/anticipation_partition.cpp
     src/anticipation_subgraph.cpp
     src/anticipation_lane.cpp
+    src/timeline_graph_binding.cpp
 )
 
-target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::runtime pulp::state)
+target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::playback pulp::runtime pulp::state)
 target_link_libraries(pulp-host PUBLIC pulp::native-components)
 target_link_libraries(pulp-host PRIVATE pulp::platform)
 # node_pack.cpp dlopen()s signed node packs (desktop + Android). iOS never builds

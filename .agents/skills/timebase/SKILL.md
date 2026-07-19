@@ -1,6 +1,6 @@
 ---
 name: timebase
-description: Pulp musical/media time primitives, immutable compiled tempo maps, monotonic transport beats, exact sample anchors, corrected inverse conversion, and shared transport quantization arithmetic.
+description: Pulp musical/media time primitives, editable tempo and meter maps, immutable compiled lookup, streaming cursors, exact sample anchors, and shared transport quantization arithmetic.
 ---
 
 # Timebase
@@ -14,7 +14,12 @@ quantizer's beat/frame arithmetic.
   integer `TickPosition`; samples use integer `SamplePosition`. Tick-position,
   duration, and `MonotonicBeat` arithmetic saturates at the signed 64-bit
   endpoints; it must not invoke signed-overflow UB.
-- `CompiledTempoMap` is immutable and sample-rate-specific. Its first tempo point
+- `TempoMap` and `MeterMap` are editable document values built through
+  nonthrowing factories. Their first point is tick zero and points are strictly
+  ordered. Meter changes must compile on exact preceding bar boundaries.
+- `CompiledTempoMap` is immutable and sample-rate-specific. Construct it only
+  through `CompiledTempoMap::compile()` and handle `TempoMapError`; public
+  throwing construction is forbidden. Its first tempo point
   is tick zero, points are strictly ordered, and BPM is finite in `[1, 1000]`.
 - Tempo ramps are BPM-linear in tick position. Integrate them analytically; do not
   approximate ramps block-by-block or accumulate floating-point deltas.
@@ -25,6 +30,14 @@ quantizer's beat/frame arithmetic.
   `absolute_error_samples`, and `exact`; the nearest tick is returned.
 - Arbitrary tick -> sample -> tick cannot be identity because many ticks share an
   integer sample. Test monotonicity and canonical-sample preservation instead.
+- `TempoCursor` is the allocation-free playback path. Monotonic sample advances
+  consume segment transitions once (amortized O(1)); seeks and loop wraps reset
+  it explicitly. Differential tests must match cold-map canonical results.
+- `CompiledMeterMap` uses zero-based bars and exact integer bar/tick conversion.
+  Tempo changes never affect bar conversion and meter changes never affect
+  tick/sample conversion. Conversion is total across `INT64_MIN..INT64_MAX`:
+  exact results are returned when representable and out-of-range results
+  saturate without signed-overflow UB.
 - Keep `TransportQuantizer`'s public behavior stable. Generic beat/frame/grid
   arithmetic belongs in `<pulp/timebase/quantize.hpp>` and the format wrapper
   delegates to it.
@@ -37,4 +50,4 @@ randomized constant/ramp cases, plus tempo-point boundary cases.
 
 `MonotonicBeat` is the strong type for the transport's non-looping musical
 clock; the transport owns how it advances while timeline positions seek or
-wrap. `MeterMap` is not part of the initial module.
+wrap.

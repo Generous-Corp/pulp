@@ -42,7 +42,7 @@ set(PULP_SDK_SMOKE_REQUIRE_FORMATS ""
 find_package(Pulp REQUIRED CONFIG)
 
 foreach(_pulp_alias_target
-        audio dsl events format host signal signal-modal-spec state timebase view standalone gpu-audio)
+        audio dsl events format host playback signal signal-modal-spec state timebase timeline view standalone gpu-audio)
     if(TARGET "Pulp::${_pulp_alias_target}"
        AND NOT TARGET "pulp::${_pulp_alias_target}")
         message(FATAL_ERROR
@@ -59,14 +59,20 @@ if(NOT TARGET Pulp::timebase)
     message(FATAL_ERROR
         "Pulp SDK smoke: installed SDK does not expose Pulp::timebase")
 endif()
+get_target_property(_pulp_timebase_features Pulp::timebase INTERFACE_COMPILE_FEATURES)
+if(NOT "cxx_std_20" IN_LIST _pulp_timebase_features)
+    message(FATAL_ERROR
+        "Pulp SDK smoke: Pulp::timebase does not propagate cxx_std_20")
+endif()
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/timebase_export_probe.cpp"
 "#include <pulp/timebase/compiled_tempo_map.hpp>\n"
 "\n"
 "int main() {\n"
 "    const pulp::timebase::TempoPoint point{{0}, 120.0};\n"
-"    const pulp::timebase::CompiledTempoMap map(\n"
+"    auto compiled = pulp::timebase::CompiledTempoMap::compile(\n"
 "        std::span<const pulp::timebase::TempoPoint>(&point, 1), {48'000, 1});\n"
-"    return map.ticks_to_samples({pulp::timebase::kTicksPerQuarter}).value == 24'000\n"
+"    return compiled && compiled->ticks_to_samples(\n"
+"        {pulp::timebase::kTicksPerQuarter}).value == 24'000\n"
 "        ? 0 : 1;\n"
 "}\n")
 add_executable(PulpSDKSmokeTimebaseProbe
@@ -89,6 +95,78 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/wav_decoder_export_probe.cpp"
 add_executable(PulpSDKSmokeWavDecoderProbe
     "${CMAKE_CURRENT_BINARY_DIR}/wav_decoder_export_probe.cpp")
 target_link_libraries(PulpSDKSmokeWavDecoderProbe PRIVATE Pulp::audio)
+
+if(NOT TARGET Pulp::playback)
+    message(FATAL_ERROR
+        "Pulp SDK smoke: installed SDK does not expose Pulp::playback")
+endif()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/playback_export_probe.cpp"
+"#include <pulp/playback/program_compiler.hpp>\n"
+"#include <pulp/playback/stable_renderer_shell.hpp>\n"
+"#include <pulp/playback/transport.hpp>\n"
+"#include <pulp/timebase/compiled_tempo_map.hpp>\n"
+"#include <array>\n"
+"\n"
+"int main() {\n"
+"    const std::array points{pulp::timebase::TempoPoint{{0}, 120.0}};\n"
+"    auto compiled = pulp::timebase::CompiledTempoMap::compile(points, {48'000, 1});\n"
+"    if (!compiled) return 1;\n"
+"    const auto& map = compiled.value();\n"
+"    pulp::playback::PlaybackProgramStore program_store;\n"
+"    pulp::playback::DeferredCompileExecutor compile_executor;\n"
+"    pulp::playback::PlaybackProgramCompiler compiler(\n"
+"        program_store, compile_executor, std::chrono::microseconds(0));\n"
+"    pulp::playback::PlaybackProgramBlockLatch latch;\n"
+"    (void)latch;\n"
+"    pulp::playback::MasterTransport transport;\n"
+"    const auto error = transport.prepare(map, {.max_buffer_size = 64});\n"
+"    pulp::playback::TransportSnapshot snapshot;\n"
+"    return error == pulp::playback::TransportError::None &&\n"
+"                   transport.begin_block(64, snapshot) ==\n"
+"                       pulp::playback::TransportError::None\n"
+"               ? 0 : 1;\n"
+"}\n")
+add_executable(PulpSDKSmokePlaybackProbe
+    "${CMAKE_CURRENT_BINARY_DIR}/playback_export_probe.cpp")
+target_link_libraries(PulpSDKSmokePlaybackProbe PRIVATE Pulp::playback)
+
+if(NOT TARGET Pulp::timeline)
+    message(FATAL_ERROR
+        "Pulp SDK smoke: installed SDK does not expose Pulp::timeline")
+endif()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/timeline_export_probe.cpp"
+"#include <pulp/timeline/command.hpp>\n"
+"#include <pulp/timeline/document_session.hpp>\n"
+"#include <pulp/timeline/journal.hpp>\n"
+"#include <pulp/timeline/model.hpp>\n"
+"#include <pulp/timeline/transaction.hpp>\n"
+"#include <pulp/timeline/undo.hpp>\n"
+"#include <pulp/timeline/serialize.hpp>\n"
+"\n"
+"int main() {\n"
+"    using namespace pulp::timeline;\n"
+"    auto track = Track::create({3}, \"track\", {});\n"
+"    if (!track) return 1;\n"
+"    auto sequence = Sequence::create({2}, \"sequence\", std::nullopt,\n"
+"                                     {std::move(track).value()});\n"
+"    if (!sequence) return 2;\n"
+"    auto project = Project::create({{1}, \"project\", 4, {2}, {},\n"
+"                                    {std::move(sequence).value()}});\n"
+"    if (!project) return 3;\n"
+"    SetTempoMap tempo_edit{project->tempo_map(), project->tempo_map()};\n"
+"    SetMeterMap meter_edit{project->meter_map(), project->meter_map()};\n"
+"    if (!equivalent(Command{tempo_edit}, Command{tempo_edit}) ||\n"
+"        !equivalent(Command{meter_edit}, Command{meter_edit})) return 7;\n"
+"    auto session = DocumentSession::create(std::move(project).value());\n"
+"    if (!session) return 4;\n"
+"    auto registry = make_builtin_timeline_registry();\n"
+"    if (!registry) return 5;\n"
+"    auto serialized = serialize_project(*session.value()->snapshot(), registry.value());\n"
+"    return serialized ? 0 : 6;\n"
+"}\n")
+add_executable(PulpSDKSmokeTimelineProbe
+    "${CMAKE_CURRENT_BINARY_DIR}/timeline_export_probe.cpp")
+target_link_libraries(PulpSDKSmokeTimelineProbe PRIVATE Pulp::timeline)
 
 # Installed host/state/dsl header + link probe. These targets were exported
 # before all of their public headers were reliably copied into the SDK, so a
@@ -162,6 +240,19 @@ if(TARGET Pulp::signal)
     add_executable(PulpSDKSmokeSignalCxx20Probe
         "${CMAKE_CURRENT_BINARY_DIR}/signal_cxx20_export_probe.cpp")
     target_link_libraries(PulpSDKSmokeSignalCxx20Probe PRIVATE Pulp::signal)
+endif()
+
+if(TARGET Pulp::timeline)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/timeline_cxx20_export_probe.cpp"
+"#include <pulp/timeline/model.hpp>\n"
+"\n"
+"int main() {\n"
+"    constexpr pulp::timeline::ClipPlaybackProperties properties;\n"
+"    return properties == pulp::timeline::ClipPlaybackProperties{} ? 0 : 1;\n"
+"}\n")
+    add_executable(PulpSDKSmokeTimelineCxx20Probe
+        "${CMAKE_CURRENT_BINARY_DIR}/timeline_cxx20_export_probe.cpp")
+    target_link_libraries(PulpSDKSmokeTimelineCxx20Probe PRIVATE Pulp::timeline)
 endif()
 
 set(PULP_SDK_SMOKE_FORMATS)

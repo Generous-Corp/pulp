@@ -617,6 +617,58 @@ does not contain crashes in deeper plug-in code.
   thread, don't recompute per block.
 - Removing a node invalidates its `NodeId`. Connections referencing a
   removed node are pruned automatically.
+- For fail-closed structural publication while audio remains live, use
+  `begin_prepared_topology_edit()` instead of mutating the owner eagerly. Build
+  the complete candidate through its `PreparedTopologyEdit`, call
+  `prepare(sample_rate, max_block_size)`, verify
+  `routed_execution_ready(max_block_size)` when the caller holds a routed-only
+  lease, then `commit()`. A failed mutation poisons the one-shot edit, and
+  destroying it before commit rolls back topology, private connection IDs,
+  next IDs, the custom registry, routing flags, and the compiled snapshot.
+  Existing `PluginSlot`s are never re-prepared off-side; dimension changes are
+  accepted only without plugin nodes and when every retained custom type has
+  neither `prepare` nor `release`. New edit-owned custom instances may be
+  prepared. Unchanged PDC rings carry by private connection identity plus equal
+  shape in the same execution domain; removed rings retire, while new,
+  reshaped, or reconnected rings start fresh. Preserve connection identity for
+  unchanged owned routes and prune unused generated custom types in the same
+  edit so registry churn stays bounded. `MidiInput` ingress may carry through
+  its shared sequence mailbox, but `MidiOutput` egress is snapshot-local so an
+  old snapshot can expose its pending output exactly once. A prepared edit
+  returns `MidiOutputSnapshotLocalRequired` before callbacks whenever either
+  the live or candidate graph contains a `MidiOutput`; do not adopt or share
+  that output mailbox. Baseline plugin removal, and baseline custom removal
+  when its registered type has `release`, are also explicit fail-closed
+  results: ordinary graph release remains the only lifecycle-callback owner.
+  Commit's exception boundary is before authoring mutation: preflight the
+  generic live `runtime::Slot` retirement capacity and reserve destination
+  `node_load_` buckets first. After every failure gate, transfer load measurers
+  with C++17 unordered-map node handles (matching integral hash/equality and
+  allocator), move the authoring containers, and call the Slot's noexcept
+  prepared publication. Never put an allocating `emplace` or ordinary
+  `Slot::publish` after that boundary.
+  `set_live_dsp_telemetry_enabled()` is a control-thread operation serialized
+  by the graph mutation lock: a prepared commit re-seeds its snapshot from the
+  owner's authoritative desired toggle immediately before publication. Do not
+  move the toggle outside that lock or restore the candidate's creation-time
+  value; either change can update the retired snapshot while publishing stale
+  telemetry state.
+  A caller that has stopped audio processing and anticipation may instead use
+  `prepare_quiesced()` for a dimension change involving external plugins or
+  retained custom instances. Candidate preparation can touch those shared
+  lifecycle objects, so *every non-commit exit* — candidate failure, routed
+  rejection, commit rejection, exception, or simple edit destruction — must
+  restore each retained object whose candidate prepare callback was entered
+  before the old snapshot resumes. Track entry immediately before invoking user
+  code: candidate preflight can fail before every callback, and plugin/custom
+  preparation can stop midway. On an unprepared base, releasing an untouched
+  retained object is an unbalanced lifecycle call just as surely as failing to
+  release a touched one. A successful candidate prepare is not ownership
+  transfer; only a successful commit cancels that rollback obligation. If
+  restoration fails, the graph deliberately unpublishes and reports
+  `QuiescedRollbackFailed`; a coupled binding must unpublish too. Never resume a
+  partially restored graph. New custom instances created before a later prepare
+  failure still require their control-thread `release` callback.
 - Per-node CPU load: `process()` wraps each node's work in a persistent
   per-node `audio::AudioProcessLoadMeasurer` (keyed by `NodeId` in
   `node_load_`), read via `node_loads()`. The measurers live on the
@@ -932,6 +984,15 @@ rules:
   writes a gain. What is immutable is the *topology*. `Slot::ReadGuard::get()`
   therefore hands back a mutable `T*`; a genuinely read-only publication says so
   in the type (`Slot<const T>`).
+- **Pin the exact committed generation when publications are coupled.**
+  `ExecutionSnapshot` is a strong handle to one specific compiled graph, and its
+  MIDI injection and `process()` methods never redirect to a newer live graph.
+  `TimelineGraphBinding` publishes that handle together with its immutable
+  playback program and bound track renderers as one `runtime::Slot` generation.
+  Topology and content adoption must replace that one generation; independently
+  latching the program store or looking up the graph's current live snapshot can
+  produce a mixed old/new audio block. As with ordinary graph processing, only
+  one audio thread may process these mutable execution snapshots at a time.
 - **Read it, don't reach for it.** Anything that dereferences the snapshot off
   the prepare/release thread must hold a pin for the whole dereference:
   `auto pin = live_slot_.read(); if (auto* cg = pin.get()) { ... }`. That

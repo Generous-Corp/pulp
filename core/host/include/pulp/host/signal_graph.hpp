@@ -38,6 +38,7 @@
 #include <mutex>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <string>
 #include <string_view>
 #include <cstdint>
@@ -290,6 +291,9 @@ struct GraphNode {
 
 class SignalGraph : public format::AudioWorkgroupClient {
 public:
+    class PreparedTopologyEdit;
+    class ExecutionSnapshot;
+
     struct GraphLimits {
         std::size_t max_nodes = 4096;
         std::size_t max_connections = 16384;
@@ -522,6 +526,13 @@ public:
     // Lifecycle
     bool prepare(double sample_rate, int max_block_size);
 
+    // Begin an isolated topology transaction. The returned edit owns a private
+    // authoring graph and custom-type registry; its mutations never invalidate
+    // this graph's live snapshot. prepare() compiles that candidate off-side and
+    // commit() installs the authoring graph and compiled snapshot together.
+    // Destroying an uncommitted edit is a complete rollback.
+    std::unique_ptr<PreparedTopologyEdit> begin_prepared_topology_edit();
+
     // Live swap transaction outcomes.
     enum class SwapResult {
         Swapped,           // the new topology was published with no silent block.
@@ -616,6 +627,7 @@ public:
     // a topology recompile (a new topology is a new timing baseline). Per-node
     // timing is recorded on the legacy reference-walk path (the default when routed
     // dispatch is off); routed-executor blocks still contribute graph-level timing.
+    // Control/UI thread only; serialized with snapshot publication.
     void set_live_dsp_telemetry_enabled(bool enabled);
     bool live_dsp_telemetry_enabled() const;
     // Drain the live snapshot's ring and return a copy of the latest summary.
@@ -665,6 +677,51 @@ public:
     // Opaque keepalive for the live compiled snapshot so a translated routing
     // can pin the lifetime of the gain atomics + plugin slots it references.
     std::shared_ptr<const void> live_snapshot_handle() const noexcept;
+
+    /// Control-thread view of the actual routed paths embedded in the live
+    /// compiled snapshot. Unlike topology eligibility, this reports whether
+    /// snapshot construction and its fixed scratch pools both succeeded for the
+    /// requested block size.
+    struct RoutedExecutionStatus {
+        bool prepared = false;
+        bool serial_selected = false;
+        bool serial_snapshot_valid = false;
+        bool serial_pool_fits = false;
+        bool parallel_selected = false;
+        bool parallel_snapshot_valid = false;
+        bool parallel_pool_fits = false;
+        bool worker_pool_running = false;
+        bool reference_walk_permitted = true;
+
+        constexpr bool routed_path_ready() const noexcept {
+            const bool serial_ready =
+                serial_selected && serial_snapshot_valid && serial_pool_fits;
+            const bool parallel_ready = parallel_selected && parallel_snapshot_valid &&
+                                        parallel_pool_fits && worker_pool_running;
+            return prepared && (serial_ready || parallel_ready);
+        }
+        constexpr bool strict_routed_ready() const noexcept {
+            return routed_path_ready() && !reference_walk_permitted;
+        }
+    };
+    RoutedExecutionStatus routed_execution_status(int block_size) const noexcept;
+    std::uint64_t routed_only_execution_failures() const noexcept {
+        return routed_only_execution_failures_.load(std::memory_order_relaxed);
+    }
+
+    /// Require compiled routed execution while at least one owner holds a lease.
+    /// If no prepared routed path can process a block, process() clears output
+    /// instead of entering the legacy reference walk. Control-thread only.
+    void acquire_routed_only_execution() noexcept {
+        routed_only_execution_owners_.fetch_add(1, std::memory_order_relaxed);
+    }
+    void release_routed_only_execution() noexcept {
+        auto owners = routed_only_execution_owners_.load(std::memory_order_relaxed);
+        while (owners != 0 && !routed_only_execution_owners_.compare_exchange_weak(
+                                  owners, owners - 1, std::memory_order_relaxed)) {
+        }
+        assert(owners != 0 && "unbalanced routed-only execution lease");
+    }
 
     // Controls whether the audio callback drives the canonical
     // GraphRuntimeExecutor when the live snapshot is executor-eligible. Default
@@ -881,7 +938,17 @@ public:
     // the node is not a Plugin or has no slot).
     float get_node_parameter(NodeId id, uint32_t param_id) const;
 
+    // Control-thread diagnostic for transactional registry-GC tests and hosts
+    // that generate short-lived custom types.
+    std::size_t custom_node_type_count() const;
+
 private:
+    friend class ExecutionSnapshot;
+    struct PrepareLifecycleObserver {
+        void* context = nullptr;
+        void (*plugin_will_prepare)(void*, PluginSlot*) noexcept = nullptr;
+        void (*custom_will_prepare)(void*, void*) noexcept = nullptr;
+    };
     struct MidiBlockSnapshot {
         MidiBlockSnapshot();
         MidiBlockSnapshot(const MidiBlockSnapshot& other);
@@ -1252,6 +1319,9 @@ private:
     // the custom registry changed (M6 — prevents binding new callbacks to
     // instances the old factory built). Guarded by graph_mutation_mutex_.
     std::uint64_t custom_registry_generation_{0};
+    // Invalidates an outstanding PreparedTopologyEdit when any direct authoring
+    // or lifecycle operation touches this graph. Guarded by graph_mutation_mutex_.
+    std::uint64_t authoring_generation_{0};
     NodeId next_id_ = 1;
     GraphLimits limits_;
 
@@ -1327,6 +1397,11 @@ private:
     std::atomic<bool> parallel_routing_enabled_{false};
     std::atomic<bool> anticipation_enabled_{false};
 
+    // Non-null only on the private shadow graph owned by PreparedTopologyEdit.
+    // compile_ uses the origin's persistent load measurers for unchanged nodes
+    // and keeps newly allocated measurers local until commit transfers them.
+    SignalGraph* prepared_edit_origin_{nullptr};
+
     // 2.2b swap-edit transaction state (guarded by graph_mutation_mutex_).
     // in_swap_edit_ is set between begin_swap_edit() and prepare_swap()/
     // abort_swap_edit(); swap_edit_owner_ is the thread that opened it. While set,
@@ -1343,6 +1418,8 @@ private:
     // See routed_walk_fallbacks(): incremented when an eligible routed path failed
     // dispatch and process() fell back to the walk. Audio-thread writer only.
     std::atomic<std::uint64_t> routed_walk_fallbacks_{0};
+    std::atomic<std::uint32_t> routed_only_execution_owners_{0};
+    std::atomic<std::uint64_t> routed_only_execution_failures_{0};
     // See transport_suppressed_for_anticipation(): set by compile_() to the count
     // of transport-sensitive nodes that active anticipation forced exterior
     // (excluded from the ahead-rendered interior so they observe the live
@@ -1536,6 +1613,13 @@ private:
                       const audio::BufferView<const float>& input,
                       int num_samples,
                       const format::ProcessContext* transport);
+    void process_snapshot_impl(audio::BufferView<float>& output,
+                               const audio::BufferView<const float>& input,
+                               int num_samples,
+                               const format::ProcessContext* transport,
+                               CompiledGraph* snapshot);
+    static bool inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,
+                                           const midi::MidiBuffer& events) noexcept;
     static std::uint64_t append_parameter_mailbox_events_(
         void* runtime,
         state::ParameterEventQueue& destination) noexcept;
@@ -1557,6 +1641,8 @@ private:
     enum class CompileMode { Normal, SwapNoAnticipation };
     std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size,
                                             CompileMode mode = CompileMode::Normal);
+    bool prepare_impl_(double sample_rate, int max_block_size,
+                       const PrepareLifecycleObserver* lifecycle_observer);
     // Build one routed-executor snapshot for compile_, defining the live-value
     // resolver set (gain / plugin slot / custom process / custom transport / load
     // measurer / plugin latency / plugin params) ONCE. compile_ builds two

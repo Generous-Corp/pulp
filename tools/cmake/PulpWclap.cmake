@@ -89,6 +89,9 @@ endif()
 set(_PULP_WCLAP_INCLUDES
     ${_PULP_WCLAP_ROOT}/core/platform/include
     ${_PULP_WCLAP_ROOT}/core/runtime/include
+    ${_PULP_WCLAP_ROOT}/core/timebase/include
+    ${_PULP_WCLAP_ROOT}/core/timeline/include
+    ${_PULP_WCLAP_ROOT}/core/playback/include
     ${_PULP_WCLAP_ROOT}/core/state/include
     ${_PULP_WCLAP_ROOT}/core/audio/include
     ${_PULP_WCLAP_ROOT}/core/midi/include
@@ -103,6 +106,33 @@ set(_PULP_WCLAP_INCLUDES
 # Portable DSP + CLAP-adapter subset — compiled once into an OBJECT library and
 # shared across every WebCLAP plugin target.
 set(_PULP_WCLAP_CORE_SOURCES
+    ${_PULP_WCLAP_ROOT}/core/timebase/src/compiled_meter_map.cpp
+    ${_PULP_WCLAP_ROOT}/core/timebase/src/compiled_tempo_map.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/assets.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/command.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/document_session.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/identity_directory.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/id_remap.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/journal.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/model.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json_canonical.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json_parser.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json_preflight.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_registry.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_decode.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_encode.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/structural_registry_validation.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/track.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/undo.cpp
+    ${_PULP_WCLAP_ROOT}/core/playback/src/audio_renderer.cpp
+    ${_PULP_WCLAP_ROOT}/core/playback/src/compile_executor.cpp
+    ${_PULP_WCLAP_ROOT}/core/playback/src/note_renderer.cpp
+    ${_PULP_WCLAP_ROOT}/core/playback/src/program.cpp
+    ${_PULP_WCLAP_ROOT}/core/playback/src/program_compiler.cpp
+    ${_PULP_WCLAP_ROOT}/core/playback/src/stable_renderer_shell.cpp
+    ${_PULP_WCLAP_ROOT}/core/playback/src/transport.cpp
     ${_PULP_WCLAP_WAV_SOURCES}
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_adapter.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_remote_controls.cpp
@@ -124,8 +154,12 @@ set(_PULP_WCLAP_CORE_SOURCES
 )
 
 add_library(pulp-wclap-dsp OBJECT ${_PULP_WCLAP_CORE_SOURCES})
+target_compile_features(pulp-wclap-dsp PUBLIC cxx_std_20)
 target_include_directories(pulp-wclap-dsp PUBLIC ${_PULP_WCLAP_INCLUDES})
-target_compile_definitions(pulp-wclap-dsp PUBLIC PULP_WCLAP=1 PULP_WASM=1)
+target_compile_definitions(pulp-wclap-dsp PUBLIC
+    PULP_WCLAP=1 PULP_WASM=1 PULP_HEADLESS=1
+    PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1)
+target_compile_options(pulp-wclap-dsp PRIVATE -fno-exceptions -fno-rtti)
 
 # pulp_add_wclap(<Name>
 #     ENTRY    <entry.cpp>          # required: the WebCLAP entry point (PULP_WCLAP_PLUGIN)

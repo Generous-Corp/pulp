@@ -732,8 +732,8 @@ grid and may canonicalize to a neighboring tick. On a sparser grid,
 error; for example, at 48 kHz and 1 BPM, ticks 0 and 1 map to samples 0 and 4, so
 sample 2 cannot have an exact integer-tick inverse.
 
-The module has no Pulp module dependencies. Tick and sample positions use their
-full signed 64-bit ranges; tick-position, duration, and `MonotonicBeat`
+The module depends only on `pulp::runtime` for typed results. Tick and sample
+positions use their full signed 64-bit ranges; tick-position, duration, and `MonotonicBeat`
 arithmetic saturates at the nearest endpoint rather than overflowing.
 `ticks_to_samples()` likewise saturates when its mathematical result exceeds the
 sample domain. When a requested sample lies outside the image of the tick
@@ -750,13 +750,176 @@ const TempoPoint points[] = {
     {{0}, 120.0, TempoCurve::LinearInTicks},
     {{8 * kTicksPerQuarter}, 160.0, TempoCurve::Constant},
 };
-const CompiledTempoMap tempo(points, {48'000, 1});
+const auto compiled = CompiledTempoMap::compile(points, {48'000, 1});
+if (!compiled)
+    return handle_tempo_map_error(compiled.error());
+const CompiledTempoMap& tempo = compiled.value();
 const auto sample = tempo.ticks_to_samples({4 * kTicksPerQuarter});
 ```
 
 `MonotonicBeat` is the strong type for the transport's non-looping musical
 clock; the transport owns advancement while timeline positions may seek or
-wrap. `MeterMap` is intentionally deferred to the timeline engine.
+wrap. `CompiledMeterMap` provides the corresponding validated meter lookup.
+
+## timeline
+
+Immutable document-model foundations and a bounded typed editing core for musical timelines. `Project`,
+`Sequence`, `Track`, and `Clip` are cheap copyable snapshots whose construction
+factories validate identities, ranges, references, and non-overlapping sparse
+arrangement lanes. Tracks retain persistent AVL indexes for both
+`(anchor, start, ItemId)` timeline order and `ItemId` lookup. `replace_clip()`
+path-copies only affected search paths while older snapshots share untouched
+subtrees.
+
+Clip insertion, removal, movement, playback-property changes, note-velocity
+edits, and tempo/meter map replacement apply only through atomic transactions.
+`DocumentSession` serializes multiple control-thread
+writers, publishes pinned immutable snapshots, rejects stale revisions and
+typed precondition failures without partial application, and records a precise
+dirty set. Its bounded journal rejects when full rather than losing replay
+history; inverse-command undo/redo append ordinary new transactions.
+
+**Link:** `pulp::timeline` · **Include prefix:** `<pulp/timeline/...>`
+
+```cpp
+#include <pulp/timeline/model.hpp>
+
+using namespace pulp::timeline;
+auto empty = Clip::create({3}, {0}, {705'600}, EmptyContent{});
+if (!empty)
+    return;
+auto track = Track::create({2}, "Notes", {std::move(empty).value()});
+```
+
+Every owned object uses a nonzero monotonic `ItemId`; a `Project` stores the
+next never-used value; `UINT64_MAX` is the explicit exhausted allocator state
+and is valid project state after ownership reaches `UINT64_MAX - 1`.
+`ClipTimeAnchor` distinguishes tempo-following musical tick ranges from fixed
+absolute ranges expressed as `SamplePosition`, integer sample count, and a
+normalized `RationalRate`. `ClipPlaybackProperties` carries nonnegative linear
+gain plus fade-in and fade-out lengths in the clip anchor's native unit:
+canonical ticks for musical clips and timeline samples for absolute clips.
+Construction checks both fades against clip duration; compilation maps musical
+fades through the tempo map to exact frame counts. Mixed-anchor clips within
+one Track are rejected until a context-owned projection can compare those
+domains; a Sequence can still contain separate musical and absolute Tracks and
+bound both domains.
+`remap_ids()` performs two passes: it allocates every destination identity
+before rebuilding the immutable hierarchy. Clip, Track, and Sequence subtree
+overloads distinguish owned IDs from external media-asset references and accept
+an atomic `ExternalIdFixup`; closure-wide duplicate owned IDs are rejected
+before allocator state changes. `NoteContent` is a flat POD array sorted by
+`(start, ItemId)`. Fallible construction uses
+`pulp::runtime::Result` and reports `ModelError` without exceptions.
+
+`assets.hpp` separates durable SHA-256 content identity from optional resolution
+hints and alternate representations. `schema_registry.hpp` provides an explicit
+immutable registry with typed extension codecs and bounded per-version
+migrations. `serialize.hpp` reads and writes deterministic JSON snapshots:
+64-bit values are canonical decimal strings, malformed or oversized input is
+rejected under `DecodeLimits`, and unknown extension envelopes retain their
+exact validated bytes for lossless re-save. `SerializedSnapshot` flags those
+opaque objects so callers can surface compatibility risk. This is snapshot JSON
+only; it does not read or write ZIP/package containers.
+
+This initial surface intentionally excludes durable journal sinks, package I/O,
+playback, automation, launch slots, takes, nesting, devices, routing, and UI.
+
+## playback
+
+The master timeline transport publishes integer-authoritative block snapshots.
+Normal blocks contain one `TransportRange`; a block crossing a loop boundary
+contains exactly two, with the second range marked as a discontinuity. Timeline
+ticks wrap while `MonotonicBeat` remains continuous, so launch and scheduling
+intent can use a clock that does not repeat. Forward, backward, and stopped
+seeks reanchor only the timeline; they never jump the monotonic clock.
+
+Control-thread changes are published as one coherent `SeqLock` state. The audio
+thread consumes that state through allocation-free `begin_block()` calls. A
+stopped block still covers the callback's frames while holding both musical
+clocks. Loops shorter than the configured maximum block are rejected, which
+guarantees one block can cross at most one loop boundary.
+
+Snapshots carry first-block-safe transport and meter change flags, while each
+range carries its own tempo and `tempo_changed` flag. This keeps a loop split
+across tempo regions faithful when projected into per-range `ProcessContext`s.
+
+**Link:** `pulp::playback` · **Include prefix:** `<pulp/playback/...>`
+
+```cpp
+#include <pulp/playback/transport.hpp>
+
+pulp::playback::MasterTransport transport;
+transport.prepare(tempo, {
+    .max_buffer_size = 1024,
+    .initially_playing = true,
+});
+
+pulp::playback::TransportSnapshot block;
+transport.begin_block(512, block);
+for (std::uint8_t i = 0; i < block.range_count; ++i) {
+    schedule(block.ranges[i]);
+}
+```
+
+Plugin/host adapters include
+`<pulp/format/playback_context_projection.hpp>` to project a range into the
+public `ProcessContext`. That header is the only lossy tick-to-double boundary;
+`core/playback` does not depend on format, host, or view code.
+
+The module also compiles immutable `PlaybackProgram` snapshots off the audio
+thread. A request carries one immutable Project snapshot, its external document
+revision, a precompiled tempo map, and an explicit dirty-track set. Clean
+`TrackProgram` objects retain shared-pointer identity while dirty tracks receive
+a newer generation; revisions skipped by request coalescing are valid.
+Sparse per-track policy deltas select an available provider and whether a stable
+shell carries state by ItemId or resets it on stateless adoption. Omitted tracks
+retain their published policy, and coalescing merges deltas with latest-track
+wins before publication.
+The compiler currently accepts arrangement payloads only: launcher/external-input
+selections and availability bits are rejected until those provider programs exist.
+`DeferredCompileExecutor` advances bounded slices from an idle/UI pump and
+`WorkerCompileExecutor` supplies the native background lane, with an explicit
+unsupported stub in threadless builds.
+
+MediaRef clips use an immutable `DecodedAudioAssetPool`. Complete WAV bytes can
+be decoded into this pool through the bounded no-file-I/O decoder, then the
+ordinary incremental compiler lowers source ranges, musical or absolute clip
+placement, gain, and fades into each `TrackProgram`. The renderer uses bounded
+stateless linear sample-rate conversion so media retains its native wall-clock
+speed; musical anchoring uses the tempo map for placement and extent but does
+not silently introduce warp or time-stretch. A later quality pass decides
+whether linear SRC should be upgraded. Missing media, metadata mismatches,
+invalid ranges, and capacity excesses reject compilation.
+
+`ArrangementAudioRenderer::process()` consumes the same pinned
+`PlaybackProgram` and the transport's complete zero/one-wrap snapshot. It
+clears output, mixes arrangement-selected tracks in deterministic ItemId order,
+zero-fills stops and source EOF, applies gain and linear fades sample-exactly,
+and performs no allocation or lock on the audio thread. Mono sources duplicate
+to wider output; multichannel sources average to mono or map like-numbered
+channels. Float sums are not clipped or normalized by the engine.
+
+At an audio callback boundary, one `PlaybackProgramBlockLatch` pins the whole
+program for the block. Every `StableRendererShell` consults that same pin,
+adopts only a newer generation for the same ItemId, and carries its small cursor
+snapshot through a `SeqLock`.
+
+Dirty arrangement tracks also compile their note clips into immutable,
+tempo-map-resolved event streams. `ArrangementNoteRenderer` consumes the same
+block pin plus the transport's one or two half-open ranges and emits
+sample-offset MIDI without a graph audio node. Call `prepare()` off the audio
+thread to reserve its bounded output buffer; `process()` is guarded by
+`ScopedNoAlloc`. The output preserves authored 16-bit note velocity in a native
+MIDI-2 UMP sidecar and provides a MIDI-1 compatibility mirror; capacity is
+preflighted so a physical event appears in both lanes or neither. Note-offs
+precede note-ons at equal samples. Program adoption,
+seek, loop wrap, and stop release active notes and reset the cursor; Phase 1 does
+not chase a note whose onset precedes the new range. The transport snapshot and
+program must name the same compiled tempo-map identity, and overlapping logical
+notes on one channel/pitch are reference-counted so the physical note-off waits
+for the last overlap. Timeline commands and persistence preserve the clip gain
+and fade properties consumed by the audio compiler.
 
 ## format
 
