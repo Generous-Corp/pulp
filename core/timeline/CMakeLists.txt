@@ -1,5 +1,6 @@
 add_library(pulp-timeline
     src/assets.cpp
+    src/automation_curve.cpp
     src/command.cpp
     src/document_session.cpp
     src/identity_directory.cpp

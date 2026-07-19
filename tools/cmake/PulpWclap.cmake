@@ -109,6 +109,7 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/timebase/src/compiled_meter_map.cpp
     ${_PULP_WCLAP_ROOT}/core/timebase/src/compiled_tempo_map.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/assets.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/automation_curve.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/command.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/document_session.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/identity_directory.cpp

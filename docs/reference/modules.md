@@ -812,6 +812,13 @@ before allocator state changes. `NoteContent` is a flat POD array sorted by
 `(start, ItemId)`. Fallible construction uses
 `pulp::runtime::Result` and reports `ModelError` without exceptions.
 
+`automation_curve.hpp` provides immutable, position-ordered automation points
+with stable IDs, Hold or Continuous interpolation, and bounded monotonic
+curvature. Its random-access evaluator is a control/compile-time API. Timeline
+lane targeting remains document-model state, while audio-thread cursors and
+per-block event coalescing belong to `pulp::playback`; neither concern is folded
+into the curve container.
+
 `assets.hpp` separates durable SHA-256 content identity from optional resolution
 hints and alternate representations. `schema_registry.hpp` provides an explicit
 immutable registry with typed extension codecs and bounded per-version
@@ -823,7 +830,8 @@ opaque objects so callers can surface compatibility risk. This is snapshot JSON
 only; it does not read or write ZIP/package containers.
 
 This initial surface intentionally excludes durable journal sinks, package I/O,
-playback, automation, launch slots, takes, nesting, devices, routing, and UI.
+playback, automation lanes and delivery, launch slots, takes, nesting, devices,
+routing, and UI.
 
 ## playback
 

@@ -15,7 +15,7 @@ modules:
     docs: reference/modules.md#timebase
 
   - name: timeline
-    summary: Immutable timeline snapshots with path-copy indexes typed atomic transactions bounded journal and undo durable assets schema registry and exact JSON persistence
+    summary: Immutable timeline snapshots and automation curves with path-copy indexes typed atomic transactions bounded journal and undo durable assets schema registry and exact JSON persistence
     status: experimental
     dependencies: [runtime, timebase]
     docs: reference/modules.md#timeline

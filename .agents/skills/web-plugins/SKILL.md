@@ -268,7 +268,9 @@ per-ABI entry point for it.** Go through the plugin's own state:
   compile them with `PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1`, and must stay in
   lockstep with the native module lists. `web-timeline-source-closure` enforces
   that source closure, and this workflow must trigger on changes to any engine
-  module or the bounded WAV decoder.
+  module or the bounded WAV decoder. Even a small value-type extraction that
+  adds one engine `.cpp` must update both curated lists in the same commit;
+  passing the native dependency-floor check does not prove the web closure.
 
 - Both ABIs already expose the plugin's opaque state behind ONE `HostAdapter`
   call — WAM through `wam_state_size`/`wam_read_state`/`wam_write_state`, WebCLAP
