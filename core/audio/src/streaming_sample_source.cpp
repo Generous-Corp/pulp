@@ -32,7 +32,7 @@ bool StreamingSampleSource::prepare(const StreamingSampleSourceConfig& config,
                        std::uint64_t start_frame,
                        BufferView<float> destination,
                        std::uint64_t frames,
-                       std::stop_token) mutable {
+                       FrameReaderStopToken) mutable {
         return reader(start_frame, destination, frames);
     };
     return prepare(config, std::move(binding));
@@ -50,7 +50,7 @@ bool StreamingSampleSource::prepare(const StreamingSampleSourceConfig& config,
     total_frames_ = config.total_frames;
     sample_rate_ = config.sample_rate;
     reader_ = std::move(reader);
-    reader_stop_source_ = std::stop_source{};
+    reader_stop_requested_.store(false, std::memory_order_release);
 
     preload_valid_ = std::min(config.preload_frames, total_frames_);
     fully_resident_ = (preload_valid_ >= total_frames_);
@@ -71,7 +71,8 @@ bool StreamingSampleSource::prepare(const StreamingSampleSourceConfig& config,
     if (preload_valid_ > 0) {
         preload_.resize(channels_, static_cast<std::size_t>(preload_valid_));
         const auto got = reader_.read(
-            0, preload_.view(), preload_valid_, reader_stop_source_.get_token());
+            0, preload_.view(), preload_valid_,
+            FrameReaderStopToken{reader_stop_requested_});
         if (got < preload_valid_) {
             // Source produced fewer frames than declared — treat the realized
             // length as authoritative so we never read past valid data.
@@ -128,7 +129,7 @@ bool StreamingSampleSource::prepare(const StreamingSampleSourceConfig& config,
 void StreamingSampleSource::stop_thread() noexcept {
     if (thread_.joinable()) {
         run_.store(false, std::memory_order_release);
-        reader_stop_source_.request_stop();
+        reader_stop_requested_.store(true, std::memory_order_release);
         cv_.notify_all();
         thread_.join();
     }
@@ -140,7 +141,7 @@ void StreamingSampleSource::release() noexcept {
     preload_ = Buffer<float>{};
     read_scratch_ = Buffer<float>{};
     reader_ = {};
-    reader_stop_source_ = std::stop_source{};
+    reader_stop_requested_.store(false, std::memory_order_release);
     channels_ = 0;
     total_frames_ = 0;
     sample_rate_ = 0;
@@ -164,7 +165,7 @@ bool StreamingSampleSource::reset() noexcept {
     if (!prepared_) return false;
     const bool had_thread = use_thread_;
     stop_thread();
-    reader_stop_source_ = std::stop_source{};
+    reader_stop_requested_.store(false, std::memory_order_release);
 
     play_pos_.store(0, std::memory_order_relaxed);
     streamed_frames_.store(0, std::memory_order_relaxed);
@@ -312,12 +313,12 @@ std::uint64_t StreamingSampleSource::pump_background() noexcept {
     // escape this noexcept function (→ std::terminate). Treat it as a read error.
     std::uint64_t got = 0;
     try {
-        got = reader_.read(
-            rpos, scratch, want, reader_stop_source_.get_token());
+        got = reader_.read(rpos, scratch, want,
+                           FrameReaderStopToken{reader_stop_requested_});
     } catch (...) {
         got = 0;
     }
-    if (reader_stop_source_.stop_requested()) return 0;
+    if (reader_stop_requested_.load(std::memory_order_acquire)) return 0;
     if (got == 0) {
         // EOF or read error before the declared end. All frames [0, rpos) are
         // already available (preload + what's in the ring), so rpos is the true

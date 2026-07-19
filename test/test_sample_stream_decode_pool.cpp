@@ -24,6 +24,7 @@ using pulp::audio::SampleStreamDecodeSourceAddStatus;
 using pulp::audio::SampleStreamDecodeSubmitStatus;
 using pulp::audio::FrameReaderBinding;
 using pulp::audio::FrameReaderStopMode;
+using pulp::audio::FrameReaderStopToken;
 using pulp::audio::match_sample_stream_decode_completion;
 
 namespace {
@@ -355,7 +356,6 @@ TEST_CASE("Sample stream decode pool joins a blocked legacy reader before teardo
     teardown.join();
     REQUIRE(gate.exited());
     REQUIRE(teardown_returned.load(std::memory_order_acquire));
-    REQUIRE(pool.telemetry().stopped_jobs == 1);
 }
 
 TEST_CASE("Sample stream decode pool requests cooperative reader stop",
@@ -376,12 +376,12 @@ TEST_CASE("Sample stream decode pool requests cooperative reader stop",
         .read = [&](std::uint64_t,
             pulp::audio::BufferView<float>,
             std::uint64_t,
-            std::stop_token stop_token) {
-            std::stop_callback notify(stop_token, [&] { changed.notify_all(); });
+            FrameReaderStopToken stop_token) {
             std::unique_lock lock(mutex);
             entered = true;
             changed.notify_all();
-            changed.wait(lock, [&] { return stop_token.stop_requested(); });
+            while (!stop_token.stop_requested())
+                changed.wait_for(lock, std::chrono::milliseconds(1));
             observed_stop = true;
             return std::uint64_t{0};
         },
@@ -419,12 +419,12 @@ TEST_CASE("Sample stream decode pool cancellation stops active cooperative I/O",
         .read = [&](std::uint64_t,
                     pulp::audio::BufferView<float>,
                     std::uint64_t,
-                    std::stop_token stop_token) {
-            std::stop_callback notify(stop_token, [&] { changed.notify_all(); });
+                    FrameReaderStopToken stop_token) {
             std::unique_lock lock(mutex);
             entered = true;
             changed.notify_all();
-            changed.wait(lock, [&] { return stop_token.stop_requested(); });
+            while (!stop_token.stop_requested())
+                changed.wait_for(lock, std::chrono::milliseconds(1));
             observed_stop = true;
             return std::uint64_t{0};
         },

@@ -28,7 +28,6 @@
 #include <mutex>
 #include <new>
 #include <optional>
-#include <stop_token>
 #include <string>
 #include <string_view>
 #include <system_error>

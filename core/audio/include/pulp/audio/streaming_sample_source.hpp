@@ -34,13 +34,31 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
-#include <stop_token>
 #include <thread>
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/planar_audio_ring_buffer.hpp>
 
 namespace pulp::audio {
+
+/// Cooperative cancellation signal passed to a streaming frame reader.
+/// Copies remain valid only for the duration of the reader invocation.
+class FrameReaderStopToken {
+public:
+    FrameReaderStopToken() noexcept = default;
+
+    explicit FrameReaderStopToken(
+        const std::atomic<bool>& stop_requested) noexcept
+        : stop_requested_(&stop_requested) {}
+
+    bool stop_requested() const noexcept {
+        return stop_requested_ != nullptr &&
+               stop_requested_->load(std::memory_order_acquire);
+    }
+
+private:
+    const std::atomic<bool>* stop_requested_ = nullptr;
+};
 
 /// Caller-supplied random-access frame reader. Fills @p dest with up to
 /// @p frames frames of planar float audio starting at source frame
@@ -67,7 +85,7 @@ using StoppableFrameReader =
     std::function<std::uint64_t(std::uint64_t start_frame,
                                 BufferView<float> dest,
                                 std::uint64_t frames,
-                                std::stop_token stop_token)>;
+                                FrameReaderStopToken stop_token)>;
 
 struct FrameReaderBinding {
     StoppableFrameReader read;
@@ -194,7 +212,7 @@ private:
     PlanarAudioRingBuffer ring_;     ///< Streamed tail, frames [preload_valid_, ...).
     Buffer<float> read_scratch_;     ///< Background reader scratch (off audio thread).
     FrameReaderBinding reader_;
-    std::stop_source reader_stop_source_;
+    std::atomic<bool> reader_stop_requested_{false};
 
     std::atomic<std::uint64_t> play_pos_{0};    ///< Audio-thread owned: next source frame to emit.
     std::atomic<std::uint64_t> reader_pos_{0};  ///< Background owned: next source frame to push.
