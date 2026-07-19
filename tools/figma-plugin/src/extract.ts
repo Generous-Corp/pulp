@@ -38,6 +38,7 @@ import {
   isPureVectorIllustration,
   collectFontFamilyAssets,
   extractConstraints,
+  extractBoundVariableBindings,
 } from "./extract-pure";
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -121,6 +122,7 @@ export async function extractScene(
     pathStack: [],
     assets,
     tokens,
+    diagnosedVariableIds: new Set(),
   };
 
   const roots: ExtractedFigmaNode[] = [];
@@ -171,6 +173,9 @@ interface WalkCtx {
   pathStack: string[];
   assets: AssetCache;
   tokens: ExtractedTokens;
+  /// Variable ids already diagnosed as unresolvable bindings — one diagnostic
+  /// per variable per export, not one per node that binds it.
+  diagnosedVariableIds: Set<string>;
 }
 
 /// Whether the parent lays its children out itself — flex (HORIZONTAL /
@@ -287,6 +292,30 @@ async function walk(
   if (parent !== null && (!parentIsAutoLayout(parent) || absoluteInStack)) {
     const constraints = extractConstraints(node);
     if (constraints) ex.constraints = constraints;
+  }
+
+  // Variable bindings — which token is bound to which property. The tokens
+  // pass already built variableIdToName (Figma variable id → canonical token
+  // name); this is the consumer that was missing: without it the map was
+  // built and the per-node `boundVariables` never read, so every binding was
+  // lost even though its token definition survived. An alias the token pass
+  // didn't capture (remote-library / deleted variable) is skipped — the
+  // envelope never carries a dangling id — and diagnosed once per variable.
+  if ("boundVariables" in node) {
+    const bound = extractBoundVariableBindings(
+      (node as SceneNode & { boundVariables?: unknown }).boundVariables,
+      ctx.tokens.variableIdToName,
+    );
+    if (bound) {
+      if (Object.keys(bound.bindings).length > 0) ex.bound_variables = bound.bindings;
+      for (const id of bound.unresolved) {
+        if (ctx.diagnosedVariableIds.has(id)) continue;
+        ctx.diagnosedVariableIds.add(id);
+        pushDiag(ctx, "warning", "variable-binding-unresolved", "capture_partial",
+          `Variable ${id} is bound to a property of "${node.name}" but was not captured ` +
+          `by the token pass (remote-library or deleted variable); the binding is dropped.`);
+      }
+    }
   }
 
   // Text content + dominant style. TEXT_PATH shares the text mixins

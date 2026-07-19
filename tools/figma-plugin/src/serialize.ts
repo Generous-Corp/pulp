@@ -256,6 +256,12 @@ function toEnvelopeNode(n: ExtractedFigmaNode): unknown {
   if (n.library_version) figma.library_version = n.library_version;
   if (n.component_properties) figma.component_properties = n.component_properties;
   if (n.variant_properties) figma.variant_properties = n.variant_properties;
+  // Variable bindings: {property: canonical token name}. Pairs with the
+  // envelope-level `tokens` maps — the binding names an entry there, so a
+  // downstream consumer can re-theme by swapping the token's value.
+  if (n.bound_variables && Object.keys(n.bound_variables).length > 0) {
+    figma.bound_variables = n.bound_variables;
+  }
   out.figma = figma;
 
   if (n.children.length > 0) {

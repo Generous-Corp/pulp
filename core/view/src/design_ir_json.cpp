@@ -1170,6 +1170,28 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
                 node.attributes[std::move(key)] = std::move(*value);
             }
         }
+        // Variable bindings: {"fills": "brand.primary", "cornerRadius":
+        // "radius.md"} → figmaBoundVariable.fills = "brand.primary" etc. The
+        // value is the canonical token name the producer's tokens pass emitted
+        // (an entry in the envelope-level tokens maps), so a downstream
+        // consumer can re-theme the import by swapping the token's value and
+        // following these attributes back to the properties it drives. The
+        // property key is the producer's own spelling (Plugin-API camelCase in
+        // all three lanes), passed through opaque — this reader preserves, it
+        // does not interpret. Additive and namespaced like every figma* key
+        // above, so a binding can never collide with a layer attribute.
+        if (fig.hasObjectMember("bound_variables") &&
+            fig["bound_variables"].isObject()) {
+            const auto bindings = fig["bound_variables"];
+            for (uint32_t i = 0; i < bindings.size(); ++i) {
+                const auto m = bindings.getObjectMemberAt(i);
+                if (std::string(m.name).empty() || !m.value.isString()) continue;
+                auto token = std::string(m.value.toString());
+                if (!token.empty())
+                    node.attributes["figmaBoundVariable." + std::string(m.name)] =
+                        std::move(token);
+            }
+        }
     }
     if (obj.hasObjectMember("layout"))
         node.layout = parse_ir_layout(obj["layout"]);

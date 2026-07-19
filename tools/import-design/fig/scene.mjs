@@ -511,6 +511,100 @@ function componentPropAssignmentValues(scene, inst, master, stateGroup) {
 
 // Figma's "no style" sentinel: an all-1s guid (0xFFFFFFFF:0xFFFFFFFF). An
 // override carrying it is not naming a style — it is DETACHING one.
+// ── variable-binding semantics ───────────────────────────────────────────────
+//
+// The kiwi scene stores per-node variable bindings in two places, and both
+// resolve through the file's own VARIABLE nodes (the same table
+// collectVariableTokens turns into the envelope's tokens maps, keyed by the
+// variable's name):
+//
+//   node.variableConsumptionMap.entries[] — scalar property bindings. Each
+//     entry names the property via the VariableField enum (CORNER_RADIUS,
+//     STACK_SPACING, ...) and the variable via
+//     variableData.value.alias (a VariableID whose guid is the VARIABLE
+//     node's guid).
+//   paint.colorVar — a paint-level color binding on an entry of
+//     fillPaints / strokePaints, same VariableData shape.
+//
+// Bindings are emitted as `figma.bound_variables` ({property: token name}),
+// the same field the plugin and REST lanes serialize, with the property key
+// translated from the kiwi enum spelling to the Plugin-API camelCase spelling
+// so all three lanes agree on one dialect. An alias whose guid is not in the
+// file's variable table (a remote-library variable this file only references)
+// is dropped with a diagnostic — never emitted as a dangling reference.
+
+// Kiwi VariableField values whose Plugin-API name is not the mechanical
+// SNAKE_CASE → camelCase conversion. Everything else (WIDTH, HEIGHT, OPACITY,
+// STROKE_WEIGHT, MIN_WIDTH, FONT_SIZE, ...) converts mechanically.
+const FIG_VARIABLE_FIELD_PROPERTY = {
+  STACK_SPACING: 'itemSpacing',
+  STACK_COUNTER_SPACING: 'counterAxisSpacing',
+  STACK_PADDING_LEFT: 'paddingLeft',
+  STACK_PADDING_TOP: 'paddingTop',
+  STACK_PADDING_RIGHT: 'paddingRight',
+  STACK_PADDING_BOTTOM: 'paddingBottom',
+  TEXT_DATA: 'characters',
+  RECTANGLE_TOP_LEFT_CORNER_RADIUS: 'topLeftRadius',
+  RECTANGLE_TOP_RIGHT_CORNER_RADIUS: 'topRightRadius',
+  RECTANGLE_BOTTOM_LEFT_CORNER_RADIUS: 'bottomLeftRadius',
+  RECTANGLE_BOTTOM_RIGHT_CORNER_RADIUS: 'bottomRightRadius',
+};
+
+function figVariableFieldProperty(field) {
+  // An old-schema entry carries only the numeric `nodeField`, which this
+  // decoder cannot name reliably — the enum decode yields a string only for
+  // `variableField`. Returning null skips the entry.
+  if (typeof field !== 'string' || !field) return null;
+  return FIG_VARIABLE_FIELD_PROPERTY[field]
+    || field.toLowerCase().replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase());
+}
+
+/** guid key → variable name for every VARIABLE node in the file — the names
+ * collectVariableTokens keys the envelope tokens maps by, so a binding's value
+ * always names an entry that exists in this envelope's own tokens block. */
+function variableNamesByGuid(scene) {
+  const names = new Map();
+  for (const node of scene.byGuid.values()) {
+    if (node.type !== 'VARIABLE' || !node.name) continue;
+    const key = guidKey(node.guid);
+    if (key) names.set(key, node.name);
+  }
+  return names;
+}
+
+/** One node's variable bindings: {bindings: {property: token name},
+ * unresolved: [guid, ...]} or null when the node binds nothing. */
+function nodeVariableBindings(node, namesByGuid) {
+  const bindings = {};
+  const unresolved = [];
+  const bind = (property, variableId) => {
+    const guid = variableId && variableId.guid ? guidKey(variableId.guid) : null;
+    if (!guid) return;
+    const name = namesByGuid.get(guid);
+    if (name) bindings[property] = name;
+    else unresolved.push(guid);
+  };
+  for (const entry of node.variableConsumptionMap?.entries || []) {
+    const property = figVariableFieldProperty(entry?.variableField);
+    const alias = entry?.variableData?.value?.alias;
+    if (property && alias) bind(property, alias);
+  }
+  // Paint-level color bindings ride on the paint, not the consumption map.
+  // First visible bound paint wins per side — the same first-visible rule the
+  // style extraction paints with.
+  const paintAlias = (paints) => {
+    for (const p of paints || []) {
+      if (p && p.visible !== false && p.colorVar?.value?.alias) return p.colorVar.value.alias;
+    }
+    return null;
+  };
+  const fill = paintAlias(node.fillPaints);
+  if (fill) bind('fills', fill);
+  const stroke = paintAlias(node.strokePaints);
+  if (stroke) bind('strokes', stroke);
+  return Object.keys(bindings).length || unresolved.length ? { bindings, unresolved } : null;
+}
+
 const NULL_GUID_PART = 0xFFFFFFFF;
 function isDetachedStyleRef(ref) {
   const g = ref && ref.guid;
@@ -1090,6 +1184,12 @@ export function materializeFrame(scene, frame, ctx) {
   // the node untouched when it references nothing, so the common path allocates
   // nothing; otherwise a shallow copy keeps the shared master node — reused by
   // every instance of it — free of per-walk mutation.
+  // Variable bindings resolve against the file's VARIABLE table; unresolvable
+  // guids (remote-library variables) are diagnosed once per variable, not once
+  // per node that binds them.
+  const variableNames = variableNamesByGuid(scene);
+  const diagnosedVariableGuids = new Set();
+
   const styledNodes = new Set();
   function withResolvedPaints(node) {
     if (!node.styleIdForFill && !node.styleIdForStrokeFill) return node;
@@ -1696,6 +1796,24 @@ export function materializeFrame(scene, frame, ctx) {
       const props = componentPropAssignmentValues(scene, node, master, stateGroup);
       if (props) figma.component_properties = props;
       out.figma = figma;
+    }
+
+    // Variable bindings — which token drives which property of this node.
+    // Same figma-block field the plugin and REST lanes emit; the token name
+    // resolves against the file's own VARIABLE table, the same names the
+    // envelope's tokens maps are keyed by. A guid outside that table (a
+    // remote-library variable) is a stated loss, diagnosed once per variable.
+    const varBindings = nodeVariableBindings(node, variableNames);
+    if (varBindings) {
+      if (Object.keys(varBindings.bindings).length) {
+        out.figma = { ...(out.figma || {}), bound_variables: varBindings.bindings };
+      }
+      for (const g of varBindings.unresolved) {
+        if (diagnosedVariableGuids.has(g)) continue;
+        diagnosedVariableGuids.add(g);
+        pushDiag('variable-binding-unresolved', node,
+          `variable ${g} is bound to a property here but is not in this file's variable table (remote-library variable?); the binding is dropped`);
+      }
     }
 
     // Vector geometry → SVG path data. `path_data` + `viewBox` + fill/stroke is
@@ -2349,6 +2467,7 @@ export const DIAGNOSTIC_SEVERITY = {
   // (see the registry contract above), and a dispatch decision written
   // precisely to end silent node drops must never itself be invisible.
   'slice-skipped': 'warning',
+  'variable-binding-unresolved': 'warning',
   'unsupported-node': 'warning',
   'slot-placeholder': 'warning',
   'text-path-flattened': 'warning',

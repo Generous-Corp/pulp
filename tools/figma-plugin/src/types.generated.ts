@@ -499,5 +499,11 @@ export interface FigmaMetadata {
   variant_properties?: {
     [k: string]: string;
   };
+  /**
+   * Variable bindings resolved from node.boundVariables: {property: canonical token name}. Array-valued properties bind index 0 to the bare property key and later entries to '<property>.<i>'; nested alias maps bind '<property>.<key>'. Values name entries in the envelope-level tokens maps. The C++ parser preserves each entry as a figmaBoundVariable.<property> attribute. Aliases whose variable was not captured by the token pass are skipped (variable-binding-unresolved diagnostic), never emitted as dangling ids.
+   */
+  bound_variables?: {
+    [k: string]: string;
+  };
   [k: string]: unknown;
 }

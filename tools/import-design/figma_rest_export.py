@@ -718,7 +718,7 @@ class ExtractContext:
     returns it so the caller reads the outputs explicitly instead of reaching into
     process-global state — the decomposed seam the plan calls for."""
     __slots__ = ("asset_ids", "fonts", "image_fills", "components", "component_sets",
-                 "diagnostics")
+                 "diagnostics", "var_id_to_name", "diagnosed_variable_ids")
 
     def __init__(self):
         self.asset_ids = []      # node ids to export as PNG via /images
@@ -727,6 +727,8 @@ class ExtractContext:
         self.components = {}      # /nodes "components": componentId -> {key, name, componentSetId}
         self.component_sets = {}  # /nodes "componentSets": setId -> {key, name}
         self.diagnostics = []     # envelope-shaped diagnostics (severity/code/kind/message/path)
+        self.var_id_to_name = {}  # /variables/local: variable id -> canonical token name
+        self.diagnosed_variable_ids = set()  # ids already diagnosed unresolved (once each)
 
 
 def _record_font(n, ctx):
@@ -751,7 +753,7 @@ def _record_font(n, ctx):
         ctx.fonts[key] = entry
 
 
-def node_tree_to_ir(root, components=None, component_sets=None):
+def node_tree_to_ir(root, components=None, component_sets=None, variable_names=None):
     """Walk a Figma node tree into the Pulp IR, returning (ir_node, ExtractContext)
     so the side effects (asset ids / fonts / image fills) are EXPLICIT outputs —
     no module globals. The decomposed seam.
@@ -760,12 +762,80 @@ def node_tree_to_ir(root, components=None, component_sets=None):
     {key, name, componentSetId} and setId → {key, name}); they let each INSTANCE
     carry its component identity so the importer's recognition resolver can wire
     it by key. Optional — a tree walked without them still expands and protects
-    instance content, it just can't name the component."""
+    instance content, it just can't name the component.
+
+    `variable_names` is the /variables/local id → canonical-token-name map from
+    variables_to_tokens(); it lets each node's boundVariables resolve to token
+    names. Optional — without it (the endpoint is Enterprise-plan-gated)
+    bindings emit the raw variable id with a diagnostic."""
     ctx = ExtractContext()
     ctx.components = components or {}
     ctx.component_sets = component_sets or {}
+    ctx.var_id_to_name = variable_names or {}
     ir = walk(root, None, 0, ctx)
     return ir, ctx
+
+
+def extract_bound_variables(n, ctx):
+    """node.boundVariables → the envelope's figma.bound_variables map
+    ({property: token name}), mirroring extractBoundVariableBindings in the
+    plugin lane (tools/figma-plugin/src/extract-pure.ts): a single alias keeps
+    the bare property key, an alias array binds index 0 bare and later entries
+    "<property>.<i>", and a nested alias map binds "<property>.<key>".
+
+    One deliberate divergence from the plugin lane: an id outside the name map
+    emits the RAW variable id instead of being dropped. The plugin always has
+    the full local variable table, so an unresolvable id there is a genuinely
+    dangling reference; here the map is usually EMPTY (the variables endpoint
+    is Enterprise-plan-gated), and dropping would lose every binding in the
+    common case. The raw id is a stable join key against a future variables
+    fetch, never a fabricated name, and each id is diagnosed once."""
+    bound = n.get("boundVariables")
+    if not isinstance(bound, dict) or not bound:
+        return None
+
+    def alias_id(v):
+        if (isinstance(v, dict) and v.get("type") == "VARIABLE_ALIAS"
+                and isinstance(v.get("id"), str) and v["id"]):
+            return v["id"]
+        return None
+
+    out = {}
+
+    def bind(key, vid):
+        name = ctx.var_id_to_name.get(vid)
+        if name:
+            out[key] = name
+            return
+        out[key] = vid
+        if vid not in ctx.diagnosed_variable_ids:
+            ctx.diagnosed_variable_ids.add(vid)
+            ctx.diagnostics.append({
+                "severity": "warning", "code": "variable-binding-unresolved",
+                "kind": "capture_partial",
+                "message": f"Variable {vid} is bound to a node property but has no "
+                           "captured token definition (variables endpoint unavailable "
+                           "or remote-library variable); the raw variable id is "
+                           "emitted instead of a token name.",
+                "path": n.get("id", "")})
+
+    for prop, value in bound.items():
+        vid = alias_id(value)
+        if vid:
+            bind(prop, vid)
+            continue
+        if isinstance(value, list):
+            for i, entry in enumerate(value):
+                vid = alias_id(entry)
+                if vid:
+                    bind(prop if i == 0 else f"{prop}.{i}", vid)
+            continue
+        if isinstance(value, dict):
+            for sub, entry in value.items():
+                vid = alias_id(entry)
+                if vid:
+                    bind(f"{prop}.{sub}", vid)
+    return out or None
 
 
 def _component_identity(n, ctx):
@@ -909,6 +979,12 @@ def walk(n, parent, z, ctx, inside_widget=False):
     out["figma"] = {"parent_id": parent.get("id") if parent else None, "z_order": z,
                     "visible": n.get("visible", True), "locked": n.get("locked", False),
                     "blend_mode": n.get("blendMode", "PASS_THROUGH")}
+    # Variable bindings — same figma-block field the plugin lane serializes.
+    # The /nodes payload carries boundVariables regardless of plan tier; only
+    # the id → token-name resolution depends on the variables endpoint.
+    bound_vars = extract_bound_variables(n, ctx)
+    if bound_vars:
+        out["figma"]["bound_variables"] = bound_vars
     if is_instance:
         component_key, component_name = _component_identity(n, ctx)
         if component_key:
@@ -1030,6 +1106,111 @@ def fetch_nodes(file_key, node_id, token):
         f"https://api.figma.com/v1/files/{file_key}/nodes?ids={node_id}&geometry=paths",
         token=token, what="file nodes")
 
+
+def fetch_file_variables(file_key, token):
+    """GET /v1/files/:key/variables/local — the file's variable collections and
+    values. Figma plan-gates this endpoint (Enterprise files only), so an HTTP
+    403 is the NORMAL outcome for most files, not an error: returns
+    (payload, None) on success, (None, reason) when the endpoint cannot serve
+    this file. Callers emit what is available and diagnose the rest — node
+    `boundVariables` still flow (the /nodes payload carries them); only the
+    id → token-name resolution is lost without this payload."""
+    try:
+        return json.loads(figma_get(
+            f"https://api.figma.com/v1/files/{file_key}/variables/local",
+            token=token, what="file variables", max_retries=1)), None
+    except urllib.error.HTTPError as e:
+        reason = ("plan-gated (variables REST endpoint is Enterprise-only)"
+                  if e.code == 403 else f"HTTP {e.code}")
+        return None, reason
+    except RuntimeError as e:
+        return None, str(e)
+
+
+def variables_to_tokens(payload):
+    """Mirror of the plugin lane's token extractor (tools/figma-plugin/src/
+    tokens.ts) over the REST variables payload, so both lanes emit the SAME
+    canonical names and mode rules: name = "collection/variable" lowercased
+    with whitespace stripped and '/' → '.'; the collection's default mode keeps
+    the bare name and every other mode is suffixed ".<mode-slug>"; aliases
+    resolve per mode (bounded, with fallback to the referent's first mode);
+    BOOLEAN values encode as "true"/"false" strings.
+
+    Returns (tokens, id_to_name): `tokens` is the envelope's
+    {colors, dimensions, strings} block and `id_to_name` maps a Figma variable
+    id to the bare (default-mode) token name bindings resolve to."""
+    meta = payload.get("meta") or {}
+    variables = meta.get("variables") or {}
+    collections = meta.get("variableCollections") or {}
+    tokens = {"colors": {}, "dimensions": {}, "strings": {}}
+    id_to_name = {}
+
+    def slug(s):
+        return re.sub(r"[^a-z0-9._-]", "", re.sub(r"\s+", "", (s or "").lower()))
+
+    def canonical(coll_name, var_name):
+        # "/" is Figma's grouping separator — it becomes "." BEFORE the
+        # invalid-char strip (which would otherwise delete it), exactly like
+        # the plugin's canonicalName.
+        s = re.sub(r"\s+", "", f"{coll_name}/{var_name}".lower()).replace("/", ".")
+        return re.sub(r"[^a-z0-9._-]", "", s)
+
+    def resolve(value, mode_id, depth=0):
+        # Follow VARIABLE_ALIAS hops until a concrete value (bounded — cycles).
+        while depth < 10 and isinstance(value, dict) and value.get("type") == "VARIABLE_ALIAS":
+            ref = variables.get(value.get("id") or "")
+            if not ref:
+                return value
+            vbm = ref.get("valuesByMode") or {}
+            nxt = vbm.get(mode_id)
+            if nxt is None and vbm:
+                # The referent lives in another collection with its own mode
+                # ids — fall back to its first/default mode value.
+                nxt = next(iter(vbm.values()))
+            if nxt is None:
+                return value
+            value = nxt
+            depth += 1
+        return value
+
+    def render_color(c):
+        r, g, b = (int(round(c.get(k, 0) * 255)) for k in ("r", "g", "b"))
+        a = c.get("a", 1)
+        if a >= 1:
+            return f"#{hex2(r)}{hex2(g)}{hex2(b)}"
+        return f"rgba({r}, {g}, {b}, {a:.3f})"
+
+    for var in variables.values():
+        if not isinstance(var, dict):
+            continue
+        coll = collections.get(var.get("variableCollectionId") or "") or {}
+        base = canonical(coll.get("name", ""), var.get("name", ""))
+        var_id = var.get("id")
+        if not base or not isinstance(var_id, str):
+            continue
+        id_to_name[var_id] = base
+        default_mode = coll.get("defaultModeId")
+        modes = coll.get("modes") or [{"modeId": default_mode, "name": ""}]
+        vbm = var.get("valuesByMode") or {}
+        rt = var.get("resolvedType")
+        for mode in modes:
+            mode_id = mode.get("modeId")
+            raw = vbm.get(mode_id)
+            if raw is None:
+                continue
+            mslug = slug(mode.get("name"))
+            name = base if mode_id == default_mode or not mslug else f"{base}.{mslug}"
+            value = resolve(raw, mode_id)
+            if rt == "COLOR" and isinstance(value, dict) and "r" in value:
+                tokens["colors"][name] = render_color(value)
+            elif rt == "FLOAT" and isinstance(value, (int, float)) and not isinstance(value, bool):
+                tokens["dimensions"][name] = value
+            elif rt == "STRING" and isinstance(value, str):
+                tokens["strings"][name] = value
+            elif rt == "BOOLEAN" and isinstance(value, bool):
+                tokens["strings"][name] = "true" if value else "false"
+    return tokens, id_to_name
+
 # --- transparent (file_key, node_id) export cache ------------------------------
 # The Figma MCP server allows only ~6 calls/MONTH on a View/Collab seat, so
 # re-testing the same frame must not re-fetch. --cache-dir memoizes the two
@@ -1038,6 +1219,7 @@ def fetch_nodes(file_key, node_id, token):
 # importer re-run fully offline (no token needed).
 _CACHE_NODES_SUFFIX = ".nodes.json"
 _CACHE_SVG_SUFFIX = ".frame.svg"
+_CACHE_VARIABLES_KEY = "variables"  # file-scoped: variables are not per-node
 
 def _export_cache_key(file_key, node_id):
     """Filesystem-safe cache basename for a (file_key, node_id) export. Figma node
@@ -1066,6 +1248,28 @@ def fetch_nodes_cached(file_key, node_id, token, cache_dir=None, refresh=False):
             json.dump(doc, f)
         print(f"  cached nodes -> {path}")
     return doc
+
+def fetch_file_variables_cached(file_key, token, cache_dir=None, refresh=False):
+    """fetch_file_variables() with the same transparent cache, keyed per FILE
+    (variables are not per-node). Only success is cached — a plan-gated 403
+    must not be memoized as a permanent miss, since the token or plan can
+    change between runs. With no token and a cache miss there is nothing to
+    fetch: returns (None, reason)."""
+    path = _cache_path(cache_dir, file_key, _CACHE_VARIABLES_KEY, ".json")
+    if path and not refresh and os.path.exists(path):
+        print(f"  cache hit (variables): {path} — no REST call")
+        with open(path) as f:
+            return json.load(f), None
+    if not token:
+        return None, "no token (offline run)"
+    payload, reason = fetch_file_variables(file_key, token)
+    if path and payload is not None:
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(payload, f)
+        print(f"  cached variables -> {path}")
+    return payload, reason
+
 
 def fetch_frame_svg_cached(file_key, node_id, token, cache_dir=None, refresh=False):
     """fetch_frame_svg() with the same transparent cache. Only a non-empty SVG is
@@ -1704,9 +1908,34 @@ def main():
            else fetch_nodes_cached(file_key, node_id, token, args.cache_dir, args.refresh_cache))
     root = doc["nodes"][node_id]["document"]
     node_entry = doc["nodes"][node_id]
+    # Variables (token definitions + id → name map) come from a separate,
+    # plan-gated endpoint. Fetched BEFORE the walk so each node's
+    # boundVariables can resolve to token names; unavailability is a stated
+    # limitation, not an error — bindings then carry raw variable ids.
+    variables_tokens = {"colors": {}, "dimensions": {}, "strings": {}}
+    var_id_to_name = {}
+    variables_diag = None
+    var_payload, var_reason = fetch_file_variables_cached(
+        file_key, token, args.cache_dir, args.refresh_cache)
+    if var_payload is not None:
+        variables_tokens, var_id_to_name = variables_to_tokens(var_payload)
+        n_tokens = sum(len(v) for v in variables_tokens.values())
+        print(f"  variables: {n_tokens} token value(s), "
+              f"{len(var_id_to_name)} variable name(s)")
+    else:
+        variables_diag = {
+            "severity": "info", "code": "variables-endpoint-unavailable",
+            "kind": "capture_partial",
+            "message": f"Figma variables endpoint unavailable ({var_reason}); "
+                       "token maps are empty and variable bindings carry raw "
+                       "variable ids instead of token names.",
+            "path": ""}
     root_node, ctx = node_tree_to_ir(root,
                                      components=node_entry.get("components"),
-                                     component_sets=node_entry.get("componentSets"))
+                                     component_sets=node_entry.get("componentSets"),
+                                     variable_names=var_id_to_name)
+    if variables_diag is not None:
+        ctx.diagnostics.append(variables_diag)
     if root_node is None:
         # The REQUESTED node dispatched to a skip (a SLICE or an editor-only
         # family) — there is nothing to import, and that is a user-input error,
@@ -1766,7 +1995,7 @@ def main():
                        "source_uri": f"figma://{file_key}/{node_id}",
                        "exported_at": "1970-01-01T00:00:00.000Z"},
         "library_manifest": None,
-        "tokens": {"colors": {}, "dimensions": {}, "strings": {}},
+        "tokens": variables_tokens,
         "asset_manifest": {"version": 1, "assets": asset_manifest_entries},
         "font_family_assets": list(ctx.fonts.values()),
         "diagnostics": ctx.diagnostics,

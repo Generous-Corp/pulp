@@ -1565,6 +1565,64 @@ this subsystem's signature bug (see the `width_mode` comment in
   fig.test.mjs auto-layout completion block, `figma-plugin/test/layout.test.ts`,
   REST `AutoLayoutTest`.
 
+### Figma variables → tokens + per-property bindings
+
+Two halves, both preserved end to end (audit item 5):
+
+- **Token definitions** — the envelope-level `tokens` block
+  (`{colors, dimensions, strings}`) → `parse_ir_tokens` → `IRTokens`.
+  Canonical names are `"collection/variable"` lowercased, whitespace stripped,
+  `/` → `.`; a multi-mode collection emits the default mode under the bare
+  name and every other mode suffixed `.<mode-slug>` (e.g. `theme.bg` +
+  `theme.bg.dark`); aliases resolve per mode; BOOLEAN → `"true"`/`"false"`
+  strings. The plugin's `tokens.ts` and REST's `variables_to_tokens()` share
+  these rules; the `.fig` lane keys tokens by the VARIABLE node's raw name.
+- **Per-property bindings** — which token drives which node property. Every
+  producer emits `figma.bound_variables: {property: tokenName}` in the node's
+  figma block; `parse_ir_node` preserves each entry as a
+  `figmaBoundVariable.<property>` attribute (opaque passthrough, namespaced,
+  additive — the reader preserves, it does not interpret). Property keys use
+  the Plugin-API camelCase dialect in ALL three lanes (`fills`, `strokes`,
+  `cornerRadius`, `itemSpacing`, …); array-valued properties bind index 0 to
+  the bare key and later entries to `<property>.<i>`; nested alias maps bind
+  `<property>.<key>`.
+
+Producers:
+
+- **plugin** (`extract.ts` reads `node.boundVariables`,
+  `extract-pure.ts::extractBoundVariableBindings` resolves via the token
+  pass's `variableIdToName`): an id the token pass didn't capture
+  (remote-library / deleted variable) is DROPPED with a
+  `variable-binding-unresolved` warning (once per variable) — the plugin has
+  the full local table, so an unresolvable id is genuinely dangling.
+- **REST** (`figma_rest_export.py`): `boundVariables` rides in the /nodes
+  payload on every plan tier, but the `/v1/files/:key/variables/local`
+  endpoint (token definitions + names) is **Enterprise-plan-gated** — expect
+  HTTP 403 on most files (`variables-endpoint-unavailable` info diagnostic,
+  empty token maps). Without the name map, bindings emit the RAW variable id
+  (`VariableID:…`) plus one `variable-binding-unresolved` warning per id —
+  a stable join key, never a fabricated name. Successful fetches are cached
+  (`<file_key>__variables.json`, file-scoped).
+- **`.fig`** (`fig/scene.mjs`): scalar bindings come from the kiwi
+  `node.variableConsumptionMap.entries[]` (`variableField` enum →
+  Plugin-API camelCase via `FIG_VARIABLE_FIELD_PROPERTY` + mechanical
+  SNAKE→camel fallback; old-schema entries carrying only the numeric
+  `nodeField` are skipped), paint-level color bindings from
+  `paint.colorVar` on `fillPaints`/`strokePaints` (first visible bound paint
+  per side → `fills`/`strokes`). Guids resolve against the file's own
+  VARIABLE nodes — the same names `collectVariableTokens` keys the tokens
+  maps by; a guid outside that table (remote-library variable) is dropped
+  with a `variable-binding-unresolved` warning, once per variable.
+
+Consumption status (compat `features.variables-tokens`, codegen **partial**):
+token definitions feed the importer's existing token/theming plumbing;
+bindings are preserved as queryable `figmaBoundVariable.*` attributes for
+downstream theming/token-swap tooling, but codegen does NOT yet emit themeable
+token references into the generated UI — swapping a token value does not
+re-theme an already-generated import. Tests: `[view][import][variables]`
+(C++), `bound-variables.test.ts` (plugin), `test_figma_rest_export.py`
+variable tests (REST), the `variable bindings` case in `fig.test.mjs` (.fig).
+
 ### Grid containers → native grid bridge (NOT Yoga grid)
 
 Pulp's engine has its **own** grid layout (`LayoutMode::grid` + `layout_grid()`
