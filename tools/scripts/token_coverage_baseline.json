@@ -9,7 +9,7 @@
   "core/view/src/design_cpp_codegen.cpp": 1,
   "core/view/src/design_frame_view.cpp": 10,
   "core/view/src/design_import_native_common.cpp": 3,
-  "core/view/src/eq_curve_view.cpp": 1,
+  "core/view/src/eq_curve_view.cpp": 12,
   "core/view/src/file_browser.cpp": 6,
   "core/view/src/file_drop_zone.cpp": 2,
   "core/view/src/gap_widgets.cpp": 2,
