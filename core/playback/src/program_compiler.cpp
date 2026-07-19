@@ -6,6 +6,74 @@
 
 namespace pulp::playback {
 
+namespace {
+
+struct BudgetedStableMergeState {
+    struct Step {
+        bool complete = false;
+        std::size_t work_units = 0;
+    };
+
+    void reset() noexcept {
+        width = 1;
+        left = 0;
+        mid = 0;
+        right = 0;
+        i = 0;
+        j = 0;
+        pair_active = false;
+        clearing_source = false;
+    }
+
+    template <typename T, typename Less>
+    Step step(std::vector<T>& values, std::vector<T>& scratch, Less less) {
+        if (values.size() <= 1 || width >= values.size())
+            return {.complete = true};
+        if (clearing_source) {
+            scratch.pop_back();
+            if (scratch.empty()) {
+                clearing_source = false;
+                width *= 2;
+                left = 0;
+            }
+            return {.work_units = 1};
+        }
+        if (left >= values.size()) {
+            values.swap(scratch);
+            clearing_source = true;
+            return {};
+        }
+        if (!pair_active) {
+            mid = std::min(left + width, values.size());
+            right = std::min(left + 2 * width, values.size());
+            i = left;
+            j = mid;
+            pair_active = true;
+            return {};
+        }
+        if (i < mid && (j >= right || !less(values[j], values[i])))
+            scratch.push_back(std::move(values[i++]));
+        else
+            scratch.push_back(std::move(values[j++]));
+        if (i == mid && j == right) {
+            left = right;
+            pair_active = false;
+        }
+        return {.work_units = 1};
+    }
+
+    std::size_t width = 1;
+    std::size_t left = 0;
+    std::size_t mid = 0;
+    std::size_t right = 0;
+    std::size_t i = 0;
+    std::size_t j = 0;
+    bool pair_active = false;
+    bool clearing_source = false;
+};
+
+} // namespace
+
 struct PlaybackProgramCompilerCore;
 
 class ProgramCompilerTask final : public CompileTask {
@@ -42,46 +110,18 @@ class ProgramCompilerTask final : public CompileTask {
     std::vector<timeline::ItemId> current_clip_ids_;
     std::vector<NoteProgramEvent> current_note_events_;
     std::vector<NoteProgramEvent> note_merge_buffer_;
-    std::size_t note_merge_width_ = 1;
-    std::size_t note_merge_left_ = 0;
-    std::size_t note_merge_mid_ = 0;
-    std::size_t note_merge_right_ = 0;
-    std::size_t note_merge_i_ = 0;
-    std::size_t note_merge_j_ = 0;
-    bool note_merge_pair_active_ = false;
-    bool clearing_note_merge_source_ = false;
+    BudgetedStableMergeState note_merge_;
     std::vector<AudioClipRendererProgram> current_audio_clips_;
     std::vector<timeline::ItemId> current_audio_ids_;
     std::vector<timeline::ItemId> audio_id_merge_buffer_;
-    std::size_t audio_id_merge_width_ = 1;
-    std::size_t audio_id_merge_left_ = 0;
-    std::size_t audio_id_merge_mid_ = 0;
-    std::size_t audio_id_merge_right_ = 0;
-    std::size_t audio_id_merge_i_ = 0;
-    std::size_t audio_id_merge_j_ = 0;
+    BudgetedStableMergeState audio_id_merge_;
     std::size_t audio_id_validation_index_ = 1;
-    bool audio_id_merge_pair_active_ = false;
-    bool clearing_audio_id_merge_source_ = false;
     std::vector<AudioClipRendererProgram> audio_merge_buffer_;
-    std::size_t audio_merge_width_ = 1;
-    std::size_t audio_merge_left_ = 0;
-    std::size_t audio_merge_mid_ = 0;
-    std::size_t audio_merge_right_ = 0;
-    std::size_t audio_merge_i_ = 0;
-    std::size_t audio_merge_j_ = 0;
-    bool audio_merge_pair_active_ = false;
-    bool clearing_audio_merge_source_ = false;
+    BudgetedStableMergeState audio_merge_;
     std::uint64_t total_audio_clips_ = 0;
     std::vector<std::shared_ptr<const TrackProgram>> tracks_;
     std::vector<std::shared_ptr<const TrackProgram>> merge_buffer_;
-    std::size_t merge_width_ = 1;
-    std::size_t merge_left_ = 0;
-    std::size_t merge_mid_ = 0;
-    std::size_t merge_right_ = 0;
-    std::size_t merge_i_ = 0;
-    std::size_t merge_j_ = 0;
-    bool merge_pair_active_ = false;
-    bool clearing_merge_source_ = false;
+    BudgetedStableMergeState track_merge_;
     std::size_t validation_track_ = 0;
     std::size_t validation_clip_ = 0;
     std::size_t validation_note_ = 0;
@@ -212,6 +252,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
     while (std::chrono::steady_clock::now() < budget.deadline && work < budget.max_work_units) {
         if (stage_ == Stage::CompileTracks) {
             if (track_index_ == sequence_->tracks().size()) {
+                track_merge_.reset();
                 stage_ = Stage::Link;
                 continue;
             }
@@ -251,16 +292,10 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             if (clip_index_ == track.clips().size()) {
                 if (current_note_events_.size() > 1) {
                     note_merge_buffer_.reserve(current_note_events_.size());
-                    note_merge_width_ = 1;
-                    note_merge_left_ = 0;
-                    note_merge_pair_active_ = false;
-                    clearing_note_merge_source_ = false;
+                    note_merge_.reset();
                     stage_ = Stage::SortTrackNotes;
                 } else if (current_audio_clips_.size() > 1) {
-                    audio_id_merge_width_ = 1;
-                    audio_id_merge_left_ = 0;
-                    audio_id_merge_pair_active_ = false;
-                    clearing_audio_id_merge_source_ = false;
+                    audio_id_merge_.reset();
                     stage_ = Stage::SortTrackAudioIds;
                 } else {
                     stage_ = Stage::FinalizeTrack;
@@ -324,98 +359,27 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             continue;
         }
         if (stage_ == Stage::SortTrackNotes) {
-            if (current_note_events_.size() <= 1 ||
-                note_merge_width_ >= current_note_events_.size()) {
+            const auto step = note_merge_.step(
+                current_note_events_, note_merge_buffer_, note_program_event_less);
+            work += step.work_units;
+            if (step.complete) {
                 if (current_audio_clips_.size() > 1) {
-                    audio_id_merge_width_ = 1;
-                    audio_id_merge_left_ = 0;
-                    audio_id_merge_pair_active_ = false;
-                    clearing_audio_id_merge_source_ = false;
+                    audio_id_merge_.reset();
                     stage_ = Stage::SortTrackAudioIds;
                 } else {
                     stage_ = Stage::FinalizeTrack;
                 }
-                continue;
-            }
-            if (clearing_note_merge_source_) {
-                note_merge_buffer_.pop_back();
-                ++work;
-                if (note_merge_buffer_.empty()) {
-                    clearing_note_merge_source_ = false;
-                    note_merge_width_ *= 2;
-                    note_merge_left_ = 0;
-                }
-                continue;
-            }
-            if (note_merge_left_ >= current_note_events_.size()) {
-                current_note_events_.swap(note_merge_buffer_);
-                clearing_note_merge_source_ = true;
-                continue;
-            }
-            if (!note_merge_pair_active_) {
-                note_merge_mid_ =
-                    std::min(note_merge_left_ + note_merge_width_, current_note_events_.size());
-                note_merge_right_ =
-                    std::min(note_merge_left_ + 2 * note_merge_width_, current_note_events_.size());
-                note_merge_i_ = note_merge_left_;
-                note_merge_j_ = note_merge_mid_;
-                note_merge_pair_active_ = true;
-            }
-            if (note_merge_i_ < note_merge_mid_ &&
-                (note_merge_j_ >= note_merge_right_ ||
-                 !note_program_event_less(current_note_events_[note_merge_j_],
-                                          current_note_events_[note_merge_i_])))
-                note_merge_buffer_.push_back(current_note_events_[note_merge_i_++]);
-            else
-                note_merge_buffer_.push_back(current_note_events_[note_merge_j_++]);
-            ++work;
-            if (note_merge_i_ == note_merge_mid_ && note_merge_j_ == note_merge_right_) {
-                note_merge_left_ = note_merge_right_;
-                note_merge_pair_active_ = false;
             }
             continue;
         }
         if (stage_ == Stage::SortTrackAudioIds) {
-            if (audio_id_merge_width_ >= current_audio_ids_.size()) {
+            const auto step = audio_id_merge_.step(
+                current_audio_ids_, audio_id_merge_buffer_,
+                [](timeline::ItemId lhs, timeline::ItemId rhs) { return lhs < rhs; });
+            work += step.work_units;
+            if (step.complete) {
                 audio_id_validation_index_ = 1;
                 stage_ = Stage::ValidateTrackAudioIds;
-                continue;
-            }
-            if (clearing_audio_id_merge_source_) {
-                audio_id_merge_buffer_.pop_back();
-                ++work;
-                if (audio_id_merge_buffer_.empty()) {
-                    clearing_audio_id_merge_source_ = false;
-                    audio_id_merge_width_ *= 2;
-                    audio_id_merge_left_ = 0;
-                }
-                continue;
-            }
-            if (audio_id_merge_left_ >= current_audio_ids_.size()) {
-                current_audio_ids_.swap(audio_id_merge_buffer_);
-                clearing_audio_id_merge_source_ = true;
-                continue;
-            }
-            if (!audio_id_merge_pair_active_) {
-                audio_id_merge_mid_ = std::min(audio_id_merge_left_ + audio_id_merge_width_,
-                                               current_audio_ids_.size());
-                audio_id_merge_right_ = std::min(audio_id_merge_left_ + 2 * audio_id_merge_width_,
-                                                 current_audio_ids_.size());
-                audio_id_merge_i_ = audio_id_merge_left_;
-                audio_id_merge_j_ = audio_id_merge_mid_;
-                audio_id_merge_pair_active_ = true;
-            }
-            if (audio_id_merge_i_ < audio_id_merge_mid_ &&
-                (audio_id_merge_j_ >= audio_id_merge_right_ ||
-                 current_audio_ids_[audio_id_merge_i_] <= current_audio_ids_[audio_id_merge_j_]))
-                audio_id_merge_buffer_.push_back(current_audio_ids_[audio_id_merge_i_++]);
-            else
-                audio_id_merge_buffer_.push_back(current_audio_ids_[audio_id_merge_j_++]);
-            ++work;
-            if (audio_id_merge_i_ == audio_id_merge_mid_ &&
-                audio_id_merge_j_ == audio_id_merge_right_) {
-                audio_id_merge_left_ = audio_id_merge_right_;
-                audio_id_merge_pair_active_ = false;
             }
             continue;
         }
@@ -431,59 +395,21 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                                  AudioRendererErrorCode::InvalidIdentity});
                 continue;
             }
-            audio_merge_width_ = 1;
-            audio_merge_left_ = 0;
-            audio_merge_pair_active_ = false;
-            clearing_audio_merge_source_ = false;
+            audio_merge_.reset();
             stage_ = Stage::SortTrackAudio;
             continue;
         }
         if (stage_ == Stage::SortTrackAudio) {
-            if (current_audio_clips_.size() <= 1 ||
-                audio_merge_width_ >= current_audio_clips_.size()) {
+            const auto step = audio_merge_.step(
+                current_audio_clips_, audio_merge_buffer_,
+                [](const AudioClipRendererProgram& lhs,
+                   const AudioClipRendererProgram& rhs) {
+                    return std::pair(lhs.timeline_start, lhs.id.value) <
+                           std::pair(rhs.timeline_start, rhs.id.value);
+                });
+            work += step.work_units;
+            if (step.complete)
                 stage_ = Stage::FinalizeTrack;
-                continue;
-            }
-            if (clearing_audio_merge_source_) {
-                audio_merge_buffer_.pop_back();
-                ++work;
-                if (audio_merge_buffer_.empty()) {
-                    clearing_audio_merge_source_ = false;
-                    audio_merge_width_ *= 2;
-                    audio_merge_left_ = 0;
-                }
-                continue;
-            }
-            if (audio_merge_left_ >= current_audio_clips_.size()) {
-                current_audio_clips_.swap(audio_merge_buffer_);
-                clearing_audio_merge_source_ = true;
-                continue;
-            }
-            if (!audio_merge_pair_active_) {
-                audio_merge_mid_ =
-                    std::min(audio_merge_left_ + audio_merge_width_, current_audio_clips_.size());
-                audio_merge_right_ = std::min(audio_merge_left_ + 2 * audio_merge_width_,
-                                              current_audio_clips_.size());
-                audio_merge_i_ = audio_merge_left_;
-                audio_merge_j_ = audio_merge_mid_;
-                audio_merge_pair_active_ = true;
-            }
-            const auto less = [](const AudioClipRendererProgram& lhs,
-                                 const AudioClipRendererProgram& rhs) {
-                return std::pair(lhs.timeline_start, lhs.id.value) <
-                       std::pair(rhs.timeline_start, rhs.id.value);
-            };
-            if (audio_merge_i_ < audio_merge_mid_ &&
-                (audio_merge_j_ >= audio_merge_right_ ||
-                 !less(current_audio_clips_[audio_merge_j_], current_audio_clips_[audio_merge_i_])))
-                audio_merge_buffer_.push_back(std::move(current_audio_clips_[audio_merge_i_++]));
-            else
-                audio_merge_buffer_.push_back(std::move(current_audio_clips_[audio_merge_j_++]));
-            ++work;
-            if (audio_merge_i_ == audio_merge_mid_ && audio_merge_j_ == audio_merge_right_) {
-                audio_merge_left_ = audio_merge_right_;
-                audio_merge_pair_active_ = false;
-            }
             continue;
         }
         if (stage_ == Stage::FinalizeTrack) {
@@ -532,42 +458,13 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             continue;
         }
         if (stage_ == Stage::Link) {
-            if (tracks_.size() <= 1 || merge_width_ >= tracks_.size()) {
+            const auto step = track_merge_.step(
+                tracks_, merge_buffer_, [](const auto& lhs, const auto& rhs) {
+                    return lhs->id() < rhs->id();
+                });
+            work += step.work_units;
+            if (step.complete)
                 stage_ = Stage::Validate;
-                continue;
-            }
-            if (clearing_merge_source_) {
-                merge_buffer_.pop_back();
-                ++work;
-                if (merge_buffer_.empty()) {
-                    clearing_merge_source_ = false;
-                    merge_width_ *= 2;
-                    merge_left_ = 0;
-                }
-                continue;
-            }
-            if (merge_left_ >= tracks_.size()) {
-                tracks_.swap(merge_buffer_);
-                clearing_merge_source_ = true;
-                continue;
-            }
-            if (!merge_pair_active_) {
-                merge_mid_ = std::min(merge_left_ + merge_width_, tracks_.size());
-                merge_right_ = std::min(merge_left_ + 2 * merge_width_, tracks_.size());
-                merge_i_ = merge_left_;
-                merge_j_ = merge_mid_;
-                merge_pair_active_ = true;
-            }
-            if (merge_i_ < merge_mid_ &&
-                (merge_j_ >= merge_right_ || tracks_[merge_i_]->id() <= tracks_[merge_j_]->id()))
-                merge_buffer_.push_back(tracks_[merge_i_++]);
-            else
-                merge_buffer_.push_back(tracks_[merge_j_++]);
-            ++work;
-            if (merge_i_ == merge_mid_ && merge_j_ == merge_right_) {
-                merge_left_ = merge_right_;
-                merge_pair_active_ = false;
-            }
             continue;
         }
         if (stage_ == Stage::Validate) {

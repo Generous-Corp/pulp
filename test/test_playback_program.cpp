@@ -479,7 +479,7 @@ TEST_CASE("many-track linking and validation advance in charged work units") {
     PlaybackProgramStore store;
     HoldingExecutor executor;
     PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
-    REQUIRE(compiler.submit(request(make_many_track_project(128), tempo_map(), 1,
+    REQUIRE(compiler.submit(request(make_many_track_project(129), tempo_map(), 1,
                                     {.all = true})));
     std::size_t slices = 0;
     executor.run_one_slice();
@@ -492,7 +492,7 @@ TEST_CASE("many-track linking and validation advance in charged work units") {
     }
     REQUIRE(slices > 1'000);
     const auto program = store.read();
-    REQUIRE(program->tracks().size() == 128);
+    REQUIRE(program->tracks().size() == 129);
     for (std::size_t i = 1; i < program->tracks().size(); ++i)
         REQUIRE(program->tracks()[i - 1]->id() < program->tracks()[i]->id());
 }
