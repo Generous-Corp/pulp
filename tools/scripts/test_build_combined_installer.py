@@ -76,12 +76,13 @@ class CombinedInstallerTest(unittest.TestCase):
                 (bundle / "Contents" / "MacOS").mkdir(parents=True)
                 args.extend(("--plugin", kind, str(bundle)))
 
-            env = os.environ.copy()
-            env["PATH"] = f"{fake_bin}:{env['PATH']}"
-            env["CAPTURE_XML"] = str(capture)
-            # This graph test must never inspect or mutate the user's keychains.
-            # Signing itself is still exercised through the fake codesign tool.
-            env["PULP_SKIP_SIGNING_PREFLIGHT"] = "1"
+            env = {
+                "PATH": f"{fake_bin}:/usr/bin:/bin",
+                "HOME": str(tmp),
+                "TMPDIR": str(tmp),
+                "CAPTURE_XML": str(capture),
+                "PULP_SKIP_SIGNING_PREFLIGHT": "1",
+            }
             completed = subprocess.run(
                 args,
                 cwd=ROOT,
@@ -96,7 +97,10 @@ class CombinedInstallerTest(unittest.TestCase):
                 0,
                 msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
             )
-            self.assertTrue(capture.is_file())
+            self.assertTrue(
+                capture.is_file(),
+                msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+            )
             return capture.read_text()
 
     def test_multi_plugin_packages_are_unique_and_grouped_by_plugin(self) -> None:

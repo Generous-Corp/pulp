@@ -1190,6 +1190,9 @@ flat format list. Keep `tools/scripts/test_build_combined_installer.py` green
 when changing this graph: it uses fake package/signing tools, sets
 `PULP_SKIP_SIGNING_PREFLIGHT=1` so it cannot inspect or mutate a developer's
 keychains, and asserts that colliding-looking names remain distinct.
+Its HOME is intentionally empty: optional `keychain.env` and `notary.env` files
+must be guarded with `-f` before `source`, because macOS Bash can terminate a
+`set -e` script at a missing sourced file before any package tool runs.
 
 **`--content "Title" "Desc" DEST SRCDIR`** (repeatable) adds a selectable
 component that installs the *contents* of `SRCDIR` to an absolute `DEST` (e.g.
