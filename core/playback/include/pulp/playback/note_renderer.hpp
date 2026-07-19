@@ -49,15 +49,15 @@ struct NoteRenderResult {
     std::uint32_t dropped_events = 0;
 };
 
-/// Phase-1 arrangement-note scheduler. This is an engine transport-tick lane,
+/// Arrangement-note scheduler for the engine transport-tick lane. It is
 /// not an audio CustomNode: it resolves immutable TrackProgram events against
 /// the transport's one or two monotonic ranges and produces block-relative
 /// MIDI for the graph/embedded adapter to consume.
 ///
 /// prepare() is control-thread work. process() owns all mutable execution state
-/// on one audio thread and is allocation-free after prepare. Phase 1 resets and
-/// releases active notes on adoption, seek, loop wrap, and stop; it deliberately
-/// does not chase notes whose onset precedes the new range.
+/// on one audio thread and is allocation-free after prepare. Adoption, seek,
+/// loop wrap, and stop reset and release active notes; notes whose onset
+/// precedes the new range are deliberately not chased.
 class ArrangementNoteRenderer {
   public:
     /// Bounded logical overlap depth per MIDI channel/pitch. Exceeding it is a

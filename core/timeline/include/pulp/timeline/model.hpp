@@ -168,8 +168,8 @@ class NoteContent {
 
 // Registered content is an extension-defined typed C++ value. The schema
 // registry owns serialization; the model deliberately stores no generic
-// string-keyed property bag. Phase 1 registered payloads must own no ItemIds,
-// so subtree remapping can preserve them without hidden reference corruption.
+// string-keyed property bag. Registered payloads must own no ItemIds, so
+// subtree remapping can preserve them without hidden reference corruption.
 class RegisteredContent {
   public:
     const SchemaIdentity& schema() const noexcept {

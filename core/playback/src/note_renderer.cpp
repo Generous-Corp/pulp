@@ -108,7 +108,8 @@ bool ArrangementNoteRenderer::emit(const NoteProgramEvent& event,
     const auto index = key_index(event.channel, event.pitch);
     auto& active = active_counts_[index];
     if (event.kind == NoteProgramEventKind::Off) {
-        if (active == 0) return true; // Phase 1 does not chase mid-note seeks.
+        // A seek may enter after the matching onset; such notes are not chased.
+        if (active == 0) return true;
         if (active > 1) {
             --active;
             return true;
