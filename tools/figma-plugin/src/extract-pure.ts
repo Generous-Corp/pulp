@@ -704,6 +704,76 @@ export function extractStrokeStyle(n: SceneNode): ExtractedStroke | undefined {
   return out;
 }
 
+// Primitive-shape provenance the raster capture cannot carry, preserved as
+// namespaced figma:* attributes (same contract as the stroke provenance
+// above): the fields a future path renderer needs to rebuild the primitive
+// without a re-export from Figma. Nothing consumes these yet — vector-like
+// leaves rasterize to PNG and the faithful-SVG capture bakes the final
+// outline — so they are provenance for path renderers and fidelity tooling
+// (tracked in compat/imports.json).
+//
+//   - ELLIPSE arcData (radians, clockwise from the x axis; innerRadius 0..1)
+//     → figma:arc_data "start,end,inner", only when the sweep is not a plain
+//     full circle or the ellipse is a donut. A full circle IS the default —
+//     emitting it on every ellipse would bloat envelopes with noise.
+//   - STAR pointCount / innerRadius (0..1 spike ratio)
+//     → figma:star_point_count / figma:star_inner_radius, always: both are
+//     required to rebuild the star, whatever their values.
+//   - POLYGON pointCount → figma:polygon_point_count, always (REST spells the
+//     node type REGULAR_POLYGON; the attribute key is shared).
+//   - cornerSmoothing (0..1 squircle factor, any cornered node) →
+//     figma:corner_smoothing, only when > 0 — the per-corner radii already
+//     ride in style, so only the non-default smoothing needs preserving.
+//   - BOOLEAN_OPERATION booleanOperation → figma:boolean_operation
+//     (union/intersect/subtract/exclude, lowercased like the stroke attrs).
+//
+// Returns undefined when the node carries no primitive metadata to state.
+const TWO_PI = Math.PI * 2;
+
+/// Up-to-4-decimal formatting with trailing zeros trimmed, so attr strings
+/// stay stable across float widths (kiwi float32 vs Plugin API double).
+function fmtGeomNum(v: number): string {
+  return String(Math.round(v * 10000) / 10000);
+}
+
+export function extractPrimitiveGeometryAttrs(n: SceneNode): Record<string, string> | undefined {
+  const attrs: Record<string, string> = {};
+
+  if (n.type === "ELLIPSE" && n.arcData) {
+    const { startingAngle, endingAngle, innerRadius } = n.arcData;
+    const fullCircle = Math.abs(endingAngle - startingAngle) >= TWO_PI - 1e-4;
+    if (!fullCircle || innerRadius > 1e-4) {
+      attrs["figma:arc_data"] =
+        `${fmtGeomNum(startingAngle)},${fmtGeomNum(endingAngle)},${fmtGeomNum(innerRadius)}`;
+    }
+  }
+
+  if (n.type === "STAR") {
+    if (typeof n.pointCount === "number") {
+      attrs["figma:star_point_count"] = String(n.pointCount);
+    }
+    if (typeof n.innerRadius === "number") {
+      attrs["figma:star_inner_radius"] = fmtGeomNum(n.innerRadius);
+    }
+  }
+
+  if (n.type === "POLYGON" && typeof n.pointCount === "number") {
+    attrs["figma:polygon_point_count"] = String(n.pointCount);
+  }
+
+  const smoothing =
+    "cornerSmoothing" in n ? (n as SceneNode & { cornerSmoothing?: unknown }).cornerSmoothing : undefined;
+  if (typeof smoothing === "number" && smoothing > 0) {
+    attrs["figma:corner_smoothing"] = fmtGeomNum(smoothing);
+  }
+
+  if (n.type === "BOOLEAN_OPERATION" && typeof n.booleanOperation === "string") {
+    attrs["figma:boolean_operation"] = n.booleanOperation.toLowerCase();
+  }
+
+  return Object.keys(attrs).length > 0 ? attrs : undefined;
+}
+
 // Variable bindings (`node.boundVariables`) resolved to canonical token names.
 // The Plugin API shape is `{ [property]: VariableAlias | VariableAlias[] |
 // { [key]: VariableAlias } }` where a VariableAlias is `{ type:

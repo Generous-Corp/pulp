@@ -495,6 +495,48 @@ def _fmt_num(v):
     f = float(v)
     return str(int(f)) if f == int(f) else str(f)
 
+def _fmt_geom_num(v):
+    """Up-to-4-decimal formatting with trailing zeros trimmed — the same
+    rounding the plugin/.fig lanes apply, so the attr strings match across
+    lanes despite float32 vs double wire widths."""
+    return _fmt_num(round(float(v), 4))
+
+_TWO_PI = 2.0 * math.pi
+
+def extract_primitive_attributes(n):
+    """Namespaced figma:* primitive-shape provenance the raster capture cannot
+    carry (same contract as extract_stroke_attributes): the fields a future
+    path renderer needs to rebuild the primitive without a re-export. No
+    renderer consumes these yet — vector-like leaves rasterize to PNG — so
+    they are provenance for path renderers and fidelity tooling (tracked in
+    compat/imports.json).
+
+    REST exposes ELLIPSE arcData (radians, REST file-property-types ArcData),
+    cornerSmoothing (0..1), and booleanOperation (UNION/INTERSECT/SUBTRACT/
+    EXCLUDE). STAR/REGULAR_POLYGON point count and star inner radius are NOT
+    in the REST wire schema (verified against the REST file-node-types docs),
+    so those attrs are plugin/.fig-lane only."""
+    attrs = {}
+    t = n.get("type")
+    arc = n.get("arcData")
+    if t == "ELLIPSE" and isinstance(arc, dict):
+        start = arc.get("startingAngle", 0.0)
+        end = arc.get("endingAngle", _TWO_PI)
+        inner = arc.get("innerRadius", 0.0)
+        full_circle = abs(end - start) >= _TWO_PI - 1e-4
+        # A plain full circle IS the default — emitting it on every ellipse
+        # would bloat envelopes with noise.
+        if not full_circle or inner > 1e-4:
+            attrs["figma:arc_data"] = ",".join(
+                _fmt_geom_num(v) for v in (start, end, inner))
+    smoothing = n.get("cornerSmoothing")
+    if isinstance(smoothing, (int, float)) and smoothing > 0:
+        attrs["figma:corner_smoothing"] = _fmt_geom_num(smoothing)
+    op = n.get("booleanOperation")
+    if t == "BOOLEAN_OPERATION" and isinstance(op, str):
+        attrs["figma:boolean_operation"] = op.lower()
+    return attrs
+
 def extract_style(n, ctx=None):
     s = {}
     bb = n.get("absoluteBoundingBox")
@@ -1495,6 +1537,14 @@ def walk(n, parent, z, ctx, inside_widget=False):
     stroke_attrs = extract_stroke_attributes(n)
     if stroke_attrs:
         out["attributes"] = {**out.get("attributes", {}), **stroke_attrs}
+
+    # Primitive-shape provenance (arc/donut data, corner smoothing, boolean
+    # operation) — namespaced figma:* attributes a future path renderer needs
+    # to rebuild the primitive without a re-export. The PNG capture below
+    # preserves the pixels; these preserve the semantics.
+    primitive_attrs = extract_primitive_attributes(n)
+    if primitive_attrs:
+        out["attributes"] = {**out.get("attributes", {}), **primitive_attrs}
 
     # A widget's own content is the designer's art — never name-guess it into a
     # built-in widget (which paints Pulp's stock silver knob over the design).
