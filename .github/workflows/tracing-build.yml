@@ -40,7 +40,7 @@ concurrency:
 
 jobs:
   tracing-on:
-    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     # Hard-coded GitHub-hosted Linux — advisory, never self-hosted (see header).
     runs-on: ubuntu-latest
     name: PULP_TRACING=ON compiles + tests pass

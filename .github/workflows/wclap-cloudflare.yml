@@ -50,7 +50,7 @@ jobs:
   build-prove-deploy:
     name: Build + prove + (owner-gated) deploy
     # Scheduled-workflow fork guard: forks should not burn a weekly cron.
-    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     env:
       # Owner-gated deploy switch (a step `if:` cannot read `secrets` directly).

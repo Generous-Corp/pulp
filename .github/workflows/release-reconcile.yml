@@ -51,7 +51,7 @@ concurrency:
 jobs:
   reconcile:
     # Never run on forks — it would dispatch workflows in someone else's repo.
-    if: github.repository == 'danielraffel/pulp'
+    if: github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     env:
       # Well above the observed p95 pipeline duration. This is only the window

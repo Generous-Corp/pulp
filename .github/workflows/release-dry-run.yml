@@ -25,7 +25,7 @@ concurrency:
 jobs:
   dry-run:
     name: Release dry-run (${{ matrix.platform }}, no publish)
-    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     strategy:
       fail-fast: false
       matrix:

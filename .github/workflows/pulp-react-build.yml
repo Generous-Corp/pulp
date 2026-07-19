@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     name: Build and test @pulp/react
 
@@ -96,7 +96,7 @@ jobs:
           verbose: true
 
   import-ir:
-    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     name: Build and test @pulp/import-ir
 
