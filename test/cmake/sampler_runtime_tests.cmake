@@ -86,6 +86,7 @@ pulp_add_test_suite(pulp-test-sample-heritage
     LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-heritage-json
     SOURCES test_sample_heritage_json.cpp
+            test_sample_heritage_runtime_state_json.cpp
     LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-starvation-envelope
     SOURCES test_sample_starvation_envelope.cpp harness/rt_allocation_probe.cpp

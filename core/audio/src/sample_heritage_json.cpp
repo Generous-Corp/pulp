@@ -2,6 +2,7 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
@@ -134,85 +135,422 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
         return fail(SampleHeritageJsonStatus::InvalidEnum, std::string(path));
     }
 
-    bool stage(Value value, std::size_t index, SampleHeritageStageSpec& destination) {
-        const auto base = "$.stages[" + std::to_string(index) + "]";
+    bool domain(Value object, std::string_view expected, std::string_view path) {
+        const auto value = object["domain"];
+        if (!value.isString())
+            return fail(SampleHeritageJsonStatus::WrongType, std::string(path));
+        if (value.getString() != expected)
+            return fail(SampleHeritageJsonStatus::InvalidEnum, std::string(path));
+        return true;
+    }
+
+    template<typename Enum, std::size_t N>
+    bool enumeration(Value object, std::string_view field, std::string_view path,
+                     const std::array<std::pair<std::string_view, Enum>, N>& values,
+                     Enum& destination) {
+        const auto value = object[field];
+        if (!value.isString())
+            return fail(SampleHeritageJsonStatus::WrongType, std::string(path));
+        for (const auto& [name, mapped] : values) {
+            if (value.getString() == name) {
+                destination = mapped;
+                return true;
+            }
+        }
+        return fail(SampleHeritageJsonStatus::InvalidEnum, std::string(path));
+    }
+
+    bool voice_block(Value value, std::size_t index,
+                     SampleHeritageVoiceBlockSpec& destination) {
+        const auto base = "$.voice[" + std::to_string(index) + "]";
         if (!value.isObject()) return fail(SampleHeritageJsonStatus::WrongType, base);
         if (!value.hasObjectMember("type"))
             return fail(SampleHeritageJsonStatus::MissingField, base + ".type");
         if (!value["type"].isString())
             return fail(SampleHeritageJsonStatus::WrongType, base + ".type");
         const auto type = value["type"].getString();
-
+        destination.domain = SampleHeritageBlockDomain::Voice;
+        const auto common = [&] {
+            return domain(value, "voice", base + ".domain") &&
+                   boolean(value, "bypass", base + ".bypass", destination.bypass);
+        };
         if (type == "machine_domain") {
-            constexpr std::array fields{"type"sv, "bypass"sv, "sample_rate"sv};
-            double sample_rate = 0.0;
-            if (!audit_object(value, base, fields) ||
-                !boolean(value, "bypass", base + ".bypass", destination.bypass) ||
-                !number(value, "sample_rate", base + ".sample_rate",
-                        std::numeric_limits<double>::denorm_min(),
-                        std::numeric_limits<double>::max(), sample_rate)) return false;
-            destination.parameters = SampleHeritageMachineDomainStage{sample_rate};
-        } else if (type == "quantization") {
-            constexpr std::array fields{"type"sv, "bypass"sv, "bit_depth"sv,
-                                        "dither_lsb"sv, "seed"sv, "seed_policy"sv};
-            std::uint8_t bit_depth = 0;
-            double dither = 0.0;
-            std::uint64_t seed_value = 0;
+            constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
+                                        "sample_rate"sv};
+            double sample_rate{};
+            if (!audit_object(value, base, fields) || !common() ||
+                !number(value, "sample_rate", base + ".sample_rate", 8000.0,
+                        384000.0, sample_rate)) return false;
+            destination.parameters = SampleHeritageVoiceMachineDomainBlock{sample_rate};
+        } else if (type == "clock") {
+            constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
+                                        "ratio"sv};
+            double ratio{};
+            if (!audit_object(value, base, fields) || !common() ||
+                !number(value, "ratio", base + ".ratio", 0.015625, 64.0, ratio))
+                return false;
+            destination.parameters = SampleHeritageVoiceClockBlock{ratio};
+        } else if (type == "pitch") {
+            constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
+                                        "family"sv};
+            constexpr std::array families{
+                std::pair{"variable_clock"sv, SampleHeritagePitchFamily::VariableClock},
+                std::pair{"drop_repeat"sv, SampleHeritagePitchFamily::DropRepeat},
+                std::pair{"early_linear"sv, SampleHeritagePitchFamily::EarlyLinear}};
+            SampleHeritagePitchFamily family{};
+            if (!audit_object(value, base, fields) || !common() ||
+                !enumeration(value, "family", base + ".family", families, family))
+                return false;
+            destination.parameters = SampleHeritageVoicePitchBlock{family};
+        } else if (type == "converter") {
+            constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
+                "family"sv, "bit_depth"sv, "dac_nonlinearity"sv,
+                "dither_lsb"sv, "seed"sv, "seed_policy"sv};
+            constexpr std::array families{
+                std::pair{"linear_pcm"sv, SampleHeritageConverterFamily::LinearPcm},
+                std::pair{"mu_law"sv, SampleHeritageConverterFamily::MuLaw},
+                std::pair{"a_law"sv, SampleHeritageConverterFamily::ALaw}};
+            SampleHeritageConverterFamily family{};
+            double bits{}, nonlinearity{}, dither{}; std::uint64_t seed_value{};
             SampleHeritageSeedPolicy policy{};
-            if (!audit_object(value, base, fields) ||
-                !boolean(value, "bypass", base + ".bypass", destination.bypass) ||
-                !integer(value, "bit_depth", base + ".bit_depth", 2, 24, bit_depth) ||
-                !number(value, "dither_lsb", base + ".dither_lsb", 0.0, 2.0, dither) ||
-                !seed(value, "seed", base + ".seed", seed_value) ||
-                !seed_policy(value, "seed_policy", base + ".seed_policy", policy)) return false;
-            destination.parameters = SampleHeritageQuantizationStage{
-                bit_depth, static_cast<float>(dither), seed_value, policy};
-        } else if (type == "clock_pitch") {
-            constexpr std::array fields{"type"sv, "bypass"sv, "ratio"sv};
-            double ratio = 0.0;
-            if (!audit_object(value, base, fields) ||
-                !boolean(value, "bypass", base + ".bypass", destination.bypass) ||
-                !number(value, "ratio", base + ".ratio",
-                        std::numeric_limits<double>::denorm_min(),
-                        std::numeric_limits<double>::max(), ratio)) return false;
-            destination.parameters = SampleHeritageClockPitchStage{ratio};
-        } else if (type == "dac_hold") {
-            constexpr std::array fields{"type"sv, "bypass"sv, "hold_samples"sv};
-            std::uint32_t hold_samples = 0;
-            if (!audit_object(value, base, fields) ||
-                !boolean(value, "bypass", base + ".bypass", destination.bypass) ||
+            if (!audit_object(value, base, fields) || !common() ||
+                !enumeration(value, "family", base + ".family", families, family) ||
+                !number(value, "bit_depth", base + ".bit_depth", 4.0, 16.0, bits) ||
+                !number(value, "dac_nonlinearity", base + ".dac_nonlinearity",
+                        0.0, 1.0, nonlinearity) ||
+                !number(value, "dither_lsb", base + ".dither_lsb", 0.0, 2.0,
+                        dither) || !seed(value, "seed", base + ".seed", seed_value) ||
+                !seed_policy(value, "seed_policy", base + ".seed_policy", policy))
+                return false;
+            if ((dither > 0.0 ||
+                 policy == SampleHeritageSeedPolicy::ContinueSerializedState) &&
+                seed_value == 0)
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".seed");
+            destination.parameters = SampleHeritageVoiceConverterBlock{
+                family, static_cast<float>(bits), static_cast<float>(nonlinearity),
+                static_cast<float>(dither), seed_value, policy};
+        } else if (type == "hold_droop") {
+            constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
+                                        "mode"sv, "hold_samples"sv, "droop"sv};
+            constexpr std::array modes{
+                std::pair{"zero_order"sv, SampleHeritageHoldMode::ZeroOrder}};
+            SampleHeritageHoldMode mode{};
+            std::uint32_t hold{}; double droop{};
+            if (!audit_object(value, base, fields) || !common() ||
+                !enumeration(value, "mode", base + ".mode", modes, mode) ||
                 !integer(value, "hold_samples", base + ".hold_samples", 1, 65536,
-                         hold_samples)) return false;
-            destination.parameters = SampleHeritageDacHoldStage{hold_samples};
-        } else if (type == "reconstruction_filter") {
-            constexpr std::array fields{"type"sv, "bypass"sv, "cutoff_hz"sv};
-            double cutoff = 0.0;
-            if (!audit_object(value, base, fields) ||
-                !boolean(value, "bypass", base + ".bypass", destination.bypass) ||
-                !number(value, "cutoff_hz", base + ".cutoff_hz",
-                        std::numeric_limits<double>::denorm_min(),
-                        std::numeric_limits<double>::max(), cutoff)) return false;
-            destination.parameters = SampleHeritageReconstructionFilterStage{cutoff};
-        } else if (type == "noise") {
-            constexpr std::array fields{"type"sv, "bypass"sv, "amplitude"sv,
-                                        "seed"sv, "seed_policy"sv};
-            double amplitude = 0.0;
-            std::uint64_t seed_value = 0;
-            SampleHeritageSeedPolicy policy{};
-            if (!audit_object(value, base, fields) ||
-                !boolean(value, "bypass", base + ".bypass", destination.bypass) ||
-                !number(value, "amplitude", base + ".amplitude", 0.0, 1.0, amplitude) ||
+                         hold) ||
+                !number(value, "droop", base + ".droop", 0.0, 1.0, droop))
+                return false;
+            destination.parameters = SampleHeritageVoiceHoldDroopBlock{
+                mode, hold, static_cast<float>(droop)};
+        } else if (type == "reconstruction") {
+            constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
+                "family"sv, "cutoff_law"sv, "cutoff_value"sv, "order"sv,
+                "ripple_db"sv};
+            constexpr std::array families{
+                std::pair{"one_pole"sv, SampleHeritageReconstructionFamily::OnePole},
+                std::pair{"butterworth"sv,
+                          SampleHeritageReconstructionFamily::Butterworth},
+                std::pair{"chebyshev"sv,
+                          SampleHeritageReconstructionFamily::Chebyshev},
+                std::pair{"elliptic"sv,
+                          SampleHeritageReconstructionFamily::Elliptic}};
+            constexpr std::array cutoff_laws{
+                std::pair{"fixed_hz"sv, SampleHeritageCutoffLaw::FixedHz},
+                std::pair{"machine_rate_ratio"sv,
+                          SampleHeritageCutoffLaw::MachineRateRatio}};
+            SampleHeritageReconstructionFamily family{};
+            SampleHeritageCutoffLaw cutoff_law{};
+            double cutoff{}, ripple{}; std::uint8_t order{};
+            if (!audit_object(value, base, fields) || !common() ||
+                !enumeration(value, "family", base + ".family", families, family) ||
+                !enumeration(value, "cutoff_law", base + ".cutoff_law",
+                             cutoff_laws, cutoff_law) ||
+                !number(value, "cutoff_value", base + ".cutoff_value", 0.0,
+                        192000.0, cutoff) ||
+                !integer(value, "order", base + ".order", 1, 16, order) ||
+                !number(value, "ripple_db", base + ".ripple_db", 0.0, 12.0,
+                        ripple)) return false;
+            double machine_rate = result.profile.host_sample_rate;
+            double clock_ratio = 1.0;
+            for (std::size_t earlier = 0; earlier < index; ++earlier) {
+                const auto& spec = result.profile.voice[earlier];
+                if (spec.bypass) continue;
+                if (const auto* machine =
+                        std::get_if<SampleHeritageVoiceMachineDomainBlock>(
+                            &spec.parameters))
+                    machine_rate = machine->sample_rate;
+                else if (const auto* clock =
+                             std::get_if<SampleHeritageVoiceClockBlock>(
+                                 &spec.parameters))
+                    clock_ratio = clock->ratio;
+            }
+            if ((cutoff_law == SampleHeritageCutoffLaw::FixedHz &&
+                 (cutoff < 1.0 || cutoff >= machine_rate * clock_ratio * 0.5)) ||
+                (cutoff_law == SampleHeritageCutoffLaw::MachineRateRatio &&
+                 (cutoff <= 0.0 || cutoff >= 0.5)))
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".cutoff_value");
+            destination.parameters = SampleHeritageVoiceReconstructionBlock{
+                family, cutoff_law, cutoff, order, static_cast<float>(ripple)};
+        } else if (type == "analog_color") {
+            constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
+                                        "drive"sv, "asymmetry"sv, "mix"sv};
+            double drive{}, asymmetry{}, mix{};
+            if (!audit_object(value, base, fields) || !common() ||
+                !number(value, "drive", base + ".drive", 0.0, 16.0, drive) ||
+                !number(value, "asymmetry", base + ".asymmetry", -1.0, 1.0,
+                        asymmetry) ||
+                !number(value, "mix", base + ".mix", 0.0, 1.0, mix)) return false;
+            destination.parameters = SampleHeritageVoiceAnalogColorBlock{
+                static_cast<float>(drive), static_cast<float>(asymmetry),
+                static_cast<float>(mix)};
+        } else if (type == "live_cyclic_stretch") {
+            constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
+                "factor"sv, "cycle_ms"sv, "splice_ms"sv, "stereo_link"sv,
+                "tempo_lock"sv, "shuffle_divisions"sv, "seed"sv,
+                "seed_policy"sv};
+            double factor{}, cycle{}, splice{}; bool stereo{}, tempo_lock{};
+            std::uint16_t shuffle_divisions{};
+            std::uint64_t seed_value{}; SampleHeritageSeedPolicy policy{};
+            if (!audit_object(value, base, fields) || !common() ||
+                !number(value, "factor", base + ".factor", 0.25, 20.0, factor) ||
+                !number(value, "cycle_ms", base + ".cycle_ms", 0.0,
+                        std::numeric_limits<double>::max(), cycle) ||
+                !number(value, "splice_ms", base + ".splice_ms", 0.0, 20.0,
+                        splice) ||
+                !boolean(value, "stereo_link", base + ".stereo_link", stereo) ||
+                !boolean(value, "tempo_lock", base + ".tempo_lock", tempo_lock) ||
+                !integer(value, "shuffle_divisions", base + ".shuffle_divisions",
+                         0, 64, shuffle_divisions) ||
                 !seed(value, "seed", base + ".seed", seed_value) ||
-                !seed_policy(value, "seed_policy", base + ".seed_policy", policy)) return false;
-            destination.parameters = SampleHeritageNoiseStage{
-                static_cast<float>(amplitude), seed_value, policy};
-        } else if (type == "output") {
-            constexpr std::array fields{"type"sv, "bypass"sv, "gain"sv};
-            double gain = 0.0;
-            if (!audit_object(value, base, fields) ||
-                !boolean(value, "bypass", base + ".bypass", destination.bypass) ||
-                !number(value, "gain", base + ".gain", 0.0, 16.0, gain)) return false;
-            destination.parameters = SampleHeritageOutputStage{static_cast<float>(gain)};
+                !seed_policy(value, "seed_policy", base + ".seed_policy", policy))
+                return false;
+            if (cycle <= 0.0)
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".cycle_ms");
+            if (splice > cycle * 0.5)
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".splice_ms");
+            if (shuffle_divisions == 1)
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".shuffle_divisions");
+            if ((shuffle_divisions != 0 ||
+                 policy == SampleHeritageSeedPolicy::ContinueSerializedState) &&
+                seed_value == 0)
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".seed");
+            destination.parameters = SampleHeritageVoiceLiveCyclicStretchBlock{
+                factor, cycle, splice, stereo, tempo_lock, shuffle_divisions,
+                seed_value, policy};
+        } else {
+            return fail(SampleHeritageJsonStatus::InvalidEnum, base + ".type");
+        }
+        return true;
+    }
+
+    bool bus_block(Value value, std::size_t index,
+                   SampleHeritageBusBlockSpec& destination) {
+        const auto base = "$.bus[" + std::to_string(index) + "]";
+        if (!value.isObject()) return fail(SampleHeritageJsonStatus::WrongType, base);
+        if (!value.hasObjectMember("type"))
+            return fail(SampleHeritageJsonStatus::MissingField, base + ".type");
+        if (!value["type"].isString())
+            return fail(SampleHeritageJsonStatus::WrongType, base + ".type");
+        const auto type = value["type"].getString();
+        destination.domain = SampleHeritageBlockDomain::Bus;
+        const auto common = [&] {
+            return domain(value, "bus", base + ".domain") &&
+                   boolean(value, "bypass", base + ".bypass", destination.bypass);
+        };
+        if (type == "noise_idle") {
+            constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
+                "noise_amplitude"sv, "idle_amplitude"sv,
+                "tilt_db_per_octave"sv, "gate"sv, "seed"sv, "seed_policy"sv};
+            constexpr std::array gates{
+                std::pair{"always_on"sv, SampleHeritageNoiseGate::AlwaysOn},
+                std::pair{"voice_active"sv, SampleHeritageNoiseGate::VoiceActive}};
+            double noise{}, idle{}, tilt{}; std::uint64_t seed_value{};
+            SampleHeritageNoiseGate gate{};
+            SampleHeritageSeedPolicy policy{};
+            if (!audit_object(value, base, fields) || !common() ||
+                !number(value, "noise_amplitude", base + ".noise_amplitude", 0.0,
+                        1.0, noise) ||
+                !number(value, "idle_amplitude", base + ".idle_amplitude", 0.0,
+                        1.0, idle) ||
+                !number(value, "tilt_db_per_octave", base + ".tilt_db_per_octave",
+                        -24.0, 24.0, tilt) ||
+                !enumeration(value, "gate", base + ".gate", gates, gate) ||
+                !seed(value, "seed", base + ".seed", seed_value) ||
+                !seed_policy(value, "seed_policy", base + ".seed_policy", policy))
+                return false;
+            if ((std::max(noise, idle) > 0.0 ||
+                 policy == SampleHeritageSeedPolicy::ContinueSerializedState) &&
+                seed_value == 0)
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".seed");
+            destination.parameters = SampleHeritageBusNoiseIdleBlock{
+                static_cast<float>(noise), static_cast<float>(idle),
+                static_cast<float>(tilt), gate, seed_value, policy};
+        } else if (type == "output_drive") {
+            constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
+                                        "drive"sv, "ceiling"sv};
+            double drive{}, ceiling{};
+            if (!audit_object(value, base, fields) || !common() ||
+                !number(value, "drive", base + ".drive", 0.0, 16.0, drive) ||
+                !number(value, "ceiling", base + ".ceiling", 0.001, 4.0,
+                        ceiling))
+                return false;
+            destination.parameters = SampleHeritageBusOutputDriveBlock{
+                static_cast<float>(drive), static_cast<float>(ceiling)};
+        } else {
+            return fail(SampleHeritageJsonStatus::InvalidEnum, base + ".type");
+        }
+        return true;
+    }
+
+    bool record_commit_block(Value value, std::size_t index,
+                             SampleHeritageRecordCommitBlockSpec& destination) {
+        const auto base = "$.record_commit[" + std::to_string(index) + "]";
+        if (!value.isObject()) return fail(SampleHeritageJsonStatus::WrongType, base);
+        if (!value.hasObjectMember("type"))
+            return fail(SampleHeritageJsonStatus::MissingField, base + ".type");
+        if (!value["type"].isString())
+            return fail(SampleHeritageJsonStatus::WrongType, base + ".type");
+        const auto type = value["type"].getString();
+        destination.domain = SampleHeritageBlockDomain::RecordCommit;
+        const auto common = [&] {
+            return domain(value, "record_commit", base + ".domain") &&
+                   boolean(value, "bypass", base + ".bypass", destination.bypass);
+        };
+        if (type == "input_drive_clip") {
+            constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
+                                        "drive"sv, "clip_level"sv};
+            double drive{}, clip{};
+            if (!audit_object(value, base, fields) || !common() ||
+                !number(value, "drive", base + ".drive", 0.0, 16.0, drive) ||
+                !number(value, "clip_level", base + ".clip_level", 0.001, 4.0,
+                        clip)) return false;
+            destination.parameters = SampleHeritageRecordInputDriveClipBlock{
+                static_cast<float>(drive), static_cast<float>(clip)};
+        } else if (type == "anti_alias_record_rate") {
+            constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
+                "filter_family"sv, "sample_rate"sv, "cutoff_law"sv,
+                "cutoff_value"sv, "order"sv, "ripple_db"sv};
+            constexpr std::array families{
+                std::pair{"one_pole"sv, SampleHeritageRecordFilterFamily::OnePole},
+                std::pair{"butterworth"sv,
+                          SampleHeritageRecordFilterFamily::Butterworth},
+                std::pair{"chebyshev"sv,
+                          SampleHeritageRecordFilterFamily::Chebyshev},
+                std::pair{"elliptic"sv,
+                          SampleHeritageRecordFilterFamily::Elliptic}};
+            constexpr std::array cutoff_laws{
+                std::pair{"fixed_hz"sv, SampleHeritageCutoffLaw::FixedHz},
+                std::pair{"machine_rate_ratio"sv,
+                          SampleHeritageCutoffLaw::MachineRateRatio}};
+            SampleHeritageRecordFilterFamily family{};
+            SampleHeritageCutoffLaw cutoff_law{};
+            double rate{}, cutoff{}, ripple{}; std::uint8_t order{};
+            if (!audit_object(value, base, fields) || !common() ||
+                !enumeration(value, "filter_family", base + ".filter_family",
+                             families, family) ||
+                !number(value, "sample_rate", base + ".sample_rate", 8000.0,
+                        384000.0, rate) ||
+                !enumeration(value, "cutoff_law", base + ".cutoff_law",
+                             cutoff_laws, cutoff_law) ||
+                !number(value, "cutoff_value", base + ".cutoff_value", 0.0,
+                        192000.0, cutoff) ||
+                !integer(value, "order", base + ".order", 1, 16, order) ||
+                !number(value, "ripple_db", base + ".ripple_db", 0.0, 12.0,
+                        ripple)) return false;
+            if ((cutoff_law == SampleHeritageCutoffLaw::FixedHz &&
+                 (cutoff < 1.0 || cutoff >= rate * 0.5)) ||
+                (cutoff_law == SampleHeritageCutoffLaw::MachineRateRatio &&
+                 (cutoff <= 0.0 || cutoff >= 0.5)))
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".cutoff_value");
+            destination.parameters = SampleHeritageRecordRateBlock{
+                family, rate, cutoff_law, cutoff, order,
+                static_cast<float>(ripple)};
+        } else if (type == "converter") {
+            constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
+                "family"sv, "bit_depth"sv, "dac_nonlinearity"sv,
+                "dither_lsb"sv, "seed"sv, "seed_policy"sv};
+            constexpr std::array families{
+                std::pair{"linear_pcm"sv, SampleHeritageConverterFamily::LinearPcm},
+                std::pair{"mu_law"sv, SampleHeritageConverterFamily::MuLaw},
+                std::pair{"a_law"sv, SampleHeritageConverterFamily::ALaw}};
+            SampleHeritageConverterFamily family{};
+            double bits{}, nonlinearity{}, dither{}; std::uint64_t seed_value{};
+            SampleHeritageSeedPolicy policy{};
+            if (!audit_object(value, base, fields) || !common() ||
+                !enumeration(value, "family", base + ".family", families, family) ||
+                !number(value, "bit_depth", base + ".bit_depth", 4.0, 16.0, bits) ||
+                !number(value, "dac_nonlinearity", base + ".dac_nonlinearity",
+                        0.0, 1.0, nonlinearity) ||
+                !number(value, "dither_lsb", base + ".dither_lsb", 0.0, 2.0,
+                        dither) || !seed(value, "seed", base + ".seed", seed_value) ||
+                !seed_policy(value, "seed_policy", base + ".seed_policy", policy))
+                return false;
+            if ((dither > 0.0 ||
+                 policy == SampleHeritageSeedPolicy::ContinueSerializedState) &&
+                seed_value == 0)
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".seed");
+            destination.parameters = SampleHeritageRecordConverterBlock{
+                family, static_cast<float>(bits), static_cast<float>(nonlinearity),
+                static_cast<float>(dither), seed_value, policy};
+        } else if (type == "commit_stretch") {
+            constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
+                "family"sv, "factor"sv, "cycle_samples"sv, "splice_samples"sv,
+                "quality"sv, "width"sv, "zone_start_frame"sv,
+                "zone_end_frame"sv, "stereo_link"sv};
+            constexpr std::array families{
+                std::pair{"cyclic"sv, SampleHeritageCommitStretchFamily::Cyclic},
+                std::pair{"adaptive"sv, SampleHeritageCommitStretchFamily::Adaptive}};
+            SampleHeritageCommitStretchFamily family{};
+            double factor{};
+            std::uint32_t cycle{}, splice{};
+            std::uint8_t quality{}, width{};
+            std::uint64_t zone_start{}, zone_end{};
+            bool stereo{};
+            if (!audit_object(value, base, fields) || !common() ||
+                !enumeration(value, "family", base + ".family", families, family) ||
+                !number(value, "factor", base + ".factor", 0.25, 20.0, factor) ||
+                !integer(value, "cycle_samples", base + ".cycle_samples", 1,
+                         1048576, cycle) ||
+                !integer(value, "splice_samples", base + ".splice_samples", 0,
+                         524288, splice) ||
+                !integer(value, "quality", base + ".quality", 0, 99, quality) ||
+                !integer(value, "width", base + ".width", 0, 99, width) ||
+                !integer(value, "zone_start_frame", base + ".zone_start_frame", 0,
+                         std::numeric_limits<std::int64_t>::max(), zone_start) ||
+                !integer(value, "zone_end_frame", base + ".zone_end_frame", 0,
+                         std::numeric_limits<std::int64_t>::max(), zone_end) ||
+                !boolean(value, "stereo_link", base + ".stereo_link", stereo))
+                return false;
+            if (splice > cycle / 2)
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".splice_samples");
+            if (family == SampleHeritageCommitStretchFamily::Cyclic &&
+                (quality != 0 || width != 0))
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            quality != 0 ? base + ".quality" : base + ".width");
+            if (family == SampleHeritageCommitStretchFamily::Adaptive && quality == 0)
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".quality");
+            if (family == SampleHeritageCommitStretchFamily::Adaptive && width == 0)
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".width");
+            if (!((zone_start == 0 && zone_end == 0) || zone_start < zone_end))
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".zone_end_frame");
+            destination.parameters = SampleHeritageRecordCommitStretchBlock{
+                family, factor, cycle, splice, quality, width, zone_start, zone_end,
+                stereo};
         } else {
             return fail(SampleHeritageJsonStatus::InvalidEnum, base + ".type");
         }
@@ -299,9 +637,8 @@ template<typename Number>
 void append_number(std::string& output, Number value) {
     if (value == Number{}) value = Number{};
     std::array<char, 64> buffer{};
-    const auto converted = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value,
-                                         std::chars_format::general,
-                                         std::numeric_limits<Number>::max_digits10);
+    const auto converted = std::to_chars(buffer.data(), buffer.data() + buffer.size(),
+                                         value, std::chars_format::general);
     output.append(buffer.data(), converted.ptr);
 }
 
@@ -319,6 +656,40 @@ std::string_view seed_policy_name(SampleHeritageSeedPolicy policy) {
         : "continue_serialized_state";
 }
 
+std::string_view converter_family_name(SampleHeritageConverterFamily family) {
+    if (family == SampleHeritageConverterFamily::MuLaw) return "mu_law";
+    if (family == SampleHeritageConverterFamily::ALaw) return "a_law";
+    return "linear_pcm";
+}
+
+std::string_view reconstruction_family_name(
+    SampleHeritageReconstructionFamily family) {
+    if (family == SampleHeritageReconstructionFamily::Butterworth)
+        return "butterworth";
+    if (family == SampleHeritageReconstructionFamily::Chebyshev)
+        return "chebyshev";
+    if (family == SampleHeritageReconstructionFamily::Elliptic) return "elliptic";
+    return "one_pole";
+}
+
+std::string_view record_filter_family_name(SampleHeritageRecordFilterFamily family) {
+    if (family == SampleHeritageRecordFilterFamily::Butterworth)
+        return "butterworth";
+    if (family == SampleHeritageRecordFilterFamily::Chebyshev) return "chebyshev";
+    if (family == SampleHeritageRecordFilterFamily::Elliptic) return "elliptic";
+    return "one_pole";
+}
+
+std::string_view cutoff_law_name(SampleHeritageCutoffLaw law) {
+    return law == SampleHeritageCutoffLaw::MachineRateRatio
+        ? "machine_rate_ratio"
+        : "fixed_hz";
+}
+
+void append_bool(std::string& output, bool value) {
+    output += value ? "true" : "false";
+}
+
 }  // namespace
 
 SampleHeritageJsonParseResult parse_sample_heritage_profile_json(std::string_view json) {
@@ -331,7 +702,8 @@ SampleHeritageJsonParseResult parse_sample_heritage_profile_json(std::string_vie
             return std::move(parser.result);
         }
         constexpr std::array fields{"schema_version"sv, "profile_id"sv,
-                                    "host_sample_rate"sv, "stages"sv};
+                                    "host_sample_rate"sv, "voice"sv, "bus"sv,
+                                    "record_commit"sv};
         if (!parser.audit_object(root, "$", fields)) return std::move(parser.result);
 
         std::uint32_t schema = 0;
@@ -352,20 +724,30 @@ SampleHeritageJsonParseResult parse_sample_heritage_profile_json(std::string_vie
         if (!parser.number(root, "host_sample_rate", "$.host_sample_rate", 8000.0,
                            384000.0, parser.result.profile.host_sample_rate))
             return std::move(parser.result);
-        const auto stages = root["stages"];
-        if (!stages.isArray()) {
-            parser.fail(SampleHeritageJsonStatus::WrongType, "$.stages");
+        const auto parse_blocks = [&](std::string_view name, std::size_t maximum,
+                                      auto& destination, auto parse_block) {
+            const auto values = root[name];
+            const auto array_path = "$." + std::string(name);
+            if (!values.isArray())
+                return parser.fail(SampleHeritageJsonStatus::WrongType, array_path);
+            if (values.size() > maximum)
+                return parser.fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                                   array_path);
+            destination.resize(values.size());
+            for (std::uint32_t index = 0; index < values.size(); ++index) {
+                if (!(parser.*parse_block)(values[index], index, destination[index]))
+                    return false;
+            }
+            return true;
+        };
+        if (!parse_blocks("voice", kSampleHeritageMaximumVoiceBlocks,
+                          parser.result.profile.voice, &Parser::voice_block) ||
+            !parse_blocks("bus", kSampleHeritageMaximumBusBlocks,
+                          parser.result.profile.bus, &Parser::bus_block) ||
+            !parse_blocks("record_commit", kSampleHeritageMaximumRecordCommitBlocks,
+                          parser.result.profile.record_commit,
+                          &Parser::record_commit_block))
             return std::move(parser.result);
-        }
-        if (stages.size() > kSampleHeritageMaximumStages) {
-            parser.fail(SampleHeritageJsonStatus::NumberOutOfRange, "$.stages");
-            return std::move(parser.result);
-        }
-        parser.result.profile.stages.resize(stages.size());
-        for (std::uint32_t index = 0; index < stages.size(); ++index) {
-            if (!parser.stage(stages[index], index, parser.result.profile.stages[index]))
-                return std::move(parser.result);
-        }
         const auto validation = validate_sample_heritage_profile(parser.result.profile);
         parser.result.profile_status = validation.status;
         if (!validation.valid()) {
@@ -378,8 +760,17 @@ SampleHeritageJsonParseResult parse_sample_heritage_profile_json(std::string_vie
             else if (validation.status ==
                      SampleHeritageProfileStatus::UnsupportedSchemaVersion)
                 path = "$.schema_version";
-            else if (validation.stage_index < parser.result.profile.stages.size())
-                path = "$.stages[" + std::to_string(validation.stage_index) + "]";
+            else {
+                const auto domain = validation.block_domain ==
+                                            SampleHeritageBlockDomain::Voice
+                                        ? "voice"
+                                    : validation.block_domain ==
+                                            SampleHeritageBlockDomain::Bus
+                                        ? "bus"
+                                        : "record_commit";
+                path = "$." + std::string(domain) + "[" +
+                       std::to_string(validation.stage_index) + "]";
+            }
             parser.fail(SampleHeritageJsonStatus::ProfileValidationFailed,
                         std::move(path));
             return std::move(parser.result);
@@ -411,6 +802,11 @@ SampleHeritageJsonWriteResult write_sample_heritage_profile_json(
     const auto validation = validate_sample_heritage_profile(profile);
     result.profile_status = validation.status;
     if (!validation.valid()) return result;
+    if (!profile.stages.empty()) {
+        result.profile_status =
+            SampleHeritageProfileStatus::NonCanonicalProfileRepresentation;
+        return result;
+    }
 
     auto& output = result.json;
     output = "{\"schema_version\":" +
@@ -418,49 +814,183 @@ SampleHeritageJsonWriteResult write_sample_heritage_profile_json(
              ",\"profile_id\":\"" + profile.profile_id +
              "\",\"host_sample_rate\":";
     append_number(output, profile.host_sample_rate);
-    output += ",\"stages\":[";
-    for (std::size_t index = 0; index < profile.stages.size(); ++index) {
+    output += ",\"voice\":[";
+    for (std::size_t index = 0; index < profile.voice.size(); ++index) {
         if (index != 0) output.push_back(',');
-        const auto& spec = profile.stages[index];
-        std::visit([&](const auto& stage) {
-            using Stage = std::decay_t<decltype(stage)>;
-            output += "{\"type\":\"";
-            if constexpr (std::is_same_v<Stage, SampleHeritageMachineDomainStage>)
-                output += "machine_domain\",\"bypass\":";
-            else if constexpr (std::is_same_v<Stage, SampleHeritageQuantizationStage>)
-                output += "quantization\",\"bypass\":";
-            else if constexpr (std::is_same_v<Stage, SampleHeritageClockPitchStage>)
-                output += "clock_pitch\",\"bypass\":";
-            else if constexpr (std::is_same_v<Stage, SampleHeritageDacHoldStage>)
-                output += "dac_hold\",\"bypass\":";
-            else if constexpr (std::is_same_v<Stage, SampleHeritageReconstructionFilterStage>)
-                output += "reconstruction_filter\",\"bypass\":";
-            else if constexpr (std::is_same_v<Stage, SampleHeritageNoiseStage>)
-                output += "noise\",\"bypass\":";
+        const auto& spec = profile.voice[index];
+        std::visit([&](const auto& block) {
+            using Block = std::decay_t<decltype(block)>;
+            output += "{\"domain\":\"voice\",\"type\":\"";
+            if constexpr (std::is_same_v<Block, SampleHeritageVoiceMachineDomainBlock>)
+                output += "machine_domain";
+            else if constexpr (std::is_same_v<Block, SampleHeritageVoiceClockBlock>)
+                output += "clock";
+            else if constexpr (std::is_same_v<Block, SampleHeritageVoicePitchBlock>)
+                output += "pitch";
+            else if constexpr (std::is_same_v<Block, SampleHeritageVoiceConverterBlock>)
+                output += "converter";
+            else if constexpr (std::is_same_v<Block, SampleHeritageVoiceHoldDroopBlock>)
+                output += "hold_droop";
+            else if constexpr (std::is_same_v<Block,
+                                               SampleHeritageVoiceReconstructionBlock>)
+                output += "reconstruction";
+            else if constexpr (std::is_same_v<Block,
+                                               SampleHeritageVoiceAnalogColorBlock>)
+                output += "analog_color";
             else
-                output += "output\",\"bypass\":";
-            output += spec.bypass ? "true" : "false";
-            if constexpr (std::is_same_v<Stage, SampleHeritageMachineDomainStage>) {
-                output += ",\"sample_rate\":"; append_number(output, stage.sample_rate);
-            } else if constexpr (std::is_same_v<Stage, SampleHeritageQuantizationStage>) {
-                output += ",\"bit_depth\":" + std::to_string(stage.bit_depth);
-                output += ",\"dither_lsb\":"; append_number(output, stage.dither_lsb);
-                output += ",\"seed\":"; append_seed(output, stage.seed);
+                output += "live_cyclic_stretch";
+            output += "\",\"bypass\":";
+            append_bool(output, spec.bypass);
+            if constexpr (std::is_same_v<Block, SampleHeritageVoiceMachineDomainBlock>) {
+                output += ",\"sample_rate\":"; append_number(output, block.sample_rate);
+            } else if constexpr (std::is_same_v<Block, SampleHeritageVoiceClockBlock>) {
+                output += ",\"ratio\":"; append_number(output, block.ratio);
+            } else if constexpr (std::is_same_v<Block, SampleHeritageVoicePitchBlock>) {
+                output += ",\"family\":\"";
+                output += block.family == SampleHeritagePitchFamily::DropRepeat
+                              ? "drop_repeat"
+                          : block.family == SampleHeritagePitchFamily::EarlyLinear
+                              ? "early_linear"
+                              : "variable_clock";
+                output.push_back('"');
+            } else if constexpr (std::is_same_v<Block,
+                                                 SampleHeritageVoiceConverterBlock>) {
+                output += ",\"family\":\""; output += converter_family_name(block.family);
+                output += "\",\"bit_depth\":"; append_number(output, block.bit_depth);
+                output += ",\"dac_nonlinearity\":";
+                append_number(output, block.dac_nonlinearity);
+                output += ",\"dither_lsb\":"; append_number(output, block.dither_lsb);
+                output += ",\"seed\":"; append_seed(output, block.seed);
                 output += ",\"seed_policy\":\"";
-                output += seed_policy_name(stage.seed_policy); output.push_back('"');
-            } else if constexpr (std::is_same_v<Stage, SampleHeritageClockPitchStage>) {
-                output += ",\"ratio\":"; append_number(output, stage.ratio);
-            } else if constexpr (std::is_same_v<Stage, SampleHeritageDacHoldStage>) {
-                output += ",\"hold_samples\":" + std::to_string(stage.hold_samples);
-            } else if constexpr (std::is_same_v<Stage, SampleHeritageReconstructionFilterStage>) {
-                output += ",\"cutoff_hz\":"; append_number(output, stage.cutoff_hz);
-            } else if constexpr (std::is_same_v<Stage, SampleHeritageNoiseStage>) {
-                output += ",\"amplitude\":"; append_number(output, stage.amplitude);
-                output += ",\"seed\":"; append_seed(output, stage.seed);
+                output += seed_policy_name(block.seed_policy); output.push_back('"');
+            } else if constexpr (std::is_same_v<Block,
+                                                 SampleHeritageVoiceHoldDroopBlock>) {
+                output += ",\"mode\":\"zero_order\"";
+                output += ",\"hold_samples\":" + std::to_string(block.hold_samples);
+                output += ",\"droop\":"; append_number(output, block.droop);
+            } else if constexpr (std::is_same_v<Block,
+                                                 SampleHeritageVoiceReconstructionBlock>) {
+                output += ",\"family\":\"";
+                output += reconstruction_family_name(block.family);
+                output += "\",\"cutoff_law\":\"";
+                output += cutoff_law_name(block.cutoff_law);
+                output += "\",\"cutoff_value\":";
+                append_number(output, block.cutoff_value);
+                output += ",\"order\":" + std::to_string(block.order);
+                output += ",\"ripple_db\":"; append_number(output, block.ripple_db);
+            } else if constexpr (std::is_same_v<Block,
+                                                 SampleHeritageVoiceAnalogColorBlock>) {
+                output += ",\"drive\":"; append_number(output, block.drive);
+                output += ",\"asymmetry\":"; append_number(output, block.asymmetry);
+                output += ",\"mix\":"; append_number(output, block.mix);
+            } else {
+                output += ",\"factor\":"; append_number(output, block.factor);
+                output += ",\"cycle_ms\":"; append_number(output, block.cycle_ms);
+                output += ",\"splice_ms\":"; append_number(output, block.splice_ms);
+                output += ",\"stereo_link\":"; append_bool(output, block.stereo_link);
+                output += ",\"tempo_lock\":"; append_bool(output, block.tempo_lock);
+                output += ",\"shuffle_divisions\":" +
+                          std::to_string(block.shuffle_divisions);
+                output += ",\"seed\":"; append_seed(output, block.seed);
                 output += ",\"seed_policy\":\"";
-                output += seed_policy_name(stage.seed_policy); output.push_back('"');
-            } else if constexpr (std::is_same_v<Stage, SampleHeritageOutputStage>) {
-                output += ",\"gain\":"; append_number(output, stage.gain);
+                output += seed_policy_name(block.seed_policy); output.push_back('"');
+            }
+            output.push_back('}');
+        }, spec.parameters);
+    }
+    output += "],\"bus\":[";
+    for (std::size_t index = 0; index < profile.bus.size(); ++index) {
+        if (index != 0) output.push_back(',');
+        const auto& spec = profile.bus[index];
+        std::visit([&](const auto& block) {
+            using Block = std::decay_t<decltype(block)>;
+            output += "{\"domain\":\"bus\",\"type\":\"";
+            if constexpr (std::is_same_v<Block, SampleHeritageBusNoiseIdleBlock>)
+                output += "noise_idle\",\"bypass\":";
+            else
+                output += "output_drive\",\"bypass\":";
+            append_bool(output, spec.bypass);
+            if constexpr (std::is_same_v<Block, SampleHeritageBusNoiseIdleBlock>) {
+                output += ",\"noise_amplitude\":";
+                append_number(output, block.noise_amplitude);
+                output += ",\"idle_amplitude\":";
+                append_number(output, block.idle_amplitude);
+                output += ",\"tilt_db_per_octave\":";
+                append_number(output, block.tilt_db_per_octave);
+                output += ",\"gate\":\"";
+                output += block.gate == SampleHeritageNoiseGate::VoiceActive
+                              ? "voice_active"
+                              : "always_on";
+                output.push_back('"');
+                output += ",\"seed\":"; append_seed(output, block.seed);
+                output += ",\"seed_policy\":\"";
+                output += seed_policy_name(block.seed_policy); output.push_back('"');
+            } else {
+                output += ",\"drive\":"; append_number(output, block.drive);
+                output += ",\"ceiling\":"; append_number(output, block.ceiling);
+            }
+            output.push_back('}');
+        }, spec.parameters);
+    }
+    output += "],\"record_commit\":[";
+    for (std::size_t index = 0; index < profile.record_commit.size(); ++index) {
+        if (index != 0) output.push_back(',');
+        const auto& spec = profile.record_commit[index];
+        std::visit([&](const auto& block) {
+            using Block = std::decay_t<decltype(block)>;
+            output += "{\"domain\":\"record_commit\",\"type\":\"";
+            if constexpr (std::is_same_v<Block,
+                                         SampleHeritageRecordInputDriveClipBlock>)
+                output += "input_drive_clip";
+            else if constexpr (std::is_same_v<Block, SampleHeritageRecordRateBlock>)
+                output += "anti_alias_record_rate";
+            else if constexpr (std::is_same_v<Block,
+                                               SampleHeritageRecordConverterBlock>)
+                output += "converter";
+            else
+                output += "commit_stretch";
+            output += "\",\"bypass\":";
+            append_bool(output, spec.bypass);
+            if constexpr (std::is_same_v<Block,
+                                         SampleHeritageRecordInputDriveClipBlock>) {
+                output += ",\"drive\":"; append_number(output, block.drive);
+                output += ",\"clip_level\":"; append_number(output, block.clip_level);
+            } else if constexpr (std::is_same_v<Block,
+                                                 SampleHeritageRecordRateBlock>) {
+                output += ",\"filter_family\":\"";
+                output += record_filter_family_name(block.filter_family);
+                output += "\",\"sample_rate\":"; append_number(output, block.sample_rate);
+                output += ",\"cutoff_law\":\"";
+                output += cutoff_law_name(block.cutoff_law);
+                output += "\",\"cutoff_value\":";
+                append_number(output, block.cutoff_value);
+                output += ",\"order\":" + std::to_string(block.order);
+                output += ",\"ripple_db\":"; append_number(output, block.ripple_db);
+            } else if constexpr (std::is_same_v<Block,
+                                                 SampleHeritageRecordConverterBlock>) {
+                output += ",\"family\":\""; output += converter_family_name(block.family);
+                output += "\",\"bit_depth\":"; append_number(output, block.bit_depth);
+                output += ",\"dac_nonlinearity\":";
+                append_number(output, block.dac_nonlinearity);
+                output += ",\"dither_lsb\":"; append_number(output, block.dither_lsb);
+                output += ",\"seed\":"; append_seed(output, block.seed);
+                output += ",\"seed_policy\":\"";
+                output += seed_policy_name(block.seed_policy); output.push_back('"');
+            } else {
+                output += ",\"family\":\"";
+                output += block.family == SampleHeritageCommitStretchFamily::Adaptive
+                              ? "adaptive"
+                              : "cyclic";
+                output += "\",\"factor\":"; append_number(output, block.factor);
+                output += ",\"cycle_samples\":" + std::to_string(block.cycle_samples);
+                output += ",\"splice_samples\":" + std::to_string(block.splice_samples);
+                output += ",\"quality\":" + std::to_string(block.quality);
+                output += ",\"width\":" + std::to_string(block.width);
+                output += ",\"zone_start_frame\":" +
+                          std::to_string(block.zone_start_frame);
+                output += ",\"zone_end_frame\":" +
+                          std::to_string(block.zone_end_frame);
+                output += ",\"stereo_link\":"; append_bool(output, block.stereo_link);
             }
             output.push_back('}');
         }, spec.parameters);

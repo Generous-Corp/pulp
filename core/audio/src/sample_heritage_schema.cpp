@@ -13,7 +13,7 @@ namespace {
 // Changing this byte contract requires a digest-version bump. The prefix keeps
 // these bytes out of every other SHA-256 protocol domain in Pulp.
 constexpr std::string_view kProfileDigestDomain =
-    "pulp.sample-heritage.profile-digest.v2";
+    "pulp.sample-heritage.profile-digest.v3";
 
 class CanonicalBytes {
 public:
@@ -64,34 +64,156 @@ std::array<std::uint8_t, 32> sample_heritage_profile_digest(
     // Host rate is an execution context, not profile identity. The same typed
     // machine profile must retain its identity when a host prepares at another
     // supported rate.
-    canonical.integer(static_cast<std::uint64_t>(profile.stages.size()));
-    for (const auto& spec : profile.stages) {
+    const auto seed_policy = [&](SampleHeritageSeedPolicy value) {
+        canonical.integer(static_cast<std::uint8_t>(value));
+    };
+    canonical.integer(static_cast<std::uint64_t>(profile.voice.size()));
+    for (const auto& spec : profile.voice) {
+        canonical.byte(static_cast<std::uint8_t>(spec.domain));
         canonical.byte(spec.bypass ? 1 : 0);
         canonical.integer(static_cast<std::uint32_t>(spec.parameters.index()));
-        std::visit([&](const auto& stage) {
-            using Stage = std::decay_t<decltype(stage)>;
-            if constexpr (std::is_same_v<Stage, SampleHeritageMachineDomainStage>) {
-                canonical.floating(stage.sample_rate);
-            } else if constexpr (std::is_same_v<Stage, SampleHeritageQuantizationStage>) {
-                canonical.integer(stage.bit_depth);
-                canonical.floating(stage.dither_lsb);
-                canonical.integer(stage.seed);
-                canonical.integer(static_cast<std::uint8_t>(stage.seed_policy));
-            } else if constexpr (std::is_same_v<Stage, SampleHeritageClockPitchStage>) {
-                canonical.floating(stage.ratio);
-            } else if constexpr (std::is_same_v<Stage, SampleHeritageDacHoldStage>) {
-                canonical.integer(stage.hold_samples);
-            } else if constexpr (std::is_same_v<Stage,
-                                                SampleHeritageReconstructionFilterStage>) {
-                canonical.floating(stage.cutoff_hz);
-            } else if constexpr (std::is_same_v<Stage, SampleHeritageNoiseStage>) {
-                canonical.floating(stage.amplitude);
-                canonical.integer(stage.seed);
-                canonical.integer(static_cast<std::uint8_t>(stage.seed_policy));
-            } else if constexpr (std::is_same_v<Stage, SampleHeritageOutputStage>) {
-                canonical.floating(stage.gain);
+        std::visit([&](const auto& block) {
+            using Block = std::decay_t<decltype(block)>;
+            if constexpr (std::is_same_v<Block, SampleHeritageVoiceMachineDomainBlock>)
+                canonical.floating(block.sample_rate);
+            else if constexpr (std::is_same_v<Block, SampleHeritageVoiceClockBlock>)
+                canonical.floating(block.ratio);
+            else if constexpr (std::is_same_v<Block, SampleHeritageVoicePitchBlock>)
+                canonical.integer(static_cast<std::uint8_t>(block.family));
+            else if constexpr (std::is_same_v<Block, SampleHeritageVoiceConverterBlock>) {
+                canonical.integer(static_cast<std::uint8_t>(block.family));
+                canonical.floating(block.bit_depth);
+                canonical.floating(block.dac_nonlinearity);
+                canonical.floating(block.dither_lsb);
+                canonical.integer(block.seed);
+                seed_policy(block.seed_policy);
+            } else if constexpr (std::is_same_v<Block, SampleHeritageVoiceHoldDroopBlock>) {
+                canonical.integer(static_cast<std::uint8_t>(block.mode));
+                canonical.integer(block.hold_samples);
+                canonical.floating(block.droop);
+            } else if constexpr (std::is_same_v<Block,
+                                                 SampleHeritageVoiceReconstructionBlock>) {
+                canonical.integer(static_cast<std::uint8_t>(block.family));
+                canonical.integer(static_cast<std::uint8_t>(block.cutoff_law));
+                canonical.floating(block.cutoff_value);
+                canonical.integer(block.order);
+                canonical.floating(block.ripple_db);
+            } else if constexpr (std::is_same_v<Block,
+                                                 SampleHeritageVoiceAnalogColorBlock>) {
+                canonical.floating(block.drive);
+                canonical.floating(block.asymmetry);
+                canonical.floating(block.mix);
+            } else {
+                canonical.floating(block.factor);
+                canonical.floating(block.cycle_ms);
+                canonical.floating(block.splice_ms);
+                canonical.byte(block.stereo_link ? 1 : 0);
+                canonical.byte(block.tempo_lock ? 1 : 0);
+                canonical.integer(block.shuffle_divisions);
+                canonical.integer(block.seed);
+                seed_policy(block.seed_policy);
             }
         }, spec.parameters);
+    }
+    canonical.integer(static_cast<std::uint64_t>(profile.bus.size()));
+    for (const auto& spec : profile.bus) {
+        canonical.byte(static_cast<std::uint8_t>(spec.domain));
+        canonical.byte(spec.bypass ? 1 : 0);
+        canonical.integer(static_cast<std::uint32_t>(spec.parameters.index()));
+        std::visit([&](const auto& block) {
+            using Block = std::decay_t<decltype(block)>;
+            if constexpr (std::is_same_v<Block, SampleHeritageBusNoiseIdleBlock>) {
+                canonical.floating(block.noise_amplitude);
+                canonical.floating(block.idle_amplitude);
+                canonical.floating(block.tilt_db_per_octave);
+                canonical.integer(static_cast<std::uint8_t>(block.gate));
+                canonical.integer(block.seed);
+                seed_policy(block.seed_policy);
+            } else {
+                canonical.floating(block.drive);
+                canonical.floating(block.ceiling);
+            }
+        }, spec.parameters);
+    }
+    canonical.integer(static_cast<std::uint64_t>(profile.record_commit.size()));
+    for (const auto& spec : profile.record_commit) {
+        canonical.byte(static_cast<std::uint8_t>(spec.domain));
+        canonical.byte(spec.bypass ? 1 : 0);
+        canonical.integer(static_cast<std::uint32_t>(spec.parameters.index()));
+        std::visit([&](const auto& block) {
+            using Block = std::decay_t<decltype(block)>;
+            if constexpr (std::is_same_v<Block,
+                                          SampleHeritageRecordInputDriveClipBlock>) {
+                canonical.floating(block.drive);
+                canonical.floating(block.clip_level);
+            } else if constexpr (std::is_same_v<Block,
+                                                 SampleHeritageRecordRateBlock>) {
+                canonical.integer(static_cast<std::uint8_t>(block.filter_family));
+                canonical.floating(block.sample_rate);
+                canonical.integer(static_cast<std::uint8_t>(block.cutoff_law));
+                canonical.floating(block.cutoff_value);
+                canonical.integer(block.order);
+                canonical.floating(block.ripple_db);
+            } else if constexpr (std::is_same_v<Block,
+                                                 SampleHeritageRecordConverterBlock>) {
+                canonical.integer(static_cast<std::uint8_t>(block.family));
+                canonical.floating(block.bit_depth);
+                canonical.floating(block.dac_nonlinearity);
+                canonical.floating(block.dither_lsb);
+                canonical.integer(block.seed);
+                seed_policy(block.seed_policy);
+            } else {
+                canonical.integer(static_cast<std::uint8_t>(block.family));
+                canonical.floating(block.factor);
+                canonical.integer(block.cycle_samples);
+                canonical.integer(block.splice_samples);
+                canonical.integer(block.quality);
+                canonical.integer(block.width);
+                canonical.integer(block.zone_start_frame);
+                canonical.integer(block.zone_end_frame);
+                canonical.byte(block.stereo_link ? 1 : 0);
+            }
+        }, spec.parameters);
+    }
+
+    const bool legacy = profile.voice.empty() && profile.bus.empty() &&
+                        profile.record_commit.empty() && !profile.stages.empty();
+    if (legacy) {
+        canonical.integer(static_cast<std::uint64_t>(profile.stages.size()));
+        for (const auto& spec : profile.stages) {
+            canonical.byte(spec.bypass ? 1 : 0);
+            canonical.integer(static_cast<std::uint32_t>(spec.parameters.index()));
+            std::visit([&](const auto& stage) {
+                using Stage = std::decay_t<decltype(stage)>;
+                if constexpr (std::is_same_v<Stage, SampleHeritageMachineDomainStage>) {
+                    canonical.floating(stage.sample_rate);
+                } else if constexpr (std::is_same_v<Stage,
+                                                    SampleHeritageQuantizationStage>) {
+                    canonical.integer(stage.bit_depth);
+                    canonical.floating(stage.dither_lsb);
+                    canonical.integer(stage.seed);
+                    canonical.integer(static_cast<std::uint8_t>(stage.seed_policy));
+                } else if constexpr (std::is_same_v<Stage,
+                                                    SampleHeritageClockPitchStage>) {
+                    canonical.floating(stage.ratio);
+                } else if constexpr (std::is_same_v<Stage,
+                                                    SampleHeritageDacHoldStage>) {
+                    canonical.integer(stage.hold_samples);
+                } else if constexpr (std::is_same_v<
+                                         Stage,
+                                         SampleHeritageReconstructionFilterStage>) {
+                    canonical.floating(stage.cutoff_hz);
+                } else if constexpr (std::is_same_v<Stage,
+                                                    SampleHeritageNoiseStage>) {
+                    canonical.floating(stage.amplitude);
+                    canonical.integer(stage.seed);
+                    canonical.integer(static_cast<std::uint8_t>(stage.seed_policy));
+                } else if constexpr (std::is_same_v<Stage,
+                                                    SampleHeritageOutputStage>) {
+                    canonical.floating(stage.gain);
+                }
+            }, spec.parameters);
+        }
     }
 
     const auto digest = runtime::sha256(canonical.get().data(), canonical.get().size());
