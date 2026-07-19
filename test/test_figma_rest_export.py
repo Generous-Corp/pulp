@@ -756,6 +756,70 @@ class TextRunsTest(unittest.TestCase):
         self.assertEqual(union["type"], "image", "raster capture still happens")
         self.assertEqual(gauge["attributes"]["figma:arc_data"], "0,4.7124,0.8")
 
+    def test_dev_metadata_preserved_as_namespaced_attributes(self):
+        # Audit "Dev metadata" / "Export settings" rows: dev status,
+        # annotations, and authored export settings are preserved as
+        # provenance-only figma:* attrs. Nothing renders from these; export
+        # settings never override the deterministic capture policy. REST
+        # specifics: exportSettings entries are {suffix, format,
+        # constraint{type,value}} with NO contentsOnly (that key is
+        # plugin/.fig-lane only), and annotation property types already use
+        # the Plugin API's camelCase vocabulary.
+        status = frx.extract_dev_metadata_attributes(
+            {"type": "FRAME", "devStatus": {"type": "READY_FOR_DEV"}})
+        self.assertEqual(status["figma:dev_status"], "ready_for_dev")
+        annotated = frx.extract_dev_metadata_attributes(
+            {"type": "FRAME", "annotations": [
+                {"label": "Use the shared knob track",
+                 "properties": [{"type": "fills"}, {"type": "itemSpacing"}]},
+                {"categoryId": "cat-7"},
+                {}]})  # nothing to state → dropped
+        self.assertEqual(
+            annotated["figma:annotations"],
+            '[{"label":"Use the shared knob track",'
+            '"properties":["fills","itemSpacing"]},{"category_id":"cat-7"}]')
+        exported = frx.extract_dev_metadata_attributes(
+            {"type": "FRAME", "exportSettings": [
+                # The everything-default preset: only the format survives.
+                {"format": "PNG", "suffix": "",
+                 "constraint": {"type": "SCALE", "value": 1}},
+                {"format": "JPG", "suffix": "@2x",
+                 "constraint": {"type": "SCALE", "value": 2}},
+                {"format": "SVG", "constraint": {"type": "WIDTH", "value": 512}}]})
+        self.assertEqual(
+            exported["figma:export_settings"],
+            '[{"format":"png"},'
+            '{"format":"jpg","suffix":"@2x","constraint":"scale:2"},'
+            '{"format":"svg","constraint":"width:512"}]')
+        # Absence stays silent — no attribute noise on plain nodes.
+        self.assertEqual(frx.extract_dev_metadata_attributes(
+            {"type": "FRAME", "devStatus": None, "annotations": [],
+             "exportSettings": []}), {})
+
+    def test_component_description_comes_from_the_components_map(self):
+        # REST carries component descriptions in the /nodes response
+        # `components` / `componentSets` maps (keyed by node id), not on the
+        # document node — mirroring the Plugin API's PublishableMixin surface
+        # (COMPONENT / COMPONENT_SET only).
+        tree = {"type": "FRAME", "name": "Panel", "id": "0:1",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 200, "height": 100},
+                "children": [
+                    {"type": "COMPONENT", "name": "Knob", "id": "1:2",
+                     "devStatus": {"type": "COMPLETED"},
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 40, "height": 40}},
+                    {"type": "FRAME", "name": "Plain", "id": "1:3",
+                     "absoluteBoundingBox": {"x": 50, "y": 0, "width": 40, "height": 40}},
+                ]}
+        ir, _ctx = frx.node_tree_to_ir(
+            tree,
+            components={"1:2": {"key": "k", "name": "Knob",
+                                "description": "Primary gain knob."}})
+        knob, plain = ir["children"][0], ir["children"][1]
+        self.assertEqual(knob["attributes"]["figma:description"],
+                         "Primary gain knob.")
+        self.assertEqual(knob["attributes"]["figma:dev_status"], "completed")
+        self.assertNotIn("attributes", plain)
+
 
 class FaithfulVectorTest(unittest.TestCase):
     """Plan B / B4a: faithful-vector lane — frame-SVG knob auto-detect + the

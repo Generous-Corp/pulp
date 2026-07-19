@@ -2658,3 +2658,61 @@ test('primitive geometry rides as figma:* attributes, non-default values only', 
     'kiwi XOR normalizes to the Plugin API vocabulary');
   assert.equal(findByName(envelope.root, 'Squircle').attributes['figma:corner_smoothing'], '0.6');
 });
+
+test('dev metadata + export settings ride as figma:* attributes, provenance-only', () => {
+  // Audit "Dev metadata" / "Export settings" rows: descriptions, annotations,
+  // and authored export settings are preserved as provenance-only figma:*
+  // attrs — nothing renders from them, and export settings never override the
+  // deterministic capture policy. Kiwi spellings under test: `description`
+  // (with `symbolDescription` fallback), Annotation label/labelV2 +
+  // SCREAMING_SNAKE property types that normalize to the Plugin API's
+  // camelCase vocabulary (FILL → fills, STACK_SPACING → itemSpacing),
+  // ExportSettings imageType (JPEG → the Plugin API's "jpg") and
+  // ExportConstraintType CONTENT_SCALE/CONTENT_WIDTH → "scale:"/"width:".
+  // The Plugin API's devStatus has NO per-node kiwi field — figma:dev_status
+  // is a documented absence in this lane. The kiwi categoryId GUID is a
+  // file-local ref, never emitted as category_id.
+  const kid = (localID, position, over) => ({
+    guid: { sessionID: 0, localID },
+    parentIndex: { guid: { sessionID: 0, localID: 2 }, position },
+    size: { x: 40, y: 40 },
+    ...over,
+  });
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 200, y: 200 } },
+    kid(3, 'a', { type: 'FRAME', name: 'Documented',
+      description: '  Primary gain knob.  ',
+      annotations: [
+        { label: 'Use the shared knob track',
+          properties: [{ type: 'FILL' }, { type: 'STACK_SPACING' }] },
+        { labelV2: 'Spacing is a token' },
+        {}, // nothing to state → dropped
+      ] }),
+    kid(4, 'b', { type: 'FRAME', name: 'Exported',
+      exportSettings: [
+        // The everything-default preset every real .fig stamps: PNG,
+        // CONTENT_SCALE 1, empty suffix, contentsOnly true → format only.
+        { suffix: '', imageType: 'PNG',
+          constraint: { type: 'CONTENT_SCALE', value: 1 }, contentsOnly: true },
+        { suffix: '@2x', imageType: 'JPEG',
+          constraint: { type: 'CONTENT_SCALE', value: 2 }, contentsOnly: false },
+        { suffix: '', imageType: 'SVG',
+          constraint: { type: 'CONTENT_WIDTH', value: 512 }, contentsOnly: true },
+      ] }),
+    kid(5, 'c', { type: 'FRAME', name: 'Plain' }),
+  ]});
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const documented = findByName(envelope.root, 'Documented');
+  assert.equal(documented.attributes['figma:description'], 'Primary gain knob.');
+  assert.equal(documented.attributes['figma:annotations'],
+    '[{"label":"Use the shared knob track","properties":["fills","itemSpacing"]},'
+      + '{"label":"Spacing is a token"}]');
+  assert.equal(findByName(envelope.root, 'Exported').attributes['figma:export_settings'],
+    '[{"format":"png"},'
+      + '{"format":"jpg","suffix":"@2x","constraint":"scale:2","contents_only":false},'
+      + '{"format":"svg","constraint":"width:512"}]');
+  assert.ok(!('attributes' in findByName(envelope.root, 'Plain')),
+    'absence stays silent — no attribute noise on plain nodes');
+});

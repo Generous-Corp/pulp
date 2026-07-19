@@ -1764,6 +1764,55 @@ semantics; tracked in `compat/imports.json`):
   `figma-plugin/test/primitive-geometry.test.ts`, REST
   `test_primitive_geometry_*`.
 
+### Dev metadata + export settings (description, dev status, annotations, export presets)
+
+Audit "Dev metadata" (Medium) + "Export settings" (Low) rows — the last
+coverage slice, and PROVENANCE-ONLY BY DESIGN: these attrs are for dev
+tooling, diagnostics, and round-trip provenance. NO renderer, codegen path, or
+importer heuristic reads them, and export settings NEVER override Pulp's
+deterministic PNG/SVG capture policy (they are asset hints, not a capture
+contract). Emitters: plugin `extract-pure.ts::extractDevMetadataAttrs`, REST
+`figma_rest_export.py::extract_dev_metadata_attributes`, `.fig`
+`scene.mjs::devMetadataAttrs`; all ride the free-form attributes passthrough
+(`design_ir_json.cpp` ~1232 — no allowlist, every `attributes.*` key lands
+verbatim in `IRNode::attributes`). Tracked in `compat/imports.json`
+(`dev-metadata` + `export-settings` rows).
+
+| Attribute | Source field (plugin / REST / `.fig` kiwi) | Emitted when |
+|---|---|---|
+| `figma:description` | `PublishableMixin.description` (COMPONENT / COMPONENT_SET) / the `/nodes` response `components`+`componentSets` maps keyed by node id (NOT on the document node) / kiwi `description`, falling back to `symbolDescription` | trimmed value is non-empty |
+| `figma:dev_status` | `devStatus.type` lowercased (`ready_for_dev` / `completed`) / same / **absent — the kiwi schema has no per-node devStatus** (`sectionStatus` is the unrelated section build-status; do not map it) | `devStatus` is set (it is `null` by default) |
+| `figma:annotations` | `annotations` → compact JSON `[{label, properties, category_id}]`; label falls back to `labelMarkdown` (`.fig`: `labelV2`) | array non-empty AND at least one entry has something to state |
+| `figma:export_settings` | `exportSettings` → compact JSON `[{format, suffix, constraint, contents_only}]` | array non-empty (an export preset existing at all is author intent; within an entry, defaults stay silent) |
+
+- **Value normalization is cross-lane, like `XOR → exclude`:** kiwi
+  `imageType: JPEG` → the Plugin API's `jpg`; kiwi constraint types
+  `CONTENT_SCALE/CONTENT_WIDTH/CONTENT_HEIGHT` → `scale:N`/`width:N`/`height:N`
+  (the `SCALE:1` default stays silent, value via `fmtGeomNum`); kiwi
+  SCREAMING_SNAKE annotation property types → Plugin-API camelCase
+  (`FILL → fills`, `STACK_SPACING → itemSpacing`, `STROKE_WIDTH →
+  strokeWeight`, `STACK_MODE → layoutMode`, `COMPONENT → mainComponent`, …
+  — table + mechanical snake→camel in `scene.mjs::annotationPropertyName`).
+- **Lane asymmetries (verified, don't "fix"):** REST does not expose
+  `contentsOnly`, so `contents_only` never appears in the REST lane. The kiwi
+  `Annotation.categoryId` is a file-local GUID ref (not the Plugin API's
+  stable category-id string), so the `.fig` lane never emits `category_id`.
+  `contents_only` is emitted only when explicitly `false` (Figma's default is
+  `true`).
+- **Deliberately NOT preserved:** plugin data / shared plugin data (arbitrary
+  third-party payloads are envelope noise) and reactions/prototype metadata
+  (out of the importer's scope).
+- Real-file sanity (designers-pick frame 1:486, 1299 nodes): 16
+  `figma:export_settings` (all the default preset every real `.fig` stamps,
+  honestly reduced to `[{"format":"png"}]`), 0 descriptions / annotations /
+  dev-status in that file (whole-file probe: 92 export-settings nodes, 0 of
+  the rest); `--dump-layout` byte-identical before/after — the attrs are
+  metadata-only and can never move layout or codegen output.
+  Tests: `[view][import][figma-plugin][dev-metadata]` (C++ attr round-trip),
+  fig.test.mjs "dev metadata + export settings" test,
+  `figma-plugin/test/dev-metadata.test.ts`, REST `test_dev_metadata_*` +
+  `test_component_description_*`.
+
 ### Figma variables → tokens + per-property bindings
 
 Two halves, both preserved end to end (audit item 5):
