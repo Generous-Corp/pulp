@@ -8,6 +8,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07140"></a>
+## [0.714.0] - 2026-07-19
+
+- feat(audio): wire render workgroups into graph workers ([#6224](https://github.com/danielraffel/pulp/pull/6224))
+- test(ci): gate Windows runner policy across workflows ([#6315](https://github.com/danielraffel/pulp/pull/6315))
+- feat(import-design): emit Figma resize constraints from all three producers ([#6314](https://github.com/danielraffel/pulp/pull/6314))
+- fix(ci): guard scheduled workflows in forks ([#6303](https://github.com/danielraffel/pulp/pull/6303))
+- fix(design-import): honor Figma mask layers as clips, never as painted fills ([#6311](https://github.com/danielraffel/pulp/pull/6311))
+
 <a id="v07130"></a>
 ## [0.713.0] - 2026-07-18
 
@@ -6625,6 +6634,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.714.0]: https://github.com/danielraffel/pulp/releases/tag/v0.714.0
 [0.713.0]: https://github.com/danielraffel/pulp/releases/tag/v0.713.0
 [0.712.2]: https://github.com/danielraffel/pulp/releases/tag/v0.712.2
 [0.712.1]: https://github.com/danielraffel/pulp/releases/tag/v0.712.1
