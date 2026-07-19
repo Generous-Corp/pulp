@@ -1446,6 +1446,19 @@ Accepted `--from` values: `fig`, `figma`, `figma-plugin`, `stitch`, `v0`, `penci
 
 Supports `--url` (fetched through an argv-safe `curl` invocation into a unique temporary file), `--frame` (Figma frame selection; required guid or name for `--from fig` unless using `--outline`), `--outline` / `--page` for local `.fig` files, and `--screen` (Stitch screen selection). See [Design Import API Reference](design-import.md) for the full flag list.
 
+A successful JS-lane import (including `--dry-run`) ends with a one-line
+per-stage timing breakdown on stdout:
+
+```
+✓ imported "A Channel FX" (1264 nodes) in 4.47s  — decode 157ms · parse 178ms · codegen 3.93s · render 177ms
+```
+
+`decode` covers everything that produces the parseable envelope content (for
+`--from fig` that includes the offline Node decode subprocess); `render`
+appears only when `--validate` actually rendered. Durations print as `123ms`
+below one second and `4.47s` at or above it; the total is measured to the
+moment of printing, so it also absorbs writes and reports.
+
 For `--from claude`, the CLI emits a `classnames.json` artifact alongside the generated JS view and `tokens.json`. The artifact maps `classname → { cssProp(camelCase): cssValue, ... }` for every `<style>` rule with a plain classname selector — `@pulp/css-adapt` (and downstream) consumes it to merge class-based styles into inline before forwarding to bridge calls. Mirrors the output shape of Spectr's `tools/extract-html-bundle/extract.mjs`.
 
 For `--from designmd`, the CLI emits **only** a `tokens.json` (W3C

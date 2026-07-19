@@ -12,6 +12,7 @@
 #include <pulp/platform/child_process.hpp>
 #include <pulp/state/store.hpp>
 #include "import_detect.hpp"
+#include "import_timing.hpp"
 #include "fig_lane.hpp"
 #include "envelope_merge.hpp"
 #include "figma_url.hpp"
@@ -558,6 +559,11 @@ std::string current_utc_timestamp() {
     out << std::put_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
     return out.str();
 }
+
+// Per-stage timing breakdown printed on a successful import — struct and
+// formatters live in import_timing.hpp; main() only stamps the boundaries.
+using pulp::import_design::StageTimings;
+using pulp::import_design::format_import_timing_line;
 
 ImportDiagnostic make_cli_diagnostic(ImportDiagnosticSeverity severity,
                                      ImportDiagnosticKind kind,
@@ -2357,6 +2363,12 @@ int main(int argc, char* argv[]) {
         return 2;
     }
 
+    // Stage timing starts here: everything from this point until `content`
+    // is ready to parse counts as "decode" — the fig lane's Node subprocess,
+    // URL fetch, ZIP unpack, and the file read itself.
+    StageTimings stage_timings;
+    stage_timings.load_start = StageTimings::Clock::now();
+
     pulp::import_design::fig::LaneArgs fig_args{
         source_str, input_file, frame_names, page_name, outline_mode, outline_json};
     fig_args.created_tmp_dir = &fig_scratch_dir;
@@ -2505,6 +2517,7 @@ int main(int argc, char* argv[]) {
     // Read input
     auto content = read_file(input_file);
     if (content.empty()) return 1;
+    stage_timings.content_ready = StageTimings::Clock::now();
 
     if (*source == DesignSource::jsx
         && runtime_mode == RuntimeMode::live
@@ -2672,6 +2685,7 @@ int main(int argc, char* argv[]) {
                   << " input: parser threw an unknown exception\n";
         return 1;
     }
+    stage_timings.ir_ready = StageTimings::Clock::now();
 
     if (pulp_zip_keepalive && !pulp_zip_keepalive->final_dir.empty()) {
         if (!commit_pulp_zip_sidecar(*pulp_zip_keepalive)) return 1;
@@ -3112,6 +3126,13 @@ int main(int argc, char* argv[]) {
     std::vector<pulp::view::FidelityIssue> fidelity_issues;
     opts.fidelity_report = &fidelity_issues;
     auto js = generate_pulp_js(ir, opts);
+    stage_timings.js_ready = StageTimings::Clock::now();
+
+    // Label for the timing summary line: the design's own root name when the
+    // source carries one, else the output artifact's stem.
+    const std::string timing_label = !ir.root.name.empty()
+        ? ir.root.name
+        : fs::path(output_file).stem().string();
 
     if (auto fidelity_exit = run_fidelity_selfcheck(fidelity_issues,
                                                     strict_fidelity,
@@ -3135,6 +3156,13 @@ int main(int argc, char* argv[]) {
         }
         // --dry-run still honors --strict-fidelity: a harness that imports with
         // both must see the non-zero exit, not a silent success.
+        if (!fidelity_failed) {
+            std::cout << "\n"
+                      << format_import_timing_line(
+                             stage_timings, timing_label,
+                             count_design_ir_elements(ir.root).nodes)
+                      << "\n";
+        }
         return fidelity_failed ? 4 : 0;
     }
 
@@ -3351,6 +3379,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Render the generated JS headlessly
+        stage_timings.render_start = StageTimings::Clock::now();
         View render_root;
         render_root.set_theme(Theme::dark());
         render_root.flex().direction = FlexDirection::column;
@@ -3372,6 +3401,7 @@ int main(int argc, char* argv[]) {
             std::cerr << "Validation error: headless render failed\n";
             return 1;
         }
+        stage_timings.render_done = StageTimings::Clock::now();
 
         auto rendered_path = pulp::import_design::render_artifact_path(output_file, design_name + "-" + source_lower + "-render.png");
         {
@@ -3565,6 +3595,14 @@ int main(int argc, char* argv[]) {
         } else {
             std::cout << "\n" << report;
         }
+    }
+
+    // Per-stage timing summary — printed only when the run is about to exit
+    // successfully, so a failing import never ends on an upbeat check mark.
+    if (!fidelity_failed && !similarity_failed && report_exit == 0) {
+        std::cout << format_import_timing_line(stage_timings, timing_label,
+                                               counts.nodes)
+                  << "\n";
     }
 
     // --strict-fidelity: a self-check finding fails the import (distinct exit

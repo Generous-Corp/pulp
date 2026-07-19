@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -2308,6 +2309,92 @@ TEST_CASE("pulp-import-design --validate labels faithful_svg fidelity honestly",
                                     "--no-tokens", "--validate"});
         REQUIRE_FALSE(r.timed_out);
         REQUIRE(r.stdout_output.find("native-materialize fidelity") == std::string::npos);
+    }
+}
+
+// Per-stage timing breakdown: a successful import ends with one stdout line
+// summarizing decode/parse/codegen(/render) durations plus the total. The
+// render segment only appears when --validate actually rendered; --dry-run
+// (no render) must omit it. Durations print as "123ms" or "4.59s".
+TEST_CASE("pulp-import-design prints a per-stage timing breakdown",
+          "[cli][import-design][tool][timing]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    const std::string scene_json =
+        R"({"format_version":"2026.05-figma-plugin-v1",)"
+        R"("provenance":{"adapter":"figma-plugin","version":"t",)"
+        R"("source_uri":"figma://x/1:1"},)"
+        R"("root":{"type":"frame","name":"Root","figma_node_id":"1:1"}})";
+
+    // Pull the timing line out of stdout; empty when none printed.
+    auto timing_line = [](const std::string& stdout_text) -> std::string {
+        std::istringstream in(stdout_text);
+        std::string line;
+        while (std::getline(in, line)) {
+            if (line.find("✓ imported") != std::string::npos) return line;
+        }
+        return {};
+    };
+    // "123ms" or "4.59s", segment-labeled.
+    const std::regex duration_re("(decode|parse|codegen|render|in) "
+                                 "([0-9]+ms|[0-9]+\\.[0-9]{2}s)");
+
+    SECTION("--validate run reports decode, parse, codegen, and render") {
+        TempDir tmp("pulp-timing-validate");
+        auto scene = tmp.path / "scene.pulp.json";
+        write_text(scene, scene_json);
+        auto r = run_import_design({"--from", "figma-plugin",
+                                    "--file", scene.string(),
+                                    "--output", (tmp.path / "ui.js").string(),
+                                    "--no-tokens", "--validate"});
+        REQUIRE_FALSE(r.timed_out);
+        if (r.exit_code != 0) {
+            // Headless render backends are not available in every environment;
+            // the --dry-run section below still covers the line's contract.
+            SUCCEED("skipped: --validate render unavailable in this environment");
+            return;
+        }
+        const auto line = timing_line(r.stdout_output);
+        INFO("stdout:\n" << r.stdout_output);
+        REQUIRE_FALSE(line.empty());
+        for (const char* field : {"imported", " in ", "decode ", "parse ",
+                                  "codegen ", "render "}) {
+            INFO("timing line: " << line);
+            REQUIRE(line.find(field) != std::string::npos);
+        }
+        // Every segment (and the total) carries a plausibly formatted duration.
+        REQUIRE(std::regex_search(line, duration_re));
+        std::smatch m;
+        std::string rest = line;
+        size_t matched_segments = 0;
+        while (std::regex_search(rest, m, duration_re)) {
+            ++matched_segments;
+            rest = m.suffix();
+        }
+        REQUIRE(matched_segments == 5);  // in + decode + parse + codegen + render
+    }
+
+    SECTION("--dry-run still reports timing but omits the render segment") {
+        TempDir tmp("pulp-timing-dryrun");
+        auto scene = tmp.path / "scene.pulp.json";
+        write_text(scene, scene_json);
+        auto r = run_import_design({"--from", "figma-plugin",
+                                    "--file", scene.string(),
+                                    "--output", (tmp.path / "ui.js").string(),
+                                    "--no-tokens", "--dry-run"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 0);
+        const auto line = timing_line(r.stdout_output);
+        INFO("stdout:\n" << r.stdout_output);
+        REQUIRE_FALSE(line.empty());
+        for (const char* field : {"imported", " in ", "decode ", "parse ", "codegen "}) {
+            INFO("timing line: " << line);
+            REQUIRE(line.find(field) != std::string::npos);
+        }
+        REQUIRE(line.find("render") == std::string::npos);
+        REQUIRE(std::regex_search(line, duration_re));
+        // --dry-run must not have written the output.
+        REQUIRE_FALSE(fs::exists(tmp.path / "ui.js"));
     }
 }
 
