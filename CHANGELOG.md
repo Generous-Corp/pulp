@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07400"></a>
+## [0.740.0] - 2026-07-19
+
+- feat(import-design): print per-stage timing breakdown on successful imports ([#6384](https://github.com/danielraffel/pulp/pull/6384))
+- test(design-import): isolate network-asset and knobclean cases from shared state ([#6382](https://github.com/danielraffel/pulp/pull/6382))
+
 <a id="v07390"></a>
 ## [0.739.0] - 2026-07-19
 
@@ -6778,6 +6784,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.740.0]: https://github.com/danielraffel/pulp/releases/tag/v0.740.0
 [0.739.0]: https://github.com/danielraffel/pulp/releases/tag/v0.739.0
 [0.738.2]: https://github.com/danielraffel/pulp/releases/tag/v0.738.2
 [0.738.1]: https://github.com/danielraffel/pulp/releases/tag/v0.738.1
