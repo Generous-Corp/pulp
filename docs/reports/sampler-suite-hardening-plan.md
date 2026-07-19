@@ -1,6 +1,6 @@
 # Sampler Suite Hardening Plan
 
-**Status:** final integration and evidence audit in progress
+**Status:** implementation and local landing validation complete; closure review and PR landing pending
 
 **Baseline:** Pulp `2fa9948ba` (v0.675.0)
 
@@ -8,8 +8,7 @@
 
 ## Implementation ledger
 
-Current branch evidence, without implying completion of the remaining landing
-gates:
+Current branch evidence:
 
 - S0-S2: exact resident/streamed parity, bounded ranged WAV and uncompressed
   AIFF admission, checked preload contracts, immutable publication, shared
@@ -50,7 +49,7 @@ gates:
 - S7 remains intentionally unshipped. There are no named hardware profiles or
   capture-matched claims; those still require the research, provenance,
   measurement, listening, and clean-room gates below.
-- S8 is implemented pending final landing evidence. This documentation
+- S8 is implemented and locally validated. This documentation
   describes current integration and limitations. The processor exposes its
   pre-prepare streaming-memory configuration, typed prepare and file-load
   results, last-load result, stream statistics, heritage controls and state,
@@ -61,6 +60,37 @@ gates:
 
 Quality Lab remains supplementary to exact transport, telemetry, lifetime,
 allocation, and current artifact-verification gates.
+
+## Final local landing evidence
+
+The final source revision is `964a1e111df416a1ac5346ecb97beafb5825dbb6`.
+The benchmark-only follow-up commit is
+`fe8baa919b6affbe9c7bcdce2deb1631e01c58e8`; its checked artifact identifies
+the source revision explicitly and passes supplied-binary, source-only, and
+self-test verification.
+
+The final source revision passed:
+
+- all 25 focused Release binaries, all 25 ASan binaries with
+  `detect_leaks=0:halt_on_error=1`, and all 25 TSan binaries with
+  `halt_on_error=1`;
+- the Debug+coverage bounded decode-pool regression;
+- `pulp-sampler-test` with 4,255 assertions in 145 cases;
+- the default-GPU Release build and all 14,521 configured CTests;
+- the explicit audio-harness slice, 789 of 789 tests;
+- the pinned Audio Quality Lab Python suite, 599 passed and 42 skipped, and all
+  four configured sampler/heritage quality gates;
+- all six applicable advisory AQL axes, with the graininess negative control
+  producing `regression_suspected` as required;
+- the block-partition null at `-inf dBFS` and the wrong-ratio negative control
+  at `-0.1 dBFS`;
+- the sampler-mip shellout, 119 assertions in two cases, and its CLI help test.
+
+Three successive exact Ultra review cycles found and drove fixes for decode
+worker wakeup/cancellation, immutable mapped-source snapshots, scheduler tie
+handling, stream-registration integrity, heritage stream-domain rebinding, and
+shared-worker throughput admission. The required final exact closure review is
+the remaining local gate before PR publication.
 
 ## Decision
 
