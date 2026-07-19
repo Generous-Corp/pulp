@@ -271,9 +271,13 @@ TEST_CASE("CompiledTempoMap reports saturation outside the tick domain") {
 
     const auto maximum_tick_sample =
         map.ticks_to_samples({std::numeric_limits<std::int64_t>::max()});
+    const auto canonical_maximum = map.resolve_sample(maximum_tick_sample);
+    REQUIRE(canonical_maximum.exact);
     const auto above = map.resolve_sample({std::numeric_limits<std::int64_t>::max()});
+    REQUIRE(above.tick == canonical_maximum.tick);
     REQUIRE(above.represented_sample == maximum_tick_sample);
     REQUIRE(map.ticks_to_samples(above.tick) == above.represented_sample);
+    REQUIRE(map.ticks_to_samples({above.tick.value - 1}).value < maximum_tick_sample.value);
     REQUIRE_FALSE(above.exact);
     REQUIRE(above.absolute_error_samples ==
             static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) -

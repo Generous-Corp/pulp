@@ -218,10 +218,17 @@ SampleToTickResult CompiledTempoMap::resolve_sample(SamplePosition sample) const
     const auto lower_sample = ticks_to_samples(lower_tick);
     const auto lower_error = integer_distance(sample.value, lower_sample.value);
     const auto upper_error = integer_distance(upper_sample.value, sample.value);
-    if (lower_error <= upper_error) {
-        return {lower_tick, lower_sample, lower_error, false};
+    auto nearest_tick = lower_error <= upper_error ? lower_tick : upper_tick;
+    const auto nearest_sample = lower_error <= upper_error ? lower_sample : upper_sample;
+    const auto nearest_error = std::min(lower_error, upper_error);
+
+    // A clamped edge can contain many ticks with the same represented sample.
+    // Canonicalize only when the selected tick is not already the first one.
+    if (nearest_tick.value != std::numeric_limits<std::int64_t>::min() &&
+        ticks_to_samples({nearest_tick.value - 1}) == nearest_sample) {
+        nearest_tick = resolve_sample(nearest_sample).tick;
     }
-    return {upper_tick, upper_sample, upper_error, false};
+    return {nearest_tick, nearest_sample, nearest_error, false};
 }
 
 } // namespace pulp::timebase
