@@ -138,6 +138,37 @@ test('the diagnosed arm applies to EVERY property, not just the one it was wired
   }
 });
 
+test('a blur that lowered to its filter slot is emitted, not excused', () => {
+  // FOREGROUND_BLUR/LAYER_BLUR now lower to style.filter and BACKGROUND_BLUR
+  // to style.backdrop_filter, so the audit must read them through the
+  // survived arm — and still catch the drop when the slot is missing.
+  const cases = [
+    ['FOREGROUND_BLUR', { filter: 'blur(8px)' }],
+    ['LAYER_BLUR', { filter: 'blur(4px)' }],
+    ['BACKGROUND_BLUR', { backdrop_filter: 'blur(12px)' }],
+  ];
+  for (const [t, style] of cases) {
+    const m = materials([{ node_id: '0:1', name: 'B', type: 'FRAME', declared: { effects: [t] } }]);
+    const kept = auditMaterials(m, envelope([{ node_id: '0:1', name: 'B', style }]), []);
+    assert.deepEqual(kept.findings, [], `${t}: a lowered blur is silent`);
+    assert.equal(kept.emittedCounts[`effects.${t}`], 1, `${t}: and counted as emitted`);
+
+    // Positive control: the same declaration with an empty style, undiagnosed,
+    // IS a silent drop — the survived arm must not become a blanket excuse.
+    const dropped = auditMaterials(m, envelope([{ node_id: '0:1', name: 'B', style: {} }]), []);
+    assert.equal(dropped.findings.length, 1, `${t}: an unlowered blur is caught`);
+    assert.equal(dropped.findings[0].property, `effects.${t}`);
+  }
+
+  // The wrong slot must not count: a background blur emitted as `filter`
+  // blurs the node itself instead of what sits behind it.
+  const m = materials([{ node_id: '0:1', name: 'B', type: 'FRAME',
+    declared: { effects: ['BACKGROUND_BLUR'] } }]);
+  const wrongSlot = auditMaterials(m, envelope([
+    { node_id: '0:1', name: 'B', style: { filter: 'blur(12px)' } }]), []);
+  assert.equal(wrongSlot.findings.length, 1, 'a background blur needs backdrop_filter');
+});
+
 test('a declared blend mode that never reached the envelope is a silent drop', () => {
   // The file's single MULTIPLY noise layer, composited NORMAL, lightened every
   // panel in the design by ~20/255 and nothing said a word for an entire evening.

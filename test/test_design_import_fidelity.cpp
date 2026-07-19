@@ -1116,6 +1116,26 @@ TEST_CASE("stroke diagnostics classify as capture_partial from code alone",
     CHECK(ir.diagnostics[1].kind == ImportDiagnosticKind::capture_partial);
 }
 
+TEST_CASE("effect diagnostics classify from code alone",
+          "[view][import][effects]") {
+    // The .fig lane emits code without kind: an unlowerable effect family
+    // (NOISE, TEXTURE/GRAIN, GLASS, …) is unsupported_property, and the
+    // progressive-blur best effort is capture_partial.
+    const auto ir = parse_design_ir_json(R"json({
+        "version": 1,
+        "root": { "type": "frame", "name": "Root" },
+        "diagnostics": [
+            { "severity": "warning", "code": "effect-unsupported",
+              "path": "1:2", "message": "NOISE has no lowering" },
+            { "severity": "warning", "code": "progressive-blur-approximated",
+              "path": "1:3", "message": "uniform blur stands in" }
+        ]
+    })json");
+    REQUIRE(ir.diagnostics.size() == 2);
+    CHECK(ir.diagnostics[0].kind == ImportDiagnosticKind::unsupported_property);
+    CHECK(ir.diagnostics[1].kind == ImportDiagnosticKind::capture_partial);
+}
+
 TEST_CASE("parse_design_ir_json reads CSS grid container + item placement",
           "[view][import][grid]") {
     auto ir = parse_design_ir_json(R"json({

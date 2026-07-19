@@ -2652,6 +2652,42 @@ re-tokenizing the raw string. **Gotcha:** the bridge takes one drop shadow, so
 multi-layer stacks render only their first layer natively even though the IR now
 preserves them all.
 
+### Figma effects: blurs lower for real; new families are diagnosed
+
+All three Figma producers lower the **ordered effect stack**, honoring
+per-effect `visible: false` (skipped, no diagnostic — it's the designer's own
+off switch):
+
+- `DROP_SHADOW` / `INNER_SHADOW` → ordered `box_shadow` layers (above).
+- `LAYER_BLUR` → `style.filter = "blur(Npx)"`. **The `.fig` kiwi schema spells
+  it `FOREGROUND_BLUR`** — `scene.mjs` accepts both spellings; don't add a
+  `LAYER_BLUR`-only dispatch to the offline lane. Consumed end to end:
+  web-compat `.style.filter` → style-decl bridge `setFilter`; bridge-native
+  `setFilter` → `View::FilterOp` chain → `save_layer_with_filters`.
+- `BACKGROUND_BLUR` → `style.backdrop_filter = "blur(Npx)"` → codegen web
+  `.style.backdropFilter` / native `setBackdropFilter(id, blur_px)` →
+  `View::set_backdrop_blur`. **The native bridge setter is numeric**, so
+  bridge-native codegen parses the radius out of the CSS value (mirrors the
+  web-compat style bridge).
+- Multiple blurs of one kind keep array order as a space-joined function
+  sequence (`blur(2px) blur(6px)`) — `setFilter` sums the amounts.
+- A `PROGRESSIVE` blur keeps its end radius as a uniform blur plus a
+  `progressive-blur-approximated` (capture_partial) diagnostic (plugin/REST).
+- Everything else (`NOISE`, `TEXTURE`/`GRAIN`, `GLASS`, anything newer) raises
+  `effect-unsupported` in every lane — never a silent drop. The `.fig` lane's
+  code registry (`DIAGNOSTIC_SEVERITY` in `scene.mjs`) enforces
+  registered ⇔ emitted in both directions; register any new code there.
+
+Shared lowering lives in `extract-pure.ts::lowerEffects` (plugin),
+`figma_rest_export.py::extract_style` (REST), and
+`scene.mjs::effectsToBoxShadow`/`effectsToFilters` (.fig);
+`material_audit.mjs::effectSurvived` reads blurs through the survived arm
+(`style.filter` / `style.backdrop_filter`), so regressing the lowering trips
+the audit unless the diagnostic comes back. **Still-partial:** the C++ native
+resolver lane (`design_import_native_common.cpp`) diagnoses `filter` /
+`backdropFilter` as unsupported (it doesn't call the View setters), and
+cpp/swiftui codegen don't emit them.
+
 ### Step 1: Identify source and input
 
 Ask the user or detect from context:

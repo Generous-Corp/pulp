@@ -437,6 +437,65 @@ class GradientFillTest(unittest.TestCase):
         self.assertTrue(s.get("background_gradient", "").startswith("linear-gradient("))
 
 
+class EffectsTest(unittest.TestCase):
+    """The ordered effect stack, mirrored against the plugin lane's
+    extract-pure.ts::lowerEffects (test/effects.test.ts) and the .fig lane
+    (fig/scene.mjs::effectsToFilters): shadows -> box_shadow, LAYER_BLUR ->
+    filter, BACKGROUND_BLUR -> backdrop_filter, everything else diagnosed."""
+
+    def test_layer_blur_lowers_to_filter(self):
+        s = frx.extract_style({"effects": [
+            {"type": "LAYER_BLUR", "visible": True, "radius": 8}]})
+        self.assertEqual(s.get("filter"), "blur(8px)")
+
+    def test_background_blur_lowers_to_backdrop_filter(self):
+        s = frx.extract_style({"effects": [
+            {"type": "BACKGROUND_BLUR", "visible": True, "radius": 12}]})
+        self.assertEqual(s.get("backdrop_filter"), "blur(12px)")
+        self.assertNotIn("filter", s)  # the wrong slot would blur the node itself
+
+    def test_mixed_stack_keeps_shadow_and_blur_order(self):
+        s = frx.extract_style({"effects": [
+            {"type": "DROP_SHADOW", "visible": True, "radius": 4, "spread": 0,
+             "offset": {"x": 0, "y": 2}, "color": {"r": 0, "g": 0, "b": 0, "a": 0.25}},
+            {"type": "LAYER_BLUR", "visible": True, "radius": 2},
+            {"type": "LAYER_BLUR", "visible": True, "radius": 6}]})
+        self.assertIn("box_shadow", s)
+        # Two visible layer blurs keep array order as a function sequence —
+        # the bridge's setFilter walks it and sums the blur amounts.
+        self.assertEqual(s.get("filter"), "blur(2px) blur(6px)")
+
+    def test_invisible_blur_is_skipped_without_diagnostic(self):
+        ctx = frx.ExtractContext()
+        s = frx.extract_style({"effects": [
+            {"type": "LAYER_BLUR", "visible": False, "radius": 8}]}, ctx)
+        self.assertNotIn("filter", s)
+        self.assertEqual(ctx.diagnostics, [])
+
+    def test_unsupported_effect_family_is_diagnosed_never_silent(self):
+        ctx = frx.ExtractContext()
+        s = frx.extract_style({"id": "1:2", "name": "Noisy", "effects": [
+            {"type": "NOISE", "visible": True},
+            {"type": "GLASS", "visible": True}]}, ctx)
+        self.assertNotIn("filter", s)
+        codes = [d["code"] for d in ctx.diagnostics]
+        self.assertEqual(codes, ["effect-unsupported", "effect-unsupported"])
+        self.assertEqual(ctx.diagnostics[0]["kind"], "unsupported_property")
+        self.assertEqual(ctx.diagnostics[0]["path"], "1:2")
+        self.assertIn("NOISE", ctx.diagnostics[0]["message"])
+        self.assertIn("GLASS", ctx.diagnostics[1]["message"])
+
+    def test_progressive_blur_keeps_end_radius_and_admits_it(self):
+        ctx = frx.ExtractContext()
+        s = frx.extract_style({"id": "1:3", "effects": [
+            {"type": "LAYER_BLUR", "visible": True, "radius": 10,
+             "blurType": "PROGRESSIVE"}]}, ctx)
+        self.assertEqual(s.get("filter"), "blur(10px)")
+        self.assertEqual([d["code"] for d in ctx.diagnostics],
+                         ["progressive-blur-approximated"])
+        self.assertEqual(ctx.diagnostics[0]["kind"], "capture_partial")
+
+
 class TextRunsTest(unittest.TestCase):
     def test_character_style_overrides_become_runs(self):
         n = {"type": "TEXT", "characters": "Hello world",

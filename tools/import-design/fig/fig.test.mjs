@@ -618,7 +618,7 @@ test('a blend mode survives; one CSS lacks is diagnosed, not approximated', () =
   assert.match(codes[0].detail, /LINEAR_BURN/);
 });
 
-test('drop shadows survive as box_shadow; unsupported effects are skipped', () => {
+test('drop shadows survive as box_shadow; blurs land on the filter slots', () => {
   // Shadows are what make a control read as an object instead of a decal. The
   // design stacks two drop shadows under every knob; dropping them rendered
   // them flat — a difference no geometry check can catch, because the box is
@@ -639,20 +639,22 @@ test('drop shadows survive as box_shadow; unsupported effects are skipped', () =
         // Hidden: the designer turned it off, so it must not paint.
         { type: 'DROP_SHADOW', offset: { x: 0, y: 99 }, radius: 9, visible: false,
           color: { r: 1, g: 0, b: 0, a: 1 } },
-        // No box-shadow equivalent — skipped rather than approximated into
-        // something the design never asked for.
+        // Not a shadow — lowers to the style's filter slot, not a box-shadow
+        // layer.
         { type: 'LAYER_BLUR', radius: 4, visible: true },
       ] },
   ]});
   const f = materializeFrame(scene, findFrame(scene, 'Root'), { images: new Map(), fileKey: 'K',
     parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
-  const bs = f.envelope.root.children[0].style.box_shadow;
+  const style = f.envelope.root.children[0].style;
+  const bs = style.box_shadow;
   assert.ok(bs, 'the knob carries a shadow');
   const layers = bs.split(', ');
   assert.equal(layers.length, 2, 'two visible shadows; the hidden and the blur are not layers');
   assert.equal(layers[0], '0px 16px 6px 0px #0000001a');
   assert.ok(layers[1].startsWith('inset '), 'an inner shadow is inset');
   assert.ok(!bs.includes('99px'), 'a hidden effect never paints');
+  assert.equal(style.filter, 'blur(4px)', 'the layer blur rides beside the shadows');
 });
 
 test('icon-font text lowers to a glyph outline; real text stays a live label', () => {
@@ -1675,16 +1677,63 @@ test('a stroke paint carries its own opacity, not just its color alpha', () => {
   assert.equal(faint.style.border, '1px solid #ffffff33');
 });
 
-test('an effect with no lowering is diagnosed, never dropped in silence', () => {
-  // effectsToBoxShadow `continue`s past anything that is not a shadow, so a
-  // LAYER_BLUR produced no shadow, no style, and no word about either.
+test('blur effects lower to filter / backdrop_filter in array order', () => {
+  // effectsToBoxShadow `continue`s past anything that is not a shadow, and
+  // blurs used to be diagnosed-and-dropped — a blur that renders sharp is a
+  // design decision the importer made on the user's behalf. They now lower to
+  // the two style slots the render stack actually consumes: setFilter builds
+  // a View::FilterOp chain, setBackdropFilter drives set_backdrop_blur.
   const scene = buildScene({ nodeChanges: [
     { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    // FOREGROUND_BLUR is the kiwi schema's own spelling for a layer blur (the
+    // Plugin/REST APIs say LAYER_BLUR; the decoder accepts both).
     { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
       parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
     { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Blurred',
       parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 50, y: 50 },
-      effects: [{ type: 'LAYER_BLUR', visible: true, radius: 8 }] },
+      effects: [{ type: 'FOREGROUND_BLUR', visible: true, radius: 8 }] },
+    { guid: { sessionID: 0, localID: 4 }, type: 'FRAME', name: 'Frosted',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 50, y: 50 },
+      effects: [{ type: 'BACKGROUND_BLUR', visible: true, radius: 12 }] },
+    // Two visible layer blurs keep array order as a function sequence
+    // (setFilter sums the amounts), alongside an ordered shadow stack.
+    { guid: { sessionID: 0, localID: 5 }, type: 'FRAME', name: 'Stacked',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'c' }, size: { x: 50, y: 50 },
+      effects: [
+        { type: 'DROP_SHADOW', visible: true, radius: 4, offset: { x: 0, y: 2 },
+          color: { r: 0, g: 0, b: 0, a: 0.25 } },
+        { type: 'LAYER_BLUR', visible: true, radius: 2 },
+        { type: 'LAYER_BLUR', visible: true, radius: 6 },
+      ] },
+    // Control: an invisible blur is the designer's own off switch — no filter,
+    // and no diagnostic either.
+    { guid: { sessionID: 0, localID: 6 }, type: 'FRAME', name: 'Off',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'd' }, size: { x: 50, y: 50 },
+      effects: [{ type: 'FOREGROUND_BLUR', visible: false, radius: 8 }] },
+  ]});
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  assert.equal(findByName(envelope.root, 'Blurred').style.filter, 'blur(8px)');
+  assert.equal(findByName(envelope.root, 'Frosted').style.backdrop_filter, 'blur(12px)');
+  const stacked = findByName(envelope.root, 'Stacked').style;
+  assert.ok(stacked.box_shadow, 'the shadow layer still lowers beside the blurs');
+  assert.equal(stacked.filter, 'blur(2px) blur(6px)', 'blur order follows the effect stack');
+  const off = findByName(envelope.root, 'Off').style;
+  assert.ok(!('filter' in off), 'a hidden blur never paints');
+  assert.equal(diagnostics.filter((d) => d.code === 'effect-unsupported').length, 0,
+    'a blur that lowers is no longer an unsupported effect');
+});
+
+test('an effect with no lowering is diagnosed, never dropped in silence', () => {
+  // The blur lowering above must not turn into a blanket "effects are handled":
+  // the newer families (NOISE, GRAIN, GLASS, …) still have no lowering, and a
+  // node that declares one composites without it — which deserves a word.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Noisy',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 50, y: 50 },
+      effects: [{ type: 'NOISE', visible: true }] },
     // Control: a shadow DOES lower, so it must not be diagnosed as unsupported.
     { guid: { sessionID: 0, localID: 4 }, type: 'FRAME', name: 'Shadowed',
       parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 50, y: 50 },
@@ -1694,13 +1743,13 @@ test('an effect with no lowering is diagnosed, never dropped in silence', () => 
     // be noise, and noise is how a checker gets ignored.
     { guid: { sessionID: 0, localID: 5 }, type: 'FRAME', name: 'Off',
       parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'c' }, size: { x: 50, y: 50 },
-      effects: [{ type: 'LAYER_BLUR', visible: false, radius: 8 }] },
+      effects: [{ type: 'GLASS', visible: false }] },
   ]});
   const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
   const unsupported = diagnostics.filter((d) => d.code === 'effect-unsupported');
-  assert.equal(unsupported.length, 1, 'exactly the blur is diagnosed');
+  assert.equal(unsupported.length, 1, 'exactly the noise effect is diagnosed');
   assert.equal(unsupported[0].node_id, '0:3');
-  assert.match(unsupported[0].detail, /LAYER_BLUR/);
+  assert.match(unsupported[0].detail, /NOISE/);
   assert.ok(findByName(envelope.root, 'Shadowed').style.box_shadow, 'a shadow still lowers');
 });
 

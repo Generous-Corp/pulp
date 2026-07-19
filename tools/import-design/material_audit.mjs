@@ -64,12 +64,15 @@ import { buildScene, findFrame, materializeFrame } from './fig/scene.mjs';
 // entry silences a whole property class file-wide, for every design, forever,
 // which is indistinguishable from the bug it is supposed to excuse.
 //
-// LAYER_BLUR / BACKGROUND_BLUR were the obvious candidates and deliberately are
-// NOT here. They have a node to point at, so they now raise `effect-unsupported`
-// at decode time — which the importer's user actually SEES, and which this
-// audit reads through the "∨ diagnosed" arm. Listing them here as well would
-// mean the audit stayed green if that diagnostic ever regressed: a static excuse
-// cannot notice that the dynamic one stopped firing.
+// The unlowerable effect families (NOISE, GRAIN, GLASS, …) were the obvious
+// candidates and deliberately are NOT here. They have a node to point at, so
+// they raise `effect-unsupported` at decode time — which the importer's user
+// actually SEES, and which this audit reads through the "∨ diagnosed" arm.
+// Listing them here as well would mean the audit stayed green if that
+// diagnostic ever regressed: a static excuse cannot notice that the dynamic
+// one stopped firing. (FOREGROUND_BLUR / BACKGROUND_BLUR used to sit on that
+// diagnostic arm too; they now lower for real, to style.filter /
+// style.backdrop_filter, so the audit reads them through the survived arm.)
 //
 // Reach for this only when there is genuinely no node to attach a diagnostic to.
 const KNOWN_UNSUPPORTED = {};
@@ -268,11 +271,23 @@ function checkEffects(decl, emitted, diagKinds) {
   }
   for (const t of decl.effects) {
     if (shadowKinds.has(t)) continue;
+    if (effectSurvived(t, emitted)) continue;        // lowered for real
     if (KNOWN_UNSUPPORTED[t]) continue;              // declared, and said so
     if (diagKinds.includes('effect-unsupported')) continue;
     out.push({ property: `effects.${t}`, declared: t, emitted: 'none' });
   }
   return out;
+}
+
+// A blur effect survives as a real style slot: a layer blur (the schema
+// spells it FOREGROUND_BLUR; Plugin/REST spell it LAYER_BLUR) as
+// style.filter, a background blur as style.backdrop_filter. Shadows are
+// checked separately; every other family has no lowering and never survives.
+function effectSurvived(t, emitted) {
+  const style = (emitted && emitted.style) || {};
+  if (t === 'FOREGROUND_BLUR' || t === 'LAYER_BLUR') return !!style.filter;
+  if (t === 'BACKGROUND_BLUR') return !!style.backdrop_filter;
+  return false;
 }
 
 function checkCornerRadius(decl, emitted, diagKinds) {
@@ -368,9 +383,9 @@ export function auditMaterials(materials, envelope, diagnostics) {
     if (d.effects) {
       for (const t of d.effects) {
         const isShadow = t === 'DROP_SHADOW' || t === 'INNER_SHADOW';
-        tally(`effects.${t}`,
-              isShadow ? !!style.box_shadow : false,
-              !isShadow && diagKinds.includes('effect-unsupported'));
+        const survived = isShadow ? !!style.box_shadow : effectSurvived(t, emitted);
+        tally(`effects.${t}`, survived,
+              !isShadow && !survived && diagKinds.includes('effect-unsupported'));
       }
       found.push(...checkEffects(d, emitted, diagKinds));
     }

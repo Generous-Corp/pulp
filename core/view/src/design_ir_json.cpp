@@ -1765,8 +1765,14 @@ static ImportDiagnosticKind diagnostic_kind_from_code(const std::string& code) {
     if (code == "fallback-used" || code == "runtime-fallback") {
         return ImportDiagnosticKind::fallback_used;
     }
-    if (code == "multi-paint-stroke" || code == "complex-stroke-flattened") {
+    if (code == "multi-paint-stroke" || code == "complex-stroke-flattened"
+        || code == "progressive-blur-approximated") {
         return ImportDiagnosticKind::capture_partial;
+    }
+    // An effect family with no lowering (NOISE, TEXTURE/GRAIN, GLASS, …) —
+    // producers that omit the kind (the .fig lane) still classify correctly.
+    if (code == "effect-unsupported") {
+        return ImportDiagnosticKind::unsupported_property;
     }
     return ImportDiagnosticKind::unknown;
 }
