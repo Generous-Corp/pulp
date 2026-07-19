@@ -3,6 +3,7 @@
 #include "project_state_access.hpp"
 #include "schema_json_write_internal.hpp"
 #include "serialize_internal.hpp"
+#include "track_schema_policy.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -313,7 +314,8 @@ bool write_device_placement(EncodeContext& context, const DevicePlacement& place
 }
 
 bool write_track(EncodeContext& context, const Track& track) {
-    return write_envelope(context, "pulp.timeline.track", 2, [&] {
+    return write_envelope(context, detail::track_schema_policy.type_name,
+                          detail::track_schema_policy.current_version, [&] {
         if (!context.writer.append("{\"clips\":["))
             return false;
         for (std::size_t index = 0; index < track.clips().size(); ++index)
