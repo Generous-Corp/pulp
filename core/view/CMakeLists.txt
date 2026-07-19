@@ -592,6 +592,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
         src/design_import_png.cpp
         src/design_binding_metadata.cpp
         src/design_ir_json.cpp
+        src/design_ir_normalize.cpp
         src/recognition_resolver.cpp
         src/design_ir_analysis.cpp
         src/design_import_v0_tsx.cpp
