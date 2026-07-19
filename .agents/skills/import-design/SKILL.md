@@ -1155,7 +1155,35 @@ groups omitted), `/` in token names nests into DTCG groups
 (`brand/primary` → `colors.brand.primary`), dimensions use the object form
 `{"value": N, "unit": "px"}`, and `IRTokens::source_identity` provenance
 lands under `$extensions["dev.pulp.source"]` (id/collection/mode/adapter,
-empty subfields omitted). Do not confuse this with `w3c_tokens.cpp`
+empty subfields omitted).
+
+String-token policy (there is no standard DTCG "string" type, and the
+emitter never invents one):
+
+- **Font families promote to `$type: "fontFamily"`.** Conservative name
+  heuristic, case-insensitive, segments split on both `/` and `.`: any
+  segment equal to `font`/`fontFamily`/`font-family`/`typeface`, or a final
+  segment of `family`/`font`. A comma-separated value ("Inter, sans-serif")
+  emits the DTCG array form `["Inter", "sans-serif"]` (entries trimmed);
+  otherwise the plain string. These live in the `strings` group with the
+  same nesting + provenance as other tokens.
+- **Everything else is PARKED, never dropped.** Ambiguous strings (easing
+  names, content text, component-style values) collect losslessly under the
+  document-root `$extensions["dev.pulp.nonStandardTokens"]` as
+  `{"<full name>": {"value": "<text>", "id", "collection", "mode",
+  "adapter"}}` (provenance subfields from `source_identity`, empties
+  omitted). Root `$extensions` is valid DTCG, so the real token groups
+  contain only standard-typed tokens.
+
+`pulp::view::validate_dtcg(json)` (same header) is the in-repo,
+dependency-free DTCG conformance check: it returns human-readable
+violations (empty ⇒ conformant), covering resolvable + standard `$type`
+per token (including group `$type` inheritance), `$value` shapes for
+color/dimension/fontFamily, the reserved-`$`-key allowlist
+(`$value`/`$type`/`$description`/`$extensions`/`$deprecated`), and
+`$extensions` being an object with namespaced (dotted) keys. The emitter
+test asserts every emitted document validates clean AND that known-bad
+documents are reported. Do not confuse this emitter with `w3c_tokens.cpp`
 (`export_w3c_tokens(Theme)`) — that is the always-compiled runtime Theme
 pair with flat dot-groups and string dimension values; the DTCG emitter is
 the authoring-side surface. Note the `fig` lane currently extracts no
