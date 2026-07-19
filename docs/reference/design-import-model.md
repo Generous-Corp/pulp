@@ -108,7 +108,7 @@ finish, the fader's track/thumb, the meter's gradient).
 > Reproducing your *exact* per-instance visuals on the native control is an
 > actively improving path — the knob is faithful today; fader and meter
 > appearance fidelity (precise track/thumb width, meter width) is being tightened
-> in [#3191](https://github.com/danielraffel/pulp/issues/3191). Where exact
+> in [#3191](https://github.com/Generous-Corp/pulp/issues/3191). Where exact
 > pixels matter more than live interaction, the captured visual is preserved in
 > the export and can back a recorded-paint route.
 
@@ -139,7 +139,7 @@ The model above is backed by machine-readable schemas and an agent-facing
 skill, so the behavior is checkable, not just described:
 
 - **The semantic source contract** —
-  [`tools/import-validation/schemas/source-contract-v0.schema.json`](https://github.com/danielraffel/pulp/blob/main/tools/import-validation/schemas/source-contract-v0.schema.json).
+  [`tools/import-validation/schemas/source-contract-v0.schema.json`](https://github.com/Generous-Corp/pulp/blob/main/tools/import-validation/schemas/source-contract-v0.schema.json).
   One serialized shape for the per-node source / route / value / event / state /
   style evidence, shared by the C++ importer and the audit summary so both can
   be checked against a single definition. This is where the route taxonomy
@@ -147,13 +147,13 @@ skill, so the behavior is checkable, not just described:
   `unsupported`) and the `fallback_reason` field are defined.
 
 - **The Figma plugin export schema** —
-  [`tools/figma-plugin/schema/figma-plugin-export-v1.json`](https://github.com/danielraffel/pulp/blob/main/tools/figma-plugin/schema/figma-plugin-export-v1.json).
+  [`tools/figma-plugin/schema/figma-plugin-export-v1.json`](https://github.com/Generous-Corp/pulp/blob/main/tools/figma-plugin/schema/figma-plugin-export-v1.json).
   The JSON shape the "Design for Pulp" plugin emits, including the audio-widget
   fields that the importer maps to `audio_widget` / `audio_label` /
   `audio_min` / `audio_max` / `audio_default`.
 
 - **The agent-facing skill** —
-  [`.agents/skills/import-design/SKILL.md`](https://github.com/danielraffel/pulp/blob/main/.agents/skills/import-design/SKILL.md).
+  [`.agents/skills/import-design/SKILL.md`](https://github.com/Generous-Corp/pulp/blob/main/.agents/skills/import-design/SKILL.md).
   How Claude Code and Codex drive the import end to end, including the mapping
   precedence and native-resolution layer.
 

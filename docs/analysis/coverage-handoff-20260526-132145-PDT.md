@@ -43,7 +43,7 @@ The primary checkout at `/Users/danielraffel/Code/pulp` is bare; run worktree-sp
 
 ## Open PR To Monitor
 
-PR: https://github.com/danielraffel/pulp/pull/2983
+PR: https://github.com/Generous-Corp/pulp/pull/2983
 
 - Title: `test(design): cover debug helper edge contracts`
 - Branch: `feature/coverage-design-debug-contracts-20260526`

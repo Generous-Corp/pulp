@@ -13,7 +13,7 @@ actionable after the represented
 local-source surface is trustworthy on Codecov; path/classification
 drift and language-lane ingestion bugs come before ordinary test-gap
 work.
-[#641](https://github.com/danielraffel/pulp/issues/641) is the
+[#641](https://github.com/Generous-Corp/pulp/issues/641) is the
 authoritative tracker for the current three-phase program: first get
 the intended source surface onto Codecov, then rank the real measured
 gaps, then close them tranche by tranche.
@@ -74,15 +74,15 @@ GitHub-hosted lanes as the last fallback.
 
 ## Where the numbers live
 
-Coverage is reported to [Codecov](https://app.codecov.io/gh/danielraffel/pulp).
+Coverage is reported to [Codecov](https://app.codecov.io/gh/Generous-Corp/pulp).
 The repo is public, so the dashboard is public and tokenless — no login
 required.
 
-- **Overall**: <https://app.codecov.io/gh/danielraffel/pulp>
+- **Overall**: <https://app.codecov.io/gh/Generous-Corp/pulp>
 - **Per-subsystem / per-platform / per-surface breakdown**:
-  <https://app.codecov.io/gh/danielraffel/pulp/components/main>
+  <https://app.codecov.io/gh/Generous-Corp/pulp/components/main>
 - **Per-OS breakdown**:
-  <https://app.codecov.io/gh/danielraffel/pulp/flags/main>
+  <https://app.codecov.io/gh/Generous-Corp/pulp/flags/main>
 - **REST API for agents**:
   `https://api.codecov.io/api/v2/github/danielraffel/repos/pulp/totals/`
 

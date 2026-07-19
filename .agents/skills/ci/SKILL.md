@@ -28,8 +28,8 @@ the optional metrics workflow, or skip metrics and inspect live jobs directly.
 Use these commands as the normal agent loop:
 
 ```bash
-shipyard metrics import github --repo danielraffel/pulp --limit 50 --json
-tartci runtime export --repo danielraffel/pulp --since-days 14 \
+shipyard metrics import github --repo Generous-Corp/pulp --limit 50 --json
+tartci runtime export --repo Generous-Corp/pulp --since-days 14 \
   | shipyard metrics import tartci --json
 shipyard metrics summary --project pulp --json
 shipyard metrics watch --project pulp --since 14d --json
@@ -270,7 +270,7 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    `macos` gate runs on the **local self-hosted Mac Studios** (`pulp-studio-01/02/03`,
    + the M5 overflow), which are usually idle. Confirm with:
    ```bash
-   ghapp api repos/danielraffel/pulp/actions/runners \
+   ghapp api repos/Generous-Corp/pulp/actions/runners \
      | python3 -c "import sys,json;[print(r['name'],r['status'],'busy='+str(r['busy'])) for r in json.load(sys.stdin)['runners']]"
    ```
    If the Studios show `busy=False`, the pool is NOT saturated — say so. What DOES
@@ -492,11 +492,11 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   ```yaml
   jobs:
     check:
-      if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+      if: github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp'
   ```
 
   compose it with an existing condition as
-  `if: (github.event_name != 'schedule' || github.repository == 'danielraffel/pulp') && (<existing>)`.
+  `if: (github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp') && (<existing>)`.
   It only suppresses the **schedule** event on forks — `push` / `pull_request` /
   `workflow_dispatch` are untouched, so PRs to this repo (which run in this repo's
   context) and manual dispatches behave exactly as before. A workflow that
@@ -1220,7 +1220,7 @@ down this list before touching build code:
 runner is *actually* running (it prints the live `Running job:` line), and
 
 ```bash
-ghapp api repos/danielraffel/pulp/actions/runners     # busy/idle per runner
+ghapp api repos/Generous-Corp/pulp/actions/runners     # busy/idle per runner
 ```
 
 distinguishes "saturated" from "wedged" from "starved by a lower-priority lane."
@@ -1746,7 +1746,7 @@ than parsing error strings.
 **Shipyard is Pulp's primary CI tool.** All merges, validations, and
 ship cycles should use Shipyard. `local_ci.py` remains in the repo as
 a fallback but is scheduled for removal after a 2-week observation
-period (see danielraffel/pulp#120).
+period (see Generous-Corp/pulp#120).
 
 **Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
 limit.** Shipyard authenticates with its own **GitHub App token**
@@ -1931,7 +1931,7 @@ If a PR's macOS check is queued, first verify whether it is actually
 waiting on the self-hosted runner pool before taking action:
 
 ```bash
-gh api repos/danielraffel/pulp/actions/runners --jq \
+gh api repos/Generous-Corp/pulp/actions/runners --jq \
   '.runners[] | select(.labels[].name == "pulp-build") |
    {name,status,busy,labels:[.labels[].name]}'
 ```
@@ -2805,10 +2805,10 @@ test -f tools/local-ci/config.json || echo "WARNING: no worktree fallback config
 
 # Verify GitHub Actions runner routing. Namespace handles macOS PR work
 # (2026-05-18 re-commissioning); GHA-hosted handles Linux+Windows.
-gh variable list -R danielraffel/pulp | grep -q '^PULP_DEFAULT_RUNNER_PROVIDER[[:space:]]*github-hosted' || echo "WARNING: PULP_DEFAULT_RUNNER_PROVIDER should be github-hosted"
-gh variable list -R danielraffel/pulp | grep -q '^PULP_LOCAL_MACOS_RUNS_ON_JSON' || echo "WARNING: PULP_LOCAL_MACOS_RUNS_ON_JSON is missing; macOS build will use hosted macos-15"
-gh variable list -R danielraffel/pulp | grep -q '^PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON' || echo "WARNING: PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON is missing; macOS overflow will not reach Namespace"
-gh variable list -R danielraffel/pulp | grep -q '^PULP_LOCAL_MAC_OVERFLOW_THRESHOLD[[:space:]]*0' || echo "INFO: PULP_LOCAL_MAC_OVERFLOW_THRESHOLD is non-zero; macOS leg will prefer the local self-hosted Mac before overflowing to Namespace"
+gh variable list -R Generous-Corp/pulp | grep -q '^PULP_DEFAULT_RUNNER_PROVIDER[[:space:]]*github-hosted' || echo "WARNING: PULP_DEFAULT_RUNNER_PROVIDER should be github-hosted"
+gh variable list -R Generous-Corp/pulp | grep -q '^PULP_LOCAL_MACOS_RUNS_ON_JSON' || echo "WARNING: PULP_LOCAL_MACOS_RUNS_ON_JSON is missing; macOS build will use hosted macos-15"
+gh variable list -R Generous-Corp/pulp | grep -q '^PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON' || echo "WARNING: PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON is missing; macOS overflow will not reach Namespace"
+gh variable list -R Generous-Corp/pulp | grep -q '^PULP_LOCAL_MAC_OVERFLOW_THRESHOLD[[:space:]]*0' || echo "INFO: PULP_LOCAL_MAC_OVERFLOW_THRESHOLD is non-zero; macOS leg will prefer the local self-hosted Mac before overflowing to Namespace"
 ```
 
 If `local_ci.py` doesn't exist, the user likely has an older checkout. Tell them to pull latest main.
@@ -2904,7 +2904,7 @@ Routing variables (verify before debugging "stuck" macOS PRs):
 
 `shipyard pr` is the authoritative ship path. Do NOT push empty commits to
 retrigger a slow macOS check. If macOS is queued >45 min, check
-`gh api repos/danielraffel/pulp/actions/runners` first.
+`gh api repos/Generous-Corp/pulp/actions/runners` first.
 
 ## Pre-push rebase hygiene
 
@@ -2953,9 +2953,9 @@ through — and slots the new SHA to the BACK of the Namespace concurrency
 queue. The correct re-run pattern when CI hit transient breakage is:
 
 ```bash
-gh api -X POST repos/danielraffel/pulp/actions/runs/<RUN_ID>/rerun
+gh api -X POST repos/Generous-Corp/pulp/actions/runs/<RUN_ID>/rerun
 # or to rerun only failed jobs:
-gh api -X POST repos/danielraffel/pulp/actions/runs/<RUN_ID>/rerun-failed-jobs
+gh api -X POST repos/Generous-Corp/pulp/actions/runs/<RUN_ID>/rerun-failed-jobs
 ```
 
 That keeps your SHA + queue position, only re-fires the failed legs.
@@ -2974,7 +2974,7 @@ stuck", confirm:
 
 ```bash
 # Are the pulp-build runners online and busy?
-gh api repos/danielraffel/pulp/actions/runners --jq \
+gh api repos/Generous-Corp/pulp/actions/runners --jq \
   '.runners[] | select(.labels[].name == "pulp-build")
    | "\(.name) status=\(.status) busy=\(.busy)"'
 ```
@@ -2992,7 +2992,7 @@ those rerun attempts can still consume runner minutes. Cancel them
 explicitly:
 
 ```bash
-gh api -X POST repos/danielraffel/pulp/actions/runs/<RUN_ID>/cancel
+gh api -X POST repos/Generous-Corp/pulp/actions/runs/<RUN_ID>/cancel
 ```
 
 The default chain (`.github/workflows/build.yml` `resolve-provider` job):
@@ -3061,7 +3061,7 @@ hit a generator-mismatch error against the warm dir.
   `resolve-provider`). A plain dispatch routes Linux/Windows to
   GitHub-hosted runners; no `-f runner_provider` is needed:
   ```bash
-  gh workflow run build.yml --repo danielraffel/pulp --ref <branch>
+  gh workflow run build.yml --repo Generous-Corp/pulp --ref <branch>
   ```
   Passing `-f runner_provider=namespace` will fail until the
   `PULP_NAMESPACE_BUILD_*_RUNS_ON_JSON` repo variables are restored.
@@ -4494,7 +4494,7 @@ Intel portability is verified in four tiers (owned by the `intel-canary` skill;
 full design in `docs/guides/intel-support.md`). CI-relevant facts:
 
 - **Tier 0** is a step in `build.yml`'s ARM macOS job, gated on the
-  `PULP_INTEL_CANARY` repo variable (set `1` on `danielraffel/pulp`; forks
+  `PULP_INTEL_CANARY` repo variable (set `1` on `Generous-Corp/pulp`; forks
   default off and skip it). It runs the lint + a GPU-off x86_64 compile.
 - **Tier 1** is `intel-portability.yml` — a path-triggered **advisory** x86_64
   lane on the STABLE `macos-15` (arm+Rosetta). Do NOT add it to required checks.

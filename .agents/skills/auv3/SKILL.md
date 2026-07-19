@@ -596,7 +596,7 @@ auval -v aumu <subtype> <manufacturer>
 default audio device while running RENDER. Announce before invoking
 (per CLAUDE.md → *Local-dev audio etiquette*) and prefer the shortest
 necessary validation when the user may be listening to something else.
-Tracked as issue [#3173](https://github.com/danielraffel/pulp/issues/3173).
+Tracked as issue [#3173](https://github.com/Generous-Corp/pulp/issues/3173).
 
 **auval does NOT exercise the AU v3 controller path** — auval calls
 `AudioComponentInstantiate` directly, bypassing the

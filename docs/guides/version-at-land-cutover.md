@@ -108,7 +108,7 @@ the bypass-trailer gates depend on it; use the opt-in `no_merges=` flag.
 
 ## Claude plugin marketplace reads main HEAD (staleness window)
 
-`claude plugin marketplace add danielraffel/pulp` tracks the repository's
+`claude plugin marketplace add Generous-Corp/pulp` tracks the repository's
 **default branch (`main`) HEAD** — it reads `.claude-plugin/marketplace.json`
 and `.claude-plugin/plugin.json` from main, NOT from a release tag
 (`docs/guides/claude-code-plugin.md`; there is no `@ref` pin anywhere in the

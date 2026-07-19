@@ -313,7 +313,7 @@ versioned release and check the exact basename. Use a release created after
 # Replace with the first release created after this workflow landed.
 version=0.617.0
 asset=pulp-darwin-arm64.tar.gz
-base="https://github.com/danielraffel/pulp/releases/download/v${version}"
+base="https://github.com/Generous-Corp/pulp/releases/download/v${version}"
 
 curl -fsSLO "$base/$asset"
 curl -fsSLO "$base/SHA256SUMS"
@@ -323,8 +323,8 @@ awk -v file="$asset" '$2 == file { print }' SHA256SUMS | shasum -a 256 -c -
 For GitHub's immutable-release layer, use GitHub CLI:
 
 ```bash
-gh release verify "v${version}" -R danielraffel/pulp
-gh release verify-asset "v${version}" "$asset" -R danielraffel/pulp
+gh release verify "v${version}" -R Generous-Corp/pulp
+gh release verify-asset "v${version}" "$asset" -R Generous-Corp/pulp
 ```
 
 `gh release verify` proves the release exists and is immutable. `gh release
@@ -338,8 +338,8 @@ that produced the asset.
 
 ```bash
 gh attestation verify "$asset" \
-  -R danielraffel/pulp \
-  --signer-workflow github.com/danielraffel/pulp/.github/workflows/release-cli.yml
+  -R Generous-Corp/pulp \
+  --signer-workflow github.com/Generous-Corp/pulp/.github/workflows/release-cli.yml
 ```
 
 For `appcast.xml`, use `sign-and-release.yml` as the signer workflow. The

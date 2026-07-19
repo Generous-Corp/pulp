@@ -110,4 +110,4 @@ The two are joined by `pulp-stress-bridge`:
 - Both exist, harness shows visual diff → status downgraded to
   `partial` and a tracker issue is filed.
 
-[umbrella]: https://github.com/danielraffel/pulp/issues/1387
+[umbrella]: https://github.com/Generous-Corp/pulp/issues/1387

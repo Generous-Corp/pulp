@@ -318,17 +318,17 @@ validation clears a bar — so an unproven detector cannot introduce a false reg
   recovers an injected ramp to within ~0.3 ms (far under the 2.67 ms onset hop) for drifts
   inside the ~12 ms search window; larger drifts drop to low-coverage UNCERTAIN rather than
   guess. Promotion to `beta` needs the real-engine negative control + a false-positive sweep
-  across tempos/seeds. Tracked in [#5295](https://github.com/danielraffel/pulp/issues/5295).
+  across tempos/seeds. Tracked in [#5295](https://github.com/Generous-Corp/pulp/issues/5295).
 - **Advisory LLM/multimodal reviewer** ships **opt-in** (`reviewer.py`, `run --review`); see
   “Advisory reviewer” above. Promotion past experimental needs real-audio answer-key
-  evidence beyond the synthetic corpus — [#5296](https://github.com/danielraffel/pulp/issues/5296).
+  evidence beyond the synthetic corpus — [#5296](https://github.com/Generous-Corp/pulp/issues/5296).
 - **Autonomous tuning loop** ships its **experimental** first slice (`loop.py`,
   `quality-lab loop`): deterministic candidate ranking, a normalized-Pareto **Goodhart
   guard** (refuses a candidate that games one detector while regressing another; held-out
   slice + NEEDS-EAR), and a **proposal-only** label transaction that writes
   `corpus/LABEL_PROPOSALS.json` and never touches `MANIFEST.json`. It proposes; a human
   decides. Wiring it to the real engine matrix + the full label lifecycle is the next slice —
-  [#5297](https://github.com/danielraffel/pulp/issues/5297).
+  [#5297](https://github.com/Generous-Corp/pulp/issues/5297).
 
 These carry the `post-mvp` + `audio-quality-lab` labels.
 

@@ -1,6 +1,6 @@
 # @danielraffel/web-player
 
-A reusable, **skinnable**, **host-agnostic** web player for [Pulp](https://github.com/danielraffel/pulp)
+A reusable, **skinnable**, **host-agnostic** web player for [Pulp](https://github.com/Generous-Corp/pulp)
 audio plugins. It is the runtime behind the live WAM demo galleries
 (`generouscorp.com/pulp-example-plugins`, `/pulp-classic-effects`), extracted into
 a real package so any plugin author can mount a token-faithful demo of their own

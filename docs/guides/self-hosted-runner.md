@@ -5,7 +5,7 @@ Pulp CI runner. The payoff is getting sanitizer + build jobs off
 GitHub-hosted runners onto your own hardware — usually 4-8× faster,
 and free. Related: the runner-selectable mechanism in
 [`local-ci.md`](local-ci.md#switching-a-jobs-runner-without-a-code-change)
-and issue [#412 step 6](https://github.com/danielraffel/pulp/issues/412).
+and issue [#412 step 6](https://github.com/Generous-Corp/pulp/issues/412).
 
 ## Who this is for
 
@@ -34,7 +34,7 @@ and issue [#412 step 6](https://github.com/danielraffel/pulp/issues/412).
 3. Follow GitHub's
    [Adding self-hosted runners](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/adding-self-hosted-runners)
    flow. Download the runner to `~/actions-runner/`, run `./config.sh`,
-   register against the `danielraffel/pulp` repo.
+   register against the `Generous-Corp/pulp` repo.
 4. Install as a launch agent so it survives reboot: `./svc.sh install; ./svc.sh start`.
 5. Add labels so Pulp workflows can target this runner specifically.
    At minimum: `self-hosted`, `macos`, `arm64`, `sanitizer` (or whatever

@@ -2,7 +2,7 @@
 
 Date: 2026-06-03
 Branch: `feature/threejs-gltf-bake-native-spikes`
-Tracking issue: https://github.com/danielraffel/pulp/issues/2738
+Tracking issue: https://github.com/Generous-Corp/pulp/issues/2738
 
 ## Scope
 
@@ -336,7 +336,7 @@ Dependency decision, rechecked during this slice:
 
 Dependency/CMake/docs/notice edits were coordinated through #2738 before
 implementation:
-https://github.com/danielraffel/pulp/issues/2738#issuecomment-4609687265
+https://github.com/Generous-Corp/pulp/issues/2738#issuecomment-4609687265
 
 The opt-in dependency graph now adds fastgltf `v0.9.0` and explicit simdjson
 `v3.12.3` FetchContent entries only when `PULP_ENABLE_SCENE3D=ON`. Explicit
@@ -1364,7 +1364,7 @@ checkers, the hardcoded `scene3d-renderer-probe-hardcoded` and BoxTextured
 URL gating, bake-artifact verification, sidecar schema constants, and the #2738
 / runtime #3369 evidence links must all stay present together. The runtime
 dependency is pinned to the exact runtime evidence comment
-`https://github.com/danielraffel/pulp/issues/3369#issuecomment-4610177927`,
+`https://github.com/Generous-Corp/pulp/issues/3369#issuecomment-4610177927`,
 not only the issue-level URL, so the native lane consumes the sibling evidence
 without reimplementing Live `GLTFLoader`. The same exact URL must remain in
 the CTest sidecar/preflight handoff and in the clean sidecar fixture used by
@@ -1498,7 +1498,7 @@ already-authored GLB/GLTF input:
 ```bash
 ./build-scene3d/core/scene/pulp-scene3d-sidecar \
   --source khronos-boxtextured \
-  --runtime-evidence https://github.com/danielraffel/pulp/issues/2738 \
+  --runtime-evidence https://github.com/Generous-Corp/pulp/issues/2738 \
   test/fixtures/scene3d/BoxTextured/BoxTextured.glb
 ```
 
@@ -1527,7 +1527,7 @@ Bake/export boundary after runtime evidence:
 
 - Runtime #3369 now carries live GLTF loader/fetch/input, `gltf-box` textured
   capture, and DataTexture upload evidence, including
-  `https://github.com/danielraffel/pulp/issues/3369#issuecomment-4610177927`,
+  `https://github.com/Generous-Corp/pulp/issues/3369#issuecomment-4610177927`,
   so the native sidecar can record that issue/comment as provenance for future
   baked GLBs.
 - This branch still does not implement `GLTFExporter`, `toDataURL`, `toBlob`,

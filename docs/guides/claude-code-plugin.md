@@ -28,7 +28,7 @@ the Claude Code plugin from the public marketplace:
 curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 
 # 2. Add the marketplace and install the plugin.
-claude plugin marketplace add danielraffel/pulp
+claude plugin marketplace add Generous-Corp/pulp
 claude plugin install pulp
 ```
 
@@ -41,7 +41,7 @@ install the plugin from that clone instead:
 
 ```bash
 # Clone the repository.
-git clone https://github.com/danielraffel/pulp.git
+git clone https://github.com/Generous-Corp/pulp.git
 cd pulp
 
 # Install the checkout into Claude Code.

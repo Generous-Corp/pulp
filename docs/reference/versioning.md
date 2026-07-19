@@ -52,7 +52,7 @@ This double-line answer is the canonical reply to "what version is my project us
 
 ## When does a new GitHub Release appear?
 
-Every merge to `main` that moves `project(Pulp VERSION …)` triggers `.github/workflows/auto-release.yml`, which tags the new version. The tag push fires `release-cli.yml` which builds the CLI binaries and publishes a release at `https://github.com/danielraffel/pulp/releases/tag/vX.Y.Z`.
+Every merge to `main` that moves `project(Pulp VERSION …)` triggers `.github/workflows/auto-release.yml`, which tags the new version. The tag push fires `release-cli.yml` which builds the CLI binaries and publishes a release at `https://github.com/Generous-Corp/pulp/releases/tag/vX.Y.Z`.
 
 If `auto-release.yml` sees `SDK_BEFORE == SDK_AFTER` (version didn't move on that merge), no tag is created — that is by design so doc-only PRs don't cut releases. The Releases page lags the CMakeLists version briefly whenever a batch of non-version-bumping PRs lands in a row.
 

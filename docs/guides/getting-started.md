@@ -33,7 +33,7 @@ installer first and verify it against Pulp's published SHA-256 checksums.
 (
   set -e
   curl -fLso install.sh https://www.generouscorp.com/pulp/install.sh
-  curl -fLso SHA256SUMS https://raw.githubusercontent.com/danielraffel/pulp/main/tools/install/SHA256SUMS
+  curl -fLso SHA256SUMS https://raw.githubusercontent.com/Generous-Corp/pulp/main/tools/install/SHA256SUMS
   if command -v sha256sum >/dev/null; then
     sha256sum -c SHA256SUMS --ignore-missing
   else
@@ -47,7 +47,7 @@ installer first and verify it against Pulp's published SHA-256 checksums.
 
 ```powershell
 Invoke-WebRequest https://www.generouscorp.com/pulp/install.ps1 -OutFile install.ps1
-Invoke-WebRequest https://raw.githubusercontent.com/danielraffel/pulp/main/tools/install/SHA256SUMS -OutFile SHA256SUMS
+Invoke-WebRequest https://raw.githubusercontent.com/Generous-Corp/pulp/main/tools/install/SHA256SUMS -OutFile SHA256SUMS
 $expected = (Select-String -Path .\SHA256SUMS -Pattern ' install\.ps1$').Line.Split()[0]
 $actual = (Get-FileHash .\install.ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw "Checksum mismatch for install.ps1" }
@@ -75,7 +75,7 @@ installer from [Quick Install](#quick-install) for step 1.
 curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 
 # 2. Plugin second (its MCP launcher resolves pulp-mcp from PATH).
-claude plugin marketplace add danielraffel/pulp && claude plugin install pulp
+claude plugin marketplace add Generous-Corp/pulp && claude plugin install pulp
 
 # 3. Verify the wiring.
 pulp doctor          # expects: pulp-mcp — <path> (pulp-mcp <version>)
@@ -138,7 +138,7 @@ unless those formats were requested explicitly.
 If you want to build the framework itself (to contribute, modify core code, or work without pre-built binaries):
 
 ```bash
-git clone https://github.com/danielraffel/pulp.git
+git clone https://github.com/Generous-Corp/pulp.git
 cd pulp
 ```
 

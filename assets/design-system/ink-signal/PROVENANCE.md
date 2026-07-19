@@ -21,7 +21,7 @@ was checked against that policy:
 
 - **Tokens, CSS, and reference screenshots** are original work produced for the
   Pulp project itself (the export's `readme.md` records the direction was "set
-  with the maintainer" and names the source repo `danielraffel/pulp`, MIT). No
+  with the maintainer" and names the source repo `Generous-Corp/pulp`, MIT). No
   third-party lineage → MIT, ships freely.
 - **Fonts** — the language references **Jost** (display/UI) and **JetBrains
   Mono** (values/code) *by family name only*. No font binaries are vendored here.
