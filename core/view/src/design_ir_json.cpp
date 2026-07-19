@@ -1599,6 +1599,7 @@ static const char* diagnostic_kind_id(ImportDiagnosticKind kind) {
     switch (kind) {
         case ImportDiagnosticKind::unknown:                    return "unknown";
         case ImportDiagnosticKind::unsupported_property:       return "unsupported_property";
+        case ImportDiagnosticKind::unsupported_node:           return "unsupported_node";
         case ImportDiagnosticKind::unresolved_asset:           return "unresolved_asset";
         case ImportDiagnosticKind::snapshot_semantics_warning: return "snapshot_semantics_warning";
         case ImportDiagnosticKind::legacy_field_shortcut:      return "legacy_field_shortcut";
@@ -1610,6 +1611,7 @@ static const char* diagnostic_kind_id(ImportDiagnosticKind kind) {
 
 static ImportDiagnosticKind parse_diagnostic_kind(const std::string& value) {
     if (value == "unsupported_property") return ImportDiagnosticKind::unsupported_property;
+    if (value == "unsupported_node") return ImportDiagnosticKind::unsupported_node;
     if (value == "unresolved_asset") return ImportDiagnosticKind::unresolved_asset;
     if (value == "snapshot_semantics_warning") return ImportDiagnosticKind::snapshot_semantics_warning;
     if (value == "legacy_field_shortcut") return ImportDiagnosticKind::legacy_field_shortcut;
@@ -1628,6 +1630,12 @@ static ImportDiagnosticKind diagnostic_kind_from_code(const std::string& code) {
         || code == "asset-data-uri-invalid"
         || code == "asset-hash-mismatch") {
         return ImportDiagnosticKind::unresolved_asset;
+    }
+    if (code == "unsupported-node"
+        || code == "slice-skipped"
+        || code == "slot-placeholder"
+        || code == "unknown-node-type") {
+        return ImportDiagnosticKind::unsupported_node;
     }
     if (code == "snapshot-dynamic-api") {
         return ImportDiagnosticKind::snapshot_semantics_warning;

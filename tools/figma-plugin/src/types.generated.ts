@@ -253,6 +253,7 @@ export interface Diagnostic {
   kind:
     | "unknown"
     | "unsupported_property"
+    | "unsupported_node"
     | "unresolved_asset"
     | "snapshot_semantics_warning"
     | "legacy_field_shortcut"

@@ -1168,13 +1168,26 @@ TEST_CASE("DesignIR diagnostic kinds parse and serialize every normalized bucket
                 "code": "unknown-code",
                 "path": "<root>",
                 "message": "unknown"
+            },
+            {
+                "severity": "warning",
+                "kind": "unsupported_node",
+                "code": "slice-skipped",
+                "path": "12:34",
+                "message": "SLICE skipped"
+            },
+            {
+                "severity": "warning",
+                "code": "unsupported-node",
+                "path": "12:35",
+                "message": "STICKY skipped"
             }
         ]
     })json");
 
     REQUIRE(parsed.capture_method == "runtime_snapshot");
     REQUIRE(parsed.settle_rounds == 2);
-    REQUIRE(parsed.diagnostics.size() == 7);
+    REQUIRE(parsed.diagnostics.size() == 9);
     REQUIRE(parsed.diagnostics[0].kind == ImportDiagnosticKind::legacy_field_shortcut);
     REQUIRE(parsed.diagnostics[1].kind == ImportDiagnosticKind::capture_partial);
     REQUIRE(parsed.diagnostics[2].severity == ImportDiagnosticSeverity::error);
@@ -1183,6 +1196,10 @@ TEST_CASE("DesignIR diagnostic kinds parse and serialize every normalized bucket
     REQUIRE(parsed.diagnostics[4].kind == ImportDiagnosticKind::snapshot_semantics_warning);
     REQUIRE(parsed.diagnostics[5].kind == ImportDiagnosticKind::fallback_used);
     REQUIRE(parsed.diagnostics[6].kind == ImportDiagnosticKind::unknown);
+    // The node-dispatch taxonomy: explicit `kind` parses, and a kind-less
+    // producer entry classifies from its dispatch code.
+    REQUIRE(parsed.diagnostics[7].kind == ImportDiagnosticKind::unsupported_node);
+    REQUIRE(parsed.diagnostics[8].kind == ImportDiagnosticKind::unsupported_node);
 
     const auto json = serialize_design_ir(parsed);
     REQUIRE(json.find("\"kind\":\"legacy_field_shortcut\"") != std::string::npos);
@@ -1191,6 +1208,7 @@ TEST_CASE("DesignIR diagnostic kinds parse and serialize every normalized bucket
     REQUIRE(json.find("\"kind\":\"unresolved_asset\"") != std::string::npos);
     REQUIRE(json.find("\"kind\":\"snapshot_semantics_warning\"") != std::string::npos);
     REQUIRE(json.find("\"kind\":\"unknown\"") != std::string::npos);
+    REQUIRE(json.find("\"kind\":\"unsupported_node\"") != std::string::npos);
     REQUIRE(json.find("\"severity\":\"error\"") != std::string::npos);
 }
 

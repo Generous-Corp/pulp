@@ -1216,5 +1216,124 @@ class ShapePrimitiveTypingTest(unittest.TestCase):
         self.assertNotIn("border_top_left_radius", s)
 
 
+class NodeDispatchTest(unittest.TestCase):
+    """Exhaustive node-type dispatch — no family reaches the envelope through a
+    silent default-to-frame. Asserted through node_tree_to_ir (the producer's
+    real entry point) so the assertions are about what the exporter WRITES:
+    skipped families emit no node + a diagnostic, diagnosed families emit a
+    node + a diagnostic, and containers dispatch explicitly with no noise.
+    Kept in lockstep with the plugin lane (extract-pure.ts::dispatchNodeType)
+    and the .fig lane (fig/scene.mjs)."""
+
+    @staticmethod
+    def _bb(x, y, w, h):
+        return {"x": x, "y": y, "width": w, "height": h}
+
+    def _tree(self):
+        return {"type": "FRAME", "name": "Panel", "id": "1:1",
+                "absoluteBoundingBox": self._bb(0, 0, 400, 300),
+                "children": [
+                    {"type": "TEXT_PATH", "name": "Curved Label", "id": "1:2",
+                     "absoluteBoundingBox": self._bb(10, 10, 120, 24),
+                     "characters": "WOW FACTOR",
+                     "style": {"fontFamily": "Inter", "fontWeight": 400,
+                               "fontSize": 12}},
+                    {"type": "TRANSFORM_GROUP", "name": "Spun Group", "id": "1:3",
+                     "absoluteBoundingBox": self._bb(10, 50, 80, 80),
+                     "children": []},
+                    {"type": "SLOT", "name": "Content Slot", "id": "1:4",
+                     "absoluteBoundingBox": self._bb(10, 140, 100, 40),
+                     "children": []},
+                    {"type": "SLICE", "name": "Export @2x", "id": "1:5",
+                     "absoluteBoundingBox": self._bb(0, 0, 400, 300)},
+                    {"type": "STICKY", "name": "Reviewer Note", "id": "1:6",
+                     "absoluteBoundingBox": self._bb(200, 10, 120, 120)},
+                    {"type": "TABLE_CELL", "name": "Cell", "id": "1:7",
+                     "absoluteBoundingBox": self._bb(0, 200, 40, 20)},
+                ]}
+
+    def _diags(self, ctx, code):
+        return [d for d in ctx.diagnostics if d["code"] == code]
+
+    def test_skipped_families_emit_no_node_and_a_diagnostic(self):
+        ir, ctx = frx.node_tree_to_ir(self._tree())
+        # SLICE (paints nothing — skipping IS correct rendering), STICKY and
+        # TABLE_CELL (editor families) are gone; before this contract they were
+        # empty generic frames that looked successfully imported.
+        self.assertEqual([c["name"] for c in ir["children"]],
+                         ["Curved Label", "Spun Group", "Content Slot"])
+        slice_diags = self._diags(ctx, "slice-skipped")
+        self.assertEqual(len(slice_diags), 1)
+        self.assertEqual(slice_diags[0]["kind"], "unsupported_node")
+        self.assertEqual(slice_diags[0]["path"], "1:5")
+        skipped = self._diags(ctx, "unsupported-node")
+        self.assertEqual({d["path"] for d in skipped}, {"1:6", "1:7"})
+        self.assertTrue(all(d["kind"] == "unsupported_node" for d in skipped))
+
+    def test_text_path_is_text_with_content_and_flatten_diagnostic(self):
+        ir, ctx = frx.node_tree_to_ir(self._tree())
+        curved = ir["children"][0]
+        self.assertEqual(curved["type"], "text")
+        # The content is the point: TEXT_PATH carries real copy, and re-typing
+        # it must not drop it.
+        self.assertEqual(curved["content"], "WOW FACTOR")
+        self.assertEqual(curved["style"]["font_family"], "Inter")
+        diags = self._diags(ctx, "text-path-flattened")
+        self.assertEqual(len(diags), 1)
+        self.assertEqual(diags[0]["kind"], "capture_partial")
+
+    def test_transform_group_is_silent_frame_and_slot_is_diagnosed_frame(self):
+        ir, ctx = frx.node_tree_to_ir(self._tree())
+        spun = ir["children"][1]
+        self.assertEqual(spun["type"], "frame")
+        # A transform group renders fine as a container — explicit dispatch,
+        # no diagnostic noise.
+        self.assertEqual([d for d in ctx.diagnostics if d["path"] == "1:3"], [])
+        slot = ir["children"][2]
+        self.assertEqual(slot["type"], "frame")
+        slot_diags = self._diags(ctx, "slot-placeholder")
+        self.assertEqual(len(slot_diags), 1)
+        self.assertEqual(slot_diags[0]["kind"], "unsupported_node")
+
+    def test_unknown_type_falls_back_to_frame_with_a_diagnostic(self):
+        tree = {"type": "FRAME", "name": "Panel", "id": "2:1",
+                "absoluteBoundingBox": self._bb(0, 0, 100, 100),
+                "children": [
+                    {"type": "HOLOGRAM_2027", "name": "Future Thing", "id": "2:2",
+                     "absoluteBoundingBox": self._bb(0, 0, 50, 50)},
+                ]}
+        ir, ctx = frx.node_tree_to_ir(tree)
+        # Never crash on new families — the node survives as a frame...
+        self.assertEqual(len(ir["children"]), 1)
+        self.assertEqual(ir["children"][0]["type"], "frame")
+        # ...but the fallback is stated, not silent.
+        diags = self._diags(ctx, "unknown-node-type")
+        self.assertEqual(len(diags), 1)
+        self.assertEqual(diags[0]["kind"], "unsupported_node")
+        self.assertIn("HOLOGRAM_2027", diags[0]["message"])
+
+    def test_dispatch_table_full_matrix(self):
+        # One row per family, REST spelling (REGULAR_POLYGON, TABLE_CELL).
+        for t in ("FRAME", "GROUP", "SECTION", "TRANSFORM_GROUP", "CANVAS",
+                  "COMPONENT", "COMPONENT_SET", "INSTANCE", "RECTANGLE",
+                  "POLYGON", "REGULAR_POLYGON", "STAR", "LINE"):
+            with self.subTest(figma_type=t):
+                self.assertEqual(frx.dispatch_node_type(t), ("frame", None))
+        self.assertEqual(frx.dispatch_node_type("ELLIPSE"), ("ellipse", None))
+        self.assertEqual(frx.dispatch_node_type("TEXT"), ("text", None))
+        self.assertEqual(frx.dispatch_node_type("VECTOR"), ("vector", None))
+        self.assertEqual(frx.dispatch_node_type("BOOLEAN_OPERATION"),
+                         ("vector", None))
+        for t in ("SLICE", "STICKY", "CONNECTOR", "SHAPE_WITH_TEXT",
+                  "CODE_BLOCK", "STAMP", "WIDGET", "EMBED", "LINK_UNFURL",
+                  "MEDIA", "HIGHLIGHT", "WASHI_TAPE", "TABLE", "TABLE_CELL",
+                  "SLIDE", "SLIDE_ROW", "SLIDE_GRID",
+                  "INTERACTIVE_SLIDE_ELEMENT"):
+            with self.subTest(figma_type=t):
+                emitted, diag = frx.dispatch_node_type(t)
+                self.assertIsNone(emitted)
+                self.assertEqual(diag["kind"], "unsupported_node")
+
+
 if __name__ == "__main__":
     unittest.main()

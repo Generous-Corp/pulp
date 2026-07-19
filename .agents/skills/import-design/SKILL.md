@@ -1313,6 +1313,55 @@ actually the dominant bottleneck for the measured fixture. Keep the legacy
 top-level `comparison` entry pointed at `baked-native`, and add per-lane
 results under `comparisons` for both baked lanes.
 
+### Node-type dispatch — exhaustive, never silent (all three producers)
+
+All three Figma producers dispatch node types EXHAUSTIVELY against the pinned
+`@figma/plugin-typings` `SceneNode` union (version in
+`tools/figma-plugin/package.json`); the old shape was a `default: "frame"`
+fallthrough that made every unsupported node — FigJam stickies, Slides rows,
+SLICE export regions — look like a successfully imported empty frame. The
+three dispatch sites, kept in lockstep (one decision table, three spellings):
+
+- plugin: `tools/figma-plugin/src/extract-pure.ts::dispatchNodeType`
+  (`mapNodeType` remains as an emit-type accessor only)
+- REST: `tools/import-design/figma_rest_export.py::dispatch_node_type`
+- `.fig`: `tools/import-design/fig/scene.mjs` — `envelopeType` +
+  the walk-top skip checks + `KNOWN_NODE_TYPES`/`SKIPPED_NODE_TYPES`
+
+The decision table, per family:
+
+| Family | Dispatch | Diagnostic |
+|---|---|---|
+| `TEXT_PATH` | emit `text`, characters preserved | `text-path-flattened` (on-path layout flattened) |
+| `TRANSFORM_GROUP` (`.fig` kiwi spelling: `TRANSFORM`) | emit `frame`, explicit | none — it renders fine |
+| `SLOT` | emit `frame` (placeholder) | `slot-placeholder` (bare import has no slot content) |
+| `SLICE` | **skip** — an export region paints nothing; a frame here invented a box | `slice-skipped` |
+| Editor/FigJam (`STICKY`, `CONNECTOR`, `SHAPE_WITH_TEXT`, `CODE_BLOCK`, `STAMP`, `WIDGET`, `EMBED`, `LINK_UNFURL`, `MEDIA`, `HIGHLIGHT`, `WASHI_TAPE`, `TABLE`, REST `TABLE_CELL`) + Slides (`SLIDE`, `SLIDE_ROW`, `SLIDE_GRID`, `INTERACTIVE_SLIDE_ELEMENT`) | **skip** | `unsupported-node` |
+| Unknown/new type | emit `frame` (never crash) | `unknown-node-type` — the fallback is stated, not silent |
+
+Gotchas:
+
+- **Diagnostic taxonomy**: plugin/REST envelopes carry `kind:
+  "unsupported_node"` (added to `ExtractedDiagnostic`, the envelope schema,
+  and C++ `ImportDiagnosticKind`; `diagnostic_kind_from_code` classifies the
+  four dispatch codes for kind-less producers). The `.fig` lane uses its own
+  `pushDiag` channel — every new code MUST be registered in
+  `DIAGNOSTIC_SEVERITY` (scene.mjs) or it silently downgrades to dropped
+  `info`; the dispatch codes are all `warning` deliberately, including
+  `slice-skipped`, because both `.fig` consumers drop `info`.
+- **The `.fig` kiwi vocabulary is NOT the Plugin API's**: components are
+  `SYMBOL`, rectangles `ROUNDED_RECTANGLE`, polygons `REGULAR_POLYGON`, and
+  the transform group is `TRANSFORM`. Both spellings are accepted where they
+  differ. Dump a file's actual enum via `readSchema(...).definitions` →
+  `NodeType` before assuming a spelling.
+- **Skips run before budgets/geometry**: plugin skips before the `maxNodes`
+  count; `.fig` skips before instance expansion and the geometry ledger, so a
+  skipped node also disappears from `--dump-layout` (expect node-count deltas
+  vs pre-dispatch dumps ONLY for skipped families).
+- **No new IR node types**: dispatch lands on existing envelope types
+  (`frame`/`text`/`ellipse`/`vector`); `design_ir_json.cpp` needed only the
+  new diagnostic kind, no node-type change.
+
 ### Vector shape primitives → synthesized SVG path
 
 `vector`/`path`/`svg_path` nodes carrying an authored `path_data` (`d`) already
