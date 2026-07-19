@@ -96,6 +96,15 @@ TEST_CASE("AutomationCurve continuous segments honor curvature") {
     REQUIRE(*ease_out.value().value_at({50}) == 0.625f);
 }
 
+TEST_CASE("continuous automation segment evaluation is total at invalid boundaries") {
+    REQUIRE(timeline::evaluate_continuous_automation_segment({9}, {10}, {10}, 0.25f, 0.75f,
+                                                             0.5f) == 0.25f);
+    REQUIRE(timeline::evaluate_continuous_automation_segment({10}, {10}, {10}, 0.25f, 0.75f,
+                                                             0.5f) == 0.75f);
+    REQUIRE(timeline::evaluate_continuous_automation_segment({12}, {20}, {10}, 0.25f, 0.75f,
+                                                             -0.5f) == 0.75f);
+}
+
 TEST_CASE("AutomationCurve evaluation has deterministic double-precision golden values") {
     auto ease_in = timeline::AutomationCurve::create(
         {point(1, -17, -0.375f, timeline::AutomationInterpolation::Continuous, 0.3f),

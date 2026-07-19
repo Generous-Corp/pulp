@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/playback/audio_renderer_limits.hpp>
+#include <pulp/playback/program_identity.hpp>
 #include <pulp/runtime/result.hpp>
 #include <pulp/runtime/slot.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
@@ -18,8 +19,6 @@ namespace pulp::playback {
 class ProgramCompilerTask;
 class AudioTrackRendererProgram;
 class DecodedAudioAssetPool;
-
-using ProgramGeneration = std::uint64_t;
 
 enum class ProgramErrorCode : std::uint8_t {
     InvalidGeneration,

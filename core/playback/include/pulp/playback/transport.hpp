@@ -63,6 +63,9 @@ struct TransportSnapshot {
     std::uint8_t range_count = 0;
 };
 
+/// Validates the shared structural contract consumed by every block renderer.
+bool valid_transport_ranges(const TransportSnapshot& transport) noexcept;
+
 struct MasterTransportConfig {
     std::uint32_t max_buffer_size = 0;
     MeterSignature meter{};
