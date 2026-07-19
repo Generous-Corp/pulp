@@ -19,6 +19,7 @@ add_library(pulp-timeline
     src/serialize_encode.cpp
     src/structural_registry_validation.cpp
     src/track.cpp
+    src/track_schema_migrations.cpp
 )
 add_library(pulp::timeline ALIAS pulp-timeline)
 

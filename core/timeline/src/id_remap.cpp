@@ -13,10 +13,8 @@ struct IdRemapBuilder {
 namespace {
 
 template <typename T>
-runtime::Result<T, ModelError> fail(ModelErrorCode code, ItemId item = {},
-                                    ItemId related = {}) {
-    return runtime::Result<T, ModelError>(
-        runtime::Err(ModelError{code, item, related}));
+runtime::Result<T, ModelError> fail(ModelErrorCode code, ItemId item = {}, ItemId related = {}) {
+    return runtime::Result<T, ModelError>(runtime::Err(ModelError{code, item, related}));
 }
 
 } // namespace
@@ -84,6 +82,8 @@ std::optional<ModelError> preflight(const Clip& clip) {
 
 std::optional<ModelError> preflight(const Track& track) {
     std::vector<ItemId> ids{track.id()};
+    for (const auto& device : track.device_chain())
+        ids.push_back(device.id);
     for (const auto& clip : track.clips()) {
         if (std::holds_alternative<OpaqueContent>(clip.content()))
             return ModelError{ModelErrorCode::OpaqueContentCannotRemap, clip.id(), {}};
@@ -96,6 +96,8 @@ std::optional<ModelError> preflight(const Sequence& sequence) {
     std::vector<ItemId> ids{sequence.id()};
     for (const auto& track : sequence.tracks()) {
         ids.push_back(track.id());
+        for (const auto& device : track.device_chain())
+            ids.push_back(device.id);
         for (const auto& clip : track.clips()) {
             if (std::holds_alternative<OpaqueContent>(clip.content()))
                 return ModelError{ModelErrorCode::OpaqueContentCannotRemap, clip.id(), {}};
@@ -147,6 +149,10 @@ void allocate_clip_owned(const Clip& clip, IdRemapTable& table, ItemIdAllocator&
 
 runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRemapTable& table,
                                                  ExternalIdFixup external) {
+    std::vector<DevicePlacement> device_chain;
+    device_chain.reserve(track.device_chain().size());
+    for (const auto& device : track.device_chain())
+        device_chain.push_back({*table.find(device.id)});
     std::vector<Clip> clips;
     clips.reserve(track.clips().size());
     for (const auto& clip : track.clips()) {
@@ -156,7 +162,10 @@ runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRem
                                rebuilt.error().related_item);
         clips.push_back(std::move(rebuilt).value());
     }
-    return Track::create(*table.find(track.id()), track.name(), std::move(clips));
+    return Track::create(TrackInput{.id = *table.find(track.id()),
+                                    .name = track.name(),
+                                    .clips = std::move(clips),
+                                    .device_chain = std::move(device_chain)});
 }
 
 runtime::Result<Sequence, ModelError>
@@ -204,6 +213,10 @@ runtime::Result<RemappedTrack, ModelError> remap_ids(const Track& track, ItemIdA
     auto working = allocator;
     IdRemapTable table;
     std::optional<ModelError> error = allocate_owned(table, working, track.id());
+    for (const auto& device : track.device_chain()) {
+        if (!error)
+            error = allocate_owned(table, working, device.id);
+    }
     for (const auto& clip : track.clips())
         allocate_clip_owned(clip, table, working, error);
     if (error)
@@ -229,6 +242,10 @@ remap_ids(const Sequence& sequence, ItemIdAllocator& allocator, ExternalIdFixup 
     for (const auto& track : sequence.tracks()) {
         if (!error)
             error = allocate_owned(table, working, track.id());
+        for (const auto& device : track.device_chain()) {
+            if (!error)
+                error = allocate_owned(table, working, device.id);
+        }
         for (const auto& clip : track.clips())
             allocate_clip_owned(clip, table, working, error);
     }
@@ -266,6 +283,10 @@ runtime::Result<RemappedProject, ModelError> remap_ids(const Project& project,
         for (const auto& track : sequence.tracks()) {
             if (!error)
                 error = allocate_owned(table, allocator, track.id());
+            for (const auto& device : track.device_chain()) {
+                if (!error)
+                    error = allocate_owned(table, allocator, device.id);
+            }
             for (const auto& clip : track.clips())
                 allocate_clip_owned(clip, table, allocator, error);
         }
@@ -302,10 +323,10 @@ runtime::Result<RemappedProject, ModelError> remap_ids(const Project& project,
                                          rebuilt.error().related_item);
         sequences.push_back(std::move(rebuilt).value());
     }
-    auto rebuilt = Project::create(ProjectInput{
-        *table.find(project.id()), project.name(), allocator.next_value(),
-        *table.find(project.root_sequence_id()), std::move(assets), std::move(sequences),
-        project.tempo_map(), project.meter_map()});
+    auto rebuilt = Project::create(
+        ProjectInput{*table.find(project.id()), project.name(), allocator.next_value(),
+                     *table.find(project.root_sequence_id()), std::move(assets),
+                     std::move(sequences), project.tempo_map(), project.meter_map()});
     if (!rebuilt)
         return fail<RemappedProject>(rebuilt.error().code, rebuilt.error().item,
                                      rebuilt.error().related_item);

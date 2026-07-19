@@ -24,8 +24,8 @@ AutomationLane::create(ItemId id, AutomationTarget target, AutomationCurve curve
     }
     const auto validation = std::visit(
         [](const DeviceParameterTarget& candidate) -> TargetValidation {
-            return {candidate.valid(), AutomationLaneErrorCode::InvalidDeviceId,
-                    candidate.device_id};
+            return {candidate.valid(), AutomationLaneErrorCode::InvalidDevicePlacementId,
+                    candidate.device_placement_id()};
         },
         target);
     if (!validation.valid) {

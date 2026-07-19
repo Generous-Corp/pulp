@@ -16,6 +16,8 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         SchemaDomain domain;
         std::string_view type_name;
         std::span<const ExpectedField> fields;
+        std::uint32_t current_version = 1;
+        bool requires_round_trip_migration = false;
     };
 
     static constexpr ExpectedField project_fields[] = {
@@ -50,8 +52,12 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     };
     static constexpr ExpectedField track_fields[] = {
         {"clips", SchemaValueKind::Array},
+        {"device_chain", SchemaValueKind::Array},
         {"id", SchemaValueKind::U64String},
         {"name", SchemaValueKind::String},
+    };
+    static constexpr ExpectedField device_placement_fields[] = {
+        {"id", SchemaValueKind::U64String},
     };
     static constexpr ExpectedField clip_fields[] = {
         {"content", SchemaValueKind::Object},
@@ -75,7 +81,8 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {SchemaDomain::AssetRepresentation, "pulp.timeline.asset_representation",
          representation_fields},
         {SchemaDomain::Document, "pulp.timeline.sequence", sequence_fields},
-        {SchemaDomain::Document, "pulp.timeline.track", track_fields},
+        {SchemaDomain::Document, "pulp.timeline.track", track_fields, 2, true},
+        {SchemaDomain::Document, "pulp.timeline.device_placement", device_placement_fields},
         {SchemaDomain::Document, "pulp.timeline.clip", clip_fields},
         {SchemaDomain::Content, "pulp.timeline.content.empty", {}},
         {SchemaDomain::Content, "pulp.timeline.content.media", media_fields},
@@ -85,8 +92,14 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         const auto* schema = registry.find(expected.domain, expected.type_name);
         if (!schema)
             return PersistenceErrorCode::UnsupportedStructuralType;
-        if (schema->current_version != 1)
+        if (schema->current_version != expected.current_version)
             return PersistenceErrorCode::UnsupportedSchemaVersion;
+        if (expected.requires_round_trip_migration &&
+            (schema->upgrades.size() != 1 || schema->downgrades.size() != 1 ||
+             schema->upgrades[0].from_version != 1 || schema->upgrades[0].to_version != 2 ||
+             !schema->upgrades[0].migrate || schema->downgrades[0].from_version != 2 ||
+             schema->downgrades[0].to_version != 1 || !schema->downgrades[0].migrate))
+            return PersistenceErrorCode::MigrationPathMissing;
         if (schema->fields.size() != expected.fields.size())
             return PersistenceErrorCode::InvalidSchema;
         for (std::size_t index = 0; index < expected.fields.size(); ++index) {

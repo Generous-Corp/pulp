@@ -10,7 +10,6 @@
 
 namespace pulp::timeline {
 
-
 namespace {
 
 template <typename T>
@@ -32,7 +31,6 @@ std::optional<ItemId> first_duplicate(const std::vector<T>& values, IdFn&& id_of
     const auto duplicate = std::adjacent_find(ids.begin(), ids.end());
     return duplicate == ids.end() ? std::nullopt : std::optional<ItemId>(*duplicate);
 }
-
 
 } // namespace
 
@@ -254,7 +252,6 @@ Clip::with_playback_properties(ClipPlaybackProperties playback) const {
                            absolute_sample_rate(), content(), playback);
 }
 
-
 struct Sequence::Data {
     ItemId id;
     std::string name;
@@ -438,6 +435,11 @@ detail::ProjectStateAccess::restore_identities(Project project,
                        location.track_id != location.clip_id &&
                        entry.item != location.sequence_id && entry.item != location.track_id &&
                        entry.item != location.clip_id;
+            case ItemKind::DevicePlacement:
+                return location.sequence_id.valid() && location.track_id.valid() &&
+                       location.sequence_id != location.track_id &&
+                       entry.item != location.sequence_id && entry.item != location.track_id &&
+                       location.clip_id == invalid;
             }
             return false;
         }();
@@ -471,6 +473,12 @@ detail::ProjectStateAccess::restore_identities(Project project,
                        clip->location.sequence_id == location.sequence_id &&
                        clip->location.track_id == location.track_id;
             }
+            case ItemKind::DevicePlacement: {
+                const auto* track = find_entry(location.track_id);
+                return owner_is(location.sequence_id, ItemKind::Sequence) && track &&
+                       track->location.kind == ItemKind::Track &&
+                       track->location.sequence_id == location.sequence_id;
+            }
             }
             return false;
         }();
@@ -492,11 +500,10 @@ detail::ProjectStateAccess::restore_identities(Project project,
     }
     if (active_index != active_entries.size())
         return fail<Project>(ModelErrorCode::InvalidSchemaIdentity);
-    project.data_ = std::make_shared<const Project::Data>(
-        Project::Data{project.data_->id, project.data_->name, project.data_->next_item_id,
-                      project.data_->root_sequence_id, project.data_->assets,
-                      project.data_->sequences, project.data_->tempo_map,
-                      project.data_->meter_map, std::move(restored)});
+    project.data_ = std::make_shared<const Project::Data>(Project::Data{
+        project.data_->id, project.data_->name, project.data_->next_item_id,
+        project.data_->root_sequence_id, project.data_->assets, project.data_->sequences,
+        project.data_->tempo_map, project.data_->meter_map, std::move(restored)});
     return runtime::Ok(std::move(project));
 }
 
@@ -543,6 +550,10 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
         for (const auto& track : sequence.tracks()) {
             all_ids.push_back(track.id());
             maximum_id = std::max(maximum_id, track.id().value);
+            for (const auto& device : track.device_chain()) {
+                all_ids.push_back(device.id);
+                maximum_id = std::max(maximum_id, device.id.value);
+            }
             for (const auto& clip : track.clips()) {
                 all_ids.push_back(clip.id());
                 maximum_id = std::max(maximum_id, clip.id().value);
@@ -599,6 +610,9 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
         add_identity(sequence.id(), {ItemKind::Sequence, sequence.id(), {}, {}, true});
         for (const auto& track : sequence.tracks()) {
             add_identity(track.id(), {ItemKind::Track, sequence.id(), track.id(), {}, true});
+            for (const auto& device : track.device_chain())
+                add_identity(device.id,
+                             {ItemKind::DevicePlacement, sequence.id(), track.id(), {}, true});
             for (const auto& clip : track.clips()) {
                 add_identity(clip.id(),
                              {ItemKind::Clip, sequence.id(), track.id(), clip.id(), true});
@@ -710,22 +724,19 @@ Project::replace_sequence(Sequence sequence, std::span<const IdentityMutation> m
     sequences[static_cast<std::size_t>(found - data_->sequences.begin())] = std::move(sequence);
     return runtime::Result<Project, ModelError>(runtime::Ok(Project(std::make_shared<const Data>(
         Data{data_->id, data_->name, next, data_->root_sequence_id, data_->assets,
-             std::move(sequences), data_->tempo_map, data_->meter_map,
-             std::move(identities)}))));
+             std::move(sequences), data_->tempo_map, data_->meter_map, std::move(identities)}))));
 }
 
 Project Project::replace_tempo_map(timebase::TempoMap tempo_map) const {
     return Project(std::make_shared<const Data>(
-        Data{data_->id, data_->name, data_->next_item_id, data_->root_sequence_id,
-             data_->assets, data_->sequences, std::move(tempo_map), data_->meter_map,
-             data_->identities}));
+        Data{data_->id, data_->name, data_->next_item_id, data_->root_sequence_id, data_->assets,
+             data_->sequences, std::move(tempo_map), data_->meter_map, data_->identities}));
 }
 
 Project Project::replace_meter_map(timebase::MeterMap meter_map) const {
     return Project(std::make_shared<const Data>(
-        Data{data_->id, data_->name, data_->next_item_id, data_->root_sequence_id,
-             data_->assets, data_->sequences, data_->tempo_map, std::move(meter_map),
-             data_->identities}));
+        Data{data_->id, data_->name, data_->next_item_id, data_->root_sequence_id, data_->assets,
+             data_->sequences, data_->tempo_map, std::move(meter_map), data_->identities}));
 }
 
 std::size_t Project::shared_identity_nodes_with(const Project& other) const {
@@ -739,6 +750,5 @@ bool Project::shares_storage_with(const Project& other) const noexcept {
 ProjectIdentityStats Project::identity_stats() noexcept {
     return detail::IdentityDirectory::stats();
 }
-
 
 } // namespace pulp::timeline

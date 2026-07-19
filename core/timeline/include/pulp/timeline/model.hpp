@@ -6,6 +6,7 @@
 #include <pulp/timebase/rational_time.hpp>
 #include <pulp/timebase/tick.hpp>
 #include <pulp/timeline/assets.hpp>
+#include <pulp/timeline/device_placement.hpp>
 #include <pulp/timeline/item_id.hpp>
 
 #include <compare>
@@ -276,6 +277,13 @@ struct TrackIndexStats {
     std::uint64_t nodes_created = 0;
 };
 
+struct TrackInput {
+    ItemId id;
+    std::string name;
+    std::vector<Clip> clips;
+    std::vector<DevicePlacement> device_chain;
+};
+
 class Track {
   public:
     class ClipView {
@@ -323,6 +331,7 @@ class Track {
 
     static runtime::Result<Track, ModelError> create(ItemId id, std::string name,
                                                      std::vector<Clip> clips);
+    static runtime::Result<Track, ModelError> create(TrackInput input);
     runtime::Result<Track, ModelError> insert_clip(Clip clip) const;
     runtime::Result<Track, ModelError> erase_clip(ItemId id) const;
     // Replaces one clip by identity with O(log n) path-copy updates. The old
@@ -335,6 +344,9 @@ class Track {
     ClipView clips() const noexcept;
     // Binary-searches the persistent ID index. Returned storage is snapshot-owned.
     const Clip* find_clip(ItemId id) const noexcept;
+    // Preserves authored processing order. Returned storage is snapshot-owned.
+    std::span<const DevicePlacement> device_chain() const noexcept;
+    const DevicePlacement* find_device_placement(ItemId id) const noexcept;
     std::size_t shared_index_nodes_with(const Track& other) const;
     bool shares_storage_with(const Track& other) const noexcept;
     static TrackIndexStats index_stats() noexcept;
@@ -380,7 +392,15 @@ struct ProjectInput {
     timebase::MeterMap meter_map{};
 };
 
-enum class ItemKind : std::uint8_t { Project, Asset, Sequence, Track, Clip, Note };
+enum class ItemKind : std::uint8_t {
+    Project,
+    Asset,
+    Sequence,
+    Track,
+    Clip,
+    Note,
+    DevicePlacement,
+};
 
 struct ItemLocation {
     ItemKind kind = ItemKind::Project;

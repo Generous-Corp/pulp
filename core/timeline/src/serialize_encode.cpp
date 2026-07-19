@@ -130,6 +130,8 @@ const char* item_kind_name(ItemKind value) noexcept {
         return "clip";
     case ItemKind::Note:
         return "note";
+    case ItemKind::DevicePlacement:
+        return "device_placement";
     }
     return "project";
 }
@@ -152,8 +154,8 @@ bool write_tempo_map(EncodeContext& context, const timebase::TempoMap& map) {
             !context.writer.quoted(point.curve_to_next == timebase::TempoCurve::LinearInTicks
                                        ? "linear_in_ticks"
                                        : "constant") ||
-            !context.writer.append(",\"tick\":") ||
-            !context.writer.i64(point.tick.value, true) || !context.writer.character('}'))
+            !context.writer.append(",\"tick\":") || !context.writer.i64(point.tick.value, true) ||
+            !context.writer.character('}'))
             return false;
     }
     return context.writer.character(']');
@@ -169,8 +171,8 @@ bool write_meter_map(EncodeContext& context, const timebase::MeterMap& map) {
             !context.writer.u64(static_cast<std::uint32_t>(point.signature.denominator)) ||
             !context.writer.append(",\"numerator\":") ||
             !context.writer.u64(static_cast<std::uint32_t>(point.signature.numerator)) ||
-            !context.writer.append(",\"tick\":") ||
-            !context.writer.i64(point.tick.value, true) || !context.writer.character('}'))
+            !context.writer.append(",\"tick\":") || !context.writer.i64(point.tick.value, true) ||
+            !context.writer.character('}'))
             return false;
     }
     return context.writer.character(']');
@@ -303,13 +305,26 @@ bool write_clip(EncodeContext& context, const Clip& clip) {
     });
 }
 
+bool write_device_placement(EncodeContext& context, const DevicePlacement& placement) {
+    return write_envelope(context, "pulp.timeline.device_placement", 1, [&] {
+        return context.writer.append("{\"id\":") && context.writer.u64(placement.id.value, true) &&
+               context.writer.character('}');
+    });
+}
+
 bool write_track(EncodeContext& context, const Track& track) {
-    return write_envelope(context, "pulp.timeline.track", 1, [&] {
+    return write_envelope(context, "pulp.timeline.track", 2, [&] {
         if (!context.writer.append("{\"clips\":["))
             return false;
         for (std::size_t index = 0; index < track.clips().size(); ++index)
             if ((index != 0 && !context.writer.character(',')) ||
                 !write_clip(context, track.clips()[index]))
+                return false;
+        if (!context.writer.append("],\"device_chain\":["))
+            return false;
+        for (std::size_t index = 0; index < track.device_chain().size(); ++index)
+            if ((index != 0 && !context.writer.character(',')) ||
+                !write_device_placement(context, track.device_chain()[index]))
                 return false;
         return context.writer.append("],\"id\":") && context.writer.u64(track.id().value, true) &&
                context.writer.append(",\"name\":") && context.writer.quoted(track.name()) &&
