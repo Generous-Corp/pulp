@@ -1549,6 +1549,24 @@ export function materializeFrame(scene, frame, ctx) {
       // Figma has modes CSS does not (LINEAR_BURN / LINEAR_DODGE). Say so rather
       // than approximate: a wrong blend paints confidently wrong pixels.
       pushDiag('blend-unsupported', node, `${node.blendMode} is not lowered; composited normally`);
+    } else if (node.blendMode === 'NORMAL') {
+      // Containers default to PASS_THROUGH — children composite against the
+      // backdrop, exactly the default web/native behavior, so dropping it is
+      // correct and silent. An EXPLICIT NORMAL on a container is Figma's
+      // "isolate" (CSS `isolation: isolate`), and the flat lowering has no
+      // isolation layer; that only changes pixels when something in the
+      // subtree actually blends, so the diagnostic is gated on that. (A
+      // container with a non-default blend needs no diagnostic: CSS
+      // mix-blend-mode itself forms an isolated group, matching Figma.)
+      const rawKids = (n) => n.__children || scene.childrenOf.get(guidKey(n.guid)) || [];
+      const subtreeBlends = (n) => Boolean(blendModeToCss(n.blendMode))
+        || rawKids(n).some(subtreeBlends);
+      const kids = rawKids(node);
+      if (kids.length && kids.some(subtreeBlends)) {
+        pushDiag('group-isolation-approximated', node,
+                 'isolate group (explicit NORMAL) has blending descendants; '
+                 + 'imported without an isolation layer, so they blend against the full backdrop');
+      }
     }
 
 
@@ -2910,6 +2928,11 @@ export const DIAGNOSTIC_SEVERITY = {
   'vector-simplified': 'warning',
   'gradient-approximated': 'warning',
   'blend-unsupported': 'warning',
+  // An isolate group (explicit NORMAL on a container whose subtree blends)
+  // composites without the isolation layer — the descendants blend against
+  // the full backdrop instead of only their group. Warning because the
+  // rendered composite deliberately differs from what the design declares.
+  'group-isolation-approximated': 'warning',
   'asset-missing': 'warning',
   'external-component': 'warning',
   'effect-unsupported': 'warning',

@@ -546,6 +546,60 @@ TEST_CASE("figma primitive-geometry provenance attributes survive envelope parse
     REQUIRE(ir.root.children[3].attributes.at("figma:corner_smoothing") == "0.6");
 }
 
+TEST_CASE("figma-plugin envelope blend modes lower through the adapter path",
+          "[view][import][figma-plugin][blend]") {
+    // Audit "Blend / opacity" row, end-to-end through the REAL plugin/REST
+    // entry (parse_figma_plugin_json, not parse_design_ir_json): a supported
+    // raw figma.blend_mode promotes to the CSS keyword; the lanes' own
+    // lowered style.mix_blend_mode parses; an unmappable raw mode stays out
+    // of the style channel (the producer diagnosed it — its diagnostic rides
+    // in the envelope, so the consumer must not add a duplicate); and an
+    // unsupported keyword in the normalized style channel is cleared WITH a
+    // consumer diagnostic.
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "provenance": { "adapter": "figma-plugin", "version": "0.1.0",
+                        "source_uri": "figma://design/blend-smoke" },
+        "root": {
+            "type": "frame",
+            "name": "Panel",
+            "style": { "width": 200, "height": 200 },
+            "children": [
+                { "type": "image", "name": "noise",
+                  "style": { "width": 40, "height": 40,
+                             "mix_blend_mode": "multiply" },
+                  "figma": { "blend_mode": "MULTIPLY" }, "children": [] },
+                { "type": "frame", "name": "raw-only",
+                  "style": { "width": 40, "height": 40 },
+                  "figma": { "blend_mode": "SCREEN" }, "children": [] },
+                { "type": "frame", "name": "burn",
+                  "style": { "width": 40, "height": 40 },
+                  "figma": { "blend_mode": "LINEAR_BURN" }, "children": [] },
+                { "type": "frame", "name": "bad-style",
+                  "style": { "width": 40, "height": 40,
+                             "mix_blend_mode": "linear-dodge" },
+                  "children": [] }
+            ]
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.children.size() == 4);
+    CHECK(ir.root.children[0].style.mix_blend_mode == "multiply");
+    CHECK(ir.root.children[1].style.mix_blend_mode == "screen");
+    CHECK_FALSE(ir.root.children[2].style.mix_blend_mode.has_value());
+    CHECK_FALSE(ir.root.children[3].style.mix_blend_mode.has_value());
+    // Exactly ONE consumer diagnostic: the invalid normalized-channel keyword.
+    // The unmappable raw (LINEAR_BURN) is the producer's to report.
+    std::size_t blend_diags = 0;
+    for (const auto& d : ir.diagnostics)
+        if (d.code == "blend-unsupported") ++blend_diags;
+    REQUIRE(blend_diags == 1);
+    REQUIRE(has_import_diagnostic(ir.diagnostics, "blend-unsupported"));
+}
+
 // An explicit `audio_widget: "none"` is an opt-out, not an absence: the
 // offline .fig decoder stamps it on every node inside an expanded component
 // instance so a layer literally named "knob base" keeps the designer's own

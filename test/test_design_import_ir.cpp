@@ -1790,3 +1790,84 @@ TEST_CASE("captured-art knob cleaned disc filename is content-addressed",
     REQUIRE_FALSE(name_other.empty());
     CHECK(name_other != name_a);
 }
+
+// ── Layer blend mode: the shared supported-blend table ─────────────────
+//
+// The producer side lives in the three lanes (fig/scene.mjs, the plugin's
+// extract-pure.ts, figma_rest_export.py); the consumer side is
+// is_supported_blend_keyword + validate_blend_modes here. Two channels reach
+// the parser: normalized `style.mixBlendMode` (CSS sources, and the lanes'
+// own lowering) and the raw `figma.blend_mode` provenance block (promoted
+// only when supported — the producer already diagnosed unmappable raws).
+
+TEST_CASE("figma-block blend promotion honors the supported-blend table",
+          "[view][import][parse][blend]") {
+    // A supported raw mode promotes to the CSS keyword (plugin + REST
+    // envelopes carry the raw Figma spelling in the figma block).
+    const auto ir = parse_design_ir_json(R"({
+      "version": 1, "source": "figma",
+      "root": {"type": "frame", "name": "Root", "children": [
+        {"type": "frame", "name": "noise",
+         "figma": {"blend_mode": "MULTIPLY"}},
+        {"type": "frame", "name": "soft",
+         "figma": {"blend_mode": "SOFT_LIGHT"}},
+        {"type": "frame", "name": "plain",
+         "figma": {"blend_mode": "NORMAL"}},
+        {"type": "frame", "name": "burn",
+         "figma": {"blend_mode": "LINEAR_BURN"}}
+      ]}
+    })");
+    REQUIRE(ir.root.children.size() == 4);
+    CHECK(ir.root.children[0].style.mix_blend_mode == "multiply");
+    CHECK(ir.root.children[1].style.mix_blend_mode == "soft-light");
+    CHECK_FALSE(ir.root.children[2].style.mix_blend_mode.has_value());
+    // An unmappable raw mode must NOT reach the style channel: "linear-burn"
+    // is invalid CSS on the web path and a silent normal-fallback on the
+    // native path. The producer that wrote the raw value also wrote its own
+    // blend-unsupported diagnostic, so the consumer stays quiet here rather
+    // than double-diagnosing the same loss.
+    CHECK_FALSE(ir.root.children[3].style.mix_blend_mode.has_value());
+    CHECK_FALSE(has_import_diagnostic(ir.diagnostics, "blend-unsupported"));
+}
+
+TEST_CASE("an unsupported style.mixBlendMode is cleared and diagnosed",
+          "[view][import][parse][blend]") {
+    // The normalized style channel is a contract: hand-authored IR (or a
+    // buggy adapter) writing a keyword outside the supported-blend table gets
+    // it cleared WITH a blend-unsupported diagnostic — never passed through
+    // as invalid CSS, never silently dropped.
+    const auto ir = parse_design_ir_json(R"({
+      "version": 1, "source": "figma",
+      "root": {"type": "frame", "name": "Root", "children": [
+        {"type": "frame", "name": "ok",
+         "style": {"mixBlendMode": "screen"}},
+        {"type": "frame", "name": "spelled",
+         "style": {"mixBlendMode": "SOFT_LIGHT"}},
+        {"type": "frame", "name": "additive",
+         "style": {"mixBlendMode": "plus-lighter"}},
+        {"type": "frame", "name": "snake",
+         "style": {"mix_blend_mode": "multiply"}},
+        {"type": "frame", "name": "bad", "id": "9:9",
+         "style": {"mixBlendMode": "linear-burn"}}
+      ]}
+    })");
+    REQUIRE(ir.root.children.size() == 5);
+    CHECK(ir.root.children[0].style.mix_blend_mode == "screen");
+    // UPPER_SNAKE normalizes through the same spelling transform.
+    CHECK(ir.root.children[1].style.mix_blend_mode == "soft-light");
+    // The CSS Compositing L2 additive pair stays supported for CSS-authored
+    // sources — the native bridge maps both plus-* keywords to kPlus.
+    CHECK(ir.root.children[2].style.mix_blend_mode == "plus-lighter");
+    // The plugin/REST lanes emit the snake_case spelling; resolve_key reads it.
+    CHECK(ir.root.children[3].style.mix_blend_mode == "multiply");
+    CHECK_FALSE(ir.root.children[4].style.mix_blend_mode.has_value());
+
+    REQUIRE(has_import_diagnostic(ir.diagnostics, "blend-unsupported"));
+    const auto it = std::find_if(
+        ir.diagnostics.begin(), ir.diagnostics.end(),
+        [](const ImportDiagnostic& d) { return d.code == "blend-unsupported"; });
+    CHECK(it->severity == ImportDiagnosticSeverity::warning);
+    CHECK(it->kind == ImportDiagnosticKind::unsupported_property);
+    CHECK(it->path == "9:9");
+    CHECK(it->message.find("linear-burn") != std::string::npos);
+}

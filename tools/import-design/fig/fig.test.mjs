@@ -618,6 +618,51 @@ test('a blend mode survives; one CSS lacks is diagnosed, not approximated', () =
   assert.match(codes[0].detail, /LINEAR_BURN/);
 });
 
+test('an isolate group with blending descendants is diagnosed; pass-through is silent', () => {
+  // Containers default to PASS_THROUGH (children composite against the
+  // backdrop — the default web/native behavior, dropped silently and
+  // correctly). An EXPLICIT NORMAL on a container is Figma's "isolate": the
+  // subtree blends within the group only, and the flat lowering has no
+  // isolation layer. That changes pixels ONLY when a descendant actually
+  // blends, so the diagnostic is gated on that.
+  const rect = (localID, parentLocalID, mode, pos) => ({
+    guid: { sessionID: 0, localID }, type: 'RECTANGLE', name: `r${localID}`,
+    parentIndex: { guid: { sessionID: 0, localID: parentLocalID }, position: pos },
+    size: { x: 10, y: 10 },
+    transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+    blendMode: mode,
+    fillPaints: [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.32, a: 1 } }],
+  });
+  const frame = (localID, parentLocalID, name, mode, pos) => ({
+    guid: { sessionID: 0, localID }, type: 'FRAME', name,
+    parentIndex: { guid: { sessionID: 0, localID: parentLocalID }, position: pos },
+    size: { x: 50, y: 50 },
+    ...(mode === undefined ? {} : { blendMode: mode }),
+  });
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    frame(2, 1, 'Root', undefined, 'a'),
+    // Isolate group: explicit NORMAL, deep descendant blends → diagnosed.
+    frame(3, 2, 'isolate', 'NORMAL', 'a'),
+    frame(4, 3, 'inner', undefined, 'a'),
+    rect(5, 4, 'MULTIPLY', 'a'),
+    // Pass-through group with a blending child: Figma default = web default,
+    // no isolation lost → silent.
+    frame(6, 2, 'passthrough', 'PASS_THROUGH', 'b'),
+    rect(7, 6, 'SCREEN', 'a'),
+    // Explicit NORMAL but nothing in the subtree blends: isolation is a
+    // no-op → silent.
+    frame(8, 2, 'inert', 'NORMAL', 'c'),
+    rect(9, 8, 'NORMAL', 'a'),
+  ]});
+  const f = materializeFrame(scene, findFrame(scene, 'Root'), { images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
+  const iso = (f.envelope.diagnostics || []).filter((d) => d.code === 'group-isolation-approximated');
+  assert.equal(iso.length, 1, 'exactly the isolate group with a blending subtree');
+  assert.equal(iso[0].node_name, 'isolate');
+  assert.equal(iso[0].severity, 'warning');
+});
+
 test('drop shadows survive as box_shadow; blurs land on the filter slots', () => {
   // Shadows are what make a control read as an object instead of a decal. The
   // design stacks two drop shadows under every knob; dropping them rendered

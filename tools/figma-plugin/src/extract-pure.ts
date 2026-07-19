@@ -227,6 +227,98 @@ export function scaleModeToObjectFit(
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Layer blend mode — the shared supported-blend table.
+//
+// Mirrors fig/scene.mjs::FIGMA_BLEND_CSS and figma_rest_export.py::
+// _FIGMA_BLEND_CSS: every listed Figma mode is a real CSS mix-blend-mode
+// value, lowered by spelling transform (UPPER_SNAKE → lowercase-hyphen). The
+// consumer side of the same table is design_ir_json.cpp::
+// is_supported_blend_keyword. LINEAR_BURN and LINEAR_DODGE are absent on
+// purpose (see the .fig lane's table comment for the full reasoning):
+// LINEAR_DODGE's natural spelling has no verified wiring, and LINEAR_BURN's
+// (`plus-darker`) maps to the ADDITIVE kPlus in Skia/Chromium, which would
+// LIGHTEN a layer the designer asked to darken. Unmappable modes lower to
+// nothing WITH a `blend-unsupported` diagnostic — a blend that is silently
+// ignored still paints, ~25/255 too bright in the file that motivated this.
+
+/// Blend modes that mean "just composite it" — never emitted, never diagnosed.
+export const BLEND_IS_DEFAULT = new Set<string>(["NORMAL", "PASS_THROUGH"]);
+
+/// Figma blend mode → CSS mix-blend-mode, for the modes CSS has.
+export const FIGMA_BLEND_CSS = new Set<string>([
+  "DARKEN", "MULTIPLY", "COLOR_BURN", "LIGHTEN", "SCREEN", "COLOR_DODGE",
+  "OVERLAY", "SOFT_LIGHT", "HARD_LIGHT", "DIFFERENCE", "EXCLUSION",
+  "HUE", "SATURATION", "COLOR", "LUMINOSITY",
+]);
+
+export interface LoweredLayerBlend {
+  /// CSS mix-blend-mode keyword, present only for supported non-default modes.
+  css?: string;
+  /// Present when the mode has no CSS equivalent — the caller pushes it.
+  diagnostic?: Pick<ExtractedDiagnostic, "severity" | "code" | "kind" | "message">;
+}
+
+/// Lower a node-level blend mode: supported modes become the CSS keyword,
+/// defaults lower to nothing, and everything else raises `blend-unsupported`.
+export function lowerLayerBlendMode(mode: string | undefined): LoweredLayerBlend {
+  if (mode === undefined || BLEND_IS_DEFAULT.has(mode)) return {};
+  if (FIGMA_BLEND_CSS.has(mode)) {
+    return { css: mode.toLowerCase().replace(/_/g, "-") };
+  }
+  return {
+    diagnostic: {
+      severity: "warning",
+      code: "blend-unsupported",
+      kind: "unsupported_property",
+      message: `${mode} is not lowered; composited normally.`,
+    },
+  };
+}
+
+/// True when any node in the subtree rooted at `n` (inclusive) carries a
+/// CSS-lowerable blend mode — the condition under which a missing isolation
+/// layer changes pixels.
+function subtreeHasLoweredBlend(n: ExtractedFigmaNode): boolean {
+  if (n.style.mix_blend_mode !== undefined) return true;
+  return n.children.some(subtreeHasLoweredBlend);
+}
+
+/// Figma GROUP/FRAME nodes default to PASS_THROUGH — children composite
+/// against the backdrop, which is exactly the default web/native behavior, so
+/// dropping it is correct and silent. An EXPLICIT NORMAL on a container is
+/// different: it is Figma's "isolate" (children blend within the group, the
+/// group composites normally — CSS `isolation: isolate`), and the flat lowering
+/// has no isolation layer. That only changes pixels when something in the
+/// subtree actually blends, so the diagnostic is gated on that. (A container
+/// with a non-default blend mode needs no diagnostic: CSS mix-blend-mode
+/// itself forms an isolated group, matching Figma.) Post-order pass over the
+/// extracted tree; call on each root after extraction.
+export function collectGroupIsolationDiagnostics(
+  root: ExtractedFigmaNode,
+): Array<Pick<ExtractedDiagnostic, "severity" | "code" | "kind" | "message"> & { path: string }> {
+  const out: Array<Pick<ExtractedDiagnostic, "severity" | "code" | "kind" | "message"> & { path: string }> = [];
+  const visit = (n: ExtractedFigmaNode): void => {
+    if (
+      n.blend_mode === "NORMAL" &&
+      n.children.length > 0 &&
+      n.children.some(subtreeHasLoweredBlend)
+    ) {
+      out.push({
+        severity: "warning",
+        code: "group-isolation-approximated",
+        kind: "capture_partial",
+        message: `${n.name}: isolate group (explicit NORMAL) has blending descendants; ` +
+          `imported without an isolation layer, so they blend against the full backdrop.`,
+        path: n.figma_node_id,
+      });
+    }
+    for (const c of n.children) visit(c);
+  };
+  visit(root);
+  return out;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Type and layout mapping — Plugin API enums → envelope strings.
 //
 // Dispatch is EXHAUSTIVE against the pinned `@figma/plugin-typings` SceneNode

@@ -269,6 +269,21 @@ test('a paint-level blend mode with no lowering is reported, not waved through',
   ]), envelope([{ node_id: '0:1', name: 'Plain', style: {} }]), []).findings, []);
 });
 
+test('a paint blend the decoder refused out loud counts as diagnosed, not dropped', () => {
+  // The decoder now emits `paint-blend-unsupported` from the paint-stack slot
+  // scan; a node it announced is not a silent drop, so no finding — the
+  // diagnosed column carries it instead (same contract as blend_mode).
+  const m = materials([
+    { node_id: '0:1', name: 'Waveform', type: 'VECTOR', declared: {
+      fill: [{ type: 'SOLID', opacity: 1, color_alpha: 1, rgb: '#ff0000', blend_mode: 'LIGHTEN' }] } },
+  ]);
+  const r = auditMaterials(m, envelope([{ node_id: '0:1', name: 'Waveform', style: {} }]),
+    [{ node_id: '0:1', code: 'paint-blend-unsupported' }]);
+  assert.deepEqual(r.findings, []);
+  assert.equal(r.declaredCounts['fill.paint_blend'], 1);
+  assert.equal(r.diagnosedCounts['fill.paint_blend'], 1);
+});
+
 // ── the codegen stage ────────────────────────────────────────────────────────
 //
 // The stage the envelope tests above cannot see. Every case here pairs a real
