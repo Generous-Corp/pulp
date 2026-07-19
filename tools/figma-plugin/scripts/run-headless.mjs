@@ -13,8 +13,17 @@
 // `mcp__figma__use_figma`. Output goes to stdout so it can be piped or
 // captured.
 //
+// The payload embeds dist/headless.packed.js — a self-extracting
+// deflate+base64 stub (see scripts/build.mjs packHeadless()) that sets
+// `globalThis.__pulp_packed_src` to the decompressed raw bundle. This script
+// then appends an `eval(prelude + source)` line so TARGET_NODE_ID /
+// FAITHFUL_VECTOR and the bundle run as ONE program — byte-for-byte the same
+// program text the old raw payload executed. (Code eval'd in the `use_figma`
+// sandbox does not see the caller's lexical scope, so the prelude must live
+// inside the eval'd source, not alongside it.)
+//
 // Why a script rather than an inline template the agent constructs each
-// time? Two reasons: (1) the bundle is 25KB minified, copy-pasting it
+// time? Two reasons: (1) the packed bundle is tens of KB, copy-pasting it
 // every call is painful; (2) we want a single regen point so the bundle
 // version and the prelude stay coupled.
 //
@@ -61,13 +70,13 @@ const faithfulVector = !argv.includes("--no-faithful-vector");
 const arg = argv.find((a) => a !== "--faithful-vector" && a !== "--no-faithful-vector");
 if (!arg) usage();
 
-const bundlePath = path.join(root, "dist", "headless.js");
+const bundlePath = path.join(root, "dist", "headless.packed.js");
 let bundle;
 try {
   bundle = await fs.readFile(bundlePath, "utf8");
 } catch (err) {
   process.stderr.write(
-    `headless bundle not found at ${bundlePath}.\n` +
+    `packed headless bundle not found at ${bundlePath}.\n` +
     "Run 'npm run build' first.\n",
   );
   process.exit(1);
@@ -85,9 +94,15 @@ if (arg === "--selection") {
 }
 prelude += ` const FAITHFUL_VECTOR = ${faithfulVector ? "true" : "false"};`;
 
-const tail = "return await globalThis.__pulp_headless_result;";
-
-const payload = `${prelude} ${trimmed} ${tail}\n`;
+// The stub sets globalThis.__pulp_packed_src; eval prelude + source as one
+// program (JSON.stringify makes the prelude a safe JS string literal), then
+// clear the staging global and await the bundle's surfaced result.
+const payload = [
+  trimmed,
+  `eval(${JSON.stringify(prelude + " ")} + globalThis.__pulp_packed_src);`,
+  "globalThis.__pulp_packed_src = void 0;",
+  "return await globalThis.__pulp_headless_result;",
+].join("\n") + "\n";
 
 // Size guard: the Figma MCP `use_figma` `code` parameter is capped at
 // 50000 characters. We fail loudly here so the agent sees the error

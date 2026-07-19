@@ -65,7 +65,8 @@ Build the bundle:
 
 ```bash
 cd tools/figma-plugin
-npm run build         # produces dist/headless.js (~25 KB minified)
+npm run build         # produces dist/headless.js (raw, ~62 KB minified)
+                      # and dist/headless.packed.js (self-extracting, ~34 KB)
 ```
 
 Generate the agent-ready JS payload:
@@ -84,12 +85,19 @@ user has selected in Figma.
 
 ### Size discipline
 
-`use_figma` caps its `code` parameter at 50 000 characters. The
-headless build asserts `dist/headless.js` stays under 49 KB (50 KB
-minus 1 KB headroom for the injected `TARGET_NODE_ID` prelude). If
-the extractor grows past the cap, `npm run build` fails loudly. The
-fix is to split shared code (the pure helpers are already in
-`src/extract-pure.ts`); see [P2 in the headless roadmap](#).
+`use_figma` caps its `code` parameter at 50 000 characters (a hard
+`maxLength` in the tool schema). The raw minified bundle outgrew that
+cap, so the payload ships as `dist/headless.packed.js`: the raw bundle
+deflated + base64'd inside a self-extracting stub (fflate inflate + a
+small base64 decoder — fflate is already a plugin dependency).
+`run-headless.mjs` appends an `eval(prelude + decompressed source)`
+line, so the prelude consts and the bundle execute as one program —
+code eval'd in the sandbox does not see the caller's lexical scope, so
+the prelude must live inside the eval'd source. The build asserts the
+packed stub stays under 49 KB (50 KB minus 1 KB headroom for the
+driver-appended prelude/eval/return lines) and verifies in-process that
+the stub decompresses byte-identical to `dist/headless.js`. If the
+packed extractor grows past the cap, `npm run build` fails loudly.
 
 ### Response-size limit
 
