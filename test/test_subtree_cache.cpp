@@ -159,6 +159,29 @@ std::vector<uint8_t> render_view(View& v) {
     return out;
 }
 
+// Render a view into a (kW*scale)x(kH*scale) raster surface with the backing
+// scale pre-applied to the canvas (simulating a HiDPI display). The recording
+// is in logical space, so a cached replay must rasterize identically to a
+// direct paint at the same scale — that is the resolution-independence claim.
+std::vector<uint8_t> render_view_at_scale(View& v, float scale) {
+    const int pw = static_cast<int>(kW * scale);
+    const int ph = static_cast<int>(kH * scale);
+    SkImageInfo info = SkImageInfo::Make(pw, ph, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    SkCanvas* skc = surface->getCanvas();
+    skc->clear(SK_ColorWHITE);
+    skc->scale(scale, scale);  // backing-scale CTM, like a 2x display
+    SkiaCanvas canvas(skc);
+    v.paint_all(canvas);
+
+    std::vector<uint8_t> out(static_cast<std::size_t>(pw) * ph * 4);
+    REQUIRE(surface->readPixels(info, out.data(), pw * 4, 0, 0));
+    return out;
+}
+
 // Build a nontrivial tree: a gradient-filled root holding a bordered, rounded,
 // inset-shadowed CountingView child. `out_child` receives the child pointer.
 std::unique_ptr<View> build_tree(CountingView** out_child) {
@@ -315,6 +338,84 @@ TEST_CASE("Layer independence — animating opacity does not re-record",
     auto ref = build_tree(&ref_child);
     ref->set_opacity(0.8f);
     REQUIRE(frame2 == render_view(*ref));
+}
+
+// FIX 1 coverage: content-mutating setters that do NOT call request_repaint
+// must still stale the cache. Without the invalidate wiring these leave stale
+// pixels — the exact gap the review flagged. This exercises the setters
+// DIRECTLY (no request_repaint), simulating the continuous-frames case where an
+// unrelated force-repaint replays the stale picture.
+TEST_CASE("set_background_color invalidates the cache without a repaint call",
+          "[view][subtree-cache][skia][issue-6262]") {
+    auto build = [](Color bg) {
+        auto root = std::make_unique<View>();
+        root->set_bounds({0, 0, kW, kH});
+        root->set_background_color(bg);
+        auto child = std::make_unique<CountingView>();
+        child->set_bounds({40, 40, 48, 48});  // leaves the bg visible around it
+        root->add_child(std::move(child));
+        return root;
+    };
+
+    auto root = build(Color::rgba8(40, 60, 200, 255));  // blue
+    root->set_subtree_cached(true);
+    std::vector<uint8_t> frame1 = render_view(*root);
+    render_view(*root);  // establish a valid, reused cache
+
+    // Direct setter — no request_repaint(). Must invalidate anyway.
+    root->set_background_color(Color::rgba8(200, 60, 40, 255));  // red
+    std::vector<uint8_t> frame3 = render_view(*root);
+    REQUIRE(frame3 != frame1);  // stale-pixel bug would keep this blue
+
+    auto ref = build(Color::rgba8(200, 60, 40, 255));
+    REQUIRE(frame3 == render_view(*ref));
+}
+
+TEST_CASE("set_visible on a child invalidates the cached parent without a repaint",
+          "[view][subtree-cache][skia][issue-6262]") {
+    auto root = std::make_unique<View>();
+    root->set_bounds({0, 0, kW, kH});
+    root->set_background_color(Color::rgba8(230, 230, 235, 255));
+    auto child = std::make_unique<CountingView>();
+    child->set_bounds({32, 32, 64, 64});
+    CountingView* cp = child.get();
+    root->add_child(std::move(child));
+    root->set_subtree_cached(true);
+
+    std::vector<uint8_t> frame1 = render_view(*root);  // child visible
+    render_view(*root);
+
+    cp->set_visible(false);  // direct, no request_repaint()
+    std::vector<uint8_t> frame2 = render_view(*root);
+    REQUIRE(frame2 != frame1);  // the child must disappear from the replay
+
+    // Reference: fresh, uncached, child hidden from the start.
+    auto ref = std::make_unique<View>();
+    ref->set_bounds({0, 0, kW, kH});
+    ref->set_background_color(Color::rgba8(230, 230, 235, 255));
+    auto ref_child = std::make_unique<CountingView>();
+    ref_child->set_bounds({32, 32, 64, 64});
+    ref_child->set_visible(false);
+    ref->add_child(std::move(ref_child));
+    REQUIRE(frame2 == render_view(*ref));
+}
+
+// FIX 4 coverage: resolution independence. The recording is logical-space, so a
+// cached replay must equal a direct paint at any backing scale.
+TEST_CASE("Cached replay equals direct paint at 1x and 2x backing scale",
+          "[view][subtree-cache][skia][issue-6262]") {
+    for (float scale : {1.0f, 2.0f}) {
+        INFO("backing scale " << scale);
+        CountingView* c_off = nullptr;
+        CountingView* c_on = nullptr;
+        auto uncached = build_tree(&c_off);
+        auto cached = build_tree(&c_on);
+        cached->set_subtree_cached(true);
+
+        std::vector<uint8_t> direct = render_view_at_scale(*uncached, scale);
+        std::vector<uint8_t> replay = render_view_at_scale(*cached, scale);
+        REQUIRE(replay == direct);
+    }
 }
 
 #endif  // PULP_HAS_SKIA

@@ -15,6 +15,11 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/runtime/trace.hpp>
+#ifndef NDEBUG
+#include <pulp/view/continuous_frames.hpp>
+#include <pulp/runtime/log.hpp>
+#include <atomic>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -771,6 +776,25 @@ void View::paint_content_maybe_cached(canvas::Canvas& canvas,
     }
 
     if (!scene_cache_valid_) {
+#ifndef NDEBUG
+        // A cached subtree only re-records on mutation (see
+        // invalidate_subtree_caches_up). A descendant that animates on its own
+        // clock — updating a uniform every vsync WITHOUT calling
+        // request_repaint() — would therefore freeze at this recorded frame.
+        // set_subtree_cached() documents this as caller error, but a descendant
+        // can START animating AFTER opt-in, so check at RECORD time and log-warn
+        // once, turning a silent freeze into a loud, actionable diagnostic. Debug
+        // builds only; zero cost in release.
+        static std::atomic<bool> s_warned_frozen{false};
+        if (needs_continuous_frames(this) &&
+            !s_warned_frozen.exchange(true, std::memory_order_relaxed)) {
+            pulp::runtime::log_warn(
+                "set_subtree_cached: a cached subtree contains a "
+                "needs_continuous_frames() descendant; it will freeze at its "
+                "recorded frame until an unrelated mutation invalidates the "
+                "cache. Do not cache continuously-animating subtrees.");
+        }
+#endif
         // Cache MISS: record the subtree once. Recording re-walks the tree and
         // legitimately allocates (the SkPicture command buffer, per-view
         // corner-path strings, gradient marshalling). That is a non-realtime
