@@ -28,6 +28,12 @@ pulp_add_test_suite(pulp-test-playback-note-renderer
 pulp_add_test_suite(pulp-test-playback-audio-renderer
     SOURCES test_playback_audio_renderer.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::playback pulp::audio pulp::timeline pulp::timebase pulp::runtime)
+pulp_add_test_suite(pulp-test-playback-automation-cursor
+    SOURCES test_playback_automation_cursor.cpp
+        $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+        $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 
 pulp_add_test_suite(pulp-test-timeline-commands LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
