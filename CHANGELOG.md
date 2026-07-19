@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07330"></a>
+## [0.733.0] - 2026-07-19
+
+- feat(import-design): lower Figma blur effects to consumed filter slots across all three lanes ([#6363](https://github.com/danielraffel/pulp/pull/6363))
+- feat(import-design): preserve Figma primitive-geometry metadata in all three producers ([#6361](https://github.com/danielraffel/pulp/pull/6361))
+
 <a id="v07320"></a>
 ## [0.732.0] - 2026-07-19
 
@@ -6727,6 +6733,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.733.0]: https://github.com/danielraffel/pulp/releases/tag/v0.733.0
 [0.732.0]: https://github.com/danielraffel/pulp/releases/tag/v0.732.0
 [0.731.1]: https://github.com/danielraffel/pulp/releases/tag/v0.731.1
 [0.731.0]: https://github.com/danielraffel/pulp/releases/tag/v0.731.0
