@@ -57,6 +57,8 @@ target_sources(pulp-audio PRIVATE
     src/rolling_audio_capture_buffer.cpp
     src/sample_asset_io.cpp
     src/sample_heritage_json.cpp
+    src/sample_heritage_runtime_state_json.cpp
+    src/sample_heritage_pitch.cpp
     src/sample_heritage_schema.cpp
     src/sample_heritage_src.cpp
     src/sample_edit_document.cpp

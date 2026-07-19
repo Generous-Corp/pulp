@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -95,6 +96,30 @@ std::string uppercase_digest(std::string json) {
     REQUIRE(letter != json.begin() + static_cast<std::ptrdiff_t>(end));
     *letter = static_cast<char>(std::toupper(static_cast<unsigned char>(*letter)));
     return json;
+}
+
+SampleHeritageTypedRuntimeState typed_runtime_state() {
+    SampleHeritageTypedRuntimeState state;
+    state.profile_schema_version = kSampleHeritageProfileSchemaVersion;
+    constexpr std::string_view id = "neutral.typed-state";
+    std::copy(id.begin(), id.end(), state.profile_id.begin());
+    for (std::size_t index = 0; index < state.profile_digest.size(); ++index)
+        state.profile_digest[index] = static_cast<std::uint8_t>(index);
+    state.host_sample_rate = 44100.5;
+    state.voice_states[2].engine.rng_states[0] = {
+        0, SampleHeritageRuntimeRngStageType::Quantization, 11};
+    state.voice_states[2].engine.rng_state_count = 1;
+    state.voice_states[7].engine.rng_states[0] = {
+        3, SampleHeritageRuntimeRngStageType::Noise, 22};
+    state.voice_states[7].engine.rng_state_count = 1;
+    state.bus_state.rng_states[0] = {
+        1, SampleHeritageRuntimeRngStageType::Noise, 33};
+    state.bus_state.rng_state_count = 1;
+    return state;
+}
+
+std::string expected_typed_runtime_state_json() {
+    return R"({"schema_version":2,"profile_schema_version":3,"profile_id":"neutral.typed-state","profile_digest_version":3,"profile_digest":"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f","host_sample_rate":44100.5,"voice_states":[{"slot_index":0,"rng_states":[]},{"slot_index":1,"rng_states":[]},{"slot_index":2,"rng_states":[{"stage_index":0,"stage_type":"quantization","random_state":"11"}]},{"slot_index":3,"rng_states":[]},{"slot_index":4,"rng_states":[]},{"slot_index":5,"rng_states":[]},{"slot_index":6,"rng_states":[]},{"slot_index":7,"rng_states":[{"stage_index":3,"stage_type":"noise","random_state":"22"}]}],"bus_state":{"rng_states":[{"stage_index":1,"stage_type":"noise","random_state":"33"}]}})";
 }
 
 }  // namespace
@@ -480,4 +505,133 @@ TEST_CASE("Heritage continuation JSON rejects duplicate and noncanonical RNG lay
     REQUIRE(rejected.json.empty());
     REQUIRE(rejected.runtime_status ==
             SampleHeritageRuntimeStateStatus::UnsupportedSchemaVersion);
+}
+
+TEST_CASE("Typed Heritage runtime state has one fixed-slot canonical form",
+          "[audio][sampler][heritage][json][state]") {
+    const auto state = typed_runtime_state();
+    for (std::size_t index = 0; index < state.voice_states.size(); ++index)
+        REQUIRE(state.voice_states[index].slot_index == index);
+
+    const auto written = write_sample_heritage_typed_runtime_state_json(state);
+    REQUIRE(written.valid());
+    REQUIRE(written.json == expected_typed_runtime_state_json());
+
+    const auto parsed =
+        parse_sample_heritage_typed_runtime_state_json(written.json);
+    REQUIRE(parsed.valid());
+    REQUIRE(parsed.runtime_status == SampleHeritageRuntimeStateStatus::Ok);
+    REQUIRE(parsed.state.schema_version == 2);
+    REQUIRE(parsed.state.bound_profile_id() == "neutral.typed-state");
+    REQUIRE(parsed.state.host_sample_rate == 44100.5);
+    REQUIRE(parsed.state.voice_states[0].engine.rng_state_count == 0);
+    REQUIRE(parsed.state.voice_states[2].engine.rng_states[0].random_state == 11);
+    REQUIRE(parsed.state.voice_states[7].engine.rng_states[0].random_state == 22);
+    REQUIRE(parsed.state.bus_state.rng_states[0].random_state == 33);
+    REQUIRE(write_sample_heritage_typed_runtime_state_json(parsed.state).json ==
+            written.json);
+}
+
+TEST_CASE("Typed Heritage runtime state rejects ambiguous slot layouts",
+          "[audio][sampler][heritage][json][state][reject]") {
+    auto wrong_slot = typed_runtime_state();
+    wrong_slot.voice_states[3].slot_index = 4;
+    const auto rejected =
+        write_sample_heritage_typed_runtime_state_json(wrong_slot);
+    REQUIRE_FALSE(rejected.valid());
+    REQUIRE(rejected.runtime_status ==
+            SampleHeritageRuntimeStateStatus::InvalidSlotLayout);
+
+    const auto valid = expected_typed_runtime_state_json();
+    const auto missing = replace_once(
+        valid, R"(,{"slot_index":7,"rng_states":[{"stage_index":3,"stage_type":"noise","random_state":"22"}]})",
+        "");
+    const auto missing_result =
+        parse_sample_heritage_typed_runtime_state_json(missing);
+    REQUIRE_FALSE(missing_result.valid());
+    REQUIRE(missing_result.status ==
+            SampleHeritageJsonStatus::NumberOutOfRange);
+    REQUIRE(missing_result.field_path == "$.voice_states");
+
+    const auto duplicate_identity = replace_once(
+        valid, R"("slot_index":3)", R"("slot_index":2)");
+    const auto duplicate_result =
+        parse_sample_heritage_typed_runtime_state_json(duplicate_identity);
+    REQUIRE_FALSE(duplicate_result.valid());
+    REQUIRE(duplicate_result.status ==
+            SampleHeritageJsonStatus::ProfileValidationFailed);
+    REQUIRE(duplicate_result.runtime_status ==
+            SampleHeritageRuntimeStateStatus::InvalidSlotLayout);
+    REQUIRE(duplicate_result.field_path == "$.voice_states[3].slot_index");
+}
+
+TEST_CASE("Typed Heritage runtime state rejects incompatible envelopes",
+          "[audio][sampler][heritage][json][state][reject]") {
+    const auto valid = expected_typed_runtime_state_json();
+    const auto future = parse_sample_heritage_typed_runtime_state_json(
+        replace_once(valid, R"("schema_version":2)",
+                     R"("schema_version":3)"));
+    REQUIRE_FALSE(future.valid());
+    REQUIRE(future.runtime_status ==
+            SampleHeritageRuntimeStateStatus::UnsupportedSchemaVersion);
+    REQUIRE(future.field_path == "$.schema_version");
+
+    const auto old_engine_envelope =
+        parse_sample_heritage_typed_runtime_state_json(
+            initial_continuation_state_json());
+    REQUIRE_FALSE(old_engine_envelope.valid());
+    REQUIRE(old_engine_envelope.runtime_status ==
+            SampleHeritageRuntimeStateStatus::UnsupportedSchemaVersion);
+
+    const auto wrong_rate = parse_sample_heritage_typed_runtime_state_json(
+        replace_once(valid, R"("host_sample_rate":44100.5)",
+                     R"("host_sample_rate":7999)"));
+    REQUIRE_FALSE(wrong_rate.valid());
+    REQUIRE(wrong_rate.runtime_status ==
+            SampleHeritageRuntimeStateStatus::InvalidHostSampleRate);
+    REQUIRE(wrong_rate.field_path == "$.host_sample_rate");
+
+    auto nonfinite = typed_runtime_state();
+    nonfinite.host_sample_rate = std::numeric_limits<double>::quiet_NaN();
+    const auto nonfinite_write =
+        write_sample_heritage_typed_runtime_state_json(nonfinite);
+    REQUIRE_FALSE(nonfinite_write.valid());
+    REQUIRE(nonfinite_write.runtime_status ==
+            SampleHeritageRuntimeStateStatus::InvalidHostSampleRate);
+
+    const auto wrong_profile = parse_sample_heritage_typed_runtime_state_json(
+        replace_once(valid, R"("profile_schema_version":3)",
+                     R"("profile_schema_version":4)"));
+    REQUIRE_FALSE(wrong_profile.valid());
+    REQUIRE(wrong_profile.runtime_status ==
+            SampleHeritageRuntimeStateStatus::ProfileMismatch);
+}
+
+TEST_CASE("Typed Heritage runtime state validates each bounded engine record",
+          "[audio][sampler][heritage][json][state][reject]") {
+    auto invalid = typed_runtime_state();
+    invalid.voice_states[2].engine.rng_states[0].random_state = 0;
+    const auto invalid_write =
+        write_sample_heritage_typed_runtime_state_json(invalid);
+    REQUIRE_FALSE(invalid_write.valid());
+    REQUIRE(invalid_write.runtime_status ==
+            SampleHeritageRuntimeStateStatus::InvalidRandomState);
+
+    const auto valid = expected_typed_runtime_state_json();
+    const auto unordered = parse_sample_heritage_typed_runtime_state_json(
+        replace_once(
+            valid,
+            R"({"stage_index":0,"stage_type":"quantization","random_state":"11"})",
+            R"({"stage_index":2,"stage_type":"noise","random_state":"11"},{"stage_index":1,"stage_type":"quantization","random_state":"12"})"));
+    REQUIRE_FALSE(unordered.valid());
+    REQUIRE(unordered.runtime_status ==
+            SampleHeritageRuntimeStateStatus::InvalidStageLayout);
+    REQUIRE(unordered.field_path == "$.voice_states[2].rng_states");
+
+    const auto unknown = parse_sample_heritage_typed_runtime_state_json(
+        replace_once(valid, R"("bus_state":{"rng_states":)",
+                     R"("bus_state":{"extra":0,"rng_states":)"));
+    REQUIRE_FALSE(unknown.valid());
+    REQUIRE(unknown.status == SampleHeritageJsonStatus::UnknownField);
+    REQUIRE(unknown.field_path == "$.bus_state.extra");
 }

@@ -248,7 +248,7 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
         } else if (type == "reconstruction") {
             constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
                 "family"sv, "cutoff_law"sv, "cutoff_value"sv, "order"sv,
-                "ripple_db"sv};
+                "ripple_db"sv, "stopband_attenuation_db"sv};
             constexpr std::array families{
                 std::pair{"one_pole"sv, SampleHeritageReconstructionFamily::OnePole},
                 std::pair{"butterworth"sv,
@@ -263,7 +263,8 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                           SampleHeritageCutoffLaw::MachineRateRatio}};
             SampleHeritageReconstructionFamily family{};
             SampleHeritageCutoffLaw cutoff_law{};
-            double cutoff{}, ripple{}; std::uint8_t order{};
+            double cutoff{}, ripple{}, stopband_attenuation{};
+            std::uint8_t order{};
             if (!audit_object(value, base, fields) || !common() ||
                 !enumeration(value, "family", base + ".family", families, family) ||
                 !enumeration(value, "cutoff_law", base + ".cutoff_law",
@@ -272,7 +273,10 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                         192000.0, cutoff) ||
                 !integer(value, "order", base + ".order", 1, 16, order) ||
                 !number(value, "ripple_db", base + ".ripple_db", 0.0, 12.0,
-                        ripple)) return false;
+                        ripple) ||
+                !number(value, "stopband_attenuation_db",
+                        base + ".stopband_attenuation_db", 0.0, 180.0,
+                        stopband_attenuation)) return false;
             double machine_rate = result.profile.host_sample_rate;
             double clock_ratio = 1.0;
             for (std::size_t earlier = 0; earlier < index; ++earlier) {
@@ -293,8 +297,30 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                  (cutoff <= 0.0 || cutoff >= 0.5)))
                 return fail(SampleHeritageJsonStatus::NumberOutOfRange,
                             base + ".cutoff_value");
+            const auto even_order = order >= 2 && (order & 1u) == 0;
+            if ((family == SampleHeritageReconstructionFamily::OnePole &&
+                 order != 1) ||
+                (family != SampleHeritageReconstructionFamily::OnePole &&
+                 !even_order))
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".order");
+            if (((family == SampleHeritageReconstructionFamily::OnePole ||
+                  family == SampleHeritageReconstructionFamily::Butterworth) &&
+                 ripple != 0.0) ||
+                ((family == SampleHeritageReconstructionFamily::Chebyshev ||
+                  family == SampleHeritageReconstructionFamily::Elliptic) &&
+                 ripple <= 0.0))
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".ripple_db");
+            if ((family != SampleHeritageReconstructionFamily::Elliptic &&
+                 stopband_attenuation != 0.0) ||
+                (family == SampleHeritageReconstructionFamily::Elliptic &&
+                 stopband_attenuation <= ripple))
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".stopband_attenuation_db");
             destination.parameters = SampleHeritageVoiceReconstructionBlock{
-                family, cutoff_law, cutoff, order, static_cast<float>(ripple)};
+                family, cutoff_law, cutoff, order, static_cast<float>(ripple),
+                static_cast<float>(stopband_attenuation)};
         } else if (type == "analog_color") {
             constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
                                         "drive"sv, "asymmetry"sv, "mix"sv};
@@ -368,11 +394,13 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
         if (type == "noise_idle") {
             constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
                 "noise_amplitude"sv, "idle_amplitude"sv,
-                "tilt_db_per_octave"sv, "gate"sv, "seed"sv, "seed_policy"sv};
+                "tilt_db_per_octave"sv, "tilt_reference_hz"sv,
+                "tilt_floor_hz"sv, "gate"sv, "seed"sv, "seed_policy"sv};
             constexpr std::array gates{
                 std::pair{"always_on"sv, SampleHeritageNoiseGate::AlwaysOn},
                 std::pair{"voice_active"sv, SampleHeritageNoiseGate::VoiceActive}};
-            double noise{}, idle{}, tilt{}; std::uint64_t seed_value{};
+            double noise{}, idle{}, tilt{}, tilt_reference{}, tilt_floor{};
+            std::uint64_t seed_value{};
             SampleHeritageNoiseGate gate{};
             SampleHeritageSeedPolicy policy{};
             if (!audit_object(value, base, fields) || !common() ||
@@ -382,6 +410,10 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                         1.0, idle) ||
                 !number(value, "tilt_db_per_octave", base + ".tilt_db_per_octave",
                         -24.0, 24.0, tilt) ||
+                !number(value, "tilt_reference_hz", base + ".tilt_reference_hz",
+                        1.0, 192000.0, tilt_reference) ||
+                !number(value, "tilt_floor_hz", base + ".tilt_floor_hz", 1.0,
+                        192000.0, tilt_floor) ||
                 !enumeration(value, "gate", base + ".gate", gates, gate) ||
                 !seed(value, "seed", base + ".seed", seed_value) ||
                 !seed_policy(value, "seed_policy", base + ".seed_policy", policy))
@@ -391,9 +423,16 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                 seed_value == 0)
                 return fail(SampleHeritageJsonStatus::NumberOutOfRange,
                             base + ".seed");
+            if (tilt_floor > tilt_reference)
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".tilt_floor_hz");
+            if (tilt_reference >= result.profile.host_sample_rate * 0.5)
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".tilt_reference_hz");
             destination.parameters = SampleHeritageBusNoiseIdleBlock{
                 static_cast<float>(noise), static_cast<float>(idle),
-                static_cast<float>(tilt), gate, seed_value, policy};
+                static_cast<float>(tilt), gate, seed_value, policy,
+                tilt_reference, tilt_floor};
         } else if (type == "output_drive") {
             constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
                                         "drive"sv, "ceiling"sv};
@@ -878,6 +917,8 @@ SampleHeritageJsonWriteResult write_sample_heritage_profile_json(
                 append_number(output, block.cutoff_value);
                 output += ",\"order\":" + std::to_string(block.order);
                 output += ",\"ripple_db\":"; append_number(output, block.ripple_db);
+                output += ",\"stopband_attenuation_db\":";
+                append_number(output, block.stopband_attenuation_db);
             } else if constexpr (std::is_same_v<Block,
                                                  SampleHeritageVoiceAnalogColorBlock>) {
                 output += ",\"drive\":"; append_number(output, block.drive);
@@ -917,6 +958,10 @@ SampleHeritageJsonWriteResult write_sample_heritage_profile_json(
                 append_number(output, block.idle_amplitude);
                 output += ",\"tilt_db_per_octave\":";
                 append_number(output, block.tilt_db_per_octave);
+                output += ",\"tilt_reference_hz\":";
+                append_number(output, block.tilt_reference_hz);
+                output += ",\"tilt_floor_hz\":";
+                append_number(output, block.tilt_floor_hz);
                 output += ",\"gate\":\"";
                 output += block.gate == SampleHeritageNoiseGate::VoiceActive
                               ? "voice_active"

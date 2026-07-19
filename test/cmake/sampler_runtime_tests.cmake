@@ -83,10 +83,13 @@ pulp_add_test_suite(pulp-test-sample-asset LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-memory-governor LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-heritage
     SOURCES test_sample_heritage.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::audio)
+    LIBRARIES pulp::audio pulp::audio-analysis)
 pulp_add_test_suite(pulp-test-sample-heritage-json
     SOURCES test_sample_heritage_json.cpp
             test_sample_heritage_runtime_state_json.cpp
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-heritage-pitch
+    SOURCES test_sample_heritage_pitch.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-starvation-envelope
     SOURCES test_sample_starvation_envelope.cpp harness/rt_allocation_probe.cpp

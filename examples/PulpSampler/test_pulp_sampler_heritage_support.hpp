@@ -8,6 +8,7 @@
 #include <pulp/runtime/scope_guard.hpp>
 
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/audio/sample_mip_sidecar.hpp>
 
 #include <algorithm>
 #include <array>
@@ -108,6 +109,26 @@ struct PulpSamplerHeritageTestAccess {
         return processor.streaming_->has_retained_streamed_source_for_test();
     }
 
+    static std::uint64_t heritage_voice_tail_frames(
+        const PulpSamplerProcessor& processor) noexcept {
+        return processor.heritage_.voice_tail_output_frames();
+    }
+
+    static std::size_t active_voices(
+        const PulpSamplerProcessor& processor) noexcept {
+        return static_cast<std::size_t>(std::count_if(
+            std::begin(processor.voices_), std::end(processor.voices_),
+            [](const SamplerVoice& voice) { return voice.active; }));
+    }
+
+    static std::uint64_t remaining_heritage_tail_frames(
+        const PulpSamplerProcessor& processor) noexcept {
+        for (const auto& voice : processor.voices_)
+            if (voice.active && voice.heritage_source_exhausted)
+                return voice.heritage_tail_frames_remaining;
+        return 0;
+    }
+
     static void fail_next_stream_domain_prepare(
         PulpSamplerProcessor& processor) noexcept {
         processor.fail_next_stream_domain_prepare_for_test_ = true;
@@ -174,6 +195,32 @@ struct HeritageTempWav {
     }
 };
 
+struct HeritageTempStereoWav {
+    std::string path;
+
+    explicit HeritageTempStereoWav(std::string_view label,
+                                   std::uint64_t frames = 500000) {
+        static std::atomic<std::uint64_t> sequence{0};
+        path = (std::filesystem::temp_directory_path() /
+                (std::string("pulp_sampler_heritage_stereo_") +
+                 std::string(label) + "_" +
+                 std::to_string(sequence.fetch_add(1)) + ".wav"))
+                   .string();
+        audio::AudioFileData data;
+        data.sample_rate = 48000;
+        data.channels = {
+            std::vector<float>(static_cast<std::size_t>(frames), 0.25f),
+            std::vector<float>(static_cast<std::size_t>(frames), -0.75f)};
+        REQUIRE(audio::write_wav_file(path, data,
+                                      audio::WavBitDepth::Float32));
+    }
+
+    ~HeritageTempStereoWav() {
+        std::error_code error;
+        std::filesystem::remove(path, error);
+    }
+};
+
 audio::SampleHeritageProfile clock_profile(double ratio,
                                            bool bypass = false) {
     return {
@@ -197,16 +244,144 @@ audio::SampleHeritageProfile clock_profile(double ratio,
     };
 }
 
+[[maybe_unused]] audio::SampleHeritageProfile typed_voice_profile(
+    double clock_ratio = 1.0, bool bypass = false) {
+    return {
+        .schema_version = audio::kSampleHeritageProfileSchemaVersion,
+        .profile_id = bypass ? "neutral.typed-voice-bypass-v3"
+                             : "neutral.typed-voice-v3",
+        .host_sample_rate = 48000.0,
+        .voice = {
+            {audio::SampleHeritageBlockDomain::Voice, bypass,
+             audio::SampleHeritageVoiceMachineDomainBlock{32000.0}},
+            {audio::SampleHeritageBlockDomain::Voice, bypass,
+             audio::SampleHeritageVoiceClockBlock{clock_ratio}},
+            {audio::SampleHeritageBlockDomain::Voice, bypass,
+             audio::SampleHeritageVoiceReconstructionBlock{
+                 audio::SampleHeritageReconstructionFamily::OnePole,
+                 audio::SampleHeritageCutoffLaw::FixedHz, 12000.0, 1, 0.0f}},
+        },
+    };
+}
+
+[[maybe_unused]] audio::SampleHeritageProfile typed_converter_profile() {
+    return {
+        .schema_version = audio::kSampleHeritageProfileSchemaVersion,
+        .profile_id = "neutral.typed-converter-v3",
+        .host_sample_rate = 48000.0,
+        .voice = {{audio::SampleHeritageBlockDomain::Voice, false,
+                   audio::SampleHeritageVoiceConverterBlock{
+                       audio::SampleHeritageConverterFamily::LinearPcm,
+                       8.0f, 0.0f, 0.5f, 0x12345678u,
+                       audio::SampleHeritageSeedPolicy::RestartFromProfileSeed}}},
+    };
+}
+
+[[maybe_unused]] audio::SampleHeritageProfile typed_filter_profile() {
+    return {
+        .schema_version = audio::kSampleHeritageProfileSchemaVersion,
+        .profile_id = "neutral.typed-filter-v3",
+        .host_sample_rate = 48000.0,
+        .voice = {{audio::SampleHeritageBlockDomain::Voice, false,
+                   audio::SampleHeritageVoiceReconstructionBlock{
+                       audio::SampleHeritageReconstructionFamily::OnePole,
+                       audio::SampleHeritageCutoffLaw::FixedHz, 1000.0, 1,
+                       0.0f}}},
+    };
+}
+
+[[maybe_unused]] audio::SampleHeritageProfile typed_rich_voice_profile() {
+    return {
+        .schema_version = audio::kSampleHeritageProfileSchemaVersion,
+        .profile_id = "neutral.typed-rich-voice-v3",
+        .host_sample_rate = 48000.0,
+        .voice = {
+            {audio::SampleHeritageBlockDomain::Voice, false,
+             audio::SampleHeritageVoiceConverterBlock{
+                 audio::SampleHeritageConverterFamily::MuLaw,
+                 6.25f, 0.35f, 0.25f, 0x13579bdfu,
+                 audio::SampleHeritageSeedPolicy::RestartFromProfileSeed}},
+            {audio::SampleHeritageBlockDomain::Voice, false,
+             audio::SampleHeritageVoiceHoldDroopBlock{
+                 audio::SampleHeritageHoldMode::ZeroOrder, 3, 0.1f}},
+            {audio::SampleHeritageBlockDomain::Voice, false,
+             audio::SampleHeritageVoiceReconstructionBlock{
+                 audio::SampleHeritageReconstructionFamily::Elliptic,
+                 audio::SampleHeritageCutoffLaw::FixedHz, 6000.0, 8,
+                 1.0f, 60.0f}},
+            {audio::SampleHeritageBlockDomain::Voice, false,
+             audio::SampleHeritageVoiceAnalogColorBlock{2.5f, 0.2f, 0.6f}},
+        },
+    };
+}
+
+[[maybe_unused]] audio::SampleHeritageProfile typed_pitch_artifact_profile(
+    audio::SampleHeritagePitchFamily family =
+        audio::SampleHeritagePitchFamily::VariableClock,
+    bool bypass = false,
+    double clock_ratio = 1.0) {
+    return {
+        .schema_version = audio::kSampleHeritageProfileSchemaVersion,
+        .profile_id = bypass ? "neutral.typed-pitch-bypass-v3"
+                             : "neutral.typed-pitch-artifact-v3",
+        .host_sample_rate = 48000.0,
+        .voice = {
+            {audio::SampleHeritageBlockDomain::Voice, bypass,
+             audio::SampleHeritageVoiceClockBlock{clock_ratio}},
+            {audio::SampleHeritageBlockDomain::Voice, bypass,
+             audio::SampleHeritageVoicePitchBlock{family}},
+        },
+    };
+}
+
+[[maybe_unused]] audio::SampleHeritageProfile typed_bus_noise_profile() {
+    return {
+        .schema_version = audio::kSampleHeritageProfileSchemaVersion,
+        .profile_id = "neutral.typed-bus-noise-v3",
+        .host_sample_rate = 48000.0,
+        .bus = {{audio::SampleHeritageBlockDomain::Bus, false,
+                 audio::SampleHeritageBusNoiseIdleBlock{
+                     .noise_amplitude = 0.01f,
+                     .idle_amplitude = 0.0f,
+                     .tilt_db_per_octave = 0.0f,
+                     .gate = audio::SampleHeritageNoiseGate::AlwaysOn,
+                     .seed = 0xabcdefu,
+                     .seed_policy = audio::SampleHeritageSeedPolicy::RestartFromProfileSeed,
+                     .tilt_reference_hz = 1000.0,
+                     .tilt_floor_hz = 20.0}}},
+    };
+}
+
 [[maybe_unused]] audio::SampleHeritageProfile continued_noise_profile() {
     return {
         .schema_version = audio::kSampleHeritageProfileSchemaVersion,
-        .profile_id = "neutral.sampler-state-v2",
+        .profile_id = "neutral.sampler-state-v3",
         .host_sample_rate = 48000.0,
-        .stages = {{false,
-                    audio::SampleHeritageNoiseStage{
-                        0.01f, 0x12345678u,
-                        audio::SampleHeritageSeedPolicy::
-                            ContinueSerializedState}}},
+        .bus = {{audio::SampleHeritageBlockDomain::Bus, false,
+                 audio::SampleHeritageBusNoiseIdleBlock{
+                     .noise_amplitude = 0.01f,
+                     .idle_amplitude = 0.0f,
+                     .tilt_db_per_octave = 0.0f,
+                     .gate = audio::SampleHeritageNoiseGate::AlwaysOn,
+                     .seed = 0x12345678u,
+                     .seed_policy = audio::SampleHeritageSeedPolicy::
+                         ContinueSerializedState,
+                     .tilt_reference_hz = 1000.0,
+                     .tilt_floor_hz = 20.0}}},
+    };
+}
+
+[[maybe_unused]] audio::SampleHeritageProfile continued_converter_profile() {
+    return {
+        .schema_version = audio::kSampleHeritageProfileSchemaVersion,
+        .profile_id = "neutral.sampler-voice-state-v3",
+        .host_sample_rate = 48000.0,
+        .voice = {{audio::SampleHeritageBlockDomain::Voice, false,
+                   audio::SampleHeritageVoiceConverterBlock{
+                       audio::SampleHeritageConverterFamily::LinearPcm,
+                       10.0f, 0.0f, 0.5f, 0x87654321u,
+                       audio::SampleHeritageSeedPolicy::
+                           ContinueSerializedState}}},
     };
 }
 
@@ -240,14 +415,17 @@ struct HeritageFixture {
     state::StateStore store;
     PulpSamplerProcessor processor;
     std::uint32_t maximum_block_frames = 0;
+    std::uint32_t output_channels = 2;
     double sample_rate = 48000.0;
 
     HeritageFixture(std::uint32_t maximum_frames,
                     const audio::SampleHeritageProfile* profile = nullptr,
                     double prepared_sample_rate = 48000.0,
-                    PulpSamplerConfig config = {})
+                    PulpSamplerConfig config = {},
+                    std::uint32_t prepared_output_channels = 2)
         : processor(config),
           maximum_block_frames(maximum_frames),
+          output_channels(prepared_output_channels),
           sample_rate(prepared_sample_rate) {
         processor.set_state_store(&store);
         processor.define_parameters(store);
@@ -262,7 +440,7 @@ struct HeritageFixture {
         context.sample_rate = sample_rate;
         context.max_buffer_size = static_cast<int>(maximum_frames);
         context.input_channels = 0;
-        context.output_channels = 2;
+        context.output_channels = static_cast<int>(output_channels);
         processor.prepare(context);
     }
 
@@ -276,7 +454,8 @@ struct HeritageFixture {
 std::vector<float> render(HeritageFixture& fixture,
                           std::span<const std::size_t> partitions,
                           std::size_t note_on_frame = 0,
-                          int note = 60) {
+                          int note = 60,
+                          bool send_note = true) {
     std::vector<float> result;
     std::size_t absolute_frame = 0;
     bool note_sent = false;
@@ -285,11 +464,11 @@ std::vector<float> render(HeritageFixture& fixture,
         std::vector<float> right(frames, 0.0f);
         float* output_ptrs[]{left.data(), right.data()};
         const float* input_ptrs[]{nullptr, nullptr};
-        audio::BufferView<float> output(output_ptrs, 2, frames);
+        audio::BufferView<float> output(output_ptrs, fixture.output_channels, frames);
         audio::BufferView<const float> input(input_ptrs, 0, frames);
         midi::MidiBuffer midi_in;
         midi::MidiBuffer midi_out;
-        if (!note_sent && note_on_frame >= absolute_frame &&
+        if (send_note && !note_sent && note_on_frame >= absolute_frame &&
             note_on_frame <= absolute_frame + frames) {
             auto event = midi::MidiEvent::note_on(0, note, 127);
             event.sample_offset =

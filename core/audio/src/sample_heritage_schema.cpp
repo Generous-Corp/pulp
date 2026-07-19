@@ -98,6 +98,7 @@ std::array<std::uint8_t, 32> sample_heritage_profile_digest(
                 canonical.floating(block.cutoff_value);
                 canonical.integer(block.order);
                 canonical.floating(block.ripple_db);
+                canonical.floating(block.stopband_attenuation_db);
             } else if constexpr (std::is_same_v<Block,
                                                  SampleHeritageVoiceAnalogColorBlock>) {
                 canonical.floating(block.drive);
@@ -126,6 +127,8 @@ std::array<std::uint8_t, 32> sample_heritage_profile_digest(
                 canonical.floating(block.noise_amplitude);
                 canonical.floating(block.idle_amplitude);
                 canonical.floating(block.tilt_db_per_octave);
+                canonical.floating(block.tilt_reference_hz);
+                canonical.floating(block.tilt_floor_hz);
                 canonical.integer(static_cast<std::uint8_t>(block.gate));
                 canonical.integer(block.seed);
                 seed_policy(block.seed_policy);

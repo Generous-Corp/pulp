@@ -86,6 +86,7 @@ struct SampleHeritageVoiceReconstructionBlock {
     double cutoff_value = 0.0;
     std::uint8_t order = 1;
     float ripple_db = 0.0f;
+    float stopband_attenuation_db = 0.0f;
 };
 struct SampleHeritageVoiceAnalogColorBlock {
     float drive = 1.0f;
@@ -129,6 +130,11 @@ struct SampleHeritageBusNoiseIdleBlock {
     std::uint64_t seed = 0;
     SampleHeritageSeedPolicy seed_policy =
         SampleHeritageSeedPolicy::RestartFromProfileSeed;
+    // The tilt gain at frequency f is
+    // 10^(tilt_db_per_octave * log2(max(f, tilt_floor_hz) /
+    // tilt_reference_hz) / 20), with Nyquist as the upper frequency bound.
+    double tilt_reference_hz = 1000.0;
+    double tilt_floor_hz = 20.0;
 };
 struct SampleHeritageBusOutputDriveBlock {
     float drive = 1.0f;
@@ -466,18 +472,34 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
                                finite_range(block.droop, 0.0f, 1.0f);
                     else if constexpr (std::is_same_v<Block,
                                                        SampleHeritageVoiceReconstructionBlock>)
-                        return (block.family ==
-                                    SampleHeritageReconstructionFamily::OnePole ||
-                                block.family ==
-                                    SampleHeritageReconstructionFamily::Butterworth ||
-                                block.family ==
-                                    SampleHeritageReconstructionFamily::Chebyshev ||
-                                block.family ==
-                                    SampleHeritageReconstructionFamily::Elliptic) &&
-                               validate_cutoff(block.cutoff_law, block.cutoff_value,
+                        return validate_cutoff(block.cutoff_law, block.cutoff_value,
                                                voice_machine_rate) &&
-                               block.order >= 1 && block.order <= 16 &&
-                               finite_range(block.ripple_db, 0.0f, 12.0f);
+                               ((block.family ==
+                                     SampleHeritageReconstructionFamily::OnePole &&
+                                 block.order == 1 && block.ripple_db == 0.0f &&
+                                 block.stopband_attenuation_db == 0.0f) ||
+                                (block.family ==
+                                     SampleHeritageReconstructionFamily::Butterworth &&
+                                 block.order >= 2 && block.order <= 16 &&
+                                 (block.order & 1u) == 0 &&
+                                 block.ripple_db == 0.0f &&
+                                 block.stopband_attenuation_db == 0.0f) ||
+                                (block.family ==
+                                     SampleHeritageReconstructionFamily::Chebyshev &&
+                                 block.order >= 2 && block.order <= 16 &&
+                                 (block.order & 1u) == 0 &&
+                                 finite_range(block.ripple_db, 0.0f, 12.0f) &&
+                                 block.ripple_db > 0.0f &&
+                                 block.stopband_attenuation_db == 0.0f) ||
+                                (block.family ==
+                                     SampleHeritageReconstructionFamily::Elliptic &&
+                                 block.order >= 2 && block.order <= 16 &&
+                                 (block.order & 1u) == 0 &&
+                                 finite_range(block.ripple_db, 0.0f, 12.0f) &&
+                                 block.ripple_db > 0.0f &&
+                                 finite_range(block.stopband_attenuation_db,
+                                              block.ripple_db, 180.0f) &&
+                                 block.stopband_attenuation_db > block.ripple_db));
                     else if constexpr (std::is_same_v<Block,
                                                        SampleHeritageVoiceAnalogColorBlock>)
                         return finite_range(block.drive, 0.0f, 16.0f) &&
@@ -512,6 +534,12 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
                                    finite_range(block.idle_amplitude, 0.0f, 1.0f) &&
                                    finite_range(block.tilt_db_per_octave, -24.0f,
                                                 24.0f) &&
+                                   std::isfinite(block.tilt_floor_hz) &&
+                                   block.tilt_floor_hz >= 1.0 &&
+                                   std::isfinite(block.tilt_reference_hz) &&
+                                   block.tilt_reference_hz >= block.tilt_floor_hz &&
+                                   block.tilt_reference_hz <
+                                       source.host_sample_rate * 0.5 &&
                                    (block.gate == SampleHeritageNoiseGate::AlwaysOn ||
                                     block.gate ==
                                         SampleHeritageNoiseGate::VoiceActive) &&

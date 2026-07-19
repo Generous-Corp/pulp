@@ -126,6 +126,34 @@ TEST_CASE("PulpSampler transactionally rebinds loaded streams across clock chang
     REQUIRE(render(fixture, disabled_block).size() == 64);
 }
 
+TEST_CASE("PulpSampler sizes heritage pitch from the admitted clock product",
+          "[audio][sampler][heritage][stream][capacity][resources]") {
+    constexpr std::size_t block_frames = 64;
+    const auto profile = typed_pitch_artifact_profile(
+        audio::SampleHeritagePitchFamily::VariableClock, false, 2.0);
+    HeritageFixture fixture(block_frames, &profile);
+    const auto stream_frames =
+        PulpSamplerHeritageTestAccess::maximum_stream_block_frames(
+            fixture.processor);
+    REQUIRE(stream_frames > block_frames);
+    REQUIRE(stream_frames < 400);
+
+    format::PrepareContext context;
+    context.sample_rate = 48000.0;
+    context.max_buffer_size = static_cast<int>(block_frames);
+    context.input_channels = 0;
+    context.output_channels = 2;
+    PulpSamplerProcessor clean;
+    const auto clean_usage = clean.estimate_prepare_resources(context);
+    PulpSamplerProcessor pitched;
+    REQUIRE(pitched.set_heritage_profile(profile) ==
+            PulpSamplerHeritageStatus::PendingPrepare);
+    const auto pitched_usage = pitched.estimate_prepare_resources(context);
+    REQUIRE(pitched_usage.persistent_bytes > clean_usage.persistent_bytes);
+    REQUIRE(pitched_usage.block_scratch_bytes >
+            clean_usage.block_scratch_bytes * 10u);
+}
+
 TEST_CASE("PulpSampler preserves the configured streaming cap across clock changes",
           "[audio][sampler][heritage][stream][capacity]") {
     const auto initial =
@@ -254,7 +282,7 @@ TEST_CASE("PulpSampler prepared state recall rebinds without dropping its source
     REQUIRE(PulpSamplerHeritageTestAccess::has_retained_streamed_source(
         fixture.processor));
 
-    const auto restored_profile = clock_profile(1.25);
+    const auto restored_profile = typed_voice_profile(1.25);
     HeritageFixture saved(64, &restored_profile);
     const auto state = saved.processor.serialize_plugin_state();
     REQUIRE_FALSE(state.empty());
