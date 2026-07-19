@@ -20,29 +20,6 @@ TimelineGraphAdmission reject(TimelineGraphAdmissionCode code, std::uint64_t act
     return {code, actual, limit, item, node};
 }
 
-bool owns_node(std::span<const std::shared_ptr<detail::TimelineGraphBoundTrack>> tracks,
-               NodeId id) noexcept;
-
-graph::GraphRuntimeNodeKind runtime_kind(NodeType type) noexcept {
-    switch (type) {
-    case NodeType::AudioInput:
-        return graph::GraphRuntimeNodeKind::AudioInput;
-    case NodeType::AudioOutput:
-        return graph::GraphRuntimeNodeKind::AudioOutput;
-    case NodeType::MidiInput:
-        return graph::GraphRuntimeNodeKind::MidiInput;
-    case NodeType::MidiOutput:
-        return graph::GraphRuntimeNodeKind::MidiOutput;
-    case NodeType::Custom:
-        return graph::GraphRuntimeNodeKind::Custom;
-    case NodeType::Gain:
-        return graph::GraphRuntimeNodeKind::Utility;
-    case NodeType::Plugin:
-        return graph::GraphRuntimeNodeKind::Processor;
-    }
-    return graph::GraphRuntimeNodeKind::Processor;
-}
-
 bool checked_add(std::uint64_t& value, std::uint64_t add) noexcept {
     if (add > std::numeric_limits<std::uint64_t>::max() - value)
         return false;
@@ -122,13 +99,66 @@ struct detail::TimelineGraphBindingState {
     std::uint32_t prepared_max_block_size = 0;
 };
 
+struct detail::TimelineGraphPreparedCandidate {
+    explicit TimelineGraphPreparedCandidate(
+        runtime::Slot<const TimelineGraphBindingState>::ReadGuard previous_state)
+        : previous(std::move(previous_state)) {}
+
+    runtime::Slot<const TimelineGraphBindingState>::ReadGuard previous;
+    std::shared_ptr<TimelineGraphBindingState> next;
+    std::unique_ptr<SignalGraph::PreparedTopologyEdit> edit;
+};
+
 namespace {
 
-bool owns_node(std::span<const std::shared_ptr<detail::TimelineGraphBoundTrack>> tracks,
-               NodeId id) noexcept {
-    return std::any_of(tracks.begin(), tracks.end(), [id](const auto& track) {
-        return track->audio_node == id || track->midi_node == id;
-    });
+TimelineGraphAdmission admit_candidate(
+    const SignalGraph& graph, std::span<const GraphNode> nodes,
+    std::span<const Connection> connections) {
+    const auto graph_limits = graph.limits();
+    if (nodes.size() > graph_limits.max_nodes)
+        return reject(TimelineGraphAdmissionCode::NodeLimitExceeded, nodes.size(),
+                      graph_limits.max_nodes);
+    if (connections.size() > graph_limits.max_connections)
+        return reject(TimelineGraphAdmissionCode::ConnectionLimitExceeded,
+                      connections.size(), graph_limits.max_connections);
+    std::uint64_t graph_ports = 0;
+    for (const auto& node : nodes) {
+        if (!checked_add(graph_ports, static_cast<std::uint64_t>(
+                                          std::max(0, node.num_input_ports))) ||
+            !checked_add(graph_ports, static_cast<std::uint64_t>(
+                                          std::max(0, node.num_output_ports))))
+            return reject(TimelineGraphAdmissionCode::TotalPortLimitExceeded,
+                          std::numeric_limits<std::uint64_t>::max(),
+                          graph_limits.max_ports);
+    }
+    if (graph_ports > graph_limits.max_ports)
+        return reject(TimelineGraphAdmissionCode::TotalPortLimitExceeded,
+                      graph_ports, graph_limits.max_ports);
+
+    const auto routed =
+        validate_signal_graph_executor_topology(nodes, connections);
+    switch (routed.code) {
+    case ExecutorTopologyValidationCode::Accepted:
+        return {};
+    case ExecutorTopologyValidationCode::TopologyIneligible:
+        return reject(TimelineGraphAdmissionCode::RoutedTopologyIneligible);
+    case ExecutorTopologyValidationCode::NodeLimitExceeded:
+        return reject(TimelineGraphAdmissionCode::NodeLimitExceeded,
+                      routed.actual, routed.limit, {}, routed.node);
+    case ExecutorTopologyValidationCode::ConnectionLimitExceeded:
+        return reject(TimelineGraphAdmissionCode::ConnectionLimitExceeded,
+                      routed.actual, routed.limit, {}, routed.node);
+    case ExecutorTopologyValidationCode::PerNodePortLimitExceeded:
+        return reject(TimelineGraphAdmissionCode::PerNodePortLimitExceeded,
+                      routed.actual, routed.limit, {}, routed.node);
+    case ExecutorTopologyValidationCode::TotalPortLimitExceeded:
+        return reject(TimelineGraphAdmissionCode::TotalPortLimitExceeded,
+                      routed.actual, routed.limit, {}, routed.node);
+    case ExecutorTopologyValidationCode::PlanRejected:
+        return reject(TimelineGraphAdmissionCode::RoutedPlanRejected,
+                      routed.index, 0, {}, routed.node);
+    }
+    return reject(TimelineGraphAdmissionCode::RoutedPlanRejected);
 }
 
 } // namespace
@@ -186,169 +216,13 @@ void TimelineGraphPlaybackBinding::remove_all_owned_nodes() noexcept {
 }
 
 TimelineGraphAdmission TimelineGraphPlaybackBinding::preflight(
-    const playback::PlaybackProgram& program, std::span<const TimelineTrackGraphRoute> routes,
+    const playback::PlaybackProgram& program,
+    std::span<const TimelineTrackGraphRoute> routes,
     const TimelineGraphBindingConfig& config, int maximum_block_size) const {
-    auto current = state_.read();
-    if (config.audio_channels == 0 || config.maximum_note_events_per_track_per_block == 0 ||
-        config.audio_channels > config.audio_limits.max_channels || maximum_block_size <= 0 ||
-        static_cast<std::uint64_t>(maximum_block_size) > config.audio_limits.max_block_frames ||
-        (current && (config.audio_channels != current->config.audio_channels ||
-                     config.audio_limits != current->config.audio_limits ||
-                       config.maximum_note_events_per_track_per_block !=
-                           current->config.maximum_note_events_per_track_per_block)))
-        return reject(TimelineGraphAdmissionCode::InvalidConfiguration);
-    if (config.maximum_note_events_per_track_per_block > maximum_graph_midi_events_per_block)
-        return reject(TimelineGraphAdmissionCode::NoteCapacityExceeded,
-                      config.maximum_note_events_per_track_per_block,
-                      maximum_graph_midi_events_per_block);
-    if (routes.size() != program.tracks().size())
-        return reject(TimelineGraphAdmissionCode::MissingTrack, routes.size(),
-                      program.tracks().size());
-
-    std::vector<TimelineTrackGraphRoute> ordered(routes.begin(), routes.end());
-    std::sort(ordered.begin(), ordered.end(),
-              [](const auto& lhs, const auto& rhs) { return lhs.track_id < rhs.track_id; });
-    for (std::size_t index = 0; index < ordered.size(); ++index) {
-        const auto& route = ordered[index];
-        if (!route.track_id.valid())
-            return reject(TimelineGraphAdmissionCode::MissingTrack, 0, 0, route.track_id);
-        if (index != 0 && route.track_id == ordered[index - 1].track_id)
-            return reject(TimelineGraphAdmissionCode::DuplicateTrack, 2, 1, route.track_id);
-        if (program.find_track(route.track_id) == nullptr)
-            return reject(TimelineGraphAdmissionCode::MissingTrack, 0, 1, route.track_id);
-        const auto* destination = graph_.node(route.audio_destination);
-        if (destination == nullptr)
-            return reject(TimelineGraphAdmissionCode::MissingDestination, 0, 1, route.track_id,
-                          route.audio_destination);
-        const auto first = static_cast<std::uint64_t>(route.audio_destination_first_port);
-        const auto last = first + config.audio_channels;
-        if (last > static_cast<std::uint64_t>(std::max(0, destination->num_input_ports)))
-            return reject(TimelineGraphAdmissionCode::DestinationPortRange, last,
-                          std::max(0, destination->num_input_ports), route.track_id,
-                          route.audio_destination);
-        if (route.midi_destination != 0 && graph_.node(route.midi_destination) == nullptr)
-            return reject(TimelineGraphAdmissionCode::MissingDestination, 0, 1, route.track_id,
-                          route.midi_destination);
-    }
-
-    std::vector<GraphNode> nodes;
-    nodes.reserve(graph_.nodes().size() + routes.size() * 2u);
-    for (const auto& node : graph_.nodes())
-        if (!current || !owns_node(current->tracks, node.id))
-            nodes.push_back(node);
-    std::vector<Connection> connections;
-    connections.reserve(graph_.connections().size() + routes.size() * (config.audio_channels + 1u));
-    for (const auto& connection : graph_.connections())
-        if ((!current || !owns_node(current->tracks, connection.source_node)) &&
-            (!current || !owns_node(current->tracks, connection.dest_node)))
-            connections.push_back(connection);
-
-    NodeId synthetic = 1;
-    for (const auto& node : nodes)
-        synthetic = std::max(synthetic, node.id + 1u);
-    for (const auto& route : ordered) {
-        GraphNode audio_node;
-        audio_node.id = synthetic++;
-        audio_node.type = NodeType::Custom;
-        audio_node.num_output_ports = static_cast<int>(config.audio_channels);
-        audio_node.custom_type_id = custom_type_id(binding_instance_id_, route.track_id);
-        audio_node.custom_type_version = 1;
-        audio_node.transport_sensitive = true;
-        nodes.push_back(audio_node);
-
-        GraphNode midi_node;
-        midi_node.id = synthetic++;
-        midi_node.type = NodeType::MidiInput;
-        midi_node.num_output_ports = 1;
-        nodes.push_back(midi_node);
-
-        for (std::uint32_t channel = 0; channel < config.audio_channels; ++channel) {
-            connections.push_back(
-                Connection{audio_node.id, static_cast<PortIndex>(channel), route.audio_destination,
-                           static_cast<PortIndex>(route.audio_destination_first_port + channel)});
-        }
-        if (route.midi_destination != 0) {
-            Connection midi{midi_node.id, 0, route.midi_destination, 0};
-            midi.midi = true;
-            connections.push_back(midi);
-        }
-    }
-
-    const auto graph_limits = graph_.limits();
-    if (nodes.size() > graph_limits.max_nodes)
-        return reject(TimelineGraphAdmissionCode::NodeLimitExceeded, nodes.size(),
-                      graph_limits.max_nodes);
-    if (connections.size() > graph_limits.max_connections)
-        return reject(TimelineGraphAdmissionCode::ConnectionLimitExceeded, connections.size(),
-                      graph_limits.max_connections);
-
-    const bool has_midi = std::any_of(nodes.begin(), nodes.end(),
-                                      [](const auto& node) {
-                                          return node.type == NodeType::MidiInput ||
-                                                 node.type == NodeType::MidiOutput;
-                                      }) ||
-                          std::any_of(connections.begin(), connections.end(),
-                                      [](const auto& connection) { return connection.midi; });
-    std::uint64_t graph_ports = 0;
-    std::uint64_t routed_ports = 0;
-    std::vector<graph::GraphRuntimeNodeSpec> node_specs;
-    node_specs.reserve(nodes.size());
-    const graph::GraphRuntimeLimits routed_limits;
-    for (const auto& node : nodes) {
-        const auto inputs = static_cast<std::uint64_t>(std::max(0, node.num_input_ports));
-        const auto outputs = static_cast<std::uint64_t>(std::max(0, node.num_output_ports));
-        if (inputs > routed_limits.max_ports_per_node ||
-            outputs > routed_limits.max_ports_per_node) {
-            return reject(TimelineGraphAdmissionCode::PerNodePortLimitExceeded,
-                          std::max(inputs, outputs), routed_limits.max_ports_per_node, {},
-                          node.id);
-        }
-        if (!checked_add(graph_ports, inputs) || !checked_add(graph_ports, outputs) ||
-            !checked_add(routed_ports, inputs) || !checked_add(routed_ports, outputs) ||
-            (has_midi && !checked_add(routed_ports, 2)))
-            return reject(TimelineGraphAdmissionCode::TotalPortLimitExceeded,
-                          std::numeric_limits<std::uint64_t>::max(),
-                          routed_limits.max_total_ports);
-        node_specs.push_back({node.id, runtime_kind(node.type), static_cast<std::uint32_t>(inputs),
-                              static_cast<std::uint32_t>(outputs), has_midi ? 1u : 0u,
-                              has_midi ? 1u : 0u});
-    }
-    if (graph_ports > graph_limits.max_ports)
-        return reject(TimelineGraphAdmissionCode::TotalPortLimitExceeded, graph_ports,
-                      graph_limits.max_ports);
-    if (nodes.size() > routed_limits.max_nodes)
-        return reject(TimelineGraphAdmissionCode::NodeLimitExceeded, nodes.size(),
-                      routed_limits.max_nodes);
-    if (connections.size() > routed_limits.max_connections)
-        return reject(TimelineGraphAdmissionCode::ConnectionLimitExceeded, connections.size(),
-                      routed_limits.max_connections);
-    if (routed_ports > routed_limits.max_total_ports)
-        return reject(TimelineGraphAdmissionCode::TotalPortLimitExceeded, routed_ports,
-                      routed_limits.max_total_ports);
-
-    std::vector<graph::GraphRuntimeConnectionSpec> connection_specs;
-    connection_specs.reserve(connections.size());
-    for (const auto& connection : connections) {
-        graph::GraphRuntimeConnectionSpec spec;
-        spec.source_node = connection.source_node;
-        spec.source_port = connection.source_port;
-        spec.dest_node = connection.dest_node;
-        spec.dest_port = connection.dest_port;
-        spec.feedback = connection.feedback;
-        spec.kind = connection.midi ? graph::GraphRuntimeConnectionKind::Event
-                                    : graph::GraphRuntimeConnectionKind::Audio;
-        connection_specs.push_back(spec);
-    }
-    const auto plan = graph::build_graph_runtime_plan(node_specs, connection_specs);
-    if (!plan.ok())
-        return reject(TimelineGraphAdmissionCode::RoutedPlanRejected, plan.error.index, 0, {},
-                      plan.error.node_id);
-
-    // Eligibility is checked only after every exact capacity axis above. It is
-    // never used as a proxy for routed-plan size.
-    if (!signal_graph_topology_executor_eligible(nodes, connections))
-        return reject(TimelineGraphAdmissionCode::RoutedTopologyIneligible);
-    return {};
+    detail::TimelineGraphPreparedCandidate candidate(state_.read());
+    return build_candidate(program, routes, config,
+                           sample_rate_double(program.tempo_map().sample_rate()),
+                           maximum_block_size, candidate);
 }
 
 TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare(
@@ -367,18 +241,146 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare_impl(
     const playback::PlaybackProgram& program, std::span<const TimelineTrackGraphRoute> routes,
     const TimelineGraphBindingConfig& config, double sample_rate, int maximum_block_size,
     bool quiesced) {
+    detail::TimelineGraphPreparedCandidate candidate(state_.read());
+    const auto admission = build_candidate(program, routes, config, sample_rate,
+                                           maximum_block_size, candidate);
+    if (!admission)
+        return admission;
+
+    auto& previous = candidate.previous;
+    auto& next = candidate.next;
+    auto& edit = candidate.edit;
+
+    // Reserve publication capacity only after the disposable candidate passes.
+    state_.prepare_publish();
+    const bool dimensions_changed = previous &&
+        (previous->prepared_sample_rate != sample_rate ||
+         previous->prepared_max_block_size != static_cast<std::uint32_t>(maximum_block_size));
+    const auto prepared = quiesced
+        ? edit->prepare_quiesced(sample_rate, maximum_block_size)
+        : edit->prepare(sample_rate, maximum_block_size);
+    if (prepared == SignalGraph::PreparedTopologyEdit::Result::QuiescedRollbackFailed) {
+        state_.publish_prepared({});
+        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed,
+                      static_cast<std::uint64_t>(prepared));
+    }
+    if (prepared != SignalGraph::PreparedTopologyEdit::Result::Prepared)
+        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed,
+                      static_cast<std::uint64_t>(prepared));
+    if (!edit->routed_execution_ready(maximum_block_size)) {
+        edit.reset();
+        if (!graph_.is_prepared())
+            state_.publish_prepared({});
+        return reject(TimelineGraphAdmissionCode::RoutedPlanRejected);
+    }
+    if (before_graph_commit_hook_for_test_ != nullptr)
+        before_graph_commit_hook_for_test_(before_graph_commit_context_for_test_);
+    SignalGraph::PreparedTopologyEdit::Result committed;
+    try {
+        committed = edit->commit();
+    } catch (...) {
+        edit.reset();
+        if (!graph_.is_prepared())
+            state_.publish_prepared({});
+        throw;
+    }
+    if (committed == SignalGraph::PreparedTopologyEdit::Result::QuiescedRollbackFailed) {
+        state_.publish_prepared({});
+        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed,
+                      static_cast<std::uint64_t>(committed));
+    }
+    if (committed != SignalGraph::PreparedTopologyEdit::Result::Committed)
+        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed,
+                      static_cast<std::uint64_t>(committed));
+
+    next->graph_snapshot = edit->committed_execution_snapshot();
+    if (!next->graph_snapshot) {
+        // commit() advanced the graph already. This should be unreachable, but
+        // keeping the prior binding would pair its program/renderers with a
+        // different live graph, so fail closed if the invariant is ever broken.
+        state_.publish_prepared({});
+        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed);
+    }
+    if (quiesced && dimensions_changed) {
+        for (const auto& track : next->tracks) {
+            track->audio_renderer->reset();
+            track->note_renderer->reset();
+        }
+    }
+    if (before_binding_publish_hook_for_test_ != nullptr)
+        before_binding_publish_hook_for_test_(before_binding_publish_context_for_test_);
+
+    // The exact graph snapshot and exact program become visible through this one
+    // publication. An in-flight block therefore remains wholly old while the
+    // next block is wholly new, even if the graph's ordinary live slot advanced.
+    state_.publish_prepared(std::shared_ptr<const detail::TimelineGraphBindingState>(
+        std::move(next)));
+    return {};
+}
+
+TimelineGraphAdmission TimelineGraphPlaybackBinding::build_candidate(
+    const playback::PlaybackProgram& program,
+    std::span<const TimelineTrackGraphRoute> routes,
+    const TimelineGraphBindingConfig& config, double sample_rate,
+    int maximum_block_size,
+    detail::TimelineGraphPreparedCandidate& candidate) const {
     const double program_sample_rate = sample_rate_double(program.tempo_map().sample_rate());
     if (!std::isfinite(sample_rate) || sample_rate <= 0.0 || sample_rate != program_sample_rate)
         return reject(TimelineGraphAdmissionCode::SampleRateMismatch);
-    const auto admission = preflight(program, routes, config, maximum_block_size);
-    if (!admission)
-        return admission;
+    const auto& previous = candidate.previous;
+    if (config.audio_channels == 0 ||
+        config.maximum_note_events_per_track_per_block == 0 ||
+        config.audio_channels > config.audio_limits.max_channels ||
+        maximum_block_size <= 0 ||
+        static_cast<std::uint64_t>(maximum_block_size) >
+            config.audio_limits.max_block_frames ||
+        (previous &&
+         (config.audio_channels != previous->config.audio_channels ||
+          config.audio_limits != previous->config.audio_limits ||
+          config.maximum_note_events_per_track_per_block !=
+              previous->config.maximum_note_events_per_track_per_block)))
+        return reject(TimelineGraphAdmissionCode::InvalidConfiguration);
+    if (config.maximum_note_events_per_track_per_block >
+        maximum_graph_midi_events_per_block)
+        return reject(TimelineGraphAdmissionCode::NoteCapacityExceeded,
+                      config.maximum_note_events_per_track_per_block,
+                      maximum_graph_midi_events_per_block);
+    if (routes.size() != program.tracks().size())
+        return reject(TimelineGraphAdmissionCode::MissingTrack, routes.size(),
+                      program.tracks().size());
 
     std::vector<TimelineTrackGraphRoute> ordered(routes.begin(), routes.end());
     std::sort(ordered.begin(), ordered.end(),
               [](const auto& lhs, const auto& rhs) { return lhs.track_id < rhs.track_id; });
+    for (std::size_t index = 0; index < ordered.size(); ++index) {
+        const auto& route = ordered[index];
+        if (!route.track_id.valid())
+            return reject(TimelineGraphAdmissionCode::MissingTrack, 0, 0,
+                          route.track_id);
+        if (index != 0 && route.track_id == ordered[index - 1].track_id)
+            return reject(TimelineGraphAdmissionCode::DuplicateTrack, 2, 1,
+                          route.track_id);
+        if (program.find_track(route.track_id) == nullptr)
+            return reject(TimelineGraphAdmissionCode::MissingTrack, 0, 1,
+                          route.track_id);
+        const auto* destination = graph_.node(route.audio_destination);
+        if (destination == nullptr)
+            return reject(TimelineGraphAdmissionCode::MissingDestination, 0, 1,
+                          route.track_id, route.audio_destination);
+        const auto first =
+            static_cast<std::uint64_t>(route.audio_destination_first_port);
+        const auto last = first + config.audio_channels;
+        if (last >
+            static_cast<std::uint64_t>(std::max(0, destination->num_input_ports)))
+            return reject(TimelineGraphAdmissionCode::DestinationPortRange, last,
+                          std::max(0, destination->num_input_ports), route.track_id,
+                          route.audio_destination);
+        if (route.midi_destination != 0 &&
+            graph_.node(route.midi_destination) == nullptr)
+            return reject(TimelineGraphAdmissionCode::MissingDestination, 0, 1,
+                          route.track_id, route.midi_destination);
+    }
 
-    auto previous = state_.read();
     auto next = std::make_shared<detail::TimelineGraphBindingState>();
     next->config = config;
     next->program = std::make_shared<const playback::PlaybackProgram>(program);
@@ -387,9 +389,6 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare_impl(
     next->tracks.reserve(ordered.size());
     next->prepared_track_ids.reserve(ordered.size());
 
-    // Make the post-commit state publication non-allocating before the graph
-    // transaction begins. If this throws, neither graph nor binding changed.
-    state_.prepare_publish();
     auto edit = graph_.begin_prepared_topology_edit();
     if (previous) {
         for (const auto& track : previous->tracks) {
@@ -527,68 +526,12 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare_impl(
     }
 
     edit->set_canonical_executor_routing_enabled(true);
-    const bool dimensions_changed = previous &&
-        (previous->prepared_sample_rate != sample_rate ||
-         previous->prepared_max_block_size != static_cast<std::uint32_t>(maximum_block_size));
-    const auto prepared = quiesced
-        ? edit->prepare_quiesced(sample_rate, maximum_block_size)
-        : edit->prepare(sample_rate, maximum_block_size);
-    if (prepared == SignalGraph::PreparedTopologyEdit::Result::QuiescedRollbackFailed) {
-        state_.publish_prepared({});
-        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed,
-                      static_cast<std::uint64_t>(prepared));
-    }
-    if (prepared != SignalGraph::PreparedTopologyEdit::Result::Prepared)
-        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed,
-                      static_cast<std::uint64_t>(prepared));
-    if (!edit->routed_execution_ready(maximum_block_size)) {
-        edit.reset();
-        if (!graph_.is_prepared())
-            state_.publish_prepared({});
-        return reject(TimelineGraphAdmissionCode::RoutedPlanRejected);
-    }
-    if (before_graph_commit_hook_for_test_ != nullptr)
-        before_graph_commit_hook_for_test_(before_graph_commit_context_for_test_);
-    SignalGraph::PreparedTopologyEdit::Result committed;
-    try {
-        committed = edit->commit();
-    } catch (...) {
-        edit.reset();
-        if (!graph_.is_prepared())
-            state_.publish_prepared({});
-        throw;
-    }
-    if (committed == SignalGraph::PreparedTopologyEdit::Result::QuiescedRollbackFailed) {
-        state_.publish_prepared({});
-        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed,
-                      static_cast<std::uint64_t>(committed));
-    }
-    if (committed != SignalGraph::PreparedTopologyEdit::Result::Committed)
-        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed,
-                      static_cast<std::uint64_t>(committed));
-
-    next->graph_snapshot = edit->committed_execution_snapshot();
-    if (!next->graph_snapshot) {
-        // commit() advanced the graph already. This should be unreachable, but
-        // keeping the prior binding would pair its program/renderers with a
-        // different live graph, so fail closed if the invariant is ever broken.
-        state_.publish_prepared({});
-        return reject(TimelineGraphAdmissionCode::GraphPrepareFailed);
-    }
-    if (quiesced && dimensions_changed) {
-        for (const auto& track : next->tracks) {
-            track->audio_renderer->reset();
-            track->note_renderer->reset();
-        }
-    }
-    if (before_binding_publish_hook_for_test_ != nullptr)
-        before_binding_publish_hook_for_test_(before_binding_publish_context_for_test_);
-
-    // The exact graph snapshot and exact program become visible through this one
-    // publication. An in-flight block therefore remains wholly old while the
-    // next block is wholly new, even if the graph's ordinary live slot advanced.
-    state_.publish_prepared(std::shared_ptr<const detail::TimelineGraphBindingState>(
-        std::move(next)));
+    const auto candidate_admission =
+        admit_candidate(graph_, edit->nodes(), edit->connections());
+    if (!candidate_admission)
+        return candidate_admission;
+    candidate.next = std::move(next);
+    candidate.edit = std::move(edit);
     return {};
 }
 

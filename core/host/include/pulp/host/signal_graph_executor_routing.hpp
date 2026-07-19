@@ -178,6 +178,31 @@ struct SignalGraphExecutorRouting {
 bool signal_graph_topology_executor_eligible(std::span<const GraphNode> nodes,
                                               std::span<const Connection> connections);
 
+enum class ExecutorTopologyValidationCode : std::uint8_t {
+    Accepted,
+    TopologyIneligible,
+    NodeLimitExceeded,
+    ConnectionLimitExceeded,
+    PerNodePortLimitExceeded,
+    TotalPortLimitExceeded,
+    PlanRejected,
+};
+
+struct ExecutorTopologyValidation {
+    ExecutorTopologyValidationCode code = ExecutorTopologyValidationCode::Accepted;
+    std::uint64_t actual = 0;
+    std::uint64_t limit = 0;
+    std::size_t index = 0;
+    NodeId node = 0;
+    constexpr explicit operator bool() const noexcept {
+        return code == ExecutorTopologyValidationCode::Accepted;
+    }
+};
+
+ExecutorTopologyValidation validate_signal_graph_executor_topology(
+    std::span<const GraphNode> nodes, std::span<const Connection> connections,
+    graph::GraphRuntimeLimits limits = {});
+
 // As above, plus requiring the graph be prepared (a live snapshot exists).
 bool signal_graph_executor_eligible(const SignalGraph& graph);
 

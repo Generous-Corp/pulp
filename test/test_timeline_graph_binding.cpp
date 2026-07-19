@@ -593,6 +593,15 @@ TEST_CASE("timeline graph binding reports exact routed capacity axes") {
     TimelineGraphPlaybackBinding binding(graph, programs.store);
     const std::array routes{TimelineTrackGraphRoute{{10}, output_node, 0, 0}};
 
+    const auto node_count = graph.nodes().size();
+    const auto connection_count = graph.connections().size();
+    const auto custom_type_count = graph.custom_node_type_count();
+    REQUIRE(binding.preflight(*pinned, routes, config(), 64));
+    REQUIRE(graph.nodes().size() == node_count);
+    REQUIRE(graph.connections().size() == connection_count);
+    REQUIRE(graph.custom_node_type_count() == custom_type_count);
+    REQUIRE(binding.audio_node_for({10}) == 0);
+
     SignalGraph::GraphLimits graph_limits;
     graph_limits.max_nodes = 2;
     graph.set_limits(graph_limits);

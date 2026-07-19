@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -260,6 +261,64 @@ bool connection_eligible(const Connection& /*c*/) noexcept {
     return true;
 }
 
+struct ExecutorPlanShape {
+    bool has_midi = false;
+    std::vector<gr::GraphRuntimeNodeSpec> nodes;
+    std::vector<gr::GraphRuntimeConnectionSpec> connections;
+};
+
+ExecutorPlanShape make_executor_plan_shape(
+    std::span<const GraphNode> nodes,
+    std::span<const Connection> connections) {
+    ExecutorPlanShape shape;
+    shape.has_midi = std::any_of(nodes.begin(), nodes.end(), [](const auto& node) {
+        return node.type == NodeType::MidiInput || node.type == NodeType::MidiOutput;
+    }) || std::any_of(connections.begin(), connections.end(), [](const auto& connection) {
+        return connection.midi;
+    });
+
+    shape.nodes.reserve(nodes.size());
+    for (const auto& node : nodes) {
+        gr::GraphRuntimeNodeSpec spec{
+            node.id,
+            map_kind(node.type),
+            static_cast<std::uint32_t>(std::max(0, node.num_input_ports)),
+            static_cast<std::uint32_t>(std::max(0, node.num_output_ports)),
+        };
+        if (shape.has_midi) {
+            spec.event_input_ports = 1;
+            spec.event_output_ports = 1;
+        }
+        spec.persistent_output =
+            node.type == NodeType::Plugin || node.type == NodeType::Custom;
+        shape.nodes.push_back(spec);
+    }
+
+    shape.connections.reserve(connections.size());
+    for (const auto& connection : connections) {
+        const ConnectionClass cls = classify(connection);
+        gr::GraphRuntimeConnectionSpec spec;
+        spec.source_node = connection.source_node;
+        spec.source_port = connection.source_port;
+        spec.dest_node = connection.dest_node;
+        spec.dest_port = connection.dest_port;
+        spec.feedback = cls.feedback;
+        spec.kind = cls.kind;
+        if (cls.kind == gr::GraphRuntimeConnectionKind::Automation) {
+            spec.automation.param_id = connection.automation_param_id;
+            spec.automation.range_lo = connection.automation_range_lo;
+            spec.automation.range_hi = connection.automation_range_hi;
+            spec.automation.smoothing_ms = connection.automation_smoothing_ms;
+            spec.automation.mix_add = connection.automation_mix == AutomationMix::Add;
+            spec.automation.audio_rate = cls.audio_rate;
+            spec.automation.bounds_lo = connection.automation_range_lo;
+            spec.automation.bounds_hi = connection.automation_range_hi;
+        }
+        shape.connections.push_back(spec);
+    }
+    return shape;
+}
+
 } // namespace
 
 bool signal_graph_topology_executor_eligible(std::span<const GraphNode> nodes,
@@ -275,6 +334,46 @@ bool signal_graph_topology_executor_eligible(std::span<const GraphNode> nodes,
     // axis for sparse two-point automation, one for dense audio-rate), so there is
     // no per-node parameter cap to fail closed on — any count routes.
     return true;
+}
+
+ExecutorTopologyValidation validate_signal_graph_executor_topology(
+    std::span<const GraphNode> nodes, std::span<const Connection> connections,
+    graph::GraphRuntimeLimits limits) {
+    if (nodes.size() > limits.max_nodes)
+        return {ExecutorTopologyValidationCode::NodeLimitExceeded, nodes.size(),
+                limits.max_nodes};
+    if (connections.size() > limits.max_connections)
+        return {ExecutorTopologyValidationCode::ConnectionLimitExceeded,
+                connections.size(), limits.max_connections};
+
+    auto shape = make_executor_plan_shape(nodes, connections);
+    std::uint64_t total_ports = 0;
+    for (const auto& node : nodes) {
+        const auto inputs = static_cast<std::uint64_t>(std::max(0, node.num_input_ports));
+        const auto outputs = static_cast<std::uint64_t>(std::max(0, node.num_output_ports));
+        if (inputs > limits.max_ports_per_node || outputs > limits.max_ports_per_node)
+            return {ExecutorTopologyValidationCode::PerNodePortLimitExceeded,
+                    std::max(inputs, outputs), limits.max_ports_per_node, 0, node.id};
+        const auto event_ports = shape.has_midi ? std::uint64_t{2} : std::uint64_t{0};
+        if (inputs > std::numeric_limits<std::uint64_t>::max() - total_ports ||
+            outputs > std::numeric_limits<std::uint64_t>::max() - total_ports - inputs ||
+            event_ports > std::numeric_limits<std::uint64_t>::max() - total_ports - inputs - outputs)
+            return {ExecutorTopologyValidationCode::TotalPortLimitExceeded,
+                    std::numeric_limits<std::uint64_t>::max(), limits.max_total_ports};
+        total_ports += inputs + outputs + event_ports;
+    }
+    if (total_ports > limits.max_total_ports)
+        return {ExecutorTopologyValidationCode::TotalPortLimitExceeded, total_ports,
+                limits.max_total_ports};
+
+    const auto plan = graph::build_graph_runtime_plan(
+        shape.nodes, shape.connections, limits);
+    if (!plan.ok())
+        return {ExecutorTopologyValidationCode::PlanRejected, plan.error.index, 0,
+                plan.error.index, plan.error.node_id};
+    if (!signal_graph_topology_executor_eligible(nodes, connections))
+        return {ExecutorTopologyValidationCode::TopologyIneligible};
+    return {};
 }
 
 bool signal_graph_executor_eligible(const SignalGraph& graph) {
@@ -352,49 +451,15 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
     // count so &custom_ctx->back() stays valid for every binding's user_data.
     if (custom_ctx != nullptr) custom_ctx->reserve(custom_count);
 
-    // Whether this graph carries any MIDI. Only then do nodes declare event
-    // ports (one in + one out, port 0 — connect_midi routes the whole per-node
-    // MIDI stream on port 0), so an audio-only graph's plan is byte-identical to
-    // before MIDI support and never inflates the total-port budget.
-    bool has_midi = false;
-    for (const auto& node : nodes) {
-        if (node.type == NodeType::MidiInput || node.type == NodeType::MidiOutput) {
-            has_midi = true;
-            break;
-        }
-    }
-    if (!has_midi) {
-        for (const auto& c : connections) {
-            if (c.midi) { has_midi = true; break; }
-        }
-    }
+    auto shape = make_executor_plan_shape(nodes, connections);
 
-    // Node specs in nodes() order; the plan resolves connections by NodeId, so
-    // bindings just need to match plan.nodes order (== spec order). Plugin output
-    // regions are pinned persistent so a non-full-writing plugin keeps its stale
-    // tail across blocks, matching SignalGraph's persistent per-node buffer.
-    std::vector<gr::GraphRuntimeNodeSpec> node_specs;
-    node_specs.reserve(nodes.size());
-    for (const auto& node : nodes) {
-        gr::GraphRuntimeNodeSpec spec{
-            node.id,
-            map_kind(node.type),
-            static_cast<std::uint32_t>(std::max(0, node.num_input_ports)),
-            static_cast<std::uint32_t>(std::max(0, node.num_output_ports)),
-        };
-        if (has_midi) {
-            spec.event_input_ports = 1;
-            spec.event_output_ports = 1;
-        }
-        // Pin a persistent output region for any node that may NOT fully
-        // overwrite its output each block, so a partial writer keeps its own
-        // stale tail across blocks instead of a recycled slot's data — matching
-        // SignalGraph's per-node persistent output buffer. Hosted plugins and
-        // Custom callbacks both qualify (neither is contractually required to
-        // write every output sample); the walk reuses an uncleared per-node
-        // buffer for both.
-        spec.persistent_output =
-            node.type == NodeType::Plugin || node.type == NodeType::Custom;
+    // Node specs stay in nodes() order; the plan resolves connections by NodeId,
+    // so bindings just need to match plan.nodes order (== spec order). Plugin
+    // output regions are pinned persistent so a non-full-writing plugin keeps its
+    // stale tail across blocks, matching SignalGraph's persistent per-node buffer.
+    for (std::size_t index = 0; index < nodes.size(); ++index) {
+        const auto& node = nodes[index];
+        auto& spec = shape.nodes[index];
         // Carry the node's reported latency so the buffer assignment can derive
         // per-connection delay compensation. Resolve it from the SAME slot the
         // legacy walk's latency pass uses (plugin_for == the compiled snapshot's
@@ -409,37 +474,21 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                 spec.latency_samples = static_cast<std::uint32_t>(std::max(0, lat));
             }
         }
-        node_specs.push_back(spec);
     }
 
     // Connection specs in connections() order, so a dest port's inbound edges
     // are summed in the SAME order SignalGraph accumulates them (float add is
     // non-associative). Feedback flag carried through; a MIDI edge becomes an
     // event connection the executor routes via its MIDI gather.
-    std::vector<gr::GraphRuntimeConnectionSpec> conn_specs;
-    conn_specs.reserve(connections.size());
-    for (const auto& c : connections) {
-        // Single classification surface: the lane (audio / event / automation),
-        // the feedback flag, and the dense-vs-sparse automation form all come
-        // from classify(), the same helper the legacy reference walk uses, so the
-        // two routing surfaces can never disagree about a Connection's lane.
-        const ConnectionClass cls = classify(c);
-        gr::GraphRuntimeConnectionSpec spec{
-            c.source_node, c.source_port, c.dest_node, c.dest_port,
-            cls.feedback, cls.kind,
-        };
+    for (std::size_t index = 0; index < connections.size(); ++index) {
+        const auto& c = connections[index];
+        auto& spec = shape.connections[index];
         // A parameter-automation edge — sparse two-point (`automation`) or dense
         // audio-rate (`audio_rate_modulation`) — carries its mapping. Resolve the
         // destination plugin's parameter bounds OFF the audio thread (so the
         // realtime gather's Add-mix clamp matches the legacy walk's
         // bounds_for_param without a plugin call).
-        if (cls.kind == gr::GraphRuntimeConnectionKind::Automation) {
-            spec.automation.param_id = c.automation_param_id;
-            spec.automation.range_lo = c.automation_range_lo;
-            spec.automation.range_hi = c.automation_range_hi;
-            spec.automation.smoothing_ms = c.automation_smoothing_ms;
-            spec.automation.mix_add = c.automation_mix == AutomationMix::Add;
-            spec.automation.audio_rate = cls.audio_rate;
+        if (spec.kind == gr::GraphRuntimeConnectionKind::Automation) {
             // Default bounds to the mapped range, then refine to the plugin's
             // declared parameter bounds if resolvable (matching bounds_for_param).
             spec.automation.bounds_lo = c.automation_range_lo;
@@ -462,10 +511,9 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                 }
             }
         }
-        conn_specs.push_back(spec);
     }
 
-    auto plan = gr::build_graph_runtime_plan(node_specs, conn_specs);
+    auto plan = gr::build_graph_runtime_plan(shape.nodes, shape.connections);
     if (!plan.ok()) return false;
 
     // Bindings in plan.nodes order (build_graph_runtime_plan preserves spec

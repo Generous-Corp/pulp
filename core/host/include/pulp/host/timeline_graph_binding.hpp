@@ -1,7 +1,6 @@
 #pragma once
 
 #include <pulp/audio/rt_safety_contract.hpp>
-#include <pulp/graph/graph_runtime_plan.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/note_renderer.hpp>
@@ -19,6 +18,7 @@ namespace detail {
 struct TimelineGraphSharedBlockState;
 struct TimelineGraphBoundTrack;
 struct TimelineGraphBindingState;
+struct TimelineGraphPreparedCandidate;
 } // namespace detail
 
 /// One phase-1 track's lowering into the desktop SignalGraph adapter.
@@ -160,6 +160,12 @@ class TimelineGraphPlaybackBinding {
     playback::RendererCarryState renderer_state_for(timeline::ItemId track_id) const noexcept;
 
   private:
+    TimelineGraphAdmission build_candidate(
+        const playback::PlaybackProgram& program,
+        std::span<const TimelineTrackGraphRoute> routes,
+        const TimelineGraphBindingConfig& config, double sample_rate,
+        int maximum_block_size,
+        detail::TimelineGraphPreparedCandidate& candidate) const;
     TimelineGraphAdmission prepare_impl(
         const playback::PlaybackProgram& program,
         std::span<const TimelineTrackGraphRoute> routes,
