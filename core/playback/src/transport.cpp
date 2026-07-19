@@ -50,6 +50,24 @@ timebase::BarPosition bar_at_tick(timebase::TickPosition tick,
 
 } // namespace
 
+bool valid_transport_ranges(const TransportSnapshot& transport) noexcept {
+    if (transport.tempo_map == nullptr || transport.frame_count == 0 ||
+        transport.frame_count >
+            static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) ||
+        transport.range_count == 0 || transport.range_count > transport.ranges.size())
+        return false;
+    std::uint64_t expected_offset = 0;
+    for (std::uint8_t index = 0; index < transport.range_count; ++index) {
+        const auto& range = transport.ranges[index];
+        if (range.frame_count == 0 || range.sample_offset != expected_offset)
+            return false;
+        expected_offset += range.frame_count;
+        if (expected_offset > transport.frame_count || (index != 0 && !range.discontinuity))
+            return false;
+    }
+    return expected_offset == transport.frame_count;
+}
+
 TransportError MasterTransport::prepare(const timebase::CompiledTempoMap& tempo_map,
                                         const MasterTransportConfig& config) noexcept {
     reset();
