@@ -820,14 +820,23 @@ per-block event coalescing belong to `pulp::playback`; neither concern is folded
 into the curve container.
 
 `automation_lane.hpp` provides an unattached immutable binding from one curve
-to a format-neutral device identity and opaque 32-bit parameter ID. Construction
-validates only the lane and device IDs via `ItemId::valid()` (neither zero nor
-the exhausted `UINT64_MAX` sentinel): it does not prove that the device exists
-in a Project, register global identity, clamp plain-domain values, or consult
-plugin metadata. The lane is not yet attached to a Track, persisted, reachable
-through commands or `DocumentSession`, or delivered to a host graph.
+to a format-neutral device-placement identity and opaque 32-bit parameter ID.
+Construction validates only the lane and placement IDs via `ItemId::valid()`
+(neither zero nor the exhausted `UINT64_MAX` sentinel): it does not prove that
+the placement exists in a Project, register global identity, clamp plain-domain
+values, or consult plugin metadata. The lane is not yet attached to a Track,
+persisted, reachable through commands or `DocumentSession`, or delivered to a
+host graph.
 `pulp::playback` can compile and exercise this standalone value without
 implying document attachment.
+
+`device_placement.hpp` defines the durable identity of one logical placement in
+a Track-owned device chain. The chain preserves authored processing order
+through immutable clip edits, persistence, and ID remapping. A placement is
+identity/order-only: runtime instances, graph nodes, plugin formats, paths, and
+platform metadata stay outside Timeline. Durable device definition and
+configuration needed for project save/load will be future document-owned state
+keyed by placement identity.
 
 `assets.hpp` separates durable SHA-256 content identity from optional resolution
 hints and alternate representations. `schema_registry.hpp` provides an explicit
@@ -839,9 +848,9 @@ exact validated bytes for lossless re-save. `SerializedSnapshot` flags those
 opaque objects so callers can surface compatibility risk. This is snapshot JSON
 only; it does not read or write ZIP/package containers.
 
-This initial surface intentionally excludes durable journal sinks, package I/O,
+This surface intentionally excludes durable journal sinks, package I/O,
 playback, document-attached automation lanes and delivery, launch slots, takes,
-nesting, devices, routing, and UI.
+nesting, device implementation and routing, and UI.
 
 ## playback
 

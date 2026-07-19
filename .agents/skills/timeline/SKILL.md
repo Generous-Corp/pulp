@@ -23,6 +23,12 @@ invariants.
 - Tracks are sparse non-overlapping lanes. Their canonical clip order is
   `(anchor, start, ItemId)`. Timeline and ID indexes are persistent AVL trees;
   `replace_clip()` path-copies only search paths and shares untouched subtrees.
+- A Track owns an ordered `DevicePlacement` chain. Placements contain only a
+  durable `ItemId`; chain order is semantic, and clip edits retain the exact
+  immutable chain storage. Runtime instances, graph nodes, plugin formats,
+  paths, and platform metadata do not belong in Timeline. Durable device
+  definition and configuration will be future document-owned state keyed by
+  placement identity.
 - `ClipTimeAnchor::Musical` follows tempo in ticks. `Absolute` uses
   `SamplePosition`, an integer sample count, and a normalized `RationalRate`,
   remaining fixed as tempo changes. Phase 1 rejects mixed anchors within one
@@ -35,11 +41,12 @@ invariants.
   segments retain the left value until the next point. `value_at()` is for
   control-thread or compile-time queries, never the audio-thread scheduler.
 - `AutomationLane` is an unattached immutable value that binds one curve to a
-  format-neutral device `ItemId` and opaque 32-bit parameter ID. It validates
-  the two value identities only; the device need not exist in a Project, and
-  the lane is not registered, persisted, command-addressable, or attached to a
-  playable Project yet. Playback can compile and exercise the standalone value;
-  document ownership and host delivery remain separate later contracts.
+  format-neutral device-placement `ItemId` and opaque 32-bit parameter ID. It
+  validates the two value identities only; the placement need not exist in a
+  Project, and the lane is not registered, persisted, command-addressable, or
+  attached to a playable Project yet. Playback can compile and exercise the
+  standalone value; document ownership and host delivery remain separate later
+  contracts.
 - Keep automation responsibilities separated: curve data belongs in
   `automation_curve.*`, logical target binding belongs in `automation_lane.*`,
   RT cursor/coalescing belongs in `core/playback`, and graph delivery belongs in
@@ -56,6 +63,10 @@ invariants.
 - Schema-v1 project persistence writes canonical `tempo_map` and `meter_map`
   arrays. BPM is stored by exact IEEE-754 bits; older v1 snapshots without map
   fields remain readable as 120 BPM and 4/4, then canonicalize on save.
+- Track schema v2 owns the required device-chain field. Its v1 upgrade adds an
+  empty chain; its downgrade succeeds only for an empty chain and fails rather
+  than discard placement identity. Each placement remains a separately versioned
+  structural envelope.
 - Build a `SchemaRegistry` explicitly with `SchemaRegistryBuilder`; there is no
   global mutable registry. Registered content codecs are typed, `noexcept`, and
   own no hidden `ItemId`s in Phase 1. Migration callbacks must return and verify
@@ -116,11 +127,11 @@ invariants.
 
 ## Scope boundary
 
-This slice does not own a durable `JournalSink`, package/container I/O,
+This subsystem does not own a durable `JournalSink`, package/container I/O,
 publication, playback, document-attached automation lanes or delivery, launch
-slots, takes, nesting, devices, routing, audio, format adapters, or UI. Add
-those in their scheduled slices instead of widening the command and persistence
-core opportunistically.
+slots, takes, nesting, device implementations, routing, audio, format adapters,
+or UI. Add those in their owning modules instead of widening the command and
+persistence core opportunistically.
 
 ## Validation
 
