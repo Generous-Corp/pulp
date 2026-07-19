@@ -116,7 +116,9 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/timeline/src/model.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_registry.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_decode.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_encode.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/structural_registry_validation.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/undo.cpp
     ${_PULP_WCLAP_ROOT}/core/playback/src/audio_renderer.cpp

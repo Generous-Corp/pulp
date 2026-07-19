@@ -9,7 +9,9 @@ add_library(pulp-timeline
     src/undo.cpp
     src/schema_json.cpp
     src/schema_registry.cpp
-    src/serialize.cpp
+    src/serialize_decode.cpp
+    src/serialize_encode.cpp
+    src/structural_registry_validation.cpp
 )
 add_library(pulp::timeline ALIAS pulp-timeline)
 

@@ -58,7 +58,9 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/model.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_registry.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_encode.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/structural_registry_validation.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/undo.cpp)
 target_link_libraries(pulp-test-timeline-no-exceptions PRIVATE
