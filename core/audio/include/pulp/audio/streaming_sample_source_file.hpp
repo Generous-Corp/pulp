@@ -87,7 +87,7 @@ inline FileFrameReader make_retained_memory_mapped_frame_reader(
                            destinations = std::vector<float*>(channels)](
                               std::uint64_t start_frame, BufferView<float> dest,
                               std::uint64_t frames,
-                              std::stop_token stop_token) mutable -> std::uint64_t {
+                              FrameReaderStopToken stop_token) mutable -> std::uint64_t {
         constexpr std::uint64_t kStopCheckFrames = 16384;
         if (start_frame >= total)
             return 0;

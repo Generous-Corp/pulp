@@ -159,7 +159,7 @@ public:
                     std::uint64_t start,
                     BufferView<float> destination,
                     std::uint64_t frames,
-                    std::stop_token) {
+                    FrameReaderStopToken) {
                     return reader(start, destination, frames);
                 },
                 .stop_mode = FrameReaderStopMode::JoinOnly,
@@ -174,7 +174,7 @@ public:
             [read = binding.read](std::uint64_t start,
                                   BufferView<float> destination,
                                   std::uint64_t frames) {
-                return read(start, destination, frames, std::stop_token{});
+                return read(start, destination, frames, FrameReaderStopToken{});
             };
         if (!decode_.add_source(config.token,
                                 config.channels,

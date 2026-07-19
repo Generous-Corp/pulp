@@ -59,10 +59,12 @@ return source.prepare(config, std::move(file.binding));
 on a control or loading thread. `release()` stops and joins the worker before
 freeing storage. Destruction calls `release()`. Legacy `FrameReader` callbacks
 are join-only: teardown waits for an entered call to return. A
-`FrameReaderBinding` marked `Cooperative` receives a `std::stop_token`; mapped
-ranged WAV/AIFF bindings check it between bounded read chunks so teardown can
-request prompt cooperative exit. Decode-once fallbacks remain honestly marked
-`JoinOnly` because their initial full decode cannot be interrupted.
+`FrameReaderBinding` marked `Cooperative` receives a `FrameReaderStopToken`.
+Readers check `stop_requested()` between bounded read chunks or bounded waits so
+teardown can request prompt cooperative exit. The token is callback-scoped and
+must not be retained after the reader returns. Decode-once fallbacks remain
+honestly marked `JoinOnly` because their initial full decode cannot be
+interrupted.
 
 ## Underruns
 

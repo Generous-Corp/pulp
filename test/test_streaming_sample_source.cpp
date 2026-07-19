@@ -305,19 +305,17 @@ void verify_cooperative_reader_teardown(bool destroy_source) {
     binding.read = [owner, gate](std::uint64_t start,
                                  BufferView<float> destination,
                                  std::uint64_t frames,
-                                 std::stop_token stop_token) -> std::uint64_t {
+                                 pulp::audio::FrameReaderStopToken stop_token)
+        -> std::uint64_t {
         if (start >= 8) {
             std::unique_lock lock(gate->mutex);
             if (gate->block_tail_read) {
                 gate->tail_read_entered = true;
                 gate->condition.notify_all();
-                std::stop_callback notify_stop(stop_token, [&gate] {
-                    gate->condition.notify_all();
-                });
-                gate->condition.wait(lock, [&gate, stop_token] {
-                    return gate->allow_tail_read_to_return ||
-                           stop_token.stop_requested();
-                });
+                while (!gate->allow_tail_read_to_return &&
+                       !stop_token.stop_requested()) {
+                    gate->condition.wait_for(lock, std::chrono::milliseconds(1));
+                }
             }
         }
 

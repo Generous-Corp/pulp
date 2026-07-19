@@ -12,7 +12,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <stop_token>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -246,7 +245,8 @@ public:
             }
             if (sources_) {
                 for (std::uint32_t index = 0; index < config_.source_capacity; ++index) {
-                    sources_[index].active_stop_source.request_stop();
+                    sources_[index].active_stop_requested.store(
+                        true, std::memory_order_release);
                 }
             }
             for (std::uint32_t index = 0; index < config_.worker_count; ++index) {
@@ -282,7 +282,7 @@ public:
                                   std::uint64_t start,
                                   BufferView<float> destination,
                                   std::uint64_t frames,
-                                  std::stop_token) {
+                                  FrameReaderStopToken) {
                                   return reader(start, destination, frames);
                               },
                               .stop_mode = FrameReaderStopMode::JoinOnly,
@@ -313,6 +313,7 @@ public:
             source.last_reservation_serial = 0;
             source.outstanding_jobs = 0;
             source.canceled.store(false, std::memory_order_relaxed);
+            source.active_stop_requested.store(false, std::memory_order_relaxed);
             source.registered = true;
             return {SampleStreamDecodeSourceAddStatus::Added, source.worker_index};
         }
@@ -379,7 +380,7 @@ public:
         }
         if (source->canceled.exchange(true, std::memory_order_acq_rel))
             return SampleStreamDecodeCancelStatus::AlreadyCanceled;
-        source->active_stop_source.request_stop();
+        source->active_stop_requested.store(true, std::memory_order_release);
         if (source->outstanding_jobs == 0) clear_source(*source);
         return SampleStreamDecodeCancelStatus::Canceled;
     }
@@ -521,7 +522,7 @@ private:
         std::uint32_t channels = 0;
         std::atomic<bool> canceled{false};
         std::atomic<std::uint32_t> active_reader_calls{0};
-        std::stop_source active_stop_source;
+        std::atomic<bool> active_stop_requested{false};
         bool registered = false;
         std::uint32_t outstanding_jobs = 0;
     };
@@ -590,7 +591,7 @@ private:
         source.channels = 0;
         source.canceled.store(false, std::memory_order_relaxed);
         source.active_reader_calls.store(0, std::memory_order_relaxed);
-        source.active_stop_source = std::stop_source{};
+        source.active_stop_requested.store(false, std::memory_order_relaxed);
         source.outstanding_jobs = 0;
         source.registered = false;
     }
@@ -636,7 +637,7 @@ private:
                         internal->job.start_frame,
                         destination,
                         internal->job.frame_count,
-                        source.active_stop_source.get_token());
+                        FrameReaderStopToken{source.active_stop_requested});
                     if (decoded > internal->job.frame_count) {
                         decoded = 0;
                         reader_error = true;

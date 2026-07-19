@@ -190,7 +190,7 @@ bool SamplerStreamingRuntime::prepare_streamed_preloads(PreparedStreamedFile& pr
         prepared.preload_leases[member] = std::move(reservation.lease);
         prepared.preloads[member].resize(file.channels, static_cast<std::size_t>(preload_frames));
         if (file.binding.read(0, prepared.preloads[member].view(), preload_frames,
-                              std::stop_token{}) != preload_frames) {
+                              audio::FrameReaderStopToken{}) != preload_frames) {
             result.status = PulpSamplerLoadStatus::PreloadReadFailed;
             return false;
         }
@@ -392,7 +392,8 @@ SamplerStreamingRuntime::publish_streamed_file(PreparedStreamedFile& prepared) {
         auto reader = std::move(files[0].binding.read);
         files[0].binding.read = [this, reader = std::move(reader)](
                                     std::uint64_t start, audio::BufferView<float> destination,
-                                    std::uint64_t frames, std::stop_token stop_token) {
+                                    std::uint64_t frames,
+                                    audio::FrameReaderStopToken stop_token) {
             reverse_decode_entered_for_test_.store(true, std::memory_order_release);
             while (!release_reverse_decode_for_test_.load(std::memory_order_acquire) &&
                    service_running_.load(std::memory_order_acquire) &&
@@ -421,7 +422,8 @@ SamplerStreamingRuntime::publish_streamed_file(PreparedStreamedFile& prepared) {
             files[member].binding.read = [this, reader = std::move(reader)](
                                              std::uint64_t start,
                                              audio::BufferView<float> destination,
-                                             std::uint64_t frames, std::stop_token stop_token) {
+                                             std::uint64_t frames,
+                                             audio::FrameReaderStopToken stop_token) {
                 if (fail_next_stream_decode_for_test_.exchange(false, std::memory_order_acq_rel)) {
                     return std::uint64_t{0};
                 }
