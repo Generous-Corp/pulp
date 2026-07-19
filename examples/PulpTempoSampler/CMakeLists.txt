@@ -19,6 +19,14 @@ pulp_add_plugin(PulpTempoSampler
     ACCEPTS_MIDI
 )
 
+include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpBundleRelocatable.cmake)
+foreach(_pts_target PulpTempoSampler_CLAP PulpTempoSampler_VST3 PulpTempoSampler_AU PulpTempoSampler_Standalone)
+    if(TARGET ${_pts_target})
+        pulp_make_bundle_relocatable(${_pts_target})
+        pulp_validate_bundle_relocatable(${_pts_target})
+    endif()
+endforeach()
+
 # Headless editor screenshot. macOS-only dev tool: it uses the
 # CoreGraphics/Skia raster capture path and would otherwise pull the Linux
 # windowing stack (SDL3/X11/Wayland) into the advisory Linux lane.
