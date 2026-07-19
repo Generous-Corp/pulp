@@ -140,9 +140,10 @@ Patterns that are easy to get wrong:
    structured access.
 5. **Interrupt a WebSocket reader before releasing its socket.**
    `WebSocketChannel::close()` uses `TcpStream::shutdown()` to wake blocking
-   reads. Destruction then joins the reader before closing the socket handle.
-   Preserve that order; closing the handle while the reader is inside
-   `receive()` races with descriptor invalidation.
+   reads and mark the stream closed. Destruction then joins the reader before
+   releasing the socket handle with `close()`. Preserve that order; closing the
+   handle while the reader is inside `receive()` races with descriptor
+   invalidation.
 6. **Do not destroy a WebSocket channel from an inline callback.** With no
    executor, callbacks run on the reader thread. They may call `close()`, but
    must defer destruction until after the callback returns; otherwise the

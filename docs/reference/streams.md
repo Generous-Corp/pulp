@@ -64,10 +64,12 @@ AsyncStream io(std::move(tcp));
 io.start();
 ```
 
-`shutdown()` interrupts blocking socket I/O without invalidating the socket
-handle. It is intended for coordinated reader teardown: signal shutdown, join
-the reader, then call `close()` to release the handle. `is_open()` may be read
-concurrently with normal reads and writes, including peer-EOF transitions.
+`shutdown()` marks the stream closed and interrupts blocking socket I/O without
+releasing the socket handle. It is intended for coordinated reader teardown:
+signal shutdown, join the reader, then call `close()` to release the handle.
+After shutdown, `is_open()` is false and new reads or writes return `Closed`.
+`is_open()` may be read concurrently with normal reads and writes, including
+peer-EOF transitions.
 
 ### `HttpStream`
 
