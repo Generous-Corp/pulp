@@ -201,6 +201,7 @@ WebSocketChannel::WebSocketChannel(std::unique_ptr<TcpStream> tcp, Role role,
 WebSocketChannel::~WebSocketChannel() {
     close();
     if (reader_.joinable()) reader_.join();
+    if (tcp_) tcp_->close();
 }
 
 void WebSocketChannel::on_message(MessageCallback cb) {
@@ -225,10 +226,7 @@ void WebSocketChannel::close() {
         fire_closed();
         return;
     }
-    // Best-effort send a 1000 Normal Closure frame; ignore failures.
-    std::uint8_t close_payload[2] = {0x03, 0xE8};  // 1000 big-endian
-    send_frame(kOpClose, close_payload, 2);
-    if (tcp_) tcp_->close();
+    if (tcp_) tcp_->shutdown();
     fire_closed();
 }
 
@@ -320,7 +318,7 @@ void WebSocketChannel::reader_main() {
     while (open_.load()) {
         std::uint8_t hdr[2];
         if (!read_exactly(*tcp_, hdr, 2)) {
-            fire_error("read header failed");
+            if (open_.exchange(false)) fire_error("read header failed");
             break;
         }
         const bool fin = (hdr[0] & 0x80) != 0;
@@ -330,11 +328,17 @@ void WebSocketChannel::reader_main() {
 
         if (len == 126) {
             std::uint8_t ext[2];
-            if (!read_exactly(*tcp_, ext, 2)) { fire_error("read len16"); break; }
+            if (!read_exactly(*tcp_, ext, 2)) {
+                if (open_.exchange(false)) fire_error("read len16");
+                break;
+            }
             len = (std::uint64_t(ext[0]) << 8) | ext[1];
         } else if (len == 127) {
             std::uint8_t ext[8];
-            if (!read_exactly(*tcp_, ext, 8)) { fire_error("read len64"); break; }
+            if (!read_exactly(*tcp_, ext, 8)) {
+                if (open_.exchange(false)) fire_error("read len64");
+                break;
+            }
             len = 0;
             for (int i = 0; i < 8; ++i) len = (len << 8) | ext[i];
         }
@@ -347,14 +351,14 @@ void WebSocketChannel::reader_main() {
         std::array<std::uint8_t, 4> mask_key{};
         if (masked) {
             if (!read_exactly(*tcp_, mask_key.data(), 4)) {
-                fire_error("read mask");
+                if (open_.exchange(false)) fire_error("read mask");
                 break;
             }
         }
 
         std::vector<std::uint8_t> payload(len);
         if (len > 0 && !read_exactly(*tcp_, payload.data(), len)) {
-            fire_error("read payload");
+            if (open_.exchange(false)) fire_error("read payload");
             break;
         }
         if (masked) {

@@ -64,6 +64,13 @@ AsyncStream io(std::move(tcp));
 io.start();
 ```
 
+`shutdown()` marks the stream closed and interrupts blocking socket I/O without
+releasing the socket handle. It is intended for coordinated reader teardown:
+signal shutdown, join the reader, then call `close()` to release the handle.
+After shutdown, `is_open()` is false and new reads or writes return `Closed`.
+`is_open()` may be read concurrently with normal reads and writes, including
+peer-EOF transitions.
+
 ### `HttpStream`
 
 ```cpp
@@ -162,6 +169,8 @@ ws->send_text("hello");
 - TLS is not currently handled at the channel layer — for `wss://`, supply a TLS-wrapped TCP stream (future `SecureTcpStream`).
 - Control frames (ping/pong/close) are handled internally; ping triggers an automatic pong.
 - Payloads up to `options.max_payload` (default 16 MiB) are accepted; larger frames fire `on_error` and close the channel.
+- `close()` interrupts the channel's blocking reader; destruction joins that reader before releasing the TCP socket handle.
+- Without an executor, callbacks run inline on the reader thread. They may call `close()`, but must defer channel destruction until after the callback returns.
 
 ### OSC
 

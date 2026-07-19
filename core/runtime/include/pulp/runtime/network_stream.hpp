@@ -11,6 +11,7 @@
 #include <pulp/runtime/socket.hpp>
 #include <pulp/runtime/http.hpp>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -39,15 +40,17 @@ public:
 
     StreamResult read(std::uint8_t* buffer, std::size_t size) override;
     StreamResult write(const std::uint8_t* buffer, std::size_t size) override;
+    /// Mark the stream closed and interrupt blocking I/O without releasing the socket handle.
+    void shutdown();
     void close() override;
-    bool is_open() const override { return open_; }
+    bool is_open() const override { return open_.load(); }
 
     /// Access the underlying socket (advanced use: set options, inspect fd).
     Socket& socket() { return socket_; }
 
 private:
     Socket socket_;
-    bool open_ = false;
+    std::atomic<bool> open_{false};
 };
 
 /// HTTP response as a readable Stream. The request is issued eagerly in the

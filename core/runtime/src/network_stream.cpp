@@ -14,16 +14,16 @@ TcpStream::TcpStream(Socket&& connected)
 TcpStream::~TcpStream() { close(); }
 
 TcpStream::TcpStream(TcpStream&& other) noexcept
-    : socket_(std::move(other.socket_)), open_(other.open_) {
-    other.open_ = false;
+    : socket_(std::move(other.socket_)), open_(other.open_.load()) {
+    other.open_.store(false);
 }
 
 TcpStream& TcpStream::operator=(TcpStream&& other) noexcept {
     if (this != &other) {
         close();
         socket_ = std::move(other.socket_);
-        open_ = other.open_;
-        other.open_ = false;
+        open_.store(other.open_.load());
+        other.open_.store(false);
     }
     return *this;
 }
@@ -35,26 +35,26 @@ bool TcpStream::connect(std::string_view host, std::uint16_t port) {
         socket_.close();
         return false;
     }
-    open_ = true;
+    open_.store(true);
     return true;
 }
 
 StreamResult TcpStream::read(std::uint8_t* buffer, std::size_t size) {
-    if (!open_) return StreamResult::fail(StreamError::Closed);
+    if (!open_.load()) return StreamResult::fail(StreamError::Closed);
     if (size == 0) return StreamResult::make(0);
     if (buffer == nullptr) return StreamResult::fail(StreamError::Invalid);
 
     int n = socket_.receive(buffer, size);
     if (n < 0) return StreamResult::fail(StreamError::IoError);
     if (n == 0) {
-        open_ = false;
+        open_.store(false);
         return StreamResult::fail(StreamError::Closed);
     }
     return StreamResult::make(static_cast<std::size_t>(n));
 }
 
 StreamResult TcpStream::write(const std::uint8_t* buffer, std::size_t size) {
-    if (!open_) return StreamResult::fail(StreamError::Closed);
+    if (!open_.load()) return StreamResult::fail(StreamError::Closed);
     if (size == 0) return StreamResult::make(0);
     if (buffer == nullptr) return StreamResult::fail(StreamError::Invalid);
 
@@ -63,11 +63,14 @@ StreamResult TcpStream::write(const std::uint8_t* buffer, std::size_t size) {
     return StreamResult::make(static_cast<std::size_t>(n));
 }
 
+void TcpStream::shutdown() {
+    open_.store(false);
+    socket_.shutdown();
+}
+
 void TcpStream::close() {
-    if (open_) {
-        socket_.close();
-        open_ = false;
-    }
+    socket_.close();
+    open_.store(false);
 }
 
 // ─── HttpStream ───────────────────────────────────────────────────────────
