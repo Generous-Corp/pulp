@@ -860,7 +860,10 @@ TEST_CASE("PulpSampler reuses bounded stream identities without ABA",
 
     constexpr std::size_t churn_count = 64;
     for (std::size_t iteration = 0; iteration < churn_count; ++iteration) {
-        REQUIRE(fixture.proc->load_sample_file(wav.path));
+        const auto load = fixture.proc->load_sample_file_result(wav.path);
+        INFO("iteration=" << iteration
+                           << " status=" << pulp_sampler_load_status_name(load.status));
+        REQUIRE(load.loaded());
         const auto token =
             PulpSamplerTestAccess::published_stream_source(*fixture.proc);
         REQUIRE(token.source_id != 0);
@@ -873,8 +876,8 @@ TEST_CASE("PulpSampler reuses bounded stream identities without ABA",
 
         block.run(*fixture.proc);
         REQUIRE(wait_for_condition([&] {
-            return PulpSamplerTestAccess::physical_stream_source_count(
-                       *fixture.proc) == 1;
+            return PulpSamplerTestAccess::physical_stream_source_count(*fixture.proc) == 1 &&
+                   PulpSamplerTestAccess::active_stream_bundle_count(*fixture.proc) == 1;
         }));
     }
 

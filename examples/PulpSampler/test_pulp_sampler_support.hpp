@@ -444,6 +444,10 @@ struct PulpSamplerTestAccess {
         return processor.streaming_->service_.cache_stats().source_count;
     }
 
+    static std::uint64_t active_stream_bundle_count(const PulpSamplerProcessor& processor) {
+        return processor.streaming_->active_sources_.load(std::memory_order_acquire);
+    }
+
     static audio::SampleStreamCacheServiceStats
     stream_cache_stats(const PulpSamplerProcessor& processor) {
         return processor.streaming_->service_.cache_stats();
