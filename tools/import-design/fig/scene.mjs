@@ -365,6 +365,105 @@ const SYMBOL_INHERITED_KEYS = [
   'rectangleBottomLeftCornerRadius', 'rectangleBottomRightCornerRadius',
 ];
 
+// ── component-property semantics ─────────────────────────────────────────────
+//
+// Beyond expanding an instance's CONTENT, the exporter preserves its component
+// SEMANTICS — which master (and variant) it points at, and the typed property
+// values assigned on it — in the same figma-block field names the in-editor
+// plugin serializes, so design_ir_json.cpp reads every lane with one parser.
+// Two generations of kiwi data feed this:
+//
+//   variantPropSpecs (on a state-group member SYMBOL) — the member's variant
+//     axis selections as {propDefId, value} pairs, keyed into the state
+//     group's componentPropDefs. The member's canonical name ("style=solid,
+//     scale=1x") encodes the same selections and is the fallback when a
+//     spec's def is gone.
+//   componentPropAssignments (on an INSTANCE) — modern typed property
+//     assignments (ComponentPropAssignment {defID, value: ComponentPropValue}),
+//     which replaced the legacy per-node override lists for TEXT / BOOL /
+//     NUMBER / INSTANCE_SWAP properties. Files that predate component
+//     properties simply lack the field — nothing is fabricated for them, and
+//     their instance swaps still ride `overriddenSymbolID` (see
+//     expandInstance), which stays supported as compatibility.
+
+// The COMPONENT_SET a variant master belongs to: in kiwi a set is a FRAME with
+// `isStateGroup`, and it — not the member SYMBOL — owns the VARIANT prop defs.
+function masterStateGroup(scene, master) {
+  const p = master.parentIndex && master.parentIndex.guid
+    ? scene.byGuid.get(guidKey(master.parentIndex.guid)) : null;
+  return p && p.isStateGroup ? p : null;
+}
+
+// {axis: value} for a state-group member SYMBOL, or null when it has none.
+function variantSelections(master, stateGroup) {
+  const defName = new Map();
+  for (const d of stateGroup.componentPropDefs || []) {
+    if (d && d.id && d.name && d.type === 'VARIANT') defName.set(guidKey(d.id), d.name);
+  }
+  const out = {};
+  for (const s of master.variantPropSpecs || []) {
+    const name = s && s.propDefId ? defName.get(guidKey(s.propDefId)) : null;
+    if (name && typeof s.value === 'string') out[name] = s.value;
+  }
+  // A member's canonical name IS its selection list — the recovery path when a
+  // spec points at a deleted def.
+  if (!Object.keys(out).length && typeof master.name === 'string' && master.name.includes('=')) {
+    for (const part of master.name.split(',')) {
+      const eq = part.indexOf('=');
+      if (eq <= 0) continue;
+      const k = part.slice(0, eq).trim();
+      const v = part.slice(eq + 1).trim();
+      if (k && v) out[k] = v;
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+// One kiwi ComponentPropValue → a plain JS value, or undefined when the union
+// carries none of the shapes this exporter can state.
+function componentPropValueOf(scene, v) {
+  if (!v) return undefined;
+  if (typeof v.boolValue === 'boolean') return v.boolValue;
+  // textValue is a TextData struct, not a string — the characters are inside.
+  if (v.textValue && typeof v.textValue.characters === 'string') return v.textValue.characters;
+  if (typeof v.floatValue === 'number') return v.floatValue;
+  if (v.guidValue) {
+    // INSTANCE_SWAP: the guid names the swapped-in master. A file-local guid
+    // means nothing outside this file, so resolve it to the component's name
+    // when it is present; keep the guid key otherwise so the swap is still
+    // stated rather than dropped.
+    const target = scene.byGuid.get(guidKey(v.guidValue));
+    return target && target.name ? target.name : guidKey(v.guidValue);
+  }
+  return undefined;
+}
+
+// {name: {type, value}} from an instance's modern componentPropAssignments —
+// the same shape the plugin lane's `componentProperties` serializes — or null.
+// Defs live on the master (plain component props) and on its state group
+// (variant defs); an assignment whose def was deleted has no name to key on
+// and is skipped rather than guessed.
+function componentPropAssignmentValues(scene, inst, master, stateGroup) {
+  const assignments = inst.componentPropAssignments || [];
+  if (!assignments.length) return null;
+  const defs = new Map();
+  for (const d of [
+    ...(master.componentPropDefs || []),
+    ...((stateGroup && stateGroup.componentPropDefs) || []),
+  ]) {
+    if (d && d.id && d.name) defs.set(guidKey(d.id), d);
+  }
+  const out = {};
+  for (const a of assignments) {
+    const def = a && a.defID ? defs.get(guidKey(a.defID)) : null;
+    if (!def) continue;
+    const value = componentPropValueOf(scene, a.value);
+    if (value === undefined) continue;
+    out[def.name] = { type: def.type || 'TEXT', value };
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 // Figma's "no style" sentinel: an all-1s guid (0xFFFFFFFF:0xFFFFFFFF). An
 // override carrying it is not naming a style — it is DETACHING one.
 const NULL_GUID_PART = 0xFFFFFFFF;
@@ -1446,7 +1545,18 @@ export function materializeFrame(scene, frame, ctx) {
         figma.component_key = master.componentKey;
       }
       if (master.name) figma.main_component_name = master.name;
-      if (Object.keys(figma).length) out.figma = figma;
+      // The master's guid IS the component id in this lane — node_id space is
+      // file-local guid keys, so downstream joins stay in one id space.
+      figma.main_component_id = node.__masterKey;
+      const stateGroup = masterStateGroup(scene, master);
+      if (stateGroup) {
+        if (stateGroup.name) figma.component_set_name = stateGroup.name;
+        const variants = variantSelections(master, stateGroup);
+        if (variants) figma.variant_properties = variants;
+      }
+      const props = componentPropAssignmentValues(scene, node, master, stateGroup);
+      if (props) figma.component_properties = props;
+      out.figma = figma;
     }
 
     // Vector geometry → SVG path data. `path_data` + `viewBox` + fill/stroke is

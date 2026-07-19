@@ -310,6 +310,33 @@ commit stayed green on bare-metal). If you touch `make_synthetic_fig.mjs`,
 regenerate the fixture from the canonical toolchain, but keep the comparison at
 the decoded layer.
 
+**Component/instance semantics are preserved end-to-end via one normalized
+figma-block contract.** All three Figma producers emit the same field names in
+a node's `figma` block — `component_key`, `main_component_name`,
+`main_component_id`, `component_set_name`, `remote_library` (emitted only when
+true), `variant_properties` (`{axis: value}`), and `component_properties`
+(`{name: {type, value}}`, type ∈ TEXT/BOOLEAN/NUMBER/VARIANT/INSTANCE_SWAP…) —
+and `design_ir_json.cpp::parse_ir_node` preserves all of them into namespaced
+node attributes: `figmaComponentKey`, `figmaMainComponentName`,
+`figmaMainComponentId`, `figmaComponentSetName`, `figmaRemoteLibrary`,
+`figmaVariant.<axis>`, `figmaComponentProperty.<name>` +
+`figmaComponentPropertyType.<name>`. The consumer strips Figma's `"#<id>"`
+property-name uniquifier (colliding stripped names fall back to the raw key)
+and stringifies values (bool → `"true"`/`"false"`, round numbers without
+`.0`). Per lane: the plugin captures instance `componentProperties` /
+`variantProperties` directly; REST derives `variant_properties` from
+VARIANT-typed `componentProperties` entries (REST has no separate variant map)
+and reads `remote` / set name from the `/nodes` components maps; the `.fig`
+decoder resolves a state-group member's `variantPropSpecs` through the set's
+`componentPropDefs` (member-name `"a=b, c=d"` parse as fallback) and modern
+`componentPropAssignments` (`{defID, value}`; `value.textValue` is a TextData
+struct — the string is `.characters`; INSTANCE_SWAP `guidValue` resolves to
+the swapped-in component's name when in-file). A kiwi COMPONENT_SET is a FRAME
+with `isStateGroup: true` — the set, not the member SYMBOL, owns the VARIANT
+defs. Nothing is fabricated: legacy files (no assignments) emit identity only.
+SLOT nodes carry no component identity in the Plugin API (`SlotNode` is a
+frame defined by a component property reference), so only their name flows.
+
 **Gotcha - old-style instance swap lives in `overriddenSymbolID`, not
 componentPropAssignments.** A file that predates component properties swaps a
 nested instance's component with a `symbolOverrides` entry carrying

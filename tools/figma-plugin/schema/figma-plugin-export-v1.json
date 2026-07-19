@@ -374,6 +374,10 @@
         "component_set_name": { "type": "string" },
         "main_component_id": { "type": "string" },
         "main_component_name": { "type": "string" },
+        "remote_library": {
+          "type": "boolean",
+          "description": "True when the instance's main component lives in a remote team library. Emitted only when true."
+        },
         "library_widget_kind": {
           "type": "string",
           "description": "Recognized Pulp widget kind, mirrors the node-root audio_widget field.",

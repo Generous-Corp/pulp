@@ -904,6 +904,104 @@ test('a self-recursive symbol terminates instead of expanding forever', () => {
   assert.ok(!('children' in top.children[0]), 'the cycle is cut, not recursed');
 });
 
+// ── component semantics: variants + modern typed property assignments ────────
+//
+// Beyond expanded content, the envelope must carry an instance's component
+// SEMANTICS in the same figma-block shape the plugin lane serializes: the
+// master id, the COMPONENT_SET (a FRAME with `isStateGroup`) name, the
+// member's variant axis selections (variantPropSpecs resolved through the
+// set's componentPropDefs), and modern componentPropAssignments resolved to
+// {name: {type, value}} — INSTANCE_SWAP guids resolved to the swapped-in
+// component's name.
+
+function componentSemanticsScene() {
+  const g = (l, s = 0) => ({ sessionID: s, localID: l });
+  return buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page' },
+    // The set owns the VARIANT defs plus the modern typed prop defs.
+    { guid: g(10), type: 'FRAME', name: 'Knob', isStateGroup: true,
+      size: { x: 100, y: 60 },
+      componentPropDefs: [
+        { id: g(100), name: 'size', type: 'VARIANT' },
+        { id: g(101), name: 'state', type: 'VARIANT' },
+        { id: g(102), name: 'label', type: 'TEXT' },
+        { id: g(103), name: 'showValue', type: 'BOOL' },
+        { id: g(104), name: 'icon', type: 'INSTANCE_SWAP' },
+      ] },
+    { guid: g(11), type: 'SYMBOL', name: 'size=lg, state=default',
+      parentIndex: { guid: g(10), position: 'a' }, size: { x: 40, y: 52 },
+      componentKey: 'setmemberkey',
+      variantPropSpecs: [
+        { propDefId: g(100), value: 'lg' },
+        { propDefId: g(101), value: 'default' },
+      ] },
+    // The swap target the INSTANCE_SWAP assignment points at.
+    { guid: g(14), type: 'SYMBOL', name: 'icon / wave', size: { x: 8, y: 8 } },
+    { guid: g(2), type: 'FRAME', name: 'Root',
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 200, y: 100 } },
+    { guid: g(20), type: 'INSTANCE', name: 'Knob',
+      parentIndex: { guid: g(2), position: 'a' }, size: { x: 40, y: 52 },
+      symbolData: { symbolID: g(11) },
+      componentPropAssignments: [
+        // textValue is a kiwi TextData struct — the characters ride inside.
+        { defID: g(102), value: { textValue: { characters: 'Drive' } } },
+        { defID: g(103), value: { boolValue: true } },
+        { defID: g(104), value: { guidValue: g(14) } },
+        // An assignment whose def was deleted has no name; skipped, not guessed.
+        { defID: g(999), value: { boolValue: false } },
+      ] },
+  ]});
+}
+
+test('an instance carries variant selections + modern typed property assignments', () => {
+  const { envelope } = materializeRoot(componentSemanticsScene());
+  const [inst] = envelope.root.children;
+  assert.equal(inst.figma.component_key, 'setmemberkey');
+  assert.equal(inst.figma.main_component_id, '0:11');
+  assert.equal(inst.figma.component_set_name, 'Knob');
+  assert.deepEqual(inst.figma.variant_properties, { size: 'lg', state: 'default' });
+  assert.deepEqual(inst.figma.component_properties, {
+    label: { type: 'TEXT', value: 'Drive' },
+    showValue: { type: 'BOOL', value: true },
+    icon: { type: 'INSTANCE_SWAP', value: 'icon / wave' },
+  });
+});
+
+test('variant selections fall back to the member name when defs are missing', () => {
+  // A set stripped of componentPropDefs (deleted defs): the member SYMBOL's
+  // canonical name IS its selection list, so the axes still survive.
+  const g = (l, s = 0) => ({ sessionID: s, localID: l });
+  const scene = buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page' },
+    { guid: g(10), type: 'FRAME', name: 'Fader', isStateGroup: true, size: { x: 10, y: 10 } },
+    { guid: g(11), type: 'SYMBOL', name: 'size=sm, state=on',
+      parentIndex: { guid: g(10), position: 'a' }, size: { x: 4, y: 20 },
+      variantPropSpecs: [{ propDefId: g(100), value: 'sm' }] },
+    { guid: g(2), type: 'FRAME', name: 'Root',
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: g(20), type: 'INSTANCE', name: 'Fader',
+      parentIndex: { guid: g(2), position: 'a' }, size: { x: 4, y: 20 },
+      symbolData: { symbolID: g(11) } },
+  ]});
+  const { envelope } = materializeRoot(scene);
+  const [inst] = envelope.root.children;
+  assert.equal(inst.figma.component_set_name, 'Fader');
+  assert.deepEqual(inst.figma.variant_properties, { size: 'sm', state: 'on' });
+});
+
+test('a legacy set-less instance emits identity only — nothing fabricated', () => {
+  // Files that predate component properties: no state group, no assignments.
+  // The figma block carries master identity and NO component_properties /
+  // variant_properties / component_set_name keys.
+  const { envelope } = materializeRoot(instanceScene());
+  const [inst] = envelope.root.children;
+  assert.equal(inst.figma.component_key, 'cafef00d');
+  assert.equal(inst.figma.main_component_id, '0:14');
+  assert.ok(!('component_set_name' in inst.figma));
+  assert.ok(!('variant_properties' in inst.figma));
+  assert.ok(!('component_properties' in inst.figma));
+});
+
 // ── instance swap (`overriddenSymbolID`) ─────────────────────────────────────
 //
 // Files that predate component properties swap a nested instance's component

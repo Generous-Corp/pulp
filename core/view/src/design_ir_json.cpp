@@ -1084,6 +1084,92 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             auto name = std::string(fig["main_component_name"].toString());
             if (!name.empty()) node.attributes["figmaMainComponentName"] = std::move(name);
         }
+        // Component semantics beyond bare identity: set name, master id,
+        // remote-library provenance, variant axis selections, and typed
+        // component-property values (TEXT / BOOLEAN / NUMBER / VARIANT /
+        // INSTANCE_SWAP). All three producers (plugin serialize.ts, REST
+        // exporter, .fig decoder) emit the same figma-block field names, so
+        // this single reader is the normalization point. Every key below is
+        // namespaced under a `figma*` prefix so a preserved property can never
+        // collide with a layer-derived attribute.
+        if (fig.hasObjectMember("component_set_name") &&
+            fig["component_set_name"].isString()) {
+            auto set_name = std::string(fig["component_set_name"].toString());
+            if (!set_name.empty())
+                node.attributes["figmaComponentSetName"] = std::move(set_name);
+        }
+        if (fig.hasObjectMember("main_component_id") &&
+            fig["main_component_id"].isString()) {
+            auto mid = std::string(fig["main_component_id"].toString());
+            if (!mid.empty()) node.attributes["figmaMainComponentId"] = std::move(mid);
+        }
+        if (fig.hasObjectMember("remote_library") && fig["remote_library"].isBool() &&
+            fig["remote_library"].getBool()) {
+            node.attributes["figmaRemoteLibrary"] = "true";
+        }
+        // Stringify a component-property value for the string→string attribute
+        // map: strings pass through, booleans become "true"/"false", numbers
+        // are trimmed (no trailing zeros) so "1.5" and "3" read back cleanly.
+        auto prop_value_string =
+            [](const choc::value::ValueView& v) -> std::optional<std::string> {
+            if (v.isString()) return std::string(v.toString());
+            if (v.isBool()) return std::string(v.getBool() ? "true" : "false");
+            if (v.isFloat() || v.isInt())
+                // Round-trip-safe, and round numbers drop the ".0" so a
+                // NUMBER property of 11 reads back as "11", not "11.0".
+                return choc::text::floatToString(v.getWithDefault<double>(0.0), -1, true);
+            return std::nullopt;
+        };
+        // Variant axis selections: {"size": "sm", "state": "default"} →
+        // figmaVariant.size = "sm", figmaVariant.state = "default". One
+        // attribute per axis keeps each selection independently queryable.
+        if (fig.hasObjectMember("variant_properties") &&
+            fig["variant_properties"].isObject()) {
+            const auto variants = fig["variant_properties"];
+            for (uint32_t i = 0; i < variants.size(); ++i) {
+                const auto m = variants.getObjectMemberAt(i);
+                if (std::string(m.name).empty()) continue;
+                if (auto value = prop_value_string(m.value))
+                    node.attributes["figmaVariant." + std::string(m.name)] =
+                        std::move(*value);
+            }
+        }
+        // Typed component properties: {"label#12:3": {type: "TEXT", value:
+        // "Gain"}} → figmaComponentProperty.label = "Gain" plus
+        // figmaComponentPropertyType.label = "TEXT". Figma uniquifies non-
+        // variant property names with a "#<id>" suffix the designer never
+        // sees; strip it so the attribute key is the authored name. If two
+        // distinct properties collide after stripping, later ones keep the
+        // full raw key — deterministic, and nothing is silently dropped.
+        // INSTANCE_SWAP values name the swapped component (an id from the
+        // plugin/REST lanes, a resolved name from the .fig decoder), which is
+        // what makes modern swaps recoverable downstream.
+        if (fig.hasObjectMember("component_properties") &&
+            fig["component_properties"].isObject()) {
+            const auto props = fig["component_properties"];
+            for (uint32_t i = 0; i < props.size(); ++i) {
+                const auto m = props.getObjectMemberAt(i);
+                const std::string raw_name(m.name);
+                if (raw_name.empty() || !m.value.isObject()) continue;
+                std::optional<std::string> value;
+                if (m.value.hasObjectMember("value"))
+                    value = prop_value_string(m.value["value"]);
+                if (!value) continue;
+                std::string base = raw_name.substr(0, raw_name.find('#'));
+                if (base.empty()) base = raw_name;
+                std::string key = "figmaComponentProperty." + base;
+                if (node.attributes.find(key) != node.attributes.end() && base != raw_name)
+                    key = "figmaComponentProperty." + raw_name;
+                if (m.value.hasObjectMember("type") && m.value["type"].isString()) {
+                    auto type = std::string(m.value["type"].toString());
+                    if (!type.empty())
+                        node.attributes["figmaComponentPropertyType." +
+                                        key.substr(sizeof("figmaComponentProperty.") - 1)] =
+                            std::move(type);
+                }
+                node.attributes[std::move(key)] = std::move(*value);
+            }
+        }
     }
     if (obj.hasObjectMember("layout"))
         node.layout = parse_ir_layout(obj["layout"]);

@@ -480,6 +480,10 @@ export interface FigmaMetadata {
   main_component_id?: string;
   main_component_name?: string;
   /**
+   * True when the instance's main component lives in a remote team library. Emitted only when true.
+   */
+  remote_library?: boolean;
+  /**
    * Recognized Pulp widget kind, mirrors the node-root audio_widget field.
    */
   library_widget_kind?: "knob" | "fader" | "meter" | "xy_pad" | "waveform" | "spectrum";

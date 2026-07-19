@@ -134,6 +134,59 @@ class CodexP2FollowupTest(unittest.TestCase):
         self.assertEqual(out["figma"]["component_key"], "setkey")
         self.assertEqual(out["figma"]["main_component_name"], "Pulp / Knob")
 
+    def test_instance_component_semantics_reach_figma_block(self):
+        # Audit item 4: REST exposes an instance's typed property values as
+        # `componentProperties` and the components/componentSets maps carry the
+        # set name + remote flag. All of it must land in the figma block under
+        # the SAME field names the plugin's serialize.ts emits, so
+        # design_ir_json.cpp parses every lane identically. VARIANT entries
+        # double as the variant axis map (REST has no separate
+        # variantProperties), and property-name "#id" suffixes pass through —
+        # the consumer owns normalization.
+        inst = {"type": "INSTANCE", "name": "Knob", "id": "5:1",
+                "componentId": "9:1",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 56, "height": 56},
+                "componentProperties": {
+                    "label#9:0": {"type": "TEXT", "value": "Drive"},
+                    "showValue#9:1": {"type": "BOOLEAN", "value": True},
+                    "icon#9:2": {"type": "INSTANCE_SWAP", "value": "77:5"},
+                    "size": {"type": "VARIANT", "value": "lg"},
+                    "bound#9:3": {"type": "TEXT",
+                                  "value": {"unexpected": "object"}},
+                }}
+        out, _ctx = frx.node_tree_to_ir(
+            inst,
+            components={"9:1": {"key": "variantkey", "name": "size=lg",
+                                "componentSetId": "8:1", "remote": True}},
+            component_sets={"8:1": {"key": "setkey", "name": "Knob"}})
+        fig = out["figma"]
+        self.assertEqual(fig["main_component_id"], "9:1")
+        self.assertEqual(fig["component_set_name"], "Knob")
+        self.assertEqual(fig["remote_library"], True)
+        self.assertEqual(fig["component_properties"], {
+            "label#9:0": {"type": "TEXT", "value": "Drive"},
+            "showValue#9:1": {"type": "BOOLEAN", "value": True},
+            "icon#9:2": {"type": "INSTANCE_SWAP", "value": "77:5"},
+            "size": {"type": "VARIANT", "value": "lg"},
+        })  # the non-scalar value is dropped, never emitted malformed
+        self.assertEqual(fig["variant_properties"], {"size": "lg"})
+
+    def test_instance_without_component_properties_emits_no_extra_fields(self):
+        # Additive contract: a set-less local instance with no typed properties
+        # gets identity only — no empty component_properties /
+        # variant_properties / remote_library keys.
+        inst = {"type": "INSTANCE", "name": "Plain", "id": "6:1",
+                "componentId": "9:9",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 10, "height": 10}}
+        out, _ctx = frx.node_tree_to_ir(
+            inst, components={"9:9": {"key": "k1", "name": "Plain"}})
+        fig = out["figma"]
+        self.assertEqual(fig["main_component_id"], "9:9")
+        self.assertNotIn("component_set_name", fig)
+        self.assertNotIn("remote_library", fig)
+        self.assertNotIn("component_properties", fig)
+        self.assertNotIn("variant_properties", fig)
+
     def test_detached_copy_subtree_is_art_not_widgets(self):
         # A DETACHED component copy is a widget-named FRAME that directly owns
         # raw shapes ('knob base', 'knob ring'). It is ONE widget whose parts

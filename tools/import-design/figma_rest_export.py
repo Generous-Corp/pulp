@@ -821,6 +821,48 @@ def walk(n, parent, z, ctx, inside_widget=False):
             out["figma"]["component_key"] = component_key
         if component_name:
             out["figma"]["main_component_name"] = component_name
+        # Component semantics beyond identity, in the same figma-block field
+        # names the plugin's serialize.ts emits so design_ir_json.cpp reads all
+        # three lanes with one parser. Everything below is additive: absent
+        # fields simply preserve nothing.
+        comp_id = n.get("componentId")
+        if isinstance(comp_id, str) and comp_id:
+            out["figma"]["main_component_id"] = comp_id
+        comp = ctx.components.get(comp_id or "")
+        if comp:
+            cset = ctx.component_sets.get(comp.get("componentSetId") or "")
+            if cset and cset.get("name"):
+                out["figma"]["component_set_name"] = cset["name"]
+            # REST's components map carries `remote` for team-library masters.
+            # Emitted only when true — presence IS the signal (serialize.ts
+            # follows the same rule).
+            if comp.get("remote") is True:
+                out["figma"]["remote_library"] = True
+        # REST exposes an instance's typed property values directly on the
+        # node as `componentProperties`: {name: {type, value, ...}}. Non-
+        # variant names carry Figma's "#<id>" uniquifier suffix, passed
+        # through untranslated — the consumer owns normalization. VARIANT
+        # entries double as the instance's variant axis selections, which REST
+        # (unlike the Plugin API) does not surface as a separate
+        # variantProperties map, so the axis map is derived here.
+        props = n.get("componentProperties")
+        if isinstance(props, dict) and props:
+            emitted = {}
+            variants = {}
+            for pname, entry in props.items():
+                if not isinstance(entry, dict):
+                    continue
+                ptype = entry.get("type")
+                pval = entry.get("value")
+                if not isinstance(ptype, str) or not isinstance(pval, (str, int, float, bool)):
+                    continue
+                emitted[pname] = {"type": ptype, "value": pval}
+                if ptype == "VARIANT" and isinstance(pval, str):
+                    variants[pname] = pval
+            if emitted:
+                out["figma"]["component_properties"] = emitted
+            if variants:
+                out["figma"]["variant_properties"] = variants
     if not captured:  # illustration frames drop their children (rasterized whole)
         kids = [c for c in n.get("children", []) if c.get("visible", True) is not False]
         if kids:
