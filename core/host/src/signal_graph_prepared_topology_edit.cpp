@@ -104,6 +104,27 @@ bool SignalGraph::PreparedTopologyEdit::is_new_node_(NodeId id) const {
     return baseline_node_ids_.find(id) == baseline_node_ids_.end();
 }
 
+std::optional<SignalGraph::PreparedTopologyEdit::Result>
+SignalGraph::PreparedTopologyEdit::baseline_removal_rejection_locked_() const {
+    owner_->assert_graph_mutation_locked_();
+    for (const auto& baseline : owner_->nodes_) {
+        const bool retained = std::any_of(
+            candidate_->nodes_.begin(), candidate_->nodes_.end(),
+            [&](const GraphNode& node) { return node.id == baseline.id; });
+        if (retained)
+            continue;
+        if (baseline.type == NodeType::Plugin)
+            return Result::BaselinePluginRemovalRequiresRelease;
+        if (baseline.type == NodeType::Custom) {
+            const auto type = owner_->custom_node_types_.find(
+                prepared_custom_key(baseline.custom_type_id, baseline.custom_type_version));
+            if (type != owner_->custom_node_types_.end() && type->second.release)
+                return Result::BaselineCustomRemovalRequiresRelease;
+        }
+    }
+    return std::nullopt;
+}
+
 bool SignalGraph::PreparedTopologyEdit::rollback_quiesced_lifecycles_locked_() noexcept {
     owner_->assert_graph_mutation_locked_();
     if (!quiesced_lifecycles_dirty_)
@@ -433,27 +454,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
         return last_result_ = Result::MidiOutputSnapshotLocalRequired;
     }
 
-    // Removing a baseline external instance would make the owner-side node
-    // assignment below its lifecycle boundary. Prepared edits cannot wait for
-    // the retired audio snapshot and therefore fail closed; ordinary
-    // SignalGraph::release() remains the sole release-callback owner.
-    for (const auto& baseline : owner_->nodes_) {
-        const bool retained = std::any_of(
-            candidate_->nodes_.begin(), candidate_->nodes_.end(),
-            [&](const GraphNode& node) { return node.id == baseline.id; });
-        if (retained)
-            continue;
-        if (baseline.type == NodeType::Plugin) {
-            return last_result_ = Result::BaselinePluginRemovalRequiresRelease;
-        }
-        if (baseline.type == NodeType::Custom) {
-            const auto type = owner_->custom_node_types_.find(
-                prepared_custom_key(baseline.custom_type_id, baseline.custom_type_version));
-            if (type != owner_->custom_node_types_.end() && type->second.release) {
-                return last_result_ = Result::BaselineCustomRemovalRequiresRelease;
-            }
-        }
-    }
+    if (const auto rejection = baseline_removal_rejection_locked_())
+        return last_result_ = *rejection;
     if (!candidate_->preflight_locked_(max_block_size) ||
         candidate_->processing_order().size() != candidate_->nodes_.size()) {
         return last_result_ = Result::PreflightFailed;
@@ -680,6 +682,8 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
     GraphMutationLock owner_lock(*owner_);
     if (!base_is_current_locked_() || owner_->in_swap_edit_)
         return last_result_ = Result::StaleBase;
+    if (const auto rejection = baseline_removal_rejection_locked_())
+        return last_result_ = *rejection;
 
     // Capture the exact retained objects and the owner's original custom
     // lifecycle callbacks before candidate preparation mutates shared state.

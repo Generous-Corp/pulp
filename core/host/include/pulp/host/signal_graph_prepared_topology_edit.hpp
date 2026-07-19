@@ -2,6 +2,8 @@
 
 #include <pulp/host/signal_graph_execution_snapshot.hpp>
 
+#include <optional>
+
 namespace pulp::host {
 
 // Isolated, fail-closed authoring transaction for topology-producing clients.
@@ -81,6 +83,7 @@ class SignalGraph::PreparedTopologyEdit {
     explicit PreparedTopologyEdit(SignalGraph& owner);
     bool base_is_current_locked_() const;
     bool is_new_node_(NodeId id) const;
+    std::optional<Result> baseline_removal_rejection_locked_() const;
     bool rollback_quiesced_lifecycles_locked_() noexcept;
     void release_new_custom_instances_() noexcept;
 

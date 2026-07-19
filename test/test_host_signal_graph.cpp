@@ -5734,51 +5734,57 @@ TEST_CASE("SignalGraph prepared edit rejects baseline lifecycle removals before 
     using Result = SignalGraph::PreparedTopologyEdit::Result;
 
     SECTION("plugin removal leaves ordinary release as the single callback owner") {
-        std::atomic<int> prepares{0};
-        std::atomic<int> releases{0};
-        SignalGraph graph;
-        const auto plugin = graph.add_plugin_node(
-            std::make_unique<PreparedEditCountingPlugin>(prepares, &releases), 1, 1,
-            "plugin");
-        REQUIRE(graph.prepare(48000.0, 8));
-        const auto before = GraphSerializer::to_json(graph);
+        for (const bool quiesced : {false, true}) {
+            std::atomic<int> prepares{0};
+            std::atomic<int> releases{0};
+            SignalGraph graph;
+            const auto plugin = graph.add_plugin_node(
+                std::make_unique<PreparedEditCountingPlugin>(prepares, &releases), 1, 1,
+                "plugin");
+            REQUIRE(graph.prepare(48000.0, 8));
+            const auto before = GraphSerializer::to_json(graph);
 
-        auto edit = graph.begin_prepared_topology_edit();
-        REQUIRE(edit->remove_node(plugin));
-        REQUIRE(edit->prepare(48000.0, 8)
-                == Result::BaselinePluginRemovalRequiresRelease);
-        edit.reset();
-        REQUIRE(GraphSerializer::to_json(graph) == before);
-        REQUIRE(graph.nodes().size() == 1);
-        REQUIRE(graph.is_prepared());
-        REQUIRE(releases.load(std::memory_order_relaxed) == 0);
+            auto edit = graph.begin_prepared_topology_edit();
+            REQUIRE(edit->remove_node(plugin));
+            const auto result = quiesced ? edit->prepare_quiesced(48000.0, 8)
+                                         : edit->prepare(48000.0, 8);
+            REQUIRE(result == Result::BaselinePluginRemovalRequiresRelease);
+            edit.reset();
+            REQUIRE(GraphSerializer::to_json(graph) == before);
+            REQUIRE(graph.nodes().size() == 1);
+            REQUIRE(graph.is_prepared());
+            REQUIRE(releases.load(std::memory_order_relaxed) == 0);
 
-        graph.release();
-        REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+            graph.release();
+            REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+        }
     }
 
     SECTION("custom removal with release leaves ordinary release as callback owner") {
-        std::atomic<int> releases{0};
-        SignalGraph graph;
-        auto type = make_prepared_edit_level_type("pulp.test.prepared.release", 1.0f);
-        type.release = [&](void*) { releases.fetch_add(1, std::memory_order_relaxed); };
-        REQUIRE(graph.register_custom_node_type(std::move(type)));
-        const auto custom = graph.add_custom_node("pulp.test.prepared.release");
-        REQUIRE(graph.prepare(48000.0, 8));
-        const auto before = GraphSerializer::to_json(graph);
+        for (const bool quiesced : {false, true}) {
+            std::atomic<int> releases{0};
+            SignalGraph graph;
+            auto type = make_prepared_edit_level_type("pulp.test.prepared.release", 1.0f);
+            type.release = [&](void*) { releases.fetch_add(1, std::memory_order_relaxed); };
+            REQUIRE(graph.register_custom_node_type(std::move(type)));
+            const auto custom = graph.add_custom_node("pulp.test.prepared.release");
+            REQUIRE(graph.prepare(48000.0, 8));
+            const auto before = GraphSerializer::to_json(graph);
 
-        auto edit = graph.begin_prepared_topology_edit();
-        REQUIRE(edit->remove_node(custom));
-        REQUIRE(edit->prepare(48000.0, 8)
-                == Result::BaselineCustomRemovalRequiresRelease);
-        edit.reset();
-        REQUIRE(GraphSerializer::to_json(graph) == before);
-        REQUIRE(graph.nodes().size() == 1);
-        REQUIRE(graph.is_prepared());
-        REQUIRE(releases.load(std::memory_order_relaxed) == 0);
+            auto edit = graph.begin_prepared_topology_edit();
+            REQUIRE(edit->remove_node(custom));
+            const auto result = quiesced ? edit->prepare_quiesced(48000.0, 8)
+                                         : edit->prepare(48000.0, 8);
+            REQUIRE(result == Result::BaselineCustomRemovalRequiresRelease);
+            edit.reset();
+            REQUIRE(GraphSerializer::to_json(graph) == before);
+            REQUIRE(graph.nodes().size() == 1);
+            REQUIRE(graph.is_prepared());
+            REQUIRE(releases.load(std::memory_order_relaxed) == 0);
 
-        graph.release();
-        REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+            graph.release();
+            REQUIRE(releases.load(std::memory_order_relaxed) == 1);
+        }
     }
 }
 
