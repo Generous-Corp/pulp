@@ -259,6 +259,20 @@ if(PULP_HAS_SKIA)
 endif()
 catch_discover_tests(pulp-test-subtree-cache)
 
+# Partial-repaint equivalence (FU-2, WI-17). Pure compute_effective_damage unit
+# tests (no Skia) PLUS a raster screenshot-equivalence harness that proves a
+# clipped repaint of a mutation is byte-identical to a full repaint, including
+# hazard cases (blurred / backdrop-filter sibling) with "naive clip WOULD
+# differ" negative proofs. Links pulp::view (producer + damage model) + Skia.
+add_executable(pulp-test-partial-repaint-equivalence test_partial_repaint_equivalence.cpp)
+target_link_libraries(pulp-test-partial-repaint-equivalence PRIVATE
+    pulp::canvas pulp::view Catch2::Catch2WithMain)
+if(PULP_HAS_SKIA)
+    target_compile_definitions(pulp-test-partial-repaint-equivalence PRIVATE PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-partial-repaint-equivalence PRIVATE ${SKIA_INCLUDE_DIRS})
+endif()
+catch_discover_tests(pulp-test-partial-repaint-equivalence)
+
 # Canvas arcs / path-primitive Skia rasterization fixtures. Native
 # arc / arcTo / ellipse / roundRect cluster: RecordingCanvas
 # captures of native primitives + Skia rasterization fixtures (full /

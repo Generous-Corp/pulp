@@ -59,6 +59,11 @@ docs:
     kind: guide
     summary: State and parameter system — ParamValue, StateStore, Binding, serialization
 
+  - slug: partial-repaint
+    path: guides/partial-repaint.md
+    kind: guide
+    summary: Partial repaint (experimental, PULP_PARTIAL_REPAINT) — damaged-rect-only repaint on the macOS GPU host via compute_effective_damage hazard escalation + SkiaSurface persistent-scene mode; interaction with subtree caching
+
   - slug: shipping
     path: guides/shipping.md
     kind: guide

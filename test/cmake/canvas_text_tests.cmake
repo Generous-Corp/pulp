@@ -190,6 +190,20 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
         ${SKIA_INCLUDE_DIRS})
     catch_discover_tests(pulp-test-subtree-cache-gpu)
 
+    # Persistent-scene mode — live-GPU cross-frame retention proof (FU-2).
+    # Drives an offscreen Dawn+Skia surface with set_persistent_scene(true) for
+    # a full frame then a clipped frame, and asserts the untouched content
+    # survives while the clipped region updates. Soft-skips without a real adapter.
+    add_executable(pulp-test-partial-repaint-gpu test_partial_repaint_gpu.cpp)
+    target_link_libraries(pulp-test-partial-repaint-gpu PRIVATE
+        pulp::view pulp::canvas pulp::render
+        Catch2::Catch2WithMain skia::skia)
+    target_compile_definitions(pulp-test-partial-repaint-gpu PRIVATE
+        PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-partial-repaint-gpu PRIVATE
+        ${SKIA_INCLUDE_DIRS})
+    catch_discover_tests(pulp-test-partial-repaint-gpu)
+
     # Embedded-host smoke (mac GPU lane): attaches the GPU host to a hidden
     # NSWindow and proves a nonblank first-frame capture, plus drives the CLAP
     # gui_create/set_parent adapter path. Needs CLAP for the PULP_CLAP_PLUGIN

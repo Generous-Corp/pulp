@@ -23,8 +23,12 @@
 #include "include/gpu/graphite/dawn/DawnUtils.h"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkSurface.h"
+#include "include/core/SkColor.h"
 #include "include/core/SkColorSpace.h"
+#include "include/core/SkImage.h"
 #include "include/core/SkImageInfo.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkSamplingOptions.h"
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -104,6 +108,20 @@ public:
     canvas::Canvas* begin_frame() override {
         if (!recorder_ || !context_) return nullptr;
 
+        // Persistent-scene mode (FU-2): draw into the retained scene surface,
+        // not the swapchain. The scene keeps last frame's pixels, so the host
+        // can clip the repaint to the damaged rect and everything else stays.
+        // The presentable drawable is wrapped later, at end_frame, for the blit.
+        if (persistent_scene_) {
+            if (!scene_surface_) create_scene_target();
+            if (!scene_surface_) return nullptr;
+            frame_surface_.reset();
+            SkCanvas* sk_canvas = scene_surface_->getCanvas();
+            if (!sk_canvas) return nullptr;
+            canvas_ = std::make_unique<canvas::SkiaCanvas>(sk_canvas, recorder_.get());
+            return canvas_.get();
+        }
+
         SkCanvas* sk_canvas = nullptr;
         frame_surface_.reset();
 
@@ -164,9 +182,17 @@ public:
         // Graphite recording snap + insert + submit — the GPU-submit stage of
         // the frame pipeline.
         PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit");
-        canvas_.reset();
+        canvas_.reset();  // flush the frame's draws into the recorder
 
         if (!recorder_ || !context_) return;
+
+        // Persistent-scene mode (FU-2): the frame drew into the retained scene
+        // surface. Record a 1:1 blit of the scene onto the presentable drawable
+        // into the SAME recorder, so the single snap() below carries both the
+        // scene draws and the blit. Offscreen (no presentable surface) needs no
+        // blit — the scene IS the readback target.
+        if (persistent_scene_ && scene_surface_)
+            blit_scene_to_drawable();
 
         // Submit the Graphite recording to the shared device/queue.
         // The GPU work targets the same texture that GpuSurface will present.
@@ -200,12 +226,39 @@ public:
         height_ = height;
         scale_ = scale;
         create_offscreen_target();
+        // A fresh scene target at the new size; the host's first post-resize
+        // frame is a full repaint into it (partial repaint can't clip across a
+        // size change).
+        if (persistent_scene_) create_scene_target();
+    }
+
+    bool set_persistent_scene(bool enable) override {
+        persistent_scene_ = enable;
+        if (enable) {
+            create_scene_target();
+        } else {
+            scene_surface_.reset();
+        }
+        return persistent_scene_ && scene_surface_ != nullptr;
+    }
+
+    bool persistent_scene() const override {
+        return persistent_scene_ && scene_surface_ != nullptr;
     }
 
     bool read_current_rgba(std::vector<uint8_t>& pixels,
                            uint32_t& pixel_width,
                            uint32_t& pixel_height) override {
-        auto* source = frame_surface_ ? frame_surface_.get() : offscreen_surface_.get();
+        // In persistent-scene mode the retained scene surface is the
+        // authoritative frame content (frame_surface_ is only the transient
+        // drawable wrapped for the blit, and is null mid-frame). Read the scene.
+        SkSurface* source = nullptr;
+        if (persistent_scene_ && scene_surface_)
+            source = scene_surface_.get();
+        else if (frame_surface_)
+            source = frame_surface_.get();
+        else
+            source = offscreen_surface_.get();
         if (!source) return false;
 
         // Callers such as MacGpuWindowHost::capture_back_buffer_png() read
@@ -359,6 +412,11 @@ private:
     // Offscreen fallback (used when no native surface is attached)
     sk_sp<SkSurface> offscreen_surface_;
 
+    // Persistent-scene target (FU-2). When persistent_scene_ is on, the frame is
+    // drawn here and RETAINED across frames; end_frame blits it to the drawable.
+    bool persistent_scene_ = false;
+    sk_sp<SkSurface> scene_surface_;
+
     std::unique_ptr<canvas::SkiaCanvas> canvas_;
 
     void create_offscreen_target() {
@@ -373,6 +431,70 @@ private:
         if (offscreen_surface_ && scale_ != 1.0f) {
             offscreen_surface_->getCanvas()->scale(scale_, scale_);
         }
+    }
+
+    // Create the retained scene surface at physical size. Like the offscreen
+    // target, the backing-scale CTM is applied once here so the host paints in
+    // logical coordinates. Cleared so a (defensive) partial first frame does not
+    // reveal undefined texture memory; the host paints a full first frame.
+    void create_scene_target() {
+        if (!recorder_) return;
+
+        int pixel_w = static_cast<int>(width_ * scale_);
+        int pixel_h = static_cast<int>(height_ * scale_);
+
+        SkImageInfo info = SkImageInfo::MakeN32Premul(pixel_w, pixel_h);
+        scene_surface_ = SkSurfaces::RenderTarget(recorder_.get(), info);
+        if (!scene_surface_) return;
+
+        SkCanvas* c = scene_surface_->getCanvas();
+        c->clear(SK_ColorTRANSPARENT);
+        if (scale_ != 1.0f) c->scale(scale_, scale_);
+    }
+
+    // Wrap the current presentable drawable and record a 1:1 device-pixel blit
+    // of the retained scene onto it (into the shared recorder). Both surfaces
+    // are physical size, so the blit is an identity-CTM drawImageRect — no
+    // scale (the drawable wrap starts with an identity CTM). Uses drawImageRect
+    // (a GPU composite), NOT makeShader, so the ensure_gpu_image() image-shader
+    // gotcha is not in play. Offscreen (no presentable surface) is a no-op: the
+    // scene is itself the readback target.
+    void blit_scene_to_drawable() {
+        if (!gpu_.has_surface()) return;
+
+        auto* texture_ptr = static_cast<wgpu::Texture*>(gpu_.current_texture_handle());
+        if (!texture_ptr || !*texture_ptr) {
+            runtime::log_warn("SkiaSurface: no current texture for persistent-scene blit");
+            return;
+        }
+        WGPUTexture raw_texture = texture_ptr->Get();
+        skgpu::graphite::BackendTexture backend_tex =
+            skgpu::graphite::BackendTextures::MakeDawn(raw_texture);
+        if (!backend_tex.isValid()) {
+            runtime::log_warn("SkiaSurface: invalid drawable texture for persistent-scene blit");
+            return;
+        }
+#ifdef __ANDROID__
+        auto surface_color_type = kRGBA_8888_SkColorType;
+#else
+        auto surface_color_type = kBGRA_8888_SkColorType;
+#endif
+        frame_surface_ = SkSurfaces::WrapBackendTexture(
+            recorder_.get(), backend_tex, surface_color_type,
+            SkColorSpace::MakeSRGB(), nullptr);
+        if (!frame_surface_) {
+            runtime::log_warn("SkiaSurface: WrapBackendTexture failed for persistent-scene blit");
+            return;
+        }
+
+        sk_sp<SkImage> snapshot = scene_surface_->makeImageSnapshot();
+        if (!snapshot) return;
+
+        const SkRect full = SkRect::MakeWH(static_cast<float>(snapshot->width()),
+                                           static_cast<float>(snapshot->height()));
+        frame_surface_->getCanvas()->drawImageRect(
+            snapshot, full, full, SkSamplingOptions(), nullptr,
+            SkCanvas::kStrict_SrcRectConstraint);
     }
 };
 

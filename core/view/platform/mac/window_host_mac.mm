@@ -35,6 +35,7 @@
 #include <pulp/render/dirty_tracker.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
+#include <pulp/view/repaint_damage.hpp>
 #include <pulp/render/skp_capture.hpp>
 #import <QuartzCore/CAMetalLayer.h>
 #import <CoreVideo/CVDisplayLink.h>
@@ -1184,6 +1185,10 @@ static void install_app_menu(NSString* appName) {
 @interface PulpMetalView : PulpView
 @property (nonatomic, readonly) CAMetalLayer* metalLayer;
 @property (nonatomic, copy) dispatch_block_t repaintBlock;
+// Fires when the backing scale (DPI) changes WITHOUT a frame-size change — a
+// display move/hotplug at the same logical size — which does not go through
+// windowDidResize. The host recreates the GPU surfaces at the new physical size.
+@property (nonatomic, copy) dispatch_block_t backingChangedBlock;
 // C++ render state is managed by MacGpuWindowHost, not the view
 @end
 
@@ -1280,6 +1285,11 @@ static void install_app_menu(NSString* appName) {
     self.metalLayer.contentsScale = scale;
     CGSize backing = CGSizeMake(self.bounds.size.width * scale, self.bounds.size.height * scale);
     self.metalLayer.drawableSize = backing;
+    // A pure backing-scale change does not trigger windowDidResize, so the host
+    // must be told to recreate its GPU surfaces (and the retained partial-repaint
+    // scene) at the new physical size — otherwise the fixed-size scene desyncs
+    // from the resized drawable.
+    if (self.backingChangedBlock) self.backingChangedBlock();
 }
 
 @end
@@ -1678,6 +1688,13 @@ public:
             if (const char* env = std::getenv("PULP_PARTIAL_RENDERING_DEBUG")) {
                 partial_rendering_debug_ = (env[0] == '1');
             }
+            // FU-2 partial repaint (WI-17), default OFF: only when
+            // PULP_PARTIAL_REPAINT=1 does the host clip the repaint to the
+            // damaged rect and blit a retained scene target. Unset ⇒ the
+            // unconditional full-repaint path below is untouched.
+            if (const char* env = std::getenv("PULP_PARTIAL_REPAINT")) {
+                partial_repaint_enabled_ = (env[0] == '1');
+            }
             NSRect frame = NSMakeRect(100, 100, options.width, options.height);
 
             // Shared NSWindow construction (style, released-when-closed,
@@ -1693,6 +1710,9 @@ public:
             metal_view_.frameClock = &frame_clock_;
             metal_view_.repaintBlock = ^{
                 needs_repaint_.store(true, std::memory_order_relaxed);
+            };
+            metal_view_.backingChangedBlock = ^{
+                handle_backing_change();
             };
             [window_ setContentView:metal_view_];
 
@@ -1847,9 +1867,18 @@ public:
 
     void repaint() override {
         needs_repaint_ = true;
-        // Until widgets pass per-rect bounds through request_repaint(),
-        // every host-level repaint() invalidates the whole viewport.
-        tracker_.invalidate_all();
+        // The base mark_dirty(Rect) accumulates the bounded region and then calls
+        // this virtual, so the pending state is current here. Under partial
+        // repaint, a bounded (non-full) pending region invalidates just that rect
+        // in the tracker; otherwise (and always when the flag is off) the whole
+        // viewport is invalidated — the historical behavior.
+        if (partial_repaint_enabled_ && !pending_repaint_is_full() &&
+            has_pending_dirty_bounds()) {
+            auto b = pending_dirty_bounds();
+            tracker_.invalidate({b.x, b.y, b.width, b.height});
+        } else {
+            tracker_.invalidate_all();
+        }
         ++request_repaint_dirty_frames_;
     }
 
@@ -2139,6 +2168,14 @@ private:
     // clipped to" against the unconditional repaint that still ships.
     render::DirtyTracker tracker_;
     bool partial_rendering_debug_ = false;
+    // FU-2 (WI-17): when true (PULP_PARTIAL_REPAINT=1) the host clips the
+    // repaint to the damaged rect and blits a retained persistent-scene target.
+    // Default false ⇒ the unconditional full-repaint path is unchanged.
+    bool partial_repaint_enabled_ = false;
+    // The backing scale the GPU surfaces were last (re)created at, so a pure
+    // backing-scale change (handle_backing_change) can detect the desync a
+    // logical resize would otherwise miss.
+    float configured_scale_ = 0.0f;
     uint64_t pump_dirty_frames_ = 0;
     uint64_t request_repaint_dirty_frames_ = 0;
     int frame_fail_count_ = 0;
@@ -2196,6 +2233,16 @@ private:
         skia_config.scale_factor = static_cast<float>(scale);
 
         skia_surface_ = render::SkiaSurface::create(*gpu_surface_, skia_config);
+        configured_scale_ = static_cast<float>(scale);
+
+        // FU-2: put the surface in persistent-scene mode when partial repaint is
+        // enabled, so a clipped repaint is correct on the non-preserving Dawn
+        // swapchain. If the backend can't retain a scene, disable partial
+        // repaint entirely — we must never clip a non-preserving surface.
+        if (skia_surface_ && partial_repaint_enabled_ &&
+            !skia_surface_->set_persistent_scene(true)) {
+            partial_repaint_enabled_ = false;
+        }
     }
 
     void handle_resize(float width, float height) {
@@ -2214,6 +2261,7 @@ private:
                                    static_cast<uint32_t>(height),
                                    static_cast<float>(scale));
         }
+        configured_scale_ = static_cast<float>(scale);
         // Relayout the root view synchronously so hit testing
         // and any user resize callback both see the new geometry. paint_scene
         // also calls set_bounds + layout_children, but that runs at the next
@@ -2233,7 +2281,33 @@ private:
         tracker_.invalidate_all();
     }
 
-    void paint_scene(canvas::Canvas& canvas) {
+    // A backing-scale (DPI) change at the SAME logical size — display move or
+    // hotplug — updates the layer's contentsScale/drawableSize but does not go
+    // through windowDidResize/handle_resize. Under partial repaint the retained
+    // scene is a FIXED-size buffer, so if the physical size changes underneath
+    // it, the 1:1 blit would leave an undefined region where the drawable grew
+    // (and the clip would mis-snap). Recreate the GPU surfaces + scene at the new
+    // physical size and force a full repaint. Gated on the flag: with partial
+    // repaint OFF the always-fresh drawable wrap already tracks the drawable, so
+    // this is a no-op and flag-off behavior is unchanged.
+    void handle_backing_change() {
+        if (!partial_repaint_enabled_) return;
+        if (!gpu_surface_ || !skia_surface_) return;
+        const float scale = static_cast<float>(metal_view_.metalLayer.contentsScale);
+        if (scale == configured_scale_ || scale <= 0.0f) return;  // no real change
+
+        gpu_surface_->resize(static_cast<uint32_t>(width_ * scale),
+                             static_cast<uint32_t>(height_ * scale));
+        skia_surface_->resize(static_cast<uint32_t>(width_),
+                              static_cast<uint32_t>(height_), scale);  // recreates the scene
+        configured_scale_ = scale;
+        tracker_.set_viewport(width_, height_);
+        tracker_.invalidate_all();          // first frame after the DPI change is full
+        needs_repaint_.store(true, std::memory_order_relaxed);  // next vsync renders it
+    }
+
+    void paint_scene(canvas::Canvas& canvas,
+                     const pulp::view::Rect* clip = nullptr) {
         // When a design viewport is set, the root
         // is pinned at design size and paint applies an aspect-correct
         // scale + letterbox translate to fit the current window. The
@@ -2256,6 +2330,19 @@ private:
         // Paint pass: background fill + view-tree paint into the canvas. Runs
         // after layout, before the GPU submit/present in render_frame.
         PULP_TRACE_SCOPE_NAMED("canvas", "paint");
+
+        // FU-2 partial repaint: clip the ENTIRE body — background fill included —
+        // to the damaged rect. Everything outside stays as the retained scene's
+        // previous-frame pixels. Only reached when compute_effective_damage
+        // returned a bounded (pixel-identical) rect. The clip is in root logical
+        // coords; the canvas already carries the backing-scale CTM, so it maps to
+        // exact device pixels (the rect was snapped out to that grid).
+        const int clip_saved = canvas.save_count();
+        if (clip) {
+            canvas.save();
+            canvas.clip_rect(clip->x, clip->y, clip->width, clip->height);
+        }
+
         canvas.set_fill_color(canvas::Color::rgba8(
             mac_host::kHostClearR, mac_host::kHostClearG, mac_host::kHostClearB));
         canvas.fill_rect(0, 0, width_, height_);
@@ -2284,6 +2371,8 @@ private:
         }
 
         // Inspector overlay is painted automatically via View::paint_overlays()
+
+        if (clip) canvas.restore_to_count(clip_saved);  // close the FU-2 clip
     }
 
     bool render_frame(std::vector<uint8_t>* capture_pixels = nullptr,
@@ -2333,7 +2422,28 @@ private:
                 width_, height_, gpu_surface_->width(), gpu_surface_->height(), scale);
         }
 
-        paint_scene(*canvas);
+        // FU-2: when partial repaint is enabled and this frame has a bounded
+        // (non-full) dirty region, ask the pure damage model whether the region
+        // can be clipped pixel-identically. A hazard (blur / backdrop-filter /
+        // mask / transformed view reaching the damage) escalates to full → no
+        // clip. Design-viewport mode always escalates in v1 (damage is in root
+        // space but paint applies a scale+letterbox). Off / full / hazard ⇒
+        // nullptr clip ⇒ the historical whole-window paint.
+        pulp::view::Rect clip_rect{};
+        const pulp::view::Rect* clip = nullptr;
+        if (partial_repaint_enabled_ && tracker_.is_dirty() &&
+            !tracker_.needs_full_repaint() && design_viewport_w_ <= 0.0f) {
+            const auto b = tracker_.bounds();
+            const CGFloat cscale = metal_view_.metalLayer.contentsScale;
+            const auto decision = pulp::view::compute_effective_damage(
+                root_, pulp::view::Rect{b.x, b.y, b.w, b.h},
+                static_cast<float>(cscale));
+            if (!decision.full) {
+                clip_rect = decision.bounds;
+                clip = &clip_rect;
+            }
+        }
+        paint_scene(*canvas, clip);
 
         // Env-var one-shot .skp capture: when PULP_SKP_CAPTURE_DIR is set, dump
         // this frame's draw ops to a backend-independent .skp for offline
@@ -2363,6 +2473,10 @@ private:
         // Clear the tracker AFTER present so the next frame starts clean.
         // The current render gate still uses needs_repaint_ / animation state.
         tracker_.clear();
+        // FU-2: the mac host consumes the base dirty accumulator directly (it
+        // never calls paint_root), so it must clear it too — otherwise the
+        // bounded region sticks and the next repaint() reads stale bounds.
+        if (partial_repaint_enabled_) clear_pending_dirty();
         return captured;
     }
 

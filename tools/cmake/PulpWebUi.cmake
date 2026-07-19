@@ -187,6 +187,9 @@ set(_PULP_WEBUI_CANVAS_SOURCES
 set(_PULP_WEBUI_VIEW_SOURCES
     ${_PULP_WEBUI_ROOT}/core/view/src/view.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/view_paint.cpp
+    # FU-2 partial-repaint damage model — pure, no platform deps. Kept in the
+    # web source set so the view lib links identically across native + wasm.
+    ${_PULP_WEBUI_ROOT}/core/view/src/repaint_damage.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/value_source_binding.cpp
     # The text editor was split into several TUs; the wasm build needs the same set the
     # native build compiles (core/view/CMakeLists.txt), because a Label can open the editor's
