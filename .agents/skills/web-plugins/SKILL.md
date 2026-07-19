@@ -134,6 +134,13 @@ must never do (decode, resample, FFT-plan, allocate) therefore has nowhere to do
 it — which is what `Processor::on_non_realtime_tick()` /
 `non_realtime_tick_pending()` exist for.
 
+`pulp::audio::decode_wav(span, limits)` is linked into both WAM and WebCLAP so
+code that already owns raw WAV bytes can share the native decoder. That is an
+**off-render import API**: never call it from `process()` or the worklet render
+turn. For browser file/drop imports, prefer the page's `AudioContext.decodeAudioData`
+when session-rate resampling is wanted, then transfer the resulting PCM through
+plugin state or another explicitly bounded handoff.
+
 - The WAM adapter marks the processor dirty on a control write and services it
   **once per render turn**, right after the render call (`WamStage::service_non_realtime`
   / `mark_non_realtime_dirty`). A knob drag delivers many control messages in one

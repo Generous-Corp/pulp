@@ -132,7 +132,7 @@ Key headers: `pulp/platform/detect.hpp`, `pulp/platform/native_handle.hpp`
 | Live Audio Inspector (RT output-boundary probe, dev window + JSON dump) | usable | [audio](modules.md#audio) | [audio-inspector](../guides/audio-inspector.md) |
 | Audio Scope acquisition and measurements (`pulp.audio.scope.v1`, CLI/MCP live or offline WAV) | experimental | [audio](modules.md#audio) | [cli](cli.md#audio) |
 
-Key headers: `pulp/audio/buffer.hpp`, `pulp/audio/device.hpp`, `pulp/audio/audio_file.hpp`, `pulp/audio/audio_scope.hpp`
+Key headers: `pulp/audio/buffer.hpp`, `pulp/audio/device.hpp`, `pulp/audio/audio_file.hpp`, `pulp/audio/wav_decoder.hpp`, `pulp/audio/audio_scope.hpp`
 
 ---
 

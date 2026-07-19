@@ -267,6 +267,11 @@ auto info = FormatRegistry::instance().read_info("song.mp3");
 // info->duration_seconds, info->num_channels, info->sample_rate
 ```
 
+For an already-resident WAV byte span, `inspect_wav()` and `decode_wav()` in
+`wav_decoder.hpp` provide a no-file-I/O, no-exceptions path with caller-set
+frame, channel, and decoded-byte ceilings. Keep parsing and allocation off the
+audio callback.
+
 ### Streaming write — large files without loading into memory
 
 ```cpp
@@ -314,7 +319,7 @@ device->start([](const auto& input, auto& output, const auto& ctx) {
 | FLAC | ✓ | ✓* | dr_flac / libflac (`pulp add libflac`) |
 | MP3 | ✓ | ✓* | dr_mp3 / LAME (`pulp add lame --accept-license LGPL-2.0`) |
 | OGG Vorbis | ✓ | — | stb_vorbis |
-| WAV | ✓ | ✓ | CHOC + StreamingWriter |
+| WAV | ✓ | ✓ | CHOC + bounded in-memory decoder + StreamingWriter |
 
 *\*Write via optional `pulp add` packages. Those packages do not add portable
 AAC/ALAC readers. Permissive (libflac, ALAC) packages install freely; copyleft
