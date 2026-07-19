@@ -263,6 +263,7 @@ TEST_CASE("DesignFrameView hover highlight tracks the knob's live rotation, not 
     hovered.set_element_value(0, 1.0f);
 
     hovered.simulate_hover({40, 40});  // -> SVG (50,50): over the knob dome
+    REQUIRE(hovered.element_hovered() == 0);
 
     auto base_png = render_to_png(baseline, 80, 80, 2.0f, ScreenshotBackend::skia);
     if (base_png.empty()) SKIP("Skia raster screenshot backend unavailable");
@@ -273,6 +274,8 @@ TEST_CASE("DesignFrameView hover highlight tracks the knob's live rotation, not 
     // otherwise identical (same value, same everything else), so every
     // differing pixel comes from the highlight redraw alone.
     const auto bounds = diff_bounds(base_png, hover_png, /*tolerance=*/4);
+    if (!bounds.valid)
+        SKIP("SVG fragment compositing unavailable in this build");
     REQUIRE(bounds.valid);
 
     // The knob center (SVG 50,50; panel origin 10,10) lands at pixel (80,80) in

@@ -60,7 +60,9 @@ done
 
 STAGE="$(mktemp -d)"; mkdir -p "$OUT" "$STAGE/comp"
 trap 'rm -rf "$STAGE"' EXIT   # clean the staging tree on any exit (success, error, signal)
-source ~/.config/pulp/secrets/keychain.env 2>/dev/null || true
+if [[ -f ~/.config/pulp/secrets/keychain.env ]]; then
+  source ~/.config/pulp/secrets/keychain.env
+fi
 
 # Non-interactive signing preflight — reuse the codified `pulp ship doctor` setup
 # (ensure_signing_ready.sh, the SAME script `pulp ship sign` runs) so a fresh
@@ -200,7 +202,9 @@ if [[ "$NOTARIZE" == 1 ]]; then
     # Submodule / standalone consumers never build pulp-cpp (it is gated to
     # top-level Pulp builds), so fall back to notarytool directly using the
     # file-based App Store Connect key. Secrets live in ~/.config/pulp/secrets.
-    source ~/.config/pulp/secrets/notary.env 2>/dev/null || true
+    if [[ -f ~/.config/pulp/secrets/notary.env ]]; then
+      source ~/.config/pulp/secrets/notary.env
+    fi
     : "${PULP_NOTARY_KEY_PATH:=$HOME/.config/pulp/secrets/AuthKey_${PULP_NOTARY_KEY_ID:-}.p8}"
     if [[ -z "${PULP_NOTARY_KEY_ID:-}" || -z "${PULP_NOTARY_ISSUER_ID:-}" || ! -f "$PULP_NOTARY_KEY_PATH" ]]; then
       echo "error: cannot notarize — pulp-cpp is not built and no notary key is configured." >&2
