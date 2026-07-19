@@ -197,6 +197,18 @@ def test_since_arg_is_absolute() -> None:
     if not _have_history():
         print("  SKIP  history not present for the live approxidate comparison")
         return
+    # A shallow checkout (CI's default fetch-depth=1 on the build job) grafts
+    # the first-parent walk at the tip, so `git log --first-parent` sees a
+    # single commit regardless of --since. The live demonstration below needs
+    # real depth to distinguish the float trap from the integer form; the
+    # arithmetic assertions above already pin the contract. Skip only the live
+    # comparison when history is truncated — same spirit as the guard above.
+    shallow = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=REPO_ROOT, capture_output=True, text=True).stdout.strip()
+    if shallow == "true":
+        print("  SKIP  shallow checkout — live approxidate comparison needs full history")
+        return
     # The trap itself, demonstrated live against this repo.
     def count(since: str) -> int:
         return len(subprocess.run(
