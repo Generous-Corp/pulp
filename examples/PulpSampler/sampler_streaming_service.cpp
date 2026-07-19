@@ -294,9 +294,8 @@ SamplerStreamingRuntime::stage_streamed_file(std::string_view path) {
         result.status = PulpSamplerLoadStatus::OpenFailed;
         return staged;
     }
-    // The file may have been replaced between the capability probe and
-    // strict reopen. Validate and report the handle that will actually be
-    // registered, rather than retaining probe-era metadata.
+    // The strict binding reports the same retained snapshot metadata as the
+    // capability probe. Revalidate the admitted contract before sidecar loading.
     result.channels = base.channels;
     result.sample_rate = base.sample_rate;
     result.total_frames = base.total_frames;

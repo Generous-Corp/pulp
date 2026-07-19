@@ -49,8 +49,18 @@ public:
                  std::uint64_t preload_frames,
                  bool has_preload_contract,
                  const SamplePreloadContract& preload_contract,
-                 bool has_stream_source) const noexcept {
-        return asset_.asset_id == asset.asset_id &&
+                 bool has_stream_source,
+                 const SampleStreamCacheSourceView& stream_source) const noexcept {
+        const bool stream_matches =
+            !has_stream_source ||
+            (stream_source.valid() &&
+             stream_registration_.matches(stream_source.token,
+                                          stream_source.window,
+                                          stream_source.total_frames,
+                                          stream_source.page_frames,
+                                          stream_source.registration_epoch) &&
+             stream_memory_governor_epoch_ == stream_source.memory_governor_epoch);
+        return stream_matches && asset_.asset_id == asset.asset_id &&
                asset_.asset_generation == asset.asset_generation &&
                source_.source_id == source.source_id &&
                source_.source_generation == source.source_generation &&
@@ -76,7 +86,13 @@ private:
           preload_frames_(config.preload_frames),
           has_preload_contract_(config.preload_contract.has_value()),
           preload_contract_(config.preload_contract.value_or(SamplePreloadContract{})),
-          has_stream_source_(config.stream_source.has_value()) {}
+          has_stream_source_(config.stream_source.has_value()),
+          stream_registration_(config.stream_source
+                                   ? config.stream_source->registration
+                                   : SampleStreamSourceRegistrationProof{}),
+          stream_memory_governor_epoch_(config.stream_source
+                                            ? config.stream_source->memory_governor_epoch
+                                            : SampleMemoryGovernorEpoch{}) {}
 
     static bool same_contract(const SamplePreloadContract& left,
                               const SamplePreloadContract& right) noexcept {
@@ -102,6 +118,8 @@ private:
     bool has_preload_contract_ = false;
     SamplePreloadContract preload_contract_{};
     bool has_stream_source_ = false;
+    SampleStreamSourceRegistrationProof stream_registration_{};
+    SampleMemoryGovernorEpoch stream_memory_governor_epoch_{};
 };
 
 static_assert(std::is_trivially_copyable_v<SampleAssetRegistrationProof>);
@@ -141,7 +159,8 @@ struct SampleAssetView {
                                   preload_frames,
                                   has_preload_contract,
                                   preload_contract,
-                                  has_stream_source)) {
+                                  has_stream_source,
+                                  stream_source)) {
             return false;
         }
         if (!has_stream_source) return true;

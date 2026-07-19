@@ -593,7 +593,9 @@ bool PulpSamplerProcessor::rebind_stream_domain(StreamDomain target) noexcept {
     if (target == current)
         return true;
     try {
-        return bind_stream_domain_checked(target).prepared();
+        return bind_stream_domain_checked(
+                   target, config_.streaming_memory_budget_bytes)
+            .prepared();
     } catch (...) {
         return false;
     }

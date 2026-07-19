@@ -126,6 +126,29 @@ TEST_CASE("PulpSampler transactionally rebinds loaded streams across clock chang
     REQUIRE(render(fixture, disabled_block).size() == 64);
 }
 
+TEST_CASE("PulpSampler preserves the configured streaming cap across clock changes",
+          "[audio][sampler][heritage][stream][capacity]") {
+    const auto initial =
+        SamplerStreamingRuntime::estimate_prepare(48000.0f, 64);
+    REQUIRE(initial.prepared());
+    const auto configured = initial.required_streaming_memory_bytes + 4096;
+
+    HeritageFixture fixture(
+        64, nullptr, 48000.0, PulpSamplerConfig{configured});
+    REQUIRE(fixture.processor.prepare_result().prepared());
+    REQUIRE(fixture.processor.prepare_result().configured_streaming_memory_bytes ==
+            configured);
+    REQUIRE(fixture.processor.diagnostics().streaming_memory_capacity_bytes ==
+            configured);
+
+    REQUIRE(fixture.processor.set_heritage_profile(clock_profile(2.0)) ==
+            PulpSamplerHeritageStatus::Ready);
+    REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(
+                fixture.processor) == 96000.0);
+    REQUIRE(fixture.processor.diagnostics().streaming_memory_capacity_bytes ==
+            configured);
+}
+
 TEST_CASE("PulpSampler serializes a staged load against stream-domain rebind",
           "[audio][sampler][heritage][stream][configuration][thread]") {
     HeritageTempWav source("clock_rebind_concurrent");

@@ -199,6 +199,25 @@ TEST_CASE("Partial sample asset requires a matching prepared stream source",
     forged = view;
     forged.preload_contract.maximum_host_block_frames += 1;
     REQUIRE_FALSE(forged.valid());
+
+    SampleStreamCacheService replacement_service;
+    REQUIRE(replacement_service.prepare({
+        .scheduler_capacity = 4,
+        .page_memory_budget_bytes = 64,
+    }));
+    const auto replacement = replacement_service.add_source({
+        .token = source,
+        .channels = 2,
+        .total_frames = 12,
+        .page_frames = 4,
+        .cache_page_count = 2,
+    }, [](std::uint64_t, pulp::audio::BufferView<float>, std::uint64_t frames) {
+        return frames;
+    });
+    REQUIRE(replacement.added());
+    forged = view;
+    forged.stream_source = replacement.view;
+    REQUIRE_FALSE(forged.valid());
 }
 
 TEST_CASE("Sample asset rejects malformed identity metadata and preload bounds",

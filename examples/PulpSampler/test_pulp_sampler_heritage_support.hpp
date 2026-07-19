@@ -244,8 +244,10 @@ struct HeritageFixture {
 
     HeritageFixture(std::uint32_t maximum_frames,
                     const audio::SampleHeritageProfile* profile = nullptr,
-                    double prepared_sample_rate = 48000.0)
-        : maximum_block_frames(maximum_frames),
+                    double prepared_sample_rate = 48000.0,
+                    PulpSamplerConfig config = {})
+        : processor(config),
+          maximum_block_frames(maximum_frames),
           sample_rate(prepared_sample_rate) {
         processor.set_state_store(&store);
         processor.define_parameters(store);
