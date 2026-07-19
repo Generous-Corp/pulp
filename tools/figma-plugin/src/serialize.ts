@@ -249,6 +249,9 @@ function toEnvelopeNode(n: ExtractedFigmaNode): unknown {
   if (n.component_set_name) figma.component_set_name = n.component_set_name;
   if (n.main_component_id) figma.main_component_id = n.main_component_id;
   if (n.main_component_name) figma.main_component_name = n.main_component_name;
+  // Only emitted when true: a local component omits the flag entirely, so the
+  // consumer treats presence as the remote-library signal.
+  if (n.remote_library === true) figma.remote_library = true;
   if (n.library_widget_kind) figma.library_widget_kind = n.library_widget_kind;
   if (n.library_version) figma.library_version = n.library_version;
   if (n.component_properties) figma.component_properties = n.component_properties;

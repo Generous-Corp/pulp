@@ -418,6 +418,93 @@ TEST_CASE("DesignIR diagnoses an unknown interactive kind instead of silent-knob
     CHECK(ir.root.interactive_elements[1].kind == InteractiveElementKind::fader);
 }
 
+TEST_CASE("figma block component semantics land in normalized attributes",
+          "[view][import][components]") {
+    // Audit item 4: the plugin/REST/.fig lanes all emit component metadata in
+    // the node's `figma` block, and parse_ir_node must preserve ALL of it into
+    // the namespaced attribute keys — not just key/name. Covers a typed TEXT
+    // property (with Figma's "#id" name uniquifier stripped), a BOOLEAN, an
+    // INSTANCE_SWAP (the swapped component id/name is the value), a VARIANT
+    // entry, the variant axis map, set name, master id, and the remote flag.
+    const std::string envelope = R"json({
+      "format_version": "2026.05-figma-plugin-v1",
+      "provenance": {"adapter": "figma-plugin", "version": "test"},
+      "root": {
+        "type": "frame", "name": "Root",
+        "children": [{
+          "type": "frame", "name": "Knob Instance",
+          "figma": {
+            "parent_id": "1:1", "z_order": 0,
+            "absolute_transform": [[1,0,0],[0,1,0]],
+            "visible": true, "locked": false, "blend_mode": "PASS_THROUGH",
+            "component_key": "abc123key",
+            "component_set_name": "Knob",
+            "main_component_id": "12:34",
+            "main_component_name": "size=lg, state=default",
+            "remote_library": true,
+            "component_properties": {
+              "label#9:0": {"type": "TEXT", "value": "Drive"},
+              "showValue#9:1": {"type": "BOOLEAN", "value": true},
+              "icon#9:2": {"type": "INSTANCE_SWAP", "value": "77:5"},
+              "size": {"type": "VARIANT", "value": "lg"},
+              "detents#9:3": {"type": "NUMBER", "value": 11}
+            },
+            "variant_properties": {"size": "lg", "state": "default"}
+          }
+        }]
+      }
+    })json";
+    const auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.children.size() == 1);
+    const auto& a = ir.root.children[0].attributes;
+    CHECK(a.at("figmaComponentKey") == "abc123key");
+    CHECK(a.at("figmaComponentSetName") == "Knob");
+    CHECK(a.at("figmaMainComponentId") == "12:34");
+    CHECK(a.at("figmaMainComponentName") == "size=lg, state=default");
+    CHECK(a.at("figmaRemoteLibrary") == "true");
+    // Typed properties: "#id" suffix stripped, value stringified, type kept.
+    CHECK(a.at("figmaComponentProperty.label") == "Drive");
+    CHECK(a.at("figmaComponentPropertyType.label") == "TEXT");
+    CHECK(a.at("figmaComponentProperty.showValue") == "true");
+    CHECK(a.at("figmaComponentPropertyType.showValue") == "BOOLEAN");
+    CHECK(a.at("figmaComponentProperty.icon") == "77:5");
+    CHECK(a.at("figmaComponentPropertyType.icon") == "INSTANCE_SWAP");
+    CHECK(a.at("figmaComponentProperty.size") == "lg");
+    CHECK(a.at("figmaComponentPropertyType.size") == "VARIANT");
+    CHECK(a.at("figmaComponentProperty.detents") == "11");
+    CHECK(a.at("figmaComponentPropertyType.detents") == "NUMBER");
+    // Variant axis selections, one attribute per axis.
+    CHECK(a.at("figmaVariant.size") == "lg");
+    CHECK(a.at("figmaVariant.state") == "default");
+}
+
+TEST_CASE("figma block without component metadata preserves nothing extra",
+          "[view][import][components]") {
+    // Negative: a plain (non-instance) node's figma block must not sprout any
+    // figma* component attributes — the preservation is strictly additive.
+    const std::string envelope = R"json({
+      "format_version": "2026.05-figma-plugin-v1",
+      "provenance": {"adapter": "figma-plugin", "version": "test"},
+      "root": {
+        "type": "frame", "name": "Root",
+        "children": [{
+          "type": "frame", "name": "Plain",
+          "figma": {
+            "parent_id": "1:1", "z_order": 0,
+            "absolute_transform": [[1,0,0],[0,1,0]],
+            "visible": true, "locked": false, "blend_mode": "PASS_THROUGH"
+          }
+        }]
+      }
+    })json";
+    const auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.children.size() == 1);
+    for (const auto& [key, value] : ir.root.children[0].attributes) {
+        INFO(key << " = " << value);
+        CHECK(key.rfind("figma", 0) != 0);
+    }
+}
+
 TEST_CASE("DesignIR round-trips the P7 import-report fields (F0 carrier chain)",
           "[view][import][ir-v1][faithful-svg][p7]") {
     // P7-F0: the resolution provenance (rung / confidence / conflicts /

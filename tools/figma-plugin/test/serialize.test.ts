@@ -118,6 +118,57 @@ test("serializeExport: figma sub-object carries library_widget_kind + component_
   ]);
 });
 
+test("serializeExport: figma sub-object carries full component semantics", () => {
+  // Audit item 4: an INSTANCE's captured component metadata — typed
+  // componentProperties (incl. INSTANCE_SWAP + VARIANT), variantProperties,
+  // set name, master id, and the remote-library flag — must all reach the
+  // figma block so design_ir_json.cpp can preserve them as attributes.
+  const inst = baseNode({
+    name: "Knob Instance",
+    figma_node_id: "9:9",
+    component_key: "setkey123",
+    component_set_name: "Knob",
+    main_component_id: "12:34",
+    main_component_name: "size=lg, state=default",
+    remote_library: true,
+    component_properties: {
+      "label#9:0": { type: "TEXT", value: "Drive" },
+      "showValue#9:1": { type: "BOOLEAN", value: true },
+      "icon#9:2": { type: "INSTANCE_SWAP", value: "77:5" },
+      size: { type: "VARIANT", value: "lg" },
+    },
+    variant_properties: { size: "lg", state: "default" },
+  });
+  const out = serializeExport([inst], [], ctx());
+  const root = rootOf(out);
+
+  assert.equal(root.figma.component_key, "setkey123");
+  assert.equal(root.figma.component_set_name, "Knob");
+  assert.equal(root.figma.main_component_id, "12:34");
+  assert.equal(root.figma.main_component_name, "size=lg, state=default");
+  assert.equal(root.figma.remote_library, true);
+  assert.deepEqual(root.figma.component_properties, {
+    "label#9:0": { type: "TEXT", value: "Drive" },
+    "showValue#9:1": { type: "BOOLEAN", value: true },
+    "icon#9:2": { type: "INSTANCE_SWAP", value: "77:5" },
+    size: { type: "VARIANT", value: "lg" },
+  });
+  assert.deepEqual(root.figma.variant_properties, { size: "lg", state: "default" });
+
+  // The serialized instance stays schema-valid.
+  const errors: string[] = [];
+  validate(out, schema as any, schema as any, "$", errors);
+  assert.deepEqual(errors, [], `schema violations:\n${errors.join("\n")}`);
+
+  // A LOCAL component omits the flag entirely — presence IS the signal.
+  const local = serializeExport(
+    [baseNode({ component_key: "k", remote_library: false })],
+    [],
+    ctx(),
+  );
+  assert.equal(rootOf(local).figma.remote_library, undefined);
+});
+
 test("serializeExport: envelope carries provenance + format_version", () => {
   const out = serializeExport([knobNode()], [], ctx()) as Record<string, any>;
   assert.equal(out.format_version, "2026.05-figma-plugin-v1");
