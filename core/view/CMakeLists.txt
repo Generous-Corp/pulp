@@ -600,6 +600,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
         src/design_cpp_codegen.cpp
         src/design_swift_codegen.cpp
         src/design_tokens.cpp
+        src/design_tokens_w3c.cpp
         src/design_manifest.cpp
         src/design_adherence.cpp
         src/design_ledger.cpp
