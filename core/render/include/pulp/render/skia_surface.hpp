@@ -79,6 +79,28 @@ public:
     /// Resize the surface
     virtual void resize(uint32_t width, uint32_t height, float scale = 1.0f) = 0;
 
+    /// Enable/disable persistent-scene mode (partial-repaint support, FU-2).
+    /// Returns whether the mode is ACTIVE after the call.
+    ///
+    /// In this mode `begin_frame()` targets a persistent, window-sized Graphite
+    /// scene surface that RETAINS its content across frames; `end_frame()` blits
+    /// that scene 1:1 onto the presentable drawable, then submits. This is what
+    /// makes a clipped (partial) repaint correct on the non-preserving Dawn
+    /// swapchain: the host repaints only the damaged rect into the retained
+    /// scene and the whole scene is re-presented, so pixels outside the clip are
+    /// the previous frame's — exactly the "static chrome doesn't re-composite"
+    /// win. The first frame after enabling (or after a resize) is a full repaint
+    /// into the fresh scene; the host arms that.
+    ///
+    /// Default: unsupported no-op returning `false` — the base and the
+    /// Ganesh/WebGL2 surface do not implement it, so a `false` return tells the
+    /// caller it must full-repaint every frame. Only the Dawn/Graphite desktop
+    /// surface implements it.
+    virtual bool set_persistent_scene(bool /*enable*/) { return false; }
+
+    /// Whether persistent-scene mode is currently active.
+    virtual bool persistent_scene() const { return false; }
+
     /// Read the current rendered frame into an RGBA buffer. If a frame is
     /// currently open, this finalizes and submits pending canvas work before
     /// readback; callers should treat readback as a capture/end-of-frame
