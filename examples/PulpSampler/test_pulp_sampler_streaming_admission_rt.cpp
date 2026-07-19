@@ -206,6 +206,48 @@ TEST_CASE("PulpSampler rejects streamed note admission above serialized source t
     REQUIRE(diagnostics.service_starvation_events == 0);
 }
 
+TEST_CASE("PulpSampler aggregates admission across distinct physical stream sources",
+          "[sampler][stream][contract][admission][worker]") {
+    TempSamplerWav first("cross_source_rate_admission_a", 500000, 0.25f);
+    TempSamplerWav second("cross_source_rate_admission_b", 500000, 0.5f);
+    SamplerFixture fixture(64);
+    fixture.store.set_value(kSamplerAttack, 0.0f);
+    fixture.store.set_value(kSamplerDecay, 0.0f);
+    fixture.store.set_value(kSamplerSustain, 100.0f);
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+    REQUIRE(fixture.proc->load_sample_file(first.path));
+
+    SamplerProcessBlock block(64);
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 100));
+    block.run(*fixture.proc);
+    block.midi_in.clear();
+    const auto first_source =
+        PulpSamplerTestAccess::published_stream_source(*fixture.proc);
+    REQUIRE(PulpSamplerTestAccess::active_streamed_voices_for_source(
+                *fixture.proc, first_source) == 1);
+
+    REQUIRE(fixture.proc->load_sample_file(second.path));
+    const auto second_source =
+        PulpSamplerTestAccess::published_stream_source(*fixture.proc);
+    REQUIRE((second_source.source_id != first_source.source_id ||
+             second_source.source_generation != first_source.source_generation));
+    REQUIRE(PulpSamplerTestAccess::force_active_stream_rate_capacity(
+        *fixture.proc, 70000.0));
+    const auto diagnostics = fixture.proc->stream_stats();
+
+    block.midi_in.add(midi::MidiEvent::note_on(0, 60, 100));
+    block.run(*fixture.proc);
+    block.midi_in.clear();
+
+    REQUIRE(PulpSamplerTestAccess::active_streamed_voices_for_source(
+                *fixture.proc, first_source) == 1);
+    REQUIRE(PulpSamplerTestAccess::active_streamed_voices_for_source(
+                *fixture.proc, second_source) == 0);
+    REQUIRE(fixture.proc->stream_stats().aggregate_rate_admission_rejections ==
+            diagnostics.aggregate_rate_admission_rejections + 1);
+    REQUIRE(fixture.proc->stream_stats().service_starvation_events == 0);
+}
+
 TEST_CASE("PulpSampler sheds streamed voices when pitch automation exceeds source throughput",
           "[sampler][stream][contract][automation]") {
     TempSamplerWav wav("aggregate_rate_automation", 500000, 0.25f);
@@ -359,7 +401,7 @@ TEST_CASE("PulpSampler in-contract stream torture survives bounded eviction and 
     REQUIRE((long_source_token.source_id != short_source.source_id ||
              long_source_token.source_generation != short_source.source_generation));
     constexpr auto kCertifiedDecoderLatencySeconds = 0.005;
-    constexpr std::array notes{48, 60, 72, 84};
+    constexpr std::array notes{36, 48, 60, 72};
     constexpr std::array churn_notes{36, 43};
     constexpr std::uint32_t kTortureCallbacks = 1800;
     constexpr std::uint32_t kChurnIntervalCallbacks = 300;
@@ -375,7 +417,7 @@ TEST_CASE("PulpSampler in-contract stream torture survives bounded eviction and 
          callback <= kLastChurnCallback;
          callback += kChurnIntervalCallbacks) {
         const auto steal = callback / kChurnIntervalCallbacks;
-        // Conservative independent upper bound: count every new long-source
+        // Conservative independent upper bound: count every new streamed
         // note without assuming which prior voice the production allocator
         // steals.
         long_source_maximum_aggregate_ratio +=
@@ -383,10 +425,10 @@ TEST_CASE("PulpSampler in-contract stream torture survives bounded eviction and 
     }
     const auto short_source_aggregate_ratio =
         1.0 + std::exp2(7.0 / 12.0);
-    REQUIRE(short_source_aggregate_ratio * 44100.0 <=
-            short_page_frames / kCertifiedDecoderLatencySeconds);
-    REQUIRE(long_source_maximum_aggregate_ratio * 44100.0 <=
-            long_page_frames / kCertifiedDecoderLatencySeconds);
+    REQUIRE((short_source_aggregate_ratio + long_source_maximum_aggregate_ratio) *
+                44100.0 <=
+            std::min(short_page_frames, long_page_frames) /
+                kCertifiedDecoderLatencySeconds);
 
     constexpr int kConcurrentTortureVoices = 4;
     for (int voice = 0; voice < kConcurrentTortureVoices - 1; ++voice) {

@@ -172,8 +172,8 @@ coherent diagnostic publication; a successful load's `selection_generation`
 matches the preload record from the same source publication. These inspection
 APIs are for a control or diagnostic thread, never the audio callback.
 
-The stream service also enforces aggregate decode throughput. For active voices
-sharing one source it computes:
+The stream service also enforces aggregate decode throughput. Across all active
+streamed voices it conservatively computes:
 
 ```text
 effective source frames/second = sum(pitch ratio * source sample rate) * active clock ratio

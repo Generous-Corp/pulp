@@ -199,11 +199,9 @@ PulpSamplerProcessor::StreamRateContract PulpSamplerProcessor::stream_rate_contr
         const auto& voice = voices_[index];
         if (!voice.active || !voice.streamed)
             continue;
-        const auto source = voice.streamed_asset.source;
-        if (source.source_id != candidate.source.source_id ||
-            source.source_generation != candidate.source.source_generation) {
-            continue;
-        }
+        // Decode workers serialize every source assigned to them. The asset view
+        // does not expose that assignment, so aggregate all streamed voices to
+        // keep each worker within one certified throughput budget.
         if (voice.stream_contract_fade_pending) {
             legacy_frames_per_second += voice.stream_playback_rate * host_sample_rate_;
         } else {
