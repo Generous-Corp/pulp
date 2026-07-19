@@ -47,6 +47,7 @@ import {
   maskClipOutline,
   assessMaskFidelity,
   extractPrimitiveGeometryAttrs,
+  extractDevMetadataAttrs,
   decodeRelativeTransform,
   extractBoundVariableBindings,
   utf16ToUtf8ByteOffsets,
@@ -276,6 +277,14 @@ async function walk(
   // The PNG capture below preserves the pixels; these preserve the semantics.
   const primitive = extractPrimitiveGeometryAttrs(node);
   if (primitive) ex.attributes = { ...(ex.attributes ?? {}), ...primitive };
+
+  // Dev-mode metadata + authored export settings (description, dev status,
+  // annotations, export settings) — provenance-only namespaced figma:* attrs.
+  // Nothing renders from these, and export settings never override Pulp's
+  // deterministic PNG/SVG capture policy: they are asset hints and round-trip
+  // context for dev tooling.
+  const devMeta = extractDevMetadataAttrs(node);
+  if (devMeta) ex.attributes = { ...(ex.attributes ?? {}), ...devMeta };
 
   // Min/max sizing — style-level clamps parse_ir_style reads and the flex
   // engines lower to min/max width/height. Figma already honored them while

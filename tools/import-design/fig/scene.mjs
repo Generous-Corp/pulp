@@ -2415,6 +2415,16 @@ export function materializeFrame(scene, frame, ctx) {
       if (preserved) out.attributes = { ...(out.attributes || {}), ...preserved };
     }
 
+    // Dev-mode metadata + authored export settings (description, annotations,
+    // export settings) — provenance-only namespaced figma:* attrs. Nothing
+    // renders from these, and export settings never override the
+    // deterministic capture choices above: they are asset hints and
+    // round-trip context for dev tooling.
+    {
+      const preserved = devMetadataAttrs(node);
+      if (preserved) out.attributes = { ...(out.attributes || {}), ...preserved };
+    }
+
     // A resolved vector is terminal. Figma already flattened the operands into
     // the geometry we just emitted, so a BOOLEAN_OPERATION's children are the
     // pre-union inputs — emitting them too would draw the shape twice, once
@@ -2702,6 +2712,108 @@ function primitiveProvenanceAttrs(node) {
   if (node.type === 'BOOLEAN_OPERATION' && typeof node.booleanOperation === 'string') {
     const op = node.booleanOperation === 'XOR' ? 'exclude' : node.booleanOperation.toLowerCase();
     attrs['figma:boolean_operation'] = op;
+  }
+  return Object.keys(attrs).length ? attrs : null;
+}
+
+/**
+ * Kiwi AnnotationPropertyType → the Plugin API's camelCase vocabulary, so all
+ * three lanes speak the same words (the XOR → exclude precedent). Only the
+ * genuinely divergent names need a table; the rest is a mechanical
+ * SCREAMING_SNAKE → camelCase conversion (WIDTH → width, GRID_ROW_GAP →
+ * gridRowGap, CORNER_RADIUS → cornerRadius).
+ */
+const KIWI_ANNOTATION_PROPERTY_NAMES = {
+  FILL: 'fills',
+  STROKE: 'strokes',
+  EFFECT: 'effects',
+  STROKE_WIDTH: 'strokeWeight',
+  TEXT_STYLE: 'textStyleId',
+  STACK_SPACING: 'itemSpacing',
+  STACK_PADDING: 'padding',
+  STACK_MODE: 'layoutMode',
+  STACK_ALIGNMENT: 'alignItems',
+  COMPONENT: 'mainComponent',
+};
+
+function annotationPropertyName(kiwiType) {
+  const mapped = KIWI_ANNOTATION_PROPERTY_NAMES[kiwiType];
+  if (mapped) return mapped;
+  const parts = kiwiType.toLowerCase().split('_');
+  return parts[0] + parts.slice(1).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join('');
+}
+
+/**
+ * Namespaced figma:* attributes for dev-mode metadata and authored export
+ * settings (audit "Dev metadata" / "Export settings" rows; same contract as
+ * strokeProvenanceAttrs), or null when there is nothing worth preserving.
+ * PROVENANCE-ONLY by design — nothing renders from these, and export settings
+ * never override Pulp's deterministic PNG/SVG capture policy; they are asset
+ * hints and round-trip context for dev tooling (tracked in
+ * compat/imports.json). Kiwi spellings differ from the Plugin API where
+ * noted; the attr keys and value formats are shared across all three lanes:
+ *
+ *   - description (falling back to symbolDescription, both plain strings in
+ *     the kiwi schema) → figma:description, trimmed, non-empty only.
+ *   - annotations → figma:annotations, a compact JSON array of {label,
+ *     properties, category_id}; `label` falls back to the kiwi `labelV2`
+ *     string, property types normalize to the Plugin API's camelCase
+ *     vocabulary (kiwi FILL → "fills", STACK_SPACING → "itemSpacing"). The
+ *     kiwi categoryId is a file-local GUID ref, not the Plugin API's stable
+ *     category-id string, so this lane never emits category_id.
+ *   - exportSettings → figma:export_settings, a compact JSON array of
+ *     {format, suffix, constraint, contents_only}: kiwi imageType lowercased
+ *     with JPEG normalized to the Plugin API's "jpg", suffix only when
+ *     non-empty, constraint types CONTENT_SCALE/CONTENT_WIDTH/CONTENT_HEIGHT
+ *     normalized to "scale:2" / "width:512" / "height:512" with the scale:1
+ *     default silent, contents_only only when explicitly false.
+ *
+ * The Plugin API's devStatus has NO per-node field in the kiwi schema
+ * (sectionStatus is the unrelated section build-status), so figma:dev_status
+ * is a documented absence in this lane. Plugin data / shared plugin data are
+ * deliberately not preserved — arbitrary third-party payloads are envelope
+ * noise.
+ */
+function devMetadataAttrs(node) {
+  const attrs = {};
+  const desc = typeof node.description === 'string' && node.description.trim()
+    ? node.description : node.symbolDescription;
+  if (typeof desc === 'string' && desc.trim()) {
+    attrs['figma:description'] = desc.trim();
+  }
+  if (Array.isArray(node.annotations) && node.annotations.length) {
+    const entries = [];
+    for (const a of node.annotations) {
+      if (!a || typeof a !== 'object') continue;
+      const entry = {};
+      const label = typeof a.label === 'string' && a.label ? a.label
+        : typeof a.labelV2 === 'string' && a.labelV2 ? a.labelV2 : null;
+      if (label) entry.label = label;
+      const props = (Array.isArray(a.properties) ? a.properties : [])
+        .map((p) => (p && typeof p.type === 'string' ? annotationPropertyName(p.type) : ''))
+        .filter((t) => t);
+      if (props.length) entry.properties = props;
+      if (Object.keys(entry).length) entries.push(entry);
+    }
+    if (entries.length) attrs['figma:annotations'] = JSON.stringify(entries);
+  }
+  if (Array.isArray(node.exportSettings) && node.exportSettings.length) {
+    const entries = [];
+    for (const s of node.exportSettings) {
+      if (!s || typeof s.imageType !== 'string') continue;
+      const entry = { format: s.imageType === 'JPEG' ? 'jpg' : s.imageType.toLowerCase() };
+      if (typeof s.suffix === 'string' && s.suffix) entry.suffix = s.suffix;
+      const c = s.constraint;
+      if (c && typeof c.type === 'string' && typeof c.value === 'number') {
+        const kind = c.type.replace(/^CONTENT_/, '').toLowerCase();
+        if (kind !== 'scale' || Math.abs(c.value - 1) > 1e-6) {
+          entry.constraint = `${kind}:${fmtGeomNum(c.value)}`;
+        }
+      }
+      if (s.contentsOnly === false) entry.contents_only = false;
+      entries.push(entry);
+    }
+    if (entries.length) attrs['figma:export_settings'] = JSON.stringify(entries);
   }
   return Object.keys(attrs).length ? attrs : null;
 }

@@ -867,6 +867,107 @@ export function extractPrimitiveGeometryAttrs(n: SceneNode): Record<string, stri
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Dev metadata + export settings → namespaced figma:* provenance attributes.
+
+// Dev-mode metadata and authored export settings, preserved as namespaced
+// figma:* attributes (same contract as the stroke/primitive provenance above:
+// audit "Dev metadata" and "Export settings" rows). PROVENANCE-ONLY by
+// design — nothing renders from these, and export settings never override
+// Pulp's deterministic PNG/SVG capture policy; they are asset hints and
+// round-trip context for dev tooling (tracked in compat/imports.json).
+// Emitted only when present and non-default, so envelopes stay lean:
+//
+//   - PublishableMixin.description (COMPONENT / COMPONENT_SET only among
+//     scene nodes) → figma:description, trimmed, non-empty only.
+//   - DevStatusMixin.devStatus ({type: "READY_FOR_DEV" | "COMPLETED"}) →
+//     figma:dev_status, lowercased like the other enum attrs
+//     ("ready_for_dev" / "completed"). The optional per-status description
+//     is not preserved. Typings-gated: guarded with a property check.
+//   - AnnotationsMixin.annotations → figma:annotations, a compact JSON array
+//     of {label, properties, category_id}; `label` falls back to
+//     `labelMarkdown`, `properties` keeps the Plugin API's camelCase
+//     vocabulary ("fills", "itemSpacing", ...). Entries with nothing to
+//     state are dropped. Typings-gated: guarded with a property check.
+//   - ExportMixin.exportSettings → figma:export_settings, a compact JSON
+//     array of {format, suffix, constraint, contents_only}: format
+//     lowercased ("png" / "jpg" / "svg" / "pdf"), suffix only when
+//     non-empty, constraint as "scale:2" / "width:512" / "height:512" only
+//     when not the SCALE:1 default, contents_only only when explicitly
+//     false (true is Figma's default).
+//
+// Plugin data / shared plugin data and reactions are deliberately NOT
+// preserved — arbitrary third-party payloads are noise in the envelope, and
+// prototype wiring is out of the importer's scope.
+//
+// Returns undefined when the node carries no dev metadata to state.
+export function extractDevMetadataAttrs(n: SceneNode): Record<string, string> | undefined {
+  const attrs: Record<string, string> = {};
+
+  const desc = "description" in n ? (n as SceneNode & { description?: unknown }).description : undefined;
+  if (typeof desc === "string" && desc.trim().length > 0) {
+    attrs["figma:description"] = desc.trim();
+  }
+
+  const status = "devStatus" in n ? (n as SceneNode & { devStatus?: unknown }).devStatus : undefined;
+  if (
+    status !== null &&
+    typeof status === "object" &&
+    typeof (status as { type?: unknown }).type === "string"
+  ) {
+    attrs["figma:dev_status"] = (status as { type: string }).type.toLowerCase();
+  }
+
+  const annotations =
+    "annotations" in n ? (n as SceneNode & { annotations?: unknown }).annotations : undefined;
+  if (Array.isArray(annotations) && annotations.length > 0) {
+    const entries: Array<{ label?: string; properties?: string[]; category_id?: string }> = [];
+    for (const a of annotations as ReadonlyArray<Annotation>) {
+      if (!a || typeof a !== "object") continue;
+      const entry: { label?: string; properties?: string[]; category_id?: string } = {};
+      const label =
+        typeof a.label === "string" && a.label
+          ? a.label
+          : typeof a.labelMarkdown === "string" && a.labelMarkdown
+            ? a.labelMarkdown
+            : undefined;
+      if (label) entry.label = label;
+      const props = Array.isArray(a.properties)
+        ? a.properties.map((p) => (p && typeof p.type === "string" ? p.type : "")).filter((t) => t)
+        : [];
+      if (props.length) entry.properties = props;
+      if (typeof a.categoryId === "string" && a.categoryId) entry.category_id = a.categoryId;
+      if (Object.keys(entry).length > 0) entries.push(entry);
+    }
+    if (entries.length) attrs["figma:annotations"] = JSON.stringify(entries);
+  }
+
+  const settings =
+    "exportSettings" in n ? (n as SceneNode & { exportSettings?: unknown }).exportSettings : undefined;
+  if (Array.isArray(settings) && settings.length > 0) {
+    const entries: Array<{ format: string; suffix?: string; constraint?: string; contents_only?: boolean }> = [];
+    for (const s of settings as ReadonlyArray<ExportSettings>) {
+      if (!s || typeof s.format !== "string") continue;
+      const entry: { format: string; suffix?: string; constraint?: string; contents_only?: boolean } = {
+        format: s.format.toLowerCase(),
+      };
+      if (typeof s.suffix === "string" && s.suffix) entry.suffix = s.suffix;
+      const c = "constraint" in s ? (s as ExportSettingsImage).constraint : undefined;
+      if (c && typeof c.type === "string" && typeof c.value === "number") {
+        const kind = c.type.toLowerCase();
+        if (kind !== "scale" || Math.abs(c.value - 1) > 1e-6) {
+          entry.constraint = `${kind}:${fmtGeomNum(c.value)}`;
+        }
+      }
+      if ((s as { contentsOnly?: unknown }).contentsOnly === false) entry.contents_only = false;
+      entries.push(entry);
+    }
+    if (entries.length) attrs["figma:export_settings"] = JSON.stringify(entries);
+  }
+
+  return Object.keys(attrs).length > 0 ? attrs : undefined;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Effects → ordered box-shadow / filter / backdrop-filter + diagnostics.
 
 /// The node's effect stack lowered to CSS, plus the diagnostics the caller

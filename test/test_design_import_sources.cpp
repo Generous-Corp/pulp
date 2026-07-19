@@ -591,13 +591,61 @@ TEST_CASE("figma-plugin envelope blend modes lower through the adapter path",
     CHECK(ir.root.children[1].style.mix_blend_mode == "screen");
     CHECK_FALSE(ir.root.children[2].style.mix_blend_mode.has_value());
     CHECK_FALSE(ir.root.children[3].style.mix_blend_mode.has_value());
-    // Exactly ONE consumer diagnostic: the invalid normalized-channel keyword.
-    // The unmappable raw (LINEAR_BURN) is the producer's to report.
     std::size_t blend_diags = 0;
     for (const auto& d : ir.diagnostics)
         if (d.code == "blend-unsupported") ++blend_diags;
     REQUIRE(blend_diags == 1);
     REQUIRE(has_import_diagnostic(ir.diagnostics, "blend-unsupported"));
+}
+
+TEST_CASE("figma dev-metadata provenance attributes survive envelope parse",
+          "[view][import][figma-plugin][dev-metadata]") {
+    // Audit "Dev metadata" + "Export settings" rows: all three producers
+    // preserve component descriptions, dev status, Dev Mode annotations, and
+    // authored export settings as namespaced figma:* attributes. The consumer
+    // contract is the free-form attributes passthrough: every key must land
+    // verbatim in IRNode::attributes. PROVENANCE-ONLY by design — no renderer
+    // or codegen path reads these, and export settings never override Pulp's
+    // deterministic PNG/SVG capture policy.
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "provenance": { "adapter": "figma-plugin", "version": "0.1.0",
+                        "source_uri": "figma://design/dev-metadata-smoke" },
+        "root": {
+            "type": "frame",
+            "name": "Panel",
+            "style": { "width": 200, "height": 200 },
+            "children": [
+                { "type": "frame", "name": "GainKnob",
+                  "attributes": {
+                      "figma:description": "Primary gain knob. Bind to param.gain.",
+                      "figma:dev_status": "ready_for_dev",
+                      "figma:annotations": "[{\"label\":\"Use the shared knob track\",\"properties\":[\"fills\",\"itemSpacing\"]}]"
+                  },
+                  "style": { "width": 40, "height": 40 }, "children": [] },
+                { "type": "image", "name": "ChannelIcon",
+                  "attributes": {
+                      "figma:export_settings": "[{\"format\":\"png\"},{\"format\":\"jpg\",\"suffix\":\"@2x\",\"constraint\":\"scale:2\",\"contents_only\":false}]"
+                  },
+                  "style": { "width": 24, "height": 24 }, "children": [] }
+            ]
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.children.size() == 2);
+    const auto& knob = ir.root.children[0];
+    REQUIRE(knob.attributes.at("figma:description") ==
+            "Primary gain knob. Bind to param.gain.");
+    REQUIRE(knob.attributes.at("figma:dev_status") == "ready_for_dev");
+    REQUIRE(knob.attributes.at("figma:annotations") ==
+            "[{\"label\":\"Use the shared knob track\","
+            "\"properties\":[\"fills\",\"itemSpacing\"]}]");
+    REQUIRE(ir.root.children[1].attributes.at("figma:export_settings") ==
+            "[{\"format\":\"png\"},{\"format\":\"jpg\",\"suffix\":\"@2x\","
+            "\"constraint\":\"scale:2\",\"contents_only\":false}]");
 }
 
 // An explicit `audio_widget: "none"` is an opt-out, not an absence: the

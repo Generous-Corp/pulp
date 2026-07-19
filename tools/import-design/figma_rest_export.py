@@ -591,6 +591,82 @@ def extract_primitive_attributes(n):
         attrs["figma:boolean_operation"] = op.lower()
     return attrs
 
+def extract_dev_metadata_attributes(n, ctx=None):
+    """Dev-mode metadata + authored export settings as namespaced figma:*
+    provenance attrs (audit "Dev metadata" / "Export settings" rows; same
+    contract as extract_stroke_attributes). PROVENANCE-ONLY by design —
+    nothing renders from these, and export settings never override Pulp's
+    deterministic PNG/SVG capture policy; they are asset hints and round-trip
+    context for dev tooling (tracked in compat/imports.json). Emitted only
+    when present and non-default.
+
+    REST specifics versus the plugin lane:
+      - Component descriptions live in the /nodes response `components` /
+        `componentSets` maps (keyed by node id), not on the document node —
+        attached here for COMPONENT / COMPONENT_SET nodes only, matching the
+        Plugin API's PublishableMixin surface.
+      - `devStatus` ({"type": "READY_FOR_DEV" | "COMPLETED"}) rides on the
+        node when set → figma:dev_status, lowercased.
+      - `annotations` label/properties/categoryId pass through; REST already
+        speaks the Plugin API's camelCase property vocabulary.
+      - `exportSettings` entries are {suffix, format, constraint{type,value}};
+        REST does NOT expose contentsOnly, so that key never appears in this
+        lane. Constraint types SCALE/WIDTH/HEIGHT are lowercased and the
+        SCALE:1 default stays silent."""
+    attrs = {}
+    t = n.get("type")
+    if ctx is not None and t in ("COMPONENT", "COMPONENT_SET"):
+        comp_map = ctx.components if t == "COMPONENT" else ctx.component_sets
+        entry = comp_map.get(n.get("id") or "")
+        desc = entry.get("description") if isinstance(entry, dict) else None
+        if isinstance(desc, str) and desc.strip():
+            attrs["figma:description"] = desc.strip()
+    status = n.get("devStatus")
+    if isinstance(status, dict) and isinstance(status.get("type"), str):
+        attrs["figma:dev_status"] = status["type"].lower()
+    annotations = n.get("annotations")
+    if isinstance(annotations, list) and annotations:
+        entries = []
+        for a in annotations:
+            if not isinstance(a, dict):
+                continue
+            entry = {}
+            label = a.get("label")
+            if isinstance(label, str) and label:
+                entry["label"] = label
+            props = [p.get("type") for p in a.get("properties") or []
+                     if isinstance(p, dict) and isinstance(p.get("type"), str)]
+            if props:
+                entry["properties"] = props
+            category = a.get("categoryId")
+            if isinstance(category, str) and category:
+                entry["category_id"] = category
+            if entry:
+                entries.append(entry)
+        if entries:
+            attrs["figma:annotations"] = json.dumps(entries, separators=(",", ":"))
+    settings = n.get("exportSettings")
+    if isinstance(settings, list) and settings:
+        entries = []
+        for s in settings:
+            if not isinstance(s, dict) or not isinstance(s.get("format"), str):
+                continue
+            entry = {"format": s["format"].lower()}
+            suffix = s.get("suffix")
+            if isinstance(suffix, str) and suffix:
+                entry["suffix"] = suffix
+            constraint = s.get("constraint")
+            if (isinstance(constraint, dict)
+                    and isinstance(constraint.get("type"), str)
+                    and isinstance(constraint.get("value"), (int, float))):
+                kind = constraint["type"].lower()
+                if kind != "scale" or abs(constraint["value"] - 1.0) > 1e-6:
+                    entry["constraint"] = f"{kind}:{_fmt_geom_num(constraint['value'])}"
+            entries.append(entry)
+        if entries:
+            attrs["figma:export_settings"] = json.dumps(entries, separators=(",", ":"))
+    return attrs
+
 def extract_style(n, ctx=None):
     s = {}
     bb = n.get("absoluteBoundingBox")
@@ -1712,6 +1788,15 @@ def walk(n, parent, z, ctx, inside_widget=False):
     primitive_attrs = extract_primitive_attributes(n)
     if primitive_attrs:
         out["attributes"] = {**out.get("attributes", {}), **primitive_attrs}
+
+    # Dev-mode metadata + authored export settings (description, dev status,
+    # annotations, export settings) — provenance-only namespaced figma:*
+    # attrs. Nothing renders from these, and export settings never override
+    # the deterministic PNG/SVG capture choices below: they are asset hints
+    # and round-trip context for dev tooling.
+    dev_attrs = extract_dev_metadata_attributes(n, ctx)
+    if dev_attrs:
+        out["attributes"] = {**out.get("attributes", {}), **dev_attrs}
 
     # A widget's own content is the designer's art — never name-guess it into a
     # built-in widget (which paints Pulp's stock silver knob over the design).
