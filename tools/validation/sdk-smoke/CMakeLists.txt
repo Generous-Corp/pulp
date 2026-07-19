@@ -76,17 +76,19 @@ target_link_libraries(PulpSDKSmokeTimebaseProbe PRIVATE Pulp::timebase)
 # Raw-byte WAV decoder export probe. Browser and storage-backed consumers
 # receive media bytes rather than native paths, so the installed SDK must
 # expose and link this no-file-I/O surface through Pulp::audio.
-if(TARGET Pulp::audio)
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/wav_decoder_export_probe.cpp"
+if(NOT TARGET Pulp::audio)
+    message(FATAL_ERROR
+        "Pulp SDK smoke: installed SDK does not expose Pulp::audio")
+endif()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/wav_decoder_export_probe.cpp"
 "#include <pulp/audio/wav_decoder.hpp>\n"
 "\n"
 "int main() {\n"
 "    return pulp::audio::decode_wav({}).has_value() ? 1 : 0;\n"
 "}\n")
-    add_executable(PulpSDKSmokeWavDecoderProbe
-        "${CMAKE_CURRENT_BINARY_DIR}/wav_decoder_export_probe.cpp")
-    target_link_libraries(PulpSDKSmokeWavDecoderProbe PRIVATE Pulp::audio)
-endif()
+add_executable(PulpSDKSmokeWavDecoderProbe
+    "${CMAKE_CURRENT_BINARY_DIR}/wav_decoder_export_probe.cpp")
+target_link_libraries(PulpSDKSmokeWavDecoderProbe PRIVATE Pulp::audio)
 
 # Installed host/state/dsl header + link probe. These targets were exported
 # before all of their public headers were reliably copied into the SDK, so a
