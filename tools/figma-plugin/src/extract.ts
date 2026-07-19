@@ -32,7 +32,7 @@ import {
   rgbaToCss,
   gradientToCss,
   gradientFallbackFlat,
-  mapNodeType,
+  dispatchNodeType,
   mapPrimaryAxisAlign,
   mapCounterAxisAlign,
   mapAxisSize,
@@ -197,6 +197,16 @@ async function walk(
   if (!ctx.cfg.includeHidden && "visible" in node && node.visible === false) {
     return null;
   }
+  // Exhaustive node-type dispatch (extract-pure.ts). Skips happen BEFORE the
+  // node-count budget: a skipped SLICE or sticky emits no node, so it must not
+  // consume maxNodes headroom either. Every skip and every fallback carries a
+  // diagnostic — no node family reaches the envelope silently re-typed.
+  const dispatch = dispatchNodeType(node.type, node.name);
+  if (dispatch.diagnostic) {
+    const d = dispatch.diagnostic;
+    pushDiag(ctx, d.severity, d.code, d.kind, d.message);
+  }
+  if (dispatch.action === "skip") return null;
   if (ctx.nodeCount >= ctx.cfg.maxNodes) {
     ctx.truncated = true;
     ctx.diagnostics.push({
@@ -210,7 +220,7 @@ async function walk(
   }
   ctx.nodeCount++;
 
-  const type = mapNodeType(node);
+  const type = dispatch.type;
   const ex: ExtractedFigmaNode = {
     type,
     figma_type: node.type,
@@ -268,10 +278,12 @@ async function walk(
     if (constraints) ex.constraints = constraints;
   }
 
-  // Text content + dominant style
-  if (node.type === "TEXT") {
+  // Text content + dominant style. TEXT_PATH shares the text mixins
+  // (characters, fontName, fills, ...) — its content must ride along even
+  // though dispatch already diagnosed the flattened on-path layout.
+  if (node.type === "TEXT" || node.type === "TEXT_PATH") {
     ex.content = (node as TextNode).characters;
-    extractTextStyle(node as TextNode, ex.style, ctx);
+    extractTextStyle(node as unknown as TextNode, ex.style, ctx);
   }
 
   // INSTANCE: capture component metadata so Pulp library widgets can be recognized.

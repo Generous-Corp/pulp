@@ -1026,8 +1026,8 @@ export function materializeFrame(scene, frame, ctx) {
         }
       }
     }
-    // On a TEXT node the solid fill is the glyph color, applied as `color` in the
-    // text branch — not a background.
+    // On a TEXT (or TEXT_PATH) node the solid fill is the glyph color, applied
+    // as `color` in the text branch — not a background.
     //
     // A GRADIENT fill counts. Reading only the solid fill dropped every
     // gradient-filled box on the floor: Figma's `knob base` is an ELLIPSE with a
@@ -1039,7 +1039,7 @@ export function materializeFrame(scene, frame, ctx) {
     // (radial / angular / diamond) has no lowering downstream, so it still
     // collapses to the mean of its stops and still says so: an honest
     // approximation, and far closer than nothing.
-    if (node.type !== 'TEXT') {
+    if (node.type !== 'TEXT' && node.type !== 'TEXT_PATH') {
       const grad = firstGradient(node.fillPaints);
       // The BOX branch, which paints via setBackgroundGradient — a consumer that
       // parses radial as well as linear (css_gradient.cpp:192). Radial was
@@ -1337,6 +1337,32 @@ export function materializeFrame(scene, frame, ctx) {
     // Hidden layers do not render in Figma; emitting them would paint hidden
     // variant parts and label slots over the visible design.
     if (node.visible === false) return null;
+    // Exhaustive node-type dispatch (see KNOWN_NODE_TYPES / envelopeType).
+    // Skips return before any geometry or style work: a SLICE paints nothing
+    // in Figma (skipping IS the correct rendering), and the editor/Slides
+    // families carry no design content this importer can express. Both leave
+    // a diagnostic so the removal is stated, never silent.
+    if (node.type === 'SLICE') {
+      pushDiag('slice-skipped', node,
+        'an export region paints nothing and emits no node');
+      return null;
+    }
+    if (SKIPPED_NODE_TYPES.has(node.type)) {
+      pushDiag('unsupported-node', node,
+        `${node.type} skipped: editor-specific node family outside the audio-plugin UI import scope`);
+      return null;
+    }
+    // Emitted-with-a-diagnostic families: the node stays, the loss is stated.
+    if (node.type === 'SLOT') {
+      pushDiag('slot-placeholder', node,
+        'component slot placeholder imported as an empty frame; slot content is not resolved');
+    } else if (node.type === 'TEXT_PATH') {
+      pushDiag('text-path-flattened', node,
+        'text-on-path layout flattened to a straight text run; characters preserved');
+    } else if (!KNOWN_NODE_TYPES.has(node.type)) {
+      pushDiag('unknown-node-type', node,
+        `unknown Figma node type ${node.type} imported as a generic frame; update the dispatch table`);
+    }
     if (node.type === 'INSTANCE') {
       const expanded = expandInstance(node);
       if (expanded) node = expanded;
@@ -1560,7 +1586,11 @@ export function materializeFrame(scene, frame, ctx) {
       if (best !== null) out.label = best;
     }
 
-    if (type === 'TEXT') {
+    // TEXT_PATH rides the same branch: it carries the same textData/character
+    // fields, and dispatch above already diagnosed the flattened on-path
+    // layout. Only the baseline geometry differs, and that is the part the
+    // envelope cannot express anyway.
+    if (type === 'TEXT' || type === 'TEXT_PATH') {
       out.type = 'text';
       const characters = node.textData && typeof node.textData.characters === 'string'
         ? node.textData.characters
@@ -1925,8 +1955,41 @@ function declaredMaterials(node) {
   return Object.keys(d).length ? d : null;
 }
 
+// Node-type dispatch tables, in the .fig kiwi schema's own vocabulary (which
+// differs from the Plugin API: components are SYMBOL, rectangles arrive as
+// ROUNDED_RECTANGLE, polygons as REGULAR_POLYGON, and the transform-group
+// container is spelled TRANSFORM). The Plugin API spellings are accepted too
+// so the three producer lanes can share one decision table.
+//
+// SKIPPED_NODE_TYPES: FigJam/editor collaborative families plus Slides
+// families — out of scope for an audio-plugin UI importer. Skipped with an
+// `unsupported-node` diagnostic rather than emitted as empty generic frames,
+// so a dropped node never looks imported. SLICE is skipped separately (its
+// own code) because skipping it is CORRECT rendering: an export region paints
+// nothing in Figma.
+const SKIPPED_NODE_TYPES = new Set([
+  'STICKY', 'CONNECTOR', 'SHAPE_WITH_TEXT', 'CODE_BLOCK', 'STAMP', 'WIDGET',
+  'EMBED', 'EMBEDDED_PROTOTYPE', 'LINK_UNFURL', 'MEDIA', 'HIGHLIGHT',
+  'WASHI_TAPE', 'TABLE', 'TABLE_CELL',
+  'SLIDE', 'SLIDE_ROW', 'SLIDE_GRID', 'INTERACTIVE_SLIDE_ELEMENT',
+]);
+
+// Every type envelopeType maps deliberately (emitted families plus the walk's
+// skip families). Anything outside this set reaches the frame fallback via an
+// `unknown-node-type` diagnostic — the fallback stays, the silence does not.
+const KNOWN_NODE_TYPES = new Set([
+  ...SKIPPED_NODE_TYPES,
+  'CANVAS', 'FRAME', 'GROUP', 'SECTION', 'TRANSFORM', 'TRANSFORM_GROUP',
+  'SYMBOL', 'COMPONENT', 'COMPONENT_SET', 'INSTANCE', 'SLOT',
+  'RECTANGLE', 'ROUNDED_RECTANGLE', 'REGULAR_POLYGON', 'POLYGON', 'STAR',
+  'LINE', 'ELLIPSE', 'VECTOR', 'BOOLEAN_OPERATION',
+  'TEXT', 'TEXT_PATH', 'SLICE',
+]);
+
 function envelopeType(figmaType) {
-  if (figmaType === 'TEXT') return 'text';
+  // TEXT_PATH carries real characters; the walk diagnoses the flattened
+  // on-path layout and the TEXT branch extracts the content.
+  if (figmaType === 'TEXT' || figmaType === 'TEXT_PATH') return 'text';
   if (figmaType === 'CANVAS') return 'frame';
   // An ELLIPSE is a circle, not a box. Collapsing it to `frame` made every
   // round thing in a design square: a knob's `knob base` became the mystery
@@ -1935,6 +1998,11 @@ function envelopeType(figmaType) {
   // (is_synthesizable_primitive), and synthesize_primitive_paths gives it a real
   // path — the decoder just never said what the node was.
   if (figmaType === 'ELLIPSE') return 'ellipse';
+  // Everything else in KNOWN_NODE_TYPES is a container or geometry family the
+  // decoder deliberately expresses as a frame (walk() re-types vectors and
+  // glyph outlines after geometry resolution). Unknown types also land here —
+  // walk() has already raised `unknown-node-type` for them, so the fallback
+  // is stated, not silent.
   return 'frame';
 }
 
@@ -2026,6 +2094,15 @@ export const DIAGNOSTIC_SEVERITY = {
   'fonts-required': 'warning',
   'icon-font-required': 'warning',
   'mask-approximated': 'warning',
+  // Node-dispatch codes. All 'warning' deliberately — including slice-skipped,
+  // whose skip is CORRECT rendering — because both consumers drop 'info'
+  // (see the registry contract above), and a dispatch decision written
+  // precisely to end silent node drops must never itself be invisible.
+  'slice-skipped': 'warning',
+  'unsupported-node': 'warning',
+  'slot-placeholder': 'warning',
+  'text-path-flattened': 'warning',
+  'unknown-node-type': 'warning',
 };
 
 /**

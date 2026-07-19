@@ -150,6 +150,7 @@ export interface ExtractedDiagnostic {
   kind:
     | "unknown"
     | "unsupported_property"
+    | "unsupported_node"
     | "unresolved_asset"
     | "capture_partial"
     | "fallback_used"

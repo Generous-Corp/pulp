@@ -61,46 +61,175 @@ export function gradientFallbackFlat(p: GradientPaint): string {
 
 // ──────────────────────────────────────────────────────────────────────────
 // Type and layout mapping — Plugin API enums → envelope strings.
+//
+// Dispatch is EXHAUSTIVE against the pinned `@figma/plugin-typings` SceneNode
+// union (version pinned in package.json). The old shape was a switch with
+// `default: return "frame"`, which made every unsupported node — FigJam
+// stickies, Slides rows, SLICE export regions — look like a successfully
+// imported empty frame. Silent success is the failure mode this replaces:
+// every family now either dispatches to a real envelope type, is skipped
+// with a diagnostic, or falls back to `frame` WITH a diagnostic saying so.
 
-export function mapNodeType(n: SceneNode): string {
-  switch (n.type) {
+/// A diagnostic the dispatch decision wants raised. `code`/`kind` follow the
+/// ExtractedDiagnostic vocabulary (extract-model.ts); the walker owns the
+/// path, so only the message rides here.
+export interface NodeDispatchDiagnostic {
+  severity: "info" | "warning";
+  code: string;
+  kind: "unsupported_node" | "capture_partial";
+  message: string;
+}
+
+/// The dispatch decision for one Figma node type. `skip` means the node must
+/// not reach the envelope at all (its diagnostic is mandatory — a skip
+/// without a diagnostic would be the silent drop this contract forbids).
+export type NodeDispatch =
+  | { action: "emit"; type: string; diagnostic?: NodeDispatchDiagnostic }
+  | { action: "skip"; diagnostic: NodeDispatchDiagnostic };
+
+// FigJam/editor collaborative families plus Slides families. Out of scope for
+// an audio-plugin UI importer: none of these carries design content a plugin
+// editor should render, and emitting them as empty generic frames made a
+// dropped node look imported. `TABLE_CELL` is the REST spelling (the Python
+// port shares this list shape); the plugin API only surfaces TABLE.
+const SKIPPED_NODE_TYPES = new Set([
+  "STICKY",
+  "CONNECTOR",
+  "SHAPE_WITH_TEXT",
+  "CODE_BLOCK",
+  "STAMP",
+  "WIDGET",
+  "EMBED",
+  "LINK_UNFURL",
+  "MEDIA",
+  "HIGHLIGHT",
+  "WASHI_TAPE",
+  "TABLE",
+  "TABLE_CELL",
+  "SLIDE",
+  "SLIDE_ROW",
+  "SLIDE_GRID",
+  "INTERACTIVE_SLIDE_ELEMENT",
+]);
+
+/// Exhaustive node-type dispatch. `name` only feeds diagnostic messages.
+/// `REGULAR_POLYGON` is accepted alongside `POLYGON` so the Python REST port
+/// (which sees the REST spelling) can mirror this table field-for-field.
+export function dispatchNodeType(figmaType: string, name: string): NodeDispatch {
+  switch (figmaType) {
     case "FRAME":
     case "GROUP":
     case "SECTION":
-      return "frame";
+    // TRANSFORM_GROUP is a legitimate container (a group with a shared
+    // transform) — it renders fine as a frame; the point of the explicit case
+    // is that it no longer reaches the unknown-type fallback.
+    case "TRANSFORM_GROUP":
+      return { action: "emit", type: "frame" };
     case "COMPONENT":
     case "COMPONENT_SET":
-      return "frame"; // recognized instances are promoted to widget kinds later
     case "INSTANCE":
-      return "frame"; // ditto
+      return { action: "emit", type: "frame" }; // recognized instances are promoted to widget kinds later
     case "TEXT":
-      return "text";
+      return { action: "emit", type: "text" };
+    // TEXT_PATH carries real `characters`; dropping it would lose copy. The
+    // on-path layout has no envelope representation, so the glyphs land as a
+    // normal straight-baseline text run — content preserved, layout diagnosed.
+    case "TEXT_PATH":
+      return {
+        action: "emit",
+        type: "text",
+        diagnostic: {
+          severity: "warning",
+          code: "text-path-flattened",
+          kind: "capture_partial",
+          message: `TEXT_PATH "${name}": text-on-path layout flattened to a straight text run; characters preserved.`,
+        },
+      };
     // An ELLIPSE is a circle, not a box. "Has a fill means renderable" holds for
     // a RECTANGLE (a frame paints its own background box) and is FALSE for a
     // circle: codegen has no painter for one, so a filled ellipse typed `frame`
     // paints a SQUARE. The IR already has `ellipse` (is_synthesizable_primitive)
     // and synthesize_node gives it a real path — this extractor just never said
     // what the node was. Mirrors the .fig lane's envelopeType (fig/scene.mjs)
-    // and the REST lane's map_node_type (figma_rest_export.py).
+    // and the REST lane's dispatch_node_type (figma_rest_export.py).
     //
     // STAR / POLYGON need no equivalent case: extract.ts's isVectorLike captures
     // them as PNG assets (type `image`) before their frame typing can matter.
     // They reach this mapping only when that export fails, which diagnoses itself.
     case "ELLIPSE":
-      return "ellipse";
+      return { action: "emit", type: "ellipse" };
     case "RECTANGLE":
     case "POLYGON":
+    case "REGULAR_POLYGON":
     case "STAR":
     case "LINE":
-      return "frame";
+      return { action: "emit", type: "frame" };
     case "VECTOR":
     case "BOOLEAN_OPERATION":
-      return "vector";
+      return { action: "emit", type: "vector" };
+    // A SLICE is an export region — it paints NOTHING in Figma, so emitting it
+    // as a frame invented a box the design never had. Skipping is the correct
+    // rendering; the diagnostic keeps the removal visible.
     case "SLICE":
-      return "frame";
+      return {
+        action: "skip",
+        diagnostic: {
+          severity: "warning",
+          code: "slice-skipped",
+          kind: "unsupported_node",
+          message: `SLICE "${name}" skipped: an export region paints nothing and emits no node.`,
+        },
+      };
+    // A SLOT is a component-system placeholder. A bare import has no slot
+    // content to substitute, so it dispatches as an (empty) frame and says so.
+    case "SLOT":
+      return {
+        action: "emit",
+        type: "frame",
+        diagnostic: {
+          severity: "warning",
+          code: "slot-placeholder",
+          kind: "unsupported_node",
+          message: `SLOT "${name}": component slot placeholder imported as an empty frame; slot content is not resolved.`,
+        },
+      };
     default:
-      return "frame";
+      if (SKIPPED_NODE_TYPES.has(figmaType)) {
+        return {
+          action: "skip",
+          diagnostic: {
+            severity: "warning",
+            code: "unsupported-node",
+            kind: "unsupported_node",
+            message: `${figmaType} "${name}" skipped: editor-specific node family outside the audio-plugin UI import scope.`,
+          },
+        };
+      }
+      // A type this table has never heard of (a Figma family newer than the
+      // pinned typings). Fall back to `frame` so the import never crashes,
+      // but say so — the fallback is honest, not silent.
+      return {
+        action: "emit",
+        type: "frame",
+        diagnostic: {
+          severity: "warning",
+          code: "unknown-node-type",
+          kind: "unsupported_node",
+          message: `Unknown Figma node type ${figmaType} ("${name}") imported as a generic frame; update the dispatch table for the current plugin typings.`,
+        },
+      };
   }
+}
+
+/// Envelope type for a node dispatch already known to emit. Kept for callers
+/// (and tests) that only need the type string; anything that can encounter a
+/// skippable or diagnosable node must go through dispatchNodeType instead.
+export function mapNodeType(n: SceneNode): string {
+  const d = dispatchNodeType(n.type, n.name ?? "");
+  // A skipped family has no envelope type; `frame` here is unreachable from
+  // extract.ts (its walker skips before asking) and exists only to keep this
+  // convenience accessor total.
+  return d.action === "emit" ? d.type : "frame";
 }
 
 export function mapPrimaryAxisAlign(v: FrameNode["primaryAxisAlignItems"]): ExtractedLayout["justify"] {

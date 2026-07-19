@@ -528,6 +528,10 @@ enum class ImportDiagnosticSeverity {
 enum class ImportDiagnosticKind {
     unknown,
     unsupported_property,
+    /// A whole node family the producer could not represent — skipped
+    /// (SLICE, FigJam/Slides families) or emitted as a diagnosed generic
+    /// fallback (SLOT placeholder, unrecognized new node types).
+    unsupported_node,
     unresolved_asset,
     snapshot_semantics_warning,
     legacy_field_shortcut,

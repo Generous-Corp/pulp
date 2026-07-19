@@ -181,26 +181,84 @@ def gradient_conic_css(p):
     return ("conic-gradient(from 0deg at 50% 50%, " + _gradient_stops_css(p) + ")"
             if p.get("gradientStops") else None)
 
-def map_node_type(t):
-    # An ELLIPSE is a circle, not a box. "Has a fill means renderable" holds for
-    # a RECTANGLE (a frame paints its own background box) and is FALSE for a
-    # circle: codegen has no painter for one, so a filled ellipse typed `frame`
-    # paints a SQUARE. The IR already has `ellipse` (is_synthesizable_primitive)
-    # and synthesize_node gives it a real path — this decoder just never said
-    # what the node was. Mirrors the .fig lane's envelopeType (fig/scene.mjs).
-    #
-    # STAR / POLYGON / REGULAR_POLYGON need no equivalent line: is_vector_like()
-    # captures them as PNG assets below (type `image`) before their frame typing
-    # can matter. They reach this fallback only when that export fails, which
-    # emits its own diagnostic.
+# FigJam/editor collaborative families plus Slides families — out of scope for
+# an audio-plugin UI importer. Skipped with an `unsupported_node` diagnostic
+# rather than emitted as empty generic frames, so a dropped node never looks
+# imported. TABLE_CELL is the REST spelling; the plugin API surfaces only TABLE.
+SKIPPED_NODE_TYPES = frozenset((
+    "STICKY", "CONNECTOR", "SHAPE_WITH_TEXT", "CODE_BLOCK", "STAMP", "WIDGET",
+    "EMBED", "LINK_UNFURL", "MEDIA", "HIGHLIGHT", "WASHI_TAPE", "TABLE",
+    "TABLE_CELL", "SLIDE", "SLIDE_ROW", "SLIDE_GRID", "INTERACTIVE_SLIDE_ELEMENT",
+))
+
+
+def dispatch_node_type(t, name=""):
+    """Exhaustive node-type dispatch, mirroring dispatchNodeType in the plugin
+    lane (tools/figma-plugin/src/extract-pure.ts) field-for-field. Returns
+    (envelope_type_or_None, diagnostic_or_None); a None type means the node is
+    skipped entirely. The old shape ended in a bare `return "frame"`, which made
+    every unsupported node — stickies, slides, SLICE export regions — look like
+    a successfully imported empty frame.
+
+    An ELLIPSE is a circle, not a box. "Has a fill means renderable" holds for
+    a RECTANGLE (a frame paints its own background box) and is FALSE for a
+    circle: codegen has no painter for one, so a filled ellipse typed `frame`
+    paints a SQUARE. The IR already has `ellipse` (is_synthesizable_primitive)
+    and synthesize_node gives it a real path.
+
+    STAR / POLYGON / REGULAR_POLYGON need no special line: is_vector_like()
+    captures them as PNG assets in walk() (type `image`) before their frame
+    typing can matter. They reach the frame mapping only when that export
+    fails, which emits its own diagnostic."""
+    def diag(severity, code, kind, message):
+        return {"severity": severity, "code": code, "kind": kind, "message": message}
+
     if t == "ELLIPSE":
-        return "ellipse"
-    if t in ("FRAME", "GROUP", "SECTION", "COMPONENT", "COMPONENT_SET", "INSTANCE",
-             "RECTANGLE", "POLYGON", "STAR", "LINE", "SLICE"):
-        return "frame"
-    if t == "TEXT": return "text"
-    if t in ("VECTOR", "BOOLEAN_OPERATION"): return "vector"
-    return "frame"
+        return "ellipse", None
+    # TRANSFORM_GROUP is a legitimate container (a group with a shared
+    # transform); the explicit entry keeps it off the unknown-type fallback.
+    if t in ("FRAME", "GROUP", "SECTION", "TRANSFORM_GROUP", "CANVAS",
+             "COMPONENT", "COMPONENT_SET", "INSTANCE",
+             "RECTANGLE", "POLYGON", "REGULAR_POLYGON", "STAR", "LINE"):
+        return "frame", None
+    if t == "TEXT":
+        return "text", None
+    # TEXT_PATH carries real `characters`; dropping it would lose copy. The
+    # on-path layout has no envelope representation, so the glyphs land as a
+    # normal straight-baseline text run — content preserved, layout diagnosed.
+    if t == "TEXT_PATH":
+        return "text", diag(
+            "warning", "text-path-flattened", "capture_partial",
+            f'TEXT_PATH "{name}": text-on-path layout flattened to a straight '
+            "text run; characters preserved.")
+    if t in ("VECTOR", "BOOLEAN_OPERATION"):
+        return "vector", None
+    # A SLICE is an export region — it paints NOTHING in Figma, so emitting it
+    # as a frame invented a box the design never had. Skipping is the correct
+    # rendering; the diagnostic keeps the removal visible.
+    if t == "SLICE":
+        return None, diag(
+            "warning", "slice-skipped", "unsupported_node",
+            f'SLICE "{name}" skipped: an export region paints nothing and emits no node.')
+    # A SLOT is a component-system placeholder; a bare import has no slot
+    # content to substitute, so it dispatches as an (empty) frame and says so.
+    if t == "SLOT":
+        return "frame", diag(
+            "warning", "slot-placeholder", "unsupported_node",
+            f'SLOT "{name}": component slot placeholder imported as an empty '
+            "frame; slot content is not resolved.")
+    if t in SKIPPED_NODE_TYPES:
+        return None, diag(
+            "warning", "unsupported-node", "unsupported_node",
+            f'{t} "{name}" skipped: editor-specific node family outside the '
+            "audio-plugin UI import scope.")
+    # A type this table has never heard of (a Figma family newer than this
+    # exporter). Fall back to `frame` so the import never crashes, but say so —
+    # the fallback is honest, not silent.
+    return "frame", diag(
+        "warning", "unknown-node-type", "unsupported_node",
+        f'Unknown Figma node type {t} ("{name}") imported as a generic frame; '
+        "update the dispatch table for the current REST node types.")
 
 def first_visible(paints):
     return next((p for p in paints if p.get("visible", True) is not False), None)
@@ -578,7 +636,8 @@ class ExtractContext:
     creates one, threads it through walk()/extract_style()/_record_font(), and
     returns it so the caller reads the outputs explicitly instead of reaching into
     process-global state — the decomposed seam the plan calls for."""
-    __slots__ = ("asset_ids", "fonts", "image_fills", "components", "component_sets")
+    __slots__ = ("asset_ids", "fonts", "image_fills", "components", "component_sets",
+                 "diagnostics")
 
     def __init__(self):
         self.asset_ids = []      # node ids to export as PNG via /images
@@ -586,6 +645,7 @@ class ExtractContext:
         self.image_fills = set()  # Figma imageRefs from IMAGE fills, resolved after the walk
         self.components = {}      # /nodes "components": componentId -> {key, name, componentSetId}
         self.component_sets = {}  # /nodes "componentSets": setId -> {key, name}
+        self.diagnostics = []     # envelope-shaped diagnostics (severity/code/kind/message/path)
 
 
 def _record_font(n, ctx):
@@ -646,7 +706,15 @@ def _component_identity(n, ctx):
 
 def walk(n, parent, z, ctx, inside_widget=False):
     ntype = n.get("type")
-    t = map_node_type(ntype)
+    # Exhaustive dispatch: a None type means the node emits nothing (SLICE,
+    # editor families). The diagnostic rides in the envelope's `diagnostics`
+    # array — same shape the plugin lane serializes — with the Figma node id as
+    # the path, so nothing is dropped silently.
+    t, disp_diag = dispatch_node_type(ntype, n.get("name", ""))
+    if disp_diag is not None:
+        ctx.diagnostics.append({**disp_diag, "path": n.get("id", "")})
+    if t is None:
+        return None
     style = extract_style(n, ctx)
     layout = extract_layout(n)
     # Absolute positioning when parent isn't auto-layout (extract.ts:158-188)
@@ -657,7 +725,10 @@ def walk(n, parent, z, ctx, inside_widget=False):
             style["left"] = cbb["x"] - pbb["x"]
             style["top"] = cbb["y"] - pbb["y"]
     out = {"type": t, "name": n.get("name", ""), "figma_node_id": n.get("id", "")}
-    if ntype == "TEXT":
+    # TEXT_PATH shares the text fields (characters, style, runs); its content
+    # must ride along even though dispatch already diagnosed the flattened
+    # on-path layout.
+    if ntype in ("TEXT", "TEXT_PATH"):
         out["content"] = n.get("characters", "")
         extract_text_style(n, style)
         _record_font(n, ctx)
@@ -753,8 +824,12 @@ def walk(n, parent, z, ctx, inside_widget=False):
     if not captured:  # illustration frames drop their children (rasterized whole)
         kids = [c for c in n.get("children", []) if c.get("visible", True) is not False]
         if kids:
-            out["children"] = [walk(c, n, i, ctx, in_widget)
-                               for i, c in enumerate(kids)]
+            # A dispatched skip (SLICE, editor families) returns None and must
+            # not leave a hole in the child list.
+            walked = [walk(c, n, i, ctx, in_widget) for i, c in enumerate(kids)]
+            walked = [w for w in walked if w is not None]
+            if walked:
+                out["children"] = walked
     return out
 
 def export_assets(file_key, ids, token, out_dir):
@@ -1496,6 +1571,16 @@ def main():
     root_node, ctx = node_tree_to_ir(root,
                                      components=node_entry.get("components"),
                                      component_sets=node_entry.get("componentSets"))
+    if root_node is None:
+        # The REQUESTED node dispatched to a skip (a SLICE or an editor-only
+        # family) — there is nothing to import, and that is a user-input error,
+        # not an empty-envelope success.
+        sys.exit(f"node {node_id} is a {root.get('type')} — not an importable "
+                 "design node (see the dispatch diagnostics above)")
+    # Dispatch diagnostics ride in the envelope, but also surface on stderr so
+    # a terminal run states its losses the way the other lanes do.
+    for d in ctx.diagnostics:
+        print(f"  [{d['severity']}] {d['code']}: {d['message']}", file=sys.stderr)
 
     out_dir = os.path.dirname(os.path.abspath(args.out))
     asset_manifest_entries = []
@@ -1548,7 +1633,7 @@ def main():
         "tokens": {"colors": {}, "dimensions": {}, "strings": {}},
         "asset_manifest": {"version": 1, "assets": asset_manifest_entries},
         "font_family_assets": list(ctx.fonts.values()),
-        "diagnostics": [],
+        "diagnostics": ctx.diagnostics,
         "root": root_node,
     }
     json.dump(envelope, open(args.out, "w"), indent=1)

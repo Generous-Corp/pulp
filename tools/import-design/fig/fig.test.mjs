@@ -1788,3 +1788,104 @@ test('a variant nested inside a variant flips visibility through both hops', () 
   // whole subtree cannot look like a pass.
   assert.ok(findByName(envelope.root, 'track'), 'the track must survive expansion');
 });
+
+// ── Node-type dispatch fidelity ──────────────────────────────────────────────
+// Exhaustive dispatch: no node family reaches the envelope through a silent
+// default-to-frame. Skipped families (SLICE, editor/FigJam/Slides) emit no
+// node + a diagnostic; diagnosed families (SLOT, TEXT_PATH, unknown types)
+// emit a node + a diagnostic; TRANSFORM (the kiwi spelling of the plugin
+// API's TRANSFORM_GROUP) is an explicit, silent container. Kept in lockstep
+// with the plugin lane (extract-pure.ts::dispatchNodeType) and the REST lane
+// (figma_rest_export.py::dispatch_node_type).
+function nodeDispatchScene() {
+  const g = (l) => ({ sessionID: 0, localID: l });
+  const child = (l, type, name, extra = {}) => ({
+    guid: g(l), type, name,
+    parentIndex: { guid: g(2), position: String.fromCharCode(97 + l) },
+    size: { x: 40, y: 20 }, ...extra,
+  });
+  return buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page' },
+    { guid: g(2), type: 'FRAME', name: 'Root',
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 400, y: 300 } },
+    child(3, 'TEXT_PATH', 'Curved Label',
+      { textData: { characters: 'WOW FACTOR' },
+        fillPaints: [{ type: 'SOLID', visible: true,
+                       color: { r: 1, g: 1, b: 1, a: 1 } }] }),
+    child(4, 'TRANSFORM', 'Spun Group'),
+    child(5, 'SLOT', 'Content Slot'),
+    child(6, 'SLICE', 'Export @2x'),
+    child(7, 'STICKY', 'Reviewer Note'),
+    child(8, 'HOLOGRAM_2027', 'Future Thing'),
+  ]});
+}
+
+test('node dispatch: SLICE and STICKY are skipped (no node) with diagnostics', () => {
+  const scene = nodeDispatchScene();
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+
+  // Before this contract both became empty generic frames that looked
+  // successfully imported — a slice paints NOTHING in Figma, so skipping it
+  // is the correct rendering, and a sticky is FigJam furniture.
+  assert.ok(!findByName(envelope.root, 'Export @2x'), 'SLICE emits no node');
+  assert.ok(!findByName(envelope.root, 'Reviewer Note'), 'STICKY emits no node');
+
+  const slice = diagnostics.filter((d) => d.code === 'slice-skipped');
+  assert.equal(slice.length, 1);
+  assert.equal(slice[0].severity, 'warning');
+  assert.equal(slice[0].node_name, 'Export @2x');
+
+  const sticky = diagnostics.filter((d) => d.code === 'unsupported-node');
+  assert.equal(sticky.length, 1);
+  assert.match(sticky[0].detail, /STICKY/);
+});
+
+test('node dispatch: TEXT_PATH lands as text with its characters and a flatten diagnostic', () => {
+  const scene = nodeDispatchScene();
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+
+  const curved = findByName(envelope.root, 'Curved Label');
+  assert.ok(curved, 'TEXT_PATH emits a node');
+  assert.equal(curved.type, 'text');
+  // The content is the point: TEXT_PATH carries real copy, and re-typing it
+  // must not drop it.
+  assert.equal(curved.content, 'WOW FACTOR');
+  // The fill is the glyph color, not a background wash behind the text.
+  assert.equal(curved.style.color, '#ffffff');
+  assert.ok(!curved.style.background_color, 'fill must not double as background');
+
+  const flat = diagnostics.filter((d) => d.code === 'text-path-flattened');
+  assert.equal(flat.length, 1);
+  assert.equal(flat[0].severity, 'warning');
+});
+
+test('node dispatch: TRANSFORM is a silent explicit frame; SLOT is a diagnosed frame', () => {
+  const scene = nodeDispatchScene();
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+
+  const spun = findByName(envelope.root, 'Spun Group');
+  assert.ok(spun, 'TRANSFORM emits a node');
+  assert.equal(spun.type, 'frame');
+  // A transform group renders fine as a container — explicit dispatch, no noise.
+  assert.equal(diagnostics.filter((d) => d.node_name === 'Spun Group').length, 0);
+
+  const slot = findByName(envelope.root, 'Content Slot');
+  assert.ok(slot, 'SLOT emits a (placeholder) node');
+  assert.equal(slot.type, 'frame');
+  const slotDiag = diagnostics.filter((d) => d.code === 'slot-placeholder');
+  assert.equal(slotDiag.length, 1);
+});
+
+test('node dispatch: an unknown type falls back to frame WITH a diagnostic', () => {
+  const scene = nodeDispatchScene();
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+
+  // Never crash on new families — the node survives as a frame...
+  const future = findByName(envelope.root, 'Future Thing');
+  assert.ok(future, 'unknown type still emits a node');
+  assert.equal(future.type, 'frame');
+  // ...but the fallback is stated, not silent.
+  const unk = diagnostics.filter((d) => d.code === 'unknown-node-type');
+  assert.equal(unk.length, 1);
+  assert.match(unk[0].detail, /HOLOGRAM_2027/);
+});
