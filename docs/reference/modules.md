@@ -819,6 +819,14 @@ lane targeting remains document-model state, while audio-thread cursors and
 per-block event coalescing belong to `pulp::playback`; neither concern is folded
 into the curve container.
 
+`automation_lane.hpp` provides an unattached immutable binding from one curve
+to a format-neutral device identity and opaque 32-bit parameter ID. Construction
+validates only the lane and device IDs via `ItemId::valid()` (neither zero nor
+the exhausted `UINT64_MAX` sentinel): it does not prove that the device exists
+in a Project, register global identity, clamp plain-domain values, or consult
+plugin metadata. The lane is not yet attached to a Track, persisted, reachable
+through commands or `DocumentSession`, compiled, or delivered to a host graph.
+
 `assets.hpp` separates durable SHA-256 content identity from optional resolution
 hints and alternate representations. `schema_registry.hpp` provides an explicit
 immutable registry with typed extension codecs and bounded per-version
@@ -830,8 +838,8 @@ opaque objects so callers can surface compatibility risk. This is snapshot JSON
 only; it does not read or write ZIP/package containers.
 
 This initial surface intentionally excludes durable journal sinks, package I/O,
-playback, automation lanes and delivery, launch slots, takes, nesting, devices,
-routing, and UI.
+playback, document-attached automation lanes and delivery, launch slots, takes,
+nesting, devices, routing, and UI.
 
 ## playback
 

@@ -4,6 +4,7 @@
 
 pulp_add_test_suite(pulp-test-timeline-model LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport
     SOURCES test_playback_transport.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
@@ -76,6 +77,7 @@ endif()
 add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/assets.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_curve.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_lane.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/command.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/document_session.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/identity_directory.cpp
