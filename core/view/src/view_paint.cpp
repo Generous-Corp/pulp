@@ -15,6 +15,11 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/runtime/trace.hpp>
+#ifndef NDEBUG
+#include <pulp/view/continuous_frames.hpp>
+#include <pulp/runtime/log.hpp>
+#include <atomic>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -758,6 +763,65 @@ void View::paint_content(canvas::Canvas& canvas, const EffectLayerState& layers,
     paint_post_decorations(canvas, layers);
 }
 
+void View::paint_content_maybe_cached(canvas::Canvas& canvas,
+                                      const EffectLayerState& layers,
+                                      std::int64_t& children_ns) {
+    // Not caching, or a backend that cannot record (CoreGraphics,
+    // RecordingCanvas, base): paint the subtree directly, every frame. This is
+    // the honest fallback — nothing blanks on a non-scene_cache backend.
+    if (!subtree_cached_ ||
+        !canvas.supports(canvas::CanvasCapability::scene_cache)) {
+        paint_content(canvas, layers, children_ns);
+        return;
+    }
+
+    if (!scene_cache_valid_) {
+#ifndef NDEBUG
+        // A cached subtree only re-records on mutation (see
+        // invalidate_subtree_caches_up). A descendant that animates on its own
+        // clock — updating a uniform every vsync WITHOUT calling
+        // request_repaint() — would therefore freeze at this recorded frame.
+        // set_subtree_cached() documents this as caller error, but a descendant
+        // can START animating AFTER opt-in, so check at RECORD time and log-warn
+        // once, turning a silent freeze into a loud, actionable diagnostic. Debug
+        // builds only; zero cost in release.
+        static std::atomic<bool> s_warned_frozen{false};
+        if (needs_continuous_frames(this) &&
+            !s_warned_frozen.exchange(true, std::memory_order_relaxed)) {
+            pulp::runtime::log_warn(
+                "set_subtree_cached: a cached subtree contains a "
+                "needs_continuous_frames() descendant; it will freeze at its "
+                "recorded frame until an unrelated mutation invalidates the "
+                "cache. Do not cache continuously-animating subtrees.");
+        }
+#endif
+        // Cache MISS: record the subtree once. Recording re-walks the tree and
+        // legitimately allocates (the SkPicture command buffer, per-view
+        // corner-path strings, gradient marshalling). That is a non-realtime
+        // event by definition — it replaces the N allocating frames that would
+        // otherwise re-walk — so suspend the paint no-alloc contract for exactly
+        // this record via ScopedAllocAllowed (narrow, cache-miss-only). The
+        // lambda paints paint_content INTO the recording canvas; children_ns is
+        // filled through the captured reference so self-time attribution still
+        // works on the miss frame.
+        pulp::runtime::ScopedAllocAllowed alloc_ok;
+        scene_cache_ = canvas.record_scene(
+            bounds_.width, bounds_.height,
+            [this, &layers, &children_ns](canvas::Canvas& rec) {
+                paint_content(rec, layers, children_ns);
+            });
+        scene_cache_valid_ = (scene_cache_ != nullptr);
+    }
+
+    // Replay the recording. On a cache HIT children are NOT re-walked, so
+    // children_ns stays 0 and the whole replay is attributed as self-time
+    // (which it is — one drawPicture). If replay is refused (foreign recording,
+    // defensive), fall back to a direct paint so the frame is never blank.
+    if (scene_cache_valid_ && scene_cache_ && canvas.draw_scene(*scene_cache_))
+        return;
+    paint_content(canvas, layers, children_ns);
+}
+
 void View::paint_all(canvas::Canvas& canvas) {
     if (!visible_) return;
 
@@ -789,7 +853,12 @@ void View::paint_all(canvas::Canvas& canvas) {
     const EffectLayerState layers = push_effect_layers(canvas);
 
     // Everything painted INSIDE those layers (the FU-3 subtree-cache unit).
-    paint_content(canvas, layers, children_ns);
+    // Routed through the cache wrapper: when set_subtree_cached(true) and the
+    // backend records, this replays a recorded scene instead of re-walking the
+    // subtree; otherwise it is a straight-through paint_content call. The
+    // effect/opacity layers above stay LIVE (outside the cache) so animating
+    // them never re-records.
+    paint_content_maybe_cached(canvas, layers, children_ns);
 
     pop_effect_layers(canvas, layers);
 

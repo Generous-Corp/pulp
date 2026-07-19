@@ -221,7 +221,7 @@ public:
     // ── Visibility ───────────────────────────────────────────────────────
 
     bool visible() const { return visible_; }
-    void set_visible(bool v) { visible_ = v; }
+    void set_visible(bool v) { visible_ = v; invalidate_subtree_caches_up(); }
 
     // ── Layout ───────────────────────────────────────────────────────────
 
@@ -718,8 +718,8 @@ public:
     float opacity() const { return opacity_; }
 
     /// Background color (optional — if set, painted before children)
-    void set_background_color(Color c) { bg_color_ = c; has_bg_ = true; }
-    void clear_background_color() { has_bg_ = false; }
+    void set_background_color(Color c) { bg_color_ = c; has_bg_ = true; invalidate_subtree_caches_up(); }
+    void clear_background_color() { has_bg_ = false; invalidate_subtree_caches_up(); }
     bool has_background_color() const { return has_bg_; }
     Color background_color() const { return bg_color_; }
 
@@ -735,8 +735,9 @@ public:
     /// Border (optional — painted on top of background)
     void set_border(Color c, float width, float radius = 0) {
         border_color_ = c; border_width_ = width; corner_radius_ = radius; has_border_ = true;
+        invalidate_subtree_caches_up();
     }
-    void clear_border() { has_border_ = false; }
+    void clear_border() { has_border_ = false; invalidate_subtree_caches_up(); }
     bool has_border() const { return has_border_; }
     Color border_color() const { return border_color_; }
     float border_width() const { return border_width_; }
@@ -745,12 +746,12 @@ public:
     /// Standalone border setters for RN parity. Each setter flips the
     /// has_border_ flag on so paint_all() actually emits the stroke even when
     /// set_border() was never called.
-    void set_border_color(Color c) { border_color_ = c; has_border_ = true; }
-    void set_border_width(float w) { border_width_ = w; has_border_ = true; }
-    void set_border_radius(float r) { corner_radius_ = r; corner_radius_pct_ = 0; }
+    void set_border_color(Color c) { border_color_ = c; has_border_ = true; invalidate_subtree_caches_up(); }
+    void set_border_width(float w) { border_width_ = w; has_border_ = true; invalidate_subtree_caches_up(); }
+    void set_border_radius(float r) { corner_radius_ = r; corner_radius_pct_ = 0; invalidate_subtree_caches_up(); }
     /// Set corner radius as percent of min(width,height). Resolved at paint
     /// time. Pass 0 to clear the percent and revert to the plain px slot.
-    void set_border_radius_pct(float pct) { corner_radius_pct_ = pct; }
+    void set_border_radius_pct(float pct) { corner_radius_pct_ = pct; invalidate_subtree_caches_up(); }
     float corner_radius_pct() const { return corner_radius_pct_; }
 
     /// RN's `borderCurve`: corner shape selection. `circular` (default) is the
@@ -759,7 +760,7 @@ public:
     /// appropriate path generator based on this slot. Slot has no effect when
     /// border-radius is 0.
     enum class BorderCurve { circular, continuous };
-    void set_border_curve(BorderCurve c) { border_curve_ = c; }
+    void set_border_curve(BorderCurve c) { border_curve_ = c; invalidate_subtree_caches_up(); }
     BorderCurve border_curve() const     { return border_curve_; }
     /// Compute the effective uniform corner radius in px against the
     /// given bounds (called by paint code).
@@ -787,7 +788,7 @@ public:
         none,     ///< No border drawn (paint short-circuits).
         hidden,   ///< Same as none for paint purposes.
     };
-    void set_border_style(BorderStyle s) { border_style_ = s; }
+    void set_border_style(BorderStyle s) { border_style_ = s; invalidate_subtree_caches_up(); }
     BorderStyle border_style() const { return border_style_; }
 
     /// CSS / RN list-style cluster. Pulp doesn't model HTML <li>/<ul>/<ol>
@@ -850,25 +851,25 @@ public:
     /// `borderTopWidth: 0` must yield a 0-px top border, not the 10-px
     /// shorthand. Without a per-edge `set` bit, the stored 0 is
     /// indistinguishable from "unset" in `apply_border_widths`.
-    void set_border_top(Color c, float w) { border_top_ = {c, w}; border_top_set_ = true; has_border_sides_ = true; }
-    void set_border_right(Color c, float w) { border_right_ = {c, w}; border_right_set_ = true; has_border_sides_ = true; }
-    void set_border_bottom(Color c, float w) { border_bottom_ = {c, w}; border_bottom_set_ = true; has_border_sides_ = true; }
-    void set_border_left(Color c, float w) { border_left_ = {c, w}; border_left_set_ = true; has_border_sides_ = true; }
+    void set_border_top(Color c, float w) { border_top_ = {c, w}; border_top_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_right(Color c, float w) { border_right_ = {c, w}; border_right_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_bottom(Color c, float w) { border_bottom_ = {c, w}; border_bottom_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_left(Color c, float w) { border_left_ = {c, w}; border_left_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
     /// Color-only setters. Setting `borderTopColor` alone must not mark the
     /// top edge's width as explicitly set; that would let a stale 0 override
     /// the uniform `borderWidth` shorthand. Mirrors CSS, where
     /// `border-top-color` and `border-top-width` are independent longhands.
-    void set_border_top_color(Color c)    { border_top_.color = c;    has_border_sides_ = true; }
-    void set_border_right_color(Color c)  { border_right_.color = c;  has_border_sides_ = true; }
-    void set_border_bottom_color(Color c) { border_bottom_.color = c; has_border_sides_ = true; }
-    void set_border_left_color(Color c)   { border_left_.color = c;   has_border_sides_ = true; }
+    void set_border_top_color(Color c)    { border_top_.color = c;    has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_right_color(Color c)  { border_right_.color = c;  has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_bottom_color(Color c) { border_bottom_.color = c; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_left_color(Color c)   { border_left_.color = c;   has_border_sides_ = true; invalidate_subtree_caches_up(); }
     /// Width-only setters. Setting `borderTopWidth` alone preserves the
     /// existing per-edge color and explicitly marks the width as set, including
     /// a width of 0, which then overrides any uniform shorthand on that edge.
-    void set_border_top_width(float w)    { border_top_.width = w;    border_top_set_ = true;    has_border_sides_ = true; }
-    void set_border_right_width(float w)  { border_right_.width = w;  border_right_set_ = true;  has_border_sides_ = true; }
-    void set_border_bottom_width(float w) { border_bottom_.width = w; border_bottom_set_ = true; has_border_sides_ = true; }
-    void set_border_left_width(float w)   { border_left_.width = w;   border_left_set_ = true;   has_border_sides_ = true; }
+    void set_border_top_width(float w)    { border_top_.width = w;    border_top_set_ = true;    has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_right_width(float w)  { border_right_.width = w;  border_right_set_ = true;  has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_bottom_width(float w) { border_bottom_.width = w; border_bottom_set_ = true; has_border_sides_ = true; invalidate_subtree_caches_up(); }
+    void set_border_left_width(float w)   { border_left_.width = w;   border_left_set_ = true;   has_border_sides_ = true; invalidate_subtree_caches_up(); }
     /// Per-side getters. The standalone setBorderTop/Right/... {Color,Width}
     /// bridge calls need to preserve the unrelated attribute when only one is
     /// being changed by a JSX prop diff.
@@ -894,16 +895,16 @@ public:
     /// the un-overridden corners from the uniform value so a sequence like
     /// `set_border_radius(10); set_corner_radius_tl(2);` renders as
     /// {2, 10, 10, 10} instead of {2, 0, 0, 0}.
-    void set_corner_radius_tl(float r) { promote_uniform_to_per_corner(); corner_radii_[0] = r; corner_radii_pct_[0] = 0; has_corner_radii_ = true; }
-    void set_corner_radius_tr(float r) { promote_uniform_to_per_corner(); corner_radii_[1] = r; corner_radii_pct_[1] = 0; has_corner_radii_ = true; }
-    void set_corner_radius_bl(float r) { promote_uniform_to_per_corner(); corner_radii_[2] = r; corner_radii_pct_[2] = 0; has_corner_radii_ = true; }
-    void set_corner_radius_br(float r) { promote_uniform_to_per_corner(); corner_radii_[3] = r; corner_radii_pct_[3] = 0; has_corner_radii_ = true; }
+    void set_corner_radius_tl(float r) { promote_uniform_to_per_corner(); corner_radii_[0] = r; corner_radii_pct_[0] = 0; has_corner_radii_ = true; invalidate_subtree_caches_up(); }
+    void set_corner_radius_tr(float r) { promote_uniform_to_per_corner(); corner_radii_[1] = r; corner_radii_pct_[1] = 0; has_corner_radii_ = true; invalidate_subtree_caches_up(); }
+    void set_corner_radius_bl(float r) { promote_uniform_to_per_corner(); corner_radii_[2] = r; corner_radii_pct_[2] = 0; has_corner_radii_ = true; invalidate_subtree_caches_up(); }
+    void set_corner_radius_br(float r) { promote_uniform_to_per_corner(); corner_radii_[3] = r; corner_radii_pct_[3] = 0; has_corner_radii_ = true; invalidate_subtree_caches_up(); }
     /// Per-corner percent setters. Same semantics as set_border_radius_pct:
     /// paint time resolves to `pct * 0.01 * min(width, height)`.
-    void set_corner_radius_tl_pct(float pct) { promote_uniform_to_per_corner(); corner_radii_pct_[0] = pct; has_corner_radii_ = true; }
-    void set_corner_radius_tr_pct(float pct) { promote_uniform_to_per_corner(); corner_radii_pct_[1] = pct; has_corner_radii_ = true; }
-    void set_corner_radius_bl_pct(float pct) { promote_uniform_to_per_corner(); corner_radii_pct_[2] = pct; has_corner_radii_ = true; }
-    void set_corner_radius_br_pct(float pct) { promote_uniform_to_per_corner(); corner_radii_pct_[3] = pct; has_corner_radii_ = true; }
+    void set_corner_radius_tl_pct(float pct) { promote_uniform_to_per_corner(); corner_radii_pct_[0] = pct; has_corner_radii_ = true; invalidate_subtree_caches_up(); }
+    void set_corner_radius_tr_pct(float pct) { promote_uniform_to_per_corner(); corner_radii_pct_[1] = pct; has_corner_radii_ = true; invalidate_subtree_caches_up(); }
+    void set_corner_radius_bl_pct(float pct) { promote_uniform_to_per_corner(); corner_radii_pct_[2] = pct; has_corner_radii_ = true; invalidate_subtree_caches_up(); }
+    void set_corner_radius_br_pct(float pct) { promote_uniform_to_per_corner(); corner_radii_pct_[3] = pct; has_corner_radii_ = true; invalidate_subtree_caches_up(); }
     float corner_radius_tl_pct() const { return corner_radii_pct_[0]; }
     float corner_radius_tr_pct() const { return corner_radii_pct_[1]; }
     float corner_radius_bl_pct() const { return corner_radii_pct_[2]; }
@@ -936,6 +937,7 @@ public:
     void set_box_shadow(float ox, float oy, float blur, float spread, Color c,
                         bool inset = false) {
         shadows_.assign(1, BoxShadow{ox, oy, blur, spread, c, inset});
+        invalidate_subtree_caches_up();
     }
     /// Appends a layer, preserving CSS author order: `box-shadow: A, B` is
     /// set_box_shadow(A) followed by add_box_shadow(B). A is the first layer
@@ -946,8 +948,9 @@ public:
     void add_box_shadow(float ox, float oy, float blur, float spread, Color c,
                         bool inset = false) {
         shadows_.push_back(BoxShadow{ox, oy, blur, spread, c, inset});
+        invalidate_subtree_caches_up();
     }
-    void clear_box_shadow() { shadows_.clear(); }
+    void clear_box_shadow() { shadows_.clear(); invalidate_subtree_caches_up(); }
     bool has_box_shadow() const { return !shadows_.empty(); }
     /// The first (topmost) layer, or a default-constructed shadow when the
     /// stack is empty — callers that only ever set one shadow can keep
@@ -972,17 +975,21 @@ public:
     /// multi-shadow longhand, so these address the first layer only.
     void set_box_shadow_color(Color c) {
         first_box_shadow().color = c;
+        invalidate_subtree_caches_up();
     }
     void set_box_shadow_offset(float ox, float oy) {
         auto& s = first_box_shadow(); s.offset_x = ox; s.offset_y = oy;
+        invalidate_subtree_caches_up();
     }
     void set_box_shadow_opacity(float a) {
         // RN's shadowOpacity is 0..1; overwrite the shadow color's normalized
         // alpha channel while preserving the existing RGB channels.
         first_box_shadow().color.a = a;
+        invalidate_subtree_caches_up();
     }
     void set_box_shadow_radius(float r) {
         first_box_shadow().blur = r;
+        invalidate_subtree_caches_up();
     }
 
     /// Generic click callback (fires on mouse-down, if set).
@@ -1640,6 +1647,40 @@ public:
     void set_needs_layer(bool v) { needs_layer_ = v; }
     bool needs_layer() const { return needs_layer_; }
 
+    /// Cache this subtree's painted CONTENT (its outset shadows, clip,
+    /// background/border, `paint()`, children, and post-decorations — i.e.
+    /// everything `paint_content` draws) as a replayable scene, re-recorded
+    /// only when the subtree is invalidated. The view's own opacity / filter /
+    /// mask / blend compositing layers stay LIVE outside the cache, so
+    /// animating THOSE (e.g. a hover-opacity fade) does not thrash the cache.
+    ///
+    /// Opt-in, default false. A no-op on backends without
+    /// `CanvasCapability::scene_cache` (CoreGraphics, RecordingCanvas, the base
+    /// canvas): those fall back to painting the subtree directly every frame,
+    /// so nothing blanks. Implies nothing about `needs_layer()`.
+    ///
+    /// The cache invalidates automatically (see invalidate_subtree_caches_up)
+    /// on the paths that change what the subtree draws:
+    ///   - `request_repaint()` / `request_repaint(Rect)` — and everything that
+    ///     routes through them (`set_theme()`, animations, JS-bridge repaints);
+    ///   - the content-mutating style setters that do NOT themselves repaint —
+    ///     `set_background_color`/gradient, every `set_border*`, `set_box_shadow*`,
+    ///     `set_border_radius`/`set_corner_radius_*`, and `set_visible`;
+    ///   - `set_bounds()` (resize/move);
+    ///   - `add_child()` / `remove_child()` (structural).
+    /// Each stales this view and every cached ancestor. Setters that only affect
+    /// a LIVE compositing layer — `set_opacity`, transforms — deliberately do
+    /// NOT invalidate, because that layer is applied outside the cached content.
+    ///
+    /// Do NOT cache a subtree that animates on its own clock
+    /// (`needs_continuous_frames()` true) — a time-driven descendant that updates
+    /// a uniform each vsync WITHOUT calling `request_repaint()` would freeze at
+    /// its recorded frame. (An animation driven through `View::animate` is safe:
+    /// it calls `request_repaint()` per tick, which invalidates.) A debug build
+    /// log-warns once at record time if it detects such a descendant.
+    void set_subtree_cached(bool v);
+    bool subtree_cached() const { return subtree_cached_; }
+
     /// Attach a GPU post-processing effect to this View's compositing layer.
     void set_effect(std::shared_ptr<canvas::ViewEffect> effect) { effect_ = std::move(effect); }
     const std::shared_ptr<canvas::ViewEffect>& effect() const { return effect_; }
@@ -1682,6 +1723,7 @@ public:
         bg_gradient_type_ = 1;  // linear
         bg_grad_x0_ = x0; bg_grad_y0_ = y0;
         bg_grad_x1_ = x1; bg_grad_y1_ = y1;
+        invalidate_subtree_caches_up();
     }
     /// Radial gradient. cx/cy are fractions of the box; radius_frac is a
     /// fraction of the larger box dimension (resolved at paint).
@@ -1693,6 +1735,7 @@ public:
         bg_gradient_type_ = 2;  // radial
         bg_grad_x0_ = cx; bg_grad_y0_ = cy;
         bg_grad_radius_ = radius_frac;
+        invalidate_subtree_caches_up();
     }
     /// Conic (CSS conic-gradient / Figma angular). cx/cy are fractions of the
     /// box; start_angle is in radians (0 = +x axis, matching the canvas API).
@@ -1704,8 +1747,9 @@ public:
         bg_gradient_type_ = 3;  // conic / sweep
         bg_grad_x0_ = cx; bg_grad_y0_ = cy;
         bg_grad_angle_ = start_angle;
+        invalidate_subtree_caches_up();
     }
-    void clear_background_gradient() { bg_gradient_type_ = 0; }
+    void clear_background_gradient() { bg_gradient_type_ = 0; invalidate_subtree_caches_up(); }
     bool has_background_gradient() const { return bg_gradient_type_ > 0; }
     /// 0=none, 1=linear, 2=radial, 3=conic. Exposed for tests/inspection.
     int background_gradient_type() const { return bg_gradient_type_; }
@@ -1867,6 +1911,18 @@ private:
     // children_ns receives the recursive child-paint time for self-time attrib.
     void paint_content(canvas::Canvas& canvas, const EffectLayerState& layers,
                        std::int64_t& children_ns);
+    // FU-3 wrapper around paint_content: replays the cached scene when caching
+    // is on, the backend supports it, and the cache is valid; otherwise records
+    // (on a miss) or paints directly. Called from the paint_all orchestrator in
+    // place of paint_content so the effect/opacity layers stay outside the cache.
+    void paint_content_maybe_cached(canvas::Canvas& canvas,
+                                    const EffectLayerState& layers,
+                                    std::int64_t& children_ns);
+    // Clear the scene cache on this view and every ancestor that has caching
+    // enabled (a mutation anywhere in a cached subtree stales that subtree's
+    // recording). Walks parent_ links; O(depth), and skipped entirely via a
+    // process-global counter when no view anywhere has caching enabled.
+    void invalidate_subtree_caches_up();
     void paint_outset_shadows(canvas::Canvas& canvas);
     void apply_overflow_and_clip_path(canvas::Canvas& canvas);
     void paint_background_and_border(canvas::Canvas& canvas);
@@ -2076,6 +2132,12 @@ private:
     float       text_shadow_dy_ = 0.0f;
     float       text_shadow_radius_ = 0.0f;
     bool needs_layer_ = false;
+    // FU-3 subtree scene cache. `subtree_cached_` is the opt-in flag;
+    // `scene_cache_` holds the recorded scene (shared_ptr so it survives across
+    // frames until invalidated); `scene_cache_valid_` gates replay vs re-record.
+    bool subtree_cached_ = false;
+    bool scene_cache_valid_ = false;
+    std::shared_ptr<canvas::SceneRecording> scene_cache_;
     WindowHost* window_host_ = nullptr;
     PluginViewHost* plugin_view_host_ = nullptr;
     HostParamSurface* host_params_ = nullptr;

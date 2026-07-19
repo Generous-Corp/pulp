@@ -175,6 +175,21 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
         ${SKIA_INCLUDE_DIRS})
     catch_discover_tests(pulp-test-plugin-editor-headless-gpu)
 
+    # Subtree scene cache — live-GPU image-in-cache proof (FU-3). Records an
+    # image draw inside a cached subtree on the miss frame (GPU-uploads the
+    # texture via the persistent Graphite recorder) and asserts it still
+    # composites on the replay frame — the cross-frame texture-lifetime gap the
+    # raster tests cannot cover. Soft-skips on Dawn-init failure.
+    add_executable(pulp-test-subtree-cache-gpu test_subtree_cache_gpu.cpp)
+    target_link_libraries(pulp-test-subtree-cache-gpu PRIVATE
+        pulp::view pulp::canvas pulp::render
+        Catch2::Catch2WithMain skia::skia)
+    target_compile_definitions(pulp-test-subtree-cache-gpu PRIVATE
+        PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-subtree-cache-gpu PRIVATE
+        ${SKIA_INCLUDE_DIRS})
+    catch_discover_tests(pulp-test-subtree-cache-gpu)
+
     # Embedded-host smoke (mac GPU lane): attaches the GPU host to a hidden
     # NSWindow and proves a nonblank first-frame capture, plus drives the CLAP
     # gui_create/set_parent adapter path. Needs CLAP for the PULP_CLAP_PLUGIN
