@@ -85,26 +85,10 @@ std::uint32_t source_channel_for(std::uint32_t source_channels,
     return source_channels == 1 ? 0 : source_channels;
 }
 
-std::uint64_t wrap_index(const LoopRegion& region, long long frame) noexcept {
-    const auto length = static_cast<long long>(region.end_frame - region.start_frame);
-    if (length <= 0) return region.start_frame;
-    auto relative = frame - static_cast<long long>(region.start_frame);
-    relative %= length;
-    if (relative < 0) relative += length;
-    return region.start_frame + static_cast<std::uint64_t>(relative);
-}
-
 std::uint64_t sample_index_for(const LoopRegion& region,
                                std::uint64_t source_frames,
                                long long frame) noexcept {
-    if (source_frames == 0) return 0;
-    if (region.playback_mode == LoopPlaybackMode::OneShot) {
-        const auto source_last = static_cast<long long>(source_frames - 1);
-        const auto lo = static_cast<long long>(region.start_frame);
-        const auto hi = std::min(static_cast<long long>(region.end_frame - 1), source_last);
-        return static_cast<std::uint64_t>(std::clamp(frame, lo, hi));
-    }
-    return wrap_index(region, frame);
+    return LoopReader::source_frame_for_tap(region, source_frames, frame);
 }
 
 float sample_at_channel(const float* source,
@@ -123,11 +107,9 @@ float sample_at_channel(const float* source,
 // the interior fast path skips the per-tap wrap/clamp modulo when every tap
 // already lands inside the un-wrapped, in-bounds window.
 //
-// Numerics: bit-identical to the previous scalar read for every input. The math
-// (floor/frac, Interpolator, and the clamp/wrap index policy) is unchanged; the
-// interior path only OMITS a wrap/clamp that is provably the identity for an
-// in-range index, and the boundary path calls the exact same per-tap helper as
-// before. The existing "matches LoopReader reference" null tests pin this.
+// The interior path omits tap mapping only when it is provably the identity for
+// an in-range index. Boundary taps use LoopReader's canonical clamp, wrap, or
+// reflection policy; parity tests pin the result against LoopReader.
 template <LoopInterpolationMode Mode>
 inline float interp_read(const float* source,
                          std::uint64_t source_frames,

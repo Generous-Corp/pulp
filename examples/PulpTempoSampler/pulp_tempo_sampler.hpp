@@ -6,8 +6,6 @@
 /// thread via pulp::signal::OfflineStretch; the audio thread only plays the
 /// pre-rendered, generation-published buffer. Link (repitch/vinyl) vs unlink
 /// (tempo-only), plus pitch + formant when unlinked.
-///
-/// Reuses PulpSampler's SamplerVoice + SamplerSampleStore + voice-render path.
 
 #include <pulp/audio/built_in_key_tempo_analyzer.hpp>
 #include <pulp/audio/buffer.hpp>
@@ -18,11 +16,13 @@
 #include <pulp/audio/published_sample_store.hpp>
 #include <pulp/audio/sample_key_map.hpp>
 #include <pulp/audio/sample_slot_bank.hpp>
+#include <pulp/audio/slice_point_analyzer.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/standalone_settings.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/platform/file_dialog.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
+#include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/offline_stretch.hpp>
 #include <pulp/signal/resampler.hpp>
@@ -58,12 +58,9 @@
 
 namespace pulp::examples {
 
-inline constexpr const char* kPulpTempoSamplerVersion = "1.7.0";
+inline constexpr const char* kPulpTempoSamplerVersion = "1.7.1";
 
-// Inlined from PulpSampler's sampler_components.hpp so this example is
-// self-contained — pulp_add_plugin compiles the format entries without an
-// extra cross-example include path.
-struct SamplerVoice {
+struct TempoSamplerVoice {
     bool active = false;
     int note = -1;
     float velocity = 0.0f;
@@ -111,7 +108,7 @@ struct SamplerVoice {
     void release() { adsr.note_off(); released = true; }
 };
 
-class SamplerSampleStore : public audio::PublishedSampleStore {
+class TempoSamplerSampleStore : public audio::PublishedSampleStore {
 public:
     static constexpr std::uint32_t kSlotCount = 2;
     static constexpr std::uint32_t kMaxChannels = 2;
@@ -126,6 +123,15 @@ public:
         return audio::PublishedSampleStore::prepare(
             audio::PublishedSampleStoreConfig{kSlotCount, kMaxChannels, kMaxFrames});
     }
+};
+
+inline constexpr std::size_t kTempoSamplerMaximumSlices = 32;
+
+struct TempoSamplerPublishedSource {
+    audio::PublishedSampleView sample;
+    std::array<audio::LoopRegion, kTempoSamplerMaximumSlices> regions{};
+    std::uint32_t region_count = 0;
+    std::uint64_t generation = 0;
 };
 
 enum TempoSamplerParams : state::ParamID {
@@ -589,7 +595,7 @@ private:
 class PulpTempoSamplerProcessor : public format::Processor {
 public:
     static constexpr int kMaxVoices = 8;
-    static constexpr std::uint32_t kMaxSampleChannels = SamplerSampleStore::kMaxChannels;
+    static constexpr std::uint32_t kMaxSampleChannels = TempoSamplerSampleStore::kMaxChannels;
     static constexpr std::uint32_t kMaxOutputChannels = 8;
     static constexpr int kDefaultRootNote = 48;  // C2 in C-2..C8 labeling (see note_name) —
                                                  // aligns with the DAW Musical Typing default octave
@@ -598,7 +604,7 @@ public:
 
     // Onset sensitivity s in [0,1] maps to a slice COUNT (the strongest cuts by
     // confidence are kept): s=0 -> 1 slice (whole sample), s=1 -> kMaxSlices.
-    static constexpr int kMaxSlices = 32;
+    static constexpr int kMaxSlices = static_cast<int>(kTempoSamplerMaximumSlices);
     // Default to the WHOLE loop (1 slice): a dropped loop plays + LOOPs as a
     // single 2-bar region that tiles the bar grid. Raising SENS chops it into
     // slices for per-key triggering. (A multi-slice default made holding the root
@@ -686,6 +692,11 @@ public:
         for (std::uint32_t ch = 0; ch < kMaxOutputChannels; ++ch)
             voice_scratch_[ch].assign(max_block_frames_, 0.0f);
         store_.prepare();
+        {
+            std::lock_guard<std::mutex> lock(publication_mutex_);
+            published_source_.write(
+                TempoSamplerPublishedSource{.sample = store_.read_published_view()});
+        }
         engine_.prepare(ctx.sample_rate, 2); // default [0.25x,4x] / ±24 st
         for (auto& voice : voices_) voice.reset();
         // Reactivation (sample-rate change / re-prepare) can arrive without the host
@@ -1206,12 +1217,26 @@ public:
     }
     bool has_sample() const { return store_.has_sample(); }
     long published_frames() const { return static_cast<long>(store_.read_published_view().num_frames); }
+    TempoSamplerPublishedSource published_source_for_test() const {
+        return published_source_.read();
+    }
+    std::array<int, kMaxVoices> active_voice_notes_for_test() const noexcept {
+        std::array<int, kMaxVoices> notes{};
+        notes.fill(-1);
+        for (int i = 0; i < kMaxVoices; ++i) {
+            if (voices_[i].active) notes[i] = voices_[i].note;
+        }
+        return notes;
+    }
     void set_loop_bpm_for_test(double bpm) { loop_bpm_.store(bpm, std::memory_order_relaxed); }
     /// Test-only: the slice index a MIDI note maps to under the current root
     /// (mirrors region_for_note's `idx = note - root`). Deterministic and
     /// independent of whether a sample is loaded.
     int slice_index_for_note_test(int note) const {
-        return note - static_cast<int>(state().get_value(kRootNote));
+        const auto key_map = tempo_key_map(
+            static_cast<int>(state().get_value(kRootNote)));
+        const auto index = key_map.slice_index_for_note(note, kMaxSlices);
+        return index ? static_cast<int>(*index) : -1;
     }
 
     /// Test-only: the [start,end) frame range region_for_note maps `note` to,
@@ -1221,8 +1246,8 @@ public:
     std::pair<std::uint64_t, std::uint64_t>
     region_range_for_note_test(int note,
                                int mode = static_cast<int>(TriggerMode::Slice)) const {
-        const auto sample = store_.read_published_view();
-        const auto r = region_for_note(note, sample,
+        const auto source = published_source_.read();
+        const auto r = region_for_note(note, source,
                                        static_cast<TriggerMode>(std::clamp(mode, 0, 2)));
         if (!r) return {0, 0};
         return {r->start_frame, r->end_frame};
@@ -1832,7 +1857,8 @@ public:
             request_render(bpm);
         }
 
-        const auto published = store_.read_published_view();
+        const auto& published_source = published_source_.read();
+        const auto published = published_source.sample;
         const bool can_trigger = store_.slot_view_valid(published);
         const auto params = current_params();
         const auto block_frames = static_cast<std::uint32_t>(output.num_samples());
@@ -1871,7 +1897,10 @@ public:
                     bool free_voice = false;
                     for (auto& v : voices_) if (!v.active) { free_voice = true; break; }
                     if (!has && free_voice && can_trigger)
-                        trigger_note(n, held_velocity_[static_cast<size_t>(n)], published, params);
+                        trigger_note(n,
+                                     held_velocity_[static_cast<size_t>(n)],
+                                     published_source,
+                                     params);
                 }
             } else {
                 // Loop turned off: switch held voices to the resolved no-loop mode
@@ -1889,7 +1918,9 @@ public:
         // Drain UI-injected notes (slice clicks / musical typing) at block start.
         while (auto n = ui_notes_.try_pop()) {
             if (n->on) {
-                if (can_trigger) trigger_note(n->note, n->velocity, published, params);
+                if (can_trigger) {
+                    trigger_note(n->note, n->velocity, published_source, params);
+                }
             } else {
                 release_note(n->note);
             }
@@ -1904,7 +1935,8 @@ public:
             if (event.message.isNoteOn() && can_trigger)
                 trigger_note(event.message.getNoteNumber(),
                              static_cast<float>(event.message.getVelocity()) / 127.0f,
-                             published, params);
+                             published_source,
+                             params);
             else if (event.message.isNoteOff())
                 release_note(event.message.getNoteNumber());
             else if (event.message.isController()) {
@@ -2095,60 +2127,37 @@ private:
 
         const double s = std::clamp(static_cast<double>(state().get_value(kOnsetSens)), 0.0, 1.0);
         const int target = 1 + static_cast<int>(std::lround(s * (kMaxSlices - 1)));  // 1..kMaxSlices
-        const int keep = std::max(0, target - 1);  // number of cut points
+        // Minimum slice length (~40 ms) prevents sliver clips at the origin,
+        // endpoint, and between dense candidates. Sign-transition snapping
+        // preserves the product's existing shared-boundary declick behavior.
+        audio::SlicePointAnalysisConfig slice_config;
+        slice_config.source_generation =
+            raw_generation_.load(std::memory_order_relaxed);
+        slice_config.source_sample_rate = raw_sr_;
+        slice_config.min_slice_frames = static_cast<std::uint64_t>(
+            std::max<long>(256, std::lround(0.040 * raw_sr_)));
+        slice_config.snap_radius_frames = static_cast<std::uint64_t>(
+            std::max<long>(32, std::lround(0.005 * raw_sr_)));
 
-        // Minimum slice length (~40 ms) so dense onsets never produce a sliver clip
-        // — worst at high sensitivity, and at the FIRST slice [0, first cut) which
-        // OnsetDetector's inter-onset spacing doesn't guard. Snap radius (~5 ms) so
-        // each cut lands on a zero-crossing: a slice boundary is shared by the end
-        // of one slice and the start of the next, so snapping it declicks BOTH edges.
-        const long kMinSlice = std::max<long>(256, std::lround(0.040 * raw_sr_));
-        const long kSnap = std::max<long>(32, std::lround(0.005 * raw_sr_));
-        auto sum_at = [&](long i) {
-            float v = 0.0f;
-            for (int c = 0; c < raw_channels_; ++c) v += raw_[c][static_cast<size_t>(i)];
-            return v;
-        };
-        auto snap_zc = [&](long f) {
-            const long lo = std::max(1L, f - kSnap), hi = std::min(raw_frames_ - 1, f + kSnap);
-            long best = f, bestd = kSnap + 1;
-            for (long i = lo; i <= hi; ++i)
-                if ((sum_at(i - 1) <= 0.0f) != (sum_at(i) <= 0.0f)) {
-                    const long d = std::llabs(i - f);
-                    if (d < bestd) { bestd = d; best = i; }
-                }
-            return best;
-        };
+        audio::SliceSelectionOptions selection;
+        selection.max_regions = static_cast<std::uint32_t>(target);
+        selection.candidate_selection =
+            audio::SliceCandidateSelection::StrongestConfidence;
+        selection.snap_policy = audio::SliceSnapPolicy::SignTransition;
 
-        // Onset slicing: greedily accept the highest-confidence cuts (preserving
-        // the sensitivity->count mapping) that keep EVERY slice — incl. first and
-        // last — at least kMinSlice long, each snapped to a zero-crossing so both
-        // shared edges declick.
-        std::vector<long> cuts;
-        {
-            std::vector<audio::OnsetMarker> cand;
-            for (const auto& m : onsets.markers)
-                if (static_cast<long>(m.frame) > 0 && static_cast<long>(m.frame) < raw_frames_)
-                    cand.push_back(m);
-            std::sort(cand.begin(), cand.end(),
-                      [](const auto& a, const auto& b) { return a.confidence > b.confidence; });
-            for (const auto& m : cand) {
-                if (static_cast<int>(cuts.size()) >= keep) break;
-                const long f = snap_zc(static_cast<long>(m.frame));
-                if (f < kMinSlice || raw_frames_ - f < kMinSlice) continue;
-                bool ok = true;
-                for (long c : cuts)
-                    if (std::llabs(c - f) < kMinSlice) { ok = false; break; }
-                if (ok) cuts.push_back(f);
-            }
-        }
-        std::sort(cuts.begin(), cuts.end());
-
+        audio::SlicePointAnalyzer analyzer;
+        const auto slices = analyzer.analyze(
+            view, onsets.markers, slice_config, selection);
         slices_orig_.clear();
-        slices_orig_.push_back(0);
-        for (long c : cuts) slices_orig_.push_back(c);
-        slices_orig_.push_back(raw_frames_);
-        slices_orig_.erase(std::unique(slices_orig_.begin(), slices_orig_.end()), slices_orig_.end());
+        if (slices.ok && !slices.map.regions.empty()) {
+            slices_orig_.reserve(slices.map.regions.size() + 1);
+            for (const auto& region : slices.map.regions) {
+                slices_orig_.push_back(static_cast<long>(region.start_frame));
+            }
+            slices_orig_.push_back(static_cast<long>(slices.map.source_frames));
+        } else {
+            slices_orig_ = {0, raw_frames_};
+        }
     }
 
     // ── Offline render to host tempo (worker thread) ──
@@ -2200,18 +2209,7 @@ private:
         // so an oversize sample plays its head instead of nothing — slices past
         // pub_frames map past the buffer and region_for_note already silences them.
         const long pub_frames =
-            std::min<long>(out_frames, static_cast<long>(SamplerSampleStore::kMaxFrames));
-
-        // NOTE: slices_stretched_ is refreshed AFTER a successful publish below, not
-        // here. The slice boundaries are scaled by the time-ratio R, so they only
-        // match the buffer that was rendered at that same R. If the re-publish is
-        // SKIPPED (a held voice still occupies a store slot, ok == false), updating
-        // the slices early would point the trigger mapping at the new R while the
-        // live buffer is still the old R — every note maps past the buffer and goes
-        // silent until a later render lands (the "adjust tempo -> sampler stops
-        // triggering, adjust again -> fixed" bug). Keeping the old slices until the
-        // matching audio is actually published keeps the sampler playable through a
-        // skipped publish; the new tempo/slicing applies once the slot frees.
+            std::min<long>(out_frames, static_cast<long>(TempoSamplerSampleStore::kMaxFrames));
 
         std::vector<std::vector<float>> stretched(static_cast<size_t>(ch),
                                                   std::vector<float>(static_cast<size_t>(out_frames)));
@@ -2240,6 +2238,7 @@ private:
 
         // Publish the stretched buffer (generation-safe; in-flight voices keep
         // their old generation until they finish — RT lifetime via the store).
+        std::lock_guard<std::mutex> publication_lock(publication_mutex_);
         const auto gen = audio_ack_generation_.load(std::memory_order_acquire);
         bool ok = false;
         if (ch == 1) {
@@ -2256,17 +2255,29 @@ private:
         }
         if (!ok) return;
 
-        // Publish succeeded — NOW refresh the slice boundaries so they always match
-        // the buffer that was just published at this R. (On a skipped publish we
-        // returned above with the old, still-consistent slices intact.)
-        {
-            std::vector<long> scaled;
-            scaled.reserve(slices.size());
-            for (long s : slices)
-                scaled.push_back(std::min<long>(pub_frames, static_cast<long>(std::llround(s * R))));
-            std::lock_guard<std::mutex> lock(slice_mutex_);
-            slices_stretched_ = std::move(scaled);
+        const auto published = store_.read_published_view();
+        if (!store_.slot_view_valid(published)) return;
+
+        TempoSamplerPublishedSource source;
+        source.sample = published;
+        source.generation = published.generation;
+        const auto available_regions = slices.size() > 1 ? slices.size() - 1 : 0;
+        source.region_count = static_cast<std::uint32_t>(std::min<std::size_t>(
+            available_regions, source.regions.size()));
+        for (std::uint32_t i = 0; i < source.region_count; ++i) {
+            auto& region = source.regions[i];
+            region.start_frame = static_cast<std::uint64_t>(std::min<long>(
+                pub_frames,
+                static_cast<long>(std::llround(slices[i] * R))));
+            region.end_frame = static_cast<std::uint64_t>(std::min<long>(
+                pub_frames,
+                static_cast<long>(std::llround(slices[i + 1] * R))));
+            region.source_sample_rate = published.sample_rate;
+            region.playback_mode = audio::LoopPlaybackMode::OneShot;
+            region.interpolation = audio::LoopInterpolationMode::Linear;
+            region.crossfade_curve = audio::LoopCrossfadeCurve::Linear;
         }
+        published_source_.write(source);
     }
 
     // ── Background worker ──
@@ -2357,6 +2368,18 @@ private:
             std::fill_n(output.channel_ptr(ch), output.num_samples(), 0.0f);
     }
 
+    static audio::SampleKeyMap tempo_key_map(int root_note) noexcept {
+        audio::SampleKeyMap key_map;
+        (void) key_map.configure({
+            .root_note = root_note,
+            .lowest_note = 0,
+            .highest_note = 127,
+            .keytrack_cents_per_key = 100.0,
+            .first_slice_note = root_note,
+        });
+        return key_map;
+    }
+
     // Region for a note within the published (already tempo-matched) buffer.
     //  - Classic / One-Shot: EVERY key plays the WHOLE sample [0, num_frames);
     //    the key's pitch is applied as a playback-rate in trigger_note (pitched
@@ -2365,29 +2388,30 @@ private:
     //    root); a key outside [root, root + num_slices) maps to nothing (silent),
     //    never the whole sample. engine_mode is OneShot (Slice is forward one-shot).
     std::optional<audio::LoopRegion> region_for_note(
-        int note, const audio::PublishedSampleView& sample,
+        int note, const TempoSamplerPublishedSource& source,
         TriggerMode mode = TriggerMode::Slice,
         audio::LoopPlaybackMode engine_mode = audio::LoopPlaybackMode::OneShot) const noexcept {
-        std::uint64_t start = 0, end = 0;
+        const auto& sample = source.sample;
         if (mode == TriggerMode::Slice) {
             const int root = static_cast<int>(state().get_value(kRootNote));
-            std::lock_guard<std::mutex> lock(slice_mutex_);
-            if (slices_stretched_.size() >= 2) {
-                const int idx = note - root;
-                if (idx >= 0 && idx + 1 < static_cast<int>(slices_stretched_.size())) {
-                    start = static_cast<std::uint64_t>(slices_stretched_[static_cast<size_t>(idx)]);
-                    end = static_cast<std::uint64_t>(slices_stretched_[static_cast<size_t>(idx) + 1]);
-                }
+            const auto key_map = tempo_key_map(root);
+            const auto index = key_map.slice_index_for_note(
+                note, source.region_count);
+            if (!index) return std::nullopt;
+            auto region = source.regions[*index];
+            if (region.end_frame <= region.start_frame ||
+                region.end_frame > sample.num_frames) {
+                return std::nullopt;
             }
-        } else {
-            // Classic / One-Shot: the whole tempo-matched sample.
-            start = 0;
-            end = sample.num_frames;
+            region.playback_mode = engine_mode;
+            return region;
         }
-        if (end <= start || end > sample.num_frames) return std::nullopt;
+
+        // Classic / One-Shot: the whole tempo-matched sample.
+        if (sample.num_frames == 0) return std::nullopt;
         audio::LoopRegion region;
-        region.start_frame = start;
-        region.end_frame = end;
+        region.start_frame = 0;
+        region.end_frame = sample.num_frames;
         region.source_sample_rate = sample.sample_rate;
         region.playback_mode = engine_mode;
         region.interpolation = audio::LoopInterpolationMode::Linear;
@@ -2431,7 +2455,7 @@ private:
             const float expr_rate = apply_expression_rate(chunk);
             audio::BufferView<float> scratch(voice_scratch_ptrs_.data(), out_ch, chunk);
             for (int vi = 0; vi < kMaxVoices; ++vi) {
-                SamplerVoice& voice = voices_[static_cast<size_t>(vi)];
+                TempoSamplerVoice& voice = voices_[static_cast<size_t>(vi)];
                 if (!voice.active) continue;
                 std::array<const float*, kMaxSampleChannels> sptrs{};
                 if (!store_.populate_channel_ptrs(voice.sample, sptrs.data(), sptrs.size())) { voice.reset(); continue; }
@@ -2457,23 +2481,26 @@ private:
         }
     }
 
-    void trigger_note(int note, float velocity, const audio::PublishedSampleView& sample,
+    void trigger_note(int note, float velocity, const TempoSamplerPublishedSource& source,
                       const RenderParams& params) {
-        auto region = region_for_note(note, sample, params.mode, params.loop_mode);
+        const auto& sample = source.sample;
+        auto region = region_for_note(note, source, params.mode, params.loop_mode);
         if (!region) return;  // note maps to no slice -> silent
         region->reverse_entry = params.reverse_entry;  // Direction = first-pass entry
-        SamplerVoice* target = nullptr;
+        TempoSamplerVoice* target = nullptr;
         for (auto& voice : voices_) if (!voice.active) { target = &voice; break; }
         if (target == nullptr) target = &voices_[0];
         // Slice: each key IS its own slice at native rate (1.0). Classic/One-Shot:
         // the whole tempo-matched sample is PITCHED across the keyboard (rate =
         // 2^((note-root)/12)), so the root plays at tempo and other keys transpose.
-        // NOTE (Phase C): this repitch also changes speed; when LINK is on we will
-        // swap it for keep-tempo/shift-pitch (Logic Flex). pitch-bend/mod apply per
-        // chunk on top of this base rate.
-        const double base_rate = (params.mode == TriggerMode::Slice)
-            ? 1.0
-            : std::pow(2.0, (static_cast<double>(note) - state().get_value(kRootNote)) / 12.0);
+        // This repitch also changes speed; pitch-bend and modulation multiply
+        // the resulting base rate.
+        const auto root = static_cast<int>(state().get_value(kRootNote));
+        const auto key_map = tempo_key_map(root);
+        const double base_rate = params.mode == TriggerMode::Slice
+                                     ? 1.0
+                                     : key_map.pitch_ratio_for_note(note);
+        if (!(base_rate > 0.0)) return;
         target->start(note, velocity, base_rate, host_sample_rate_, sample, *region, sample.num_frames);
         // Finite One-Shot (One-Shot + Loop=None) ignores note-off; a One-Shot LOOP
         // does NOT (it must be stoppable, or it drones forever). Captured now so a
@@ -2512,11 +2539,13 @@ private:
     }
 
     // State
-    SamplerSampleStore store_;
+    TempoSamplerSampleStore store_;
+    mutable runtime::TripleBuffer<TempoSamplerPublishedSource> published_source_;
+    std::mutex publication_mutex_;
     signal::OfflineStretch engine_; // sizing reference (bounds); renders use a local instance
     std::array<std::vector<float>, kMaxOutputChannels> voice_scratch_{};
     std::array<float*, kMaxOutputChannels> voice_scratch_ptrs_{};
-    SamplerVoice voices_[kMaxVoices]{};
+    TempoSamplerVoice voices_[kMaxVoices]{};
     std::atomic<std::uint64_t> audio_ack_generation_{0};
     float host_sample_rate_ = 48000.0f;
     std::uint32_t max_block_frames_ = 512;
@@ -2549,9 +2578,6 @@ private:
     double raw_sr_ = 48000.0;
     std::atomic<double> loop_bpm_{0.0};
     std::vector<long> slices_orig_;
-
-    mutable std::mutex slice_mutex_;
-    std::vector<long> slices_stretched_;
 
     // Background render worker
     std::thread worker_;

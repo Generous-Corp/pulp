@@ -9,6 +9,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include "pulp_tempo_sampler.hpp"
+#include "scoped_rt_process_probe.hpp"
 
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/platform/file_dialog.hpp>
@@ -24,12 +25,13 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <span>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <set>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -228,7 +230,7 @@ TEST_CASE("a sample longer than the old 60 s cap still publishes (not silent)",
     constexpr long kOldCap = 48000L * 60L;        // the previous per-slot cap
     const long n = 48000L * 61L;                  // 61 s — over the old cap, under the new
     REQUIRE(n > kOldCap);
-    REQUIRE(n <= static_cast<long>(SamplerSampleStore::kMaxFrames));
+    REQUIRE(n <= static_cast<long>(TempoSamplerSampleStore::kMaxFrames));
     auto buf = sine(220.0, 48000.0, n);
     const float* ch[1] = {buf.data()};
     REQUIRE(f.proc->load_loop(ch, 1, n, 48000.0));
@@ -238,7 +240,8 @@ TEST_CASE("a sample longer than the old 60 s cap still publishes (not silent)",
     // Publishes the full 61 s (was 0 before the fix), and never exceeds the cap.
     REQUIRE(wait_for([&] { return f.proc->published_frames() == n; },
                      std::chrono::seconds(20)));
-    REQUIRE(f.proc->published_frames() <= static_cast<long>(SamplerSampleStore::kMaxFrames));
+    REQUIRE(f.proc->published_frames() <=
+            static_cast<long>(TempoSamplerSampleStore::kMaxFrames));
 }
 
 // Regression (#112): a sub-host-rate sample (e.g. 44.1k loaded into a 48k host)
@@ -403,8 +406,8 @@ TEST_CASE("MIDI note outside the slice map is silent (no whole-sample fallback)"
     CHECK(inr > 1e-6);
 }
 
-// Changing SENS must reach the AUDIO trigger mapping (slices_stretched_), not
-// just the UI slice count (slices_orig_). A higher key plays at high sensitivity
+// Changing SENS must reach the audio trigger mapping, not just the UI slice
+// count. A higher key plays at high sensitivity
 // (more slices) and goes silent at low sensitivity (fewer slices) — i.e. the
 // keyboard mapping follows the slider.
 TEST_CASE("sensitivity change reaches the keyboard trigger mapping", "[tempo-sampler]") {
@@ -436,14 +439,18 @@ TEST_CASE("sensitivity change reaches the keyboard trigger mapping", "[tempo-sam
     f.store.set_value(kOnsetSens, 1.0f);
     f.proc->request_reanalyze();
     REQUIRE(wait_for([&] { return f.proc->num_slices() >= 7; }));
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));  // let the re-render refresh slices_stretched_
+    REQUIRE(wait_for([&] {
+        return f.proc->published_source_for_test().region_count >= 7;
+    }));
     CHECK(plays(root + 6) > 1e-6);   // root+6 triggers a slice
 
     // Low sensitivity -> 1 slice; root+6 must now be SILENT (mapping followed SENS).
     f.store.set_value(kOnsetSens, 0.0f);
     f.proc->request_reanalyze();
     REQUIRE(wait_for([&] { return f.proc->num_slices() == 1; }));
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    REQUIRE(wait_for([&] {
+        return f.proc->published_source_for_test().region_count == 1;
+    }));
     CHECK(plays(root + 6) < 1e-9);
 }
 
@@ -464,6 +471,78 @@ TEST_CASE("render while playing is finite + stable (race)", "[tempo-sampler]") {
         for (float v : r) REQUIRE(std::isfinite(v));
     }
     SUCCEED();
+}
+
+TEST_CASE("published sample and slice regions share one generation",
+          "[tempo-sampler][publication]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 8);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] {
+        return f.proc->published_source_for_test().generation != 0;
+    }));
+
+    const auto source = f.proc->published_source_for_test();
+    REQUIRE(source.sample.valid);
+    CHECK(source.generation == source.sample.generation);
+    REQUIRE(source.region_count > 0);
+    for (std::uint32_t i = 0; i < source.region_count; ++i) {
+        CHECK(source.regions[i].end_frame <= source.sample.num_frames);
+    }
+}
+
+TEST_CASE("publication remains matched while an active voice is processing",
+          "[tempo-sampler][publication][rt]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 8);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] {
+        return f.proc->published_source_for_test().generation != 0;
+    }));
+
+    std::vector<float> l(512), r(512);
+    process_block(*f.proc, 120.0, true, kRoot, l, r);
+    for (int block = 0; block < 40; ++block) {
+        process_block(*f.proc, 80.0 + (block % 8) * 10.0, false, 0, l, r);
+        const auto source = f.proc->published_source_for_test();
+        REQUIRE(source.sample.valid);
+        CHECK(source.generation == source.sample.generation);
+        for (std::uint32_t i = 0; i < source.region_count; ++i) {
+            CHECK(source.regions[i].end_frame <= source.sample.num_frames);
+        }
+    }
+}
+
+TEST_CASE("PulpTempoSampler prepared steady-state process is allocation and lock free",
+          "[tempo-sampler][rt]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] {
+        return f.proc->published_source_for_test().generation != 0;
+    }));
+
+    std::vector<float> left(512), right(512);
+    process_block(*f.proc, 120.0, true, kRoot, left, right);
+    float* output_channels[2] = {left.data(), right.data()};
+    audio::BufferView<float> output(output_channels, 2, left.size());
+    const float* input_channels[1] = {nullptr};
+    audio::BufferView<const float> input(input_channels, 0, left.size());
+    midi::MidiBuffer midi_in, midi_out;
+    format::ProcessContext context{48000, static_cast<int>(left.size())};
+    context.tempo_bpm = 120.0;
+    context.is_playing = true;
+
+    std::size_t allocations = 0;
+    {
+        pulp::test::ScopedRtProcessProbe probe;
+        f.proc->process(output, input, midi_in, midi_out, context);
+        allocations = probe.allocation_count();
+    }
+    CHECK(allocations == 0);
 }
 
 // #race-2: changing tempo/slices while voices are sounding must NOT leave the
@@ -601,10 +680,37 @@ TEST_CASE("root note remaps slice-to-key (idx = note - root)", "[tempo-sampler]"
     // Default root is C2 (48 in this editor's labeling).
     REQUIRE(f.proc->slice_index_for_note_test(kRoot) == 0);
     REQUIRE(f.proc->slice_index_for_note_test(kRoot + 3) == 3);
+    REQUIRE(f.proc->slice_index_for_note_test(kRoot - 1) == -1);
+    REQUIRE(f.proc->slice_index_for_note_test(128) == -1);
 
     f.store.set_value(kRootNote, 48.0f);
     REQUIRE(f.proc->slice_index_for_note_test(48) == 0);
     REQUIRE(f.proc->slice_index_for_note_test(60) == 12);
+}
+
+TEST_CASE("ninth note steals the fixed first voice",
+          "[tempo-sampler][voice-steal]") {
+    Fixture f;
+    f.store.set_value(kPlaybackMode, 0.0f);
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] {
+        return f.proc->published_source_for_test().generation != 0;
+    }));
+
+    midi::MidiBuffer notes;
+    for (int i = 0; i < PulpTempoSamplerProcessor::kMaxVoices + 1; ++i) {
+        notes.add(midi::MidiEvent::note_on(i, kRoot + i, 100));
+    }
+    std::vector<float> left(512), right(512);
+    process_midi(*f.proc, 120.0, notes, left, right);
+
+    const auto active = f.proc->active_voice_notes_for_test();
+    CHECK(active[0] == kRoot + PulpTempoSamplerProcessor::kMaxVoices);
+    for (int i = 1; i < PulpTempoSamplerProcessor::kMaxVoices; ++i) {
+        CHECK(active[i] == kRoot + i);
+    }
 }
 
 TEST_CASE("onset sensitivity changes the slice count", "[tempo-sampler]") {
@@ -1271,6 +1377,10 @@ TEST_CASE("plugin state round-trips the loaded sample (close/reopen)", "[tempo-s
         REQUIRE(wait_for([&] { return a.proc->has_sample(); }));
         blob = a.proc->serialize_plugin_state();
         REQUIRE(!blob.empty());
+        REQUIRE(blob.size() >= 8);
+        std::uint32_t schema_version = 0;
+        std::memcpy(&schema_version, blob.data() + 4, sizeof(schema_version));
+        CHECK(schema_version == 2);
     }
     // Fresh processor instance (simulates close+reopen / DAW project reload).
     Fixture b;

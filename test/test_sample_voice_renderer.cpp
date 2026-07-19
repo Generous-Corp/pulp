@@ -671,6 +671,55 @@ TEST_CASE("SampleVoiceRenderer matches LoopReader reference for cubic loops",
     }
 }
 
+TEST_CASE("SampleVoiceRenderer supported tap modes match LoopReader",
+          "[audio][sampler][voice-render][loop][parity]") {
+    std::array<float, 6> samples{0.0f, 0.2f, 0.8f, -0.1f, -0.5f, 0.4f};
+    PublishedSampleStore store;
+    prepare_store(store, samples);
+    const auto sample = resolve_sample(store);
+    std::array<const float*, 1> source_channels{};
+
+    struct Case {
+        LoopPlaybackMode playback;
+        LoopInterpolationMode interpolation;
+        double position;
+    };
+    constexpr std::array cases{
+        Case{LoopPlaybackMode::OneShot, LoopInterpolationMode::None, 1.25},
+        Case{LoopPlaybackMode::OneShot, LoopInterpolationMode::Linear, 4.75},
+        Case{LoopPlaybackMode::Forward, LoopInterpolationMode::Linear, 4.75},
+        Case{LoopPlaybackMode::Forward, LoopInterpolationMode::Cubic, 1.1},
+        Case{LoopPlaybackMode::Reverse, LoopInterpolationMode::None, 4.2},
+        Case{LoopPlaybackMode::Reverse, LoopInterpolationMode::Cubic, 1.1},
+    };
+
+    for (const auto& test : cases) {
+        const auto region = playback_region(
+            1, 5, test.playback, test.interpolation);
+        SampleVoiceRenderState state{
+            .active = true,
+            .sample = sample,
+            .position_frames = test.position,
+            .use_playback_region = true,
+            .playback_region = region,
+        };
+        Buffer<float> output(1, 1);
+        const auto result = SampleVoiceRenderer::render(
+            state,
+            output.view(),
+            1,
+            source_channels,
+            SampleVoiceRenderOptions{.accumulate = false});
+        REQUIRE(result.rendered_frames == 1);
+
+        BufferView<const float> source_view(
+            source_channels.data(), 1, samples.size());
+        const auto expected = LoopReader::read_validated(
+            source_view, region, 0, test.position);
+        CHECK_THAT(output.channel(0)[0], WithinAbs(expected, 1.0e-6f));
+    }
+}
+
 TEST_CASE("SampleVoiceRenderer accumulates or overwrites by option",
           "[audio][sampler][voice-render]") {
     std::array<float, 2> samples{0.25f, 0.25f};

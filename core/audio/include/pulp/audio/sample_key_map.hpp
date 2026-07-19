@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 
 #include <pulp/audio/slice_map.hpp>
 
@@ -36,6 +38,9 @@ public:
                                   double source_sample_rate,
                                   double host_sample_rate,
                                   double tune_semitones = 0.0) const noexcept;
+    std::optional<std::uint32_t> slice_index_for_note(
+        int note,
+        std::size_t slice_count) const noexcept;
     SampleKeySliceResolution resolve_slice_for_note(
         int note,
         const SliceMap& map) const noexcept;

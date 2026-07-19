@@ -103,6 +103,27 @@ Features:
 - Optional typed synthetic heritage processing, transactional clock-domain
   rebind, and strict profile/runtime-state persistence
 
+See the [sampler playback chooser](sampler-playback.md) before reusing its
+shared paged architecture for a simpler sequential or resident product.
+
+## PulpTempoSampler
+
+**Path**: `examples/PulpTempoSampler/`
+**Type**: Instrument
+**Formats**: VST3, AU v2, CLAP, Standalone
+**Purpose**: Demonstrates offline tempo matching followed by lock-free,
+matched-generation resident sample and slice publication.
+
+Features:
+- Bar-exact tempo policy over offline `OfflineStretch` rendering
+- Strongest-confidence onset slicing through `SlicePointAnalyzer`
+- Root-relative slice and chromatic pitch mapping through `SampleKeyMap`
+- Product-specific fixed voice stealing, sustain, loop re-engagement, panic,
+  gate/play-through behavior, and dynamic `signal::Adsr`
+- Stable parameter identities and plugin-state schema v2
+
+See the [full example guide](../examples/pulp-tempo-sampler.md).
+
 ## PulpPluck
 
 **Path**: `examples/pulp-pluck/`
@@ -144,7 +165,7 @@ Features:
 ## Additional CMake-Backed Examples
 
 `examples/CMakeLists.txt` includes more shipped targets than the curated plugin
-gallery above. Current examples include PulpTempoSampler, PulpMpeSynth,
+gallery above. Current examples include PulpMpeSynth,
 ViewBridge, Audio Inspector, Plugin Host, Stream, SDF, WebView, Three.js, and iOS
 AUv3 demos. Some are gated by platform, optional dependencies, or feature flags.
 

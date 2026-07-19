@@ -122,7 +122,7 @@ TEST_CASE("Sampler RT safety contracts are well formed",
 
 TEST_CASE("Sampler RT safety contracts preserve required coverage",
           "[audio][sampler][rt-safety]") {
-    constexpr std::array<RequiredContract, 15> hot_paths{{
+    constexpr std::array<RequiredContract, 24> hot_paths{{
         {"PlanarAudioRingBuffer", "read_write", RtSafetyClass::AudioCallbackSafeAfterPrepare, true},
         {"AudioStreamHandoff", "push_pull", RtSafetyClass::AudioCallbackSafeAfterPrepare, true},
         {"RollingAudioCaptureBuffer", "append_snapshot_hold", RtSafetyClass::AudioCallbackSafeAfterPrepare, true},
@@ -138,9 +138,18 @@ TEST_CASE("Sampler RT safety contracts preserve required coverage",
         {"SampleStreamWindow", "read_frames", RtSafetyClass::AudioCallbackSafeWithImmutableInputs, true},
         {"LoopReader", "read_validated", RtSafetyClass::AudioCallbackSafeWithImmutableInputs, true},
         {"VoiceSumMixer", "mix", RtSafetyClass::AudioCallbackSafe, true},
+        {"SampleAssetView", "read", RtSafetyClass::AudioCallbackSafeWithImmutableInputs, true},
+        {"PreparedSampleInterpolation", "footprint_evaluate", RtSafetyClass::AudioCallbackSafeWithImmutableInputs, true},
+        {"LoopPlaybackCursor", "frame_read_plan_advance", RtSafetyClass::AudioCallbackSafeAfterPrepare, true},
+        {"SampleStreamRequestInbox", "try_push_pop", RtSafetyClass::AudioCallbackSafeAfterPrepare, true},
+        {"SampleStreamCommandInbox", "demand_cancel", RtSafetyClass::AudioCallbackSafeAfterPrepare, true},
+        {"SampleStreamService", "begin_complete_audio_page_read", RtSafetyClass::AudioCallbackSafeAfterPrepare, true},
+        {"SampleStreamVoiceReader", "plan_render", RtSafetyClass::AudioCallbackSafeAfterPrepare, true},
+        {"SampleStreamLoopVoiceReader", "plan_render", RtSafetyClass::AudioCallbackSafeAfterPrepare, true},
+        {"SampleStarvationEnvelope", "next_gain", RtSafetyClass::AudioCallbackSafeAfterPrepare, true},
     }};
 
-    constexpr std::array<RequiredContract, 12> off_thread_paths{{
+    constexpr std::array<RequiredContract, 18> off_thread_paths{{
         {"RealtimeSampleRecorder", "materialize_snapshot", RtSafetyClass::BackgroundThreadOnly, false},
         {"RealtimeSampleRecorder", "release_reset_consume", RtSafetyClass::OfflineOnly, false},
         {"SampleSlotBank", "publish_from_buffer", RtSafetyClass::ControlThreadOnly, false},
@@ -153,6 +162,12 @@ TEST_CASE("Sampler RT safety contracts preserve required coverage",
         {"SampleAssetExporter", "export", RtSafetyClass::BackgroundThreadOnly, false},
         {"SampleSlotMaterializer", "publish_completed_recording", RtSafetyClass::BackgroundThreadOnly, false},
         {"WaveformOverview", "build_and_cache", RtSafetyClass::BackgroundThreadOnly, false},
+        {"SampleAsset", "prepare_release", RtSafetyClass::ControlThreadOnly, false},
+        {"SampleStreamService", "prepare_mutate_cache", RtSafetyClass::ControlThreadOnly, false},
+        {"SampleStreamDecodePool", "decode_work", RtSafetyClass::BackgroundThreadOnly, false},
+        {"SampleStreamAsyncService", "owner_work", RtSafetyClass::BackgroundThreadOnly, false},
+        {"SampleMemoryGovernorHandle", "reserve_stats", RtSafetyClass::ControlThreadOnly, false},
+        {"SampleMemoryLease", "reset_release", RtSafetyClass::ControlThreadOnly, false},
     }};
 
     check_required_contracts(hot_paths);

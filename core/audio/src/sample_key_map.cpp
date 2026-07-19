@@ -68,18 +68,25 @@ SampleKeySliceResolution SampleKeyMap::resolve_slice_for_note(
     int note,
     const SliceMap& map) const noexcept {
     SampleKeySliceResolution result;
-    if (!accepts_note(note) || !validate_slice_map(map)) return result;
-
-    const auto slice_offset = note - config_.first_slice_note;
-    if (slice_offset < 0) return result;
-
-    const auto slice_index = static_cast<std::uint32_t>(slice_offset);
-    if (slice_index >= map.regions.size()) return result;
+    if (!validate_slice_map(map)) return result;
+    const auto slice_index = slice_index_for_note(note, map.regions.size());
+    if (!slice_index) return result;
 
     result.valid = true;
-    result.slice_index = slice_index;
-    result.region = map.regions[slice_index];
+    result.slice_index = *slice_index;
+    result.region = map.regions[*slice_index];
     return result;
+}
+
+std::optional<std::uint32_t> SampleKeyMap::slice_index_for_note(
+    int note,
+    std::size_t slice_count) const noexcept {
+    if (!accepts_note(note)) return std::nullopt;
+    const auto slice_offset = note - config_.first_slice_note;
+    if (slice_offset < 0) return std::nullopt;
+    const auto slice_index = static_cast<std::uint32_t>(slice_offset);
+    if (slice_index >= slice_count) return std::nullopt;
+    return slice_index;
 }
 
 }  // namespace pulp::audio

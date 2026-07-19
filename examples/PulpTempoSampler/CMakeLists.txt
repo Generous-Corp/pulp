@@ -12,7 +12,7 @@ pulp_add_plugin(PulpTempoSampler
     PLUGIN_NAME       "PulpTempoSampler"
     BUNDLE_ID         "com.pulp.tempo-sampler"
     MANUFACTURER      "Pulp"
-    VERSION           "1.7.0"
+    VERSION           "1.7.1"
     CATEGORY          Instrument
     PLUGIN_CODE       "PTsm"
     MANUFACTURER_CODE "Pulp"
@@ -31,8 +31,13 @@ endif()
 
 if(PULP_BUILD_TESTS)
     add_executable(pulp-tempo-sampler-test test_pulp_tempo_sampler.cpp)
+    target_sources(pulp-tempo-sampler-test PRIVATE
+        $<$<BOOL:${UNIX}>:${PROJECT_SOURCE_DIR}/test/native_components/rt_intercept_test_support.cpp>
+        $<$<NOT:$<BOOL:${UNIX}>>:${PROJECT_SOURCE_DIR}/test/harness/rt_allocation_probe.cpp>)
     target_link_libraries(pulp-tempo-sampler-test PRIVATE
-        pulp::format pulp::audio pulp::signal Catch2::Catch2WithMain)
+        pulp::format pulp::audio pulp::signal Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
+    target_compile_definitions(pulp-tempo-sampler-test PRIVATE
+        $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
     # The WaveformDropView drop-target test (Apple-gated in the source) needs
     # pulp::view. Link it only on macOS so the advisory Linux test lane doesn't
     # pull the desktop windowing stack (SDL3/X11) — mirrors the screenshot tool.
@@ -43,7 +48,9 @@ if(PULP_BUILD_TESTS)
         # stack-free.
         target_link_libraries(pulp-tempo-sampler-test PRIVATE pulp::view pulp::standalone)
     endif()
-    target_include_directories(pulp-tempo-sampler-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_include_directories(pulp-tempo-sampler-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/test/harness)
     target_compile_definitions(pulp-tempo-sampler-test
         PRIVATE PULP_TEMPO_SAMPLER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     catch_discover_tests(pulp-tempo-sampler-test)

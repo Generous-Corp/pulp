@@ -106,6 +106,49 @@ TEST_CASE("SampleKeyMap resolves one-slice-per-key maps",
     REQUIRE_FALSE(map.resolve_slice_for_note(35, slices).valid);
 }
 
+TEST_CASE("SampleKeyMap slice helper matches resolve and PulpTempo root bounds",
+          "[audio][sampler][keys][slice]") {
+    SampleKeyMap map;
+    REQUIRE(map.configure(SampleKeyMapConfig{
+        .root_note = 48,
+        .lowest_note = 0,
+        .highest_note = 127,
+        .first_slice_note = 48,
+    }));
+
+    SliceMap slices;
+    slices.source_generation = 3;
+    slices.source_frames = 400;
+    slices.source_sample_rate = 48000.0;
+    slices.markers = {
+        {0, 1.0, SliceMarkerSource::Onset},
+        {100, 1.0, SliceMarkerSource::Onset},
+        {200, 1.0, SliceMarkerSource::Onset},
+        {300, 1.0, SliceMarkerSource::Onset},
+    };
+    slices.regions = {
+        {0, 100, 0},
+        {100, 200, 1},
+        {200, 300, 2},
+        {300, 400, 3},
+    };
+
+    for (int note = 48; note < 52; ++note) {
+        const auto index = map.slice_index_for_note(note, slices.regions.size());
+        const auto resolved = map.resolve_slice_for_note(note, slices);
+        REQUIRE(index);
+        REQUIRE(resolved.valid);
+        CHECK(*index == resolved.slice_index);
+    }
+    CHECK_FALSE(map.slice_index_for_note(47, slices.regions.size()));
+    CHECK_FALSE(map.slice_index_for_note(52, slices.regions.size()));
+    CHECK_FALSE(map.slice_index_for_note(-1, slices.regions.size()));
+    CHECK_FALSE(map.slice_index_for_note(128, slices.regions.size()));
+    CHECK(map.slice_index_for_note(48, 0) == std::nullopt);
+    CHECK_THAT(map.pitch_ratio_for_note(48), WithinAbs(1.0, 1.0e-12));
+    CHECK_THAT(map.pitch_ratio_for_note(60), WithinAbs(2.0, 1.0e-12));
+}
+
 TEST_CASE("SampleKeyMap hot operations do not require allocation",
           "[audio][sampler][keys][rt]") {
     SliceMap slices;

@@ -412,8 +412,28 @@ storage.
 primitive. It renders one-shot forward playback from a `SamplePoolResolution`
 into a caller-owned `BufferView`, using caller-owned source-channel scratch and
 an optional per-voice `AhdsrEnvelope`. It can accumulate into an output buffer
-or clear/overwrite the requested span. Looping, streaming, interpolation policy,
-modulation, and SIMD voice summing remain separate slices.
+or clear/overwrite the requested span. Its compatible region modes reuse
+`LoopReader` tap mapping, but new rich-loop playback should use
+`LoopPlaybackCursor`, `PreparedSampleInterpolation`, and `LoopRenderer`.
+Streaming, modulation, and SIMD voice summing remain separate concerns.
+
+Representative sampler callback paths are explicitly inventoried:
+
+| Callback-safe after preparation | Off-thread owner work |
+|---|---|
+| `SampleAssetView` metadata/preload reads | `SampleAsset` prepare/release |
+| prepared interpolation footprint/evaluation | cache prepare, fill completion, eviction, and reclamation |
+| cursor read planning and advance | decoder worker calls and completion publication |
+| demand/cancel inbox pushes | async-service demand draining and retirement |
+| cache-service page-read begin/complete | memory-governor reservation and lease release |
+| narrow and loop-aware paged-reader plan/render | file decode/import and asset preparation |
+| starvation-envelope gain transitions | onset/slice analysis and offline stretch |
+| PulpTempoSampler steady-state `process()` | PulpTempoSampler stretch and matched-source publication |
+
+The complete machine-checked rows and ownership notes live in
+`rt_safety_contract.hpp`. PulpTempoSampler publishes one resident sample view
+and its fixed-capacity slice regions as a matched `TripleBuffer` value; its
+callback does not take the control-side raw-analysis mutex.
 
 Prefer the `ProcessContext` predicates for common block-policy decisions:
 `should_reset_dsp_state()` covers explicit reset requests and derived transport
