@@ -147,6 +147,19 @@ bool has_diagnostic(const IRAssetRef& asset, const std::string& code) {
     return false;
 }
 
+// Joined diagnostic codes for INFO() context on has_diagnostic assertions.
+// When a network-asset case flakes in a full CI run, "missed asset-empty"
+// alone cannot distinguish a cache hit from a fetcher-resolution failure
+// from a timeout reclassification — the codes that WERE present can.
+std::string diagnostic_codes(const IRAssetRef& asset) {
+    std::string codes;
+    for (const auto& diagnostic : asset.diagnostics) {
+        if (!codes.empty()) codes += ", ";
+        codes += diagnostic.code;
+    }
+    return codes.empty() ? std::string("<none>") : codes;
+}
+
 bool has_import_diagnostic(const std::vector<ImportDiagnostic>& diagnostics,
                            const std::string& code) {
     for (const auto& diagnostic : diagnostics) {

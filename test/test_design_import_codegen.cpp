@@ -1120,15 +1120,29 @@ TEST_CASE("DesignIR asset manifest reports missing fetcher and empty network dow
     DesignIrAssetOptions options;
     options.allow_network_fetch = true;
     options.cache_directory = tmp.path / "asset-cache";
-    options.network_timeout_ms = 10000;
+    // 30s matches the other two network smoke cases (hardened after the
+    // 2026-05-21 full-suite flake): the fetch path classifies a slow child
+    // spawn as asset-fetch-timeout, which would replace the diagnostics this
+    // case asserts. The fake curl below never sleeps, so the wide timeout
+    // only absorbs co-load spawn latency — it never adds wall time.
+    options.network_timeout_ms = 30000;
+
+    // Unique per-invocation URLs. The on-disk asset cache is keyed by the
+    // absolute URL (by-url/<sha256(url)>), so a fixed URL relies on every
+    // test (and every concurrently running test process) keeping its own
+    // cache_directory to avoid a cache hit that would skip the download and
+    // its diagnostic. The unique host path makes that collision structurally
+    // impossible regardless of where the cache lives.
+    const auto nonce = tmp.path.filename().string();
 
     DesignIR missing_fetcher_ir;
     missing_fetcher_ir.root.type = "frame";
     missing_fetcher_ir.root.name = "MissingFetcher";
     missing_fetcher_ir.root.style.background_image =
-        "url(https://example.test/missing-fetcher.svg)";
+        "url(https://example.test/" + nonce + "/missing-fetcher.svg)";
     auto missing_fetcher = collect_design_ir_assets(missing_fetcher_ir, options);
     REQUIRE(missing_fetcher.assets.size() == 1);
+    INFO("missing-fetcher diagnostics: " << diagnostic_codes(missing_fetcher.assets[0]));
     REQUIRE(has_diagnostic(missing_fetcher.assets[0], "asset-fetcher-missing"));
 
     const auto curl = bin / "curl";
@@ -1151,9 +1165,10 @@ TEST_CASE("DesignIR asset manifest reports missing fetcher and empty network dow
     empty_download_ir.root.type = "frame";
     empty_download_ir.root.name = "EmptyDownload";
     empty_download_ir.root.style.background_image =
-        "url(https://example.test/empty.svg)";
+        "url(https://example.test/" + nonce + "/empty.svg)";
     auto empty_download = collect_design_ir_assets(empty_download_ir, options);
     REQUIRE(empty_download.assets.size() == 1);
+    INFO("empty-download diagnostics: " << diagnostic_codes(empty_download.assets[0]));
     REQUIRE(has_diagnostic(empty_download.assets[0], "asset-empty"));
 
     set_env_var("PATH", old_path);

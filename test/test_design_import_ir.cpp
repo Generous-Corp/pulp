@@ -1744,7 +1744,12 @@ TEST_CASE("captured-art knob cleaned disc lands in the durable asset cache",
     // The ctest working directory is the build tree; assert that premise rather
     // than let a temp-hosted working dir quietly void the check below.
     REQUIRE_FALSE(is_under(fs::current_path(), fs::temp_directory_path()));
-    const fs::path home = fs::current_path() / "knobclean-home";
+    // Unique per-invocation directory: the fixed "knobclean-home" name is
+    // shared state between concurrent runs of this binary from the same
+    // working directory — one process's remove_all below races another's
+    // CHECK(fs::exists(emitted)) and deletes the emitted disc under it.
+    const fs::path home = fs::current_path() /
+        ("knobclean-home-" + source.path.filename().string());
     fs::create_directories(home);
     ScopedEnvVar cache("PULP_IMPORT_ASSET_CACHE", (home / "import-assets").string());
 
