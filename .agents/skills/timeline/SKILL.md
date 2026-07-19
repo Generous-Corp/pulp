@@ -37,7 +37,9 @@ invariants.
 - `AutomationLane` is an unattached immutable value that binds one curve to a
   format-neutral device `ItemId` and opaque 32-bit parameter ID. It validates
   the two value identities only; the device need not exist in a Project, and
-  the lane is not registered, persisted, command-addressable, or playable yet.
+  the lane is not registered, persisted, command-addressable, or attached to a
+  playable Project yet. Playback can compile and exercise the standalone value;
+  document ownership and host delivery remain separate later contracts.
 - Keep automation responsibilities separated: curve data belongs in
   `automation_curve.*`, logical target binding belongs in `automation_lane.*`,
   RT cursor/coalescing belongs in `core/playback`, and graph delivery belongs in

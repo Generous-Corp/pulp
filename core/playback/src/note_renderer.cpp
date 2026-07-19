@@ -3,7 +3,6 @@
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
 #include <algorithm>
-#include <limits>
 
 namespace pulp::playback {
 namespace {
@@ -17,26 +16,6 @@ constexpr std::uint8_t midi1_velocity(std::uint16_t velocity) noexcept {
     // MIDI 1.0 defines note-on velocity zero as note-off. Keep a model note-on
     // semantically a note-on even when its 16-bit authored velocity is zero.
     return static_cast<std::uint8_t>(std::max<std::uint32_t>(1u, scaled));
-}
-
-bool valid_ranges(const TransportSnapshot& transport) noexcept {
-    if (transport.tempo_map == nullptr || transport.frame_count == 0 ||
-        transport.frame_count >
-            static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) ||
-        transport.range_count == 0 || transport.range_count > transport.ranges.size())
-        return false;
-    std::uint64_t expected_offset = 0;
-    for (std::uint8_t index = 0; index < transport.range_count; ++index) {
-        const auto& range = transport.ranges[index];
-        if (range.frame_count == 0 || range.sample_offset != expected_offset)
-            return false;
-        expected_offset += range.frame_count;
-        if (expected_offset > transport.frame_count)
-            return false;
-        if (index != 0 && !range.discontinuity)
-            return false;
-    }
-    return expected_offset == transport.frame_count;
 }
 
 } // namespace
@@ -176,7 +155,7 @@ NoteRenderResult ArrangementNoteRenderer::process(
     if (!prepared_) return {NoteRenderCode::NotPrepared};
     state_overflow_ = false;
 
-    if (!valid_ranges(transport)) {
+    if (!valid_transport_ranges(transport)) {
         (void)flush(0);
         return {dropped_events_ == 0 ? NoteRenderCode::InvalidTransport
                                      : NoteRenderCode::OutputOverflow,

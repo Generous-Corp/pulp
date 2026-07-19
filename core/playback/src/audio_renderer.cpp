@@ -96,9 +96,8 @@ std::optional<std::uint64_t> scale_duration_ceil(std::uint64_t value, timebase::
 bool valid_transport(const TransportSnapshot& transport, std::size_t output_frames,
                      const timebase::CompiledTempoMap& tempo_map,
                      const AudioRendererLimits& limits) noexcept {
-    if (transport.frame_count != output_frames || transport.frame_count == 0 ||
-        transport.frame_count > limits.max_block_frames || transport.range_count == 0 ||
-        transport.range_count > transport.ranges.size() || transport.tempo_map != &tempo_map ||
+    if (!valid_transport_ranges(transport) || transport.frame_count != output_frames ||
+        transport.frame_count > limits.max_block_frames || transport.tempo_map != &tempo_map ||
         !same_rate(transport.sample_rate, tempo_map.sample_rate()))
         return false;
     std::uint32_t prior_end = 0;

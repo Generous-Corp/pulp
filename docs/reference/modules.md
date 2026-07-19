@@ -825,7 +825,9 @@ validates only the lane and device IDs via `ItemId::valid()` (neither zero nor
 the exhausted `UINT64_MAX` sentinel): it does not prove that the device exists
 in a Project, register global identity, clamp plain-domain values, or consult
 plugin metadata. The lane is not yet attached to a Track, persisted, reachable
-through commands or `DocumentSession`, compiled, or delivered to a host graph.
+through commands or `DocumentSession`, or delivered to a host graph.
+`pulp::playback` can compile and exercise this standalone value without
+implying document attachment.
 
 `assets.hpp` separates durable SHA-256 content identity from optional resolution
 hints and alternate representations. `schema_registry.hpp` provides an explicit
@@ -897,6 +899,22 @@ selections and availability bits are rejected until those provider programs exis
 `DeferredCompileExecutor` advances bounded slices from an idle/UI pump and
 `WorkerCompileExecutor` supplies the native background lane, with an explicit
 unsupported stub in threadless builds.
+
+`AutomationProgram` separately compiles one immutable automation lane against
+the exact shared tempo map. It retains tick endpoints so curved values stay in
+musical time across tempo ramps while also storing sample-domain knots for
+cursor traversal. A nonzero compile-time instance token distinguishes immutable
+programs even when a caller accidentally reuses a generation.
+`AutomationCursor` is an allocation-free, single-audio-thread
+renderer over the transport's one or two half-open ranges. It emits immediate
+or linear-ramp plain-domain control points into a caller-owned span. Selection
+work and output are bounded by that explicit capacity. Range seeds and unique
+in-range authored knots are mandatory; remaining capacity deterministically
+refines continuous spans without erasing authored topology. The cursor reseeds
+on loop/seek/adoption and rejects tempo-map or monotonic-generation mismatches.
+This layer deliberately does not know graph nodes or `ParameterEventQueue`; a
+host binding must aggregate all lanes for a device, apply one global queue
+budget, and inject one batch.
 
 MediaRef clips use an immutable `DecodedAudioAssetPool`. Complete WAV bytes can
 be decoded into this pool through the bounded no-file-I/O decoder, then the

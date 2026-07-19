@@ -47,6 +47,27 @@ double shape_fraction(double fraction, float curvature) noexcept {
 
 } // namespace
 
+float evaluate_continuous_automation_segment(timebase::TickPosition position,
+                                             timebase::TickPosition start,
+                                             timebase::TickPosition end, float start_value,
+                                             float end_value, float curvature) noexcept {
+    if (end <= start)
+        return position < end ? start_value : end_value;
+    if (position <= start)
+        return start_value;
+    if (position >= end)
+        return end_value;
+    const auto span =
+        static_cast<std::uint64_t>(end.value) - static_cast<std::uint64_t>(start.value);
+    const auto offset =
+        static_cast<std::uint64_t>(position.value) - static_cast<std::uint64_t>(start.value);
+    const double fraction =
+        std::clamp(static_cast<double>(offset) / static_cast<double>(span), 0.0, 1.0);
+    const double shaped = shape_fraction(fraction, curvature);
+    return static_cast<float>(std::fma(static_cast<double>(end_value) - start_value, shaped,
+                                       static_cast<double>(start_value)));
+}
+
 runtime::Result<AutomationCurve, AutomationCurveError>
 AutomationCurve::create(std::vector<AutomationPoint> points) {
     std::unordered_set<ItemId> ids;
@@ -89,15 +110,8 @@ std::optional<float> AutomationCurve::value_at(timebase::TickPosition position) 
     if (right == points_->end() || left.interpolation == AutomationInterpolation::Hold)
         return left.value;
 
-    const auto span = static_cast<std::uint64_t>(right->position.value) -
-                      static_cast<std::uint64_t>(left.position.value);
-    const auto offset = static_cast<std::uint64_t>(position.value) -
-                        static_cast<std::uint64_t>(left.position.value);
-    const double fraction =
-        std::clamp(static_cast<double>(offset) / static_cast<double>(span), 0.0, 1.0);
-    const double shaped = shape_fraction(fraction, left.curvature);
-    return static_cast<float>(std::fma(static_cast<double>(right->value) - left.value, shaped,
-                                       static_cast<double>(left.value)));
+    return evaluate_continuous_automation_segment(position, left.position, right->position,
+                                                  left.value, right->value, left.curvature);
 }
 
 runtime::Result<AutomationCurve, AutomationCurveError>

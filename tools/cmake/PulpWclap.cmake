@@ -129,6 +129,8 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/undo.cpp
     ${_PULP_WCLAP_ROOT}/core/playback/src/audio_renderer.cpp
+    ${_PULP_WCLAP_ROOT}/core/playback/src/automation_cursor.cpp
+    ${_PULP_WCLAP_ROOT}/core/playback/src/automation_program.cpp
     ${_PULP_WCLAP_ROOT}/core/playback/src/compile_executor.cpp
     ${_PULP_WCLAP_ROOT}/core/playback/src/note_renderer.cpp
     ${_PULP_WCLAP_ROOT}/core/playback/src/program.cpp

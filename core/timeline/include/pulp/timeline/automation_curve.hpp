@@ -37,6 +37,13 @@ struct AutomationPointPositionLess {
     }
 };
 
+/// Evaluates one continuous segment and clamps outside it. Reversed or empty
+/// intervals resolve to their start value before `end` and end value otherwise.
+float evaluate_continuous_automation_segment(timebase::TickPosition position,
+                                             timebase::TickPosition start,
+                                             timebase::TickPosition end, float start_value,
+                                             float end_value, float curvature) noexcept;
+
 enum class AutomationCurveErrorCode : std::uint8_t {
     InvalidPointId,
     DuplicatePointId,
