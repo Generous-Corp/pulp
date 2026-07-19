@@ -65,13 +65,20 @@ the two ever diverge, the conformance test (`P3-alt`) flags it.
 
 ### Bundle size discipline
 
-`use_figma` caps its `code` parameter at 50 000 chars. The build asserts
-`dist/headless.js` stays under 49 KB so the agent's small prelude
-(`const TARGET_NODE_ID = "..."`) plus trailing
-`return await globalThis.__pulp_headless_result;` always fits. If the
-extractor grows past that, `npm run build` fails loudly — the fix is to
-split shared code into a tinier core (see P2 in
-`planning/figma-import-coordination-log.md`).
+`use_figma` caps its `code` parameter at 50 000 chars (a hard
+`maxLength` in the tool schema). The raw minified bundle outgrew that
+cap, so the shipped artifact is `dist/headless.packed.js`: a
+self-extracting stub (fflate inflate + a small base64 decoder) around
+the deflated raw bundle — roughly half the raw size. `run-headless.mjs`
+appends an `eval(prelude + decompressed source)` line so
+`TARGET_NODE_ID` / `FAITHFUL_VECTOR` and the bundle run as one program
+(code eval'd in the sandbox does not see the caller's lexical scope).
+The build asserts the packed stub stays under 49 KB so the driver's
+small prelude + trailing
+`return await globalThis.__pulp_headless_result;` always fits, and
+round-trips the stub in-process to prove it decompresses byte-identical
+to `dist/headless.js`. If the packed extractor grows past the cap,
+`npm run build` fails loudly.
 
 ### Driving from an agent
 
