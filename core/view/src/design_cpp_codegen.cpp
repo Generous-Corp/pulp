@@ -738,6 +738,10 @@ void emit_visual_style(std::ostringstream& out,
                   cpp_string_literal(*style.background_gradient) + ");");
     if (style.background_repeat)
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_background_repeat(" + cpp_string_literal(*style.background_repeat) + ");");
+    if (style.background_size)
+        emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_background_size(" + cpp_string_literal(*style.background_size) + ");");
+    if (style.object_fit)
+        emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_object_fit(" + cpp_string_literal(*style.object_fit) + ");");
     emit_color("set_inheritable_text_color", style.color);
     emit_color("set_border_color", style.border_color);
     emit_color("set_border_top_color", style.border_top_color);

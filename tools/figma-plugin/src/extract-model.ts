@@ -120,6 +120,12 @@ export interface ExtractedStyle {
   background_color?: string;
   background_gradient?: string;
   background_image?: string;
+  // CSS background-size keyword — Figma IMAGE-fill scale mode on frame-shaped
+  // nodes (FILL → cover, FIT → contain, TILE → auto + background_repeat).
+  background_size?: string;
+  // CSS object-fit — Figma IMAGE-fill scale mode when the fill becomes a
+  // dedicated image node; ImageView::paint honors it.
+  object_fit?: string;
   color?: string;
   opacity?: number;
   border_radius?: number;

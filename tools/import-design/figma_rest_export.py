@@ -148,20 +148,31 @@ def rgba_to_css(c):
     if a >= 1.0: return f"#{hex2(r)}{hex2(g)}{hex2(b)}"
     return f"rgba({int(round(r))}, {int(round(g))}, {int(round(b))}, {a:.3f})"
 
+def _stop_css(c, paint_opacity=1.0):
+    # A gradient paint's own `opacity` (0..1) scales every stop's alpha — it is
+    # paint-level, distinct from layer opacity; dropping it painted a 24% sheen
+    # as a hard opaque ramp. Same fold paint_to_color applies for solids and the
+    # plugin / .fig lanes apply for their gradients.
+    if paint_opacity >= 1.0: return rgba_to_css(c)
+    cc = dict(c); cc["a"] = c.get("a", 1.0) * paint_opacity
+    return rgba_to_css(cc)
+
 def gradient_to_css(p):
     stops = p.get("gradientStops", [])
     if not stops: return "linear-gradient(transparent, transparent)"
-    return "linear-gradient(to bottom, " + ", ".join(rgba_to_css(s["color"]) for s in stops) + ")"
+    op = p.get("opacity", 1.0)
+    return "linear-gradient(to bottom, " + ", ".join(_stop_css(s["color"], op) for s in stops) + ")"
 
 def gradient_flat(p):
     stops = p.get("gradientStops", [])
-    return rgba_to_css(stops[0]["color"]) if stops else "transparent"
+    return _stop_css(stops[0]["color"], p.get("opacity", 1.0)) if stops else "transparent"
 
 def _gradient_stops_css(p):
     # "color pos%, color pos%, ..." using Figma's normalized stop positions.
     out = []
+    op = p.get("opacity", 1.0)
     for s in p.get("gradientStops", []):
-        css = rgba_to_css(s["color"])
+        css = _stop_css(s["color"], op)
         if "position" in s:
             css += f" {round(s['position'] * 100)}%"
         out.append(css)
@@ -263,6 +274,122 @@ def dispatch_node_type(t, name=""):
 def first_visible(paints):
     return next((p for p in paints if p.get("visible", True) is not False), None)
 
+# ──────────────────────────────────────────────────────────────────────────
+# Ordered paint-stack lowering (audit item 7). Mirrors
+# tools/figma-plugin/src/extract-pure.ts::lowerFillPaints field-for-field.
+#
+# Figma renders `fills` bottom→top (index 0 at the BOTTOM). The IR background
+# model has exactly three slots — one solid color, one gradient, one image —
+# painted in that order, so a stack is representable exactly when it reads
+# [solid…, gradient?, image?] bottom→top. This consumes that prefix and
+# reports everything else as a structured diagnostic instead of the old
+# first-visible-paint-wins pick that dropped the rest silently.
+
+_GRADIENT_TYPES = ("GRADIENT_LINEAR", "GRADIENT_RADIAL",
+                   "GRADIENT_ANGULAR", "GRADIENT_DIAMOND")
+
+def composite_solid_paints(solids):
+    """Composite a run of SOLID paints the way Figma paints them: array order,
+    index 0 at the bottom, each source-over the result so far. color.a and the
+    paint's own opacity both fold into each paint's alpha, exactly as
+    paint_to_color does for one. Mirrors compositeSolids in fig/scene.mjs."""
+    if len(solids) == 1:
+        return paint_to_color(solids[0])
+    r = g = b = a = 0.0  # accumulated, non-premultiplied
+    for p in solids:
+        c = p.get("color", {})
+        sa = c.get("a", 1.0) * p.get("opacity", 1.0)
+        if sa <= 0: continue
+        na = sa + a * (1 - sa)
+        if na <= 0: continue
+        r = (c.get("r", 0.0) * sa + r * a * (1 - sa)) / na
+        g = (c.get("g", 0.0) * sa + g * a * (1 - sa)) / na
+        b = (c.get("b", 0.0) * sa + b * a * (1 - sa)) / na
+        a = na
+    return rgba_to_css({"r": r, "g": g, "b": b, "a": a})
+
+def lower_fill_paints(fills):
+    """Slot scan over the visible fills. Returns
+    {background_color?, gradient_paint?, image_paint?, diagnostics: [...]}
+    with envelope-shaped diagnostics (severity/code/kind/message)."""
+    out = {"diagnostics": []}
+    visible = [p for p in fills if p.get("visible", True) is not False]
+    if not visible:
+        return out
+
+    # Newer paint families (VIDEO, PATTERN, …) have no color to lower —
+    # dispatch them out explicitly so the loss is stated, and keep lowering
+    # whatever supported paints remain.
+    supported, unsupported_types = [], []
+    for p in visible:
+        t = p.get("type")
+        if t == "SOLID" or t == "IMAGE" or t in _GRADIENT_TYPES:
+            supported.append(p)
+        else:
+            unsupported_types.append(str(t))
+    if unsupported_types:
+        out["diagnostics"].append({
+            "severity": "warning", "code": "unsupported-paint-type",
+            "kind": "unsupported_property",
+            "message": ("Unsupported paint type(s) " + ", ".join(unsupported_types)
+                        + " dropped; only solid / gradient / image fills are lowered.")})
+
+    # Paint-level blend modes have no slot in the one-background model; the
+    # paint still lowers, composited NORMAL, and the difference is stated.
+    blend_modes = sorted({p.get("blendMode") for p in visible
+                          if p.get("blendMode") not in (None, "NORMAL")})
+    if blend_modes:
+        out["diagnostics"].append({
+            "severity": "warning", "code": "paint-blend-unsupported",
+            "kind": "unsupported_property",
+            "message": ("Paint blend mode(s) " + ", ".join(blend_modes)
+                        + " composited as NORMAL.")})
+
+    # A fully opaque solid hides everything below it, so trimming the stack to
+    # start at the LAST opaque solid is exact — no diagnostic owed for the
+    # hidden paints. Without this, [gradient, opaque solid] would lower the
+    # gradient and flatten the solid that actually covers it.
+    for k in range(len(supported) - 1, 0, -1):
+        p = supported[k]
+        if (p.get("type") == "SOLID" and p.get("opacity", 1.0) >= 1.0
+                and p.get("color", {}).get("a", 1.0) >= 1.0):
+            supported = supported[k:]
+            break
+
+    # Slot scan, bottom→top: [solid…, gradient?, image?].
+    i = 0
+    solids = []
+    while i < len(supported) and supported[i].get("type") == "SOLID":
+        solids.append(supported[i]); i += 1
+    if solids:
+        out["background_color"] = composite_solid_paints(solids)
+    if i < len(supported) and supported[i].get("type") in _GRADIENT_TYPES:
+        out["gradient_paint"] = supported[i]; i += 1
+    if i < len(supported) and supported[i].get("type") == "IMAGE":
+        out["image_paint"] = supported[i]; i += 1
+    if i < len(supported):
+        extras = [str(p.get("type")) for p in supported[i:]]
+        out["diagnostics"].append({
+            "severity": "warning", "code": "multi-paint-flattened",
+            "kind": "capture_partial",
+            "message": (f"{len(extras)} of {len(supported)} visible fill(s) ("
+                        + ", ".join(extras)
+                        + ") exceed the color/gradient/image background slots and are "
+                          "flattened out; the stack renders from the lower paints only.")})
+    return out
+
+def scale_mode_to_background_size(scale_mode):
+    """Figma IMAGE-fill scale mode → CSS background-size / background-repeat
+    for frame-shaped nodes carrying a background_image. FILL crops to cover the
+    box; FIT letterboxes; TILE repeats at natural size; CROP shows a
+    transform-defined window — cover is the closest aspect-preserving
+    approximation. The third member says whether the mapping is exact."""
+    if scale_mode in (None, "FILL"): return "cover", None, True
+    if scale_mode == "FIT":          return "contain", None, True
+    if scale_mode == "TILE":         return "auto", "repeat", True
+    if scale_mode == "CROP":         return "cover", None, False
+    return None, None, False
+
 def extract_style(n, ctx=None):
     s = {}
     bb = n.get("absoluteBoundingBox")
@@ -275,30 +402,101 @@ def extract_style(n, ctx=None):
         if inflated:
             s["render_bounds"] = {"w": rb["width"], "h": rb["height"],
                                   "dx": rb["x"] - bb["x"], "dy": rb["y"] - bb["y"]}
+    # Paint-level opacity of an IMAGE fill, folded into the layer opacity at
+    # the opacity block below (a later assignment there would overwrite an
+    # early fold here).
+    image_fill_opacity = 1.0
+    def _paint_diag(d):
+        # ctx is None only on direct extract_style() calls that don't thread a
+        # context; the envelope path always diagnoses.
+        if ctx is not None:
+            ctx.diagnostics.append({**d, "path": n.get("id", "")})
     fills = n.get("fills")
     if isinstance(fills, list) and fills:
-        f = first_visible(fills)
+        # Ordered paint-stack lowering (lower_fill_paints). Figma renders
+        # `fills` bottom→top; the IR has one color + one gradient + one image
+        # background slot painted in that order, so a [solid…, gradient?,
+        # image?] prefix lowers exactly (leading solids composite source-over)
+        # and anything beyond it raises multi-paint-flattened /
+        # unsupported-paint-type instead of vanishing behind a
+        # first-visible-paint-wins pick.
+        lowered = lower_fill_paints(fills)
+        for d in lowered["diagnostics"]:
+            _paint_diag({**d, "message": f"{n.get('name', '')}: {d['message']}"})
+        if "background_color" in lowered:
+            s["background_color"] = lowered["background_color"]
+        f = lowered.get("gradient_paint")
         if f:
             t = f.get("type")
-            if t == "SOLID": s["background_color"] = paint_to_color(f)
-            elif t == "GRADIENT_LINEAR": s["background_gradient"] = gradient_to_css(f)
-            elif t == "IMAGE":
-                ih = f.get("imageRef") or f.get("imageHash")
-                if ih:
-                    s["background_image"] = f"pending:{ih}"
-                    # Accumulate into the explicit context (no module global).
-                    # ctx is None only on direct extract_style() calls (unit tests
-                    # that don't exercise image-fill resolution).
-                    if ctx is not None:
-                        ctx.image_fills.add(ih)  # resolved → real path after the walk
-            elif t in ("GRADIENT_RADIAL", "GRADIENT_DIAMOND"):
-                g = gradient_radial_css(f)
-                if g: s["background_gradient"] = g
-                else: s["background_color"] = gradient_flat(f)
-            elif t == "GRADIENT_ANGULAR":
-                g = gradient_conic_css(f)
-                if g: s["background_gradient"] = g
-                else: s["background_color"] = gradient_flat(f)
+            if t == "GRADIENT_LINEAR":
+                s["background_gradient"] = gradient_to_css(f)
+            else:
+                g = (gradient_conic_css(f) if t == "GRADIENT_ANGULAR"
+                     else gradient_radial_css(f))
+                if g:
+                    s["background_gradient"] = g
+                elif "background_color" not in s:
+                    s["background_color"] = gradient_flat(f)
+                else:
+                    # The flat fallback would overwrite the exact solid
+                    # composite below the gradient; keep the solid, state the
+                    # gradient's loss.
+                    _paint_diag({
+                        "severity": "warning", "code": "multi-paint-flattened",
+                        "kind": "capture_partial",
+                        "message": (f"{n.get('name', '')}: {t} over a solid fill has no "
+                                    "CSS lowering; solid kept, gradient dropped.")})
+        f = lowered.get("image_paint")
+        if f:
+            ih = f.get("imageRef") or f.get("imageHash")
+            if ih:
+                s["background_image"] = f"pending:{ih}"
+                # Accumulate into the explicit context (no module global).
+                # ctx is None only on direct extract_style() calls (unit tests
+                # that don't exercise image-fill resolution).
+                if ctx is not None:
+                    ctx.image_fills.add(ih)  # resolved → real path after the walk
+                # Scale mode → CSS background-size / background-repeat. The
+                # REST lane keeps image fills as a frame background, so the
+                # keywords land in the View's background slots (stored +
+                # round-tripped; raster background paint consumes them when it
+                # lands). CROP's imageTransform window has no CSS equivalent —
+                # cover is the aspect-preserving approximation, and it says so.
+                scale_mode = f.get("scaleMode")
+                size, repeat, exact = scale_mode_to_background_size(scale_mode)
+                if size: s["background_size"] = size
+                if repeat: s["background_repeat"] = repeat
+                if not exact:
+                    _paint_diag({
+                        "severity": "warning", "code": "image-scale-approximated",
+                        "kind": "capture_partial",
+                        "message": (f"{n.get('name', '')}: image fill scale mode "
+                                    f"{scale_mode} has no exact equivalent; "
+                                    + (f"approximated as background-size: {size}."
+                                       if size else "rendered stretched to the box."))})
+                elif scale_mode == "TILE" and f.get("scalingFactor") not in (None, 1, 1.0):
+                    _paint_diag({
+                        "severity": "warning", "code": "image-scale-approximated",
+                        "kind": "capture_partial",
+                        "message": (f"{n.get('name', '')}: TILE scalingFactor "
+                                    f"{f.get('scalingFactor')} not represented; tiles "
+                                    "render at natural size.")})
+                # Paint-level opacity — distinct from layer opacity. For a
+                # childless node the fill IS the node's only content, so
+                # folding it into the layer opacity composites identically;
+                # with children present the fold would fade them too, so the
+                # loss is diagnosed instead.
+                img_op = f.get("opacity", 1.0)
+                if isinstance(img_op, (int, float)) and img_op < 1:
+                    if n.get("children"):
+                        _paint_diag({
+                            "severity": "warning", "code": "image-opacity-dropped",
+                            "kind": "unsupported_property",
+                            "message": (f"{n.get('name', '')}: image fill opacity "
+                                        f"{img_op:.3f} cannot fold into layer opacity "
+                                        "(node has children); image renders opaque.")})
+                    else:
+                        image_fill_opacity = float(img_op)
     strokes = n.get("strokes")
     if isinstance(strokes, list) and strokes:
         f = first_visible(strokes)
@@ -326,7 +524,11 @@ def extract_style(n, ctx=None):
             s["border_bottom_left_radius"] = bl
             s.pop("border_radius", None)
     op = n.get("opacity")
-    if isinstance(op, (int, float)) and op < 1: s["opacity"] = op
+    if not isinstance(op, (int, float)): op = 1.0
+    # Layer opacity × image-fill paint opacity (the fold is gated to childless
+    # nodes above, where the two composite identically).
+    op = op * image_fill_opacity
+    if op < 1: s["opacity"] = op
     effects = n.get("effects")
     if isinstance(effects, list):
         shadows = []; filt = None

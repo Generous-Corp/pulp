@@ -89,7 +89,8 @@ static design adapters and later baked materializers:
 
 | Field | Type |
 |---|---|
-| `backgroundColor`, `backgroundGradient`, `backgroundImage`, `backgroundRepeat` | string |
+| `backgroundColor`, `backgroundGradient`, `backgroundImage`, `backgroundRepeat`, `backgroundSize` | string |
+| `objectFit` | string |
 | `color`, `opacity` | string / number |
 | `border`, `borderColor`, `borderWidth`, `borderStyle` | string / number |
 | `borderTopColor`, `borderRightColor`, `borderBottomColor`, `borderLeftColor` | string |

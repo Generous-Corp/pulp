@@ -1648,5 +1648,153 @@ class AutoLayoutTest(unittest.TestCase):
         self.assertNotIn("min_height", s)
 
 
+class PaintStackTest(unittest.TestCase):
+    """Ordered paint-stack lowering (audit item 7): leading-solid compositing,
+    paint-level opacity, image scale mode, and structured diagnostics for
+    whatever the color/gradient/image slot model cannot represent. Mirrors
+    tools/figma-plugin/test/paints.test.ts field-for-field."""
+
+    BB = {"x": 0, "y": 0, "width": 100, "height": 100}
+
+    @staticmethod
+    def _solid(r, g, b, **over):
+        return {"type": "SOLID", "color": {"r": r, "g": g, "b": b}, **over}
+
+    def _style(self, node):
+        ctx = frx.ExtractContext()
+        return frx.extract_style(node, ctx), ctx
+
+    def test_solid_paint_opacity_folds_into_alpha(self):
+        # A 50%-opacity black fill must not import fully opaque.
+        s, ctx = self._style({"type": "RECTANGLE", "id": "1:1", "name": "half",
+                              "absoluteBoundingBox": self.BB,
+                              "fills": [self._solid(0, 0, 0, opacity=0.5)]})
+        self.assertEqual(s["background_color"], "rgba(0, 0, 0, 0.500)")
+        self.assertEqual(ctx.diagnostics, [])
+
+    def test_gradient_paint_opacity_scales_stop_alpha(self):
+        p = {"type": "GRADIENT_LINEAR", "opacity": 0.5, "gradientStops": [
+            {"position": 0, "color": {"r": 1, "g": 1, "b": 1, "a": 1}},
+            {"position": 1, "color": {"r": 0, "g": 0, "b": 0, "a": 0.5}}]}
+        self.assertEqual(
+            frx.gradient_to_css(p),
+            "linear-gradient(to bottom, rgba(255, 255, 255, 0.500), "
+            "rgba(0, 0, 0, 0.250))")
+        # The positioned-stop helper (radial/conic) folds the same way.
+        self.assertIn("rgba(0, 0, 0, 0.250) 100%", frx._gradient_stops_css(p))
+
+    def test_leading_solids_composite_source_over(self):
+        # #4b4d51 base with white@0.55 over it -> #aeafb1, the value Figma's
+        # own raster samples (same fixture fig/scene.mjs compositeSolids cites).
+        s, ctx = self._style({"type": "RECTANGLE", "id": "1:2", "name": "thumb",
+                              "absoluteBoundingBox": self.BB,
+                              "fills": [self._solid(0x4b/255, 0x4d/255, 0x51/255),
+                                        self._solid(1, 1, 1, opacity=0.55)]})
+        self.assertEqual(s["background_color"], "#aeafb1")
+        self.assertEqual(ctx.diagnostics, [])
+
+    def test_solid_below_gradient_fills_both_slots(self):
+        s, ctx = self._style({"type": "RECTANGLE", "id": "1:3", "name": "panel",
+                              "absoluteBoundingBox": self.BB,
+                              "fills": [self._solid(0, 0, 0),
+                                        {"type": "GRADIENT_LINEAR", "gradientStops": [
+                                            {"position": 0, "color": {"r": 1, "g": 1, "b": 1, "a": 1}}]}]})
+        self.assertEqual(s["background_color"], "#000000")
+        self.assertTrue(s["background_gradient"].startswith("linear-gradient("))
+        self.assertEqual(ctx.diagnostics, [])
+
+    def test_extra_paints_raise_multi_paint_flattened(self):
+        s, ctx = self._style({"type": "RECTANGLE", "id": "1:4", "name": "busy",
+                              "absoluteBoundingBox": self.BB,
+                              "fills": [
+                                  {"type": "GRADIENT_LINEAR", "gradientStops": []},
+                                  # A SEMI-TRANSPARENT solid above a gradient has
+                                  # no slot (an opaque one would trim the stack
+                                  # instead — covered by the test above).
+                                  self._solid(1, 0, 0, opacity=0.5),
+                              ]})
+        self.assertNotIn("background_color", s)
+        codes = [d["code"] for d in ctx.diagnostics]
+        self.assertIn("multi-paint-flattened", codes)
+        d = next(d for d in ctx.diagnostics if d["code"] == "multi-paint-flattened")
+        self.assertEqual(d["kind"], "capture_partial")
+        self.assertEqual(d["path"], "1:4")
+        self.assertIn("SOLID", d["message"])
+
+    def test_opaque_solid_above_gradient_hides_it_exactly(self):
+        # Trimming at the last fully opaque solid is exact: the paints below
+        # it are invisible in Figma too, so nothing is owed a diagnostic.
+        s, ctx = self._style({"type": "RECTANGLE", "id": "1:12", "name": "capped",
+                              "absoluteBoundingBox": self.BB,
+                              "fills": [
+                                  {"type": "GRADIENT_LINEAR", "gradientStops": []},
+                                  self._solid(0.5, 0.5, 0.5),
+                              ]})
+        self.assertEqual(s["background_color"], "#808080")
+        self.assertNotIn("background_gradient", s)
+        self.assertEqual(ctx.diagnostics, [])
+
+    def test_video_pattern_diagnose_and_never_shadow_a_solid(self):
+        s, ctx = self._style({"type": "RECTANGLE", "id": "1:5", "name": "vid",
+                              "absoluteBoundingBox": self.BB,
+                              "fills": [self._solid(0, 0, 1),
+                                        {"type": "VIDEO"}, {"type": "PATTERN"}]})
+        self.assertEqual(s["background_color"], "#0000ff")
+        d = next(d for d in ctx.diagnostics if d["code"] == "unsupported-paint-type")
+        self.assertEqual(d["kind"], "unsupported_property")
+        self.assertIn("VIDEO, PATTERN", d["message"])
+
+    def test_paint_blend_mode_is_stated_and_paint_still_lowers(self):
+        s, ctx = self._style({"type": "RECTANGLE", "id": "1:6", "name": "mult",
+                              "absoluteBoundingBox": self.BB,
+                              "fills": [self._solid(1, 1, 1, blendMode="MULTIPLY")]})
+        self.assertEqual(s["background_color"], "#ffffff")
+        d = next(d for d in ctx.diagnostics if d["code"] == "paint-blend-unsupported")
+        self.assertIn("MULTIPLY", d["message"])
+
+    def test_image_scale_modes_map_to_background_size(self):
+        for mode, size, repeat in (("FILL", "cover", None),
+                                   ("FIT", "contain", None),
+                                   ("TILE", "auto", "repeat")):
+            s, ctx = self._style({"type": "RECTANGLE", "id": "1:7", "name": "img",
+                                  "absoluteBoundingBox": self.BB,
+                                  "fills": [{"type": "IMAGE", "imageRef": "ref1",
+                                             "scaleMode": mode}]})
+            self.assertEqual(s["background_image"], "pending:ref1")
+            self.assertEqual(s.get("background_size"), size)
+            self.assertEqual(s.get("background_repeat"), repeat)
+            self.assertEqual(ctx.diagnostics, [], mode)
+            self.assertIn("ref1", ctx.image_fills)
+
+    def test_image_crop_approximates_as_cover_with_diagnostic(self):
+        s, ctx = self._style({"type": "RECTANGLE", "id": "1:8", "name": "crop",
+                              "absoluteBoundingBox": self.BB,
+                              "fills": [{"type": "IMAGE", "imageRef": "ref2",
+                                         "scaleMode": "CROP",
+                                         "imageTransform": [[1, 0, 0], [0, 1, 0]]}]})
+        self.assertEqual(s.get("background_size"), "cover")
+        d = next(d for d in ctx.diagnostics if d["code"] == "image-scale-approximated")
+        self.assertEqual(d["kind"], "capture_partial")
+        self.assertIn("CROP", d["message"])
+
+    def test_image_paint_opacity_folds_when_childless(self):
+        s, ctx = self._style({"type": "RECTANGLE", "id": "1:9", "name": "faded",
+                              "absoluteBoundingBox": self.BB, "opacity": 0.8,
+                              "fills": [{"type": "IMAGE", "imageRef": "ref3",
+                                         "opacity": 0.5}]})
+        self.assertAlmostEqual(s["opacity"], 0.4, places=6)
+        self.assertEqual(ctx.diagnostics, [])
+
+    def test_image_paint_opacity_with_children_is_diagnosed_not_folded(self):
+        s, ctx = self._style({"type": "FRAME", "id": "1:10", "name": "parent",
+                              "absoluteBoundingBox": self.BB,
+                              "children": [{"type": "TEXT", "id": "1:11"}],
+                              "fills": [{"type": "IMAGE", "imageRef": "ref4",
+                                         "opacity": 0.5}]})
+        self.assertNotIn("opacity", s)
+        d = next(d for d in ctx.diagnostics if d["code"] == "image-opacity-dropped")
+        self.assertEqual(d["kind"], "unsupported_property")
+
+
 if __name__ == "__main__":
     unittest.main()

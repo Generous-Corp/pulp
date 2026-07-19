@@ -73,6 +73,19 @@ struct IRStyle {
     std::optional<std::string> background_gradient;   // linear-gradient(...)
     std::optional<std::string> background_image;      // url(...), data:..., or none
     std::optional<std::string> background_repeat;
+    // CSS background-size keyword ("cover", "contain", "auto"). Figma IMAGE
+    // fill scale modes lower here on frame-shaped nodes (FILL → cover,
+    // FIT → contain, TILE → auto + background_repeat: repeat). Stored on the
+    // View via set_background_size and emitted by every codegen; raster
+    // background-image paint honoring is the same deferred slot as
+    // background_repeat (View::style_extras).
+    std::optional<std::string> background_size;
+    // CSS object-fit for image-shaped nodes ("fill", "contain", "cover",
+    // "none", "scale-down"). Figma IMAGE fill scale modes lower here when the
+    // fill becomes a dedicated image node (FILL → cover, FIT → contain);
+    // ImageView::paint honors it, so this is a rendered property, not a
+    // storage-only slot.
+    std::optional<std::string> object_fit;
     std::optional<std::string> color;                  // text color
     std::optional<float> opacity;
     // CSS mix-blend-mode keyword (e.g. "multiply", "screen", "color-dodge").

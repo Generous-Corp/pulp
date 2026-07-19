@@ -113,6 +113,10 @@ defs[D.Paint] = { name: 'Paint', kind: 2, fields: [
   { name: 'visible', type: T.BOOL, isArray: false, value: 3 },
   { name: 'opacity', type: T.FLOAT, isArray: false, value: 4 },
   { name: 'image', type: D.ImageRef, isArray: false, value: 5 },
+  // Real exports spell the scale mode imageScaleMode ('FILL'/'FIT'/'STRETCH'/
+  // 'TILE'; STRETCH is the Plugin API's CROP) — verified against a production
+  // .fig's IMAGE paints.
+  { name: 'imageScaleMode', type: T.STRING, isArray: false, value: 6 },
 ]};
 defs[D.TextData] = { name: 'TextData', kind: 2, fields: [
   { name: 'characters', type: T.STRING, isArray: false, value: 1 },
@@ -186,16 +190,28 @@ const matrix = (w, x, y) => {
   w.float(0); w.float(1); w.float(y);   // m10 m11 m12
 };
 
-function solidPaint(w, [r, g, b, a]) {
+function solidPaint(w, p) {
+  const [r, g, b, a] = p.color;
   w.varUint(1); w.string('SOLID');
   w.varUint(2); color(w, r, g, b, a);
   w.varUint(3); w.byte(1);
+  if (p.opacity !== undefined) { w.varUint(4); w.float(p.opacity); }
   w.varUint(0);
 }
-function imagePaint(w, hash) {
+function imagePaint(w, p) {
   w.varUint(1); w.string('IMAGE');
   w.varUint(3); w.byte(1);
-  w.varUint(5); w.string(hash);
+  if (p.opacity !== undefined) { w.varUint(4); w.float(p.opacity); }
+  w.varUint(5); w.string(p.image);
+  if (p.mode) { w.varUint(6); w.string(p.mode); }
+  w.varUint(0);
+}
+// A paint family the importer has no lowering for (VIDEO / PATTERN / a future
+// type) — type + visible only, like a real export of a family this schema
+// doesn't model.
+function rawPaint(w, type) {
+  w.varUint(1); w.string(type);
+  w.varUint(3); w.byte(1);
   w.varUint(0);
 }
 
@@ -208,7 +224,11 @@ function writeNode(w, n) {
   if (n.size) { w.varUint(5); vector(w, n.size[0], n.size[1]); }
   if (n.fills) {
     w.varUint(6); w.varUint(n.fills.length);
-    for (const p of n.fills) (p.image ? imagePaint(w, p.image) : solidPaint(w, p.color));
+    for (const p of n.fills) {
+      if (p.image) imagePaint(w, p);
+      else if (p.type) rawPaint(w, p.type);
+      else solidPaint(w, p);
+    }
   }
   if (n.radius !== undefined) { w.varUint(7); w.float(n.radius); }
   if (n.text !== undefined) { w.varUint(8); w.varUint(1); w.string(n.text); w.varUint(0); }
@@ -262,6 +282,28 @@ const NODES = [
     size: [24, 24], at: [36, 8], fills: [{ color: [1, 1, 1, 1] }] },
   { s: 0, l: 9, type: 2, name: 'Rec', parent: [0, 6], pos: 'c',
     size: [24, 24], at: [68, 8], fills: [{ color: [1, 1, 1, 1] }] },
+  // Paint-stack fixtures (audit item 7): paint-level opacity, image scale
+  // mode, and stacks the one-background model diagnoses. A separate top-level
+  // frame so 'Plugin UI' keeps its committed shape (tests index frames[0]).
+  { s: 0, l: 10, type: 2, name: 'Paint Lab', parent: [0, 1], pos: 'z',
+    size: [200, 200], fills: [{ color: [0, 0, 0, 1] }] },
+  // #4b4d51 base + white@0.55 over it — composites source-over to #aeafb1,
+  // the same pair the compositeSolids doc comment cites.
+  { s: 0, l: 11, type: 2, name: 'Composite Chip', parent: [0, 10], pos: 'a',
+    size: [40, 40], at: [8, 8],
+    fills: [{ color: [0x4b / 255, 0x4d / 255, 0x51 / 255, 1] },
+            { color: [1, 1, 1, 1], opacity: 0.55 }] },
+  // FIT-mode image at 50% paint opacity: object-fit contain + opacity fold.
+  { s: 0, l: 12, type: 2, name: 'Fit Photo', parent: [0, 10], pos: 'b',
+    size: [40, 40], at: [8, 56],
+    fills: [{ image: IMAGE_HASH, mode: 'FIT', opacity: 0.5 }] },
+  // A VIDEO paint over a solid: unsupported-paint-type diagnostic, solid kept.
+  { s: 0, l: 13, type: 2, name: 'Video Chip', parent: [0, 10], pos: 'c',
+    size: [40, 40], at: [8, 104],
+    fills: [{ color: [0, 0, 1, 1] }, { type: 'VIDEO' }] },
+  // TILE image: no object-fit lowering; image-scale-approximated diagnostic.
+  { s: 0, l: 14, type: 2, name: 'Tile Chip', parent: [0, 10], pos: 'd',
+    size: [40, 40], at: [8, 152], fills: [{ image: IMAGE_HASH, mode: 'TILE' }] },
   { s: 0, l: 5, type: 1, name: 'Empty Page', parent: [0, 0], pos: 'b' },
 ];
 

@@ -59,7 +59,8 @@ test('outline lists pages and their top-level frames', () => {
   assert.equal(o.pageCount, 2);
   const pageOne = o.pages.find((p) => p.name === 'Page One');
   assert.ok(pageOne, 'Page One present');
-  assert.equal(pageOne.frameCount, 1);
+  // 'Plugin UI' plus the 'Paint Lab' paint-stack fixture frame.
+  assert.equal(pageOne.frameCount, 2);
   assert.equal(pageOne.frames[0].name, 'Plugin UI');
   assert.equal(pageOne.frames[0].width, 320);
   assert.equal(pageOne.frames[0].height, 200);
@@ -193,6 +194,103 @@ test('materializeFrame builds a valid figma-plugin envelope', () => {
   assert.ok(!('background_color' in label.style), 'text has no background');
 
   assert.equal(envelope.asset_manifest.assets.length, 1);
+});
+
+test('paint-stack lowering: opacity, scale mode, and honest diagnostics (Paint Lab)', () => {
+  // Decoded from real kiwi Paint blobs (imageScaleMode / opacity spellings the
+  // production .fig format uses), not hand-built JS objects — the fixture
+  // generator writes the same field ids a Figma export carries.
+  const { scene, container } = loadFixtureScene();
+  const frame = findFrame(scene, 'Paint Lab');
+  const { envelope, diagnostics } = materializeFrame(scene, frame, {
+    images: container.images,
+    fileKey: 'TESTKEY',
+    parserVersion: '0.1.0-test',
+    compatSchemaVersion: '1',
+    exportedAt: '1970-01-01T00:00:00Z',
+  });
+  const child = (name) => envelope.root.children.find((c) => c.name === name);
+
+  // Two solids composite source-over, bottom→top: #4b4d51 + white@0.55 →
+  // #aeafb1 (the value Figma's own raster samples for this pair).
+  assert.equal(child('Composite Chip').style.background_color, '#aeafb1');
+
+  // FIT scale mode → object-fit contain (honored by ImageView::paint), and the
+  // paint's 50% opacity folds into the childless node's layer opacity.
+  const fit = child('Fit Photo');
+  assert.ok(fit.asset_ref, 'image fill resolves to an asset');
+  assert.equal(fit.style.object_fit, 'contain');
+  assert.equal(fit.style.opacity, 0.5);
+
+  // A VIDEO paint over a solid: the solid still lowers, and the unsupported
+  // family is stated instead of silently dropped.
+  assert.equal(child('Video Chip').style.background_color, '#0000ff');
+  assert.ok(diagnostics.some((d) =>
+    d.code === 'unsupported-paint-type' && d.node_name === 'Video Chip' && /VIDEO/.test(d.detail)));
+
+  // TILE has no painter in the image widget: no object-fit keyword (stretch
+  // default stands), and the approximation is stated.
+  const tile = child('Tile Chip');
+  assert.ok(tile.asset_ref);
+  assert.ok(!('object_fit' in tile.style));
+  assert.ok(diagnostics.some((d) =>
+    d.code === 'image-scale-approximated' && d.node_name === 'Tile Chip'));
+});
+
+test('paint-stack lowering: gradient over solid keeps both slots; extras are diagnosed', () => {
+  // Inline scenes for the stack shapes the fixture does not carry: a linear
+  // gradient stacked over a solid (both slots lower — the old code silently
+  // dropped the gradient), and a second solid above a gradient (no slot →
+  // multi-paint-flattened; an OPAQUE one instead trims the stack exactly).
+  const mkScene = (fills) => buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+      size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'ROUNDED_RECTANGLE', name: 'chip',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' },
+      size: { x: 50, y: 50 }, fillPaints: fills },
+  ] });
+  const materialize = (fills) => {
+    const scene = mkScene(fills);
+    return materializeFrame(scene, findFrame(scene, 'Root'), { images: new Map() });
+  };
+  const linear = {
+    type: 'GRADIENT_LINEAR',
+    transform: { m00: 0, m01: 1, m02: 0, m10: 1, m11: 0, m12: 0 },
+    stops: [
+      { position: 0, color: { r: 1, g: 1, b: 1, a: 1 } },
+      { position: 1, color: { r: 0, g: 0, b: 0, a: 1 } },
+    ],
+  };
+
+  // Solid below + gradient above → BOTH slots, no diagnostic.
+  const both = materialize([
+    { type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 1 } },
+    linear,
+  ]);
+  const chip = both.envelope.root.children[0];
+  assert.equal(chip.style.background_color, '#000000');
+  assert.match(chip.style.background_gradient || '', /^linear-gradient\(/);
+  assert.ok(!both.diagnostics.some((d) => d.code === 'multi-paint-flattened'));
+
+  // A SEMI-TRANSPARENT solid above the gradient has no slot → diagnosed.
+  const extra = materialize([
+    linear,
+    { type: 'SOLID', color: { r: 1, g: 0, b: 0, a: 1 }, opacity: 0.5 },
+  ]);
+  assert.ok(extra.diagnostics.some((d) =>
+    d.code === 'multi-paint-flattened' && d.node_name === 'chip' && /SOLID/.test(d.detail)));
+
+  // An OPAQUE solid above the gradient hides it exactly: trim, no diagnostic.
+  const trimmed = materialize([
+    linear,
+    { type: 'SOLID', color: { r: 0.5, g: 0.5, b: 0.5, a: 1 } },
+  ]);
+  const trimmedChip = trimmed.envelope.root.children[0];
+  assert.equal(trimmedChip.style.background_color, '#808080');
+  assert.ok(!('background_gradient' in trimmedChip.style));
+  assert.ok(!trimmed.diagnostics.some((d) => d.code === 'multi-paint-flattened'));
 });
 
 test('a rotated box-model layer carries its rotation, not just its origin', () => {

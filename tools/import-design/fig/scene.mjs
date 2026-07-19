@@ -1287,48 +1287,151 @@ export function materializeFrame(scene, frame, ctx) {
     // (radial / angular / diamond) has no lowering downstream, so it still
     // collapses to the mean of its stops and still says so: an honest
     // approximation, and far closer than nothing.
+    // Ordered paint-stack lowering (audit item 7), mirrored across the plugin
+    // (extract-pure.ts::lowerFillPaints) and REST (figma_rest_export.py::
+    // lower_fill_paints) lanes. Figma renders fillPaints bottom→top; the IR
+    // has one color + one gradient + one image background slot painted in
+    // that order, so a [solid…, gradient?, image?] prefix lowers exactly
+    // (leading solids composite source-over) and anything beyond it raises a
+    // structured diagnostic instead of vanishing silently. Before this, a
+    // gradient stacked OVER a solid was dropped without a word — the solids
+    // composite stood in for the whole stack.
+    let imagePaint = null;
+    let imagePaintOpacity = 1;
     if (node.type !== 'TEXT' && node.type !== 'TEXT_PATH') {
-      const grad = firstGradient(node.fillPaints);
-      // The BOX branch, which paints via setBackgroundGradient — a consumer that
-      // parses radial as well as linear (css_gradient.cpp:192). Radial was
-      // deferred here on the claim that "only LINEAR is expressible", which was
-      // true of the SvgPath fill branch and false of this one; the design's
-      // 167x119 xy-pad vignette flattened to a uniform wash because of it.
-      // A radial may ONLY go to a node that will actually take the box branch.
-      // A VECTOR_LIKE node is re-lowered below to path_data + setSvgFill, whose
-      // consumer parses `linear-gradient(` and nothing else — handing it a
-      // radial paints NOTHING. A test caught exactly that leak here, which is
-      // the whole point of asserting per-consumer rather than per-kind.
-      const boxPainted = !VECTOR_LIKE.has(node.type);
-      const css = firstSolidFill(node)
-        ? null
-        : (gradientPaintToCss(grad, style.width, style.height)
-           || (boxPainted ? radialPaintToCss(grad, style.width, style.height) : null));
-      if (css) {
-        style.background_gradient = css;
-        // A radial still loses something: the consumer's radial is a CIRCLE,
-        // and Figma's paint may be an ellipse or rotated. Say so — a quieter
-        // loss is still a loss, and this is the diagnostic that survives the fix.
-        if (grad && grad.type === 'GRADIENT_RADIAL') {
-          pushDiag('gradient-approximated', node,
-                   `${node.type} GRADIENT_RADIAL painted as a circle; an elliptical or rotated ramp is approximated`);
+      const visible = (node.fillPaints || []).filter((p) => p.visible !== false);
+      const supported = [];
+      const unsupportedTypes = [];
+      for (const p of visible) {
+        const t = p.type;
+        if (t === 'SOLID' || t === 'IMAGE'
+            || (typeof t === 'string' && t.startsWith('GRADIENT'))) supported.push(p);
+        else if (t !== undefined) unsupportedTypes.push(String(t));
+      }
+      // Newer paint families (VIDEO, PATTERN, …) have no color to lower —
+      // state the loss and keep lowering whatever supported paints remain.
+      if (unsupportedTypes.length) {
+        pushDiag('unsupported-paint-type', node,
+                 `unsupported paint type(s) ${unsupportedTypes.join(', ')} dropped; ` +
+                 'only solid / gradient / image fills are lowered');
+      }
+      // Paint-level blend modes have no slot in the one-background model; the
+      // paint still lowers, composited NORMAL, and the difference is stated.
+      const paintBlends = [...new Set(visible.map((p) => p.blendMode)
+        .filter((m) => m && m !== 'NORMAL' && !BLEND_IS_DEFAULT.has(m)))];
+      if (paintBlends.length) {
+        pushDiag('paint-blend-unsupported', node,
+                 `paint blend mode(s) ${paintBlends.join(', ')} composited as NORMAL`);
+      }
+      // A fully opaque solid hides everything below it, so trimming the stack
+      // to start at the LAST opaque solid is exact — no diagnostic owed for
+      // the hidden paints.
+      for (let k = supported.length - 1; k > 0; k--) {
+        const p = supported[k];
+        if (p.type === 'SOLID' && (p.opacity ?? 1) >= 1 && (p.color?.a ?? 1) >= 1) {
+          supported.splice(0, k);
+          break;
         }
-      } else {
-        const hex = approximatePaintColor(node.fillPaints);
-        if (hex) style.background_color = hex;
-        if (!firstSolidFill(node) && grad) {
+      }
+      // Slot scan, bottom→top: [solid…, gradient?, image?].
+      let i = 0;
+      const solids = [];
+      while (i < supported.length && supported[i].type === 'SOLID') {
+        solids.push(supported[i]);
+        i++;
+      }
+      if (solids.length) style.background_color = colorToHex(compositeSolids(solids));
+      let grad = null;
+      if (i < supported.length && supported[i].type.startsWith('GRADIENT')) {
+        grad = supported[i];
+        i++;
+      }
+      if (i < supported.length && supported[i].type === 'IMAGE') {
+        imagePaint = supported[i];
+        i++;
+      }
+      if (i < supported.length) {
+        const extras = supported.slice(i).map((p) => String(p.type));
+        pushDiag('multi-paint-flattened', node,
+                 `${extras.length} of ${supported.length} visible fill(s) (${extras.join(', ')}) ` +
+                 'exceed the color/gradient/image background slots and are flattened out');
+      }
+      if (grad) {
+        // The BOX branch paints via setBackgroundGradient — a consumer that
+        // parses radial as well as linear (css_gradient.cpp:192). Radial was
+        // once deferred here on the claim that "only LINEAR is expressible",
+        // which was true of the SvgPath fill branch and false of this one; the
+        // design's 167x119 xy-pad vignette flattened to a uniform wash because
+        // of it. A radial may ONLY go to a node that will actually take the
+        // box branch. A VECTOR_LIKE node is re-lowered below to path_data +
+        // setSvgFill, whose consumer parses `linear-gradient(` and nothing
+        // else — handing it a radial paints NOTHING. A test caught exactly
+        // that leak here, which is the whole point of asserting per-consumer
+        // rather than per-kind.
+        const boxPainted = !VECTOR_LIKE.has(node.type);
+        const css = gradientPaintToCss(grad, style.width, style.height)
+          || (boxPainted ? radialPaintToCss(grad, style.width, style.height) : null);
+        if (css) {
+          style.background_gradient = css;
+          // A radial still loses something: the consumer's radial is a CIRCLE,
+          // and Figma's paint may be an ellipse or rotated. Say so — a quieter
+          // loss is still a loss, and this is the diagnostic that survives the fix.
+          if (grad.type === 'GRADIENT_RADIAL') {
+            pushDiag('gradient-approximated', node,
+                     `${node.type} GRADIENT_RADIAL painted as a circle; an elliptical or rotated ramp is approximated`);
+          }
+        } else if (style.background_color) {
+          // The mean-stop flatten would overwrite the exact solids composite
+          // below the gradient; keep the solid, state the gradient's loss.
+          pushDiag('gradient-approximated', node,
+                   `${node.type} ${grad.type} over a solid fill has no lowering; solid kept, gradient dropped`);
+        } else {
+          const hex = approximatePaintColor([grad]);
+          if (hex) style.background_color = hex;
           pushDiag('gradient-approximated', node,
                    `${node.type} ${grad.type} flattened to its mean stop color`);
         }
       }
     }
-    const image = firstImageFill(node);
+    // TEXT nodes never take the box branch, but an image-filled TEXT still
+    // carries its bitmap in fillPaints — same reader as before the slot scan.
+    const image = imagePaint || ((node.type === 'TEXT' || node.type === 'TEXT_PATH')
+      ? firstImageFill(node) : null);
     let assetRef = null;
     if (image && image.image && image.image.hash) {
       const hash = hashToHex(image.image.hash);
       if (hash && ctx.images.has(hash)) {
         assetHashes.add(hash);
         assetRef = hash;
+        // Scale mode → CSS object-fit, honored by ImageView::paint once the
+        // node lowers to an image widget. .fig spells the crop mode STRETCH
+        // (the Plugin API's CROP); its transform-defined window has no CSS
+        // equivalent, so cover is the aspect-preserving approximation. TILE
+        // cannot be painted by the image widget; the stretch default stands.
+        const mode = image.imageScaleMode;
+        if (mode === undefined || mode === 'FILL') {
+          style.object_fit = 'cover';
+        } else if (mode === 'FIT') {
+          style.object_fit = 'contain';
+        } else if (mode === 'STRETCH') {
+          style.object_fit = 'cover';
+          pushDiag('image-scale-approximated', node,
+                   'crop-mode (STRETCH) image fill approximated as object-fit: cover');
+        } else if (mode === 'TILE') {
+          pushDiag('image-scale-approximated', node,
+                   'TILE image fill rendered stretched to the box; tiling is not painted');
+        }
+        // Paint-level opacity — distinct from layer opacity. For a childless
+        // node the fill IS the node's only content, so folding it into the
+        // layer opacity (below) composites identically; with children present
+        // the fold would fade them too, so the loss is diagnosed instead.
+        const imgOp = image.opacity ?? 1;
+        if (imgOp < 1) {
+          const kids = scene.childrenOf.get(guidKey(node.guid)) || [];
+          if (kids.length === 0) imagePaintOpacity = imgOp;
+          else pushDiag('image-opacity-dropped', node,
+                        `image fill opacity ${round2(imgOp)} cannot fold into layer opacity (node has children); image renders opaque`);
+        }
       } else {
         pushDiag('asset-missing', node, `image hash ${hash || '?'} not in bundle`);
       }
@@ -1378,6 +1481,13 @@ export function materializeFrame(scene, frame, ctx) {
     // for the frame being imported, so this is exactly the root.
     if (typeof node.opacity === 'number' && node.opacity < 1 && parent) {
       style.opacity = round2(node.opacity);
+    }
+    // Image-fill paint opacity, folded into the layer opacity (the fold is
+    // gated to childless nodes above, where the two composite identically).
+    // Multiplied here, after the layer value lands, so neither overwrites the
+    // other.
+    if (imagePaintOpacity < 1) {
+      style.opacity = round2((style.opacity ?? 1) * imagePaintOpacity);
     }
 
     // Blend mode. A layer that COMPOSITES differently is not a cosmetic detail:
@@ -2586,6 +2696,14 @@ export const DIAGNOSTIC_SEVERITY = {
   // (see the registry contract above), and a dispatch decision written
   // precisely to end silent node drops must never itself be invisible.
   'slice-skipped': 'warning',
+  // Paint-stack codes (audit item 7). All 'warning' for the same reason as
+  // the dispatch codes: a diagnostic written precisely to end a silent paint
+  // drop must never itself be invisible.
+  'multi-paint-flattened': 'warning',
+  'unsupported-paint-type': 'warning',
+  'paint-blend-unsupported': 'warning',
+  'image-scale-approximated': 'warning',
+  'image-opacity-dropped': 'warning',
   'variable-binding-unresolved': 'warning',
   'unsupported-node': 'warning',
   'slot-placeholder': 'warning',
