@@ -1894,6 +1894,55 @@ scan, kept in field-for-field lockstep:
   `.fig` `Paint Lab` fixture frame (regenerate `synthetic.fig` via
   `make_synthetic_fig.mjs` — a staleness gate compares decoded content).
 
+### Layer blend modes: the shared supported-blend table + group isolation
+
+A layer that COMPOSITES differently is not cosmetic (the motivating file lays
+a light noise texture over its panels at `MULTIPLY`; ignoring it painted every
+panel ~25/255 too bright, silently). One supported-blend table now spans all
+three producers AND the consumer, kept in lockstep:
+
+- **The table** (15 CSS-equivalent Figma modes): DARKEN, MULTIPLY, COLOR_BURN,
+  LIGHTEN, SCREEN, COLOR_DODGE, OVERLAY, SOFT_LIGHT, HARD_LIGHT, DIFFERENCE,
+  EXCLUSION, HUE, SATURATION, COLOR, LUMINOSITY — lowered by spelling
+  transform (UPPER_SNAKE → lowercase-hyphen) into `style.mix_blend_mode`.
+  Lives in `.fig` `scene.mjs::FIGMA_BLEND_CSS`, plugin
+  `extract-pure.ts::FIGMA_BLEND_CSS` (+ `lowerLayerBlendMode`), REST
+  `figma_rest_export.py::_FIGMA_BLEND_CSS` (+ `blend_mode_to_css`), consumer
+  `design_ir_json.cpp::is_supported_blend_keyword`.
+- **Unmappable modes** (LINEAR_BURN, LINEAR_DODGE, future families) lower to
+  NOTHING and raise `blend-unsupported` in every producer — never
+  approximate: LINEAR_BURN's natural CSS spelling `plus-darker` maps to the
+  ADDITIVE kPlus in Skia/Chromium, which would LIGHTEN a layer the designer
+  asked to darken. The raw Figma mode still rides in `figma.blend_mode` for
+  provenance; the consumer promotes it into `style.mix_blend_mode` only when
+  supported (unmappable raws stay out silently — the producer already
+  diagnosed them, so the consumer must not double-diagnose).
+- **Consumer chokepoint**: `validate_blend_modes` (called on every adapter
+  parse path) clears any `style.mixBlendMode` outside the table WITH a
+  `blend-unsupported` diagnostic — an unknown keyword is invalid CSS on the
+  web path and a SILENT normal-fallback in `setMixBlendMode` on the native
+  path, so it must never reach codegen. `plus-lighter`/`plus-darker` stay
+  accepted for CSS-authored sources (the bridge maps both to kPlus).
+- **Group compositing**: container `PASS_THROUGH` (Figma's default) IS the
+  default web/native behavior — dropped silently and correctly. An EXPLICIT
+  `NORMAL` on a container is Figma's "isolate" (CSS `isolation: isolate`);
+  the flat lowering has no isolation layer, so when the subtree actually
+  blends, every lane raises `group-isolation-approximated` (gated on a
+  blending descendant — inert isolation is a no-op). A container with its own
+  non-default blend needs nothing: CSS `mix-blend-mode` itself forms an
+  isolated group, matching Figma. Faithful SVG capture remains the honest
+  path for exact isolate-group compositing.
+- **Layer vs paint channels stay separate**: layer opacity → `IRStyle.
+  opacity`, layer blend → `mix_blend_mode`; paint opacity folds into paint
+  color alpha and paint blend raises `paint-blend-unsupported` (see the
+  paint-stack section above). No field double-applies.
+- Plugin envelope schema carries `style.mix_blend_mode` (regenerate
+  `types.generated.ts` after schema edits). Tests: `[blend]` in
+  `test_design_import_ir.cpp` + `test_design_import_fidelity.cpp`,
+  `tools/figma-plugin/test/blend.test.ts`,
+  `test_figma_rest_export.py::LayerBlendTest`, and the `.fig` blend +
+  isolate-group tests in `fig.test.mjs`.
+
 ### Radial / conic background gradients
 
 Linear gradients were end-to-end; radial/conic used to round-trip the CSS string

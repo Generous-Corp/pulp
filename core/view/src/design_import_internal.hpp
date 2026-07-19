@@ -130,6 +130,16 @@ bool is_asset_reference_key(std::string_view key);
 // Parse a single DesignIR node tree; defined in design_ir_json.cpp.
 IRNode parse_ir_node(const choc::value::ValueView& obj);
 
+// True when `kw` (CSS lowercase-hyphen spelling) is in the supported-blend
+// table every lane shares; defined in design_ir_json.cpp.
+bool is_supported_blend_keyword(const std::string& kw);
+
+// Clear any mix_blend_mode outside the supported-blend table, pushing a
+// `blend-unsupported` diagnostic per cleared node. Call after parse_ir_node on
+// every adapter path so an unmappable keyword never reaches codegen as invalid
+// CSS (web) or a silent normal-fallback (native). Defined in design_ir_json.cpp.
+void validate_blend_modes(IRNode& node, std::vector<ImportDiagnostic>& diagnostics);
+
 // Minimal JSON string escaper; defined in design_ir_json.cpp. Shared with
 // design_ir_report.cpp (the import-report JSON emitter) so the report analysis
 // pass can live in its own TU without duplicating the escaper.

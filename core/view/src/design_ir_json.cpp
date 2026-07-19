@@ -235,6 +235,53 @@ static std::optional<std::string> normalize_blend_mode(std::string raw) {
     return raw;
 }
 
+// The supported-blend table: every keyword the whole pipeline can honor.
+// The 15 non-default W3C mix-blend-mode values map 1:1 to Figma blend modes
+// and to the native bridge (style_effects_api.cpp::setMixBlendMode); the
+// CSS Compositing Level 2 additive pair (plus-lighter / plus-darker) is
+// accepted for CSS-authored sources because the bridge maps both to the
+// additive kPlus. Everything else — Figma's LINEAR_BURN / LINEAR_DODGE and
+// any future mode — has NO faithful lowering and must be dropped WITH a
+// diagnostic, never passed through: an unknown keyword is invalid CSS on the
+// web path and a silent normal-fallback on the native path, and a blend that
+// quietly composites differently paints confidently wrong pixels. The three
+// producers (fig/scene.mjs::FIGMA_BLEND_CSS, figma-plugin
+// extract-pure.ts::FIGMA_BLEND_CSS, figma_rest_export.py::_FIGMA_BLEND_CSS)
+// mirror the 15-mode Figma subset of this table.
+bool is_supported_blend_keyword(const std::string& kw) {
+    static const char* const supported[] = {
+        "multiply", "screen", "overlay", "darken", "lighten",
+        "color-dodge", "color-burn", "hard-light", "soft-light",
+        "difference", "exclusion", "hue", "saturation", "color",
+        "luminosity", "plus-lighter", "plus-darker",
+    };
+    for (const char* s : supported)
+        if (kw == s) return true;
+    return false;
+}
+
+// Clear any mix_blend_mode outside the supported-blend table and say so.
+// This is the consumer-side chokepoint for the normalized `style.mixBlendMode`
+// channel — it catches hand-authored IR and CSS-source adapters. Raw
+// `figma.blend_mode` values never reach here: the promotion in parse_ir_node
+// only promotes supported modes, and each producer diagnoses its own
+// unmappable raw modes (so a lane's diagnostic is not duplicated here).
+void validate_blend_modes(IRNode& node, std::vector<ImportDiagnostic>& diagnostics) {
+    if (node.style.mix_blend_mode &&
+        !is_supported_blend_keyword(*node.style.mix_blend_mode)) {
+        std::string where = node.source_node_id ? *node.source_node_id : node.name;
+        diagnostics.push_back(make_import_diagnostic(
+            ImportDiagnosticSeverity::warning,
+            "blend-unsupported",
+            where,
+            "mix-blend-mode '" + *node.style.mix_blend_mode +
+                "' has no supported lowering; composited normally",
+            ImportDiagnosticKind::unsupported_property));
+        node.style.mix_blend_mode.reset();
+    }
+    for (auto& child : node.children) validate_blend_modes(child, diagnostics);
+}
+
 static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     IRStyle s;
     if (!obj.isObject()) return s;
@@ -1069,11 +1116,18 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     // (e.g. {"figma": {"blend_mode": "MULTIPLY"}}), not in `style`. Promote it
     // into the normalized IRStyle when `style.mixBlendMode` didn't already set
     // one, so a Figma layer's blend mode survives the same as a CSS source's.
+    // Only supported-table modes promote: an unmappable raw mode (LINEAR_BURN,
+    // LINEAR_DODGE, future families) stays out of the style channel — the
+    // producer that wrote the raw value also wrote its `blend-unsupported`
+    // diagnostic, so promoting garbage here would either emit invalid CSS or
+    // double-diagnose in validate_blend_modes.
     if (!node.style.mix_blend_mode && obj.hasObjectMember("figma") &&
         obj["figma"].isObject() && obj["figma"].hasObjectMember("blend_mode") &&
         obj["figma"]["blend_mode"].isString()) {
-        node.style.mix_blend_mode =
+        auto promoted =
             normalize_blend_mode(std::string(obj["figma"]["blend_mode"].toString()));
+        if (promoted && is_supported_blend_keyword(*promoted))
+            node.style.mix_blend_mode = std::move(promoted);
     }
     // Preserve the Figma component identity the serializer packs into the
     // `figma` block (serialize.ts: component_key / main_component_name). The
@@ -1771,8 +1825,16 @@ static ImportDiagnosticKind diagnostic_kind_from_code(const std::string& code) {
     }
     // An effect family with no lowering (NOISE, TEXTURE/GRAIN, GLASS, …) —
     // producers that omit the kind (the .fig lane) still classify correctly.
-    if (code == "effect-unsupported") {
+    // Same for the blend family: a layer or paint blend mode outside the
+    // supported-blend table composites normally and says so.
+    if (code == "effect-unsupported" || code == "blend-unsupported"
+        || code == "paint-blend-unsupported") {
         return ImportDiagnosticKind::unsupported_property;
+    }
+    // An isolate group (explicit NORMAL on a container whose subtree blends)
+    // composites without the isolation layer — approximated, not dropped.
+    if (code == "group-isolation-approximated") {
+        return ImportDiagnosticKind::capture_partial;
     }
     return ImportDiagnosticKind::unknown;
 }
@@ -2494,6 +2556,7 @@ DesignIR parse_design_ir_json(const std::string& json) {
         }
         if (parsed.hasObjectMember("diagnostics"))
             ir.diagnostics = parse_import_diagnostics(parsed["diagnostics"]);
+        validate_blend_modes(ir.root, ir.diagnostics);
         promote_interactive_frames(ir.root);
         return ir;
     }
@@ -2508,6 +2571,7 @@ DesignIR parse_design_ir_json(const std::string& json) {
         "<root>",
         "parsed legacy bare-node DesignIR JSON",
         ImportDiagnosticKind::legacy_field_shortcut));
+    validate_blend_modes(ir.root, ir.diagnostics);
     promote_interactive_frames(ir.root);
     return ir;
 }

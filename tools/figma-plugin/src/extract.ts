@@ -32,6 +32,8 @@ import {
   gradientToCss,
   gradientFallbackFlat,
   lowerFillPaints,
+  lowerLayerBlendMode,
+  collectGroupIsolationDiagnostics,
   scaleModeToObjectFit,
   dispatchNodeType,
   extractLayout,
@@ -144,6 +146,16 @@ export async function extractScene(
     if (extracted) {
       if (cfg.faithfulVector) await applyFaithfulVector(extracted, n, ctx);
       roots.push(extracted);
+    }
+  }
+
+  // Isolate groups (explicit NORMAL on a container with blending
+  // descendants) lose their isolation layer in the flat lowering — a
+  // post-order pass over the finished tree states each one. Runs after the
+  // walk because the condition reads the children's lowered blend modes.
+  for (const root of roots) {
+    for (const d of collectGroupIsolationDiagnostics(root)) {
+      ctx.diagnostics.push(d);
     }
   }
 
@@ -850,6 +862,20 @@ function extractStyle(n: SceneNode, ctx: WalkCtx): ExtractedStyle {
   // Opacity
   if ("opacity" in n && (n as BlendMixin).opacity !== undefined && (n as BlendMixin).opacity < 1) {
     s.opacity = (n as BlendMixin).opacity;
+  }
+
+  // Layer blend mode — normalized to the CSS keyword here (matching the .fig
+  // lane) so the consumer reads all three lanes' `style` channel identically;
+  // the raw Figma mode still rides in the `figma` block for provenance. A mode
+  // outside the shared supported-blend table lowers to nothing WITH a
+  // diagnostic — silently ignoring it still paints, confidently wrong.
+  if ("blendMode" in n) {
+    const blend = lowerLayerBlendMode((n as BlendMixin).blendMode);
+    if (blend.css) s.mix_blend_mode = blend.css;
+    if (blend.diagnostic) {
+      const d = blend.diagnostic;
+      pushDiag(ctx, d.severity, d.code, d.kind, `${n.name}: ${d.message}`);
+    }
   }
 
   // Effects — the ordered stack lowers in extract-pure (shadows → box_shadow,

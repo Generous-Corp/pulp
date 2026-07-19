@@ -134,6 +134,12 @@ export interface ExtractedStyle {
   object_fit?: string;
   color?: string;
   opacity?: number;
+  // CSS mix-blend-mode — the node's layer blend mode when it is in the shared
+  // supported-blend table (extract-pure.ts::FIGMA_BLEND_CSS), lowered to the
+  // CSS keyword ("multiply", "soft-light"). Unmappable modes emit nothing here
+  // and raise `blend-unsupported`; the raw Figma mode always rides in the
+  // node's figma.blend_mode for provenance.
+  mix_blend_mode?: string;
   border_radius?: number;
   // Per-corner radii — emitted (and border_radius dropped) only when the four
   // corners differ; C++ parse_ir_style reads these four fields directly.

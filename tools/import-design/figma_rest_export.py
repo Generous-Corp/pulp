@@ -288,6 +288,60 @@ def first_visible(paints):
 _GRADIENT_TYPES = ("GRADIENT_LINEAR", "GRADIENT_RADIAL",
                    "GRADIENT_ANGULAR", "GRADIENT_DIAMOND")
 
+# Blend modes that mean "just composite it" — never emitted, never diagnosed.
+_BLEND_IS_DEFAULT = {"NORMAL", "PASS_THROUGH"}
+
+# The shared supported-blend table — mirrors fig/scene.mjs::FIGMA_BLEND_CSS
+# and the plugin's extract-pure.ts::FIGMA_BLEND_CSS; the consumer side is
+# design_ir_json.cpp::is_supported_blend_keyword. Every listed Figma mode is a
+# real CSS mix-blend-mode value, lowered by spelling transform (UPPER_SNAKE →
+# lowercase-hyphen). LINEAR_BURN and LINEAR_DODGE are absent on purpose (see
+# the .fig lane's table comment for the full reasoning): unmappable modes
+# lower to nothing WITH a `blend-unsupported` diagnostic.
+_FIGMA_BLEND_CSS = {
+    "DARKEN", "MULTIPLY", "COLOR_BURN", "LIGHTEN", "SCREEN", "COLOR_DODGE",
+    "OVERLAY", "SOFT_LIGHT", "HARD_LIGHT", "DIFFERENCE", "EXCLUSION",
+    "HUE", "SATURATION", "COLOR", "LUMINOSITY",
+}
+
+def blend_mode_to_css(mode):
+    """Figma blend mode → CSS mix-blend-mode keyword, or None for defaults
+    and modes CSS has no equivalent for (the caller diagnoses those)."""
+    if not mode or mode in _BLEND_IS_DEFAULT or mode not in _FIGMA_BLEND_CSS:
+        return None
+    return mode.lower().replace("_", "-")
+
+def _subtree_has_lowered_blend(n):
+    """True when any node in the subtree rooted at `n` (inclusive) carries a
+    CSS-lowerable blend mode — the condition under which a missing isolation
+    layer changes pixels."""
+    if blend_mode_to_css(n.get("blendMode")):
+        return True
+    return any(_subtree_has_lowered_blend(c) for c in n.get("children") or [])
+
+def diagnose_group_isolation(n, ctx):
+    """Figma GROUP/FRAME nodes default to PASS_THROUGH — children composite
+    against the backdrop, exactly the default web/native behavior, so dropping
+    it is correct and silent. An EXPLICIT NORMAL on a container is Figma's
+    "isolate" (CSS `isolation: isolate`), and the flat lowering has no
+    isolation layer; that only changes pixels when something in the subtree
+    actually blends, so the diagnostic is gated on that. (A container with a
+    non-default blend needs no diagnostic: CSS mix-blend-mode itself forms an
+    isolated group, matching Figma.) Mirrors the plugin lane's
+    collectGroupIsolationDiagnostics and the .fig lane's materialize check."""
+    children = n.get("children") or []
+    if (n.get("blendMode") == "NORMAL" and children
+            and any(_subtree_has_lowered_blend(c) for c in children)
+            and ctx is not None):
+        ctx.diagnostics.append({
+            "severity": "warning", "code": "group-isolation-approximated",
+            "kind": "capture_partial",
+            "message": (f"{n.get('name', '')}: isolate group (explicit NORMAL) "
+                        "has blending descendants; imported without an "
+                        "isolation layer, so they blend against the full "
+                        "backdrop."),
+            "path": n.get("id", "")})
+
 def composite_solid_paints(solids):
     """Composite a run of SOLID paints the way Figma paints them: array order,
     index 0 at the bottom, each source-over the result so far. color.a and the
@@ -669,6 +723,23 @@ def extract_style(n, ctx=None):
     # nodes above, where the two composite identically).
     op = op * image_fill_opacity
     if op < 1: s["opacity"] = op
+    # Layer blend mode — normalized to the CSS keyword here (matching the .fig
+    # and plugin lanes) so the consumer reads all three lanes' `style` channel
+    # identically; the raw Figma mode still rides in the `figma` block for
+    # provenance. A mode outside the shared supported-blend table lowers to
+    # nothing WITH a diagnostic — silently ignoring it still paints,
+    # confidently wrong.
+    blend_css = blend_mode_to_css(n.get("blendMode"))
+    if blend_css:
+        s["mix_blend_mode"] = blend_css
+    elif (n.get("blendMode") and n.get("blendMode") not in _BLEND_IS_DEFAULT
+          and ctx is not None):
+        ctx.diagnostics.append({
+            "severity": "warning", "code": "blend-unsupported",
+            "kind": "unsupported_property",
+            "message": (f"{n.get('name', '')}: {n.get('blendMode')} is not "
+                        "lowered; composited normally."),
+            "path": n.get("id", "")})
     # Effects — the ordered stack, mirroring the plugin lane's
     # extract-pure.ts::lowerEffects: shadows -> box_shadow (comma-joined in
     # array order), LAYER_BLUR -> filter, BACKGROUND_BLUR -> backdrop_filter
@@ -1589,6 +1660,7 @@ def walk(n, parent, z, ctx, inside_widget=False):
     if t is None:
         return None
     style = extract_style(n, ctx)
+    diagnose_group_isolation(n, ctx)
     layout = extract_layout(n, parent)
     # Min/max sizing — style-level clamps parse_ir_style reads and the flex
     # engines lower to min/max width/height. Figma already honored them while

@@ -1705,6 +1705,7 @@ DesignIR parse_figma_plugin_json(const std::string& json) {
         // Defensive fallback — treat the whole document as the root.
         ir.root = parse_ir_node(parsed);
     }
+    validate_blend_modes(ir.root, ir.diagnostics);
 
     if (parsed.hasObjectMember("tokens"))
         ir.tokens = parse_ir_tokens(parsed["tokens"]);
@@ -1834,6 +1835,7 @@ DesignIR parse_figma_json(const std::string& json) {
 
     // Figma export can be the IR format directly (from MCP or export tool)
     ir.root = parse_ir_node(root);
+    validate_blend_modes(ir.root, ir.diagnostics);
 
     if (root.hasObjectMember("tokens"))
         ir.tokens = parse_ir_tokens(root["tokens"]);
@@ -1863,6 +1865,7 @@ DesignIR parse_stitch_html(const std::string& html) {
     try {
         auto root = choc::json::parse(html);
         ir.root = parse_ir_node(root);
+        validate_blend_modes(ir.root, ir.diagnostics);
         if (root.hasObjectMember("tokens"))
             ir.tokens = parse_ir_tokens(root["tokens"]);
         ir.root.provenance = IRProvenance{"stitch-html", "1", {}};
@@ -1942,6 +1945,7 @@ DesignIR parse_pencil_json(const std::string& json) {
 
     // Pencil MCP batch_get returns a node tree similar to our IR
     ir.root = parse_ir_node(root);
+    validate_blend_modes(ir.root, ir.diagnostics);
 
     if (root.hasObjectMember("tokens"))
         ir.tokens = parse_ir_tokens(root["tokens"]);

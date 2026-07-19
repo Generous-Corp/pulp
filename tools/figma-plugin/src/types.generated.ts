@@ -413,6 +413,10 @@ export interface Style {
   object_fit?: string;
   color?: string;
   opacity?: number;
+  /**
+   * CSS mix-blend-mode keyword for the node's layer blend mode, present only when the Figma mode is in the shared supported-blend table (extract-pure.ts::FIGMA_BLEND_CSS). Unmappable modes (LINEAR_BURN, LINEAR_DODGE, newer families) emit nothing here and raise a `blend-unsupported` diagnostic; the raw Figma mode always rides in figma.blend_mode.
+   */
+  mix_blend_mode?: string;
   border_radius?: number;
   border_top_left_radius?: number;
   border_top_right_radius?: number;

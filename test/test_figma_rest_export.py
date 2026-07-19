@@ -2038,6 +2038,103 @@ class PaintStackTest(unittest.TestCase):
         d = next(d for d in ctx.diagnostics if d["code"] == "image-opacity-dropped")
         self.assertEqual(d["kind"], "unsupported_property")
 
+class LayerBlendTest(unittest.TestCase):
+    """Layer blend-mode lowering (audit: Blend / opacity). Every Figma mode
+    with a CSS mix-blend-mode equivalent lowers to the CSS keyword; modes CSS
+    lacks raise blend-unsupported; an isolate group (explicit NORMAL on a
+    container whose subtree blends) raises group-isolation-approximated.
+    Mirrors tools/figma-plugin/test/blend.test.ts and the .fig lane's tests."""
+
+    BB = {"x": 0, "y": 0, "width": 100, "height": 100}
+
+    # The shared supported-blend table, spelled out so drift in any lane's set
+    # is a test failure, not a silent divergence.
+    SUPPORTED = ["DARKEN", "MULTIPLY", "COLOR_BURN", "LIGHTEN", "SCREEN",
+                 "COLOR_DODGE", "OVERLAY", "SOFT_LIGHT", "HARD_LIGHT",
+                 "DIFFERENCE", "EXCLUSION", "HUE", "SATURATION", "COLOR",
+                 "LUMINOSITY"]
+
+    def _style(self, node):
+        ctx = frx.ExtractContext()
+        return frx.extract_style(node, ctx), ctx
+
+    def test_supported_table_is_the_15_css_equivalent_modes(self):
+        self.assertEqual(sorted(frx._FIGMA_BLEND_CSS), sorted(self.SUPPORTED))
+        self.assertEqual(sorted(frx._BLEND_IS_DEFAULT),
+                         ["NORMAL", "PASS_THROUGH"])
+
+    def test_supported_modes_lower_to_the_css_keyword(self):
+        for mode in self.SUPPORTED:
+            s, ctx = self._style({"type": "RECTANGLE", "id": "2:1",
+                                  "name": "b", "absoluteBoundingBox": self.BB,
+                                  "blendMode": mode})
+            self.assertEqual(s["mix_blend_mode"],
+                             mode.lower().replace("_", "-"), mode)
+            self.assertEqual(ctx.diagnostics, [], mode)
+
+    def test_default_modes_lower_to_nothing_silently(self):
+        for mode in (None, "NORMAL", "PASS_THROUGH"):
+            node = {"type": "RECTANGLE", "id": "2:2", "name": "p",
+                    "absoluteBoundingBox": self.BB}
+            if mode is not None:
+                node["blendMode"] = mode
+            s, ctx = self._style(node)
+            self.assertNotIn("mix_blend_mode", s, str(mode))
+            self.assertEqual(ctx.diagnostics, [], str(mode))
+
+    def test_a_mode_css_lacks_is_diagnosed_not_approximated(self):
+        for mode in ("LINEAR_BURN", "LINEAR_DODGE", "FUTURE_MODE"):
+            s, ctx = self._style({"type": "RECTANGLE", "id": "2:3",
+                                  "name": "burn",
+                                  "absoluteBoundingBox": self.BB,
+                                  "blendMode": mode})
+            self.assertNotIn("mix_blend_mode", s, mode)
+            d = next(d for d in ctx.diagnostics
+                     if d["code"] == "blend-unsupported")
+            self.assertEqual(d["severity"], "warning")
+            self.assertEqual(d["kind"], "unsupported_property")
+            self.assertIn(mode, d["message"])
+            self.assertEqual(d["path"], "2:3")
+
+    def test_isolate_group_with_blending_descendant_is_diagnosed(self):
+        # Explicit NORMAL on a container = Figma's "isolate"; a DEEP
+        # descendant with a lowered blend mode means the missing isolation
+        # layer changes pixels.
+        ctx = frx.ExtractContext()
+        group = {"type": "FRAME", "id": "3:1", "name": "isolate",
+                 "blendMode": "NORMAL",
+                 "children": [{"type": "FRAME", "id": "3:2", "name": "inner",
+                               "children": [{"type": "RECTANGLE", "id": "3:3",
+                                             "name": "noise",
+                                             "blendMode": "MULTIPLY"}]}]}
+        frx.diagnose_group_isolation(group, ctx)
+        d = next(d for d in ctx.diagnostics
+                 if d["code"] == "group-isolation-approximated")
+        self.assertEqual(d["severity"], "warning")
+        self.assertEqual(d["kind"], "capture_partial")
+        self.assertEqual(d["path"], "3:1")
+        self.assertIn("isolate", d["message"])
+
+    def test_pass_through_and_inert_isolate_groups_stay_silent(self):
+        # PASS_THROUGH with a blending child: Figma default = web default.
+        # Explicit NORMAL with a non-blending subtree: isolation is a no-op.
+        # A childless node's own NORMAL (the leaf default) never fires.
+        for group in (
+            {"type": "FRAME", "id": "3:4", "name": "pt",
+             "blendMode": "PASS_THROUGH",
+             "children": [{"type": "RECTANGLE", "id": "3:5",
+                           "blendMode": "SCREEN"}]},
+            {"type": "FRAME", "id": "3:6", "name": "inert",
+             "blendMode": "NORMAL",
+             "children": [{"type": "RECTANGLE", "id": "3:7",
+                           "blendMode": "NORMAL"}]},
+            {"type": "RECTANGLE", "id": "3:8", "name": "leaf",
+             "blendMode": "NORMAL"},
+        ):
+            ctx = frx.ExtractContext()
+            frx.diagnose_group_isolation(group, ctx)
+            self.assertEqual(ctx.diagnostics, [], group["name"])
+
 class StrokesTest(unittest.TestCase):
     """Strokes → Pulp's box-border contract, mirroring the plugin lane's
     extract-pure.ts::extractStrokeStyle and the .fig lane in fig/scene.mjs:
