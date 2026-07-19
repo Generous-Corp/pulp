@@ -294,6 +294,104 @@ class CodexP2FollowupTest(unittest.TestCase):
         self.assertNotIn("constraints", row)
         self.assertEqual(badge["constraints"], {"horizontal": "RIGHT", "vertical": "TOP"})
 
+    def test_bound_variables_resolve_to_token_names(self):
+        # Audit item 5: the /nodes payload carries each node's boundVariables;
+        # with the /variables/local name map they resolve to canonical token
+        # names in figma.bound_variables — single alias bare, alias arrays
+        # index-0 bare + ".<i>" suffixed, nested alias maps ".<key>" suffixed.
+        alias = lambda vid: {"type": "VARIABLE_ALIAS", "id": vid}
+        tree = {"type": "FRAME", "name": "Chip", "id": "0:1",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 40, "height": 16},
+                "boundVariables": {
+                    "fills": [alias("VariableID:1:1"), alias("VariableID:1:3")],
+                    "cornerRadius": alias("VariableID:1:2"),
+                    "componentProperties": {"label#9:0": alias("VariableID:1:4")},
+                },
+                "children": [
+                    {"type": "FRAME", "name": "Plain", "id": "0:2",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 10, "height": 10}},
+                ]}
+        ir, ctx = frx.node_tree_to_ir(tree, variable_names={
+            "VariableID:1:1": "theme.brand.primary",
+            "VariableID:1:2": "theme.radius.md",
+            "VariableID:1:3": "theme.brand.secondary",
+            "VariableID:1:4": "theme.label.gain",
+        })
+        self.assertEqual(ir["figma"]["bound_variables"], {
+            "fills": "theme.brand.primary",
+            "fills.1": "theme.brand.secondary",
+            "cornerRadius": "theme.radius.md",
+            "componentProperties.label#9:0": "theme.label.gain",
+        })
+        # Fully resolved: no unresolved-binding diagnostics.
+        self.assertEqual([d for d in ctx.diagnostics
+                          if d["code"] == "variable-binding-unresolved"], [])
+        # A node without boundVariables must not grow the key.
+        self.assertNotIn("bound_variables", ir["children"][0]["figma"])
+
+    def test_bound_variables_without_name_map_emit_raw_ids_with_one_diagnostic(self):
+        # The variables endpoint is Enterprise-plan-gated, so the common case
+        # has NO name map: the raw variable id is emitted (a stable join key,
+        # never a fabricated name) and each id is diagnosed once, even when two
+        # nodes bind the same variable.
+        alias = lambda vid: {"type": "VARIABLE_ALIAS", "id": vid}
+        tree = {"type": "FRAME", "name": "Panel", "id": "0:1",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 100, "height": 100},
+                "boundVariables": {"fills": [alias("VariableID:7:7")]},
+                "children": [
+                    {"type": "FRAME", "name": "Twin", "id": "0:2",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 10, "height": 10},
+                     "boundVariables": {"opacity": alias("VariableID:7:7")}},
+                ]}
+        ir, ctx = frx.node_tree_to_ir(tree)
+        self.assertEqual(ir["figma"]["bound_variables"], {"fills": "VariableID:7:7"})
+        self.assertEqual(ir["children"][0]["figma"]["bound_variables"],
+                         {"opacity": "VariableID:7:7"})
+        diags = [d for d in ctx.diagnostics if d["code"] == "variable-binding-unresolved"]
+        self.assertEqual(len(diags), 1)  # once per variable, not per node
+        self.assertEqual(diags[0]["severity"], "warning")
+
+    def test_variables_to_tokens_mirrors_plugin_canonical_names_and_modes(self):
+        # variables_to_tokens must produce the SAME names the plugin lane's
+        # tokens.ts produces: "collection/variable" lowercased, whitespace
+        # stripped, "/" → "."; default mode bare + other modes ".<slug>";
+        # aliases resolved per mode with fallback to the referent's first mode;
+        # booleans encoded as strings.
+        payload = {"meta": {
+            "variableCollections": {
+                "VC:1": {"id": "VC:1", "name": "Theme", "defaultModeId": "m1",
+                         "modes": [{"modeId": "m1", "name": "Light"},
+                                   {"modeId": "m2", "name": "Dark"}]},
+                "VC:2": {"id": "VC:2", "name": "Base", "defaultModeId": "mb",
+                         "modes": [{"modeId": "mb", "name": "Value"}]},
+            },
+            "variables": {
+                "VariableID:1:1": {"id": "VariableID:1:1", "name": "Brand/Primary",
+                                   "variableCollectionId": "VC:1", "resolvedType": "COLOR",
+                                   "valuesByMode": {
+                                       "m1": {"type": "VARIABLE_ALIAS", "id": "VariableID:2:1"},
+                                       "m2": {"r": 0, "g": 0, "b": 0, "a": 1}}},
+                "VariableID:1:2": {"id": "VariableID:1:2", "name": "Radius MD",
+                                   "variableCollectionId": "VC:1", "resolvedType": "FLOAT",
+                                   "valuesByMode": {"m1": 8}},
+                "VariableID:1:3": {"id": "VariableID:1:3", "name": "Show Value",
+                                   "variableCollectionId": "VC:1", "resolvedType": "BOOLEAN",
+                                   "valuesByMode": {"m1": True}},
+                # Referent in another collection: alias falls back to its own
+                # first/default mode value.
+                "VariableID:2:1": {"id": "VariableID:2:1", "name": "White",
+                                   "variableCollectionId": "VC:2", "resolvedType": "COLOR",
+                                   "valuesByMode": {"mb": {"r": 1, "g": 1, "b": 1, "a": 1}}},
+            }}}
+        tokens, id_to_name = frx.variables_to_tokens(payload)
+        self.assertEqual(id_to_name["VariableID:1:1"], "theme.brand.primary")
+        self.assertEqual(id_to_name["VariableID:1:2"], "theme.radiusmd")
+        self.assertEqual(tokens["colors"]["theme.brand.primary"], "#ffffff")
+        self.assertEqual(tokens["colors"]["theme.brand.primary.dark"], "#000000")
+        self.assertEqual(tokens["dimensions"]["theme.radiusmd"], 8)
+        self.assertEqual(tokens["strings"]["theme.showvalue"], "true")
+        self.assertEqual(tokens["colors"]["base.white"], "#ffffff")
+
     def test_parse_url_handles_percent_encoded_node_id(self):
         self.assertEqual(frx.parse_url("https://figma.com/design/KEY/x?node-id=3%3A42"), ("KEY", "3:42"))
         self.assertEqual(frx.parse_url("https://figma.com/design/KEY/x?node-id=3-42"), ("KEY", "3:42"))

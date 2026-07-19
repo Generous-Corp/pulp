@@ -413,6 +413,74 @@ test('resize constraints reach the envelope in Figma spelling; flowing auto-layo
     'ABSOLUTE opt-out keeps constraints');
 });
 
+test('variable bindings reach figma.bound_variables; unresolvable guids are diagnosed once', () => {
+  // The gap this pins: the decoder captured variable VALUES (tokens maps) but
+  // never read variableConsumptionMap or paint colorVar, so no node said which
+  // token drives which property. VARIABLE nodes carry no parentIndex here —
+  // like the real file, they live outside the frame tree and are reached via
+  // scene.byGuid, not the walk.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 10 }, type: 'VARIABLE', name: 'brand/primary',
+      variableData: { colorValue: { r: 1, g: 0, b: 0, a: 1 } } },
+    { guid: { sessionID: 0, localID: 11 }, type: 'VARIABLE', name: 'radius/md',
+      variableData: { floatValue: 8 } },
+    { guid: { sessionID: 0, localID: 12 }, type: 'VARIABLE', name: 'space/sm',
+      variableData: { floatValue: 4 } },
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Vars',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Chip',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 40, y: 16 },
+      // Scalar bindings: one mechanical enum conversion (CORNER_RADIUS →
+      // cornerRadius) and one from the override table (STACK_SPACING →
+      // itemSpacing, the Plugin-API spelling all three lanes share).
+      variableConsumptionMap: { entries: [
+        { variableField: 'CORNER_RADIUS',
+          variableData: { value: { alias: { guid: { sessionID: 0, localID: 11 } } } } },
+        { variableField: 'STACK_SPACING',
+          variableData: { value: { alias: { guid: { sessionID: 0, localID: 12 } } } } },
+      ] },
+      // Paint-level color binding rides on the paint itself.
+      fillPaints: [{ type: 'SOLID', color: { r: 1, g: 0, b: 0, a: 1 }, opacity: 1, visible: true,
+        colorVar: { value: { alias: { guid: { sessionID: 0, localID: 10 } } } } }] },
+    // Two nodes bound to the SAME unknown (remote-library) variable: the
+    // binding is dropped, and the loss is diagnosed once, not once per node.
+    { guid: { sessionID: 0, localID: 4 }, type: 'FRAME', name: 'RemoteA',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 10, y: 10 },
+      variableConsumptionMap: { entries: [
+        { variableField: 'WIDTH',
+          variableData: { value: { alias: { guid: { sessionID: 9, localID: 99 } } } } },
+      ] } },
+    { guid: { sessionID: 0, localID: 5 }, type: 'FRAME', name: 'RemoteB',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'c' }, size: { x: 10, y: 10 },
+      variableConsumptionMap: { entries: [
+        { variableField: 'HEIGHT',
+          variableData: { value: { alias: { guid: { sessionID: 9, localID: 99 } } } } },
+      ] } },
+    { guid: { sessionID: 0, localID: 6 }, type: 'FRAME', name: 'Plain',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'd' }, size: { x: 10, y: 10 } },
+  ]});
+  const f = materializeFrame(scene, findFrame(scene, 'Vars'), { images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
+  const [chip, remoteA, remoteB, plain] = f.envelope.root.children;
+  assert.deepEqual(chip.figma.bound_variables, {
+    cornerRadius: 'radius/md',
+    itemSpacing: 'space/sm',
+    fills: 'brand/primary',
+  });
+  // The binding names entries in this envelope's own tokens maps.
+  assert.equal(f.envelope.tokens.colors['brand/primary'], '#ff0000');
+  assert.equal(f.envelope.tokens.dimensions['radius/md'], 8);
+  // Unknown guid: no dangling binding, one warning for both nodes.
+  assert.ok(!(remoteA.figma && 'bound_variables' in remoteA.figma));
+  assert.ok(!(remoteB.figma && 'bound_variables' in remoteB.figma));
+  const unresolved = f.diagnostics.filter((d) => d.code === 'variable-binding-unresolved');
+  assert.equal(unresolved.length, 1, 'diagnosed once per variable, not per node');
+  assert.equal(unresolved[0].severity, 'warning');
+  // No bindings, no key.
+  assert.ok(!('figma' in plain) || !('bound_variables' in plain.figma));
+});
+
 test('a blend mode survives; one CSS lacks is diagnosed, not approximated', () => {
   // A layer that COMPOSITES differently is not cosmetic. This design lays a
   // 912x300 noise texture over its panels at opacity 0.10 blendMode MULTIPLY.

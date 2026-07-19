@@ -411,6 +411,72 @@ export function extractConstraints(
   return out.horizontal || out.vertical ? out : undefined;
 }
 
+// Variable bindings (`node.boundVariables`) resolved to canonical token names.
+// The Plugin API shape is `{ [property]: VariableAlias | VariableAlias[] |
+// { [key]: VariableAlias } }` where a VariableAlias is `{ type:
+// "VARIABLE_ALIAS", id }`: array-valued properties (fills, strokes, effects)
+// carry one alias per entry, and a few properties (componentProperties,
+// textRangeFills) nest a keyed map of aliases. Output is the flat
+// `{ property: tokenName }` map the envelope's `figma.bound_variables` field
+// carries: a single alias keeps the bare property key, an array binds index 0
+// to the bare key and later entries to "<property>.<i>", and a nested map
+// binds "<property>.<key>" — flat string→string so the C++ consumer can
+// preserve each binding as one namespaced attribute.
+//
+// An id the token pass didn't capture (remote-library or deleted variable) is
+// NOT emitted — a dangling reference that resolves to nothing downstream is
+// worse than an honest skip — and is returned in `unresolved` for the caller
+// to diagnose.
+export interface BoundVariableBindings {
+  bindings: Record<string, string>;
+  unresolved: string[];
+}
+
+export function extractBoundVariableBindings(
+  bound: unknown,
+  idToName: Record<string, string>,
+): BoundVariableBindings | undefined {
+  if (!bound || typeof bound !== "object") return undefined;
+  const out: BoundVariableBindings = { bindings: {}, unresolved: [] };
+
+  const aliasId = (v: unknown): string | undefined => {
+    if (v && typeof v === "object" && (v as VariableAlias).type === "VARIABLE_ALIAS" &&
+        typeof (v as VariableAlias).id === "string") {
+      return (v as VariableAlias).id;
+    }
+    return undefined;
+  };
+  const bind = (key: string, id: string) => {
+    const name = idToName[id];
+    if (name) out.bindings[key] = name;
+    else out.unresolved.push(id);
+  };
+
+  for (const [property, value] of Object.entries(bound as Record<string, unknown>)) {
+    if (value === null || value === undefined) continue;
+    const single = aliasId(value);
+    if (single) {
+      bind(property, single);
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) {
+        const id = aliasId(value[i]);
+        if (id) bind(i === 0 ? property : `${property}.${i}`, id);
+      }
+      continue;
+    }
+    if (typeof value === "object") {
+      for (const [sub, entry] of Object.entries(value as Record<string, unknown>)) {
+        const id = aliasId(entry);
+        if (id) bind(`${property}.${sub}`, id);
+      }
+    }
+  }
+
+  return Object.keys(out.bindings).length > 0 || out.unresolved.length > 0 ? out : undefined;
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Library recognition fallback — name-based heuristic when the
 // component_set_key match doesn't hit (e.g. unpublished local

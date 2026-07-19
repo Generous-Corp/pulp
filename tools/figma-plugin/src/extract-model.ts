@@ -72,6 +72,15 @@ export interface ExtractedFigmaNode {
   // `Pulp / XYPad` library instances.
   audio_binding_y?: string;
 
+  // Variable bindings: which design token (canonical name from the tokens
+  // pass) is bound to which property of THIS node, resolved from
+  // `node.boundVariables` via tokens.variableIdToName. Serialized into the
+  // node's `figma` block as `bound_variables`; design_ir_json.cpp preserves
+  // each entry as a `figmaBoundVariable.<property>` attribute. Only resolved
+  // bindings appear — an alias whose variable the token pass didn't capture
+  // is skipped with a diagnostic, never emitted as a dangling id.
+  bound_variables?: Record<string, string>;
+
   // Resize constraints in Figma's Plugin-API spelling
   // (MIN/MAX/CENTER/STRETCH/SCALE per axis). Serialized at the envelope node
   // root as `constraints`; design_ir_json.cpp normalizes the tokens and

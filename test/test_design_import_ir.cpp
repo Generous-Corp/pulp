@@ -478,6 +478,71 @@ TEST_CASE("figma block component semantics land in normalized attributes",
     CHECK(a.at("figmaVariant.state") == "default");
 }
 
+TEST_CASE("figma block variable bindings land in namespaced attributes",
+          "[view][import][variables]") {
+    // Audit item 5: token DEFINITIONS always flowed (envelope tokens block →
+    // parse_ir_tokens → IRTokens) but no node said WHICH token drives WHICH
+    // property. The producers now emit figma.bound_variables
+    // ({property: token name}); parse_ir_node must preserve every entry as a
+    // figmaBoundVariable.<property> attribute, opaque and additive, alongside
+    // the token definitions it points into.
+    const std::string envelope = R"json({
+      "format_version": "2026.05-figma-plugin-v1",
+      "provenance": {"adapter": "figma-plugin", "version": "test"},
+      "tokens": {
+        "colors": {"theme.brand.primary": "#ff0000"},
+        "dimensions": {"theme.radius.md": 8},
+        "strings": {"theme.label.gain": "Gain"}
+      },
+      "root": {
+        "type": "frame", "name": "Root",
+        "children": [
+          {
+            "type": "frame", "name": "Bound",
+            "figma": {
+              "parent_id": "1:1", "z_order": 0,
+              "absolute_transform": [[1,0,0],[0,1,0]],
+              "visible": true, "locked": false, "blend_mode": "PASS_THROUGH",
+              "bound_variables": {
+                "fills": "theme.brand.primary",
+                "fills.1": "theme/secondary with spaces",
+                "cornerRadius": "theme.radius.md",
+                "componentProperties.label#9:0": "theme.label.gain"
+              }
+            }
+          },
+          {
+            "type": "frame", "name": "Plain",
+            "figma": {
+              "parent_id": "1:1", "z_order": 1,
+              "absolute_transform": [[1,0,0],[0,1,0]],
+              "visible": true, "locked": false, "blend_mode": "PASS_THROUGH"
+            }
+          }
+        ]
+      }
+    })json";
+    const auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.children.size() == 2);
+    const auto& a = ir.root.children[0].attributes;
+    CHECK(a.at("figmaBoundVariable.fills") == "theme.brand.primary");
+    // Token names are opaque passthrough — slashes/spaces are the producer's
+    // business, this reader must not normalize them.
+    CHECK(a.at("figmaBoundVariable.fills.1") == "theme/secondary with spaces");
+    CHECK(a.at("figmaBoundVariable.cornerRadius") == "theme.radius.md");
+    CHECK(a.at("figmaBoundVariable.componentProperties.label#9:0") ==
+          "theme.label.gain");
+    // The bindings point into token definitions that round-trip beside them.
+    CHECK(ir.tokens.colors.at("theme.brand.primary") == "#ff0000");
+    CHECK(ir.tokens.dimensions.at("theme.radius.md") == 8.0f);
+    CHECK(ir.tokens.strings.at("theme.label.gain") == "Gain");
+    // Negative: a node without bound_variables gains no binding attribute.
+    for (const auto& [key, value] : ir.root.children[1].attributes) {
+        (void)value;
+        CHECK(key.rfind("figmaBoundVariable.", 0) != 0);
+    }
+}
+
 TEST_CASE("figma block without component metadata preserves nothing extra",
           "[view][import][components]") {
     // Negative: a plain (non-instance) node's figma block must not sprout any
