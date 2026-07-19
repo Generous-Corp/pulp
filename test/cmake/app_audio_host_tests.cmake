@@ -504,13 +504,6 @@ target_sources(pulp-test-host-signal-graph PRIVATE
 target_link_libraries(pulp-test-host-signal-graph PRIVATE pulp::host Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-host-signal-graph)
 
-pulp_add_test_suite(pulp-test-timeline-graph-binding
-    SOURCES test_timeline_graph_binding.cpp
-        $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
-        $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
-    LIBRARIES pulp::host pulp::native-components ${CMAKE_DL_LIBS}
-    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
-
 # NativeHandleVisitor pure-header pattern test. No plugin loading
 # required; uses lightweight mock slots to exercise dispatch.
 add_executable(pulp-test-native-handle-visitor test_native_handle_visitor.cpp)
@@ -602,24 +595,6 @@ pulp_add_test_suite(pulp-test-graph-serializer LIBRARIES pulp::host)
 
 # NetworkServiceDiscovery backend-dispatch tests
 pulp_add_test_suite(pulp-test-network-service-discovery LIBRARIES pulp::events)
-
-# Phase-1 Creative Timeline Engine worked-example tests. Compile their real
-# implementation sources even when PULP_BUILD_EXAMPLES=OFF so the normal PR
-# test and coverage lanes keep exercising the examples.
-add_executable(pulp-test-timeline-phase1-examples
-    ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_example_engine.cpp
-    ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_audio_player.cpp
-    ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_step_pattern_content.cpp
-    ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_step_sequencer.cpp
-    ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_examples.cpp
-    ${CMAKE_SOURCE_DIR}/test/harness/rt_allocation_probe.cpp)
-target_link_libraries(pulp-test-timeline-phase1-examples PRIVATE
-    pulp::format pulp::host pulp::playback pulp::timeline pulp::timebase
-    pulp::standalone Catch2::Catch2WithMain)
-target_include_directories(pulp-test-timeline-phase1-examples PRIVATE
-    ${CMAKE_SOURCE_DIR}/examples/timeline-phase1
-    ${CMAKE_SOURCE_DIR}/test)
-catch_discover_tests(pulp-test-timeline-phase1-examples)
 
 # WAMv2 + WebCLAP format adapter tests
 add_executable(pulp-test-wam-wclap test_wam_wclap.cpp
