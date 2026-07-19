@@ -3,6 +3,7 @@ add_library(pulp-timeline
     src/command.cpp
     src/document_session.cpp
     src/identity_directory.cpp
+    src/id_remap.cpp
     src/journal.cpp
     src/model.cpp
     src/transaction.cpp
@@ -12,6 +13,7 @@ add_library(pulp-timeline
     src/serialize_decode.cpp
     src/serialize_encode.cpp
     src/structural_registry_validation.cpp
+    src/track.cpp
 )
 add_library(pulp::timeline ALIAS pulp-timeline)
 

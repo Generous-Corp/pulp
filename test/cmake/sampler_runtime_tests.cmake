@@ -54,6 +54,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/command.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/document_session.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/identity_directory.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/id_remap.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/journal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/model.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json.cpp
@@ -61,6 +62,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_encode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/structural_registry_validation.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/track.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/undo.cpp)
 target_link_libraries(pulp-test-timeline-no-exceptions PRIVATE
