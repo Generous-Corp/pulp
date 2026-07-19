@@ -113,7 +113,7 @@ jobs:
   # graph/scene subsystems drifted onto main undetected until this job
   # existed. Keep it cheap and unconditional.
   codecov-config-validation:
-    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -144,7 +144,7 @@ jobs:
   # output, so a TS-only PR exits the macOS leg in <20 min instead of
   # ~45-60 min.
   changed-files:
-    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     # dorny/paths-filter@v3 in PR mode requires pull-requests:read; without
     # it the action silently returns no changed files, which would defeat
@@ -196,7 +196,7 @@ jobs:
   # Namespace build variables because coverage/sanitizer/release lanes must
   # not spill onto the warm macOS gate pool.
   resolve-runners:
-    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     outputs:
       linux_runs_on: ${{ steps.resolve.outputs.linux_runs_on }}
@@ -280,7 +280,7 @@ jobs:
   # as "native build required". See that script's module docstring +
   # tools/scripts/test_classify_changes.py.
   classify:
-    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     outputs:
       # Force the full native matrix on `schedule` AND `workflow_dispatch`:
@@ -1192,7 +1192,7 @@ jobs:
     # validates PRs, but it must not be the only main upload for a SHA whose
     # native Coverage run was superseded before any OS legs uploaded.
     name: Coverage report (@pulp/react, Vitest)
-    if: (github.event_name != 'schedule' || github.repository == 'danielraffel/pulp') && (github.event_name != 'pull_request')
+    if: (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO) && (github.event_name != 'pull_request')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

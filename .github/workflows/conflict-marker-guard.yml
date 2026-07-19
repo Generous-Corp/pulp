@@ -30,7 +30,7 @@ concurrency:
 jobs:
   scan:
     # Fork guard: never let a fork's copy of this workflow email its owner.
-    if: github.repository == 'danielraffel/pulp'
+    if: github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     name: Scan main for conflict markers
 

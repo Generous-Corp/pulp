@@ -48,7 +48,7 @@ jobs:
   # ── Job A: native Intel (flake-tolerant) ─────────────────────────────────
   native-intel:
     name: Native Intel build + test (macos-15-intel)
-    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: macos-15-intel
     timeout-minutes: 120
     outputs:
@@ -189,7 +189,7 @@ jobs:
   # ── Job B: universal cross-check on the stable runner ────────────────────
   universal-crosscheck:
     name: Universal + lipo + dual-arch auval (macos-15)
-    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: macos-15
     timeout-minutes: 120
     outputs:
@@ -354,7 +354,7 @@ jobs:
   watchdog:
     name: Intel nightly watchdog
     needs: [native-intel, universal-crosscheck]
-    if: always() && (github.event_name != 'schedule' || github.repository == 'danielraffel/pulp')
+    if: always() && (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO)
     runs-on: ubuntu-latest
     permissions:
       contents: read
