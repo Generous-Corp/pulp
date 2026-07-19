@@ -173,7 +173,6 @@ TEST_CASE("WebSocketChannel echo round-trip on loopback", "[websocket]") {
     auto client = WebSocketChannel::connect(std::move(client_tcp), "127.0.0.1", "/");
     REQUIRE(client != nullptr);
     REQUIRE(client->is_open());
-
     std::mutex client_mu;
     std::vector<std::string> client_seen;
     client->on_message([&](const Message& m) {
@@ -201,8 +200,8 @@ TEST_CASE("WebSocketChannel echo round-trip on loopback", "[websocket]") {
     }
 
     client->close();
-    if (server_ws) server_ws->close();
     server_thread.join();
+    if (server_ws) server_ws->close();
 }
 
 TEST_CASE("WebSocketChannel rejects handshake without upgrade header", "[websocket]") {
@@ -364,6 +363,8 @@ TEST_CASE("WebSocketChannel close flips is_open to false",
     auto client = WebSocketChannel::connect(std::move(client_tcp), "127.0.0.1", "/");
     REQUIRE(client != nullptr);
     REQUIRE(client->is_open());
+    std::atomic<bool> client_error{false};
+    client->on_error([&](std::string_view) { client_error.store(true); });
 
     client->close();
     REQUIRE_FALSE(client->is_open());
@@ -371,9 +372,11 @@ TEST_CASE("WebSocketChannel close flips is_open to false",
     // Double-close is safe.
     client->close();
     REQUIRE_FALSE(client->is_open());
+    client.reset();
+    REQUIRE_FALSE(client_error.load());
 
-    if (server_ws) server_ws->close();
     server_thread.join();
+    if (server_ws) server_ws->close();
 }
 
 TEST_CASE("WebSocketChannel echoes a >126-byte message (16-bit payload length)",
@@ -428,8 +431,8 @@ TEST_CASE("WebSocketChannel echoes a >126-byte message (16-bit payload length)",
     }
 
     client->close();
-    if (server_ws) server_ws->close();
     server_thread.join();
+    if (server_ws) server_ws->close();
 }
 
 TEST_CASE("WebSocketChannel delivers binary send as binary message",
@@ -481,8 +484,8 @@ TEST_CASE("WebSocketChannel delivers binary send as binary message",
     }
 
     client->close();
-    if (server_ws) server_ws->close();
     server_thread.join();
+    if (server_ws) server_ws->close();
 }
 
 TEST_CASE("WebSocketChannel assembles fragmented text frames",
@@ -544,8 +547,8 @@ TEST_CASE("WebSocketChannel assembles fragmented text frames",
     }
 
     client.close();
-    if (server_ws) server_ws->close();
     server_thread.join();
+    if (server_ws) server_ws->close();
 }
 
 TEST_CASE("WebSocketChannel reports unknown frame opcodes",
@@ -601,8 +604,8 @@ TEST_CASE("WebSocketChannel reports unknown frame opcodes",
     }));
 
     client.close();
-    if (server_ws) server_ws->close();
     server_thread.join();
+    if (server_ws) server_ws->close();
 }
 
 // max_payload bounds a single frame, but a message reassembled across
@@ -677,8 +680,8 @@ TEST_CASE("WebSocketChannel bounds total reassembled message size",
     REQUIRE(messages.load() == 0);  // never delivered a partial/oversized message
 
     client.close();
-    if (server_ws) server_ws->close();
     server_thread.join();
+    if (server_ws) server_ws->close();
 }
 
 TEST_CASE("WebSocketChannel replies to ping frames with pong",
@@ -726,8 +729,8 @@ TEST_CASE("WebSocketChannel replies to ping frames with pong",
     REQUIRE(*payload == std::vector<std::uint8_t>{'o', 'k'});
 
     client.close();
-    if (server_ws) server_ws->close();
     server_thread.join();
+    if (server_ws) server_ws->close();
 }
 
 TEST_CASE("WebSocketChannel echoes close frames and closes",
@@ -781,8 +784,8 @@ TEST_CASE("WebSocketChannel echoes close frames and closes",
     REQUIRE_FALSE(server_ws->is_open());
 
     client.close();
-    if (server_ws) server_ws->close();
     server_thread.join();
+    if (server_ws) server_ws->close();
 }
 
 TEST_CASE("WebSocketChannel receives 64-bit payload length frames",
@@ -842,8 +845,8 @@ TEST_CASE("WebSocketChannel receives 64-bit payload length frames",
     }
 
     client->close();
-    if (server_ws) server_ws->close();
     server_thread.join();
+    if (server_ws) server_ws->close();
 }
 
 TEST_CASE("WebSocketChannel rejects frames above max_payload",
@@ -897,6 +900,6 @@ TEST_CASE("WebSocketChannel rejects frames above max_payload",
     }
 
     client->close();
-    if (server_ws) server_ws->close();
     server_thread.join();
+    if (server_ws) server_ws->close();
 }
