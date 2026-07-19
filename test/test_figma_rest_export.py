@@ -1908,5 +1908,167 @@ class StrokesTest(unittest.TestCase):
         self.assertIn("complex-stroke-flattened", codes)
 
 
+class SiblingMaskTest(unittest.TestCase):
+    """Audit item 9: a child with isMask=True paints NOWHERE — its outline
+    clips the siblings painted after it via a synthetic `(mask scope)` wrapper
+    carrying `style.clip_path` in parent space; siblings below the mask stay
+    outside; inexact lowerings (luminance / soft alpha) are diagnosed. Kept in
+    lockstep with the .fig lane (fig/scene.mjs) and the plugin lane
+    (tools/figma-plugin/test/masks.test.ts)."""
+
+    OPAQUE = [{"type": "SOLID", "opacity": 1,
+               "color": {"r": 0, "g": 0, "b": 0, "a": 1}}]
+
+    def panel(self, mask_overrides=None):
+        mask = {"type": "RECTANGLE", "id": "1:3", "name": "Window", "isMask": True,
+                "size": {"x": 200, "y": 100},
+                "absoluteBoundingBox": {"x": 40, "y": 30, "width": 200, "height": 100},
+                "fills": list(self.OPAQUE)}
+        mask.update(mask_overrides or {})
+        # The TEXT label keeps the frame out of the pure-vector-illustration
+        # capture path, so the walk recurses into the children where mask
+        # lowering lives.
+        return {"type": "FRAME", "name": "Panel", "id": "1:1",
+                "size": {"x": 400, "y": 300},
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 400, "height": 300},
+                "children": [
+                    {"type": "TEXT", "id": "1:8", "name": "Label",
+                     "characters": "Label",
+                     "absoluteBoundingBox": {"x": 0, "y": 280, "width": 60, "height": 20},
+                     "style": {"fontFamily": "Inter", "fontSize": 12}},
+                    {"type": "RECTANGLE", "id": "1:2", "name": "Below",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 400, "height": 300},
+                     "fills": list(self.OPAQUE)},
+                    mask,
+                    {"type": "RECTANGLE", "id": "1:4", "name": "ContentA",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 400, "height": 300},
+                     "fills": list(self.OPAQUE)},
+                    {"type": "RECTANGLE", "id": "1:5", "name": "ContentB",
+                     "absoluteBoundingBox": {"x": 10, "y": 10, "width": 100, "height": 100},
+                     "fills": list(self.OPAQUE)},
+                ]}
+
+    def _names(self, node, out=None):
+        out = [] if out is None else out
+        out.append(node.get("name"))
+        for c in node.get("children", []):
+            self._names(c, out)
+        return out
+
+    def test_sibling_mask_moves_later_siblings_into_clip_wrapper(self):
+        ir, ctx = frx.node_tree_to_ir(self.panel())
+        self.assertEqual([c["name"] for c in ir["children"]],
+                         ["Label", "Below", "Window (mask scope)"])
+        scope = ir["children"][2]
+        self.assertEqual(scope["type"], "frame")
+        self.assertEqual(scope["figma_node_id"], "1:3/mask-scope")
+        self.assertEqual(scope["audio_widget"], "none")
+        # The wrapper spans the parent from (0,0) so the outline (parent
+        # space) clips where the design put the mask.
+        s = scope["style"]
+        self.assertEqual((s["position"], s["left"], s["top"], s["width"], s["height"]),
+                         ("absolute", 0, 0, 400, 300))
+        self.assertEqual(s["clip_path"],
+                         'path("M40 30 L240 30 L240 130 L40 130 L40 30 Z")')
+        self.assertEqual([c["name"] for c in scope["children"]],
+                         ["ContentA", "ContentB"])
+        # The mask itself is painted NOWHERE, and an exact geometric lowering
+        # raises no mask diagnostic.
+        self.assertNotIn("Window", self._names(ir))
+        self.assertEqual([d for d in ctx.diagnostics if "mask" in d["code"]], [])
+
+    def test_rounded_and_ellipse_masks_synthesize_curved_outlines(self):
+        ir, _ = frx.node_tree_to_ir(self.panel({"cornerRadius": 8}))
+        d = ir["children"][2]["style"]["clip_path"]
+        self.assertIn("C", d)  # rounded corners emit cubics
+        ir, _ = frx.node_tree_to_ir(self.panel({"type": "ELLIPSE"}))
+        d = ir["children"][2]["style"]["clip_path"]
+        self.assertTrue(d.startswith('path("M140 30 C'))
+
+    def test_vector_mask_clips_via_transformed_fill_geometry(self):
+        ir, _ = frx.node_tree_to_ir(self.panel({
+            "type": "VECTOR",
+            "fillGeometry": [{"windingRule": "NONZERO", "path": "M0 0 L200 0 L200 100 Z"}],
+        }))
+        self.assertEqual(ir["children"][2]["style"]["clip_path"],
+                         'path("M40 30 L240 30 L240 130 Z")')
+
+    def test_luminance_mask_keeps_outline_clip_and_is_diagnosed(self):
+        ir, ctx = frx.node_tree_to_ir(self.panel({"maskType": "LUMINANCE"}))
+        self.assertIn("clip_path", ir["children"][2]["style"])
+        d = next(d for d in ctx.diagnostics if d["code"] == "mask-luminance-approximated")
+        self.assertEqual(d["severity"], "warning")
+        self.assertEqual(d["path"], "1:3")
+
+    def test_soft_alpha_mask_keeps_outline_clip_with_complex_mask_diagnostic(self):
+        ir, ctx = frx.node_tree_to_ir(self.panel({
+            "maskType": "ALPHA",
+            "fills": [{"type": "SOLID", "opacity": 0.4,
+                       "color": {"r": 0, "g": 0, "b": 0, "a": 1}}]}))
+        self.assertIn("clip_path", ir["children"][2]["style"])
+        self.assertTrue(any(d["code"] == "complex-mask-flattened"
+                            for d in ctx.diagnostics))
+
+    def test_mask_inside_auto_layout_parent_degrades_honestly(self):
+        tree = self.panel()
+        tree["layoutMode"] = "VERTICAL"
+        ir, ctx = frx.node_tree_to_ir(tree)
+        # No wrapper, siblings flow unmasked — and the mask still never paints.
+        names = self._names(ir)
+        self.assertNotIn("Window (mask scope)", names)
+        self.assertNotIn("Window", names)
+        self.assertTrue(any(d["code"] == "mask-approximated"
+                            and "auto-layout" in d["message"] for d in ctx.diagnostics))
+
+    def test_hidden_mask_neither_paints_nor_clips(self):
+        ir, ctx = frx.node_tree_to_ir(self.panel({"visible": False}))
+        self.assertEqual([c["name"] for c in ir["children"]],
+                         ["Label", "Below", "ContentA", "ContentB"])
+        self.assertEqual([d for d in ctx.diagnostics if "mask" in d["code"]], [])
+
+    def test_empty_mask_scope_is_pruned(self):
+        tree = self.panel()
+        tree["children"] = tree["children"][:3]  # nothing above the mask
+        ir, _ = frx.node_tree_to_ir(tree)
+        self.assertEqual([c["name"] for c in ir["children"]], ["Label", "Below"])
+
+    def test_stacked_masks_nest_so_clips_intersect(self):
+        tree = self.panel()
+        tree["children"] += [
+            {"type": "RECTANGLE", "id": "1:6", "name": "Inner", "isMask": True,
+             "size": {"x": 50, "y": 50},
+             "absoluteBoundingBox": {"x": 0, "y": 0, "width": 50, "height": 50},
+             "fills": list(self.OPAQUE)},
+            {"type": "RECTANGLE", "id": "1:7", "name": "Deep",
+             "absoluteBoundingBox": {"x": 5, "y": 5, "width": 20, "height": 20},
+             "fills": list(self.OPAQUE)},
+        ]
+        ir, _ = frx.node_tree_to_ir(tree)
+        outer = ir["children"][2]
+        inner = next(c for c in outer["children"] if c["name"] == "Inner (mask scope)")
+        self.assertIn("clip_path", inner["style"])
+        self.assertEqual([c["name"] for c in inner["children"]], ["Deep"])
+
+    def test_rotated_mask_keeps_its_relative_transform(self):
+        # 90° rotation: relativeTransform is authoritative; the outline's
+        # points go through the full affine.
+        ir, _ = frx.node_tree_to_ir(self.panel({
+            "size": {"x": 200, "y": 100},
+            "relativeTransform": [[0, -1, 140], [1, 0, 30]],
+            "absoluteBoundingBox": {"x": 40, "y": 30, "width": 100, "height": 200}}))
+        self.assertEqual(ir["children"][2]["style"]["clip_path"],
+                         'path("M140 30 L140 230 L40 230 L40 30 L140 30 Z")')
+
+    def test_untransformable_geometry_falls_back_to_box_outline(self):
+        # Arcs don't survive a general affine; the approximate box clip beats
+        # painting the mask or dropping the clip entirely.
+        ir, _ = frx.node_tree_to_ir(self.panel({
+            "type": "VECTOR",
+            "fillGeometry": [{"windingRule": "NONZERO",
+                              "path": "M0 50 A50 50 0 1 0 200 50 Z"}]}))
+        self.assertEqual(ir["children"][2]["style"]["clip_path"],
+                         'path("M40 30 L240 30 L240 130 L40 130 L40 30 Z")')
+
+
 if __name__ == "__main__":
     unittest.main()

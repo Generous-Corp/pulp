@@ -42,6 +42,8 @@ import {
   collectFontFamilyAssets,
   extractConstraints,
   extractStrokeStyle,
+  maskClipOutline,
+  assessMaskFidelity,
   extractBoundVariableBindings,
   utf16ToUtf8ByteOffsets,
 } from "./extract-pure";
@@ -465,18 +467,123 @@ async function walk(
     }
   }
 
-  // Recurse for container nodes that have children.
+  // Recurse for container nodes that have children, honoring Figma's `isMask`
+  // flag: a mask child is painted NOWHERE — its outline CLIPS the siblings
+  // painted after it (above it in paint order), and its own fill never
+  // reaches the canvas. Materializing the flag as a normal child would paint
+  // an opaque panel OVER the very content the design clips. Lowering mirrors
+  // the .fig decoder (fig/scene.mjs::walkChildren): the siblings above the
+  // mask move into a synthetic wrapper that spans the parent and carries the
+  // mask outline as a CSS clip-path. Siblings BELOW the mask stay outside the
+  // wrapper, unclipped — exactly Figma's scope — and a second mask opens a
+  // second wrapper inside the first, so stacked masks intersect the way
+  // nested clips do.
   if ("children" in node) {
     const children = (node as ChildrenMixin).children;
+    // Open mask scopes: synthetic wrappers, pruned when they end up empty.
+    const scopes: Array<{ wrapper: ExtractedFigmaNode; holder: ExtractedFigmaNode[] }> = [];
+    let target = ex.children;
     for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if ("isMask" in child && (child as SceneNode & { isMask?: boolean }).isMask === true) {
+        // A hidden mask neither paints nor clips.
+        if (child.visible === false) continue;
+        ctx.pathStack.push(`/children[${i}]`);
+        const wrapper = beginMaskScope(child, node, i, ctx);
+        ctx.pathStack.pop();
+        if (wrapper) {
+          target.push(wrapper);
+          scopes.push({ wrapper, holder: target });
+          target = wrapper.children;
+        }
+        continue;
+      }
       ctx.pathStack.push(`/children[${i}]`);
-      const child = await walk(children[i], node.id, i, ctx, node);
+      const walked = await walk(child, node.id, i, ctx, node);
       ctx.pathStack.pop();
-      if (child) ex.children.push(child);
+      if (walked) target.push(walked);
+    }
+    // A scope with nothing above the mask paints nothing. Deepest-first, so a
+    // scope left holding only an emptied deeper scope collapses too.
+    for (let i = scopes.length - 1; i >= 0; i--) {
+      const { wrapper, holder } = scopes[i];
+      if (wrapper.children.length === 0) holder.splice(holder.indexOf(wrapper), 1);
     }
   }
 
   return ex;
+}
+
+/// Lower one sibling mask into its synthetic clip wrapper, or return null
+/// (with a diagnostic) when no lowering exists — the siblings then render
+/// unmasked rather than occluded. The wrapper spans the parent from (0, 0),
+/// so the outline (already in the parent's space) clips exactly where the
+/// design put the mask and the masked siblings keep their coordinates.
+function beginMaskScope(
+  mask: SceneNode,
+  parent: SceneNode,
+  zOrder: number,
+  ctx: WalkCtx,
+): ExtractedFigmaNode | null {
+  if (parentIsAutoLayout(parent)) {
+    // The wrapper is absolutely placed, which would yank flowed siblings out
+    // of the flex pass. No lowering — but never paint the mask.
+    pushDiag(ctx, "warning", "mask-approximated", "unsupported_property",
+      `Mask "${mask.name}" inside an auto-layout parent has no lowering; siblings flow unmasked.`);
+    return null;
+  }
+  const d = maskClipOutline(mask, parent);
+  if (!d) {
+    pushDiag(ctx, "warning", "mask-approximated", "unsupported_property",
+      `Mask "${mask.name}" outline unresolvable; siblings render unmasked.`);
+    return null;
+  }
+  // An outline clip is exact for an outline (VECTOR) mask and for an alpha
+  // mask whose content is one opaque solid. Anything softer flattens to the
+  // hard outline — say so: a mask that clips harder than the design intended
+  // looks like a cropping bug, not a dropped property.
+  const fidelity = assessMaskFidelity(mask);
+  if (fidelity === "luminance") {
+    pushDiag(ctx, "warning", "mask-luminance-approximated", "unsupported_property",
+      `Luminance mask "${mask.name}" flattened to its outline clip; pixel-brightness alpha is not reproduced.`);
+  } else if (fidelity === "soft_alpha") {
+    pushDiag(ctx, "warning", "complex-mask-flattened", "fallback_used",
+      `Alpha mask "${mask.name}" flattened to its outline; soft or partial alpha is not reproduced.`);
+  }
+  const pw = "width" in parent ? parent.width : 0;
+  const ph = "height" in parent ? parent.height : 0;
+  const pb = "absoluteBoundingBox" in parent
+    ? (parent as SceneNode & { absoluteBoundingBox: Rect | null }).absoluteBoundingBox
+    : null;
+  return {
+    type: "frame",
+    figma_type: "FRAME",
+    name: `${mask.name || "mask"} (mask scope)`,
+    // Synthetic, so it must not collide with any real node in tools that join
+    // on node id, and must never be name-guessed into a widget.
+    figma_node_id: `${mask.id}/mask-scope`,
+    parent_id: parent.id,
+    z_order: zOrder,
+    absolute_bounds: pb
+      ? { x: pb.x, y: pb.y, w: pb.width, h: pb.height }
+      : { x: 0, y: 0, w: pw, h: ph },
+    relative_transform: [[1, 0, 0], [0, 1, 0]],
+    visible: true,
+    locked: false,
+    opacity: 1,
+    blend_mode: "PASS_THROUGH",
+    style: {
+      width: Math.round(pw),
+      height: Math.round(ph),
+      position: "absolute",
+      left: 0,
+      top: 0,
+      clip_path: `path("${d}")`,
+    },
+    layout: {},
+    audio_widget: "none",
+    children: [],
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────────────

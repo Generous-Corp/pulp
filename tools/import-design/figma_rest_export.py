@@ -1181,6 +1181,265 @@ def _component_identity(n, ctx):
     return comp.get("key"), name
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# Sibling-mask lowering (audit item 9).
+#
+# A child with `isMask: true` paints NOWHERE — its outline CLIPS the siblings
+# painted after it (above it in paint order) in the same parent, until the
+# next mask or the parent's end. The walk moves those siblings into a
+# synthetic wrapper that spans the parent and carries the mask's outline as a
+# CSS clip-path — the consumer contract the engine already has end-to-end
+# (IRStyle::clip_path → setClipPath → SkPath::FromSVGString), and the exact
+# wrapper shape the .fig decoder (fig/scene.mjs::walkChildren) and the plugin
+# lane (tools/figma-plugin/src/extract.ts) emit. Mirror of the plugin lane's
+# pure helpers (extract-pure.ts) in the REST vocabulary.
+
+def _round2(v):
+    return round(v * 100) / 100
+
+
+def _rest_transform(n):
+    """The node's relativeTransform as [[m00,m01,m02],[m10,m11,m12]], or None
+    when absent/malformed (the field rides along with geometry=paths)."""
+    t = n.get("relativeTransform")
+    if (isinstance(t, list) and len(t) == 2
+            and all(isinstance(r, list) and len(r) == 3
+                    and all(isinstance(v, (int, float)) for v in r) for r in t)):
+        return t
+    return None
+
+
+def _mask_parent_space_transform(n, parent):
+    """The transform that places a mask node's LOCAL geometry in its parent's
+    border-box space — the space a CSS clip-path on a wrapper spanning the
+    parent is consumed in. A rotated mask keeps its relativeTransform; an
+    axis-aligned one uses the absoluteBoundingBox delta instead, which is
+    exact AND robust to REST's GROUP-parent coordinate quirks (the same
+    reason walk() positions children by bounding-box deltas)."""
+    t = _rest_transform(n)
+    if t is not None and (abs(t[0][1]) > 1e-6 or abs(t[1][0]) > 1e-6):
+        return t
+    nb = n.get("absoluteBoundingBox")
+    pb = parent.get("absoluteBoundingBox") if parent else None
+    if nb and pb:
+        return [[1, 0, nb["x"] - pb["x"]], [0, 1, nb["y"] - pb["y"]]]
+    if t is not None:
+        return t
+    return [[1, 0, 0], [0, 1, 0]]
+
+
+def _transform_svg_path(d, m):
+    """Apply an affine transform to SVG path data. Handles the command set
+    Figma geometry uses (M, L, C, Q, Z) plus H/V/S/T and the relative forms
+    defensively; H/V become L because a horizontal segment stops being
+    horizontal under rotation. Arcs (A/a) don't survive a general affine
+    without re-deriving axes, so they return None and the caller falls back
+    to the box outline — an approximate clip beats dropping the clip."""
+    tokens = re.findall(r"[MmLlHhVvCcSsQqTtAaZz]|-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?", d or "")
+    if not tokens:
+        return None
+    out = []
+    cx = cy = sx = sy = 0.0  # current point / subpath start, for H/V and Z
+    i = 0
+
+    def is_cmd(tok):
+        return len(tok) == 1 and tok.isalpha()
+
+    def map_abs(x, y):
+        return (f"{_round2(m[0][0] * x + m[0][1] * y + m[0][2]):g} "
+                f"{_round2(m[1][0] * x + m[1][1] * y + m[1][2]):g}")
+
+    while i < len(tokens):
+        cmd = tokens[i]; i += 1
+        if not is_cmd(cmd):
+            return None  # stray number: malformed data
+        rel = cmd.islower()
+        op = cmd.upper()
+        if op == "A":
+            return None
+        if op == "Z":
+            out.append("Z")
+            cx, cy = sx, sy
+            continue
+        groups = 0
+        while i < len(tokens) and not is_cmd(tokens[i]):
+            groups += 1
+            if op in ("H", "V"):
+                v = float(tokens[i]); i += 1
+                x = (cx + v if rel else v) if op == "H" else cx
+                y = (cy + v if rel else v) if op == "V" else cy
+                out.append(f"L{map_abs(x, y)}")
+                cx, cy = x, y
+                continue
+            pairs = 3 if op == "C" else 2 if op in ("S", "Q") else 1
+            pts = []
+            for _ in range(pairs):
+                if i + 1 >= len(tokens) or is_cmd(tokens[i]) or is_cmd(tokens[i + 1]):
+                    return None
+                x, y = float(tokens[i]), float(tokens[i + 1]); i += 2
+                pts.append((cx + x, cy + y) if rel else (x, y))
+            # Per the SVG grammar an M's extra coordinate pairs are implicit
+            # line-tos, so only the FIRST group after an M keeps the M.
+            emit_op = "L" if op == "M" and groups > 1 else op
+            out.append(emit_op + " ".join(map_abs(x, y) for x, y in pts))
+            cx, cy = pts[-1]
+            if emit_op == "M":
+                sx, sy = cx, cy
+        if groups == 0:
+            return None  # command with no arguments: malformed
+    return " ".join(out)
+
+
+def _box_outline_path(w, h, m, is_ellipse=False, radii=None):
+    """A box-model node's outline as SVG path data through the given affine —
+    for a rectangle / rounded rectangle / ellipse / frame used as a mask,
+    whose geometry derives from the box. Every point (cubic control points
+    included — an affine maps a bezier's control polygon exactly) goes
+    through the transform, so a rotated mask clips where the design rotated
+    it. Mirrors fig/scene.mjs::boxMaskOutline and the plugin lane's
+    boxOutlinePath."""
+    if not (w > 0 and h > 0):
+        return None
+
+    def pt(x, y):
+        return (f"{_round2(m[0][0] * x + m[0][1] * y + m[0][2]):g} "
+                f"{_round2(m[1][0] * x + m[1][1] * y + m[1][2]):g}")
+
+    # Circular-arc-from-cubic constant; the same approximation every
+    # renderer's rounded rect uses.
+    k = 0.5522847498
+    if is_ellipse:
+        rx, ry = w / 2, h / 2
+        return (f"M{pt(rx, 0)} "
+                f"C{pt(rx + k * rx, 0)} {pt(w, ry - k * ry)} {pt(w, ry)} "
+                f"C{pt(w, ry + k * ry)} {pt(rx + k * rx, h)} {pt(rx, h)} "
+                f"C{pt(rx - k * rx, h)} {pt(0, ry + k * ry)} {pt(0, ry)} "
+                f"C{pt(0, ry - k * ry)} {pt(rx - k * rx, 0)} {pt(rx, 0)} Z")
+    cap = min(w, h) / 2
+    r = lambda v: min(max(v or 0, 0), cap)  # noqa: E731 — tiny clamp, mirror of the .fig lane
+    tl, tr, br, bl = (r(radii[i]) for i in range(4)) if radii else (0, 0, 0, 0)
+    return (f"M{pt(tl, 0)} L{pt(w - tr, 0)} "
+            + (f"C{pt(w - tr + k * tr, 0)} {pt(w, tr - k * tr)} {pt(w, tr)} " if tr else "")
+            + f"L{pt(w, h - br)} "
+            + (f"C{pt(w, h - br + k * br)} {pt(w - br + k * br, h)} {pt(w - br, h)} " if br else "")
+            + f"L{pt(bl, h)} "
+            + (f"C{pt(bl - k * bl, h)} {pt(0, h - bl + k * bl)} {pt(0, h - bl)} " if bl else "")
+            + f"L{pt(0, tl)} "
+            + (f"C{pt(0, tl - k * tl)} {pt(tl - k * tl, 0)} {pt(tl, 0)} " if tl else "")
+            + "Z")
+
+
+def _node_local_size(n):
+    """(width, height) of the node's own box: `size` (rides along with
+    geometry=paths, rotation-independent) preferred over the axis-aligned
+    absoluteBoundingBox."""
+    sz = n.get("size")
+    if isinstance(sz, dict) and isinstance(sz.get("x"), (int, float)):
+        return sz["x"], sz.get("y", 0)
+    bb = n.get("absoluteBoundingBox") or {}
+    return bb.get("width", 0), bb.get("height", 0)
+
+
+def _mask_clip_outline(n, parent):
+    """The mask's clip outline in its parent's border-box space: the node's
+    own vector geometry (fillGeometry, else strokeGeometry) transformed into
+    parent space when present, else the box-model outline synthesized from
+    its size and corner radii. What clips is the mask's SHAPE — fill
+    visibility on a mask changes its alpha semantics, not its outline —
+    hence fillGeometry first regardless of paint visibility."""
+    m = _mask_parent_space_transform(n, parent)
+    geometry = n.get("fillGeometry") or n.get("strokeGeometry")
+    if isinstance(geometry, list) and geometry:
+        parts = []
+        for g in geometry:
+            d = g.get("path") if isinstance(g, dict) else None
+            t = _transform_svg_path(d, m) if isinstance(d, str) and d else None
+            if t is None:
+                parts = None  # untransformable → box-outline fallback below
+                break
+            parts.append(t)
+        if parts:
+            return " ".join(parts)
+    w, h = _node_local_size(n)
+    radii = None
+    rect_radii = n.get("rectangleCornerRadii")
+    if isinstance(rect_radii, list) and len(rect_radii) == 4:
+        radii = rect_radii
+    elif isinstance(n.get("cornerRadius"), (int, float)):
+        radii = [n["cornerRadius"]] * 4
+    return _box_outline_path(w, h, m, is_ellipse=n.get("type") == "ELLIPSE", radii=radii)
+
+
+def _assess_mask_fidelity(n):
+    """How faithful an outline clip-path is to this mask's real semantics:
+    'geometric' (outline masks, and alpha masks whose content is one fully
+    opaque solid — the hard outline IS the mask), 'luminance' (pixel
+    brightness modulates alpha; an outline can't carry it), or 'soft_alpha'
+    (image / gradient fill, partial paint or node opacity, or no visible
+    fill: flattening to the outline clips harder than the design)."""
+    mask_type = n.get("maskType")
+    if mask_type == "LUMINANCE":
+        return "luminance"
+    if mask_type == "VECTOR" or n.get("isMaskOutline") is True:
+        return "geometric"
+    fills = n.get("fills") or []
+    paint = next((p for p in fills if isinstance(p, dict) and p.get("visible", True) is not False), None)
+    soft = (paint is None or paint.get("type") != "SOLID"
+            or paint.get("opacity", 1) < 1
+            or (paint.get("color") or {}).get("a", 1) < 1
+            or n.get("opacity", 1) < 1)
+    return "soft_alpha" if soft else "geometric"
+
+
+def _begin_mask_scope(mask, parent, ctx):
+    """Lower one sibling mask into its synthetic clip wrapper, or return None
+    (with a diagnostic) when no lowering exists — the siblings then render
+    unmasked rather than occluded. The wrapper spans the parent from (0, 0),
+    so the outline (already in parent space) clips exactly where the design
+    put the mask and the masked siblings keep their coordinates."""
+    def diag(code, kind, message):
+        ctx.diagnostics.append({"severity": "warning", "code": code, "kind": kind,
+                                "message": message, "path": mask.get("id", "")})
+
+    if is_auto_layout(parent):
+        # The wrapper is absolutely placed, which would yank flowed siblings
+        # out of the flex pass. No lowering — but never paint the mask.
+        diag("mask-approximated", "unsupported_property",
+             f"Mask \"{mask.get('name', '')}\" inside an auto-layout parent has no "
+             "lowering; siblings flow unmasked.")
+        return None
+    d = _mask_clip_outline(mask, parent)
+    if not d:
+        diag("mask-approximated", "unsupported_property",
+             f"Mask \"{mask.get('name', '')}\" outline unresolvable; siblings render unmasked.")
+        return None
+    # An outline clip is exact for an outline (VECTOR) mask and for an alpha
+    # mask whose content is one opaque solid. Anything softer flattens to the
+    # hard outline — say so: a mask that clips harder than the design intended
+    # looks like a cropping bug, not a dropped property.
+    fidelity = _assess_mask_fidelity(mask)
+    if fidelity == "luminance":
+        diag("mask-luminance-approximated", "unsupported_property",
+             f"Luminance mask \"{mask.get('name', '')}\" flattened to its outline clip; "
+             "pixel-brightness alpha is not reproduced.")
+    elif fidelity == "soft_alpha":
+        diag("complex-mask-flattened", "fallback_used",
+             f"Alpha mask \"{mask.get('name', '')}\" flattened to its outline; "
+             "soft or partial alpha is not reproduced.")
+    pw, ph = _node_local_size(parent)
+    return {
+        "type": "frame",
+        "name": f"{mask.get('name') or 'mask'} (mask scope)",
+        # Synthetic, so it must not collide with any real node in tools that
+        # join on node id, and must never be name-guessed into a widget.
+        "figma_node_id": f"{mask.get('id', '')}/mask-scope",
+        "audio_widget": "none",
+        "style": {"width": round(pw), "height": round(ph), "position": "absolute",
+                  "left": 0, "top": 0, "clip_path": f'path("{d}")'},
+        "children": [],
+    }
+
+
 def walk(n, parent, z, ctx, inside_widget=False):
     ntype = n.get("type")
     # Exhaustive dispatch: a None type means the node emits nothing (SLICE,
@@ -1370,12 +1629,36 @@ def walk(n, parent, z, ctx, inside_widget=False):
             if variants:
                 out["figma"]["variant_properties"] = variants
     if not captured:  # illustration frames drop their children (rasterized whole)
+        # A hidden child never emits — and a hidden MASK neither paints nor
+        # clips, so the visibility filter is right for masks too.
         kids = [c for c in n.get("children", []) if c.get("visible", True) is not False]
         if kids:
-            # A dispatched skip (SLICE, editor families) returns None and must
-            # not leave a hole in the child list.
-            walked = [walk(c, n, i, ctx, in_widget) for i, c in enumerate(kids)]
-            walked = [w for w in walked if w is not None]
+            # Walk honoring Figma's `isMask` flag: siblings painted after a
+            # mask move into its synthetic clip wrapper; siblings BELOW the
+            # mask stay outside it — exactly Figma's scope — and a second
+            # mask opens a second wrapper inside the first, so stacked masks
+            # intersect the way nested clips do. A dispatched skip (SLICE,
+            # editor families) returns None and must not leave a hole.
+            walked = []
+            scopes = []   # (wrapper, holder) — pruned when they end up empty
+            target = walked
+            for i, c in enumerate(kids):
+                if c.get("isMask") is True:
+                    wrapper = _begin_mask_scope(c, n, ctx)
+                    if wrapper is not None:
+                        target.append(wrapper)
+                        scopes.append((wrapper, target))
+                        target = wrapper["children"]
+                    continue
+                w = walk(c, n, i, ctx, in_widget)
+                if w is not None:
+                    target.append(w)
+            # A scope with nothing above the mask paints nothing. Deepest-
+            # first, so a scope left holding only an emptied deeper scope
+            # collapses too.
+            for wrapper, holder in reversed(scopes):
+                if not wrapper["children"]:
+                    holder.remove(wrapper)
             if walked:
                 out["children"] = walked
     return out

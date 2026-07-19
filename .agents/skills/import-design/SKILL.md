@@ -404,23 +404,39 @@ noise card ran 19px past its 235px symbol and buried the transport's step row).
 
 **Gotcha - a `mask: true` child paints NOWHERE; materializing it as content
 occludes everything painted after it.** Figma's mask layer clips the siblings
-painted ABOVE it in the same parent and never renders its own fill. The `.fig`
-decoder lowers this by moving the masked siblings into a synthetic
+painted ABOVE it in the same parent and never renders its own fill. ALL THREE
+Figma lanes now reconstruct this sibling-mask structure with one wrapper
+contract: the masked siblings move into a synthetic
 `<mask name> (mask scope)` wrapper (spans the parent, `audio_widget: 'none'`,
-node_id `<maskKey>/mask-scope`) whose `style.clip_path = path("<d>")` carries
-the mask outline in PARENT space — `geometryToClipPath` (paths.mjs) skips the
-0,0-viewBox normalization `geometryToPath` does because a CSS clip-path is
-consumed in the clipped view's border-box space, and box-model masks
-(rect/ellipse, no geometry blobs) get a synthesized outline. The chain
-downstream already existed end-to-end (`parse_ir_style('clipPath')` →
-codegen `setClipPath` → `SkPath::FromSVGString` clip); only the extractor
-never emitted it. Siblings BELOW the mask stay outside the wrapper (Figma's
-scope), soft/image alpha masks and auto-layout parents degrade with a
-`mask-approximated` warning — but the mask itself is never painted, in any
-branch. Symptom when broken: a "gray" element whose accent color is right
-there in the data — the selected mixer channel's red tab read gray because the
-master's opaque `Bg PAnel` mask (invisible in Figma) painted over it, and
-every channel body sat one gray lighter than the design.
+node_id `<maskId>/mask-scope`) whose `style.clip_path = path("<d>")` carries
+the mask outline in PARENT space. Per lane: the `.fig` decoder
+(`scene.mjs::walkChildren` + `maskClipOutline`/`boxMaskOutline`;
+`geometryToClipPath` in paths.mjs skips the 0,0-viewBox normalization
+`geometryToPath` does because a CSS clip-path is consumed in the clipped
+view's border-box space), the plugin (`extract.ts::beginMaskScope` over the
+pure helpers in `extract-pure.ts` — `maskClipOutline` transforms
+`fillGeometry` into parent space via inv(parent.absoluteTransform) ∘
+node.absoluteTransform, group-proof; box-model masks get a synthesized
+outline), and REST (`figma_rest_export.py::_begin_mask_scope`, same helpers
+in Python; axis-aligned masks translate by absoluteBoundingBox deltas, robust
+to REST's GROUP-parent coordinate quirks). The chain downstream already
+existed end-to-end (`parse_ir_style('clipPath')` → codegen `setClipPath` →
+`SkPath::FromSVGString` clip). Siblings BELOW the mask stay outside the
+wrapper (Figma's scope); a second mask opens a nested wrapper so stacked
+masks intersect. Fidelity is diagnosed, never silent: an outline clip is
+exact for VECTOR (outline) masks and opaque-solid alpha masks; LUMINANCE
+masks keep the best-effort outline clip plus a `mask-luminance-approximated`
+warning, soft/partial alpha masks (image/gradient fill, partial opacity) get
+`complex-mask-flattened` (plugin/REST; the `.fig` lane keeps its original
+`mask-approximated` code), and unresolvable outlines / masks inside
+auto-layout parents degrade with `mask-approximated` — but the mask itself is
+never painted, in any branch of any lane. Arcs in vector mask geometry don't
+survive a general affine, so an `A` command falls back to the box outline
+(approximate clip beats no clip). Symptom when broken: a "gray" element whose
+accent color is right there in the data — the selected mixer channel's red
+tab read gray because the master's opaque `Bg PAnel` mask (invisible in
+Figma) painted over it, and every channel body sat one gray lighter than the
+design.
 
 **Gotcha - a Figma slider stores a value-driven fill position that can detach
 from the thumb.** A slider component (track + progress fill + round thumb) keeps

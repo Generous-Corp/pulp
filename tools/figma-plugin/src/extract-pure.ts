@@ -771,6 +771,296 @@ export function extractBoundVariableBindings(
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Sibling-mask lowering (audit item 9).
+//
+// A Figma child with `isMask: true` paints NOWHERE — its outline CLIPS the
+// siblings painted after it (above it in paint order) in the same parent,
+// until the next mask or the parent's end. The walker (extract.ts) moves
+// those siblings into a synthetic wrapper that spans the parent and carries
+// the mask's outline as a CSS clip-path — the consumer contract the engine
+// already has end-to-end (IRStyle::clip_path → setClipPath →
+// SkPath::FromSVGString), and the exact wrapper shape the .fig decoder emits
+// (fig/scene.mjs::walkChildren). The helpers here are the pure parts:
+// parent-space transform resolution, outline synthesis, and fidelity
+// assessment. Kept in lockstep with the REST port
+// (tools/import-design/figma_rest_export.py).
+
+/// 2×3 affine row-major matrix, the Plugin API `Transform` shape:
+/// [[m00, m01, m02], [m10, m11, m12]] mapping (x, y) → (m00x + m01y + m02,
+/// m10x + m11y + m12).
+export type AffineTransform = readonly [
+  readonly [number, number, number],
+  readonly [number, number, number],
+];
+
+const IDENTITY_TRANSFORM: AffineTransform = [[1, 0, 0], [0, 1, 0]];
+
+function isAffine(t: unknown): t is AffineTransform {
+  return (
+    Array.isArray(t) && t.length === 2 &&
+    t.every((row) => Array.isArray(row) && row.length === 3 &&
+      row.every((v: unknown) => typeof v === "number" && isFinite(v)))
+  );
+}
+
+/// a ∘ b — apply b first, then a.
+export function composeAffine(a: AffineTransform, b: AffineTransform): AffineTransform {
+  return [
+    [
+      a[0][0] * b[0][0] + a[0][1] * b[1][0],
+      a[0][0] * b[0][1] + a[0][1] * b[1][1],
+      a[0][0] * b[0][2] + a[0][1] * b[1][2] + a[0][2],
+    ],
+    [
+      a[1][0] * b[0][0] + a[1][1] * b[1][0],
+      a[1][0] * b[0][1] + a[1][1] * b[1][1],
+      a[1][0] * b[0][2] + a[1][1] * b[1][2] + a[1][2],
+    ],
+  ];
+}
+
+/// Inverse of an affine transform, or null when degenerate (zero-area scale).
+export function invertAffine(m: AffineTransform): AffineTransform | null {
+  const det = m[0][0] * m[1][1] - m[0][1] * m[1][0];
+  if (!isFinite(det) || Math.abs(det) < 1e-12) return null;
+  const a = m[1][1] / det;
+  const b = -m[0][1] / det;
+  const c = -m[1][0] / det;
+  const d = m[0][0] / det;
+  return [
+    [a, b, -(a * m[0][2] + b * m[1][2])],
+    [c, d, -(c * m[0][2] + d * m[1][2])],
+  ];
+}
+
+/// The transform that places a mask node's LOCAL geometry in its parent's
+/// border-box space — the space a CSS clip-path on a wrapper spanning the
+/// parent is consumed in. Preference order:
+///   1. inv(parent.absoluteTransform) ∘ node.absoluteTransform — exact and
+///      group-proof (relativeTransform is relative to the nearest non-group
+///      container, NOT the direct parent, so it is wrong inside a GROUP).
+///   2. node.relativeTransform — right whenever the parent is that container.
+///   3. Pure translation from absoluteBoundingBox deltas — loses rotation but
+///      still lands the clip at the right offset.
+export function maskParentSpaceTransform(
+  node: SceneNode,
+  parent: SceneNode | null,
+): AffineTransform {
+  const abs = (n: SceneNode | null): AffineTransform | null => {
+    if (!n) return null;
+    const t = (n as SceneNode & { absoluteTransform?: unknown }).absoluteTransform;
+    return isAffine(t) ? t : null;
+  };
+  const nodeAbs = abs(node);
+  const parentAbs = abs(parent);
+  if (nodeAbs && parentAbs) {
+    const inv = invertAffine(parentAbs);
+    if (inv) return composeAffine(inv, nodeAbs);
+  }
+  const rel = (node as SceneNode & { relativeTransform?: unknown }).relativeTransform;
+  if (isAffine(rel)) return rel;
+  const nb = "absoluteBoundingBox" in node ? node.absoluteBoundingBox : null;
+  const pb = parent && "absoluteBoundingBox" in parent
+    ? (parent as SceneNode & { absoluteBoundingBox: Rect | null }).absoluteBoundingBox
+    : null;
+  if (nb && pb) return [[1, 0, nb.x - pb.x], [0, 1, nb.y - pb.y]];
+  return IDENTITY_TRANSFORM;
+}
+
+function roundCoord(v: number): number {
+  return Math.round(v * 100) / 100;
+}
+
+/// Apply an affine transform to SVG path data. Handles the command set Figma
+/// geometry uses (M, L, C, Q, Z) plus H/V/S/T and the relative forms
+/// defensively; H/V become L because a horizontal segment stops being
+/// horizontal under rotation. Arcs (A/a) don't survive a general affine
+/// without re-deriving axes, so they return null and the caller falls back to
+/// the box outline — an approximate clip region beats dropping the clip.
+export function transformSvgPathData(d: string, m: AffineTransform): string | null {
+  const tokens = d.match(/[MmLlHhVvCcSsQqTtAaZz]|-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/g);
+  if (!tokens || tokens.length === 0) return null;
+  const out: string[] = [];
+  // Current absolute point, tracked so H/V can be rewritten as L.
+  let cx = 0, cy = 0;       // current point
+  let sx = 0, sy = 0;       // subpath start (for Z)
+  let i = 0;
+  const num = (): number | null => {
+    if (i >= tokens.length || /^[A-Za-z]$/.test(tokens[i])) return null;
+    return parseFloat(tokens[i++]);
+  };
+  const mapAbs = (x: number, y: number): string =>
+    `${roundCoord(m[0][0] * x + m[0][1] * y + m[0][2])} ${roundCoord(m[1][0] * x + m[1][1] * y + m[1][2])}`;
+  while (i < tokens.length) {
+    const cmd = tokens[i++];
+    if (!/^[A-Za-z]$/.test(cmd)) return null; // stray number: malformed data
+    const rel = cmd >= "a" && cmd <= "z";
+    const op = cmd.toUpperCase();
+    if (op === "A") return null;
+    if (op === "Z") { out.push("Z"); cx = sx; cy = sy; continue; }
+    // Consume coordinate groups until the next command letter; every SVG
+    // command may carry repeated argument groups.
+    let groups = 0;
+    for (;;) {
+      const peek = i < tokens.length ? tokens[i] : null;
+      if (peek === null || /^[A-Za-z]$/.test(peek)) {
+        if (groups === 0) return null; // command with no arguments: malformed
+        break;
+      }
+      groups++;
+      // Resolve this group to absolute endpoint(s), then transform.
+      if (op === "H" || op === "V") {
+        const v = num();
+        if (v === null) return null;
+        const x = op === "H" ? (rel ? cx + v : v) : cx;
+        const y = op === "V" ? (rel ? cy + v : v) : cy;
+        out.push(`L${mapAbs(x, y)}`);
+        cx = x; cy = y;
+        continue;
+      }
+      const pairs = op === "C" ? 3 : op === "S" || op === "Q" ? 2 : 1;
+      const pts: Array<[number, number]> = [];
+      for (let p = 0; p < pairs; p++) {
+        const x = num(); const y = num();
+        if (x === null || y === null) return null;
+        pts.push(rel ? [cx + x, cy + y] : [x, y]);
+      }
+      // Per the SVG grammar an M's extra coordinate pairs are implicit L
+      // commands, so only the FIRST group after an M keeps the M.
+      const emitOp = op === "M" && groups > 1 ? "L" : op;
+      const emitted = pts.map(([x, y]) => mapAbs(x, y)).join(" ");
+      out.push(`${emitOp}${emitted}`);
+      const [ex, ey] = pts[pts.length - 1];
+      cx = ex; cy = ey;
+      if (emitOp === "M") { sx = ex; sy = ey; }
+    }
+  }
+  return out.join(" ");
+}
+
+/// Per-corner radii of a box-model node, clamped later by the outline
+/// builder. Returns null when the node carries no numeric radii (a plain
+/// sharp rectangle / frame).
+function boxCornerRadii(node: SceneNode): { tl: number; tr: number; br: number; bl: number } {
+  const n = node as SceneNode & {
+    cornerRadius?: number | symbol;
+    topLeftRadius?: number; topRightRadius?: number;
+    bottomRightRadius?: number; bottomLeftRadius?: number;
+  };
+  const uniform = typeof n.cornerRadius === "number" ? n.cornerRadius : 0;
+  return {
+    tl: typeof n.topLeftRadius === "number" ? n.topLeftRadius : uniform,
+    tr: typeof n.topRightRadius === "number" ? n.topRightRadius : uniform,
+    br: typeof n.bottomRightRadius === "number" ? n.bottomRightRadius : uniform,
+    bl: typeof n.bottomLeftRadius === "number" ? n.bottomLeftRadius : uniform,
+  };
+}
+
+/// A box-model node's outline as SVG path data through the given transform —
+/// for a rectangle / rounded rectangle / ellipse / frame used as a mask,
+/// whose geometry derives from the box. Every point (cubic control points
+/// included — an affine maps a bezier's control polygon exactly) goes through
+/// the transform, so a rotated mask clips where the design rotated it.
+/// Mirrors fig/scene.mjs::boxMaskOutline.
+export function boxOutlinePath(
+  width: number,
+  height: number,
+  m: AffineTransform,
+  opts: { isEllipse?: boolean; radii?: { tl: number; tr: number; br: number; bl: number } } = {},
+): string | null {
+  const w = width, h = height;
+  if (!(w > 0) || !(h > 0)) return null;
+  const pt = (x: number, y: number): string =>
+    `${roundCoord(m[0][0] * x + m[0][1] * y + m[0][2])} ${roundCoord(m[1][0] * x + m[1][1] * y + m[1][2])}`;
+  // Circular-arc-from-cubic constant; the same approximation every renderer's
+  // rounded rect uses, and exact enough that no display resolves the error.
+  const k = 0.5522847498;
+  if (opts.isEllipse) {
+    const rx = w / 2, ry = h / 2;
+    return `M${pt(rx, 0)} `
+      + `C${pt(rx + k * rx, 0)} ${pt(w, ry - k * ry)} ${pt(w, ry)} `
+      + `C${pt(w, ry + k * ry)} ${pt(rx + k * rx, h)} ${pt(rx, h)} `
+      + `C${pt(rx - k * rx, h)} ${pt(0, ry + k * ry)} ${pt(0, ry)} `
+      + `C${pt(0, ry - k * ry)} ${pt(rx - k * rx, 0)} ${pt(rx, 0)} Z`;
+  }
+  const cap = Math.min(w, h) / 2;
+  const r = (v: number): number => Math.min(Math.max(v || 0, 0), cap);
+  const tl = r(opts.radii?.tl ?? 0);
+  const tr = r(opts.radii?.tr ?? 0);
+  const br = r(opts.radii?.br ?? 0);
+  const bl = r(opts.radii?.bl ?? 0);
+  return `M${pt(tl, 0)} L${pt(w - tr, 0)} `
+    + (tr ? `C${pt(w - tr + k * tr, 0)} ${pt(w, tr - k * tr)} ${pt(w, tr)} ` : "")
+    + `L${pt(w, h - br)} `
+    + (br ? `C${pt(w, h - br + k * br)} ${pt(w - br + k * br, h)} ${pt(w - br, h)} ` : "")
+    + `L${pt(bl, h)} `
+    + (bl ? `C${pt(bl - k * bl, h)} ${pt(0, h - bl + k * bl)} ${pt(0, h - bl)} ` : "")
+    + `L${pt(0, tl)} `
+    + (tl ? `C${pt(0, tl - k * tl)} ${pt(tl - k * tl, 0)} ${pt(tl, 0)} ` : "")
+    + "Z";
+}
+
+/// The mask's clip outline in its parent's border-box space: the node's own
+/// vector geometry (fillGeometry, else strokeGeometry) transformed into
+/// parent space when it carries one, else the box-model outline synthesized
+/// from its size and corner radii (a rectangle or ellipse used as a mask).
+/// What clips is the mask's SHAPE — fill visibility on a mask changes its
+/// alpha semantics, not its outline — hence fillGeometry first regardless of
+/// paint visibility. Mirrors fig/scene.mjs::maskClipOutline.
+export function maskClipOutline(node: SceneNode, parent: SceneNode | null): string | null {
+  const m = maskParentSpaceTransform(node, parent);
+  const geo = node as SceneNode & {
+    fillGeometry?: readonly { data: string }[];
+    strokeGeometry?: readonly { data: string }[];
+  };
+  const paths = (geo.fillGeometry && geo.fillGeometry.length ? geo.fillGeometry : undefined)
+    ?? (geo.strokeGeometry && geo.strokeGeometry.length ? geo.strokeGeometry : undefined);
+  if (paths) {
+    const parts: string[] = [];
+    let ok = true;
+    for (const p of paths) {
+      if (typeof p.data !== "string" || !p.data) { ok = false; break; }
+      const t = transformSvgPathData(p.data, m);
+      if (t === null) { ok = false; break; }
+      parts.push(t);
+    }
+    // An untransformable path falls through to the box outline: an
+    // approximate clip region beats painting the mask or dropping the clip.
+    if (ok && parts.length) return parts.join(" ");
+  }
+  const w = "width" in node ? node.width : 0;
+  const h = "height" in node ? node.height : 0;
+  return boxOutlinePath(w, h, m, {
+    isEllipse: node.type === "ELLIPSE",
+    radii: boxCornerRadii(node),
+  });
+}
+
+/// How faithful an outline clip-path is to this mask's real semantics.
+///   geometric — outline (VECTOR) masks, and ALPHA masks whose content is one
+///               fully opaque solid: the hard outline IS the mask.
+///   luminance — pixel brightness modulates alpha; an outline can't carry it.
+///   soft_alpha — ALPHA mask with soft or partial coverage (image / gradient
+///               fill, partial paint or node opacity, or no visible fill):
+///               flattening to the outline clips harder than the design.
+export type MaskFidelity = "geometric" | "luminance" | "soft_alpha";
+
+export function assessMaskFidelity(node: SceneNode): MaskFidelity {
+  const n = node as SceneNode & { maskType?: string; opacity?: number; fills?: unknown };
+  if (n.maskType === "LUMINANCE") return "luminance";
+  if (n.maskType === "VECTOR") return "geometric";
+  // ALPHA (or a typings vintage without maskType): exact only when the mask's
+  // content is one fully opaque solid at full node opacity.
+  const fills = Array.isArray(n.fills) ? (n.fills as Paint[]) : [];
+  const paint = fills.find((p) => p && p.visible !== false);
+  const soft =
+    !paint || paint.type !== "SOLID" ||
+    (paint.opacity ?? 1) < 1 ||
+    (typeof n.opacity === "number" && n.opacity < 1);
+  return soft ? "soft_alpha" : "geometric";
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Library recognition fallback — name-based heuristic when the
 // component_set_key match doesn't hit (e.g. unpublished local
 // components, or designs that use the audio widget visual without

@@ -81,6 +81,12 @@ export interface ExtractedFigmaNode {
   library_widget_kind?: AudioWidgetKind;
   library_version?: string;
 
+  // Explicit widget opt-out for synthetic nodes (the mask-scope wrapper).
+  // Serialized as the envelope's `audio_widget: "none"` — the opt-out
+  // parse_ir_audio_widget honors, so the C++ name heuristic never guesses a
+  // widget out of a wrapper named after its mask.
+  audio_widget?: "none";
+
   // Structured audio-widget properties. Populated when a Pulp library widget is
   // recognized; carried into the JSON envelope at the node root so
   // design_import.cpp::parse_ir_node maps them onto IRNode.audio_label /
@@ -155,6 +161,10 @@ export interface ExtractedStyle {
   box_shadow?: string;
   filter?: string;
   backdrop_filter?: string;
+  // CSS clip-path (`path("<d>")`). Emitted on the synthetic mask-scope
+  // wrapper a sibling mask lowers to; parse_ir_style reads it (clipPath or
+  // clip_path) and codegen lowers to setClipPath → SkPath::FromSVGString.
+  clip_path?: string;
   font_family?: string;
   font_size?: number;
   font_weight?: number;
