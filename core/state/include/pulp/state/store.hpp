@@ -6,6 +6,7 @@
 #include <array>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -213,6 +214,23 @@ public:
     /// **Main-thread only** — see @c begin_gesture().
     void end_gesture(ParamID id);
 
+    /// Close every gesture still open and report each end to the host.
+    ///
+    /// The store tracks which parameters have an open gesture (a
+    /// @c begin_gesture with no matching @c end_gesture) so that begin/end are
+    /// balanced 1:1 toward the host — a second @c begin_gesture on an
+    /// already-open parameter is suppressed, and an @c end_gesture on a
+    /// parameter that was never opened is a no-op. An editor torn down mid-drag
+    /// (the user closes the plugin window without lifting the mouse) would
+    /// otherwise leave the host's automation record open forever; a format
+    /// adapter calls this on editor teardown to release everything still held.
+    /// **Main-thread only** — see @c begin_gesture().
+    void release_open_gestures();
+
+    /// Number of parameters with an open gesture (begin without a matching
+    /// end). Observability for tests and adapters.
+    std::size_t open_gesture_count() const noexcept { return open_gestures_.size(); }
+
     /// Run a complete parameter gesture (begin_gesture → value writes →
     /// end_gesture) on the host's main thread, from ANY thread.
     ///
@@ -368,6 +386,12 @@ private:
     std::function<void(ParamID)> on_begin_gesture_;
     std::function<void(ParamID)> on_end_gesture_;
 
+    // Parameters with an open gesture (begin without a matching end). Keeps
+    // begin/end balanced 1:1 toward the host and lets release_open_gestures()
+    // close everything still held on editor teardown. Main-thread-only, like
+    // the gesture entry points that mutate it.
+    std::unordered_set<ParamID> open_gestures_;
+
     // Off-main-thread gesture-misuse counter. Bumped (relaxed) by
     // begin_gesture/end_gesture when a MainThreadDispatcher backend is live but
     // the caller is not on the main thread. Observability only — never blocks
@@ -384,6 +408,11 @@ public:
     {
         on_begin_gesture_ = std::move(begin_fn);
         on_end_gesture_ = std::move(end_fn);
+        // A new callback set is a new host/editor session: any gesture tracked
+        // against the previous callbacks is stale. Reset so a re-opened editor
+        // (e.g. AU clears callbacks on teardown, then re-installs on reopen)
+        // does not have a lingering entry suppress a fresh begin_gesture.
+        open_gestures_.clear();
     }
 };
 

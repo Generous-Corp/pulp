@@ -665,6 +665,9 @@ struct PulpPlugViewTestAccess {
     static bool owner_is_alive(const PulpPlugView& view) {
         return view.bridge_.owner_is_alive();
     }
+    static pulp::state::StateStore& store(PulpPlugView& view) {
+        return view.store_;
+    }
 };
 } // namespace pulp::format::vst3
 
@@ -747,6 +750,85 @@ TEST_CASE("VST3 retained editor observes processor-owner teardown",
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
     REQUIRE_FALSE(pulp::format::vst3::PulpPlugViewTestAccess::owner_is_alive(*view));
     view->release();
+}
+
+namespace {
+// Records every host begin/end-edit so a test can prove they stay balanced.
+class GestureEditRecorder final : public Steinberg::Vst::IComponentHandler {
+public:
+    Steinberg::tresult PLUGIN_API beginEdit(Steinberg::Vst::ParamID id) override {
+        begins.push_back(id);
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API performEdit(Steinberg::Vst::ParamID,
+                                              Steinberg::Vst::ParamValue) override {
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID id) override {
+        ends.push_back(id);
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32) override {
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid,
+                                                 void** obj) override {
+        if (Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::Vst::IComponentHandler::iid) ||
+            Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::FUnknown::iid)) {
+            *obj = static_cast<Steinberg::Vst::IComponentHandler*>(this);
+            return Steinberg::kResultTrue;
+        }
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override { return 1; }
+    Steinberg::uint32 PLUGIN_API release() override { return 1; }
+
+    std::vector<Steinberg::Vst::ParamID> begins;
+    std::vector<Steinberg::Vst::ParamID> ends;
+};
+}  // namespace
+
+TEST_CASE("VST3 editor removed mid-gesture releases the open beginEdit",
+          "[vst3][editor][gesture][lifecycle]") {
+    // A user drags a knob (beginEdit) and closes the plugin window without
+    // lifting the mouse. The editor teardown must emit the matching endEdit,
+    // or the host's automation record stays latched open forever.
+    ScopedEnv disable_editor("PULP_DISABLE_PLUGIN_EDITOR");
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+    disable_editor.unset();
+    headless.unset();
+    test_mode.unset();
+    ci.unset();
+
+    reset_test_processor();
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    GestureEditRecorder recorder;
+    REQUIRE(processor.setComponentHandler(&recorder) == Steinberg::kResultOk);
+
+    auto* raw_view = processor.createView(Steinberg::Vst::ViewType::kEditor);
+    REQUIRE(raw_view != nullptr);
+    auto* view = static_cast<pulp::format::vst3::PulpPlugView*>(raw_view);
+    auto& store = pulp::format::vst3::PulpPlugViewTestAccess::store(*view);
+
+    // Mouse-down on the knob: one beginEdit, no endEdit yet.
+    store.begin_gesture(kGainParamId);
+    REQUIRE(recorder.begins == std::vector<Steinberg::Vst::ParamID>{kGainParamId});
+    REQUIRE(recorder.ends.empty());
+    REQUIRE(store.open_gesture_count() == 1);
+
+    // Window closed before mouse-up: teardown must balance the gesture.
+    REQUIRE(view->removed() == Steinberg::kResultOk);
+    REQUIRE(recorder.ends == std::vector<Steinberg::Vst::ParamID>{kGainParamId});
+    REQUIRE(store.open_gesture_count() == 0);
+
+    view->release();
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
 TEST_CASE("VST3 survives repeated initialize activate process deactivate terminate cycles",

@@ -54,6 +54,22 @@ the plugin would leak host-window-dependent resources. `ViewBridge`
 guarantees balance **only when the adapter honors the two-step
 protocol** (`open()` then `notify_attached()`).
 
+### Release open parameter gestures on editor teardown
+
+An editor closed **mid-drag** (the user closes the plugin window without
+lifting the mouse off a knob) leaves a `begin_gesture` with no matching
+`end_gesture`, so the host's automation record stays latched open forever
+(VST3 `beginEdit` with no `endEdit`, and the equivalent for AU/CLAP). The
+adapter's editor-teardown path (VST3 `IPlugView::removed()`, an AU view
+controller's teardown) must call `StateStore::release_open_gestures()`
+**before** it tears the view down, so every host begin-edit is balanced.
+The store tracks open gestures itself and keeps begin/end 1:1 (a duplicate
+begin is suppressed, a stray end is a no-op); it also resets that tracking
+whenever `set_gesture_callbacks()` is reinstalled, so an editor that clears
+its callbacks on close and re-installs them on reopen starts each session
+clean. When you add a new format's editor lifecycle, wire this release call
+in its teardown or the same latch bug reappears per-format.
+
 ### Per-format attach point
 
 | Format | `open()` is called here | `notify_attached()` is called here |

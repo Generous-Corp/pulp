@@ -116,6 +116,11 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
 }
 
 tresult PLUGIN_API PulpPlugView::removed() {
+    // Close the window mid-drag (mouse never lifted) and the host would keep
+    // the automation record open forever. Release everything still held before
+    // tearing the editor down, so every beginEdit is balanced by an endEdit.
+    store_.release_open_gestures();
+
     if (editor_host_) {
         editor_host_->detach();
         editor_host_.reset();

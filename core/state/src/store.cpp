@@ -496,6 +496,10 @@ void StateStore::begin_gesture(ParamID id) {
         assert(false && "StateStore::begin_gesture called off the host main "
                         "thread; use run_gesture_on_main()");
     }
+    // Balance begin/end 1:1 toward the host: a second begin on an
+    // already-open parameter must not emit a second host begin-edit (which the
+    // matching end would then leave latched open).
+    if (!open_gestures_.insert(id).second) return;
     if (on_begin_gesture_) on_begin_gesture_(id);
 }
 
@@ -505,7 +509,26 @@ void StateStore::end_gesture(ParamID id) {
         assert(false && "StateStore::end_gesture called off the host main "
                         "thread; use run_gesture_on_main()");
     }
+    // Only report an end for a gesture we actually opened — a stray end (or a
+    // duplicate) must not emit an unbalanced host end-edit.
+    if (open_gestures_.erase(id) == 0) return;
     if (on_end_gesture_) on_end_gesture_(id);
+}
+
+void StateStore::release_open_gestures() {
+    if (gesture_off_main_thread()) {
+        gesture_thread_violations_.fetch_add(1, std::memory_order_relaxed);
+        assert(false && "StateStore::release_open_gestures called off the host "
+                        "main thread; call it from the editor-teardown path");
+    }
+    if (open_gestures_.empty()) return;
+    // Move out first: firing the host end-edit must not observe a
+    // half-cleared set, and callbacks cannot re-enter a live iteration.
+    const auto held = std::move(open_gestures_);
+    open_gestures_.clear();
+    if (on_end_gesture_) {
+        for (const ParamID id : held) on_end_gesture_(id);
+    }
 }
 
 void StateStore::run_gesture_on_main(std::function<void()> gesture) {
