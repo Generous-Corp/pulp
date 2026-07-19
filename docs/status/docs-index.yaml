@@ -299,6 +299,11 @@ docs:
     kind: guide
     summary: Shared sampler page cache, bounded decode workers, scheduling, starvation, and multi-voice playback contracts
 
+  - slug: sampler-playback
+    path: guides/sampler-playback.md
+    kind: guide
+    summary: Decision guide for sequential streaming, shared paged playback, resident publication, instruments, tempo matching, and slice analysis
+
   - slug: streaming-sample-source
     path: guides/streaming-sample-source.md
     kind: guide
@@ -308,6 +313,10 @@ docs:
     path: examples/pulp-sampler.md
     kind: guide
     summary: PulpSampler - eight-voice sampler with bounded streaming, loops, interpolation, mips, and synthetic heritage processing
+  - slug: example-pulp-tempo-sampler
+    path: examples/pulp-tempo-sampler.md
+    kind: guide
+    summary: PulpTempoSampler - offline tempo matching with matched-generation resident sample and slice publication
   - slug: example-pulp-pluck
     path: examples/pulp-pluck.md
     kind: guide

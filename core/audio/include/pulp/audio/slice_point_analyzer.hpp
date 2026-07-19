@@ -51,6 +51,24 @@ struct SlicePointAnalysisResult {
     std::vector<SliceMarkerClassification> marker_classifications;
 };
 
+enum class SliceCandidateSelection : std::uint8_t {
+    TimelineOrder,
+    StrongestConfidence,
+};
+
+enum class SliceSnapPolicy : std::uint8_t {
+    NearZero,
+    SignTransition,
+};
+
+struct SliceSelectionOptions {
+    // Includes the origin region. Zero leaves the region count unlimited.
+    std::uint32_t max_regions = 0;
+    SliceCandidateSelection candidate_selection =
+        SliceCandidateSelection::TimelineOrder;
+    SliceSnapPolicy snap_policy = SliceSnapPolicy::NearZero;
+};
+
 class SlicePointAnalyzer {
 public:
     // Off-real-time/background analysis. Merges built-in/package onsets with
@@ -58,6 +76,10 @@ public:
     SlicePointAnalysisResult analyze(BufferView<const float> source,
                                      std::span<const OnsetMarker> onsets,
                                      const SlicePointAnalysisConfig& config) const;
+    SlicePointAnalysisResult analyze(BufferView<const float> source,
+                                     std::span<const OnsetMarker> onsets,
+                                     const SlicePointAnalysisConfig& config,
+                                     const SliceSelectionOptions& options) const;
 };
 
 }  // namespace pulp::audio

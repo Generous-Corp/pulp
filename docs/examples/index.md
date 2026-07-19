@@ -2,7 +2,7 @@
 
 This page is the curated gallery for the documented core examples. The broader
 `examples/` tree also contains subsystem demos and platform-specific proof
-projects such as PulpTempoSampler, MPE, WebView, Three.js, SDF, Stream,
+projects such as MPE, WebView, Three.js, SDF, Stream,
 Plugin Host, Audio Inspector, and iOS AUv3 examples.
 
 ## Gallery
@@ -27,6 +27,7 @@ These examples exist to test and validate specific subsystems of the framework.
 | [PulpDrums](example-pulp-drums.html) | Generative drum sequencer with MIDI output | CLAP |
 | [PulpSynth](example-pulp-synth.html) | Macro oscillator synth using the signal DSP library | CLAP |
 | [PulpSampler](example-pulp-sampler.html) | Eight-voice sampler with bounded streaming, loops, interpolation, mips, and synthetic heritage processing | CLAP |
+| [PulpTempoSampler](pulp-tempo-sampler.md) | Offline tempo matching with matched-generation resident sample and slice publication | VST3, AU v2, CLAP, Standalone |
 | [PulpPluck](example-pulp-pluck.html) | Karplus-Strong plucked string synth | VST3, AU v2, CLAP |
 
 ### Experimental

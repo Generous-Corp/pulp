@@ -40,6 +40,9 @@ struct SampleVoiceRenderResult {
 
 class SampleVoiceRenderer {
 public:
+    // This adapter owns pool resolution, optional envelope integration, steal
+    // fades, and accumulate/overwrite behavior. Use LoopRenderer for new
+    // cursor-owned rich-loop playback.
     // RT-safe when state.sample's borrowed store remains valid, destination and
     // channel_scratch are caller-owned, and any envelope has been prepared.
     // If provided, the envelope must be per-voice state, not shared across

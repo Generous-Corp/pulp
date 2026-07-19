@@ -5,6 +5,13 @@ sharing decoded sample pages across voices. It canonicalizes page geometry from
 registered source metadata, coalesces voice demands for the same source page,
 publishes through `SampleStreamWindow`, and rejects source-generation mismatches.
 
+Use this service for shared polyphony, random access, reverse playback, or
+looping across paged assets. For one ordered consumer, use
+[`StreamingSampleSource`](streaming-sample-source.md); for a decoded or
+offline-rendered resident generation, use `PublishedSampleStore` with
+`LoopRenderer`. The [sampler playback chooser](sampler-playback.md) compares
+the complete set of surfaces.
+
 Page storage is always leased through `SampleMemoryGovernor`. Without an
 external governor handle, `page_memory_budget_bytes` creates an internal
 page-only cap. With `memory_governor`, that field is ignored and the shared

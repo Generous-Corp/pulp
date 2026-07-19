@@ -26,8 +26,11 @@ using pulp::audio::OnsetDetectionMethod;
 using pulp::audio::OnsetDetector;
 using pulp::audio::OnsetMarker;
 using pulp::audio::SliceMarkerSource;
+using pulp::audio::SliceCandidateSelection;
 using pulp::audio::SlicePointAnalysisConfig;
 using pulp::audio::SlicePointAnalyzer;
+using pulp::audio::SliceSelectionOptions;
+using pulp::audio::SliceSnapPolicy;
 using pulp::audio::TransientClass;
 using pulp::audio::TransientClassification;
 using pulp::audio::kUnmappedTransientCandidateMarkerIndex;
@@ -201,6 +204,87 @@ TEST_CASE("SlicePointAnalyzer builds ordered regions from debounced onsets",
     REQUIRE(result.map.regions[0].start_frame == 0);
     REQUIRE(result.map.regions[0].end_frame == 1050);
     REQUIRE(result.map.regions[4].end_frame == source.num_samples());
+}
+
+TEST_CASE("SlicePointAnalyzer strongest selection is bounded and timeline sorted",
+          "[audio][onset][slice][selection]") {
+    Buffer<float> source(1, 1000);
+    std::vector<const float*> ptrs;
+    std::vector<OnsetMarker> onsets = {
+        {200, 0.2, OnsetDetectionMethod::EnergyFlux},
+        {400, 0.9, OnsetDetectionMethod::EnergyFlux},
+        {700, 0.8, OnsetDetectionMethod::EnergyFlux},
+        {850, 0.7, OnsetDetectionMethod::EnergyFlux},
+    };
+    SlicePointAnalysisConfig config;
+    config.source_sample_rate = 48000.0;
+    config.min_slice_frames = 100;
+    config.snap_to_zero_crossing = false;
+    SliceSelectionOptions options;
+    options.max_regions = 3;
+    options.candidate_selection = SliceCandidateSelection::StrongestConfidence;
+
+    const auto result = SlicePointAnalyzer{}.analyze(
+        const_view(source, ptrs), onsets, config, options);
+    REQUIRE(result.ok);
+    REQUIRE(result.map.markers.size() == 3);
+    CHECK(result.map.markers[0].frame == 0);
+    CHECK(result.map.markers[1].frame == 400);
+    CHECK(result.map.markers[2].frame == 700);
+}
+
+TEST_CASE("SlicePointAnalyzer strongest ties and spacing guards are deterministic",
+          "[audio][onset][slice][selection]") {
+    Buffer<float> source(1, 1000);
+    std::vector<const float*> ptrs;
+    std::vector<OnsetMarker> onsets = {
+        {50, 1.0, OnsetDetectionMethod::EnergyFlux},
+        {300, 0.8, OnsetDetectionMethod::EnergyFlux},
+        {700, 0.8, OnsetDetectionMethod::EnergyFlux},
+        {950, 1.0, OnsetDetectionMethod::EnergyFlux},
+    };
+    SlicePointAnalysisConfig config;
+    config.source_sample_rate = 48000.0;
+    config.min_slice_frames = 100;
+    config.snap_to_zero_crossing = false;
+    SliceSelectionOptions options;
+    options.max_regions = 2;
+    options.candidate_selection = SliceCandidateSelection::StrongestConfidence;
+
+    const auto result = SlicePointAnalyzer{}.analyze(
+        const_view(source, ptrs), onsets, config, options);
+    REQUIRE(result.ok);
+    REQUIRE(result.map.markers.size() == 2);
+    CHECK(result.map.markers[1].frame == 300);
+    CHECK(result.map.regions.back().end_frame == 1000);
+}
+
+TEST_CASE("SlicePointAnalyzer supports sign-transition snapping",
+          "[audio][onset][slice][snap]") {
+    Buffer<float> source(1, 100);
+    std::fill(source.channel(0).begin(), source.channel(0).end(), 1.0f);
+    std::fill(source.channel(0).begin() + 50, source.channel(0).end(), -1.0f);
+    std::vector<const float*> ptrs;
+    const std::vector<OnsetMarker> onsets = {
+        {53, 1.0, OnsetDetectionMethod::EnergyFlux},
+    };
+    SlicePointAnalysisConfig config;
+    config.source_sample_rate = 48000.0;
+    config.min_slice_frames = 10;
+    config.snap_radius_frames = 5;
+
+    SliceSelectionOptions near_zero;
+    const auto unchanged = SlicePointAnalyzer{}.analyze(
+        const_view(source, ptrs), onsets, config, near_zero);
+    REQUIRE(unchanged.ok);
+    CHECK(unchanged.map.markers[1].frame == 53);
+
+    SliceSelectionOptions transition;
+    transition.snap_policy = SliceSnapPolicy::SignTransition;
+    const auto snapped = SlicePointAnalyzer{}.analyze(
+        const_view(source, ptrs), onsets, config, transition);
+    REQUIRE(snapped.ok);
+    CHECK(snapped.map.markers[1].frame == 50);
 }
 
 TEST_CASE("SlicePointAnalyzer remaps analyzer provenance through debounced markers",

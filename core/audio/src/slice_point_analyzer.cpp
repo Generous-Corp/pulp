@@ -43,6 +43,33 @@ bool valid_marker_confidence(double confidence) noexcept {
     return std::isfinite(confidence) && confidence >= 0.0;
 }
 
+bool sign_transition(BufferView<const float> source,
+                     std::uint64_t frame) noexcept {
+    if (frame == 0 || frame >= source.num_samples()) return false;
+    const auto previous = detail::aggregate_sample(source, frame - 1);
+    const auto current = detail::aggregate_sample(source, frame);
+    return (previous <= 0.0) != (current <= 0.0);
+}
+
+std::uint64_t snap_to_sign_transition(BufferView<const float> source,
+                                      std::uint64_t frame,
+                                      std::uint64_t radius) noexcept {
+    const auto source_frames = static_cast<std::uint64_t>(source.num_samples());
+    if (source_frames < 2) return frame;
+    frame = std::min(frame, source_frames - 1);
+    if (sign_transition(source, frame)) return frame;
+    for (std::uint64_t distance = 1; distance <= radius; ++distance) {
+        if (frame > distance && sign_transition(source, frame - distance)) {
+            return frame - distance;
+        }
+        if (frame + distance < source_frames &&
+            sign_transition(source, frame + distance)) {
+            return frame + distance;
+        }
+    }
+    return frame;
+}
+
 bool better_marker(SliceMarker candidate, SliceMarker existing) noexcept {
     if (candidate.confidence != existing.confidence) {
         return candidate.confidence > existing.confidence;
@@ -207,6 +234,14 @@ SlicePointAnalysisResult SlicePointAnalyzer::analyze(
     BufferView<const float> source,
     std::span<const OnsetMarker> onsets,
     const SlicePointAnalysisConfig& config) const {
+    return analyze(source, onsets, config, {});
+}
+
+SlicePointAnalysisResult SlicePointAnalyzer::analyze(
+    BufferView<const float> source,
+    std::span<const OnsetMarker> onsets,
+    const SlicePointAnalysisConfig& config,
+    const SliceSelectionOptions& options) const {
     SlicePointAnalysisResult result;
     const auto source_frames = static_cast<std::uint64_t>(source.num_samples());
     if (source.num_channels() == 0 || source_frames == 0 ||
@@ -251,22 +286,63 @@ SlicePointAnalysisResult SlicePointAnalyzer::analyze(
         if (candidate.marker.frame == 0 || candidate.marker.frame >= source_frames) continue;
         auto frame = candidate.marker.frame;
         if (config.snap_to_zero_crossing) {
-            frame = snap_to_zero_crossing(source, frame, config.snap_radius_frames);
+            frame = options.snap_policy == SliceSnapPolicy::SignTransition
+                        ? snap_to_sign_transition(source,
+                                                  frame,
+                                                  config.snap_radius_frames)
+                        : snap_to_zero_crossing(source,
+                                                frame,
+                                                config.snap_radius_frames);
         }
         if (frame == 0 || frame >= source_frames) continue;
         candidate.marker.frame = frame;
         snapped_candidates.push_back(candidate);
     }
-    std::sort(snapped_candidates.begin(), snapped_candidates.end(), [](const auto& a, const auto& b) {
+    const auto timeline_order = [](const auto& a, const auto& b) {
         if (a.marker.frame != b.marker.frame) return a.marker.frame < b.marker.frame;
         if (a.marker.confidence != b.marker.confidence) {
             return a.marker.confidence > b.marker.confidence;
         }
-        return marker_source_priority(a.marker.source) > marker_source_priority(b.marker.source);
-    });
+        return marker_source_priority(a.marker.source) >
+               marker_source_priority(b.marker.source);
+    };
+    const auto maximum_cuts = options.max_regions == 0
+                                  ? std::numeric_limits<std::size_t>::max()
+                                  : static_cast<std::size_t>(options.max_regions - 1);
 
-    for (const auto& candidate : snapped_candidates) {
-        add_candidate(selected, candidate, config.min_slice_frames);
+    if (options.candidate_selection == SliceCandidateSelection::StrongestConfidence) {
+        std::stable_sort(snapped_candidates.begin(),
+                         snapped_candidates.end(),
+                         [](const auto& a, const auto& b) {
+                             if (a.marker.confidence != b.marker.confidence) {
+                                 return a.marker.confidence > b.marker.confidence;
+                             }
+                             const auto a_priority = marker_source_priority(a.marker.source);
+                             const auto b_priority = marker_source_priority(b.marker.source);
+                             if (a_priority != b_priority) return a_priority > b_priority;
+                             return a.marker.frame < b.marker.frame;
+                         });
+        for (const auto& candidate : snapped_candidates) {
+            if (selected.size() - 1 >= maximum_cuts) break;
+            if (candidate.marker.frame < config.min_slice_frames ||
+                source_frames - candidate.marker.frame < config.min_slice_frames) {
+                continue;
+            }
+            const auto spaced = std::all_of(
+                selected.begin(), selected.end(), [&](const auto& existing) {
+                    return frame_distance(candidate.marker.frame,
+                                          existing.marker.frame) >=
+                           config.min_slice_frames;
+                });
+            if (spaced) selected.push_back(candidate);
+        }
+        std::sort(selected.begin(), selected.end(), timeline_order);
+    } else {
+        std::sort(snapped_candidates.begin(), snapped_candidates.end(), timeline_order);
+        for (const auto& candidate : snapped_candidates) {
+            if (selected.size() - 1 >= maximum_cuts) break;
+            add_candidate(selected, candidate, config.min_slice_frames);
+        }
     }
 
     result.map.markers.reserve(selected.size());

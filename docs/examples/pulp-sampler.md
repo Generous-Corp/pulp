@@ -10,6 +10,10 @@ The implementation is in `examples/PulpSampler/`. It is an example integration,
 not a promise that every record in `sampler_api.hpp` is already exposed through
 every plugin-format adapter.
 
+This example uses the shared polyphonic/random-access page-service model. See
+the [sampler playback chooser](../guides/sampler-playback.md) before adopting
+it for a sequential single-consumer or fully resident product.
+
 ## Build and load
 
 ```bash
