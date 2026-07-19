@@ -730,6 +730,18 @@ ordering (AU pattern, no explicit close), or does the lane have a
 return path that bypasses the window-close callback (standalone
 pattern, explicit close before processor teardown)?
 
+Standalone also owns the native audio-workgroup lifetime for an opt-in parallel
+Processor. After `AudioDevice::open()` and before `Processor::prepare()`, it
+discovers `format::AudioWorkgroupClient` and forwards
+`callback_workgroup()`. During stop it stops the callback first, publishes null
+to the client, waits off the render thread until every worker acknowledges the
+removal, then closes the device. Keep that order: the handle is borrowed from
+the open device, and close (or a live default-device retarget) can invalidate it
+before an asynchronously waking worker has left unless the acknowledgment
+barrier completes first. The device's close preparation must also disable future
+retarget notifications and serialize with an in-flight switch before the final
+null+ack; draining only in standalone leaves a rebind window before close.
+
 ## EditorBridge — JSON message dispatch over the editor lifecycle
 
 `pulp::format::ViewBridge` (this skill) handles **when** the editor

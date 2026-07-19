@@ -31,6 +31,19 @@
 using namespace pulp::host;
 using Catch::Matchers::WithinAbs;
 
+TEST_CASE("SignalGraph accepts the audio workgroup capability handoff",
+          "[host][signal-graph][workgroup]") {
+    SignalGraph graph;
+    auto* client = dynamic_cast<pulp::format::AudioWorkgroupClient*>(&graph);
+    REQUIRE(client != nullptr);
+
+    auto* handle = reinterpret_cast<void*>(std::uintptr_t{0x6060});
+    client->set_audio_workgroup(handle);
+    REQUIRE(graph.configured_audio_workgroup() == handle);
+    client->set_audio_workgroup(nullptr);
+    REQUIRE(graph.configured_audio_workgroup() == nullptr);
+}
+
 namespace {
 PluginInfo make_plugin_info(std::string name,
                             int num_inputs = 0,

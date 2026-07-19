@@ -67,6 +67,8 @@ using AudioCallback = std::function<void(
 // Abstract audio device interface
 class AudioDevice {
 public:
+    using WorkgroupChangeCallback = std::function<void(void* workgroup)>;
+
     virtual ~AudioDevice() = default;
 
     virtual bool open(const DeviceConfig& config) = 0;
@@ -88,8 +90,11 @@ public:
     /// `nullptr` and callers fall back to
     /// `AudioWorkgroup::set_realtime_priority()`.
     ///
-    /// The returned pointer is owned by the device and remains valid
-    /// for the lifetime of the open device. Callers must not free it.
+    /// The returned pointer is owned by the device (CoreAudio owns a retained
+    /// property-query reference). It remains valid until close or, for a
+    /// live-retargeting backend, until the removal notification and auxiliary
+    /// worker acknowledgment registered below have completed. Callers must not
+    /// retain or free it.
     /// Pass it to `AudioWorkgroup::set_workgroup(static_cast<os_workgroup_t>(...))`
     /// before joining from the audio thread.
     ///
@@ -105,6 +110,29 @@ public:
 
     /// Reset the xrun counter to 0. Safe from any thread.
     virtual void reset_xrun_counter() {}
+
+    /// Atomically subscribe to callback_workgroup() changes and synchronously
+    /// deliver the current value before returning. Live-retargeting backends
+    /// must serialize callback installation + initial delivery with changes, so
+    /// callers cannot publish a stale snapshot after a concurrent switch.
+    /// The callback may execute inside that serialization boundary and must not
+    /// re-enter the device.
+    ///
+    /// Apple devices which
+    /// follow the system default output call this off the render thread after
+    /// stopping the old callback and before invalidating its borrowed handle,
+    /// then again with the replacement handle before rendering resumes.
+    /// Other backends deliver their stable snapshot through the default
+    /// implementation and never send a later change.
+    virtual void set_workgroup_change_callback(WorkgroupChangeCallback callback) {
+        if (callback) callback(callback_workgroup());
+    }
+
+    /// Disable future workgroup-change notifications and serialize with any
+    /// notification already in flight. Live-retargeting backends must publish
+    /// null and wait for its callback to return before this method returns.
+    /// Called only off the render thread before close() invalidates the handle.
+    virtual void quiesce_workgroup_changes() {}
 };
 
 // Audio system — enumerates devices and creates device instances

@@ -21,6 +21,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/live_dsp_telemetry.hpp>
 #include <pulp/audio/load_measurer.hpp>
+#include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/runtime/slot.hpp>
 #include <pulp/midi/buffer.hpp>
@@ -286,7 +287,7 @@ struct GraphNode {
 
 // ── Signal Graph ────────────────────────────────────────────────────────
 
-class SignalGraph {
+class SignalGraph : public format::AudioWorkgroupClient {
 public:
     struct GraphLimits {
         std::size_t max_nodes = 4096;
@@ -682,6 +683,24 @@ public:
     }
     bool parallel_routing_enabled() const noexcept {
         return parallel_routing_enabled_.load(std::memory_order_relaxed);
+    }
+    // Publish the native device or AU render workgroup to the persistent
+    // parallel executor. Safe before prepare and on render-context changes.
+    void set_audio_workgroup(void* workgroup) noexcept override {
+        worker_pool_.set_audio_workgroup(workgroup);
+    }
+    void set_audio_workgroup_from_render_context(
+        void* workgroup) noexcept override {
+        worker_pool_.set_audio_workgroup_from_render_context(workgroup);
+    }
+    bool prepare_audio_workgroup_for_render() noexcept override {
+        return worker_pool_.prepare_audio_workgroup_for_render();
+    }
+    void wait_for_audio_workgroup_update() noexcept override {
+        worker_pool_.wait_for_audio_workgroup_update();
+    }
+    void* configured_audio_workgroup() const noexcept {
+        return worker_pool_.configured_audio_workgroup();
     }
     // Break-even threshold for the parallel executor. A level runs across the
     // worker pool only when its static work-weight x frame count reaches this

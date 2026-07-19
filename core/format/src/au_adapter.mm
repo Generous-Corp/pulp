@@ -30,6 +30,7 @@
 //  │ setShouldBypassEffect:                   │ void      │ main + audio │ NO (RT-safe) │
 //  │ allocateRenderResourcesAndReturnError:   │ BOOL      │ main         │ YES (init)   │
 //  │ deallocateRenderResources                │ void      │ main         │ YES (release)│
+//  │ renderContextObserver                    │ block     │ AUDIO        │ NO (body)    │
 //  │ internalRenderBlock                      │ block     │ main         │ YES (block)  │
 //  │   └─ render block body                   │ OSStatus  │ AUDIO        │ NO           │
 //  │ fullState                                │ NSDict    │ main         │ YES (serdes) │
@@ -55,6 +56,7 @@
 #import <CoreAudioKit/CoreAudioKit.h>
 #import <mach/mach_time.h>
 #include <pulp/events/plugin_main_thread.hpp>
+#include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/plugin_state_io.hpp>
@@ -105,6 +107,7 @@ struct AUBridge {
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
     std::unique_ptr<Processor> processor;
+    AudioWorkgroupClient* audio_workgroup_client = nullptr;
     double sample_rate = 48000.0;
     AUAudioFrameCount max_frames = 512;
     int input_channels = 0;
@@ -355,6 +358,8 @@ struct ScopedAuV3HostWriting {
     }
     _bridge.processor->set_state_store(&_bridge.store);
     _bridge.processor->define_parameters(_bridge.store);
+    _bridge.audio_workgroup_client =
+        dynamic_cast<pulp::format::AudioWorkgroupClient*>(_bridge.processor.get());
 
     // Resolve host accommodations once via the runtime policy
     // (PULP_HOST_QUIRKS env / set_host_quirk_policy API).
@@ -491,6 +496,37 @@ struct ScopedAuV3HostWriting {
 
 - (BOOL)supportsUserPresets { return NO; }
 - (BOOL)canProcessInPlace { return YES; }
+
+- (AURenderContextObserver)renderContextObserver {
+    auto* bridge = &_bridge;
+    AURenderContextObserver observer = ^(const AudioUnitRenderContext *context) {
+        // The OS calls this on the realtime render thread immediately before a
+        // render whose workgroup changed. Copy only the host-owned workgroup
+        // value; the AudioUnitRenderContext struct itself is callback-scoped.
+        // GraphRuntimeWorkerPool publishes pointer + generation coherently and
+        // auxiliary workers perform their own leave/join before another batch.
+        // os_retain/os_release are deliberately absent: Apple marks this block
+        // CA_REALTIME_API but does not document reference-count operations as
+        // RT-safe. Lifetime instead follows the render-context observer
+        // protocol described in AudioUnitProperties.h.
+        if (bridge->audio_workgroup_client) {
+            bridge->audio_workgroup_client->set_audio_workgroup_from_render_context(
+                context ? reinterpret_cast<void*>(context->workgroup) : nullptr);
+            // Apple's render-context contract requires auxiliary realtime
+            // threads to leave the preceding workgroup and join the new one as
+            // part of this observer call. The full-participant barrier is
+            // allocation-free, lock-free, and relax-only on the render thread;
+            // it returns only after every worker has completed leave(old) and
+            // acknowledged its join result.
+            (void)bridge->audio_workgroup_client->prepare_audio_workgroup_for_render();
+        }
+    };
+#if __has_feature(objc_arc)
+    return [observer copy];
+#else
+    return [[observer copy] autorelease];
+#endif
+}
 
 - (AUParameterTree *)parameterTree {
     // Built once and retained: the host observes THESE AUParameter objects, so a
@@ -750,6 +786,8 @@ struct ScopedAuV3HostWriting {
 }
 
 - (void)deallocateRenderResources {
+    pulp::format::clear_audio_workgroup_after_render_resources(
+        _bridge.audio_workgroup_client);
     if (_bridge.processor) _bridge.processor->release();
     // Drop per-note expression state so a re-allocation does not route a stale
     // noteId to a voice that no longer exists (mirrors VST3's setActive(false)).
@@ -806,6 +844,13 @@ struct ScopedAuV3HostWriting {
         const AURenderEvent *realtimeEventListHead,
         AURenderPullInputBlock __unsafe_unretained pullInputBlock)
     {
+        // The observer completes a changed borrowed-handle transition before it
+        // returns. Keep this idempotent entry guard so every render path also
+        // verifies the current publication before *any* early exit.
+        if (bridge->audio_workgroup_client) {
+            (void)bridge->audio_workgroup_client->prepare_audio_workgroup_for_render();
+        }
+
         if (!bridge->processor) {
             if (outputData) {
                 for (UInt32 i = 0; i < outputData->mNumberBuffers; ++i) {
