@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07150"></a>
+## [0.715.0] - 2026-07-19
+
+- test(host): pin MIDI sidecar drain resumes ([#6317](https://github.com/danielraffel/pulp/pull/6317))
+
 <a id="v07140"></a>
 ## [0.714.0] - 2026-07-19
 
@@ -6634,6 +6639,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.715.0]: https://github.com/danielraffel/pulp/releases/tag/v0.715.0
 [0.714.0]: https://github.com/danielraffel/pulp/releases/tag/v0.714.0
 [0.713.0]: https://github.com/danielraffel/pulp/releases/tag/v0.713.0
 [0.712.2]: https://github.com/danielraffel/pulp/releases/tag/v0.712.2
