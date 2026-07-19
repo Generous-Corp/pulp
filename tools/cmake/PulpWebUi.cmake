@@ -205,6 +205,14 @@ set(_PULP_WEBUI_VIEW_SOURCES
     ${_PULP_WEBUI_ROOT}/core/view/src/gesture.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/caret.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/continuous_frames.cpp
+    # continuous_frames.cpp does a dynamic_cast<EqCurveView*> (a hover-settle
+    # animation branch), which references EqCurveView's RTTI typeinfo. Its key
+    # function lives in eq_curve_view.cpp, so that translation unit must be in
+    # every target that compiles continuous_frames.cpp or the WASM/wasm-ld link
+    # fails with "undefined symbol: typeinfo for pulp::view::EqCurveView". The
+    # native view lib already lists it (core/view/CMakeLists.txt); this WebUI
+    # source list was missed when the EQ curve editor landed.
+    ${_PULP_WEBUI_ROOT}/core/view/src/eq_curve_view.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/frame_clock.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/motion.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/motion_geometry.cpp
