@@ -6,13 +6,12 @@
 #include <pulp/timebase/rational_time.hpp>
 #include <pulp/timebase/tick.hpp>
 #include <pulp/timeline/assets.hpp>
+#include <pulp/timeline/item_id.hpp>
 
 #include <compare>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <iterator>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -27,16 +26,6 @@ namespace detail {
 class ProjectStateAccess;
 }
 class SchemaRegistry;
-
-struct ItemId {
-    std::uint64_t value = 0;
-
-    // Zero is the null sentinel and UINT64_MAX is the exhausted allocator state.
-    constexpr bool valid() const noexcept {
-        return value != 0 && value != std::numeric_limits<std::uint64_t>::max();
-    }
-    constexpr auto operator<=>(const ItemId&) const = default;
-};
 
 enum class ModelErrorCode : std::uint8_t {
     InvalidItemId,
@@ -502,9 +491,3 @@ runtime::Result<RemappedProject, ModelError> remap_ids(const Project& project,
                                                        std::uint64_t first_id);
 
 } // namespace pulp::timeline
-
-template <> struct std::hash<pulp::timeline::ItemId> {
-    std::size_t operator()(pulp::timeline::ItemId id) const noexcept {
-        return std::hash<std::uint64_t>{}(id.value);
-    }
-};

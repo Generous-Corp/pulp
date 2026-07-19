@@ -59,7 +59,7 @@ for its complete, authoritative guidance.
 | `tart-ci` | Stand up a fast, cached, isolated, disposable macOS CI lane on Tart — layered golden VM images, ephemeral per-job GitHub Actions runners, host-mounted caches, and a reusable per-repo vm-image manifest. |
 | `threejs-bridge` | Build or iterate on Pulp's native Dawn-backed Three.js workflow using the real three.webgpu.js renderer, focused bridge tests, and native demo capture. |
 | `timebase` | Pulp musical/media time primitives, editable tempo and meter maps, immutable compiled lookup, streaming cursors, exact sample anchors, and shared transport quantization arithmetic. |
-| `timeline` | Pulp immutable timeline model, typed command transactions, bounded journal and undo, durable assets, schema registry, and exact JSON persistence. |
+| `timeline` | Pulp immutable timeline model and automation curves, typed command transactions, bounded journal and undo, durable assets, schema registry, and exact JSON persistence. |
 | `trace-analysis` | The investigation harness for "why is this slow?" over a Pulp Perfetto trace (.pftrace). |
 | `trace-sql` | SQL discipline for querying Pulp Perfetto traces (.pftrace) with trace_processor — idempotent CREATE OR REPLACE PERFETTO views, GLOB not LIKE, dur = -1 incomplete-slice handling, EXTRACT_ARG for span args, joining on stable utid/upid, SPAN_JOIN PARTITIONED, and the draft→validate→execute loop. |
 | `update-demos` | Rebuild, re-pin, and republish Pulp's downstream demo/example repos against a new or the latest SDK. |

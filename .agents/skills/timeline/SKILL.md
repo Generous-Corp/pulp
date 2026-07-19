@@ -1,6 +1,6 @@
 ---
 name: timeline
-description: Pulp immutable timeline model, typed command transactions, bounded journal and undo, durable assets, schema registry, and exact JSON persistence.
+description: Pulp immutable timeline model and automation curves, typed command transactions, bounded journal and undo, durable assets, schema registry, and exact JSON persistence.
 ---
 
 # Timeline document model
@@ -29,6 +29,14 @@ invariants.
   Track until a context-owned tempo/rate projection can compare them safely.
 - `NoteContent` is a flat POD array sorted by `(start, ItemId)`. Note durations
   are positive, pitch is MIDI 0-127, and channel is 0-15.
+- `AutomationCurve` is a position-ordered immutable point sequence. Point IDs
+  and positions are unique within a curve; values are finite; curvature is in
+  `[-1, 1]`. Continuous segments use a monotonic quadratic blend, while Hold
+  segments retain the left value until the next point. `value_at()` is for
+  control-thread or compile-time queries, never the audio-thread scheduler.
+- Keep automation responsibilities separated: curve data belongs in
+  `automation_curve.*`, lane target ownership belongs in a later Timeline
+  module, and RT cursor/coalescing logic belongs in `core/playback`.
 - `MediaRef` ranges are checked locally for overflow and against their asset at
   project construction.
 - A media asset's SHA-256 `ContentHash` is its durable identity. Locators are
@@ -102,9 +110,10 @@ invariants.
 ## Scope boundary
 
 This slice does not own a durable `JournalSink`, package/container I/O,
-publication, playback, automation, launch slots, takes, nesting, devices,
-routing, audio, format adapters, or UI. Add those in their scheduled slices
-instead of widening the command and persistence core opportunistically.
+publication, playback, automation lanes or delivery, launch slots, takes,
+nesting, devices, routing, audio, format adapters, or UI. Add those in their
+scheduled slices instead of widening the command and persistence core
+opportunistically.
 
 ## Validation
 
