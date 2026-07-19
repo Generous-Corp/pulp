@@ -139,6 +139,19 @@ export interface ExtractedStyle {
   border_color?: string;
   border_width?: number;
   border_style?: string;
+  // Per-side box strokes (Figma individualStrokeWeights, active when the four
+  // sides differ). All four widths are emitted — an explicit 0 side paints
+  // nothing — with the single Figma stroke color repeated per painted side;
+  // the uniform border/border_width shorthand is omitted in that case. C++
+  // parse_ir_style reads all eight fields directly.
+  border_top_width?: number;
+  border_right_width?: number;
+  border_bottom_width?: number;
+  border_left_width?: number;
+  border_top_color?: string;
+  border_right_color?: string;
+  border_bottom_color?: string;
+  border_left_color?: string;
   box_shadow?: string;
   filter?: string;
   backdrop_filter?: string;

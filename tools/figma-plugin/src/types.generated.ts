@@ -322,6 +322,19 @@ export interface Node {
    */
   content?: string;
   /**
+   * Ordered mixed-style text runs (when type=text and the node carries range overrides). Each run is the style DELTA against the node's dominant style over [start,end) UTF-8 BYTE offsets into `content` (converted from Figma's UTF-16 code-unit indices). Maps to IRNode.text_runs via design_ir_json.cpp::parse_ir_text_runs; homogeneous text omits this and keeps the flat single-style path.
+   */
+  runs?: {
+    start: number;
+    end: number;
+    fontSize?: number;
+    fontWeight?: number;
+    fontStyle?: "normal" | "italic";
+    color?: string;
+    letterSpacing?: number;
+    textDecoration?: "underline" | "line-through";
+  }[];
+  /**
    * Recognized Pulp audio-widget kind. Emitted at the node root when serialize.ts sees node.library_widget_kind. The C++ parser maps this onto IRNode.audio_widget (enum). Equal to figma.library_widget_kind when present.
    */
   audio_widget?: "knob" | "fader" | "meter" | "xy_pad" | "waveform" | "spectrum";
@@ -401,10 +414,22 @@ export interface Style {
   color?: string;
   opacity?: number;
   border_radius?: number;
+  border_top_left_radius?: number;
+  border_top_right_radius?: number;
+  border_bottom_right_radius?: number;
+  border_bottom_left_radius?: number;
   border?: string;
   border_color?: string;
   border_width?: number;
   border_style?: string;
+  border_top_width?: number;
+  border_right_width?: number;
+  border_bottom_width?: number;
+  border_left_width?: number;
+  border_top_color?: string;
+  border_right_color?: string;
+  border_bottom_color?: string;
+  border_left_color?: string;
   box_shadow?: string;
   filter?: string;
   backdrop_filter?: string;
@@ -413,6 +438,7 @@ export interface Style {
   font_weight?: number;
   font_style?: "normal" | "italic";
   text_align?: string;
+  vertical_align?: "top" | "middle" | "bottom";
   letter_spacing?: number;
   line_height?: number;
   text_transform?: string;
@@ -433,6 +459,15 @@ export interface Style {
   min_height?: number;
   max_width?: number;
   max_height?: number;
+  /**
+   * True visual extent when effects/strokes bleed past the layout box (w/h = render size, dx/dy = offset from the bounding-box origin, negative = bleed left/above).
+   */
+  render_bounds?: {
+    w: number;
+    h: number;
+    dx?: number;
+    dy?: number;
+  };
 }
 /**
  * Maps to IRLayout. Padding is nested as an object here; parser flattens to padding_top/right/bottom/left. The camelCase keys (rowGap, flexGrow, alignSelf, gridTemplate*, ...) use the consumer's spelling — the exact member names design_ir_json.cpp::parse_ir_layout reads — so the schema can never declare a key nobody consumes.

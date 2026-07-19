@@ -213,6 +213,46 @@ test("serializeExport: resize constraints pass through at the node root in Figma
   assert.ok(!("constraints" in rootOf(plain)));
 });
 
+test("serializeExport: per-side borders + stroke provenance stay schema-valid", () => {
+  // The strokes contract end-to-end through the serializer: discrete
+  // border_*_width/color fields (an explicit 0 side must SURVIVE the truthy
+  // style filter — 0 is a positive "no edge here"), border_style "dashed",
+  // and the namespaced figma:* provenance attributes, all valid against
+  // schema/figma-plugin-export-v1.json.
+  const frame = baseNode({
+    name: "Sided",
+    figma_node_id: "8:1",
+    style: {
+      border_color: "#ff0000",
+      border_style: "dashed",
+      border_top_width: 4,
+      border_right_width: 0,
+      border_bottom_width: 1,
+      border_left_width: 0,
+      border_top_color: "#ff0000",
+      border_bottom_color: "#ff0000",
+    },
+    attributes: {
+      "figma:dash_pattern": "4,2",
+      "figma:stroke_align": "outside",
+      "figma:stroke_cap": "round",
+    },
+  });
+  const out = serializeExport([frame], [], ctx());
+  const root = rootOf(out);
+  assert.equal(root.style.border_top_width, 4);
+  assert.equal(root.style.border_right_width, 0, "explicit 0 survives the style filter");
+  assert.equal(root.style.border_bottom_width, 1);
+  assert.equal(root.style.border_style, "dashed");
+  assert.equal(root.style.border_top_color, "#ff0000");
+  assert.equal(root.attributes["figma:dash_pattern"], "4,2");
+  assert.ok(!("border" in root.style), "no shorthand beside per-side widths");
+
+  const errors: string[] = [];
+  validate(out, schema as any, schema as any, "$", errors);
+  assert.deepEqual(errors, [], `schema violations:\n${errors.join("\n")}`);
+});
+
 // ---------------------------------------------------------------------------
 // Emitter ↔ schema agreement. A tiny structural validator over the subset of
 // JSON Schema the export uses (type, enum, required, properties, $ref,

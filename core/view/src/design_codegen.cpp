@@ -1709,6 +1709,60 @@ static void emit_js_text_node(const NativeEmit& e) {
     ss << "\n";
 }
 
+// The node's box border. Two shapes share this exit:
+//   - Per-side widths (Figma individualStrokeWeights → border_top_width …)
+//     lower to setBorderSide per edge. An explicit width of 0 is a positive
+//     "no edge here" — the side simply emits nothing, and because the
+//     per-side path never emits the uniform setBorder, nothing paints there.
+//     Side colors fall back to the uniform border_color (Figma strokes carry
+//     one color even when the four weights differ).
+//   - The uniform border_color/border_width pair keeps the existing
+//     setBorder(id, color, width, radius) call.
+// Either way, a non-solid border_style (a Figma dashPattern lowered to
+// "dashed") rides as setBorderStyle — the bridge maps the CSS keyword onto
+// View::BorderStyle and Skia installs the dash effect at stroke time.
+static void emit_js_box_border(std::ostringstream& ss, const std::string& ind,
+                               const std::string& id, const IRNode& node) {
+    const IRStyle& st = node.style;
+    const bool per_side = st.border_top_width.has_value() ||
+                          st.border_right_width.has_value() ||
+                          st.border_bottom_width.has_value() ||
+                          st.border_left_width.has_value();
+    bool emitted = false;
+    if (per_side) {
+        const struct {
+            const char* side;
+            const std::optional<float>& width;
+            const std::optional<std::string>& color;
+        } sides[] = {
+            {"top",    st.border_top_width,    st.border_top_color},
+            {"right",  st.border_right_width,  st.border_right_color},
+            {"bottom", st.border_bottom_width, st.border_bottom_color},
+            {"left",   st.border_left_width,   st.border_left_color},
+        };
+        for (const auto& s : sides) {
+            if (!s.width || *s.width <= 0.0f) continue;
+            const std::optional<std::string>& color =
+                (s.color && !s.color->empty()) ? s.color : st.border_color;
+            ss << ind << "setBorderSide('" << id << "', '" << s.side << "', "
+               << *s.width << ", '"
+               << (color ? js_single_quote_escape(*color) : "") << "');\n";
+            emitted = true;
+        }
+    } else if (st.border_color && st.border_width && *st.border_width > 0.0f) {
+        float br = st.border_radius.value_or(0.0f);
+        ss << ind << "setBorder('" << id << "', '"
+           << js_single_quote_escape(*st.border_color) << "', "
+           << *st.border_width << ", " << br << ");\n";
+        emitted = true;
+    }
+    if (emitted && st.border_style && !st.border_style->empty() &&
+        *st.border_style != "solid") {
+        ss << ind << "setBorderStyle('" << id << "', '"
+           << js_single_quote_escape(*st.border_style) << "');\n";
+    }
+}
+
 // Container: createRow / createCol / createGrid, its own layout and visual
 // style, then a recursive descent into the children.
 static void emit_js_container(const NativeEmit& e, int& var_counter,
@@ -1901,18 +1955,13 @@ static void emit_js_container(const NativeEmit& e, int& var_counter,
            << js_single_quote_escape(*node.style.background_size) << "');\n";
     if (node.style.border_radius)
         ss << ind << "setCornerRadius('" << id << "', 'All', " << *node.style.border_radius << ");\n";
-    // Emit border (Figma frame stroke) as setBorder(id, color, width).
-    // Column frames inside a gradient panel can carry a 1px rgba(...)
-    // border that Figma renders as the thin vertical separators between
-    // columns. The bridge's parseColor accepts both hex and rgba(...), so
-    // pass border_color verbatim from the IR.
-    if (node.style.border_color && node.style.border_width &&
-        *node.style.border_width > 0.0f) {
-        float br = node.style.border_radius.value_or(0.0f);
-        ss << ind << "setBorder('" << id << "', '"
-           << js_single_quote_escape(*node.style.border_color) << "', "
-           << *node.style.border_width << ", " << br << ");\n";
-    }
+    // Emit border (Figma frame stroke): uniform setBorder(id, color, width),
+    // or setBorderSide per edge when the source declared per-side widths,
+    // plus setBorderStyle for a dashed stroke. Column frames inside a
+    // gradient panel can carry a 1px rgba(...) border that Figma renders as
+    // the thin vertical separators between columns. The bridge's parseColor
+    // accepts both hex and rgba(...), so pass border_color verbatim.
+    emit_js_box_border(ss, ind, id, node);
     // NOTE: no setBoxShadow and no setOpacity here. This branch calls
     // emit_js_visual_overrides above, which emits both for every node
     // kind. Keeping a copy here wrote the line TWICE for every container.
@@ -2049,13 +2098,7 @@ static void emit_js_generic_frame(const NativeEmit& e) {
     // here (a v0/claude/stitch `div`/`button`/`canvas` that maps to no widget)
     // lost its stroke even though normalize_border_shorthand had split it into
     // the discrete fields. Mirror emit_js_container's border emit exactly.
-    if (node.style.border_color && node.style.border_width &&
-        *node.style.border_width > 0.0f) {
-        float br = node.style.border_radius.value_or(0.0f);
-        ss << ind << "setBorder('" << id << "', '"
-           << js_single_quote_escape(*node.style.border_color) << "', "
-           << *node.style.border_width << ", " << br << ");\n";
-    }
+    emit_js_box_border(ss, ind, id, node);
     ss << "\n";
 }
 

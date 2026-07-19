@@ -980,6 +980,142 @@ TEST_CASE("resize constraints flow end-to-end: producer wire spellings to flex c
     }
 }
 
+TEST_CASE("per-side border widths flow end-to-end: producer wire shape to setBorderSide",
+          "[view][import][codegen][strokes]") {
+    // The shape every Figma producer emits for individualStrokeWeights
+    // (Figma strokeTopWeight/... when the four sides differ): all four
+    // border_*_width fields — an explicit 0 is a positive "no edge here" —
+    // plus the single stroke color repeated on each painted side. Codegen
+    // must lower the painted sides to setBorderSide and must NOT also emit
+    // the uniform setBorder (which would paint all four edges).
+    const auto ir = parse_design_ir_json(R"json({
+        "type": "frame", "name": "Root",
+        "style": { "width": 400, "height": 400 },
+        "children": [
+            { "type": "frame", "name": "Card",
+              "style": { "width": 50, "height": 50,
+                "border_color": "#ff0000", "border_style": "solid",
+                "border_top_width": 4, "border_right_width": 0,
+                "border_bottom_width": 1, "border_left_width": 0,
+                "border_top_color": "#ff0000", "border_bottom_color": "#ff0000" } }
+        ]
+    })json");
+    REQUIRE(ir.root.children.size() == 1);
+    const auto& st = ir.root.children[0].style;
+    CHECK(st.border_top_width == 4.0f);
+    CHECK(st.border_right_width == 0.0f);
+    CHECK(st.border_bottom_width == 1.0f);
+    CHECK(st.border_left_width == 0.0f);
+
+    const auto js = generate_pulp_js(ir, CodeGenOptions{});
+    INFO(js);
+    CHECK(js.find("setBorderSide('") != std::string::npos);
+    CHECK(js.find("'top', 4, '#ff0000')") != std::string::npos);
+    CHECK(js.find("'bottom', 1, '#ff0000')") != std::string::npos);
+    // The 0-width sides paint nothing — exactly two setBorderSide calls — and
+    // the uniform setBorder never fires beside the per-side calls
+    // ("setBorder('" cannot match "setBorderSide('").
+    size_t side_calls = 0;
+    for (size_t pos = js.find("setBorderSide('"); pos != std::string::npos;
+         pos = js.find("setBorderSide('", pos + 1))
+        ++side_calls;
+    CHECK(side_calls == 2);
+    CHECK(js.find("setBorder('") == std::string::npos);
+    // Solid is the border-style default; nothing to emit.
+    CHECK(js.find("setBorderStyle") == std::string::npos);
+}
+
+TEST_CASE("camelCase per-side border spellings parse identically",
+          "[view][import][strokes]") {
+    // The generic IR dialect (figma/pencil/v0) spells the same fields
+    // camelCase; parse_ir_style resolves both.
+    const auto ir = parse_design_ir_json(R"json({
+        "type": "frame", "name": "Root",
+        "children": [
+            { "type": "frame", "name": "A",
+              "style": { "borderTopWidth": 2, "borderLeftWidth": 3,
+                         "borderTopColor": "#123456" } }
+        ]
+    })json");
+    const auto& st = ir.root.children[0].style;
+    CHECK(st.border_top_width == 2.0f);
+    CHECK(st.border_left_width == 3.0f);
+    REQUIRE(st.border_top_color.has_value());
+    CHECK(*st.border_top_color == "#123456");
+}
+
+TEST_CASE("dashed borders lower to setBorderStyle in both shorthand and discrete forms",
+          "[view][import][codegen][strokes]") {
+    // A Figma dashPattern lowers at the producers to border_style "dashed"
+    // (a box border cannot carry the exact array — that rides as the
+    // figma:dash_pattern attribute for path renderers). Codegen must emit
+    // setBorderStyle beside the border, from BOTH the shorthand ("2px dashed
+    // #00ff00", split by normalize_border_shorthand) and the discrete fields.
+    auto emit = [](const std::string& style_json) {
+        const std::string json = R"({
+            "type": "frame", "name": "Root",
+            "style": { "width": 400, "height": 400 },
+            "children": [
+                { "type": "frame", "name": "Child",
+                  "style": )" + style_json + R"( } ] })";
+        return generate_pulp_js(parse_design_ir_json(json), CodeGenOptions{});
+    };
+    {
+        auto js = emit(R"({ "width": 50, "height": 50, "border": "2px dashed #00ff00" })");
+        INFO(js);
+        CHECK(js.find("setBorder('") != std::string::npos);
+        CHECK(js.find("#00ff00") != std::string::npos);
+        CHECK(js.find("setBorderStyle('") != std::string::npos);
+        CHECK(js.find("'dashed')") != std::string::npos);
+    }
+    {
+        auto js = emit(R"({ "width": 50, "height": 50,
+            "border_color": "#00ff00", "border_width": 2, "border_style": "dashed" })");
+        INFO(js);
+        CHECK(js.find("setBorderStyle('") != std::string::npos);
+        CHECK(js.find("'dashed')") != std::string::npos);
+    }
+    {
+        // Solid stays silent — no setBorderStyle noise on every bordered node.
+        auto js = emit(R"({ "width": 50, "height": 50,
+            "border_color": "#00ff00", "border_width": 2, "border_style": "solid" })");
+        INFO(js);
+        CHECK(js.find("setBorder('") != std::string::npos);
+        CHECK(js.find("setBorderStyle") == std::string::npos);
+    }
+    {
+        // Dashed per-side borders: setBorderSide + setBorderStyle together.
+        auto js = emit(R"({ "width": 50, "height": 50,
+            "border_color": "#00ff00", "border_style": "dashed",
+            "border_top_width": 3, "border_right_width": 0,
+            "border_bottom_width": 0, "border_left_width": 0 })");
+        INFO(js);
+        CHECK(js.find("setBorderSide('") != std::string::npos);
+        CHECK(js.find("'top', 3, '#00ff00')") != std::string::npos);
+        CHECK(js.find("setBorderStyle('") != std::string::npos);
+        CHECK(js.find("'dashed')") != std::string::npos);
+    }
+}
+
+TEST_CASE("stroke diagnostics classify as capture_partial from code alone",
+          "[view][import][strokes]") {
+    // Producers emit kind explicitly, but the code→kind fallback must know
+    // the stroke codes too (an envelope stripped of kinds still classifies).
+    const auto ir = parse_design_ir_json(R"json({
+        "version": 1,
+        "root": { "type": "frame", "name": "Root" },
+        "diagnostics": [
+            { "severity": "warning", "code": "multi-paint-stroke",
+              "path": "1:2", "message": "m" },
+            { "severity": "warning", "code": "complex-stroke-flattened",
+              "path": "1:3", "message": "m" }
+        ]
+    })json");
+    REQUIRE(ir.diagnostics.size() == 2);
+    CHECK(ir.diagnostics[0].kind == ImportDiagnosticKind::capture_partial);
+    CHECK(ir.diagnostics[1].kind == ImportDiagnosticKind::capture_partial);
+}
+
 TEST_CASE("parse_design_ir_json reads CSS grid container + item placement",
           "[view][import][grid]") {
     auto ir = parse_design_ir_json(R"json({

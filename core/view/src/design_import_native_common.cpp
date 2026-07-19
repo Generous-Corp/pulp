@@ -1286,6 +1286,18 @@ void apply_visual_style(View& view, const IRStyle& style,
             if (auto color = parse_any_css_color(*style.border_left_color))
                 view.set_border_left_color(*color);
         }
+        // CSS border-style keyword → View::BorderStyle, same table the bridge's
+        // setBorderStyle uses. A Figma dashPattern lowers to "dashed" at the
+        // producers; without this the native materializer painted it solid
+        // while the JS-bridge lane dashed it. Unknown keywords keep the solid
+        // default (View degrades double/groove/... to solid anyway).
+        if (style.border_style) {
+            const std::string& bs = *style.border_style;
+            if (bs == "dashed")      view.set_border_style(View::BorderStyle::dashed);
+            else if (bs == "dotted") view.set_border_style(View::BorderStyle::dotted);
+            else if (bs == "none")   view.set_border_style(View::BorderStyle::none);
+            else if (bs == "hidden") view.set_border_style(View::BorderStyle::hidden);
+        }
     }
     if (style.border_top_left_radius) view.set_corner_radius_tl(*style.border_top_left_radius);
     if (style.border_top_right_radius) view.set_corner_radius_tr(*style.border_top_right_radius);

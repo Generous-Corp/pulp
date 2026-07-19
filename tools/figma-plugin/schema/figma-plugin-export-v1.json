@@ -273,10 +273,22 @@
         "color": { "type": "string" },
         "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
         "border_radius": { "type": "number" },
+        "border_top_left_radius": { "type": "number" },
+        "border_top_right_radius": { "type": "number" },
+        "border_bottom_right_radius": { "type": "number" },
+        "border_bottom_left_radius": { "type": "number" },
         "border": { "type": "string" },
         "border_color": { "type": "string" },
         "border_width": { "type": "number" },
         "border_style": { "type": "string" },
+        "border_top_width": { "type": "number" },
+        "border_right_width": { "type": "number" },
+        "border_bottom_width": { "type": "number" },
+        "border_left_width": { "type": "number" },
+        "border_top_color": { "type": "string" },
+        "border_right_color": { "type": "string" },
+        "border_bottom_color": { "type": "string" },
+        "border_left_color": { "type": "string" },
         "box_shadow": { "type": "string" },
         "filter": { "type": "string" },
         "backdrop_filter": { "type": "string" },
@@ -305,7 +317,19 @@
         "min_width": { "type": "number" },
         "min_height": { "type": "number" },
         "max_width": { "type": "number" },
-        "max_height": { "type": "number" }
+        "max_height": { "type": "number" },
+        "render_bounds": {
+          "type": "object",
+          "description": "True visual extent when effects/strokes bleed past the layout box (w/h = render size, dx/dy = offset from the bounding-box origin, negative = bleed left/above).",
+          "properties": {
+            "w": { "type": "number" },
+            "h": { "type": "number" },
+            "dx": { "type": "number" },
+            "dy": { "type": "number" }
+          },
+          "required": ["w", "h"],
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },

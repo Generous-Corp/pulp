@@ -405,6 +405,9 @@ const SYMBOL_INHERITED_KEYS = [
   'gridRows', 'gridColumns', 'gridRowGap', 'gridColumnGap',
   'gridColumnsSizing', 'gridRowsSizing', 'gridAutoTracks',
   'fillPaints', 'strokePaints', 'strokeWeight', 'strokeAlign',
+  'borderStrokeWeightsIndependent', 'borderTopWeight', 'borderRightWeight',
+  'borderBottomWeight', 'borderLeftWeight', 'dashPattern',
+  'strokeCap', 'strokeJoin', 'miterLimit',
   'cornerRadius', 'rectangleCornerRadiiIndependent',
   'rectangleTopLeftCornerRadius', 'rectangleTopRightCornerRadius',
   'rectangleBottomLeftCornerRadius', 'rectangleBottomRightCornerRadius',
@@ -2256,17 +2259,90 @@ export function materializeFrame(scene, frame, ctx) {
       pushDiag('gradient-approximated', node, gradient.type);
     }
 
-    if (!vectorStrokeBand && (node.strokePaints || []).length && typeof node.strokeWeight === 'number' && node.strokeWeight > 0) {
-      const s = firstSolidStroke(node);
-      // Figma multiplies a paint's own `opacity` by its color's alpha — the
-      // same product the fill and text paths already take. Reading only
-      // `color.a` here rendered a stroke the designer set to 20% at FULL
-      // strength, which does not look like a dropped property; it looks like the
-      // design just has a harder edge than it should, so nobody calls it a bug.
-      if (s) {
-        const hex = colorToHex({ ...s.color, a: (s.color?.a ?? 1) * (s.opacity ?? 1) });
-        out.style.border = `${Math.round(node.strokeWeight)}px solid ${hex}`;
+    if (!vectorStrokeBand && (node.strokePaints || []).length) {
+      const visibleStrokes = (node.strokePaints || []).filter((p) => p.visible !== false);
+      // Per-side box strokes: kiwi stores individualStrokeWeights as
+      // `borderStrokeWeightsIndependent` + border{Top,Right,Bottom,Left}Weight
+      // (an absent side is 0, not "inherit the uniform weight").
+      const indep = node.borderStrokeWeightsIndependent === true;
+      const sideOf = (v) => (typeof v === 'number' && v > 0 ? round2(v) : 0);
+      const sideWeights = indep ? {
+        top: sideOf(node.borderTopWeight),
+        right: sideOf(node.borderRightWeight),
+        bottom: sideOf(node.borderBottomWeight),
+        left: sideOf(node.borderLeftWeight),
+      } : null;
+      const uniformWeight = typeof node.strokeWeight === 'number' ? node.strokeWeight : 0;
+      const hasWeight = indep
+        ? Object.values(sideWeights).some((w) => w > 0)
+        : uniformWeight > 0;
+      if (visibleStrokes.length && hasWeight) {
+        const s = firstSolidStroke(node);
+        // A box border carries exactly one paint. More than one visible stroke
+        // paint, a non-solid paint on top, or a brush (variable-width) stroke
+        // cannot ride it — flatten to the first solid and SAY SO. (A vector's
+        // baked strokeGeometry band — vectorStrokeBand above — is the faithful
+        // path and never reaches this branch.)
+        if (visibleStrokes.length > 1) {
+          pushDiag('multi-paint-stroke', node,
+            `${visibleStrokes.length} visible stroke paints; a box border carries one — flattened to the first solid`);
+        }
+        if (!s) {
+          pushDiag('complex-stroke-flattened', node,
+            `${visibleStrokes[0].type} stroke has no solid paint to flatten to; the stroke is dropped`);
+        } else {
+          if (visibleStrokes[0] !== s) {
+            pushDiag('complex-stroke-flattened', node,
+              `${visibleStrokes[0].type} top stroke paint is not expressible as a box border; flattened to the first solid`);
+          }
+          if (node.dynamicStrokeSettings || node.scatterStrokeSettings || node.stretchStrokeSettings) {
+            pushDiag('complex-stroke-flattened', node,
+              'variable-width (brush) stroke flattened to a uniform-weight border');
+          }
+          // Figma multiplies a paint's own `opacity` by its color's alpha — the
+          // same product the fill and text paths already take. Reading only
+          // `color.a` here rendered a stroke the designer set to 20% at FULL
+          // strength, which does not look like a dropped property; it looks like
+          // the design just has a harder edge than it should, so nobody calls it
+          // a bug.
+          const hex = colorToHex({ ...s.color, a: (s.color?.a ?? 1) * (s.opacity ?? 1) });
+          // A non-empty dashPattern maps to CSS "dashed" — a box border cannot
+          // express an arbitrary dash array, so the exact array is preserved as
+          // figma:dash_pattern for path renderers (strokeProvenanceAttrs below).
+          const dashes = Array.isArray(node.dashPattern)
+            ? node.dashPattern.filter((v) => typeof v === 'number' && v > 0) : [];
+          const styleWord = dashes.length ? 'dashed' : 'solid';
+          if (sideWeights) {
+            // Per-side widths + the (single) stroke color per painted side.
+            // No `border` shorthand: the discrete fields ARE the statement,
+            // including the explicit 0 sides, which paint nothing.
+            out.style.border_color = hex;
+            out.style.border_style = styleWord;
+            out.style.border_top_width = sideWeights.top;
+            out.style.border_right_width = sideWeights.right;
+            out.style.border_bottom_width = sideWeights.bottom;
+            out.style.border_left_width = sideWeights.left;
+            for (const [side, w] of Object.entries(sideWeights)) {
+              if (w > 0) out.style[`border_${side}_color`] = hex;
+            }
+          } else {
+            out.style.border = `${Math.round(uniformWeight)}px ${styleWord} ${hex}`;
+          }
+        }
       }
+    }
+
+    // Stroke provenance the box-border contract cannot carry, preserved as
+    // namespaced attributes (never mistaken for a lowered style): the exact
+    // dash array, non-default alignment, and the path-stroke trio
+    // (cap/join/miter). Consumers today: none render these directly — a
+    // vector's baked strokeGeometry already realizes caps/joins/dashes in its
+    // outline — so they are provenance for a future path renderer and for
+    // fidelity tooling. Emitted only on nodes with a visible stroke, and only
+    // for non-default values, so envelopes stay lean.
+    {
+      const preserved = strokeProvenanceAttrs(node);
+      if (preserved) out.attributes = { ...(out.attributes || {}), ...preserved };
     }
 
     // A resolved vector is terminal. Figma already flattened the operands into
@@ -2461,6 +2537,34 @@ export function materializeFrame(scene, frame, ctx) {
 
 function firstSolidStroke(node) {
   return (node.strokePaints || []).find((p) => p.type === 'SOLID' && p.visible !== false) || null;
+}
+
+/**
+ * Namespaced figma:* attributes for stroke properties the box-border contract
+ * cannot express, or null when there is nothing worth preserving. Non-default
+ * values only — MITER joins, NONE caps, the 4.0 miter limit, and INSIDE
+ * alignment (the closest match to how a CSS box border paints) stay silent so
+ * real designs do not grow an attribute on every stroked node.
+ */
+function strokeProvenanceAttrs(node) {
+  if (!(node.strokePaints || []).some((p) => p.visible !== false)) return null;
+  const attrs = {};
+  const dashes = Array.isArray(node.dashPattern)
+    ? node.dashPattern.filter((v) => typeof v === 'number' && v > 0) : [];
+  if (dashes.length) attrs['figma:dash_pattern'] = dashes.map(round2).join(',');
+  if (node.strokeAlign === 'CENTER' || node.strokeAlign === 'OUTSIDE') {
+    attrs['figma:stroke_align'] = node.strokeAlign.toLowerCase();
+  }
+  if (typeof node.strokeCap === 'string' && node.strokeCap !== 'NONE') {
+    attrs['figma:stroke_cap'] = node.strokeCap.toLowerCase();
+  }
+  if (typeof node.strokeJoin === 'string' && node.strokeJoin !== 'MITER') {
+    attrs['figma:stroke_join'] = node.strokeJoin.toLowerCase();
+  }
+  if (typeof node.miterLimit === 'number' && Math.abs(node.miterLimit - 4) > 1e-6) {
+    attrs['figma:stroke_miter_limit'] = String(round2(node.miterLimit));
+  }
+  return Object.keys(attrs).length ? attrs : null;
 }
 
 /**
@@ -2691,6 +2795,11 @@ export const DIAGNOSTIC_SEVERITY = {
   'fonts-required': 'warning',
   'icon-font-required': 'warning',
   'mask-approximated': 'warning',
+  // A stroke a box border cannot carry (multiple paints, non-solid top paint,
+  // variable-width brush) flattened to its first solid — warning because the
+  // rendered edge is deliberately NOT what the design declares.
+  'multi-paint-stroke': 'warning',
+  'complex-stroke-flattened': 'warning',
   // Node-dispatch codes. All 'warning' deliberately — including slice-skipped,
   // whose skip is CORRECT rendering — because both consumers drop 'info'
   // (see the registry contract above), and a dispatch decision written

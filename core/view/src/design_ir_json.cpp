@@ -1765,6 +1765,9 @@ static ImportDiagnosticKind diagnostic_kind_from_code(const std::string& code) {
     if (code == "fallback-used" || code == "runtime-fallback") {
         return ImportDiagnosticKind::fallback_used;
     }
+    if (code == "multi-paint-stroke" || code == "complex-stroke-flattened") {
+        return ImportDiagnosticKind::capture_partial;
+    }
     return ImportDiagnosticKind::unknown;
 }
 
