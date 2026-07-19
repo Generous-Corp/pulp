@@ -411,6 +411,7 @@ target_sources(pulp-view-core PRIVATE
     src/gesture.cpp
     src/value_source_binding.cpp
     src/view.cpp
+    src/view_paint.cpp
     src/pointer_dispatch.cpp
     src/caret.cpp
     src/continuous_frames.cpp

@@ -1846,6 +1846,33 @@ private:
         }
     }
 
+    // ── paint_all decomposition (behavior-preserving) ─────────────────────
+    // paint_all() is an orchestrator over these private helpers. The one
+    // load-bearing invariant is the compositing-layer imbalance: every helper
+    // enters and leaves the canvas at the SAME save depth it does today,
+    // EXCEPT push_effect_layers / pop_effect_layers, which own the imbalance by
+    // contract — push returns the exact count/flag it opened and pop consumes
+    // it, so the push/pop pair is auditable in isolation. Splitting the monolith
+    // this way also gives FU-3's subtree cache a clean "content" seam
+    // (paint_content) that excludes the effect/opacity layer wrappers.
+    struct EffectLayerState {
+        int  layers_pushed   = 0;      ///< compositing layers opened (an effect can open >1)
+        bool backdrop_pushed = false;  ///< a backdrop-filter layer was opened
+    };
+    void apply_canvas_transforms(canvas::Canvas& canvas);
+    EffectLayerState push_effect_layers(canvas::Canvas& canvas);
+    void pop_effect_layers(canvas::Canvas& canvas, const EffectLayerState& layers);
+    // The FU-3 cache-capture unit: everything painted INSIDE the effect layers
+    // (shadows, clip, background/border, paint(), children, decorations).
+    // children_ns receives the recursive child-paint time for self-time attrib.
+    void paint_content(canvas::Canvas& canvas, const EffectLayerState& layers,
+                       std::int64_t& children_ns);
+    void paint_outset_shadows(canvas::Canvas& canvas);
+    void apply_overflow_and_clip_path(canvas::Canvas& canvas);
+    void paint_background_and_border(canvas::Canvas& canvas);
+    void paint_children_in_order(canvas::Canvas& canvas);
+    void paint_post_decorations(canvas::Canvas& canvas, const EffectLayerState& layers);
+
     Rect bounds_{};
     FlexStyle flex_{};
     GridStyle grid_{};

@@ -212,12 +212,20 @@ public:
     void set_shadow_offset_x(float dx) override;
     void set_shadow_offset_y(float dy) override;
 
+    // ── Capabilities ───────────────────────────────────────────────────
+    // CG overrides ONLY the image verbs (real ImageIO decoder). Every other
+    // effect verb — filter chains, mask/backdrop/bloom layers, SkSL, SVG,
+    // path-clip, Gaussian box-shadow — inherits the base degradation, so it
+    // advertises `images` and nothing else. Honest map of the real CG gaps.
+    bool supports(CanvasCapability cap) const override {
+        return cap == CanvasCapability::images;
+    }
+
     // ── Images ───────────────────────────────────────────────────────────
     // CG has a real ImageIO decoder (cg_decode_image_from_path_or_data), so
     // these verbs decode + CGContextDrawImage instead of leaving the base
     // no-op that made ImageView render each image's FILENAME as placeholder
     // text on the macOS CPU paint path (the "filename-placeholder trap").
-    bool supports_image_draw() const override { return true; }
     bool draw_image_from_data(const uint8_t* data, size_t size,
                               float x, float y, float w, float h) override;
     bool draw_image_from_file(const std::string& path,

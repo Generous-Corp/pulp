@@ -219,54 +219,91 @@ TEST_CASE("SkiaCanvas filter chain: opacity ordering changes pixel output "
 }
 
 // Regression test: `parse_filter_chain("drop-shadow(dx dy blur color)")`
-// must return non-null and the resulting SkImageFilter must produce a
-// visible offset shadow when rendered through SkiaCanvas::set_filter().
+// must return non-null and the resulting SkImageFilter must render a
+// visible offset shadow through SkiaCanvas::set_filter().
 //
-// Kept [!mayfail]: this fails for a reason UNRELATED to the color-matrix bias
-// fix — the drop-shadow filter is created (the getImageFilter() assertion
-// passes) but no darkened pixel appears at the expected shadow offset (28,28),
-// i.e. the set_filter/apply_filter drop-shadow render/position path, not the
-// contrast/invert bias. Left masked so this closeout doesn't silently flip a
-// test that is red for a separate, unaddressed reason.
+// Coordinate derivation (this pins the exact offset math; the earlier
+// [!mayfail] framing blamed a nonexistent "render bug" — the renderer is
+// correct, the old probe was simply off-by-one):
+//   - The 16x16 rect at (8,8) covers pixel columns/rows x ∈ [8,24), i.e.
+//     8..23 inclusive.
+//   - drop-shadow(4px 4px 0px) offsets by +4 with ZERO blur, so the shadow
+//     is a hard-edged copy covering 12..27 inclusive.
+//   - Therefore (26,26) is solidly inside the shadow; (28,28) is one pixel
+//     PAST the last shadow row/col (exclusive edge) and stays white.
+// The old code probed (28,28) — the exclusive edge — and read white, then
+// mislabeled that as a render failure. This is now enforced (no [!mayfail]).
 TEST_CASE("SkiaCanvas set_filter parses drop-shadow and renders shadow",
-          "[canvas][skia][filter-chain][drop-shadow][!mayfail]") {
+          "[canvas][skia][filter-chain][drop-shadow]") {
     constexpr int kW = 32;
     constexpr int kH = 32;
-    SkImageInfo info = SkImageInfo::Make(kW, kH, kN32_SkColorType,
-                                         kPremul_SkAlphaType,
-                                         SkColorSpace::MakeSRGB());
-    auto surface = SkSurfaces::Raster(info);
-    REQUIRE(surface != nullptr);
-    auto* sk_canvas = surface->getCanvas();
-    REQUIRE(sk_canvas != nullptr);
-    sk_canvas->clear(SK_ColorWHITE);
 
-    SkiaCanvas canvas(sk_canvas);
-    canvas.set_filter("drop-shadow(4px 4px 0px black)");
+    // Render a 16x16 RED rect at (8,8), optionally through the drop-shadow
+    // filter. Returns the raster surface for pixel readback.
+    auto render_rect = [&](bool with_filter) {
+        SkImageInfo info = SkImageInfo::Make(kW, kH, kN32_SkColorType,
+                                             kPremul_SkAlphaType,
+                                             SkColorSpace::MakeSRGB());
+        auto surface = SkSurfaces::Raster(info);
+        REQUIRE(surface != nullptr);
+        auto* sk_canvas = surface->getCanvas();
+        REQUIRE(sk_canvas != nullptr);
+        sk_canvas->clear(SK_ColorWHITE);
 
-    SkPaint paint;
-    canvas.apply_filter(paint);
-    REQUIRE(paint.getImageFilter() != nullptr);
+        SkPaint layer_paint;
+        if (with_filter) {
+            SkiaCanvas canvas(sk_canvas);
+            canvas.set_filter("drop-shadow(4px 4px 0px black)");
+            canvas.apply_filter(layer_paint);
+            REQUIRE(layer_paint.getImageFilter() != nullptr);
+            sk_canvas->saveLayer(nullptr, &layer_paint);
+        } else {
+            sk_canvas->saveLayer(nullptr, nullptr);
+        }
+        SkPaint rect_paint;
+        rect_paint.setColor(SK_ColorRED);
+        rect_paint.setAntiAlias(false);
+        sk_canvas->drawRect(SkRect::MakeXYWH(8, 8, 16, 16), rect_paint);
+        sk_canvas->restore();
+        return surface;
+    };
 
-    // Render a 16x16 filled rect at (8,8). The drop-shadow should
-    // produce a black pixel at the shadow offset position (8+16+4, 8+16+4)
-    // = (28,28) that is NOT fully white.
-    sk_canvas->saveLayer(nullptr, &paint);
-    SkPaint rect_paint;
-    rect_paint.setColor(SK_ColorRED);
-    rect_paint.setAntiAlias(false);
-    sk_canvas->drawRect(SkRect::MakeXYWH(8, 8, 16, 16), rect_paint);
-    sk_canvas->restore();
+    auto shadowed = render_rect(/*with_filter=*/true);
+    auto plain = render_rect(/*with_filter=*/false);
 
-    SkPixmap pm;
-    REQUIRE(surface->peekPixels(&pm));
-    SkColor shadow_pixel = pm.getColor(28, 28);
-    // Black drop-shadow on white → at least one channel < 200.
-    bool has_shadow =
-        SkColorGetR(shadow_pixel) < 200 ||
-        SkColorGetG(shadow_pixel) < 200 ||
-        SkColorGetB(shadow_pixel) < 200;
-    REQUIRE(has_shadow);
+    SkPixmap pm, pm_plain;
+    REQUIRE(shadowed->peekPixels(&pm));
+    REQUIRE(plain->peekPixels(&pm_plain));
+
+    // (1) Shadow present: (26,26) is inside the 12..27 shadow band and must
+    // be near-black (pure black in practice; AA headroom of <50 per channel).
+    SkColor shadow_px = pm.getColor(26, 26);
+    REQUIRE(SkColorGetR(shadow_px) < 50);
+    REQUIRE(SkColorGetG(shadow_px) < 50);
+    REQUIRE(SkColorGetB(shadow_px) < 50);
+
+    // (2) Body still red: (16,16) is inside the original fill, drawn ON TOP
+    // of its own shadow, so it stays red — the filter does not swallow it.
+    SkColor body_px = pm.getColor(16, 16);
+    REQUIRE(SkColorGetR(body_px) > 200);
+    REQUIRE(SkColorGetG(body_px) < 50);
+    REQUIRE(SkColorGetB(body_px) < 50);
+
+    // (3) Exclusive-edge control: (28,28) is one pixel past the shadow band
+    // (12..27) and must stay white. This pins the exact +4 offset math — a
+    // filter that smeared the shadow would darken this pixel.
+    SkColor edge_px = pm.getColor(28, 28);
+    REQUIRE(SkColorGetR(edge_px) >= 250);
+    REQUIRE(SkColorGetG(edge_px) >= 250);
+    REQUIRE(SkColorGetB(edge_px) >= 250);
+
+    // (4) No-filter control (non-tautology guard): with NO drop-shadow, the
+    // same rect leaves (26,26) white — proving that pixel only darkens
+    // because of the filter, not because something is drawn there anyway.
+    SkColor plain_px = pm_plain.getColor(26, 26);
+    REQUIRE(SkColorGetR(plain_px) >= 250);
+    REQUIRE(SkColorGetG(plain_px) >= 250);
+    REQUIRE(SkColorGetB(plain_px) >= 250);
 }
 
 TEST_CASE("SkiaCanvas set_filter parsers drop-shadow with hex color",

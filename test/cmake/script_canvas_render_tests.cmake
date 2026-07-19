@@ -225,6 +225,24 @@ if(PULP_HAS_SKIA)
 endif()
 catch_discover_tests(pulp-test-canvas-filter-chain)
 
+# Canvas::supports(CanvasCapability) — the honest per-backend capability map
+# (WI-28). Drives Skia (full faithful set), CoreGraphics (images only, macOS),
+# and RecordingCanvas (records intent, advertises nothing) plus a real
+# masked-View paint that proves the verb still lands when the capability is
+# false. Links pulp::view for the paint_all mask-branch case.
+add_executable(pulp-test-canvas-capabilities test_canvas_capabilities.cpp)
+target_link_libraries(pulp-test-canvas-capabilities PRIVATE
+    pulp::canvas pulp::view Catch2::Catch2WithMain)
+if(PULP_HAS_SKIA)
+    target_compile_definitions(pulp-test-canvas-capabilities PRIVATE PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-canvas-capabilities PRIVATE ${SKIA_INCLUDE_DIRS})
+endif()
+if(APPLE)
+    target_link_libraries(pulp-test-canvas-capabilities PRIVATE
+        "-framework CoreGraphics")
+endif()
+catch_discover_tests(pulp-test-canvas-capabilities)
+
 # Canvas arcs / path-primitive Skia rasterization fixtures. Native
 # arc / arcTo / ellipse / roundRect cluster: RecordingCanvas
 # captures of native primitives + Skia rasterization fixtures (full /

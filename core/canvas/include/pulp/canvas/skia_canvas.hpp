@@ -185,8 +185,31 @@ public:
     float text_x_for_byte(const std::string& text,
                           std::size_t byte_index) override;
 
+    // ── Capabilities ────────────────────────────────────────────────────
+    // Skia renders every listed verb faithfully (SkImageFilters color ops,
+    // SkSVGDOM, path-clip parser, real Gaussian box-shadow, SkSL runtime
+    // effects). scene_cache flips to true when record_scene lands (FU-3).
+    bool supports(CanvasCapability cap) const override {
+        switch (cap) {
+            case CanvasCapability::images:
+            case CanvasCapability::svg:
+            case CanvasCapability::clip_path_svg:
+            case CanvasCapability::filter_chain:
+            case CanvasCapability::mask_layer:
+            case CanvasCapability::backdrop_filter:
+            case CanvasCapability::bloom_layer:
+            case CanvasCapability::sksl_draw:
+            case CanvasCapability::sksl_post_effect:
+            case CanvasCapability::box_shadow_gaussian:
+                return true;
+            case CanvasCapability::scene_cache:
+            case CanvasCapability::count:  // sentinel; never a real query
+                return false;
+        }
+        return false;
+    }
+
     // ── Images ──────────────────────────────────────────────────────────
-    bool supports_image_draw() const override { return true; }
     bool draw_image_from_data(const uint8_t* data, size_t size,
                               float x, float y, float w, float h) override;
     bool draw_image_from_file(const std::string& path,

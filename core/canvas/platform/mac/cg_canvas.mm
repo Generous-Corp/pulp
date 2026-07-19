@@ -1221,8 +1221,9 @@ void CoreGraphicsCanvas::set_stroke_pattern(const std::string& image_src,
 // FILENAME as placeholder text on the macOS CPU paint path — the
 // "filename-placeholder trap" that has its own skill + a CLI default that
 // forces the Skia backend to dodge it. With a real decoder present there is no
-// reason for CG to render unfaithfully; supports_image_draw() now returns true
-// so headless tooling treats CG as image-capable.
+// reason for CG to render unfaithfully; supports(CanvasCapability::images)
+// (and its alias supports_image_draw()) returns true so headless tooling
+// treats CG as image-capable.
 
 bool CoreGraphicsCanvas::draw_cg_image_in_rect(CGImageRef img,
                                                bool has_src,

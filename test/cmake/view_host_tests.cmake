@@ -92,6 +92,14 @@ pulp_add_test_suite(pulp-test-partial-invalidation LIBRARIES pulp::view)
 # unclipped for a full one, clearing the pending region after each paint.
 pulp_add_test_suite(pulp-test-dirty-region-consumption LIBRARIES pulp::view)
 
+# paint_all compositing-layer contract (WI-27). After the FU-4 decomposition,
+# pins the push_effect_layers / pop_effect_layers save-depth invariant across
+# the full layer-inducing config matrix (opacity / filter / mask / blend /
+# backdrop / effect-chain / combos) with and without an overflow clip: save
+# stack balanced, save_layer* count == expected layers_pushed, backdrop wraps
+# the effect layer. RecordingCanvas — no raster backend.
+pulp_add_test_suite(pulp-test-paint-layer-balance LIBRARIES pulp::view)
+
 # Root-View "◉ TRACING" reminder badge: painted only in a PULP_TRACING=ON build
 # and suppressible via set_tracing_badge_visible(). Config-agnostic — asserts the
 # badge is present under ON and wholly absent under the default OFF build, using a

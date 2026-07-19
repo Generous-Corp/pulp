@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <pulp/canvas/affine_transform.hpp>
+#include <pulp/canvas/canvas_capability.hpp>
 #include <pulp/canvas/path.hpp>
 #include <pulp/canvas/text_utf8.hpp>
 #include <string>
@@ -189,6 +190,10 @@ enum class TextAlign { left, center, right, justify };
 enum class TextVerticalAlign { top, center, bottom, baseline };
 enum class TextBaseline { top, middle, bottom };
 enum class TextDirection { left_to_right, right_to_left, top_to_bottom, bottom_to_top };
+
+// CanvasCapability lives in its own header so capability-query call sites can
+// include just the enum; canvas.hpp re-exports it here for back-compat, so any
+// TU that includes canvas.hpp still sees CanvasCapability unchanged.
 
 // Abstract canvas for 2D drawing
 // Widgets paint against this interface. Concrete backends (Skia, CoreGraphics,
@@ -1123,14 +1128,23 @@ public:
         fill_text(text, x, y);
     }
 
+    // ── Capability queries ───────────────────────────────────────────────
+    /// Report whether this backend renders `cap`'s verb faithfully. Base
+    /// returns false for everything: the base-class verb defaults are all
+    /// degradations (silent no-op, color/mask/blur op dropped, filename
+    /// placeholder). Concrete backends override to advertise the subset they
+    /// actually implement. Callers branch on this to log-once and keep the
+    /// documented fallback rather than silently emitting an unfaithful frame.
+    virtual bool supports(CanvasCapability) const { return false; }
+
     // ── Images ───────────────────────────────────────────────────────────
     /// Whether this backend can actually decode + draw a raster image (the
-    /// `draw_image_from_*` verbs below). Default false: the base no-op verbs
-    /// return false and callers (e.g. ImageView) render a filename placeholder.
-    /// Backends with a real decoder — SkiaCanvas and CoreGraphicsCanvas —
-    /// override to true so headless tooling can warn ("image draw unsupported
-    /// on this backend") instead of silently producing an unfaithful render.
-    virtual bool supports_image_draw() const { return false; }
+    /// `draw_image_from_*` verbs below). Thin alias for
+    /// `supports(CanvasCapability::images)` — kept because it is public API
+    /// used by headless tooling (ImageView placeholder path, CG image tests).
+    /// Not virtual: backends express image support through `supports()`, and
+    /// this forwards to it so there is one vocabulary and one source of truth.
+    bool supports_image_draw() const { return supports(CanvasCapability::images); }
 
     /// Draw an image from encoded data (PNG, JPEG, WebP) at the given rect.
     /// Returns true if the image was decoded and drawn successfully.
