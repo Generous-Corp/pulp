@@ -3,7 +3,7 @@
 exporter's font-capture + content-hash behavior (the two conformance gaps vs
 the plugin). Pure (no network)."""
 from __future__ import annotations
-import hashlib, importlib.util, pathlib, unittest
+import hashlib, importlib.util, math, pathlib, unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location(
@@ -293,6 +293,129 @@ class CodexP2FollowupTest(unittest.TestCase):
         row, badge = ir["children"]
         self.assertNotIn("constraints", row)
         self.assertEqual(badge["constraints"], {"horizontal": "RIGHT", "vertical": "TOP"})
+
+    def test_rotation_lowers_to_rotate_with_center_preserving_placement(self):
+        # Audit "Rotation / transform" row: a non-orthogonal pure rotation in
+        # relativeTransform lowers to the `rotate(<deg>deg)` spelling the
+        # shared codegen maps to setRotation. Placement is re-anchored: the
+        # rotated AABB's center IS the node's center, so the unrotated `size`
+        # box is centered in the AABB and the renderer's center-pivot rotate()
+        # reproduces Figma's rendering. The full matrix rides along as the
+        # figma:transform_matrix provenance attr.
+        c30, s30 = math.cos(math.radians(30)), math.sin(math.radians(30))
+        # A 40x12 box rotated 30deg: AABB is (40c+12s) x (40s+12c).
+        bw, bh = 40 * c30 + 12 * s30, 40 * s30 + 12 * c30
+        tree = {"type": "FRAME", "name": "Panel", "id": "0:1",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 200, "height": 200},
+                "children": [
+                    {"type": "FRAME", "name": "Tilted", "id": "0:2",
+                     "size": {"x": 40, "y": 12},
+                     "relativeTransform": [[c30, -s30, 20], [s30, c30, 30]],
+                     "absoluteBoundingBox": {"x": 14, "y": 30, "width": bw, "height": bh}},
+                ]}
+        ir, ctx = frx.node_tree_to_ir(tree)
+        tilted = ir["children"][0]
+        self.assertEqual(tilted["style"]["transform"], "rotate(30.00deg)")
+        # Untransformed size, centered in the AABB.
+        self.assertEqual(tilted["style"]["width"], 40)
+        self.assertEqual(tilted["style"]["height"], 12)
+        self.assertAlmostEqual(tilted["style"]["left"], 14 + (bw - 40) / 2, places=6)
+        self.assertAlmostEqual(tilted["style"]["top"], 30 + (bh - 12) / 2, places=6)
+        self.assertEqual(tilted["attributes"]["figma:transform_matrix"],
+                         "0.866,-0.5,20,0.5,0.866,30")
+        self.assertEqual(ctx.diagnostics, [])
+
+    def test_orthogonal_rotation_falls_through_to_plain_aabb_placement(self):
+        # The #6277 guard mirrored from the .fig lane: a 90deg multiple keeps
+        # the box axis-aligned and the AABB placement is already exact — a
+        # slider's 180deg-rotated fill must NOT be re-rotated off its track.
+        # Parent deliberately NOT widget-named — a "Slider"-named frame would
+        # be promoted to a leaf widget and drop the child under test.
+        tree = {"type": "FRAME", "name": "Progress Track", "id": "0:1",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 100, "height": 20},
+                "children": [
+                    {"type": "RECTANGLE", "name": "Fill", "id": "0:2",
+                     "size": {"x": 60, "y": 4},
+                     "relativeTransform": [[-1, 0, 80], [0, -1, 12]],
+                     "absoluteBoundingBox": {"x": 20, "y": 8, "width": 60, "height": 4}},
+                    # Text sibling keeps the parent off the pure-vector-
+                    # illustration whole-frame capture path.
+                    {"type": "TEXT", "name": "Label", "id": "0:3", "characters": "x",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 10, "height": 8}},
+                ]}
+        ir, ctx = frx.node_tree_to_ir(tree)
+        fill = ir["children"][0]
+        self.assertNotIn("transform", fill["style"])
+        self.assertEqual(fill["style"]["left"], 20)
+        self.assertEqual(fill["style"]["top"], 8)
+        self.assertNotIn("attributes", fill)
+        self.assertEqual(ctx.diagnostics, [])
+
+    def test_skewed_matrix_diagnoses_and_preserves_matrix_without_rotation(self):
+        # A sheared matrix is NOT a pure rotation; a single center rotate()
+        # would be wrong. The producer diagnoses transform-skew-approximated,
+        # keeps the axis-aligned AABB placement, and preserves the full matrix
+        # as figma:transform_matrix for a future matrix-capable renderer.
+        tree = {"type": "FRAME", "name": "Panel", "id": "0:1",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 200, "height": 200},
+                "children": [
+                    {"type": "FRAME", "name": "Sheared", "id": "0:2",
+                     "size": {"x": 40, "y": 12},
+                     "relativeTransform": [[1, 0.5, 20], [0, 1, 30]],
+                     "absoluteBoundingBox": {"x": 20, "y": 30, "width": 46, "height": 12}},
+                ]}
+        ir, ctx = frx.node_tree_to_ir(tree)
+        sheared = ir["children"][0]
+        self.assertNotIn("transform", sheared["style"])
+        self.assertEqual(sheared["style"]["left"], 20)
+        self.assertEqual(sheared["attributes"]["figma:transform_matrix"],
+                         "1,0.5,20,0,1,30")
+        diags = [d for d in ctx.diagnostics if d["code"] == "transform-skew-approximated"]
+        self.assertEqual(len(diags), 1)
+        self.assertEqual(diags[0]["kind"], "unsupported_property")
+        self.assertEqual(diags[0]["path"], "0:2")
+        self.assertIn("skew", diags[0]["message"])
+
+    def test_rotated_vector_leaf_keeps_baked_capture_without_double_rotation(self):
+        # The .fig lane's VECTOR_LIKE exclusion: the REST images render bakes
+        # the rotation into the exported pixels and the emitted box is the
+        # rotated AABB — a second rotate() double-rotates the art.
+        c45, s45 = math.cos(math.radians(45)), math.sin(math.radians(45))
+        tree = {"type": "FRAME", "name": "Panel", "id": "0:1",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 100, "height": 100},
+                "children": [
+                    {"type": "VECTOR", "name": "Glyph", "id": "0:2",
+                     "size": {"x": 20, "y": 20},
+                     "relativeTransform": [[c45, -s45, 40], [s45, c45, 10]],
+                     "absoluteBoundingBox": {"x": 26, "y": 10, "width": 28.28, "height": 28.28}},
+                    # Text sibling keeps the parent off the pure-vector-
+                    # illustration whole-frame capture path, so the VECTOR
+                    # itself takes the per-node asset branch under test.
+                    {"type": "TEXT", "name": "Label", "id": "0:3", "characters": "x",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 10, "height": 8}},
+                ]}
+        ir, ctx = frx.node_tree_to_ir(tree)
+        glyph = ir["children"][0]
+        self.assertEqual(glyph.get("asset_ref"), "0:2")
+        self.assertNotIn("transform", glyph.get("style", {}))
+        self.assertEqual(ctx.diagnostics, [])
+
+    def test_flowing_auto_layout_child_never_rotates(self):
+        # Same gate as position/constraints: a flowing stack child's transform
+        # is layout OUTPUT — emitting it would fight the flex pass.
+        c30, s30 = math.cos(math.radians(30)), math.sin(math.radians(30))
+        tree = {"type": "FRAME", "name": "Stack", "id": "0:1", "layoutMode": "VERTICAL",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 100, "height": 100},
+                "children": [
+                    {"type": "FRAME", "name": "Row", "id": "0:2",
+                     "size": {"x": 40, "y": 12},
+                     "relativeTransform": [[c30, -s30, 20], [s30, c30, 30]],
+                     "absoluteBoundingBox": {"x": 14, "y": 30, "width": 46, "height": 30}},
+                ]}
+        ir, _ctx = frx.node_tree_to_ir(tree)
+        row = ir["children"][0]
+        self.assertNotIn("transform", row.get("style", {}))
+        self.assertNotIn("attributes", row)
 
     def test_bound_variables_resolve_to_token_names(self):
         # Audit item 5: the /nodes payload carries each node's boundVariables;

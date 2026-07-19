@@ -844,6 +844,105 @@ export function lowerEffects(effects: readonly Effect[]): LoweredEffects {
   return out;
 }
 
+// Rotation / transform (audit "Rotation / transform" row).
+
+/// A node's 2x3 relativeTransform decoded into the lowering the shared
+/// consumer already understands. Three outcomes:
+///
+///   - "identity": nothing to emit — the matrix is translation-only, or its
+///     rotation is a multiple of 90deg. An orthogonal spin keeps the box
+///     axis-aligned, and the bounding-box placement the caller already
+///     emitted is exact for it; re-applying the angle (plus a center-pivot
+///     compensation) only shifts the box off its intended row — the #6277
+///     slider-fill regression in the .fig lane. Tolerance mirrors
+///     fig/scene.mjs::styleFor field-for-field: 0.5deg on either side of
+///     each 90deg multiple.
+///   - "rotate": a pure rotation (uniform unit scale, orthogonal columns,
+///     no mirroring) at a meaningfully non-orthogonal angle. The caller
+///     emits `rotate(<deg>deg)` — the exact spelling the shared codegen
+///     lowers to setRotation — plus center-preserving placement.
+///   - "unrepresentable": the matrix carries skew, non-unit / non-uniform
+///     scale, or a mirror combined with rotation. A single center
+///     `rotate()` would be WRONG for these, and a wrong rotation reads as
+///     a layout bug, not a dropped property — so the caller must diagnose
+///     (`transform-skew-approximated`) and keep the node axis-aligned at
+///     its bounding box (today's behavior), preserving the full matrix as
+///     the `figma:transform_matrix` provenance attribute instead.
+///
+/// A pure orthogonal mirror (flip-H/flip-V with no rotation) stays
+/// "identity": the axis-aligned box already occupies the right pixels, which
+/// matches what every lane ships today, and diagnosing each flipped icon
+/// would bury real findings.
+export type DecodedTransform =
+  | { kind: "identity" }
+  | { kind: "rotate"; deg: number; matrixAttr: string }
+  | {
+      kind: "unrepresentable";
+      matrixAttr: string;
+      diagnostic: Pick<ExtractedDiagnostic, "severity" | "code" | "kind" | "message">;
+    };
+
+/// The full 2x3 affine as a stable attr string: "m00,m01,m02,m10,m11,m12"
+/// (row-major, the wire order), numbers trimmed like the geometry attrs.
+export function transformMatrixAttr(t: number[][]): string {
+  return [t[0][0], t[0][1], t[0][2], t[1][0], t[1][1], t[1][2]].map(fmtGeomNum).join(",");
+}
+
+export function decodeRelativeTransform(
+  t: number[][] | null | undefined,
+  nodeName: string,
+): DecodedTransform {
+  if (
+    !Array.isArray(t) || t.length !== 2 ||
+    !Array.isArray(t[0]) || t[0].length !== 3 ||
+    !Array.isArray(t[1]) || t[1].length !== 3 ||
+    ![...t[0], ...t[1]].every((v) => typeof v === "number" && Number.isFinite(v))
+  ) {
+    return { kind: "identity" };
+  }
+  const [[m00, m01], [m10, m11]] = t;
+  // Column lengths = the axis scale factors. A degenerate column means the
+  // node renders zero-sized on that axis; there is nothing to rotate.
+  const sx = Math.hypot(m00, m10);
+  const sy = Math.hypot(m01, m11);
+  if (sx < 1e-6 || sy < 1e-6) return { kind: "identity" };
+
+  const deg = (Math.atan2(m10, m00) * 180) / Math.PI;
+  const mod90 = Math.abs(deg) % 90;
+  const nonOrthogonal = mod90 > 0.5 && mod90 < 89.5;
+
+  // A center rotate() is exact only for a similarity transform with unit
+  // scale and no mirror: orthogonal columns (normalized dot ~ 0), both
+  // scales ~ 1, positive determinant. Figma's matrices are unit-scale for
+  // ordinary layers (resize lands in width/height, not the matrix), so a
+  // deviation here means real skew / scale / mirror the design carries.
+  const skewed = Math.abs((m00 * m01 + m10 * m11) / (sx * sy)) > 1e-3;
+  const scaled = Math.abs(sx - 1) > 1e-3 || Math.abs(sy - 1) > 1e-3;
+  const mirrored = m00 * m11 - m01 * m10 < 0;
+  if (skewed || scaled || (mirrored && nonOrthogonal)) {
+    const parts = [
+      skewed ? "skew" : "",
+      scaled ? "non-unit scale" : "",
+      mirrored ? "mirroring" : "",
+    ].filter(Boolean).join(" + ");
+    return {
+      kind: "unrepresentable",
+      matrixAttr: transformMatrixAttr(t),
+      diagnostic: {
+        severity: "warning",
+        code: "transform-skew-approximated",
+        kind: "unsupported_property",
+        message:
+          `"${nodeName}": relativeTransform carries ${parts}, which a single center ` +
+          `rotate() cannot represent. Rendered axis-aligned at its bounding box; the ` +
+          `full matrix is preserved as figma:transform_matrix.`,
+      },
+    };
+  }
+  if (!nonOrthogonal) return { kind: "identity" };
+  return { kind: "rotate", deg, matrixAttr: transformMatrixAttr(t) };
+}
+
 // Variable bindings (`node.boundVariables`) resolved to canonical token names.
 // The Plugin API shape is `{ [property]: VariableAlias | VariableAlias[] |
 // { [key]: VariableAlias } }` where a VariableAlias is `{ type:

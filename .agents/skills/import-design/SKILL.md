@@ -520,6 +520,40 @@ native codegen lowers `transform: rotate()` to `setRotation` in the shared
 Covered by `[rotation]` in `test_design_import_codegen.cpp` + a decoder test in
 `fig/fig.test.mjs` (45deg needle rotates; VECTOR and 180deg fill do not).
 
+**All three lanes now lower rotation** (audit "Rotation / transform" row). The
+plugin (`extract.ts` walk + `extract-pure.ts::decodeRelativeTransform`) and
+REST (`figma_rest_export.py::_decode_rotation`) producers decode
+`relativeTransform` and emit the same `transform: rotate(<deg>deg)` spelling,
+with the `.fig` guards mirrored field-for-field (non-orthogonal tolerance
+`0.5 < mod90 < 89.5`; vector-like exclusion — extended in plugin/REST to EVERY
+node-export capture, i.e. widget-instance and pure-vector-illustration PNGs,
+because `exportAsync`/the REST images render bakes the rotation into the
+pixels; an image FILL asset is raw bytes, not a node render, so image-filled
+boxes still rotate). Placement differs from `.fig` by design: plugin/REST
+position by absoluteBoundingBox deltas, and the rotated AABB's center IS the
+node's center, so they emit the UNTRANSFORMED size (`node.width/height`,
+REST `size` — both ride with the export) centered in the AABB and let the
+center-pivot `rotate()` land it (the origin-pivot compensation formula is only
+the plugin's `node.x/y` fallback path). Two additions the `.fig` lane does not
+have:
+1. **Skew / non-unit scale / mirror-plus-rotation** is NOT representable as a
+   single center `rotate()` — the producers raise a
+   `transform-skew-approximated` warning (`unsupported_property`), keep the
+   node axis-aligned at its AABB (the pre-fix behavior), and never fake an
+   angle. A pure orthogonal flip stays silent (axis-aligned box already
+   occupies the right pixels — matches all shipped lanes).
+2. **`figma:transform_matrix`** — the full 2x3 affine
+   (`"m00,m01,m02,m10,m11,m12"`, row-major, trimmed like the geometry attrs)
+   is preserved as a namespaced provenance attribute on every rotated or
+   diagnosed node, so a future matrix-capable renderer needs no re-export.
+   Same documented-provenance-sink contract as the `figma:arc_data` /
+   `figma:stroke_*` attrs; nothing consumes it today. The `.fig` lane does
+   not emit it (its rotation logic is frozen; envelope stays byte-identical).
+Tests: `transform.test.ts` (plugin decode), rotation cases in
+`test_figma_rest_export.py` (placement math, skew diagnostic, vector-leaf and
+flowing-child exclusions), and plugin/REST end-to-end `[rotation]` cases in
+`test_design_import_codegen.cpp`.
+
 **Gotcha - a "label" token names the caption, not the control.**
 `detect_audio_widget` (`design_import.cpp`) whole-token-matches "knob"/"fader"/…
 to promote a node to a built-in widget. A node named `sound / knob label`

@@ -570,6 +570,115 @@ TEST_CASE("a layer rotation lowers to setRotation, not a dropped needle",
     REQUIRE(generate_pulp_js(plain, opts).find("setRotation('") == std::string::npos);
 }
 
+TEST_CASE("producer-lowered rotation flows end-to-end from plugin and REST envelopes",
+          "[view][import][rotation]") {
+    // Audit "Rotation / transform" row: the plugin (extract.ts) and REST
+    // (figma_rest_export.py) producers now decode relativeTransform and emit
+    // the same `transform: rotate(<deg>deg)` the .fig decoder ships, plus the
+    // full matrix as figma:transform_matrix provenance. Drive both wire shapes
+    // through their parsers into generate_pulp_js and assert the rotation
+    // lowers to setRotation and the provenance attr survives.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    opts.include_comments = false;
+
+    // Plugin envelope (parse_figma_plugin_json): a 30deg-rotated panel.
+    {
+        const std::string envelope = R"json({
+          "format_version": "2026.05-figma-plugin-v1",
+          "provenance": {"adapter": "figma-plugin", "version": "test"},
+          "root": {
+            "type": "frame", "name": "Root",
+            "style": {"width": 200, "height": 200},
+            "children": [{
+              "type": "frame", "name": "Tilted",
+              "style": {"width": 40, "height": 12, "position": "absolute",
+                        "left": 20, "top": 30, "background_color": "#ff0000",
+                        "transform": "rotate(30.00deg)"},
+              "attributes": {"figma:transform_matrix":
+                             "0.866,-0.5,20,0.5,0.866,30"},
+              "figma": {"parent_id": "1:1", "z_order": 0,
+                        "absolute_transform": [[0.866,-0.5,20],[0.5,0.866,30]],
+                        "visible": true, "locked": false,
+                        "blend_mode": "PASS_THROUGH"}
+            }]
+          }
+        })json";
+        const auto ir = parse_figma_plugin_json(envelope);
+        REQUIRE(ir.root.children.size() == 1);
+        const auto& tilted = ir.root.children[0];
+        REQUIRE(tilted.style.transform.has_value());
+        CHECK(*tilted.style.transform == "rotate(30.00deg)");
+        // The provenance sink a future matrix-capable renderer reads.
+        CHECK(tilted.attributes.at("figma:transform_matrix") ==
+              "0.866,-0.5,20,0.5,0.866,30");
+        const auto js = generate_pulp_js(ir, opts);
+        INFO(js);
+        CHECK(js.find("setRotation('") != std::string::npos);
+        CHECK(js.find(", 30)") != std::string::npos);
+    }
+
+    // REST / generic IR envelope (parse_design_ir_json): same contract.
+    {
+        const auto ir = parse_design_ir_json(R"json({
+            "type": "frame", "name": "Root",
+            "style": {"width": 200, "height": 200},
+            "children": [{
+              "type": "frame", "name": "Needle",
+              "style": {"width": 2, "height": 10, "position": "absolute",
+                        "left": 99, "top": 95, "background_color": "#f56161",
+                        "transform": "rotate(-43.40deg)"},
+              "attributes": {"figma:transform_matrix":
+                             "0.7264,0.6873,99,-0.6873,0.7264,95"}
+            }]
+        })json");
+        REQUIRE(ir.root.children.size() == 1);
+        CHECK(ir.root.children[0].attributes.at("figma:transform_matrix") ==
+              "0.7264,0.6873,99,-0.6873,0.7264,95");
+        const auto js = generate_pulp_js(ir, opts);
+        INFO(js);
+        CHECK(js.find("setRotation('") != std::string::npos);
+        CHECK(js.find("-43.4") != std::string::npos);
+    }
+}
+
+TEST_CASE("a skewed matrix reaches the consumer as provenance only, never a wrong rotation",
+          "[view][import][rotation]") {
+    // When the matrix carries skew / non-unit scale / mirror-plus-rotation, the
+    // producers diagnose (transform-skew-approximated) and emit NO transform —
+    // only the figma:transform_matrix provenance attr. The consumer must keep
+    // the node axis-aligned: no setRotation invented from the matrix.
+    const std::string envelope = R"json({
+      "format_version": "2026.05-figma-plugin-v1",
+      "provenance": {"adapter": "figma-plugin", "version": "test"},
+      "root": {
+        "type": "frame", "name": "Root",
+        "style": {"width": 200, "height": 200},
+        "children": [{
+          "type": "frame", "name": "Sheared",
+          "style": {"width": 40, "height": 12, "position": "absolute",
+                    "left": 20, "top": 30, "background_color": "#00ff00"},
+          "attributes": {"figma:transform_matrix": "1,0.5,20,0,1,30"},
+          "figma": {"parent_id": "1:1", "z_order": 0,
+                    "absolute_transform": [[1,0.5,20],[0,1,30]],
+                    "visible": true, "locked": false,
+                    "blend_mode": "PASS_THROUGH"}
+        }]
+      }
+    })json";
+    const auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.children.size() == 1);
+    CHECK_FALSE(ir.root.children[0].style.transform.has_value());
+    CHECK(ir.root.children[0].attributes.at("figma:transform_matrix") ==
+          "1,0.5,20,0,1,30");
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    opts.include_comments = false;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO(js);
+    CHECK(js.find("setRotation('") == std::string::npos);
+}
+
 TEST_CASE("a knob emits a value-driven arc, not a parked plain ring",
           "[view][import][knob]") {
     // .fig visual-open 6.2: some big knobs looked like a plain ring instead of a
