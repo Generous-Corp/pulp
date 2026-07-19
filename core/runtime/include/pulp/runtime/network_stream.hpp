@@ -40,7 +40,7 @@ public:
 
     StreamResult read(std::uint8_t* buffer, std::size_t size) override;
     StreamResult write(const std::uint8_t* buffer, std::size_t size) override;
-    /// Interrupt blocking I/O without closing or invalidating the socket handle.
+    /// Mark the stream closed and interrupt blocking I/O without releasing the socket handle.
     void shutdown();
     void close() override;
     bool is_open() const override { return open_.load(); }

@@ -30,6 +30,8 @@ using pulp::runtime::HttpStream;
 using pulp::runtime::MemoryStream;
 using pulp::runtime::NamedPipe;
 using pulp::runtime::PipeStream;
+using pulp::runtime::Socket;
+using pulp::runtime::SocketType;
 using pulp::runtime::Stream;
 using pulp::runtime::StreamError;
 using pulp::runtime::StreamResult;
@@ -801,6 +803,33 @@ TEST_CASE("TcpStream closed state rejects I/O and survives move assignment",
     REQUIRE_FALSE(second.is_open());
     REQUIRE(second.read(&byte, 1).closed());
     REQUIRE(second.write(&byte, 1).closed());
+}
+
+TEST_CASE("TcpStream shutdown closes the stream but retains its socket handle",
+          "[stream][tcp]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    REQUIRE(listener.bind("127.0.0.1", 0));
+    REQUIRE(listener.listen(1));
+    const auto port = listener.local_port();
+    REQUIRE(port != 0);
+
+    TcpStream stream;
+    REQUIRE(stream.connect("127.0.0.1", port));
+    auto accepted = listener.accept();
+    REQUIRE(accepted.has_value());
+
+    stream.shutdown();
+    REQUIRE_FALSE(stream.is_open());
+    REQUIRE(stream.socket().is_open());
+
+    std::uint8_t byte = 0;
+    REQUIRE(stream.read(&byte, 1).closed());
+    REQUIRE(stream.write(&byte, 1).closed());
+
+    stream.close();
+    REQUIRE_FALSE(stream.socket().is_open());
+    accepted->close();
 }
 
 TEST_CASE("HttpStream invalid URLs fail without external transport",

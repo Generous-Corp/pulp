@@ -64,6 +64,7 @@ StreamResult TcpStream::write(const std::uint8_t* buffer, std::size_t size) {
 }
 
 void TcpStream::shutdown() {
+    open_.store(false);
     socket_.shutdown();
 }
 
