@@ -157,6 +157,17 @@ public:
     bool layer_valid(LayerHandle layer) const override;
     void invalidate_layer(LayerHandle layer) override;
 
+    // ── Scene recording (subtree cache, FU-3) ─────────────────────────────
+    // record_scene captures `paint` into an SkPicture via SkPictureRecorder;
+    // draw_scene replays it with SkCanvas::drawPicture at the current CTM/clip.
+    // Resolution-independent — no image shader is created, so the Graphite
+    // ensure_gpu_image() upload path is not in play for the replay itself; any
+    // images drawn DURING the record are GPU-uploaded at record time because
+    // the recording SkiaCanvas is handed this canvas's recorder + context.
+    std::shared_ptr<SceneRecording> record_scene(
+        float w, float h, const std::function<void(Canvas&)>& paint) override;
+    bool draw_scene(const SceneRecording& rec) override;
+
     // ── Text ─────────────────────────────────────────────────────────────
     void set_font(const std::string& family, float size) override;
     void set_font_full(const std::string& family, float size,
@@ -188,7 +199,7 @@ public:
     // ── Capabilities ────────────────────────────────────────────────────
     // Skia renders every listed verb faithfully (SkImageFilters color ops,
     // SkSVGDOM, path-clip parser, real Gaussian box-shadow, SkSL runtime
-    // effects). scene_cache flips to true when record_scene lands (FU-3).
+    // effects, and the FU-3 SkPicture-backed scene_cache record/replay).
     bool supports(CanvasCapability cap) const override {
         switch (cap) {
             case CanvasCapability::images:
@@ -201,8 +212,8 @@ public:
             case CanvasCapability::sksl_draw:
             case CanvasCapability::sksl_post_effect:
             case CanvasCapability::box_shadow_gaussian:
+            case CanvasCapability::scene_cache:  // record_scene/draw_scene (FU-3)
                 return true;
-            case CanvasCapability::scene_cache:
             case CanvasCapability::count:  // sentinel; never a real query
                 return false;
         }

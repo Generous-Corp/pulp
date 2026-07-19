@@ -34,6 +34,8 @@
 #include "include/core/SkColorFilter.h"
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkBlendMode.h"
+#include "include/core/SkPicture.h"
+#include "include/core/SkPictureRecorder.h"
 #include "include/effects/SkImageFilters.h"
 #endif  // PULP_HAS_SKIA
 
@@ -278,6 +280,62 @@ SkiaCanvas::~SkiaCanvas() = default;
 
 void SkiaCanvas::set_gpu_upload_context(GrDirectContext* context) {
     gr_context_ = context;
+}
+
+// ── Scene recording (subtree cache, FU-3) ────────────────────────────────
+namespace {
+// Backend-specific SceneRecording payload: the recorded SkPicture. draw_scene
+// downcasts to this to recognise its own recordings (a foreign or base
+// recording draws nothing).
+struct SkiaSceneRecording final : public SceneRecording {
+    explicit SkiaSceneRecording(sk_sp<SkPicture> p) : picture(std::move(p)) {}
+    sk_sp<SkPicture> picture;
+};
+}  // namespace
+
+std::shared_ptr<SceneRecording> SkiaCanvas::record_scene(
+    float w, float h, const std::function<void(Canvas&)>& paint) {
+    // Nothing to record into, or a degenerate size — let the caller paint
+    // directly rather than hand back an empty recording.
+    if (!canvas_ || w <= 0.0f || h <= 0.0f || !paint) return nullptr;
+
+    // The cull rect is only a culling HINT, not a hard clip, but Skia is
+    // permitted to drop draws outside it. Subtree content legitimately paints
+    // OUTSIDE [0,w]x[0,h] (outset box shadows, negative-offset overhang), so
+    // record with a rect large enough that nothing is ever culled. 1<<24 stays
+    // within float's exact-integer range, so the bound is precise.
+    constexpr float kBig = static_cast<float>(1 << 24);
+    SkPictureRecorder recorder;
+    SkCanvas* rec_canvas =
+        recorder.beginRecording(SkRect::MakeLTRB(-kBig, -kBig, kBig, kBig));
+    if (!rec_canvas) return nullptr;
+
+    // Wrap the recorder's canvas in a stack-local SkiaCanvas that carries THIS
+    // canvas's GPU backend identity (Graphite recorder + Ganesh context), so
+    // image draws inside the record go through the same ensure_gpu_image()
+    // upload path they would in a direct paint — the recorded SkPicture then
+    // references GPU-backed images and replays correctly on the live surface.
+    // On a CPU-raster canvas both are null and images stay raster, which is
+    // correct there too.
+    SkiaCanvas scoped(rec_canvas, recorder_);
+    scoped.set_gpu_upload_context(gr_context_);
+    paint(scoped);
+
+    sk_sp<SkPicture> picture = recorder.finishRecordingAsPicture();
+    if (!picture) return nullptr;
+    return std::make_shared<SkiaSceneRecording>(std::move(picture));
+}
+
+bool SkiaCanvas::draw_scene(const SceneRecording& rec) {
+    if (!canvas_) return false;
+    // Recognise only our own recording type; anything else is not drawable
+    // here and the caller falls back to a direct paint.
+    const auto* skia_rec = dynamic_cast<const SkiaSceneRecording*>(&rec);
+    if (!skia_rec || !skia_rec->picture) return false;
+    // Replays at the current CTM/clip — the recording is in the subtree's
+    // logical space, so the live translate + effect layers compose over it.
+    canvas_->drawPicture(skia_rec->picture.get());
+    return true;
 }
 
 // Null-safe: canvas_ can be null when swapchain texture wrap fails on Android

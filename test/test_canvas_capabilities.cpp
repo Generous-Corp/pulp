@@ -124,12 +124,11 @@ TEST_CASE("SkiaCanvas advertises the full faithful capability set",
     REQUIRE(canvas.supports(CanvasCapability::sksl_draw));
     REQUIRE(canvas.supports(CanvasCapability::sksl_post_effect));
     REQUIRE(canvas.supports(CanvasCapability::box_shadow_gaussian));
+    // scene_cache landed with FU-3: Skia records via SkPictureRecorder and
+    // replays via drawPicture, so it now advertises the capability.
+    REQUIRE(canvas.supports(CanvasCapability::scene_cache));
     // The alias agrees with the enum query.
     REQUIRE(canvas.supports_image_draw());
-
-    // scene_cache is FU-3 work; Skia honestly reports false until record_scene
-    // lands, so callers still paint directly today.
-    REQUIRE_FALSE(canvas.supports(CanvasCapability::scene_cache));
 }
 #endif
 

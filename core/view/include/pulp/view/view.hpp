@@ -1640,6 +1640,27 @@ public:
     void set_needs_layer(bool v) { needs_layer_ = v; }
     bool needs_layer() const { return needs_layer_; }
 
+    /// Cache this subtree's painted CONTENT (its outset shadows, clip,
+    /// background/border, `paint()`, children, and post-decorations — i.e.
+    /// everything `paint_content` draws) as a replayable scene, re-recorded
+    /// only when the subtree is invalidated. The view's own opacity / filter /
+    /// mask / blend compositing layers stay LIVE outside the cache, so
+    /// animating THOSE (e.g. a hover-opacity fade) does not thrash the cache.
+    ///
+    /// Opt-in, default false. A no-op on backends without
+    /// `CanvasCapability::scene_cache` (CoreGraphics, RecordingCanvas, the base
+    /// canvas): those fall back to painting the subtree directly every frame,
+    /// so nothing blanks. Implies nothing about `needs_layer()`.
+    ///
+    /// Do NOT cache a subtree that animates on its own clock
+    /// (`needs_continuous_frames()` true) — a time-driven descendant inside a
+    /// cache that only invalidates on mutation would freeze at its recorded
+    /// frame. The cache invalidates on `request_repaint()`, `set_bounds()`, and
+    /// child add/remove (see invalidate_subtree_caches_up), which covers widget
+    /// mutations but not free-running animation.
+    void set_subtree_cached(bool v);
+    bool subtree_cached() const { return subtree_cached_; }
+
     /// Attach a GPU post-processing effect to this View's compositing layer.
     void set_effect(std::shared_ptr<canvas::ViewEffect> effect) { effect_ = std::move(effect); }
     const std::shared_ptr<canvas::ViewEffect>& effect() const { return effect_; }
@@ -1867,6 +1888,18 @@ private:
     // children_ns receives the recursive child-paint time for self-time attrib.
     void paint_content(canvas::Canvas& canvas, const EffectLayerState& layers,
                        std::int64_t& children_ns);
+    // FU-3 wrapper around paint_content: replays the cached scene when caching
+    // is on, the backend supports it, and the cache is valid; otherwise records
+    // (on a miss) or paints directly. Called from the paint_all orchestrator in
+    // place of paint_content so the effect/opacity layers stay outside the cache.
+    void paint_content_maybe_cached(canvas::Canvas& canvas,
+                                    const EffectLayerState& layers,
+                                    std::int64_t& children_ns);
+    // Clear the scene cache on this view and every ancestor that has caching
+    // enabled (a mutation anywhere in a cached subtree stales that subtree's
+    // recording). Walks parent_ links; O(depth), and skipped entirely via a
+    // process-global counter when no view anywhere has caching enabled.
+    void invalidate_subtree_caches_up();
     void paint_outset_shadows(canvas::Canvas& canvas);
     void apply_overflow_and_clip_path(canvas::Canvas& canvas);
     void paint_background_and_border(canvas::Canvas& canvas);
@@ -2076,6 +2109,12 @@ private:
     float       text_shadow_dy_ = 0.0f;
     float       text_shadow_radius_ = 0.0f;
     bool needs_layer_ = false;
+    // FU-3 subtree scene cache. `subtree_cached_` is the opt-in flag;
+    // `scene_cache_` holds the recorded scene (shared_ptr so it survives across
+    // frames until invalidated); `scene_cache_valid_` gates replay vs re-record.
+    bool subtree_cached_ = false;
+    bool scene_cache_valid_ = false;
+    std::shared_ptr<canvas::SceneRecording> scene_cache_;
     WindowHost* window_host_ = nullptr;
     PluginViewHost* plugin_view_host_ = nullptr;
     HostParamSurface* host_params_ = nullptr;

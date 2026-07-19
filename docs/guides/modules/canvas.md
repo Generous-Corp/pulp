@@ -121,3 +121,40 @@ if (icon.is_valid()) {
 ```
 
 SVG files are parsed into vector paths and rendered at any resolution without pixelation.
+
+## Subtree Scene Cache
+
+A mostly-static subtree can cache its painted content so later frames replay a
+recording instead of re-walking the tree. Opt in per view:
+
+```cpp
+panel.set_subtree_cached(true);   // default false
+```
+
+On the first frame the view records its content (background, border, `paint()`,
+children, decorations) into a replayable scene via
+`Canvas::record_scene()` / `draw_scene()` (a Skia `SkPicture` under the hood).
+Later frames replay that recording — skipping the per-view paint walk, corner-
+path string building, and gradient marshalling — until the subtree is
+invalidated. The recording is resolution-independent, so a DPI change costs
+nothing.
+
+The cache captures only the subtree's *content*: the view's own opacity, filter,
+mask, and blend compositing layers stay live outside it, so animating those (a
+hover-opacity fade, a mix-blend animation) does **not** re-record.
+
+Invalidation is automatic on the paths that already announce a change:
+`request_repaint()` (and everything that calls it, including `set_theme()` and
+the JS bridge setters), `set_bounds()` (resize/move), and `add_child()` /
+`remove_child()` (structural changes) each stale the view and every cached
+ancestor. Do **not** cache a subtree that animates on its own clock
+(`needs_continuous_frames()` true) — a free-running descendant inside a
+mutation-invalidated cache would freeze at its recorded frame.
+
+Only the SkiaCanvas backend records (`supports(CanvasCapability::scene_cache)`);
+CoreGraphics and RecordingCanvas fall back to painting the subtree directly
+every frame, so enabling the cache never blanks a non-Skia backend.
+
+This is distinct from the retained texture layer (`begin_layer(bounds,
+/*cacheable=*/true)` … `draw_layer`): that snapshots a rasterized texture; the
+scene cache records the command stream (lighter, resolution-free).

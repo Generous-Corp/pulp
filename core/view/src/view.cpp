@@ -59,6 +59,19 @@ View* root_for_gesture_relationship_cleanup(View* view) {
 // (UI) thread; the atomic only guards against incidental cross-thread access.
 std::atomic<std::uint64_t> g_view_structure_generation{1};
 
+// Process-global count of views with subtree caching enabled (FU-3). The vast
+// majority of trees never cache, and invalidate_subtree_caches_up() runs on
+// EVERY request_repaint()/set_bounds()/child-mutation — a hot mutation path.
+// This counter lets that walk early-out with a single relaxed load when no
+// view anywhere has opted in, so the feature adds no measurable cost to trees
+// that don't use it. Touched only by set_subtree_cached() and ~View(). Relaxed
+// is sufficient: the flag only gates an optimization, and the mutations that
+// matter are already ordered by the single-threaded UI paint/mutation model.
+std::atomic<int>& subtree_cache_enabled_count() {
+    static std::atomic<int> count{0};
+    return count;
+}
+
 } // namespace
 
 View::View()
@@ -94,6 +107,12 @@ View::~View() {
         if (a.clock) a.clock->unsubscribe(a.clock_id);
     }
     animations_.clear();
+    // Keep the process-global "any view caching?" counter balanced. Uses the
+    // member directly (not set_subtree_cached, which would request a repaint on
+    // a dying view). Parent-cache invalidation for a removed subtree is handled
+    // in remove_child while parent_ is still live.
+    if (subtree_cached_)
+        subtree_cache_enabled_count().fetch_sub(1, std::memory_order_relaxed);
 }
 
 int View::animate(std::function<void(float)> apply, float from, float to,
@@ -173,6 +192,38 @@ bool tracing_badge_should_paint() {
 
 void set_tracing_badge_visible(bool visible) {
     tracing_badge_visible_flag().store(visible, std::memory_order_relaxed);
+}
+
+// ── Subtree scene cache (FU-3) ───────────────────────────────────────────
+void View::set_subtree_cached(bool v) {
+    if (subtree_cached_ == v) return;
+    subtree_cached_ = v;
+    if (v) {
+        subtree_cache_enabled_count().fetch_add(1, std::memory_order_relaxed);
+    } else {
+        subtree_cache_enabled_count().fetch_sub(1, std::memory_order_relaxed);
+        // Drop any recorded scene so re-enabling later starts fresh, and so the
+        // shared_ptr does not pin a stale recording.
+        scene_cache_.reset();
+        scene_cache_valid_ = false;
+    }
+    // Turning caching on or off changes what the next frame must do; make sure
+    // a repaint is on the way.
+    request_repaint();
+}
+
+void View::invalidate_subtree_caches_up() {
+    // Fast path: nobody caches anywhere → nothing to invalidate. One relaxed
+    // load, no tree walk.
+    if (subtree_cache_enabled_count().load(std::memory_order_relaxed) == 0)
+        return;
+    // A mutation at THIS view stales the recording of every cached ancestor
+    // (their pictures include this view's content) and of this view itself if
+    // it caches. Walk up parent_ links clearing validity; O(depth).
+    for (View* v = this; v; v = v->parent_) {
+        if (v->subtree_cached_)
+            v->scene_cache_valid_ = false;
+    }
 }
 
 void View::simulate_click(Point root_pos) {
@@ -367,6 +418,10 @@ View* View::focus_prev(View& root, View* current) {
 void View::set_bounds(Rect r) {
     if (bounds_ == r) return;
     bounds_ = r;
+    // Resize/move re-records: the recording was captured at the old size (and a
+    // parent's recording placed this view at its old box). Stale this view and
+    // its cached ancestors before on_resized() drives the repaint.
+    invalidate_subtree_caches_up();
     on_resized();
 }
 
@@ -456,6 +511,9 @@ void View::add_child(std::unique_ptr<View> child) {
     child->set_host_actions(host_actions_);
     children_.push_back(std::move(child));
     children_.back()->on_attached();
+    // Structural change: this view's (and its cached ancestors') recording no
+    // longer includes the new child. Stale them so the next frame re-records.
+    invalidate_subtree_caches_up();
     // If this parent can already reach a FrameClock, tell the newly-grafted
     // subtree so a self-subscribing descendant (a live Meter built offline)
     // attaches to the already-present clock instead of silently missing it.
@@ -513,6 +571,9 @@ std::unique_ptr<View> View::remove_child(View* child) {
     // A node was detached: invalidate every external liveness cache keyed on the
     // structure generation (see View::structure_generation()).
     g_view_structure_generation.fetch_add(1, std::memory_order_relaxed);
+    // Structural change: this view's (and its cached ancestors') recording still
+    // includes the now-removed child. Stale them so the next frame re-records.
+    invalidate_subtree_caches_up();
     return owned;
 }
 
@@ -1203,6 +1264,12 @@ float View::scalar_value() const {
 }
 
 void View::request_repaint() {
+    // A repaint request is the canonical "my content changed" signal, so it is
+    // also where the subtree scene cache stales: clear this view and every
+    // cached ancestor (their recordings include this view). Cheap no-op when no
+    // view anywhere caches. Covers widget mutations, set_theme(), and JS-bridge
+    // setters, all of which funnel through here.
+    invalidate_subtree_caches_up();
     // set_window_host / set_plugin_view_host propagate to children on
     // add_child, so any attached view sees its own host pointer and we
     // never need to walk the parent chain. No host attached: silent
@@ -1221,6 +1288,11 @@ void View::request_repaint() {
 }
 
 void View::request_repaint(const Rect& local_dirty) {
+    // Stale the subtree scene cache up the ancestor chain (see request_repaint()
+    // above). Done here too because the bounded-success path below calls
+    // mark_dirty() directly rather than request_repaint(), so it would not
+    // otherwise reach the invalidation.
+    invalidate_subtree_caches_up();
     // Bounded invalidation is only wired for the window-host path; the
     // plugin-view-host path (and no host) has no sub-region invalidator, so
     // fall back to a full repaint there.

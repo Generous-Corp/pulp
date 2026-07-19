@@ -7,6 +7,8 @@
 #include <pulp/canvas/affine_transform.hpp>
 #include <pulp/canvas/canvas_capability.hpp>
 #include <pulp/canvas/path.hpp>
+#include <pulp/canvas/scene_recording.hpp>
+#include <memory>
 #include <pulp/canvas/text_utf8.hpp>
 #include <string>
 #include <vector>
@@ -844,6 +846,38 @@ public:
     /// Drop `layer`'s texture. The next `layer_valid()` returns false, so the
     /// caller re-records it. Call this when the layer's contents change.
     virtual void invalidate_layer(LayerHandle layer) { (void)layer; }
+
+    // ── Scene recording (subtree cache, FU-3) ─────────────────────────────
+    /// Record `paint` into a replayable `SceneRecording`, capturing its draw
+    /// commands ONCE so later frames can `draw_scene()` the result instead of
+    /// re-running the (recursive, allocating) paint. `w`/`h` are the recorded
+    /// content's logical size — the recording is resolution-INDEPENDENT (it
+    /// stores commands in logical coordinates), so a DPI change replays the
+    /// same recording with no re-record and no image re-upload.
+    ///
+    /// Distinct from the `begin_layer`/`draw_layer` texture cache above:
+    /// that snapshots a rasterised texture (Visage-style), this records the
+    /// command stream (a lighter, resolution-free cache). Both are opt-in
+    /// caches over the same "paint a subtree once, reuse it" need.
+    ///
+    /// Returns nullptr when the backend cannot record (the base class, the
+    /// CoreGraphics backend, and RecordingCanvas all do) — the caller MUST
+    /// then paint directly every frame. `supports(CanvasCapability::scene_cache)`
+    /// reports which backends record for real, so a caller can decide up front.
+    virtual std::shared_ptr<SceneRecording> record_scene(
+            float w, float h, const std::function<void(Canvas&)>& paint) {
+        (void)w; (void)h; (void)paint;
+        return nullptr;
+    }
+
+    /// Replay a recording produced by THIS backend's `record_scene()` at the
+    /// current transform/clip. Returns false when `rec` is not this backend's
+    /// recording type (defensive — a foreign or base recording is never
+    /// drawn), leaving the caller to fall back to a direct paint.
+    virtual bool draw_scene(const SceneRecording& rec) {
+        (void)rec;
+        return false;
+    }
 
     /// Save a compositing layer. All drawing until restore() is composited
     /// with the given opacity and optional blur. This is the correct way to

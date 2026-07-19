@@ -243,6 +243,22 @@ if(APPLE)
 endif()
 catch_discover_tests(pulp-test-canvas-capabilities)
 
+# Subtree scene cache — View::set_subtree_cached + Canvas::record_scene /
+# draw_scene (FU-3, WI-20). Raster-Skia pixel readback proves cached == uncached
+# and that invalidation (child mutation / add_child / set_bounds) re-records,
+# while a spied child paint() proves a cache HIT skips the subtree walk. A
+# RecordingCanvas case proves the honest direct-paint fallback on a
+# non-scene_cache backend, and a ScopedAllocAllowed case pins the record's
+# no-alloc exemption. Links pulp::view for paint_all + the cache wiring.
+add_executable(pulp-test-subtree-cache test_subtree_cache.cpp)
+target_link_libraries(pulp-test-subtree-cache PRIVATE
+    pulp::canvas pulp::view Catch2::Catch2WithMain)
+if(PULP_HAS_SKIA)
+    target_compile_definitions(pulp-test-subtree-cache PRIVATE PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-subtree-cache PRIVATE ${SKIA_INCLUDE_DIRS})
+endif()
+catch_discover_tests(pulp-test-subtree-cache)
+
 # Canvas arcs / path-primitive Skia rasterization fixtures. Native
 # arc / arcTo / ellipse / roundRect cluster: RecordingCanvas
 # captures of native primitives + Skia rasterization fixtures (full /
