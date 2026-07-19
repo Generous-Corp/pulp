@@ -224,6 +224,17 @@ TEST_CASE("Timeline persistence restores device placement tombstones with Track 
     REQUIRE_FALSE(tombstone->active);
     REQUIRE(take(serialize_project(restored, builtins())).json == snapshot);
 
+    const auto remapped = take(remap_ids(restored, 100));
+    const auto remapped_tombstone_id = remapped.ids.find({6});
+    REQUIRE(remapped_tombstone_id.has_value());
+    const auto remapped_tombstone = remapped.project.locate(*remapped_tombstone_id);
+    REQUIRE(remapped_tombstone.has_value());
+    REQUIRE(remapped_tombstone->kind == ItemKind::DevicePlacement);
+    REQUIRE(remapped_tombstone->sequence_id == *remapped.ids.find({2}));
+    REQUIRE(remapped_tombstone->track_id == *remapped.ids.find({3}));
+    REQUIRE_FALSE(remapped_tombstone->active);
+    REQUIRE(remapped.project.next_item_id() == 106);
+
     require_invalid_identity(
         replace_once(snapshot, "\"clip_id\":\"0\",\"id\":\"6\"", "\"clip_id\":\"4\",\"id\":\"6\""));
     require_invalid_identity(replace_once(
