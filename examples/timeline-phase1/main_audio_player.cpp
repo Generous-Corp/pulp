@@ -37,11 +37,11 @@ bool run_headless() {
     host.prepare(48'000.0, 128, 0, 2);
     if (!host.valid())
         return false;
-    std::vector<float> left(128), right(128);
+    std::vector<float> left(128), right(128), input_left(128), input_right(128);
     std::array<float*, 2> output_ptrs{left.data(), right.data()};
-    std::array<const float*, 0> input_ptrs{};
+    std::array<const float*, 2> input_ptrs{input_left.data(), input_right.data()};
     auto output = pulp::audio::BufferView<float>(output_ptrs.data(), 2, 128);
-    auto input = pulp::audio::BufferView<const float>(input_ptrs.data(), 0, 128);
+    auto input = pulp::audio::BufferView<const float>(input_ptrs.data(), 2, 128);
     host.process(output, input);
     double energy = 0.0;
     for (float sample : left)
