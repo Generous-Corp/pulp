@@ -63,7 +63,7 @@ allocation, and current artifact-verification gates.
 
 ## Final local landing evidence
 
-After the final rebase, the final source revision is
+After the final rebase, the final runtime source revision is
 `cf4c5d8c9736f96ac1836a12bedc3f4b7cd7164a`. The checked benchmark artifact
 identifies that source revision explicitly and passes supplied-binary,
 source-only, and self-test verification.
@@ -75,7 +75,11 @@ The final source revision passed:
   `halt_on_error=1`;
 - the Debug+coverage bounded decode-pool regression;
 - `pulp-sampler-test` with 4,255 assertions in 145 cases;
-- the default-GPU Release build and all 14,521 configured CTests;
+- the post-rebase default-GPU Release build; 14,551 of 14,552 configured CTests
+  passed in the aggregate run, and the sole failure exposed a test-only
+  reclamation predicate that observed cache teardown before ownership-slot
+  teardown. After the predicate was fixed, that case passed 100 consecutive
+  processes and the complete sampler binary passed all 4,255 assertions;
 - the explicit audio-harness slice, 789 of 789 tests;
 - the pinned Audio Quality Lab Python suite, 599 passed and 42 skipped, and all
   four configured sampler/heritage quality gates;

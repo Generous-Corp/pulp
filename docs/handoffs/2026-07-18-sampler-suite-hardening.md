@@ -14,7 +14,7 @@ private-plan closeout, PR publication, required CI, and merge verification.
 
 - Branch: `resume/sampler-suite-hardening-20260718`
 - Rebased landing base: `7f71e49f5efdea45629ac881b846f5ad7cbf6847`
-- Final source revision: `cf4c5d8c9736f96ac1836a12bedc3f4b7cd7164a`
+- Final runtime source revision: `cf4c5d8c9736f96ac1836a12bedc3f4b7cd7164a`
 - Benchmark artifact: refreshed after the final rebase in the closure evidence
   commit.
 
@@ -64,7 +64,11 @@ The branch contains reusable sampler audio primitives and a production-shaped
 - TSan: all 25 binaries passed with `halt_on_error=1`.
 - Debug+coverage: bounded cross-source decode-pool concurrency CTest passed.
 - Sampler integration: 4,255 assertions in 145 cases.
-- Default-GPU Release: full build passed; 14,521 of 14,521 CTests passed.
+- Post-rebase default-GPU Release: full build passed. The aggregate CTest run
+  passed 14,551 of 14,552 tests; the sole failure exposed a test predicate
+  racing cache teardown against ownership-slot teardown. After the predicate
+  was fixed, the case passed 100 consecutive processes and the full sampler
+  binary passed all 4,255 assertions in 145 cases.
 - Audio harness: 789 of 789 tests passed.
 - Audio Quality Lab: 599 passed, 42 skipped; all four configured
   sampler/heritage gates passed.
