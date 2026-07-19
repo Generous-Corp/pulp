@@ -2,7 +2,7 @@
 
 #include <pulp/audio/rt_safety_contract.hpp>
 #include <pulp/graph/graph_runtime_plan.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/note_renderer.hpp>
 #include <pulp/runtime/slot.hpp>
@@ -76,7 +76,6 @@ enum class TimelineGraphProcessCode : std::uint8_t {
     MissingProgram,
     InvalidTransport,
     NoteRenderFailed,
-    MidiInjectionFailed,
     AudioRenderFailed,
     CapacityExceeded,
     InputShapeMismatch,
@@ -178,7 +177,5 @@ class TimelineGraphPlaybackBinding {
     BeforeBindingPublishHookForTest before_graph_commit_hook_for_test_ = nullptr;
     void* before_graph_commit_context_for_test_ = nullptr;
 };
-
-using TimelineGraphBinding = TimelineGraphPlaybackBinding;
 
 } // namespace pulp::host

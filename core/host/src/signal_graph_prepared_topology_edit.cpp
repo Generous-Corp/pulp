@@ -6,7 +6,7 @@
 // holding the owner's control lock, so audio observes exactly the old or new
 // compiled graph and control readers cannot observe a mixed authoring graph.
 
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 
 #include <algorithm>
 #include <thread>

@@ -9,6 +9,7 @@
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #if defined(__unix__) || defined(__APPLE__)

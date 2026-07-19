@@ -9,6 +9,7 @@
 // See signal_graph.hpp for the mutation protocol details.
 
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_execution_snapshot.hpp>
 #include <pulp/host/anticipation_eligibility.hpp>
 #include <pulp/host/anticipation_partition.hpp>
 #include <pulp/host/anticipation_subgraph.hpp>
