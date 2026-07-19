@@ -7,6 +7,7 @@ add_library(pulp-playback
     src/program.cpp
     src/program_compiler.cpp
     src/stable_renderer_shell.cpp
+    src/track_automation_program.cpp
     src/transport.cpp
 )
 add_library(pulp::playback ALIAS pulp-playback)
@@ -47,6 +48,7 @@ if(PULP_BUILD_TESTS AND NOT MSVC)
         src/program.cpp
         src/program_compiler.cpp
         src/stable_renderer_shell.cpp
+        src/track_automation_program.cpp
         src/transport.cpp
     )
     target_compile_features(timeline-program-threadless-no-exceptions-check PRIVATE cxx_std_20)
