@@ -1686,6 +1686,50 @@ CSS border on baked stroke-band vectors — do not regress it).
   `figma-plugin/test/strokes.test.ts` (+ serialize schema round-trip), REST
   `StrokesTest`.
 
+### Primitive geometry metadata (arc/donut, star/polygon, smoothing, boolean op)
+
+Audit "Geometry" row. All three producers preserve the primitive-shape fields a
+future path renderer needs to rebuild the shape without a re-export from Figma,
+as namespaced `figma:*` attributes on the node (the same
+provenance-not-lowered contract as the stroke attrs — nothing consumes them
+yet; the PNG/faithful-SVG capture preserves the pixels, these preserve the
+semantics; tracked in `compat/imports.json`):
+
+| Attribute | Source field (plugin / REST / `.fig` kiwi) | Emitted when |
+|---|---|---|
+| `figma:arc_data` = `"start,end,inner"` | `ELLIPSE.arcData` (radians, same spelling all lanes) | sweep is not a plain full circle, or `innerRadius > 0` (donut). `.fig` stamps a DEFAULT full-circle `arcData` on every ellipse — emitting unconditionally would grow an attr per node |
+| `figma:star_point_count` | `STAR.pointCount` / — / `count` | always on STAR (required to rebuild it) |
+| `figma:star_inner_radius` | `STAR.innerRadius` (0..1) / — / `starInnerScale` | always on STAR |
+| `figma:polygon_point_count` | `POLYGON.pointCount` / — / `REGULAR_POLYGON.count` | always on POLYGON |
+| `figma:corner_smoothing` | `cornerSmoothing` (0..1 squircle factor) | `> 0` only (per-corner radii already ride in style) |
+| `figma:boolean_operation` | `booleanOperation`, lowercased | always on BOOLEAN_OPERATION. Kiwi's `XOR` is the Plugin API's `EXCLUDE` — normalize it (`fig/scene.mjs primitiveProvenanceAttrs`) so all lanes share one vocabulary |
+
+- **REST cannot see star/polygon fields.** The REST wire schema exposes
+  `arcData`, `cornerSmoothing`, and `booleanOperation`, but NOT
+  `pointCount`/`innerRadius` (verified against the REST file-node-types /
+  file-property-types docs) — so the star/polygon attrs are plugin/`.fig`-lane
+  only. Do not fabricate them in `figma_rest_export.py`.
+- Numbers are formatted to at most 4 decimals with trailing zeros trimmed
+  (`fmtGeomNum` / `_fmt_geom_num`) so kiwi float32 vs Plugin-API double never
+  produce different attr strings; the full-circle test uses a `1e-4` epsilon
+  because kiwi's float32 2π ≠ `Math.PI * 2`.
+- **Capture policy stays PNG for vector-like leaves.** `ImageView`'s decoder
+  is PNG/JPEG; SVG rendering exists only at frame level via the faithful-vector
+  lane (`render_mode: faithful_svg` → `DesignFrameView`), which is already
+  default-on. Switching leaf `asset_ref` capture to SVG would hand `ImageView`
+  bytes it cannot decode — leaf-level SVG is deferred until an SVG-capable
+  image path exists.
+- Real-file sanity (designers-pick frame 1:486, 1299 nodes): 140
+  `figma:boolean_operation` (instance expansion multiplies the 41 raw scene
+  nodes), 1 `figma:polygon_point_count`, 0 arc/star/smoothing (every ellipse
+  in the frame is a plain full circle); envelope otherwise byte-identical and
+  `--dump-layout` byte-identical — the attrs are metadata-only and can never
+  move layout.
+  Tests: `[view][import][figma-plugin][geometry]` (C++ attr round-trip),
+  fig.test.mjs "primitive geometry" test,
+  `figma-plugin/test/primitive-geometry.test.ts`, REST
+  `test_primitive_geometry_*`.
+
 ### Figma variables → tokens + per-property bindings
 
 Two halves, both preserved end to end (audit item 5):

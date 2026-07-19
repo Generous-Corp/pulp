@@ -2520,3 +2520,47 @@ test('stroke provenance rides as figma:* attributes, non-default values only', (
   const defaulty = findByName(envelope.root, 'Defaulty');
   assert.ok(!('attributes' in defaulty), 'defaults preserve nothing');
 });
+
+test('primitive geometry rides as figma:* attributes, non-default values only', () => {
+  // Audit "Geometry" row: arc/donut data, star/polygon point counts, corner
+  // smoothing, and the boolean-operation type reach the envelope as figma:*
+  // provenance so a future path renderer can rebuild the primitive without a
+  // re-export. Kiwi spellings under test: ELLIPSE.arcData (same as the Plugin
+  // API), STAR/REGULAR_POLYGON `count`, STAR `starInnerScale` (Plugin API
+  // innerRadius), `cornerSmoothing`, and BooleanOperation's XOR, which is the
+  // Plugin API's EXCLUDE and must land normalized.
+  const kid = (localID, position, over) => ({
+    guid: { sessionID: 0, localID },
+    parentIndex: { guid: { sessionID: 0, localID: 2 }, position },
+    ...over,
+  });
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 200, y: 200 } },
+    // Donut gauge: full float32 sweep + inner radius → figma:arc_data.
+    kid(3, 'a', { type: 'ELLIPSE', name: 'Gauge', size: { x: 40, y: 40 },
+      arcData: { startingAngle: 0, endingAngle: 4.71238898038469, innerRadius: 0.8 } }),
+    // A plain full circle (the default every .fig ellipse carries) stays silent.
+    kid(4, 'b', { type: 'ELLIPSE', name: 'Dot', size: { x: 8, y: 8 },
+      arcData: { startingAngle: 0, endingAngle: 6.2831854820251465, innerRadius: 0 } }),
+    kid(5, 'c', { type: 'STAR', name: 'Spark', size: { x: 24, y: 24 },
+      count: 5, starInnerScale: 0.382 }),
+    kid(6, 'd', { type: 'REGULAR_POLYGON', name: 'Tri', size: { x: 24, y: 24 }, count: 3 }),
+    kid(7, 'e', { type: 'BOOLEAN_OPERATION', name: 'Punch', size: { x: 24, y: 24 },
+      booleanOperation: 'XOR' }),
+    kid(8, 'f', { type: 'ROUNDED_RECTANGLE', name: 'Squircle', size: { x: 24, y: 24 },
+      cornerRadius: 6, cornerSmoothing: 0.6 }),
+  ]});
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  assert.equal(findByName(envelope.root, 'Gauge').attributes['figma:arc_data'], '0,4.7124,0.8');
+  assert.ok(!('attributes' in findByName(envelope.root, 'Dot')),
+    'a default full circle preserves nothing');
+  const spark = findByName(envelope.root, 'Spark');
+  assert.equal(spark.attributes['figma:star_point_count'], '5');
+  assert.equal(spark.attributes['figma:star_inner_radius'], '0.382');
+  assert.equal(findByName(envelope.root, 'Tri').attributes['figma:polygon_point_count'], '3');
+  assert.equal(findByName(envelope.root, 'Punch').attributes['figma:boolean_operation'], 'exclude',
+    'kiwi XOR normalizes to the Plugin API vocabulary');
+  assert.equal(findByName(envelope.root, 'Squircle').attributes['figma:corner_smoothing'], '0.6');
+});

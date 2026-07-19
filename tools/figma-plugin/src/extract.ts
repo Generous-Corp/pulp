@@ -44,6 +44,7 @@ import {
   extractStrokeStyle,
   maskClipOutline,
   assessMaskFidelity,
+  extractPrimitiveGeometryAttrs,
   extractBoundVariableBindings,
   utf16ToUtf8ByteOffsets,
 } from "./extract-pure";
@@ -255,6 +256,13 @@ async function walk(
     if (stroke.attributes) ex.attributes = { ...(ex.attributes ?? {}), ...stroke.attributes };
     for (const d of stroke.diagnostics) pushDiag(ctx, d.severity, d.code, d.kind, d.message);
   }
+
+  // Primitive-shape provenance (arc/donut data, star/polygon point counts,
+  // corner smoothing, boolean operation) — namespaced figma:* attributes a
+  // future path renderer needs to rebuild the primitive without a re-export.
+  // The PNG capture below preserves the pixels; these preserve the semantics.
+  const primitive = extractPrimitiveGeometryAttrs(node);
+  if (primitive) ex.attributes = { ...(ex.attributes ?? {}), ...primitive };
 
   // Min/max sizing — style-level clamps parse_ir_style reads and the flex
   // engines lower to min/max width/height. Figma already honored them while

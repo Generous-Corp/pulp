@@ -513,6 +513,67 @@ class TextRunsTest(unittest.TestCase):
         self.assertEqual(frx.extract_text_attributes(
             {"style": {"textAutoResize": "NONE", "textTruncation": "DISABLED"}}), {})
 
+    def test_primitive_geometry_preserved_as_namespaced_attributes(self):
+        # Audit "Geometry" row: arc/donut data, corner smoothing, and the
+        # boolean-operation type are preserved as figma:* provenance so a
+        # future path renderer can rebuild the primitive without a re-export.
+        # REST spellings verified against the REST file-node-types /
+        # file-property-types docs: ELLIPSE.arcData {startingAngle,
+        # endingAngle, innerRadius} (radians), cornerSmoothing (0..1),
+        # BOOLEAN_OPERATION.booleanOperation. STAR/REGULAR_POLYGON point
+        # count and star inner radius are NOT in the REST wire schema, so
+        # those attrs are plugin/.fig-lane only.
+        import math
+        donut = frx.extract_primitive_attributes({
+            "type": "ELLIPSE",
+            "arcData": {"startingAngle": 0.0, "endingAngle": 2 * math.pi,
+                        "innerRadius": 0.5}})
+        self.assertEqual(donut["figma:arc_data"], "0,6.2832,0.5")
+        arc = frx.extract_primitive_attributes({
+            "type": "ELLIPSE",
+            "arcData": {"startingAngle": 0.0, "endingAngle": math.pi,
+                        "innerRadius": 0.0}})
+        self.assertEqual(arc["figma:arc_data"], "0,3.1416,0")
+        # A plain full circle is the default — no attribute noise per ellipse.
+        self.assertEqual(frx.extract_primitive_attributes({
+            "type": "ELLIPSE",
+            "arcData": {"startingAngle": 0.0, "endingAngle": 2 * math.pi,
+                        "innerRadius": 0.0}}), {})
+        boolean = frx.extract_primitive_attributes({
+            "type": "BOOLEAN_OPERATION", "booleanOperation": "EXCLUDE"})
+        self.assertEqual(boolean["figma:boolean_operation"], "exclude")
+        squircle = frx.extract_primitive_attributes({
+            "type": "RECTANGLE", "cornerSmoothing": 0.6})
+        self.assertEqual(squircle["figma:corner_smoothing"], "0.6")
+        self.assertEqual(frx.extract_primitive_attributes({
+            "type": "RECTANGLE", "cornerSmoothing": 0}), {})
+
+    def test_primitive_geometry_attrs_ride_the_walked_node(self):
+        # The attrs must reach the envelope node's `attributes` map through
+        # walk() — the same channel the stroke provenance uses — even though
+        # the vector-like leaf itself rasterizes to a PNG asset_ref.
+        # The TEXT sibling keeps the frame out of the pure-vector-illustration
+        # collapse, so the vector leaves stay individual (rasterized) nodes.
+        tree = {"type": "FRAME", "name": "Panel", "id": "0:1",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 100, "height": 100},
+                "children": [
+                    {"type": "BOOLEAN_OPERATION", "name": "Union", "id": "0:2",
+                     "booleanOperation": "UNION",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 40, "height": 40}},
+                    {"type": "ELLIPSE", "name": "Gauge", "id": "0:3",
+                     "arcData": {"startingAngle": 0.0, "endingAngle": 4.7124,
+                                 "innerRadius": 0.8},
+                     "absoluteBoundingBox": {"x": 0, "y": 50, "width": 40, "height": 40}},
+                    {"type": "TEXT", "name": "Caption", "id": "0:4",
+                     "characters": "dB",
+                     "absoluteBoundingBox": {"x": 50, "y": 50, "width": 40, "height": 12}},
+                ]}
+        ir, _ctx = frx.node_tree_to_ir(tree)
+        union, gauge = ir["children"][0], ir["children"][1]
+        self.assertEqual(union["attributes"]["figma:boolean_operation"], "union")
+        self.assertEqual(union["type"], "image", "raster capture still happens")
+        self.assertEqual(gauge["attributes"]["figma:arc_data"], "0,4.7124,0.8")
+
 
 class FaithfulVectorTest(unittest.TestCase):
     """Plan B / B4a: faithful-vector lane — frame-SVG knob auto-detect + the

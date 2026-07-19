@@ -2345,6 +2345,16 @@ export function materializeFrame(scene, frame, ctx) {
       if (preserved) out.attributes = { ...(out.attributes || {}), ...preserved };
     }
 
+    // Primitive-shape provenance (arc/donut data, star/polygon point counts,
+    // corner smoothing, boolean operation) — namespaced figma:* attributes a
+    // future path renderer needs to rebuild the primitive without a
+    // re-export. The baked geometry preserves the pixels; these preserve the
+    // semantics.
+    {
+      const preserved = primitiveProvenanceAttrs(node);
+      if (preserved) out.attributes = { ...(out.attributes || {}), ...preserved };
+    }
+
     // A resolved vector is terminal. Figma already flattened the operands into
     // the geometry we just emitted, so a BOOLEAN_OPERATION's children are the
     // pre-union inputs — emitting them too would draw the shape twice, once
@@ -2563,6 +2573,75 @@ function strokeProvenanceAttrs(node) {
   }
   if (typeof node.miterLimit === 'number' && Math.abs(node.miterLimit - 4) > 1e-6) {
     attrs['figma:stroke_miter_limit'] = String(round2(node.miterLimit));
+  }
+  return Object.keys(attrs).length ? attrs : null;
+}
+
+const TWO_PI = Math.PI * 2;
+
+/**
+ * Up-to-4-decimal formatting with trailing zeros trimmed — the same rounding
+ * the plugin/REST lanes apply, so the attr strings match across lanes despite
+ * kiwi's float32 wire width (2π decodes as 6.2831854820251465, not Math.PI*2).
+ */
+function fmtGeomNum(v) {
+  return String(Math.round(v * 10000) / 10000);
+}
+
+/**
+ * Namespaced figma:* attributes for primitive-shape metadata the emitted
+ * geometry cannot carry (same contract as strokeProvenanceAttrs), or null when
+ * there is nothing worth preserving. The baked fillGeometry blobs already
+ * render arcs, donuts, stars, and boolean results faithfully — these preserve
+ * the SEMANTICS (the numbers a future path renderer needs to rebuild the
+ * primitive without a re-export from Figma). Kiwi spellings differ from the
+ * Plugin API where noted; the attr keys and value formats are shared across
+ * all three lanes:
+ *
+ *   - ELLIPSE arcData {startingAngle, endingAngle, innerRadius} (radians;
+ *     same spelling as the Plugin API) → figma:arc_data "start,end,inner",
+ *     only when the sweep is not a plain full circle or the ellipse is a
+ *     donut — .fig files stamp a default full-circle arcData on EVERY
+ *     ellipse, so emitting unconditionally would grow an attribute per node.
+ *   - STAR count / starInnerScale (Plugin API pointCount / innerRadius)
+ *     → figma:star_point_count / figma:star_inner_radius, always: both are
+ *     required to rebuild the star, whatever their values.
+ *   - REGULAR_POLYGON count (Plugin API POLYGON.pointCount)
+ *     → figma:polygon_point_count, always.
+ *   - cornerSmoothing (0..1 squircle factor) → figma:corner_smoothing, only
+ *     when > 0 — the per-corner radii already ride in style.
+ *   - BOOLEAN_OPERATION booleanOperation → figma:boolean_operation,
+ *     lowercased; kiwi's XOR is the Plugin API's EXCLUDE and is normalized so
+ *     every lane speaks the same vocabulary.
+ */
+function primitiveProvenanceAttrs(node) {
+  const attrs = {};
+  if (node.type === 'ELLIPSE' && node.arcData) {
+    const start = node.arcData.startingAngle ?? 0;
+    const end = node.arcData.endingAngle ?? TWO_PI;
+    const inner = node.arcData.innerRadius ?? 0;
+    const fullCircle = Math.abs(end - start) >= TWO_PI - 1e-4;
+    if (!fullCircle || inner > 1e-4) {
+      attrs['figma:arc_data'] = [start, end, inner].map(fmtGeomNum).join(',');
+    }
+  }
+  if (node.type === 'STAR') {
+    if (typeof node.count === 'number') {
+      attrs['figma:star_point_count'] = String(node.count);
+    }
+    if (typeof node.starInnerScale === 'number') {
+      attrs['figma:star_inner_radius'] = fmtGeomNum(node.starInnerScale);
+    }
+  }
+  if (node.type === 'REGULAR_POLYGON' && typeof node.count === 'number') {
+    attrs['figma:polygon_point_count'] = String(node.count);
+  }
+  if (typeof node.cornerSmoothing === 'number' && node.cornerSmoothing > 0) {
+    attrs['figma:corner_smoothing'] = fmtGeomNum(node.cornerSmoothing);
+  }
+  if (node.type === 'BOOLEAN_OPERATION' && typeof node.booleanOperation === 'string') {
+    const op = node.booleanOperation === 'XOR' ? 'exclude' : node.booleanOperation.toLowerCase();
+    attrs['figma:boolean_operation'] = op;
   }
   return Object.keys(attrs).length ? attrs : null;
 }

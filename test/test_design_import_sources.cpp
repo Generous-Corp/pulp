@@ -497,6 +497,55 @@ TEST_CASE("parse_figma_plugin_json handles a Pulp / Knob without optional units"
     REQUIRE(ir.root.attributes.count("units") == 0);
 }
 
+TEST_CASE("figma primitive-geometry provenance attributes survive envelope parse",
+          "[view][import][figma-plugin][geometry]") {
+    // Audit "Geometry" row: all three producers (plugin extract.ts, REST
+    // figma_rest_export.py, offline fig/scene.mjs) preserve primitive-shape
+    // metadata — arc/donut data, star/polygon point counts, corner smoothing,
+    // boolean operation — as namespaced figma:* attributes. The consumer
+    // contract is the free-form attributes passthrough: every key must land
+    // verbatim in IRNode::attributes so a future path renderer can rebuild
+    // the primitive without a re-export from Figma.
+    const std::string envelope = R"JSON({
+        "format_version": "v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "v1",
+        "provenance": { "adapter": "figma-plugin", "version": "0.1.0",
+                        "source_uri": "figma://design/geometry-smoke" },
+        "root": {
+            "type": "frame",
+            "name": "Panel",
+            "style": { "width": 200, "height": 200 },
+            "children": [
+                { "type": "image", "name": "Gauge",
+                  "attributes": { "figma:arc_data": "0,4.7124,0.8" },
+                  "style": { "width": 40, "height": 40 }, "children": [] },
+                { "type": "image", "name": "Spark",
+                  "attributes": { "figma:star_point_count": "5",
+                                   "figma:star_inner_radius": "0.382" },
+                  "style": { "width": 24, "height": 24 }, "children": [] },
+                { "type": "image", "name": "Punch",
+                  "attributes": { "figma:boolean_operation": "exclude",
+                                   "figma:polygon_point_count": "3" },
+                  "style": { "width": 24, "height": 24 }, "children": [] },
+                { "type": "frame", "name": "Squircle",
+                  "attributes": { "figma:corner_smoothing": "0.6" },
+                  "style": { "width": 24, "height": 24, "border_radius": 6 },
+                  "children": [] }
+            ]
+        }
+    })JSON";
+
+    auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.children.size() == 4);
+    REQUIRE(ir.root.children[0].attributes.at("figma:arc_data") == "0,4.7124,0.8");
+    REQUIRE(ir.root.children[1].attributes.at("figma:star_point_count") == "5");
+    REQUIRE(ir.root.children[1].attributes.at("figma:star_inner_radius") == "0.382");
+    REQUIRE(ir.root.children[2].attributes.at("figma:boolean_operation") == "exclude");
+    REQUIRE(ir.root.children[2].attributes.at("figma:polygon_point_count") == "3");
+    REQUIRE(ir.root.children[3].attributes.at("figma:corner_smoothing") == "0.6");
+}
+
 // An explicit `audio_widget: "none"` is an opt-out, not an absence: the
 // offline .fig decoder stamps it on every node inside an expanded component
 // instance so a layer literally named "knob base" keeps the designer's own
