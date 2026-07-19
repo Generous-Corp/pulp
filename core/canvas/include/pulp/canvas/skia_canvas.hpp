@@ -203,6 +203,7 @@ public:
             case CanvasCapability::box_shadow_gaussian:
                 return true;
             case CanvasCapability::scene_cache:
+            case CanvasCapability::count:  // sentinel; never a real query
                 return false;
         }
         return false;
