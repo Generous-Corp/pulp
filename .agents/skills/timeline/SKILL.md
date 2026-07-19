@@ -48,6 +48,10 @@ invariants.
 - Unknown or future extension content is retained as exact validated envelope
   bytes. Saving may splice those bytes unchanged and reports
   `has_opaque_objects`; ID remapping must fail closed for any opaque subtree.
+- Versioned persistence fixtures live under `test/fixtures/timeline/vN/` and
+  remain permanent compatibility inputs. Exercise unknown envelopes from those
+  files instead of rebuilding equivalent JSON inside a test so whitespace,
+  escapes, and member order cover the exact-byte re-save contract.
 - Decode through `DecodeLimits`. Keep input size, depth, value/member/array and
   domain object limits enforced before growth. Duplicate object keys, malformed
   UTF-8/surrogates, noncanonical wide integers, and non-normalized rates fail.
@@ -109,6 +113,9 @@ and undo suites, plus `pulp-test-timeline-schema-registry` and
 `pulp-test-timeline-persistence` in Release and UBSan configurations.
 Keep the 10k-clip edit test proving bounded node creation, subtree sharing, and
 reclamation; a vector rebuild is not an acceptable persistent-index substitute.
+Keep `pulp-test-timeline-replay-golden` green: it applies real journaled gain,
+fade, and note edits, replays from the checkpoint, and compares the resulting
+audio/MIDI byte stream with both the committed snapshot and pinned fixture.
 Also verify installed-header consumption, `-fno-exceptions -fno-rtti`, and that
 timeline translation units do not include or link `pulp::format`, `pulp::host`,
 or `pulp::view`.

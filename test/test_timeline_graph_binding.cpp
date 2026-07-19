@@ -35,7 +35,8 @@ template <typename T, typename E> T take(runtime::Result<T, E> result) {
 
 std::shared_ptr<const CompiledTempoMap> tempo_map(RationalRate rate = {48'000, 1}) {
     const std::array points{TempoPoint{{0}, 120.0}};
-    return std::make_shared<const CompiledTempoMap>(points, rate);
+    return std::make_shared<const CompiledTempoMap>(
+        take(CompiledTempoMap::compile(points, rate)));
 }
 
 std::shared_ptr<const audio::AudioFileData> audio_data(std::vector<float> mono) {

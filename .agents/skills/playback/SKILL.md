@@ -85,6 +85,10 @@ the format-layer projection from playback snapshots to `ProcessContext`.
 - Arrangement note events are compiled against the owning program's exact
   tempo map and ordered by sample, note-off before note-on, then clip/note ID.
   A renderer uses half-open sample ranges and never latches a callback size.
+- Audio and note renderers must consume the same `TransportSnapshot` for a
+  callback. The replay golden uses a varying schedule up to the transport's
+  prepared `max_buffer_size`; never cache the first callback size in either
+  renderer or bypass `MasterTransport`'s upper-bound rejection.
 - `StableRendererShell`, `ArrangementAudioTrackRenderer`, and
   `ArrangementNoteRenderer` expose control-thread `reset()` for a successful
   quiesced sample-rate or maximum-block-size lifecycle change. Reset every
@@ -113,3 +117,9 @@ Also build `timeline-program-threadless-no-exceptions-check`; it compiles the
 program/compiler/executor/shell lane with `-fno-exceptions -fno-rtti` and the
 threadless executor stub. Run the WASI SDK build when `/opt/wasi-sdk` is
 available; the native compile-only gate remains mandatory when it is not.
+Keep `pulp-test-timeline-replay-golden` green: it applies journaled gain, fade,
+and note edits, replays from the checkpoint, and compares the audio/MIDI byte
+stream with both the committed snapshot and the pinned fixture.
+`web-timeline-source-closure` compares the native timebase, timeline, and
+playback source lists with both curated production web ABI lists. Add a portable
+engine translation unit to native, WAM, and WebCLAP ownership together.

@@ -429,9 +429,14 @@ TEST_CASE("Timeline registered encoders cannot exceed the remaining output sink"
 }
 
 TEST_CASE("Timeline unknown content is retained byte for byte and marked opaque") {
-    const std::string raw =
-        "{ \"version\" : 7, \"data\" : {\"escaped\":\"\\u0061\",\"owned_id\":\"99\"}, "
-        "\"type_name\" : \"vendor.future\" }";
+    std::ifstream fixture_stream(std::string(PULP_TIMELINE_FIXTURE_DIR) +
+                                     "/v1/unknown-content-envelope.json",
+                                 std::ios::binary);
+    REQUIRE(fixture_stream.good());
+    std::string raw((std::istreambuf_iterator<char>(fixture_stream)),
+                    std::istreambuf_iterator<char>());
+    while (!raw.empty() && (raw.back() == '\n' || raw.back() == '\r'))
+        raw.pop_back();
     OpaqueContentLimits opaque_limits;
     opaque_limits.max_input_bytes = raw.size();
     opaque_limits.max_opaque_bytes = raw.size();

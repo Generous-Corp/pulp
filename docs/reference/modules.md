@@ -732,8 +732,8 @@ grid and may canonicalize to a neighboring tick. On a sparser grid,
 error; for example, at 48 kHz and 1 BPM, ticks 0 and 1 map to samples 0 and 4, so
 sample 2 cannot have an exact integer-tick inverse.
 
-The module has no Pulp module dependencies. Tick and sample positions use their
-full signed 64-bit ranges; tick-position, duration, and `MonotonicBeat`
+The module depends only on `pulp::runtime` for typed results. Tick and sample
+positions use their full signed 64-bit ranges; tick-position, duration, and `MonotonicBeat`
 arithmetic saturates at the nearest endpoint rather than overflowing.
 `ticks_to_samples()` likewise saturates when its mathematical result exceeds the
 sample domain. When a requested sample lies outside the image of the tick
@@ -750,13 +750,16 @@ const TempoPoint points[] = {
     {{0}, 120.0, TempoCurve::LinearInTicks},
     {{8 * kTicksPerQuarter}, 160.0, TempoCurve::Constant},
 };
-const CompiledTempoMap tempo(points, {48'000, 1});
+const auto compiled = CompiledTempoMap::compile(points, {48'000, 1});
+if (!compiled)
+    return handle_tempo_map_error(compiled.error());
+const CompiledTempoMap& tempo = compiled.value();
 const auto sample = tempo.ticks_to_samples({4 * kTicksPerQuarter});
 ```
 
 `MonotonicBeat` is the strong type for the transport's non-looping musical
 clock; the transport owns advancement while timeline positions may seek or
-wrap. `MeterMap` is intentionally deferred to the timeline engine.
+wrap. `CompiledMeterMap` provides the corresponding validated meter lookup.
 
 ## timeline
 
@@ -768,8 +771,9 @@ arrangement lanes. Tracks retain persistent AVL indexes for both
 path-copies only affected search paths while older snapshots share untouched
 subtrees.
 
-`InsertClip`, `RemoveClip`, `MoveClip`, and `SetNoteVelocity` apply only through
-atomic transactions. `DocumentSession` serializes multiple control-thread
+Clip insertion, removal, movement, playback-property changes, note-velocity
+edits, and tempo/meter map replacement apply only through atomic transactions.
+`DocumentSession` serializes multiple control-thread
 writers, publishes pinned immutable snapshots, rejects stale revisions and
 typed precondition failures without partial application, and records a precise
 dirty set. Its bounded journal rejects when full rather than losing replay

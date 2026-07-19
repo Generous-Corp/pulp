@@ -326,8 +326,12 @@ bool TimelineStepSequencerProcessor::compile_pattern(const state::Snapshot& snap
     if (integer_rate == 0)
         return false;
     const std::array points{timebase::TempoPoint{{0}, 120.0}};
-    auto map = std::make_shared<const timebase::CompiledTempoMap>(
+    auto compiled_map = timebase::CompiledTempoMap::compile(
         points, timebase::RationalRate{integer_rate, 1});
+    if (!compiled_map)
+        return false;
+    auto map = std::make_shared<const timebase::CompiledTempoMap>(
+        std::move(compiled_map).value());
     auto assets = playback::DecodedAudioAssetPool::create({});
     if (!assets)
         return false;

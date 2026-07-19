@@ -27,7 +27,6 @@ MODULE_FLOORS = {
         "runtime",
     },
 }
-OPTIONAL_MODULES = {"timeline"}
 INCLUDE_RE = re.compile(r"^\s*#\s*include\s*[<\"]pulp/([^/]+)/", re.MULTILINE)
 LINK_RE = re.compile(r"\bpulp(?:::|-)([a-zA-Z0-9_-]+)\b")
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".mm"}
@@ -38,8 +37,7 @@ def verify(repo_root: Path) -> list[str]:
     for module, allowed in MODULE_FLOORS.items():
         module_root = repo_root / "core" / module
         if not module_root.is_dir():
-            if module not in OPTIONAL_MODULES:
-                errors.append(f"missing required engine module: {module_root}")
+            errors.append(f"missing required engine module: {module_root}")
             continue
 
         for path in sorted(module_root.rglob("*")):
@@ -126,8 +124,8 @@ def run_selftest() -> int:
             )
 
         shutil.rmtree(root / "core" / "timeline")
-        if verify(root):
-            print("selftest rejected absent optional timeline module")
+        if not any("missing required engine module" in error for error in verify(root)):
+            print("selftest missed absent required timeline module")
             return 1
 
     print("timeline_engine_dependency_floor_selftest=true")
