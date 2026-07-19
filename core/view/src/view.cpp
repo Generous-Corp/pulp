@@ -12,8 +12,8 @@
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/value_source_binding.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
-#include <pulp/runtime/log.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/view/capability_fallback.hpp>
 #include <memory>
 #include <algorithm>
 #include <atomic>
@@ -287,22 +287,9 @@ std::atomic<bool>& tracing_badge_visible_flag() {
     static std::atomic<bool> visible{true};
     return visible;
 }
-
-// Warn at most once per process, per capability, when a paint path degrades
-// because the active canvas backend does not support the capability it needs.
-// The dedup is a relaxed atomic bitmask keyed by the CanvasCapability ordinal:
-// allocation-free on every call after the first, so it is safe inside
-// paint_all's ScopedNoAlloc guard (the one-time first-warn log is a
-// non-realtime event by construction, and the guard is a no-op in Release).
-// `msg` must be a string literal — passed straight to log_warn without format.
-void warn_capability_fallback_once(canvas::CanvasCapability cap,
-                                   const char* msg) {
-    static std::atomic<uint32_t> warned{0};
-    const uint32_t bit = 1u << static_cast<uint32_t>(cap);
-    if ((warned.fetch_or(bit, std::memory_order_relaxed) & bit) != 0) return;
-    pulp::runtime::log_warn("{}", msg);
-}
 }  // namespace
+// warn_capability_fallback_once lives in <pulp/view/capability_fallback.hpp>
+// (the one shared warn-once vocabulary, also used by ImageView).
 
 bool tracing_badge_should_paint() {
     return pulp::runtime::kTracingEnabled

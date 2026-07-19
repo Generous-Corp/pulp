@@ -9,12 +9,11 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/view/capability_fallback.hpp>
 #include <pulp/audio/waveform_overview.hpp>
-#include <pulp/runtime/log.hpp>
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
-#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -304,15 +303,13 @@ void ImageView::paint(canvas::Canvas& canvas) {
     // placeholder so authors can debug src wiring without a blank rect.
     // Distinguish the two causes for the author: when the backend has no image
     // decoder at all, the placeholder is inevitable regardless of the src, so
-    // warn once with the capability query (one vocabulary with paint_all's
-    // capability fallbacks) instead of leaving them guessing at a bad path.
+    // warn once (through the shared warn-once vocabulary that paint_all's
+    // capability fallbacks use) instead of leaving them guessing at a bad path.
     if (!canvas.supports(canvas::CanvasCapability::images)) {
-        static std::atomic<bool> warned_no_images{false};
-        if (!warned_no_images.exchange(true, std::memory_order_relaxed)) {
-            pulp::runtime::log_warn(
-                "canvas backend cannot draw images; ImageView renders the "
-                "filename as placeholder text");
-        }
+        warn_capability_fallback_once(
+            canvas::CanvasCapability::images,
+            "canvas backend cannot draw images; ImageView renders the "
+            "filename as placeholder text");
     }
     canvas.set_fill_color(resolve_color("bg.surface", canvas::Color::rgba8(50, 50, 60)));
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 4);
