@@ -1,5 +1,7 @@
 #include <pulp/timeline/model.hpp>
 
+#include "project_state_access.hpp"
+
 #include <algorithm>
 
 namespace pulp::timeline {
@@ -273,23 +275,11 @@ runtime::Result<RemappedProject, ModelError> remap_ids(const Project& project,
                                                  clip.id());
     ItemIdAllocator allocator(first_id);
     IdRemapTable table;
-    std::optional<ModelError> error = allocate_owned(table, allocator, project.id());
-    for (const auto& asset : project.assets())
+    const auto identities = detail::ProjectStateAccess::identity_entries(project);
+    std::optional<ModelError> error;
+    for (const auto& identity : identities) {
         if (!error)
-            error = allocate_owned(table, allocator, asset.id);
-    for (const auto& sequence : project.sequences()) {
-        if (!error)
-            error = allocate_owned(table, allocator, sequence.id());
-        for (const auto& track : sequence.tracks()) {
-            if (!error)
-                error = allocate_owned(table, allocator, track.id());
-            for (const auto& device : track.device_chain()) {
-                if (!error)
-                    error = allocate_owned(table, allocator, device.id);
-            }
-            for (const auto& clip : track.clips())
-                allocate_clip_owned(clip, table, allocator, error);
-        }
+            error = allocate_owned(table, allocator, identity.item);
     }
     if (error)
         return fail<RemappedProject>(error->code, error->item, error->related_item);
@@ -330,8 +320,33 @@ runtime::Result<RemappedProject, ModelError> remap_ids(const Project& project,
     if (!rebuilt)
         return fail<RemappedProject>(rebuilt.error().code, rebuilt.error().item,
                                      rebuilt.error().related_item);
+
+    std::vector<detail::IdentityRecord> remapped_identities;
+    remapped_identities.reserve(identities.size());
+    for (const auto& identity : identities) {
+        auto location = identity.location;
+        const auto remap_owner = [&](ItemId& owner) {
+            if (!owner.valid())
+                return true;
+            const auto mapped = table.find(owner);
+            if (!mapped)
+                return false;
+            owner = *mapped;
+            return true;
+        };
+        const auto mapped_item = table.find(identity.item);
+        if (!mapped_item || !remap_owner(location.sequence_id) || !remap_owner(location.track_id) ||
+            !remap_owner(location.clip_id))
+            return fail<RemappedProject>(ModelErrorCode::InvalidSchemaIdentity, identity.item);
+        remapped_identities.push_back({*mapped_item, location});
+    }
+    auto restored = detail::ProjectStateAccess::restore_identities(std::move(rebuilt).value(),
+                                                                   std::move(remapped_identities));
+    if (!restored)
+        return fail<RemappedProject>(restored.error().code, restored.error().item,
+                                     restored.error().related_item);
     return runtime::Result<RemappedProject, ModelError>(
-        runtime::Ok(RemappedProject{std::move(rebuilt).value(), std::move(table)}));
+        runtime::Ok(RemappedProject{std::move(restored).value(), std::move(table)}));
 }
 
 } // namespace pulp::timeline
