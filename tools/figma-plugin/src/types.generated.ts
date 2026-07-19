@@ -433,6 +433,10 @@ export interface Style {
   box_shadow?: string;
   filter?: string;
   backdrop_filter?: string;
+  /**
+   * CSS clip-path (path("<d>")) — carried by the synthetic mask-scope wrapper a Figma sibling mask lowers to.
+   */
+  clip_path?: string;
   font_family?: string;
   font_size?: number;
   font_weight?: number;

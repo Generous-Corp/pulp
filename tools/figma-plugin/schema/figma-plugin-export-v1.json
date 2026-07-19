@@ -292,6 +292,7 @@
         "box_shadow": { "type": "string" },
         "filter": { "type": "string" },
         "backdrop_filter": { "type": "string" },
+        "clip_path": { "type": "string", "description": "CSS clip-path (path(\"<d>\")) — carried by the synthetic mask-scope wrapper a Figma sibling mask lowers to." },
         "font_family": { "type": "string" },
         "font_size": { "type": "number" },
         "font_weight": { "type": "integer" },

@@ -207,7 +207,10 @@ function toEnvelopeNode(n: ExtractedFigmaNode): unknown {
   //   label         → IRNode.audio_label
   //   min/max/default → IRNode.audio_min/max/default (float)
   //   attributes.* → IRNode.attributes (free-form passthrough)
-  if (n.library_widget_kind) out.audio_widget = n.library_widget_kind;
+  // The explicit "none" opt-out (synthetic mask-scope wrappers) wins over the
+  // recognized-widget kind — a synthetic node is never a widget.
+  if (n.audio_widget) out.audio_widget = n.audio_widget;
+  else if (n.library_widget_kind) out.audio_widget = n.library_widget_kind;
   if (n.audio_label !== undefined) out.label = n.audio_label;
   if (n.audio_min !== undefined) out.min = n.audio_min;
   if (n.audio_max !== undefined) out.max = n.audio_max;

@@ -1792,14 +1792,26 @@ DesignIR parse_figma_plugin_json(const std::string& json) {
             // different emitter of this envelope is not silently blanked.
             out.message = str(d, "detail");
             if (out.message.empty()) out.message = str(d, "message");
-            // Prefer the readable node name for `path`; fall back to the guid,
-            // which is at least resolvable.
-            out.path = str(d, "node_name");
+            // `path` is the plugin/REST emitters' field name; the .fig decoder
+            // has none, so prefer its readable node name there and fall back to
+            // the guid, which is at least resolvable.
+            out.path = str(d, "path");
+            if (out.path.empty()) out.path = str(d, "node_name");
             if (out.path.empty()) out.path = str(d, "node_id");
             const std::string sev = str(d, "severity");
             out.severity = sev == "error" ? ImportDiagnosticSeverity::error
                          : sev == "info"  ? ImportDiagnosticSeverity::info
                                           : ImportDiagnosticSeverity::warning;
+            // The plugin/REST emitters carry the schema's structured `kind`
+            // (figma-plugin-export-v1.json); the .fig decoder omits it, and an
+            // unrecognized value stays `unknown` rather than guessing.
+            const std::string kind = str(d, "kind");
+            out.kind = kind == "unsupported_property" ? ImportDiagnosticKind::unsupported_property
+                     : kind == "unsupported_node"     ? ImportDiagnosticKind::unsupported_node
+                     : kind == "unresolved_asset"     ? ImportDiagnosticKind::unresolved_asset
+                     : kind == "capture_partial"      ? ImportDiagnosticKind::capture_partial
+                     : kind == "fallback_used"        ? ImportDiagnosticKind::fallback_used
+                                                      : ImportDiagnosticKind::unknown;
             if (auto id = str(d, "node_id"); !id.empty()) out.anchor_id = id;
             ir.diagnostics.push_back(std::move(out));
         }
